@@ -1,0 +1,788 @@
+2026-03-03 13:51:09 | ===================================================
+2026-03-03 13:51:09 | [GUARD] Nova Guard online
+2026-03-03 13:51:09 | [GUARD] ROOT=C:\Nova
+2026-03-03 13:51:09 | [GUARD] VENV_PY=C:\Nova\.venv\Scripts\python.exe
+2026-03-03 13:51:09 | [GUARD] NOVA_CORE=C:\Nova\nova_core.py
+2026-03-03 13:51:09 | ===================================================
+2026-03-03 13:51:09 | [GUARD] Starting: nova_core.py
+2026-03-03 13:51:11 | [OK] Nova Core started
+2026-03-03 13:51:11 | [CORE] Nova Core: loading Whisper (CPU mode)...
+2026-03-03 13:51:11 | [CORE] 
+2026-03-03 13:51:11 | [CORE] Nova Core is ready.
+2026-03-03 13:51:11 | [CORE] Voice commands: screen | camera <prompt> | ls [folder] | read <file> | find <kw> [folder] | health
+2026-03-03 13:51:11 | [CORE] Press ENTER to talk (records ~6 seconds). Type 'q' then ENTER to quit.
+2026-03-03 13:51:11 | [CORE] 
+2026-03-03 14:10:04 | ===================================================
+2026-03-03 14:10:04 | [GUARD] Nova Guard online
+2026-03-03 14:10:04 | [GUARD] Core will open in a NEW window (use ENTER in that Core window).
+2026-03-03 14:10:04 | [GUARD] Stop Guard with Ctrl+C OR run stop command (we’ll add nova stop next).
+2026-03-03 14:10:04 | [GUARD] ROOT=C:\Nova
+2026-03-03 14:10:04 | [GUARD] VENV_PY=C:\Nova\.venv\Scripts\python.exe
+2026-03-03 14:10:04 | [GUARD] NOVA_CORE=C:\Nova\nova_core.py
+2026-03-03 14:10:04 | ===================================================
+2026-03-03 14:10:04 | [GUARD] Starting: nova_core.py (NEW CONSOLE for interactive input)
+2026-03-03 14:10:04 | [OK] Nova Core started (pid=15228)
+2026-03-03 14:11:30 | [GUARD] Starting: nova_core.py (NEW CONSOLE for interactive input)
+2026-03-03 14:11:30 | [OK] Nova Core started (pid=12772)
+2026-03-03 14:11:40 | [GUARD] Starting: nova_core.py (NEW CONSOLE for interactive input)
+2026-03-03 14:11:40 | [OK] Nova Core started (pid=15672)
+2026-03-03 14:19:42 | ===================================================
+2026-03-03 14:19:42 | [GUARD] Nova Guard online
+2026-03-03 14:19:42 | [GUARD] Core will open in a NEW window (use ENTER in that Core window).
+2026-03-03 14:19:42 | [GUARD] Stop Guard with Ctrl+C OR run stop command (we’ll add nova stop next).
+2026-03-03 14:19:42 | [GUARD] ROOT=C:\Nova
+2026-03-03 14:19:42 | [GUARD] VENV_PY=C:\Nova\.venv\Scripts\python.exe
+2026-03-03 14:19:42 | [GUARD] NOVA_CORE=C:\Nova\nova_core.py
+2026-03-03 14:19:42 | ===================================================
+2026-03-03 14:19:42 | [GUARD] Starting: nova_core.py (NEW CONSOLE for interactive input)
+2026-03-03 14:19:42 | [OK] Nova Core started (pid=2432)
+2026-03-03 14:34:30 | ===================================================
+2026-03-03 14:34:30 | [GUARD] Nova Guard online
+2026-03-03 14:34:30 | [GUARD] Core will open in a NEW window (use ENTER in that Core window).
+2026-03-03 14:34:30 | [GUARD] Stop Guard with Ctrl+C OR run stop command (we’ll add nova stop next).
+2026-03-03 14:34:30 | [GUARD] ROOT=C:\Nova
+2026-03-03 14:34:30 | [GUARD] VENV_PY=C:\Nova\.venv\Scripts\python.exe
+2026-03-03 14:34:30 | [GUARD] NOVA_CORE=C:\Nova\nova_core.py
+2026-03-03 14:34:30 | ===================================================
+2026-03-03 14:34:30 | [GUARD] Starting: nova_core.py (NEW CONSOLE for interactive input)
+2026-03-03 14:34:30 | [OK] Nova Core started (pid=10072)
+2026-03-03 14:38:13 | ===================================================
+2026-03-03 14:38:13 | [GUARD] Nova Guard online (single-instance)
+2026-03-03 14:38:13 | [GUARD] Core opens in a NEW window (use ENTER there).
+2026-03-03 14:38:13 | [GUARD] ROOT=C:\Nova
+2026-03-03 14:38:13 | [GUARD] VENV_PY=C:\Nova\.venv\Scripts\python.exe
+2026-03-03 14:38:13 | [GUARD] NOVA_CORE=C:\Nova\nova_core.py
+2026-03-03 14:38:13 | ===================================================
+2026-03-03 14:38:13 | [GUARD] Starting: nova_core.py (NEW CONSOLE)
+2026-03-03 14:38:13 | [OK] Nova Core started (pid=2512)
+2026-03-03 14:38:19 | [GUARD] Another guard is already running (pid=6828). Exiting.
+2026-03-03 14:38:38 | [GUARD] Starting: nova_core.py (NEW CONSOLE)
+2026-03-03 14:38:38 | [OK] Nova Core started (pid=1332)
+2026-03-03 14:41:58 | [GUARD] Another guard is already running (pid=6828). Exiting.
+2026-03-03 14:41:59 | [GUARD] Another guard is already running (pid=6828). Exiting.
+2026-03-03 14:42:01 | [GUARD] Another guard is already running (pid=6828). Exiting.
+2026-03-03 14:42:02 | [GUARD] Another guard is already running (pid=6828). Exiting.
+2026-03-03 14:42:03 | [GUARD] Another guard is already running (pid=6828). Exiting.
+2026-03-03 15:16:44 | ===================================================
+2026-03-03 15:16:44 | [GUARD] Nova Guard online (core-enforcer)
+2026-03-03 15:16:44 | [GUARD] Enforces ONE nova_core.py at all times.
+2026-03-03 15:16:44 | [GUARD] ROOT=C:\Nova
+2026-03-03 15:16:44 | [GUARD] VENV_PY=C:\Nova\.venv\Scripts\python.exe
+2026-03-03 15:16:44 | [GUARD] NOVA_CORE=C:\Nova\nova_core.py
+2026-03-03 15:16:44 | ===================================================
+2026-03-03 15:16:44 | [GUARD] Starting: nova_core.py (NEW CONSOLE)
+2026-03-03 15:16:44 | [OK] Nova Core started (pid=18068)
+2026-03-03 15:16:49 | [GUARD] Detected 2 cores. Keeping pid=18068, killing [13820]
+2026-03-03 15:16:50 | [OK] Killed duplicate_core pid=13820
+2026-03-03 15:16:55 | [GUARD] Starting: nova_core.py (NEW CONSOLE)
+2026-03-03 15:16:55 | [OK] Nova Core started (pid=14536)
+2026-03-03 15:17:00 | [GUARD] Detected 2 cores. Keeping pid=14536, killing [10852]
+2026-03-03 15:17:00 | [OK] Killed duplicate_core pid=10852
+2026-03-03 15:17:05 | [GUARD] Starting: nova_core.py (NEW CONSOLE)
+2026-03-03 15:17:05 | [OK] Nova Core started (pid=10008)
+2026-03-03 15:17:11 | [GUARD] Detected 2 cores. Keeping pid=10008, killing [7924]
+2026-03-03 15:17:11 | [OK] Killed duplicate_core pid=7924
+2026-03-03 15:17:16 | [GUARD] Starting: nova_core.py (NEW CONSOLE)
+2026-03-03 15:17:16 | [OK] Nova Core started (pid=23900)
+2026-03-03 15:17:21 | [GUARD] Detected 2 cores. Keeping pid=23900, killing [11400]
+2026-03-03 15:17:21 | [OK] Killed duplicate_core pid=11400
+2026-03-03 15:17:27 | [GUARD] Starting: nova_core.py (NEW CONSOLE)
+2026-03-03 15:17:27 | [OK] Nova Core started (pid=16716)
+2026-03-03 15:17:32 | [GUARD] Detected 2 cores. Keeping pid=19788, killing [16716]
+2026-03-03 15:17:32 | [OK] Killed duplicate_core pid=16716
+2026-03-03 15:17:37 | [GUARD] Starting: nova_core.py (NEW CONSOLE)
+2026-03-03 15:17:37 | [OK] Nova Core started (pid=6828)
+2026-03-03 15:17:42 | [GUARD] Detected 2 cores. Keeping pid=20212, killing [6828]
+2026-03-03 15:17:43 | [OK] Killed duplicate_core pid=6828
+2026-03-03 15:17:48 | [GUARD] Starting: nova_core.py (NEW CONSOLE)
+2026-03-03 15:17:48 | [OK] Nova Core started (pid=16128)
+2026-03-03 15:17:53 | [GUARD] Detected 2 cores. Keeping pid=16128, killing [3348]
+2026-03-03 15:17:53 | [OK] Killed duplicate_core pid=3348
+2026-03-03 15:17:58 | [GUARD] Starting: nova_core.py (NEW CONSOLE)
+2026-03-03 15:17:58 | [OK] Nova Core started (pid=21212)
+2026-03-03 15:18:04 | [GUARD] Detected 2 cores. Keeping pid=21212, killing [15004]
+2026-03-03 15:18:04 | [WARN] Could not kill duplicate_core pid=15004 (maybe already stopped)
+2026-03-03 15:21:45 | ===================================================
+2026-03-03 15:21:45 | [GUARD] Nova Guard online (stable core supervision)
+2026-03-03 15:21:45 | [GUARD] Core liveness uses core_pid.json + tasklist (NOT WMIC).
+2026-03-03 15:21:45 | [GUARD] WMIC is used only occasionally for duplicate cleanup.
+2026-03-03 15:21:45 | [GUARD] ROOT=C:\Nova
+2026-03-03 15:21:45 | [GUARD] VENV_PY=C:\Nova\.venv\Scripts\python.exe
+2026-03-03 15:21:45 | [GUARD] NOVA_CORE=C:\Nova\nova_core.py
+2026-03-03 15:21:45 | ===================================================
+2026-03-03 15:21:46 | [GUARD] Starting: nova_core.py (NEW CONSOLE)
+2026-03-03 15:21:46 | [OK] Nova Core started (pid=15280)
+2026-03-03 15:21:51 | [GUARD] Duplicate cores detected by WMIC. Keeping 15280, killing [25312]
+2026-03-03 15:21:51 | [OK] Killed duplicate_core pid=25312
+2026-03-03 15:21:56 | [GUARD] Starting: nova_core.py (NEW CONSOLE)
+2026-03-03 15:21:56 | [OK] Nova Core started (pid=22052)
+2026-03-03 15:22:53 | [GUARD] Duplicate cores detected by WMIC. Keeping 22052, killing [10260]
+2026-03-03 15:22:54 | [OK] Killed duplicate_core pid=10260
+2026-03-03 15:22:59 | [GUARD] Starting: nova_core.py (NEW CONSOLE)
+2026-03-03 15:22:59 | [OK] Nova Core started (pid=16592)
+2026-03-03 15:23:55 | [GUARD] Duplicate cores detected by WMIC. Keeping 16592, killing [10688]
+2026-03-03 15:23:56 | [OK] Killed duplicate_core pid=10688
+2026-03-03 15:24:01 | [GUARD] Starting: nova_core.py (NEW CONSOLE)
+2026-03-03 15:24:01 | [OK] Nova Core started (pid=7520)
+2026-03-03 15:24:49 | ===================================================
+2026-03-03 15:24:49 | [GUARD] Nova Guard online (PID + adopt mode)
+2026-03-03 15:24:49 | [GUARD] If pid file is wrong, it adopts a running core instead of spawning duplicates.
+2026-03-03 15:24:49 | [GUARD] ROOT=C:\Nova
+2026-03-03 15:24:49 | [GUARD] VENV_PY=C:\Nova\.venv\Scripts\python.exe
+2026-03-03 15:24:49 | [GUARD] NOVA_CORE=C:\Nova\nova_core.py
+2026-03-03 15:24:49 | ===================================================
+2026-03-03 15:24:49 | [GUARD] core_pid.json => None (file=C:\Nova\runtime\core_pid.json)
+2026-03-03 15:24:49 | [GUARD] Starting: nova_core.py (NEW CONSOLE)
+2026-03-03 15:24:49 | [OK] Nova Core started (pid=6660)
+2026-03-03 15:24:54 | [GUARD] core_pid.json => 6660 (file=C:\Nova\runtime\core_pid.json)
+2026-03-03 15:24:54 | [GUARD] Duplicate cores detected. Keeping 6660, killing [12640]
+2026-03-03 15:24:54 | [OK] Killed duplicate_core pid=12640
+2026-03-03 15:25:00 | [GUARD] core_pid.json => 6660 (file=C:\Nova\runtime\core_pid.json)
+2026-03-03 15:25:00 | [GUARD] Starting: nova_core.py (NEW CONSOLE)
+2026-03-03 15:25:00 | [OK] Nova Core started (pid=2256)
+2026-03-03 15:25:05 | [GUARD] core_pid.json => 2256 (file=C:\Nova\runtime\core_pid.json)
+2026-03-03 15:25:10 | [GUARD] core_pid.json => 2256 (file=C:\Nova\runtime\core_pid.json)
+2026-03-03 15:25:15 | [GUARD] core_pid.json => 2256 (file=C:\Nova\runtime\core_pid.json)
+2026-03-03 15:25:20 | [GUARD] core_pid.json => 2256 (file=C:\Nova\runtime\core_pid.json)
+2026-03-03 15:25:26 | [GUARD] core_pid.json => 2256 (file=C:\Nova\runtime\core_pid.json)
+2026-03-03 15:25:31 | [GUARD] core_pid.json => 2256 (file=C:\Nova\runtime\core_pid.json)
+2026-03-03 15:25:36 | [GUARD] core_pid.json => 2256 (file=C:\Nova\runtime\core_pid.json)
+2026-03-03 15:25:41 | [GUARD] core_pid.json => 2256 (file=C:\Nova\runtime\core_pid.json)
+2026-03-03 15:25:46 | [GUARD] core_pid.json => 2256 (file=C:\Nova\runtime\core_pid.json)
+2026-03-03 15:25:51 | [GUARD] core_pid.json => 2256 (file=C:\Nova\runtime\core_pid.json)
+2026-03-03 15:25:57 | [GUARD] core_pid.json => 2256 (file=C:\Nova\runtime\core_pid.json)
+2026-03-03 15:25:57 | [GUARD] Duplicate cores detected. Keeping 2256, killing [23540]
+2026-03-03 15:25:57 | [OK] Killed duplicate_core pid=23540
+2026-03-03 15:26:02 | [GUARD] core_pid.json => 2256 (file=C:\Nova\runtime\core_pid.json)
+2026-03-03 15:26:02 | [GUARD] Starting: nova_core.py (NEW CONSOLE)
+2026-03-03 15:26:02 | [OK] Nova Core started (pid=25308)
+2026-03-03 15:26:07 | [GUARD] core_pid.json => 25308 (file=C:\Nova\runtime\core_pid.json)
+2026-03-03 15:26:12 | [GUARD] core_pid.json => 25308 (file=C:\Nova\runtime\core_pid.json)
+2026-03-03 15:26:17 | [GUARD] core_pid.json => 25308 (file=C:\Nova\runtime\core_pid.json)
+2026-03-03 15:26:23 | [GUARD] core_pid.json => 25308 (file=C:\Nova\runtime\core_pid.json)
+2026-03-03 15:26:28 | [GUARD] core_pid.json => 25308 (file=C:\Nova\runtime\core_pid.json)
+2026-03-03 15:26:33 | [GUARD] core_pid.json => 25308 (file=C:\Nova\runtime\core_pid.json)
+2026-03-03 15:26:38 | [GUARD] core_pid.json => 25308 (file=C:\Nova\runtime\core_pid.json)
+2026-03-03 15:26:43 | [GUARD] core_pid.json => 25308 (file=C:\Nova\runtime\core_pid.json)
+2026-03-03 15:26:48 | [GUARD] core_pid.json => 25308 (file=C:\Nova\runtime\core_pid.json)
+2026-03-03 15:26:54 | [GUARD] core_pid.json => 25308 (file=C:\Nova\runtime\core_pid.json)
+2026-03-03 15:26:59 | [GUARD] core_pid.json => 25308 (file=C:\Nova\runtime\core_pid.json)
+2026-03-03 15:26:59 | [GUARD] Duplicate cores detected. Keeping 25308, killing [16804]
+2026-03-03 15:26:59 | [OK] Killed duplicate_core pid=16804
+2026-03-03 15:27:04 | [GUARD] core_pid.json => 25308 (file=C:\Nova\runtime\core_pid.json)
+2026-03-03 15:27:05 | [GUARD] Starting: nova_core.py (NEW CONSOLE)
+2026-03-03 15:27:05 | [OK] Nova Core started (pid=13068)
+2026-03-03 15:27:10 | [GUARD] core_pid.json => 13068 (file=C:\Nova\runtime\core_pid.json)
+2026-03-03 15:27:15 | [GUARD] core_pid.json => 13068 (file=C:\Nova\runtime\core_pid.json)
+2026-03-03 15:27:20 | [GUARD] core_pid.json => 13068 (file=C:\Nova\runtime\core_pid.json)
+2026-03-03 15:27:25 | [GUARD] core_pid.json => 13068 (file=C:\Nova\runtime\core_pid.json)
+2026-03-03 15:27:30 | [GUARD] core_pid.json => 13068 (file=C:\Nova\runtime\core_pid.json)
+2026-03-03 15:27:35 | [GUARD] core_pid.json => 13068 (file=C:\Nova\runtime\core_pid.json)
+2026-03-03 15:27:41 | [GUARD] core_pid.json => 13068 (file=C:\Nova\runtime\core_pid.json)
+2026-03-03 15:27:46 | [GUARD] core_pid.json => 13068 (file=C:\Nova\runtime\core_pid.json)
+2026-03-03 15:27:51 | [GUARD] core_pid.json => 13068 (file=C:\Nova\runtime\core_pid.json)
+2026-03-03 15:27:56 | [GUARD] core_pid.json => 13068 (file=C:\Nova\runtime\core_pid.json)
+2026-03-03 15:28:01 | [GUARD] core_pid.json => 13068 (file=C:\Nova\runtime\core_pid.json)
+2026-03-03 15:28:02 | [GUARD] Duplicate cores detected. Keeping 13068, killing [12028]
+2026-03-03 15:28:02 | [OK] Killed duplicate_core pid=12028
+2026-03-03 15:28:07 | [GUARD] core_pid.json => 13068 (file=C:\Nova\runtime\core_pid.json)
+2026-03-03 15:28:07 | [GUARD] Starting: nova_core.py (NEW CONSOLE)
+2026-03-03 15:28:07 | [OK] Nova Core started (pid=14728)
+2026-03-03 15:28:12 | [GUARD] core_pid.json => 14728 (file=C:\Nova\runtime\core_pid.json)
+2026-03-03 15:30:41 | ===================================================
+2026-03-03 15:30:41 | [GUARD] Nova Guard online (psutil liveness)
+2026-03-03 15:30:41 | [GUARD] Core liveness uses PID existence + cmdline match (no tasklist parsing).
+2026-03-03 15:30:41 | [GUARD] ROOT=C:\Nova
+2026-03-03 15:30:41 | [GUARD] VENV_PY=C:\Nova\.venv\Scripts\python.exe
+2026-03-03 15:30:41 | [GUARD] NOVA_CORE=C:\Nova\nova_core.py
+2026-03-03 15:30:41 | ===================================================
+2026-03-03 15:30:41 | [GUARD] core_pid.json => None (file=C:\Nova\runtime\core_pid.json)
+2026-03-03 15:30:42 | [GUARD] Starting: nova_core.py (NEW CONSOLE)
+2026-03-03 15:30:42 | [OK] Nova Core started (pid=25028)
+2026-03-03 15:30:47 | [GUARD] core_pid.json => 25028 (file=C:\Nova\runtime\core_pid.json)
+2026-03-03 15:30:47 | [GUARD] Duplicate cores detected. Keeping 25028, killing [14584]
+2026-03-03 15:30:47 | [OK] Killed duplicate_core pid=14584
+2026-03-03 15:30:52 | [GUARD] core_pid.json => 25028 (file=C:\Nova\runtime\core_pid.json)
+2026-03-03 15:30:52 | [GUARD] Starting: nova_core.py (NEW CONSOLE)
+2026-03-03 15:30:52 | [OK] Nova Core started (pid=21692)
+2026-03-03 15:30:57 | [GUARD] core_pid.json => 21692 (file=C:\Nova\runtime\core_pid.json)
+2026-03-03 15:31:02 | [GUARD] core_pid.json => 21692 (file=C:\Nova\runtime\core_pid.json)
+2026-03-03 15:31:07 | [GUARD] core_pid.json => 21692 (file=C:\Nova\runtime\core_pid.json)
+2026-03-03 15:31:12 | [GUARD] core_pid.json => 21692 (file=C:\Nova\runtime\core_pid.json)
+2026-03-03 15:31:17 | [GUARD] core_pid.json => 21692 (file=C:\Nova\runtime\core_pid.json)
+2026-03-03 15:31:22 | [GUARD] core_pid.json => 21692 (file=C:\Nova\runtime\core_pid.json)
+2026-03-03 15:31:27 | [GUARD] core_pid.json => 21692 (file=C:\Nova\runtime\core_pid.json)
+2026-03-03 15:31:32 | [GUARD] core_pid.json => 21692 (file=C:\Nova\runtime\core_pid.json)
+2026-03-03 15:31:38 | [GUARD] core_pid.json => 21692 (file=C:\Nova\runtime\core_pid.json)
+2026-03-03 15:31:43 | [GUARD] core_pid.json => 21692 (file=C:\Nova\runtime\core_pid.json)
+2026-03-03 15:31:48 | [GUARD] core_pid.json => 21692 (file=C:\Nova\runtime\core_pid.json)
+2026-03-03 15:31:48 | [GUARD] Duplicate cores detected. Keeping 21692, killing [23880]
+2026-03-03 15:31:48 | [OK] Killed duplicate_core pid=23880
+2026-03-03 15:31:53 | [GUARD] core_pid.json => 21692 (file=C:\Nova\runtime\core_pid.json)
+2026-03-03 15:31:53 | [GUARD] Starting: nova_core.py (NEW CONSOLE)
+2026-03-03 15:31:53 | [OK] Nova Core started (pid=22976)
+2026-03-03 15:31:58 | [GUARD] core_pid.json => 22976 (file=C:\Nova\runtime\core_pid.json)
+2026-03-03 15:32:03 | [GUARD] core_pid.json => 22976 (file=C:\Nova\runtime\core_pid.json)
+2026-03-03 15:32:08 | [GUARD] core_pid.json => 22976 (file=C:\Nova\runtime\core_pid.json)
+2026-03-03 15:32:13 | [GUARD] core_pid.json => 22976 (file=C:\Nova\runtime\core_pid.json)
+2026-03-03 15:32:18 | [GUARD] core_pid.json => 22976 (file=C:\Nova\runtime\core_pid.json)
+2026-03-03 15:32:23 | [GUARD] core_pid.json => 22976 (file=C:\Nova\runtime\core_pid.json)
+2026-03-03 15:32:28 | [GUARD] core_pid.json => 22976 (file=C:\Nova\runtime\core_pid.json)
+2026-03-03 15:32:33 | [GUARD] core_pid.json => 22976 (file=C:\Nova\runtime\core_pid.json)
+2026-03-03 15:32:38 | [GUARD] core_pid.json => 22976 (file=C:\Nova\runtime\core_pid.json)
+2026-03-03 15:32:43 | [GUARD] core_pid.json => 22976 (file=C:\Nova\runtime\core_pid.json)
+2026-03-03 15:32:48 | [GUARD] core_pid.json => 22976 (file=C:\Nova\runtime\core_pid.json)
+2026-03-03 15:32:49 | [GUARD] Duplicate cores detected. Keeping 22976, killing [3868]
+2026-03-03 15:32:49 | [OK] Killed duplicate_core pid=3868
+2026-03-03 15:32:54 | [GUARD] core_pid.json => 22976 (file=C:\Nova\runtime\core_pid.json)
+2026-03-03 15:32:54 | [GUARD] Starting: nova_core.py (NEW CONSOLE)
+2026-03-03 15:32:54 | [OK] Nova Core started (pid=21408)
+2026-03-03 15:32:59 | [GUARD] core_pid.json => 21408 (file=C:\Nova\runtime\core_pid.json)
+2026-03-03 15:32:59 | [GUARD] Starting: nova_core.py (NEW CONSOLE)
+2026-03-03 15:32:59 | [OK] Nova Core started (pid=22820)
+2026-03-03 15:33:04 | [GUARD] core_pid.json => 22820 (file=C:\Nova\runtime\core_pid.json)
+2026-03-03 15:33:09 | [GUARD] core_pid.json => 22820 (file=C:\Nova\runtime\core_pid.json)
+2026-03-03 15:33:09 | [GUARD] Starting: nova_core.py (NEW CONSOLE)
+2026-03-03 15:33:09 | [OK] Nova Core started (pid=10552)
+2026-03-03 15:33:14 | [GUARD] core_pid.json => 10552 (file=C:\Nova\runtime\core_pid.json)
+2026-03-03 15:33:19 | [GUARD] core_pid.json => 10552 (file=C:\Nova\runtime\core_pid.json)
+2026-03-03 15:33:24 | [GUARD] core_pid.json => 10552 (file=C:\Nova\runtime\core_pid.json)
+2026-03-03 15:33:29 | [GUARD] core_pid.json => 10552 (file=C:\Nova\runtime\core_pid.json)
+2026-03-03 15:33:35 | [GUARD] core_pid.json => 10552 (file=C:\Nova\runtime\core_pid.json)
+2026-03-03 15:33:40 | [GUARD] core_pid.json => 10552 (file=C:\Nova\runtime\core_pid.json)
+2026-03-03 15:33:45 | [GUARD] core_pid.json => 10552 (file=C:\Nova\runtime\core_pid.json)
+2026-03-03 15:33:50 | [GUARD] core_pid.json => 10552 (file=C:\Nova\runtime\core_pid.json)
+2026-03-03 15:33:50 | [GUARD] Duplicate cores detected. Keeping 10552, killing [18156]
+2026-03-03 15:33:50 | [OK] Killed duplicate_core pid=18156
+2026-03-03 15:33:55 | [GUARD] core_pid.json => 10552 (file=C:\Nova\runtime\core_pid.json)
+2026-03-03 15:33:55 | [GUARD] Starting: nova_core.py (NEW CONSOLE)
+2026-03-03 15:33:55 | [OK] Nova Core started (pid=16132)
+2026-03-03 15:34:00 | [GUARD] core_pid.json => 16132 (file=C:\Nova\runtime\core_pid.json)
+2026-03-03 15:34:05 | [GUARD] core_pid.json => 16132 (file=C:\Nova\runtime\core_pid.json)
+2026-03-03 15:34:10 | [GUARD] core_pid.json => 16132 (file=C:\Nova\runtime\core_pid.json)
+2026-03-03 15:34:18 | ===================================================
+2026-03-03 15:34:18 | [GUARD] Nova Guard online (psutil liveness)
+2026-03-03 15:34:18 | [GUARD] Core liveness uses PID existence + cmdline match (no tasklist parsing).
+2026-03-03 15:34:18 | [GUARD] ROOT=C:\Nova
+2026-03-03 15:34:18 | [GUARD] VENV_PY=C:\Nova\.venv\Scripts\python.exe
+2026-03-03 15:34:18 | [GUARD] NOVA_CORE=C:\Nova\nova_core.py
+2026-03-03 15:34:18 | ===================================================
+2026-03-03 15:34:18 | [GUARD] core_pid.json => None (file=C:\Nova\runtime\core_pid.json)
+2026-03-03 15:34:18 | [GUARD] Starting: nova_core.py (NEW CONSOLE)
+2026-03-03 15:34:18 | [OK] Nova Core started (pid=16152)
+2026-03-03 15:34:23 | [GUARD] core_pid.json => 16152 (file=C:\Nova\runtime\core_pid.json)
+2026-03-03 15:34:23 | [GUARD] Duplicate cores detected. Keeping 16152, killing [6620]
+2026-03-03 15:34:24 | [OK] Killed duplicate_core pid=6620
+2026-03-03 15:34:29 | [GUARD] core_pid.json => 16152 (file=C:\Nova\runtime\core_pid.json)
+2026-03-03 15:34:29 | [GUARD] Starting: nova_core.py (NEW CONSOLE)
+2026-03-03 15:34:29 | [OK] Nova Core started (pid=17984)
+2026-03-03 15:34:34 | [GUARD] core_pid.json => 17984 (file=C:\Nova\runtime\core_pid.json)
+2026-03-03 15:34:39 | [GUARD] core_pid.json => 17984 (file=C:\Nova\runtime\core_pid.json)
+2026-03-03 15:34:44 | [GUARD] core_pid.json => 17984 (file=C:\Nova\runtime\core_pid.json)
+2026-03-03 15:34:49 | [GUARD] core_pid.json => 17984 (file=C:\Nova\runtime\core_pid.json)
+2026-03-03 15:34:54 | [GUARD] core_pid.json => 17984 (file=C:\Nova\runtime\core_pid.json)
+2026-03-03 15:34:59 | [GUARD] core_pid.json => 17984 (file=C:\Nova\runtime\core_pid.json)
+2026-03-03 15:35:04 | [GUARD] core_pid.json => 17984 (file=C:\Nova\runtime\core_pid.json)
+2026-03-03 15:35:09 | [GUARD] core_pid.json => 17984 (file=C:\Nova\runtime\core_pid.json)
+2026-03-03 15:35:14 | [GUARD] core_pid.json => 17984 (file=C:\Nova\runtime\core_pid.json)
+2026-03-03 15:35:19 | [GUARD] core_pid.json => 17984 (file=C:\Nova\runtime\core_pid.json)
+2026-03-03 15:35:30 | ===================================================
+2026-03-03 15:35:30 | [GUARD] Nova Guard online (psutil liveness)
+2026-03-03 15:35:30 | [GUARD] Core liveness uses PID existence + cmdline match (no tasklist parsing).
+2026-03-03 15:35:30 | [GUARD] ROOT=C:\Nova
+2026-03-03 15:35:30 | [GUARD] VENV_PY=C:\Nova\.venv\Scripts\python.exe
+2026-03-03 15:35:30 | [GUARD] NOVA_CORE=C:\Nova\nova_core.py
+2026-03-03 15:35:30 | ===================================================
+2026-03-03 15:35:31 | [GUARD] core_pid.json => None (file=C:\Nova\runtime\core_pid.json)
+2026-03-03 15:35:31 | [GUARD] Starting: nova_core.py (NEW CONSOLE)
+2026-03-03 15:35:31 | [OK] Nova Core started (pid=17168)
+2026-03-03 15:35:36 | [GUARD] core_pid.json => 17168 (file=C:\Nova\runtime\core_pid.json)
+2026-03-03 15:35:36 | [GUARD] Duplicate cores detected. Keeping 17168, killing [5284]
+2026-03-03 15:35:36 | [OK] Killed duplicate_core pid=5284
+2026-03-03 15:35:41 | [GUARD] core_pid.json => 17168 (file=C:\Nova\runtime\core_pid.json)
+2026-03-03 15:35:41 | [GUARD] Starting: nova_core.py (NEW CONSOLE)
+2026-03-03 15:35:41 | [OK] Nova Core started (pid=17740)
+2026-03-03 15:35:46 | [GUARD] core_pid.json => 17740 (file=C:\Nova\runtime\core_pid.json)
+2026-03-03 15:35:51 | [GUARD] core_pid.json => 17740 (file=C:\Nova\runtime\core_pid.json)
+2026-03-03 15:35:56 | [GUARD] core_pid.json => 17740 (file=C:\Nova\runtime\core_pid.json)
+2026-03-03 15:36:01 | [GUARD] core_pid.json => 17740 (file=C:\Nova\runtime\core_pid.json)
+2026-03-03 15:36:06 | [GUARD] core_pid.json => 17740 (file=C:\Nova\runtime\core_pid.json)
+2026-03-03 15:36:11 | [GUARD] core_pid.json => 17740 (file=C:\Nova\runtime\core_pid.json)
+2026-03-03 15:36:17 | [GUARD] core_pid.json => 17740 (file=C:\Nova\runtime\core_pid.json)
+2026-03-03 15:36:22 | [GUARD] core_pid.json => 17740 (file=C:\Nova\runtime\core_pid.json)
+2026-03-03 15:36:27 | [GUARD] core_pid.json => 17740 (file=C:\Nova\runtime\core_pid.json)
+2026-03-03 15:36:32 | [GUARD] core_pid.json => 17740 (file=C:\Nova\runtime\core_pid.json)
+2026-03-03 15:36:37 | [GUARD] core_pid.json => 17740 (file=C:\Nova\runtime\core_pid.json)
+2026-03-03 15:36:37 | [GUARD] Duplicate cores detected. Keeping 17740, killing [14272]
+2026-03-03 15:36:37 | [OK] Killed duplicate_core pid=14272
+2026-03-03 15:36:42 | [GUARD] core_pid.json => 17740 (file=C:\Nova\runtime\core_pid.json)
+2026-03-03 15:36:42 | [GUARD] Starting: nova_core.py (NEW CONSOLE)
+2026-03-03 15:36:42 | [OK] Nova Core started (pid=16468)
+2026-03-03 15:36:47 | [GUARD] core_pid.json => 16468 (file=C:\Nova\runtime\core_pid.json)
+2026-03-03 15:39:18 | ===================================================
+2026-03-03 15:39:18 | [GUARD] Nova Guard online (psutil liveness)
+2026-03-03 15:39:18 | [GUARD] Core liveness uses PID existence + cmdline match (no tasklist parsing).
+2026-03-03 15:39:18 | [GUARD] ROOT=C:\Nova
+2026-03-03 15:39:18 | [GUARD] VENV_PY=C:\Nova\.venv\Scripts\python.exe
+2026-03-03 15:39:18 | [GUARD] NOVA_CORE=C:\Nova\nova_core.py
+2026-03-03 15:39:18 | ===================================================
+2026-03-03 15:39:18 | [GUARD] core_pid.json => None (file=C:\Nova\runtime\core_pid.json)
+2026-03-03 15:39:18 | [GUARD] Starting: nova_core.py (NEW CONSOLE)
+2026-03-03 15:39:19 | [OK] Nova Core started (pid=21772)
+2026-03-03 15:39:19 | [GUARD] Duplicate cores detected. Keeping 21772, killing [14388]
+2026-03-03 15:39:19 | [OK] Killed duplicate_core pid=14388
+2026-03-03 15:39:24 | [GUARD] core_pid.json => 21772 (file=C:\Nova\runtime\core_pid.json)
+2026-03-03 15:39:25 | [GUARD] Starting: nova_core.py (NEW CONSOLE)
+2026-03-03 15:39:26 | [OK] Nova Core started (pid=12968)
+2026-03-03 15:39:31 | [GUARD] core_pid.json => 12968 (file=C:\Nova\runtime\core_pid.json)
+2026-03-03 15:39:36 | [GUARD] core_pid.json => 12968 (file=C:\Nova\runtime\core_pid.json)
+2026-03-03 15:39:41 | [GUARD] core_pid.json => 12968 (file=C:\Nova\runtime\core_pid.json)
+2026-03-03 15:39:46 | [GUARD] core_pid.json => 12968 (file=C:\Nova\runtime\core_pid.json)
+2026-03-03 15:39:51 | [GUARD] core_pid.json => 12968 (file=C:\Nova\runtime\core_pid.json)
+2026-03-03 15:39:51 | [GUARD] Duplicate cores detected. Keeping 12968, killing [9308]
+2026-03-03 15:39:51 | [OK] Killed duplicate_core pid=9308
+2026-03-03 15:39:56 | [GUARD] core_pid.json => 12968 (file=C:\Nova\runtime\core_pid.json)
+2026-03-03 15:39:56 | [GUARD] Starting: nova_core.py (NEW CONSOLE)
+2026-03-03 15:39:57 | [OK] Nova Core started (pid=24680)
+2026-03-03 15:40:02 | [GUARD] core_pid.json => 24680 (file=C:\Nova\runtime\core_pid.json)
+2026-03-03 15:40:07 | [GUARD] core_pid.json => 24680 (file=C:\Nova\runtime\core_pid.json)
+2026-03-03 15:40:12 | [GUARD] core_pid.json => 24680 (file=C:\Nova\runtime\core_pid.json)
+2026-03-03 15:40:17 | [GUARD] core_pid.json => 24680 (file=C:\Nova\runtime\core_pid.json)
+2026-03-03 15:40:22 | [GUARD] core_pid.json => 24680 (file=C:\Nova\runtime\core_pid.json)
+2026-03-03 15:40:22 | [GUARD] Duplicate cores detected. Keeping 24680, killing [22084]
+2026-03-03 15:40:22 | [OK] Killed duplicate_core pid=22084
+2026-03-03 15:40:27 | [GUARD] core_pid.json => 24680 (file=C:\Nova\runtime\core_pid.json)
+2026-03-03 15:40:27 | [GUARD] Starting: nova_core.py (NEW CONSOLE)
+2026-03-03 15:40:28 | [OK] Nova Core started (pid=25420)
+2026-03-03 15:40:33 | [GUARD] core_pid.json => 25420 (file=C:\Nova\runtime\core_pid.json)
+2026-03-03 15:40:38 | [GUARD] core_pid.json => 25420 (file=C:\Nova\runtime\core_pid.json)
+2026-03-03 15:40:43 | [GUARD] core_pid.json => 25420 (file=C:\Nova\runtime\core_pid.json)
+2026-03-03 15:42:26 | ===================================================
+2026-03-03 15:42:26 | [GUARD] Nova Guard online (psutil liveness)
+2026-03-03 15:42:26 | [GUARD] Core liveness uses PID + safe checks (no tasklist/wmic dependence).
+2026-03-03 15:42:26 | [GUARD] ROOT=C:\Nova
+2026-03-03 15:42:26 | [GUARD] VENV_PY=C:\Nova\.venv\Scripts\python.exe
+2026-03-03 15:42:26 | [GUARD] NOVA_CORE=C:\Nova\nova_core.py
+2026-03-03 15:42:26 | ===================================================
+2026-03-03 15:42:26 | [GUARD] core_pid.json => None (file=C:\Nova\runtime\core_pid.json)
+2026-03-03 15:42:26 | [GUARD] Starting: nova_core.py (NEW CONSOLE)
+2026-03-03 15:42:26 | [OK] Nova Core started (pid=22580)
+2026-03-03 15:42:31 | [GUARD] core_pid.json => 22580 (file=C:\Nova\runtime\core_pid.json)
+2026-03-03 15:42:36 | [GUARD] core_pid.json => 22580 (file=C:\Nova\runtime\core_pid.json)
+2026-03-03 15:42:41 | [GUARD] core_pid.json => 22580 (file=C:\Nova\runtime\core_pid.json)
+2026-03-03 15:42:46 | [GUARD] core_pid.json => 22580 (file=C:\Nova\runtime\core_pid.json)
+2026-03-03 15:42:46 | [GUARD] Duplicate cores detected. Keeping 22580, killing [15628]
+2026-03-03 15:42:46 | [OK] Killed duplicate_core pid=15628
+2026-03-03 15:42:51 | [GUARD] core_pid.json => 22580 (file=C:\Nova\runtime\core_pid.json)
+2026-03-03 15:42:51 | [GUARD] Starting: nova_core.py (NEW CONSOLE)
+2026-03-03 15:42:51 | [OK] Nova Core started (pid=19392)
+2026-03-03 15:42:56 | [GUARD] core_pid.json => 19392 (file=C:\Nova\runtime\core_pid.json)
+2026-03-03 15:43:01 | [GUARD] core_pid.json => 19392 (file=C:\Nova\runtime\core_pid.json)
+2026-03-03 15:43:06 | [GUARD] core_pid.json => 19392 (file=C:\Nova\runtime\core_pid.json)
+2026-03-03 15:43:06 | [GUARD] Duplicate cores detected. Keeping 19392, killing [19648]
+2026-03-03 15:43:06 | [OK] Killed duplicate_core pid=19648
+2026-03-03 15:43:11 | [GUARD] core_pid.json => 19392 (file=C:\Nova\runtime\core_pid.json)
+2026-03-03 15:43:11 | [GUARD] Starting: nova_core.py (NEW CONSOLE)
+2026-03-03 15:43:11 | [OK] Nova Core started (pid=5032)
+2026-03-03 15:43:16 | [GUARD] core_pid.json => 5032 (file=C:\Nova\runtime\core_pid.json)
+2026-03-03 15:43:21 | [GUARD] core_pid.json => 5032 (file=C:\Nova\runtime\core_pid.json)
+2026-03-03 15:51:07 | ===================================================
+2026-03-03 15:51:07 | [GUARD] Nova Guard online (stable)
+2026-03-03 15:51:07 | [GUARD] One rule: if core PID is alive -> do NOT spawn.
+2026-03-03 15:51:07 | [GUARD] ROOT=C:\Nova
+2026-03-03 15:51:07 | [GUARD] VENV_PY=C:\Nova\.venv\Scripts\python.exe
+2026-03-03 15:51:07 | [GUARD] NOVA_CORE=C:\Nova\nova_core.py
+2026-03-03 15:51:07 | ===================================================
+2026-03-03 15:51:07 | [GUARD] core_pid.json => None (file=C:\Nova\runtime\core_pid.json)
+2026-03-03 15:51:07 | [GUARD] Starting: nova_core.py (NEW CONSOLE)
+2026-03-03 15:51:07 | [OK] Nova Core started (pid=22156)
+2026-03-03 15:51:09 | [GUARD] Duplicate cores detected. Keeping 22156, killing [13636]
+2026-03-03 15:51:09 | [OK] Killed duplicate_core pid=13636
+2026-03-03 15:51:09 | [GUARD] core_pid.json => 22156 (file=C:\Nova\runtime\core_pid.json)
+2026-03-03 15:51:14 | [GUARD] core_pid.json => 22156 (file=C:\Nova\runtime\core_pid.json)
+2026-03-03 15:51:14 | [GUARD] Starting: nova_core.py (NEW CONSOLE)
+2026-03-03 15:51:14 | [OK] Nova Core started (pid=3568)
+2026-03-03 15:51:16 | [GUARD] Duplicate cores detected. Keeping 3568, killing [21652]
+2026-03-03 15:51:16 | [OK] Killed duplicate_core pid=21652
+2026-03-03 15:51:16 | [GUARD] core_pid.json => 3568 (file=C:\Nova\runtime\core_pid.json)
+2026-03-03 15:51:21 | [GUARD] core_pid.json => 3568 (file=C:\Nova\runtime\core_pid.json)
+2026-03-03 15:51:21 | [GUARD] Starting: nova_core.py (NEW CONSOLE)
+2026-03-03 15:51:21 | [OK] Nova Core started (pid=24120)
+2026-03-03 15:51:23 | [GUARD] Duplicate cores detected. Keeping 24120, killing [19844]
+2026-03-03 15:51:23 | [OK] Killed duplicate_core pid=19844
+2026-03-03 15:51:23 | [GUARD] core_pid.json => 24120 (file=C:\Nova\runtime\core_pid.json)
+2026-03-03 15:51:28 | [GUARD] core_pid.json => 24120 (file=C:\Nova\runtime\core_pid.json)
+2026-03-03 15:51:28 | [GUARD] Starting: nova_core.py (NEW CONSOLE)
+2026-03-03 15:51:28 | [OK] Nova Core started (pid=14784)
+2026-03-03 15:51:30 | [GUARD] Duplicate cores detected. Keeping 14784, killing [13556]
+2026-03-03 15:51:30 | [OK] Killed duplicate_core pid=13556
+2026-03-03 15:51:30 | [GUARD] core_pid.json => 14784 (file=C:\Nova\runtime\core_pid.json)
+2026-03-03 15:51:35 | [GUARD] core_pid.json => 14784 (file=C:\Nova\runtime\core_pid.json)
+2026-03-03 15:51:35 | [GUARD] Starting: nova_core.py (NEW CONSOLE)
+2026-03-03 15:51:35 | [OK] Nova Core started (pid=11792)
+2026-03-03 15:51:37 | [GUARD] Duplicate cores detected. Keeping 11792, killing [24804]
+2026-03-03 15:51:37 | [OK] Killed duplicate_core pid=24804
+2026-03-03 15:51:37 | [GUARD] core_pid.json => 11792 (file=C:\Nova\runtime\core_pid.json)
+2026-03-03 15:51:42 | [GUARD] core_pid.json => 11792 (file=C:\Nova\runtime\core_pid.json)
+2026-03-03 15:51:42 | [GUARD] Starting: nova_core.py (NEW CONSOLE)
+2026-03-03 15:51:42 | [OK] Nova Core started (pid=25036)
+2026-03-03 15:51:44 | [GUARD] Duplicate cores detected. Keeping 25036, killing [15584]
+2026-03-03 15:51:44 | [OK] Killed duplicate_core pid=15584
+2026-03-03 15:51:44 | [GUARD] core_pid.json => 25036 (file=C:\Nova\runtime\core_pid.json)
+2026-03-03 15:51:49 | [GUARD] core_pid.json => 25036 (file=C:\Nova\runtime\core_pid.json)
+2026-03-03 15:51:49 | [GUARD] Starting: nova_core.py (NEW CONSOLE)
+2026-03-03 15:51:49 | [OK] Nova Core started (pid=19196)
+2026-03-03 15:51:51 | [GUARD] Duplicate cores detected. Keeping 19196, killing [6256]
+2026-03-03 15:51:51 | [OK] Killed duplicate_core pid=6256
+2026-03-03 15:51:51 | [GUARD] core_pid.json => 19196 (file=C:\Nova\runtime\core_pid.json)
+2026-03-03 15:51:56 | [GUARD] core_pid.json => 19196 (file=C:\Nova\runtime\core_pid.json)
+2026-03-03 15:51:56 | [GUARD] Starting: nova_core.py (NEW CONSOLE)
+2026-03-03 15:51:56 | [OK] Nova Core started (pid=24656)
+2026-03-03 15:51:58 | [GUARD] Duplicate cores detected. Keeping 24656, killing [4016]
+2026-03-03 15:51:58 | [OK] Killed duplicate_core pid=4016
+2026-03-03 15:51:58 | [GUARD] core_pid.json => 24656 (file=C:\Nova\runtime\core_pid.json)
+2026-03-03 15:52:03 | [GUARD] core_pid.json => 24656 (file=C:\Nova\runtime\core_pid.json)
+2026-03-03 15:52:03 | [GUARD] Starting: nova_core.py (NEW CONSOLE)
+2026-03-03 15:52:03 | [OK] Nova Core started (pid=904)
+2026-03-03 15:52:05 | [GUARD] Duplicate cores detected. Keeping 904, killing [13128]
+2026-03-03 15:52:05 | [OK] Killed duplicate_core pid=13128
+2026-03-03 15:52:05 | [GUARD] core_pid.json => 904 (file=C:\Nova\runtime\core_pid.json)
+2026-03-03 15:52:10 | [GUARD] core_pid.json => 904 (file=C:\Nova\runtime\core_pid.json)
+2026-03-03 15:52:10 | [GUARD] Starting: nova_core.py (NEW CONSOLE)
+2026-03-03 15:52:10 | [OK] Nova Core started (pid=21708)
+2026-03-03 15:52:12 | [GUARD] Duplicate cores detected. Keeping 21708, killing [25076]
+2026-03-03 15:52:12 | [OK] Killed duplicate_core pid=25076
+2026-03-03 15:52:12 | [GUARD] core_pid.json => 21708 (file=C:\Nova\runtime\core_pid.json)
+2026-03-03 15:52:17 | [GUARD] core_pid.json => 21708 (file=C:\Nova\runtime\core_pid.json)
+2026-03-03 15:52:17 | [GUARD] Starting: nova_core.py (NEW CONSOLE)
+2026-03-03 15:52:17 | [OK] Nova Core started (pid=9344)
+2026-03-03 15:52:20 | [GUARD] Duplicate cores detected. Keeping 9344, killing [25196]
+2026-03-03 15:52:20 | [OK] Killed duplicate_core pid=25196
+2026-03-03 15:52:20 | [GUARD] core_pid.json => 9344 (file=C:\Nova\runtime\core_pid.json)
+2026-03-03 15:52:25 | [GUARD] core_pid.json => 9344 (file=C:\Nova\runtime\core_pid.json)
+2026-03-03 15:52:25 | [GUARD] Starting: nova_core.py (NEW CONSOLE)
+2026-03-03 15:52:25 | [OK] Nova Core started (pid=8000)
+2026-03-03 15:52:27 | [GUARD] Duplicate cores detected. Keeping 8000, killing [8464]
+2026-03-03 15:52:27 | [OK] Killed duplicate_core pid=8464
+2026-03-03 15:52:27 | [GUARD] core_pid.json => 8000 (file=C:\Nova\runtime\core_pid.json)
+2026-03-03 15:52:32 | [GUARD] core_pid.json => 8000 (file=C:\Nova\runtime\core_pid.json)
+2026-03-03 15:52:32 | [GUARD] Starting: nova_core.py (NEW CONSOLE)
+2026-03-03 15:52:32 | [OK] Nova Core started (pid=20556)
+2026-03-03 15:52:34 | [GUARD] Duplicate cores detected. Keeping 20556, killing [22840]
+2026-03-03 15:52:34 | [OK] Killed duplicate_core pid=22840
+2026-03-03 15:52:34 | [GUARD] core_pid.json => 20556 (file=C:\Nova\runtime\core_pid.json)
+2026-03-03 15:52:39 | [GUARD] core_pid.json => 20556 (file=C:\Nova\runtime\core_pid.json)
+2026-03-03 15:52:39 | [GUARD] Starting: nova_core.py (NEW CONSOLE)
+2026-03-03 15:52:39 | [OK] Nova Core started (pid=24280)
+2026-03-03 15:52:41 | [GUARD] Duplicate cores detected. Keeping 24280, killing [25428]
+2026-03-03 15:52:41 | [OK] Killed duplicate_core pid=25428
+2026-03-03 15:52:41 | [GUARD] core_pid.json => 24280 (file=C:\Nova\runtime\core_pid.json)
+2026-03-03 15:52:46 | [GUARD] core_pid.json => 24280 (file=C:\Nova\runtime\core_pid.json)
+2026-03-03 15:52:46 | [GUARD] Starting: nova_core.py (NEW CONSOLE)
+2026-03-03 15:52:46 | [OK] Nova Core started (pid=16868)
+2026-03-03 15:52:48 | [GUARD] Duplicate cores detected. Keeping 16868, killing [24200]
+2026-03-03 15:52:48 | [OK] Killed duplicate_core pid=24200
+2026-03-03 15:52:48 | [GUARD] core_pid.json => 16868 (file=C:\Nova\runtime\core_pid.json)
+2026-03-03 16:00:43 | ===================================================
+2026-03-03 16:00:43 | [GUARD] Nova Guard online (psutil + adopt + atomic pid)
+2026-03-03 16:00:43 | [GUARD] This guard supervises ONE nova_core.py instance.
+2026-03-03 16:00:43 | [GUARD] ROOT=C:\Nova
+2026-03-03 16:00:43 | [GUARD] VENV_PY=C:\Nova\.venv\Scripts\python.exe
+2026-03-03 16:00:43 | [GUARD] NOVA_CORE=C:\Nova\nova_core.py
+2026-03-03 16:00:43 | ===================================================
+2026-03-03 16:00:43 | [GUARD] Starting: nova_core.py (NEW CONSOLE)
+2026-03-03 16:00:43 | [OK] Nova Core started (pid=2552)
+2026-03-03 16:01:03 | [GUARD] Duplicate cores detected. Keeping 2552, killing [4844]
+2026-03-03 16:01:03 | [OK] Killed duplicate_core pid=4844
+2026-03-03 16:01:09 | [GUARD] Starting: nova_core.py (NEW CONSOLE)
+2026-03-03 16:01:09 | [OK] Nova Core started (pid=24776)
+2026-03-03 16:01:24 | [GUARD] Duplicate cores detected. Keeping 24776, killing [11124]
+2026-03-03 16:01:24 | [OK] Killed duplicate_core pid=11124
+2026-03-03 16:01:29 | [GUARD] Starting: nova_core.py (NEW CONSOLE)
+2026-03-03 16:01:29 | [OK] Nova Core started (pid=6544)
+2026-03-03 16:01:39 | [GUARD] Starting: nova_core.py (NEW CONSOLE)
+2026-03-03 16:01:39 | [OK] Nova Core started (pid=24064)
+2026-03-03 16:01:44 | [GUARD] Duplicate cores detected. Keeping 24064, killing [8828]
+2026-03-03 16:01:44 | [OK] Killed duplicate_core pid=8828
+2026-03-03 16:01:49 | [GUARD] Starting: nova_core.py (NEW CONSOLE)
+2026-03-03 16:01:49 | [OK] Nova Core started (pid=11548)
+2026-03-03 16:02:04 | [GUARD] Duplicate cores detected. Keeping 11548, killing [10968]
+2026-03-03 16:02:04 | [OK] Killed duplicate_core pid=10968
+2026-03-03 16:02:09 | [GUARD] Starting: nova_core.py (NEW CONSOLE)
+2026-03-03 16:02:09 | [OK] Nova Core started (pid=9272)
+2026-03-03 16:02:14 | [GUARD] Starting: nova_core.py (NEW CONSOLE)
+2026-03-03 16:02:14 | [OK] Nova Core started (pid=6552)
+2026-03-03 16:05:21 | ===================================================
+2026-03-03 16:05:21 | [GUARD] Nova Guard online (stable)
+2026-03-03 16:05:21 | [GUARD] One rule: if ANY core exists -> adopt, do NOT spawn.
+2026-03-03 16:05:21 | [GUARD] ROOT=C:\Nova
+2026-03-03 16:05:21 | [GUARD] VENV_PY=C:\Nova\.venv\Scripts\python.exe
+2026-03-03 16:05:21 | [GUARD] NOVA_CORE=C:\Nova\nova_core.py
+2026-03-03 16:05:21 | ===================================================
+2026-03-03 16:05:21 | [GUARD] Starting: nova_core.py (NEW CONSOLE)
+2026-03-03 16:05:21 | [OK] Nova Core started (pid=16952)
+2026-03-03 16:05:26 | [GUARD] Duplicate cores detected. Keeping 16952, killing [15236]
+2026-03-03 16:05:26 | [OK] Killed duplicate_core pid=15236
+2026-03-03 16:05:31 | [GUARD] Starting: nova_core.py (NEW CONSOLE)
+2026-03-03 16:05:31 | [OK] Nova Core started (pid=22748)
+2026-03-03 16:05:36 | [GUARD] Duplicate cores detected. Keeping 22748, killing [24604]
+2026-03-03 16:05:36 | [OK] Killed duplicate_core pid=24604
+2026-03-03 16:05:41 | [GUARD] Starting: nova_core.py (NEW CONSOLE)
+2026-03-03 16:05:41 | [OK] Nova Core started (pid=19656)
+2026-03-03 16:05:46 | [GUARD] Duplicate cores detected. Keeping 19656, killing [3728]
+2026-03-03 16:05:46 | [OK] Killed duplicate_core pid=3728
+2026-03-03 16:05:51 | [GUARD] Starting: nova_core.py (NEW CONSOLE)
+2026-03-03 16:05:51 | [OK] Nova Core started (pid=6692)
+2026-03-03 16:05:56 | [GUARD] Duplicate cores detected. Keeping 6692, killing [1212]
+2026-03-03 16:05:56 | [OK] Killed duplicate_core pid=1212
+2026-03-03 16:06:01 | [GUARD] Starting: nova_core.py (NEW CONSOLE)
+2026-03-03 16:06:01 | [OK] Nova Core started (pid=16572)
+2026-03-03 16:06:06 | [GUARD] Duplicate cores detected. Keeping 16572, killing [15240]
+2026-03-03 16:06:06 | [OK] Killed duplicate_core pid=15240
+2026-03-03 16:14:31 | ===================================================
+2026-03-03 16:14:31 | [GUARD] Nova Guard online (deterministic)
+2026-03-03 16:14:31 | [GUARD] Policy: trust statefile+heartbeat only; no process scanning.
+2026-03-03 16:14:31 | [GUARD] ROOT=C:\Nova
+2026-03-03 16:14:31 | [GUARD] VENV_PY=C:\Nova\.venv\Scripts\python.exe
+2026-03-03 16:14:31 | [GUARD] NOVA_CORE=C:\Nova\nova_core.py
+2026-03-03 16:14:31 | ===================================================
+2026-03-03 16:14:31 | [GUARD] No valid core on boot (no_statefile). Spawning.
+2026-03-03 16:14:31 | [GUARD] Starting nova_core.py (NEW CONSOLE)
+2026-03-03 16:14:31 | [OK] Spawned core pid=22916
+2026-03-03 16:14:31 | [GUARD] Core invalid (heartbeat_stale). Spawning replacement.
+2026-03-03 16:14:31 | [GUARD] Starting nova_core.py (NEW CONSOLE)
+2026-03-03 16:14:31 | [OK] Spawned core pid=5172
+2026-03-03 16:16:25 | [GUARD] Core invalid (pid_missing). Spawning replacement.
+2026-03-03 16:16:25 | [GUARD] Starting nova_core.py (NEW CONSOLE)
+2026-03-03 16:16:25 | [OK] Spawned core pid=19888
+2026-03-03 16:18:48 | [GUARD] Core invalid (pid_missing). Spawning replacement.
+2026-03-03 16:18:48 | [GUARD] Starting nova_core.py (NEW CONSOLE)
+2026-03-03 16:18:48 | [OK] Spawned core pid=24116
+2026-03-03 16:18:59 | ===================================================
+2026-03-03 16:18:59 | [GUARD] Nova Guard online (deterministic)
+2026-03-03 16:18:59 | [GUARD] Policy: trust statefile+heartbeat only; no process scanning.
+2026-03-03 16:18:59 | [GUARD] ROOT=C:\Nova
+2026-03-03 16:18:59 | [GUARD] VENV_PY=C:\Nova\.venv\Scripts\python.exe
+2026-03-03 16:18:59 | [GUARD] NOVA_CORE=C:\Nova\nova_core.py
+2026-03-03 16:18:59 | ===================================================
+2026-03-03 16:19:07 | [GUARD] Core invalid (pid_missing). Spawning replacement.
+2026-03-03 16:19:07 | [GUARD] Starting nova_core.py (NEW CONSOLE)
+2026-03-03 16:19:07 | [OK] Spawned core pid=6776
+2026-03-03 16:19:11 | [GUARD] Core not valid yet (pid_missing) but within BOOT_GRACE_SECONDS; waiting.
+2026-03-03 16:19:13 | [GUARD] Core not valid yet (pid_missing) but within BOOT_GRACE_SECONDS; waiting.
+2026-03-03 16:19:15 | [GUARD] Core not valid yet (pid_missing) but within BOOT_GRACE_SECONDS; waiting.
+2026-03-03 16:19:17 | [GUARD] Core not valid yet (pid_missing) but within BOOT_GRACE_SECONDS; waiting.
+2026-03-03 16:19:19 | [GUARD] Core invalid (pid_missing). Spawning replacement.
+2026-03-03 16:19:19 | [GUARD] Starting nova_core.py (NEW CONSOLE)
+2026-03-03 16:19:19 | [OK] Spawned core pid=12784
+2026-03-03 16:23:55 | [GUARD] Stop file detected. Exiting guard.
+2026-03-03 16:23:55 | [GUARD] Guard stopped.
+2026-03-03 16:26:43 | ===================================================
+2026-03-03 16:26:43 | [GUARD] Nova Guard online (deterministic)
+2026-03-03 16:26:43 | [GUARD] Policy: trust statefile+heartbeat only; no process scanning.
+2026-03-03 16:26:43 | [GUARD] ROOT=C:\Nova
+2026-03-03 16:26:43 | [GUARD] VENV_PY=C:\Nova\.venv\Scripts\python.exe
+2026-03-03 16:26:43 | [GUARD] NOVA_CORE=C:\Nova\nova_core.py
+2026-03-03 16:26:43 | ===================================================
+2026-03-03 16:26:43 | [GUARD] No valid core on boot (pid_missing). Spawning.
+2026-03-03 16:26:43 | [GUARD] Starting nova_core.py (NEW CONSOLE)
+2026-03-03 16:26:43 | [OK] Spawned core pid=936
+2026-03-03 16:26:43 | [GUARD] Stop file detected. Exiting guard.
+2026-03-03 16:26:43 | [GUARD] Guard stopped.
+2026-03-03 16:32:19 | ===================================================
+2026-03-03 16:32:19 | [GUARD] Nova Guard online (self-healing + failsafe)
+2026-03-03 16:32:19 | [GUARD] Policy: trust statefile+heartbeat only; no process scanning.
+2026-03-03 16:32:19 | ===================================================
+2026-03-03 16:32:19 | [GUARD] Stop file detected. Exiting guard.
+2026-03-03 16:32:19 | [GUARD] Guard stopped.
+2026-03-03 16:34:16 | ===================================================
+2026-03-03 16:34:16 | [GUARD] Nova Guard online (self-healing + failsafe)
+2026-03-03 16:34:16 | [GUARD] Policy: trust statefile+heartbeat only; no process scanning.
+2026-03-03 16:34:16 | ===================================================
+2026-03-03 16:34:16 | [GUARD] Starting nova_core.py (NEW CONSOLE) because: boot:pid_missing
+2026-03-03 16:34:16 | [OK] Spawned core pid=13972
+2026-03-03 16:34:16 | [GUARD] Core not valid yet (heartbeat_stale) but within BOOT_GRACE_SECONDS; waiting.
+2026-03-03 16:35:44 | [GUARD] Stop file detected. Exiting guard.
+2026-03-03 16:35:44 | [GUARD] Guard stopped.
+2026-03-03 16:35:59 | ===================================================
+2026-03-03 16:35:59 | [GUARD] Nova Guard online (self-healing + failsafe)
+2026-03-03 16:35:59 | [GUARD] Policy: trust statefile+heartbeat only; no process scanning.
+2026-03-03 16:35:59 | ===================================================
+2026-03-03 16:35:59 | [GUARD] Starting nova_core.py (NEW CONSOLE) because: boot:pid_missing
+2026-03-03 16:35:59 | [OK] Spawned core pid=24732
+2026-03-03 16:35:59 | [GUARD] Core not valid yet (heartbeat_stale) but within BOOT_GRACE_SECONDS; waiting.
+2026-03-03 16:36:29 | [GUARD] Stop file detected. Exiting guard.
+2026-03-03 16:36:29 | [GUARD] Guard stopped.
+2026-03-03 16:37:21 | ===================================================
+2026-03-03 16:37:21 | [GUARD] Nova Guard online (self-healing + failsafe)
+2026-03-03 16:37:21 | [GUARD] Policy: trust statefile+heartbeat only; no process scanning.
+2026-03-03 16:37:21 | ===================================================
+2026-03-03 16:37:21 | [GUARD] Starting nova_core.py (NEW CONSOLE) because: boot:pid_missing
+2026-03-03 16:37:21 | [OK] Spawned core pid=2700
+2026-03-03 16:37:21 | [GUARD] Stop file detected. Exiting guard.
+2026-03-03 16:37:21 | [GUARD] Guard stopped.
+2026-03-03 16:39:45 | ===================================================
+2026-03-03 16:39:45 | [GUARD] Nova Guard online (self-healing + failsafe)
+2026-03-03 16:39:45 | [GUARD] Policy: trust statefile+heartbeat only; no process scanning.
+2026-03-03 16:39:45 | ===================================================
+2026-03-03 16:39:45 | [GUARD] Starting nova_core.py (NEW CONSOLE) because: boot:pid_missing
+2026-03-03 16:39:45 | [OK] Spawned core pid=21352
+2026-03-03 16:39:45 | [GUARD] Core not valid yet (heartbeat_stale) but within BOOT_GRACE_SECONDS; waiting.
+2026-03-03 16:43:57 | [GUARD] Starting nova_core.py (NEW CONSOLE) because: invalid:pid_missing
+2026-03-03 16:43:57 | [OK] Spawned core pid=24200
+2026-03-03 16:44:03 | [GUARD] Core not valid yet (pid_missing) but within BOOT_GRACE_SECONDS; waiting.
+2026-03-03 16:44:05 | [GUARD] Core not valid yet (pid_missing) but within BOOT_GRACE_SECONDS; waiting.
+2026-03-03 16:44:07 | [GUARD] Core not valid yet (pid_missing) but within BOOT_GRACE_SECONDS; waiting.
+2026-03-03 16:44:09 | [GUARD] Starting nova_core.py (NEW CONSOLE) because: invalid:pid_missing
+2026-03-03 16:44:09 | [OK] Spawned core pid=20732
+2026-03-03 16:44:15 | [GUARD] Core not valid yet (pid_missing) but within BOOT_GRACE_SECONDS; waiting.
+2026-03-03 16:44:17 | [GUARD] Core not valid yet (pid_missing) but within BOOT_GRACE_SECONDS; waiting.
+2026-03-03 16:44:19 | [GUARD] Core not valid yet (pid_missing) but within BOOT_GRACE_SECONDS; waiting.
+2026-03-03 16:44:21 | [GUARD] Starting nova_core.py (NEW CONSOLE) because: invalid:pid_missing
+2026-03-03 16:44:21 | [OK] Spawned core pid=22764
+2026-03-03 16:44:27 | [GUARD] Core not valid yet (pid_missing) but within BOOT_GRACE_SECONDS; waiting.
+2026-03-03 16:44:29 | [GUARD] Core not valid yet (pid_missing) but within BOOT_GRACE_SECONDS; waiting.
+2026-03-03 16:44:31 | [GUARD] Core not valid yet (pid_missing) but within BOOT_GRACE_SECONDS; waiting.
+2026-03-03 16:44:33 | [GUARD] Stop file detected. Exiting guard.
+2026-03-03 16:44:33 | [GUARD] Guard stopped.
+2026-03-03 17:35:18 | ===================================================
+2026-03-03 17:35:18 | [GUARD] Nova Guard online (self-healing + failsafe)
+2026-03-03 17:35:18 | [GUARD] Policy: trust statefile+heartbeat only; no process scanning.
+2026-03-03 17:35:18 | ===================================================
+2026-03-03 17:35:18 | [GUARD] Starting nova_core.py (NEW CONSOLE) because: boot:pid_missing
+2026-03-03 17:35:18 | [OK] Spawned core pid=16836
+2026-03-03 17:35:18 | [GUARD] Core not valid yet (heartbeat_stale) but within BOOT_GRACE_SECONDS; waiting.
+2026-03-03 17:40:33 | [GUARD] Starting nova_core.py (NEW CONSOLE) because: invalid:pid_missing
+2026-03-03 17:40:33 | [OK] Spawned core pid=7328
+2026-03-03 17:41:05 | [GUARD] Starting nova_core.py (NEW CONSOLE) because: invalid:no_statefile
+2026-03-03 17:41:05 | [OK] Spawned core pid=14900
+2026-03-03 17:41:17 | [GUARD] Stop file detected. Exiting guard.
+2026-03-03 17:41:17 | [GUARD] Guard stopped.
+2026-03-03 17:46:30 | ===================================================
+2026-03-03 17:46:30 | [GUARD] Nova Guard online (self-healing + failsafe)
+2026-03-03 17:46:30 | [GUARD] Policy: trust statefile+heartbeat only; no process scanning.
+2026-03-03 17:46:30 | ===================================================
+2026-03-03 17:46:30 | [GUARD] Starting nova_core.py (NEW CONSOLE) because: boot:no_statefile
+2026-03-03 17:46:30 | [OK] Spawned core pid=14876
+2026-03-03 17:59:38 | [GUARD] Starting nova_core.py (NEW CONSOLE) because: invalid:pid_missing
+2026-03-03 17:59:38 | [OK] Spawned core pid=20436
+2026-03-03 17:59:46 | [GUARD] Stop file detected. Exiting guard.
+2026-03-03 17:59:46 | [GUARD] Guard stopped.
+2026-03-03 18:30:49 | ===================================================
+2026-03-03 18:30:49 | [GUARD] Nova Guard online (deterministic)
+2026-03-03 18:30:49 | [GUARD] Policy: trust statefile+heartbeat only; no process scanning.
+2026-03-03 18:30:49 | [GUARD] ROOT=C:\Nova
+2026-03-03 18:30:49 | [GUARD] VENV_PY=C:\Nova\.venv\Scripts\python.exe
+2026-03-03 18:30:49 | [GUARD] NOVA_CORE=C:\Nova\nova_core.py
+2026-03-03 18:30:49 | ===================================================
+2026-03-03 18:30:49 | [GUARD] Starting nova_core.py (NEW CONSOLE) because: boot:pid_missing
+2026-03-03 18:30:49 | [OK] Spawned core pid=460
+2026-03-03 18:32:07 | [GUARD] Starting nova_core.py (NEW CONSOLE) because: pid_missing
+2026-03-03 18:32:07 | [OK] Spawned core pid=18536
+2026-03-03 18:32:23 | [GUARD] Starting nova_core.py (NEW CONSOLE) because: pid_missing
+2026-03-03 18:32:23 | [OK] Spawned core pid=19608
+2026-03-03 18:32:37 | [GUARD] Stop file detected. Exiting guard.
+2026-03-03 18:32:37 | [GUARD] Guard stopped.
+2026-03-03 18:37:59 | ===================================================
+2026-03-03 18:37:59 | [GUARD] Nova Guard online (deterministic)
+2026-03-03 18:37:59 | [GUARD] Policy: trust statefile+heartbeat only; no process scanning.
+2026-03-03 18:37:59 | [GUARD] ROOT=C:\Nova
+2026-03-03 18:37:59 | [GUARD] VENV_PY=C:\Nova\.venv\Scripts\python.exe
+2026-03-03 18:37:59 | [GUARD] NOVA_CORE=C:\Nova\nova_core.py
+2026-03-03 18:37:59 | ===================================================
+2026-03-03 18:37:59 | [GUARD] Starting nova_core.py (NEW CONSOLE) because: boot:pid_missing
+2026-03-03 18:37:59 | [OK] Spawned core pid=23732
+2026-03-03 18:44:15 | [GUARD] Stop file detected. Exiting guard.
+2026-03-03 18:44:15 | [GUARD] Guard stopped.
+2026-03-03 18:44:30 | ===================================================
+2026-03-03 18:44:30 | [GUARD] Nova Guard online (deterministic)
+2026-03-03 18:44:30 | [GUARD] Policy: trust statefile+heartbeat only; no process scanning.
+2026-03-03 18:44:30 | [GUARD] ROOT=C:\Nova
+2026-03-03 18:44:30 | [GUARD] VENV_PY=C:\Nova\.venv\Scripts\python.exe
+2026-03-03 18:44:30 | [GUARD] NOVA_CORE=C:\Nova\nova_core.py
+2026-03-03 18:44:30 | ===================================================
+2026-03-03 18:44:30 | [GUARD] Starting nova_core.py (NEW CONSOLE) because: boot:pid_missing
+2026-03-03 18:44:30 | [OK] Spawned core pid=25056
+2026-03-03 18:52:59 | [GUARD] Stop file detected. Exiting guard.
+2026-03-03 18:52:59 | [GUARD] Guard stopped.
+2026-03-03 18:53:13 | ===================================================
+2026-03-03 18:53:13 | [GUARD] Nova Guard online (deterministic)
+2026-03-03 18:53:13 | [GUARD] Policy: trust statefile+heartbeat only; no process scanning.
+2026-03-03 18:53:13 | [GUARD] ROOT=C:\Nova
+2026-03-03 18:53:13 | [GUARD] VENV_PY=C:\Nova\.venv\Scripts\python.exe
+2026-03-03 18:53:13 | [GUARD] NOVA_CORE=C:\Nova\nova_core.py
+2026-03-03 18:53:13 | ===================================================
+2026-03-03 18:53:13 | [GUARD] Starting nova_core.py (NEW CONSOLE) because: boot:pid_missing
+2026-03-03 18:53:14 | [OK] Spawned core pid=4084
+2026-03-03 18:57:40 | [GUARD] Starting nova_core.py (NEW CONSOLE) because: pid_missing
+2026-03-03 18:57:40 | [OK] Spawned core pid=8204
+2026-03-04 07:59:35 | ===================================================
+2026-03-04 07:59:35 | [GUARD] Nova Guard online (deterministic)
+2026-03-04 07:59:35 | [GUARD] Policy: trust statefile+heartbeat only; no process scanning.
+2026-03-04 07:59:35 | [GUARD] ROOT=C:\Nova
+2026-03-04 07:59:35 | [GUARD] VENV_PY=C:\Nova\.venv\Scripts\python.exe
+2026-03-04 07:59:35 | [GUARD] NOVA_CORE=C:\Nova\nova_core.py
+2026-03-04 07:59:35 | ===================================================
+2026-03-04 07:59:35 | [GUARD] Starting nova_core.py (NEW CONSOLE) because: boot:pid_missing
+2026-03-04 07:59:35 | [OK] Spawned core pid=10212
+2026-03-04 08:04:14 | [GUARD] Starting nova_core.py (NEW CONSOLE) because: pid_missing
+2026-03-04 08:04:14 | [OK] Spawned core pid=5616
+2026-03-04 08:04:30 | [GUARD] Starting nova_core.py (NEW CONSOLE) because: pid_missing
+2026-03-04 08:04:30 | [OK] Spawned core pid=15192
+2026-03-04 08:09:51 | [GUARD] Stop file detected. Exiting guard.
+2026-03-04 08:09:51 | [GUARD] Guard stopped.
+2026-03-04 08:25:29 | ===================================================
+2026-03-04 08:25:29 | [GUARD] Nova Guard online (deterministic)
+2026-03-04 08:25:29 | [GUARD] Policy: trust statefile+heartbeat only; no process scanning.
+2026-03-04 08:25:29 | [GUARD] ROOT=C:\Nova
+2026-03-04 08:25:29 | [GUARD] VENV_PY=C:\Nova\.venv\Scripts\python.exe
+2026-03-04 08:25:29 | [GUARD] NOVA_CORE=C:\Nova\nova_core.py
+2026-03-04 08:25:29 | ===================================================
+2026-03-04 08:25:55 | [GUARD] Starting nova_core.py (NEW CONSOLE) because: pid_missing
+2026-03-04 08:25:55 | [OK] Spawned core pid=5440
+2026-03-04 08:45:14 | [GUARD] Stop file detected. Exiting guard.
+2026-03-04 08:45:14 | [GUARD] Guard stopped.
+2026-03-04 08:45:21 | ===================================================
+2026-03-04 08:45:21 | [GUARD] Nova Guard online (deterministic)
+2026-03-04 08:45:21 | [GUARD] Policy: trust statefile+heartbeat only; no process scanning.
+2026-03-04 08:45:21 | [GUARD] ROOT=C:\Nova
+2026-03-04 08:45:21 | [GUARD] VENV_PY=C:\Nova\.venv\Scripts\python.exe
+2026-03-04 08:45:21 | [GUARD] NOVA_CORE=C:\Nova\nova_core.py
+2026-03-04 08:45:21 | ===================================================
+2026-03-04 08:45:21 | [GUARD] Starting nova_core.py (NEW CONSOLE) because: boot:pid_missing
+2026-03-04 08:45:21 | [OK] Spawned core pid=7136
+2026-03-04 08:45:21 | [GUARD] Stop file detected. Exiting guard.
+2026-03-04 08:45:21 | [GUARD] Guard stopped.
+2026-03-08 21:31:33 | ===================================================
+2026-03-08 21:31:33 | [GUARD] Nova Guard online (deterministic)
+2026-03-08 21:31:33 | [GUARD] Policy: trust statefile+heartbeat only; no process scanning.
+2026-03-08 21:31:33 | [GUARD] ROOT=C:\Nova
+2026-03-08 21:31:33 | [GUARD] VENV_PY=C:\Nova\.venv\Scripts\python.exe
+2026-03-08 21:31:33 | [GUARD] NOVA_CORE=C:\Nova\nova_core.py
+2026-03-08 21:31:33 | ===================================================
+2026-03-08 21:31:33 | [GUARD] Starting nova_core.py (NEW CONSOLE) because: boot:pid_missing
+2026-03-08 21:31:33 | [OK] Spawned core pid=21620
+2026-03-08 21:36:49 | [GUARD] Stop file detected. Exiting guard.
+2026-03-08 21:36:49 | [GUARD] Guard stopped.
+2026-03-08 21:41:54 | ===================================================
+2026-03-08 21:41:54 | [GUARD] Nova Guard online (deterministic)
+2026-03-08 21:41:54 | [GUARD] Policy: trust statefile+heartbeat only; no process scanning.
+2026-03-08 21:41:54 | [GUARD] ROOT=C:\Nova
+2026-03-08 21:41:54 | [GUARD] VENV_PY=C:\Nova\.venv\Scripts\python.exe
+2026-03-08 21:41:54 | [GUARD] NOVA_CORE=C:\Nova\nova_core.py
+2026-03-08 21:41:54 | ===================================================
+2026-03-08 21:41:54 | [GUARD] Starting nova_core.py (NEW CONSOLE) because: boot:pid_missing
+2026-03-08 21:41:54 | [OK] Spawned core pid=10192
+2026-03-08 21:41:54 | [GUARD] Stop file detected. Exiting guard.
+2026-03-08 21:41:54 | [GUARD] Guard stopped.
+2026-03-08 22:37:24 | ===================================================
+2026-03-08 22:37:24 | [GUARD] Nova Guard online (deterministic)
+2026-03-08 22:37:24 | [GUARD] Policy: trust statefile+heartbeat only; no process scanning.
+2026-03-08 22:37:24 | [GUARD] ROOT=C:\Nova
+2026-03-08 22:37:24 | [GUARD] VENV_PY=C:\Nova\.venv\Scripts\python.exe
+2026-03-08 22:37:24 | [GUARD] NOVA_CORE=C:\Nova\nova_core.py
+2026-03-08 22:37:24 | ===================================================
+2026-03-08 22:37:24 | [GUARD] Starting nova_core.py (NEW CONSOLE) because: boot:pid_missing
+2026-03-08 22:37:24 | [OK] Spawned core pid=21276
+2026-03-08 22:37:24 | [GUARD] Stop file detected. Exiting guard.
+2026-03-08 22:37:24 | [GUARD] Guard stopped.
