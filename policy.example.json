@@ -1,0 +1,27 @@
+{
+  "allowed_root": "C:\\Users\\guribe\\Desktop\\UniserverZ",
+  "allow_shell": false,
+  "confirm_writes": true,
+  "confirm_exec": true,
+  "tools_enabled": {
+    "screen": true,
+    "camera": true,
+    "files": true,
+    "health": true
+  },
+  "models": {
+    "chat": "llama3.1:8b",
+    "vision": "qwen2.5vl:7b",
+    "stt_size": "small"
+  },
+  "memory": {
+    "enabled": false,
+    "mode": "B",
+    "top_k": 5,
+    "context_top_k": 3,
+    "store_min_chars": 12
+  },
+  "patch": {
+    "strict_manifest": true
+  }
+}
