@@ -1,0 +1,42 @@
+{
+  "allowed_root": "C:\\Nova",
+  "allow_shell": false,
+  "confirm_writes": true,
+  "confirm_exec": true,
+  "tools_enabled": {
+    "screen": true,
+    "camera": true,
+    "files": true,
+    "health": true,
+    "web": true
+  },
+  "models": {
+    "chat": "qwen2.5:7b-instruct",
+    "vision": "qwen2.5vl:7b",
+    "stt_size": "base"
+  },
+  "memory": {
+    "enabled": true,
+    "mode": "B",
+    "top_k": 5,
+    "context_top_k": 3,
+    "min_score": 0.18,
+    "store_min_chars": 12,
+    "exclude_sources": ["voice"]
+  },
+  "web": {
+    "enabled": true,
+    "allow_domains": [
+      "tea.texas.gov",
+      "txschools.gov",
+      "tea4avcastro.tea.texas.gov",
+      "region1.net",
+      "texasstudentdatasystem.org",
+      "tsds.txschools.gov"
+    ],
+    "max_bytes": 20000000
+  },
+  "patch": {
+    "strict_manifest": true
+  }
+}

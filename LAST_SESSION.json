@@ -1,0 +1,27 @@
+{
+  "date": "2026-03-08",
+  "project": "Nova",
+  "workspace": "C:\\Nova",
+  "status": "active-handoff",
+  "current_stage": "functional prototype with runtime hardening",
+  "last_completed": [
+    "Health/doctor/smoke operational flows stabilized",
+    "Patch downgrade guard and manifest checks added",
+    "Memory retrieval + session awareness improved",
+    "Web search/gather/research commands added",
+    "Color/animal preference deterministic handling improved"
+  ],
+  "next_priority": [
+    "Add tests for deterministic preference logic branches",
+    "Improve web research depth (sitemap/domain heuristics)",
+    "Add explicit pinned memory command (remember: <fact>)",
+    "Add chat context debug command",
+    "Add compact regression runner command"
+  ],
+  "resume_files": [
+    "C:\\Nova\\RESUME_HERE.txt",
+    "C:\\Nova\\PROJECT_STATUS.md",
+    "C:\\Nova\\LAST_SESSION.json"
+  ],
+  "resume_command": "continue from C:\\Nova\\PROJECT_STATUS.md"
+}
