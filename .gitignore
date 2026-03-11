@@ -1,0 +1,37 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Virtual env
+.venv/
+venv/
+
+# Runtime / logs
+logs/
+runtime/
+updates/snapshots/
+
+# Local databases / caches
+*.sqlite
+*.db
+
+# Bundles / archives
+*.zip
+
+# Downloaded web content
+knowledge/web/
+
+# OS/editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Large local binaries / models
+piper/models/
+piper/espeak-ng-data/
+
+# Optional local artifacts
+LAST_SESSION.json
