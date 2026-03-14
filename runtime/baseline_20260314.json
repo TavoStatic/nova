@@ -1,0 +1,23 @@
+{
+  "date": "2026-03-14",
+  "workspace": "C:\\Nova",
+  "baseline_label": "stable-2026-03-14",
+  "git_head_short": "e07745a",
+  "git_dirty_file_count": 41,
+  "regression": {
+    "passed": true,
+    "test_count": 63
+  },
+  "soak": {
+    "passed": true,
+    "duration_sec": 180,
+    "checks_total": 103,
+    "checks_failed": 0
+  },
+  "features_validated": [
+    "control room auth and actions",
+    "chat history persistence",
+    "cross-device session manager",
+    "identity memory stability"
+  ]
+}
