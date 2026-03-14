@@ -29,7 +29,7 @@ import tempfile
 import difflib
 from pathlib import Path
 from typing import Optional, Tuple
-from urllib.parse import urlparse, parse_qs, unquote, urljoin
+from urllib.parse import urlparse, parse_qs, unquote, urljoin, quote
 from capabilities import explain_missing, describe_capabilities
 from task_engine import analyze_request
 from action_planner import decide_actions
@@ -88,6 +88,8 @@ else:
 
 RUNTIME_DIR = BASE_DIR / "runtime"
 LOG_DIR = BASE_DIR / "logs"
+MEMORY_DIR = BASE_DIR / "memory"
+IDENTITY_FILE = MEMORY_DIR / "identity.json"
 POLICY_PATH = BASE_DIR / "policy.json"
 PYTHON = str(BASE_DIR / ".venv" / "Scripts" / "python.exe")
 OLLAMA_BASE = "http://127.0.0.1:11434"
@@ -130,6 +132,12 @@ SNAPSHOTS_DIR = UPDATES_DIR / "snapshots"
 PATCH_LOG = UPDATES_DIR / "patch.log"
 PATCH_REVISION_FILE = UPDATES_DIR / "revision.json"
 PATCH_MANIFEST_NAME = "nova_patch.json"
+POLICY_AUDIT_LOG = RUNTIME_DIR / "policy_changes.jsonl"
+
+# Session-scoped web research continuation cache.
+WEB_RESEARCH_LAST_QUERY: str = ""
+WEB_RESEARCH_LAST_RESULTS: list[tuple[float, str, str]] = []
+WEB_RESEARCH_CURSOR: int = 0
 
 
 def ok(msg): print(f"[OK]   {msg}", flush=True)
@@ -146,6 +154,34 @@ def load_policy() -> dict:
     data.setdefault("web", {"enabled": False, "allow_domains": [], "max_bytes": 20_000_000})
     data.setdefault("patch", {"strict_manifest": True})
     return data
+
+
+def _load_policy_raw() -> dict:
+    try:
+        return json.loads(POLICY_PATH.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+
+def _save_policy_raw(data: dict) -> None:
+    POLICY_PATH.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
+def _record_policy_change(action: str, target: str, result: str, details: str = "") -> None:
+    entry = {
+        "ts": int(time.time()),
+        "user": get_active_user() or "unknown",
+        "action": str(action or "").strip(),
+        "target": str(target or "").strip(),
+        "result": str(result or "").strip(),
+        "details": str(details or "").strip(),
+    }
+    try:
+        POLICY_AUDIT_LOG.parent.mkdir(parents=True, exist_ok=True)
+        with open(POLICY_AUDIT_LOG, "a", encoding="utf-8") as f:
+            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    except Exception:
+        pass
 
 
 def policy_models():
@@ -257,6 +293,260 @@ def web_fetch(url: str, save_dir: Path) -> dict:
             r.close()
         except Exception:
             pass
+
+
+def _web_allowlist_message(context: str = "") -> str:
+    """Return a friendly message explaining web allowlist restrictions and list allowed domains."""
+    cfg = policy_web()
+    allow_domains = cfg.get("allow_domains") or []
+    if not allow_domains:
+        base = "I attempted to access the web, but web access is restricted by policy and no allowlisted domains are configured."
+        return base
+
+    lines = [f"I attempted to access the web{(' for ' + context) if context else ''}, but my web tool only allows specific sources:"]
+    for d in allow_domains:
+        lines.append(f"- {d}")
+
+    # suggest common weather API if present in allowlist otherwise suggest a known source
+    preferred = None
+    for candidate in ("api.weather.gov", "noaa.gov", "weather.gov"):
+        for d in allow_domains:
+            if candidate in d:
+                preferred = candidate
+                break
+        if preferred:
+            break
+
+    if preferred:
+        lines.append(f"If you'd like, I can try again using {preferred}.")
+    else:
+        lines.append("If you'd like, tell me which of the allowlisted domains to try, or provide an allowed URL to fetch.")
+    lines.append("To add a new allowed domain, use: policy allow <domain>")
+
+    return "\n".join(lines)
+
+
+def _weather_source_host() -> Optional[str]:
+    allow_domains = [str(d).strip().lower() for d in (policy_web().get("allow_domains") or []) if str(d).strip()]
+    for preferred in ("api.weather.gov", "wttr.in"):
+        for d in allow_domains:
+            if d == preferred or d.endswith("." + preferred):
+                return preferred
+    return None
+
+
+def _weather_unavailable_message() -> str:
+    return (
+        "I can access websites, but I don't yet have a reliable structured weather source configured. "
+        "I cannot honestly claim weather results from raw weather.com pages. "
+        "Add a source like 'policy allow api.weather.gov' and then use 'weather <location-or-lat,lon>'."
+    )
+
+
+def weather_response_style() -> str:
+    try:
+        s = str((policy_web().get("weather_response_style") or "concise")).strip().lower()
+        if s in {"concise", "tool"}:
+            return s
+    except Exception:
+        pass
+    return "concise"
+
+
+def _format_weather_output(label: str, summary: str) -> str:
+    # Normalize whitespace and strip any existing weather-style prefixes so output is never stacked.
+    s = re.sub(r"\s+", " ", (summary or "").strip())
+    s = re.sub(r"^(?:weather|forecast)\s+for\s+[^:]+:\s*", "", s, flags=re.I)
+    l = (label or "").strip() or "this location"
+
+    # Normalize common deterministic location aliases to cleaner display names.
+    aliases = {
+        "brownsville": "Brownsville, TX",
+        "brownsville tx": "Brownsville, TX",
+        "brownsville, tx": "Brownsville, TX",
+    }
+    n = re.sub(r"\s+", " ", l.lower()).strip()
+    l = aliases.get(n, l)
+
+    style = weather_response_style()
+    if style == "tool":
+        return f"Forecast for {l}: {s}"
+    return f"{l}: {s}"
+
+
+def _mentions_location_phrase(text: str) -> bool:
+    low = (text or "").lower()
+    return any(p in low for p in [
+        "location",
+        "locaiton",  # common typo seen in transcript
+        "physical location",
+        "physical locaiton",
+    ])
+
+
+BROWNSVILLE_LAT = 25.9017
+BROWNSVILLE_LON = -97.4975
+
+
+def _parse_lat_lon(text: str) -> Optional[tuple[float, float]]:
+    m = re.search(r"(-?\d{1,2}(?:\.\d+)?)\s*,\s*(-?\d{1,3}(?:\.\d+)?)", (text or ""))
+    if not m:
+        return None
+    try:
+        lat = float(m.group(1))
+        lon = float(m.group(2))
+    except Exception:
+        return None
+    if not (-90.0 <= lat <= 90.0 and -180.0 <= lon <= 180.0):
+        return None
+    return (lat, lon)
+
+
+def _coords_for_location_hint(location: str) -> Optional[tuple[float, float]]:
+    loc = (location or "").strip().lower()
+    if not loc:
+        return None
+    parsed = _parse_lat_lon(loc)
+    if parsed:
+        return parsed
+
+    if "brownsville" in loc:
+        return (BROWNSVILLE_LAT, BROWNSVILLE_LON)
+
+    return None
+
+
+def _coords_from_saved_location() -> Optional[tuple[float, float]]:
+    # Prefer explicit operator-set coordinates stored in core state.
+    try:
+        st = read_core_state(DEFAULT_STATEFILE)
+        c = st.get("location_coords") if isinstance(st, dict) else None
+        if isinstance(c, dict):
+            lat = float(c.get("lat"))
+            lon = float(c.get("lon"))
+            if -90.0 <= lat <= 90.0 and -180.0 <= lon <= 180.0:
+                return (lat, lon)
+    except Exception:
+        pass
+
+    try:
+        audit_out = mem_audit("location coordinates lat lon")
+        j = json.loads(audit_out) if audit_out else {}
+        results = j.get("results") if isinstance(j, dict) else []
+        for r in results:
+            preview = (r.get("preview") or "").strip()
+            parsed = _parse_lat_lon(preview)
+            if parsed:
+                return parsed
+    except Exception:
+        return None
+    return None
+
+
+def set_location_coords(value: str) -> str:
+    coords = _parse_lat_lon(value)
+    if not coords:
+        return "Usage: location coords <lat>,<lon>"
+
+    lat, lon = coords
+    try:
+        set_core_state(DEFAULT_STATEFILE, "location_coords", {"lat": lat, "lon": lon})
+    except Exception:
+        pass
+
+    # Also store in memory for continuity across tooling.
+    try:
+        mem_add("profile", "location_coords", f"location coordinates: {lat},{lon}")
+    except Exception:
+        pass
+
+    return f"Saved current location coordinates: {lat},{lon}"
+
+
+def get_weather_for_location(lat: float, lon: float) -> str:
+    headers = {
+        "User-Agent": "Nova/1.0 (local assistant)",
+        "Accept": "application/geo+json",
+    }
+
+    point_url = f"https://api.weather.gov/points/{lat},{lon}"
+    r1 = requests.get(point_url, headers=headers, timeout=20)
+    r1.raise_for_status()
+    point_data = r1.json()
+    forecast_url = ((point_data.get("properties") or {}).get("forecast") or "").strip()
+    if not forecast_url:
+        return "I reached the weather service, but no forecast URL was returned for that location."
+
+    r2 = requests.get(forecast_url, headers=headers, timeout=20)
+    r2.raise_for_status()
+    forecast_data = r2.json()
+
+    periods = ((forecast_data.get("properties") or {}).get("periods") or [])
+    if not periods:
+        return "I reached the weather service, but no forecast periods were returned."
+
+    now = periods[0]
+    return (
+        f"{now.get('name', 'Current')}: {now.get('temperature', '?')}°{now.get('temperatureUnit', 'F')}, "
+        f"{now.get('shortForecast', 'unknown')}. Wind {now.get('windSpeed', '?')} {now.get('windDirection', '?')}. "
+        f"[source: api.weather.gov]"
+    )
+
+
+def _need_confirmed_location_message() -> str:
+    return "I have a weather tool now, but I still need a confirmed location or coordinates."
+
+
+def tool_weather(location: str) -> str:
+    if not policy_tools_enabled().get("web", False) or not web_enabled():
+        return "Weather lookup unavailable: web tool is disabled by policy."
+
+    source = _weather_source_host()
+    if not source:
+        return _weather_unavailable_message()
+
+    loc = (location or "").strip()
+
+    if source == "api.weather.gov":
+        coords = _coords_for_location_hint(loc)
+        if not coords:
+            return _need_confirmed_location_message()
+        lat, lon = coords
+        try:
+            summary = get_weather_for_location(lat, lon)
+            label = loc if loc else f"{lat},{lon}"
+            return _format_weather_output(label, summary)
+        except Exception as e:
+            return f"Weather lookup failed: {e}"
+
+    if not loc:
+        return "Usage: weather <location-or-lat,lon>"
+
+    if source == "wttr.in":
+        url = f"https://wttr.in/{quote(loc)}?format=j1"
+        try:
+            r = requests.get(url, headers={"User-Agent": "Nova/1.0"}, timeout=25)
+            r.raise_for_status()
+            data = r.json()
+        except Exception as e:
+            return f"Weather lookup failed: {e}"
+
+        try:
+            cur = ((data.get("current_condition") or [{}])[0])
+            desc = (((cur.get("weatherDesc") or [{}])[0]).get("value") or "unknown").strip()
+            temp_f = (cur.get("temp_F") or "?").strip()
+            feels_f = (cur.get("FeelsLikeF") or "?").strip()
+            humidity = (cur.get("humidity") or "?").strip()
+            wind_mph = (cur.get("windspeedMiles") or "?").strip()
+
+            return _format_weather_output(
+                loc,
+                f"{desc}, {temp_f}F (feels like {feels_f}F), humidity {humidity}%, wind {wind_mph} mph. [source: wttr.in]",
+            )
+        except Exception:
+            return "Weather lookup succeeded but returned an unexpected payload format."
+
+    return _need_confirmed_location_message()
 
 def allowed_root() -> Path:
     p = load_policy()
@@ -597,6 +887,87 @@ def mem_audit(query: str) -> str:
         return f"Memory audit failed: {e}"
 
 
+def mem_remember_fact(text: str) -> str:
+    fact = (text or "").strip().strip("\"'")
+    if not fact:
+        return "Usage: remember: <fact>"
+    if not mem_enabled():
+        return "Memory is disabled in policy."
+    if len(fact) < 3:
+        return "Fact is too short to store."
+
+    mem_add("fact", "pinned", fact)
+    return f"Pinned memory saved: {fact}"
+
+
+def load_identity_profile() -> dict:
+    try:
+        if not IDENTITY_FILE.exists():
+            return {}
+        data = json.loads(IDENTITY_FILE.read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def save_identity_profile(data: dict) -> None:
+    try:
+        MEMORY_DIR.mkdir(parents=True, exist_ok=True)
+        tmp = IDENTITY_FILE.with_suffix(".json.tmp")
+        payload = json.dumps(data, ensure_ascii=True, indent=2)
+        tmp.write_text(payload, encoding="utf-8")
+        tmp.replace(IDENTITY_FILE)
+    except Exception:
+        pass
+
+
+def remember_name_origin(story_text: str) -> str:
+    story = re.sub(r"\s+", " ", (story_text or "").strip())
+    if len(story) < 30:
+        return "Please provide a longer origin story so I can store it accurately."
+
+    profile = load_identity_profile()
+    profile["name_origin"] = story
+    profile["updated_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
+    save_identity_profile(profile)
+
+    if mem_enabled():
+        try:
+            mem_add("identity", "typed", f"nova_name_origin: {story[:1400]}")
+        except Exception:
+            pass
+
+    return "Stored. I will remember this as the story behind my name."
+
+
+def get_name_origin_story() -> str:
+    p = load_identity_profile()
+    story = str(p.get("name_origin") or "").strip()
+    if story:
+        return story
+
+    # Fallback to memory recall if identity file has not been set yet.
+    try:
+        recall = mem_recall("nova name origin story creator gus")
+        if recall:
+            return recall.strip()[:2000]
+    except Exception:
+        pass
+    return ""
+
+
+def identity_context_for_prompt() -> str:
+    p = load_identity_profile()
+    lines = []
+    story = str(p.get("name_origin") or "").strip()
+    if story:
+        lines.append("Identity fact: The assistant's name origin story is user-defined.")
+        lines.append(f"Name origin story: {story[:1400]}")
+    if not lines:
+        return ""
+    return "\n".join(lines)
+
+
 def build_learning_context(query: str) -> str:
     blocks = []
 
@@ -713,6 +1084,254 @@ def _extract_urls(text: str) -> list[str]:
     return urls
 
 
+def _strip_invocation_prefix(text: str) -> str:
+    """Normalize inputs like 'nova, ...' so routing sees the actual request."""
+    t = (text or "").strip()
+    if not t:
+        return t
+
+    m = re.match(r"^nova\b[\s,:\-]*(.*)$", t, flags=re.I)
+    if not m:
+        return t
+
+    rest = (m.group(1) or "").strip()
+    if not rest:
+        return ""
+
+    # Only strip when it looks like direct address/invocation.
+    starter = (rest.split(maxsplit=1)[0] or "").lower()
+    invoke_starters = {
+        "what", "which", "who", "where", "when", "why", "how",
+        "can", "could", "would", "do", "does", "did", "is", "are",
+        "say", "tell", "show", "find", "search", "read", "list", "give",
+        "web", "screen", "camera", "health", "inspect", "capabilities",
+        "patch", "kb", "mem", "teach",
+    }
+    if starter in invoke_starters:
+        return rest
+
+    return t
+
+
+def _normalize_domain_input(value: str) -> str:
+    s = (value or "").strip().lower()
+    if not s:
+        return ""
+
+    if not re.match(r"^[a-z][a-z0-9+.-]*://", s):
+        s = "https://" + s
+
+    try:
+        p = urlparse(s)
+        host = (p.hostname or "").strip().lower()
+    except Exception:
+        return ""
+
+    if not host:
+        return ""
+
+    # Basic host validation: labels with letters/numbers/hyphen, separated by dots.
+    if not re.match(r"^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)(?:\.(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?))*$", host):
+        return ""
+
+    return host
+
+
+def list_allowed_domains() -> str:
+    allow_domains = list(policy_web().get("allow_domains") or [])
+    if not allow_domains:
+        return "No allowed domains are configured in policy.json."
+
+    lines = ["Here are the domains I currently allow:"]
+    for d in allow_domains:
+        lines.append(f"- {d}")
+    return "\n".join(lines)
+
+
+def policy_allow_domain(value: str) -> str:
+    host = _normalize_domain_input(value)
+    if not host:
+        _record_policy_change("allow_domain", value, "failed", "invalid_domain_input")
+        return "Usage: policy allow <domain-or-url>"
+
+    data = _load_policy_raw()
+    web = data.get("web") if isinstance(data.get("web"), dict) else {}
+    allow_domains = list(web.get("allow_domains") or [])
+
+    existing = {str(x).strip().lower() for x in allow_domains if str(x).strip()}
+    if host in existing:
+        _record_policy_change("allow_domain", host, "skipped", "already_allowed")
+        return f"Domain already allowed: {host}"
+
+    allow_domains.append(host)
+    web["allow_domains"] = allow_domains
+    data["web"] = web
+    _save_policy_raw(data)
+    _record_policy_change("allow_domain", host, "success", "added_to_allow_domains")
+
+    return f"Added allowed domain: {host}\n{list_allowed_domains()}"
+
+
+def policy_remove_domain(value: str) -> str:
+    host = _normalize_domain_input(value)
+    if not host:
+        _record_policy_change("remove_domain", value, "failed", "invalid_domain_input")
+        return "Usage: policy remove <domain-or-url>"
+
+    data = _load_policy_raw()
+    web = data.get("web") if isinstance(data.get("web"), dict) else {}
+    allow_domains = list(web.get("allow_domains") or [])
+
+    kept = []
+    removed = False
+    for d in allow_domains:
+        dd = str(d).strip()
+        if dd.lower() == host:
+            removed = True
+            continue
+        kept.append(dd)
+
+    if not removed:
+        _record_policy_change("remove_domain", host, "skipped", "not_found")
+        return f"Domain not found in allowlist: {host}"
+
+    web["allow_domains"] = kept
+    data["web"] = web
+    _save_policy_raw(data)
+    _record_policy_change("remove_domain", host, "success", "removed_from_allow_domains")
+    return f"Removed allowed domain: {host}\n{list_allowed_domains()}"
+
+
+def policy_audit(limit: int = 20) -> str:
+    n = max(1, min(200, int(limit or 20)))
+    if not POLICY_AUDIT_LOG.exists():
+        return "No policy audit entries yet."
+
+    try:
+        lines = [ln for ln in POLICY_AUDIT_LOG.read_text(encoding="utf-8").splitlines() if ln.strip()]
+    except Exception as e:
+        return f"Failed to read policy audit log: {e}"
+
+    if not lines:
+        return "No policy audit entries yet."
+
+    rows = []
+    for ln in lines[-n:]:
+        try:
+            rows.append(json.loads(ln))
+        except Exception:
+            continue
+    if not rows:
+        return "No parseable policy audit entries found."
+
+    out = [f"Recent policy changes (last {len(rows)}):"]
+    for r in rows:
+        ts = int(r.get("ts") or 0)
+        tstr = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(ts)) if ts else "unknown-time"
+        user = str(r.get("user") or "unknown")
+        action = str(r.get("action") or "")
+        target = str(r.get("target") or "")
+        result = str(r.get("result") or "")
+        details = str(r.get("details") or "")
+        out.append(f"- {tstr} user={user} action={action} target={target} result={result} details={details}")
+
+    return "\n".join(out)
+
+
+WEB_RESEARCH_PRESETS = {
+    "normal": {
+        "research_domains_limit": 4,
+        "research_pages_per_domain": 8,
+        "research_scan_pages_per_domain": 12,
+        "research_max_depth": 1,
+        "research_seeds_per_domain": 8,
+        "research_max_results": 8,
+        "research_min_score": 3.0,
+    },
+    "max": {
+        "research_domains_limit": 8,
+        "research_pages_per_domain": 25,
+        "research_scan_pages_per_domain": 60,
+        "research_max_depth": 2,
+        "research_seeds_per_domain": 20,
+        "research_max_results": 20,
+        "research_min_score": 1.5,
+    },
+}
+
+
+def web_mode_status() -> str:
+    cfg = policy_web()
+    lines = ["Current web research limits:"]
+    keys = [
+        "research_domains_limit",
+        "research_pages_per_domain",
+        "research_scan_pages_per_domain",
+        "research_max_depth",
+        "research_seeds_per_domain",
+        "research_max_results",
+        "research_min_score",
+    ]
+    for k in keys:
+        lines.append(f"- {k}: {cfg.get(k)}")
+    lines.append("Use: web mode max | web mode normal")
+    return "\n".join(lines)
+
+
+def set_web_mode(mode: str) -> str:
+    m = (mode or "").strip().lower()
+    if m in {"balanced", "default"}:
+        m = "normal"
+    if m in {"deep", "full", "maxinput"}:
+        m = "max"
+
+    if m not in WEB_RESEARCH_PRESETS:
+        return "Usage: web mode <normal|max>"
+
+    data = _load_policy_raw()
+    web = data.get("web") if isinstance(data.get("web"), dict) else {}
+    for k, v in WEB_RESEARCH_PRESETS[m].items():
+        web[k] = v
+    data["web"] = web
+    _save_policy_raw(data)
+    _record_policy_change("web_mode", m, "success", "updated_research_limits")
+    return f"Web research mode set to {m}.\n" + web_mode_status()
+
+
+def _build_greeting_reply(user_text: str, active_user: Optional[str] = None) -> Optional[str]:
+    t = (user_text or "").strip().lower()
+    greet_regex = re.compile(r"^(hi|hello|hey|good morning|good afternoon|good evening)([\s!,\.]|$)")
+    m = greet_regex.match(t)
+    if not m:
+        return None
+
+    # If this utterance includes an actual request after the greeting, do not
+    # short-circuit here; let deterministic command routing handle it.
+    rest = t[m.end():].strip()
+    rest = re.sub(r"^nova\b[\s,:\-]*", "", rest, flags=re.I).strip()
+    request_markers = [
+        "can you", "could you", "would you", "please", "give me", "check", "show", "tell me",
+        "weather", "web", "search", "find", "read", "list", "inspect", "health", "help",
+    ]
+    if rest and any(k in rest for k in request_markers):
+        return None
+
+    who = (active_user or "").strip()
+    has_how_are_you = bool(re.search(r"\bhow\s+are\s+you\b", t))
+
+    if has_how_are_you:
+        if who:
+            return f"Hey {who}. I'm doing good today. What's going on?"
+        return "Hey. I'm doing good today. What's going on?"
+
+    word = m.group(1)
+    if word in {"hi", "hello"}:
+        return f"Hi {who}." if who else "Hello."
+    if word == "hey":
+        return f"Hey {who}. What do you need?" if who else "Hey, what do you need?"
+    return f"{word.capitalize()}, {who}." if who else f"{word.capitalize()}."
+
+
 def _extract_color_preferences(session_turns: list[tuple[str, str]]) -> list[str]:
     colors = []
     seen = set()
@@ -756,6 +1375,91 @@ def _extract_color_preferences_from_memory() -> list[str]:
         return []
     probe = mem_recall("what colors does the user like favorite color preference")
     return _extract_color_preferences_from_text(probe)
+
+
+def _extract_developer_color_preferences(session_turns: list[tuple[str, str]]) -> list[str]:
+    aliases = {"gus", "gustavo", "developer", "dev"}
+    out = []
+    seen = set()
+    for role, text in session_turns:
+        if role != "user":
+            continue
+        t = (text or "").lower().strip()
+        if not any(a in t for a in aliases):
+            continue
+        if not any(k in t for k in ["color", "colors", "favourite", "favorite", "likes", "like", "bilingual", "english", "spanish"]):
+            continue
+        for w in re.findall(r"[a-z]{3,20}", t):
+            if w in KNOWN_COLORS and w not in seen:
+                seen.add(w)
+                out.append(w)
+    return out
+
+
+def _extract_developer_color_preferences_from_memory() -> list[str]:
+    if not mem_enabled():
+        return []
+    probe = mem_recall("gustavo gus developer favorite colors color preference")
+    if not probe:
+        return []
+
+    out = []
+    seen = set()
+    lines = [ln.strip().lower() for ln in probe.splitlines() if ln.strip()]
+    candidate_lines = [
+        ln for ln in lines
+        if any(a in ln for a in ["gus", "gustavo", "developer"])
+        and any(k in ln for k in ["color", "colors", "favorite", "favourite", "likes", "like"])
+    ]
+    source = "\n".join(candidate_lines) if candidate_lines else probe
+    for w in re.findall(r"[a-z]{3,20}", source.lower()):
+        if w in KNOWN_COLORS and w not in seen:
+            seen.add(w)
+            out.append(w)
+    return out
+
+
+def _is_developer_color_lookup_request(user_text: str) -> bool:
+    t = (user_text or "").lower()
+    if not any(k in t for k in ["color", "colors"]):
+        return False
+    return any(k in t for k in ["developer", "gus", "gustavo", "he", "his"])
+
+
+def _is_developer_bilingual_request(user_text: str) -> bool:
+    t = (user_text or "").lower()
+    if not any(k in t for k in ["developer", "gus", "gustavo", "he", "his"]):
+        return False
+    return any(k in t for k in ["bilingual", "english", "spanish", "languages", "language"])
+
+
+def _developer_is_bilingual(session_turns: list[tuple[str, str]]) -> Optional[bool]:
+    aliases = ["developer", "gus", "gustavo"]
+    for role, text in reversed(session_turns):
+        if role != "user":
+            continue
+        t = (text or "").lower()
+        if not any(a in t for a in aliases):
+            continue
+        if "bilingual" in t and ("english" in t or "spanish" in t):
+            return True
+        if "not bilingual" in t:
+            return False
+    return None
+
+
+def _developer_is_bilingual_from_memory() -> Optional[bool]:
+    if not mem_enabled():
+        return None
+    probe = mem_recall("is gustavo bilingual english spanish developer")
+    low = (probe or "").lower()
+    if not low:
+        return None
+    if ("gus" in low or "gustavo" in low or "developer" in low) and "bilingual" in low and ("english" in low or "spanish" in low):
+        return True
+    if "not bilingual" in low:
+        return False
+    return None
 
 
 def _extract_animal_preferences(session_turns: list[tuple[str, str]]) -> list[str]:
@@ -1232,9 +1936,9 @@ def patch_apply(zip_path: str, force: bool = False) -> str:
     if not z.exists() or not z.is_file():
         return f"Not a file: {z}"
 
-    # Run a preview check first to avoid blind applies.
+    # Run a preview check first to avoid blind applies and write a preview report.
     try:
-        preview_out = patch_preview(str(z))
+        preview_out = patch_preview(str(z), write_report=True)
         # Only proceed automatically if preview indicates eligible or force=True
         if not force and "Status: eligible" not in preview_out:
             # Try to return a structured rejection message consistent with previous behavior
@@ -1282,6 +1986,20 @@ def patch_apply(zip_path: str, force: bool = False) -> str:
                 )
 
             # Fallback: return preview output
+            # If preview was written to disk, require an explicit local approval
+            m = re.search(r"Preview written:\s*(.+)$", preview_out, flags=re.M)
+            if m:
+                preview_path = m.group(1).strip()
+                # check approvals
+                approved = False
+                for a in _read_approvals():
+                    if str(preview_path) == str(a.get("preview")) and a.get("decision") == "approved":
+                        approved = True
+                        break
+                if not approved:
+                    return (f"Patch rejected: preview check failed. A preview was generated at {preview_path} and requires local approval before applying.\n\nPreview output:\n{preview_out}\n\n"
+                            "Approve with: patch approve <preview_filename>\nOr re-run with --force to override.")
+
             return (f"Patch rejected: preview check failed.\n\nPreview output:\n{preview_out}\n\n"
                     "If you really want to apply anyway, re-run with: patch apply <zip_path> --force")
     except Exception:
@@ -1557,6 +2275,154 @@ def patch_preview(zip_path: str, write_report: bool = False) -> str:
     return out
 
 
+# -------------------------
+# Preview approval helpers
+# -------------------------
+def _approvals_file() -> Path:
+    p = UPDATES_DIR / "approvals.jsonl"
+    p.parent.mkdir(parents=True, exist_ok=True)
+    return p
+
+
+def _read_approvals() -> list[dict]:
+    p = _approvals_file()
+    if not p.exists():
+        return []
+    out = []
+    try:
+        with open(p, "r", encoding="utf-8") as f:
+            for ln in f:
+                ln = ln.strip()
+                if not ln:
+                    continue
+                try:
+                    out.append(json.loads(ln))
+                except Exception:
+                    continue
+    except Exception:
+        return []
+    return out
+
+
+def _record_approval(preview_path: str, decision: str, user: Optional[str] = None, note: str = "") -> bool:
+    rec = {
+        "ts": int(time.time()),
+        "preview": str(preview_path),
+        "decision": decision,
+        "user": user or (get_active_user() or "unknown"),
+        "note": note,
+    }
+    try:
+        with open(_approvals_file(), "a", encoding="utf-8") as f:
+            f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+        return True
+    except Exception:
+        return False
+
+
+def list_previews() -> str:
+    previews = UPDATES_DIR / "previews"
+    if not previews.exists():
+        return "No previews found."
+    files = sorted(previews.glob("*.txt"), key=lambda p: p.stat().st_mtime, reverse=True)
+    approvals = _read_approvals()
+    mapping = {a.get("preview"): a for a in approvals}
+    lines = []
+    for p in files:
+        status = "pending"
+        ap = mapping.get(str(p)) or mapping.get(p.name)
+        if ap:
+            status = ap.get("decision", "pending")
+        lines.append(f"- {p.name}  [{status}]")
+    return "\n".join(lines)
+
+
+def show_preview(path_or_name: str) -> str:
+    previews = UPDATES_DIR / "previews"
+    p = Path(path_or_name)
+    if not p.is_absolute():
+        p = previews / path_or_name
+    if not p.exists():
+        return f"Preview not found: {p}"
+    try:
+        return p.read_text(encoding="utf-8")
+    except Exception as e:
+        return f"Failed to read preview: {e}"
+
+
+def approve_preview(path_or_name: str, note: str = "") -> str:
+    previews = UPDATES_DIR / "previews"
+    p = Path(path_or_name)
+    if not p.is_absolute():
+        p = previews / path_or_name
+    if not p.exists():
+        return f"Preview not found: {p}"
+    ok = _record_approval(str(p), "approved", user=get_active_user(), note=note)
+    return "Approved." if ok else "Failed to record approval."
+
+
+def reject_preview(path_or_name: str, note: str = "") -> str:
+    previews = UPDATES_DIR / "previews"
+    p = Path(path_or_name)
+    if not p.is_absolute():
+        p = previews / path_or_name
+    if not p.exists():
+        return f"Preview not found: {p}"
+    ok = _record_approval(str(p), "rejected", user=get_active_user(), note=note)
+    return "Rejected." if ok else "Failed to record rejection."
+
+
+def interactive_preview_review(preview_path: str) -> str:
+    """TTY-only interactive review loop for a preview file.
+    Options: approve, reject, view, cancel
+    Records decision to approvals log.
+    Returns a short status message.
+    """
+    try:
+        import sys
+        p = Path(preview_path)
+        if not p.exists():
+            return f"Preview not found: {p}"
+        # show concise header
+        header = p.name
+        # read first ~2000 chars of preview for quick summary
+        text = p.read_text(encoding="utf-8")
+        summary = "\n".join(text.splitlines()[:40])
+        print("\nProposal review:\n", flush=True)
+        print(f"Name: {header}")
+        # try to extract patch revision line
+        mrev = re.search(r"Patch revision:\s*(.+)$", text, flags=re.M)
+        if mrev:
+            print(f"Revision: {mrev.group(1).strip()}")
+        # list changed/added counts
+        changed = re.findall(r"^Changed files:\s*$", text, flags=re.M)
+        # print short summary
+        print("Files / diff preview (first lines):")
+        print(summary)
+
+        while True:
+            try:
+                resp = input('\nDecision? (approve/reject/view/cancel): ').strip().lower()
+            except EOFError:
+                return "No interactive input; review aborted."
+            if resp in {"approve", "a"}:
+                ok = _record_approval(str(p), "approved", user=get_active_user())
+                return "Approved." if ok else "Failed to record approval."
+            if resp in {"reject", "r"}:
+                ok = _record_approval(str(p), "rejected", user=get_active_user())
+                return "Rejected." if ok else "Failed to record rejection."
+            if resp in {"view", "v"}:
+                print('\n---- Full preview ----\n')
+                print(text)
+                print('\n---- End preview ----\n')
+                continue
+            if resp in {"cancel", "c", "quit", "q"}:
+                return "Review canceled."
+            print("Unknown response. Enter 'approve', 'reject', 'view', or 'cancel'.")
+    except Exception as e:
+        return f"Interactive review failed: {e}"
+
+
 # =========================
 # Deterministic answers & hallucination filters
 # =========================
@@ -1593,6 +2459,12 @@ def sanitize_llm_reply(reply: str, tool_context: str = "") -> str:
             return ("I didn’t run any scans or system commands. I won’t fabricate scan outputs. "
                     "If you want a scan, run the tool and paste the real output and I’ll interpret it.")
 
+    # Prevent ungrounded weather success claims when no structured weather output exists.
+    if re.search(r"\bi\s+(?:fetched|retrieved|got)\s+(?:the\s+)?weather", low):
+        tc = (tool_context or "").lower()
+        if "weather for" not in tc and "source: wttr.in" not in tc:
+            return _weather_unavailable_message()
+
     # Enforce explicit TOOL citation when assistant appears to reference tool-produced artifacts.
     strong_patterns = [
         r"\bsaved\s+to\b",
@@ -1628,7 +2500,79 @@ def sanitize_llm_reply(reply: str, tool_context: str = "") -> str:
             return ("I can’t claim tool outputs unless they come from a real tool run in this chat. "
                     "I won’t fabricate TOOL citations.")
 
-    return r
+    # --- Additional UX rules to strip auto-offer phrases, unsolicited links, and ungrounded capability claims ---
+    # Remove sentences that offer help unsolicitedly (unless we have tool context)
+    offer_patterns = [
+        r"how can i (help|assist)",
+        r"would you like me to",
+        r"do you want me to",
+        r"\bi can (help|assist)\b",
+        r"i(?:'| i)?ll start (?:research|researching)",
+        r"i will start (?:research|researching)",
+        r"i(?:'| i)?ll research",
+        r"i will research",
+        # remove terse "retrieving ..." or similar interim-status sentences when no tool ran
+        r"\bretriev(?:ing|e)?\b",
+    ]
+
+    def _sentence_filter(text: str) -> str:
+        parts = re.split(r'(?<=[.!?])\s+', text)
+        out = []
+        for s in parts:
+            low_s = s.lower()
+            skip = False
+            for p in offer_patterns:
+                if re.search(p, low_s):
+                    # if tool_context contains some tool token, keep; else skip
+                    if not (tool_context or ""):  # no tool context
+                        skip = True
+                        break
+            if not skip:
+                out.append(s)
+        return " ".join(out).strip()
+
+    # Remove sentences that promise future research or actions unless a tool ran
+    research_patterns = [
+        r"i\s*(?:'| i)?ll (?:research|look into|investigate|start researching|go research)",
+        r"i will (?:research|look into|investigate|start researching|go research)",
+        r"i(?:'| i)?m going to (?:research|look into|investigate)",
+    ]
+
+    def _remove_research_promises(text: str) -> str:
+        parts = re.split(r'(?<=[.!?])\s+', text)
+        out = []
+        for s in parts:
+            low_s = s.lower()
+            skip = False
+            for p in research_patterns:
+                if re.search(p, low_s):
+                    if not (tool_context or ""):
+                        skip = True
+                        break
+            if not skip:
+                out.append(s)
+        return " ".join(out).strip()
+
+    filtered = _sentence_filter(r)
+    filtered = _remove_research_promises(filtered)
+
+    # Remove raw URLs unless a TOOL citation is present or user requested sources
+    if re.search(r"https?://", filtered) and not (tool_context or ""):
+        # strip URLs
+        filtered = re.sub(r"https?://\S+", "[link removed]", filtered)
+
+    # If the assistant claims 'I can <action>' for capabilities, replace with known capabilities list
+    cap_match = re.search(r"\bi can (fetch|browse|search|lookup|open|download|run|apply|patch|install|scan)\b", filtered or "", flags=re.I)
+    if cap_match:
+        caps = describe_capabilities()
+        return caps
+
+    filtered = filtered.strip()
+    if not filtered:
+        # fallback to short acknowledgement
+        return "Okay."
+
+    return filtered
 
 
 def _strip_mem_leak(reply: str, mem_block: str) -> str:
@@ -1672,10 +2616,10 @@ def _ensure_reply(reply: Optional[str]) -> str:
     try:
         r = (reply or "")
         if not r or not r.strip():
-            return "I understood you, but I don't have a clear reply yet."
+            return "Okay."
         return r
     except Exception:
-        return "I understood you, but I don't have a clear reply yet."
+        return "Okay."
 
 
 def _normalize_location_preview(preview: str) -> str:
@@ -1751,6 +2695,10 @@ def ollama_chat(text: str, retrieved_context: str = "") -> str:
         system_msg = casual_prompt
     else:
         system_msg = assist_prompt
+
+    identity_ctx = identity_context_for_prompt()
+    if identity_ctx:
+        system_msg = f"{system_msg}\n\nPersistent identity memory:\n{identity_ctx}"
 
     # Build user content with optional retrieved context
     user_content = text
@@ -1933,7 +2881,32 @@ def _teach_propose_patch(description: str) -> str:
         except Exception:
             pass
 
-        return f"Created proposal: {out_zip} — apply with: patch apply {out_zip}"
+        # generate preview report for this proposal
+        try:
+            preview_out = patch_preview(str(out_zip), write_report=True)
+        except Exception:
+            preview_out = "Preview generation failed."
+
+        # If running in an interactive terminal, offer immediate local review UI
+        try:
+            import sys
+            if sys.stdin and hasattr(sys.stdin, "isatty") and sys.stdin.isatty():
+                # extract preview filename if present
+                m = re.search(r"Preview written:\s*(.+)$", preview_out or "", flags=re.M)
+                preview_path = m.group(1).strip() if m else None
+                if preview_path:
+                    decision_msg = interactive_preview_review(preview_path)
+                else:
+                    decision_msg = "Preview saved but path not found. Use 'patch list-previews' to locate it."
+            else:
+                decision_msg = ""
+        except Exception:
+            decision_msg = ""
+
+        base_msg = f"Created proposal: {out_zip} — apply with: patch apply {out_zip}"
+        if decision_msg:
+            return base_msg + "\n" + decision_msg
+        return base_msg
     except Exception as e:
         return f"Failed to create teach proposal: {e}"
 
@@ -2179,7 +3152,11 @@ def tool_web(url: str):
     out = web_fetch(url, WEB_CACHE_DIR)
 
     if not out.get("ok"):
-        return f"[FAIL] {out.get('error', 'unknown error')}"
+        err = out.get("error", "unknown error")
+        # If domain blocked by allowlist, provide helpful instructions
+        if isinstance(err, str) and "not allowed" in err.lower():
+            return _web_allowlist_message(url)
+        return f"[FAIL] {err}"
     return f"[OK] Saved: {out['path']} ({out['content_type']}, {out['bytes']} bytes)"
 
 
@@ -2319,12 +3296,60 @@ def _extract_same_host_links(raw_html: str, base_url: str, host: str) -> list[st
     return links
 
 
+def _expand_research_terms(tokens: list[str]) -> list[str]:
+    terms = set(t for t in tokens if t)
+    if "peims" in terms:
+        terms.update({"tsds", "submission", "interchange", "student", "reporting"})
+    if "attendance" in terms:
+        terms.update({"ada", "attendance", "reporting"})
+    if "timeline" in terms:
+        terms.update({"calendar", "deadline", "dates"})
+    if "reporting" in terms:
+        terms.update({"submission", "report"})
+    return list(terms)
+
+
+def _score_research_hit(url: str, text: str, terms: list[str], primary_tokens: Optional[list[str]] = None) -> float:
+    low_url = (url or "").lower()
+    low_text = (text or "").lower()
+    primary_tokens = [t for t in (primary_tokens or []) if t]
+    p = urlparse(url or "")
+
+    unique_text_hits = sum(1 for t in terms if t in low_text)
+    unique_url_hits = sum(1 for t in terms if t in low_url)
+    total_text_hits = sum(low_text.count(t) for t in terms)
+    total_url_hits = sum(low_url.count(t) for t in terms)
+
+    # Domain-specific boosts for likely data/reporting pages.
+    boost_patterns = ["peims", "tsds", "attendance", "ada", "submission", "calendar", "timeline", "report", "student-data"]
+    path_boost = sum(1 for p in boost_patterns if p in low_url)
+
+    score = (
+        unique_text_hits * 4.0
+        + unique_url_hits * 6.0
+        + min(30.0, float(total_text_hits) * 0.25)
+        + min(20.0, float(total_url_hits) * 0.75)
+        + path_boost * 1.5
+    )
+
+    # Penalize generic pages when none of the user's original query tokens are present.
+    if primary_tokens and not any(t in low_text or t in low_url for t in primary_tokens):
+        score -= 8.0
+
+    # Strongly de-prioritize homepage if it doesn't contain primary intent terms.
+    if (p.path or "/") in {"", "/"} and primary_tokens and not any(t in low_text or t in low_url for t in primary_tokens):
+        score -= 12.0
+
+    return score
+
+
 def _crawl_domain_for_query(start_url: str, query_tokens: list[str], max_pages: int, max_depth: int) -> list[tuple[float, str, str]]:
     parsed = urlparse(start_url)
     host = parsed.hostname or ""
     if not host:
         return []
 
+    terms = _expand_research_terms(query_tokens)
     q = [(start_url, 0)]
     seen = {start_url}
     fetched = 0
@@ -2346,17 +3371,8 @@ def _crawl_domain_for_query(start_url: str, query_tokens: list[str], max_pages: 
 
         raw = r.text
         text = _extract_text_from_html_content(raw, max_chars=5000)
-        low_text = text.lower()
-        low_url = url.lower()
-
-        text_hits = 0
-        url_hits = 0
-        for t in query_tokens:
-            text_hits += low_text.count(t)
-            url_hits += low_url.count(t)
-
-        score = (url_hits * 2.0) + min(40.0, float(text_hits) * 0.5)
-        if score > 0:
+        score = _score_research_hit(url, text, terms, primary_tokens=query_tokens)
+        if score >= 3.0:
             snippet = text[:900]
             hits.append((score, url, snippet))
 
@@ -2368,6 +3384,58 @@ def _crawl_domain_for_query(start_url: str, query_tokens: list[str], max_pages: 
                 continue
             seen.add(nxt)
             q.append((nxt, depth + 1))
+
+    return hits
+
+
+def _scan_candidate_urls_for_query(urls: list[str], query_tokens: list[str], max_pages: int, min_score: float = 3.0) -> list[tuple[float, str, str]]:
+    terms = _expand_research_terms(query_tokens)
+
+    def _url_candidate_score(u: str) -> float:
+        low = (u or "").lower()
+        p = urlparse(u)
+        score = 0.0
+        for t in terms:
+            score += low.count(t) * 2.0
+        for k in ("peims", "tsds", "attendance", "ada", "submission", "calendar", "timeline", "report", "student-data"):
+            if k in low:
+                score += 3.0
+        # Prefer content pages over domain root index pages.
+        if (p.path or "/") in {"", "/"}:
+            score -= 2.0
+        # De-prioritize non-html document links during candidate scan.
+        if re.search(r"\.(pdf|docx?|xlsx?|pptx?)($|\?)", low):
+            score -= 4.0
+        return score
+
+    ranked_urls = sorted(urls, key=_url_candidate_score, reverse=True)
+
+    hits = []
+    scanned = 0
+
+    for url in ranked_urls:
+        if scanned >= max_pages:
+            break
+        try:
+            r = requests.get(url, headers={"User-Agent": "Nova/1.0"}, timeout=20)
+            r.raise_for_status()
+        except Exception:
+            continue
+
+        ctype = (r.headers.get("Content-Type") or "").lower()
+        scanned += 1
+
+        if "html" in ctype:
+            text = _extract_text_from_html_content(r.text, max_chars=5000)
+            score = _score_research_hit(url, text, terms, primary_tokens=query_tokens)
+            if score >= min_score:
+                hits.append((score, url, text[:900]))
+        else:
+            # Keep high-relevance document links (pdf/doc/xls/etc.) as sources.
+            score = _score_research_hit(url, "", terms, primary_tokens=query_tokens)
+            if score >= min_score:
+                snippet = f"Non-HTML source ({ctype or 'unknown'}). Use web gather <url> to fetch and inspect."
+                hits.append((score, url, snippet))
 
     return hits
 
@@ -2404,8 +3472,9 @@ def _fetch_sitemap_urls(domain: str, limit: int = 80) -> list[str]:
                 if p.query:
                     clean += f"?{p.query}"
 
-                # Nested sitemap index entries often point to other XML sitemap files.
-                if clean.lower().endswith(".xml"):
+                # Nested sitemap index entries often point to other XML sitemap files,
+                # including forms like sitemap.xml?page=2.
+                if Path(p.path).suffix.lower() == ".xml":
                     if clean not in seen_sitemaps:
                         queue.append(clean)
                     continue
@@ -2428,10 +3497,14 @@ def _seed_urls_for_domain(domain: str, query_tokens: list[str], max_seed: int = 
     if not candidates:
         return seeds
 
+    terms = _expand_research_terms(query_tokens)
     scored = []
     for u in candidates:
         low = u.lower()
-        score = sum(low.count(t) for t in query_tokens)
+        score = sum(low.count(t) for t in terms)
+        for p in ("peims", "tsds", "attendance", "ada", "submission", "calendar", "timeline", "report"):
+            if p in low:
+                score += 2
         if score > 0:
             scored.append((score, u))
 
@@ -2471,58 +3544,144 @@ def tool_web_search(query: str):
     if not q:
         return "Usage: web search <query>"
 
-    # Bias search toward allowed domains only
-    scoped = q + " " + " ".join(f"site:{d}" for d in allow_domains[:6])
+    def _search_via_api(query_text: str, domains: list[str], max_results: int = 5) -> tuple[list[tuple[str, str]], Optional[str]]:
+        provider = str(cfg.get("search_provider") or "").strip().lower()
+        if provider not in {"brave", "searxng"}:
+            return ([], None)
 
-    try:
-        r = requests.get(
-            "https://duckduckgo.com/html/",
-            params={"q": scoped},
-            headers={"User-Agent": "Nova/1.0"},
-            timeout=30,
-        )
-        r.raise_for_status()
-        page = r.text
-    except Exception as e:
-        return f"[FAIL] Web search request failed: {e}"
+        scoped_query = query_text + " " + " ".join(f"site:{d}" for d in domains[:8])
 
-    hrefs = re.findall(r'href=["\']([^"\']+)["\']', page, flags=re.I)
-    # Fallback: capture literal URLs in result page text when redirect links are absent
-    direct_urls = re.findall(r"https?://[^\s\"'<>]+", page)
-    seen = set()
-    urls = []
-    for h in hrefs:
-        u = _decode_search_href(h)
-        if not u:
-            continue
-        host = urlparse(u).hostname or ""
-        if not _host_allowed(host, allow_domains):
-            continue
-        if u in seen:
-            continue
-        seen.add(u)
-        urls.append(u)
-        if len(urls) >= 5:
-            break
+        if provider == "brave":
+            key_env = str(cfg.get("search_api_key_env") or "BRAVE_SEARCH_API_KEY").strip() or "BRAVE_SEARCH_API_KEY"
+            api_key = (os.environ.get(key_env) or "").strip()
+            if not api_key:
+                return ([], f"missing_api_key_env:{key_env}")
 
-    if len(urls) < 5:
-        for u in direct_urls:
+            endpoint = str(cfg.get("search_api_endpoint") or "https://api.search.brave.com/res/v1/web/search").strip()
+            try:
+                r = requests.get(
+                    endpoint,
+                    params={"q": scoped_query, "count": max(1, min(20, int(max_results)))},
+                    headers={
+                        "Accept": "application/json",
+                        "X-Subscription-Token": api_key,
+                        "User-Agent": "Nova/1.0",
+                    },
+                    timeout=30,
+                )
+                r.raise_for_status()
+                data = r.json()
+            except Exception as e:
+                return ([], f"api_error:{e}")
+
+            items = []
+            for it in ((data.get("web") or {}).get("results") or []):
+                url = str(it.get("url") or "").strip()
+                title = str(it.get("title") or "").strip() or url
+                if not url:
+                    continue
+                host = urlparse(url).hostname or ""
+                if not _host_allowed(host, domains):
+                    continue
+                items.append((title, url))
+                if len(items) >= max_results:
+                    break
+            return (items, None)
+
+        # searxng provider: self-hosted instance, no API key required.
+        endpoint = str(cfg.get("search_api_endpoint") or "http://127.0.0.1:8080/search").strip()
+        try:
+            r = requests.get(
+                endpoint,
+                params={"q": scoped_query, "format": "json"},
+                headers={"Accept": "application/json", "User-Agent": "Nova/1.0"},
+                timeout=30,
+            )
+            r.raise_for_status()
+            data = r.json()
+        except Exception as e:
+            return ([], f"api_error:{e}")
+
+        items = []
+        for it in (data.get("results") or []):
+            url = str(it.get("url") or "").strip()
+            title = str(it.get("title") or "").strip() or url
+            if not url:
+                continue
+            host = urlparse(url).hostname or ""
+            if not _host_allowed(host, domains):
+                continue
+            items.append((title, url))
+            if len(items) >= max_results:
+                break
+        return (items, None)
+
+    def _search_via_html(query_text: str, domains: list[str], max_results: int = 5) -> tuple[list[tuple[str, str]], Optional[str]]:
+        scoped_query = query_text + " " + " ".join(f"site:{d}" for d in domains[:6])
+        try:
+            r = requests.get(
+                "https://duckduckgo.com/html/",
+                params={"q": scoped_query},
+                headers={"User-Agent": "Nova/1.0"},
+                timeout=30,
+            )
+            r.raise_for_status()
+            page = r.text
+        except Exception as e:
+            return ([], f"html_error:{e}")
+
+        hrefs = re.findall(r'href=["\']([^"\']+)["\']', page, flags=re.I)
+        direct_urls = re.findall(r"https?://[^\s\"'<>]+", page)
+        seen = set()
+        urls = []
+        for h in hrefs:
+            u = _decode_search_href(h)
+            if not u:
+                continue
             host = urlparse(u).hostname or ""
-            if not _host_allowed(host, allow_domains):
+            if not _host_allowed(host, domains):
                 continue
             if u in seen:
                 continue
             seen.add(u)
-            urls.append(u)
-            if len(urls) >= 5:
+            urls.append((u, u))
+            if len(urls) >= max_results:
                 break
 
-    if not urls:
-        return "No allowlisted web results found for that query."
+        if len(urls) < max_results:
+            for u in direct_urls:
+                host = urlparse(u).hostname or ""
+                if not _host_allowed(host, domains):
+                    continue
+                if u in seen:
+                    continue
+                seen.add(u)
+                urls.append((u, u))
+                if len(urls) >= max_results:
+                    break
+        return (urls, None)
 
-    lines = ["Web results (allowlisted):"]
-    for i, u in enumerate(urls, start=1):
-        lines.append(f"{i}. {u}")
+    provider = str(cfg.get("search_provider") or "").strip().lower()
+    rows, api_err = _search_via_api(q, allow_domains, max_results=5)
+    provider_used = f"api:{provider}" if rows else "html"
+    if not rows:
+        rows, html_err = _search_via_html(q, allow_domains, max_results=5)
+        if not rows and api_err:
+            return f"[FAIL] Web search unavailable. API reason={api_err}; HTML fallback failed={html_err}"
+
+    if not rows:
+        msg = "No allowlisted web results found for that query."
+        # Offer a helpful allowlist explanation
+        msg += "\n\n" + _web_allowlist_message(query)
+        return msg
+
+    lines = [f"Web results (allowlisted, provider={provider_used}):"]
+    for i, (title, u) in enumerate(rows, start=1):
+        if title and title != u:
+            lines.append(f"{i}. {title}")
+            lines.append(f"   {u}")
+        else:
+            lines.append(f"{i}. {u}")
     lines.append("Tip: run 'web gather <url>' to fetch and summarize one result.")
     return "\n".join(lines)
 
@@ -2537,7 +3696,10 @@ def tool_web_gather(url: str):
 
     out = web_fetch(url, WEB_CACHE_DIR)
     if not out.get("ok"):
-        return f"[FAIL] {out.get('error', 'unknown error')}"
+        err = out.get("error", "unknown error")
+        if isinstance(err, str) and "not allowed" in err.lower():
+            return _web_allowlist_message(url)
+        return f"[FAIL] {err}"
 
     p = Path(out["path"])
     snippet = _extract_text_from_path(p, max_chars=2200)
@@ -2547,10 +3709,20 @@ def tool_web_gather(url: str):
             f"Summary snippet:\n{snippet}"
         )
 
+    ctype = str(out.get("content_type") or "").lower()
+    if "html" in ctype:
+        return (
+            f"[OK] Saved: {out['path']} ({out['content_type']}, {out['bytes']} bytes)\n"
+            "I could access the page, but I couldn't extract readable content. "
+            "It may be JavaScript-heavy/dynamic, and I do not run a browser renderer in this path."
+        )
+
     return f"[OK] Saved: {out['path']} ({out['content_type']}, {out['bytes']} bytes)"
 
 
-def tool_web_research(query: str):
+def tool_web_research(query: str, continue_mode: bool = False):
+    global WEB_RESEARCH_LAST_QUERY, WEB_RESEARCH_LAST_RESULTS, WEB_RESEARCH_CURSOR
+
     missing = explain_missing("web_fetch", ["web_access"])
     if missing:
         return missing
@@ -2566,6 +3738,34 @@ def tool_web_research(query: str):
         return "Web research unavailable: no allow_domains configured in policy."
 
     q = (query or "").strip()
+    if continue_mode:
+        if not WEB_RESEARCH_LAST_RESULTS:
+            return "No active web research session. Start with: web research <query>"
+
+        max_results = max(1, min(40, int((policy_web().get("research_max_results") or 8))))
+        start = WEB_RESEARCH_CURSOR
+        end = min(len(WEB_RESEARCH_LAST_RESULTS), start + max_results)
+        if start >= len(WEB_RESEARCH_LAST_RESULTS):
+            return "No more cached research results. Start a new search with: web research <query>"
+
+        lines = [f"Web research results (continued) for: {WEB_RESEARCH_LAST_QUERY}"]
+        rank = start
+        for score, url, snippet in WEB_RESEARCH_LAST_RESULTS[start:end]:
+            rank += 1
+            lines.append(f"{rank}. [{score:.1f}] {url}")
+            if snippet:
+                lines.append(f"   {snippet[:220]}")
+
+        WEB_RESEARCH_CURSOR = end
+        if WEB_RESEARCH_CURSOR < len(WEB_RESEARCH_LAST_RESULTS):
+            remaining = len(WEB_RESEARCH_LAST_RESULTS) - WEB_RESEARCH_CURSOR
+            lines.append(f"{remaining} more result(s) available. Type 'web continue' to keep going.")
+        else:
+            lines.append("End of cached research results.")
+
+        lines.append("Tip: run 'web gather <url>' for any source above to fetch and summarize it fully.")
+        return "\n".join(lines)
+
     if not q:
         return "Usage: web research <query>"
 
@@ -2573,15 +3773,21 @@ def tool_web_research(query: str):
     if not toks:
         return "Query too short for web research."
 
-    domains_limit = int(cfg.get("research_domains_limit") or 4)
-    pages_per_domain = int(cfg.get("research_pages_per_domain") or 8)
-    max_depth = int(cfg.get("research_max_depth") or 1)
-    max_results = int(cfg.get("research_max_results") or 8)
-    seeds_per_domain = int(cfg.get("research_seeds_per_domain") or 8)
+    domains_limit = max(1, min(12, int(cfg.get("research_domains_limit") or 4)))
+    pages_per_domain = max(2, min(50, int(cfg.get("research_pages_per_domain") or 8)))
+    max_depth = max(0, min(3, int(cfg.get("research_max_depth") or 1)))
+    max_results = max(1, min(40, int(cfg.get("research_max_results") or 8)))
+    seeds_per_domain = max(1, min(40, int(cfg.get("research_seeds_per_domain") or 8)))
+    scan_pages_per_domain = max(2, min(200, int(cfg.get("research_scan_pages_per_domain") or 12)))
+    min_score = max(0.0, min(10.0, float(cfg.get("research_min_score") or 3.0)))
 
     domains = allow_domains[:max(1, min(domains_limit, len(allow_domains)))]
     all_hits = []
     for d in domains:
+        sitemap_urls = _fetch_sitemap_urls(d, limit=max(200, scan_pages_per_domain * 25))
+        if sitemap_urls:
+            all_hits.extend(_scan_candidate_urls_for_query(sitemap_urls, toks, max_pages=max(2, scan_pages_per_domain), min_score=min_score))
+
         seeds = _seed_urls_for_domain(d, toks, max_seed=max(1, seeds_per_domain))
         for start in seeds:
             all_hits.extend(_crawl_domain_for_query(start, toks, max_pages=max(2, pages_per_domain), max_depth=max(0, max_depth)))
@@ -2590,19 +3796,36 @@ def tool_web_research(query: str):
         return "No relevant pages found across allowlisted domains for that query."
 
     all_hits.sort(key=lambda x: x[0], reverse=True)
-    lines = ["Web research results (allowlisted crawl):"]
     used = set()
-    rank = 0
+    ordered = []
     for score, url, snippet in all_hits:
         if url in used:
             continue
         used.add(url)
+        ordered.append((score, url, snippet))
+
+    WEB_RESEARCH_LAST_QUERY = q
+    WEB_RESEARCH_LAST_RESULTS = ordered
+    WEB_RESEARCH_CURSOR = 0
+
+    max_results = max(1, min(40, int((cfg.get("research_max_results") or 8))))
+    start = WEB_RESEARCH_CURSOR
+    end = min(len(WEB_RESEARCH_LAST_RESULTS), start + max_results)
+
+    lines = [f"Web research results (allowlisted crawl) for: {q}"]
+    rank = start
+    for score, url, snippet in WEB_RESEARCH_LAST_RESULTS[start:end]:
         rank += 1
         lines.append(f"{rank}. [{score:.1f}] {url}")
         if snippet:
             lines.append(f"   {snippet[:220]}")
-        if rank >= max_results:
-            break
+
+    WEB_RESEARCH_CURSOR = end
+    if WEB_RESEARCH_CURSOR < len(WEB_RESEARCH_LAST_RESULTS):
+        remaining = len(WEB_RESEARCH_LAST_RESULTS) - WEB_RESEARCH_CURSOR
+        lines.append(f"{remaining} more result(s) available. Type 'web continue' to keep going.")
+    else:
+        lines.append("No more results pending for this query.")
 
     lines.append("Tip: run 'web gather <url>' for any source above to fetch and summarize it fully.")
     return "\n".join(lines)
@@ -2621,6 +3844,9 @@ def handle_keywords(text: str):
     if low.startswith("web research "):
         q = text.split(maxsplit=2)[2].strip() if len(text.split(maxsplit=2)) >= 3 else ""
         return ("tool", tool_web_research(q))
+
+    if low in {"web continue", "continue web", "continue web research"}:
+        return ("tool", tool_web_research("", continue_mode=True))
 
     if low.startswith("web search "):
         q = text.split(maxsplit=2)[2].strip() if len(text.split(maxsplit=2)) >= 3 else ""
@@ -2671,9 +3897,91 @@ def handle_keywords(text: str):
 # =========================
 # Commands (typed) for kb / patch
 # =========================
-def handle_commands(user_text: str) -> Optional[str]:
-    t = (user_text or "").strip()
+def handle_commands(user_text: str, session_turns: Optional[list[tuple[str, str]]] = None) -> Optional[str]:
+    t = _strip_invocation_prefix((user_text or "").strip())
     low = t.lower()
+
+    # Natural follow-up variants such as "use your location nova" should resolve deterministically.
+    if ("use your" in low or low.startswith("use ")) and _mentions_location_phrase(low):
+        return tool_weather("brownsville")
+
+    if low in {"use your physical location", "use your location", "use default location", "default location"}:
+        return tool_weather("brownsville")
+
+    # Natural weather requests should stay deterministic and not fall through to LLM.
+    if "weather" in low and not low.startswith("web "):
+        if "your" in low and _mentions_location_phrase(low):
+            return tool_weather("brownsville")
+        if any(p in low for p in ["give me", "check", "show", "tell me", "what is", "what's", "today", "now", "current"]):
+            coords = _coords_from_saved_location()
+            if coords:
+                lat, lon = coords
+                return tool_weather(f"{lat},{lon}")
+            return _need_confirmed_location_message() + " You can set one with: location coords <lat,lon>"
+
+    if low in {"chat context", "show chat context", "context", "chatctx"}:
+        rendered = _render_chat_context(session_turns or [])
+        if not rendered:
+            return "No chat context is available yet in this session."
+        return "Current chat context:\n" + rendered
+
+    if "domanins" in low and any(k in low for k in ["domain", "domanins", "allow", "policy", "list", "show"]):
+        return "It looks like you meant \"domains\".\n" + list_allowed_domains()
+
+    if low in {"domains", "list domains", "show domains", "list the domains", "allowed domains", "allow domains", "policy domains"}:
+        return list_allowed_domains()
+
+    if low.startswith("policy allow "):
+        value = t.split(maxsplit=2)[2] if len(t.split(maxsplit=2)) >= 3 else ""
+        return policy_allow_domain(value)
+
+    if low.startswith("policy remove "):
+        value = t.split(maxsplit=2)[2] if len(t.split(maxsplit=2)) >= 3 else ""
+        return policy_remove_domain(value)
+
+    if low.startswith("policy audit"):
+        parts = t.split()
+        n = 20
+        if len(parts) >= 3:
+            try:
+                n = int(parts[2])
+            except Exception:
+                n = 20
+        return policy_audit(n)
+
+    if low in {"web mode", "web limits", "web research limits"}:
+        return web_mode_status()
+
+    if low.startswith("web mode "):
+        mode = t.split(maxsplit=2)[2] if len(t.split(maxsplit=2)) >= 3 else ""
+        return set_web_mode(mode)
+
+    if low.startswith("location coords ") or low.startswith("set location coords "):
+        raw = t
+        if low.startswith("set location coords "):
+            raw = t[len("set location coords "):].strip()
+        else:
+            raw = t[len("location coords "):].strip()
+        return set_location_coords(raw)
+
+    if low in {"weather", "check weather", "weather current location", "weather current"}:
+        coords = _coords_from_saved_location()
+        if not coords:
+            return _need_confirmed_location_message()
+        lat, lon = coords
+        return tool_weather(f"{lat},{lon}")
+
+    if low.startswith("weather ") or low.startswith("check weather "):
+        parts = t.split(maxsplit=2)
+        loc = ""
+        if low.startswith("check weather ") and len(parts) >= 3:
+            loc = parts[2].strip()
+        elif low.startswith("weather ") and len(parts) >= 2:
+            loc = t.split(maxsplit=1)[1].strip()
+        return tool_weather(loc)
+
+    if low.startswith("remember:"):
+        return mem_remember_fact(t.split(":", 1)[1])
 
     if low in {"what can you do", "capabilities", "show capabilities"}:
         return describe_capabilities()
@@ -2727,6 +4035,21 @@ def handle_commands(user_text: str) -> Optional[str]:
     if low.startswith("patch preview "):
         p = t.split(maxsplit=2)[2].strip() if len(t.split(maxsplit=2)) >= 3 else ""
         return patch_preview(p)
+
+    if low == "patch list-previews":
+        return list_previews()
+
+    if low.startswith("patch show "):
+        p = t.split(maxsplit=2)[2].strip() if len(t.split(maxsplit=2)) >= 3 else ""
+        return show_preview(p)
+
+    if low.startswith("patch approve "):
+        p = t.split(maxsplit=2)[2].strip() if len(t.split(maxsplit=2)) >= 3 else ""
+        return approve_preview(p)
+
+    if low.startswith("patch reject "):
+        p = t.split(maxsplit=2)[2].strip() if len(t.split(maxsplit=2)) >= 3 else ""
+        return reject_preview(p)
 
     if low == "patch rollback":
         return patch_rollback()
@@ -2824,7 +4147,7 @@ def run_loop(tts):
         warn(f"Voice mode disabled; typed chat still works. (Reason: {VOICE_IMPORT_ERR})")
 
     print("\nNova Core is ready.", flush=True)
-    print("Commands: screen | camera <prompt> | web <url> | web search <query> | web research <query> | web gather <url> | ls [folder] | read <file> | find <kw> [folder] | health | capabilities | inspect", flush=True)
+    print("Commands: screen | camera <prompt> | web <url> | web search <query> | web research <query> | web gather <url> | weather <location-or-lat,lon> | check weather <location> | weather current location | location coords <lat,lon> | domains | policy allow <domain> | chat context | ls [folder] | read <file> | find <kw> [folder] | health | capabilities | inspect", flush=True)
     print("Press ENTER for voice. Or type a message/command and press ENTER. Type 'q' to quit.\n", flush=True)
 
     recent_tool_context = ""
@@ -2845,6 +4168,7 @@ def run_loop(tts):
                 idx = int(m_idx.group(1))
                 if 1 <= idx <= len(recent_web_urls):
                     user_text = f"web gather {recent_web_urls[idx - 1]}"
+            user_text = _strip_invocation_prefix(user_text)
             print(f"You (typed): {user_text}", flush=True)
         else:
             input_source = "voice"
@@ -2857,6 +4181,7 @@ def run_loop(tts):
             if not user_text:
                 print("Nova: (heard nothing)\n", flush=True)
                 continue
+            user_text = _strip_invocation_prefix(user_text)
             print(f"You: {user_text}", flush=True)
 
         session_turns.append(("user", user_text))
@@ -2887,23 +4212,8 @@ def run_loop(tts):
         # Quick greeting fast-path (avoid LLM for simple salutations)
         try:
             low_q = (user_text or "").strip().lower()
-            greet_regex = re.compile(r"^(hi|hello|hey|good morning|good afternoon|good evening)([\s!,\.]|$)")
-            m = greet_regex.match(low_q)
-            if m:
-                who = get_active_user() or ""
-                word = m.group(1)
-                if word in {"hi", "hello"}:
-                    if who:
-                        msg = f"Hi {who}."
-                    else:
-                        msg = "Hello."
-                elif word == "hey":
-                    msg = "Hey, what do you need?"
-                else:
-                    if who:
-                        msg = f"{word.capitalize()}, {who}."
-                    else:
-                        msg = f"{word.capitalize()}."
+            msg = _build_greeting_reply(low_q, active_user=get_active_user() or "")
+            if msg:
 
                 # Apply any stored reply overrides before sending
                 try:
@@ -2981,9 +4291,12 @@ def run_loop(tts):
                         j = json.loads(audit_out) if audit_out else {}
                         results = j.get("results") if isinstance(j, dict) else None
                         if results and len(results) > 0:
-                            top = results[0]
-                            preview = _normalize_location_preview((top.get("preview") or "").strip())
-                            msg = f"I have your stored location as {preview}. I can look up the weather for that location if you want."
+                            coords = _coords_from_saved_location()
+                            if coords:
+                                lat, lon = coords
+                                msg = tool_weather(f"{lat},{lon}")
+                            else:
+                                msg = _need_confirmed_location_message()
                         else:
                             msg = "I don't have a stored location yet. You can tell me: 'My location is ...'"
                     except Exception:
@@ -3003,11 +4316,27 @@ def run_loop(tts):
                 m = re.search(r"weather in ([a-z0-9 ,.-]+)", low_q)
                 if m:
                     place = m.group(1).strip()
-                    msg = f"I can look up the weather for {place}. Do you want me to fetch it now?"
+                    msg = tool_weather(place)
                     try:
                         final = _apply_reply_overrides(msg)
                     except Exception:
                         final = msg
+                    print(f"Nova: {final}\n", flush=True)
+                    session_turns.append(("assistant", final))
+                    speak_chunked(tts, final)
+                    continue
+
+                # For generic weather questions, be explicit about capability status.
+                if any(x in low_q for x in ["what is the weather", "what's the weather", "weather today", "weather now"]):
+                    if not _weather_source_host():
+                        msg = _weather_unavailable_message()
+                    else:
+                        msg = "Tell me a location/coordinates and run: weather <location-or-lat,lon>."
+                    try:
+                        final = _apply_reply_overrides(msg)
+                    except Exception:
+                        final = msg
+                    final = _ensure_reply(final)
                     print(f"Nova: {final}\n", flush=True)
                     session_turns.append(("assistant", final))
                     speak_chunked(tts, final)
@@ -3097,7 +4426,7 @@ def run_loop(tts):
                 if mem_should_store(user_text):
                     mem_add("fact", input_source, user_text)
                 # Soften casual acknowledgements
-                ack = "Got it. I've noted that."
+                ack = "Noted."
                 print(f"Nova: {ack}\n", flush=True)
                 session_turns.append(("assistant", ack))
                 speak_chunked(tts, ack)
@@ -3105,7 +4434,7 @@ def run_loop(tts):
         except Exception:
             pass
 
-        cmd_out = handle_commands(user_text)
+        cmd_out = handle_commands(user_text, session_turns=session_turns)
         if cmd_out:
             print(f"Nova: {cmd_out}\n", flush=True)
             session_turns.append(("assistant", cmd_out))
@@ -3145,6 +4474,45 @@ def run_loop(tts):
                     msg = "You told me you like these colors: " + ", ".join(prefs[:-1]) + f", and {prefs[-1]}."
             else:
                 msg = "You haven't told me a color preference in this current chat yet."
+            try:
+                final = _apply_reply_overrides(msg)
+            except Exception:
+                final = msg
+            print(f"Nova: {final}\n", flush=True)
+            session_turns.append(("assistant", final))
+            speak_chunked(tts, final)
+            continue
+
+        if _is_developer_color_lookup_request(user_text):
+            prefs = _extract_developer_color_preferences(session_turns)
+            if not prefs:
+                prefs = _extract_developer_color_preferences_from_memory()
+            if prefs:
+                if len(prefs) == 1:
+                    msg = f"From what you've told me, Gus likes {prefs[0]}."
+                else:
+                    msg = "From what you've told me, Gus likes these colors: " + ", ".join(prefs[:-1]) + f", and {prefs[-1]}."
+            else:
+                msg = "I don't have Gus's color preferences yet."
+            try:
+                final = _apply_reply_overrides(msg)
+            except Exception:
+                final = msg
+            print(f"Nova: {final}\n", flush=True)
+            session_turns.append(("assistant", final))
+            speak_chunked(tts, final)
+            continue
+
+        if _is_developer_bilingual_request(user_text):
+            known = _developer_is_bilingual(session_turns)
+            if known is None:
+                known = _developer_is_bilingual_from_memory()
+            if known is True:
+                msg = "Yes. From what you've told me, Gus is bilingual in English and Spanish."
+            elif known is False:
+                msg = "From what I have, Gus is not bilingual."
+            else:
+                msg = "I don't have confirmed language details for Gus yet."
             try:
                 final = _apply_reply_overrides(msg)
             except Exception:
@@ -3198,7 +4566,8 @@ def run_loop(tts):
             speak_chunked(tts, msg)
             continue
 
-        print("Nova: thinking...", flush=True)
+        # suppressed noisy interim status to keep replies concise
+
 
         # First, ask the action planner what to do deterministically
         try:
@@ -3244,16 +4613,49 @@ def run_loop(tts):
                     try:
                         out = fn(*args) if isinstance(args, (list, tuple)) else fn(args)
                     except Exception as e:
-                        out = f"Tool error: {e}"
+                        out = {"ok": False, "error": f"Tool error: {e}"}
 
-                    # If the tool returned a path-like success, include a TOOL citation
+                    # Normalize outputs: many tools return strings, others dicts.
+                    # Treat None or empty-string as failure.
+                    if out is None or (isinstance(out, str) and not out.strip()):
+                        # Provide a helpful failure message rather than stalling.
+                        if tool.startswith("web"):
+                            final_msg = _web_allowlist_message("requested resource")
+                        else:
+                            final_msg = f"The {tool} tool did not return a result. No data was available."
+                        try:
+                            final_msg = _apply_reply_overrides(final_msg)
+                        except Exception:
+                            pass
+                        print(f"Nova: {final_msg}\n", flush=True)
+                        session_turns.append(("assistant", final_msg))
+                        speak_chunked(tts, final_msg)
+                        continue
+
+                    # If the tool returned a dict-style response with an explicit failure
+                    if isinstance(out, dict) and not out.get("ok", True):
+                        err = out.get("error", "unknown error")
+                        if isinstance(err, str) and ("not allowed" in err.lower() or "domain not allowed" in err.lower()):
+                            final_msg = _web_allowlist_message(args[0] if args else "")
+                        else:
+                            final_msg = f"Tool {tool} failed: {err}"
+                        try:
+                            final_msg = _apply_reply_overrides(final_msg)
+                        except Exception:
+                            pass
+                        print(f"Nova: {final_msg}\n", flush=True)
+                        session_turns.append(("assistant", final_msg))
+                        speak_chunked(tts, final_msg)
+                        continue
+
+                    # If the tool returned a success string, include TOOL citation when appropriate
                     citation = format_tool_citation(tool, out)
-
                     if citation:
                         print(f"Nova (tool output):\n{citation}{out}\n", flush=True)
                     else:
                         print(f"Nova (tool output):\n{out}\n", flush=True)
 
+                    # record recent tool context for later LLM retrieval if it's textual
                     if isinstance(out, str) and out.strip():
                         recent_tool_context = out.strip()[:2500]
                         recent_web_urls = _extract_urls(out)
@@ -3290,10 +4692,23 @@ def run_loop(tts):
 
         # remove any raw memory dumps leaking into the assistant reply before showing
         clean_reply = _strip_mem_leak(reply, retrieved_context)
+        # Shorten replies for ordinary conversation: if the user did not explicitly request an action,
+        # prefer a concise reply (first 1-2 sentences). Keep full replies for explicit requests.
+        try:
+            if not _is_explicit_request(user_text):
+                # take up to first 2 sentences
+                sents = re.split(r'(?<=[.!?])\s+', (clean_reply or "").strip())
+                short = " ".join([s for s in sents if s])[:600]
+                if short:
+                    # prefer the short form unless it's obviously truncating a tool citation
+                    clean_reply = short
+        except Exception:
+            pass
         try:
             final = _apply_reply_overrides(clean_reply)
         except Exception:
             final = clean_reply
+        final = _ensure_reply(final)
         print(f"Nova: {final}\n", flush=True)
         session_turns.append(("assistant", final))
         speak_chunked(tts, final)
