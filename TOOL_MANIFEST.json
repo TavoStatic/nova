@@ -1,0 +1,55 @@
+{
+  "version": 1,
+  "tools": [
+    {
+      "name": "filesystem",
+      "category": "filesystem",
+      "safe": true,
+      "requires_admin": false,
+      "locality": "local",
+      "mutating": false,
+      "scope": "user",
+      "actions": ["ls", "read", "find"]
+    },
+    {
+      "name": "vision",
+      "category": "vision",
+      "safe": true,
+      "requires_admin": false,
+      "locality": "local",
+      "mutating": false,
+      "scope": "user",
+      "actions": ["screen", "camera"]
+    },
+    {
+      "name": "research",
+      "category": "research",
+      "safe": true,
+      "requires_admin": false,
+      "locality": "network",
+      "mutating": false,
+      "scope": "user",
+      "actions": ["web_fetch", "web_search", "web_research", "web_gather"]
+    },
+    {
+      "name": "system",
+      "category": "system",
+      "safe": false,
+      "requires_admin": false,
+      "locality": "local",
+      "mutating": false,
+      "scope": "system",
+      "actions": ["health_check", "doctor", "diag"]
+    },
+    {
+      "name": "patch",
+      "category": "patch",
+      "safe": false,
+      "requires_admin": true,
+      "locality": "local",
+      "mutating": true,
+      "scope": "system",
+      "actions": ["preview", "list_previews", "show", "approve", "reject", "apply", "rollback"]
+    }
+  ]
+}

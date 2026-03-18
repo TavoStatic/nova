@@ -92,16 +92,32 @@ def remove_file(path: Path):
     except Exception:
         pass
 
+def _write_guard_lock(path: Path, payload: dict) -> None:
+    with open(path, "x", encoding="utf-8") as f:
+        json.dump(payload, f, ensure_ascii=True)
+
 def acquire_lock_or_exit():
     RUNTIME_DIR.mkdir(parents=True, exist_ok=True)
-    if LOCK_FILE.exists():
-        data = read_json(LOCK_FILE) or {}
-        other_pid = int(data.get("pid", 0) or 0)
-        if other_pid > 0 and psutil.pid_exists(other_pid):
-            log(f"[GUARD] Another guard is already running (pid={other_pid}). Exiting.")
-            sys.exit(0)
-    atomic_write_json(LOCK_FILE, {"pid": os.getpid(), "ts": ts()})
-    atomic_write_json(GUARD_PID_FILE, {"pid": os.getpid(), "ts": ts()})
+    payload = {"pid": os.getpid(), "ts": ts()}
+
+    for _attempt in range(2):
+        try:
+            _write_guard_lock(LOCK_FILE, payload)
+            atomic_write_json(GUARD_PID_FILE, payload)
+            return
+        except FileExistsError:
+            data = read_json(LOCK_FILE) or {}
+            other_pid = int(data.get("pid", 0) or 0)
+            if other_pid > 0 and psutil.pid_exists(other_pid):
+                log(f"[GUARD] Another guard is already running (pid={other_pid}). Exiting.")
+                sys.exit(0)
+            remove_file(LOCK_FILE)
+        except Exception as e:
+            log(f"[GUARD] Failed to acquire guard lock: {e}")
+            sys.exit(1)
+
+    log("[GUARD] Failed to acquire guard lock after stale-lock cleanup.")
+    sys.exit(1)
 
 def is_heartbeat_fresh() -> bool:
     try:

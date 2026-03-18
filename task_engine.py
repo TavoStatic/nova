@@ -19,10 +19,79 @@ SUGGESTIONS = {
 }
 
 
-def extract_requirements(user_text: str) -> list[str]:
+def _looks_like_explicit_web_research(text: str) -> bool:
+    low = (text or "").strip().lower()
+    if not low:
+        return False
+
+    direct_phrases = [
+        "just use the web",
+        "use the web",
+        "only need web",
+        "all you need is the web",
+        "all you need is web",
+        "need is the web",
+        "online about",
+        "online for",
+        "online on",
+        "search online",
+        "research online",
+        "search the web",
+        "web research",
+        "web search",
+        "find online",
+        "look online",
+        "anything online",
+    ]
+    if any(phrase in low for phrase in direct_phrases):
+        return True
+
+    research_terms = ["research", "search", "find", "lookup", "look up", "browse", "fetch"]
+    web_terms = ["web", "online", "internet", "website", "site", "tea.texas.gov", "txschools.gov"]
+    return any(term in low for term in research_terms) and any(term in low for term in web_terms)
+
+
+def extract_requirements(user_text: str, config: dict | None = None) -> list[str]:
 
     t = user_text.lower().strip()
     req = set()
+    cfg = config if isinstance(config, dict) else {}
+    prefer_web_for_data_queries = bool(cfg.get("prefer_web_for_data_queries", False))
+
+    def _looks_like_profile_statement(text: str) -> bool:
+        low = (text or "").strip().lower()
+        if not low or "?" in low:
+            return False
+        role_markers = [
+            "developer",
+            "engineer",
+            "specialist",
+            "analyst",
+            "manager",
+            "administrator",
+            "teacher",
+            "programmer",
+            "full stack",
+        ]
+        if not any(marker in low for marker in role_markers):
+            return False
+        profile_markers = [
+            " i am ",
+            " i'm ",
+            " he is ",
+            " she's ",
+            " she is ",
+            " gus is ",
+            " gustavo is ",
+            " works as ",
+            " work as ",
+            " works in ",
+        ]
+        padded = f" {low} "
+        return any(marker in padded for marker in profile_markers) or low.startswith("yes ")
+
+    if _looks_like_profile_statement(t):
+        return []
 
     # --------------------------------------------------
     # Knowledge / explanation questions
@@ -39,6 +108,8 @@ def extract_requirements(user_text: str) -> list[str]:
 
     if any(t.startswith(k) for k in knowledge_starters):
         return []
+
+    explicit_web_research = _looks_like_explicit_web_research(t)
 
     # --------------------------------------------------
     # SIS / student data / PEIMS
@@ -65,7 +136,7 @@ def extract_requirements(user_text: str) -> list[str]:
         "show me"
     ]
 
-    if any(kw in t for kw in sis_keywords):
+    if any(kw in t for kw in sis_keywords) and not (explicit_web_research or prefer_web_for_data_queries):
 
         req.update([
             "database_connection",
@@ -108,6 +179,9 @@ def extract_requirements(user_text: str) -> list[str]:
     if any(kw in t for kw in web_keywords):
         req.add("web_access")
 
+    if explicit_web_research or prefer_web_for_data_queries:
+        req.add("web_access")
+
     # --------------------------------------------------
     # Code execution requests
     # --------------------------------------------------
@@ -127,9 +201,9 @@ def extract_requirements(user_text: str) -> list[str]:
     return sorted(req)
 
 
-def analyze_request(user_text: str) -> TaskResult:
+def analyze_request(user_text: str, config: dict | None = None) -> TaskResult:
 
-    req = extract_requirements(user_text)
+    req = extract_requirements(user_text, config=config)
 
     # no special capability needed
     if not req:

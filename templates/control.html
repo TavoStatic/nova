@@ -1,0 +1,310 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>NYO System Control</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-QWTKZyjpPEjISv5WaRU9OFeRpok6YctnYmDr5pNlyT2bRjXh0JMhjY6hW+ALEwIH" crossorigin="anonymous">
+    <link href="/static/control.css" rel="stylesheet">
+</head>
+<body>
+    <div class="control-shell">
+        <aside class="control-sidebar panel-card">
+            <div class="brand-stack">
+                <div class="brand-kicker">NYO System</div>
+                <div class="brand-mark">Not Your Ordinary AI System</div>
+                <div class="brand-sub">NYO runtime operator console and behavior inspector</div>
+            </div>
+
+            <div class="sidebar-health-row">
+                <span id="healthBadge" class="status-pill status-pill-blue">Health --</span>
+                <button id="btnRefresh" class="btn btn-sm btn-operator-primary" type="button">Refresh</button>
+            </div>
+
+            <nav class="nav-stack">
+                <button class="nav-pill active" data-view-target="overview" type="button">Overview</button>
+                <button class="nav-pill" data-view-target="operations" type="button">Tools</button>
+                <button class="nav-pill" data-view-target="sessions" type="button">Sessions</button>
+                <button class="nav-pill" data-view-target="logs" type="button">Logs</button>
+                <button class="nav-pill" data-view-target="health" type="button">Health</button>
+            </nav>
+
+            <div class="sidebar-meta">
+                <a href="/">Open NYO Chat</a>
+                <button id="btnInspectorToggle" class="btn btn-sm btn-operator-alt" type="button">Toggle Inspector</button>
+                <button id="btnLogout" class="btn btn-sm btn-operator-danger" type="button">Logout</button>
+            </div>
+
+            <div class="panel-card compact-card">
+                <div class="section-title">Operator Access</div>
+                <label class="field-label" for="key">Operator key</label>
+                <input id="key" class="form-control form-control-sm" type="password" placeholder="NOVA_CONTROL_TOKEN" />
+            </div>
+
+            <div class="panel-card compact-card sidebar-callout">
+                <div class="section-title">Operator Brief</div>
+                <div class="section-subtitle">Hybrid mission console: live health up front, actions centered, inspector always close to the work.</div>
+            </div>
+        </aside>
+
+        <main class="control-main">
+            <header class="main-topbar panel-card">
+                <div class="topbar-copy">
+                    <div class="topbar-kicker">NYO System Control</div>
+                    <div class="topbar-title">Mission control for the NYO runtime</div>
+                    <div class="brand-sub">NOT YOUR ORDINARY AI SYSTEM</div>
+                </div>
+                <div id="overrideBadges" class="badge-tray"></div>
+            </header>
+
+            <div id="feedbackBar" class="signal-bar signal-info">Control UI ready.</div>
+            <div id="runtimeNoteBar" class="signal-bar signal-muted"> Runtime note not loaded yet.</div>
+
+            <section class="main-view" data-view="overview">
+                <div class="hero-deck mb-3">
+                    <div class="panel-card hero-card">
+                        <div class="section-title">Core Pulse</div>
+                        <div id="heroHealthSummary" class="hero-value">Waiting for health data.</div>
+                        <div class="hero-note">Health score, pass ratio, and live alerts.</div>
+                    </div>
+
+                    <div class="panel-card hero-card">
+                        <div class="section-title">Route Trace</div>
+                        <div id="heroRouteSummary" class="hero-value">Waiting for route data.</div>
+                        <div class="hero-note">Current intent, planner route, and last tool used.</div>
+                    </div>
+
+                    <div class="panel-card hero-card">
+                        <div class="section-title">Ops Snapshot</div>
+                        <div id="heroOpsSummary" class="hero-value">Waiting for operator data.</div>
+                        <div class="hero-note">Sessions, provider, memory scope, and runtime mode.</div>
+                    </div>
+                </div>
+
+                <div class="panel-card main-card mb-3">
+                    <div class="section-head">
+                        <div>
+                            <div class="section-title">System Matrix</div>
+                            <div class="section-subtitle">Live service state, policy posture, and control-plane telemetry.</div>
+                        </div>
+                    </div>
+                    <div id="statusKv" class="metric-grid"></div>
+                </div>
+
+                <div class="panel-card main-card mb-3">
+                    <div class="section-head">
+                        <div>
+                            <div class="section-title">Action Stream</div>
+                            <div class="section-subtitle">Latest control actions, tool output, and operator feedback.</div>
+                        </div>
+                    </div>
+                    <pre id="actionBox" class="console-box">No actions yet.</pre>
+                </div>
+
+                <div class="panel-card main-card">
+                    <div class="section-head">
+                        <div>
+                            <div class="section-title">Telemetry</div>
+                            <div class="section-subtitle">Heartbeat, request volume, and errors over time.</div>
+                        </div>
+                    </div>
+                    <canvas id="metricsCanvas" width="1100" height="220"></canvas>
+                    <div class="section-footnote">Green: heartbeat age | Blue: requests/min | Red: errors/min</div>
+                </div>
+            </section>
+
+            <section class="main-view d-none" data-view="operations">
+                <div class="ops-grid">
+                    <div class="panel-card main-card">
+                        <div class="section-title">Guard Control</div>
+                        <div class="button-row mb-2">
+                            <button id="btnGuardStatus" class="btn btn-sm btn-operator-alt" type="button">Guard Status</button>
+                            <button id="btnGuardStart" class="btn btn-sm btn-operator-primary" type="button">Start Guard</button>
+                            <button id="btnGuardStop" class="btn btn-sm btn-operator-danger" type="button">Stop Guard</button>
+                        </div>
+                        <pre id="guardBox" class="console-box compact-console">No guard data yet.</pre>
+                    </div>
+
+                    <div class="panel-card main-card">
+                        <div class="section-title">Policy Controls</div>
+                        <div class="button-row mb-2">
+                            <input id="domainInput" class="form-control form-control-sm" placeholder="example.com" />
+                            <button id="btnAllow" class="btn btn-sm btn-operator-primary" type="button">Allow Domain</button>
+                            <button id="btnRemove" class="btn btn-sm btn-operator-alt" type="button">Remove Domain</button>
+                        </div>
+                        <div class="button-row">
+                            <select id="webMode" class="form-select form-select-sm">
+                                <option value="normal">web mode normal</option>
+                                <option value="max">web mode max</option>
+                            </select>
+                            <button id="btnMode" class="btn btn-sm btn-operator-warn" type="button">Apply Web Mode</button>
+                            <button id="btnAudit" class="btn btn-sm btn-operator-alt" type="button">Policy Audit</button>
+                        </div>
+                    </div>
+
+                    <div class="panel-card main-card">
+                        <div class="section-title">Memory Governance</div>
+                        <div class="button-row mb-2">
+                            <select id="memoryScope" class="form-select form-select-sm">
+                                <option value="private">memory scope private</option>
+                                <option value="hybrid">memory scope hybrid</option>
+                                <option value="shared">memory scope shared</option>
+                            </select>
+                            <button id="btnMemoryScope" class="btn btn-sm btn-operator-primary" type="button">Apply Memory Scope</button>
+                        </div>
+                        <pre id="memoryScopeBox" class="console-box compact-console">Memory scope not loaded yet.</pre>
+                    </div>
+
+                    <div class="panel-card main-card">
+                        <div class="section-title">Search Provider</div>
+                        <div class="button-row">
+                            <select id="searchProvider" class="form-select form-select-sm">
+                                <option value="html">search provider html</option>
+                                <option value="searxng">search provider searxng</option>
+                            </select>
+                            <button id="btnSearchProvider" class="btn btn-sm btn-operator-primary" type="button">Apply Provider</button>
+                            <button id="btnSearchToggle" class="btn btn-sm btn-operator-alt" type="button">Toggle Provider</button>
+                        </div>
+                    </div>
+
+                    <div class="panel-card main-card">
+                        <div class="section-title">Chat Access</div>
+                        <div class="button-row mb-2">
+                            <select id="chatUserSelect" class="form-select form-select-sm"></select>
+                            <input id="chatUserName" class="form-control form-control-sm" placeholder="username" />
+                            <input id="chatUserPass" class="form-control form-control-sm" type="password" placeholder="new password" />
+                        </div>
+                        <div class="button-row mb-2">
+                            <button id="btnChatUserUpsert" class="btn btn-sm btn-operator-primary" type="button">Save Chat User</button>
+                            <button id="btnChatUserDelete" class="btn btn-sm btn-operator-danger" type="button">Delete Chat User</button>
+                            <button id="btnChatUserRefresh" class="btn btn-sm btn-operator-alt" type="button">Refresh Chat Users</button>
+                        </div>
+                        <pre id="chatAuthBox" class="console-box compact-console">Chat access not loaded yet.</pre>
+                    </div>
+
+                    <div class="panel-card main-card span-2">
+                        <div class="section-title">Operator Actions</div>
+                        <div class="button-row wrap-buttons">
+                            <button id="btnInspect" class="btn btn-sm btn-operator-warn" type="button">Inspect Environment</button>
+                            <button id="btnNovaStart" class="btn btn-sm btn-operator-primary" type="button">Start Runtime</button>
+                            <button id="btnSelfCheck" class="btn btn-sm btn-operator-primary" type="button">Run Self-Check</button>
+                            <button id="btnExportCaps" class="btn btn-sm btn-operator-alt" type="button">Export Capabilities</button>
+                            <button id="btnExportLedger" class="btn btn-sm btn-operator-alt" type="button">Export Ledger Summary</button>
+                            <button id="btnExportBundle" class="btn btn-sm btn-operator-warn" type="button">Export Diagnostics Bundle</button>
+                            <button id="btnOut" class="btn btn-sm btn-operator-alt" type="button">Tail HTTP OUT</button>
+                            <button id="btnErr" class="btn btn-sm btn-operator-danger" type="button">Tail HTTP ERR</button>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <section class="main-view d-none" data-view="sessions">
+                <div class="ops-grid">
+                    <div class="panel-card main-card">
+                        <div class="section-head">
+                            <div>
+                                <div class="section-title">Live Sessions</div>
+                                <div class="section-subtitle">Open, inspect, copy, and delete live HTTP session traces.</div>
+                            </div>
+                        </div>
+                        <div class="button-row mb-2">
+                            <select id="sessionSelect" class="form-select form-select-sm"></select>
+                        </div>
+                        <div class="button-row mb-2 wrap-buttons">
+                            <button id="btnSessionsRefresh" class="btn btn-sm btn-operator-alt" type="button">Refresh Sessions</button>
+                            <button id="btnSessionOpen" class="btn btn-sm btn-operator-primary" type="button">Open In Chat</button>
+                            <button id="btnSessionCopy" class="btn btn-sm btn-operator-warn" type="button">Copy Session ID</button>
+                            <button id="btnSessionDelete" class="btn btn-sm btn-operator-danger" type="button">Delete Session</button>
+                        </div>
+                        <pre id="sessionBox" class="console-box">No session selected.</pre>
+                        <div class="section-title mt-3">Live Probe Findings</div>
+                        <pre id="sessionProbeBox" class="console-box compact-console">No session selected.</pre>
+                    </div>
+
+                    <div class="panel-card main-card">
+                        <div class="section-head">
+                            <div>
+                                <div class="section-title">Parity Test Runs</div>
+                                <div class="section-subtitle">Runner artifacts from runtime/test_sessions. Separate from live session traffic.</div>
+                            </div>
+                        </div>
+                        <div id="testRunBadges" class="badge-tray mb-2"></div>
+                        <div class="button-row mb-2 wrap-buttons">
+                            <select id="testSessionDefinitionSelect" class="form-select form-select-sm"></select>
+                            <button id="btnTestRunExecute" class="btn btn-sm btn-operator-primary" type="button">Run Test Session</button>
+                        </div>
+                        <div class="button-row mb-2">
+                            <select id="testRunSelect" class="form-select form-select-sm"></select>
+                        </div>
+                        <div class="button-row mb-2 wrap-buttons">
+                            <button id="btnTestRunsRefresh" class="btn btn-sm btn-operator-alt" type="button">Refresh Test Runs</button>
+                            <button id="btnTestRunCopy" class="btn btn-sm btn-operator-warn" type="button">Copy Report Path</button>
+                        </div>
+                        <pre id="testRunBox" class="console-box">No test run selected.</pre>
+                        <div class="section-title mt-3">Per-Turn Drift</div>
+                        <div id="testRunDriftGrid" class="inspector-stack">No test run selected.</div>
+                        <div class="section-title mt-3">Parity Findings</div>
+                        <pre id="testRunProbeBox" class="console-box compact-console">No test run selected.</pre>
+                    </div>
+                </div>
+            </section>
+
+            <section class="main-view d-none" data-view="logs">
+                <div class="panel-card main-card mb-3">
+                    <div class="section-head">
+                        <div>
+                            <div class="section-title">Policy Snapshot</div>
+                            <div class="section-subtitle">Current policy and auth configuration exposed to the control plane.</div>
+                        </div>
+                    </div>
+                    <pre id="policyBox" class="console-box">Loading...</pre>
+                </div>
+                <div class="panel-card main-card">
+                    <div class="section-title">Action Output</div>
+                    <pre id="actionBoxClone" class="console-box">No actions yet.</pre>
+                </div>
+            </section>
+
+            <section class="main-view d-none" data-view="health">
+                <div class="panel-card main-card mb-3">
+                    <div class="section-title">Health Summary</div>
+                    <div id="healthSummary" class="inspector-stack">Waiting for live status.</div>
+                </div>
+                <div class="panel-card main-card">
+                    <div class="section-title">Supervisor Snapshot</div>
+                    <div id="supervisorSummaryMain" class="inspector-stack">No supervisor data yet.</div>
+                </div>
+            </section>
+        </main>
+
+        <aside id="inspectorPanel" class="control-inspector panel-card">
+            <div>
+                <div class="section-title">Live Inspector</div>
+                <div class="section-subtitle">Planner, ledger, supervisor, and live session state close to the action stream.</div>
+            </div>
+
+            <div class="panel-card inspector-card">
+                <div class="section-title">Planner Decision</div>
+                <div id="plannerInspector" class="inspector-stack">No planner data yet.</div>
+            </div>
+
+            <div class="panel-card inspector-card">
+                <div class="section-title">Ledger</div>
+                <div id="ledgerInspector" class="timeline-stack">No ledger data yet.</div>
+            </div>
+
+            <div class="panel-card inspector-card">
+                <div class="section-title">Supervisor</div>
+                <div id="supervisorInspector" class="inspector-stack">No supervisor data yet.</div>
+            </div>
+
+            <div class="panel-card inspector-card">
+                <div class="section-title">Session State</div>
+                <div id="sessionStateInspector" class="inspector-stack">No session selected.</div>
+            </div>
+        </aside>
+    </div>
+
+    <script src="/static/control.js"></script>
+</body>
+</html>

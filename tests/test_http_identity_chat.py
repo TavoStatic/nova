@@ -1,4 +1,7 @@
 import unittest
+import tempfile
+import json
+from pathlib import Path
 
 import nova_http
 import nova_core
@@ -7,6 +10,7 @@ import nova_core
 class TestHttpIdentityChat(unittest.TestCase):
     def setUp(self):
         nova_http.SESSION_TURNS.clear()
+        nova_http.SESSION_STATE_MANAGER.clear()
         self.orig_remember_name_origin = nova_core.remember_name_origin
         self.orig_get_name_origin_story = nova_core.get_name_origin_story
         self.orig_mem_should_store = nova_core.mem_should_store
@@ -15,6 +19,21 @@ class TestHttpIdentityChat(unittest.TestCase):
         self.orig_render_chat_context = nova_core._render_chat_context
         self.orig_ollama_chat = nova_core.ollama_chat
         self.orig_sanitize = nova_core.sanitize_llm_reply
+        self.orig_tool_web_research = nova_core.tool_web_research
+        self.orig_tool_web_gather = nova_core.tool_web_gather
+        self.orig_mem_recall = nova_core.mem_recall
+        self.orig_learned_facts_file = nova_core.LEARNED_FACTS_FILE
+        self.orig_identity_file = nova_core.IDENTITY_FILE
+        self.orig_action_ledger_dir = nova_core.ACTION_LEDGER_DIR
+        self.orig_self_reflection_log = nova_core.SELF_REFLECTION_LOG
+        self.orig_health_log = nova_core.HEALTH_LOG
+        self._tmp_dir = tempfile.TemporaryDirectory()
+        nova_core.LEARNED_FACTS_FILE = Path(self._tmp_dir.name) / "learned_facts_test.json"
+        nova_core.IDENTITY_FILE = Path(self._tmp_dir.name) / "identity_test.json"
+        nova_core.ACTION_LEDGER_DIR = Path(self._tmp_dir.name) / "actions"
+        nova_core.SELF_REFLECTION_LOG = Path(self._tmp_dir.name) / "self_reflection.jsonl"
+        nova_core.HEALTH_LOG = Path(self._tmp_dir.name) / "health.log"
+        nova_core.TURN_SUPERVISOR.reset()
 
         nova_core.mem_should_store = lambda _text: False
         nova_core.mem_add = lambda *args, **kwargs: None
@@ -22,6 +41,7 @@ class TestHttpIdentityChat(unittest.TestCase):
         nova_core._render_chat_context = lambda _turns: ""
         nova_core.ollama_chat = lambda text, retrieved_context="": f"LLM:{text}"
         nova_core.sanitize_llm_reply = lambda text, _tool: text
+        nova_core.tool_web_research = lambda _q: "Web research summary"
 
     def tearDown(self):
         nova_core.remember_name_origin = self.orig_remember_name_origin
@@ -32,6 +52,22 @@ class TestHttpIdentityChat(unittest.TestCase):
         nova_core._render_chat_context = self.orig_render_chat_context
         nova_core.ollama_chat = self.orig_ollama_chat
         nova_core.sanitize_llm_reply = self.orig_sanitize
+        nova_core.tool_web_research = self.orig_tool_web_research
+        nova_core.tool_web_gather = self.orig_tool_web_gather
+        nova_core.mem_recall = self.orig_mem_recall
+        nova_core.LEARNED_FACTS_FILE = self.orig_learned_facts_file
+        nova_core.IDENTITY_FILE = self.orig_identity_file
+        nova_core.ACTION_LEDGER_DIR = self.orig_action_ledger_dir
+        nova_core.SELF_REFLECTION_LOG = self.orig_self_reflection_log
+        nova_core.HEALTH_LOG = self.orig_health_log
+        nova_core.TURN_SUPERVISOR.reset()
+        nova_http.SESSION_STATE_MANAGER.clear()
+        self._tmp_dir.cleanup()
+
+    def _latest_action_payload(self):
+        files = sorted(nova_core.ACTION_LEDGER_DIR.glob("*.json"))
+        self.assertTrue(files)
+        return json.loads(files[-1].read_text(encoding="utf-8"))
 
     def test_remember_this_stores_name_origin(self):
         calls = []
@@ -65,6 +101,412 @@ class TestHttpIdentityChat(unittest.TestCase):
 
         out = nova_http.process_chat("s3", "so do you now know where your name comes from ?")
         self.assertIn("creator gus", out.lower())
+
+    def test_peims_attendance_rules_routes_to_sourced_research(self):
+        nova_core.remember_name_origin = lambda _text: "Stored"
+        nova_core.get_name_origin_story = lambda: ""
+        nova_core.tool_web_research = lambda _q: "Web research:\nhttps://tea.texas.gov/reports-and-data/data-submission/peims"
+        nova_core.tool_web_gather = lambda _u: "[OK] Saved ...\nSummary snippet:\nAttendance data must be reported daily."
+
+        out = nova_http.process_chat("s4", "What are the attendance reporting rules for PEIMS?")
+        low = out.lower()
+        self.assertTrue(
+            ("allowlisted" in low and "tea.texas.gov" in low)
+            or ("local peims knowledge files" in low and "knowledge/peims/05_attendance_reporting.txt" in low)
+        )
+
+    def test_ui_tip_line_is_stripped_from_reply(self):
+        nova_core.remember_name_origin = lambda _text: "Stored"
+        nova_core.get_name_origin_story = lambda: ""
+        nova_core.ollama_chat = lambda _text, retrieved_context="": "Answer line\nTip: start server with --host 0.0.0.0 to test"
+
+        out = nova_http.process_chat("s5", "random question")
+        self.assertIn("Answer line", out)
+        self.assertNotIn("Tip: start server", out)
+
+    def test_grounded_answer_adds_source_citations(self):
+        nova_core.remember_name_origin = lambda _text: "Stored"
+        nova_core.get_name_origin_story = lambda: ""
+
+        def fake_research(_q: str):
+            return "Web research results:\n1) https://tea.texas.gov/reports-and-data/data-submission/peims\n2) https://www.texasstudentdatasystem.org/"
+
+        def fake_gather(url: str):
+            if "tea.texas.gov" in url:
+                return "[OK] Saved ...\nSummary snippet:\nAttendance data is required for each instructional day."
+            return "[OK] Saved ...\nSummary snippet:\nTSDS explains PEIMS submission guidance and deadlines."
+
+        nova_core.tool_web_research = fake_research
+        nova_core.tool_web_gather = fake_gather
+
+        out = nova_http.process_chat("s6", "What are the attendance reporting rules for PEIMS?")
+        self.assertIn("[source: tea.texas.gov]", out)
+        self.assertIn("attendance data is required", out.lower())
+
+    def test_session_recap_returns_recent_topics(self):
+        nova_core.remember_name_origin = lambda _text: "Stored"
+        nova_core.get_name_origin_story = lambda: ""
+
+        nova_http.process_chat("s7", "What are the attendance reporting rules for PEIMS?")
+        nova_http.process_chat("s7", "can you do a deep search and let me know what else you dig up?")
+        out = nova_http.process_chat("s7", "give me a recap of this entire chat session nova")
+
+        self.assertIn("recap of this session", out.lower())
+        self.assertIn("attendance reporting rules", out.lower())
+        self.assertIn("deep search", out.lower())
+
+    def test_peims_local_fallback_when_web_research_returns_no_urls(self):
+        nova_core.remember_name_origin = lambda _text: "Stored"
+        nova_core.get_name_origin_story = lambda: ""
+        nova_core.tool_web_research = lambda _q: "No relevant pages found across allowlisted domains for that query."
+        nova_core.tool_web_gather = lambda _u: ""
+
+        out = nova_http.process_chat("s8", "What are the attendance reporting rules for PEIMS?")
+        self.assertIn("local peims knowledge files", out.lower())
+        self.assertIn("[source: knowledge/peims/05_attendance_reporting.txt]", out.lower())
+
+    def test_llm_path_always_includes_recent_chat_context(self):
+        nova_core.remember_name_origin = lambda _text: "Stored"
+        nova_core.get_name_origin_story = lambda: ""
+        nova_core._render_chat_context = lambda turns: "\n".join([f"{r}:{t}" for r, t in turns[-4:]])
+
+        captured = {"retrieved": ""}
+
+        def fake_ollama(text: str, retrieved_context: str = "") -> str:
+            captured["retrieved"] = retrieved_context
+            return "ok"
+
+        nova_core.ollama_chat = fake_ollama
+
+        nova_http.process_chat("s9", "Explain photosynthesis briefly.")
+        nova_http.process_chat("s9", "why?")
+
+        self.assertIn("CURRENT CHAT CONTEXT", captured["retrieved"])
+        self.assertIn("Explain photosynthesis briefly.", captured["retrieved"])
+
+    def test_peims_weak_web_snippet_falls_back_to_local_citations(self):
+        nova_core.remember_name_origin = lambda _text: "Stored"
+        nova_core.get_name_origin_story = lambda: ""
+        nova_core.tool_web_research = lambda _q: "Web research:\nhttps://tea.texas.gov/"
+        nova_core.tool_web_gather = lambda _u: "[OK] Saved ...\nSummary snippet:\nWelcome to Texas Education Agency | Texas Education Agency Skip to main content Mega Menu"
+
+        out = nova_http.process_chat("s10", "What are the attendance reporting rules for PEIMS?")
+        self.assertIn("local peims knowledge files", out.lower())
+        self.assertIn("[source: knowledge/peims/05_attendance_reporting.txt]", out.lower())
+
+    def test_http_session_web_override_sticks_for_followup_peims_query(self):
+        nova_core.remember_name_origin = lambda _text: "Stored"
+        nova_core.get_name_origin_story = lambda: ""
+        orig_execute_planned_action = nova_core.execute_planned_action
+        try:
+            nova_core.execute_planned_action = lambda tool, args=None: "Web research summary" if tool == "web_research" else ""
+            ack = nova_http.process_chat("s10_override", "all you need is the Web")
+            out = nova_http.process_chat("s10_override", "give me anything about PEIMS")
+            self.assertIn("prefer web research", ack.lower())
+            self.assertEqual(out, "Web research summary")
+        finally:
+            nova_core.execute_planned_action = orig_execute_planned_action
+
+    def test_http_broad_peims_query_uses_local_overview(self):
+        nova_core.remember_name_origin = lambda _text: "Stored"
+        nova_core.get_name_origin_story = lambda: ""
+
+        out = nova_http.process_chat("s10_overview", "what do you know about PEIMS?")
+        self.assertIn("peims overview details in local knowledge files", out.lower())
+        self.assertIn("[source: knowledge/peims/", out.lower())
+
+    def test_http_creator_followup_uses_session_conversation_state(self):
+        nova_core.remember_name_origin = lambda _text: "Stored"
+        nova_core.get_name_origin_story = lambda: "Nova was given its name by Gus."
+
+        first = nova_http.process_chat("s10_profile", "who is your creator ?")
+        followup = nova_http.process_chat("s10_profile", "what else?")
+
+        self.assertIn("gustavo", first.lower())
+        self.assertIn("verified facts", followup.lower())
+        self.assertIn("gustavo", followup.lower())
+
+    def test_http_retrieval_followup_uses_session_conversation_state(self):
+        nova_core.remember_name_origin = lambda _text: "Stored"
+        nova_core.get_name_origin_story = lambda: ""
+        orig_execute_planned_action = nova_core.execute_planned_action
+        orig_tool_web_gather = nova_core.tool_web_gather
+        try:
+            nova_core.execute_planned_action = lambda tool, args=None: "1) https://tea.texas.gov/a\n2) https://tea.texas.gov/b" if tool == "web_research" else ""
+            nova_core.tool_web_gather = lambda url: f"Gathered: {url}"
+
+            first = nova_http.process_chat("s10_retrieval", "research PEIMS online")
+            followup = nova_http.process_chat("s10_retrieval", "tell me about the first one")
+            session = nova_http.SESSION_STATE_MANAGER.get("s10_retrieval")
+
+            self.assertIn("https://tea.texas.gov/a", first.lower())
+            self.assertEqual(followup, "Gathered: https://tea.texas.gov/a")
+            self.assertEqual(session.active_subject(), "retrieval:web_gather")
+            self.assertEqual((session.retrieval_state() or {}).get("top_url"), "https://tea.texas.gov/a")
+        finally:
+            nova_core.execute_planned_action = orig_execute_planned_action
+            nova_core.tool_web_gather = orig_tool_web_gather
+
+    def test_http_creator_query_after_retrieval_resets_followup_to_creator_thread(self):
+        nova_core.remember_name_origin = lambda _text: "Stored"
+        nova_core.get_name_origin_story = lambda: "Nova was given its name by Gus."
+        orig_execute_planned_action = nova_core.execute_planned_action
+        try:
+            nova_core.execute_planned_action = lambda tool, args=None: "1) https://tea.texas.gov/a\n2) https://tea.texas.gov/b" if tool == "web_research" else ""
+
+            nova_http.process_chat("s10_mix", "research PEIMS online")
+            nova_http.process_chat("s10_mix", "tell me about the first one")
+            creator = nova_http.process_chat("s10_mix", "who is your creator?")
+            followup = nova_http.process_chat("s10_mix", "what else?")
+            session = nova_http.SESSION_STATE_MANAGER.get("s10_mix")
+
+            self.assertIn("gustavo", creator.lower())
+            self.assertIn("verified facts", followup.lower())
+            self.assertIn("gustavo", followup.lower())
+            self.assertEqual(session.active_subject(), "identity_profile:developer")
+        finally:
+            nova_core.execute_planned_action = orig_execute_planned_action
+
+    def test_javascript_placeholder_snippet_is_rejected_as_grounding(self):
+        nova_core.remember_name_origin = lambda _text: "Stored"
+        nova_core.get_name_origin_story = lambda: ""
+        nova_core.tool_web_research = lambda _q: "Web research:\nhttps://tea.texas.gov/"
+        nova_core.tool_web_gather = lambda _u: "[OK] Saved ...\nSummary snippet:\nYou need to enable JavaScript to run this app."
+
+        out = nova_http.process_chat("s10b", "What are the attendance reporting rules for PEIMS?")
+        self.assertIn("local peims knowledge files", out.lower())
+        self.assertNotIn("enable javascript", out.lower())
+
+    def test_name_origin_ignores_polluted_memory_lines(self):
+        nova_core.get_name_origin_story = self.orig_get_name_origin_story
+        nova_core.mem_recall = lambda _q: "- name: gus\n- my name is gus"
+
+        out = nova_http.process_chat("s11", "why are you called Nova?")
+        self.assertIn("do not have a saved name-origin story", out.lower())
+        self.assertNotIn("my name is gus", out.lower())
+
+    def test_assistant_name_correction_is_deterministic(self):
+        nova_core.remember_name_origin = lambda _text: "Stored"
+        nova_core.get_name_origin_story = lambda: ""
+
+        ack = nova_http.process_chat("s12", "no he does not your developer's name is gus .. your name is Nova")
+        self.assertIn("i learned", ack.lower())
+        out = nova_http.process_chat("s12", "what is your name?")
+        self.assertIn("my name is nova", out.lower())
+
+    def test_developer_full_name_query(self):
+        nova_core.remember_name_origin = lambda _text: "Stored"
+        nova_core.get_name_origin_story = lambda: ""
+
+        out = nova_http.process_chat("s13", "and that is just his nick name what is his full name ?")
+        self.assertIn("full name is gustavo", out.lower())
+
+    def test_creator_query_uses_deterministic_developer_profile(self):
+        nova_core.remember_name_origin = lambda _text: "Stored"
+        nova_core.get_name_origin_story = lambda: ""
+
+        out = nova_http.process_chat("s13b", "who is your creator ?")
+        self.assertIn("gustavo", out.lower())
+        self.assertIn("created me", out.lower())
+
+    def test_creator_confirmation_query_stays_deterministic(self):
+        nova_core.remember_name_origin = lambda _text: "Stored"
+        nova_core.get_name_origin_story = lambda: ""
+
+        out = nova_http.process_chat("s13c", "so gus is your creator ?")
+        self.assertIn("gustavo", out.lower())
+        self.assertIn("created me", out.lower())
+
+    def test_assistant_name_typo_confirmation(self):
+        nova_core.remember_name_origin = lambda _text: "Stored"
+        nova_core.get_name_origin_story = lambda: ""
+
+        out = nova_http.process_chat("s14", "are hou sure that is your name ?")
+        self.assertIn("my name is nova", out.lower())
+
+    def test_clarification_prompt_does_not_trigger_web_lookup(self):
+        nova_core.remember_name_origin = lambda _text: "Stored"
+        nova_core.get_name_origin_story = lambda: ""
+        nova_core.tool_web_research = lambda _q: "Web research:\nhttps://tea.texas.gov/"
+        nova_core.tool_web_gather = lambda _u: "[OK] Saved ...\nSummary snippet:\nYou need to enable JavaScript to run this app."
+
+        first = nova_http.process_chat("s14b", "who is your creator ?")
+        self.assertIn("gustavo", first.lower())
+
+        out = nova_http.process_chat("s14b", "what are you talking about ?")
+        self.assertNotIn("allowlisted references", out.lower())
+        self.assertNotIn("enable javascript", out.lower())
+        self.assertIn("web lookup", out.lower())
+
+    def test_learning_updates_assistant_name(self):
+        nova_core.remember_name_origin = lambda _text: "Stored"
+        nova_core.get_name_origin_story = lambda: ""
+
+        ack = nova_http.process_chat("s15", "your name is NovaPrime")
+        self.assertIn("i learned", ack.lower())
+
+        out = nova_http.process_chat("s15", "what is your name?")
+        self.assertIn("novaprime", out.lower())
+
+    def test_learning_updates_developer_full_name(self):
+        nova_core.remember_name_origin = lambda _text: "Stored"
+        nova_core.get_name_origin_story = lambda: ""
+
+        ack = nova_http.process_chat("s16", "his full name is Gustavo Uribe")
+        self.assertIn("i learned", ack.lower())
+
+        out = nova_http.process_chat("s16", "what is his full name?")
+        self.assertIn("gustavo uribe", out.lower())
+
+    def test_http_pending_correction_flow(self):
+        nova_core.remember_name_origin = lambda _text: "Stored"
+        nova_core.get_name_origin_story = lambda: ""
+
+        # Seed a prior assistant answer to be corrected.
+        nova_http._append_session_turn("s17", "assistant", "Old incorrect answer")
+        out1 = nova_http.process_chat("s17", "you gave me garbage back .. why ?")
+        self.assertIn("exact corrected answer", out1.lower())
+        self.assertEqual(nova_http.SESSION_STATE_MANAGER.get("s17").pending_correction_target, "Old incorrect answer")
+
+        out2 = nova_http.process_chat("s17", "My name is Nova. Please use Nova going forward.")
+        self.assertIn("corrected that", out2.lower())
+        self.assertEqual(nova_http.SESSION_STATE_MANAGER.get("s17").pending_correction_target, "")
+
+    def test_http_writes_action_ledger_record(self):
+        nova_core.remember_name_origin = lambda _text: "Stored"
+        nova_core.get_name_origin_story = lambda: ""
+        nova_core.ollama_chat = lambda _text, retrieved_context="": "Simple answer"
+
+        out = nova_http.process_chat("ledger1", "random question for ledger")
+        self.assertIn("Simple answer", out)
+
+        files = sorted(nova_core.ACTION_LEDGER_DIR.glob("*.json"))
+        self.assertTrue(files)
+        payload = json.loads(files[-1].read_text(encoding="utf-8"))
+        self.assertEqual(payload.get("user_input"), "random question for ledger")
+        self.assertIn("planner_decision", payload)
+        self.assertIn("final_answer", payload)
+        self.assertIn("grounded", payload)
+        self.assertIn("route_trace", payload)
+        self.assertTrue(isinstance(payload.get("route_trace"), list))
+        self.assertTrue(payload.get("route_summary"))
+        session = nova_http.SESSION_STATE_MANAGER.get("ledger1")
+        self.assertEqual(session.last_reflection.get("probe_summary"), "1 issue detected")
+        self.assertIn("YELLOW: rule_coverage", "\n".join(session.last_reflection.get("probe_results", [])))
+
+    def test_delete_session_writes_session_end_health_snapshot(self):
+        nova_core.ollama_chat = lambda _text, retrieved_context="": "Simple answer"
+        nova_http.process_chat("ledger_delete", "random question for ledger")
+
+        ok, msg = nova_http._delete_session("ledger_delete")
+
+        self.assertTrue(ok)
+        self.assertEqual(msg, "session_deleted")
+        rows = [json.loads(line) for line in nova_core.HEALTH_LOG.read_text(encoding="utf-8").splitlines() if line.strip()]
+        self.assertEqual(rows[-1].get("session_id"), "ledger_delete")
+        self.assertTrue(bool(rows[-1].get("session_end")))
+
+    def test_http_action_ledger_records_planner_owned_command_route(self):
+        nova_core._render_chat_context = lambda turns: "User: hello there"
+        nova_http.process_chat("ledger_cmd", "hello there")
+        out = nova_http.process_chat("ledger_cmd", "chat context")
+        self.assertIn("Current chat context", out)
+
+        payload = self._latest_action_payload()
+        self.assertEqual(payload.get("user_input"), "chat context")
+        self.assertEqual(payload.get("planner_decision"), "command")
+        self.assertIn("action_planner:route_command", payload.get("route_summary", ""))
+        self.assertIn("command:matched", payload.get("route_summary", ""))
+
+    def test_http_action_ledger_records_planner_owned_keyword_route(self):
+        orig_handle_keywords = nova_core.handle_keywords
+        try:
+            nova_core.handle_keywords = lambda _text: ("tool", "web_research", "continued web research")
+            out = nova_http.process_chat("ledger_kw", "web continue")
+            self.assertIn("continued web research", out)
+        finally:
+            nova_core.handle_keywords = orig_handle_keywords
+
+        payload = self._latest_action_payload()
+        self.assertEqual(payload.get("user_input"), "web continue")
+        self.assertEqual(payload.get("planner_decision"), "run_tool")
+        self.assertEqual(payload.get("tool"), "web_research")
+        self.assertIn("action_planner:route_keyword", payload.get("route_summary", ""))
+        self.assertIn("keyword_tool:matched", payload.get("route_summary", ""))
+
+    def test_http_action_ledger_records_planner_owned_respond_route(self):
+        out = nova_http.process_chat("ledger_rsp", "can you debug this bug in my code")
+        self.assertIn("file path", out.lower())
+
+        payload = self._latest_action_payload()
+        self.assertEqual(payload.get("user_input"), "can you debug this bug in my code")
+        self.assertEqual(payload.get("planner_decision"), "respond")
+        self.assertIn("action_planner:respond", payload.get("route_summary", ""))
+
+    def test_http_capability_self_correction(self):
+        nova_core.remember_name_origin = lambda _text: "Stored"
+        nova_core.get_name_origin_story = lambda: ""
+        nova_core.ollama_chat = lambda _text, retrieved_context="": "I can autonomously enhance myself and self-sustain."
+
+        out = nova_http.process_chat("ledger2", "what are your abilities?")
+        self.assertIn("Current capabilities:", out)
+        self.assertIn("web_access", out)
+
+    def test_http_what_do_you_do_routes_to_capabilities_not_local_knowledge(self):
+        nova_core.remember_name_origin = lambda _text: "Stored"
+        nova_core.get_name_origin_story = lambda: ""
+
+        out = nova_http.process_chat("ledger2b", "what do you do nova ?")
+        self.assertIn("Current capabilities:", out)
+        self.assertIn("web_access", out)
+        self.assertNotIn("local knowledge files", out.lower())
+
+    def test_http_developer_location_pronoun_followup_avoids_grounded_lookup(self):
+        nova_core.remember_name_origin = lambda _text: "Stored"
+        nova_core.get_name_origin_story = lambda: ""
+
+        nova_http.process_chat("ledger2c", "what do you know about gus?")
+        out = nova_http.process_chat("ledger2c", "do you know his current location?")
+
+        self.assertIn("uncertain about gus's current location", out.lower())
+        self.assertNotIn("local knowledge files", out.lower())
+
+    def test_http_self_location_query_stays_deterministic_after_peims_turn(self):
+        nova_core.set_location_text("Brownsville, Texas")
+
+        nova_http.process_chat("location_http_1", "what do you know about PEIMS?")
+        out = nova_http.process_chat("location_http_1", "What is your current physical location nova?")
+
+        self.assertIn("my location is brownsville, texas", out.lower())
+        self.assertNotIn("local knowledge files", out.lower())
+
+    def test_http_learns_developer_location_relation_and_reuses_saved_location(self):
+        nova_core.set_location_text("Brownsville, Texas")
+
+        ack = nova_http.process_chat("location_http_2", "well gus' locatio is the same as yours..")
+        out = nova_http.process_chat("location_http_2", "what is his location ?")
+
+        self.assertIn("i learned", ack.lower())
+        self.assertIn("brownsville, texas", out.lower())
+
+    def test_http_reflective_followup_uses_learned_developer_location_relation(self):
+        nova_core.set_location_text("Brownsville, Texas")
+
+        nova_http.process_chat("location_http_3", "who is your creator?")
+        nova_http.process_chat("location_http_3", "gus' locatio is the same as yours")
+        out = nova_http.process_chat("location_http_3", "if you think for a bit.. you now know gus' locaiton do you not?")
+
+        self.assertIn("brownsville, texas", out.lower())
+
+    def test_http_policy_domain_query_uses_truth_hierarchy(self):
+        orig_policy_web = nova_core.policy_web
+        try:
+            nova_core.policy_web = lambda: {"enabled": True, "allow_domains": ["tea.texas.gov"]}
+            out = nova_http.process_chat("ledger3", "what domain access do you have?")
+            self.assertIn("Policy web access enabled", out)
+            self.assertIn("tea.texas.gov", out)
+        finally:
+            nova_core.policy_web = orig_policy_web
 
 
 if __name__ == "__main__":
