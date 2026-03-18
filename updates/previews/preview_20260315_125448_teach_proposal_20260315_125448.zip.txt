@@ -1,0 +1,14 @@
+Patch Preview
+-------------
+Zip: teach_proposal_20260315_125448.zip
+Patch revision: 0
+Min base revision: 0
+Current revision: 0
+Status: rejected: non-forward revision
+
+Added files:
+- examples.jsonl
+- nova_patch.json
+
+Diff summary:
+- No text diffs available or all changes are binary/non-text

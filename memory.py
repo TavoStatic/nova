@@ -1,6 +1,7 @@
 import argparse
 import json
 import math
+import os
 import re
 import sqlite3
 import time
@@ -21,6 +22,50 @@ STOPWORDS = {
     "how", "have", "your", "you", "are", "was", "were", "will", "would", "could",
     "about", "into", "over", "under", "then", "than", "just", "also", "very",
 }
+
+PINNED_KIND_BOOST = 0.08
+PINNED_SOURCE_BOOST = 0.04
+
+
+def normalize_scope(scope: str) -> str:
+    raw = str(scope or "private").strip().lower()
+    if raw not in {"private", "shared", "hybrid"}:
+        return "private"
+    return raw
+
+
+def default_user_id() -> str:
+    raw = (
+        os.environ.get("NOVA_USER_ID")
+        or os.environ.get("NOVA_CHAT_USER")
+        or os.environ.get("USERNAME")
+        or ""
+    )
+    return re.sub(r"[^A-Za-z0-9._-]", "", str(raw).strip())[:64]
+
+
+def select_memory_rows(con, user: Optional[str], scope: str):
+    scope = normalize_scope(scope)
+    who = (user or "").strip()
+    if scope == "shared":
+        return con.execute(
+            "SELECT ts, kind, source, user, text, vec FROM memories WHERE COALESCE(user, '') = '' ORDER BY ts DESC"
+        ).fetchall()
+    if scope == "hybrid":
+        if who:
+            return con.execute(
+                "SELECT ts, kind, source, user, text, vec FROM memories WHERE user = ? OR COALESCE(user, '') = '' ORDER BY ts DESC",
+                (who,),
+            ).fetchall()
+        return con.execute(
+            "SELECT ts, kind, source, user, text, vec FROM memories WHERE COALESCE(user, '') = '' ORDER BY ts DESC"
+        ).fetchall()
+    if not who:
+        return []
+    return con.execute(
+        "SELECT ts, kind, source, user, text, vec FROM memories WHERE user = ? ORDER BY ts DESC",
+        (who,),
+    ).fetchall()
 
 def load_policy():
     return json.loads(POLICY_PATH.read_text(encoding="utf-8"))
@@ -118,12 +163,29 @@ def query_tokens(text: str) -> List[str]:
             out.append(t)
     return out
 
-def add_memory(kind: str, source: str, text: str, user: str = ""):
+
+def memory_score_boost(kind: str, source: str) -> float:
+    k = (kind or "").strip().lower()
+    s = (source or "").strip().lower()
+    boost = 0.0
+    if k == "fact":
+        boost += PINNED_KIND_BOOST
+    if s == "pinned":
+        boost += PINNED_SOURCE_BOOST
+    return boost
+
+def add_memory(kind: str, source: str, text: str, user: str = "", scope: str = "private"):
+    scope = normalize_scope(scope)
+    write_user = (user or "").strip()
+    if scope == "shared":
+        write_user = ""
+    elif scope == "private" and not write_user:
+        raise RuntimeError("private_memory_requires_user")
     con = connect()
     v = embed(text)
     con.execute(
         "INSERT INTO memories(ts, kind, source, user, text, vec) VALUES (?, ?, ?, ?, ?, ?)",
-        (int(time.time()), kind, source, user or "", text, vec_to_blob(v)),
+        (int(time.time()), kind, source, write_user, text, vec_to_blob(v)),
     )
     con.commit()
     con.close()
@@ -131,6 +193,7 @@ def add_memory(kind: str, source: str, text: str, user: str = ""):
 def recall(query: str, top_k: int = 5, min_score: float = 0.25,
            exclude_sources: Optional[Iterable[str]] = None,
            user: Optional[str] = None,
+           scope: str = "private",
            debug: bool = False) -> List[Tuple[float, int, str, str, str, str]]:
     ex = set(s.lower() for s in (exclude_sources or []))
 
@@ -149,10 +212,7 @@ def recall(query: str, top_k: int = 5, min_score: float = 0.25,
         return []
 
     # Pull newest first so ties prefer recent notes
-    if user:
-        rows = con.execute("SELECT ts, kind, source, user, text, vec FROM memories WHERE user = ? ORDER BY ts DESC", (user,)).fetchall()
-    else:
-        rows = con.execute("SELECT ts, kind, source, user, text, vec FROM memories ORDER BY ts DESC").fetchall()
+    rows = select_memory_rows(con, user, scope)
     scored = []
     lexical_candidates = []
     q_words = query_tokens(query)
@@ -167,12 +227,13 @@ def recall(query: str, top_k: int = 5, min_score: float = 0.25,
             continue
 
         s = cosine(qv, v)
+        eff = s + memory_score_boost(kind, source)
 
         if debug and len(scored) < 3:
-            print(f"[DEBUG] sample_hit ts={ts} source={source} emb_len={len(v)} emb_norm={vn:.6f} score={s:.6f}")
+            print(f"[DEBUG] sample_hit ts={ts} source={source} emb_len={len(v)} emb_norm={vn:.6f} score={s:.6f} effective={eff:.6f}")
 
-        if s >= min_score:
-            scored.append((s, ts, kind, source, user_row, text))
+        if eff >= min_score:
+            scored.append((eff, ts, kind, source, user_row, text))
 
         # Keep a lightweight lexical candidate list for fallback when embedding recall misses.
         if q_words:
@@ -216,7 +277,8 @@ def recall(query: str, top_k: int = 5, min_score: float = 0.25,
 
 def recall_explain(query: str, top_k: int = 5, min_score: float = 0.25,
                    exclude_sources: Optional[Iterable[str]] = None,
-                   user: Optional[str] = None) -> dict:
+                   user: Optional[str] = None,
+                   scope: str = "private") -> dict:
     ex = set(s.lower() for s in (exclude_sources or []))
 
     con = connect()
@@ -224,10 +286,7 @@ def recall_explain(query: str, top_k: int = 5, min_score: float = 0.25,
     qn = vec_norm(qv)
     q_words = query_tokens(query)
 
-    if user:
-        rows = con.execute("SELECT ts, kind, source, user, text, vec FROM memories WHERE user = ? ORDER BY ts DESC", (user,)).fetchall()
-    else:
-        rows = con.execute("SELECT ts, kind, source, user, text, vec FROM memories ORDER BY ts DESC").fetchall()
+    rows = select_memory_rows(con, user, scope)
     con.close()
 
     semantic_hits = []
@@ -241,8 +300,9 @@ def recall_explain(query: str, top_k: int = 5, min_score: float = 0.25,
         vn = vec_norm(v)
         if qn > 0.0 and len(qv) > 0 and vn > 0.0 and len(v) > 0:
             s = cosine(qv, v)
-            if s >= min_score:
-                semantic_hits.append((s, ts, kind, source, user_row, text))
+            eff = s + memory_score_boost(kind, source)
+            if eff >= min_score:
+                semantic_hits.append((eff, ts, kind, source, user_row, text))
 
         if q_words:
             low_text = text.lower()
@@ -293,6 +353,7 @@ def recall_explain(query: str, top_k: int = 5, min_score: float = 0.25,
 
     return {
         "query": query,
+        "scope": normalize_scope(scope),
         "mode": mode,
         "top_k": int(top_k),
         "min_score": float(min_score),
@@ -305,32 +366,31 @@ def reset():
         DB_PATH.unlink()
 
 
-def stats() -> dict:
+def stats(scope: str = "hybrid", user: Optional[str] = None) -> dict:
     con = connect()
-    total = con.execute("SELECT COUNT(*) FROM memories").fetchone()[0]
+    rows = select_memory_rows(con, user, scope)
+    total = len(rows)
 
-    by_kind = {
-        str(k): int(c)
-        for k, c in con.execute(
-            "SELECT kind, COUNT(*) FROM memories GROUP BY kind ORDER BY COUNT(*) DESC"
-        ).fetchall()
-    }
-
-    by_source = {
-        str(s): int(c)
-        for s, c in con.execute(
-            "SELECT source, COUNT(*) FROM memories GROUP BY source ORDER BY COUNT(*) DESC"
-        ).fetchall()
-    }
-
-    oldest = con.execute("SELECT MIN(ts) FROM memories").fetchone()[0]
-    newest = con.execute("SELECT MAX(ts) FROM memories").fetchone()[0]
+    by_kind = {}
+    by_source = {}
+    by_user = {}
+    oldest = None
+    newest = None
+    for ts, kind, source, user_row, _text, _vec in rows:
+        by_kind[str(kind)] = int(by_kind.get(str(kind), 0)) + 1
+        by_source[str(source)] = int(by_source.get(str(source), 0)) + 1
+        key = str(user_row or "shared") or "shared"
+        by_user[key] = int(by_user.get(key, 0)) + 1
+        oldest = int(ts) if oldest is None else min(oldest, int(ts))
+        newest = int(ts) if newest is None else max(newest, int(ts))
     con.close()
 
     return {
         "total": int(total or 0),
+        "scope": normalize_scope(scope),
         "by_kind": by_kind,
         "by_source": by_source,
+        "by_user": by_user,
         "oldest_ts": int(oldest) if oldest else None,
         "newest_ts": int(newest) if newest else None,
     }
@@ -342,7 +402,8 @@ def main():
     a = sub.add_parser("add")
     a.add_argument("--kind", required=True)
     a.add_argument("--source", required=True)
-    a.add_argument("--user", required=False, default="", help="Optional user id to scope the memory")
+    a.add_argument("--user", required=False, default=default_user_id(), help="Optional user id to scope the memory")
+    a.add_argument("--scope", required=False, default="private", choices=["private", "shared", "hybrid"])
     a.add_argument("--text", required=True)
 
     r = sub.add_parser("recall")
@@ -352,27 +413,31 @@ def main():
     r.add_argument("--exclude-source", action="append", default=[],
                    help="Exclude a source (repeatable), e.g. --exclude-source voice")
     r.add_argument("--debug", action="store_true", help="Print embedding diagnostics")
-    r.add_argument("--user", required=False, default="", help="Optional user id to scope recall")
+    r.add_argument("--user", required=False, default=default_user_id(), help="Optional user id to scope recall")
+    r.add_argument("--scope", required=False, default="private", choices=["private", "shared", "hybrid"])
 
     sub.add_parser("reset")
-    sub.add_parser("stats")
+    s = sub.add_parser("stats")
+    s.add_argument("--user", required=False, default=default_user_id(), help="Optional user id to scope stats")
+    s.add_argument("--scope", required=False, default="hybrid", choices=["private", "shared", "hybrid"])
 
     a2 = sub.add_parser("audit")
     a2.add_argument("--query", required=True)
     a2.add_argument("--topk", type=int, default=5)
     a2.add_argument("--minscore", type=float, default=0.25)
     a2.add_argument("--exclude-source", action="append", default=[])
-    a2.add_argument("--user", required=False, default="", help="Optional user id to scope audit")
+    a2.add_argument("--user", required=False, default=default_user_id(), help="Optional user id to scope audit")
+    a2.add_argument("--scope", required=False, default="private", choices=["private", "shared", "hybrid"])
 
     args = ap.parse_args()
 
     if args.cmd == "add":
-        add_memory(args.kind, args.source, args.text, user=args.user)
+        add_memory(args.kind, args.source, args.text, user=args.user, scope=args.scope)
         print("OK")
         return
 
     if args.cmd == "recall":
-        hits = recall(args.query, args.topk, args.minscore, args.exclude_source, user=args.user or None, debug=args.debug)
+        hits = recall(args.query, args.topk, args.minscore, args.exclude_source, user=args.user or None, scope=args.scope, debug=args.debug)
         if not hits:
             print("No memories.")
             return
@@ -386,11 +451,11 @@ def main():
         return
 
     if args.cmd == "stats":
-        print(json.dumps(stats(), indent=2))
+        print(json.dumps(stats(scope=args.scope, user=args.user or None), indent=2))
         return
 
     if args.cmd == "audit":
-        out = recall_explain(args.query, args.topk, args.minscore, args.exclude_source, user=args.user or None)
+        out = recall_explain(args.query, args.topk, args.minscore, args.exclude_source, user=args.user or None, scope=args.scope)
         print(json.dumps(out, indent=2))
         return
 

@@ -32,8 +32,9 @@ def main():
     results = []
 
     # 1) Unit tests
-    print("1) Running unit tests: python -m unittest discover -v")
-    rc, out = run_cmd([PY, "-m", "unittest", "discover", "-v"]) 
+    print("1) Running unit tests: python -m unittest discover -v -s tests")
+    # Run discovery explicitly from the `tests` directory to avoid missing tests
+    rc, out = run_cmd([PY, "-m", "unittest", "discover", "-v", "-s", "tests"]) 
     print(out)
     results.append(("unittest", rc))
 

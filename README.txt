@@ -1,15 +1,8 @@
-Nova bundle v5 — Subprocess TTS (reliable)
+Legacy bundle note.
 
-Goal:
-- Fix Windows TTS going silent after the first interaction.
+Canonical operations and architecture docs now live under:
 
-Approach:
-- Speak via a short-lived subprocess (tts_say.py) for each utterance.
-- Avoids pyttsx3/SAPI5 deadlocks in long-running processes.
+- [docs/OPERATIONS.md](c:/Nova/docs/OPERATIONS.md)
+- [docs/ARCHITECTURE.md](c:/Nova/docs/ARCHITECTURE.md)
 
-Install:
-1) Unzip into C:\Nova
-   - overwrite: nova_core.py
-   - add: tts_say.py
-2) Run:
-   nova run
+This file is retained only as a compatibility pointer.

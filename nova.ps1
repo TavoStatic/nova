@@ -1,11 +1,11 @@
 param(
-  # Subcommand: look | lookfull | chat | camera | ls | read | find | run | hub | smoke | health | guard | install | update | diag | logs | mem | config
+  # Subcommand: look | lookfull | chat | camera | ls | read | find | run | webui | webui-start | webui-stop | webui-status | hub | smoke | test | health | guard | install | update | diag | logs | mem | config
   [Parameter(Position=0)]
   [string]$cmd = "help",
 
   # Everything else after the subcommand
   [Parameter(ValueFromRemainingArguments=$true)]
-  [string[]]$remainingArgs
+  [string[]]$remainingTokens
 )
 
 # =========================
@@ -27,7 +27,10 @@ $CAMERA    = Join-Path $ROOT "camera.py"
 $AGENT     = Join-Path $ROOT "agent.py"
 $CORE      = Join-Path $ROOT "nova_core.py"
 $SMOKEPY   = Join-Path $ROOT "smoke_test.py"
+$REGRESSION = Join-Path $ROOT "run_regression.py"
 $RUN_TOOLS = Join-Path $ROOT "run_tools.py"   # optional
+$CHATPY    = Join-Path $ROOT "chat_client.py" # unified text chat client
+$WEBUIPY   = Join-Path $ROOT "nova_http.py"   # network UI/API
 $HEALTHPY  = Join-Path $ROOT "health.py"      # optional
 $MEMORYPY  = Join-Path $ROOT "memory.py"      # optional
 $DOCTORPY  = Join-Path $ROOT "doctor.py"      # preflight validator
@@ -44,9 +47,9 @@ $STOPPY = Join-Path $ROOT "stop_guard.py"
 # ======================
 # Helpers (do not remove)
 # ======================
-function Join-Args([string[]]$args) {
-  if ($null -eq $args) { return "" }
-  return ($args -join " ").Trim()
+function Join-Args([string[]]$tokenList) {
+  if ($null -eq $tokenList) { return "" }
+  return ($tokenList -join " ").Trim()
 }
 
 function Ensure-Python {
@@ -63,7 +66,7 @@ function Ensure-Logs {
   if (-not (Test-Path $LOG_DIR)) { New-Item -ItemType Directory -Force -Path $LOG_DIR | Out-Null }
 }
 
-function Run-Py([string]$script, [string[]]$args=@()) {
+function Run-Py([string]$script, [string[]]$scriptTokens=@()) {
   Ensure-Python
   if (-not (Test-Path $script)) {
     Write-Host ""
@@ -71,13 +74,13 @@ function Run-Py([string]$script, [string[]]$args=@()) {
     Write-Host ""
     exit 1
   }
-  & $venvPython $script @args
+  & $venvPython $script @scriptTokens
   exit $LASTEXITCODE
 }
 
-function Run-Ollama([string[]]$args=@()) {
+function Run-Ollama([string[]]$ollamaTokens=@()) {
   # "ollama" should be on PATH if installed
-  & ollama @args
+  & ollama @ollamaTokens
   exit $LASTEXITCODE
 }
 
@@ -103,13 +106,62 @@ function Run-DoctorPreflight([bool]$useFix=$false) {
   return $true
 }
 
+function Get-NovaHttpProcesses {
+  return @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
+    Where-Object {
+      $_.Name -match '^python(\.exe)?$' -and
+      ($_.CommandLine -match 'nova_http\.py')
+    })
+}
+
+function Get-NovaHttpLogicalProcesses {
+  $all = @(Get-NovaHttpProcesses)
+  if (-not $all -or $all.Count -eq 0) { return @() }
+
+  $parentIds = @{}
+  foreach ($p in $all) {
+    $parentIds[[int]$p.ParentProcessId] = $true
+  }
+
+  $leaf = @($all | Where-Object { -not $parentIds.ContainsKey([int]$_.ProcessId) })
+  if ($leaf.Count -gt 0) { return $leaf }
+  return $all
+}
+
+function Stop-NovaHttpProcesses {
+  $procs = Get-NovaHttpProcesses
+  if (-not $procs -or $procs.Count -eq 0) {
+    Write-Host "[INFO] No nova_http.py processes running."
+    return 0
+  }
+  foreach ($p in $procs) {
+    try {
+      Stop-Process -Id $p.ProcessId -Force -ErrorAction SilentlyContinue
+      Write-Host ("[OK]   Stopped nova_http pid=" + $p.ProcessId)
+    } catch {
+      Write-Host ("[WARN] Failed to stop pid=" + $p.ProcessId)
+    }
+  }
+  return $procs.Count
+}
+
+function Stop-NovaHttpExcept([int]$keepPid) {
+  $procs = Get-NovaHttpProcesses | Where-Object { $_.ProcessId -ne $keepPid }
+  foreach ($p in $procs) {
+    try {
+      Stop-Process -Id $p.ProcessId -Force -ErrorAction SilentlyContinue
+      Write-Host ("[OK]   Stopped extra nova_http pid=" + $p.ProcessId)
+    } catch {}
+  }
+}
+
 function Show-Help {
   Write-Host ""
   Write-Host "Nova commands:"
   Write-Host "  nova help"
   Write-Host "  nova look                      # center-crop screenshot -> vision"
   Write-Host "  nova lookfull                  # full screenshot -> vision"
-  Write-Host "  nova chat                      # ollama run llama3.1:8b"
+  Write-Host "  nova chat                      # unified API chat (/api/chat)"
   Write-Host "  nova camera                    # webcam snapshot -> vision"
   Write-Host "  nova camera ""your prompt""      # webcam with custom prompt"
   Write-Host "  nova hub                       # menu: chat / look / camera"
@@ -122,8 +174,14 @@ function Show-Help {
   Write-Host "Runtime:"
   Write-Host "  nova doctor [--fix]            # startup preflight validator"
   Write-Host "  nova run [--fix]               # Nova core (voice + tools)"
+  Write-Host "  nova webui [--host 0.0.0.0 --port 8080]  # network web interface"
+  Write-Host "  nova webui-start [--host 127.0.0.1 --port 8080] [--fix]  # start webui in background"
+  Write-Host "  nova webui-stop                # stop all nova_http processes"
+  Write-Host "  nova webui-status [--port 8080] # show webui pids + endpoint check"
   Write-Host "  nova smoke [--fix]             # doctor -> guard -> smoke_test -> stop"
+  Write-Host "  nova test                      # compact regression checks"
   Write-Host "  nova runtools                  # (optional) run_tools.py if you use it"
+  Write-Host "  nova tools                     # list registered Nova tools"
   Write-Host ""
   Write-Host "Ops (optional / future):"
   Write-Host "  nova health                    # health.py (if present)"
@@ -183,7 +241,7 @@ switch ($cmd.ToLower()) {
 
   "camera" {
     # Join args into ONE string so quotes/spaces behave
-    $prompt = Join-Args $remainingArgs
+    $prompt = Join-Args $remainingTokens
     if ([string]::IsNullOrWhiteSpace($prompt)) { $prompt = "what do you see" }
     Run-Py $CAMERA @($prompt)
     break
@@ -193,8 +251,11 @@ switch ($cmd.ToLower()) {
   # Chat
   # ----------
   "chat" {
-    # If you later build chat.py, you can swap this to Run-Py
-    Run-Ollama @("run","llama3.1:8b")
+    if (Test-Path $CHATPY) {
+      Run-Py $CHATPY
+    } else {
+      Run-Ollama @("run","llama3.1:8b")
+    }
     break
   }
 
@@ -202,7 +263,7 @@ switch ($cmd.ToLower()) {
   # File tools (agent.py)
   # ----------
   "ls" {
-    $arg = Join-Args $remainingArgs
+    $arg = Join-Args $remainingTokens
     if ([string]::IsNullOrWhiteSpace($arg)) {
       Run-Py $AGENT @("ls")
     } else {
@@ -212,7 +273,7 @@ switch ($cmd.ToLower()) {
   }
 
   "read" {
-    $arg = Join-Args $remainingArgs
+    $arg = Join-Args $remainingTokens
     if ([string]::IsNullOrWhiteSpace($arg)) {
       Write-Host ""
       Write-Host "Usage: nova read <file>"
@@ -225,7 +286,7 @@ switch ($cmd.ToLower()) {
 
   "find" {
     # Keep it flexible: allow user to pass "keyword [folder]" in one line
-    $arg = Join-Args $remainingArgs
+    $arg = Join-Args $remainingTokens
     if ([string]::IsNullOrWhiteSpace($arg)) {
       Write-Host ""
       Write-Host "Usage: nova find ""keyword"" [folder]"
@@ -240,8 +301,8 @@ switch ($cmd.ToLower()) {
   # Runtime (Nova Core)
   # ----------
   "doctor" {
-    if ($remainingArgs -and $remainingArgs.Count -gt 0) {
-      Run-Py $DOCTORPY $remainingArgs
+    if ($remainingTokens -and $remainingTokens.Count -gt 0) {
+      Run-Py $DOCTORPY $remainingTokens
     } else {
       Run-Py $DOCTORPY
     }
@@ -250,15 +311,133 @@ switch ($cmd.ToLower()) {
 
   "run" {
     $useFix = $false
-    if ($remainingArgs -contains "--fix") { $useFix = $true }
+    if ($remainingTokens -contains "--fix") { $useFix = $true }
     if (-not (Run-DoctorPreflight $useFix)) { exit 1 }
     Run-Py $CORE
     break
   }
 
+  "webui" {
+    $useFix = $false
+    if ($remainingTokens -contains "--fix") { $useFix = $true }
+
+    # Fallback for cmd->powershell forwarding quirks with double-dash args.
+    # nova.cmd stores the raw argument tail in NOVA_RAW_ARGS.
+    $rawArgs = [string]($env:NOVA_RAW_ARGS)
+    if (-not $useFix -and $rawArgs -match "(^|\s)--fix(\s|$)") { $useFix = $true }
+
+    $webuiArgs = @()
+    if ($remainingTokens -and $remainingTokens.Count -gt 0) {
+      $webuiArgs = @($remainingTokens)
+    } else {
+      if ($rawArgs) {
+        if ($rawArgs -match "(?i)(^|\s)--host\s+([^\s]+)") {
+          $hostValue = $Matches[2].Trim().Trim('"')
+          if ($hostValue) { $webuiArgs += @("--host", $hostValue) }
+        }
+        if ($rawArgs -match "(?i)(^|\s)--port\s+(\d+)") {
+          $portValue = $Matches[2].Trim()
+          if ($portValue) { $webuiArgs += @("--port", $portValue) }
+        }
+      }
+    }
+
+    if (-not (Run-DoctorPreflight $useFix)) { exit 1 }
+
+    # Pass remaining args through (e.g., --host 0.0.0.0 --port 8080)
+    if ($webuiArgs -and $webuiArgs.Count -gt 0) {
+      Run-Py $WEBUIPY $webuiArgs
+    } else {
+      Run-Py $WEBUIPY
+    }
+    break
+  }
+
+  "webui-start" {
+    $useFix = $false
+    if ($remainingTokens -contains "--fix") { $useFix = $true }
+    if (-not (Run-DoctorPreflight $useFix)) { exit 1 }
+
+    $bindHost = "127.0.0.1"
+    $bindPort = "8080"
+    $portSpecified = $false
+    for ($i = 0; $i -lt $remainingTokens.Count; $i++) {
+      if ($remainingTokens[$i] -ieq "--host" -and $i + 1 -lt $remainingTokens.Count) {
+        $bindHost = $remainingTokens[$i + 1]
+      }
+      if ($remainingTokens[$i] -ieq "--port" -and $i + 1 -lt $remainingTokens.Count) {
+        $bindPort = $remainingTokens[$i + 1]
+        $portSpecified = $true
+      }
+    }
+
+    $occupied = @(Get-NetTCPConnection -LocalPort ([int]$bindPort) -State Listen -ErrorAction SilentlyContinue)
+    if ($occupied.Count -gt 0) {
+      if ($portSpecified) {
+        Write-Host ("[WARN] Requested port " + $bindPort + " already has listeners. Trying anyway.")
+      } else {
+        Write-Host ("[WARN] Port " + $bindPort + " is occupied; switching to 8090.")
+        $bindPort = "8090"
+      }
+    }
+
+    Stop-NovaHttpProcesses | Out-Null
+    try {
+      Remove-Item (Join-Path $ROOT "runtime\guard.stop") -Force -ErrorAction SilentlyContinue
+    } catch {}
+
+    Ensure-Python
+    Ensure-Logs
+    $outLog = Join-Path $LOG_DIR "nova_http.out.log"
+    $errLog = Join-Path $LOG_DIR "nova_http.err.log"
+    $proc = Start-Process -FilePath $venvPython -ArgumentList @($WEBUIPY, "--host", $bindHost, "--port", $bindPort) -PassThru -WindowStyle Hidden -RedirectStandardOutput $outLog -RedirectStandardError $errLog
+    Start-Sleep -Milliseconds 700
+    Stop-NovaHttpExcept $proc.Id
+    if ($proc.HasExited) {
+      Write-Host ("[FAIL] webui process exited early (pid=" + $proc.Id + ").")
+      Write-Host ("[INFO] Check logs: " + $errLog)
+      exit 1
+    }
+    Write-Host ("[OK]   Started webui pid=" + $proc.Id)
+    Write-Host ("[INFO] URL: http://" + $bindHost + ":" + $bindPort + "/control")
+    break
+  }
+
+  "webui-stop" {
+    Stop-NovaHttpProcesses | Out-Null
+    break
+  }
+
+  "webui-status" {
+    $port = "8080"
+    for ($i = 0; $i -lt $remainingTokens.Count; $i++) {
+      if ($remainingTokens[$i] -ieq "--port" -and $i + 1 -lt $remainingTokens.Count) {
+        $port = $remainingTokens[$i + 1]
+      }
+    }
+
+    $procs = Get-NovaHttpLogicalProcesses
+    if ($procs.Count -eq 0) {
+      Write-Host "[INFO] No nova_http.py process running."
+    } else {
+      foreach ($p in $procs) {
+        Write-Host ("[INFO] nova_http pid=" + $p.ProcessId)
+      }
+    }
+
+    $url = "http://127.0.0.1:" + $port + "/api/control/status"
+    try {
+      $r = Invoke-WebRequest -UseBasicParsing $url -TimeoutSec 4
+      Write-Host ("[OK]   " + $url + " => " + $r.StatusCode)
+    } catch {
+      Write-Host ("[WARN] " + $url + " unreachable")
+    }
+    break
+  }
+
   "smoke" {
     $useFix = $false
-    if ($remainingArgs -contains "--fix") { $useFix = $true }
+    if ($remainingTokens -contains "--fix") { $useFix = $true }
     if (-not (Run-DoctorPreflight $useFix)) { exit 1 }
 
     Ensure-Python
@@ -296,9 +475,19 @@ switch ($cmd.ToLower()) {
     exit $smokeCode
   }
 
+  "test" {
+    Run-Py $REGRESSION
+    break
+  }
+
   "runtools" {
     # Optional script you already used earlier
     Run-Py $RUN_TOOLS
+    break
+  }
+
+  "tools" {
+    Run-Py $RUN_TOOLS @("--list-tools")
     break
   }
 
@@ -344,7 +533,7 @@ switch ($cmd.ToLower()) {
   "memory" {
     # If you have a memory.py tool, run it; otherwise keep this as a hook.
     if (Test-Path $MEMORYPY) {
-      $arg = Join-Args $remainingArgs
+      $arg = Join-Args $remainingTokens
       if ([string]::IsNullOrWhiteSpace($arg)) {
         Run-Py $MEMORYPY
       } else {
@@ -387,7 +576,7 @@ switch ($cmd.ToLower()) {
   "guard" {
     if (Test-Path $GUARDPY) {
       $useFix = $false
-      if ($remainingArgs -contains "--fix") { $useFix = $true }
+      if ($remainingTokens -contains "--fix") { $useFix = $true }
       if (-not (Run-DoctorPreflight $useFix)) { exit 1 }
       Run-Py $GUARDPY
     } else {

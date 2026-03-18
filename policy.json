@@ -1,8 +1,31 @@
 {
-  "allowed_root": "C:\\Nova",
   "allow_shell": false,
   "confirm_writes": true,
   "confirm_exec": true,
+  "web": {
+    "search_provider": "searxng",
+    "enabled": true,
+    "search_api_endpoint": "http://127.0.0.1:8081/search",
+    "allow_domains": [
+      "tea.texas.gov",
+      "txschools.gov",
+      "tea4avcastro.tea.texas.gov",
+      "region1.net",
+      "texasstudentdatasystem.org",
+      "tsds.txschools.gov",
+      "weather.com",
+      "api.weather.gov"
+    ],
+    "max_bytes": 20000000,
+    "research_domains_limit": 4,
+    "research_pages_per_domain": 8,
+    "research_scan_pages_per_domain": 12,
+    "research_max_depth": 1,
+    "research_seeds_per_domain": 8,
+    "research_max_results": 8,
+    "research_min_score": 3.0
+  },
+  "allowed_root": "C:\\Nova",
   "tools_enabled": {
     "screen": true,
     "camera": true,
@@ -11,32 +34,36 @@
     "web": true
   },
   "models": {
-    "chat": "qwen2.5:7b-instruct",
+    "chat": "llama3.1:8b",
     "vision": "qwen2.5vl:7b",
     "stt_size": "base"
   },
   "memory": {
     "enabled": true,
     "mode": "B",
+    "scope": "private",
     "top_k": 5,
     "context_top_k": 3,
     "min_score": 0.18,
     "store_min_chars": 12,
-    "exclude_sources": ["voice"]
-  },
-  "web": {
-    "enabled": true,
-    "allow_domains": [
-      "tea.texas.gov",
-      "txschools.gov",
-      "tea4avcastro.tea.texas.gov",
-      "region1.net",
-      "texasstudentdatasystem.org",
-      "tsds.txschools.gov"
+    "store_include_patterns": [
+      "^remember this",
+      "^learned_fact:",
+      "\\b(my name is|my location is|i live in|i work in|my favorite)\\b"
     ],
-    "max_bytes": 20000000
+    "store_exclude_patterns": [
+      "^tip:",
+      "^network error:",
+      "^loading",
+      "^please try:"
+    ],
+    "exclude_sources": [
+      "voice"
+    ]
   },
   "patch": {
-    "strict_manifest": true
+    "strict_manifest": true,
+    "enabled": true,
+    "allow_force": false
   }
 }

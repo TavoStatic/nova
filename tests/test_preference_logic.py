@@ -106,6 +106,35 @@ class TestPreferenceLogic(unittest.TestCase):
         prefs = nova_core._extract_color_preferences_from_memory()
         self.assertEqual(prefs, ["yellow", "black"])
 
+    def test_strip_invocation_prefix_for_direct_requests(self):
+        self.assertEqual(
+            nova_core._strip_invocation_prefix("nova, what colors does Gus like?"),
+            "what colors does Gus like?",
+        )
+        self.assertEqual(
+            nova_core._strip_invocation_prefix("nova say hi to ana"),
+            "say hi to ana",
+        )
+
+    def test_extract_developer_colors_from_session(self):
+        turns = [
+            ("user", "Gus favorite colors are Silver red blue"),
+            ("assistant", "Noted."),
+        ]
+        prefs = nova_core._extract_developer_color_preferences(turns)
+        self.assertEqual(prefs, ["silver", "red", "blue"])
+
+    def test_extract_developer_colors_from_memory_probe(self):
+        nova_core.mem_enabled = lambda: True
+        nova_core.mem_recall = lambda q: "- Gus favorite colors are silver, red, and blue"
+        prefs = nova_core._extract_developer_color_preferences_from_memory()
+        self.assertEqual(prefs, ["silver", "red", "blue"])
+
+    def test_detect_developer_bilingual_from_memory(self):
+        nova_core.mem_enabled = lambda: True
+        nova_core.mem_recall = lambda q: "- Your developer Gustavo (Gus) is bilingual in English and Spanish"
+        self.assertTrue(nova_core._developer_is_bilingual_from_memory())
+
 
 if __name__ == "__main__":
     unittest.main()

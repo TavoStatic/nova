@@ -1,0 +1,9 @@
+{
+  "name": "PEIMS overview parity",
+  "messages": [
+    "what do you know about PEIMS?",
+    "what are the attendance reporting rules for PEIMS?",
+    "can you do a deep search and let me know what else you dig up?",
+    "give me a recap of this session"
+  ]
+}

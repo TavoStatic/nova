@@ -35,3 +35,8 @@ piper/espeak-ng-data/
 
 # Optional local artifacts
 LAST_SESSION.json
+
+# Local repo backups / mirrors
+.git-backup/
+nova-mirror.git/
+nova-mirror-backup.git/
