@@ -1,4 +1,4 @@
-# Project NOVA
+# Project Not Your Ordinary AI System
 
 Minimal notes to run and operate Nova locally.
 
