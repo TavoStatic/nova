@@ -1,4 +1,4 @@
-# 🚀 Nova — Not Your Ordinary AI System (NYO)
+# Not Your Ordinary AI System (NYO)
 
 **Agent Operating System (AAOS)**  
 Deterministic • Traceable • Testable AI Behavior
