@@ -1,46 +1,74 @@
-# Nova — Not Your Ordinary AI System (NYO)
+# 🚀  Not Your Ordinary AI System (NYO)
 
 **Agent Operating System (AAOS)**  
 Deterministic • Traceable • Testable AI Behavior
 
-![Status](https://img.shields.io/badge/status-active-success)
-![Tests](https://img.shields.io/badge/tests-375%2B%20passing-brightgreen)
-![Architecture](https://img.shields.io/badge/architecture-supervisor--first-blue)
-![Platform](https://img.shields.io/badge/platform-AAOS-purple)
-
 ---
 
-## What is Nova?
+## 🧠 What is NYO & Who is Nova?
 
 Nova is not just an AI assistant.
 
-It is an **Agent Operating System (AAOS)** designed to enforce:
+It is a **supervisor-driven Agent Operating System (AAOS)** designed to enforce:
 
-- deterministic behavior
-- structured execution
+- deterministic behavior  
+- structured execution  
 - full traceability
 
-Unlike traditional AI systems that rely on loosely controlled outputs, Nova introduces **governance at the core of the runtime**.
+  NYO is the philosophy.
 
 ---
 
-## Why Nova Exists
+**Nova** is the runtime.
 
-Most AI systems optimize for:
+Nova is the **Agent Operating System (AAOS)** that brings NYO to life by enforcing:
 
-- more tools
-- more autonomy
-- more output
-
-Nova optimizes for:
-
-- **correct behavior**
-- **predictable execution**
-- **observable decisions**
+- deterministic routing (via the supervisor)  
+- contract-based responses (not string-based logic)  
+- full traceability (ledger + reflection)  
+- consistent behavior across CLI and HTTP  
 
 ---
 
-## Architecture
+### 🧩 In simple terms
+
+- **NYO** = the mindset  
+- **Nova** = the system  
+
+---
+
+### ⚙️ What Nova actually does
+
+Nova does not “guess” what to do.
+
+It:
+
+1. routes input through a **supervisor**
+2. determines **who owns the turn**
+3. executes through the **core system**
+4. produces a response using **contracts**
+5. records everything for **traceability**
+
+---
+
+### 🔥 Why this matters
+
+Most AI systems:
+- generate answers
+
+Nova:
+- **executes decisions**
+
+---
+
+### 🧠 One-line definition
+
+> NYO is the philosophy.  
+> Nova is the system that enforces it.
+
+---
+
+## ⚙️ Architecture
 
 ```text
 User Input
@@ -49,16 +77,29 @@ Supervisor (routing authority)
     ↓
 Core (execution + outcome classification)
     ↓
-Contract Renderer (semantic → response)
+Contract Renderer
     ↓
-Ledger + Reflection (traceability)
+Ledger + Reflection
     ↓
-HTTP / CLI (transport layer)
+HTTP / CLI
 ```
 
 ---
 
-## Quick Start
+## 🧱 Core Components
+
+| Component | Description |
+|----------|-------------|
+| `supervisor.py` | Routing authority (who owns the turn) |
+| `nova_core.py` | Execution engine + contract system |
+| `nova_http.py` | Transport layer (mirrors core only) |
+| `nova_guard.py` | Runtime watchdog + heartbeat |
+| `policy.json` | Configuration (tools, memory, models) |
+| `runtime/` | Live system state |
+
+---
+
+## 🚀 Quick Start
 
 ### Install Dependencies
 
@@ -88,32 +129,41 @@ C:\Nova\.venv\Scripts\python.exe C:\Nova\stop_guard.py
 
 ---
 
-## Health Check
+## 🩺 Health & Diagnostics
 
 ```powershell
 C:\Nova\.venv\Scripts\python.exe C:\Nova\health.py
+C:\Nova\.venv\Scripts\python.exe C:\Nova\health.py check
+C:\Nova\.venv\Scripts\python.exe C:\Nova\health.py diag
+C:\Nova\.venv\Scripts\python.exe C:\Nova\health.py repair
 ```
 
 ---
 
-## Memory
+## 🧪 Smoke Test
 
 ```powershell
-C:\Nova\.venv\Scripts\python.exe C:\Nova\memory.py stats
+C:\Nova\nova.ps1 smoke --fix
+```
+
+Runs:
+
+```text
+doctor → guard → smoke_test → stop
 ```
 
 ---
 
-## Runtime Model
+## 🧠 Runtime Model
 
-Nova follows a supervisor-first model:
+Nova follows a **supervisor-first execution model**:
 
-- Supervisor → routing  
-- Core → execution  
-- Contracts → response structure  
-- Ledger → trace  
+- Supervisor → decides ownership  
+- Core → executes behavior  
+- Contracts → define response structure  
+- Ledger → records decisions  
 
-Each response includes:
+Each deterministic response includes:
 
 ```json
 {
@@ -124,15 +174,58 @@ Each response includes:
 
 ---
 
-## Vision
+## 📊 Current Status
+
+- ✔ Supervisor-first routing implemented  
+- ✔ Contract/outcome system active  
+- ✔ Multiple behavior families migrated  
+- ✔ Full test suite passing  
+
+---
+
+## 🧱 Runtime Files
+
+Located in `runtime/`:
+
+- `core_state.json` — system state  
+- `core.heartbeat` — live signal  
+- `guard.stop` — shutdown trigger  
+- `core.fail` — failure indicator  
+
+---
+
+## ⚠️ Development Notes
+
+- `NOVA_DEV_MODE` enables strict enforcement  
+- HTTP must mirror core behavior (no divergence)  
+- Smoke tests validate full system integrity  
+
+---
+
+## 🧠 Vision
 
 Nova is evolving into:
 
 **AAOS — Agent Operating System**
 
+A system where:
+
+- behavior is enforced, not guessed  
+- routing is explicit, not implicit  
+- AI becomes **predictable infrastructure**
+
 ---
 
-## Final Thought
+## ⭐ Support
+
+If you find this project useful:
+
+- Star the repo  
+- Follow its evolution  
+
+---
+
+## 🔥 Final Thought
 
 Nova is not trying to be the smartest AI.  
-It is trying to be the most reliable.
+It is trying to be the most reliable system for AI behavior.
