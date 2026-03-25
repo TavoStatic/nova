@@ -1,5 +1,11 @@
 # Nova Architecture
 
+## System Direction
+
+Nova is becoming the runtime core of NYO System: a single decision spine with distributed execution, operator-visible telemetry, scoped memory, governed mutation paths, and optional domain extension points.
+
+Architecturally, that means Nova should be treated as a supervised local runtime and control surface, not just a conversational shell. The public runtime should remain generic while domain specialization is attached explicitly through policy, tools, and operator-loaded knowledge packs rather than bundled repo-local vertical content.
+
 ## Main Components
 
 - `nova_core.py`
@@ -11,7 +17,7 @@
   - tool orchestration and teach/patch logic
 
 - `nova_http.py`
-  - browser chat UI and control room
+  - browser runtime console and operator console
   - persistent HTTP sessions and owner binding
   - optional control login and optional chat login
   - admin actions for guard, policy, memory scope, and managed chat users
@@ -118,6 +124,17 @@ Patch execution is still separately governed, but it is no longer outside the to
 
 The current architectural direction should be understood as a single decision spine, not a single monolithic processor.
 
+## Supervisor Ownership Constitution
+
+Deterministic behavior ownership is governed by [SUPERVISOR_CONTRACT.md](SUPERVISOR_CONTRACT.md).
+
+The short version is:
+
+- every deterministic behavior starts as a supervisor rule
+- core executes supervisor-selected actions only
+- HTTP mirrors core execution and may not fork deterministic routing
+- bypassing supervisor phases is a bug
+
 The rule is:
 
 - one routing authority owns turn classification and dispatch decisions
@@ -150,6 +167,8 @@ That shape now has an explicit planner boundary:
 - route classification lives in `planner_decision.py`
 - execution choice is mapped back into planner actions before `nova_core.py` and `nova_http.py` dispatch to specialized handlers
 - `action_planner.py` is now a thin adapter over that decision module rather than the primary home for mixed string heuristics
+- followup move classification for supervisor-owned continuation handling now lives in `followup_move_classifier.py` rather than remaining embedded only inside `supervisor.py`
+- active-task context resolution and pending-thread bindings for supervisor-owned continuation handling now live in `active_task_constraints.py` rather than remaining embedded only inside `supervisor.py`
 
 ## Current Refactor Risk
 
@@ -167,6 +186,13 @@ The next cleanup priority is therefore not basic route ownership. It is keeping 
 - one layer owns dispatch choice
 - execution helpers remain specialized and reusable
 - planner heuristics do not collapse back into one large mixed file
+
+For the supervisor-owned continuation path, the current seam shape is now:
+
+- `followup_move_classifier.py` owns move classification and the shared heuristics that support it
+- `active_task_constraints.py` owns active-task context resolution plus shared pending-thread bindings
+- `supervisor.py` owns rule-family arbitration
+- domain families should decide execution only after move classification and active-task constraints have been applied
 
 ## Request Flow Summary
 

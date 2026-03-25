@@ -97,6 +97,19 @@ class TestPolicyCommands(unittest.TestCase):
         self.assertIn("Current web research limits", out)
         self.assertIn("research_max_depth", out)
 
+    def test_load_policy_sets_safety_envelope_defaults(self):
+        loaded = nova_core.load_policy()
+
+        envelope = loaded.get("safety_envelope") or {}
+        self.assertTrue(envelope.get("enabled"))
+        self.assertEqual(envelope.get("mode"), "observe")
+        self.assertEqual(envelope.get("human_veto_first_n"), 3)
+
+        kidney_cfg = loaded.get("kidney") or {}
+        self.assertTrue(kidney_cfg.get("enabled"))
+        self.assertEqual(kidney_cfg.get("mode"), "observe")
+        self.assertEqual(kidney_cfg.get("definition_max_age_days"), 7)
+
 
 if __name__ == "__main__":
     unittest.main()

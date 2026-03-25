@@ -10,6 +10,7 @@ class TestMemoryScope(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.orig_db_path = memory.DB_PATH
         self.orig_embed = memory.embed
+        self.orig_connect = memory.connect
         memory.DB_PATH = Path(self.tmp.name) / "memory_scope.sqlite"
 
         def fake_embed(text: str):
@@ -27,7 +28,39 @@ class TestMemoryScope(unittest.TestCase):
     def tearDown(self):
         memory.DB_PATH = self.orig_db_path
         memory.embed = self.orig_embed
+        memory.connect = self.orig_connect
         self.tmp.cleanup()
+
+    def test_connections_close_when_embed_raises(self):
+        closed = []
+
+        class DummyConnection:
+            def execute(self, *_args, **_kwargs):
+                return self
+
+            def fetchall(self):
+                return []
+
+            def commit(self):
+                return None
+
+            def close(self):
+                closed.append(True)
+
+        memory.connect = lambda: DummyConnection()
+        memory.embed = lambda _text: (_ for _ in ()).throw(RuntimeError("embed_failed"))
+
+        with self.assertRaises(RuntimeError):
+            memory.add_memory("fact", "typed", "otter", user="userA", scope="private")
+        self.assertEqual(len(closed), 1)
+
+        with self.assertRaises(RuntimeError):
+            memory.recall("otter", user="userA", scope="private")
+        self.assertEqual(len(closed), 2)
+
+        with self.assertRaises(RuntimeError):
+            memory.recall_explain("otter", user="userA", scope="private")
+        self.assertEqual(len(closed), 3)
 
     def test_private_scope_requires_user(self):
         with self.assertRaises(RuntimeError):

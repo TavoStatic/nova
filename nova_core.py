@@ -12,6 +12,8 @@
 from __future__ import annotations
 
 import argparse
+import ast
+from dataclasses import dataclass, field
 import io
 import json
 import os
@@ -28,9 +30,10 @@ import html
 import tempfile
 import difflib
 from pathlib import Path
-from typing import Optional, Tuple
+from typing import Any, Optional, Tuple
 from urllib.parse import urlparse, parse_qs, unquote, urljoin, quote
 from conversation_manager import ConversationSession
+from subconscious_config import SUBCONSCIOUS_CHARTER
 from supervisor import Supervisor
 from capabilities import explain_missing, describe_capabilities
 from task_engine import analyze_request
@@ -60,18 +63,40 @@ def get_active_user() -> Optional[str]:
 # -------------------------
 # Voice deps are optional
 # -------------------------
-VOICE_OK = True
+VOICE_OK = False
+VOICE_READY = False
 VOICE_IMPORT_ERR = ""
-try:
-    import sounddevice as sd
-    import scipy.io.wavfile as wav
-    from faster_whisper import WhisperModel
-except Exception as e:
-    VOICE_OK = False
-    VOICE_IMPORT_ERR = str(e)
-    sd = None
-    wav = None
-    WhisperModel = None
+sd = None
+wav = None
+WhisperModel = None
+
+
+def _ensure_voice_deps() -> bool:
+    """Import voice dependencies only when voice features are actually used."""
+    global VOICE_OK, VOICE_READY, VOICE_IMPORT_ERR, sd, wav, WhisperModel
+
+    if VOICE_READY:
+        return VOICE_OK
+
+    VOICE_READY = True
+    try:
+        import sounddevice as _sd
+        import scipy.io.wavfile as _wav
+        from faster_whisper import WhisperModel as _WhisperModel
+
+        sd = _sd
+        wav = _wav
+        WhisperModel = _WhisperModel
+        VOICE_OK = True
+        VOICE_IMPORT_ERR = ""
+    except Exception as e:
+        VOICE_OK = False
+        VOICE_IMPORT_ERR = str(e)
+        sd = None
+        wav = None
+        WhisperModel = None
+
+    return VOICE_OK
 
 
 
@@ -113,7 +138,6 @@ OLLAMA_REQ_TIMEOUT = 1800
 
 # Knowledge packs (B-mode)
 KNOWLEDGE_ROOT = BASE_DIR / "knowledge"
-PEIMS_KNOWLEDGE_DIR = KNOWLEDGE_ROOT / "peims"
 PACKS_DIR = KNOWLEDGE_ROOT / "packs"
 ACTIVE_PACK_FILE = KNOWLEDGE_ROOT / "active_pack.txt"
 KB_MAX_FILES = 3
@@ -172,6 +196,87 @@ BEHAVIOR_METRICS: dict = {
 TURN_SUPERVISOR = Supervisor()
 
 
+def _identity_memory_text_allowed(kind: str, text: str) -> bool:
+    if str(kind or "").strip().lower() != "identity":
+        return True
+    low = re.sub(r"\s+", " ", str(text or "").strip().lower())
+    if not low:
+        return False
+    if "nova_name_origin:" in low:
+        return True
+    return low.startswith((
+        "learned_fact: assistant_name=",
+        "learned_fact: developer_name=",
+        "learned_fact: developer_nickname=",
+        "learned_fact: identity_binding=developer",
+    ))
+
+
+def _session_identity_only_mode(session_id: str) -> bool:
+    normalized = re.sub(r"\s+", " ", str(session_id or "").strip().lower())
+    if not normalized:
+        return False
+    return "clean_slate" in normalized or "clean slate" in normalized
+
+
+def _looks_like_identity_only_location_text(user_text: str) -> bool:
+    raw = str(user_text or "").strip()
+    if not raw:
+        return False
+    explicit_patterns = (
+        r"^\s*the\s+(\d{5})\s+is\s+the\s+zip\s+code\s+for\s+your\s+current\s+physical\s+location\s*[.!?]*$",
+        r"^\s*my\s+zip\s+is\s+(.+?)\s*[.!?]*$",
+        r"^\s*set\s+location\s+to\s+(.+?)\s*[.!?]*$",
+        r"^\s*(?:my|your|the)(?:\s+(?:current|physical))?\s+location\s+is\s+(.+?)\s*[.!?]*$",
+        r"^\s*i\s*(?:am|m)\s+in\s+(.+?)\s*[.!?]*$",
+        r"^\s*i\s+am\s+located\s+in\s+(.+?)\s*[.!?]*$",
+        r"^\s*you\s+are\s+located\s+in\s+(.+?)\s*[.!?]*$",
+        r"^\s*(?:living|based)\s+in\s+(.+?)\s*[.!?]*$",
+    )
+    return any(re.match(pattern, raw, flags=re.I) for pattern in explicit_patterns)
+
+
+def _identity_only_block_kind(user_text: str, *, intent_result: Optional[dict] = None) -> str:
+    text = str(user_text or "").strip()
+    low = _normalize_turn_text(text).strip().lower()
+    intent = str((intent_result or {}).get("intent") or "").strip().lower()
+    if not low and not intent:
+        return ""
+
+    if intent in {"set_location", "weather_lookup", "store_fact", "web_research_family"}:
+        return {
+            "set_location": "location",
+            "weather_lookup": "weather",
+            "store_fact": "memory",
+            "web_research_family": "web",
+        }.get(intent, "") or ""
+
+    if _looks_like_identity_only_location_text(text) or _is_location_recall_query(text) or _is_location_name_query(text):
+        return "location"
+    if "weather" in low or _is_saved_location_weather_query(text):
+        return "weather"
+    if _is_peims_broad_query(text) or "peims" in low or "tsds" in low:
+        return "knowledge"
+    if _is_declarative_info(text):
+        return "memory"
+    return ""
+
+
+def _identity_only_block_reply(block_kind: str) -> str:
+    domain = str(block_kind or "").strip().lower()
+    if domain == "location":
+        return "This clean session is identity-only, so I won't store or use location here."
+    if domain == "weather":
+        return "This clean session is identity-only, so I won't run weather lookups here."
+    if domain == "web":
+        return "This clean session is identity-only, so I won't run web research here."
+    if domain == "knowledge":
+        return "This clean session is identity-only, so I won't use local knowledge grounding here."
+    if domain == "memory":
+        return "This clean session is identity-only, so I won't store general memory here."
+    return "This clean session is identity-only, so I won't run non-identity routing here."
+
+
 def _save_behavior_metrics() -> None:
     try:
         RUNTIME_DIR.mkdir(parents=True, exist_ok=True)
@@ -180,6 +285,643 @@ def _save_behavior_metrics() -> None:
         tmp.replace(BEHAVIOR_METRICS_FILE)
     except Exception:
         pass
+
+
+def _get_session_fulfillment_state(session: object) -> Optional[dict]:
+    state = getattr(session, "fulfillment_state", None)
+    return state if isinstance(state, dict) else None
+
+
+def _set_session_fulfillment_state(session: object, state: Optional[dict]) -> None:
+    try:
+        setattr(session, "fulfillment_state", state if isinstance(state, dict) else None)
+    except Exception:
+        pass
+
+
+@dataclass(slots=True)
+class SubconsciousState:
+    replan_requested: bool = False
+    crack_counts: dict[str, int] = field(default_factory=dict)
+    recent_pressure_records: list[object] = field(default_factory=list)
+
+
+_SUBCONSCIOUS_IMMEDIATE_REPLAN_SIGNALS = set(SUBCONSCIOUS_CHARTER["signal_handling_rules"]["replan_immediate_signals"])
+_SUBCONSCIOUS_WEAK_CRACK_SIGNALS = set(SUBCONSCIOUS_CHARTER["signal_handling_rules"]["weak_crack_signals"])
+_MAX_RECENT_PRESSURE_RECORDS = int(SUBCONSCIOUS_CHARTER["crack_accumulation_rules"]["recent_pressure_window_cap"])
+
+
+def _get_subconscious_snapshot(session: object) -> dict:
+    state = getattr(session, "subconscious_state", None)
+    if not isinstance(state, SubconsciousState):
+        return {
+            "replan_requested": False,
+            "active_recent_signals": [],
+            "crack_counts": {},
+            "recent_pressure_records": [],
+            "record_window": {"count": 0, "cap": _MAX_RECENT_PRESSURE_RECORDS},
+        }
+
+    recent_records = list(state.recent_pressure_records or [])
+    recent_summaries = []
+    active_recent_signals: list[str] = []
+    for record in recent_records[-3:]:
+        signals = [str(signal).strip() for signal in list(getattr(record, "signals", []) or []) if str(signal).strip()]
+        for signal in signals:
+            if signal not in active_recent_signals:
+                active_recent_signals.append(signal)
+        recent_summaries.append(
+            {
+                "chosen_route": str(getattr(record, "chosen_route", "") or "") or None,
+                "comparison_strength": str(getattr(record, "comparison_strength", "") or "").strip().lower() or "weak",
+                "signals": list(signals),
+                "weak_spots": [
+                    str(item).strip()
+                    for item in list(getattr(record, "weak_spots", []) or [])
+                    if str(item).strip()
+                ],
+            }
+        )
+
+    return {
+        "replan_requested": bool(state.replan_requested),
+        "active_recent_signals": active_recent_signals,
+        "crack_counts": {str(key): int(value) for key, value in dict(state.crack_counts or {}).items()},
+        "recent_pressure_records": recent_summaries,
+        "record_window": {
+            "count": len(recent_records),
+            "cap": _MAX_RECENT_PRESSURE_RECORDS,
+        },
+    }
+
+
+def _get_subconscious_training_backlog_summary(session: object) -> Optional[dict]:
+    snapshot = _get_subconscious_snapshot(session)
+    try:
+        from subconscious_training_backlog import build_training_backlog
+    except Exception:
+        return None
+
+    backlog = build_training_backlog(snapshot)
+    candidate_tests = list(getattr(backlog, "candidate_tests", []) or [])
+    if not candidate_tests:
+        return None
+
+    return {
+        "replan_requested": bool(getattr(backlog, "replan_requested", False)),
+        "candidate_tests": [
+            {
+                "signal": str(getattr(item, "signal", "") or "").strip(),
+                "occurrences": max(0, int(getattr(item, "occurrences", 0) or 0)),
+                "priority": str(getattr(item, "priority", "") or "").strip().lower() or "low",
+                "suggested_test_name": str(getattr(item, "suggested_test_name", "") or "").strip(),
+                "rationale": str(getattr(item, "rationale", "") or "").strip(),
+            }
+            for item in candidate_tests
+            if str(getattr(item, "signal", "") or "").strip()
+        ],
+    }
+
+
+def _get_subconscious_robust_weakness_summary(session: object) -> Optional[dict]:
+    family_summary = getattr(session, "subconscious_live_family_summary", None)
+    if family_summary is None:
+        return None
+
+    def _extract_items(name: str) -> list[dict]:
+        values = getattr(family_summary, name, None)
+        if values is None and isinstance(family_summary, dict):
+            values = family_summary.get(name)
+        items = []
+        for item in list(values or []):
+            payload = dict(item) if isinstance(item, dict) else None
+            if payload is None:
+                continue
+            cleaned = {
+                "signal": str(payload.get("signal") or "").strip(),
+                "classification": str(payload.get("classification") or "").strip(),
+                "robustness_score": round(float(payload.get("robustness_score", 0.0) or 0.0), 4),
+            }
+            if str(payload.get("suggested_test_name") or "").strip():
+                cleaned["suggested_test_name"] = str(payload.get("suggested_test_name") or "").strip()
+            if cleaned["signal"]:
+                items.append(cleaned)
+        return items
+
+    quiet_control_verdict = getattr(family_summary, "quiet_control_verdict", None)
+    if quiet_control_verdict is None and isinstance(family_summary, dict):
+        quiet_control_verdict = family_summary.get("quiet_control_verdict")
+    quiet_control_payload = dict(quiet_control_verdict) if isinstance(quiet_control_verdict, dict) else {}
+
+    robust_signals = _extract_items("robust_signals")
+    script_specific_signals = _extract_items("script_specific_signals")
+    robust_backlog_candidates = _extract_items("robust_backlog_candidates")
+
+    if not robust_signals and not script_specific_signals and not robust_backlog_candidates and not quiet_control_payload:
+        return None
+
+    summary = {
+        "robust_signals": robust_signals,
+        "script_specific_signals": script_specific_signals,
+        "robust_backlog_candidates": robust_backlog_candidates,
+        "quiet_control_verdict": {
+            "quiet_control": bool(quiet_control_payload.get("quiet_control", False)),
+            "status": str(quiet_control_payload.get("status") or "").strip(),
+        },
+    }
+    if str(quiet_control_payload.get("reason") or "").strip():
+        summary["quiet_control_verdict"]["reason"] = str(quiet_control_payload.get("reason") or "").strip()
+    return summary
+
+
+def _update_subconscious_state(
+    session: object,
+    probe_result: dict,
+    *,
+    chosen_route: Optional[str] = None,
+) -> Optional[SubconsciousState]:
+    if not isinstance(probe_result, dict):
+        return None
+
+    try:
+        from subconscious_route_probe import analyze_route_pressure
+    except Exception:
+        return None
+
+    existing_state = getattr(session, "subconscious_state", None)
+    state = existing_state if isinstance(existing_state, SubconsciousState) else SubconsciousState()
+    record = analyze_route_pressure(probe_result, chosen_route=chosen_route)
+
+    for signal in list(record.signals or []):
+        cleaned = str(signal or "").strip()
+        if cleaned:
+            state.crack_counts[cleaned] = int(state.crack_counts.get(cleaned, 0)) + 1
+
+    state.recent_pressure_records.append(record)
+    if len(state.recent_pressure_records) > _MAX_RECENT_PRESSURE_RECORDS:
+        state.recent_pressure_records = state.recent_pressure_records[-_MAX_RECENT_PRESSURE_RECORDS:]
+
+    repeated_weak_crack = any(
+        state.crack_counts.get(signal, 0) >= 2
+        for signal in list(record.signals or [])
+        if signal in _SUBCONSCIOUS_WEAK_CRACK_SIGNALS
+    )
+    state.replan_requested = any(
+        signal in _SUBCONSCIOUS_IMMEDIATE_REPLAN_SIGNALS for signal in list(record.signals or [])
+    ) or repeated_weak_crack
+
+    try:
+        setattr(session, "subconscious_state", state)
+    except Exception:
+        return state
+    return state
+
+
+def _fulfillment_route_viability(
+    user_text: str,
+    session: object,
+    recent_turns: list[tuple[str, str]],
+    *,
+    pending_action: Optional[dict] = None,
+) -> dict:
+    state = _get_session_fulfillment_state(session)
+    text = str(user_text or "").strip()
+    low = text.lower()
+    conversation_state = getattr(session, "conversation_state", None)
+    state_kind = str(conversation_state.get("kind") or "").strip().lower() if isinstance(conversation_state, dict) else ""
+
+    if state is not None:
+        return {
+            "viable": True,
+            "fit_notes": ["existing fulfillment state present", "follow-up can replan current fulfillment space"],
+            "comparison_strength": "clear",
+        }
+    if isinstance(pending_action, dict):
+        return {
+            "viable": False,
+            "fit_notes": ["pending action is active", "fulfillment should not interrupt explicit continuation"],
+            "comparison_strength": "clear",
+        }
+    if state_kind and state_kind != "fulfillment":
+        return {
+            "viable": False,
+            "fit_notes": [f"active conversation state is {state_kind}", "fulfillment should not take over another active thread"],
+            "comparison_strength": "clear",
+        }
+    if len(text.split()) < 4:
+        return {
+            "viable": False,
+            "fit_notes": ["turn is too short", "not enough information to open a fulfillment space"],
+            "comparison_strength": "weak",
+        }
+    if low in {"yes", "no", "ok", "okay", "continue", "go ahead"} or _looks_like_affirmative_followup(text):
+        return {
+            "viable": False,
+            "fit_notes": ["turn looks like a short continuation", "fulfillment should not guess from a minimal follow-up"],
+            "comparison_strength": "weak",
+        }
+
+    model_space_cues = (
+        " options",
+        " option ",
+        " ways",
+        " way to",
+        " approaches",
+        " approach ",
+        " compare ",
+        " tradeoff",
+        " trade-off",
+        " path ",
+        " paths",
+        " best way",
+        " how should i",
+        " what are my options",
+        " help me decide",
+        " help me figure out",
+        " help me choose",
+        " show me workable",
+        " show me options",
+    )
+    starts_like_model_space = low.startswith((
+        "compare ",
+        "show me ",
+        "help me decide",
+        "help me choose",
+        "how should i ",
+        "what are my options",
+    ))
+    cue_match = any(cue in f" {low} " for cue in model_space_cues)
+    if starts_like_model_space or cue_match:
+        notes = ["turn suggests multiple possible ways forward", "fulfillment comparison may be useful"]
+        if recent_turns:
+            notes.append("recent turns are available for intent context")
+        return {
+            "viable": True,
+            "fit_notes": notes,
+            "comparison_strength": "clear",
+        }
+    return {
+        "viable": False,
+        "fit_notes": ["no model-space cues detected", "generic fallback is a safer default"],
+        "comparison_strength": "weak",
+    }
+
+
+def _deterministic_route_viability(
+    user_text: str,
+    session: object,
+    recent_turns: list[tuple[str, str]],
+    *,
+    pending_action: Optional[dict] = None,
+) -> dict:
+    intent_result = TURN_SUPERVISOR.evaluate_rules(
+        user_text,
+        manager=session,
+        turns=recent_turns,
+        phase="intent",
+        entry_point="probe",
+    )
+    handle_result = TURN_SUPERVISOR.evaluate_rules(
+        user_text,
+        manager=session,
+        turns=recent_turns,
+        phase="handle",
+        entry_point="probe",
+    )
+
+    owned_result = intent_result if _supervisor_result_has_route(intent_result) else handle_result
+    if _supervisor_result_has_route(owned_result):
+        notes = [
+            note for note in [
+                f"explicit supervisor rule: {str(owned_result.get('rule_name') or '').strip()}",
+                f"intent: {str(owned_result.get('intent') or '').strip()}" if str(owned_result.get("intent") or "").strip() else "",
+                f"action: {str(owned_result.get('action') or '').strip()}" if str(owned_result.get("action") or "").strip() else "",
+            ] if note
+        ]
+        return {
+            "viable": True,
+            "fit_notes": notes,
+            "comparison_strength": "clear",
+            "owner_kind": "supervisor",
+            "intent_result": intent_result,
+            "handle_result": handle_result,
+            "owned_result": owned_result,
+        }
+
+    try:
+        from planner_decision import decide_turn
+    except Exception:
+        return {
+            "viable": False,
+            "fit_notes": [],
+            "comparison_strength": "weak",
+            "owner_kind": "",
+            "intent_result": intent_result,
+            "handle_result": handle_result,
+            "owned_result": {},
+        }
+
+    planner_actions = decide_turn(
+        user_text,
+        config={
+            "session_turns": list(recent_turns or []),
+            "pending_action": dict(pending_action) if isinstance(pending_action, dict) else None,
+        },
+    )
+    first_action = planner_actions[0] if isinstance(planner_actions, list) and planner_actions else {}
+    action_type = str(first_action.get("type") or "").strip()
+    tool_name = str(first_action.get("tool") or "").strip()
+
+    if action_type == "route_keyword":
+        return {
+            "viable": True,
+            "fit_notes": ["planner keyword route is deterministic", "keyword route keeps follow-up handling out of fallback"],
+            "comparison_strength": "clear",
+            "owner_kind": "planner_keyword",
+            "intent_result": intent_result,
+            "handle_result": handle_result,
+            "owned_result": {"action": "route_keyword", "rule_name": "planner_keyword"},
+        }
+
+    if action_type == "run_tool" and tool_name in {"patch_apply", "patch_rollback"}:
+        return {
+            "viable": True,
+            "fit_notes": ["planner direct-tool route is deterministic", "patch apply should not be treated as generic fallback"],
+            "comparison_strength": "clear",
+            "owner_kind": "planner_direct_tool",
+            "intent_result": intent_result,
+            "handle_result": handle_result,
+            "owned_result": {"action": tool_name, "rule_name": "planner_direct_tool", "intent": tool_name},
+        }
+
+    if action_type == "route_command":
+        normalized_text = str(user_text or "").strip().lower()
+        if normalized_text.startswith("patch ") or normalized_text == "patch rollback":
+            return {
+                "viable": True,
+                "fit_notes": ["planner command route is deterministic", "patch command should not be treated as generic fallback"],
+                "comparison_strength": "clear",
+                "owner_kind": "planner_command",
+                "intent_result": intent_result,
+                "handle_result": handle_result,
+                "owned_result": {"action": "route_command", "rule_name": "planner_command", "intent": "patch_command"},
+            }
+
+    return {
+        "viable": False,
+        "fit_notes": [],
+        "comparison_strength": "weak",
+        "owner_kind": "",
+        "intent_result": intent_result,
+        "handle_result": handle_result,
+        "owned_result": {},
+    }
+
+
+def _probe_turn_routes(
+    user_text: str,
+    session: object,
+    recent_turns: list[tuple[str, str]],
+    pending_action: Optional[dict] = None,
+) -> dict:
+    deterministic = _deterministic_route_viability(
+        user_text,
+        session,
+        recent_turns,
+        pending_action=pending_action,
+    )
+    supervisor_owned = deterministic.get("owned_result") if isinstance(deterministic.get("owned_result"), dict) else {}
+    supervisor_viable = bool(deterministic.get("viable"))
+
+    fulfillment = _fulfillment_route_viability(
+        user_text,
+        session,
+        recent_turns,
+        pending_action=pending_action,
+    )
+
+    generic_fallback_viable = True
+    generic_notes = ["generic fallback remains available if no explicit owner or useful fulfillment comparison exists"]
+    comparison_strength = "clear"
+    if supervisor_viable and fulfillment.get("viable"):
+        comparison_strength = "weak"
+        generic_notes.append("multiple routes are viable; no route should claim ownership in probe mode")
+    elif not supervisor_viable and not fulfillment.get("viable"):
+        comparison_strength = str(fulfillment.get("comparison_strength") or "weak")
+        generic_notes.append("fallback is the likely route because explicit ownership and fulfillment both look weak")
+
+    return {
+        "user_text": text if (text := str(user_text or "").strip()) else "",
+        "comparison_strength": comparison_strength,
+        "routes": {
+            "supervisor_owned": {
+                "viable": supervisor_viable,
+                "fit_notes": list(deterministic.get("fit_notes") or []),
+            },
+            "fulfillment_applicable": {
+                "viable": bool(fulfillment.get("viable")),
+                "fit_notes": list(fulfillment.get("fit_notes") or []),
+            },
+            "generic_fallback": {
+                "viable": generic_fallback_viable,
+                "fit_notes": generic_notes,
+            },
+        },
+    }
+
+
+def _should_attempt_fulfillment_flow(
+    user_text: str,
+    session: object,
+    recent_turns: list[tuple[str, str]],
+    *,
+    pending_action: Optional[dict] = None,
+) -> bool:
+    probe = _probe_turn_routes(
+        user_text,
+        session,
+        recent_turns,
+        pending_action=pending_action,
+    )
+    routes = probe.get("routes") if isinstance(probe.get("routes"), dict) else {}
+    supervisor_route = routes.get("supervisor_owned") if isinstance(routes.get("supervisor_owned"), dict) else {}
+    fulfillment_route = routes.get("fulfillment_applicable") if isinstance(routes.get("fulfillment_applicable"), dict) else {}
+    if bool(supervisor_route.get("viable")):
+        return False
+    if not bool(fulfillment_route.get("viable")):
+        return False
+    return str(probe.get("comparison_strength") or "weak").strip().lower() == "clear"
+
+
+def _build_fulfillment_state(
+    intent: object,
+    models: list[object],
+    assessments: list[object],
+    choice_set: object,
+) -> dict:
+    return {
+        "intent": intent,
+        "models": list(models or []),
+        "assessments": list(assessments or []),
+        "choice_set": choice_set,
+    }
+
+
+def _render_fulfillment_reply(choice_set: object) -> str:
+    options = list(getattr(choice_set, "options", []) or [])
+    if not options:
+        return ""
+
+    mode = str(getattr(getattr(choice_set, "mode", None), "value", getattr(choice_set, "mode", "")) or "")
+    selected_model_id = str(getattr(choice_set, "selected_model_id", "") or "")
+    if mode == "single_result":
+        option = next((item for item in options if str(getattr(item, "model_id", "") or "") == selected_model_id), options[0])
+        reply = f"I see one current fulfillment result: {str(getattr(option, 'label', '') or 'current path')}."
+        why_distinct = [str(item).strip() for item in list(getattr(option, "why_distinct", []) or []) if str(item).strip()]
+        tradeoffs = [str(item).strip() for item in list(getattr(option, "tradeoffs", []) or []) if str(item).strip()]
+        if why_distinct:
+            reply += f" Why this path: {'; '.join(why_distinct[:2])}."
+        if tradeoffs:
+            reply += f" Tradeoffs: {'; '.join(tradeoffs[:2])}."
+        return reply
+
+    lines = ["I see multiple meaningful fulfillment paths right now:"]
+    for option in options[:3]:
+        label = str(getattr(option, "label", "") or "option")
+        why_distinct = [str(item).strip() for item in list(getattr(option, "why_distinct", []) or []) if str(item).strip()]
+        tradeoffs = [str(item).strip() for item in list(getattr(option, "tradeoffs", []) or []) if str(item).strip()]
+        line = f"- {label}"
+        if why_distinct:
+            line += f": {why_distinct[0]}"
+        if tradeoffs:
+            line += f"; tradeoff: {tradeoffs[0]}"
+        lines.append(line)
+    plurality_reason = str(getattr(choice_set, "plurality_reason", "") or "").strip()
+    if plurality_reason:
+        lines.append(f"Why they remain distinct: {plurality_reason}.")
+    return "\n".join(lines)
+
+
+def _maybe_run_fulfillment_flow(
+    user_text: str,
+    session: object,
+    recent_turns: list[tuple[str, str]],
+    *,
+    pending_action: Optional[dict] = None,
+) -> Optional[dict]:
+    probe = _probe_turn_routes(
+        user_text,
+        session,
+        recent_turns,
+        pending_action=pending_action,
+    )
+    routes = probe.get("routes") if isinstance(probe.get("routes"), dict) else {}
+    supervisor_route = routes.get("supervisor_owned") if isinstance(routes.get("supervisor_owned"), dict) else {}
+    fulfillment_route = routes.get("fulfillment_applicable") if isinstance(routes.get("fulfillment_applicable"), dict) else {}
+    should_attempt = not bool(supervisor_route.get("viable")) and bool(fulfillment_route.get("viable")) and str(probe.get("comparison_strength") or "weak").strip().lower() == "clear"
+    if not should_attempt:
+        _update_subconscious_state(session, probe, chosen_route="generic_fallback")
+        return None
+
+    try:
+        from choice_presenter import ChoiceMode, ChoicePresenter
+        from dynamic_replanner import DynamicReplanner
+        from fit_evaluator import FitEvaluator
+        from fulfillment_contracts import CollapseStatus, ReplanContext, ReplanReason
+        from fulfillment_model_generator import FulfillmentModelGenerator
+        from intent_interpreter import IntentInterpreter
+    except Exception:
+        return None
+
+    state = _get_session_fulfillment_state(session)
+    try:
+        if state is None:
+            interpreter = IntentInterpreter()
+            generator = FulfillmentModelGenerator()
+            evaluator = FitEvaluator()
+            presenter = ChoicePresenter()
+
+            intent = interpreter.interpret(
+                user_text,
+                current_intent=None,
+                shared_context={"recent_turns": list(recent_turns or [])},
+            )
+            models = generator.generate(
+                intent,
+                existing_models=None,
+                shared_context={"recent_turns": list(recent_turns or [])},
+            )
+            assessments = evaluator.evaluate(
+                intent,
+                models,
+                shared_context={"recent_turns": list(recent_turns or [])},
+            )
+            choice_set = presenter.present(
+                intent,
+                models,
+                assessments,
+                current_choice_set=None,
+                shared_context={"recent_turns": list(recent_turns or [])},
+            )
+            state = _build_fulfillment_state(intent, models, assessments, choice_set)
+        else:
+            intent = state.get("intent")
+            models = list(state.get("models") or [])
+            assessments = list(state.get("assessments") or [])
+            choice_set = state.get("choice_set")
+            if intent is None or not models or choice_set is None:
+                return None
+
+            replanner = DynamicReplanner()
+            revised_intent, revised_models, revised_assessments, revised_choice_set = replanner.replan(
+                ReplanContext(
+                    replan_id=f"replan:{str(getattr(intent, 'intent_id', '') or 'intent')}:{int(time.time() * 1000)}",
+                    intent_id=str(getattr(intent, "intent_id", "") or ""),
+                    reason=ReplanReason.NEW_INFORMATION,
+                    trigger_summary=str(user_text or "")[:160],
+                    changed_facts={"new_information": str(user_text or "")},
+                    may_revise_fit=True,
+                    may_revise_choice=True,
+                    previous_active_model_ids=[str(getattr(model, "model_id", "") or "") for model in models],
+                    previous_selected_model_id=str(getattr(choice_set, "selected_model_id", "") or "") or None,
+                    previous_collapse_status=getattr(choice_set, "collapse_status", CollapseStatus.NOT_EVALUATED),
+                ),
+                intent=intent,
+                models=models,
+                assessments=assessments,
+                choice_set=choice_set,
+                shared_context={"recent_turns": list(recent_turns or []), "new_information": str(user_text or "")},
+            )
+            if revised_intent is None or revised_models is None or revised_assessments is None or revised_choice_set is None:
+                return None
+            state = _build_fulfillment_state(revised_intent, revised_models, revised_assessments, revised_choice_set)
+    except NotImplementedError:
+        _update_subconscious_state(session, probe, chosen_route="generic_fallback")
+        return None
+    except Exception:
+        _update_subconscious_state(session, probe, chosen_route="generic_fallback")
+        return None
+
+    _set_session_fulfillment_state(session, state)
+    choice_set = state.get("choice_set")
+    if choice_set is None or not list(getattr(choice_set, "options", []) or []):
+        _update_subconscious_state(session, probe, chosen_route="generic_fallback")
+        return None
+
+    mode = str(getattr(getattr(choice_set, "mode", None), "value", getattr(choice_set, "mode", "")) or "")
+    if mode not in {ChoiceMode.SINGLE_RESULT.value, ChoiceMode.MULTI_CHOICE.value}:
+        _update_subconscious_state(session, probe, chosen_route="generic_fallback")
+        return None
+
+    _update_subconscious_state(session, probe, chosen_route="fulfillment_applicable")
+
+    return {
+        "reply": _render_fulfillment_reply(choice_set),
+        "state": state,
+        "choice_set": choice_set,
+        "planner_decision": "fulfillment_single_result" if mode == ChoiceMode.SINGLE_RESULT.value else "fulfillment_choice",
+        "grounded": True,
+    }
 
 
 def behavior_record_event(event: str) -> None:
@@ -632,14 +1374,22 @@ def build_turn_reflection(
     session_id: str,
     current_decision: dict,
 ) -> dict:
+    session_summary = session_state.reflection_summary()
+    session_summary["subconscious_snapshot"] = _get_subconscious_snapshot(session_state)
     reflection = TURN_SUPERVISOR.process_turn(
         entry_point=entry_point,
         session_id=session_id,
-        session_summary=session_state.reflection_summary(),
+        session_summary=session_summary,
         current_decision=current_decision,
         recent_records=_recent_action_ledger_records(limit=10),
         recent_reflections=_recent_self_reflection_rows(limit=3),
     )
+    subconscious_training_backlog = _get_subconscious_training_backlog_summary(session_state)
+    if isinstance(subconscious_training_backlog, dict):
+        reflection["subconscious_training_backlog"] = subconscious_training_backlog
+    subconscious_robust_weakness = _get_subconscious_robust_weakness_summary(session_state)
+    if isinstance(subconscious_robust_weakness, dict):
+        reflection["subconscious_robust_weakness"] = subconscious_robust_weakness
     reflection["session_id"] = str(session_id or "default").strip() or "default"
     reflection["entry_point"] = str(entry_point or "unknown").strip().lower() or "unknown"
     session_state.set_last_reflection(reflection)
@@ -668,10 +1418,187 @@ def _execute_registered_supervisor_rule(
         return True, remember_name_origin(store_text), current_state
 
     if action == "self_location":
+        next_state = (rule_result or {}).get("next_state") if isinstance((rule_result or {}).get("next_state"), dict) else _make_conversation_state("location_recall")
+        return True, _location_reply(), next_state
+
+    if action == "location_recall":
+        next_state = (rule_result or {}).get("next_state") if isinstance((rule_result or {}).get("next_state"), dict) else _make_conversation_state("location_recall")
+        if _is_location_name_query(text):
+            return True, _location_name_reply(), next_state
+        return True, _location_recall_reply(), next_state
+
+    if action == "location_name":
+        next_state = current_state if isinstance(current_state, dict) else _make_conversation_state("location_recall")
+        return True, _location_name_reply(), next_state
+
+    if action == "weather_current_location":
         next_state = (rule_result or {}).get("next_state")
         if not isinstance(next_state, dict):
             next_state = _make_conversation_state("location_recall")
-        return True, _location_reply(), next_state
+        outcome = _classify_weather_lookup_outcome({
+            "weather_mode": "current_location",
+            "next_state": next_state,
+        })
+        _attach_reply_outcome(rule_result, outcome)
+        tool_result = execute_planned_action("weather_current_location")
+        return True, render_reply({**outcome, "tool_result": str(tool_result or "")}), next_state
+
+    if action == "apply_correction":
+        correction_text = str((rule_result or {}).get("user_correction_text") or text).strip()
+        pending_target = ""
+        pending_followup = isinstance(current_state, dict) and str(current_state.get("kind") or "") == "correction_pending"
+        if pending_followup:
+            pending_target = str(current_state.get("target") or "").strip()
+        last_assistant = pending_target or _last_assistant_turn_text(turns)
+        parsed = _parse_correction(correction_text)
+        authoritative = _extract_authoritative_correction_text(correction_text)
+        correction_value = parsed or authoritative
+
+        _store_supervisor_correction_record(
+            correction_text,
+            input_source=input_source,
+            last_assistant=last_assistant,
+            parsed_correction=(correction_value or ""),
+        )
+
+        learned_fact, learned_msg = learn_from_user_correction(correction_text)
+        if learned_fact:
+            outcome = _classify_correction_outcome(
+                correction_text=correction_text,
+                correction_value=correction_value,
+                last_assistant=last_assistant,
+                pending_followup=pending_followup,
+                learned_fact=True,
+                learned_message=learned_msg,
+            )
+            _attach_reply_outcome(rule_result, outcome)
+            return True, render_reply(outcome), None
+
+        if correction_value and last_assistant and mem_enabled():
+            corr_store = _normalize_correction_for_storage(correction_value)
+            _teach_store_example(last_assistant, corr_store, user=get_active_user() or None)
+            outcome = _classify_correction_outcome(
+                correction_text=correction_text,
+                correction_value=correction_value,
+                last_assistant=last_assistant,
+                pending_followup=pending_followup,
+                replacement_applied=True,
+            )
+            _attach_reply_outcome(rule_result, outcome)
+            return True, render_reply(outcome), None
+
+        if pending_followup and _looks_like_correction_cancel(correction_text):
+            reply_text = "Understood. I canceled that replacement request and did not learn anything from it."
+            outcome = {
+                "intent": "apply_correction",
+                "kind": "correction_cancelled",
+                "correction_kind": "cancel_pending_replacement",
+                "reply_contract": "correction.cancelled",
+                "reply_text": reply_text,
+                "state_delta": {},
+            }
+            _attach_reply_outcome(rule_result, outcome)
+            return True, reply_text, None
+
+        if pending_followup and not correction_value and _looks_like_pending_replacement_text(correction_text):
+            if last_assistant and mem_enabled():
+                corr_store = _normalize_correction_for_storage(correction_text)
+                _teach_store_example(last_assistant, corr_store, user=get_active_user() or None)
+                outcome = _classify_correction_outcome(
+                    correction_text=correction_text,
+                    correction_value=correction_text,
+                    last_assistant=last_assistant,
+                    pending_followup=True,
+                    replacement_applied=True,
+                )
+                _attach_reply_outcome(rule_result, outcome)
+                return True, render_reply(outcome), None
+
+        if pending_followup and not correction_value and correction_text and "?" not in correction_text:
+            reply_text = "I still need the exact replacement wording you want me to use."
+            outcome = {
+                "intent": "apply_correction",
+                "kind": "pending_replacement_reminder",
+                "correction_kind": "awaiting_replacement_text",
+                "reply_contract": "correction.pending_replacement",
+                "reply_text": reply_text,
+                "state_delta": {},
+            }
+            _attach_reply_outcome(rule_result, outcome)
+            return True, reply_text, current_state
+
+        if last_assistant:
+            next_state = _make_conversation_state("correction_pending", target=last_assistant)
+            outcome = _classify_correction_outcome(
+                correction_text=correction_text,
+                correction_value=correction_value,
+                last_assistant=last_assistant,
+                pending_followup=pending_followup,
+                replacement_pending=True,
+            )
+            _attach_reply_outcome(rule_result, outcome)
+            return True, render_reply(outcome), next_state
+
+        outcome = _classify_correction_outcome(
+            correction_text=correction_text,
+            correction_value=correction_value,
+            last_assistant=last_assistant,
+            pending_followup=pending_followup,
+        )
+        _attach_reply_outcome(rule_result, outcome)
+        return True, render_reply(outcome), None
+
+    if action == "retrieval_followup":
+        if not isinstance(current_state, dict) or str(current_state.get("kind") or "") != "retrieval":
+            return False, "", current_state
+        reply, next_state, outcome = _execute_retrieval_followup_outcome(current_state, text)
+        _attach_reply_outcome(rule_result, outcome)
+        return True, reply, next_state
+
+    if action == "identity_history_family":
+        reply, next_state, outcome = _execute_identity_history_outcome(
+            rule_result,
+            current_state,
+            text,
+            turns=turns,
+        )
+        _attach_reply_outcome(rule_result, outcome)
+        return True, reply, next_state
+
+    if action == "open_probe_family":
+        reply_text, outcome_kind = _open_probe_reply(text, turns=turns)
+        outcome = {
+            "intent": "open_probe_family",
+            "kind": outcome_kind,
+            "reply_contract": f"open_probe.{outcome_kind}",
+            "reply_text": reply_text,
+            "state_delta": {},
+        }
+        _attach_reply_outcome(rule_result, outcome)
+        return True, reply_text, current_state
+
+    if action == "last_question_recall":
+        reply_text, outcome_kind = _last_question_recall_reply(text, turns=turns)
+        outcome = {
+            "intent": "last_question_recall",
+            "kind": outcome_kind,
+            "reply_contract": f"last_question.{outcome_kind}",
+            "reply_text": reply_text,
+            "state_delta": {},
+        }
+        _attach_reply_outcome(rule_result, outcome)
+        return True, reply_text, current_state
+
+    if action == "rules_list":
+        outcome = {
+            "intent": "rules_list",
+            "kind": "list",
+            "reply_contract": "rules.list",
+            "reply_text": _rules_reply(),
+            "state_delta": {},
+        }
+        _attach_reply_outcome(rule_result, outcome)
+        return True, str(outcome.get("reply_text") or ""), current_state
 
     if action == "developer_location":
         next_state = current_state if isinstance(current_state, dict) else _make_conversation_state("identity_profile", subject="developer")
@@ -696,6 +1623,32 @@ def _last_assistant_turn_text(turns: Optional[list[tuple[str, str]]]) -> str:
     return ""
 
 
+def _looks_like_affirmative_followup(text: str) -> bool:
+    normalized = _normalize_turn_text(text).strip(" .,!?")
+    if not normalized:
+        return False
+    return (
+        normalized in {"yes", "yeah", "yea", "sure", "okay", "ok", "please", "do that", "go ahead"}
+        or normalized.startswith("yes ")
+        or normalized.startswith("yeah ")
+        or normalized.startswith("yea ")
+        or normalized.startswith("please ")
+        or "do that" in normalized
+    )
+
+
+def _looks_like_shared_location_reference(text: str) -> bool:
+    normalized = _normalize_turn_text(text).strip(" .,!?")
+    if not normalized:
+        return False
+    return (
+        normalized in {"our location", "our location nova", "same location", "shared location"}
+        or (("your" in normalized or "our" in normalized) and "location" in normalized)
+        or "that location" in normalized
+        or normalized in {"there", "same place"}
+    )
+
+
 def _intent_trace_preview(text: str, *, limit: int = 120) -> str:
     compact = re.sub(r"\s+", " ", str(text or "").strip())
     if len(compact) <= limit:
@@ -703,13 +1656,443 @@ def _intent_trace_preview(text: str, *, limit: int = 120) -> str:
     return compact[: max(0, limit - 3)] + "..."
 
 
+def _supervisor_result_has_route(rule_result: Optional[dict]) -> bool:
+    payload = rule_result if isinstance(rule_result, dict) else {}
+    return bool(payload.get("handled")) or bool(str(payload.get("action") or "").strip())
+
+
+def _dev_mode_enabled() -> bool:
+    raw = str(os.environ.get("NOVA_DEV_MODE") or "").strip().lower()
+    return raw in {"1", "true", "yes", "on"}
+
+
+_ALLOWED_SUPERVISOR_BYPASSES: tuple[dict[str, object], ...] = (
+    {
+        "category": "fallback.meta_confusion",
+        "phrases": {
+        },
+    },
+    {
+        # These are intentionally open-ended prompts that currently remain model-owned.
+        "category": "intentional_fallback.general_qa",
+        "phrases": {
+            "can you debug this bug in my code",
+            "explain photosynthesis briefly",
+            "why",
+        },
+    },
+)
+
+
+def _looks_like_open_fallback_turn(text: str) -> bool:
+    candidate = str(text or "").strip()
+    if not candidate:
+        return False
+    if _is_explicit_command_like(candidate):
+        return False
+    if _is_location_request(candidate):
+        return False
+    normalized = _normalize_turn_text(candidate)
+    if normalized in {
+        "weather",
+        "weather now",
+        "weather current",
+        "weather today",
+        "current weather",
+        "what's the weather",
+        "what is the weather",
+        "what is the weather now",
+        "what's the weather now",
+    }:
+        return False
+    if _is_peims_broad_query(candidate) or _is_local_knowledge_topic_query(candidate):
+        return False
+    if re.match(r"^(hi|hello|hey)\b", normalized, flags=re.I):
+        return True
+    if candidate.endswith("?"):
+        return True
+    if len(normalized.split()) >= 3:
+        return True
+    return normalized.startswith((
+        "how ",
+        "why ",
+        "what ",
+        "who ",
+        "can you ",
+        "could you ",
+        "would you ",
+        "tell me ",
+        "explain ",
+        "help ",
+        "show me ",
+        "compare ",
+        "recap ",
+        "summarize ",
+    ))
+
+
+def _normalize_bypass_phrase(text: str) -> str:
+    return _normalize_turn_text(text).strip(" .,!?:;\t\r\n")
+
+
+def _classify_supervisor_bypass(text: str) -> dict:
+    normalized = _normalize_bypass_phrase(text)
+    if not normalized:
+        return {"allowed": False, "category": "unlisted", "reason": "empty"}
+    for item in _ALLOWED_SUPERVISOR_BYPASSES:
+        phrases = item.get("phrases")
+        if isinstance(phrases, set) and normalized in phrases:
+            return {
+                "allowed": True,
+                "category": str(item.get("category") or "fallback.allowlisted"),
+                "reason": "allowlisted_bypass",
+                "normalized_input": normalized,
+            }
+    if _looks_like_open_fallback_turn(text):
+        return {
+            "allowed": False,
+            "category": "intentional_fallback.open_fulfillment_or_model",
+            "reason": "open_fallback_candidate",
+            "normalized_input": normalized,
+        }
+    return {
+        "allowed": False,
+        "category": "unlisted",
+        "reason": "not_allowlisted",
+        "normalized_input": normalized,
+    }
+
+
+def _supervisor_candidate_trace(rule_result: Optional[dict]) -> list[dict]:
+    candidates = []
+    for raw in list((rule_result or {}).get("candidates") or [])[:12]:
+        if not isinstance(raw, dict):
+            continue
+        item = {
+            "rule_name": str(raw.get("rule_name") or "").strip(),
+            "priority": int(raw.get("priority", 100)),
+            "handled": bool(raw.get("handled")),
+        }
+        action = str(raw.get("action") or "").strip()
+        if action:
+            item["action"] = action
+        intent = str(raw.get("intent") or "").strip()
+        if intent:
+            item["intent"] = intent
+        if bool(raw.get("rewrite")):
+            item["rewrite"] = True
+        if bool(raw.get("state_update")):
+            item["state_update"] = True
+        rule_error = str(raw.get("rule_error") or "").strip()
+        if rule_error:
+            item["rule_error"] = rule_error[:160]
+        candidates.append(item)
+    return candidates
+
+
+def _supervisor_phase_record(rule_result: Optional[dict], *, phase: str) -> dict:
+    payload = rule_result if isinstance(rule_result, dict) else {}
+    return {
+        "phase": str(phase or "unknown").strip().lower() or "unknown",
+        "handled": bool(_supervisor_result_has_route(payload)),
+        "rule_name": str(payload.get("matched_rule_name") or payload.get("rule_name") or "").strip(),
+        "intent": str(payload.get("intent") or "").strip(),
+        "action": str(payload.get("action") or "").strip(),
+        "priority": int(payload.get("priority", 100)) if str(payload.get("priority") or "").strip() else None,
+        "candidates": _supervisor_candidate_trace(payload),
+    }
+
+
+def _build_routing_decision(
+    text: str,
+    *,
+    entry_point: str,
+    intent_result: Optional[dict] = None,
+    handle_result: Optional[dict] = None,
+    final_owner: str = "pending",
+    allowed_bypass: bool = False,
+    allowed_bypass_category: str = "",
+    bypass_reason: str = "",
+    reply_contract: str = "",
+    reply_outcome: Optional[dict] = None,
+    turn_acts: Optional[list[str]] = None,
+) -> dict:
+    outcome = reply_outcome if isinstance(reply_outcome, dict) else {}
+    acts = [str(item).strip() for item in list(turn_acts or []) if str(item).strip()]
+    return {
+        "input_preview": _intent_trace_preview(text),
+        "entry_point": str(entry_point or "unknown").strip().lower() or "unknown",
+        "intent_phase": _supervisor_phase_record(intent_result, phase="intent"),
+        "handle_phase": _supervisor_phase_record(handle_result, phase="handle"),
+        "final_owner": str(final_owner or "pending").strip().lower() or "pending",
+        "allowed_bypass": bool(allowed_bypass),
+        "allowed_bypass_category": str(allowed_bypass_category or "").strip(),
+        "bypass_reason": str(bypass_reason or "").strip(),
+        "reply_contract": str(reply_contract or "").strip(),
+        "reply_outcome_kind": str(outcome.get("kind") or "").strip(),
+        "turn_acts": acts,
+    }
+
+
+def _finalize_routing_decision(
+    routing_decision: Optional[dict],
+    *,
+    planner_decision: str = "",
+    reply_contract: str = "",
+    reply_outcome: Optional[dict] = None,
+    turn_acts: Optional[list[str]] = None,
+) -> dict:
+    payload = dict(routing_decision or {})
+    if not payload:
+        return {}
+    intent_phase = payload.get("intent_phase") if isinstance(payload.get("intent_phase"), dict) else {}
+    handle_phase = payload.get("handle_phase") if isinstance(payload.get("handle_phase"), dict) else {}
+    final_owner = str(payload.get("final_owner") or "").strip().lower()
+    if final_owner in {"", "pending"}:
+        if bool(intent_phase.get("handled")):
+            final_owner = "supervisor_intent"
+        elif bool(handle_phase.get("handled")):
+            final_owner = "supervisor_handle"
+        elif str(planner_decision or "").strip().lower() in {
+            "llm_fallback",
+            "respond",
+            "run_tool",
+            "command",
+            "ask_clarify",
+            "grounded_lookup",
+            "truth_hierarchy",
+            "blocked_low_confidence",
+            "policy_block",
+            "conversation_followup",
+        }:
+            final_owner = "fallback"
+        else:
+            final_owner = "core_legacy"
+    payload["final_owner"] = final_owner
+    if reply_contract:
+        payload["reply_contract"] = str(reply_contract).strip()
+    outcome = reply_outcome if isinstance(reply_outcome, dict) else {}
+    if outcome:
+        payload["reply_outcome_kind"] = str(outcome.get("kind") or payload.get("reply_outcome_kind") or "").strip()
+    acts = turn_acts if isinstance(turn_acts, list) else payload.get("turn_acts")
+    payload["turn_acts"] = [str(item).strip() for item in acts if str(item).strip()] if isinstance(acts, list) else []
+    return payload
+
+
+def _supervisor_bypass_warning(text: str, *, entry_point: str, routing_decision: Optional[dict] = None) -> str:
+    where = str(entry_point or "unknown").strip().lower() or "unknown"
+    category = str((routing_decision or {}).get("allowed_bypass_category") or "").strip()
+    if where == "http" and category.startswith("intentional_fallback."):
+        warning = (
+            "[INFO] Open fallback - learning invitation active"
+            f" [{where}] {_intent_trace_preview(text)}"
+        )
+    else:
+        warning = (
+            "[WARN] Turn bypassed supervisor intent phase — this will be an error soon"
+            f" [{where}] {_intent_trace_preview(text)}"
+        )
+    if category:
+        warning += f" [{category}]"
+    return warning
+
+
+def _handle_supervisor_bypass(text: str, *, entry_point: str, routing_decision: Optional[dict] = None) -> str:
+    classification = _classify_supervisor_bypass(text)
+    if isinstance(routing_decision, dict):
+        routing_decision["allowed_bypass"] = bool(classification.get("allowed"))
+        routing_decision["allowed_bypass_category"] = str(classification.get("category") or "").strip()
+        routing_decision["bypass_reason"] = str(classification.get("reason") or "").strip()
+        routing_decision["final_owner"] = "fallback"
+    warning = _supervisor_bypass_warning(text, entry_point=entry_point, routing_decision=routing_decision)
+    if _dev_mode_enabled() and not bool(classification.get("allowed")):
+        detail = routing_decision if isinstance(routing_decision, dict) else classification
+        raise RuntimeError(f"Bypass detected: {_intent_trace_preview(text)} :: {json.dumps(detail, ensure_ascii=True, sort_keys=True)}")
+    return warning
+
+
+def _should_warn_supervisor_bypass(text: str) -> bool:
+    candidate = str(text or "").strip()
+    if not candidate:
+        return False
+    if _looks_like_open_fallback_turn(candidate):
+        return False
+    if _is_explicit_command_like(candidate):
+        return False
+    if _is_location_request(candidate):
+        return False
+    normalized = _normalize_turn_text(candidate)
+    if normalized in {
+        "weather",
+        "weather now",
+        "weather current",
+        "weather today",
+        "current weather",
+        "what's the weather",
+        "what is the weather",
+        "what is the weather now",
+        "what's the weather now",
+    }:
+        return False
+    if _is_peims_broad_query(candidate) or _is_local_knowledge_topic_query(candidate):
+        return False
+    return True
+
+
+def _should_clarify_unlabeled_numeric_turn(
+    text: str,
+    *,
+    pending_action: Optional[dict] = None,
+    current_state: Optional[dict] = None,
+) -> bool:
+    raw = str(text or "").strip()
+    if not re.fullmatch(r"\d{5}", raw):
+        return False
+    state = current_state if isinstance(current_state, dict) else {}
+    if str(state.get("kind") or "").strip() in {"numeric_reference", "numeric_reference_clarify"} and str(state.get("value") or "").strip() == raw:
+        return False
+    action = pending_action if isinstance(pending_action, dict) else {}
+    if (
+        str(action.get("kind") or "") == "weather_lookup"
+        and str(action.get("status") or "") == "awaiting_location"
+    ):
+        return False
+    try:
+        return bool(str(get_saved_location_text() or "").strip())
+    except Exception:
+        return True
+
+
+def _runtime_set_location_intent(
+    text: str,
+    *,
+    pending_action: Optional[dict] = None,
+) -> Optional[dict[str, object]]:
+    raw = str(text or "").strip()
+    if not re.fullmatch(r"\d{5}", raw):
+        return None
+    action = pending_action if isinstance(pending_action, dict) else {}
+    if (
+        str(action.get("kind") or "") == "weather_lookup"
+        and str(action.get("status") or "") == "awaiting_location"
+    ):
+        return None
+    try:
+        if str(get_saved_location_text() or "").strip():
+            return None
+    except Exception:
+        pass
+    return {
+        "handled": True,
+        "intent": "set_location",
+        "rule_name": "set_location_zip",
+        "matched_rule_name": "set_location_zip",
+        "location_value": raw,
+        "location_kind": "zip",
+        "location_ack_kind": "fact_only",
+    }
+
+
+_ROUTING_INTENT_PROMPT = """\
+Classify the user message into exactly one routing intent. Reply with the label only — no explanation.
+
+Labels:
+weather_lookup   – user wants current conditions, temperature, rain, forecast, or whether to dress for outdoors
+web_research     – user wants online research on a topic
+web_search       – user wants a quick web search
+store_fact       – user is telling a personal fact to remember
+set_location     – user is providing their location or zip code
+general_chat     – everything else
+
+User message: {text}
+Label:"""
+
+
+def _llm_classify_routing_intent(
+    text: str,
+    turns: Optional[list[tuple[str, str]]] = None,
+) -> Optional[dict[str, object]]:
+    """Ask the LLM to classify routing intent for turns that rule-based routing misses.
+
+    This is the replacement for keyword-trigger routing: the LLM understands
+    'should I bring a jacket?' the same way it understands 'what's the weather?'.
+    Returns a supervisor-compatible dict or None (falls through to general chat).
+    """
+    raw = str(text or "").strip()
+    if not raw:
+        return None
+    try:
+        prompt = _ROUTING_INTENT_PROMPT.format(text=raw[:500])
+        payload = {
+            "model": chat_model(),
+            "stream": False,
+            "options": {"temperature": 0.0, "top_p": 1.0, "num_predict": 8},
+            "messages": [{"role": "user", "content": prompt}],
+        }
+        r = requests.post(
+            f"{OLLAMA_BASE}/api/chat",
+            json=payload,
+            timeout=8,
+        )
+        r.raise_for_status()
+        label = str(r.json().get("message", {}).get("content") or "").strip().lower()
+        label = re.sub(r"[^a-z_]", "", (label.split() or [""])[0])
+    except Exception:
+        return None
+
+    if label == "weather_lookup":
+        saved_location = ""
+        try:
+            saved_location = str(get_saved_location_text() or "").strip()
+        except Exception:
+            pass
+        if saved_location:
+            return {
+                "handled": True,
+                "intent": "weather_lookup",
+                "rule_name": "weather_lookup",
+                "matched_rule_name": "weather_lookup",
+                "weather_mode": "current_location",
+                "location_value": saved_location,
+            }
+        return {
+            "handled": True,
+            "intent": "weather_lookup",
+            "rule_name": "weather_lookup",
+            "matched_rule_name": "weather_lookup",
+            "weather_mode": "clarify",
+        }
+
+    # Future intents (web_research, store_fact, set_location) can be wired
+    # here without keyword lists once their action paths are validated.
+    return None
+
+
+def _unlabeled_numeric_turn_reply(text: str) -> str:
+    value = str(text or "").strip()
+    return f"What does {value} refer to?"
+
+
+def _numeric_reference_guess_reply(value: str) -> str:
+    clean = str(value or "").strip()
+    return f"I don't know what {clean} refers to yet. Tell me what it refers to."
+
+
+def _numeric_reference_binding_reply(value: str, referent: str) -> str:
+    clean_value = str(value or "").strip()
+    clean_referent = str(referent or "").strip().rstrip(".!?")
+    return f"Understood. In this chat, {clean_value} refers to {clean_referent}."
+
+
 def _emit_supervisor_intent_trace(intent_result: dict, *, user_text: str = "") -> None:
     intent = str((intent_result or {}).get("intent") or "intent").strip().lower() or "intent"
-    rule = str((intent_result or {}).get("rule_name") or "").strip()
+    rule = str((intent_result or {}).get("matched_rule_name") or (intent_result or {}).get("rule_name") or "").strip()
     reason = ""
 
     if intent == "store_fact":
         reason = str((intent_result or {}).get("fact_text") or user_text).strip()
+    elif intent == "set_location":
+        reason = str((intent_result or {}).get("location_value") or user_text).strip()
     elif intent == "apply_correction":
         reason = str((intent_result or {}).get("user_correction_text") or user_text).strip()
     elif intent == "session_summary":
@@ -749,10 +2132,65 @@ def _handle_supervisor_intent(
     *,
     turns: Optional[list[tuple[str, str]]] = None,
     input_source: str = "typed",
-) -> tuple[bool, str]:
+    entry_point: str = "",
+) -> tuple[bool, str, Optional[dict], Optional[dict]]:
     intent = str((intent_result or {}).get("intent") or "").strip().lower()
     if not intent:
-        return False, ""
+        return False, "", None, None
+
+    normalized_entry_point = str(entry_point or "").strip().lower()
+
+    if intent == "web_research_family":
+        outcome = _classify_web_research_outcome(intent_result, user_text, turns=turns)
+        tool_name = str(outcome.get("tool_name") or "web_research").strip().lower() or "web_research"
+        query = str(outcome.get("query") or "").strip()
+        tool_args = [query] if query else []
+        tool_result = execute_planned_action(tool_name, tool_args)
+        outcome["tool_result"] = str(tool_result or "")
+        next_state = _make_retrieval_conversation_state(tool_name, query, outcome["tool_result"])
+        return True, render_reply(outcome), next_state, {
+            "reply_contract": str(outcome.get("reply_contract") or ""),
+            "reply_outcome": outcome,
+        }
+
+    if intent == "store_fact":
+        fact_text = str((intent_result or {}).get("fact_text") or user_text).strip()
+        memory_kind = str((intent_result or {}).get("memory_kind") or "user_fact").strip() or "user_fact"
+        storage_performed = False
+        if fact_text and mem_enabled():
+            try:
+                mem_add(memory_kind, input_source, fact_text)
+                storage_performed = True
+            except Exception:
+                storage_performed = False
+        outcome = _classify_store_fact_outcome(intent_result, user_text, source="intent", storage_performed=storage_performed)
+        return True, render_reply(outcome), None, {
+            "reply_contract": str(outcome.get("reply_contract") or ""),
+            "reply_outcome": outcome,
+        }
+
+    if intent == "weather_lookup":
+        weather_mode = str((intent_result or {}).get("weather_mode") or "clarify").strip().lower() or "clarify"
+        outcome = _classify_weather_lookup_outcome(intent_result)
+        reply_text, next_state, reply_outcome = _execute_weather_lookup_outcome(outcome)
+        return True, reply_text, next_state, {
+            "reply_contract": str(reply_outcome.get("reply_contract") or ""),
+            "reply_outcome": reply_outcome,
+            "pending_action": reply_outcome.get("pending_action"),
+        }
+
+    if intent == "set_location":
+        location_value = str((intent_result or {}).get("location_value") or user_text).strip()
+        if location_value:
+            try:
+                set_location_text(location_value, input_source=input_source)
+            except Exception:
+                pass
+        outcome = _classify_set_location_outcome(intent_result, user_text)
+        return True, render_reply(outcome), _make_conversation_state("location_recall"), {
+            "reply_contract": str(outcome.get("reply_contract") or ""),
+            "reply_outcome": outcome,
+        }
 
     if intent == "apply_correction":
         correction_text = str((intent_result or {}).get("user_correction_text") or user_text).strip()
@@ -766,21 +2204,659 @@ def _handle_supervisor_intent(
         )
         if parsed and last_assistant and mem_enabled():
             _teach_store_example(last_assistant, parsed, user=get_active_user() or None)
-        return True, "Got it - correcting that."
+            outcome = _classify_correction_outcome(
+                correction_text=correction_text,
+                correction_value=parsed,
+                last_assistant=last_assistant,
+                pending_followup=False,
+                replacement_applied=True,
+            )
+        else:
+            outcome = {
+                "intent": "apply_correction",
+                "kind": "intent_ack",
+                "correction_kind": "simple_negation",
+                "reply_contract": "correction.intent_ack",
+                "correction_text": correction_text,
+                "correction_value": str(parsed or "").strip(),
+                "learned_message": "",
+                "target_text": str(last_assistant or "").strip(),
+                "pending_followup": False,
+                "state_delta": {},
+            }
+        return True, render_reply(outcome), None, {
+            "reply_contract": str(outcome.get("reply_contract") or ""),
+            "reply_outcome": outcome,
+        }
 
-    if intent == "store_fact":
-        fact_text = str((intent_result or {}).get("fact_text") or user_text).strip()
-        if fact_text and mem_enabled():
-            mem_add("user_fact", input_source, fact_text)
-            return True, "Stored."
-        if fact_text:
-            return True, "Noted."
-        return True, "I need the fact to store."
+    if intent == "smalltalk":
+        reply = _quick_smalltalk_reply(user_text, active_user=get_active_user())
+        if reply:
+            return True, reply, None, None
+        return False, "", None, None
+
+    if intent == "capability_query":
+        return True, describe_capabilities(), None, None
+
+    if intent == "policy_domain_query":
+        web = policy_web()
+        domains = list(web.get("allow_domains") or [])
+        enabled = bool(web.get("enabled", False))
+        lines = [f"Policy web access enabled: {enabled}"]
+        if domains:
+            lines.append("Allowed domains: " + ", ".join(domains))
+        else:
+            lines.append("Allowed domains: none configured")
+        return True, "\n".join(lines), None, None
+
+    if intent == "assistant_name":
+        return True, _assistant_name_reply(user_text), None, None
+
+    if intent == "self_identity_web_challenge":
+        return True, _self_identity_web_challenge_reply(), None, None
+
+    if intent == "name_origin":
+        outcome = _classify_name_origin_outcome(intent_result)
+        return True, render_reply(outcome), None, {
+            "reply_contract": str(outcome.get("reply_contract") or ""),
+            "reply_outcome": outcome,
+        }
+
+    if intent == "developer_full_name":
+        return True, _developer_full_name_reply(), _make_conversation_state("identity_profile", subject="developer"), None
+
+    if intent == "creator_identity":
+        creator_reply = hard_answer(user_text) or _developer_profile_reply(turns=turns, user_text=user_text)
+        return True, creator_reply, _make_conversation_state("identity_profile", subject="developer"), None
+
+    if intent == "developer_profile":
+        return True, _developer_profile_reply(turns=turns, user_text=user_text), _make_conversation_state("identity_profile", subject="developer"), None
 
     if intent == "session_summary":
-        return True, _session_recap_reply(list(turns or []), user_text)
+        return True, _session_recap_reply(list(turns or []), user_text), None, None
 
-    return False, ""
+    return False, "", None, None
+
+
+def _resolve_set_location_semantics(intent_result: dict, user_text: str = "") -> dict[str, str]:
+    payload = intent_result if isinstance(intent_result, dict) else {}
+    location_value = str(payload.get("location_value") or user_text).strip()
+    location_kind = str(payload.get("location_kind") or "").strip().lower()
+    if location_kind not in {"zip", "place"}:
+        location_kind = "zip" if re.fullmatch(r"\d{5}", location_value) else "place"
+    ack_kind = str(payload.get("location_ack_kind") or "").strip().lower()
+    if ack_kind not in {"fact_only", "confirmed_location"}:
+        ack_kind = "fact_only" if location_kind == "zip" else "confirmed_location"
+    return {
+        "location_value": location_value,
+        "location_kind": location_kind,
+        "location_ack_kind": ack_kind,
+    }
+
+
+REPLY_TEMPLATES: dict[str, str] = {
+    "set_location.missing_value": "I need a location value to store.",
+    "set_location.observed_zip": "Got it - {location_value} is a ZIP code.",
+    "set_location.explicit_location": "Got it - using {location_value} as your location.",
+    "correction.recorded": "Got it - I recorded that correction.",
+    "correction.pending_replacement": "You're right. I recorded that correction. Send the exact corrected answer if you want me to store the replacement answer.",
+    "correction.replacement_applied": "Understood. I corrected that and will use your version going forward.",
+    "correction.intent_ack": "Got it - correcting that.",
+    "correction.identity_correction": "{learned_message}",
+    "store_fact.missing_value": "I need the fact to store.",
+    "store_fact.explicit_store": "Learned: {fact_text}",
+    "store_fact.prompted_store": "Learned: {fact_text}",
+    "store_fact.correctional_store": "Learned correction: {fact_text}",
+    "store_fact.declarative_ack": "Noted.",
+    "weather_lookup.clarify": "What location should I use for the weather lookup?",
+    "weather_lookup.current_location": "{tool_result}",
+    "weather_lookup.explicit_location": "{tool_result}",
+    "web_research_family.research_prompt": "{tool_result}",
+    "web_research_family.deep_search": "{tool_result}",
+    "name_origin.story_known": "{reply_text}",
+    "name_origin.story_missing": "{reply_text}",
+    "name_origin.full_story": "{reply_text}",
+    "identity_history.name_origin": "{reply_text}",
+    "identity_history.creator_question": "{reply_text}",
+    "identity_history.history_recall": "{reply_text}",
+    "last_question.recall": "{reply_text}",
+    "last_question.empty": "{reply_text}",
+    "rules.list": "{reply_text}",
+    "open_probe.clarification": "{reply_text}",
+    "open_probe.safe_fallback": "{reply_text}",
+    "turn.truthful_limit": "{reply_text}",
+    "retrieval_followup.selected_result": "{reply_text}",
+    "retrieval_followup.continued_results": "{reply_text}",
+    "retrieval_followup.meta_summary": "{reply_text}",
+    "retrieval_followup.guidance": "{reply_text}",
+}
+
+
+def render_reply(outcome: Optional[dict]) -> str:
+    payload = outcome if isinstance(outcome, dict) else {}
+    contract = str(payload.get("reply_contract") or "").strip()
+    if not contract:
+        return "Internal reply error - missing contract."
+    template = REPLY_TEMPLATES.get(contract)
+    if not template:
+        return "Internal reply error - missing template."
+    try:
+        return template.format(**payload)
+    except Exception:
+        return "Internal reply error - invalid template data."
+
+
+def _attach_reply_outcome(result_payload: Optional[dict], outcome: Optional[dict]) -> None:
+    if not isinstance(result_payload, dict) or not isinstance(outcome, dict):
+        return
+    result_payload["reply_contract"] = str(outcome.get("reply_contract") or "")
+    result_payload["reply_outcome"] = dict(outcome)
+
+
+def _classify_set_location_outcome(intent_result: dict, user_text: str = "") -> dict[str, object]:
+    semantics = _resolve_set_location_semantics(intent_result, user_text)
+    payload = intent_result if isinstance(intent_result, dict) else {}
+    location_value = str(semantics.get("location_value") or "").strip()
+    if not location_value:
+        return {
+            "intent": "set_location",
+            "kind": "missing_value",
+            "reply_contract": "set_location.missing_value",
+            "location_value": "",
+            "location_kind": str(semantics.get("location_kind") or "").strip().lower(),
+            "location_ack_kind": str(semantics.get("location_ack_kind") or "").strip().lower(),
+            "user_commitment": "none",
+            "state_delta": {},
+        }
+
+    location_kind = str(semantics.get("location_kind") or "place").strip().lower()
+    ack_kind = str(semantics.get("location_ack_kind") or "confirmed_location").strip().lower()
+    rule_name = str(payload.get("rule_name") or "").strip().lower()
+    user_commitment = "implied" if rule_name == "set_location_zip" else "explicit"
+    outcome_kind = "observed_zip" if location_kind == "zip" or ack_kind == "fact_only" else "explicit_location"
+    return {
+        "intent": "set_location",
+        "kind": outcome_kind,
+        "reply_contract": f"set_location.{outcome_kind}",
+        "location_value": location_value,
+        "location_kind": location_kind,
+        "location_ack_kind": ack_kind,
+        "user_commitment": user_commitment,
+        "state_delta": {"location": location_value},
+    }
+
+
+def _classify_correction_outcome(
+    *,
+    correction_text: str,
+    correction_value: str,
+    last_assistant: str,
+    pending_followup: bool,
+    learned_fact: bool = False,
+    learned_message: str = "",
+    replacement_applied: bool = False,
+    replacement_pending: bool = False,
+) -> dict[str, object]:
+    normalized_value = str(correction_value or "").strip()
+    if learned_fact:
+        correction_kind = "identity_correction"
+        kind = "identity_correction"
+        reply_contract = "correction.identity_correction"
+    elif replacement_applied:
+        correction_kind = "fact_replacement"
+        kind = "followup_replacement" if pending_followup else "explicit_replacement"
+        reply_contract = "correction.replacement_applied"
+    elif replacement_pending:
+        correction_kind = "simple_negation"
+        kind = "pending_replacement"
+        reply_contract = "correction.pending_replacement"
+    elif last_assistant:
+        correction_kind = "simple_negation"
+        kind = "pending_replacement"
+        reply_contract = "correction.pending_replacement"
+    else:
+        correction_kind = "simple_negation"
+        kind = "recorded_only"
+        reply_contract = "correction.recorded"
+    return {
+        "intent": "apply_correction",
+        "kind": kind,
+        "correction_kind": correction_kind,
+        "reply_contract": reply_contract,
+        "correction_text": str(correction_text or "").strip(),
+        "correction_value": normalized_value,
+        "learned_message": str(learned_message or "").strip(),
+        "target_text": str(last_assistant or "").strip(),
+        "pending_followup": bool(pending_followup),
+        "state_delta": {"kind": "correction_pending", "target": str(last_assistant or "").strip()} if kind == "pending_replacement" and last_assistant else {},
+    }
+
+
+def _classify_store_fact_outcome(
+    intent_result: dict,
+    user_text: str = "",
+    *,
+    source: str = "intent",
+    storage_performed: bool = False,
+) -> dict[str, object]:
+    payload = intent_result if isinstance(intent_result, dict) else {}
+    fact_text = str(payload.get("fact_text") or user_text).strip()
+    requested_kind = str(payload.get("store_fact_kind") or "").strip().lower()
+    if requested_kind not in {"explicit_store", "prompted_store", "correctional_store", "declarative_ack"}:
+        requested_kind = "declarative_ack" if source == "declarative" else "explicit_store"
+    user_commitment = str(payload.get("user_commitment") or "").strip().lower()
+    if user_commitment not in {"explicit", "implied", "none"}:
+        user_commitment = "implied" if source == "declarative" else "explicit"
+    if not fact_text:
+        return {
+            "intent": "store_fact",
+            "kind": "missing_value",
+            "reply_contract": "store_fact.missing_value",
+            "fact_text": "",
+            "user_commitment": "none",
+            "storage_performed": False,
+            "memory_kind": str(payload.get("memory_kind") or "user_fact").strip() or "user_fact",
+            "state_delta": {},
+        }
+
+    outcome_kind = requested_kind
+    reply_contract = f"store_fact.{outcome_kind}"
+    if outcome_kind != "declarative_ack" and not storage_performed:
+        outcome_kind = "declarative_ack"
+        reply_contract = "store_fact.declarative_ack"
+
+    return {
+        "intent": "store_fact",
+        "kind": outcome_kind,
+        "reply_contract": reply_contract,
+        "fact_text": fact_text,
+        "user_commitment": user_commitment,
+        "storage_performed": bool(storage_performed),
+        "memory_kind": str(payload.get("memory_kind") or ("fact" if source == "declarative" else "user_fact")).strip() or ("fact" if source == "declarative" else "user_fact"),
+        "state_delta": {},
+    }
+
+
+def _classify_weather_lookup_outcome(intent_result: dict) -> dict[str, object]:
+    payload = intent_result if isinstance(intent_result, dict) else {}
+    weather_mode = str(payload.get("weather_mode") or "clarify").strip().lower() or "clarify"
+    next_state = payload.get("next_state") if isinstance(payload.get("next_state"), dict) else None
+    location_value = str(payload.get("location_value") or "").strip()
+    if weather_mode == "current_location":
+        return {
+            "intent": "weather_lookup",
+            "kind": "current_location",
+            "reply_contract": "weather_lookup.current_location",
+            "weather_mode": weather_mode,
+            "location_value": "",
+            "requires_tool": True,
+            "pending_action": None,
+            "next_state": next_state,
+            "state_delta": next_state or {},
+        }
+    if weather_mode == "explicit_location" and location_value:
+        return {
+            "intent": "weather_lookup",
+            "kind": "explicit_location",
+            "reply_contract": "weather_lookup.explicit_location",
+            "weather_mode": weather_mode,
+            "location_value": location_value,
+            "requires_tool": True,
+            "pending_action": None,
+            "next_state": next_state,
+            "state_delta": next_state or {},
+        }
+    return {
+        "intent": "weather_lookup",
+        "kind": "clarify",
+        "reply_contract": "weather_lookup.clarify",
+        "weather_mode": "clarify",
+        "location_value": "",
+        "requires_tool": False,
+        "pending_action": make_pending_weather_action(),
+        "next_state": next_state,
+        "state_delta": next_state or {},
+    }
+
+
+def _execute_weather_lookup_outcome(weather_outcome: dict[str, object]) -> tuple[str, Optional[dict], dict[str, object]]:
+    outcome = dict(weather_outcome or {})
+    weather_mode = str(outcome.get("weather_mode") or "clarify").strip().lower() or "clarify"
+    next_state = outcome.get("next_state") if isinstance(outcome.get("next_state"), dict) else None
+    if weather_mode == "clarify":
+        return render_reply(outcome), next_state, outcome
+
+    if weather_mode == "current_location":
+        tool_result = execute_planned_action("weather_current_location")
+        next_state = _make_weather_result_state(weather_mode=weather_mode, tool_result=str(tool_result or ""))
+        outcome["next_state"] = next_state
+        outcome["state_delta"] = next_state
+        outcome["tool_result"] = str(tool_result or "")
+        return render_reply(outcome), next_state, outcome
+
+    if weather_mode == "explicit_location":
+        location_value = str(outcome.get("location_value") or "").strip()
+        if not location_value:
+            fallback = _classify_weather_lookup_outcome({"weather_mode": "clarify", "next_state": next_state})
+            return render_reply(fallback), next_state, fallback
+        tool_result = execute_planned_action("weather_location", [location_value])
+        next_state = _make_weather_result_state(
+            weather_mode=weather_mode,
+            location_value=location_value,
+            tool_result=str(tool_result or ""),
+        )
+        outcome["next_state"] = next_state
+        outcome["state_delta"] = next_state
+        outcome["tool_result"] = str(tool_result or "")
+        return render_reply(outcome), next_state, outcome
+
+    fallback = _classify_weather_lookup_outcome({"weather_mode": "clarify", "next_state": next_state})
+    return render_reply(fallback), next_state, fallback
+
+
+def _classify_name_origin_outcome(intent_result: dict) -> dict[str, object]:
+    payload = intent_result if isinstance(intent_result, dict) else {}
+    query_kind = str(payload.get("name_origin_query_kind") or "source_recall").strip().lower() or "source_recall"
+    assistant_name = str(get_learned_fact("assistant_name", "Nova") or "Nova").strip() or "Nova"
+    developer_name = str(get_learned_fact("developer_name", "Gustavo Uribe") or "Gustavo Uribe").strip() or "Gustavo Uribe"
+    developer_nickname = str(get_learned_fact("developer_nickname", "Gus") or developer_name).strip() or developer_name
+    story = get_name_origin_story().strip()
+    if story:
+        if query_kind == "why_called":
+            low_story = story.lower()
+            if "was given its name" in low_story and "creator" in low_story:
+                reply_text = story
+            else:
+                reply_text = f"{assistant_name} was given its name by its creator, {developer_nickname}. {story}"
+        else:
+            reply_text = story
+        contract = "name_origin.full_story" if query_kind == "full_story" else "name_origin.story_known"
+        outcome_kind = "full_story" if query_kind == "full_story" else "story_known"
+    else:
+        if query_kind == "full_story":
+            reply_text = "I do not have a saved full name-origin story yet. You can teach me with: remember this ..."
+        else:
+            reply_text = "I do not have a saved name-origin story yet. You can teach me with: remember this ..."
+        contract = "name_origin.story_missing"
+        outcome_kind = "story_missing"
+    return {
+        "intent": "name_origin",
+        "kind": outcome_kind,
+        "query_kind": query_kind,
+        "reply_contract": contract,
+        "reply_text": reply_text,
+        "story_known": bool(story),
+        "story_text": story,
+        "state_delta": {},
+    }
+
+
+def _execute_identity_history_outcome(
+    rule_result: dict,
+    current_state: Optional[dict],
+    text: str,
+    *,
+    turns: Optional[list[tuple[str, str]]] = None,
+) -> tuple[str, Optional[dict], dict[str, object]]:
+    payload = rule_result if isinstance(rule_result, dict) else {}
+    outcome_kind = str(payload.get("identity_history_kind") or "history_recall").strip().lower() or "history_recall"
+    subject = str(payload.get("subject") or (current_state or {}).get("subject") or "developer").strip() or "developer"
+    state_kind = str((current_state or {}).get("kind") or "").strip()
+    normalized_text = _normalize_turn_text(text)
+
+    if isinstance(current_state, dict):
+        next_state = current_state
+    elif subject == "developer" and _speaker_matches_developer():
+        next_state = _make_conversation_state("developer_identity", subject="developer")
+    else:
+        next_state = _make_conversation_state("identity_profile", subject=subject)
+
+    if outcome_kind == "creator_question":
+        reply_text = hard_answer(text) or _developer_profile_reply(turns=turns, user_text=text)
+        next_state = _make_conversation_state("identity_profile", subject="developer")
+        subject = "developer"
+    elif outcome_kind == "name_origin":
+        if state_kind == "developer_identity" or (subject == "developer" and _speaker_matches_developer()):
+            reply_text = _developer_identity_followup_reply(turns=turns, name_focus=True)
+            next_state = _make_conversation_state("developer_identity", subject="developer")
+            subject = "developer"
+        elif state_kind == "identity_profile":
+            reply_text = _identity_name_followup_reply(subject)
+        else:
+            name_origin_outcome = _classify_name_origin_outcome({
+                "name_origin_query_kind": str(payload.get("name_origin_query_kind") or "source_recall"),
+            })
+            reply_text = render_reply(name_origin_outcome)
+    else:
+        build_history_prompt = any(
+            phrase in normalized_text
+            for phrase in (
+                "how did he develop you",
+                "how did he developed you",
+                "how did he build you",
+                "how was he able to develop you",
+            )
+        )
+        if build_history_prompt:
+            reply_text = _developer_profile_reply(turns=turns, user_text=text)
+            next_state = _make_conversation_state("identity_profile", subject="developer")
+            subject = "developer"
+        elif state_kind == "developer_identity" or (subject == "developer" and _speaker_matches_developer()):
+            reply_text = _developer_identity_followup_reply(turns=turns, name_focus=False)
+            next_state = _make_conversation_state("developer_identity", subject="developer")
+            subject = "developer"
+        else:
+            reply_text = _identity_profile_followup_reply(subject, turns=turns)
+
+    outcome = {
+        "intent": "identity_history_family",
+        "kind": outcome_kind,
+        "reply_contract": f"identity_history.{outcome_kind}",
+        "reply_text": str(reply_text or "").strip(),
+        "subject": subject,
+        "state_delta": dict(next_state or {}) if isinstance(next_state, dict) else {},
+    }
+    return outcome["reply_text"], next_state, outcome
+
+
+def _open_probe_reply(text: str, turns: Optional[list[tuple[str, str]]] = None) -> tuple[str, str]:
+    normalized = _normalize_turn_text(text)
+    normalized_key = re.sub(r"[^a-z0-9 ]+", " ", normalized)
+    normalized_key = re.sub(r"\s+", " ", normalized_key).strip()
+    if normalized_key in {"can you help me a little here", "can you help me here"}:
+        return (
+            "What kind of help do you want?",
+            "safe_fallback",
+        )
+    if normalized_key in {"what do you think then", "what now", "what next", "okay so what next", "where does that leave us"}:
+        return (
+            "I don't have enough context to answer that yet. Tell me the topic or decision you want help with, and I'll stay on it.",
+            "safe_fallback",
+        )
+    if any(cue in normalized for cue in ("what are you talking about", "what are you talking", "what ?", "what?")):
+        last_assistant = ""
+        for role, txt in reversed(list(turns or [])):
+            if str(role or "").strip().lower() == "assistant":
+                last_assistant = str(txt or "").strip()
+                break
+        if last_assistant and any(token in last_assistant.lower() for token in ("allowlisted references", "web lookup", "web research")):
+            return (
+                "You're right. That response drifted into web lookup when you were asking a direct chat question. Ask it again and I'll answer it directly.",
+                "clarification",
+            )
+        return (
+            "You're right. I should stay with the current chat instead of jumping to web lookup for that kind of question.",
+            "clarification",
+        )
+    return (
+        _truthful_limit_reply(text),
+        "safe_fallback",
+    )
+
+
+def _truthful_limit_reply(
+    text: str = "",
+    *,
+    limitation: str = "cannot_verify",
+    include_next_step: bool = True,
+) -> str:
+    normalized = _normalize_turn_text(text)
+    limitation_kind = str(limitation or "cannot_verify").strip().lower() or "cannot_verify"
+    if limitation_kind == "cannot_do":
+        base = "I can't do that with the tools or permissions I have available right now, and I don't want to pretend I can."
+    else:
+        base = "I don't know that based on what I can verify right now, and I don't want to make it up."
+
+    learning_invitation = "If you know the answer or want to correct me, tell me and I'll store it so I do better next time."
+
+    if not include_next_step:
+        return base + " " + learning_invitation
+    if _looks_like_mixed_info_request_turn(normalized):
+        return base + " Please split the request or tell me which part you want me to handle first. " + learning_invitation
+    if _is_explicit_request(normalized) or "?" in normalized:
+        return base + " If you want, I can ask a clarifying question or use a grounded source or tool if one is available. " + learning_invitation
+    return base + " If you want, I can stay on the current thread, ask a clarifying question, or use a grounded source or tool if one is available. " + learning_invitation
+
+
+def _attach_learning_invitation(reply_text: str, *, truthful_limit: bool = False) -> str:
+    reply = str(reply_text or "").strip()
+    if not reply:
+        return reply
+
+    normalized = _normalize_turn_text(reply)
+    if "correct me" in normalized and ("store it" in normalized or "do better next time" in normalized):
+        return reply
+
+    if not truthful_limit:
+        return reply
+
+    suffix = "If you know the answer or want to correct me, tell me and I'll store it so I do better next time."
+    return reply + " " + suffix
+
+
+def _truthful_limit_outcome(
+    text: str = "",
+    *,
+    limitation: str = "cannot_verify",
+) -> dict[str, str]:
+    return {
+        "intent": "truthful_limit",
+        "kind": str(limitation or "cannot_verify").strip().lower() or "cannot_verify",
+        "reply_contract": "turn.truthful_limit",
+        "reply_text": _truthful_limit_reply(text, limitation=limitation),
+    }
+
+
+def _last_question_recall_reply(text: str, turns: Optional[list[tuple[str, str]]] = None) -> tuple[str, str]:
+    last_question = _extract_last_user_question(list(turns or []), text)
+    if last_question:
+        return f"Your last question before this one was: {last_question}", "recall"
+    return "I don't have an earlier question in this active chat session.", "empty"
+
+
+def _execute_retrieval_followup_outcome(state: dict, text: str) -> tuple[str, Optional[dict], dict[str, object]]:
+    current_state = state if isinstance(state, dict) else {}
+    urls = current_state.get("urls") if isinstance(current_state.get("urls"), list) else []
+    query = str(current_state.get("query") or "").strip()
+    source = str(current_state.get("subject") or "retrieval").strip().lower()
+    result_count = max(0, int(current_state.get("result_count", 0) or 0))
+    index = _extract_retrieval_result_index(text)
+
+    if _is_retrieval_meta_question(text):
+        reply_text = _retrieval_meta_reply(current_state)
+        outcome = {
+            "intent": "retrieval_followup",
+            "kind": "meta_summary",
+            "reply_contract": "retrieval_followup.meta_summary",
+            "reply_text": reply_text,
+            "query": query,
+            "result_count": result_count,
+            "selected_index": None,
+            "state_delta": current_state,
+        }
+        return render_reply(outcome), current_state, outcome
+
+    if index is not None and 1 <= index <= len(urls):
+        selected_url = str(urls[index - 1])
+        result = tool_web_gather(selected_url)
+        next_state = _make_retrieval_conversation_state("web_gather", selected_url, result) or current_state
+        outcome = {
+            "intent": "retrieval_followup",
+            "kind": "selected_result",
+            "reply_contract": "retrieval_followup.selected_result",
+            "reply_text": str(result or ""),
+            "query": query,
+            "result_count": result_count,
+            "selected_index": index,
+            "selected_url": selected_url,
+            "state_delta": next_state,
+        }
+        return render_reply(outcome), next_state, outcome
+
+    if source == "web_research" and _looks_like_retrieval_followup(text):
+        result = tool_web_research("", continue_mode=True)
+        if result and not result.lower().startswith("no active web research session"):
+            next_state = _make_retrieval_conversation_state("web_research", WEB_RESEARCH_LAST_QUERY, result) or current_state
+            outcome = {
+                "intent": "retrieval_followup",
+                "kind": "continued_results",
+                "reply_contract": "retrieval_followup.continued_results",
+                "reply_text": str(result or ""),
+                "query": str(WEB_RESEARCH_LAST_QUERY or query).strip(),
+                "result_count": len(WEB_RESEARCH_LAST_RESULTS) if WEB_RESEARCH_LAST_RESULTS else result_count,
+                "selected_index": None,
+                "state_delta": next_state,
+            }
+            return render_reply(outcome), next_state, outcome
+
+    parts = []
+    if query:
+        parts.append(f"Continuing from your last retrieval for '{query}'.")
+    else:
+        parts.append("Continuing from your last retrieval thread.")
+    if result_count > 0:
+        parts.append(f"I have {result_count} source(s) in the current retrieval context.")
+    if urls:
+        parts.append("You can ask me about the first result, the second source, or tell me to gather one directly.")
+    else:
+        parts.append("If you want, I can run a more specific search or gather a particular source.")
+    reply_text = " ".join(parts)
+    outcome = {
+        "intent": "retrieval_followup",
+        "kind": "guidance",
+        "reply_contract": "retrieval_followup.guidance",
+        "reply_text": reply_text,
+        "query": query,
+        "result_count": result_count,
+        "selected_index": index,
+        "state_delta": current_state,
+    }
+    return render_reply(outcome), current_state, outcome
+
+
+def _classify_web_research_outcome(
+    intent_result: dict,
+    user_text: str = "",
+    *,
+    turns: Optional[list[tuple[str, str]]] = None,
+) -> dict[str, object]:
+    payload = intent_result if isinstance(intent_result, dict) else {}
+    request_kind = str(payload.get("web_request_kind") or "research_prompt").strip().lower() or "research_prompt"
+    tool_name = str(payload.get("tool_name") or "web_research").strip().lower() or "web_research"
+    query = str(payload.get("query") or "").strip()
+    if request_kind == "deep_search" and not query:
+        query = _infer_research_query_from_turns(list(turns or []))
+    if not query:
+        query = str(user_text or "").strip()
+    return {
+        "intent": "web_research_family",
+        "kind": request_kind,
+        "reply_contract": f"web_research_family.{request_kind}",
+        "tool_name": tool_name,
+        "query": query,
+        "requires_tool": True,
+        "state_delta": {},
+    }
 
 
 def start_action_ledger_record(
@@ -803,6 +2879,9 @@ def start_action_ledger_record(
         "tool_args": {},
         "tool_result": "",
         "final_answer": "",
+        "reply_contract": "",
+        "reply_outcome": {},
+        "turn_acts": [],
         "grounded": False,
         "active_subject": str(active_subject or "").strip(),
         "continuation_used": False,
@@ -894,6 +2973,9 @@ def finalize_action_ledger_record(
     intent: str = "",
     active_subject: str = "",
     continuation_used: Optional[bool] = None,
+    reply_contract: str = "",
+    reply_outcome: Optional[dict] = None,
+    routing_decision: Optional[dict] = None,
     reflection_payload: Optional[dict] = None,
 ) -> Optional[Path]:
     rec = dict(record or {})
@@ -907,6 +2989,19 @@ def finalize_action_ledger_record(
     rec["tool_args"] = args if isinstance(args, dict) else {}
     rec["tool_result"] = str(tool_result or rec.get("tool_result") or "")
     rec["final_answer"] = str(final_answer or "")
+    rec["reply_contract"] = str(reply_contract or rec.get("reply_contract") or "").strip()
+    outcome_payload = reply_outcome if isinstance(reply_outcome, dict) else rec.get("reply_outcome")
+    rec["reply_outcome"] = dict(outcome_payload) if isinstance(outcome_payload, dict) else {}
+    acts = rec.get("turn_acts")
+    rec["turn_acts"] = [str(item).strip() for item in acts if str(item).strip()] if isinstance(acts, list) else []
+    finalized_routing_decision = _finalize_routing_decision(
+        routing_decision if isinstance(routing_decision, dict) else rec.get("routing_decision"),
+        planner_decision=rec.get("planner_decision") or "",
+        reply_contract=rec.get("reply_contract") or "",
+        reply_outcome=rec.get("reply_outcome") if isinstance(rec.get("reply_outcome"), dict) else {},
+    )
+    if finalized_routing_decision:
+        rec["routing_decision"] = finalized_routing_decision
     rec["active_subject"] = str(active_subject or rec.get("active_subject") or "").strip()
     rec["continuation_used"] = bool(rec.get("continuation_used", False)) if continuation_used is None else bool(continuation_used)
     if grounded is None:
@@ -1045,8 +3140,8 @@ def _is_assistant_name_query(text: str) -> bool:
         "what is your name",
         "what's your name",
         "are you sure that is your name",
-        "your name is nova",
         "your name is not",
+        "is your name",
     ]
     if any(c in low for c in cues):
         return True
@@ -1092,6 +3187,9 @@ def _is_developer_full_name_query(text: str) -> bool:
     low = (text or "").strip().lower()
     if "full name" not in low:
         return False
+    query_cues = ["what is", "what's", "tell me", "do you know", "can you tell me"]
+    if "?" not in text and not any(cue in low for cue in query_cues):
+        return False
     cues = ["developer", "gus", "nickname", "nick name", "his full name"]
     return any(c in low for c in cues)
 
@@ -1105,13 +3203,19 @@ def _developer_full_name_reply() -> str:
 
 
 def _is_location_request(user_text: str) -> bool:
-    t = _normalize_turn_text(user_text)
-    triggers = [
-        "where is nova", "where are you", "your location", "what is your location",
-        "what is your current location", "what is your current physical location",
-        "where are you located", "where is nova located",
-    ]
-    return any(x in t for x in triggers)
+    normalized = _normalize_turn_text(user_text)
+    if not normalized:
+        return False
+    return any(cue in normalized for cue in (
+        "where is nova",
+        "where are you",
+        "your location",
+        "what is your location",
+        "what is your current location",
+        "what is your current physical location",
+        "where are you located",
+        "where is nova located",
+    ))
 
 
 def _location_reply() -> str:
@@ -1165,16 +3269,8 @@ def _session_recap_reply(turns: list[tuple[str, str]], current_text: str) -> str
 
 
 def _is_deep_search_followup_request(text: str) -> bool:
-    low = (text or "").strip().lower()
-    cues = [
-        "deep search",
-        "dig up",
-        "find out what else",
-        "more information",
-        "more info",
-        "search more",
-    ]
-    return any(c in low for c in cues)
+    del text
+    return False
 
 
 def _infer_research_query_from_turns(turns: list[tuple[str, str]]) -> str:
@@ -1376,7 +3472,36 @@ def load_policy() -> dict:
     patch.setdefault("enabled", True)
     patch.setdefault("allow_force", False)
     patch.setdefault("strict_manifest", True)
+    patch.setdefault("behavioral_check", True)
+    patch.setdefault("behavioral_check_timeout_sec", 600)
     data["patch"] = patch
+
+    safety_envelope = data.get("safety_envelope") if isinstance(data.get("safety_envelope"), dict) else {}
+    safety_envelope.setdefault("enabled", True)
+    safety_envelope.setdefault("mode", "observe")
+    safety_envelope.setdefault("replay_threshold", 1.0)
+    safety_envelope.setdefault("novelty_min", 0.35)
+    safety_envelope.setdefault("entropy_min", 2.8)
+    safety_envelope.setdefault("human_veto_first_n", 3)
+    safety_envelope.setdefault("auto_demote_threshold", 0.90)
+    safety_envelope.setdefault("max_candidates_per_cycle", 3)
+    safety_envelope.setdefault("full_regression_required", False)
+    safety_envelope.setdefault("quarantine_root", str(BASE_DIR / "runtime" / "test_sessions" / "quarantine"))
+    safety_envelope.setdefault("pending_review_root", str(BASE_DIR / "runtime" / "test_sessions" / "pending_review"))
+    data["safety_envelope"] = safety_envelope
+
+    kidney = data.get("kidney") if isinstance(data.get("kidney"), dict) else {}
+    kidney.setdefault("enabled", True)
+    kidney.setdefault("mode", "observe")
+    kidney.setdefault("definition_max_age_days", 7)
+    kidney.setdefault("definition_novelty_min", 0.4)
+    kidney.setdefault("quarantine_max_age_hours", 48)
+    kidney.setdefault("preview_max_age_days", 3)
+    kidney.setdefault("snapshot_max_age_days", 30)
+    kidney.setdefault("temp_max_age_days", 14)
+    kidney.setdefault("temp_max_total_mb", 500)
+    kidney.setdefault("protect_patterns", [])
+    data["kidney"] = kidney
 
     return data
 
@@ -1464,7 +3589,7 @@ def execute_registered_tool(tool_name: str, args: dict, *, is_admin: bool = Fals
     
 def _research_handlers() -> dict[str, object]:
     return {
-        "web_fetch": tool_web,
+        "web_fetch": tool_web_fetch,
         "web_search": tool_web_search,
         "web_research": tool_web_research,
         "web_gather": tool_web_gather,
@@ -1686,6 +3811,12 @@ def _mentions_location_phrase(text: str) -> bool:
 
 BROWNSVILLE_LAT = 25.9017
 BROWNSVILLE_LON = -97.4975
+_LOCATION_HINT_COORDS = {
+    "78521": (BROWNSVILLE_LAT, BROWNSVILLE_LON),
+}
+_LOCATION_HINT_LABELS = {
+    "78521": "Brownsville, TX",
+}
 
 
 def _parse_lat_lon(text: str) -> Optional[tuple[float, float]]:
@@ -1709,6 +3840,9 @@ def _coords_for_location_hint(location: str) -> Optional[tuple[float, float]]:
     parsed = _parse_lat_lon(loc)
     if parsed:
         return parsed
+
+    if loc in _LOCATION_HINT_COORDS:
+        return _LOCATION_HINT_COORDS[loc]
 
     if "brownsville" in loc:
         return (BROWNSVILLE_LAT, BROWNSVILLE_LON)
@@ -1797,6 +3931,11 @@ def set_location_text(value: str, input_source: str = "typed") -> str:
         pass
 
     try:
+        mem_add("user_fact", input_source, f"My location is {cleaned}")
+    except Exception:
+        pass
+
+    try:
         coords = _coords_for_location_hint(cleaned)
         if coords:
             lat, lon = coords
@@ -1830,39 +3969,171 @@ def _store_location_fact_reply(
     input_source: str = "typed",
     pending_action: Optional[dict] = None,
 ) -> str:
-    awaiting_weather_location = (
-        isinstance(pending_action, dict)
-        and str(pending_action.get("kind") or "") == "weather_lookup"
-        and str(pending_action.get("status") or "") == "awaiting_location"
-    )
-    if awaiting_weather_location:
+    action = pending_action if isinstance(pending_action, dict) else {}
+    if (
+        str(action.get("kind") or "") == "weather_lookup"
+        and str(action.get("status") or "") == "awaiting_location"
+    ):
         return ""
-    location_fact = _extract_location_fact(text)
-    if not location_fact:
+
+    location_value = _extract_location_fact(text)
+    if not location_value:
         return ""
-    set_location_text(location_fact, input_source=input_source)
+
+    try:
+        set_location_text(location_value, input_source=input_source)
+    except Exception:
+        return ""
     return "Noted."
 
 
 def _store_declarative_fact_reply(text: str, *, input_source: str = "typed") -> str:
-    if not _is_declarative_info(text):
+    outcome = _store_declarative_fact_outcome(text, input_source=input_source)
+    if not isinstance(outcome, dict):
         return ""
-    if mem_should_store(text):
-        mem_add("fact", input_source, text)
-    return "Noted."
+    return render_reply(outcome)
+
+
+def _store_declarative_fact_outcome(text: str, *, input_source: str = "typed") -> Optional[dict[str, object]]:
+    fact_text = str(text or "").strip()
+    if not fact_text or not _is_declarative_info(fact_text):
+        return None
+
+    storage_performed = False
+    try:
+        if mem_should_store(fact_text):
+            mem_add("fact", input_source, fact_text)
+            storage_performed = True
+    except Exception:
+        storage_performed = False
+
+    return _classify_store_fact_outcome(
+        {
+            "fact_text": fact_text,
+            "store_fact_kind": "declarative_ack",
+            "user_commitment": "implied",
+            "memory_kind": "fact",
+        },
+        fact_text,
+        source="declarative",
+        storage_performed=storage_performed,
+    )
+
+
+def _is_saved_location_weather_query(text: str) -> bool:
+    normalized = _normalize_turn_text(text).strip(" .,!?")
+    if not normalized:
+        return False
+    return normalized in {
+        "weather",
+        "weather now",
+        "weather current",
+        "weather today",
+        "current weather",
+        "what's the weather",
+        "what is the weather",
+        "what is the weather now",
+        "what's the weather now",
+    }
 
 
 def _weather_for_saved_location() -> str:
-    saved_text = get_saved_location_text()
-    if saved_text:
-        return tool_weather(saved_text)
+    saved_location = str(get_saved_location_text() or "").strip()
+    if not saved_location:
+        return ""
+    try:
+        return str(tool_weather(saved_location) or "")
+    except Exception:
+        return ""
 
+
+def _extract_weather_source_host(tool_result: str) -> str:
+    text = str(tool_result or "").strip()
+    if not text:
+        return ""
+    match = re.search(r"\[source:\s*([^\]]+)\]", text, flags=re.I)
+    if not match:
+        return ""
+    return str(match.group(1) or "").strip().lower()
+
+
+def _weather_location_label(weather_mode: str, location_value: str = "") -> str:
+    mode = str(weather_mode or "").strip().lower()
+    explicit_value = str(location_value or "").strip()
+    if mode == "explicit_location" and explicit_value:
+        return explicit_value
+    saved_location = str(get_saved_location_text() or "").strip()
+    if saved_location:
+        return saved_location
     coords = _coords_from_saved_location()
     if coords:
-        lat, lon = coords
-        return tool_weather(f"{lat},{lon}")
+        return f"{coords[0]},{coords[1]}"
+    return explicit_value
 
-    return _need_confirmed_location_message() + " You can tell me: 'My location is ...'"
+
+def _make_weather_result_state(*, weather_mode: str, location_value: str = "", tool_result: str = "") -> dict:
+    return _make_conversation_state(
+        "weather_result",
+        subject="weather",
+        weather_mode=str(weather_mode or "").strip().lower(),
+        location_value=_weather_location_label(weather_mode, location_value),
+        source_host=_extract_weather_source_host(tool_result) or str(_weather_source_host() or "").strip().lower(),
+        tool_result=str(tool_result or "").strip(),
+    )
+
+
+def _is_weather_meta_followup(text: str) -> bool:
+    normalized = _normalize_turn_text(text)
+    if not normalized or "weather" not in normalized:
+        return False
+    return any(phrase in normalized for phrase in (
+        "how did you get the weather",
+        "how did you get that weather",
+        "how did you get the weather information",
+        "where did you get the weather",
+        "where did you get that weather",
+        "what source did you use for the weather",
+        "weather tool",
+    ))
+
+
+def _is_weather_status_followup(text: str) -> bool:
+    normalized = _normalize_turn_text(text)
+    if not normalized or "weather" not in normalized:
+        return False
+    return any(phrase in normalized for phrase in (
+        "what happened to my weather",
+        "what happened to the weather",
+        "what happened to that weather",
+        "what happened to my weather information",
+        "what happened to the weather information",
+        "did you get the weather",
+        "did you get my weather",
+    ))
+
+
+def _weather_meta_reply(state: dict) -> str:
+    source_host = str(state.get("source_host") or "").strip()
+    location_value = str(state.get("location_value") or "").strip()
+    if source_host and location_value:
+        return f"I got that weather information from the weather tool using {source_host} for {location_value}."
+    if source_host:
+        return f"I got that weather information from the weather tool using {source_host}."
+    if location_value:
+        return f"I got that weather information from the weather tool for {location_value}."
+    return "I got that weather information from the weather tool."
+
+
+def _weather_status_reply(state: dict) -> str:
+    location_value = str(state.get("location_value") or "").strip()
+    tool_result = str(state.get("tool_result") or "").strip()
+    if tool_result and location_value:
+        return f"The last weather lookup I handled was for {location_value}. Result: {tool_result}"
+    if tool_result:
+        return f"The last weather lookup I handled returned: {tool_result}"
+    if location_value:
+        return f"The last weather lookup I handled was for {location_value}, but I do not have the final result cached here."
+    return "I do not have a completed weather result cached for this thread yet."
 
 
 def _is_location_recall_query(text: str) -> bool:
@@ -1870,9 +4141,13 @@ def _is_location_recall_query(text: str) -> bool:
     if not t:
         return False
     cues = [
+        "where am i",
+        "where am i located",
+        "what's my location",
         "recall my location",
         "remember my location",
         "what is my location",
+        "where is my location",
         "do you know my location",
         "can you recall my location",
         "can you remember my location",
@@ -1883,8 +4158,60 @@ def _is_location_recall_query(text: str) -> bool:
 def _location_recall_reply() -> str:
     preview = get_saved_location_text()
     if preview:
+        expanded = _LOCATION_HINT_LABELS.get(str(preview or "").strip().lower())
+        if expanded and expanded.lower() not in str(preview or "").strip().lower():
+            return f"Your saved location is {preview} ({expanded})."
         return f"Your saved location is {preview}."
     return "I don't have a stored location yet. You can tell me: 'My location is ...'"
+
+
+def _is_location_name_query(text: str) -> bool:
+    normalized = _normalize_turn_text(text).strip(" .,!?")
+    if not normalized:
+        return False
+    explicit_cues = [
+        "give me the name to that location",
+        "give me the name of that location",
+        "whats the name of that location",
+        "what's the name of that location",
+        "what is the name of that location",
+        "what location is that",
+        "which location is that",
+        "what city is that zip",
+        "what city is that location",
+        "name of that location",
+        "name to that location",
+    ]
+    if any(cue in normalized for cue in explicit_cues):
+        return True
+    return "location" in normalized and "name" in normalized and _uses_prior_reference(normalized)
+
+
+def _location_name_reply() -> str:
+    preview = get_saved_location_text()
+    if not preview:
+        return "I don't have a stored location yet. You can tell me: 'My location is ...'"
+    expanded = _LOCATION_HINT_LABELS.get(str(preview or "").strip().lower())
+    if expanded:
+        return f"That location is {expanded}."
+    return f"The location I have saved is {preview}."
+
+
+def _handle_location_conversation_turn(
+    state: Optional[dict],
+    text: str,
+    turns: Optional[list[tuple[str, str]]] = None,
+) -> tuple[bool, str, Optional[dict], str]:
+    next_state = state if isinstance(state, dict) else _make_conversation_state("location_recall")
+    if _is_location_name_query(text):
+        return True, _location_name_reply(), next_state, "location_name"
+    if _is_location_recall_query(text):
+        return True, _location_recall_reply(), _make_conversation_state("location_recall"), "location_recall"
+    if _looks_like_contextual_followup(text) and (
+        _is_location_recall_state(state) or _looks_like_location_recall_followup(list(turns or []), text)
+    ):
+        return True, _location_recall_reply(), _make_conversation_state("location_recall"), "location_recall"
+    return False, "", next_state, ""
 
 
 def _make_conversation_state(kind: str, **data) -> dict:
@@ -1980,6 +4307,21 @@ def _looks_like_contextual_followup(text: str) -> bool:
     return len(normalized.split()) <= 4 and _uses_prior_reference(normalized)
 
 
+def _looks_like_contextual_continuation(text: str) -> bool:
+    normalized = _normalize_turn_text(text).strip(" .,!?")
+    return normalized in {
+        "what did you find",
+        "well what did you find",
+        "what else",
+        "anything else",
+        "go on",
+        "continue",
+        "ok and then",
+        "and then",
+        "and",
+    }
+
+
 def _looks_like_profile_followup(text: str) -> bool:
     normalized = _normalize_turn_text(text).strip(" .,!?")
     if not normalized:
@@ -1996,7 +4338,7 @@ def _looks_like_profile_followup(text: str) -> bool:
         "tell me more",
     }:
         return True
-    return len(normalized.split()) <= 5 and _uses_prior_reference(normalized)
+    return False
 
 
 def _is_retrieval_meta_question(text: str) -> bool:
@@ -2155,6 +4497,56 @@ def _make_retrieval_conversation_state(tool_name: str, query: str, tool_output: 
     return state
 
 
+def _load_generated_queue_payload(limit: int = 12) -> dict:
+    try:
+        import nova_http
+
+        payload = nova_http._generated_work_queue(int(limit or 12))
+        return payload if isinstance(payload, dict) else {}
+    except Exception:
+        return {}
+
+
+def _make_queue_status_conversation_state(tool_output: str) -> Optional[dict]:
+    if not str(tool_output or "").strip():
+        return None
+
+    queue = _load_generated_queue_payload(12)
+    if not queue:
+        return None
+
+    next_item = queue.get("next_item") if isinstance(queue.get("next_item"), dict) else {}
+    highest = next_item.get("highest_priority") if isinstance(next_item.get("highest_priority"), dict) else {}
+    return _make_conversation_state(
+        "queue_status",
+        subject="generated_work_queue",
+        count=int(queue.get("count", 0) or 0),
+        open_count=int(queue.get("open_count", 0) or 0),
+        green_count=int(queue.get("green_count", 0) or 0),
+        drift_count=int(queue.get("drift_count", 0) or 0),
+        warning_count=int(queue.get("warning_count", 0) or 0),
+        never_run_count=int(queue.get("never_run_count", 0) or 0),
+        next_item=dict(next_item),
+        next_file=str(next_item.get("file") or "").strip(),
+        next_family=str(next_item.get("family_id") or "").strip(),
+        next_status=str(next_item.get("latest_status") or "").strip(),
+        next_reason=str(next_item.get("opportunity_reason") or "").strip(),
+        next_report_path=str(next_item.get("latest_report_path") or "").strip(),
+        next_signal=str(highest.get("signal") or "").strip(),
+        next_urgency=str(highest.get("urgency") or "").strip(),
+        next_seam=str(highest.get("seam") or "").strip(),
+    )
+
+
+def _make_tool_conversation_state(tool_name: str, query: str, tool_output: str) -> Optional[dict]:
+    next_state = _make_retrieval_conversation_state(tool_name, query, tool_output)
+    if next_state is not None:
+        return next_state
+    if str(tool_name or "").strip().lower() == "queue_status":
+        return _make_queue_status_conversation_state(tool_output)
+    return None
+
+
 def _infer_post_reply_conversation_state(
     routed_text: str,
     *,
@@ -2170,7 +4562,7 @@ def _infer_post_reply_conversation_state(
         args_dict = tool_args if isinstance(tool_args, dict) else {}
         action_args = args_dict.get("args") if isinstance(args_dict.get("args"), list) else []
         action_query = str(action_args[0] if action_args else routed_text)
-        next_state = _make_retrieval_conversation_state(tool, action_query, tool_result)
+        next_state = _make_tool_conversation_state(tool, action_query, tool_result)
     if next_state is None:
         inferred_profile_state = _infer_profile_conversation_state(routed_text)
         if inferred_profile_state is not None:
@@ -2210,12 +4602,111 @@ def _retrieval_followup_reply(state: dict, text: str) -> tuple[str, Optional[dic
     return " ".join(parts), state
 
 
+def _is_queue_status_reason_followup(text: str) -> bool:
+    normalized = _normalize_turn_text(text).strip(" .,!?")
+    if not normalized:
+        return False
+    return any(
+        phrase in normalized
+        for phrase in (
+            "why is that the next item in the queue",
+            "why is that next in the queue",
+            "why is that next",
+            "why is that the next item",
+            "why is that next item",
+            "why that item",
+            "why this item",
+        )
+    )
+
+
+def _queue_status_reason_reply(state: dict) -> str:
+    next_file = str(state.get("next_file") or "").strip()
+    next_status = str(state.get("next_status") or "unknown").strip() or "unknown"
+    next_reason = str(state.get("next_reason") or "unknown").strip() or "unknown"
+    next_signal = str(state.get("next_signal") or "").strip()
+    next_urgency = str(state.get("next_urgency") or "").strip()
+    next_seam = str(state.get("next_seam") or "").strip()
+    next_family = str(state.get("next_family") or "").strip()
+
+    if not next_file:
+        return "There is no next open queue item right now because the generated work queue is clear."
+
+    parts = [f"{next_file} is next because it is still open with status {next_status} and reason {next_reason}."]
+    if next_signal:
+        signal_text = f"Its highest-priority signal is {next_signal}"
+        if next_urgency:
+            signal_text += f" at {next_urgency} urgency"
+        if next_seam:
+            signal_text += f" on seam {next_seam}"
+        parts.append(signal_text + ".")
+    if next_family:
+        parts.append(f"It currently leads the {next_family} family among open generated queue items.")
+    return " ".join(parts)
+
+
+def _is_queue_status_report_followup(text: str) -> bool:
+    normalized = _normalize_turn_text(text).strip(" .,!?")
+    if not normalized:
+        return False
+    return any(
+        phrase in normalized
+        for phrase in (
+            "show me the report path",
+            "what is the report path",
+            "where is the report",
+            "where is the latest report",
+            "show me the latest report",
+        )
+    )
+
+
+def _queue_status_report_reply(state: dict) -> str:
+    next_file = str(state.get("next_file") or "").strip()
+    report_path = str(state.get("next_report_path") or "").strip()
+    if not report_path:
+        if next_file:
+            return f"I don't have a saved report path yet for {next_file}."
+        return "I don't have a saved report path because there is no current open queue item."
+    if next_file:
+        return f"The latest report for {next_file} is at {report_path}"
+    return f"The latest queue report path is {report_path}"
+
+
+def _is_queue_status_seam_followup(text: str) -> bool:
+    normalized = _normalize_turn_text(text).strip(" .,!?")
+    if not normalized:
+        return False
+    return any(
+        phrase in normalized
+        for phrase in (
+            "what seam is it failing on",
+            "what seam is it on",
+            "which seam is failing",
+            "what seam",
+        )
+    )
+
+
+def _queue_status_seam_reply(state: dict) -> str:
+    next_file = str(state.get("next_file") or "").strip()
+    next_seam = str(state.get("next_seam") or "").strip()
+    next_signal = str(state.get("next_signal") or "").strip()
+    if not next_seam:
+        if next_file:
+            return f"I don't have a recorded seam yet for {next_file}."
+        return "I don't have a recorded seam because there is no current open queue item."
+    if next_signal:
+        return f"{next_file or 'That queue item'} is currently failing on seam {next_seam} with signal {next_signal}."
+    return f"{next_file or 'That queue item'} is currently failing on seam {next_seam}."
+
+
 def _is_location_recall_state(state: Optional[dict]) -> bool:
     return isinstance(state, dict) and str(state.get("kind") or "") == "location_recall"
 
 
 def _looks_like_location_recall_followup(session_turns: list[tuple[str, str]], text: str) -> bool:
-    if _looks_like_contextual_followup(text):
+    if _looks_like_contextual_continuation(text):
         recent = session_turns[-6:] if isinstance(session_turns, list) else []
         for role, content in reversed(recent):
             low = str(content or "").strip().lower()
@@ -2267,22 +4758,14 @@ def _is_web_research_override_request(text: str) -> bool:
 
 
 def set_location_coords(value: str) -> str:
-    coords = _parse_lat_lon(value)
-    if not coords:
-        return "Usage: location coords <lat>,<lon>"
-
-    lat, lon = coords
+    parsed = _parse_lat_lon(value)
+    if not parsed:
+        return "Usage: location coords <lat,lon>"
+    lat, lon = parsed
     try:
         set_core_state(DEFAULT_STATEFILE, "location_coords", {"lat": lat, "lon": lon})
     except Exception:
-        pass
-
-    # Also store in memory for continuity across tooling.
-    try:
-        mem_add("profile", "location_coords", f"location coordinates: {lat},{lon}")
-    except Exception:
-        pass
-
+        return "Failed to save current location coordinates."
     return f"Saved current location coordinates: {lat},{lon}"
 
 
@@ -2761,6 +5244,17 @@ def mem_add(kind: str, source: str, text: str):
         return
     started = time.time()
     try:
+        if not _identity_memory_text_allowed(kind, text):
+            _record_memory_event(
+                "add",
+                "skipped",
+                scope=mem_scope(),
+                kind=kind,
+                source=source,
+                reason="identity_only_mode",
+                duration_ms=int((time.time() - started) * 1000),
+            )
+            return
         # Avoid storing assistant outputs and obvious questions
         if source and str(source).lower() in {"assistant", "nova"}:
             _record_memory_event(
@@ -2955,6 +5449,96 @@ def mem_recall(query: str) -> str:
             duration_ms=int((time.time() - started) * 1000),
         )
         return ""
+
+
+def _prefix_from_earlier_memory(reply_text: str) -> str:
+    reply = str(reply_text or "").strip()
+    if not reply:
+        return reply
+    if reply.lower().startswith("from earlier memory:"):
+        return reply
+    return f"From earlier memory: {reply}"
+
+
+def _normalize_recent_learning_item(kind: str, text: str) -> str:
+    raw_kind = str(kind or "").strip().lower()
+    raw_text = str(text or "").strip()
+    if not raw_text:
+        return ""
+
+    if raw_kind == "user_correction":
+        try:
+            payload = json.loads(raw_text)
+        except Exception:
+            payload = {}
+        parsed = str(payload.get("parsed_correction") or "").strip()
+        correction_text = str(payload.get("text") or raw_text).strip()
+        value = parsed or correction_text
+        return f"Correction: {value}" if value else ""
+
+    clean = raw_text
+    if raw_kind == "identity" and clean.lower().startswith("learned_fact:"):
+        clean = clean.split(":", 1)[1].strip()
+    if raw_kind in {"user_fact", "fact", "identity", "profile"}:
+        return clean
+    return ""
+
+
+def mem_get_recent_learned(limit: int = 5) -> list[str]:
+    requested = max(1, int(limit or 5))
+    items: list[str] = []
+    seen: set[str] = set()
+
+    if mem_enabled() and memory_mod is not None:
+        con = None
+        try:
+            con = memory_mod.connect()
+            rows = memory_mod.select_memory_rows(con, _memory_runtime_user(), mem_scope())
+            for _ts, kind, source, _user_row, text, _vec in rows:
+                source_name = str(source or "").strip().lower()
+                kind_name = str(kind or "").strip().lower()
+                if source_name in {"assistant", "nova", "pinned"}:
+                    continue
+                if kind_name not in {"user_correction", "user_fact", "fact", "identity", "profile"}:
+                    continue
+                item = _normalize_recent_learning_item(kind_name, text)
+                if not item:
+                    continue
+                dedupe_key = re.sub(r"\s+", " ", item).strip().lower()
+                if dedupe_key in seen:
+                    continue
+                seen.add(dedupe_key)
+                items.append(item)
+                if len(items) >= requested:
+                    return items
+        except Exception:
+            pass
+        finally:
+            if con is not None:
+                try:
+                    con.close()
+                except Exception:
+                    pass
+
+    learned = load_learned_facts()
+    fallback_pairs = [
+        ("assistant_name", "Assistant name"),
+        ("developer_name", "Developer name"),
+        ("developer_nickname", "Developer nickname"),
+    ]
+    for key, label in fallback_pairs:
+        value = str(learned.get(key) or "").strip()
+        if not value:
+            continue
+        item = f"{label}: {value}"
+        dedupe_key = item.lower()
+        if dedupe_key in seen:
+            continue
+        seen.add(dedupe_key)
+        items.append(item)
+        if len(items) >= requested:
+            break
+    return items[:requested]
 
 
 def mem_stats() -> str:
@@ -3414,7 +5998,14 @@ def extract_name_origin_teach_text(text: str) -> str:
     low = raw.lower()
 
     # Preferred explicit trigger.
-    if "remember this" in low:
+    if "remember this" in low and any(cue in low for cue in (
+        "nova",
+        "name",
+        "story behind your name",
+        "story behing your name",
+        "gus gave you your name",
+        "gus named you",
+    )):
         idx = low.find("remember this")
         candidate = raw[idx:]
         candidate = re.sub(r"(?is)^\s*remember\s+this\s*[:.\-]*\s*", "", candidate).strip()
@@ -3483,6 +6074,33 @@ def _render_chat_context(turns: list[tuple[str, str]], max_chars: int = 1800) ->
         return ""
     out = "\n".join(lines)
     return out[:max_chars]
+
+
+def build_fallback_context_details(query: str, turns: list[tuple[str, str]] | None = None) -> dict[str, Any]:
+    session_turns = turns if isinstance(turns, list) else []
+    learning_details = build_learning_context_details(query)
+    learning_context = str(learning_details.get("context") or "")
+    chat_context = _render_chat_context(session_turns)
+    session_fact_sheet = _build_session_fact_sheet(session_turns)
+
+    context_blocks: list[str] = []
+    if learning_context:
+        context_blocks.append(learning_context)
+    if chat_context:
+        context_blocks.append("CURRENT CHAT CONTEXT:\n" + chat_context)
+    if session_fact_sheet:
+        context_blocks.append("SESSION FACT SHEET:\n" + session_fact_sheet)
+
+    return {
+        "context": "\n\n".join(context_blocks).strip()[:6000],
+        "learning_context": learning_context,
+        "chat_context": chat_context,
+        "session_fact_sheet": session_fact_sheet,
+        "memory_used": bool(learning_details.get("memory_used")),
+        "knowledge_used": bool(learning_details.get("knowledge_used")),
+        "memory_chars": int(learning_details.get("memory_chars") or 0),
+        "knowledge_chars": int(learning_details.get("knowledge_chars") or 0),
+    }
 
 
 def _build_session_fact_sheet(turns: list[tuple[str, str]], max_chars: int = 1200) -> str:
@@ -3628,7 +6246,7 @@ def _apply_claim_gate(reply: str, evidence_text: str = "", tool_context: str = "
     if kept:
         return " ".join(kept).strip(), True, "unsupported_claim_removed"
 
-    return "I’m not sure based on the evidence I have in this session.", True, "unsupported_claim_blocked"
+    return _truthful_limit_reply("", include_next_step=False), True, "unsupported_claim_blocked"
 
 
 def _uses_prior_reference(user_text: str) -> bool:
@@ -3709,6 +6327,169 @@ def _is_explicit_request(text: str) -> bool:
     if first in verbs:
         return True
     return False
+
+
+def _split_turn_clauses(text: str) -> list[str]:
+    raw = str(text or "").strip()
+    if not raw:
+        return []
+    pieces: list[str] = []
+    for chunk in re.split(r"[.!?;]+", raw):
+        fragment = str(chunk or "").strip(" \t\r\n\"'")
+        if not fragment:
+            continue
+        subparts = re.split(
+            r"(?:,\s*|\b(?:and|but)\s+)(?=(?:can|could|would|do|does|did|what|how|why|where|when|which|please|show|tell|give|check|find|search|look|fetch|gather)\b)",
+            fragment,
+            flags=re.I,
+        )
+        for subpart in subparts:
+            cleaned = str(subpart or "").strip(" \t\r\n\"'")
+            if cleaned:
+                pieces.append(cleaned)
+    return pieces
+
+
+def _is_statement_like_clause(text: str) -> bool:
+    raw = str(text or "").strip()
+    if not raw:
+        return False
+    low = raw.lower()
+    if _is_explicit_request(raw) or _is_explicit_command_like(raw):
+        return False
+    if _is_declarative_info(raw):
+        return True
+    if low.startswith(("i wonder if", "i'm wondering if", "i am wondering if")):
+        return False
+    if len(raw.split()) < 3:
+        return False
+    subject_markers = ("the ", "this ", "that ", "it ", "i ", "we ", "you ", "he ", "she ", "they ")
+    verb_markers = (" is ", " are ", " was ", " were ", " looks ", " look ", " seems ", " seem ", " feels ", " feel ", " stays ", " stay ", " remains ", " remain ", " has ", " have ")
+    return low.startswith(subject_markers) and any(marker in low for marker in verb_markers)
+
+
+def _looks_like_correction_turn(text: str) -> bool:
+    raw = str(text or "").strip()
+    if not raw:
+        return False
+    low = raw.lower()
+    identity_correction_patterns = (
+        r"\byour\s+name\s+is\s+[a-z]",
+        r"\b(?:his|the\s+developer(?:'s)?)\s+full\s+name\s+is\s+[a-z]",
+        r"\bdeveloper(?:'s)?\s+name\s+is\s+[a-z]",
+        r"\bcreator(?:'s)?\s+full\s+name\s+is\s+[a-z]",
+    )
+    triggers = (
+        "wrong",
+        "no,",
+        "actually",
+        "that's not",
+        "that is not",
+        "not true",
+        "incorrect",
+        "mistake",
+        "you lied",
+        "correction:",
+        "you gave me garbage",
+        "garbage back",
+    )
+    if _is_negative_feedback(raw) or _parse_correction(raw):
+        return True
+    if any(trigger in low for trigger in triggers):
+        return True
+    return "?" not in raw and any(re.search(pattern, low) for pattern in identity_correction_patterns)
+
+
+def _looks_like_continue_thread_turn(
+    text: str,
+    *,
+    turns: Optional[list[tuple[str, str]]] = None,
+    active_subject: str = "",
+    pending_action: Optional[dict] = None,
+) -> bool:
+    raw = str(text or "").strip()
+    if not raw:
+        return False
+    normalized_active_subject = str(active_subject or "").strip()
+    pending = pending_action if isinstance(pending_action, dict) else {}
+    assistant_turn = _last_assistant_turn_text(list(turns or []))
+    thread_active = bool(
+        normalized_active_subject
+        or str(pending.get("kind") or "").strip()
+        or assistant_turn
+    )
+    if not thread_active:
+        return False
+    if _looks_like_contextual_followup(raw):
+        return True
+    if _extract_retrieval_result_index(raw) is not None:
+        return True
+    if _looks_like_affirmative_followup(raw) or _looks_like_shared_location_reference(raw):
+        return True
+    return bool(assistant_turn) and _assistant_offered_weather_lookup(assistant_turn) and _looks_like_affirmative_followup(raw)
+
+
+def _assistant_offered_weather_lookup(text: str) -> bool:
+    normalized = _normalize_turn_text(text)
+    if not normalized:
+        return False
+    return any(phrase in normalized for phrase in (
+        "what location should i use for the weather lookup",
+        "tell me what location to use",
+        "ask for our current location",
+        "check the weather for you",
+    ))
+
+
+def _classify_turn_acts(
+    text: str,
+    *,
+    turns: Optional[list[tuple[str, str]]] = None,
+    active_subject: str = "",
+    pending_action: Optional[dict] = None,
+) -> list[str]:
+    raw = str(text or "").strip()
+    if not raw:
+        return []
+    clauses = _split_turn_clauses(raw) or [raw]
+    has_command = _is_explicit_command_like(raw)
+    has_correct = _looks_like_correction_turn(raw)
+    has_ask = any(_is_explicit_request(clause) for clause in clauses)
+    has_inform = any(_is_statement_like_clause(clause) for clause in clauses)
+    has_continue_thread = _looks_like_continue_thread_turn(
+        raw,
+        turns=turns,
+        active_subject=active_subject,
+        pending_action=pending_action,
+    )
+
+    acts: list[str] = []
+    if has_correct:
+        acts.append("correct")
+    if has_command:
+        acts.append("command")
+    elif has_ask:
+        acts.append("ask")
+    if has_inform:
+        acts.append("inform")
+    if has_continue_thread:
+        acts.append("continue_thread")
+    if has_inform and (has_ask or has_command):
+        acts.append("mixed")
+    return acts
+
+
+def _looks_like_mixed_info_request_turn(text: str) -> bool:
+    return "mixed" in _classify_turn_acts(text)
+
+
+def _mixed_info_request_clarify_reply(text: str) -> str:
+    del text
+    return (
+        "I think you're both giving context and asking me to do something. "
+        "Do you want me to treat the first part as context and answer the request, "
+        "or focus on just one part first?"
+    )
 
 
 def _extract_urls(text: str) -> list[str]:
@@ -4061,6 +6842,11 @@ def _quick_smalltalk_reply(user_text: str, active_user: Optional[str] = None) ->
     if greeting:
         return greeting
 
+    normalized = re.sub(r"[^a-z0-9 ]+", " ", t)
+    normalized = re.sub(r"\s+", " ", normalized).strip()
+    if normalized.startswith("how are you doing") or normalized.startswith("how is your day going") or normalized.startswith("are you doing alright today nova"):
+        return f"Hey {who}. I'm doing good today. What's going on?" if who else "Hey. I'm doing good today. What's going on?"
+
     if "thank you" in t or t in {"thanks", "thx"}:
         return "You're welcome."
 
@@ -4378,12 +7164,12 @@ def _developer_profile_reply(turns: Optional[list[tuple[str, str]]] = None, user
         base_fact = f"His full name is {developer_name}."
 
     if "how did" in low or "developed you" in low or "built you" in low:
-        return f"{base_fact} He created me. I do not have detailed build-history notes in memory yet."
+        return _prefix_from_earlier_memory(f"{base_fact} He created me. I do not have detailed build-history notes in memory yet.")
 
     if "who is" in low or "who's" in low or "creator" in low:
         if developer_nickname and developer_nickname.lower() != developer_name.lower():
-            return f"My developer is {developer_name}. {developer_nickname} is his nickname. He created me."
-        return f"My developer is {developer_name}. He created me."
+            return _prefix_from_earlier_memory(f"My developer is {developer_name}. {developer_nickname} is his nickname. He created me.")
+        return _prefix_from_earlier_memory(f"My developer is {developer_name}. He created me.")
 
     extra_facts: list[str] = []
     if roles:
@@ -4400,8 +7186,8 @@ def _developer_profile_reply(turns: Optional[list[tuple[str, str]]] = None, user
 
     lead = "Here are the verified facts I have about my developer, Gus."
     if extra_facts:
-        return " ".join([lead, base_fact] + extra_facts)
-    return f"{lead} {base_fact} I don't have any additional verified information about him beyond that yet."
+        return _prefix_from_earlier_memory(" ".join([lead, base_fact] + extra_facts))
+    return _prefix_from_earlier_memory(f"{lead} {base_fact} I don't have any additional verified information about him beyond that yet.")
 
 
 def _is_developer_location_request(
@@ -4440,7 +7226,7 @@ def _developer_location_reply() -> str:
     if relation == "same_as_assistant":
         preview = get_saved_location_text()
         if preview:
-            return f"Based on the verified relation you gave me, Gus's location is {preview}."
+            return _prefix_from_earlier_memory(f"Based on the verified relation you gave me, Gus's location is {preview}.")
         return "You told me Gus shares my location, but I do not have my own stored location yet. You can tell me: 'My location is ...'"
     return "I'm uncertain about Gus's current location. I do not have verified current whereabouts for him."
 
@@ -4538,6 +7324,13 @@ def _identity_name_followup_reply(subject: str) -> str:
         return f"The verified name I have for you in this session is {active_user_raw}."
 
     return "I do not have a more detailed verified name record for this thread yet."
+
+
+def _rules_reply() -> str:
+    return (
+        "Yes. I follow strict operating rules: I do not fabricate tool actions or files, "
+        "I stay within enabled policy/tool limits, and I should say uncertain when I cannot verify something."
+    )
 
 
 def _developer_identity_followup_reply(turns: Optional[list[tuple[str, str]]] = None, *, name_focus: bool = False) -> str:
@@ -4669,9 +7462,51 @@ def _consume_conversation_followup(state: Optional[dict], text: str, input_sourc
             return True, reply, next_state
         return False, "", state
 
+    if kind == "queue_status":
+        if _is_queue_status_reason_followup(text):
+            return True, _queue_status_reason_reply(state), state
+        if _is_queue_status_report_followup(text):
+            return True, _queue_status_report_reply(state), state
+        if _is_queue_status_seam_followup(text):
+            return True, _queue_status_seam_reply(state), state
+        return False, "", state
+
     if kind == "location_recall":
-        if _looks_like_contextual_followup(text):
-            return True, _location_recall_reply(), state
+        handled_location, location_reply, location_state, _location_intent = _handle_location_conversation_turn(
+            state,
+            text,
+            turns=turns,
+        )
+        if handled_location:
+            return True, location_reply, location_state
+        return False, "", state
+
+    if kind == "weather_result":
+        if _is_weather_meta_followup(text):
+            return True, _weather_meta_reply(state), state
+        if _is_weather_status_followup(text):
+            return True, _weather_status_reply(state), state
+        return False, "", state
+
+    if kind == "numeric_reference_clarify":
+        value = str(state.get("value") or "").strip()
+        normalized = _normalize_turn_text(text)
+        raw = str(text or "").strip()
+        if not raw:
+            return False, "", state
+        if raw == value or "?" in raw or any(phrase in normalized for phrase in ("what do you think", "what is it", "what do you guess", "guess")):
+            return True, _numeric_reference_guess_reply(value), state
+        referent = raw.rstrip(".!? ")
+        if not referent:
+            return False, "", state
+        return True, _numeric_reference_binding_reply(value, referent), _make_conversation_state("numeric_reference", value=value, referent=referent)
+
+    if kind == "numeric_reference":
+        value = str(state.get("value") or "").strip()
+        referent = str(state.get("referent") or "").strip()
+        raw = str(text or "").strip()
+        if raw == value and referent:
+            return True, _numeric_reference_binding_reply(value, referent), state
         return False, "", state
 
     if kind == "developer_role_guess":
@@ -4844,17 +7679,29 @@ def _is_explicit_command_like(text: str) -> bool:
     return any(low == p.strip() or low.startswith(p) for p in command_prefixes)
 
 
-def _determine_turn_direction(turns: list[tuple[str, str]], text: str) -> dict:
+def _determine_turn_direction(
+    turns: list[tuple[str, str]],
+    text: str,
+    *,
+    active_subject: str = "",
+    pending_action: Optional[dict] = None,
+) -> dict:
     effective_query, analysis_reason = _analyze_routing_text(turns, text)
     low = (effective_query or "").strip().lower()
     raw_low = (text or "").strip().lower()
+    turn_acts = _classify_turn_acts(
+        effective_query,
+        turns=turns,
+        active_subject=active_subject,
+        pending_action=pending_action,
+    )
 
     primary = "general_chat"
-    if _is_negative_feedback(text):
+    if "correct" in turn_acts:
         primary = "correction_feedback"
     elif _extract_memory_teach_text(text):
         primary = "memory_teach"
-    elif _is_explicit_command_like(effective_query):
+    elif "command" in turn_acts:
         primary = "explicit_command"
     elif _is_identity_or_developer_query(effective_query) or any(
         q in low for q in ["what do you know about me", "what else do you know about me", "what do you know about gus"]
@@ -4866,7 +7713,7 @@ def _determine_turn_direction(turns: list[tuple[str, str]], text: str) -> dict:
         primary = "identity_query"
     elif bool(re.match(r"^i\s+am\s+([a-z][a-z '\-]{1,40})[.!?]*$", raw_low)):
         primary = "identity_binding"
-    elif _is_declarative_info(text):
+    elif "inform" in turn_acts and "mixed" not in turn_acts:
         if any(k in raw_low for k in ["my favorite", "my favourite", "creator", "developer", "gus", "gustavo"]):
             primary = "identity_teach"
         else:
@@ -4880,6 +7727,7 @@ def _determine_turn_direction(turns: list[tuple[str, str]], text: str) -> dict:
         "primary": primary,
         "effective_query": effective_query,
         "analysis_reason": analysis_reason,
+        "turn_acts": turn_acts,
         "identity_focused": identity_focused,
         "bypass_pattern_routes": bypass_pattern_routes,
     }
@@ -5140,6 +7988,16 @@ def kb_add_zip(zip_path: str, pack_name: str) -> str:
     return f"Added {extracted} file(s) to knowledge pack: {pack_name}"
 
 
+def _active_knowledge_root() -> Optional[Path]:
+    pack = kb_active_pack()
+    if not pack:
+        return None
+    root = PACKS_DIR / pack
+    if not root.exists() or not root.is_dir():
+        return None
+    return root
+
+
 def kb_search(query: str, max_files: int = KB_MAX_FILES, max_chars: int = KB_MAX_CHARS) -> str:
     pack = kb_active_pack()
     if not pack:
@@ -5279,8 +8137,12 @@ def _build_local_topic_digest_answer(query_text: str, max_files: int = 4, max_po
     if not q:
         return ""
 
+    root = _active_knowledge_root()
+    if root is None:
+        return ""
+
     tokens = _topic_tokens(q)
-    candidates = [p for p in KNOWLEDGE_ROOT.glob("**/*.txt") if p.is_file()]
+    candidates = [p for p in root.glob("**/*.txt") if p.is_file()]
     if not candidates:
         return ""
 
@@ -5300,7 +8162,12 @@ def _build_local_topic_digest_answer(query_text: str, max_files: int = 4, max_po
     scored.sort(key=lambda item: item[0], reverse=True)
     top = scored[: max(1, int(max_files))]
 
-    lines = ["I found relevant details in local knowledge files:"]
+    try:
+        pack_name = root.relative_to(PACKS_DIR).as_posix()
+    except Exception:
+        pack_name = root.name
+
+    lines = [f"I found relevant details in the active knowledge pack ({pack_name}):"]
     points = 0
     cited: set[str] = set()
     for _score, path, txt in top:
@@ -5323,68 +8190,15 @@ def _build_local_topic_digest_answer(query_text: str, max_files: int = 4, max_po
 
 
 def _is_local_knowledge_topic_query(text: str) -> bool:
-    low = _normalize_turn_text(text)
-    if not low:
-        return False
-    if not (
-        low.startswith(("what", "how", "when", "why", "which", "where", "who"))
-        or "tell me about" in low
-        or "what do you know about" in low
-    ):
-        return False
-    if _is_peims_broad_query(low):
-        return False
-    topic_tokens = ("tsds", "attendance", "snapshot", "timeline", "submission", "reporting", "validation", "leaver")
-    return any(tok in low for tok in topic_tokens)
-
-
-def _build_local_peims_overview_answer() -> str:
-    files = sorted(PEIMS_KNOWLEDGE_DIR.glob("*.txt"))
-    if not files:
-        return ""
-
-    lines = ["I found PEIMS overview details in local knowledge files:"]
-    facts_added = 0
-    cited = set()
-
-    for path in files:
-        key_lines = _extract_key_lines(_read_text_safely(path), max_lines=2)
-        for key_line in key_lines:
-            lines.append(f"- {key_line}.")
-            facts_added += 1
-            cited.add(f"knowledge/peims/{path.name}")
-            if facts_added >= 12:
-                break
-        if facts_added >= 12:
-            break
-
-    if facts_added == 0:
-        return ""
-
-    for cited_path in sorted(cited):
-        lines.append(f"[source: {cited_path}]")
-    return "\n".join(lines)
+    del text
+    return False
 
 
 def _is_peims_broad_query(text: str) -> bool:
-    low = _normalize_turn_text(text)
-    if "peims" not in low:
-        return False
-    if "attendance" in low and any(token in low for token in ("rules", "requirements", "reporting", "what are", "tea say")):
-        return False
-    cues = (
-        "all of peims",
-        "all peims",
-        "everything about peims",
-        "as much information",
-        "full peims",
-        "peims overview",
-        "what do you know about peims",
-        "tell me about peims",
-        "give me anything about peims",
-        "know about peims",
-    )
-    return any(cue in low for cue in cues)
+    del text
+    return False
+
+
 
 
 # =========================
@@ -5417,34 +8231,25 @@ def _write_patch_revision(revision: int, source: str):
     PATCH_REVISION_FILE.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
-def _read_patch_manifest(zip_path: Path) -> Tuple[Optional[dict], Optional[str]]:
-    try:
-        with zipfile.ZipFile(zip_path, "r") as z:
-            names = {n.replace("\\", "/").lstrip("/") for n in z.namelist()}
-            if PATCH_MANIFEST_NAME not in names:
-                return None, None
-            raw = z.read(PATCH_MANIFEST_NAME)
-            data = json.loads(raw.decode("utf-8", errors="replace"))
-            if not isinstance(data, dict):
-                return None, "Patch manifest must be a JSON object."
-            return data, None
-    except json.JSONDecodeError as e:
-        return None, f"Invalid patch manifest JSON: {e}"
-    except Exception as e:
-        return None, f"Unable to read patch manifest: {e}"
-
-
 def _snapshot_meta_path(snapshot_zip: Path) -> Path:
-    return snapshot_zip.with_suffix(snapshot_zip.suffix + ".meta.json")
+    return snapshot_zip.with_suffix(snapshot_zip.suffix + ".json")
 
 
-def _write_snapshot_meta(snapshot_zip: Path, revision: int):
+def _write_snapshot_meta(snapshot_zip: Path, base_revision: int) -> None:
     meta = {
-        "revision": int(revision),
         "snapshot": snapshot_zip.name,
+        "base_revision": int(base_revision),
         "ts": time.time(),
     }
     _snapshot_meta_path(snapshot_zip).write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def _detached_domain_reply(domain_name: str, suggested_query: str) -> str:
+    pack = kb_active_pack()
+    base = f"I don't have bundled {domain_name} guidance in this public repo."
+    if pack:
+        return f"{base} Try web research, or switch to a knowledge pack that contains {domain_name} material. Active knowledge pack: {pack}."
+    return f"{base} Try: {suggested_query} or load a knowledge pack with kb add <zip_path> <pack_name>."
 
 
 def _read_snapshot_meta(snapshot_zip: Path) -> Optional[dict]:
@@ -5513,6 +8318,229 @@ def _py_compile_check() -> Tuple[bool, str]:
         return ok_, out.strip()
     except Exception as e:
         return False, str(e)
+
+
+def _last_nonempty_line(text: str) -> str:
+    for line in reversed(str(text or "").splitlines()):
+        clean = str(line or "").strip()
+        if clean:
+            return clean
+    return ""
+
+
+def _read_patch_manifest(zip_path: Path) -> tuple[Optional[dict], Optional[str]]:
+    try:
+        with zipfile.ZipFile(zip_path, "r") as zf:
+            if PATCH_MANIFEST_NAME not in zf.namelist():
+                return None, None
+            raw = zf.read(PATCH_MANIFEST_NAME)
+    except zipfile.BadZipFile:
+        return None, "invalid patch zip."
+    except Exception as e:
+        return None, f"failed to read {PATCH_MANIFEST_NAME}: {e}"
+
+    try:
+        manifest = json.loads(raw.decode("utf-8"))
+    except UnicodeDecodeError:
+        return None, f"{PATCH_MANIFEST_NAME} must be UTF-8 JSON."
+    except json.JSONDecodeError:
+        return None, f"{PATCH_MANIFEST_NAME} is not valid JSON."
+
+    if not isinstance(manifest, dict):
+        return None, f"{PATCH_MANIFEST_NAME} must contain a JSON object."
+
+    return manifest, None
+
+
+def _behavioral_check_command(base_dir: Optional[Path] = None) -> list[str]:
+    del base_dir
+    return [PYTHON, "-m", "unittest", "discover", "-s", "tests", "-f"]
+
+
+def _behavioral_check(*, base_dir: Optional[Path] = None, timeout_sec: Optional[int] = None) -> dict:
+    workspace = Path(base_dir or BASE_DIR)
+    tests_dir = workspace / "tests"
+    timeout_value = timeout_sec
+    if timeout_value is None:
+        timeout_value = int(policy_patch().get("behavioral_check_timeout_sec", 600) or 600)
+    timeout_value = max(1, int(timeout_value))
+    command = _behavioral_check_command(workspace)
+
+    if not tests_dir.exists():
+        return {
+            "ok": True,
+            "ran": False,
+            "skipped": True,
+            "summary": "behavioral check skipped: tests directory not found",
+            "output": "",
+            "command": list(command),
+            "cwd": str(workspace),
+            "timeout_sec": timeout_value,
+        }
+
+    try:
+        proc = subprocess.run(
+            command,
+            cwd=str(workspace),
+            capture_output=True,
+            text=True,
+            timeout=timeout_value,
+        )
+        output = ((proc.stdout or "") + ("\n" + proc.stderr if proc.stderr else "")).strip()
+        summary = _last_nonempty_line(output) or f"exit:{proc.returncode}"
+        return {
+            "ok": proc.returncode == 0,
+            "ran": True,
+            "skipped": False,
+            "summary": summary,
+            "output": output,
+            "command": list(command),
+            "cwd": str(workspace),
+            "timeout_sec": timeout_value,
+        }
+    except subprocess.TimeoutExpired as e:
+        output = ((e.stdout or "") + ("\n" + e.stderr if e.stderr else "")).strip()
+        return {
+            "ok": False,
+            "ran": True,
+            "skipped": False,
+            "summary": f"behavioral check timed out after {timeout_value}s",
+            "output": output,
+            "command": list(command),
+            "cwd": str(workspace),
+            "timeout_sec": timeout_value,
+        }
+    except Exception as e:
+        return {
+            "ok": False,
+            "ran": False,
+            "skipped": False,
+            "summary": f"behavioral check failed to start: {e}",
+            "output": str(e),
+            "command": list(command),
+            "cwd": str(workspace),
+            "timeout_sec": timeout_value,
+        }
+
+
+def _read_patch_log_tail_line() -> str:
+    try:
+        if not PATCH_LOG.exists():
+            return ""
+        return _last_nonempty_line(PATCH_LOG.read_text(encoding="utf-8", errors="ignore"))
+    except Exception:
+        return ""
+
+
+def _preview_status_from_report(path: Path) -> str:
+    try:
+        for line in path.read_text(encoding="utf-8", errors="ignore").splitlines():
+            if line.lower().startswith("status:"):
+                return str(line.split(":", 1)[1] or "").strip()
+    except Exception:
+        return ""
+    return ""
+
+
+def patch_preview_summaries(limit: int = 40) -> list[dict]:
+    try:
+        previews = UPDATES_DIR / "previews"
+        if not previews.exists():
+            return []
+        files = sorted(previews.glob("*.txt"), key=lambda p: p.stat().st_mtime, reverse=True)
+        approvals = _read_approvals()
+        approval_map = {}
+        for item in approvals:
+            if not isinstance(item, dict):
+                continue
+            preview = str(item.get("preview") or "").strip()
+            if preview:
+                approval_map[preview] = item
+                approval_map[Path(preview).name] = item
+        summaries = []
+        for preview in files[: max(0, int(limit or 0))]:
+            approval = approval_map.get(str(preview)) or approval_map.get(preview.name) or {}
+            summaries.append({
+                "name": preview.name,
+                "path": str(preview),
+                "status": _preview_status_from_report(preview),
+                "decision": str(approval.get("decision") or "pending"),
+                "mtime": int(preview.stat().st_mtime),
+            })
+        return summaries
+    except Exception:
+        return []
+
+
+def patch_status_payload() -> dict:
+    try:
+        cfg = policy_patch()
+        previews_dir = UPDATES_DIR / "previews"
+        files = sorted(previews_dir.glob("*.txt"), key=lambda p: p.stat().st_mtime, reverse=True) if previews_dir.exists() else []
+        approvals = _read_approvals()
+        approval_map = {}
+        for item in approvals:
+            if not isinstance(item, dict):
+                continue
+            preview = str(item.get("preview") or "").strip()
+            if preview:
+                approval_map[preview] = item
+                approval_map[Path(preview).name] = item
+
+        previews_pending = 0
+        previews_approved = 0
+        previews_rejected = 0
+        previews_eligible = 0
+        previews_approved_eligible = 0
+        last_preview_name = ""
+        last_preview_status = ""
+        last_preview_decision = ""
+        if files:
+            last_preview_name = files[0].name
+            last_preview_status = _preview_status_from_report(files[0])
+            last_preview_decision = str((approval_map.get(str(files[0])) or approval_map.get(files[0].name) or {}).get("decision") or "pending")
+        for preview in files:
+            decision = str((approval_map.get(str(preview)) or approval_map.get(preview.name) or {}).get("decision") or "pending").strip().lower()
+            status_text = _preview_status_from_report(preview)
+            if status_text.lower().startswith("eligible"):
+                previews_eligible += 1
+            if decision == "approved":
+                previews_approved += 1
+                if status_text.lower().startswith("eligible"):
+                    previews_approved_eligible += 1
+            elif decision == "rejected":
+                previews_rejected += 1
+            else:
+                previews_pending += 1
+
+        tests_available = (BASE_DIR / "tests").exists()
+        behavioral_check = bool(cfg.get("behavioral_check", True))
+        pipeline_ready = bool(cfg.get("enabled", True)) and bool(cfg.get("strict_manifest", True)) and behavioral_check and bool(tests_available)
+        return {
+            "ok": True,
+            "enabled": bool(cfg.get("enabled", True)),
+            "strict_manifest": bool(cfg.get("strict_manifest", True)),
+            "allow_force": bool(cfg.get("allow_force", False)),
+            "behavioral_check": behavioral_check,
+            "behavioral_check_timeout_sec": int(cfg.get("behavioral_check_timeout_sec", 600) or 600),
+            "tests_available": bool(tests_available),
+            "pipeline_ready": pipeline_ready,
+            "current_revision": _read_patch_revision(),
+            "previews_total": len(files),
+            "previews_pending": previews_pending,
+            "previews_approved": previews_approved,
+            "previews_rejected": previews_rejected,
+            "previews_eligible": previews_eligible,
+            "previews_approved_eligible": previews_approved_eligible,
+            "last_preview_name": last_preview_name,
+            "last_preview_status": last_preview_status,
+            "last_preview_decision": last_preview_decision,
+            "last_patch_log_line": _read_patch_log_tail_line(),
+            "previews": patch_preview_summaries(40),
+            "ready_for_validated_apply": pipeline_ready and previews_approved_eligible > 0,
+        }
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
 
 
 def _patch_reject_message(
@@ -5694,12 +8722,46 @@ def patch_apply(zip_path: str, force: bool = False) -> str:
         patch_rollback(str(snap))
         return "Patch applied, but compile check failed. Rolled back.\n\nCompile output:\n" + out[-3500:]
 
+    patch_cfg = policy_patch()
+    behavioral_enabled = bool(patch_cfg.get("behavioral_check", True))
+    behavior_result = {
+        "ok": True,
+        "ran": False,
+        "skipped": True,
+        "summary": "behavioral check disabled by policy",
+        "output": "",
+    }
+    if behavioral_enabled:
+        behavior_result = _behavioral_check(
+            timeout_sec=int(patch_cfg.get("behavioral_check_timeout_sec", 600) or 600),
+        )
+        if not bool(behavior_result.get("ok")):
+            summary = str(behavior_result.get("summary") or "behavioral check failed")
+            _log_patch(f"BEHAVIOR_FAIL {summary} -> rollback")
+            patch_rollback(str(snap))
+            output = str(behavior_result.get("output") or "").strip()
+            msg = "Patch applied, but behavioral check failed. Rolled back.\n\nBehavioral summary:\n" + summary
+            if output:
+                msg += "\n\nBehavioral output:\n" + output[-3500:]
+            return msg
+        if bool(behavior_result.get("skipped")):
+            _log_patch(f"BEHAVIOR_SKIP {str(behavior_result.get('summary') or '').strip()}")
+        else:
+            _log_patch(f"BEHAVIOR_OK {str(behavior_result.get('summary') or '').strip()}")
+    else:
+        _log_patch("BEHAVIOR_SKIP disabled_by_policy")
+
     if next_revision is not None:
         _write_patch_revision(next_revision, source=z.name)
 
     _log_patch(f"APPLY_OK files={n}")
     rev_msg = f" Revision: {next_revision}." if next_revision is not None else ""
-    return f"Patch applied: {n} file(s). Compile check OK. Snapshot: {snap.name}.{rev_msg}"
+    behavior_msg = ""
+    if behavioral_enabled:
+        behavior_msg = f" Behavioral check OK ({str(behavior_result.get('summary') or 'passed')})."
+    else:
+        behavior_msg = " Behavioral check skipped by policy."
+    return f"Patch applied: {n} file(s). Compile check OK.{behavior_msg} Snapshot: {snap.name}.{rev_msg}"
 
 
 def patch_rollback(snapshot_zip: Optional[str] = None) -> str:
@@ -6040,6 +9102,10 @@ def hard_answer(user_text: str) -> Optional[str]:
     t = (user_text or "").strip().lower()
     t = re.sub(r"\byor\b", "your", t)
 
+    arithmetic_reply = _arithmetic_expression_reply(user_text)
+    if arithmetic_reply:
+        return arithmetic_reply
+
     assistant_name = get_learned_fact("assistant_name", "Nova")
     developer_name = get_learned_fact("developer_name", "Gustavo")
     developer_nickname = get_learned_fact("developer_nickname", "Gus")
@@ -6118,7 +9184,7 @@ def hard_answer(user_text: str) -> Optional[str]:
         return "I do not have a saved name-origin story yet. You can teach me with: remember this ..."
 
     if "who gave you that name" in t or "who gave you your name" in t:
-        return f"My name was given by my developer, {developer_name} ({developer_nickname})."
+        return _prefix_from_earlier_memory(f"My name was given by my developer, {developer_name} ({developer_nickname}).")
 
     creator_query = (
         bool(re.search(r"\bwho\s+is\s+your\s+creator\b", t))
@@ -6129,8 +9195,8 @@ def hard_answer(user_text: str) -> Optional[str]:
     )
     if creator_query:
         if developer_nickname and developer_nickname.lower() != developer_name.lower():
-            return f"My creator is {developer_name}. He created me. {developer_nickname} is his nickname."
-        return f"My creator is {developer_name}. He created me."
+            return _prefix_from_earlier_memory(f"My creator is {developer_name}. He created me. {developer_nickname} is his nickname.")
+        return _prefix_from_earlier_memory(f"My creator is {developer_name}. He created me.")
 
     if any(q in t for q in ["what do you know about me", "what else do you know about me", "what do you remember about me"]):
         facts = []
@@ -6186,22 +9252,24 @@ def hard_answer(user_text: str) -> Optional[str]:
 
     if "full name" in t and any(k in t for k in ["developer", "creator", "his", "gus", "nickname"]):
         if developer_nickname and developer_nickname.lower() != developer_name.lower():
-            return f"My developer's full name is {developer_name}. {developer_nickname} is his nickname."
-        return f"My developer's full name is {developer_name}."
+            return _prefix_from_earlier_memory(f"My developer's full name is {developer_name}. {developer_nickname} is his nickname.")
+        return _prefix_from_earlier_memory(f"My developer's full name is {developer_name}.")
 
     if any(k in t for k in ["what are your abilities", "what are you capable", "know what your capable", "know what you're capable", "what can you do"]):
         return describe_capabilities()
 
-    if "what have you learned" in t:
-        learned = load_learned_facts()
-        learned_items = []
-        for k in ["assistant_name", "developer_name", "developer_nickname"]:
-            v = str(learned.get(k) or "").strip()
-            if v:
-                learned_items.append(f"{k}={v}")
+    if t in {
+        "what have you learned from me",
+        "what have you learned from me?",
+        "what did you learn from me",
+        "what did you learn from me?",
+        "show me what you've learned",
+        "show me what you have learned",
+    }:
+        learned_items = mem_get_recent_learned(5)
         if not learned_items:
-            return "I have not learned new persistent identity facts recently."
-        return "Recent learned facts: " + ", ".join(learned_items) + "."
+            return "I haven't learned anything specific from you recently."
+        return "Here's what I've learned from you recently:\n- " + "\n- ".join(learned_items)
 
     if t in {"can you code", "can you code?", "do you code", "do you code?"}:
         return ("Yes. I can write code, debug it, and explain it. "
@@ -6430,10 +9498,58 @@ def _normalize_location_preview(preview: str) -> str:
     return p
 
 
+def _clamp_language_mix(value: Any) -> int:
+    try:
+        return max(0, min(100, int(value)))
+    except Exception:
+        return 0
+
+
+def _estimate_spanish_ratio(text: str) -> float:
+    """Estimate Spanish content from Unicode character profile only — no keyword lists."""
+    raw = str(text or "")
+    if not raw.strip():
+        return 0.0
+    # Spanish-specific characters not naturally present in standard English text.
+    # Using character-level evidence avoids keyword-trigger brittleness.
+    spanish_chars = set("áéíóúüñÁÉÍÓÚÜÑ¿¡")
+    letter_count = sum(1 for c in raw if c.isalpha())
+    if letter_count == 0:
+        return 0.0
+    accent_count = sum(1 for c in raw if c in spanish_chars)
+    # Accented chars are a strong signal; scale so ~12% accent ratio → 1.0
+    return min(1.0, float(accent_count) / max(1, letter_count) * 8.0)
+
+
+def _auto_adjust_language_mix(current_mix: int, user_text: str) -> int:
+    current = _clamp_language_mix(current_mix)
+    observed = int(round(_estimate_spanish_ratio(user_text) * 100.0))
+    # No guardrails: always nudge toward observed user language blend.
+    return _clamp_language_mix(int(round((current * 0.7) + (observed * 0.3))))
+
+
+def _language_mix_instruction(spanish_pct: int) -> str:
+    mix = _clamp_language_mix(spanish_pct)
+    if mix <= 0:
+        return (
+            "Language preference:\n"
+            "- Default to English.\n"
+            "- Keep the response natural and concise."
+        )
+
+    eng_pct = 100 - mix
+    return (
+        "Language preference:\n"
+        "- Default to English, but adapt to user style.\n"
+        f"- Target approx {eng_pct}% English and {mix}% Spanish (natural Spanglish).\n"
+        "- Keep technical terms in English unless the user clearly prefers Spanish wording."
+    )
+
+
 # =========================
 # Ollama chat
 # =========================
-def ollama_chat(text: str, retrieved_context: str = "") -> str:
+def ollama_chat(text: str, retrieved_context: str = "", language_mix_spanish_pct: int = 0) -> str:
     """
     Deterministic chat wrapper: strict non-hallucination rules and low temperature.
     This function avoids injecting memory and enforces a constrained system prompt.
@@ -6490,6 +9606,8 @@ def ollama_chat(text: str, retrieved_context: str = "") -> str:
     identity_ctx = identity_context_for_prompt()
     if identity_ctx:
         system_msg = f"{system_msg}\n\nPersistent identity memory:\n{identity_ctx}"
+
+    system_msg = f"{system_msg}\n\n{_language_mix_instruction(language_mix_spanish_pct)}"
 
     # Build user content with optional retrieved context
     user_content = text
@@ -6575,6 +9693,94 @@ def _parse_correction(text: str) -> Optional[str]:
             if corr:
                 return corr
     return None
+
+
+def _looks_like_correction_cancel(text: str) -> bool:
+    low = _normalize_turn_text(text)
+    if not low:
+        return False
+    cues = (
+        "dont have to replace",
+        "don't have to replace",
+        "no need to replace",
+        "you dont have to replace",
+        "you don't have to replace",
+        "i was just small talk",
+        "it was just small talk",
+        "just small talk",
+        "leave it alone",
+        "never mind that correction",
+        "nevermind that correction",
+    )
+    return any(cue in low for cue in cues)
+
+
+def _looks_like_pending_replacement_text(text: str) -> bool:
+    raw = str(text or "").strip()
+    if not raw or "?" in raw:
+        return False
+    if bool(re.fullmatch(r"['\"].+['\"]", raw)):
+        return True
+    normalized = _normalize_turn_text(raw)
+    words = [word for word in normalized.split() if word]
+    if not words:
+        return False
+    return len(words) <= 4
+
+
+def _safe_eval_arithmetic_expression(expr: str) -> Optional[float]:
+    text = str(expr or "").strip()
+    if not text:
+        return None
+    try:
+        node = ast.parse(text, mode="eval")
+    except Exception:
+        return None
+
+    def _eval(n: ast.AST) -> float:
+        if isinstance(n, ast.Expression):
+            return _eval(n.body)
+        if isinstance(n, ast.Constant) and isinstance(n.value, (int, float)):
+            return float(n.value)
+        if isinstance(n, ast.UnaryOp) and isinstance(n.op, (ast.UAdd, ast.USub)):
+            value = _eval(n.operand)
+            return value if isinstance(n.op, ast.UAdd) else -value
+        if isinstance(n, ast.BinOp) and isinstance(n.op, (ast.Add, ast.Sub, ast.Mult, ast.Div)):
+            left = _eval(n.left)
+            right = _eval(n.right)
+            if isinstance(n.op, ast.Add):
+                return left + right
+            if isinstance(n.op, ast.Sub):
+                return left - right
+            if isinstance(n.op, ast.Mult):
+                return left * right
+            if right == 0:
+                raise ZeroDivisionError()
+            return left / right
+        raise ValueError("unsupported_expression")
+
+    try:
+        return _eval(node)
+    except Exception:
+        return None
+
+
+def _arithmetic_expression_reply(user_text: str) -> Optional[str]:
+    raw = str(user_text or "").strip()
+    if not raw:
+        return None
+    match = re.search(r"(?<!\d)(\d+(?:\s*[+\-*/]\s*\d+){1,8})\s*=?(?!\d)", raw)
+    if not match:
+        return None
+    expr = str(match.group(1) or "").strip()
+    value = _safe_eval_arithmetic_expression(expr)
+    if value is None:
+        return None
+    if float(value).is_integer():
+        rendered = str(int(value))
+    else:
+        rendered = str(round(float(value), 6)).rstrip("0").rstrip(".")
+    return rendered
 
 
 def _is_negative_feedback(text: str) -> bool:
@@ -6663,44 +9869,39 @@ def _apply_reply_overrides(reply: str) -> str:
         fn = teach_dir / "examples.jsonl"
         if not fn.exists():
             return reply
-        norm = lambda s: re.sub(r"\s+", " ", (s or "").strip())
-        target = norm(reply)
-        # Try semantic fuzzy match if memory embed utilities are available
-        try:
-            if memory_mod is not None and hasattr(memory_mod, "embed") and hasattr(memory_mod, "cosine"):
-                tvec = memory_mod.embed(target)
-                best = (0.0, None)
-                with open(fn, "r", encoding="utf-8") as f:
-                    for ln in f:
-                        try:
-                            j = json.loads(ln)
-                            orig = norm(j.get("orig") or "")
-                            corr = j.get("corr") or ""
-                            if not orig:
-                                continue
-                            ovec = memory_mod.embed(orig)
-                            sim = memory_mod.cosine(tvec, ovec)
-                            if sim > best[0]:
-                                best = (sim, corr)
-                        except Exception:
-                            continue
-                # threshold for accepting a fuzzy override
-                if best[0] >= 0.85 and best[1]:
-                    return best[1]
-        except Exception:
-            pass
+        def _norm(s: str) -> str:
+            return re.sub(r"\s+", " ", (s or "").strip())
 
-        # Fallback: exact normalized match
+        def _loose_norm(s: str) -> str:
+            base = _norm(s).lower()
+            base = re.sub(r"[^a-z0-9 ]+", " ", base)
+            return re.sub(r"\s+", " ", base).strip()
+
+        target = _norm(reply)
+        target_loose = _loose_norm(reply)
+        best_ratio = 0.0
+        best_corr = ""
+
         with open(fn, "r", encoding="utf-8") as f:
             for ln in f:
                 try:
                     j = json.loads(ln)
-                    orig = norm(j.get("orig") or "")
+                    orig = _norm(j.get("orig") or "")
                     corr = j.get("corr") or ""
                     if orig and orig == target:
                         return corr
+                    orig_loose = _loose_norm(orig)
+                    if orig_loose and orig_loose == target_loose:
+                        return corr
+                    if orig_loose and target_loose:
+                        ratio = difflib.SequenceMatcher(None, target_loose, orig_loose).ratio()
+                        if ratio > best_ratio:
+                            best_ratio = ratio
+                            best_corr = corr
                 except Exception:
                     continue
+        if best_ratio >= 0.94 and best_corr:
+            return best_corr
     except Exception:
         pass
     return reply
@@ -6734,10 +9935,12 @@ def _teach_propose_patch(description: str) -> str:
 
         ts = time.strftime("%Y%m%d_%H%M%S")
         out_zip = UPDATES_DIR / f"teach_proposal_{ts}.zip"
+        current_revision = _read_patch_revision()
         manifest = {
             "name": f"teach_proposal_{ts}",
-            "desc": description or "Teach examples proposal",
-            "rev": int(time.time()),
+            "notes": description or "Teach examples proposal",
+            "patch_revision": current_revision + 1,
+            "min_base_revision": current_revision,
         }
         tmp_manifest = UPDATES_DIR / f"teach_manifest_{ts}.json"
         tmp_manifest.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -6831,18 +10034,17 @@ def _teach_autoapply_proposal(zip_path: str, apply_live: bool = False) -> str:
         with zipfile.ZipFile(z, "r") as zz:
             zz.extractall(path=staging)
 
-        # run tests in staging
-        python_exe = PYTHON
-        cmd = [python_exe, "-m", "unittest", "discover", "-v"]
-        proc = subprocess.run(cmd, cwd=str(staging), capture_output=True, text=True, timeout=600)
-        out = proc.stdout + "\n" + proc.stderr
-        if proc.returncode != 0:
+        # run the same behavioral validation gate in staging before any live apply.
+        behavior_result = _behavioral_check(base_dir=staging)
+        if not bool(behavior_result.get("ok")):
             # cleanup staging
             try:
                 shutil.rmtree(staging)
             except Exception:
                 pass
-            return f"Tests failed in staging:\n{out}"
+            out = str(behavior_result.get("output") or "")
+            summary = str(behavior_result.get("summary") or "behavioral check failed")
+            return f"Behavioral check failed in staging:\n{summary}\n\n{out}"
 
         # tests passed; either apply to live repo or return suggested command
         if apply_live:
@@ -6863,7 +10065,7 @@ def _teach_autoapply_proposal(zip_path: str, apply_live: bool = False) -> str:
                 pass
 
             return (
-                "Staging tests passed. To apply this proposal to the live repo run:\n"
+                f"Staging behavioral check passed ({str(behavior_result.get('summary') or 'passed')}). To apply this proposal to the live repo run:\n"
                 f"  teach autoapply apply {zip_path}\n"
                 "Or run the suggested patch apply command directly: patch apply <zip_path>"
             )
@@ -6914,7 +10116,7 @@ def _teach_autoapply_proposal(zip_path: str, apply_live: bool = False) -> str:
 # Voice (STT)
 # =========================
 def record_seconds(seconds=3):
-    if not VOICE_OK or sd is None:
+    if not _ensure_voice_deps() or sd is None:
         raise RuntimeError(f"Voice is disabled (import error: {VOICE_IMPORT_ERR})")
     print(f"Nova: recording for {seconds} seconds... (talk now)", flush=True)
     audio = sd.rec(
@@ -6928,7 +10130,7 @@ def record_seconds(seconds=3):
 
 
 def transcribe(model, audio_int16):
-    if not VOICE_OK or wav is None:
+    if not _ensure_voice_deps() or wav is None:
         raise RuntimeError(f"Voice is disabled (import error: {VOICE_IMPORT_ERR})")
     buf = io.BytesIO()
     wav.write(buf, SAMPLE_RATE, audio_int16)
@@ -6982,24 +10184,33 @@ def tool_health():
     return execute_registered_tool("system", {"action": "health_check"})
 
 
+def tool_queue_status():
+    return execute_registered_tool("system", {"action": "queue_status"})
+
+
 def execute_planned_action(tool: str, args=None):
     tool_name = str(tool or "").strip()
     tool_args = list(args) if isinstance(args, (list, tuple)) else ([] if args in {None, ""} else [args])
 
     if tool_name in {"web_fetch", "web_search", "web_research", "web_gather"}:
-        value = tool_args[0] if tool_args else ""
-        return execute_research_action(tool_name, str(value or ""))
+        return ""
 
     if tool_name == "weather_current_location":
-        return _weather_for_saved_location()
+        saved_location = str(get_saved_location_text() or "").strip()
+        if saved_location:
+            return str(tool_weather(saved_location) or "")
+        coords = _coords_from_saved_location()
+        if coords:
+            return str(tool_weather(f"{coords[0]},{coords[1]}") or "")
+        return _need_confirmed_location_message()
 
     if tool_name == "weather_location":
-        value = tool_args[0] if tool_args else ""
-        return tool_weather(str(value or ""))
+        location_value = str(tool_args[0] if tool_args else "").strip()
+        return str(tool_weather(location_value) or "")
 
     if tool_name == "location_coords":
-        value = tool_args[0] if tool_args else ""
-        return set_location_coords(str(value or ""))
+        location_value = str(tool_args[0] if tool_args else "").strip()
+        return set_location_coords(location_value)
 
     tool_map = {
         "patch_apply": patch_apply,
@@ -7010,6 +10221,7 @@ def execute_planned_action(tool: str, args=None):
         "ls": tool_ls,
         "find": tool_find,
         "health": tool_health,
+        "queue_status": tool_queue_status,
     }
     fn = tool_map.get(tool_name)
     if not fn:
@@ -7031,34 +10243,7 @@ def make_pending_weather_action() -> dict:
     }
 
 
-def tool_web(url: str):
-    # capability awareness check
-    missing = explain_missing("web_fetch", ["web_access"])
-    if missing:
-        return missing
-    
-    if not policy_tools_enabled().get("web", False):
-        return "Web tool disabled by policy."
-    out = web_fetch(url, WEB_CACHE_DIR)
-
-    if not out.get("ok"):
-        err = out.get("error", "unknown error")
-        # If domain blocked by allowlist, provide helpful instructions
-        if isinstance(err, str) and "not allowed" in err.lower():
-            return _web_allowlist_message(url)
-        return f"[FAIL] {err}"
-    return f"[OK] Saved: {out['path']} ({out['content_type']}, {out['bytes']} bytes)"
-
-
 def web_search(query: str, save_dir: Path, max_results: int = 5) -> dict:
-    """
-    Conservative web search using DuckDuckGo HTML interface.
-    Saves a plain-text summary to `save_dir` and returns {ok, path, bytes}.
-    This avoids JS-heavy scraping and does not require external deps.
-    """
-    if not web_enabled():
-        return {"ok": False, "error": "Web tool disabled by policy."}
-
     save_dir.mkdir(parents=True, exist_ok=True)
     try:
         url = "https://html.duckduckgo.com/html/"
@@ -7415,6 +10600,24 @@ def _seed_urls_for_domain(domain: str, query_tokens: list[str], max_seed: int = 
     return seeds
 
 
+
+def tool_web_fetch(url: str):
+    missing = explain_missing("web_fetch", ["web_access"])
+    if missing:
+        return missing
+
+    if not policy_tools_enabled().get("web", False):
+        return "Web tool disabled by policy."
+
+    out = web_fetch(url, WEB_CACHE_DIR)
+    if not out.get("ok"):
+        err = out.get("error", "unknown error")
+        if isinstance(err, str) and "not allowed" in err.lower():
+            return _web_allowlist_message(url)
+        return f"[FAIL] {err}"
+
+    return f"[OK] Saved: {out['path']} ({out['content_type']}, {out['bytes']} bytes)"
+
 def tool_web_search(query: str):
     missing = explain_missing("web_fetch", ["web_access"])
     if missing:
@@ -7745,7 +10948,8 @@ def tool_web_research(query: str, continue_mode: bool = False):
 
 
 def handle_keywords(text: str):
-    low = text.lower().strip()
+    raw = str(text or "").strip()
+    low = raw.lower()
 
     if low in {"screen", "look at my screen"}:
         return ("tool", "screen", tool_screen())
@@ -7754,46 +10958,17 @@ def handle_keywords(text: str):
         prompt = text[len("camera"):].strip() or "what do you see"
         return ("tool", "camera", tool_camera(prompt))
 
-    if low.startswith("web research "):
-        q = text.split(maxsplit=2)[2].strip() if len(text.split(maxsplit=2)) >= 3 else ""
-        return ("tool", "web_research", execute_research_action("web_research", q))
-
-    if low in {"web continue", "continue web", "continue web research"}:
-        return ("tool", "web_research", tool_web_research("", continue_mode=True))
-
-    if low.startswith("web search "):
-        q = text.split(maxsplit=2)[2].strip() if len(text.split(maxsplit=2)) >= 3 else ""
-        return ("tool", "web_search", execute_research_action("web_search", q))
-
-    # shorthand: `search <query>` -> conservative DuckDuckGo search (saves summary)
-    if low.startswith("search "):
-        q = text.split(maxsplit=1)[1].strip() if len(text.split(maxsplit=1)) >= 2 else ""
-        return ("tool", "search", tool_search(q))
-
-    # shorthand: `findweb <query>` -> quick allowlisted web search (returns URLs)
-    if low.startswith("findweb "):
-        q = text.split(maxsplit=1)[1].strip() if len(text.split(maxsplit=1)) >= 2 else ""
-        return ("tool", "web_search", execute_research_action("web_search", q))
-
-    if low.startswith("web gather "):
-        url = text.split(maxsplit=2)[2].strip() if len(text.split(maxsplit=2)) >= 3 else ""
-        return ("tool", "web_gather", execute_research_action("web_gather", url))
-
-    if low.startswith("web "):
-        url = text.split(maxsplit=1)[1].strip()
-        return ("tool", "web_fetch", execute_research_action("web_fetch", url))
-
-    if low.startswith("ls"):
-        parts = text.split(maxsplit=1)
+    if low == "ls" or _is_brief_command_form(raw, "ls", max_tokens=2):
+        parts = raw.split(maxsplit=1)
         sub = parts[1] if len(parts) > 1 else ""
         return ("tool", "ls", tool_ls(sub))
 
-    if low.startswith("read "):
-        path = text.split(maxsplit=1)[1]
+    if _is_brief_command_form(raw, "read", max_tokens=2):
+        path = raw.split(maxsplit=1)[1]
         return ("tool", "read", tool_read(path))
 
-    if low.startswith("find "):
-        parts = text.split(maxsplit=2)
+    if _is_brief_command_form(raw, "find", max_tokens=3):
+        parts = raw.split(maxsplit=2)
         keyword = parts[1] if len(parts) > 1 else ""
         folder = parts[2] if len(parts) > 2 else ""
         return ("tool", "find", tool_find(keyword, folder))
@@ -7804,34 +10979,43 @@ def handle_keywords(text: str):
     return None
 
 
+def _is_brief_command_form(text: str, command: str, max_tokens: int) -> bool:
+    raw = str(text or "").strip()
+    low = raw.lower()
+    if not low.startswith(f"{command} "):
+        return False
+    if raw.endswith("?"):
+        return False
+    tail = raw[len(command):].strip()
+    if not tail:
+        return False
+    tokens = tail.split()
+    if len(tokens) < 1 or len(tokens) + 1 > max_tokens:
+        return False
+    if any(mark in raw for mark in (",", ";", ":")):
+        return False
+    return True
+
+
 # =========================
 # Commands (typed) for kb / patch
 # =========================
-def handle_commands(user_text: str, session_turns: Optional[list[tuple[str, str]]] = None) -> Optional[str]:
+def handle_commands(
+    user_text: str,
+    session_turns: Optional[list[tuple[str, str]]] = None,
+    session: Optional[ConversationSession] = None,
+) -> Optional[str]:
     t = _strip_invocation_prefix((user_text or "").strip())
     low = t.lower()
-
-    # Natural follow-up variants such as "use your location nova" should resolve deterministically.
-    if ("use your" in low or low.startswith("use ")) and _mentions_location_phrase(low):
-        return _weather_for_saved_location()
-
-    if low in {"use your physical location", "use your location", "use default location", "default location"}:
-        return _weather_for_saved_location()
-
-    # Natural weather requests should stay deterministic and not fall through to LLM.
-    if "weather" in low and not low.startswith("web "):
-        if "your" in low and _mentions_location_phrase(low):
-            return _weather_for_saved_location()
-        if "there" in low or "that location" in low:
-            return _weather_for_saved_location()
-        if any(p in low for p in ["give me", "check", "show", "tell me", "what is", "what's", "today", "now", "current"]):
-            return _weather_for_saved_location()
 
     if low in {"chat context", "show chat context", "context", "chatctx"}:
         rendered = _render_chat_context(session_turns or [])
         if not rendered:
             return "No chat context is available yet in this session."
         return "Current chat context:\n" + rendered
+
+    if low in {"queue", "queue status", "work queue", "show queue", "standing work queue"}:
+        return str(execute_planned_action("queue_status") or "")
 
     if "domanins" in low and any(k in low for k in ["domain", "domanins", "allow", "policy", "list", "show"]):
         return "It looks like you meant \"domains\".\n" + list_allowed_domains()
@@ -7865,24 +11049,39 @@ def handle_commands(user_text: str, session_turns: Optional[list[tuple[str, str]
         return set_web_mode(mode)
 
     if low.startswith("location coords ") or low.startswith("set location coords "):
-        raw = t
-        if low.startswith("set location coords "):
-            raw = t[len("set location coords "):].strip()
-        else:
-            raw = t[len("location coords "):].strip()
-        return set_location_coords(raw)
+        value = t.split(maxsplit=2)[2] if len(t.split(maxsplit=2)) >= 3 else ""
+        return set_location_coords(value)
 
     if low in {"weather", "check weather", "weather current location", "weather current"}:
-        return _weather_for_saved_location()
+        return str(execute_planned_action("weather_current_location") or "")
 
     if low.startswith("weather ") or low.startswith("check weather "):
         parts = t.split(maxsplit=2)
-        loc = ""
-        if low.startswith("check weather ") and len(parts) >= 3:
-            loc = parts[2].strip()
-        elif low.startswith("weather ") and len(parts) >= 2:
-            loc = t.split(maxsplit=1)[1].strip()
-        return tool_weather(loc)
+        location_value = parts[2] if len(parts) >= 3 else (parts[1] if len(parts) >= 2 else "")
+        return str(execute_planned_action("weather_location", [location_value]) or "")
+
+    normalized = _normalize_turn_text(t)
+    if normalized in {"use your physical location", "use your location nova", "use your location"}:
+        return str(execute_planned_action("weather_current_location") or "")
+
+    if _is_saved_location_weather_query(normalized) or (
+        "weather" in normalized and any(phrase in normalized for phrase in (
+            "give me",
+            "can you give me",
+            "what is",
+            "what's",
+            "forecast",
+            "current",
+            "today",
+            "now",
+        ))
+    ):
+        if get_saved_location_text() or _coords_from_saved_location():
+            return str(execute_planned_action("weather_current_location") or "")
+        return _need_confirmed_location_message() + " My location is unknown until you tell me or save coordinates."
+
+    if _is_location_request(normalized):
+        return _location_reply()
 
     if low.startswith("remember:"):
         return mem_remember_fact(t.split(":", 1)[1])
@@ -7892,6 +11091,38 @@ def handle_commands(user_text: str, session_turns: Optional[list[tuple[str, str]
 
     if low in {"mem stats", "memory stats"}:
         return mem_stats()
+
+    if low in {"mix", "mix status", "language status", "spanglish status"}:
+        current = int(getattr(session, "language_mix_spanish_pct", 0) or 0)
+        return f"Language mix status: English default with Spanish mix at {current}%"
+
+    if low.startswith("set mix "):
+        m = re.search(r"set\s+mix\s+(\d{1,3})", low)
+        if not m:
+            return "Usage: set mix <0-100>"
+        value = _clamp_language_mix(int(m.group(1)))
+        if session is not None:
+            session.set_language_mix_spanish_pct(value)
+        return f"Language mix updated: Spanish {value}% (English {100 - value}%)"
+
+    if low in {"more spanish", "more espanol", "mas espanol"}:
+        current = int(getattr(session, "language_mix_spanish_pct", 0) or 0)
+        value = _clamp_language_mix(current + 20)
+        if session is not None:
+            session.set_language_mix_spanish_pct(value)
+        return f"Language mix nudged toward Spanish: {value}%"
+
+    if low in {"more english", "menos espanol"}:
+        current = int(getattr(session, "language_mix_spanish_pct", 0) or 0)
+        value = _clamp_language_mix(current - 20)
+        if session is not None:
+            session.set_language_mix_spanish_pct(value)
+        return f"Language mix nudged toward English: Spanish {value}%"
+
+    if low in {"english default", "default english", "english only"}:
+        if session is not None:
+            session.set_language_mix_spanish_pct(0)
+        return "English is now the default response language for this session."
 
     if low.startswith("mem audit ") or low.startswith("memory audit "):
         q = t.split(maxsplit=2)[2] if len(t.split(maxsplit=2)) >= 3 else ""
@@ -7957,6 +11188,36 @@ def handle_commands(user_text: str, session_turns: Optional[list[tuple[str, str]
 
     if low == "patch rollback":
         return execute_patch_action("rollback", is_admin=True)
+
+    if low == "kidney" or low == "kidney help":
+        return (
+            "Kidney commands:\n"
+            "  kidney status\n"
+            "  kidney now\n"
+            "  kidney dry-run\n"
+            "  kidney protect <pattern>\n"
+        )
+
+    if low == "kidney status":
+        import kidney
+
+        return kidney.render_status()
+
+    if low == "kidney now":
+        import kidney
+
+        return kidney.render_run(dry_run=False)
+
+    if low == "kidney dry-run":
+        import kidney
+
+        return kidney.render_run(dry_run=True)
+
+    if low.startswith("kidney protect "):
+        import kidney
+
+        pattern = t.split(maxsplit=2)[2].strip() if len(t.split(maxsplit=2)) >= 3 else ""
+        return kidney.add_protect_pattern(pattern)
 
     # Teach workflow: remember examples and propose patches
     if low.startswith("teach "):
@@ -8063,25 +11324,25 @@ def handle_commands(user_text: str, session_turns: Optional[list[tuple[str, str]
 # =========================
 def run_loop(tts):
     whisper = None
-    if VOICE_OK and WhisperModel is not None:
+    if _ensure_voice_deps() and WhisperModel is not None:
         print("Nova Core: loading Whisper (CPU mode)...", flush=True)
         whisper = WhisperModel(whisper_size(), device="cpu", compute_type="int8")
     else:
         warn(f"Voice mode disabled; typed chat still works. (Reason: {VOICE_IMPORT_ERR})")
 
     print("\nNova Core is ready.", flush=True)
-    print("Commands: screen | camera <prompt> | web <url> | web search <query> | web research <query> | web gather <url> | weather <location-or-lat,lon> | check weather <location> | weather current location | location coords <lat,lon> | domains | policy allow <domain> | chat context | ls [folder] | read <file> | find <kw> [folder] | health | capabilities | inspect", flush=True)
+    print("Commands: screen | camera <prompt> | web <url> | web search <query> | web research <query> | web gather <url> | weather <location-or-lat,lon> | check weather <location> | weather current location | location coords <lat,lon> | domains | policy allow <domain> | chat context | queue status | ls [folder] | read <file> | find <kw> [folder] | health | capabilities | inspect", flush=True)
     print("Press ENTER for voice. Or type a message/command and press ENTER. Type 'q' to quit.\n", flush=True)
 
     recent_tool_context = ""
     recent_web_urls: list[str] = []
     session_turns: list[tuple[str, str]] = []
     session_state = ConversationSession()
-    pending_correction_for: Optional[str] = None
     pending_action_ledger: Optional[dict] = None
     pending_action: Optional[dict] = session_state.pending_action
     conversation_state: Optional[dict] = session_state.conversation_state
     prefer_web_for_data_queries = session_state.prefer_web_for_data_queries
+    language_mix_spanish_pct = int(session_state.language_mix_spanish_pct or 0)
 
     def _set_pending_action(value: Optional[dict]) -> None:
         nonlocal pending_action
@@ -8097,6 +11358,11 @@ def run_loop(tts):
         nonlocal prefer_web_for_data_queries
         prefer_web_for_data_queries = bool(value)
         session_state.set_prefer_web_for_data_queries(prefer_web_for_data_queries)
+
+    def _set_language_mix_spanish_pct(value: int) -> None:
+        nonlocal language_mix_spanish_pct
+        language_mix_spanish_pct = _clamp_language_mix(value)
+        session_state.set_language_mix_spanish_pct(language_mix_spanish_pct)
 
     def _sync_pending_conversation_tracking() -> None:
         if not pending_action_ledger:
@@ -8141,6 +11407,9 @@ def run_loop(tts):
             intent=str(pending_action_ledger.get("intent") or ""),
             active_subject=str(pending_action_ledger.get("active_subject") or ""),
             continuation_used=bool(pending_action_ledger.get("continuation_used", False)),
+            reply_contract=str(pending_action_ledger.get("reply_contract") or ""),
+            reply_outcome=pending_action_ledger.get("reply_outcome") if isinstance(pending_action_ledger.get("reply_outcome"), dict) else {},
+            routing_decision=pending_action_ledger.get("routing_decision") if isinstance(pending_action_ledger.get("routing_decision"), dict) else {},
             reflection_payload=build_turn_reflection(
                 session_state,
                 entry_point="cli",
@@ -8151,10 +11420,20 @@ def run_loop(tts):
                     "tool": str(pending_action_ledger.get("tool") or ""),
                     "tool_result": str(pending_action_ledger.get("tool_result") or ""),
                     "final_answer": final_answer,
+                    "reply_contract": str(pending_action_ledger.get("reply_contract") or ""),
+                    "reply_outcome": pending_action_ledger.get("reply_outcome") if isinstance(pending_action_ledger.get("reply_outcome"), dict) else {},
+                    "turn_acts": list(pending_action_ledger.get("turn_acts") or []),
                     "grounded": pending_action_ledger.get("grounded") if isinstance(pending_action_ledger.get("grounded"), bool) else None,
                     "active_subject": str(pending_action_ledger.get("active_subject") or session_state.active_subject() or ""),
                     "continuation_used": bool(pending_action_ledger.get("continuation_used", False)),
                     "pending_action": session_state.pending_action,
+                    "routing_decision": _finalize_routing_decision(
+                        pending_action_ledger.get("routing_decision") if isinstance(pending_action_ledger.get("routing_decision"), dict) else {},
+                        planner_decision=str(pending_action_ledger.get("planner_decision") or "deterministic"),
+                        reply_contract=str(pending_action_ledger.get("reply_contract") or ""),
+                        reply_outcome=pending_action_ledger.get("reply_outcome") if isinstance(pending_action_ledger.get("reply_outcome"), dict) else {},
+                        turn_acts=list(pending_action_ledger.get("turn_acts") or []),
+                    ),
                     "route_summary": action_ledger_route_summary((pending_action_ledger.get("record") or {}).get("route_trace")),
                 },
             ),
@@ -8213,45 +11492,42 @@ def run_loop(tts):
             "continuation_used": False,
         }
 
-        # If a prior answer was flagged as wrong, learn from the next authoritative user statement.
-        try:
-            if pending_correction_for:
-                corr = _extract_authoritative_correction_text(user_text)
-                if corr:
-                    _trace("correction_capture", "applied", "user supplied authoritative correction")
-                    corr_store = _normalize_correction_for_storage(corr)
-                    _teach_store_example(pending_correction_for, corr_store, user=get_active_user() or None)
-                    behavior_record_event("correction_applied")
-                    ack = "Understood. I corrected that and will use your version going forward."
-                    print(f"Nova: {ack}\n", flush=True)
-                    session_turns.append(("assistant", ack))
-                    speak_chunked(tts, ack)
-                    pending_correction_for = None
-                    continue
-        except Exception:
-            pass
-
         routed_user_text = user_text
         turn_direction = {
             "primary": "general_chat",
             "effective_query": user_text,
             "analysis_reason": "",
+            "turn_acts": [],
             "identity_focused": False,
             "bypass_pattern_routes": False,
         }
         try:
-            turn_direction = _determine_turn_direction(session_turns, user_text)
+            turn_direction = _determine_turn_direction(
+                session_turns,
+                user_text,
+                active_subject=session_state.active_subject(),
+                pending_action=pending_action,
+            )
             routed_user_text = str(turn_direction.get("effective_query") or user_text)
+            _set_language_mix_spanish_pct(_auto_adjust_language_mix(language_mix_spanish_pct, routed_user_text))
+            turn_acts = [str(item).strip() for item in list(turn_direction.get("turn_acts") or []) if str(item).strip()]
+            if pending_action_ledger is not None:
+                pending_action_ledger["turn_acts"] = turn_acts
+                record = pending_action_ledger.get("record")
+                if isinstance(record, dict):
+                    record["turn_acts"] = list(turn_acts)
             _trace(
                 "direction_analysis",
                 str(turn_direction.get("primary") or "general_chat"),
                 str(turn_direction.get("analysis_reason") or "")[:120],
                 effective_query=routed_user_text[:180],
+                turn_acts=",".join(turn_acts),
                 identity_focused=bool(turn_direction.get("identity_focused")),
                 bypass_pattern_routes=bool(turn_direction.get("bypass_pattern_routes")),
             )
         except Exception:
             routed_user_text = user_text
+            turn_acts = []
 
         intent_rule = TURN_SUPERVISOR.evaluate_rules(
             routed_user_text,
@@ -8260,15 +11536,106 @@ def run_loop(tts):
             phase="intent",
             entry_point="cli",
         )
-        handled_intent, intent_msg = _handle_supervisor_intent(
+        if not _supervisor_result_has_route(intent_rule):
+            runtime_intent = _runtime_set_location_intent(routed_user_text, pending_action=pending_action)
+            if isinstance(runtime_intent, dict):
+                intent_rule = runtime_intent
+        if not _supervisor_result_has_route(intent_rule):
+            llm_intent = _llm_classify_routing_intent(routed_user_text, turns=session_turns)
+            if isinstance(llm_intent, dict) and _supervisor_result_has_route(llm_intent):
+                intent_rule = llm_intent
+                _trace("llm_routing", "matched", intent=str(intent_rule.get("intent") or ""))
+        if not _supervisor_result_has_route(intent_rule) and _should_clarify_unlabeled_numeric_turn(
+            routed_user_text,
+            pending_action=pending_action,
+            current_state=conversation_state,
+        ):
+            final = _ensure_reply(_unlabeled_numeric_turn_reply(routed_user_text))
+            _set_conversation_state(_make_conversation_state("numeric_reference_clarify", value=str(routed_user_text or "").strip()))
+            _sync_pending_conversation_tracking()
+            if pending_action_ledger is not None:
+                pending_action_ledger["planner_decision"] = "ask_clarify"
+                pending_action_ledger["grounded"] = False
+            _trace("numeric_clarify", "blocked")
+            print(f"Nova: {final}\n", flush=True)
+            session_turns.append(("assistant", final))
+            speak_chunked(tts, final)
+            continue
+        if "mixed" in turn_acts:
+            final = _ensure_reply(_mixed_info_request_clarify_reply(routed_user_text))
+            if pending_action_ledger is not None:
+                pending_action_ledger["planner_decision"] = "ask_clarify"
+                pending_action_ledger["grounded"] = False
+                pending_action_ledger["reply_contract"] = "turn.clarify_mixed_intent"
+                pending_action_ledger["reply_outcome"] = {
+                    "intent": "clarify_mixed_turn",
+                    "kind": "mixed_info_request",
+                    "reply_contract": "turn.clarify_mixed_intent",
+                }
+            _trace("mixed_turn_clarify", "blocked")
+            print(f"Nova: {final}\n", flush=True)
+            session_turns.append(("assistant", final))
+            speak_chunked(tts, final)
+            continue
+        # DO NOT add new deterministic phrase routing here.
+        # Add a supervisor rule plus shared core action execution instead.
+        # See docs/SUPERVISOR_CONTRACT.md.
+        handled_intent, intent_msg, intent_state, intent_effects = _handle_supervisor_intent(
             intent_rule,
             routed_user_text,
             turns=session_turns,
             input_source=input_source,
+            entry_point="cli",
         )
+        if pending_action_ledger is not None:
+            pending_action_ledger["routing_decision"] = _build_routing_decision(
+                routed_user_text,
+                entry_point="cli",
+                intent_result=intent_rule,
+                handle_result=None,
+                reply_contract=str(intent_effects.get("reply_contract") or "") if isinstance(intent_effects, dict) else "",
+                reply_outcome=dict(intent_effects.get("reply_outcome") or {}) if isinstance(intent_effects, dict) and isinstance(intent_effects.get("reply_outcome"), dict) else {},
+                turn_acts=turn_acts,
+            )
         if handled_intent:
+            weather_mode = str(intent_rule.get("weather_mode") or "").strip().lower()
+            intent_name = str(intent_rule.get("intent") or "").strip().lower()
             _emit_supervisor_intent_trace(intent_rule, user_text=routed_user_text)
             final = _ensure_reply(intent_msg)
+            if isinstance(intent_effects, dict) and "pending_action" in intent_effects:
+                _set_pending_action(intent_effects.get("pending_action"))
+            if isinstance(intent_effects, dict):
+                pending_action_ledger["reply_contract"] = str(intent_effects.get("reply_contract") or "")
+                pending_action_ledger["reply_outcome"] = dict(intent_effects.get("reply_outcome") or {}) if isinstance(intent_effects.get("reply_outcome"), dict) else {}
+            if pending_action_ledger is not None and intent_name == "web_research_family":
+                reply_outcome = pending_action_ledger.get("reply_outcome") if isinstance(pending_action_ledger.get("reply_outcome"), dict) else {}
+                tool_name = str((reply_outcome or {}).get("tool_name") or intent_rule.get("tool_name") or "web_research").strip().lower() or "web_research"
+                query = str((reply_outcome or {}).get("query") or intent_rule.get("query") or routed_user_text).strip()
+                pending_action_ledger["planner_decision"] = "run_tool"
+                pending_action_ledger["tool"] = tool_name
+                pending_action_ledger["tool_args"] = {"args": [query]} if query else {"args": []}
+                pending_action_ledger["tool_result"] = str(final or "")
+                pending_action_ledger["grounded"] = bool(str(final or "").strip())
+                _trace("action_planner", "run_tool", tool=tool_name)
+                _trace("tool_execution", "ok", tool=tool_name, grounded=bool(str(final or "").strip()))
+            elif pending_action_ledger is not None and intent_name == "weather_lookup" and weather_mode in {"current_location", "explicit_location"}:
+                tool_name = "weather_current_location" if weather_mode == "current_location" else "weather_location"
+                pending_action_ledger["planner_decision"] = "run_tool"
+                pending_action_ledger["tool"] = tool_name
+                if tool_name == "weather_location":
+                    pending_action_ledger["tool_args"] = {"args": [str(intent_rule.get("location_value") or "").strip()]}
+                pending_action_ledger["tool_result"] = str(final or "")
+                pending_action_ledger["grounded"] = bool(str(final or "").strip())
+                _trace("action_planner", "run_tool", tool=tool_name)
+                _trace("tool_execution", "ok", tool=tool_name, grounded=bool(str(final or "").strip()))
+            elif pending_action_ledger is not None and intent_name == "weather_lookup" and weather_mode == "clarify":
+                pending_action_ledger["planner_decision"] = "ask_clarify"
+                pending_action_ledger["grounded"] = False
+                _trace("action_planner", "ask_clarify")
+                _trace("pending_action", "awaiting_location", tool="weather")
+            if isinstance(intent_state, dict):
+                _set_conversation_state(intent_state)
+                _sync_pending_conversation_tracking()
             _trace(
                 "supervisor_intent",
                 "handled",
@@ -8279,59 +11646,7 @@ def run_loop(tts):
             session_turns.append(("assistant", final))
             speak_chunked(tts, final)
             continue
-
-        # Detect broad negative feedback and either learn immediate correction text
-        # or mark the prior assistant answer as pending correction.
-        try:
-            if _is_negative_feedback(user_text):
-                last_assistant = None
-                for role, txt in reversed(session_turns[:-1]):
-                    if role == "assistant":
-                        last_assistant = txt
-                        break
-                if last_assistant:
-                    corr = _extract_authoritative_correction_text(user_text)
-                    if corr:
-                        _trace("correction_feedback", "learned", "negative feedback included replacement")
-                        corr_store = _normalize_correction_for_storage(corr)
-                        _teach_store_example(last_assistant, corr_store, user=get_active_user() or None)
-                        behavior_record_event("correction_learned")
-                        ack = "You're right. I saved your correction and will use it next time."
-                        print(f"Nova: {ack}\n", flush=True)
-                        session_turns.append(("assistant", ack))
-                        speak_chunked(tts, ack)
-                        continue
-                    pending_correction_for = last_assistant
-                    _trace("correction_feedback", "pending", "awaiting exact corrected answer")
-                    ack = "You're right. Give me the exact corrected answer and I will learn it now."
-                    print(f"Nova: {ack}\n", flush=True)
-                    session_turns.append(("assistant", ack))
-                    speak_chunked(tts, ack)
-                    continue
-        except Exception:
-            pass
-
-        # Learn explicit user corrections as structured facts before any planner/tool routing.
-        try:
-            if _is_web_research_override_request(user_text):
-                _set_prefer_web_for_data_queries(True)
-                _trace("routing_override", "enabled", "session prefers web research for data-domain queries")
-                ack = "Understood. For this session, I will prefer web research for PEIMS and similar data-domain questions instead of a database route."
-                print(f"Nova: {ack}\n", flush=True)
-                session_turns.append(("assistant", ack))
-                speak_chunked(tts, ack)
-                continue
-
-            learned, learned_msg = learn_from_user_correction(user_text)
-            if learned:
-                _trace("correction_learning", "stored", "structured fact learned from user correction")
-                final = _ensure_reply(learned_msg)
-                print(f"Nova: {final}\n", flush=True)
-                session_turns.append(("assistant", final))
-                speak_chunked(tts, final)
-                continue
-        except Exception:
-            pass
+        warn_supervisor_bypass = not _supervisor_result_has_route(intent_rule) and _should_warn_supervisor_bypass(routed_user_text)
 
         try:
             identity_learned, identity_msg = _learn_self_identity_binding(user_text)
@@ -8388,19 +11703,6 @@ def run_loop(tts):
         except Exception:
             pass
 
-        try:
-            memory_teach = _extract_memory_teach_text(user_text)
-            if memory_teach and mem_enabled():
-                _trace("declarative_memory", "stored", "captured explicit memory teaching")
-                mem_add("fact", input_source, memory_teach)
-                final = _ensure_reply("Yes. I stored that for future context.")
-                print(f"Nova: {final}\n", flush=True)
-                session_turns.append(("assistant", final))
-                speak_chunked(tts, final)
-                continue
-        except Exception:
-            pass
-
         general_rule = TURN_SUPERVISOR.evaluate_rules(
             user_text,
             manager=session_state,
@@ -8408,22 +11710,37 @@ def run_loop(tts):
             phase="handle",
             entry_point="cli",
         )
+        # DO NOT add new deterministic branching in this loop.
+        # New turn ownership must start in supervisor and flow through shared action execution.
+        # See docs/SUPERVISOR_CONTRACT.md.
         handled_rule, rule_msg, rule_state = _execute_registered_supervisor_rule(
             general_rule,
             user_text,
             conversation_state,
             turns=session_turns,
             input_source=input_source,
-            allowed_actions={"name_origin_store", "self_location"},
+            allowed_actions={"name_origin_store", "self_location", "location_recall", "location_name", "weather_current_location", "apply_correction", "retrieval_followup", "identity_history_family", "open_probe_family", "last_question_recall", "rules_list", "developer_identity_followup", "identity_profile_followup", "developer_location"},
         )
+        if pending_action_ledger is not None:
+            pending_action_ledger["routing_decision"] = _build_routing_decision(
+                routed_user_text,
+                entry_point="cli",
+                intent_result=intent_rule,
+                handle_result=general_rule,
+                reply_contract=str(general_rule.get("reply_contract") or "") if isinstance(general_rule, dict) else "",
+                reply_outcome=dict(general_rule.get("reply_outcome") or {}) if isinstance(general_rule, dict) and isinstance(general_rule.get("reply_outcome"), dict) else {},
+                turn_acts=turn_acts,
+            )
         if handled_rule:
             try:
                 final = _apply_reply_overrides(rule_msg)
             except Exception:
                 final = rule_msg
             final = _ensure_reply(final)
-            if isinstance(rule_state, dict):
-                _set_conversation_state(rule_state)
+            if pending_action_ledger is not None:
+                pending_action_ledger["reply_contract"] = str(general_rule.get("reply_contract") or "")
+                pending_action_ledger["reply_outcome"] = dict(general_rule.get("reply_outcome") or {}) if isinstance(general_rule.get("reply_outcome"), dict) else {}
+            _set_conversation_state(rule_state)
             if bool(general_rule.get("continuation")):
                 session_state.mark_continuation_used()
                 if pending_action_ledger is not None:
@@ -8434,11 +11751,43 @@ def run_loop(tts):
                 str(general_rule.get("rule_name") or "registered_rule"),
                 rule=str(general_rule.get("rule_name") or ""),
             )
+            _update_subconscious_state(
+                session_state,
+                _probe_turn_routes(
+                    routed_user_text,
+                    session_state,
+                    session_turns,
+                    pending_action=pending_action,
+                ),
+                chosen_route="supervisor_owned",
+            )
             _sync_pending_conversation_tracking()
             print(f"Nova: {final}\n", flush=True)
             session_turns.append(("assistant", final))
             speak_chunked(tts, final)
             continue
+
+        fulfillment_result = _maybe_run_fulfillment_flow(
+            routed_user_text,
+            session_state,
+            session_turns,
+            pending_action=pending_action,
+        )
+        if isinstance(fulfillment_result, dict):
+            final = _ensure_reply(str(fulfillment_result.get("reply") or ""))
+            if final:
+                if pending_action_ledger is not None:
+                    pending_action_ledger["planner_decision"] = str(fulfillment_result.get("planner_decision") or "fulfillment")
+                    pending_action_ledger["grounded"] = bool(fulfillment_result.get("grounded", True))
+                _trace(
+                    "fulfillment_flow",
+                    "handled",
+                    str(fulfillment_result.get("planner_decision") or "fulfillment"),
+                )
+                print(f"Nova: {final}\n", flush=True)
+                session_turns.append(("assistant", final))
+                speak_chunked(tts, final)
+                continue
 
         try:
             handled_followup, followup_msg, next_state = _consume_conversation_followup(
@@ -8469,38 +11818,14 @@ def run_loop(tts):
         except Exception:
             pass
 
-        # Interactive correction capture: if the user provides a correction like
-        # "no — say 'Hi Gus' instead" or "say 'Hi Gus' instead", store it as a teach example.
-        try:
-            corr_text = (user_text or "").strip()
-            # find last assistant message
-            last_assistant = None
-            for role, txt in reversed(session_turns[:-1]):
-                if role == "assistant":
-                    last_assistant = txt
-                    break
-
-            if last_assistant:
-                corr = _parse_correction(corr_text)
-                if corr:
-                    _trace("teach_override", "stored", "interactive correction example captured")
-                    corr_store = _normalize_correction_for_storage(corr)
-                    _teach_store_example(last_assistant, corr_store, user=get_active_user() or None)
-                    behavior_record_event("correction_learned")
-                    ack = "Thanks — I'll prefer that reply in future. I've stored the example."
-                    print(f"Nova: {ack}\n", flush=True)
-                    session_turns.append(("assistant", ack))
-                    speak_chunked(tts, ack)
-                    pending_correction_for = None
-                    continue
-        except Exception:
-            pass
-
         # Quick greeting fast-path (avoid LLM for simple salutations)
         try:
-            low_q = (routed_user_text or "").strip().lower()
-            msg = _build_greeting_reply(low_q, active_user=get_active_user() or "")
+            msg = _quick_smalltalk_reply(routed_user_text, active_user=get_active_user() or "")
             if msg:
+                _trace("fast_smalltalk", "matched")
+                if pending_action_ledger is not None:
+                    pending_action_ledger["planner_decision"] = "deterministic"
+                    pending_action_ledger["grounded"] = False
 
                 # Apply any stored reply overrides before sending
                 try:
@@ -8566,7 +11891,7 @@ def run_loop(tts):
         # future conversation to the correct user. Matches: "my name is X", "i am X", "i'm X", "this is X".
         try:
             # Only capture explicit identity phrases to avoid false positives.
-            id_m = re.match(r"^(?:my name is|my name's|call me|you can call me|this is)\s+(.+)$", user_text.strip(), flags=re.I)
+            id_m = None
             if id_m:
                 name = id_m.group(1).strip().strip(".!,")
                 if name:
@@ -8584,41 +11909,20 @@ def run_loop(tts):
         try:
             low_q = (routed_user_text or "").strip().lower()
 
-            if _is_location_recall_state(conversation_state) and _looks_like_contextual_followup(routed_user_text):
-                msg = _location_recall_reply()
+            handled_location, msg, next_location_state, _location_intent = _handle_location_conversation_turn(
+                conversation_state,
+                routed_user_text,
+                turns=session_turns,
+            )
+            if handled_location:
                 try:
                     final = _apply_reply_overrides(msg)
                 except Exception:
                     final = msg
                 final = _ensure_reply(final)
-                print(f"Nova: {final}\n", flush=True)
-                session_turns.append(("assistant", final))
-                speak_chunked(tts, final)
-                continue
-
-            if _looks_like_location_recall_followup(session_turns, routed_user_text):
-                msg = _location_recall_reply()
-                try:
-                    final = _apply_reply_overrides(msg)
-                except Exception:
-                    final = msg
-                final = _ensure_reply(final)
-                _set_conversation_state(_make_conversation_state("location_recall"))
-                _sync_pending_conversation_tracking()
-                print(f"Nova: {final}\n", flush=True)
-                session_turns.append(("assistant", final))
-                speak_chunked(tts, final)
-                continue
-
-            if _is_location_recall_query(routed_user_text):
-                msg = _location_recall_reply()
-                try:
-                    final = _apply_reply_overrides(msg)
-                except Exception:
-                    final = msg
-                final = _ensure_reply(final)
-                _set_conversation_state(_make_conversation_state("location_recall"))
-                _sync_pending_conversation_tracking()
+                if isinstance(next_location_state, dict):
+                    _set_conversation_state(next_location_state)
+                    _sync_pending_conversation_tracking()
                 print(f"Nova: {final}\n", flush=True)
                 session_turns.append(("assistant", final))
                 speak_chunked(tts, final)
@@ -8706,21 +12010,49 @@ def run_loop(tts):
         except Exception:
             pass
 
+        try:
+            location_ack = _store_location_fact_reply(
+                user_text,
+                input_source=input_source,
+                pending_action=pending_action,
+            )
+            if location_ack:
+                _set_conversation_state(_make_conversation_state("location_recall"))
+                _sync_pending_conversation_tracking()
+                final = _ensure_reply(location_ack)
+                print(f"Nova: {final}\n", flush=True)
+                session_turns.append(("assistant", final))
+                speak_chunked(tts, final)
+                continue
+        except Exception:
+            pass
+
+        try:
+            if (
+                isinstance(conversation_state, dict)
+                and str(conversation_state.get("kind") or "") == "location_recall"
+                and _is_saved_location_weather_query(routed_user_text)
+            ):
+                weather_reply = _weather_for_saved_location()
+                if weather_reply:
+                    _set_conversation_state(_make_conversation_state("location_recall"))
+                    _sync_pending_conversation_tracking()
+                    final = _ensure_reply(weather_reply)
+                    print(f"Nova: {final}\n", flush=True)
+                    session_turns.append(("assistant", final))
+                    speak_chunked(tts, final)
+                    continue
+        except Exception:
+            pass
+
         # Treat declarative info (not requests) as facts to store and acknowledge.
         try:
-            location_fact = _extract_location_fact(user_text)
-            if location_fact:
-                set_location_text(location_fact, input_source=input_source)
-                ack = "Noted."
-                print(f"Nova: {ack}\n", flush=True)
-                session_turns.append(("assistant", ack))
-                speak_chunked(tts, ack)
-                continue
-            if _is_declarative_info(user_text):
-                if mem_should_store(user_text):
-                    mem_add("fact", input_source, user_text)
-                # Soften casual acknowledgements
-                ack = "Noted."
+            declarative_outcome = _store_declarative_fact_outcome(user_text, input_source=input_source)
+            if isinstance(declarative_outcome, dict):
+                ack = render_reply(declarative_outcome)
+                if pending_action_ledger is not None:
+                    pending_action_ledger["reply_contract"] = str(declarative_outcome.get("reply_contract") or "")
+                    pending_action_ledger["reply_outcome"] = dict(declarative_outcome)
                 print(f"Nova: {ack}\n", flush=True)
                 session_turns.append(("assistant", ack))
                 speak_chunked(tts, ack)
@@ -8730,6 +12062,29 @@ def run_loop(tts):
 
         # Reason-first action selection: let the planner choose clarify vs tool
         # before legacy command/keyword handlers execute side effects.
+        if warn_supervisor_bypass:
+            safe_reply, safe_kind = _open_probe_reply(routed_user_text, turns=session_turns)
+            safe_outcome = {
+                "intent": "open_probe_family",
+                "kind": safe_kind,
+                "reply_contract": f"open_probe.{safe_kind}",
+                "reply_text": safe_reply,
+                "state_delta": {},
+            }
+            if pending_action_ledger is not None:
+                pending_action_ledger["planner_decision"] = "deterministic"
+                pending_action_ledger["grounded"] = False
+                pending_action_ledger["reply_contract"] = str(safe_outcome.get("reply_contract") or "")
+                pending_action_ledger["reply_outcome"] = dict(safe_outcome)
+                routing_decision = pending_action_ledger.get("routing_decision")
+                if isinstance(routing_decision, dict):
+                    routing_decision["final_owner"] = "supervisor_handle"
+            _trace("open_probe", "matched", safe_kind)
+            final = _ensure_reply(safe_reply)
+            print(f"Nova: {final}\n", flush=True)
+            session_turns.append(("assistant", final))
+            speak_chunked(tts, final)
+            continue
         try:
             actions = [] if turn_direction.get("bypass_pattern_routes") else decide_actions(
                 routed_user_text,
@@ -8779,7 +12134,7 @@ def run_loop(tts):
 
             if atype == "route_command":
                 _trace("action_planner", "route_command")
-                cmd_out = handle_commands(routed_user_text, session_turns=session_turns)
+                cmd_out = handle_commands(routed_user_text, session_turns=session_turns, session=session_state)
                 if cmd_out:
                     _trace("command", "matched", tool="weather" if "api.weather.gov" in str(cmd_out).lower() else "")
                     if pending_action_ledger is not None:
@@ -8814,9 +12169,12 @@ def run_loop(tts):
                     if isinstance(out, str) and out.strip():
                         recent_tool_context = out.strip()[:2500]
                         recent_web_urls = _extract_urls(out)
-                        next_retrieval_state = _make_retrieval_conversation_state(str(routed_tool or ""), _retrieval_query_from_text(str(routed_tool or ""), routed_user_text), out)
-                        if next_retrieval_state is not None:
-                            session_state.set_retrieval_state(next_retrieval_state)
+                        next_tool_state = _make_tool_conversation_state(str(routed_tool or ""), _retrieval_query_from_text(str(routed_tool or ""), routed_user_text), out)
+                        if next_tool_state is not None:
+                            if str(next_tool_state.get("kind") or "") == "retrieval":
+                                session_state.set_retrieval_state(next_tool_state)
+                            else:
+                                _set_conversation_state(next_tool_state)
                             conversation_state = session_state.conversation_state
                             _sync_pending_conversation_tracking()
                         session_turns.append(("assistant", out.strip()[:350]))
@@ -8886,9 +12244,12 @@ def run_loop(tts):
                     recent_tool_context = out.strip()[:2500]
                     recent_web_urls = _extract_urls(out)
                     query_text = args[0] if isinstance(args, (list, tuple)) and args else user_text
-                    next_retrieval_state = _make_retrieval_conversation_state(str(tool or ""), str(query_text or ""), out)
-                    if next_retrieval_state is not None:
-                        session_state.set_retrieval_state(next_retrieval_state)
+                    next_tool_state = _make_tool_conversation_state(str(tool or ""), str(query_text or ""), out)
+                    if next_tool_state is not None:
+                        if str(next_tool_state.get("kind") or "") == "retrieval":
+                            session_state.set_retrieval_state(next_tool_state)
+                        else:
+                            _set_conversation_state(next_tool_state)
                         conversation_state = session_state.conversation_state
                         _sync_pending_conversation_tracking()
                     session_turns.append(("assistant", out.strip()[:350]))
@@ -8943,23 +12304,6 @@ def run_loop(tts):
             speak_chunked(tts, final)
             continue
         _trace("hard_answer", "not_matched")
-
-        if _is_peims_broad_query(routed_user_text):
-            local_overview = _build_local_peims_overview_answer()
-            if local_overview:
-                behavior_record_event("deterministic_hit")
-                _trace("grounded_lookup", "matched", tool="local_knowledge")
-                if pending_action_ledger is not None:
-                    pending_action_ledger["planner_decision"] = "grounded_lookup"
-                    pending_action_ledger["tool"] = "local_knowledge"
-                    pending_action_ledger["tool_args"] = {"query": user_text}
-                    pending_action_ledger["tool_result"] = local_overview
-                    pending_action_ledger["grounded"] = True
-                print(f"Nova: {local_overview}\n", flush=True)
-                session_turns.append(("assistant", local_overview))
-                speak_chunked(tts, local_overview)
-                continue
-            _trace("grounded_lookup", "missed", tool="local_knowledge")
 
         if _is_local_knowledge_topic_query(routed_user_text):
             local_topic = _build_local_topic_digest_answer(routed_user_text)
@@ -9119,6 +12463,34 @@ def run_loop(tts):
             speak_chunked(tts, msg)
             continue
 
+        last_assistant_text = _last_assistant_turn_text(session_turns[:-1])
+        pending_weather_followup = (
+            isinstance(pending_action, dict)
+            and str(pending_action.get("kind") or "") == "weather_lookup"
+            and str(pending_action.get("status") or "") == "awaiting_location"
+            and bool(pending_action.get("saved_location_available"))
+        )
+        pending_weather_cli_fallback = pending_weather_followup and (
+            _looks_like_affirmative_followup(routed_user_text)
+            or _looks_like_shared_location_reference(routed_user_text)
+        )
+        if pending_weather_cli_fallback or (
+            _looks_like_affirmative_followup((routed_user_text or "").lower())
+            and _assistant_offered_weather_lookup(last_assistant_text)
+        ):
+            if pending_action_ledger is not None:
+                pending_action_ledger["planner_decision"] = "llm_fallback"
+                pending_action_ledger["grounded"] = False
+            if pending_weather_followup:
+                _set_pending_action(None)
+                _sync_pending_conversation_tracking()
+            msg = "I can try to check the weather for you, but I need a specific weather source or tool available here first."
+            final = _ensure_reply(msg)
+            print(f"Nova: {final}\n", flush=True)
+            session_turns.append(("assistant", final))
+            speak_chunked(tts, final)
+            continue
+
         task = analyze_request(
             routed_user_text,
             config={"prefer_web_for_data_queries": prefer_web_for_data_queries},
@@ -9139,23 +12511,21 @@ def run_loop(tts):
             continue
         _trace("policy_gate", "allowed")
 
-        context_details = build_learning_context_details(routed_user_text)
-        retrieved_context = str(context_details.get("context") or "")
+        fallback_context = build_fallback_context_details(routed_user_text, session_turns)
+        retrieved_context = str(fallback_context.get("context") or "")
         _trace(
             "memory_context",
-            "used" if retrieved_context else "empty",
-            memory_used=bool(context_details.get("memory_used")),
-            knowledge_used=bool(context_details.get("knowledge_used")),
-            memory_chars=int(context_details.get("memory_chars") or 0),
-            knowledge_chars=int(context_details.get("knowledge_chars") or 0),
+            "used" if str(fallback_context.get("learning_context") or "") else "empty",
+            memory_used=bool(fallback_context.get("memory_used")),
+            knowledge_used=bool(fallback_context.get("knowledge_used")),
+            memory_chars=int(fallback_context.get("memory_chars") or 0),
+            knowledge_chars=int(fallback_context.get("knowledge_chars") or 0),
         )
-        chat_ctx = _render_chat_context(session_turns)
+        chat_ctx = str(fallback_context.get("chat_context") or "")
         if chat_ctx:
-            retrieved_context = (retrieved_context + "\n\nCURRENT CHAT CONTEXT:\n" + chat_ctx).strip()[:6000]
             _trace("chat_context", "used", chars=len(chat_ctx))
-        session_fact_sheet = _build_session_fact_sheet(session_turns)
+        session_fact_sheet = str(fallback_context.get("session_fact_sheet") or "")
         if session_fact_sheet:
-            retrieved_context = (retrieved_context + "\n\nSESSION FACT SHEET:\n" + session_fact_sheet).strip()[:6000]
             _trace("session_fact_sheet", "used", chars=len(session_fact_sheet))
         if recent_tool_context and _uses_prior_reference(routed_user_text):
             retrieved_context = (retrieved_context + "\n\nRECENT TOOL OUTPUT:\n" + recent_tool_context).strip()[:6000]
@@ -9164,10 +12534,13 @@ def run_loop(tts):
         if should_block_low_confidence(routed_user_text, retrieved_context=retrieved_context, tool_context=recent_tool_context):
             behavior_record_event("low_confidence_block")
             _trace("low_confidence_gate", "blocked")
+            truthful_outcome = _truthful_limit_outcome(routed_user_text)
             if pending_action_ledger is not None:
                 pending_action_ledger["planner_decision"] = "blocked_low_confidence"
                 pending_action_ledger["grounded"] = False
-            msg = "Uncertain. I do not have enough grounded context to answer that reliably yet."
+                pending_action_ledger["reply_contract"] = str(truthful_outcome.get("reply_contract") or "")
+                pending_action_ledger["reply_outcome"] = dict(truthful_outcome)
+            msg = str(truthful_outcome.get("reply_text") or _truthful_limit_reply(routed_user_text))
             final = _ensure_reply(msg)
             print(f"Nova: {final}\n", flush=True)
             session_turns.append(("assistant", final))
@@ -9178,7 +12551,11 @@ def run_loop(tts):
         _trace("llm_fallback", "invoked", retrieved_chars=len(retrieved_context))
         if pending_action_ledger is not None:
             pending_action_ledger["planner_decision"] = "llm_fallback"
-        reply = ollama_chat(routed_user_text, retrieved_context=retrieved_context)
+        reply = ollama_chat(
+            routed_user_text,
+            retrieved_context=retrieved_context,
+            language_mix_spanish_pct=language_mix_spanish_pct,
+        )
         reply = sanitize_llm_reply(reply, tool_context=recent_tool_context)
 
         if mem_enabled():
@@ -9210,6 +12587,12 @@ def run_loop(tts):
         if claim_gate_changed:
             _trace("claim_gate", "adjusted", claim_gate_reason)
             clean_reply = claim_gated_reply
+            if claim_gate_reason == "unsupported_claim_blocked" and pending_action_ledger is not None:
+                truthful_outcome = _truthful_limit_outcome(routed_user_text)
+                pending_action_ledger["grounded"] = False
+                pending_action_ledger["reply_contract"] = str(truthful_outcome.get("reply_contract") or "")
+                pending_action_ledger["reply_outcome"] = dict(truthful_outcome)
+        reply_contract = str(pending_action_ledger.get("reply_contract") or "").strip() if isinstance(pending_action_ledger, dict) else ""
         # Shorten replies for ordinary conversation: if the user did not explicitly request an action,
         # prefer a concise reply (first 1-2 sentences). Keep full replies for explicit requests.
         try:

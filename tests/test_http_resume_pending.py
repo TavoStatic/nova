@@ -18,7 +18,7 @@ class TestHttpResumePending(unittest.TestCase):
         nova_core.mem_add = lambda *args, **kwargs: None
         nova_core.build_learning_context = lambda _text: ""
         nova_core._render_chat_context = lambda _turns: ""
-        nova_core.ollama_chat = lambda text, retrieved_context="": f"LLM:{text}"
+        nova_core.ollama_chat = lambda text, retrieved_context="", **_kwargs: f"LLM:{text}"
         nova_core.sanitize_llm_reply = lambda text, _tool: text
 
     def tearDown(self):

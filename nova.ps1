@@ -1,5 +1,5 @@
 param(
-  # Subcommand: look | lookfull | chat | camera | ls | read | find | run | webui | webui-start | webui-stop | webui-status | hub | smoke | test | health | guard | install | update | diag | logs | mem | config
+  # Subcommand: look | lookfull | chat | camera | ls | read | find | run | webui | webui-start | webui-stop | webui-status | operator | hub | smoke | test | health | guard | install | update | diag | logs | mem | config
   [Parameter(Position=0)]
   [string]$cmd = "help",
 
@@ -34,6 +34,8 @@ $WEBUIPY   = Join-Path $ROOT "nova_http.py"   # network UI/API
 $HEALTHPY  = Join-Path $ROOT "health.py"      # optional
 $MEMORYPY  = Join-Path $ROOT "memory.py"      # optional
 $DOCTORPY  = Join-Path $ROOT "doctor.py"      # preflight validator
+$SUBCONSCIOUSRUNNER = Join-Path $ROOT "subconscious_runner.py"
+$OPERATORCLI = Join-Path $ROOT "scripts\operator_cli.py"
 $POLICY    = Join-Path $ROOT "policy.json"    # optional
 $LOG_DIR   = Join-Path $ROOT "logs"
 
@@ -114,6 +116,158 @@ function Get-NovaHttpProcesses {
     })
 }
 
+function Get-NovaScriptProcesses([string]$scriptName) {
+  if ([string]::IsNullOrWhiteSpace($scriptName)) { return @() }
+  $escaped = [regex]::Escape($scriptName)
+  return @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
+    Where-Object {
+      $_.Name -match '^python(\.exe)?$' -and
+      $_.CommandLine -match $escaped
+    })
+}
+
+function Get-NovaLogicalProcesses([string]$scriptName) {
+  $all = @(Get-NovaScriptProcesses $scriptName)
+  if (-not $all -or $all.Count -eq 0) { return @() }
+
+  $parentIds = @{}
+  foreach ($p in $all) {
+    $parentIds[[int]$p.ParentProcessId] = $true
+  }
+
+  $leaf = @($all | Where-Object { -not $parentIds.ContainsKey([int]$_.ProcessId) })
+  if ($leaf.Count -gt 0) { return $leaf }
+  return $all
+}
+
+function Read-NovaIdentityFile([string]$path) {
+  if (-not (Test-Path $path)) {
+    return [pscustomobject]@{ pid = $null; create_time = $null; exists = $false }
+  }
+  try {
+    $raw = Get-Content -Raw -Encoding UTF8 $path | ConvertFrom-Json
+    $pid = $null
+    if ($raw.pid -is [int] -and $raw.pid -gt 0) {
+      $pid = [int]$raw.pid
+    } elseif ($raw.pid) {
+      $parsedPid = 0
+      if ([int]::TryParse([string]$raw.pid, [ref]$parsedPid) -and $parsedPid -gt 0) {
+        $pid = $parsedPid
+      }
+    }
+
+    $createTime = $null
+    if ($raw.create_time -is [double] -or $raw.create_time -is [single] -or $raw.create_time -is [decimal] -or $raw.create_time -is [int] -or $raw.create_time -is [long]) {
+      $createTime = [double]$raw.create_time
+    }
+
+    return [pscustomobject]@{
+      pid = $pid
+      create_time = $createTime
+      exists = $true
+    }
+  } catch {
+    return [pscustomobject]@{ pid = $null; create_time = $null; exists = $true }
+  }
+}
+
+function Select-NovaLogicalProcess($processes, [object]$targetPid, [object]$targetCreateTime) {
+  $items = @($processes)
+  if ($items.Count -eq 0) { return $null }
+
+  $hasPid = $null -ne $targetPid -and [int]$targetPid -gt 0
+  $hasCreateTime = $null -ne $targetCreateTime
+
+  if ($hasPid) {
+    foreach ($item in $items) {
+      if ([int]$item.ProcessId -ne [int]$targetPid) { continue }
+      if (-not $hasCreateTime) { return $item }
+      $procCreate = $null
+      if ($item.CreationDate) {
+        $procCreate = [Management.ManagementDateTimeConverter]::ToDateTime($item.CreationDate).ToUniversalTime()
+        $procCreate = [double][DateTimeOffset]$procCreate.ToUnixTimeSeconds()
+      }
+      if ($null -eq $procCreate -or [math]::Abs([double]$procCreate - [double]$targetCreateTime) -lt 1.0) {
+        return $item
+      }
+    }
+  }
+
+  if ($hasCreateTime) {
+    foreach ($item in $items) {
+      if (-not $item.CreationDate) { continue }
+      $procCreate = [Management.ManagementDateTimeConverter]::ToDateTime($item.CreationDate).ToUniversalTime()
+      $procCreate = [double][DateTimeOffset]$procCreate.ToUnixTimeSeconds()
+      if ([math]::Abs([double]$procCreate - [double]$targetCreateTime) -lt 1.0) {
+        return $item
+      }
+    }
+  }
+
+  return $items[0]
+}
+
+function Get-NovaHeartbeatAgeSeconds {
+  $heartbeatPath = Join-Path $ROOT "runtime\core.heartbeat"
+  if (-not (Test-Path $heartbeatPath)) { return $null }
+  try {
+    $age = ((Get-Date).ToUniversalTime() - (Get-Item $heartbeatPath).LastWriteTimeUtc).TotalSeconds
+    return [int][math]::Max([math]::Floor($age), 0)
+  } catch {
+    return $null
+  }
+}
+
+function Show-NovaRuntimeStatus {
+  $runtimeDir = Join-Path $ROOT "runtime"
+  $guardIdentity = Read-NovaIdentityFile (Join-Path $runtimeDir "guard_pid.json")
+  $coreIdentity = Read-NovaIdentityFile (Join-Path $runtimeDir "core_state.json")
+  $guardLogical = @(Get-NovaLogicalProcesses "nova_guard.py")
+  $coreLogical = @(Get-NovaLogicalProcesses "nova_core.py")
+  $webLogical = @(Get-NovaHttpLogicalProcesses)
+  $guardSelected = Select-NovaLogicalProcess $guardLogical $guardIdentity.pid $guardIdentity.create_time
+  $coreSelected = Select-NovaLogicalProcess $coreLogical $coreIdentity.pid $coreIdentity.create_time
+  $heartbeatAge = Get-NovaHeartbeatAgeSeconds
+
+  $guardStatus = "stopped"
+  if ($guardSelected) {
+    $guardStatus = "running"
+  } elseif ($guardIdentity.pid) {
+    $guardStatus = if (Get-Process -Id $guardIdentity.pid -ErrorAction SilentlyContinue) { "stale_identity" } else { "not_running" }
+  }
+
+  $coreStatus = "stopped"
+  if ($coreSelected) {
+    $coreStatus = "running"
+  } elseif ($coreIdentity.pid) {
+    $coreStatus = if (Get-Process -Id $coreIdentity.pid -ErrorAction SilentlyContinue) { "stale_identity" } else { "not_running" }
+  } elseif ($null -ne $heartbeatAge -and $heartbeatAge -le 5) {
+    $coreStatus = "heartbeat_only"
+  }
+
+  $stopFlag = Test-Path (Join-Path $runtimeDir "guard.stop")
+  $guardLock = Test-Path (Join-Path $runtimeDir "guard.lock")
+
+  Write-Host ""
+  Write-Host "Nova Runtime Status"
+  Write-Host "-------------------"
+  Write-Host ("guard status      : " + $guardStatus)
+  Write-Host ("guard pid         : " + ($(if ($guardSelected) { $guardSelected.ProcessId } elseif ($guardIdentity.pid) { $guardIdentity.pid } else { "-" })))
+  Write-Host ("guard count       : " + $guardLogical.Count)
+  Write-Host ("guard lock        : " + ($(if ($guardLock) { "present" } else { "missing" })))
+  Write-Host ("guard stop flag   : " + ($(if ($stopFlag) { "present" } else { "missing" })))
+  Write-Host ""
+  Write-Host ("core status       : " + $coreStatus)
+  Write-Host ("core pid          : " + ($(if ($coreSelected) { $coreSelected.ProcessId } elseif ($coreIdentity.pid) { $coreIdentity.pid } else { "-" })))
+  Write-Host ("core count        : " + $coreLogical.Count)
+  Write-Host ("heartbeat age sec : " + ($(if ($null -ne $heartbeatAge) { $heartbeatAge } else { "-" })))
+  Write-Host ""
+  Write-Host ("webui status      : " + ($(if ($webLogical.Count -gt 0) { "running" } else { "stopped" })))
+  Write-Host ("webui pid(s)      : " + ($(if ($webLogical.Count -gt 0) { (($webLogical | ForEach-Object { $_.ProcessId }) -join ", ") } else { "-" })))
+  Write-Host ("webui count       : " + $webLogical.Count)
+  Write-Host ""
+}
+
 function Get-NovaHttpLogicalProcesses {
   $all = @(Get-NovaHttpProcesses)
   if (-not $all -or $all.Count -eq 0) { return @() }
@@ -178,8 +332,12 @@ function Show-Help {
   Write-Host "  nova webui-start [--host 127.0.0.1 --port 8080] [--fix]  # start webui in background"
   Write-Host "  nova webui-stop                # stop all nova_http processes"
   Write-Host "  nova webui-status [--port 8080] # show webui pids + endpoint check"
+  Write-Host "  nova runtime-status            # logical guard/core/webui summary"
+  Write-Host "  nova operator [--session <id>] [--macro <id>] [message]  # local operator CLI via /api/control/action"
+  Write-Host "  nova operator --list-macros      # list saved operator macros"
   Write-Host "  nova smoke [--fix]             # doctor -> guard -> smoke_test -> stop"
   Write-Host "  nova test                      # compact regression checks"
+  Write-Host "  nova subconscious [--family <id>] [--label overnight]  # unattended subconscious batch report"
   Write-Host "  nova runtools                  # (optional) run_tools.py if you use it"
   Write-Host "  nova tools                     # list registered Nova tools"
   Write-Host ""
@@ -435,6 +593,11 @@ switch ($cmd.ToLower()) {
     break
   }
 
+  "runtime-status" {
+    Show-NovaRuntimeStatus
+    break
+  }
+
   "smoke" {
     $useFix = $false
     if ($remainingTokens -contains "--fix") { $useFix = $true }
@@ -477,6 +640,24 @@ switch ($cmd.ToLower()) {
 
   "test" {
     Run-Py $REGRESSION
+    break
+  }
+
+  "operator" {
+    if ($remainingTokens -and $remainingTokens.Count -gt 0) {
+      Run-Py $OPERATORCLI $remainingTokens
+    } else {
+      Run-Py $OPERATORCLI
+    }
+    break
+  }
+
+  "subconscious" {
+    if ($remainingTokens -and $remainingTokens.Count -gt 0) {
+      Run-Py $SUBCONSCIOUSRUNNER $remainingTokens
+    } else {
+      Run-Py $SUBCONSCIOUSRUNNER
+    }
     break
   }
 

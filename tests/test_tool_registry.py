@@ -109,6 +109,45 @@ class TestToolRegistry(unittest.TestCase):
             registry.run_tool("patch", {"action": "preview", "value": "demo.zip"}, ctx)
         self.assertEqual(str(err.exception), "admin_required")
 
+    def test_system_tool_queue_status_formats_generated_queue(self):
+        registry = build_default_registry()
+        ctx = ToolContext(
+            user_id="tester",
+            session_id="sess-queue",
+            policy={"tools_enabled": {"health": True}},
+            allowed_root=".",
+        )
+        queue_payload = {
+            "count": 4,
+            "open_count": 2,
+            "green_count": 2,
+            "drift_count": 2,
+            "warning_count": 0,
+            "never_run_count": 0,
+            "next_item": {
+                "file": "next_generated.json",
+                "family_id": "demo-family",
+                "latest_status": "drift",
+                "opportunity_reason": "parity_drift",
+                "latest_report_path": "C:/Nova/runtime/test_sessions/next_generated/result.json",
+            },
+            "items": [
+                {
+                    "file": "next_generated.json",
+                    "open": True,
+                    "latest_status": "drift",
+                    "opportunity_reason": "parity_drift",
+                    "highest_priority": {"signal": "fallback_overuse", "urgency": "high", "seam": "demo_seam"},
+                }
+            ],
+        }
+        with patch("nova_http._generated_work_queue", return_value=queue_payload):
+            out = registry.run_tool("system", {"action": "queue_status"}, ctx)
+        self.assertIn("Standing work queue", out)
+        self.assertIn("open: 2 of 4", out)
+        self.assertIn("Next item: next_generated.json", out)
+        self.assertIn("fallback_overuse", out)
+
     def test_core_keyword_to_status_event_pipeline(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

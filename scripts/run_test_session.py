@@ -174,6 +174,7 @@ def _isolated_runner_state(mode_dir: Path):
 
     saved_turns = dict(nova_http.SESSION_TURNS)
     saved_owners = dict(nova_http.SESSION_OWNERS)
+    saved_active_user = nova_core.get_active_user()
 
     with mock.patch.object(nova_core, "ACTION_LEDGER_DIR", action_dir), \
          mock.patch.object(nova_core, "SELF_REFLECTION_LOG", reflection_log), \
@@ -183,6 +184,7 @@ def _isolated_runner_state(mode_dir: Path):
          mock.patch.object(nova_http, "RUNTIME_DIR", mode_dir), \
          mock.patch.object(nova_http, "SESSION_STORE_PATH", session_store):
         try:
+            nova_core.set_active_user(None)
             nova_http.SESSION_TURNS.clear()
             nova_http.SESSION_OWNERS.clear()
             nova_http.SESSION_STATE_MANAGER.clear()
@@ -195,6 +197,7 @@ def _isolated_runner_state(mode_dir: Path):
                 "session_store": session_store,
             }
         finally:
+            nova_core.set_active_user(saved_active_user)
             nova_http.SESSION_TURNS.clear()
             nova_http.SESSION_TURNS.update(saved_turns)
             nova_http.SESSION_OWNERS.clear()
@@ -236,7 +239,7 @@ def run_http_session(messages: list[str], mode_dir: Path) -> dict[str, Any]:
         reflection_rows: list[dict[str, Any]] = []
 
         for index, message in enumerate(messages, start=1):
-            reply = nova_http.process_chat(session_id, message, user_id="runner")
+            reply = nova_http.process_chat(session_id, message)
             ledgers = _read_ledger_rows(paths["action_dir"])
             reflections = _read_jsonl(paths["reflection_log"])
             ledger = ledgers[-1] if ledgers else {}
@@ -278,6 +281,11 @@ def compare_sessions(cli_result: dict[str, Any], http_result: dict[str, Any]) ->
             issues["continuation_used"] = {
                 "cli": bool(cli_turn.get("continuation_used", False)),
                 "http": bool(http_turn.get("continuation_used", False)),
+            }
+        if _normalize_text(cli_turn.get("route_summary")) != _normalize_text(http_turn.get("route_summary")):
+            issues["route_summary"] = {
+                "cli": cli_turn.get("route_summary", ""),
+                "http": http_turn.get("route_summary", ""),
             }
         if _normalize_text(cli_turn.get("probe_summary")) != _normalize_text(http_turn.get("probe_summary")):
             issues["probe_summary"] = {
@@ -341,7 +349,7 @@ def _print_summary(session_meta: dict[str, Any], comparison: dict[str, Any], rep
         print("Drift detected:")
         _print_drift_details(diffs)
     else:
-        print("No CLI/HTTP drift detected in replies, active subject, continuation flags, or probe summaries.")
+        print("No CLI/HTTP drift detected in replies, route summaries, active subject, continuation flags, or probe summaries.")
 
     cli_flagged = comparison.get("cli_flagged_probes") or []
     http_flagged = comparison.get("http_flagged_probes") or []

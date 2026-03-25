@@ -333,5 +333,79 @@ class TestWeatherBehavior(unittest.TestCase):
         self.assertIn("[source: api.weather.gov]", out)
 
 
+class TestLlmRoutingIntentClassifier(unittest.TestCase):
+    """Validates _llm_classify_routing_intent — the non-keyword routing path.
+
+    Every input here deliberately contains NO trigger keyword (no 'weather',
+    no 'forecast').  If these tests fail, we have domesticated the test suite
+    back to keyword triggers.
+    """
+
+    def setUp(self):
+        self.orig_post = nova_core.requests.post
+        self.orig_location = nova_core.get_saved_location_text
+
+    def tearDown(self):
+        nova_core.requests.post = self.orig_post
+        nova_core.get_saved_location_text = self.orig_location
+
+    def _mock_llm_label(self, label: str):
+        class _Resp:
+            def raise_for_status(self):
+                pass
+
+            def json(self):
+                return {"message": {"content": label}}
+
+        nova_core.requests.post = lambda *a, **kw: _Resp()
+
+    def test_jacket_question_classifies_as_weather(self):
+        """'should I bring a jacket?' — no keyword, LLM must classify it."""
+        self._mock_llm_label("weather_lookup")
+        nova_core.get_saved_location_text = lambda: ""
+        result = nova_core._llm_classify_routing_intent("should I bring a jacket today?")
+        self.assertIsNotNone(result)
+        self.assertEqual(result.get("intent"), "weather_lookup")
+        self.assertEqual(result.get("weather_mode"), "clarify")
+
+    def test_umbrella_question_with_saved_location(self):
+        """'do I need an umbrella?' with saved location → current_location mode."""
+        self._mock_llm_label("weather_lookup")
+        nova_core.get_saved_location_text = lambda: "Brownsville TX"
+        result = nova_core._llm_classify_routing_intent("do I need an umbrella?")
+        self.assertIsNotNone(result)
+        self.assertEqual(result.get("intent"), "weather_lookup")
+        self.assertEqual(result.get("weather_mode"), "current_location")
+        self.assertEqual(result.get("location_value"), "Brownsville TX")
+
+    def test_hot_outside_question_with_saved_location(self):
+        """'how hot is it outside?' — implicit outdoor conditions, no keyword."""
+        self._mock_llm_label("weather_lookup")
+        nova_core.get_saved_location_text = lambda: "McAllen TX"
+        result = nova_core._llm_classify_routing_intent("how hot is it outside right now?")
+        self.assertIsNotNone(result)
+        self.assertEqual(result.get("weather_mode"), "current_location")
+        self.assertEqual(result.get("location_value"), "McAllen TX")
+
+    def test_general_chat_returns_none(self):
+        """LLM says general_chat → no route returned (falls through to LLM chat)."""
+        self._mock_llm_label("general_chat")
+        nova_core.get_saved_location_text = lambda: ""
+        result = nova_core._llm_classify_routing_intent("tell me something interesting about the moon")
+        self.assertIsNone(result)
+
+    def test_ollama_failure_returns_none(self):
+        """If Ollama is unreachable, routing falls through gracefully — no crash."""
+        def _fail(*a, **kw):
+            raise ConnectionError("ollama down")
+        nova_core.requests.post = _fail
+        result = nova_core._llm_classify_routing_intent("is it going to rain this afternoon?")
+        self.assertIsNone(result)
+
+    def test_empty_text_returns_none(self):
+        result = nova_core._llm_classify_routing_intent("")
+        self.assertIsNone(result)
+
+
 if __name__ == "__main__":
     unittest.main()
