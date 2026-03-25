@@ -70,7 +70,7 @@
   },
   "safety_envelope": {
     "enabled": true,
-    "mode": "observe",
+    "mode": "enforce",
     "replay_threshold": 1.0,
     "novelty_min": 0.35,
     "entropy_min": 2.8,
@@ -83,7 +83,7 @@
   },
   "kidney": {
     "enabled": true,
-    "mode": "observe",
+    "mode": "enforce",
     "definition_max_age_days": 7,
     "definition_novelty_min": 0.4,
     "quarantine_max_age_hours": 48,
