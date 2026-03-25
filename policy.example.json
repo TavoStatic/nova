@@ -22,6 +22,20 @@
     "store_min_chars": 12
   },
   "patch": {
-    "strict_manifest": true
+    "strict_manifest": true,
+    "behavioral_check": true,
+    "behavioral_check_timeout_sec": 600
+  },
+  "web": {
+    "enabled": false,
+    "allow_domains": [],
+    "max_bytes": 20000000,
+    "research_domains_limit": 4,
+    "research_pages_per_domain": 8,
+    "research_scan_pages_per_domain": 12,
+    "research_max_depth": 1,
+    "research_seeds_per_domain": 8,
+    "research_max_results": 8,
+    "research_min_score": 3.0
   }
 }
