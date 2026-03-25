@@ -1,134 +1,46 @@
-# Not Your Ordinary AI System (NYO)
+# NYO System
 
-**Agent Operating System (AAOS)**  
-Deterministic • Traceable • Testable AI Behavior
+Project documentation is now centralized under [docs/README.md](docs/README.md).
 
----
+Public branding uses NYO System.
+Internal runtime and module names may still reference Nova.
 
-## 🧠 What is NYO & Who is Nova?
+## What Nova Has Become
 
-**NYO (Not Your Ordinary)** is the philosophy behind the system.
+Nova is now the core runtime inside NYO System: a supervised local operations system with deterministic routing, operator control surfaces, patch governance, and self-maintenance loops.
 
-It represents a shift away from traditional AI behavior:
-- not just generating responses  
-- not just calling tools  
-- but executing structured, controlled decisions  
+This repository is no longer best understood as a simple chat assistant project. It now centers on a runtime that can:
 
----
+- route requests through a supervisor-owned decision spine
+- expose operator control through CLI flows, HTTP control surfaces, and runtime status views
+- maintain scoped memory, structured telemetry, and inspectable runtime artifacts
+- run operator-approved tools and web-backed research workflows
+- generate, review, and apply change proposals under patch governance
+- perform scheduled maintenance and improvement loops instead of relying on ad hoc manual intervention
 
-**Nova** is the system.
+## Current Shape
 
-Nova is a **supervisor-driven Agent Operating System (AAOS)** that enforces:
+The current Nova runtime includes:
 
-- deterministic routing  
-- contract-based responses  
-- full traceability  
-- consistent behavior across CLI and HTTP  
+- supervised runtime ownership and recovery behavior
+- patch preview, approval, apply, and rollback workflows
+- subconscious/session generation and training backlog paths
+- a Phase 2 Safety Envelope for promotion and review governance
+- a Kidney System for cleanup, retention, and artifact hygiene
+- package-readiness and productization documentation for moving from project state to releasable system state
 
----
+The browser control room is one interface into the runtime. It is not the entire product.
 
-## ⚙️ Architecture
+Domain-specific behavior should live in external packs, policies, tools, or product layers rather than as hidden assumptions inside the base repository.
 
-```
-User Input
-    ↓
-Supervisor (routing authority)
-    ↓
-Core (execution + outcome classification)
-    ↓
-Contract Renderer
-    ↓
-Ledger + Reflection
-    ↓
-HTTP / CLI
-```
+## Start Here
 
----
+- [docs/README.md](docs/README.md)
+- [docs/OPERATIONS.md](docs/OPERATIONS.md)
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
+- [docs/SUPERVISOR_CONTRACT.md](docs/SUPERVISOR_CONTRACT.md)
+- [docs/STATUS.md](docs/STATUS.md)
+- [docs/PATCHING.md](docs/PATCHING.md)
+- [docs/PACKAGE_PRODUCT_ROADMAP.md](docs/PACKAGE_PRODUCT_ROADMAP.md)
 
-## 🧱 Core Components
-
-- `supervisor.py` — routing authority  
-- `nova_core.py` — execution + contracts  
-- `nova_http.py` — transport layer  
-- `nova_guard.py` — runtime watchdog  
-- `policy.json` — configuration  
-- `runtime/` — system state  
-
----
-
-## 🚀 Quick Start
-
-### Install Dependencies
-
-```powershell
-C:\Nova\.venv\Scripts\python.exe -m pip install -r C:\Nova\requirements.txt
-```
-
-### Start Nova
-
-```powershell
-C:\Nova\nova.ps1 doctor
-C:\Nova\.venv\Scripts\python.exe C:\Nova\nova_guard.py
-```
-
-### Stop Nova
-
-```powershell
-C:\Nova\.venv\Scripts\python.exe C:\Nova\stop_guard.py
-```
-
----
-
-## 🩺 Health Check
-
-```powershell
-C:\Nova\.venv\Scripts\python.exe C:\Nova\health.py
-```
-
----
-
-## 🧠 Runtime Model
-
-Nova follows a **supervisor-first execution model**:
-
-- Supervisor → decides ownership  
-- Core → executes behavior  
-- Contracts → define responses  
-- Ledger → records decisions  
-
-Example:
-
-```json
-{
-  "reply_contract": "...",
-  "reply_outcome": "..."
-}
-```
-
----
-
-## 📊 Current Status
-
-- Supervisor-first routing implemented  
-- Contract/outcome system active  
-- Full test suite passing  
-
----
-
-## 🧠 Vision
-
-Nova is evolving into:
-
-**AAOS — Agent Operating System**
-
-A system where:
-- behavior is enforced, not guessed  
-- routing is explicit  
-- AI becomes predictable  
-
----
-
-## ⭐ Final Thought
-
-Nova is not trying to be the smartest AI.  
-It is trying to be the most reliable.
+This root README is the short public entry point. The detailed operational and architectural record lives under [docs/README.md](docs/README.md).

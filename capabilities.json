@@ -2,6 +2,7 @@
   "web_access": "Nova can retrieve information from allowed websites",
   "file_read": "Nova can read files within allowed root directory",
   "file_search": "Nova can search files for keywords",
+  "queue_status": "Nova can inspect its standing generated work queue and report the next open regression item",
   "vision": "Nova can analyze screenshots or camera input",
   "speech_to_text": "Nova can transcribe voice input",
   "text_to_speech": "Nova can speak responses"

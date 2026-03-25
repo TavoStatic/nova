@@ -1,37 +1,20 @@
-# Python
-__pycache__/
+﻿# Runtime artifacts - never commit these
+runtime/
 *.pyc
 *.pyo
-*.pyd
+__pycache__/
+*.log
+core.heartbeat
+guard.log
+*.jsonl
+kidney/snapshots/
+disposal_snapshots/
+promotion_audit.jsonl
 
-# Virtual env
-.venv/
-venv/
-
-# Runtime / logs
-logs/
-runtime/
-updates/snapshots/
-
-# Local databases / caches
-*.sqlite
-*.db
-
-# Bundles / archives
-*.zip
-
-# Downloaded web content
-knowledge/web/
-
-# OS/editor
+# OS
 .DS_Store
 Thumbs.db
-.vscode/
-.idea/
 
-# Large local binaries / models
-piper/models/
-piper/espeak-ng-data/
-
-# Optional local artifacts
-LAST_SESSION.json
+# Virtualenv
+.venv/
+venv/

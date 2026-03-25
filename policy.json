@@ -1,8 +1,31 @@
 {
-  "allowed_root": "C:\\Nova",
   "allow_shell": false,
   "confirm_writes": true,
   "confirm_exec": true,
+  "web": {
+    "search_provider": "searxng",
+    "enabled": true,
+    "search_api_endpoint": "http://127.0.0.1:8081/search",
+    "allow_domains": [
+      "tea.texas.gov",
+      "txschools.gov",
+      "tea4avcastro.tea.texas.gov",
+      "region1.net",
+      "texasstudentdatasystem.org",
+      "tsds.txschools.gov",
+      "weather.com",
+      "api.weather.gov"
+    ],
+    "max_bytes": 20000000,
+    "research_domains_limit": 4,
+    "research_pages_per_domain": 8,
+    "research_scan_pages_per_domain": 12,
+    "research_max_depth": 1,
+    "research_seeds_per_domain": 8,
+    "research_max_results": 8,
+    "research_min_score": 3.0
+  },
+  "allowed_root": "C:\\Nova",
   "tools_enabled": {
     "screen": true,
     "camera": true,
@@ -11,32 +34,63 @@
     "web": true
   },
   "models": {
-    "chat": "qwen2.5:7b-instruct",
+    "chat": "llama3.1:8b",
     "vision": "qwen2.5vl:7b",
     "stt_size": "base"
   },
   "memory": {
     "enabled": true,
     "mode": "B",
+    "scope": "private",
     "top_k": 5,
     "context_top_k": 3,
     "min_score": 0.18,
     "store_min_chars": 12,
-    "exclude_sources": ["voice"]
-  },
-  "web": {
-    "enabled": true,
-    "allow_domains": [
-      "tea.texas.gov",
-      "txschools.gov",
-      "tea4avcastro.tea.texas.gov",
-      "region1.net",
-      "texasstudentdatasystem.org",
-      "tsds.txschools.gov"
+    "store_include_patterns": [
+      "^remember this",
+      "^learned_fact:",
+      "\\b(my name is|my location is|i live in|i work in|my favorite)\\b"
     ],
-    "max_bytes": 20000000
+    "store_exclude_patterns": [
+      "^tip:",
+      "^network error:",
+      "^loading",
+      "^please try:"
+    ],
+    "exclude_sources": [
+      "voice"
+    ]
   },
   "patch": {
-    "strict_manifest": true
+    "strict_manifest": true,
+    "enabled": true,
+    "allow_force": false,
+    "behavioral_check": true,
+    "behavioral_check_timeout_sec": 600
+  },
+  "safety_envelope": {
+    "enabled": true,
+    "mode": "observe",
+    "replay_threshold": 1.0,
+    "novelty_min": 0.35,
+    "entropy_min": 2.8,
+    "human_veto_first_n": 3,
+    "auto_demote_threshold": 0.9,
+    "max_candidates_per_cycle": 3,
+    "full_regression_required": false,
+    "quarantine_root": "C:\\Nova\\runtime\\test_sessions\\quarantine",
+    "pending_review_root": "C:\\Nova\\runtime\\test_sessions\\pending_review"
+  },
+  "kidney": {
+    "enabled": true,
+    "mode": "observe",
+    "definition_max_age_days": 7,
+    "definition_novelty_min": 0.4,
+    "quarantine_max_age_hours": 48,
+    "preview_max_age_days": 3,
+    "snapshot_max_age_days": 30,
+    "temp_max_age_days": 14,
+    "temp_max_total_mb": 500,
+    "protect_patterns": []
   }
 }
