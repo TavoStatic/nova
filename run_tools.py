@@ -93,6 +93,10 @@ def handle_tools(user_text: str):
         print("Nova: tool -> read")
         return run_tool([r"C:\Nova\agent.py", "read", file_part])
 
+    if low in {"queue", "queue status", "work queue", "show queue", "standing work queue"}:
+        print("Nova: tool -> system.queue_status")
+        return dispatch_tool("system", {"action": "queue_status"}, context=ctx)
+
     return None
 
 def main():
