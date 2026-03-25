@@ -94,11 +94,126 @@
                 <div class="panel-card main-card mb-3">
                     <div class="section-head">
                         <div>
+                            <div class="section-title">Subconscious Watch</div>
+                            <div class="section-subtitle">Latest unattended seam run, generated regression bundle, and the highest-priority subconscious findings.</div>
+                        </div>
+                    </div>
+                    <div id="subconsciousStatusBox" class="runtime-summary-grid">Subconscious status not loaded yet.</div>
+                    <div class="section-title mt-3">Top Priorities</div>
+                    <div id="subconsciousPriorityList" class="inspector-stack">No subconscious priorities yet.</div>
+                    <div class="section-title mt-3">Standing Work Queue</div>
+                    <div class="button-row mb-2 wrap-buttons">
+                        <button id="btnGeneratedQueueRunNext" class="btn btn-sm btn-operator-warn" type="button">Run Next Queue Item</button>
+                        <button id="btnGeneratedQueueInvestigate" class="btn btn-sm btn-operator-primary" type="button">Investigate Next Queue Item</button>
+                    </div>
+                    <div id="generatedQueueBox" class="inspector-stack">No generated work queue yet.</div>
+                </div>
+
+                <div class="panel-card main-card mb-3 patch-panel">
+                    <div class="section-head">
+                        <div>
+                            <div class="section-title">Patch Readiness</div>
+                            <div class="section-subtitle">Validated-apply posture, preview queue state, and the latest patch governance signal.</div>
+                        </div>
+                        <span id="patchStatusBadge" class="status-pill status-pill-neutral">Patch status unknown</span>
+                    </div>
+                    <div id="patchStatusNarrative" class="patch-narrative">Waiting for patch telemetry.</div>
+                    <div class="patch-actions mt-3">
+                        <div class="button-row wrap-buttons mb-2">
+                            <select id="patchPreviewSelect" class="form-select form-select-sm"></select>
+                            <input id="patchPreviewNote" class="form-control form-control-sm" placeholder="approval or rejection note" />
+                        </div>
+                        <div class="button-row wrap-buttons">
+                            <button id="btnPatchPreviewRefresh" class="btn btn-sm btn-operator-alt" type="button">Refresh Queue</button>
+                            <button id="btnPatchPreviewShow" class="btn btn-sm btn-operator-primary" type="button">Show Preview</button>
+                            <button id="btnPatchPreviewApprove" class="btn btn-sm btn-operator-primary" type="button">Approve Preview</button>
+                            <button id="btnPatchPreviewReject" class="btn btn-sm btn-operator-danger" type="button">Reject Preview</button>
+                            <button id="btnPatchPreviewApply" class="btn btn-sm btn-operator-warn" type="button">Apply Approved Preview</button>
+                        </div>
+                    </div>
+                    <div class="patch-grid mt-3">
+                        <div class="patch-column">
+                            <div class="patch-column-title">Validation Gate</div>
+                            <div id="patchSummaryGrid" class="inspector-stack"></div>
+                        </div>
+                        <div class="patch-column">
+                            <div class="patch-column-title">Preview Queue</div>
+                            <div id="patchPreviewGrid" class="inspector-stack"></div>
+                        </div>
+                    </div>
+                    <div class="patch-log-wrap mt-3">
+                        <div class="patch-column-title">Latest Patch Log</div>
+                        <pre id="patchLogBox" class="console-box compact-console">No patch log data yet.</pre>
+                    </div>
+                    <div class="patch-log-wrap mt-3">
+                        <div class="patch-column-title">Preview Viewer</div>
+                        <pre id="patchPreviewBox" class="console-box compact-console">Select a preview and click Show Preview.</pre>
+                    </div>
+                    <div class="patch-log-wrap mt-3">
+                        <div class="patch-column-title">Patch Action Readiness</div>
+                        <div id="patchActionReadiness" class="inspector-stack">Patch action readiness has not been evaluated yet.</div>
+                    </div>
+                </div>
+
+                <div class="panel-card main-card mb-3">
+                    <div class="section-head">
+                        <div>
                             <div class="section-title">Action Stream</div>
                             <div class="section-subtitle">Latest control actions, tool output, and operator feedback.</div>
                         </div>
                     </div>
                     <pre id="actionBox" class="console-box">No actions yet.</pre>
+                </div>
+
+                <div class="panel-card main-card mb-3">
+                    <div class="section-head">
+                        <div>
+                            <div class="section-title">Runtime Timeline</div>
+                            <div class="section-subtitle">Recent operator actions, guard lifecycle transitions, and boot outcomes in one stream.</div>
+                        </div>
+                    </div>
+                    <div id="runtimeTimeline" class="timeline-stack">No runtime events yet.</div>
+                </div>
+
+                <div class="panel-card main-card mb-3">
+                    <div class="section-head">
+                        <div>
+                            <div class="section-title">Failure Reasons</div>
+                            <div class="section-subtitle">Current operator-facing explanation for each service, based on live status and the latest runtime event.</div>
+                        </div>
+                    </div>
+                    <div id="runtimeFailures" class="runtime-summary-grid">No failure data yet.</div>
+                </div>
+
+                <div class="panel-card main-card mb-3">
+                    <div class="section-head">
+                        <div>
+                            <div class="section-title">Runtime Artifacts</div>
+                            <div class="section-subtitle">Key runtime files and logs that explain the current system state.</div>
+                        </div>
+                    </div>
+                    <div id="runtimeArtifacts" class="artifact-grid">No runtime artifacts yet.</div>
+                </div>
+
+                <div class="panel-card main-card mb-3">
+                    <div class="section-head">
+                        <div>
+                            <div class="section-title">Artifact Drill-Down</div>
+                            <div class="section-subtitle">Inspect full runtime evidence, artifact path, and related events without leaving the console.</div>
+                        </div>
+                    </div>
+                    <div id="artifactDetailMeta" class="inspector-stack">Select a runtime artifact to inspect it in detail.</div>
+                    <pre id="artifactDetailBox" class="console-box compact-console mt-3">Artifact detail will appear here.</pre>
+                </div>
+
+                <div class="panel-card main-card mb-3">
+                    <div class="section-head">
+                        <div>
+                            <div class="section-title">Restart Analytics</div>
+                            <div class="section-subtitle">Recent restart pressure, flap detection, and latest guard boot outcomes.</div>
+                        </div>
+                    </div>
+                    <div id="restartAnalytics" class="inspector-stack">Restart analytics not loaded yet.</div>
                 </div>
 
                 <div class="panel-card main-card">
@@ -121,8 +236,34 @@
                             <button id="btnGuardStatus" class="btn btn-sm btn-operator-alt" type="button">Guard Status</button>
                             <button id="btnGuardStart" class="btn btn-sm btn-operator-primary" type="button">Start Guard</button>
                             <button id="btnGuardStop" class="btn btn-sm btn-operator-danger" type="button">Stop Guard</button>
+                            <button id="btnGuardRestart" class="btn btn-sm btn-operator-warn" type="button">Restart Guard</button>
                         </div>
-                        <pre id="guardBox" class="console-box compact-console">No guard data yet.</pre>
+                            <div id="guardBox" class="runtime-summary-grid">No guard data yet.</div>
+                            <div class="section-title mt-3">Raw Runtime Fields</div>
+                            <pre id="guardRawBox" class="console-box compact-console">Click a runtime badge to inspect raw runtime fields.</pre>
+                    </div>
+
+                    <div class="panel-card main-card">
+                        <div class="section-title">Core Recovery</div>
+                        <div class="button-row mb-2 wrap-buttons">
+                            <button id="btnCoreStart" class="btn btn-sm btn-operator-primary" type="button">Start Core</button>
+                            <button id="btnCoreStop" class="btn btn-sm btn-operator-danger" type="button">Stop Core</button>
+                            <button id="btnCoreRestart" class="btn btn-sm btn-operator-warn" type="button">Restart Core</button>
+                        </div>
+                        <div class="section-subtitle">Direct runtime recovery actions for the supervised core process.</div>
+                    </div>
+
+                    <div class="panel-card main-card">
+                        <div class="section-title">Web UI Recovery</div>
+                        <div class="button-row mb-2 wrap-buttons">
+                            <button id="btnWebuiRestart" class="btn btn-sm btn-operator-warn" type="button">Restart Web UI</button>
+                        </div>
+                        <div class="section-subtitle">Restarts the control-plane HTTP process. The page will disconnect briefly and should recover on refresh.</div>
+                    </div>
+
+                    <div class="panel-card main-card span-2">
+                        <div class="section-title">Action Readiness</div>
+                        <div id="runtimeActionReadiness" class="inspector-stack">Action readiness has not been evaluated yet.</div>
                     </div>
 
                     <div class="panel-card main-card">
@@ -183,6 +324,31 @@
                     </div>
 
                     <div class="panel-card main-card span-2">
+                        <div class="section-head">
+                            <div>
+                                <div class="section-title">Operator Command Deck</div>
+                                <div class="section-subtitle">Drive Nova from the operator console without opening the chat page. Commands stay in one persistent operator session so you can inspect the same thread in the Sessions view.</div>
+                            </div>
+                        </div>
+                        <div class="button-row mb-2 wrap-buttons">
+                            <input id="operatorSessionId" class="form-control form-control-sm" placeholder="operator session id" />
+                            <select id="operatorMacroSelect" class="form-select form-select-sm"></select>
+                            <button id="btnOperatorMacroApply" class="btn btn-sm btn-operator-alt" type="button">Load Macro</button>
+                            <button id="btnOperatorMacroRun" class="btn btn-sm btn-operator-warn" type="button">Run Macro</button>
+                            <button id="btnOperatorSend" class="btn btn-sm btn-operator-primary" type="button">Send To Nova</button>
+                            <button id="btnOperatorNewSession" class="btn btn-sm btn-operator-alt" type="button">New Session</button>
+                            <button id="btnOperatorInspect" class="btn btn-sm btn-operator-warn" type="button">Inspect Session</button>
+                            <button id="btnOperatorToggleAudio" class="btn btn-sm btn-operator-alt" type="button">Voice Off</button>
+                            <button id="btnOperatorMic" class="btn btn-sm btn-operator-alt" type="button">Mic Unavailable</button>
+                        </div>
+                        <div class="button-row mb-2">
+                            <textarea id="operatorPromptInput" class="form-control form-control-sm" rows="4" placeholder="Ask Nova to inspect, explain, plan, or act from the operator console..."></textarea>
+                        </div>
+                        <div class="section-title">Operator Reply</div>
+                        <pre id="operatorPromptReply" class="console-box compact-console">No operator prompt sent yet.</pre>
+                    </div>
+
+                    <div class="panel-card main-card span-2">
                         <div class="section-title">Operator Actions</div>
                         <div class="button-row wrap-buttons">
                             <button id="btnInspect" class="btn btn-sm btn-operator-warn" type="button">Inspect Environment</button>
@@ -208,6 +374,11 @@
                             </div>
                         </div>
                         <div class="button-row mb-2">
+                            <select id="sessionFilterSelect" class="form-select form-select-sm">
+                                <option value="all">All Sessions</option>
+                                <option value="operator">Operator Sessions</option>
+                                <option value="non-operator">Non-Operator Sessions</option>
+                            </select>
                             <select id="sessionSelect" class="form-select form-select-sm"></select>
                         </div>
                         <div class="button-row mb-2 wrap-buttons">
@@ -232,6 +403,10 @@
                         <div class="button-row mb-2 wrap-buttons">
                             <select id="testSessionDefinitionSelect" class="form-select form-select-sm"></select>
                             <button id="btnTestRunExecute" class="btn btn-sm btn-operator-primary" type="button">Run Test Session</button>
+                            <button id="btnGeneratedQueueRunNextOps" class="btn btn-sm btn-operator-warn" type="button">Run Next Queue Item</button>
+                            <button id="btnGeneratedQueueInvestigateOps" class="btn btn-sm btn-operator-primary" type="button">Investigate Next Queue Item</button>
+                            <button id="btnGeneratedPackRun" class="btn btn-sm btn-operator-warn" type="button">Run Generated Pack</button>
+                            <button id="btnGeneratedPriorityRun" class="btn btn-sm btn-operator-danger" type="button">Run Highest Priority</button>
                         </div>
                         <div class="button-row mb-2">
                             <select id="testRunSelect" class="form-select form-select-sm"></select>
@@ -269,6 +444,45 @@
                 <div class="panel-card main-card mb-3">
                     <div class="section-title">Health Summary</div>
                     <div id="healthSummary" class="inspector-stack">Waiting for live status.</div>
+                </div>
+                <div class="panel-card main-card mb-3">
+                    <div class="section-title">Runtime Summary</div>
+                    <div id="runtimeSummary" class="inspector-stack">Waiting for runtime status.</div>
+                    <div class="section-title mt-3">Raw Runtime Fields</div>
+                    <pre id="runtimeRawBox" class="console-box compact-console">Click a runtime badge to inspect raw runtime fields.</pre>
+                    <div id="runtimeLegend" class="runtime-legend">
+                        <div class="runtime-legend-title">Badge Legend</div>
+                        <div class="runtime-legend-card">
+                            <div class="runtime-legend-row">
+                                <span class="status-pill status-pill-good">Running</span>
+                                <span class="runtime-legend-copy">Healthy process or logical service match.</span>
+                            </div>
+                        </div>
+                        <div class="runtime-legend-card">
+                            <div class="runtime-legend-row">
+                                <span class="status-pill status-pill-blue">Heartbeat Only</span>
+                                <span class="runtime-legend-copy">Live signal exists, but the logical process match is indirect or incomplete.</span>
+                            </div>
+                        </div>
+                        <div class="runtime-legend-card">
+                            <div class="runtime-legend-row">
+                                <span class="status-pill status-pill-warn">Starting / Stopping</span>
+                                <span class="runtime-legend-copy">Transition state or operator attention required.</span>
+                            </div>
+                        </div>
+                        <div class="runtime-legend-card">
+                            <div class="runtime-legend-row">
+                                <span class="status-pill status-pill-danger">Stale / Failed</span>
+                                <span class="runtime-legend-copy">Stale identity, heartbeat stale, boot timeout, or unhealthy runtime state.</span>
+                            </div>
+                        </div>
+                        <div class="runtime-legend-card">
+                            <div class="runtime-legend-row">
+                                <span class="status-pill status-pill-neutral">Stopped</span>
+                                <span class="runtime-legend-copy">Service is not running or was not detected.</span>
+                            </div>
+                        </div>
+                    </div>
                 </div>
                 <div class="panel-card main-card">
                     <div class="section-title">Supervisor Snapshot</div>

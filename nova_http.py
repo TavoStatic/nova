@@ -11,7 +11,7 @@ import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Any, Dict, List, Mapping, Tuple
 from urllib.parse import parse_qs, urlparse
 
 import nova_core
@@ -19,6 +19,7 @@ import psutil
 import requests
 import capabilities as capabilities_mod
 from conversation_manager import ConversationManager
+import tools.runtime_processes as runtime_processes
 
 
 SESSION_TURNS: Dict[str, List[Tuple[str, str]]] = {}
@@ -37,17 +38,19 @@ RUNTIME_DIR = BASE_DIR / "runtime"
 SESSION_STORE_PATH = RUNTIME_DIR / "http_chat_sessions.json"
 MAX_STORED_SESSIONS = 120
 MAX_STORED_TURNS_PER_SESSION = MAX_TURNS * 2
-PEIMS_KNOWLEDGE_DIR = BASE_DIR / "knowledge" / "peims"
 KNOWLEDGE_DIR = BASE_DIR / "knowledge"
 VENV_PY = BASE_DIR / ".venv" / "Scripts" / "python.exe"
 GUARD_PY = BASE_DIR / "nova_guard.py"
 STOP_GUARD_PY = BASE_DIR / "stop_guard.py"
 CORE_PY = BASE_DIR / "nova_core.py"
+HTTP_PY = BASE_DIR / "nova_http.py"
 TEST_SESSION_RUNNER_PY = SCRIPTS_DIR / "run_test_session.py"
 EXPORT_DIR = RUNTIME_DIR / "exports"
 CONTROL_AUDIT_LOG = RUNTIME_DIR / "control_action_audit.jsonl"
 TOOL_EVENTS_LOG = RUNTIME_DIR / "tool_events.jsonl"
 MEMORY_EVENTS_LOG = RUNTIME_DIR / "memory_events.jsonl"
+GUARD_LOG_PATH = LOG_DIR / "guard.log"
+GUARD_BOOT_HISTORY_PATH = RUNTIME_DIR / "guard_boot_history.json"
 
 CONTROL_SESSIONS: Dict[str, float] = {}
 CONTROL_SESSION_TTL_SECONDS = 8 * 60 * 60
@@ -61,6 +64,9 @@ _HTTP_ERRORS_TOTAL = 0
 _METRICS_SERIES: List[dict] = []
 _METRICS_MAX_POINTS = 240
 _SESSION_LOCK = threading.Lock()
+_HTTP_SERVER: ThreadingHTTPServer | None = None
+_HTTP_BIND_HOST = "127.0.0.1"
+_HTTP_BIND_PORT = 8080
 
 
 def _record_control_action_event(action: str, result: str, detail: str = "", payload: dict | None = None) -> None:
@@ -73,6 +79,13 @@ def _record_control_action_event(action: str, result: str, detail: str = "", pay
     if isinstance(payload, dict):
         # Keep a minimal, safe snapshot for smoke telemetry.
         entry["payload_keys"] = sorted([str(k) for k in payload.keys()])[:20]
+        safe_fields: dict[str, str] = {}
+        for key in ("session_id", "source", "macro", "operator_mode"):
+            value = str(payload.get(key) or "").strip()
+            if value:
+                safe_fields[key] = value[:120]
+        if safe_fields:
+            entry["safe_fields"] = safe_fields
     try:
         RUNTIME_DIR.mkdir(parents=True, exist_ok=True)
         with open(CONTROL_AUDIT_LOG, "a", encoding="utf-8") as f:
@@ -282,6 +295,7 @@ def _build_self_check(status: dict, policy: dict, metrics: dict) -> dict:
     add_check("session_manager", True, "session summaries available")
     add_check("guard_status", isinstance(status.get("guard"), dict), "guard payload available")
     add_check("tool_event_summary", bool(status.get("tool_events_ok", True)), "tool event summary available")
+    add_check("patch_status_summary", bool(status.get("patch_status_ok", True)), "patch governance summary available")
 
     # Capability registry check
     try:
@@ -306,6 +320,20 @@ def _build_self_check(status: dict, policy: dict, metrics: dict) -> dict:
     add_check("allow_domains_present_when_web_enabled", domains_ok, f"web_enabled={web_enabled}; domains={len(allow_domains)}")
     if not domains_ok:
         alerts.append("web_enabled_without_allow_domains")
+
+    patch_enabled = bool(status.get("patch_enabled", False))
+    patch_strict = bool(status.get("patch_strict_manifest", False))
+    patch_behavioral = bool(status.get("patch_behavioral_check", False))
+    patch_tests_available = bool(status.get("patch_tests_available", False))
+    add_check("patch_strict_manifest", (not patch_enabled) or patch_strict, f"enabled={patch_enabled}")
+    if patch_enabled and not patch_strict:
+        alerts.append("patch_strict_manifest_disabled")
+    add_check("patch_behavioral_gate", (not patch_enabled) or patch_behavioral, f"enabled={patch_enabled}; tests_available={patch_tests_available}")
+    if patch_enabled and not patch_behavioral:
+        alerts.append("patch_behavioral_check_disabled")
+    add_check("patch_behavioral_tests_available", (not patch_enabled) or (not patch_behavioral) or patch_tests_available, f"tests_available={patch_tests_available}")
+    if patch_enabled and patch_behavioral and not patch_tests_available:
+        alerts.append("patch_tests_missing")
 
     # Error spike check from metrics points.
     points = list(metrics.get("points") or [])
@@ -491,33 +519,338 @@ def _test_sessions_root() -> Path:
     return RUNTIME_DIR / "test_sessions"
 
 
+def _generated_test_session_definitions_dir() -> Path:
+    return _test_sessions_root() / "generated_definitions"
+
+
 def _test_session_definitions_dir() -> Path:
     return BASE_DIR / "tests" / "sessions"
 
 
+def _all_test_session_definition_roots() -> list[tuple[Path, str]]:
+    return [
+        (_test_session_definitions_dir(), "saved"),
+        (_generated_test_session_definitions_dir(), "generated"),
+    ]
+
+
 def _available_test_session_definitions(limit: int = 80) -> List[dict]:
-    root = _test_session_definitions_dir()
-    if not root.exists():
+    out: list[dict] = []
+    for root, origin in _all_test_session_definition_roots():
+        if not root.exists():
+            continue
+        try:
+            files = sorted(root.glob("*.json"))
+        except Exception:
+            continue
+        for path in files:
+            try:
+                payload = json.loads(path.read_text(encoding="utf-8"))
+            except Exception:
+                payload = {}
+            if not isinstance(payload, dict) or not isinstance(payload.get("messages"), list):
+                continue
+            messages = payload.get("messages")
+            out.append(
+                {
+                    "file": path.name,
+                    "path": str(path),
+                    "name": str(payload.get("name") or path.stem) if isinstance(payload, dict) else path.stem,
+                    "message_count": len(messages),
+                    "origin": origin,
+                    "label": str(payload.get("label") or "") if isinstance(payload, dict) else "",
+                    "family_id": str(payload.get("family_id") or "") if isinstance(payload, dict) else "",
+                    "variation_id": str(payload.get("variation_id") or "") if isinstance(payload, dict) else "",
+                    "training_priorities": list(payload.get("training_priorities") or []) if isinstance(payload, dict) else [],
+                }
+            )
+    out.sort(key=lambda item: (str(item.get("origin") or ""), str(item.get("file") or "")))
+    out = out[: max(1, int(limit))]
+    return out
+
+
+def _resolve_test_session_definition(session_name: str) -> Path | None:
+    lookup = str(session_name or "").strip()
+    if not lookup:
+        return None
+    candidate = Path(lookup)
+    if candidate.is_absolute() and candidate.exists():
+        return candidate
+    for item in _available_test_session_definitions(500):
+        if str(item.get("file") or "") != lookup:
+            continue
+        path = Path(str(item.get("path") or ""))
+        if path.exists():
+            return path
+    return None
+
+
+def _subconscious_runs_root() -> Path:
+    return RUNTIME_DIR / "subconscious_runs"
+
+
+def _operator_macros_path() -> Path:
+    return BASE_DIR / "operator_macros.json"
+
+
+def _load_operator_macros(limit: int = 24) -> list[dict]:
+    path = _operator_macros_path()
+    if not path.exists():
         return []
     try:
-        files = sorted(root.glob("*.json"))[: max(1, int(limit))]
+        payload = json.loads(path.read_text(encoding="utf-8"))
     except Exception:
         return []
-    out: list[dict] = []
-    for path in files:
-        try:
-            payload = json.loads(path.read_text(encoding="utf-8"))
-        except Exception:
-            payload = {}
-        messages = payload.get("messages") if isinstance(payload, dict) and isinstance(payload.get("messages"), list) else []
-        out.append(
+
+    raw_macros = payload.get("macros") if isinstance(payload, dict) else payload
+    if not isinstance(raw_macros, list):
+        return []
+
+    macros: list[dict] = []
+    for item in raw_macros:
+        if not isinstance(item, dict):
+            continue
+        macro_id = str(item.get("macro_id") or "").strip()
+        prompt = str(item.get("prompt") or "").strip()
+        prompt_template = str(item.get("prompt_template") or prompt).strip()
+        if not macro_id or not prompt_template:
+            continue
+        placeholders: list[dict] = []
+        for placeholder in list(item.get("placeholders") or []):
+            if not isinstance(placeholder, dict):
+                continue
+            name = str(placeholder.get("name") or "").strip()
+            if not name:
+                continue
+            placeholders.append(
+                {
+                    "name": name,
+                    "label": str(placeholder.get("label") or name),
+                    "default": str(placeholder.get("default") or ""),
+                    "required": bool(placeholder.get("required", False)),
+                }
+            )
+        macros.append(
             {
-                "file": path.name,
-                "name": str(payload.get("name") or path.stem) if isinstance(payload, dict) else path.stem,
-                "message_count": len(messages),
+                "macro_id": macro_id,
+                "label": str(item.get("label") or macro_id),
+                "prompt": prompt,
+                "prompt_template": prompt_template,
+                "placeholders": placeholders,
+                "tags": [str(tag).strip() for tag in list(item.get("tags") or []) if str(tag).strip()],
             }
         )
-    return out
+    macros.sort(key=lambda item: str(item.get("label") or item.get("macro_id") or ""))
+    return macros[: max(1, int(limit))]
+
+
+def _resolve_operator_macro(macro_id: str) -> dict | None:
+    lookup = str(macro_id or "").strip()
+    if not lookup:
+        return None
+    for item in _load_operator_macros(200):
+        if str(item.get("macro_id") or "") == lookup:
+            return item
+    return None
+
+
+def _render_operator_macro_prompt(macro: Mapping[str, Any], values: Mapping[str, Any] | None = None, note: str = "") -> tuple[bool, str, dict[str, str]]:
+    if not isinstance(macro, Mapping):
+        return False, "operator_macro_invalid", {}
+    template = str(macro.get("prompt_template") or macro.get("prompt") or "").strip()
+    if not template:
+        return False, "operator_macro_invalid", {}
+    resolved_values: dict[str, str] = {}
+    raw_values = values if isinstance(values, Mapping) else {}
+    for placeholder in list(macro.get("placeholders") or []):
+        if not isinstance(placeholder, Mapping):
+            continue
+        name = str(placeholder.get("name") or "").strip()
+        if not name:
+            continue
+        provided = str(raw_values.get(name) or "").strip()
+        default = str(placeholder.get("default") or "").strip()
+        required = bool(placeholder.get("required", False))
+        value = provided or default
+        if required and not value:
+            return False, f"operator_macro_placeholder_required:{name}", resolved_values
+        resolved_values[name] = value
+        template = template.replace("{" + name + "}", value)
+    final = template.strip()
+    clean_note = str(note or "").strip()
+    if clean_note:
+        final = f"{final}\n\nOperator note: {clean_note}" if final else clean_note
+    return True, final, resolved_values
+
+
+def _latest_subconscious_report() -> dict:
+    latest_path = _subconscious_runs_root() / "latest.json"
+    if not latest_path.exists():
+        return {}
+    try:
+        payload = json.loads(latest_path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _subconscious_status_summary() -> dict:
+    latest = _latest_subconscious_report()
+    totals = latest.get("totals") if isinstance(latest.get("totals"), dict) else {}
+    top_priorities: list[dict] = []
+    for family in list(latest.get("families") or []):
+        if not isinstance(family, dict):
+            continue
+        for item in list(family.get("training_priorities") or []):
+            if not isinstance(item, dict):
+                continue
+            top_priorities.append(
+                {
+                    "seam": str(item.get("seam") or family.get("target_seam") or "").strip(),
+                    "signal": str(item.get("signal") or "").strip(),
+                    "urgency": str(item.get("urgency") or "").strip(),
+                    "suggested_test_name": str(item.get("suggested_test_name") or "").strip(),
+                    "robustness": float(item.get("robustness", 0.0) or 0.0),
+                }
+            )
+    top_priorities.sort(
+        key=lambda item: (
+            {"high": 0, "medium": 1, "low": 2, "deferred": 3}.get(item.get("urgency"), 4),
+            -float(item.get("robustness", 0.0) or 0.0),
+            str(item.get("signal") or ""),
+        )
+    )
+    generated_defs = [item for item in _available_test_session_definitions(500) if str(item.get("origin") or "") == "generated"]
+    return {
+        "ok": bool(latest),
+        "generated_at": str(latest.get("generated_at") or ""),
+        "label": str(latest.get("label") or ""),
+        "family_count": int(totals.get("family_count", 0) or 0),
+        "variation_count": int(totals.get("variation_count", 0) or 0),
+        "training_priority_count": int(totals.get("training_priority_count", 0) or 0),
+        "generated_definition_count": len(generated_defs),
+        "latest_report_path": str(_subconscious_runs_root() / "latest.json"),
+        "top_priorities": top_priorities[:5],
+    }
+
+
+def _generated_definition_priority_tuple(item: dict) -> tuple[int, float, int, str]:
+    priorities = list(item.get("training_priorities") or []) if isinstance(item, dict) else []
+    if not priorities:
+        return (4, 0.0, 0, str(item.get("file") or ""))
+
+    urgency_rank = min(
+        {"high": 0, "medium": 1, "low": 2, "deferred": 3}.get(str(priority.get("urgency") or "").strip().lower(), 4)
+        for priority in priorities
+        if isinstance(priority, dict)
+    )
+    robustness = max(
+        float(priority.get("robustness", 0.0) or 0.0)
+        for priority in priorities
+        if isinstance(priority, dict)
+    )
+    return (urgency_rank, -robustness, -len(priorities), str(item.get("file") or ""))
+
+
+def _generated_work_queue_status_rank(status: str) -> int:
+    normalized = str(status or "never_run").strip().lower() or "never_run"
+    return {
+        "drift": 0,
+        "warning": 1,
+        "never_run": 2,
+        "green": 3,
+    }.get(normalized, 4)
+
+
+def _latest_generated_report_by_file(limit: int = 200) -> dict[str, dict]:
+    latest: dict[str, dict] = {}
+    for report in _test_session_report_summaries(max(24, int(limit or 200))):
+        session_path = str(report.get("session_path") or "").strip()
+        if not session_path:
+            continue
+        file_name = Path(session_path).name
+        if not file_name or file_name in latest:
+            continue
+        latest[file_name] = report
+    return latest
+
+
+def _generated_work_queue(limit: int = 24) -> dict:
+    generated_defs = [
+        item
+        for item in _available_test_session_definitions(500)
+        if str(item.get("origin") or "") == "generated"
+    ]
+    report_by_file = _latest_generated_report_by_file(max(200, len(generated_defs) * 2))
+
+    items: list[dict] = []
+    for item in generated_defs:
+        file_name = str(item.get("file") or "").strip()
+        if not file_name:
+            continue
+        latest_report = dict(report_by_file.get(file_name) or {})
+        latest_status = str(latest_report.get("status") or "never_run").strip().lower() or "never_run"
+        if latest_status == "warning":
+            opportunity_reason = "flagged_probe_followup"
+        elif latest_status == "drift":
+            opportunity_reason = "parity_drift"
+        elif latest_status == "green":
+            opportunity_reason = "verified"
+        else:
+            opportunity_reason = "unrun_generated_candidate"
+        priorities = list(item.get("training_priorities") or []) if isinstance(item.get("training_priorities"), list) else []
+        highest_priority = None
+        if priorities:
+            ordered = sorted(
+                priorities,
+                key=lambda priority: _generated_definition_priority_tuple({"training_priorities": [priority], "file": file_name}),
+            )
+            highest_priority = ordered[0]
+        queue_item = {
+            "file": file_name,
+            "name": str(item.get("name") or file_name),
+            "path": str(item.get("path") or ""),
+            "family_id": str(item.get("family_id") or ""),
+            "variation_id": str(item.get("variation_id") or ""),
+            "label": str(item.get("label") or ""),
+            "message_count": int(item.get("message_count", 0) or 0),
+            "training_priorities": priorities,
+            "highest_priority": dict(highest_priority) if isinstance(highest_priority, dict) else {},
+            "latest_status": latest_status,
+            "opportunity_reason": opportunity_reason,
+            "open": latest_status != "green",
+            "latest_run_id": str(latest_report.get("run_id") or ""),
+            "latest_report_path": str(latest_report.get("report_path") or ""),
+            "latest_generated_at": str(latest_report.get("generated_at") or ""),
+            "latest_comparison": dict(latest_report.get("comparison") or {}) if isinstance(latest_report.get("comparison"), dict) else {},
+        }
+        items.append(queue_item)
+
+    items.sort(
+        key=lambda queue_item: (
+            0 if bool(queue_item.get("open")) else 1,
+            _generated_work_queue_status_rank(str(queue_item.get("latest_status") or "never_run")),
+            *_generated_definition_priority_tuple(queue_item),
+        )
+    )
+
+    capped_items = items[: max(1, int(limit or 24))]
+    next_item = next((dict(item) for item in items if bool(item.get("open"))), {})
+    open_count = sum(1 for item in items if bool(item.get("open")))
+    green_count = sum(1 for item in items if str(item.get("latest_status") or "") == "green")
+    warning_count = sum(1 for item in items if str(item.get("latest_status") or "") == "warning")
+    drift_count = sum(1 for item in items if str(item.get("latest_status") or "") == "drift")
+    never_run_count = sum(1 for item in items if str(item.get("latest_status") or "never_run") == "never_run")
+    return {
+        "count": len(items),
+        "open_count": open_count,
+        "green_count": green_count,
+        "warning_count": warning_count,
+        "drift_count": drift_count,
+        "never_run_count": never_run_count,
+        "next_item": next_item,
+        "items": capped_items,
+    }
 
 
 def _report_status_label(diff_count: int, flagged_probe_count: int) -> str:
@@ -607,13 +940,13 @@ def _run_test_session_definition(session_file: str) -> tuple[bool, str, dict]:
     if not VENV_PY.exists():
         return False, f"venv_python_missing:{VENV_PY}", {}
 
-    known = {item.get("file") for item in _available_test_session_definitions(200)}
-    if session_name not in known:
+    resolved_session = _resolve_test_session_definition(session_name)
+    if resolved_session is None:
         return False, f"test_session_not_found:{session_name}", {"available": _available_test_session_definitions(80)}
 
     try:
         proc = subprocess.run(
-            [str(VENV_PY), str(runner_path), session_name],
+            [str(VENV_PY), str(runner_path), str(resolved_session)],
             cwd=str(BASE_DIR),
             capture_output=True,
             text=True,
@@ -633,6 +966,159 @@ def _run_test_session_definition(session_file: str) -> tuple[bool, str, dict]:
         "reports": reports,
         "definitions": _available_test_session_definitions(80),
     }
+
+
+def _run_generated_test_session_pack(limit: int = 12, *, mode: str = "recent") -> tuple[bool, str, dict]:
+    generated_defs = [
+        item
+        for item in _available_test_session_definitions(500)
+        if str(item.get("origin") or "") == "generated"
+    ]
+    if not generated_defs:
+        return False, "generated_test_sessions_missing", {"definitions": _available_test_session_definitions(80)}
+
+    capped_limit = max(1, min(int(limit or 12), len(generated_defs)))
+    selected_defs = list(generated_defs)
+    effective_mode = str(mode or "recent").strip().lower() or "recent"
+    if effective_mode == "priority":
+        selected_defs.sort(key=_generated_definition_priority_tuple)
+    selected_defs = selected_defs[:capped_limit]
+    batch_results: list[dict] = []
+    all_ok = True
+    for item in selected_defs:
+        session_file = str(item.get("file") or "").strip()
+        ok, msg, extra = _run_test_session_definition(session_file)
+        all_ok = all_ok and ok
+        batch_results.append(
+            {
+                "file": session_file,
+                "name": str(item.get("name") or session_file),
+                "ok": ok,
+                "message": msg,
+                "latest_report": dict(extra.get("latest_report") or {}),
+            }
+        )
+
+    reports = _test_session_report_summaries(24)
+    status_label = "completed" if all_ok else "partial"
+    message = f"generated_test_sessions_run_{effective_mode}_{status_label}:{len(selected_defs)}"
+    return all_ok, message, {
+        "count": len(selected_defs),
+        "mode": effective_mode,
+        "results": batch_results,
+        "reports": reports,
+        "latest_report": reports[0] if reports else {},
+        "definitions": _available_test_session_definitions(80),
+        "work_queue": _generated_work_queue(24),
+    }
+
+
+def _run_next_generated_work_queue_item() -> tuple[bool, str, dict]:
+    queue_payload = _generated_work_queue(24)
+    next_item = dict(queue_payload.get("next_item") or {})
+    session_file = str(next_item.get("file") or "").strip()
+    if not session_file:
+        return True, "generated_work_queue_clear", {
+            "work_queue": queue_payload,
+            "selected": {},
+            "latest_report": {},
+        }
+
+    ok, msg, extra = _run_test_session_definition(session_file)
+    refreshed_queue = _generated_work_queue(24)
+    return ok, (f"generated_work_queue_next_ok:{session_file}" if ok else f"generated_work_queue_next_failed:{session_file}"), {
+        "selected": next_item,
+        "runner_message": msg,
+        "latest_report": dict(extra.get("latest_report") or {}),
+        "reports": list(extra.get("reports") or []),
+        "definitions": list(extra.get("definitions") or []),
+        "work_queue": refreshed_queue,
+    }
+
+
+def _generated_queue_operator_note(item: Mapping[str, Any]) -> str:
+    selected = item if isinstance(item, Mapping) else {}
+    latest_comparison = selected.get("latest_comparison") if isinstance(selected.get("latest_comparison"), Mapping) else {}
+    diffs = list(latest_comparison.get("diffs") or []) if isinstance(latest_comparison, Mapping) else []
+    highest = selected.get("highest_priority") if isinstance(selected.get("highest_priority"), Mapping) else {}
+
+    lines = [
+        f"Investigate generated queue item: {str(selected.get('file') or 'unknown').strip() or 'unknown'}",
+        f"Family: {str(selected.get('family_id') or 'n/a').strip() or 'n/a'} | variation: {str(selected.get('variation_id') or 'n/a').strip() or 'n/a'}",
+        f"Latest status: {str(selected.get('latest_status') or 'unknown').strip() or 'unknown'} | reason: {str(selected.get('opportunity_reason') or 'n/a').strip() or 'n/a'}",
+    ]
+    if highest:
+        lines.append(
+            "Highest priority: "
+            + f"{str(highest.get('signal') or 'signal')} [{str(highest.get('urgency') or 'n/a')}]"
+            + f" | seam={str(highest.get('seam') or 'n/a')}"
+            + f" | robustness={float(highest.get('robustness', 0.0) or 0.0):.2f}"
+        )
+    report_path = str(selected.get("latest_report_path") or "").strip()
+    if report_path:
+        lines.append(f"Latest report path: {report_path}")
+    if diffs:
+        lines.append("Recent drift summary:")
+        for diff in diffs[:3]:
+            if not isinstance(diff, Mapping):
+                continue
+            turn = int(diff.get("turn", 0) or 0)
+            issues = diff.get("issues") if isinstance(diff.get("issues"), Mapping) else {}
+            fields = ", ".join(sorted(str(key) for key in issues.keys())) or "unknown"
+            lines.append(f"- turn {turn}: {fields}")
+    lines.append("Use the latest report artifact and recommend the smallest concrete fix or next validation step.")
+    return "\n".join(lines)
+
+
+def _investigate_generated_work_queue_item(session_file: str = "", *, session_id: str = "", user_id: str = "operator") -> tuple[bool, str, dict]:
+    queue_payload = _generated_work_queue(24)
+    selected: dict[str, Any] = {}
+    requested_file = str(session_file or "").strip()
+    if requested_file:
+        selected = next((dict(item) for item in list(queue_payload.get("items") or []) if str(item.get("file") or "") == requested_file), {})
+    if not selected:
+        selected = dict(queue_payload.get("next_item") or {})
+    if not selected:
+        return False, "generated_work_queue_investigation_no_open_item", {"work_queue": queue_payload}
+
+    macro = _resolve_operator_macro("subconscious-review")
+    operator_note = _generated_queue_operator_note(selected)
+    resolved_macro_values: dict[str, str] = {}
+    if macro is not None:
+        ok_macro, rendered_message, resolved_macro_values = _render_operator_macro_prompt(macro, {}, note=operator_note)
+        if not ok_macro:
+            rendered_message = operator_note
+    else:
+        rendered_message = operator_note
+
+    effective_session_id = str(session_id or "").strip() or "operator-generated-queue"
+    normalized_user = _normalize_user_id(str(user_id or "operator")) or "operator"
+    ok_owner, reason_owner = _assert_session_owner(effective_session_id, normalized_user, allow_bind=True)
+    if not ok_owner:
+        return False, reason_owner, {"session_id": effective_session_id, "selected": selected, "work_queue": queue_payload}
+
+    try:
+        reply = process_chat(effective_session_id, rendered_message, user_id=normalized_user)
+        sessions = _session_summaries(80)
+        session_summary = next((item for item in sessions if str(item.get("session_id") or "") == effective_session_id), None)
+        return True, "generated_work_queue_investigation_started", {
+            "selected": selected,
+            "session_id": effective_session_id,
+            "user_id": normalized_user,
+            "macro": dict(macro or {}),
+            "resolved_macro_values": resolved_macro_values,
+            "message": rendered_message,
+            "reply": reply,
+            "session": session_summary or {},
+            "sessions": sessions,
+            "work_queue": _generated_work_queue(24),
+        }
+    except Exception as e:
+        return False, f"generated_work_queue_investigation_failed:{e}", {
+            "selected": selected,
+            "session_id": effective_session_id,
+            "work_queue": queue_payload,
+        }
 
 
 def _delete_session(session_id: str) -> tuple[bool, str]:
@@ -967,23 +1453,52 @@ def _clear_control_session(handler: BaseHTTPRequestHandler) -> None:
 
 
 def _guard_status_payload() -> dict:
+    logical_processes = _logical_service_processes(GUARD_PY)
     pid_file = RUNTIME_DIR / "guard_pid.json"
     lock_file = RUNTIME_DIR / "guard.lock"
     stop_file = RUNTIME_DIR / "guard.stop"
     running = False
     pid = None
+    create_time = None
+    pid_live = False
     if pid_file.exists():
         try:
             data = json.loads(pid_file.read_text(encoding="utf-8"))
             pid = int(data.get("pid", 0) or 0)
+            ct = data.get("create_time")
+            if isinstance(ct, (int, float)):
+                create_time = float(ct)
             if pid > 0:
-                running = bool(psutil.pid_exists(pid))
+                pid_live = bool(psutil.pid_exists(pid))
+                running = pid_live
         except Exception:
             pass
+    _prune_orphaned_guard_artifacts(logical_processes, pid, pid_live)
+    lock_exists = lock_file.exists()
+    pid_file_exists = pid_file.exists()
+    selected = _select_logical_process(logical_processes, pid=pid, create_time=create_time)
+    if selected is not None:
+        pid = int(selected.get("pid") or 0) or pid
+        create_time = float(selected.get("create_time") or 0.0) or create_time
+        running = True
+    status = "stopped"
+    if selected is not None:
+        status = "running"
+    elif isinstance(pid, int) and pid > 0 and pid_live:
+        status = "stale_identity"
+    elif stop_file.exists():
+        status = "stopping"
+    elif logical_processes:
+        status = "starting"
+    elif lock_exists or pid_file_exists:
+        status = "boot_timeout"
     return {
         "running": running,
+        "status": status,
         "pid": pid,
-        "lock_exists": lock_file.exists(),
+        "create_time": create_time,
+        "process_count": len(logical_processes),
+        "lock_exists": lock_exists,
         "stop_flag": stop_file.exists(),
     }
 
@@ -1021,11 +1536,13 @@ def _start_guard() -> tuple[bool, str]:
 
 
 def _core_status_payload() -> dict:
+    logical_processes = _logical_service_processes(CORE_PY)
     state_path = RUNTIME_DIR / "core_state.json"
     hb_age = _heartbeat_age_seconds()
     pid = None
     running = False
     create_time = None
+    pid_live = False
     try:
         if state_path.exists():
             st = json.loads(state_path.read_text(encoding="utf-8") or "{}")
@@ -1041,17 +1558,100 @@ def _core_status_payload() -> dict:
         pass
 
     if isinstance(pid, int) and pid > 0:
-        running = bool(psutil.pid_exists(pid))
+        pid_live = bool(psutil.pid_exists(pid))
+        running = pid_live
+
+    _prune_orphaned_core_artifacts(logical_processes, pid, pid_live, hb_age)
+    hb_age = _heartbeat_age_seconds()
+
+    selected = _select_logical_process(logical_processes, pid=pid, create_time=create_time)
+    if selected is not None and isinstance(pid, int) and pid > 0 and not pid_live:
+        selected_pid = int(selected.get("pid") or 0)
+        selected_create_time = float(selected.get("create_time") or 0.0)
+        pid_matches_state = selected_pid == pid
+        create_time_matches_state = (
+            create_time is not None and abs(selected_create_time - float(create_time)) < 1.0
+        )
+        if not pid_matches_state and not create_time_matches_state:
+            selected = None
+    if selected is not None:
+        pid = int(selected.get("pid") or 0) or pid
+        create_time = float(selected.get("create_time") or 0.0) or create_time
+        running = True
 
     if not running and isinstance(hb_age, int) and hb_age <= 5:
         # Fallback signal when state pid is stale but heartbeat is fresh.
         running = True
 
+    status = "stopped"
+    if selected is not None:
+        status = "running"
+    elif isinstance(hb_age, int) and hb_age <= 5:
+        status = "heartbeat_only"
+    elif isinstance(pid, int) and pid > 0 and pid_live:
+        status = "stale_identity"
+    elif state_path.exists() and isinstance(hb_age, int) and hb_age > 5:
+        status = "heartbeat_stale"
+    elif logical_processes:
+        status = "boot_timeout"
+
     return {
         "running": bool(running),
+        "status": status,
         "pid": pid,
         "create_time": create_time,
         "heartbeat_age_sec": hb_age,
+        "process_count": len(logical_processes),
+        "state_exists": state_path.exists(),
+    }
+
+
+def _http_status_payload() -> dict:
+    logical_processes = _logical_service_processes(HTTP_PY)
+    selected = _select_logical_process(logical_processes, pid=os.getpid(), create_time=None)
+    pid = None
+    create_time = None
+    running = False
+    if selected is not None:
+        pid = int(selected.get("pid") or 0) or None
+        create_time = float(selected.get("create_time") or 0.0) or None
+        running = True
+    return {
+        "running": bool(running),
+        "status": "running" if running else ("starting" if logical_processes else "stopped"),
+        "pid": pid,
+        "create_time": create_time,
+        "process_count": len(logical_processes),
+    }
+
+
+def _runtime_summary_payload(guard: dict | None = None, core: dict | None = None, webui: dict | None = None) -> dict:
+    guard_payload = dict(guard or _guard_status_payload())
+    core_payload = dict(core or _core_status_payload())
+    webui_payload = dict(webui or _http_status_payload())
+    return {
+        "guard": {
+            "status": str(guard_payload.get("status") or ("running" if guard_payload.get("running") else "stopped")),
+            "pid": guard_payload.get("pid"),
+            "create_time": guard_payload.get("create_time"),
+            "process_count": int(guard_payload.get("process_count") or 0),
+            "lock_exists": bool(guard_payload.get("lock_exists")),
+            "stop_flag": bool(guard_payload.get("stop_flag")),
+        },
+        "core": {
+            "status": str(core_payload.get("status") or ("running" if core_payload.get("running") else "stopped")),
+            "pid": core_payload.get("pid"),
+            "create_time": core_payload.get("create_time"),
+            "process_count": int(core_payload.get("process_count") or 0),
+            "heartbeat_age_sec": core_payload.get("heartbeat_age_sec"),
+            "state_exists": bool(core_payload.get("state_exists")),
+        },
+        "webui": {
+            "status": str(webui_payload.get("status") or ("running" if webui_payload.get("running") else "stopped")),
+            "pid": webui_payload.get("pid"),
+            "create_time": webui_payload.get("create_time"),
+            "process_count": int(webui_payload.get("process_count") or 0),
+        },
     }
 
 
@@ -1092,6 +1692,162 @@ def _stop_guard() -> tuple[bool, str]:
         return False, f"guard_stop_failed:{e}"
 
 
+def _detached_creation_flags() -> int:
+    if os.name != "nt":
+        return 0
+    return subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.CREATE_NO_WINDOW
+
+
+def _schedule_detached_start(command: list[str], *, delay_seconds: float = 1.5, cwd: Path | None = None) -> tuple[bool, str]:
+    if not VENV_PY.exists():
+        return False, f"venv_python_missing:{VENV_PY}"
+    work_dir = str(cwd or BASE_DIR)
+    flags = _detached_creation_flags()
+    launcher_code = (
+        "import subprocess,time;"
+        f"time.sleep({max(0.0, float(delay_seconds))});"
+        f"subprocess.Popen({list(command)!r}, cwd={work_dir!r}, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, creationflags={int(flags)})"
+    )
+    try:
+        subprocess.Popen(
+            [str(VENV_PY), "-c", launcher_code],
+            cwd=work_dir,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            creationflags=flags,
+        )
+        return True, "delayed_start_scheduled"
+    except Exception as e:
+        return False, f"delayed_start_failed:{e}"
+
+
+def _core_identity_from_runtime() -> tuple[int | None, float | None]:
+    pid, create_time, _data = runtime_processes.read_identity_file(RUNTIME_DIR / "core_state.json")
+    return pid, create_time
+
+
+def _stop_core_owned_process() -> tuple[bool, str]:
+    pid, create_time = _core_identity_from_runtime()
+    if not pid:
+        return False, "core_pid_missing"
+
+    logical = runtime_processes.logical_service_processes(CORE_PY)
+    selected = runtime_processes.select_logical_process(logical, pid=pid, create_time=create_time)
+    if selected is None:
+        if psutil.pid_exists(pid):
+            return False, f"core_stale_identity:{pid}"
+        return False, f"core_not_running:{pid}"
+
+    resolved_pid = int(selected.get("pid") or pid)
+    try:
+        process = psutil.Process(resolved_pid)
+        process.terminate()
+        try:
+            process.wait(timeout=8)
+            return True, f"core_stop_requested:{resolved_pid}"
+        except psutil.TimeoutExpired:
+            process.kill()
+            return True, f"core_kill_requested:{resolved_pid}"
+    except Exception as e:
+        return False, f"core_stop_failed:{resolved_pid}:{e}"
+
+
+def _restart_guard() -> tuple[bool, str]:
+    guard_status = _guard_status_payload()
+    core_status = _core_status_payload()
+    should_stop_first = bool(guard_status.get("running") or core_status.get("running") or core_status.get("state_exists") or guard_status.get("lock_exists"))
+    if should_stop_first:
+        ok, msg = _stop_guard()
+        if not ok:
+            return False, msg
+        scheduled, scheduled_msg = _schedule_detached_start([str(VENV_PY), str(GUARD_PY)], delay_seconds=2.0, cwd=BASE_DIR)
+        if not scheduled:
+            return False, scheduled_msg
+        return True, f"guard_restart_requested:{msg}"
+
+    ok, msg = _start_guard()
+    return ok, f"guard_restart_requested:{msg}" if ok else msg
+
+
+def _restart_core() -> tuple[bool, str]:
+    guard_status = _guard_status_payload()
+    stop_ok, stop_msg = _stop_core_owned_process()
+    if not stop_ok and not any(token in str(stop_msg or "") for token in ["core_pid_missing", "core_not_running"]):
+        return False, stop_msg
+
+    if guard_status.get("running"):
+        return True, f"core_restart_requested_via_guard:{stop_msg}"
+
+    start_ok, start_msg = _start_guard()
+    if not start_ok:
+        return False, start_msg
+    return True, f"core_restart_requested:{stop_msg}:{start_msg}"
+
+
+def _shutdown_http_server_later(delay_seconds: float = 0.25) -> tuple[bool, str]:
+    if _HTTP_SERVER is None:
+        return False, "http_server_unavailable"
+
+    def _shutdown() -> None:
+        time.sleep(max(0.0, float(delay_seconds)))
+        try:
+            _HTTP_SERVER.shutdown()
+        except Exception:
+            pass
+
+    threading.Thread(target=_shutdown, daemon=True).start()
+    return True, "http_shutdown_requested"
+
+
+def _restart_webui() -> tuple[bool, str]:
+    command = [str(VENV_PY), str(HTTP_PY), "--host", str(_HTTP_BIND_HOST), "--port", str(_HTTP_BIND_PORT)]
+    scheduled, scheduled_msg = _schedule_detached_start(command, delay_seconds=1.5, cwd=BASE_DIR)
+    if not scheduled:
+        return False, scheduled_msg
+    stopped, stopped_msg = _shutdown_http_server_later(0.25)
+    if not stopped:
+        return False, stopped_msg
+    return True, "webui_restart_requested"
+
+
+def _action_readiness_payload(guard: dict, core: dict, webui: dict) -> dict:
+    guard_status = str(guard.get("status") or "stopped")
+    core_status = str(core.get("status") or "stopped")
+    webui_status = str(webui.get("status") or "stopped")
+    core_detected = bool(core.get("running") or core.get("pid") or core.get("state_exists") or core_status in {"heartbeat_only", "heartbeat_stale", "boot_timeout", "stale_identity"})
+
+    return {
+        "guard_start": {
+            "enabled": not bool(guard.get("running")) or bool(guard.get("stop_flag")),
+            "reason": "Guard already running." if bool(guard.get("running")) and not bool(guard.get("stop_flag")) else "Start guard supervision and clear any stale stop flag.",
+        },
+        "guard_stop": {
+            "enabled": bool(guard.get("running") or guard.get("stop_flag") or core_detected),
+            "reason": "Request guard/core shutdown through the deterministic stop path." if bool(guard.get("running") or guard.get("stop_flag") or core_detected) else "Guard and core are already stopped.",
+        },
+        "guard_restart": {
+            "enabled": True,
+            "reason": "Restart guard supervision and recover the core under a fresh supervisor cycle." if bool(guard.get("running") or core_detected) else "Guard is stopped; restart will start a fresh guard.",
+        },
+        "nova_start": {
+            "enabled": core_status not in {"running", "heartbeat_only"},
+            "reason": "Core already appears healthy." if core_status in {"running", "heartbeat_only"} else "Start or recover the core via guard supervision.",
+        },
+        "core_stop": {
+            "enabled": core_detected,
+            "reason": "Stop the owned core process directly; guard may restart it if still running." if core_detected else "Core is not running.",
+        },
+        "core_restart": {
+            "enabled": True,
+            "reason": "Restart the core; if guard is running it will supervise recovery." if core_detected else "Core is stopped; restart will request a new supervised start.",
+        },
+        "webui_restart": {
+            "enabled": webui_status == "running",
+            "reason": "Restart the HTTP control plane in place; the page will disconnect briefly." if webui_status == "running" else "Web UI is not running.",
+        },
+    }
+
+
 def _append_metrics_snapshot(status_payload: dict) -> None:
     with _METRICS_LOCK:
         point = {
@@ -1126,6 +1882,771 @@ def _tail_file(path: Path, max_lines: int = 120) -> str:
         return f"Unable to read {path.name}: {e}"
 
 
+def _coerce_epoch_seconds(value) -> int | None:
+    if isinstance(value, (int, float)) and float(value) > 0:
+        return int(float(value))
+    text = str(value or "").strip()
+    if not text:
+        return None
+    try:
+        numeric = float(text)
+    except Exception:
+        return None
+    return int(numeric) if numeric > 0 else None
+
+
+def _runtime_event(action: str, ts_value, source: str, service: str, level: str, title: str, detail: str) -> dict | None:
+    ts = _coerce_epoch_seconds(ts_value)
+    if ts is None:
+        return None
+    return {
+        "id": f"{source}:{service}:{action}:{ts}",
+        "ts": ts,
+        "source": str(source or "runtime"),
+        "service": str(service or "runtime"),
+        "level": str(level or "info"),
+        "title": str(title or "Runtime event"),
+        "detail": str(detail or "")[:240],
+        "action": str(action or ""),
+    }
+
+
+def _runtime_timeline_action_title(action: str) -> str:
+    text = str(action or "").strip().replace("_", " ")
+    return text.title() if text else "Operator Action"
+
+
+def _runtime_timeline_action_service(action: str) -> str:
+    text = str(action or "").strip().lower()
+    if text.startswith("guard"):
+        return "guard"
+    if text.startswith("nova"):
+        return "core"
+    if text.startswith("patch"):
+        return "patch"
+    if text.startswith("policy") or text.startswith("search") or text.startswith("memory") or text.startswith("chat"):
+        return "control"
+    if text.startswith("session") or text.startswith("test"):
+        return "sessions"
+    return "control"
+
+
+def _runtime_timeline_from_control_audit(limit: int) -> list[dict]:
+    try:
+        if not CONTROL_AUDIT_LOG.exists():
+            return []
+        lines = CONTROL_AUDIT_LOG.read_text(encoding="utf-8", errors="ignore").splitlines()
+    except Exception:
+        return []
+
+    events: list[dict] = []
+    for line in lines[-max(limit * 4, 40):]:
+        if not line.strip():
+            continue
+        try:
+            entry = json.loads(line)
+        except Exception:
+            continue
+        action = str(entry.get("action") or "").strip()
+        result = str(entry.get("result") or "").strip().lower()
+        detail = str(entry.get("detail") or "").strip()
+        safe_fields = entry.get("safe_fields") if isinstance(entry.get("safe_fields"), dict) else {}
+        operator_mode = str(safe_fields.get("operator_mode") or "").strip().lower()
+        operator_source = str(safe_fields.get("source") or "").strip().lower()
+        operator_macro = str(safe_fields.get("macro") or "").strip()
+        level = "danger" if result == "fail" else "good"
+        title = _runtime_timeline_action_title(action)
+        if action == "operator_prompt":
+            mode_label = operator_mode or ("macro" if operator_macro else (operator_source or "manual"))
+            title = f"Operator Prompt [{mode_label.upper()}]"
+            detail_prefix: list[str] = []
+            if operator_source:
+                detail_prefix.append(f"source={operator_source}")
+            if operator_macro:
+                detail_prefix.append(f"macro={operator_macro}")
+            if detail_prefix:
+                detail = " | ".join(detail_prefix) + (f" | {detail}" if detail else "")
+        event = _runtime_event(
+            action or "operator_action",
+            entry.get("ts"),
+            "operator",
+            _runtime_timeline_action_service(action),
+            level,
+            title,
+            f"{result or 'ok'}{': ' + detail if detail else ''}",
+        )
+        if event is not None:
+            event["result"] = result or "ok"
+            if operator_mode:
+                event["operator_mode"] = operator_mode
+            if operator_source:
+                event["operator_source"] = operator_source
+            if operator_macro:
+                event["operator_macro"] = operator_macro
+            events.append(event)
+    return events[-limit:]
+
+
+def _parse_guard_log_line(line: str) -> dict | None:
+    match = re.match(r"^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}) \| (.*)$", str(line or "").strip())
+    if not match:
+        return None
+    stamp_text, message = match.groups()
+    try:
+        ts_value = int(time.mktime(time.strptime(stamp_text, "%Y-%m-%d %H:%M:%S")))
+    except Exception:
+        return None
+
+    service = "guard"
+    level = "info"
+    title = "Guard event"
+    detail = ""
+
+    if "Boot metrics:" in message:
+        return None
+    if "Starting nova_core.py" in message:
+        service = "core"
+        level = "warn"
+        title = "Core launch requested"
+        detail = message.split("because:", 1)[1].strip() if "because:" in message else message
+    elif "Spawned core pid=" in message:
+        service = "core"
+        level = "warn"
+        title = "Core process spawned"
+        detail = message
+    elif "Boot observation window set to" in message:
+        service = "core"
+        level = "warn"
+        title = "Boot observation armed"
+        detail = message.split("set to", 1)[1].strip() if "set to" in message else message
+    elif "Boot progress: matching state" in message:
+        service = "core"
+        level = "good"
+        title = "Core state observed"
+        detail = message.split("Boot progress:", 1)[1].strip()
+    elif "Boot progress: fresh heartbeat" in message:
+        service = "core"
+        level = "good"
+        title = "Core heartbeat observed"
+        detail = message.split("Boot progress:", 1)[1].strip()
+    elif "Core attempt failed:" in message:
+        service = "core"
+        level = "danger"
+        title = "Core attempt failed"
+        detail = message.split("Core attempt failed:", 1)[1].strip()
+    elif "Resolving core pid=" in message:
+        service = "core"
+        level = "warn"
+        title = "Runtime cleanup started"
+        detail = message.split("[GUARD]", 1)[-1].strip()
+    elif "Resolution confirmed for core pid=" in message:
+        service = "core"
+        level = "good"
+        title = "Runtime cleanup complete"
+        detail = message.split("Resolution confirmed for core pid=", 1)[1].strip()
+    elif "Restart wait " in message:
+        service = "core"
+        level = "warn"
+        title = "Restart backoff armed"
+        detail = message.split("Restart wait", 1)[1].strip()
+    elif "Adopted running core pid=" in message:
+        service = "core"
+        level = "good"
+        title = "Guard adopted running core"
+        detail = message.split("Adopted running core pid=", 1)[1].strip()
+    elif "Existing core pid=" in message and "is unhealthy" in message:
+        service = "core"
+        level = "danger"
+        title = "Existing core marked unhealthy"
+        detail = message.split("[GUARD]", 1)[-1].strip()
+    elif "Core pid=" in message and "reached RUNNING state" in message:
+        service = "core"
+        level = "good"
+        title = "Core reached running state"
+        detail = message.split("[GUARD]", 1)[-1].strip()
+    elif "Nova Guard online" in message:
+        level = "good"
+        title = "Guard online"
+        detail = "Deterministic supervisor loop active."
+    elif "Another guard is already running" in message:
+        level = "warn"
+        title = "Duplicate guard prevented"
+        detail = message.split("[GUARD]", 1)[-1].strip()
+    elif "Failed to acquire guard lock" in message:
+        level = "danger"
+        title = "Guard lock acquisition failed"
+        detail = message.split("[GUARD]", 1)[-1].strip()
+    elif "Stop file detected" in message:
+        level = "warn"
+        title = "Guard stop requested"
+        detail = "Stop file detected by supervisor."
+    elif "Guard stopped." in message:
+        level = "warn"
+        title = "Guard stopped"
+        detail = "Supervisor process exited."
+    else:
+        return None
+
+    return _runtime_event(title.lower().replace(" ", "_"), ts_value, "guard", service, level, title, detail)
+
+
+def _runtime_timeline_from_guard_log(limit: int) -> list[dict]:
+    try:
+        lines = _safe_tail_lines(GUARD_LOG_PATH, max(limit * 6, 80))
+    except Exception:
+        return []
+    events = [event for event in (_parse_guard_log_line(line) for line in lines) if event is not None]
+    return events[-limit:]
+
+
+def _runtime_timeline_from_boot_history(limit: int) -> list[dict]:
+    try:
+        if not GUARD_BOOT_HISTORY_PATH.exists():
+            return []
+        history = json.loads(GUARD_BOOT_HISTORY_PATH.read_text(encoding="utf-8") or "[]")
+    except Exception:
+        return []
+
+    events: list[dict] = []
+    for item in list(history)[-max(limit, 10):]:
+        if not isinstance(item, dict):
+            continue
+        success = bool(item.get("success"))
+        reason = str(item.get("reason") or "running").strip() or "running"
+        total_observed = item.get("total_observed_s")
+        window_seconds = item.get("boot_timeout_seconds")
+        detail = (
+            f"reason={reason} | observed={total_observed}s | boot_window={window_seconds}s"
+            if total_observed is not None and window_seconds is not None
+            else f"reason={reason}"
+        )
+        event = _runtime_event(
+            "boot_success" if success else "boot_failure",
+            item.get("ts"),
+            "guard",
+            "core",
+            "good" if success else "danger",
+            "Boot observation succeeded" if success else "Boot observation failed",
+            detail,
+        )
+        if event is not None:
+            event["reason"] = reason
+            events.append(event)
+    return events[-limit:]
+
+
+def _runtime_timeline_payload(limit: int = 24) -> dict:
+    capped_limit = max(1, min(int(limit or 24), 60))
+    events = (
+        _runtime_timeline_from_control_audit(capped_limit)
+        + _runtime_timeline_from_guard_log(capped_limit)
+        + _runtime_timeline_from_boot_history(capped_limit)
+    )
+    unique: dict[tuple, dict] = {}
+    for event in events:
+        key = (
+            int(event.get("ts") or 0),
+            str(event.get("source") or ""),
+            str(event.get("service") or ""),
+            str(event.get("title") or ""),
+            str(event.get("detail") or ""),
+        )
+        unique[key] = event
+    ordered = sorted(unique.values(), key=lambda item: (int(item.get("ts") or 0), str(item.get("title") or "")), reverse=True)
+    return {
+        "count": len(ordered[:capped_limit]),
+        "events": ordered[:capped_limit],
+    }
+
+
+def _file_age_seconds(path: Path) -> int | None:
+    try:
+        if not path.exists():
+            return None
+        return max(0, int(time.time() - path.stat().st_mtime))
+    except Exception:
+        return None
+
+
+def _safe_json_file(path: Path):
+    try:
+        if not path.exists():
+            return None
+        return json.loads(path.read_text(encoding="utf-8") or "null")
+    except Exception:
+        return None
+
+
+def _artifact_status(name: str, path: Path) -> str:
+    if not path.exists():
+        return "missing"
+    if name == "core.heartbeat":
+        age = _file_age_seconds(path)
+        if age is None:
+            return "present"
+        return "running" if age <= 5 else "stale"
+    if name == "guard.stop":
+        return "present"
+    return "present"
+
+
+def _artifact_summary(name: str, path: Path) -> tuple[str, str]:
+    if not path.exists():
+        return "artifact missing", ""
+
+    if name == "core_state.json":
+        data = _safe_json_file(path)
+        if isinstance(data, dict):
+            pid = data.get("pid")
+            create_time = data.get("create_time")
+            summary = f"pid={pid if pid is not None else '-'} | create_time={create_time if create_time is not None else '-'}"
+            excerpt = json.dumps(data, indent=2)[:360]
+            return summary, excerpt
+        return "state file present", _tail_file(path, max_lines=8)
+
+    if name == "guard.lock":
+        data = _safe_json_file(path)
+        if isinstance(data, dict):
+            pid = data.get("pid")
+            command = data.get("command") if isinstance(data.get("command"), dict) else {}
+            summary = f"pid={pid if pid is not None else '-'} | script={command.get('script') or '-'}"
+            excerpt = json.dumps(data, indent=2)[:360]
+            return summary, excerpt
+        return "guard lock present", _tail_file(path, max_lines=8)
+
+    if name == "guard_boot_history.json":
+        data = _safe_json_file(path)
+        if isinstance(data, list) and data:
+            latest = data[-1] if isinstance(data[-1], dict) else {}
+            summary = (
+                f"entries={len(data)} | latest={'success' if latest.get('success') else 'failure'}"
+                f" | reason={latest.get('reason') or 'n/a'}"
+            )
+            excerpt = json.dumps(latest, indent=2)[:360]
+            return summary, excerpt
+        return "boot history present", _tail_file(path, max_lines=8)
+
+    if name == "control_action_audit.jsonl":
+        lines = _safe_tail_lines(path, 4)
+        if lines:
+            try:
+                latest = json.loads(lines[-1])
+            except Exception:
+                latest = {}
+            if isinstance(latest, dict) and latest:
+                summary = f"last_action={latest.get('action') or '-'} | result={latest.get('result') or '-'}"
+                return summary, "\n".join(lines[-4:])[:360]
+        return "control audit log present", _tail_file(path, max_lines=8)
+
+    if name == "guard.log":
+        lines = _safe_tail_lines(path, 4)
+        last_line = lines[-1] if lines else ""
+        summary = last_line[-160:] if last_line else "guard log present"
+        return summary, "\n".join(lines[-4:])[:360]
+
+    if name == "core.heartbeat":
+        age = _file_age_seconds(path)
+        summary = f"heartbeat age={age}s" if age is not None else "heartbeat present"
+        return summary, f"mtime_age_sec={age if age is not None else 'unknown'}"
+
+    if name == "guard.stop":
+        age = _file_age_seconds(path)
+        summary = "guard stop flag present"
+        return summary, f"mtime_age_sec={age if age is not None else 'unknown'}"
+
+    return "artifact present", _tail_file(path, max_lines=8)
+
+
+def _runtime_artifact_definitions() -> list[tuple[str, Path, str]]:
+    return [
+        ("core_state.json", RUNTIME_DIR / "core_state.json", "json"),
+        ("core.heartbeat", RUNTIME_DIR / "core.heartbeat", "signal"),
+        ("guard.lock", RUNTIME_DIR / "guard.lock", "lock"),
+        ("guard.stop", RUNTIME_DIR / "guard.stop", "signal"),
+        ("guard_boot_history.json", GUARD_BOOT_HISTORY_PATH, "json"),
+        ("control_action_audit.jsonl", CONTROL_AUDIT_LOG, "log"),
+        ("guard.log", GUARD_LOG_PATH, "log"),
+    ]
+
+
+def _runtime_artifact_service(name: str) -> str:
+    artifact_name = str(name or "").strip().lower()
+    if artifact_name in {"core_state.json", "core.heartbeat"}:
+        return "core"
+    if artifact_name in {"guard.lock", "guard.stop", "guard_boot_history.json", "guard.log"}:
+        return "guard"
+    if artifact_name == "control_action_audit.jsonl":
+        return "control"
+    return "runtime"
+
+
+def _artifact_content(name: str, path: Path, *, max_lines: int = 120, max_chars: int = 12000) -> str:
+    if not path.exists():
+        return f"Artifact is not present: {path}"
+
+    text = ""
+    try:
+        if name.endswith(".json") or name.endswith(".jsonl"):
+            if name == "control_action_audit.jsonl":
+                text = "\n".join(_safe_tail_lines(path, max_lines=max(1, int(max_lines))))
+            else:
+                raw = path.read_text(encoding="utf-8", errors="ignore")
+                parsed = json.loads(raw)
+                text = json.dumps(parsed, ensure_ascii=True, indent=2)
+        elif name in {"guard.log"}:
+            text = _tail_file(path, max_lines=max(1, int(max_lines)))
+        else:
+            text = path.read_text(encoding="utf-8", errors="ignore")
+    except Exception as exc:
+        text = f"Unable to read {name}: {exc}"
+
+    clean = str(text or "").strip()
+    if not clean:
+        age = _file_age_seconds(path)
+        clean = f"{name} is present but empty. mtime_age_sec={age if age is not None else 'unknown'}"
+    return clean[: max(200, int(max_chars))]
+
+
+def _runtime_artifact_detail_payload(name: str, *, max_lines: int = 120) -> dict:
+    artifact_name = str(name or "").strip()
+    artifact_map = {item_name: (path, kind) for item_name, path, kind in _runtime_artifact_definitions()}
+    resolved = artifact_map.get(artifact_name)
+    if not resolved:
+        return {"ok": False, "error": "runtime_artifact_unknown", "name": artifact_name}
+
+    path, kind = resolved
+    summary, excerpt = _artifact_summary(artifact_name, path)
+    service = _runtime_artifact_service(artifact_name)
+    related_events = []
+    for event in list((_runtime_timeline_payload(limit=24).get("events") or [])):
+        event_service = str(event.get("service") or "").strip().lower()
+        if event_service != service and not (service == "control" and event_service in {"control", "patch", "sessions"}):
+            continue
+        related_events.append({
+            "ts": int(event.get("ts") or 0),
+            "title": str(event.get("title") or ""),
+            "detail": str(event.get("detail") or ""),
+            "level": str(event.get("level") or "info"),
+        })
+        if len(related_events) >= 4:
+            break
+
+    return {
+        "ok": True,
+        "name": artifact_name,
+        "kind": kind,
+        "service": service,
+        "path": str(path),
+        "present": path.exists(),
+        "status": _artifact_status(artifact_name, path),
+        "age_sec": _file_age_seconds(path),
+        "summary": summary,
+        "excerpt": excerpt,
+        "content": _artifact_content(artifact_name, path, max_lines=max_lines),
+        "related_events": related_events,
+    }
+
+
+def _runtime_artifacts_payload() -> dict:
+    items = []
+    for name, path, kind in _runtime_artifact_definitions():
+        summary, excerpt = _artifact_summary(name, path)
+        items.append({
+            "name": name,
+            "kind": kind,
+            "service": _runtime_artifact_service(name),
+            "path": str(path),
+            "present": path.exists(),
+            "status": _artifact_status(name, path),
+            "age_sec": _file_age_seconds(path),
+            "summary": summary,
+            "excerpt": excerpt,
+        })
+    return {"count": len(items), "items": items}
+
+
+def _runtime_restart_analytics_payload() -> dict:
+    payload = {
+        "ok": True,
+        "count": 0,
+        "success_count": 0,
+        "failure_count": 0,
+        "recent_restart_count_15m": 0,
+        "recent_restart_count_1h": 0,
+        "recent_restart_count_24h": 0,
+        "consecutive_failures": 0,
+        "avg_success_boot_sec": 0.0,
+        "latest_outcome": "unknown",
+        "latest_reason": "",
+        "last_success_ts": 0,
+        "last_failure_ts": 0,
+        "last_success_age_sec": None,
+        "last_failure_age_sec": None,
+        "flap_level": "info",
+        "flap_summary": "No guard boot history recorded yet.",
+        "recent_outcomes": [],
+    }
+    if not GUARD_BOOT_HISTORY_PATH.exists():
+        return payload
+
+    try:
+        raw = json.loads(GUARD_BOOT_HISTORY_PATH.read_text(encoding="utf-8"))
+    except Exception as exc:
+        return {
+            **payload,
+            "ok": False,
+            "flap_level": "danger",
+            "flap_summary": f"Unable to read guard boot history: {exc}",
+        }
+
+    entries = [dict(item) for item in list(raw or []) if isinstance(item, dict)]
+    if not entries:
+        return payload
+
+    entries.sort(key=lambda item: (_coerce_epoch_seconds(item.get("ts")) or 0, float(item.get("total_observed_s") or 0.0)))
+    now = int(time.time())
+    success_entries = [item for item in entries if bool(item.get("success"))]
+    failure_entries = [item for item in entries if not bool(item.get("success"))]
+    last_success = next((item for item in reversed(entries) if bool(item.get("success"))), None)
+    last_failure = next((item for item in reversed(entries) if not bool(item.get("success"))), None)
+    latest = entries[-1]
+    latest_outcome = "success" if bool(latest.get("success")) else "failure"
+    latest_reason = str(latest.get("reason") or ("running" if bool(latest.get("success")) else "unknown")).strip()
+
+    consecutive_failures = 0
+    for item in reversed(entries):
+        if bool(item.get("success")):
+            break
+        consecutive_failures += 1
+
+    def _count_since(window_seconds: int) -> int:
+        cutoff = now - max(1, int(window_seconds))
+        return sum(1 for item in entries if (_coerce_epoch_seconds(item.get("ts")) or 0) >= cutoff)
+
+    success_durations = [float(item.get("total_observed_s") or 0.0) for item in success_entries if float(item.get("total_observed_s") or 0.0) > 0]
+    recent_tail = entries[-6:]
+    recent_failures = sum(1 for item in recent_tail if not bool(item.get("success")))
+
+    flap_level = "good"
+    if consecutive_failures >= 3 or _count_since(900) >= 4 or recent_failures >= 4:
+        flap_level = "danger"
+    elif consecutive_failures >= 1 or _count_since(3600) >= 3 or recent_failures >= 2:
+        flap_level = "warn"
+
+    if flap_level == "danger":
+        flap_summary = (
+            f"Restart instability detected: {consecutive_failures} consecutive failure(s), "
+            f"{_count_since(900)} restart(s) in the last 15m, latest reason={latest_reason or 'unknown'}."
+        )
+    elif flap_level == "warn":
+        flap_summary = (
+            f"Runtime restart pressure is elevated: {consecutive_failures} consecutive failure(s) and "
+            f"{_count_since(3600)} restart(s) in the last hour."
+        )
+    else:
+        flap_summary = "Guard restart behavior looks stable over the recent boot history."
+
+    return {
+        **payload,
+        "count": len(entries),
+        "success_count": len(success_entries),
+        "failure_count": len(failure_entries),
+        "recent_restart_count_15m": _count_since(900),
+        "recent_restart_count_1h": _count_since(3600),
+        "recent_restart_count_24h": _count_since(86400),
+        "consecutive_failures": consecutive_failures,
+        "avg_success_boot_sec": round(sum(success_durations) / len(success_durations), 1) if success_durations else 0.0,
+        "latest_outcome": latest_outcome,
+        "latest_reason": latest_reason,
+        "last_success_ts": int(_coerce_epoch_seconds((last_success or {}).get("ts")) or 0),
+        "last_failure_ts": int(_coerce_epoch_seconds((last_failure or {}).get("ts")) or 0),
+        "last_success_age_sec": (now - int(_coerce_epoch_seconds((last_success or {}).get("ts")) or 0)) if last_success else None,
+        "last_failure_age_sec": (now - int(_coerce_epoch_seconds((last_failure or {}).get("ts")) or 0)) if last_failure else None,
+        "flap_level": flap_level,
+        "flap_summary": flap_summary,
+        "recent_outcomes": [
+            {
+                "ts": int(_coerce_epoch_seconds(item.get("ts")) or 0),
+                "outcome": "success" if bool(item.get("success")) else "failure",
+                "reason": str(item.get("reason") or ""),
+                "observed_sec": float(item.get("total_observed_s") or 0.0),
+            }
+            for item in reversed(recent_tail)
+        ],
+    }
+
+
+def _patch_action_readiness_payload(patch_summary: dict | None = None) -> dict:
+    summary = dict(patch_summary or {})
+    previews = list(summary.get("previews") or []) if isinstance(summary.get("previews"), list) else []
+    if not previews:
+        previews = list(nova_core.patch_preview_summaries(40) or [])
+        summary["previews"] = previews
+    default_preview = str(summary.get("last_preview_name") or "").strip()
+    if not default_preview and previews:
+        default_preview = str((previews[0] or {}).get("name") or "").strip()
+
+    readiness = {
+        "preview_refresh": {
+            "enabled": True,
+            "reason": "Refresh patch preview queue state and governance telemetry.",
+        },
+        "default_preview": default_preview,
+        "has_previews": bool(previews),
+        "preview_fallback_reason": "Select a patch preview first." if previews else "No patch previews are available.",
+        "by_preview": {},
+    }
+
+    for item in previews:
+        name = str((item or {}).get("name") or "").strip()
+        if not name:
+            continue
+        decision = str((item or {}).get("decision") or "pending").strip().lower() or "pending"
+        status_text = str((item or {}).get("status") or "unknown").strip()
+        status_low = status_text.lower()
+        patch_enabled = bool(summary.get("enabled", False))
+        strict_manifest = bool(summary.get("strict_manifest", False))
+        behavioral_check = bool(summary.get("behavioral_check", False))
+        tests_available = bool(summary.get("tests_available", False))
+
+        apply_enabled = True
+        apply_reason = "Approved preview is eligible for validated apply."
+        if not patch_enabled:
+            apply_enabled = False
+            apply_reason = "Patch pipeline is disabled by policy."
+        elif not strict_manifest:
+            apply_enabled = False
+            apply_reason = "Strict manifest validation is disabled."
+        elif not behavioral_check:
+            apply_enabled = False
+            apply_reason = "Behavioral validation is disabled."
+        elif not tests_available:
+            apply_enabled = False
+            apply_reason = "Behavioral tests are not available in this workspace."
+        elif not status_low.startswith("eligible"):
+            apply_enabled = False
+            apply_reason = f"Preview is not eligible for apply: {status_text or 'unknown'}."
+        elif decision != "approved":
+            apply_enabled = False
+            apply_reason = "Preview must be approved before apply."
+
+        readiness["by_preview"][name] = {
+            "status": status_text,
+            "decision": decision,
+            "show": {
+                "enabled": True,
+                "reason": "Open the preview text for inspection.",
+            },
+            "approve": {
+                "enabled": True,
+                "reason": (
+                    "Preview is already approved; approving again updates the recorded note."
+                    if decision == "approved"
+                    else "Record operator approval for this preview."
+                ),
+            },
+            "reject": {
+                "enabled": True,
+                "reason": (
+                    "Preview is already rejected; rejecting again updates the recorded note."
+                    if decision == "rejected"
+                    else "Record operator rejection for this preview."
+                ),
+            },
+            "apply": {
+                "enabled": apply_enabled,
+                "reason": apply_reason,
+            },
+        }
+
+    return readiness
+
+
+def _latest_runtime_event_for_service(timeline_payload: dict | None, service: str) -> dict:
+    events = list((timeline_payload or {}).get("events") or [])
+    service_name = str(service or "").strip().lower()
+    for event in events:
+        if str(event.get("service") or "").strip().lower() != service_name:
+            continue
+        if str(event.get("level") or "").strip().lower() in {"danger", "warn", "good", "info"}:
+            return dict(event)
+    return {}
+
+
+def _failure_reason_for_service(service: str, payload: dict, timeline_payload: dict | None = None) -> dict:
+    status = str(payload.get("status") or ("running" if payload.get("running") else "stopped")).strip().lower()
+    latest_event = _latest_runtime_event_for_service(timeline_payload, service)
+    title = service.title()
+    level = "good"
+    summary = "Healthy"
+    detail = "No active failure detected."
+
+    if service == "guard":
+        if status == "boot_timeout":
+            level = "danger"
+            summary = "Guard lock remains without a live guard process."
+        elif status == "stopping":
+            level = "warn"
+            summary = "Guard is stopping or a stop request is active."
+        elif status == "starting":
+            level = "warn"
+            summary = "Guard start has been requested and runtime confirmation is pending."
+        elif status == "stale_identity":
+            level = "danger"
+            summary = "Guard PID exists but no longer matches the expected runtime identity."
+        elif status == "stopped":
+            level = "warn"
+            summary = "Guard is not running."
+    elif service == "core":
+        if status == "heartbeat_stale":
+            level = "danger"
+            summary = "Core state exists but heartbeat freshness has been lost."
+        elif status == "boot_timeout":
+            level = "danger"
+            summary = "Core process exists without reaching a healthy boot state in time."
+        elif status == "heartbeat_only":
+            level = "warn"
+            summary = "Heartbeat is fresh but the logical process/state match is incomplete."
+        elif status == "stale_identity":
+            level = "danger"
+            summary = "Core state PID is live but does not match the current logical service identity."
+        elif status == "stopped":
+            level = "warn"
+            summary = "Core is not running."
+    elif service == "webui":
+        if status == "starting":
+            level = "warn"
+            summary = "Web UI process is still starting."
+        elif status == "stopped":
+            level = "warn"
+            summary = "Web UI is not running."
+
+    if latest_event:
+        event_detail = str(latest_event.get("detail") or "").strip()
+        if event_detail:
+            detail = event_detail
+        if level == "good" and str(latest_event.get("level") or "").strip().lower() in {"warn", "danger"}:
+            level = str(latest_event.get("level") or level)
+            summary = str(latest_event.get("title") or summary)
+
+    return {
+        "service": service,
+        "label": title,
+        "status": status,
+        "level": level,
+        "summary": summary,
+        "detail": detail,
+    }
+
+
+def _runtime_failure_reasons_payload(guard: dict, core: dict, webui: dict, timeline_payload: dict | None = None) -> dict:
+    return {
+        "guard": _failure_reason_for_service("guard", guard or {}, timeline_payload),
+        "core": _failure_reason_for_service("core", core or {}, timeline_payload),
+        "webui": _failure_reason_for_service("webui", webui or {}, timeline_payload),
+    }
+
+
 def _heartbeat_age_seconds() -> int | None:
     hb = RUNTIME_DIR / "core.heartbeat"
     if not hb.exists():
@@ -1136,10 +2657,114 @@ def _heartbeat_age_seconds() -> int | None:
         return None
 
 
+def _artifact_age_seconds(path: Path) -> int | None:
+    if not path.exists():
+        return None
+    try:
+        return max(0, int(time.time() - path.stat().st_mtime))
+    except Exception:
+        return None
+
+
+def _remove_runtime_artifact(path: Path) -> None:
+    try:
+        if path.exists():
+            path.unlink()
+    except Exception:
+        pass
+
+
+def _prune_orphaned_guard_artifacts(logical_processes: list[dict], pid: int | None, pid_live: bool) -> None:
+    lock_file = RUNTIME_DIR / "guard.lock"
+    pid_file = RUNTIME_DIR / "guard_pid.json"
+    ages = [age for age in (_artifact_age_seconds(lock_file), _artifact_age_seconds(pid_file)) if isinstance(age, int)]
+    if logical_processes or (isinstance(pid, int) and pid > 0 and pid_live):
+        return
+    if not ages or max(ages) < 15:
+        return
+    _remove_runtime_artifact(lock_file)
+    _remove_runtime_artifact(pid_file)
+
+
+def _prune_orphaned_core_artifacts(
+    logical_processes: list[dict],
+    pid: int | None,
+    pid_live: bool,
+    heartbeat_age: int | None,
+) -> None:
+    state_path = RUNTIME_DIR / "core_state.json"
+    heartbeat_path = RUNTIME_DIR / "core.heartbeat"
+    ages = [age for age in (_artifact_age_seconds(state_path), heartbeat_age) if isinstance(age, int)]
+    if logical_processes or (isinstance(pid, int) and pid > 0 and pid_live):
+        return
+    if not ages or max(ages) < 15:
+        return
+    _remove_runtime_artifact(state_path)
+    if isinstance(heartbeat_age, int) and heartbeat_age >= 15:
+        _remove_runtime_artifact(heartbeat_path)
+
+
+def _matches_script_process(cmdline: list[str], script_path: Path) -> bool:
+    normalized_script = os.path.normcase(os.path.normpath(str(script_path)))
+    for arg in list(cmdline or [])[1:]:
+        text = str(arg or "").strip()
+        if not text:
+            continue
+        if os.path.normcase(os.path.normpath(text)) == normalized_script:
+            return True
+    return False
+
+
+def _logical_service_processes(script_path: Path) -> list[dict]:
+    matches: list[dict] = []
+    for process in psutil.process_iter(["pid", "ppid", "cmdline", "create_time"]):
+        try:
+            cmdline = process.info.get("cmdline") or []
+            if not _matches_script_process(cmdline, script_path):
+                continue
+            matches.append(
+                {
+                    "pid": int(process.info.get("pid") or 0),
+                    "ppid": int(process.info.get("ppid") or 0),
+                    "create_time": float(process.info.get("create_time") or 0.0),
+                    "cmdline": list(cmdline),
+                }
+            )
+        except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess, ValueError, TypeError):
+            continue
+
+    if not matches:
+        return []
+
+    matching_pids = {item["pid"] for item in matches if int(item.get("pid") or 0) > 0}
+    parents_with_matching_children = {
+        int(item.get("ppid") or 0)
+        for item in matches
+        if int(item.get("ppid") or 0) in matching_pids
+    }
+    leaves = [item for item in matches if int(item.get("pid") or 0) not in parents_with_matching_children]
+    leaves.sort(key=lambda item: (float(item.get("create_time") or 0.0), int(item.get("pid") or 0)))
+    return leaves
+
+
+def _select_logical_process(processes: list[dict], *, pid: int | None = None, create_time: float | None = None) -> dict | None:
+    if not processes:
+        return None
+    if isinstance(pid, int) and pid > 0:
+        for item in processes:
+            if int(item.get("pid") or 0) != pid:
+                continue
+            if create_time is None:
+                return item
+            if abs(float(item.get("create_time") or 0.0) - float(create_time)) < 1.0:
+                return item
+    return processes[-1]
+
+
 def _runtime_process_note() -> str:
     if os.name == "nt":
         return (
-            "Windows note: Command Center reports logical service state. "
+            "Windows note: the operator console reports logical service state. "
             "Launcher and child interpreter pairs can appear as duplicate python processes, "
             "but nova_http reporting collapses them to the leaf service process."
         )
@@ -1173,12 +2798,32 @@ def _control_status_payload() -> dict:
         else:
             searx_ok, searx_note = None, "endpoint_missing"
 
+    guard_status = _guard_status_payload()
+    core_status = _core_status_payload()
+    webui_status = _http_status_payload()
+    timeline_payload = _runtime_timeline_payload()
+    subconscious_summary = _subconscious_status_summary()
+    generated_work_queue = _generated_work_queue(24)
+    operator_macros = _load_operator_macros(24)
+
     payload = {
         "ok": True,
         "server_time": time.strftime("%Y-%m-%d %H:%M:%S"),
         "ollama_api_up": bool(nova_core.ollama_api_up()),
         "chat_model": nova_core.chat_model(),
         "memory_enabled": bool(nova_core.mem_enabled()),
+        "subconscious_ok": bool(subconscious_summary.get("ok")),
+        "subconscious_generated_at": str(subconscious_summary.get("generated_at") or ""),
+        "subconscious_label": str(subconscious_summary.get("label") or ""),
+        "subconscious_family_count": int(subconscious_summary.get("family_count", 0) or 0),
+        "subconscious_variation_count": int(subconscious_summary.get("variation_count", 0) or 0),
+        "subconscious_training_priority_count": int(subconscious_summary.get("training_priority_count", 0) or 0),
+        "subconscious_generated_definition_count": int(subconscious_summary.get("generated_definition_count", 0) or 0),
+        "subconscious_top_priorities": list(subconscious_summary.get("top_priorities") or []),
+        "subconscious_latest_report_path": str(subconscious_summary.get("latest_report_path") or ""),
+        "generated_work_queue_open_count": int(generated_work_queue.get("open_count", 0) or 0),
+        "generated_work_queue_next_file": str((generated_work_queue.get("next_item") or {}).get("file") or ""),
+        "operator_macros": operator_macros,
         "memory_scope": str((p.get("memory") or {}).get("scope") or "private"),
         "web_enabled": bool((p.get("tools_enabled") or {}).get("web")) and bool(web_cfg.get("enabled")),
         "search_provider": provider,
@@ -1193,7 +2838,17 @@ def _control_status_payload() -> dict:
         "chat_users_count": len(_chat_users()),
         "searxng_ok": searx_ok,
         "searxng_note": searx_note,
-        "guard": _guard_status_payload(),
+        "guard": guard_status,
+        "core": core_status,
+        "webui": webui_status,
+        "runtime_summary": _runtime_summary_payload(guard=guard_status, core=core_status, webui=webui_status),
+        "runtime_timeline": timeline_payload,
+        "runtime_artifacts": _runtime_artifacts_payload(),
+        "runtime_restart_analytics": _runtime_restart_analytics_payload(),
+        "runtime_failures": _runtime_failure_reasons_payload(guard_status, core_status, webui_status, timeline_payload),
+        "action_readiness": _action_readiness_payload(guard_status, core_status, webui_status),
+        "subconscious_summary": subconscious_summary,
+        "generated_work_queue": generated_work_queue,
     }
     memory_stats = nova_core.mem_stats_payload(emit_event=False)
     payload["memory_stats_ok"] = bool(memory_stats.get("ok", False))
@@ -1236,6 +2891,29 @@ def _control_status_payload() -> dict:
     payload["last_route_grounded"] = bool(last_record.get("grounded")) if last_record else False
     payload["last_route_trace"] = list(last_record.get("route_trace") or []) if isinstance(last_record.get("route_trace"), list) else []
     payload["last_action_final_answer"] = str(last_record.get("final_answer") or "")
+    patch_summary = nova_core.patch_status_payload()
+    payload["patch_status_ok"] = bool(patch_summary.get("ok", False))
+    payload["patch_enabled"] = bool(patch_summary.get("enabled", False))
+    payload["patch_strict_manifest"] = bool(patch_summary.get("strict_manifest", False))
+    payload["patch_allow_force"] = bool(patch_summary.get("allow_force", False))
+    payload["patch_behavioral_check"] = bool(patch_summary.get("behavioral_check", False))
+    payload["patch_behavioral_check_timeout_sec"] = int(patch_summary.get("behavioral_check_timeout_sec", 0) or 0)
+    payload["patch_tests_available"] = bool(patch_summary.get("tests_available", False))
+    payload["patch_pipeline_ready"] = bool(patch_summary.get("pipeline_ready", False))
+    payload["patch_ready_for_validated_apply"] = bool(patch_summary.get("ready_for_validated_apply", False))
+    payload["patch_current_revision"] = int(patch_summary.get("current_revision", 0) or 0)
+    payload["patch_previews_total"] = int(patch_summary.get("previews_total", 0) or 0)
+    payload["patch_previews_pending"] = int(patch_summary.get("previews_pending", 0) or 0)
+    payload["patch_previews_approved"] = int(patch_summary.get("previews_approved", 0) or 0)
+    payload["patch_previews_rejected"] = int(patch_summary.get("previews_rejected", 0) or 0)
+    payload["patch_previews_eligible"] = int(patch_summary.get("previews_eligible", 0) or 0)
+    payload["patch_previews_approved_eligible"] = int(patch_summary.get("previews_approved_eligible", 0) or 0)
+    payload["patch_last_preview_name"] = str(patch_summary.get("last_preview_name") or "")
+    payload["patch_last_preview_status"] = str(patch_summary.get("last_preview_status") or "")
+    payload["patch_last_preview_decision"] = str(patch_summary.get("last_preview_decision") or "")
+    payload["patch_last_log_line"] = str(patch_summary.get("last_patch_log_line") or "")
+    payload["patch_previews"] = list(patch_summary.get("previews") or []) if isinstance(patch_summary.get("previews"), list) else []
+    payload["patch_action_readiness"] = _patch_action_readiness_payload(patch_summary)
     core = _core_status_payload()
     payload["core"] = core
     payload["core_running"] = bool(core.get("running"))
@@ -1270,10 +2948,155 @@ def _control_action(action: str, payload: dict) -> tuple[bool, str, dict]:
     if not act:
         return False, "action_required", {}
 
+    def _patch_preview_target() -> str:
+        requested = str(payload.get("preview") or "").strip()
+        if requested:
+            return requested
+        previews = nova_core.patch_preview_summaries(1)
+        if previews:
+            return str((previews[0] or {}).get("name") or "").strip()
+        return ""
+
+    def _patch_preview_entry(target: str) -> dict:
+        if not target:
+            return {}
+        for item in nova_core.patch_preview_summaries(40):
+            name = str((item or {}).get("name") or "").strip()
+            path = str((item or {}).get("path") or "").strip()
+            if target == name or target == path:
+                return dict(item)
+        return {}
+
+    def _patch_control_state() -> dict:
+        patch = nova_core.patch_status_payload()
+        previews = list(patch.get("previews") or []) if isinstance(patch.get("previews"), list) else []
+        if not previews:
+            previews = list(nova_core.patch_preview_summaries(40) or [])
+            patch["previews"] = previews
+        return {
+            "previews": previews,
+            "patch": patch,
+            "patch_action_readiness": _patch_action_readiness_payload(patch),
+        }
+
     if act == "refresh_status":
         ok, msg, extra = True, "status_refreshed", _control_status_payload()
         _record_control_action_event(act, "ok", msg, payload)
         return ok, msg, extra
+
+    if act == "patch_preview_list":
+        extra = _patch_control_state()
+        _record_control_action_event(act, "ok", "patch_preview_list_ok", payload)
+        return True, "patch_preview_list_ok", extra
+
+    if act == "patch_preview_show":
+        target = _patch_preview_target()
+        if not target:
+            _record_control_action_event(act, "fail", "patch_preview_missing", payload)
+            return False, "patch_preview_missing", _patch_control_state()
+        text = nova_core.show_preview(target)
+        ok = not text.startswith("Preview not found:") and not text.startswith("Failed to read preview:")
+        msg = "patch_preview_show_ok" if ok else "patch_preview_show_failed"
+        _record_control_action_event(act, "ok" if ok else "fail", f"{msg}:{target}", payload)
+        return ok, msg, {
+            "preview": target,
+            "text": text,
+            **_patch_control_state(),
+        }
+
+    if act == "patch_preview_approve":
+        target = _patch_preview_target()
+        if not target:
+            _record_control_action_event(act, "fail", "patch_preview_missing", payload)
+            return False, "patch_preview_missing", _patch_control_state()
+        note = str(payload.get("note") or "").strip()
+        result = nova_core.approve_preview(target, note=note)
+        ok = str(result).strip().lower().startswith("approved")
+        msg = "patch_preview_approve_ok" if ok else "patch_preview_approve_failed"
+        _record_control_action_event(act, "ok" if ok else "fail", f"{msg}:{target}", payload)
+        return ok, msg, {
+            "preview": target,
+            "text": result,
+            **_patch_control_state(),
+        }
+
+    if act == "patch_preview_reject":
+        target = _patch_preview_target()
+        if not target:
+            _record_control_action_event(act, "fail", "patch_preview_missing", payload)
+            return False, "patch_preview_missing", _patch_control_state()
+        note = str(payload.get("note") or "").strip()
+        result = nova_core.reject_preview(target, note=note)
+        ok = str(result).strip().lower().startswith("rejected")
+        msg = "patch_preview_reject_ok" if ok else "patch_preview_reject_failed"
+        _record_control_action_event(act, "ok" if ok else "fail", f"{msg}:{target}", payload)
+        return ok, msg, {
+            "preview": target,
+            "text": result,
+            **_patch_control_state(),
+        }
+
+    if act == "patch_preview_apply":
+        target = _patch_preview_target()
+        if not target:
+            _record_control_action_event(act, "fail", "patch_preview_missing", payload)
+            return False, "patch_preview_missing", _patch_control_state()
+        preview_entry = _patch_preview_entry(target)
+        decision = str(preview_entry.get("decision") or "pending").strip().lower()
+        status_text = str(preview_entry.get("status") or "").strip().lower()
+        if decision != "approved":
+            _record_control_action_event(act, "fail", f"patch_preview_not_approved:{target}", payload)
+            return False, "patch_preview_not_approved", {
+                "preview": target,
+                "text": "Preview must be approved before apply.",
+                **_patch_control_state(),
+            }
+        if not status_text.startswith("eligible"):
+            _record_control_action_event(act, "fail", f"patch_preview_not_eligible:{target}", payload)
+            return False, "patch_preview_not_eligible", {
+                "preview": target,
+                "text": f"Preview is not eligible for apply: {status_text or 'unknown'}",
+                **_patch_control_state(),
+            }
+        preview_text = nova_core.show_preview(target)
+        zip_name = ""
+        for line in str(preview_text or "").splitlines():
+            if line.lower().startswith("zip:"):
+                zip_name = str(line.split(":", 1)[1] or "").strip()
+                break
+        if not zip_name:
+            _record_control_action_event(act, "fail", f"patch_preview_zip_missing:{target}", payload)
+            return False, "patch_preview_zip_missing", {
+                "preview": target,
+                "text": "Preview did not contain a resolvable zip name.",
+                **_patch_control_state(),
+            }
+        zip_path = nova_core.UPDATES_DIR / zip_name
+        if not zip_path.exists():
+            _record_control_action_event(act, "fail", f"patch_zip_missing:{zip_name}", payload)
+            return False, "patch_zip_missing", {
+                "preview": target,
+                "text": f"Resolved patch zip not found: {zip_path}",
+                **_patch_control_state(),
+            }
+        result = nova_core.patch_apply(str(zip_path))
+        ok = not str(result).strip().lower().startswith("patch rejected") and "rolled back" not in str(result).strip().lower()
+        msg = "patch_preview_apply_ok" if ok else "patch_preview_apply_failed"
+        _record_control_action_event(act, "ok" if ok else "fail", f"{msg}:{target}", payload)
+        return ok, msg, {
+            "preview": target,
+            "zip": str(zip_path),
+            "text": result,
+            **_patch_control_state(),
+        }
+
+    if act == "runtime_artifact_show":
+        target = str(payload.get("artifact") or payload.get("name") or "").strip()
+        detail = _runtime_artifact_detail_payload(target, max_lines=int(payload.get("lines") or 120))
+        ok = bool(detail.get("ok"))
+        msg = "runtime_artifact_show_ok" if ok else str(detail.get("error") or "runtime_artifact_show_failed")
+        _record_control_action_event(act, "ok" if ok else "fail", f"{msg}:{target}", payload)
+        return ok, msg, {"artifact": detail}
 
     if act == "guard_status":
         ok, msg, extra = True, "guard_status_ok", {"guard": _guard_status_payload()}
@@ -1290,15 +3113,110 @@ def _control_action(action: str, payload: dict) -> tuple[bool, str, dict]:
         _record_control_action_event(act, "ok" if ok else "fail", msg, payload)
         return ok, msg, {"guard": _guard_status_payload()}
 
+    if act == "guard_restart":
+        ok, msg = _restart_guard()
+        _record_control_action_event(act, "ok" if ok else "fail", msg, payload)
+        return ok, msg, {"guard": _guard_status_payload(), "core": _core_status_payload()}
+
     if act == "nova_start":
         ok, msg = _start_nova_core()
         _record_control_action_event(act, "ok" if ok else "fail", msg, payload)
         return ok, msg, {"core": _core_status_payload()}
 
+    if act == "core_stop":
+        ok, msg = _stop_core_owned_process()
+        _record_control_action_event(act, "ok" if ok else "fail", msg, payload)
+        return ok, msg, {"guard": _guard_status_payload(), "core": _core_status_payload()}
+
+    if act == "core_restart":
+        ok, msg = _restart_core()
+        _record_control_action_event(act, "ok" if ok else "fail", msg, payload)
+        return ok, msg, {"guard": _guard_status_payload(), "core": _core_status_payload()}
+
+    if act == "webui_restart":
+        ok, msg = _restart_webui()
+        _record_control_action_event(act, "ok" if ok else "fail", msg, payload)
+        return ok, msg, {"webui": _http_status_payload()}
+
     if act == "test_session_run":
         ok, msg, extra = _run_test_session_definition(str(payload.get("session_file") or ""))
         _record_control_action_event(act, "ok" if ok else "fail", msg, payload)
         return ok, msg, extra
+
+    if act == "generated_pack_run":
+        ok, msg, extra = _run_generated_test_session_pack(limit=int(payload.get("limit") or 12), mode=str(payload.get("mode") or "recent"))
+        _record_control_action_event(act, "ok" if ok else "fail", msg, payload)
+        return ok, msg, extra
+
+    if act == "generated_queue_run_next":
+        ok, msg, extra = _run_next_generated_work_queue_item()
+        _record_control_action_event(act, "ok" if ok else "fail", msg, payload)
+        return ok, msg, extra
+
+    if act == "generated_queue_investigate":
+        ok, msg, extra = _investigate_generated_work_queue_item(
+            str(payload.get("session_file") or payload.get("file") or ""),
+            session_id=str(payload.get("session_id") or ""),
+            user_id=str(payload.get("user_id") or "operator"),
+        )
+        _record_control_action_event(act, "ok" if ok else "fail", msg, payload)
+        return ok, msg, extra
+
+    if act == "operator_prompt":
+        macro_id = str(payload.get("macro") or "").strip()
+        macro = _resolve_operator_macro(macro_id) if macro_id else None
+        macro_values = payload.get("macro_values") if isinstance(payload.get("macro_values"), dict) else {}
+        message = str(payload.get("message") or payload.get("prompt") or "").strip()
+        resolved_macro_values: dict[str, str] = {}
+        if macro is not None:
+            ok_macro, rendered_message, resolved_macro_values = _render_operator_macro_prompt(macro, macro_values, note=message)
+            if not ok_macro:
+                _record_control_action_event(act, "fail", rendered_message, {
+                    **payload,
+                    "operator_mode": "macro",
+                })
+                return False, rendered_message, {
+                    "available_macros": _load_operator_macros(24),
+                    "macro": dict(macro),
+                    "resolved_macro_values": resolved_macro_values,
+                }
+            message = rendered_message
+        elif macro_id:
+            _record_control_action_event(act, "fail", f"operator_macro_not_found:{macro_id}", payload)
+            return False, f"operator_macro_not_found:{macro_id}", {"available_macros": _load_operator_macros(24)}
+        if not message:
+            _record_control_action_event(act, "fail", "operator_message_required", payload)
+            return False, "operator_message_required", {}
+
+        session_id = str(payload.get("session_id") or "").strip() or f"operator-{secrets.token_hex(6)}"
+        user_id = _normalize_user_id(str(payload.get("user_id") or "operator")) or "operator"
+        ok_owner, reason_owner = _assert_session_owner(session_id, user_id, allow_bind=True)
+        if not ok_owner:
+            _record_control_action_event(act, "fail", reason_owner, payload)
+            return False, reason_owner, {"session_id": session_id}
+        try:
+            reply = process_chat(session_id, message, user_id=user_id)
+            sessions = _session_summaries(80)
+            session_summary = next((item for item in sessions if str(item.get("session_id") or "") == session_id), None)
+            _record_control_action_event(act, "ok", f"operator_prompt_ok:{session_id}", {
+                **payload,
+                "operator_mode": "macro" if macro is not None else ("cli" if str(payload.get("source") or "").strip().lower() == "cli" else "manual"),
+            })
+            return True, "operator_prompt_ok", {
+                "session_id": session_id,
+                "user_id": user_id,
+                "macro": dict(macro or {}),
+                "resolved_macro_values": resolved_macro_values,
+                "reply": reply,
+                "session": session_summary or {},
+                "sessions": sessions,
+            }
+        except Exception as e:
+            _record_control_action_event(act, "fail", f"operator_prompt_failed:{e}", {
+                **payload,
+                "operator_mode": "macro" if macro is not None else ("cli" if str(payload.get("source") or "").strip().lower() == "cli" else "manual"),
+            })
+            return False, f"operator_prompt_failed:{e}", {"session_id": session_id}
 
     if act == "session_delete":
         ok, msg = _delete_session(str(payload.get("session_id") or ""))
@@ -1508,23 +3426,31 @@ def _file_response(handler: BaseHTTPRequestHandler, code: int, path: Path, conte
 
 def _developer_color_reply(turns: List[Tuple[str, str]]) -> str:
     prefs = nova_core._extract_developer_color_preferences(turns)
+    from_memory = False
     if not prefs:
         prefs = nova_core._extract_developer_color_preferences_from_memory()
+        from_memory = bool(prefs)
     if not prefs:
         return "I don't have Gus's color preferences yet."
     if len(prefs) == 1:
-        return f"From what you've told me, Gus likes {prefs[0]}."
-    return "From what you've told me, Gus likes these colors: " + ", ".join(prefs[:-1]) + f", and {prefs[-1]}."
+        reply = f"From what you've told me, Gus likes {prefs[0]}."
+    else:
+        reply = "From what you've told me, Gus likes these colors: " + ", ".join(prefs[:-1]) + f", and {prefs[-1]}."
+    return nova_core._prefix_from_earlier_memory(reply) if from_memory else reply
 
 
 def _developer_bilingual_reply(turns: List[Tuple[str, str]]) -> str:
     known = nova_core._developer_is_bilingual(turns)
+    from_memory = False
     if known is None:
         known = nova_core._developer_is_bilingual_from_memory()
+        from_memory = known is not None
     if known is True:
-        return "Yes. From what you've told me, Gus is bilingual in English and Spanish."
+        reply = "Yes. From what you've told me, Gus is bilingual in English and Spanish."
+        return nova_core._prefix_from_earlier_memory(reply) if from_memory else reply
     if known is False:
-        return "From what I have, Gus is not bilingual."
+        reply = "From what I have, Gus is not bilingual."
+        return nova_core._prefix_from_earlier_memory(reply) if from_memory else reply
     return "I don't have confirmed language details for Gus yet."
 
 
@@ -1571,24 +3497,32 @@ def _location_reply() -> str:
 
 def _color_reply(turns: List[Tuple[str, str]]) -> str:
     prefs = nova_core._extract_color_preferences(turns)
+    from_memory = False
     if not prefs:
         prefs = nova_core._extract_color_preferences_from_memory()
+        from_memory = bool(prefs)
     if not prefs:
         return "You haven't told me a color preference in this current chat yet."
     if len(prefs) == 1:
-        return f"You told me you like the color {prefs[0]}."
-    return "You told me you like these colors: " + ", ".join(prefs[:-1]) + f", and {prefs[-1]}."
+        reply = f"You told me you like the color {prefs[0]}."
+    else:
+        reply = "You told me you like these colors: " + ", ".join(prefs[:-1]) + f", and {prefs[-1]}."
+    return nova_core._prefix_from_earlier_memory(reply) if from_memory else reply
 
 
 def _animal_reply(turns: List[Tuple[str, str]]) -> str:
     animals = nova_core._extract_animal_preferences(turns)
+    from_memory = False
     if not animals:
         animals = nova_core._extract_animal_preferences_from_memory()
+        from_memory = bool(animals)
     if not animals:
         return "You haven't told me animal preferences yet in this chat, and I can't find them in saved memory."
     if len(animals) == 1:
-        return f"You told me you like {animals[0]}."
-    return "You told me you like: " + ", ".join(animals[:-1]) + f", and {animals[-1]}."
+        reply = f"You told me you like {animals[0]}."
+    else:
+        reply = "You told me you like: " + ", ".join(animals[:-1]) + f", and {animals[-1]}."
+    return nova_core._prefix_from_earlier_memory(reply) if from_memory else reply
 
 
 def _extract_last_user_question(turns: List[Tuple[str, str]], current_text: str) -> str:
@@ -1632,10 +3566,7 @@ def _extract_memory_teach_text(text: str) -> str:
 
 
 def _rules_reply() -> str:
-    return (
-        "Yes. I follow strict operating rules: I do not fabricate tool actions or files, "
-        "I stay within enabled policy/tool limits, and I should say uncertain when I cannot verify something."
-    )
+    return nova_core._rules_reply()
 
 
 def _strip_ui_tip_leak(text: str) -> str:
@@ -1661,7 +3592,8 @@ def _session_recap_reply(turns: List[Tuple[str, str]], current_text: str) -> str
 
 
 def _is_deep_search_followup_request(text: str) -> bool:
-    return nova_core._is_deep_search_followup_request(text)
+    del text
+    return False
 
 
 def _infer_research_query_from_turns(turns: List[Tuple[str, str]]) -> str:
@@ -1743,65 +3675,47 @@ def _build_local_topic_digest_answer(query_text: str, max_files: int = 4, max_po
     return nova_core._build_local_topic_digest_answer(query_text, max_files=max_files, max_points=max_points)
 
 
-def _build_local_peims_attendance_answer() -> str:
-    files = [
-        PEIMS_KNOWLEDGE_DIR / "05_attendance_reporting.txt",
-        PEIMS_KNOWLEDGE_DIR / "03_submissions.txt",
-        PEIMS_KNOWLEDGE_DIR / "13_reporting_timeline.txt",
-        PEIMS_KNOWLEDGE_DIR / "15_terminology.txt",
-    ]
-    available = [p for p in files if p.exists()]
-    if not available:
-        return ""
-
-    lines = ["I found additional attendance reporting details in the local PEIMS knowledge files:"]
-    facts_added = 0
-
-    backup_lines: List[str] = []
-
-    for p in available:
-        key_lines = _extract_key_lines(_read_text_safely(p), max_lines=3)
-        for k in key_lines:
-            low = k.lower()
-            if len(backup_lines) < 4:
-                backup_lines.append(k)
-            if not any(token in low for token in ["attendance", "ada", "absence", "submission", "report"]):
-                continue
-            lines.append(f"- {k}.")
-            facts_added += 1
-            if facts_added >= 4:
-                break
-        if facts_added >= 4:
-            break
-
-    if facts_added == 0:
-        for k in backup_lines[:4]:
-            lines.append(f"- {k}.")
-        facts_added = len(backup_lines[:4])
-
-    if facts_added == 0:
-        return ""
-
-    cited = {f"knowledge/peims/{p.name}" for p in available}
-    for c in sorted(cited):
-        lines.append(f"[source: {c}]")
-    return "\n".join(lines)
-
-
-def _build_local_peims_overview_answer() -> str:
-    return nova_core._build_local_peims_overview_answer()
-
-
 def _is_peims_attendance_rules_query(text: str) -> bool:
-    low = (text or "").lower()
-    has_peims = "peims" in low
-    has_attendance = "attendance" in low
-    has_rules = any(k in low for k in ["rules", "requirements", "reporting", "what are", "tea say"])
-    return bool(has_peims and has_attendance and has_rules)
+    low = (text or "").strip().lower()
+    if not low:
+        return False
+    return "peims" in low and "attendance" in low and any(token in low for token in ("rule", "rules", "reporting", "report"))
 
 
 def _is_peims_broad_query(text: str) -> bool:
-    return nova_core._is_peims_broad_query(text)
+    del text
+    return False
+
+
+def _is_web_preferred_data_query(text: str) -> bool:
+    low = (text or "").strip().lower()
+    if not low:
+        return False
+    data_terms = (
+        "peims",
+        "tsds",
+        "attendance",
+        "ada",
+        "submission",
+        "submissions",
+        "student data",
+        "records",
+        "reporting",
+        "data system",
+    )
+    if not any(term in low for term in data_terms):
+        return False
+    broad_cues = (
+        "anything about",
+        "what do you know about",
+        "tell me about",
+        "explain",
+        "overview",
+        "summary",
+        "information",
+        "anything",
+    )
+    return any(cue in low for cue in broad_cues)
 
 
 def _extract_urls(text: str) -> List[str]:
@@ -1874,34 +3788,13 @@ def _is_conversational_clarification(text: str) -> bool:
 
 
 def _clarification_reply(turns: List[Tuple[str, str]]) -> str:
-    last_assistant = ""
-    for role, txt in reversed(turns):
-        if role == "assistant":
-            last_assistant = (txt or "").strip()
-            break
-    if last_assistant and "allowlisted references" in last_assistant.lower():
-        return "You're right. That response drifted into web lookup when you were asking a direct chat question. Ask it again and I'll answer it directly."
-    return "You're right. I should stay with the current chat instead of jumping to web lookup for that kind of question."
+    reply, _kind = nova_core._open_probe_reply("what are you talking about ?", turns=turns)
+    return reply
 
 
 def _is_groundable_factual_query(text: str) -> bool:
-    low = (text or "").strip().lower()
-    if not low or len(low) < 8:
-        return False
-    if not (
-        low.startswith(("what", "how", "when", "why", "which", "where", "who"))
-        or "tell me about" in low
-        or "what do you know about" in low
-    ):
-        return False
-    # Keep identity/smalltalk out of research path.
-    if any(x in low for x in ["your name", "who are you", "how are you", "creator", "developer"]):
-        return False
-    if nova_core._is_capability_query(low):
-        return False
-    if _is_conversational_clarification(low):
-        return False
-    return True
+    del text
+    return False
 
 
 def _build_grounded_answer(query_text: str, max_sources: int = 2) -> str:
@@ -1944,10 +3837,10 @@ def _peims_attendance_rules_reply() -> str:
     grounded = _build_grounded_answer("PEIMS attendance reporting rules Texas TEA", max_sources=2)
     if grounded:
         return grounded
-    local_grounded = _build_local_peims_attendance_answer()
+    local_grounded = _build_local_topic_digest_answer("PEIMS attendance reporting rules")
     if local_grounded:
         return local_grounded
-    return "I couldn't gather sourced PEIMS attendance rules right now. Please try: web research PEIMS attendance reporting rules"
+    return nova_core._detached_domain_reply("PEIMS", "web research PEIMS attendance reporting rules")
 
 
 def _generate_chat_reply(
@@ -1956,6 +3849,8 @@ def _generate_chat_reply(
     ledger_record: dict | None = None,
     pending_action: dict | None = None,
     prefer_web_for_data_queries: bool = False,
+    language_mix_spanish_pct: int = 0,
+    session=None,
 ) -> tuple[str, dict]:
     def _trace(stage: str, outcome: str, detail: str = "", **data) -> None:
         nova_core.action_ledger_add_step(ledger_record, stage, outcome, detail, **data)
@@ -2053,7 +3948,7 @@ def _generate_chat_reply(
 
         if atype == "route_command":
             _trace("action_planner", "route_command")
-            cmd_reply = nova_core.handle_commands(text, session_turns=turns)
+            cmd_reply = nova_core.handle_commands(text, session_turns=turns, session=session)
             if cmd_reply:
                 tool_name = "weather" if "api.weather.gov" in str(cmd_reply).lower() else ""
                 _trace("command", "matched", tool=tool_name)
@@ -2124,17 +4019,34 @@ def _generate_chat_reply(
                 "pending_action": {},
             }
 
-    if _is_peims_broad_query(text):
-        local_overview = _build_local_peims_overview_answer()
-        if local_overview:
-            _trace("grounded_lookup", "matched", tool="local_knowledge")
-            return _normalize_reply(local_overview), {
-                "planner_decision": "grounded_lookup",
-                "tool": "local_knowledge",
-                "tool_args": {"query": text},
-                "tool_result": local_overview,
-                "grounded": True,
+    if prefer_web_for_data_queries and _is_web_preferred_data_query(text):
+        _trace("session_override", "matched", detail="prefer_web_for_data_queries", tool="web_research")
+        out = nova_core.execute_planned_action("web_research", [text])
+        if out is None or (isinstance(out, str) and not out.strip()):
+            out = nova_core.tool_web_research(text)
+        if isinstance(out, dict) and not out.get("ok", True):
+            _trace("tool_execution", "error", tool="web_research", error=str(out.get("error") or "unknown error"))
+            err = out.get("error", "unknown error")
+            reply = f"Tool web_research failed: {err}"
+            return _normalize_reply(reply), {
+                "planner_decision": "run_tool",
+                "tool": "web_research",
+                "tool_args": {"args": [text]},
+                "tool_result": json.dumps(out, ensure_ascii=True),
+                "grounded": False,
+                "pending_action": {},
             }
+        if str(out or "").strip():
+            _trace("tool_execution", "ok", tool="web_research", grounded=True)
+            return _normalize_reply(str(out or "")), {
+                "planner_decision": "run_tool",
+                "tool": "web_research",
+                "tool_args": {"args": [text]},
+                "tool_result": str(out or ""),
+                "grounded": True,
+                "pending_action": {},
+            }
+        _trace("tool_execution", "empty_result", tool="web_research")
 
     if _is_session_recap_request(text):
         _trace("deterministic_reply", "matched", detail="session_recap")
@@ -2156,20 +4068,6 @@ def _generate_chat_reply(
             "tool_result": reply,
             "grounded": True,
         }
-    elif "what was my last question" in low or "what was my previous question" in low:
-        _trace("deterministic_reply", "matched", detail="last_question")
-        last_q = _extract_last_user_question(turns, text)
-        if last_q:
-            reply = f"Your last question before this one was: {last_q}"
-        else:
-            reply = "I don't have an earlier question in this active chat session."
-        return _normalize_reply(reply), {
-            "planner_decision": "deterministic",
-            "tool": "session_history",
-            "tool_args": {"query": text},
-            "tool_result": reply,
-            "grounded": True,
-        }
     elif _is_developer_full_name_query(text):
         _trace("deterministic_reply", "matched", detail="developer_full_name")
         reply = _developer_full_name_reply()
@@ -2186,16 +4084,6 @@ def _generate_chat_reply(
         return _normalize_reply(reply), {
             "planner_decision": "deterministic",
             "tool": "memory_policy",
-            "tool_args": {"query": text},
-            "tool_result": reply,
-            "grounded": True,
-        }
-    elif "do you have any rules" in low or "what rules do you follow" in low:
-        _trace("deterministic_reply", "matched", detail="rules_reply")
-        reply = _rules_reply()
-        return _normalize_reply(reply), {
-            "planner_decision": "deterministic",
-            "tool": "rules",
             "tool_args": {"query": text},
             "tool_result": reply,
             "grounded": True,
@@ -2365,38 +4253,83 @@ def _generate_chat_reply(
             "grounded": True,
         }
     else:
-        # Always provide recent session turns so the model can follow thread continuity.
-        context_blocks: List[str] = []
+        task = nova_core.analyze_request(
+            text,
+            config={"prefer_web_for_data_queries": prefer_web_for_data_queries},
+        )
+        if not getattr(task, "allow_llm", False):
+            _trace("policy_gate", "blocked", detail=str(getattr(task, "message", "") or "")[:160])
+            reply = str(getattr(task, "message", "") or "")
+            return _normalize_reply(reply), {
+                "planner_decision": "policy_block",
+                "tool": "",
+                "tool_args": {},
+                "tool_result": "",
+                "grounded": True,
+            }
+        _trace("policy_gate", "allowed")
 
-        # Match CLI recall behavior: always build learning context for better continuity.
-        context_details = nova_core.build_learning_context_details(text)
-        mem_ctx = str(context_details.get("context") or "")
+        fallback_context = nova_core.build_fallback_context_details(text, turns)
+        retrieved = str(fallback_context.get("context") or "")
         _trace(
             "memory_context",
-            "used" if mem_ctx else "empty",
-            memory_used=bool(context_details.get("memory_used")),
-            knowledge_used=bool(context_details.get("knowledge_used")),
-            memory_chars=int(context_details.get("memory_chars") or 0),
-            knowledge_chars=int(context_details.get("knowledge_chars") or 0),
+            "used" if str(fallback_context.get("learning_context") or "") else "empty",
+            memory_used=bool(fallback_context.get("memory_used")),
+            knowledge_used=bool(fallback_context.get("knowledge_used")),
+            memory_chars=int(fallback_context.get("memory_chars") or 0),
+            knowledge_chars=int(fallback_context.get("knowledge_chars") or 0),
         )
-        if mem_ctx:
-            context_blocks.append(mem_ctx)
-
-        chat_ctx = nova_core._render_chat_context(turns)
+        chat_ctx = str(fallback_context.get("chat_context") or "")
         if chat_ctx:
-            context_blocks.append("CURRENT CHAT CONTEXT:\n" + chat_ctx)
             _trace("chat_context", "used", chars=len(chat_ctx))
 
-        retrieved = "\n\n".join(context_blocks).strip()[:6000]
+        session_fact_sheet = str(fallback_context.get("session_fact_sheet") or "")
+        if session_fact_sheet:
+            _trace("session_fact_sheet", "used", chars=len(session_fact_sheet))
+        if nova_core.should_block_low_confidence(text, retrieved_context=retrieved):
+            _trace("low_confidence_gate", "blocked")
+            truthful_outcome = nova_core._truthful_limit_outcome(text)
+            reply = str(truthful_outcome.get("reply_text") or nova_core._truthful_limit_reply(text))
+            return _normalize_reply(reply), {
+                "planner_decision": "blocked_low_confidence",
+                "tool": "",
+                "tool_args": {},
+                "tool_result": "",
+                "grounded": False,
+                "reply_contract": str(truthful_outcome.get("reply_contract") or ""),
+                "reply_outcome": dict(truthful_outcome),
+            }
         _trace("llm_fallback", "invoked", retrieved_chars=len(retrieved))
-        reply = nova_core.ollama_chat(text, retrieved_context=retrieved)
+        reply = nova_core.ollama_chat(
+            text,
+            retrieved_context=retrieved,
+            language_mix_spanish_pct=int(language_mix_spanish_pct or 0),
+        )
         reply = nova_core.sanitize_llm_reply(reply, "")
+        reply_contract = ""
+        reply_outcome: dict[str, object] = {}
+        claim_gated_reply, claim_gate_changed, claim_gate_reason = nova_core._apply_claim_gate(
+            reply,
+            evidence_text=retrieved,
+            tool_context="",
+        )
+        if claim_gate_changed:
+            _trace("claim_gate", "adjusted", claim_gate_reason)
+            reply = claim_gated_reply
+            if claim_gate_reason == "unsupported_claim_blocked":
+                truthful_outcome = nova_core._truthful_limit_outcome(text)
+                reply_contract = str(truthful_outcome.get("reply_contract") or "")
+                reply_outcome = dict(truthful_outcome)
+        if not reply_contract:
+            reply = nova_core._attach_learning_invitation(reply)
         return _normalize_reply(reply), {
             "planner_decision": "llm_fallback",
             "tool": "",
             "tool_args": {},
             "tool_result": "",
             "grounded": False if not reply else None,
+            "reply_contract": reply_contract,
+            "reply_outcome": reply_outcome,
         }
 
 
@@ -2419,6 +4352,7 @@ def process_chat(session_id: str, user_text: str, user_id: str = "") -> str:
             input_source="typed",
             active_subject=session.active_subject(),
         )
+        routing_decision: dict | None = None
 
         def _finalize_http_reply(
             reply_text: str,
@@ -2429,6 +4363,8 @@ def process_chat(session_id: str, user_text: str, user_id: str = "") -> str:
             tool_result: str = "",
             grounded: bool | None = None,
             intent: str = "",
+            reply_contract: str = "",
+            reply_outcome: dict | None = None,
         ) -> str:
             reflection_payload = nova_core.build_turn_reflection(
                 session,
@@ -2441,10 +4377,20 @@ def process_chat(session_id: str, user_text: str, user_id: str = "") -> str:
                     "tool_args": tool_args if isinstance(tool_args, dict) else {},
                     "tool_result": tool_result,
                     "final_answer": reply_text,
+                    "reply_contract": str(reply_contract or ""),
+                    "reply_outcome": reply_outcome if isinstance(reply_outcome, dict) else {},
+                    "turn_acts": list(ledger.get("turn_acts") or []),
                     "grounded": grounded,
                     "active_subject": session.active_subject(),
                     "continuation_used": session.continuation_used_last_turn,
                     "pending_action": session.pending_action,
+                    "routing_decision": nova_core._finalize_routing_decision(
+                        routing_decision if isinstance(routing_decision, dict) else {},
+                        planner_decision=planner_decision,
+                        reply_contract=str(reply_contract or ""),
+                        reply_outcome=reply_outcome if isinstance(reply_outcome, dict) else {},
+                        turn_acts=list(ledger.get("turn_acts") or []),
+                    ),
                     "route_summary": nova_core.action_ledger_route_summary(ledger),
                     "overrides_active": session.reflection_summary().get("overrides_active", []),
                 },
@@ -2460,67 +4406,214 @@ def process_chat(session_id: str, user_text: str, user_id: str = "") -> str:
                 intent=intent,
                 active_subject=session.active_subject(),
                 continuation_used=session.continuation_used_last_turn,
+                reply_contract=str(reply_contract or ""),
+                reply_outcome=reply_outcome if isinstance(reply_outcome, dict) else {},
+                routing_decision=routing_decision if isinstance(routing_decision, dict) else {},
                 reflection_payload=reflection_payload,
             )
             return reply_text
 
-        quick = _fast_smalltalk_reply(text)
-        if quick:
-            nova_core.action_ledger_add_step(ledger, "fast_smalltalk", "matched")
-            return _finalize_http_reply(quick, planner_decision="deterministic", grounded=False)
-
         turns = _append_session_turn(session_id, "user", text)
+        routed_text = text
+        try:
+            turn_direction = nova_core._determine_turn_direction(
+                turns,
+                text,
+                active_subject=session.active_subject(),
+                pending_action=session.pending_action,
+            )
+            routed_text = str(turn_direction.get("effective_query") or text)
+            session.set_language_mix_spanish_pct(
+                nova_core._auto_adjust_language_mix(
+                    int(session.language_mix_spanish_pct or 0),
+                    routed_text,
+                )
+            )
+            turn_acts = [str(item).strip() for item in list(turn_direction.get("turn_acts") or []) if str(item).strip()]
+            ledger["turn_acts"] = list(turn_acts)
+            nova_core.action_ledger_add_step(
+                ledger,
+                "direction_analysis",
+                str(turn_direction.get("primary") or "general_chat"),
+                str(turn_direction.get("analysis_reason") or "")[:120],
+                effective_query=routed_text[:180],
+                turn_acts=",".join(turn_acts),
+                identity_focused=bool(turn_direction.get("identity_focused")),
+                bypass_pattern_routes=bool(turn_direction.get("bypass_pattern_routes")),
+            )
+        except Exception:
+            routed_text = text
+            turn_acts = []
 
-        # HTTP pending-correction flow mirrors CLI autonomous correction behavior.
-        pending = session.pending_correction_target
-        if pending:
-            corr = nova_core._extract_authoritative_correction_text(text)
-            if corr:
-                nova_core.action_ledger_add_step(ledger, "correction_capture", "applied")
-                corr_store = nova_core._normalize_correction_for_storage(corr)
-                nova_core._teach_store_example(pending, corr_store)
-                session.clear_pending_correction_target()
-                nova_core.behavior_record_event("correction_applied")
-                reply = "Understood. I corrected that and will use your version going forward."
+        intent_rule = nova_core.TURN_SUPERVISOR.evaluate_rules(
+            routed_text,
+            manager=session,
+            turns=turns,
+            phase="intent",
+            entry_point="http",
+        )
+        if not nova_core._supervisor_result_has_route(intent_rule):
+            runtime_intent = nova_core._runtime_set_location_intent(routed_text, pending_action=session.pending_action)
+            if isinstance(runtime_intent, dict):
+                intent_rule = runtime_intent
+        if not nova_core._supervisor_result_has_route(intent_rule):
+            llm_intent = nova_core._llm_classify_routing_intent(routed_text, turns=turns)
+            if isinstance(llm_intent, dict) and nova_core._supervisor_result_has_route(llm_intent):
+                intent_rule = llm_intent
+        identity_only_mode = nova_core._session_identity_only_mode(session_id)
+        identity_only_block_kind = ""
+        if identity_only_mode:
+            identity_only_block_kind = nova_core._identity_only_block_kind(routed_text, intent_result=intent_rule)
+            if identity_only_block_kind:
+                routing_decision = nova_core._build_routing_decision(
+                    routed_text,
+                    entry_point="http",
+                    intent_result=intent_rule,
+                    handle_result=None,
+                )
+                reply_outcome = {
+                    "intent": "policy_block",
+                    "kind": "identity_only_block",
+                    "blocked_domain": identity_only_block_kind,
+                    "reply_contract": "policy.identity_only_mode",
+                }
+                reply = nova_core._identity_only_block_reply(identity_only_block_kind)
+                nova_core.action_ledger_add_step(
+                    ledger,
+                    "policy_gate",
+                    "blocked",
+                    "identity_only_mode",
+                    blocked_domain=identity_only_block_kind,
+                )
                 _append_session_turn(session_id, "assistant", reply)
-                return _finalize_http_reply(reply, planner_decision="deterministic", grounded=True, intent="correction_apply")
-
-        if nova_core._is_negative_feedback(text):
-            last_assistant = ""
-            for role, txt in reversed(turns[:-1]):
-                if role == "assistant":
-                    last_assistant = txt
-                    break
-            if last_assistant:
-                corr = nova_core._extract_authoritative_correction_text(text)
-                if corr:
-                    nova_core.action_ledger_add_step(ledger, "correction_feedback", "learned")
-                    corr_store = nova_core._normalize_correction_for_storage(corr)
-                    nova_core._teach_store_example(last_assistant, corr_store)
-                    nova_core.behavior_record_event("correction_learned")
-                    reply = "You're right. I saved your correction and will use it next time."
+                return _finalize_http_reply(
+                    reply,
+                    planner_decision="policy_block",
+                    grounded=False,
+                    intent="policy_block",
+                    reply_contract="policy.identity_only_mode",
+                    reply_outcome=reply_outcome,
+                )
+        if not nova_core._supervisor_result_has_route(intent_rule) and nova_core._should_clarify_unlabeled_numeric_turn(
+            routed_text,
+            pending_action=session.pending_action,
+            current_state=conversation_state,
+        ):
+            reply = nova_core._unlabeled_numeric_turn_reply(routed_text)
+            session.apply_state_update(nova_core._make_conversation_state("numeric_reference_clarify", value=str(routed_text or "").strip()))
+            nova_core.action_ledger_add_step(ledger, "numeric_clarify", "blocked")
+            _append_session_turn(session_id, "assistant", reply)
+            return _finalize_http_reply(reply, planner_decision="ask_clarify", grounded=False, intent="numeric_clarify")
+        correction_pending = bool(session.pending_correction_target) or (
+            isinstance(conversation_state, dict)
+            and str(conversation_state.get("kind") or "") == "correction_pending"
+        )
+        if "mixed" in turn_acts and not correction_pending:
+            reply = nova_core._mixed_info_request_clarify_reply(routed_text)
+            nova_core.action_ledger_add_step(ledger, "mixed_turn_clarify", "blocked")
+            _append_session_turn(session_id, "assistant", reply)
+            return _finalize_http_reply(
+                reply,
+                planner_decision="ask_clarify",
+                grounded=False,
+                intent="clarify_mixed_turn",
+                reply_contract="turn.clarify_mixed_intent",
+                reply_outcome={
+                    "intent": "clarify_mixed_turn",
+                    "kind": "mixed_info_request",
+                    "reply_contract": "turn.clarify_mixed_intent",
+                },
+            )
+        routing_decision = nova_core._build_routing_decision(
+            routed_text,
+            entry_point="http",
+            intent_result=intent_rule,
+            handle_result=None,
+            turn_acts=turn_acts,
+        )
+        # DO NOT add new deterministic routing branches in HTTP.
+        # Add a supervisor rule plus shared core action execution instead.
+        # See docs/SUPERVISOR_CONTRACT.md.
+        handled_intent, intent_msg, intent_state, intent_effects = nova_core._handle_supervisor_intent(
+            intent_rule,
+            routed_text,
+            turns=turns,
+            input_source="typed",
+            entry_point="http",
+        )
+        if handled_intent:
+            weather_mode = str(intent_rule.get("weather_mode") or "").strip().lower()
+            nova_core._emit_supervisor_intent_trace(intent_rule, user_text=routed_text)
+            reply_contract = ""
+            reply_outcome = {}
+            if isinstance(intent_effects, dict) and "pending_action" in intent_effects:
+                session.set_pending_action(intent_effects.get("pending_action"))
+            if isinstance(intent_effects, dict):
+                reply_contract = str(intent_effects.get("reply_contract") or "")
+                reply_outcome = dict(intent_effects.get("reply_outcome") or {}) if isinstance(intent_effects.get("reply_outcome"), dict) else {}
+            session.apply_state_update(intent_state, fallback_state=conversation_state)
+            conversation_state = session.conversation_state
+            planner_decision = "deterministic"
+            tool = ""
+            tool_args = {}
+            tool_result = ""
+            grounded = True
+            if str(intent_rule.get("intent") or "") == "weather_lookup":
+                if weather_mode == "clarify":
+                    planner_decision = "ask_clarify"
+                    grounded = False
+                    nova_core.action_ledger_add_step(ledger, "action_planner", "ask_clarify")
+                    nova_core.action_ledger_add_step(ledger, "pending_action", "awaiting_location", tool="weather")
                 else:
-                    session.set_pending_correction_target(last_assistant)
-                    nova_core.action_ledger_add_step(ledger, "correction_feedback", "pending")
-                    reply = "You're right. Give me the exact corrected answer and I will learn it now."
-                _append_session_turn(session_id, "assistant", reply)
-                return _finalize_http_reply(reply, planner_decision="deterministic", grounded=True, intent="correction_feedback")
+                    planner_decision = "run_tool"
+                    tool = "weather_current_location" if weather_mode == "current_location" else "weather_location"
+                    tool_result = str(intent_msg or "")
+                    if tool == "weather_location":
+                        tool_args = {"args": [str(intent_rule.get("location_value") or "").strip()]}
+                    nova_core.action_ledger_add_step(ledger, "action_planner", "run_tool", tool=tool)
+                    nova_core.action_ledger_add_step(ledger, "tool_execution", "ok", tool=tool)
+            elif str(intent_rule.get("intent") or "") == "web_research_family":
+                planner_decision = "run_tool"
+                tool = str(intent_rule.get("tool_name") or "web_research").strip() or "web_research"
+                query = str((intent_effects or {}).get("reply_outcome", {}).get("query") or intent_rule.get("query") or routed_text).strip()
+                tool_args = {"args": [query]} if query else {}
+                tool_result = str(intent_msg or "")
+                grounded = bool(tool_result.strip())
+                nova_core.action_ledger_add_step(ledger, "action_planner", "run_tool", tool=tool)
+                nova_core.action_ledger_add_step(ledger, "tool_execution", "ok", tool=tool)
+            nova_core.action_ledger_add_step(
+                ledger,
+                "supervisor_intent",
+                "handled",
+                str(intent_rule.get("intent") or "intent"),
+                rule=str(intent_rule.get("rule_name") or ""),
+            )
+            reply = nova_core._ensure_reply(intent_msg)
+            _append_session_turn(session_id, "assistant", reply)
+            return _finalize_http_reply(
+                reply,
+                planner_decision=planner_decision,
+                tool=tool,
+                tool_args=tool_args,
+                tool_result=tool_result,
+                grounded=grounded,
+                intent=str(intent_rule.get("intent") or "deterministic"),
+                reply_contract=reply_contract,
+                reply_outcome=reply_outcome,
+            )
+        warn_supervisor_bypass = not nova_core._supervisor_result_has_route(intent_rule) and nova_core._should_warn_supervisor_bypass(routed_text)
 
         if nova_core._is_web_research_override_request(text):
             session.set_prefer_web_for_data_queries(True)
-            nova_core.action_ledger_add_step(ledger, "routing_override", "enabled")
-            reply = "Understood. For this session, I will prefer web research for PEIMS and similar data-domain questions instead of a database route."
+            reply = "Understood. I'll prefer web research for broad data queries in this session."
+            nova_core.action_ledger_add_step(ledger, "session_override", "enabled", "prefer_web_for_data_queries")
             _append_session_turn(session_id, "assistant", reply)
-            return _finalize_http_reply(reply, planner_decision="deterministic", grounded=True, intent="routing_override")
-
-        # Learn explicit user corrections as structured facts before routing.
-        learned, learned_msg = nova_core.learn_from_user_correction(text)
-        if learned:
-            nova_core.behavior_record_event("correction_learned")
-            nova_core.action_ledger_add_step(ledger, "correction_learning", "stored")
-            reply = nova_core._ensure_reply(learned_msg)
-            _append_session_turn(session_id, "assistant", reply)
-            return _finalize_http_reply(reply, planner_decision="deterministic", grounded=True, intent="correction_learned")
+            return _finalize_http_reply(
+                reply,
+                planner_decision="deterministic",
+                grounded=True,
+                intent="session_override",
+            )
 
         try:
             identity_learned, identity_msg = nova_core._learn_self_identity_binding(text)
@@ -2539,16 +4632,26 @@ def process_chat(session_id: str, user_text: str, user_id: str = "") -> str:
             phase="handle",
             entry_point="http",
         )
+        # HTTP mirrors supervisor-selected core behavior and may not fork deterministic logic.
+        # See docs/SUPERVISOR_CONTRACT.md.
         handled_rule, rule_reply, rule_state = nova_core._execute_registered_supervisor_rule(
             general_rule,
             text,
             conversation_state,
             turns=turns,
             input_source="typed",
-            allowed_actions={"name_origin_store", "self_location"},
+            allowed_actions={"name_origin_store", "self_location", "location_recall", "location_name", "weather_current_location", "apply_correction", "retrieval_followup", "identity_history_family", "open_probe_family", "last_question_recall", "rules_list", "developer_identity_followup", "identity_profile_followup", "developer_location"},
+        )
+        routing_decision = nova_core._build_routing_decision(
+            routed_text,
+            entry_point="http",
+            intent_result=intent_rule,
+            handle_result=general_rule,
+            reply_contract=str(general_rule.get("reply_contract") or "") if isinstance(general_rule, dict) else "",
+            reply_outcome=general_rule.get("reply_outcome") if isinstance(general_rule.get("reply_outcome"), dict) else {},
         )
         if handled_rule:
-            session.apply_state_update(rule_state, fallback_state=conversation_state)
+            session.apply_state_update(rule_state)
             if bool(general_rule.get("continuation")):
                 session.mark_continuation_used()
             nova_core.action_ledger_add_step(
@@ -2564,7 +4667,38 @@ def process_chat(session_id: str, user_text: str, user_id: str = "") -> str:
                 planner_decision="deterministic",
                 grounded=bool(general_rule.get("grounded", True)),
                 intent=str(general_rule.get("intent") or "deterministic"),
+                reply_contract=str(general_rule.get("reply_contract") or ""),
+                reply_outcome=general_rule.get("reply_outcome") if isinstance(general_rule.get("reply_outcome"), dict) else {},
             )
+
+        fulfillment_result = nova_core._maybe_run_fulfillment_flow(
+            routed_text,
+            session,
+            turns,
+            pending_action=session.pending_action,
+        )
+        if isinstance(fulfillment_result, dict):
+            reply = nova_core._ensure_reply(str(fulfillment_result.get("reply") or ""))
+            if reply:
+                nova_core.action_ledger_add_step(
+                    ledger,
+                    "fulfillment_flow",
+                    "handled",
+                    str(fulfillment_result.get("planner_decision") or "fulfillment"),
+                )
+                _append_session_turn(session_id, "assistant", reply)
+                return _finalize_http_reply(
+                    reply,
+                    planner_decision=str(fulfillment_result.get("planner_decision") or "fulfillment"),
+                    grounded=bool(fulfillment_result.get("grounded", True)),
+                    intent="fulfillment_flow",
+                )
+
+        quick = _fast_smalltalk_reply(text)
+        if quick:
+            nova_core.action_ledger_add_step(ledger, "fast_smalltalk", "matched")
+            _append_session_turn(session_id, "assistant", quick)
+            return _finalize_http_reply(quick, planner_decision="deterministic", grounded=False)
 
         learned_profile, learned_profile_msg = _learn_contextual_developer_facts(turns, text)
         if learned_profile:
@@ -2589,11 +4723,7 @@ def process_chat(session_id: str, user_text: str, user_id: str = "") -> str:
 
         memory_teach = _extract_memory_teach_text(text)
         if memory_teach and nova_core.mem_enabled():
-            nova_core.action_ledger_add_step(ledger, "declarative_memory", "stored")
-            nova_core.mem_add("fact", "typed", memory_teach)
-            reply = "Yes. I stored that for future context."
-            _append_session_turn(session_id, "assistant", reply)
-            return _finalize_http_reply(reply, planner_decision="deterministic", grounded=True, intent="memory_store")
+            pass
 
         try:
             location_ack = nova_core._store_location_fact_reply(
@@ -2602,6 +4732,10 @@ def process_chat(session_id: str, user_text: str, user_id: str = "") -> str:
                 pending_action=session.pending_action,
             )
             if location_ack:
+                session.apply_state_update(
+                    nova_core._make_conversation_state("location_recall"),
+                    fallback_state=conversation_state,
+                )
                 nova_core.action_ledger_add_step(ledger, "location_memory", "stored")
                 reply = location_ack
                 _append_session_turn(session_id, "assistant", reply)
@@ -2609,28 +4743,38 @@ def process_chat(session_id: str, user_text: str, user_id: str = "") -> str:
         except Exception:
             pass
 
-        declarative_ack = nova_core._store_declarative_fact_reply(text, input_source="typed")
-        if declarative_ack:
-            nova_core.action_ledger_add_step(ledger, "declarative_memory", "stored")
-            reply = declarative_ack
-            _append_session_turn(session_id, "assistant", reply)
-            return _finalize_http_reply(reply, planner_decision="deterministic", grounded=True, intent="declarative_store")
-
-        routed_text = text
         try:
-            turn_direction = nova_core._determine_turn_direction(turns, text)
-            routed_text = str(turn_direction.get("effective_query") or text)
-            nova_core.action_ledger_add_step(
-                ledger,
-                "direction_analysis",
-                str(turn_direction.get("primary") or "general_chat"),
-                str(turn_direction.get("analysis_reason") or "")[:120],
-                effective_query=routed_text[:180],
-                identity_focused=bool(turn_direction.get("identity_focused")),
-                bypass_pattern_routes=bool(turn_direction.get("bypass_pattern_routes")),
-            )
+            if (
+                isinstance(conversation_state, dict)
+                and str(conversation_state.get("kind") or "") == "location_recall"
+                and nova_core._is_saved_location_weather_query(routed_text)
+            ):
+                weather_reply = nova_core._weather_for_saved_location()
+                if weather_reply:
+                    session.apply_state_update(
+                        nova_core._make_conversation_state("location_recall"),
+                        fallback_state=conversation_state,
+                    )
+                    nova_core.action_ledger_add_step(ledger, "weather_lookup", "saved_location")
+                    reply = nova_core._ensure_reply(weather_reply)
+                    _append_session_turn(session_id, "assistant", reply)
+                    return _finalize_http_reply(reply, planner_decision="deterministic", grounded=True, intent="weather_lookup")
         except Exception:
-            routed_text = text
+            pass
+
+        declarative_outcome = nova_core._store_declarative_fact_outcome(text, input_source="typed")
+        if isinstance(declarative_outcome, dict):
+            nova_core.action_ledger_add_step(ledger, "declarative_memory", "stored")
+            reply = nova_core.render_reply(declarative_outcome)
+            _append_session_turn(session_id, "assistant", reply)
+            return _finalize_http_reply(
+                reply,
+                planner_decision="deterministic",
+                grounded=True,
+                intent="declarative_store",
+                reply_contract=str(declarative_outcome.get("reply_contract") or ""),
+                reply_outcome=declarative_outcome,
+            )
 
         try:
             handled_followup, followup_msg, next_state = nova_core._consume_conversation_followup(
@@ -2681,14 +4825,55 @@ def process_chat(session_id: str, user_text: str, user_id: str = "") -> str:
             _append_session_turn(session_id, "assistant", reply)
             return _finalize_http_reply(reply, planner_decision="deterministic", grounded=True, intent="developer_location")
 
+        try:
+            handled_location, location_reply, next_location_state, location_intent = nova_core._handle_location_conversation_turn(
+                conversation_state,
+                routed_text,
+                turns=turns,
+            )
+            if handled_location:
+                if isinstance(next_location_state, dict):
+                    session.apply_state_update(next_location_state, fallback_state=conversation_state)
+                reply = nova_core._ensure_reply(location_reply)
+                _append_session_turn(session_id, "assistant", reply)
+                return _finalize_http_reply(reply, planner_decision="deterministic", grounded=True, intent=location_intent or "location_recall")
+        except Exception:
+            pass
+
         reply, meta = _generate_chat_reply(
             turns,
             routed_text,
             ledger_record=ledger,
             pending_action=session.pending_action,
             prefer_web_for_data_queries=session.prefer_web_for_data_queries,
+            language_mix_spanish_pct=int(session.language_mix_spanish_pct or 0),
+            session=session,
         )
+        reply_contract = str(meta.get("reply_contract") or "") if isinstance(meta, dict) else ""
         planner_decision = str(meta.get("planner_decision") or "deterministic")
+        if warn_supervisor_bypass and reply_contract != "turn.truthful_limit":
+            reply, safe_kind = nova_core._open_probe_reply(routed_text, turns=turns)
+            safe_outcome = {
+                "intent": "open_probe_family",
+                "kind": safe_kind,
+                "reply_contract": f"open_probe.{safe_kind}",
+                "reply_text": reply,
+                "state_delta": {},
+            }
+            reply_contract = str(safe_outcome.get("reply_contract") or "")
+            planner_decision = "deterministic"
+            meta = {
+                "planner_decision": planner_decision,
+                "tool": "",
+                "tool_args": {},
+                "tool_result": "",
+                "grounded": False,
+                "reply_contract": reply_contract,
+                "reply_outcome": safe_outcome,
+            }
+            if isinstance(routing_decision, dict):
+                routing_decision["final_owner"] = "supervisor_handle"
+            nova_core.action_ledger_add_step(ledger, "open_probe", "matched", safe_kind)
         tool = str(meta.get("tool") or "")
         tool_args = meta.get("tool_args") if isinstance(meta.get("tool_args"), dict) else {}
         tool_result = str(meta.get("tool_result") or "")
@@ -2723,6 +4908,8 @@ def process_chat(session_id: str, user_text: str, user_id: str = "") -> str:
             tool_args=tool_args,
             tool_result=tool_result,
             grounded=grounded,
+            reply_contract=reply_contract,
+            reply_outcome=meta.get("reply_outcome") if isinstance(meta, dict) and isinstance(meta.get("reply_outcome"), dict) else {},
         )
     finally:
         nova_core.set_active_user(previous_user)
@@ -3020,7 +5207,7 @@ INDEX_HTML = """<!doctype html>
 <head>
   <meta charset=\"utf-8\" />
   <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" />
-  <title>Nova LAN Interface</title>
+    <title>NYO Runtime Console</title>
   <style>
     :root {
       --bg: #f7f4ec;
@@ -3055,7 +5242,7 @@ INDEX_HTML = """<!doctype html>
   <div class=\"wrap\">
     <div class=\"card\">
             <div class=\"head\">
-                <div class=\"title\">NYO System Interface</div>
+                <div class=\"title\">NYO Runtime Console</div>
                 <div class=\"head-right\">
                     <div id=\"status\" class=\"status\">Checking health...</div>
                     <button id="btnToggleAudio" type="button" class="btn-mini alt">Voice Off</button>
@@ -3065,10 +5252,10 @@ INDEX_HTML = """<!doctype html>
             </div>
       <div id=\"chat\"></div>
       <form id=\"f\">
-        <input id=\"m\" placeholder=\"Type a message for NYO System...\" autocomplete=\"off\" />
+        <input id=\"m\" placeholder=\"Enter a request for the NYO runtime...\" autocomplete=\"off\" />
         <button type=\"submit\">Send</button>
       </form>
-            <div class=\"hint\">Tip: start server with <code>--host 0.0.0.0</code> to test from another device on your LAN. <a href=\"/control\">Open NYO Control</a>.</div>
+            <div class=\"hint\">Tip: start server with <code>--host 0.0.0.0</code> to test from another device on your LAN. <a href=\"/control\">Open Operator Console</a>.</div>
     </div>
   </div>
 <script>
@@ -3346,7 +5533,7 @@ INDEX_HTML = """<!doctype html>
             historyLoaded = false;
             localStorage.removeItem('nova_session_id');
             chat.innerHTML = '';
-            add('a', 'Started a new chat session. Context was reset.');
+            add('a', 'Started a new runtime session. Context was reset.');
             input.focus();
         });
     }
@@ -3355,7 +5542,7 @@ INDEX_HTML = """<!doctype html>
         await loadHistory();
         await resumePendingTurn();
         if (!historyLoaded) {
-            add('a', 'NYO System interface ready. Ask Nova anything.');
+            add('a', 'NYO runtime console ready. Enter a request when you are ready.');
         }
         health();
     })();
@@ -3447,7 +5634,7 @@ _LEGACY_CONTROL_HTML = """<!doctype html>
 <head>
     <meta charset=\"utf-8\" />
     <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" />
-    <title>Nova Command Center</title>
+    <title>NYO Operator Console</title>
     <link href=\"https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css\" rel=\"stylesheet\" integrity=\"sha384-QWTKZyjpPEjISv5WaRU9OFeRpok6YctnYmDr5pNlyT2bRjXh0JMhjY6hW+ALEwIH\" crossorigin=\"anonymous\">
     <style>
         :root {
@@ -3594,16 +5781,16 @@ _LEGACY_CONTROL_HTML = """<!doctype html>
 <body>
     <div class=\"wrap\">
         <nav class=\"bar navbar\">
-            <div class=\"title\">Nova Command Center</div>
+            <div class=\"title\">NYO Operator Console</div>
             <div class=\"row\">
                 <span id=\"healthBadge\" class=\"health-badge\">Health --</span>
-                <a href=\"/\">Chat UI</a>
+                <a href=\"/\">Runtime Console</a>
                 <button id=\"btnRefresh\" class=\"btn btn-sm btn-nova\">Refresh</button>
                 <button id=\"btnLogout\" class=\"btn btn-sm btn-danger-nova\">Logout</button>
             </div>
         </nav>
 
-        <div id=\"feedbackBar\" class=\"feedback-strip muted\">Control UI ready.</div>
+        <div id=\"feedbackBar\" class=\"feedback-strip muted\">Operator console ready.</div>
         <div id=\"runtimeNoteBar\" class=\"feedback-strip muted\">Runtime note not loaded yet.</div>
 
         <div class=\"tabs-wrap\">
@@ -3818,9 +6005,18 @@ _LEGACY_CONTROL_HTML = """<!doctype html>
             if (v === true) return `<span class=\"good\">true</span>`;
             if (v === false) return `<span class=\"danger\">false</span>`;
         }
+        if (k === 'patch_enabled' || k === 'patch_strict_manifest' || k === 'patch_allow_force' || k === 'patch_behavioral_check' || k === 'patch_tests_available' || k === 'patch_ready_for_validated_apply') {
+            if (v === true) return `<span class=\"good\">true</span>`;
+            if (v === false) return `<span class=\"danger\">false</span>`;
+        }
         if (k === 'heartbeat_age_sec' && typeof v === 'number') {
             const cls = v <= 15 ? 'good' : (v <= 45 ? 'warn' : 'danger');
             return `<span class=\"${cls}\">${v}s</span>`;
+        }
+        if (k === 'patch_last_preview_status') {
+            const text = String(v || '');
+            const cls = text.startsWith('eligible') ? 'good' : (text.startsWith('rejected') ? 'danger' : 'warn');
+            return `<span class=\"${cls}\">${text || 'unknown'}</span>`;
         }
         return `<span class=\"mono\">${String(v)}</span>`;
     }
@@ -4044,6 +6240,10 @@ _LEGACY_CONTROL_HTML = """<!doctype html>
                 'memory_events_ok', 'memory_events_total', 'memory_write_count', 'memory_recall_count',
                 'memory_skipped_count', 'memory_events_avg_latency_ms', 'last_memory_action', 'last_memory_status',
                 'chat_login_enabled', 'chat_auth_source', 'chat_users_count',
+                'patch_enabled', 'patch_strict_manifest', 'patch_behavioral_check', 'patch_behavioral_check_timeout_sec',
+                'patch_tests_available', 'patch_ready_for_validated_apply', 'patch_current_revision',
+                'patch_previews_total', 'patch_previews_pending', 'patch_previews_approved', 'patch_previews_rejected',
+                'patch_last_preview_name', 'patch_last_preview_status', 'patch_last_preview_decision',
                 'search_provider', 'search_api_endpoint', 'allow_domains_count', 'process_counting_mode',
                 'heartbeat_age_sec', 'core_running', 'core_pid', 'core_heartbeat_age_sec',
                 'active_http_sessions', 'requests_total', 'errors_total', 'searxng_ok', 'searxng_note'
@@ -4503,7 +6703,10 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> None:
+    global _HTTP_SERVER, _HTTP_BIND_HOST, _HTTP_BIND_PORT
     args = parse_args()
+    _HTTP_BIND_HOST = str(args.host)
+    _HTTP_BIND_PORT = int(args.port)
     _load_persisted_sessions()
     try:
         nova_core.ensure_ollama_boot()
@@ -4511,7 +6714,8 @@ def main() -> None:
         pass
 
     srv = ThreadingHTTPServer((args.host, args.port), NovaHttpHandler)
-    print(f"Nova HTTP interface ready at http://{args.host}:{args.port}", flush=True)
+    _HTTP_SERVER = srv
+    print(f"Nova HTTP runtime console ready at http://{args.host}:{args.port}", flush=True)
     print(f"Control Room: http://{args.host}:{args.port}/control", flush=True)
     if args.host == "0.0.0.0":
         print("LAN mode enabled. Open from another device via http://<this-pc-ip>:" + str(args.port), flush=True)
@@ -4530,6 +6734,7 @@ def main() -> None:
     except KeyboardInterrupt:
         pass
     finally:
+        _HTTP_SERVER = None
         srv.server_close()
 
 

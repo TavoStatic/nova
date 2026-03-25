@@ -22,7 +22,9 @@
     "store_min_chars": 12
   },
   "patch": {
-    "strict_manifest": true
+    "strict_manifest": true,
+    "behavioral_check": true,
+    "behavioral_check_timeout_sec": 600
   },
   "web": {
     "enabled": false,

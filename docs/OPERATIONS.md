@@ -66,19 +66,19 @@ C:\Nova\.venv\Scripts\python.exe C:\Nova\health.py diag
 C:\Nova\.venv\Scripts\python.exe C:\Nova\health.py repair
 ```
 
-## Control Center Parity Checklist
+## Operator Console Parity Checklist
 
-When Nova core behavior changes, treat the Command Center in `nova_http.py` as part of the same release surface.
+When Nova core behavior changes, treat the operator console in `nova_http.py` as part of the same release surface.
 
 Run this checklist after changes to routing, session state, policy, telemetry, reflection, or runtime health:
 
 1. Verify `GET /api/control/status` still exposes the current truth for sessions, memory, tool activity, action-ledger state, guard/core state, and health score.
 2. Verify `POST /api/control/action` still returns the expected payload shape for `refresh_status`, `self_check`, and any policy or runtime action you changed.
-3. Verify the Command Center UI still points at the live control endpoints and still exposes the tabs operators use: Overview, Operations, Sessions, and Logs.
+3. Verify the operator console still points at the live control endpoints and still exposes the tabs operators use: Overview, Operations, Sessions, and Logs.
 4. If you changed session lifecycle behavior, verify session counts, session deletion, and any session-end telemetry still show up in the control surface.
 5. If you changed reflection, supervisor, or telemetry behavior, verify the control payload still reflects the new fields or summaries operators need.
 
-Focused control-center regression:
+Focused operator-console regression:
 
 ```powershell
 C:\Nova\.venv\Scripts\python.exe -m unittest tests.test_http_session_manager
@@ -88,14 +88,25 @@ C:\Nova\.venv\Scripts\python.exe -m unittest tests.test_http_session_manager
 
 ```powershell
 C:\Nova\.venv\Scripts\python.exe C:\Nova\memory.py stats
-C:\Nova\.venv\Scripts\python.exe C:\Nova\memory.py audit --query "peims reporting timeline"
+C:\Nova\.venv\Scripts\python.exe C:\Nova\memory.py audit --query "student reporting timeline"
 ```
+
+## Repo Policy
+
+Local-generated state is not source of truth and should stay out of normal Git history.
+
+- local-only: `runtime/`, `logs/`, `memory/`, `knowledge/web/`, `*.sqlite`, `LAST_SESSION.json`, test caches, local archives, and ad hoc run outputs
+- source-controlled until packaging changes: shipped Piper/TTS runtime assets under `piper/` and `tts/`
+
+If the repo later gains a documented asset bootstrap or download step, those shipped assets can move into the local-only bucket in a separate policy change.
 
 Current policy supports explicit memory scopes:
 
 - `private`: per-user only
 - `shared`: shared memory only
 - `hybrid`: shared plus current user memory
+
+Bundled domain-specific knowledge has been reduced. Public repo behavior should assume domain packs are optional operator-provided inputs rather than shipped product content.
 
 ## Test Commands
 
@@ -128,7 +139,7 @@ C:\Nova\.venv\Scripts\python.exe -m unittest \
 ## Files Worth Knowing
 
 - `nova_core.py`: core orchestration, policy, memory, tools, teach flow
-- `nova_http.py`: chat UI, control room, auth, session APIs
+- `nova_http.py`: runtime console, operator console, auth, session APIs
 - `memory.py`: SQLite-backed memory storage and recall
 - `run_tools.py`: tool-assisted API chat runner
 - `chat_client.py`: CLI chat client for `/api/chat`

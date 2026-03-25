@@ -203,6 +203,10 @@ def handle_tools(user_text: str, *, context: ToolContext | None = None):
         print("Nova: tool -> system.health_check")
         return dispatch_tool("system", {"action": "health_check"}, context=ctx)
 
+    if low in {"queue", "queue status", "work queue", "show queue", "standing work queue"}:
+        print("Nova: tool -> system.queue_status")
+        return dispatch_tool("system", {"action": "queue_status"}, context=ctx)
+
     return None
 
 

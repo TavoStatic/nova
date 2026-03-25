@@ -64,6 +64,33 @@
   "patch": {
     "strict_manifest": true,
     "enabled": true,
-    "allow_force": false
+    "allow_force": false,
+    "behavioral_check": true,
+    "behavioral_check_timeout_sec": 600
+  },
+  "safety_envelope": {
+    "enabled": true,
+    "mode": "observe",
+    "replay_threshold": 1.0,
+    "novelty_min": 0.35,
+    "entropy_min": 2.8,
+    "human_veto_first_n": 3,
+    "auto_demote_threshold": 0.9,
+    "max_candidates_per_cycle": 3,
+    "full_regression_required": false,
+    "quarantine_root": "C:\\Nova\\runtime\\test_sessions\\quarantine",
+    "pending_review_root": "C:\\Nova\\runtime\\test_sessions\\pending_review"
+  },
+  "kidney": {
+    "enabled": true,
+    "mode": "observe",
+    "definition_max_age_days": 7,
+    "definition_novelty_min": 0.4,
+    "quarantine_max_age_hours": 48,
+    "preview_max_age_days": 3,
+    "snapshot_max_age_days": 30,
+    "temp_max_age_days": 14,
+    "temp_max_total_mb": 500,
+    "protect_patterns": []
   }
 }
