@@ -3,25 +3,23 @@ import time
 from pathlib import Path
 
 import psutil
+import tools.runtime_processes as runtime_processes
 
 ROOT = Path(r"C:\Nova")
 RUNTIME = ROOT / "runtime"
 
 GUARD_STOP = RUNTIME / "guard.stop"
 CORE_STATE = RUNTIME / "core_state.json"
+CORE_PY = ROOT / "nova_core.py"
 
 def warn(msg): print(f"[WARN] {msg}")
 def ok(msg): print(f"[OK]   {msg}")
 
-def read_core_pid():
-    try:
-        if not CORE_STATE.exists():
-            return None
-        data = json.loads(CORE_STATE.read_text(encoding="utf-8"))
-        pid = int(data.get("pid", 0) or 0)
-        return pid if pid > 0 else None
-    except Exception:
-        return None
+def read_core_identity():
+    if not CORE_STATE.exists():
+        return None, None
+    pid, create_time, _data = runtime_processes.read_identity_file(CORE_STATE)
+    return pid, create_time
 
 def main():
     # 1) Deterministic guard stop signal
@@ -30,16 +28,23 @@ def main():
     ok("Sent guard stop signal: runtime/guard.stop")
 
     # 2) Best-effort stop core using statefile (no scanning, no guessing)
-    pid = read_core_pid()
+    pid, create_time = read_core_identity()
     if not pid:
         warn("No core pid found (runtime/core_state.json missing or invalid)")
         ok("Done.")
         return
 
-    if not psutil.pid_exists(pid):
-        warn(f"Core not running (pid={pid})")
+    logical = runtime_processes.logical_service_processes(CORE_PY)
+    selected = runtime_processes.select_logical_process(logical, pid=pid, create_time=create_time)
+    if selected is None:
+        if psutil.pid_exists(pid):
+            warn(f"Core state points to stale identity pid={pid}; refusing to stop unrelated process")
+        else:
+            warn(f"Core not running (pid={pid})")
         ok("Done.")
         return
+
+    pid = int(selected.get("pid") or pid)
 
     try:
         p = psutil.Process(pid)

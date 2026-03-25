@@ -44,6 +44,23 @@ class TestIntegrationOverride(unittest.TestCase):
         out = nova_core._apply_reply_overrides(last)
         self.assertEqual(out, "Hi Gus")
 
+    def test_apply_override_does_not_require_embeddings(self):
+        orig_embed = None
+        had_embed = False
+        if nova_core.memory_mod is not None and hasattr(nova_core.memory_mod, "embed"):
+            had_embed = True
+            orig_embed = nova_core.memory_mod.embed
+            nova_core.memory_mod.embed = lambda _text: (_ for _ in ()).throw(AssertionError("embed should not be called"))
+        try:
+            orig = "Hello."
+            corr = "Hi Gus."
+            nova_core._teach_store_example(orig, corr, user="tester")
+            out = nova_core._apply_reply_overrides(orig)
+            self.assertEqual(out, corr)
+        finally:
+            if had_embed:
+                nova_core.memory_mod.embed = orig_embed
+
     def test_fuzzy_override(self):
         # store an original with punctuation
         orig = "Hello there."

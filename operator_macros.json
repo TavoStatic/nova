@@ -1,0 +1,52 @@
+{
+  "macros": [
+    {
+      "macro_id": "morning-brief",
+      "label": "Morning Brief",
+      "prompt": "Summarize current runtime health, subconscious pressure, open risks, and the single highest-value next action for the operator.",
+      "tags": ["brief", "daily", "operator"]
+    },
+    {
+      "macro_id": "inspect-runtime",
+      "label": "Inspect Runtime",
+      "prompt": "Inspect the runtime and summarize guard/core/webui state, active failures, restart pressure, and anything needing operator attention.",
+      "prompt_template": "Inspect the runtime and summarize guard/core/webui state, active failures, restart pressure, and anything needing operator attention. Focus especially on {focus_area} and use a {detail_level} level of detail.",
+      "placeholders": [
+        {
+          "name": "focus_area",
+          "label": "Focus area",
+          "default": "the highest current runtime risk",
+          "required": true
+        },
+        {
+          "name": "detail_level",
+          "label": "Detail level",
+          "default": "concise",
+          "required": true
+        }
+      ],
+      "tags": ["inspect", "runtime"]
+    },
+    {
+      "macro_id": "subconscious-review",
+      "label": "Subconscious Review",
+      "prompt": "Review the latest subconscious run, explain the top training priorities, and recommend which generated regression sessions should run next.",
+      "tags": ["subconscious", "regression"]
+    },
+    {
+      "macro_id": "patch-readiness",
+      "label": "Patch Readiness",
+      "prompt": "Review patch readiness, preview eligibility, and validation posture. Summarize whether any preview is ready for safe apply and why.",
+      "prompt_template": "Review patch readiness, preview eligibility, and validation posture. Focus on {target_scope}. Summarize whether any preview is ready for safe apply and why.",
+      "placeholders": [
+        {
+          "name": "target_scope",
+          "label": "Target scope",
+          "default": "the highest-risk preview first",
+          "required": true
+        }
+      ],
+      "tags": ["patch", "governance"]
+    }
+  ]
+}
