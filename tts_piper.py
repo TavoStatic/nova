@@ -13,6 +13,11 @@ ESPEAK_DATA = BASE / "piper" / "espeak-ng-data"
 text = " ".join(sys.argv[1:]).strip()
 
 
+def _prefer_windows_sapi() -> bool:
+    engine = str(os.environ.get("NOVA_TTS_ENGINE") or "sapi").strip().lower()
+    return os.name == "nt" and engine != "piper"
+
+
 def _fallback_tts(message: str) -> int:
     try:
         return subprocess.run([sys.executable, str(BASE / "tts_say.py"), message], check=False).returncode
@@ -21,6 +26,9 @@ def _fallback_tts(message: str) -> int:
 
 if not text:
     sys.exit(0)
+
+if _prefer_windows_sapi():
+    sys.exit(_fallback_tts(text))
 
 if not PIPER.exists():
     print(f"Missing Piper executable: {PIPER}; falling back to SAPI one-shot")

@@ -27,6 +27,16 @@ class ConversationSession:
 
     def set_conversation_state(self, state: Optional[dict]) -> None:
         self.conversation_state = state if isinstance(state, dict) else None
+        self._sync_pending_correction_target()
+
+    def _sync_pending_correction_target(self) -> None:
+        state = self.conversation_state if isinstance(self.conversation_state, dict) else {}
+        if str(state.get("kind") or "").strip() == "correction_pending":
+            target = str(state.get("target") or "").strip()
+            if target:
+                self.pending_correction_target = target
+            return
+        self.pending_correction_target = ""
 
     def state_kind(self) -> str:
         state = self.conversation_state if isinstance(self.conversation_state, dict) else {}
@@ -40,15 +50,19 @@ class ConversationSession:
     def set_retrieval_state(self, state: Optional[dict]) -> None:
         if isinstance(state, dict) and str(state.get("kind") or "").strip() == "retrieval":
             self.conversation_state = state
+            self._sync_pending_correction_target()
             return
         if state is None and self.state_kind() == "retrieval":
             self.conversation_state = None
+            self._sync_pending_correction_target()
 
     def apply_state_update(self, next_state: Optional[dict], fallback_state: Optional[dict] = None) -> None:
         if isinstance(next_state, dict):
             self.conversation_state = next_state
+            self._sync_pending_correction_target()
             return
         self.conversation_state = fallback_state if isinstance(fallback_state, dict) else None
+        self._sync_pending_correction_target()
 
     def set_pending_action(self, action: Optional[dict]) -> None:
         self.pending_action = action if isinstance(action, dict) else None

@@ -3872,11 +3872,13 @@ def _generate_chat_reply(
     if handled_truth:
         _trace("truth_hierarchy", "matched", tool=str(_truth_source or ""), grounded=bool(_truth_grounded))
         reply = truth_reply
+        used_hard_answer = False
         # For creator/name profile prompts, prefer deterministic hard answers when available.
         if _is_developer_profile_request(text):
             hard = nova_core.hard_answer(text)
             if hard:
                 reply = hard
+                used_hard_answer = True
             elif reply.lower().startswith("uncertain. no structured identity fact"):
                 reply = _developer_profile_reply(turns, text)
         elif reply.lower().startswith("uncertain. no structured identity fact"):
@@ -3886,7 +3888,9 @@ def _generate_chat_reply(
                 hard = nova_core.hard_answer(text)
                 if hard:
                     reply = hard
-        return _normalize_reply(reply), {
+                    used_hard_answer = True
+        final_reply = nova_core._ensure_reply(reply) if used_hard_answer else _normalize_reply(reply)
+        return final_reply, {
             "planner_decision": "truth_hierarchy",
             "tool": str(_truth_source or ""),
             "tool_args": {"query": text},
@@ -3898,7 +3902,7 @@ def _generate_chat_reply(
     hard = nova_core.hard_answer(text)
     if hard:
         _trace("hard_answer", "matched", grounded=True)
-        reply = _normalize_reply(hard)
+        reply = nova_core._ensure_reply(hard)
         return reply, {
             "planner_decision": "deterministic",
             "tool": "hard_answer",
