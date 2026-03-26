@@ -25,6 +25,9 @@ const operatorPromptInput = document.getElementById('operatorPromptInput');
 const operatorPromptReply = document.getElementById('operatorPromptReply');
 const btnOperatorToggleAudio = document.getElementById('btnOperatorToggleAudio');
 const btnOperatorMic = document.getElementById('btnOperatorMic');
+const backendCommandSelect = document.getElementById('backendCommandSelect');
+const backendCommandArgs = document.getElementById('backendCommandArgs');
+const backendCommandOutput = document.getElementById('backendCommandOutput');
 const memoryScopeSelect = document.getElementById('memoryScope');
 const memoryScopeBox = document.getElementById('memoryScopeBox');
 const chatUserSelect = document.getElementById('chatUserSelect');
@@ -1300,6 +1303,40 @@ function renderOperatorMacros(status) {
     }
 }
 
+function renderBackendCommands(status, commandsOverride = null) {
+    if (!backendCommandSelect) return;
+    const previous = String(backendCommandSelect.value || '').trim();
+    const commands = Array.isArray(commandsOverride)
+        ? commandsOverride
+        : (Array.isArray(status && status.backend_commands) ? status.backend_commands : []);
+    backendCommandSelect.innerHTML = '';
+    const empty = document.createElement('option');
+    empty.value = '';
+    empty.textContent = commands.length ? '(select backend command)' : '(no backend commands)';
+    backendCommandSelect.appendChild(empty);
+    commands.forEach((command) => {
+        const option = document.createElement('option');
+        const commandId = String(command && command.command_id ? command.command_id : '').trim();
+        const label = String(command && command.label ? command.label : commandId).trim();
+        option.value = commandId;
+        option.textContent = label;
+        const details = [
+            String(command && command.description ? command.description : '').trim(),
+            `kind=${String(command && command.kind ? command.kind : '').trim()}`,
+            `entry=${String(command && command.entry ? command.entry : '').trim()}`,
+            `dynamic_args=${Boolean(command && command.allow_dynamic_args)}`,
+        ].filter(Boolean);
+        option.title = details.join(' | ');
+        backendCommandSelect.appendChild(option);
+    });
+    if (previous && commands.some((row) => String(row.command_id || '') === previous)) {
+        backendCommandSelect.value = previous;
+    }
+    if (backendCommandOutput && !String(backendCommandOutput.textContent || '').trim()) {
+        backendCommandOutput.textContent = 'No backend command has run yet.';
+    }
+}
+
 function selectedOperatorMacro() {
     const macroId = operatorMacroSelect ? String(operatorMacroSelect.value || '').trim() : '';
     const macros = Array.isArray(latestStatus && latestStatus.operator_macros) ? latestStatus.operator_macros : [];
@@ -1455,6 +1492,7 @@ async function refresh() {
             renderMetricGrid(latestStatus);
             renderSubconscious(latestStatus);
             renderOperatorMacros(latestStatus);
+            renderBackendCommands(latestStatus);
             renderPlannerInspector(latestStatus);
             renderLedgerInspector(latestStatus);
             renderPatchReadiness(latestStatus);
@@ -1734,6 +1772,34 @@ bindClick('btnOperatorInspect', async () => {
     focusOperatorSession(sid);
     setActiveView('sessions');
     setAction('Operator session loaded in Sessions view: ' + sid);
+});
+bindClick('btnBackendCommandRefresh', async () => {
+    const payload = await postAction('backend_command_list');
+    const commands = Array.isArray(payload.commands) ? payload.commands : [];
+    renderBackendCommands(latestStatus, commands);
+    if (backendCommandOutput) {
+        backendCommandOutput.textContent = commands.length
+            ? `Loaded ${commands.length} backend commands from backend_command_deck.json.`
+            : 'No backend commands are configured.';
+    }
+    setAction(payload.message || `backend command list refreshed (${commands.length})`);
+});
+bindClick('btnBackendCommandRun', async () => {
+    const commandId = backendCommandSelect ? String(backendCommandSelect.value || '').trim() : '';
+    if (!commandId) {
+        setAction('Select a backend command first.');
+        return;
+    }
+    const rawArgs = backendCommandArgs ? String(backendCommandArgs.value || '').trim() : '';
+    const payload = await postAction('backend_command_run', {command_id: commandId, args: rawArgs});
+    const commands = Array.isArray(payload.available_commands) ? payload.available_commands : null;
+    if (commands) renderBackendCommands(latestStatus, commands);
+    if (backendCommandOutput) {
+        const output = String(payload.output || payload.stdout || payload.stderr || payload.message || '').trim();
+        backendCommandOutput.textContent = output || `${commandId} completed with no output.`;
+    }
+    setAction(payload.message || `${commandId} completed.`);
+    await refresh();
 });
 if (btnOperatorToggleAudio) {
     syncOperatorAudioButton();

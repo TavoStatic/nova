@@ -1,0 +1,26 @@
+{
+  "commands": [
+    {
+      "command_id": "regression_gate",
+      "label": "Run Regression Gate",
+      "description": "Compile critical modules and run focused regression checks.",
+      "kind": "python_script",
+      "entry": "run_regression.py",
+      "args": [],
+      "allow_dynamic_args": false,
+      "enabled": true,
+      "timeout_sec": 2400
+    },
+    {
+      "command_id": "test_session_runner",
+      "label": "Run Test Session Runner",
+      "description": "Run scripts/run_test_session.py with optional session file argument.",
+      "kind": "python_script",
+      "entry": "scripts/run_test_session.py",
+      "args": [],
+      "allow_dynamic_args": true,
+      "enabled": true,
+      "timeout_sec": 2400
+    }
+  ]
+}
