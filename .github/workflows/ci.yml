@@ -22,7 +22,18 @@ jobs:
         run: |
           python3 -m pip install --upgrade pip
           # CI only needs lightweight core deps used by smoke/regression checks.
-          for i in 1 2 3; do python3 -m pip install requests psutil flake8 && break || sleep 5; done
+          ok=0
+          for i in 1 2 3; do
+            if python3 -m pip install requests psutil flake8; then
+              ok=1
+              break
+            fi
+            sleep 5
+          done
+          if [ "$ok" -ne 1 ]; then
+            echo "Dependency installation failed after retries"
+            exit 1
+          fi
 
       - name: Static compile check
         run: python3 -m compileall -q .
