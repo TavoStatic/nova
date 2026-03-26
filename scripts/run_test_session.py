@@ -40,7 +40,7 @@ def load_session(session_name: str) -> dict[str, Any]:
     raw = str(session_name or "").strip()
     candidate = Path(raw)
     windows_abs = bool(re.match(r"^[A-Za-z]:[\\/]", raw))
-    if windows_abs:
+    if windows_abs and not candidate.exists():
         # Accept legacy Windows absolute paths in generated definitions and remap
         # them into this checkout so Linux CI can load the same session artifact.
         remapped = re.sub(r"^[A-Za-z]:[\\/]", "", raw).replace("\\", "/")
