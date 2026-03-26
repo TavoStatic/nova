@@ -190,12 +190,22 @@ def scan_candidates() -> list[dict[str, Any]]:
             fallback = metrics.get("fallback_overuse")
             status = str(audit_row.get("status") or "")
             reason = ""
-            if age > quarantine_max_age:
-                reason = f"{root_name}_age_limit"
-            elif fallback is not None and float(fallback or 0.0) > demote_threshold:
-                reason = f"fallback_overuse>{demote_threshold:.2f}"
-            elif status in {"observed_review", "quarantined"} and age > quarantine_max_age:
-                reason = f"stale_{status}"
+            if root_name == "pending_review":
+                # Keep pending-review candidates available for operator review.
+                # They should only be flushed once stale or if explicitly marked quarantined.
+                if status == "quarantined":
+                    reason = "pending_review_marked_quarantined"
+                elif age > quarantine_max_age:
+                    reason = f"{root_name}_age_limit"
+                elif status == "observed_review" and age > quarantine_max_age:
+                    reason = f"stale_{status}"
+            else:
+                if age > quarantine_max_age:
+                    reason = f"{root_name}_age_limit"
+                elif fallback is not None and float(fallback or 0.0) > demote_threshold:
+                    reason = f"fallback_overuse>{demote_threshold:.2f}"
+                elif status in {"observed_review", "quarantined"} and age > quarantine_max_age:
+                    reason = f"stale_{status}"
             if reason:
                 out.append(_build_candidate(path, "quarantined_waste", "delete", reason, extra={"fallback_overuse": fallback, "audit_status": status}))
 

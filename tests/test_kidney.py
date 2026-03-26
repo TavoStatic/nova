@@ -152,6 +152,51 @@ class TestKidney(unittest.TestCase):
 
         self.assertEqual(candidates, [])
 
+    def test_pending_review_high_fallback_is_retained_until_age_limit(self):
+        self._write_policy({"enabled": True, "mode": "observe", "quarantine_max_age_hours": 48})
+        pending = kidney.PENDING_REVIEW_DIR / "candidate.json"
+        pending.parent.mkdir(parents=True, exist_ok=True)
+        pending.write_text(json.dumps({"messages": ["review me"]}), encoding="utf-8")
+        self._touch_old(pending, 30)
+        kidney.PROMOTION_AUDIT_PATH.parent.mkdir(parents=True, exist_ok=True)
+        kidney.PROMOTION_AUDIT_PATH.write_text(
+            json.dumps({
+                "file": "candidate.json",
+                "status": "pending_review",
+                "metrics": {"fallback_overuse": 0.97},
+            })
+            + "\n",
+            encoding="utf-8",
+        )
+
+        candidates = kidney.scan_candidates()
+
+        self.assertFalse(any(item.get("name") == "candidate.json" for item in candidates))
+
+    def test_pending_review_marked_quarantined_is_deleted(self):
+        self._write_policy({"enabled": True, "mode": "observe", "quarantine_max_age_hours": 48})
+        pending = kidney.PENDING_REVIEW_DIR / "candidate.json"
+        pending.parent.mkdir(parents=True, exist_ok=True)
+        pending.write_text(json.dumps({"messages": ["review me"]}), encoding="utf-8")
+        self._touch_old(pending, 30)
+        kidney.PROMOTION_AUDIT_PATH.parent.mkdir(parents=True, exist_ok=True)
+        kidney.PROMOTION_AUDIT_PATH.write_text(
+            json.dumps({
+                "file": "candidate.json",
+                "status": "quarantined",
+                "metrics": {"fallback_overuse": 0.97},
+            })
+            + "\n",
+            encoding="utf-8",
+        )
+
+        candidates = kidney.scan_candidates()
+
+        item = next((row for row in candidates if row.get("name") == "candidate.json"), None)
+        self.assertIsNotNone(item)
+        self.assertEqual(item.get("action"), "delete")
+        self.assertEqual(item.get("reason"), "pending_review_marked_quarantined")
+
 
 if __name__ == "__main__":
     unittest.main()
