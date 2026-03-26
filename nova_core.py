@@ -5091,6 +5091,8 @@ def _default_local_user_id() -> str:
     raw = (
         os.environ.get("NOVA_USER_ID")
         or os.environ.get("NOVA_CHAT_USER")
+        or os.environ.get("USER")
+        or os.environ.get("LOGNAME")
         or os.environ.get("USERNAME")
         or ""
     )

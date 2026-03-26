@@ -37,9 +37,28 @@ class _SilentTTS:
 
 
 def load_session(session_name: str) -> dict[str, Any]:
-    candidate = Path(session_name)
-    if not candidate.is_absolute():
-        candidate = DEFAULT_SESSIONS_DIR / session_name
+    raw = str(session_name or "").strip()
+    candidate = Path(raw)
+    windows_abs = bool(re.match(r"^[A-Za-z]:[\\/]", raw))
+    if windows_abs:
+        # Accept legacy Windows absolute paths in generated definitions and remap
+        # them into this checkout so Linux CI can load the same session artifact.
+        remapped = re.sub(r"^[A-Za-z]:[\\/]", "", raw).replace("\\", "/")
+        parts = [p for p in remapped.split("/") if p]
+        lowered = [p.lower() for p in parts]
+        if parts and lowered[0] == BASE_DIR.name.lower():
+            parts = parts[1:]
+            lowered = lowered[1:]
+        if parts:
+            candidate = BASE_DIR.joinpath(*parts)
+    elif not candidate.is_absolute():
+        candidate = DEFAULT_SESSIONS_DIR / raw
+
+    if not candidate.exists() and windows_abs:
+        alt = BASE_DIR / "runtime" / "test_sessions" / "generated_definitions" / Path(raw).name
+        if alt.exists():
+            candidate = alt
+
     if not candidate.exists():
         raise FileNotFoundError(f"Session file not found: {candidate}")
 
