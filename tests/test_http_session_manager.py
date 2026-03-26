@@ -550,6 +550,41 @@ class TestHttpSessionManager(unittest.TestCase):
         self.assertEqual((extra.get("artifact") or {}).get("name"), "guard.log")
         detail_mock.assert_called_once_with("guard.log", max_lines=50)
 
+    def test_control_action_backend_command_list_returns_deck(self):
+        commands = [{"command_id": "regression_gate", "label": "Run Regression Gate"}]
+        with mock.patch("nova_http._load_backend_commands", return_value=commands) as load_mock:
+            ok, msg, extra = nova_http._control_action("backend_command_list", {})
+
+        self.assertTrue(ok)
+        self.assertEqual(msg, "backend_command_list_ok")
+        self.assertEqual(extra.get("commands"), commands)
+        load_mock.assert_called_once_with(80)
+
+    def test_control_action_backend_command_run_executes_selected_command(self):
+        result = {
+            "command": {"command_id": "regression_gate"},
+            "returncode": 0,
+            "stdout": "all good",
+            "stderr": "",
+            "output": "all good",
+            "available_commands": [{"command_id": "regression_gate"}],
+        }
+        with mock.patch("nova_http._run_backend_command", return_value=(True, "backend_command_ok:regression_gate", result)) as run_mock:
+            ok, msg, extra = nova_http._control_action("backend_command_run", {"command_id": "regression_gate"})
+
+        self.assertTrue(ok)
+        self.assertEqual(msg, "backend_command_ok:regression_gate")
+        self.assertEqual(extra.get("output"), "all good")
+        run_mock.assert_called_once_with("regression_gate", {"command_id": "regression_gate"})
+
+    def test_control_action_backend_command_run_requires_command(self):
+        with mock.patch("nova_http._load_backend_commands", return_value=[]):
+            ok, msg, extra = nova_http._control_action("backend_command_run", {})
+
+        self.assertFalse(ok)
+        self.assertEqual(msg, "backend_command_required")
+        self.assertIn("available_commands", extra)
+
     def test_control_action_patch_preview_show_returns_preview_text(self):
         previews = [{"name": "preview_a.txt", "status": "eligible", "decision": "pending"}]
         patch_payload = {"ok": True, "previews_total": 1}
@@ -663,8 +698,11 @@ class TestHttpSessionManager(unittest.TestCase):
         self.assertIn("renderRestartAnalytics", script)
         self.assertIn("renderActionReadiness", script)
         self.assertIn("renderPatchActionReadiness", script)
+        self.assertIn("renderBackendCommands", script)
         self.assertIn("runtimeTimelineClass", script)
         self.assertIn("String(text == null ? '' : text)", script)
+        self.assertIn("backend_command_run", script)
+        self.assertIn("backendCommandSelect", script)
         self.assertIn("NYO System Control", html)
         self.assertIn("Not Your Ordinary AI System", html)
         self.assertIn("Overview", html)
@@ -706,6 +744,9 @@ class TestHttpSessionManager(unittest.TestCase):
         self.assertIn('id="runtimeLegend"', html)
         self.assertIn('id="runtimeRawBox"', html)
         self.assertIn('id="guardRawBox"', html)
+        self.assertIn('id="backendCommandSelect"', html)
+        self.assertIn('id="btnBackendCommandRun"', html)
+        self.assertIn('id="backendCommandOutput"', html)
 
     def test_test_session_report_summaries_surface_runner_artifacts(self):
         with tempfile.TemporaryDirectory() as td:

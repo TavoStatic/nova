@@ -49,6 +49,7 @@ EXPORT_DIR = RUNTIME_DIR / "exports"
 CONTROL_AUDIT_LOG = RUNTIME_DIR / "control_action_audit.jsonl"
 TOOL_EVENTS_LOG = RUNTIME_DIR / "tool_events.jsonl"
 MEMORY_EVENTS_LOG = RUNTIME_DIR / "memory_events.jsonl"
+BACKEND_COMMAND_DECK_PATH = BASE_DIR / "backend_command_deck.json"
 GUARD_LOG_PATH = LOG_DIR / "guard.log"
 GUARD_BOOT_HISTORY_PATH = RUNTIME_DIR / "guard_boot_history.json"
 
@@ -652,6 +653,125 @@ def _resolve_operator_macro(macro_id: str) -> dict | None:
         if str(item.get("macro_id") or "") == lookup:
             return item
     return None
+
+
+def _load_backend_commands(limit: int = 40) -> list[dict]:
+    path = BACKEND_COMMAND_DECK_PATH
+    if not path.exists():
+        return []
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return []
+
+    raw_items = payload.get("commands") if isinstance(payload, dict) else payload
+    if not isinstance(raw_items, list):
+        return []
+
+    out: list[dict] = []
+    for item in raw_items:
+        if not isinstance(item, dict):
+            continue
+        command_id = str(item.get("command_id") or "").strip().lower()
+        kind = str(item.get("kind") or "python_script").strip().lower()
+        entry = str(item.get("entry") or "").strip()
+        if not command_id or not entry:
+            continue
+        if kind not in {"python_script", "python_module"}:
+            continue
+        fixed_args = [str(arg).strip() for arg in list(item.get("args") or []) if str(arg).strip()]
+        out.append(
+            {
+                "command_id": command_id,
+                "label": str(item.get("label") or command_id),
+                "description": str(item.get("description") or ""),
+                "kind": kind,
+                "entry": entry,
+                "args": fixed_args,
+                "allow_dynamic_args": bool(item.get("allow_dynamic_args", False)),
+                "enabled": bool(item.get("enabled", True)),
+                "timeout_sec": max(10, min(int(item.get("timeout_sec", 1800) or 1800), 7200)),
+            }
+        )
+    out.sort(key=lambda row: str(row.get("label") or row.get("command_id") or ""))
+    return out[: max(1, int(limit))]
+
+
+def _resolve_backend_command(command_id: str) -> dict | None:
+    lookup = str(command_id or "").strip().lower()
+    if not lookup:
+        return None
+    for row in _load_backend_commands(200):
+        if str(row.get("command_id") or "").strip().lower() == lookup:
+            return row
+    return None
+
+
+def _parse_backend_dynamic_args(raw: Any) -> list[str]:
+    if isinstance(raw, list):
+        return [str(item).strip() for item in raw if str(item).strip()][:24]
+    text = str(raw or "").strip()
+    if not text:
+        return []
+    tokens = re.findall(r"[^\s\"']+|\"[^\"]*\"|'[^']*'", text)
+    out: list[str] = []
+    for token in tokens[:24]:
+        out.append(token.strip().strip("\"'").strip())
+    return [item for item in out if item]
+
+
+def _run_backend_command(command_id: str, payload: dict) -> tuple[bool, str, dict]:
+    command = _resolve_backend_command(command_id)
+    if not command:
+        return False, "backend_command_not_found", {"available_commands": _load_backend_commands(80)}
+    if not bool(command.get("enabled", True)):
+        return False, "backend_command_disabled", {"command": command, "available_commands": _load_backend_commands(80)}
+
+    python_bin = str(VENV_PY if VENV_PY.exists() else Path(os.sys.executable))
+    kind = str(command.get("kind") or "python_script")
+    entry = str(command.get("entry") or "").strip()
+    fixed_args = [str(arg).strip() for arg in list(command.get("args") or []) if str(arg).strip()]
+    dynamic_args = _parse_backend_dynamic_args(payload.get("args")) if bool(command.get("allow_dynamic_args")) else []
+
+    cmd: list[str] = []
+    if kind == "python_script":
+        script_path = (BASE_DIR / entry).resolve()
+        if not script_path.exists():
+            return False, "backend_command_entry_missing", {"command": command}
+        if BASE_DIR.resolve() not in script_path.parents and script_path != BASE_DIR.resolve():
+            return False, "backend_command_entry_outside_workspace", {"command": command}
+        cmd = [python_bin, str(script_path), *fixed_args, *dynamic_args]
+    elif kind == "python_module":
+        if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_\.]*", entry):
+            return False, "backend_command_invalid_module", {"command": command}
+        cmd = [python_bin, "-m", entry, *fixed_args, *dynamic_args]
+    else:
+        return False, "backend_command_invalid_kind", {"command": command}
+
+    try:
+        proc = subprocess.run(
+            cmd,
+            cwd=str(BASE_DIR),
+            capture_output=True,
+            text=True,
+            timeout=int(command.get("timeout_sec", 1800) or 1800),
+        )
+    except Exception as e:
+        return False, f"backend_command_run_failed:{e}", {"command": command, "cmd": cmd}
+
+    stdout = str(proc.stdout or "")
+    stderr = str(proc.stderr or "")
+    ok = proc.returncode == 0
+    msg = f"backend_command_ok:{command.get('command_id')}" if ok else f"backend_command_failed:{command.get('command_id')}:exit:{proc.returncode}"
+    return ok, msg, {
+        "command": command,
+        "cmd": cmd,
+        "returncode": int(proc.returncode),
+        "stdout": stdout[-12000:],
+        "stderr": stderr[-12000:],
+        "output": (stdout + ("\n" + stderr if stderr else ""))[-12000:],
+        "available_commands": _load_backend_commands(80),
+    }
 
 
 def _render_operator_macro_prompt(macro: Mapping[str, Any], values: Mapping[str, Any] | None = None, note: str = "") -> tuple[bool, str, dict[str, str]]:
@@ -2805,6 +2925,7 @@ def _control_status_payload() -> dict:
     subconscious_summary = _subconscious_status_summary()
     generated_work_queue = _generated_work_queue(24)
     operator_macros = _load_operator_macros(24)
+    backend_commands = _load_backend_commands(40)
 
     payload = {
         "ok": True,
@@ -2824,6 +2945,8 @@ def _control_status_payload() -> dict:
         "generated_work_queue_open_count": int(generated_work_queue.get("open_count", 0) or 0),
         "generated_work_queue_next_file": str((generated_work_queue.get("next_item") or {}).get("file") or ""),
         "operator_macros": operator_macros,
+        "backend_commands": backend_commands,
+        "backend_command_count": len(backend_commands),
         "memory_scope": str((p.get("memory") or {}).get("scope") or "private"),
         "web_enabled": bool((p.get("tools_enabled") or {}).get("web")) and bool(web_cfg.get("enabled")),
         "search_provider": provider,
@@ -3159,6 +3282,20 @@ def _control_action(action: str, payload: dict) -> tuple[bool, str, dict]:
             session_id=str(payload.get("session_id") or ""),
             user_id=str(payload.get("user_id") or "operator"),
         )
+        _record_control_action_event(act, "ok" if ok else "fail", msg, payload)
+        return ok, msg, extra
+
+    if act == "backend_command_list":
+        commands = _load_backend_commands(80)
+        _record_control_action_event(act, "ok", f"backend_command_list_ok:{len(commands)}", payload)
+        return True, "backend_command_list_ok", {"commands": commands}
+
+    if act == "backend_command_run":
+        command_id = str(payload.get("command_id") or payload.get("command") or "").strip().lower()
+        if not command_id:
+            _record_control_action_event(act, "fail", "backend_command_required", payload)
+            return False, "backend_command_required", {"available_commands": _load_backend_commands(80)}
+        ok, msg, extra = _run_backend_command(command_id, payload)
         _record_control_action_event(act, "ok" if ok else "fail", msg, payload)
         return ok, msg, extra
 

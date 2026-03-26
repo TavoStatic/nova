@@ -58,6 +58,21 @@ C:\Nova\nova.cmd webui-status --port 8080
 C:\Nova\nova.cmd webui-stop
 ```
 
+## Central Backend Command Console
+
+Any new backend operation should be wired through the control console instead of ad hoc manual shell steps.
+
+1. Add a command entry in `C:\Nova\backend_command_deck.json`.
+2. Open NYO control (`/control`) and use **Backend Command Console** in the **Tools** tab.
+3. Run the command through `backend_command_run` so execution is captured in `runtime/control_action_audit.jsonl`.
+
+Deck command kinds:
+
+- `python_script`: runs `python <workspace-relative-script>`
+- `python_module`: runs `python -m <module>`
+
+This keeps backend execution centralized, auditable, and available to operators without code changes to UI routes.
+
 ## Health and Diagnostics
 
 ```powershell
