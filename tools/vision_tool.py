@@ -30,7 +30,16 @@ class VisionTool(NovaTool):
 
     def run(self, args: dict, context: ToolContext) -> str:
         base_dir = Path(__file__).resolve().parent.parent
-        python_exe = str((base_dir / ".venv" / "Scripts" / "python.exe").resolve())
+        venv_windows = base_dir / ".venv" / "Scripts" / "python.exe"
+        venv_posix = base_dir / ".venv" / "bin" / "python"
+        if venv_windows.exists():
+            python_exe = str(venv_windows.resolve())
+        elif venv_posix.exists():
+            python_exe = str(venv_posix.resolve())
+        else:
+            import sys
+
+            python_exe = str(Path(sys.executable).resolve())
         action = str(args.get("action") or "").strip().lower()
         if action == "screen":
             cmd = [python_exe, str((base_dir / "look_crop.py").resolve())]

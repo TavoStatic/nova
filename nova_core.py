@@ -125,7 +125,20 @@ LEARNED_FACTS_FILE = MEMORY_DIR / "learned_facts.json"
 BEHAVIOR_METRICS_FILE = RUNTIME_DIR / "behavior_metrics.json"
 SELF_REFLECTION_LOG = RUNTIME_DIR / "self_reflection.jsonl"
 POLICY_PATH = BASE_DIR / "policy.json"
-PYTHON = str(BASE_DIR / ".venv" / "Scripts" / "python.exe")
+
+
+def _resolve_python_executable() -> str:
+    candidates = [
+        BASE_DIR / ".venv" / "Scripts" / "python.exe",
+        BASE_DIR / ".venv" / "bin" / "python",
+    ]
+    for path in candidates:
+        if path.exists():
+            return str(path)
+    return str(Path(sys.executable).resolve())
+
+
+PYTHON = _resolve_python_executable()
 OLLAMA_BASE = "http://127.0.0.1:11434"
 
 SAMPLE_RATE = 16000
