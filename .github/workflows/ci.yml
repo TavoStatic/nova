@@ -34,3 +34,6 @@ jobs:
         env:
           SKIP_HEALTH: '1'
         run: python smoke_test.py
+
+      - name: Run regression gate
+        run: python run_regression.py

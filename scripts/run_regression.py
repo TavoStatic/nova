@@ -28,36 +28,39 @@ def run_step(name: str, cmd: list[str]) -> int:
 
 
 def main() -> int:
+    regression_tests = [
+        "tests.test_memory_scope",
+        "tests.test_memory_capture.TestMemoryCapture.test_mem_add_and_recall",
+        "tests.test_http_identity_chat.TestHttpIdentityChat.test_http_pending_correction_flow",
+        "tests.test_http_identity_chat.TestHttpIdentityChat.test_http_queue_status_runs_direct_tool_and_records_ledger",
+        "tests.test_http_identity_chat.TestHttpIdentityChat.test_http_queue_status_followup_uses_structured_tool_state",
+        "tests.test_http_identity_chat.TestHttpIdentityChat.test_http_queue_status_report_and_seam_followups_use_structured_state",
+        "tests.test_nova_http.TestNovaHttpProfile.test_creator_query_uses_hard_answer_before_grounded_lookup",
+        "tests.test_regression_contracts",
+        "tests.test_http_resume_pending",
+        "tests.test_run_test_session",
+        "tests.test_tool_registry",
+        "tests.test_policy_commands",
+    ]
+
     steps = [
         (
             "Python compile check",
-            [PY, "-m", "py_compile", "nova_core.py", "nova_http.py", "memory.py", "health.py", "action_planner.py"],
-        ),
-        (
-            "Focused unit tests",
             [
                 PY,
                 "-m",
-                "unittest",
-                "-q",
-                "tests/test_action_planner.py",
-                "tests/test_health.py",
-                "tests/test_patch_guard.py",
-                "tests/test_preference_logic.py",
-                "tests/test_remember_command.py",
-                "tests/test_memory_pinned.py",
-                "tests/test_greeting_logic.py",
-                "tests/test_policy_commands.py",
-                "tests/test_chat_context_command.py",
-                "tests/test_core_identity_learning.py",
-                "tests/test_weather_behavior.py",
-                "tests/test_web_research_continue.py",
-                "tests/test_web_search_api.py",
-                "tests/test_http_identity_chat.py",
-                "tests/test_http_chat_persistence.py",
-                "tests/test_http_session_manager.py",
-                "tests/test_http_resume_pending.py",
+                "py_compile",
+                "nova_core.py",
+                "nova_http.py",
+                "memory.py",
+                "conversation_manager.py",
+                "planner_decision.py",
+                "action_planner.py",
             ],
+        ),
+        (
+            "Focused unit tests",
+            [PY, "-m", "unittest", "-q", *regression_tests],
         ),
     ]
 
