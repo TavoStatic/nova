@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import subprocess
 import sys
+import unittest
 from pathlib import Path
 
 
@@ -27,22 +28,48 @@ def run_step(name: str, cmd: list[str]) -> int:
     return process.returncode
 
 
+def run_unittest_suite(test_names: list[str], *, verbosity: int = 1) -> tuple[bool, list[str]]:
+    loader = unittest.defaultTestLoader
+    suite = loader.loadTestsFromNames(test_names)
+    runner = unittest.TextTestRunner(verbosity=verbosity)
+    result = runner.run(suite)
+    failed_ids: list[str] = []
+    for case, _ in list(result.failures) + list(result.errors):
+        try:
+            failed_ids.append(case.id())
+        except Exception:
+            failed_ids.append(str(case))
+    return result.wasSuccessful(), failed_ids
+
+
 def run_focused_unit_tests(regression_tests: list[str]) -> int:
-    quiet_cmd = [PY, "-m", "unittest", "-q", *regression_tests]
-    code = run_step("Focused unit tests", quiet_cmd)
-    if code == 0:
+    print("\n=== Focused unit tests ===")
+    print("$ " + " ".join([PY, "-m", "unittest", "-q", *regression_tests]))
+    ok, failed_ids = run_unittest_suite(regression_tests, verbosity=1)
+    if ok:
+        print("[OK] Focused unit tests")
         return 0
 
     # CI can occasionally fail due transient state; retry once before escalating.
     print("\nRetrying focused unit tests once...")
-    code = run_step("Focused unit tests (retry)", quiet_cmd)
-    if code == 0:
+    ok, failed_ids = run_unittest_suite(regression_tests, verbosity=1)
+    if ok:
+        print("[OK] Focused unit tests (retry)")
         return 0
 
     print("\nFocused unit tests still failing. Rerunning with verbosity for diagnostics...")
-    verbose_cmd = [PY, "-m", "unittest", "-v", *regression_tests]
-    run_step("Focused unit tests (diagnostic verbose)", verbose_cmd)
-    return code
+    ok, failed_ids = run_unittest_suite(regression_tests, verbosity=2)
+
+    if failed_ids:
+        print("\nFailing regression tests:")
+        for test_id in failed_ids:
+            print(f"- {test_id}")
+            # GitHub Actions annotation format for easier triage.
+            print(f"::error::regression_test_failed::{test_id}")
+    else:
+        print("\n::error::regression_test_failed::unknown_test_failure")
+
+    return 1
 
 
 def main() -> int:
