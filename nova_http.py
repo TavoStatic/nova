@@ -7,6 +7,7 @@ import os
 import re
 import secrets
 import subprocess
+import sys
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -39,7 +40,20 @@ SESSION_STORE_PATH = RUNTIME_DIR / "http_chat_sessions.json"
 MAX_STORED_SESSIONS = 120
 MAX_STORED_TURNS_PER_SESSION = MAX_TURNS * 2
 KNOWLEDGE_DIR = BASE_DIR / "knowledge"
-VENV_PY = BASE_DIR / ".venv" / "Scripts" / "python.exe"
+
+
+def _resolve_venv_python() -> Path:
+    candidates = [
+        BASE_DIR / ".venv" / "Scripts" / "python.exe",
+        BASE_DIR / ".venv" / "bin" / "python",
+    ]
+    for path in candidates:
+        if path.exists():
+            return path
+    return Path(sys.executable).resolve()
+
+
+VENV_PY = _resolve_venv_python()
 GUARD_PY = BASE_DIR / "nova_guard.py"
 STOP_GUARD_PY = BASE_DIR / "stop_guard.py"
 CORE_PY = BASE_DIR / "nova_core.py"
