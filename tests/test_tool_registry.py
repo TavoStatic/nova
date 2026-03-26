@@ -148,6 +148,25 @@ class TestToolRegistry(unittest.TestCase):
         self.assertIn("Next item: next_generated.json", out)
         self.assertIn("fallback_overuse", out)
 
+    def test_system_tool_system_check_alias_runs_health_check(self):
+        registry = build_default_registry()
+        ctx = ToolContext(
+            user_id="tester",
+            session_id="sess-system-check",
+            policy={"tools_enabled": {"health": True}},
+            allowed_root=".",
+        )
+
+        fake_completed = type("P", (), {"stdout": "{\"ok\": true}\n", "stderr": ""})()
+        with patch("tools.system_tool.subprocess.run", return_value=fake_completed) as run_mock:
+            out = registry.run_tool("system", {"action": "system_check"}, ctx)
+
+        self.assertIn('"ok": true', out)
+        called_cmd = run_mock.call_args[0][0]
+        self.assertGreaterEqual(len(called_cmd), 3)
+        self.assertIn("health.py", str(called_cmd[1]).lower())
+        self.assertEqual(called_cmd[2], "check")
+
     def test_core_keyword_to_status_event_pipeline(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

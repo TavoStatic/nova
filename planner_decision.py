@@ -311,8 +311,15 @@ def classify_route(turn: TurnUnderstanding) -> RouteDecision:
         prompt = t[len("camera"):].strip() or "what do you see"
         return RouteDecision(kind="direct_tool", tool="camera", args=(prompt,))
 
-    if low in {"health", "status"}:
-        return RouteDecision(kind="direct_tool", tool="health")
+    if low in {
+        "health",
+        "status",
+        "system check",
+        "system checks",
+        "run system check",
+        "run system checks",
+    }:
+        return RouteDecision(kind="direct_tool", tool="system_check")
 
     if low == "ls" or low.startswith("ls "):
         path = t.split(maxsplit=1)[1].strip() if len(t.split(maxsplit=1)) > 1 else ""
