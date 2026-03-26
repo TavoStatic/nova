@@ -1,5 +1,8 @@
 name: CI
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
+
 on:
   push:
     branches: [ main, master ]
@@ -18,13 +21,18 @@ jobs:
         with:
           python-version: '3.14'
 
+      - name: Python diagnostics
+        run: |
+          python --version
+          python -m pip --version
+
       - name: Install dependencies
         run: |
-          python3 -m pip install --upgrade pip
+          python -m pip install --upgrade pip
           # CI only needs lightweight core deps used by smoke/regression checks.
           ok=0
           for i in 1 2 3; do
-            if python3 -m pip install requests psutil flake8; then
+            if python -m pip install requests psutil flake8; then
               ok=1
               break
             fi
@@ -36,18 +44,18 @@ jobs:
           fi
 
       - name: Static compile check
-        run: python3 -m compileall -q .
+        run: python -m compileall -q .
 
       - name: Lint
-        run: python3 -m flake8 . || true
+        run: python -m flake8 . || true
 
       - name: Run smoke test (skip health)
         env:
           SKIP_HEALTH: '1'
-        run: python3 smoke_test.py
+        run: python smoke_test.py
 
       - name: Run regression gate
-        run: python3 run_regression.py
+        run: python run_regression.py
 
   runtime-deps-health:
     runs-on: ubuntu-latest
@@ -61,6 +69,11 @@ jobs:
         with:
           python-version: '3.14'
 
+      - name: Python diagnostics
+        run: |
+          python --version
+          python -m pip --version
+
       - name: Install host audio libraries
         run: |
           sudo apt-get update
@@ -68,12 +81,12 @@ jobs:
 
       - name: Install full runtime dependencies
         run: |
-          python3 -m pip install --upgrade pip
-          if [ -f requirements.txt ]; then python3 -m pip install -r requirements.txt; fi
+          python -m pip install --upgrade pip
+          if [ -f requirements.txt ]; then python -m pip install -r requirements.txt; fi
 
       - name: Runtime import probe (advisory)
         run: |
-          python3 - <<'PY'
+          python - <<'PY'
           import importlib
 
           modules = [
