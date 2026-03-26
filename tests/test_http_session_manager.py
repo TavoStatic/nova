@@ -407,17 +407,21 @@ class TestHttpSessionManager(unittest.TestCase):
         self.assertTrue((payload.get("webui_restart") or {}).get("enabled"))
 
     def test_patch_action_readiness_payload_explains_preview_controls(self):
-        payload = nova_http._patch_action_readiness_payload({
-            "enabled": True,
-            "strict_manifest": True,
-            "behavioral_check": True,
-            "tests_available": True,
-            "last_preview_name": "preview_a.txt",
-            "previews": [
-                {"name": "preview_a.txt", "status": "eligible", "decision": "approved"},
-                {"name": "preview_b.txt", "status": "rejected: non-forward revision", "decision": "pending"},
-            ],
-        })
+        with mock.patch("nova_http.nova_core.show_preview", side_effect=[
+            "Patch Preview\nZip: teach_proposal_1.zip\nStatus: eligible",
+            "Patch Preview\nZip: teach_proposal_2.zip\nStatus: rejected: non-forward revision",
+        ]), mock.patch("pathlib.Path.exists", return_value=True):
+            payload = nova_http._patch_action_readiness_payload({
+                "enabled": True,
+                "strict_manifest": True,
+                "behavioral_check": True,
+                "tests_available": True,
+                "last_preview_name": "preview_a.txt",
+                "previews": [
+                    {"name": "preview_a.txt", "status": "eligible", "decision": "approved"},
+                    {"name": "preview_b.txt", "status": "rejected: non-forward revision", "decision": "pending"},
+                ],
+            })
 
         approved = ((payload.get("by_preview") or {}).get("preview_a.txt") or {})
         blocked = ((payload.get("by_preview") or {}).get("preview_b.txt") or {})
@@ -425,6 +429,24 @@ class TestHttpSessionManager(unittest.TestCase):
         self.assertTrue(((approved.get("apply") or {}).get("enabled")))
         self.assertFalse(((blocked.get("apply") or {}).get("enabled")))
         self.assertIn("not eligible", ((blocked.get("apply") or {}).get("reason") or "").lower())
+
+    def test_patch_action_readiness_payload_blocks_missing_preview_zip(self):
+        with mock.patch("nova_http.nova_core.show_preview", return_value="Patch Preview\nZip: missing_patch.zip\nStatus: eligible"), \
+            mock.patch("pathlib.Path.exists", return_value=False):
+            payload = nova_http._patch_action_readiness_payload({
+                "enabled": True,
+                "strict_manifest": True,
+                "behavioral_check": True,
+                "tests_available": True,
+                "last_preview_name": "preview_a.txt",
+                "previews": [
+                    {"name": "preview_a.txt", "status": "eligible", "decision": "approved"},
+                ],
+            })
+
+        preview = ((payload.get("by_preview") or {}).get("preview_a.txt") or {})
+        self.assertFalse(((preview.get("apply") or {}).get("enabled")))
+        self.assertIn("missing patch zip", ((preview.get("apply") or {}).get("reason") or "").lower())
 
     def test_control_status_payload_includes_runtime_timeline(self):
         policy = {
@@ -643,7 +665,8 @@ class TestHttpSessionManager(unittest.TestCase):
         self.assertEqual(msg, "patch_preview_apply_ok")
         self.assertIn("Patch applied", extra.get("text", ""))
         self.assertTrue(str(extra.get("zip", "")).endswith("teach_proposal_1.zip"))
-        show_mock.assert_called_once_with("preview_a.txt")
+        self.assertEqual(show_mock.call_count, 2)
+        show_mock.assert_any_call("preview_a.txt")
         apply_mock.assert_called_once()
 
     def test_control_action_patch_preview_apply_blocks_pending_preview(self):

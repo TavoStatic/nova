@@ -2642,6 +2642,19 @@ def _patch_action_readiness_payload(patch_summary: dict | None = None) -> dict:
         strict_manifest = bool(summary.get("strict_manifest", False))
         behavioral_check = bool(summary.get("behavioral_check", False))
         tests_available = bool(summary.get("tests_available", False))
+        zip_exists = True
+        zip_reason = ""
+        preview_text = nova_core.show_preview(name)
+        zip_name = ""
+        for line in str(preview_text or "").splitlines():
+            if line.lower().startswith("zip:"):
+                zip_name = str(line.split(":", 1)[1] or "").strip()
+                break
+        if zip_name:
+            zip_path = nova_core.UPDATES_DIR / zip_name
+            if not zip_path.exists():
+                zip_exists = False
+                zip_reason = f"Preview references a missing patch zip: {zip_name}"
 
         apply_enabled = True
         apply_reason = "Approved preview is eligible for validated apply."
@@ -2657,6 +2670,9 @@ def _patch_action_readiness_payload(patch_summary: dict | None = None) -> dict:
         elif not tests_available:
             apply_enabled = False
             apply_reason = "Behavioral tests are not available in this workspace."
+        elif not zip_exists:
+            apply_enabled = False
+            apply_reason = zip_reason or "Preview references a missing patch zip."
         elif not status_low.startswith("eligible"):
             apply_enabled = False
             apply_reason = f"Preview is not eligible for apply: {status_text or 'unknown'}."
@@ -2667,6 +2683,8 @@ def _patch_action_readiness_payload(patch_summary: dict | None = None) -> dict:
         readiness["by_preview"][name] = {
             "status": status_text,
             "decision": decision,
+            "zip_name": zip_name,
+            "zip_exists": zip_exists,
             "show": {
                 "enabled": True,
                 "reason": "Open the preview text for inspection.",
