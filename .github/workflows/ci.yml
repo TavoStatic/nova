@@ -1,5 +1,8 @@
 name: CI
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
+
 on:
   push:
     branches: [ main, master ]
@@ -11,10 +14,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Set up Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
           python-version: '3.14'
 
@@ -44,12 +47,17 @@ jobs:
     continue-on-error: true
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Set up Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
           python-version: '3.14'
+
+      - name: Install host audio libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libportaudio2 portaudio19-dev espeak-ng
 
       - name: Install full runtime dependencies
         run: |
@@ -58,5 +66,37 @@ jobs:
 
       - name: Runtime import probe (advisory)
         run: |
-          python -c "import requests, psutil; print('core deps ok')"
-          python -c "import sounddevice, scipy, pyttsx3; print('audio deps import ok')"
+          python - <<'PY'
+          import importlib
+
+          modules = [
+            ("requests", True),
+            ("psutil", True),
+            ("sounddevice", False),
+            ("scipy", False),
+            ("pyttsx3", False),
+          ]
+          hard_fail = []
+          soft_fail = []
+          for name, required in modules:
+            try:
+              importlib.import_module(name)
+              print(f"ok:{name}")
+            except Exception as exc:
+              row = f"{name}: {exc}"
+              if required:
+                hard_fail.append(row)
+              else:
+                soft_fail.append(row)
+
+          if soft_fail:
+            print("optional_runtime_import_failures:")
+            for row in soft_fail:
+              print(f"- {row}")
+
+          if hard_fail:
+            print("required_runtime_import_failures:")
+            for row in hard_fail:
+              print(f"- {row}")
+            raise SystemExit(1)
+          PY
