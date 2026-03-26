@@ -43,6 +43,9 @@ jobs:
             exit 1
           fi
 
+      - name: Verify core imports
+        run: python -c "import requests, psutil; print('core_imports_ok')"
+
       - name: Static compile check
         run: python -m compileall -q .
 
@@ -50,12 +53,23 @@ jobs:
         run: python -m flake8 . || true
 
       - name: Run smoke test (skip health)
+        id: smoke
+        continue-on-error: true
         env:
           SKIP_HEALTH: '1'
         run: python smoke_test.py
 
       - name: Run regression gate
+        id: regression
+        continue-on-error: true
         run: python run_regression.py
+
+      - name: Fail if validation checks failed
+        if: steps.smoke.outcome == 'failure' || steps.regression.outcome == 'failure'
+        run: |
+          echo "smoke_outcome=${{ steps.smoke.outcome }}"
+          echo "regression_outcome=${{ steps.regression.outcome }}"
+          exit 1
 
   runtime-deps-health:
     runs-on: ubuntu-latest
