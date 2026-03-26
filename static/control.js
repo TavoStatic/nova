@@ -46,6 +46,7 @@ const patchPreviewNote = document.getElementById('patchPreviewNote');
 const patchSummaryGrid = document.getElementById('patchSummaryGrid');
 const patchPreviewGrid = document.getElementById('patchPreviewGrid');
 const patchLogBox = document.getElementById('patchLogBox');
+const patchPreviewSummary = document.getElementById('patchPreviewSummary');
 const patchPreviewBox = document.getElementById('patchPreviewBox');
 const patchActionReadiness = document.getElementById('patchActionReadiness');
 const healthSummary = document.getElementById('healthSummary');
@@ -184,6 +185,114 @@ function renderOperatorMacroPrompt(macro, values, note = '') {
 
 function escapeHtml(text) {
     return String(text == null ? '' : text).replace(/[&<>"']/g, (match) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[match]));
+}
+
+function classifyPatchFileImpact(path) {
+    const clean = String(path || '').trim().toLowerCase();
+    if (!clean) return 'runtime update';
+    if (clean.startsWith('tests/')) return 'test coverage';
+    if (clean.startsWith('docs/')) return 'operator documentation';
+    if (clean.startsWith('templates/') || clean.startsWith('static/')) return 'control UI behavior';
+    if (clean.startsWith('scripts/')) return 'automation script behavior';
+    if (clean.endsWith('.py')) return 'runtime logic';
+    if (clean.endsWith('.md')) return 'docs and runbooks';
+    if (clean.endsWith('.json')) return 'policy or data contract';
+    return 'runtime files';
+}
+
+function parsePatchPreviewReport(text) {
+    const lines = String(text || '').split(/\r?\n/);
+    const out = {
+        zip: '',
+        status: '',
+        patchRevision: '',
+        minBaseRevision: '',
+        currentRevision: '',
+        changed: [],
+        added: [],
+        skipped: [],
+    };
+    let section = '';
+    for (const line of lines) {
+        const raw = String(line || '');
+        const trimmed = raw.trim();
+        if (!trimmed) {
+            section = '';
+            continue;
+        }
+        if (trimmed === 'Changed files:') { section = 'changed'; continue; }
+        if (trimmed === 'Added files:') { section = 'added'; continue; }
+        if (trimmed === 'Skipped files:') { section = 'skipped'; continue; }
+        if (trimmed.startsWith('Diff summary:')) { section = ''; continue; }
+
+        const zipMatch = trimmed.match(/^Zip:\s*(.+)$/i);
+        if (zipMatch) { out.zip = zipMatch[1].trim(); continue; }
+        const statusMatch = trimmed.match(/^Status:\s*(.+)$/i);
+        if (statusMatch) { out.status = statusMatch[1].trim(); continue; }
+        const revMatch = trimmed.match(/^Patch revision:\s*(.+)$/i);
+        if (revMatch) { out.patchRevision = revMatch[1].trim(); continue; }
+        const baseMatch = trimmed.match(/^Min base revision:\s*(.+)$/i);
+        if (baseMatch) { out.minBaseRevision = baseMatch[1].trim(); continue; }
+        const currentMatch = trimmed.match(/^Current revision:\s*(.+)$/i);
+        if (currentMatch) { out.currentRevision = currentMatch[1].trim(); continue; }
+
+        if (section && trimmed.startsWith('- ')) {
+            const value = trimmed.slice(2).trim();
+            if (value) out[section].push(value);
+        }
+    }
+    return out;
+}
+
+function renderPatchPreviewSummary(text, previewName = '') {
+    if (!patchPreviewSummary) return;
+    const parsed = parsePatchPreviewReport(text);
+    const changed = Array.isArray(parsed.changed) ? parsed.changed : [];
+    const added = Array.isArray(parsed.added) ? parsed.added : [];
+    const skipped = Array.isArray(parsed.skipped) ? parsed.skipped : [];
+    if (!String(text || '').trim()) {
+        patchPreviewSummary.innerHTML = '<div class="inspector-item"><div class="inspector-key">Preview Summary</div><div class="inspector-value">Load a preview to see what Nova is adding before approving it.</div></div>';
+        return;
+    }
+
+    const allTouched = [...added, ...changed];
+    const impactCounts = new Map();
+    allTouched.forEach((item) => {
+        const key = classifyPatchFileImpact(item);
+        impactCounts.set(key, (impactCounts.get(key) || 0) + 1);
+    });
+    const topImpacts = [...impactCounts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 3).map(([name, count]) => `${count} ${name}`);
+    const statusLow = String(parsed.status || '').toLowerCase();
+    let approvalMessage = 'This preview is ready for operator decision.';
+    if (statusLow.startsWith('eligible')) {
+        approvalMessage = 'Nova can apply this after you approve it.';
+    } else if (statusLow.startsWith('rejected')) {
+        approvalMessage = 'Do not approve yet: governance marked this preview as blocked.';
+    }
+
+    const changedPreview = changed.slice(0, 4).map((item) => `<li>${escapeHtml(item)}</li>`).join('');
+    const addedPreview = added.slice(0, 4).map((item) => `<li>${escapeHtml(item)}</li>`).join('');
+
+    patchPreviewSummary.innerHTML = [
+        '<div class="patch-summary-highlight">',
+        '<div class="patch-summary-title">What Nova Is Adding</div>',
+        `<div class="patch-summary-body">${escapeHtml(approvalMessage)} ${escapeHtml(topImpacts.length ? 'Main impact areas: ' + topImpacts.join(', ') + '.' : 'No changed or added files were detected.')}</div>`,
+        '</div>',
+        '<div class="inspector-item">',
+        '<div class="inspector-key">Preview</div>',
+        `<div class="inspector-value">${escapeHtml(previewName || parsed.zip || 'selected preview')}</div>`,
+        '</div>',
+        '<div class="inspector-item">',
+        '<div class="inspector-key">Approval Gate</div>',
+        `<div class="inspector-value">Status=${escapeHtml(parsed.status || 'unknown')} | Patch rev=${escapeHtml(parsed.patchRevision || 'unknown')} | Base=${escapeHtml(parsed.minBaseRevision || 'n/a')} | Current=${escapeHtml(parsed.currentRevision || 'n/a')}</div>`,
+        '</div>',
+        '<div class="inspector-item">',
+        '<div class="inspector-key">Change Counts</div>',
+        `<div class="inspector-value">Added=${added.length} | Changed=${changed.length} | Skipped=${skipped.length}</div>`,
+        '</div>',
+        changedPreview ? `<div class="inspector-item"><div class="inspector-key">Top Changed Files</div><div class="inspector-value"><ul>${changedPreview}</ul></div></div>` : '',
+        addedPreview ? `<div class="inspector-item"><div class="inspector-key">Top Added Files</div><div class="inspector-value"><ul>${addedPreview}</ul></div></div>` : '',
+    ].join('');
 }
 
 function setActiveView(name) {
@@ -582,6 +691,9 @@ function renderPatchReadiness(status) {
 
     if (patchPreviewBox && (!status || !Array.isArray(status.patch_previews) || !status.patch_previews.length)) {
         patchPreviewBox.textContent = 'No patch previews are available yet.';
+    }
+    if (patchPreviewSummary && (!status || !Array.isArray(status.patch_previews) || !status.patch_previews.length)) {
+        renderPatchPreviewSummary('', '');
     }
 
     renderPatchActionReadiness(status);
@@ -1589,6 +1701,7 @@ bindClick('btnPatchPreviewShow', async () => {
     if (patchPreviewBox) {
         patchPreviewBox.textContent = payload.text || `Preview loaded: ${preview}`;
     }
+    renderPatchPreviewSummary(payload.text || '', preview);
     await refresh();
     setAction(payload.text || `Preview loaded: ${preview}`);
 });
