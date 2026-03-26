@@ -1,5 +1,6 @@
 import tempfile
 import unittest
+import json
 from hashlib import sha1
 from pathlib import Path
 from unittest import mock
@@ -40,9 +41,21 @@ class TestRunTestSessionIsolation(unittest.TestCase):
         self.assertEqual(len(result.get("turns") or []), 2)
 
     def test_generated_canary_has_no_cli_http_drift(self):
-        session_meta = load_session(
-            r"c:\Nova\runtime\test_sessions\generated_definitions\subconscious_fulfillment-fallthrough-family_clarified-second-turn.json"
-        )
+        with tempfile.TemporaryDirectory() as td:
+            canary_path = Path(td) / "generated_canary.json"
+            canary_path.write_text(
+                json.dumps(
+                    {
+                        "name": "generated-canary",
+                        "messages": [
+                            "check queue status",
+                            "and what should we do next",
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            session_meta = load_session(str(canary_path))
 
         orig_mem_recall = nova_core.mem_recall
         orig_kb_search = nova_core.kb_search
