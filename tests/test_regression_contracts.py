@@ -26,6 +26,12 @@ class TestRegressionContracts(unittest.TestCase):
         self.assertEqual(actions[0].get("type"), "run_tool")
         self.assertEqual(actions[0].get("tool"), "queue_status")
 
+    def test_system_check_phrase_routes_to_direct_tool(self):
+        actions = decide_turn("run system checks", config={})
+        self.assertTrue(actions)
+        self.assertEqual(actions[0].get("type"), "run_tool")
+        self.assertEqual(actions[0].get("tool"), "system_check")
+
     def test_pending_correction_target_tracks_conversation_state(self):
         session = ConversationSession()
         session.apply_state_update({"kind": "correction_pending", "target": "Old incorrect answer"})

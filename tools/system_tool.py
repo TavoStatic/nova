@@ -71,7 +71,7 @@ class SystemTool(NovaTool):
             return ok, reason
         action = str(args.get("action") or "").strip().lower()
         tools = (context.policy.get("tools_enabled") or {}) if isinstance(context.policy, dict) else {}
-        if action == "health_check" and not bool(tools.get("health", False)):
+        if action in {"health_check", "system_check"} and not bool(tools.get("health", False)):
             return False, "health_tool_disabled"
         if action in {"doctor", "diag"} and not bool(context.is_admin):
             return False, "admin_required"
@@ -90,7 +90,7 @@ class SystemTool(NovaTool):
 
             python_exe = str(Path(sys.executable).resolve())
         action = str(args.get("action") or "").strip().lower()
-        if action == "health_check":
+        if action in {"health_check", "system_check"}:
             cmd = [python_exe, str((base_dir / "health.py").resolve()), "check"]
         elif action == "doctor":
             cmd = [python_exe, str((base_dir / "doctor.py").resolve()), "--quiet"]

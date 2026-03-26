@@ -10204,6 +10204,10 @@ def tool_health():
     return execute_registered_tool("system", {"action": "health_check"})
 
 
+def tool_system_check():
+    return execute_registered_tool("system", {"action": "system_check"})
+
+
 def tool_queue_status():
     return execute_registered_tool("system", {"action": "queue_status"})
 
@@ -10241,6 +10245,7 @@ def execute_planned_action(tool: str, args=None):
         "ls": tool_ls,
         "find": tool_find,
         "health": tool_health,
+        "system_check": tool_system_check,
         "queue_status": tool_queue_status,
     }
     fn = tool_map.get(tool_name)
