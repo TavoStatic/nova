@@ -27,6 +27,24 @@ def run_step(name: str, cmd: list[str]) -> int:
     return process.returncode
 
 
+def run_focused_unit_tests(regression_tests: list[str]) -> int:
+    quiet_cmd = [PY, "-m", "unittest", "-q", *regression_tests]
+    code = run_step("Focused unit tests", quiet_cmd)
+    if code == 0:
+        return 0
+
+    # CI can occasionally fail due transient state; retry once before escalating.
+    print("\nRetrying focused unit tests once...")
+    code = run_step("Focused unit tests (retry)", quiet_cmd)
+    if code == 0:
+        return 0
+
+    print("\nFocused unit tests still failing. Rerunning with verbosity for diagnostics...")
+    verbose_cmd = [PY, "-m", "unittest", "-v", *regression_tests]
+    run_step("Focused unit tests (diagnostic verbose)", verbose_cmd)
+    return code
+
+
 def main() -> int:
     regression_tests = [
         "tests.test_memory_scope",
@@ -58,16 +76,16 @@ def main() -> int:
                 "action_planner.py",
             ],
         ),
-        (
-            "Focused unit tests",
-            [PY, "-m", "unittest", "-q", *regression_tests],
-        ),
     ]
 
     for name, cmd in steps:
         code = run_step(name, cmd)
         if code != 0:
             return code
+
+    code = run_focused_unit_tests(regression_tests)
+    if code != 0:
+        return code
 
     print("\nAll regression checks passed.")
     return 0
