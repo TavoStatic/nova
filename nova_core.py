@@ -124,6 +124,15 @@ IDENTITY_FILE = MEMORY_DIR / "identity.json"
 LEARNED_FACTS_FILE = MEMORY_DIR / "learned_facts.json"
 BEHAVIOR_METRICS_FILE = RUNTIME_DIR / "behavior_metrics.json"
 SELF_REFLECTION_LOG = RUNTIME_DIR / "self_reflection.jsonl"
+AUTONOMY_MAINTENANCE_FILE = RUNTIME_DIR / "autonomy_maintenance_state.json"
+PULSE_SNAPSHOT_FILE = RUNTIME_DIR / "pulse_snapshot.json"
+UPDATE_NOW_PENDING_FILE = RUNTIME_DIR / "update_now_pending.json"
+TEST_SESSIONS_DIR = RUNTIME_DIR / "test_sessions"
+GENERATED_DEFINITIONS_DIR = TEST_SESSIONS_DIR / "generated_definitions"
+PENDING_REVIEW_DIR = TEST_SESSIONS_DIR / "pending_review"
+QUARANTINE_DIR = TEST_SESSIONS_DIR / "quarantine"
+PROMOTION_AUDIT_LOG = TEST_SESSIONS_DIR / "promotion_audit.jsonl"
+PROMOTED_DEFINITIONS_DIR = BASE_DIR / "tests" / "sessions"
 POLICY_PATH = BASE_DIR / "policy.json"
 
 
@@ -3495,8 +3504,10 @@ def load_policy() -> dict:
     safety_envelope.setdefault("enabled", True)
     safety_envelope.setdefault("mode", "observe")
     safety_envelope.setdefault("replay_threshold", 1.0)
+    safety_envelope.setdefault("replay_attempts", 2)
     safety_envelope.setdefault("novelty_min", 0.35)
     safety_envelope.setdefault("entropy_min", 2.8)
+    safety_envelope.setdefault("diversity_min_messages", 3)
     safety_envelope.setdefault("human_veto_first_n", 3)
     safety_envelope.setdefault("auto_demote_threshold", 0.90)
     safety_envelope.setdefault("max_candidates_per_cycle", 3)
@@ -7681,6 +7692,12 @@ def _is_explicit_command_like(text: str) -> bool:
         "web ",
         "weather",
         "check weather",
+        "pulse",
+        "nova pulse",
+        "update now",
+        "update now confirm",
+        "update now cancel",
+        "apply update now",
         "location coords",
         "domains",
         "policy allow",
@@ -10214,6 +10231,448 @@ def tool_queue_status():
     return execute_registered_tool("system", {"action": "queue_status"})
 
 
+def tool_phase2_audit():
+    import kidney
+    import nova_safety_envelope
+
+    sections = [
+        "Post-Phase-2 audit:",
+        str(tool_system_check() or ""),
+        str(kidney.render_status() or ""),
+        str(nova_safety_envelope.render_status() or ""),
+    ]
+    return "\n\n".join(section for section in sections if str(section or "").strip())
+
+
+def _load_json_file(path: Path, default: Any) -> Any:
+    try:
+        if not path.exists():
+            return default
+        data = json.loads(path.read_text(encoding="utf-8") or "null")
+        return default if data is None else data
+    except Exception:
+        return default
+
+
+def _count_definition_files(root: Path) -> int:
+    manifest_names = {"generated_manifest.json", "latest_manifest.json"}
+    try:
+        if not root.exists():
+            return 0
+        return sum(1 for path in root.glob("*.json") if path.is_file() and path.name not in manifest_names)
+    except Exception:
+        return 0
+
+
+def _promotion_audit_summary() -> dict:
+    latest_by_file = {}
+    if PROMOTION_AUDIT_LOG.exists():
+        try:
+            with PROMOTION_AUDIT_LOG.open("r", encoding="utf-8") as handle:
+                for line in handle:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        row = json.loads(line)
+                    except Exception:
+                        continue
+                    if not isinstance(row, dict):
+                        continue
+                    file_name = str(row.get("file") or "").strip()
+                    if not file_name:
+                        continue
+                    latest_by_file[file_name] = row
+        except Exception:
+            latest_by_file = {}
+
+    status_counts = {}
+    latest_ts = ""
+    for row in latest_by_file.values():
+        status = str(row.get("status") or "unknown").strip() or "unknown"
+        status_counts[status] = int(status_counts.get(status, 0) or 0) + 1
+        row_ts = str(row.get("ts") or "").strip()
+        if row_ts > latest_ts:
+            latest_ts = row_ts
+
+    return {
+        "generated_total": _count_definition_files(GENERATED_DEFINITIONS_DIR),
+        "promoted_total": _count_definition_files(PROMOTED_DEFINITIONS_DIR),
+        "pending_review_total": _count_definition_files(PENDING_REVIEW_DIR),
+        "quarantine_total": _count_definition_files(QUARANTINE_DIR),
+        "latest_audited_files": len(latest_by_file),
+        "latest_audit_ts": latest_ts,
+        "status_counts": status_counts,
+    }
+
+
+def _parse_log_timestamp(ts_text: str) -> float:
+    try:
+        return time.mktime(time.strptime(str(ts_text or "").strip(), "%Y-%m-%d %H:%M:%S"))
+    except Exception:
+        return 0.0
+
+
+def _patch_activity_summary(window_hours: int = 24) -> dict:
+    summary = {
+        "apply_count": 0,
+        "apply_ok_count": 0,
+        "rollback_count": 0,
+        "behavior_fail_count": 0,
+        "last_line": _read_patch_log_tail_line(),
+    }
+    if not PATCH_LOG.exists():
+        return summary
+
+    window_seconds = max(1, int(window_hours or 24)) * 3600
+    cutoff = time.time() - window_seconds
+    try:
+        with PATCH_LOG.open("r", encoding="utf-8") as handle:
+            for raw_line in handle:
+                line = raw_line.strip()
+                if not line or "|" not in line:
+                    continue
+                ts_text, event = line.split("|", 1)
+                event = event.strip()
+                event_ts = _parse_log_timestamp(ts_text)
+                if event_ts and event_ts < cutoff:
+                    continue
+                if event.startswith("APPLY_OK"):
+                    summary["apply_ok_count"] += 1
+                elif event.startswith("APPLY "):
+                    summary["apply_count"] += 1
+                elif event.startswith("ROLLBACK"):
+                    summary["rollback_count"] += 1
+                elif event.startswith("BEHAVIOR_FAIL"):
+                    summary["behavior_fail_count"] += 1
+    except Exception:
+        return summary
+    return summary
+
+
+def _preview_name_to_zip_path(preview_name: str) -> Optional[Path]:
+    name = str(preview_name or "").strip()
+    if not name:
+        return None
+    match = re.match(r"^preview_\d{8}_\d{6}_(.+)\.txt$", name)
+    if not match:
+        return None
+    zip_name = str(match.group(1) or "").strip()
+    if not zip_name:
+        return None
+    path = UPDATES_DIR / zip_name
+    return path if path.exists() else None
+
+
+def _latest_approved_update_zip(patch_payload: Optional[dict] = None) -> Optional[Path]:
+    payload = patch_payload if isinstance(patch_payload, dict) else patch_status_payload()
+    previews = payload.get("previews") if isinstance(payload, dict) else None
+    if not isinstance(previews, list):
+        return None
+    for item in previews:
+        if not isinstance(item, dict):
+            continue
+        decision = str(item.get("decision") or "").strip().lower()
+        status = str(item.get("status") or "").strip().lower()
+        if decision != "approved" or not status.startswith("eligible"):
+            continue
+        path = _preview_name_to_zip_path(str(item.get("name") or ""))
+        if path is not None:
+            return path
+    return None
+
+
+def _pulse_level(ollama_up: bool, routing_stable: bool, fallback_score: float, rollback_count: int) -> str:
+    if not ollama_up:
+        return "deterministic-only"
+    if not routing_stable or fallback_score >= 0.9 or rollback_count > 0:
+        return "guarded"
+    return "operational"
+
+
+def _pulse_mood(ollama_up: bool, routing_stable: bool, promoted_delta: int, fallback_score: float, rollback_count: int) -> str:
+    if not ollama_up:
+        return "LLM link is down, so I am holding to deterministic paths only."
+    if rollback_count > 0 or fallback_score >= 0.9:
+        return "Stable, but I am watching rollback pressure and fallback drift closely."
+    if not routing_stable:
+        return "Routing is unsettled, so I am staying conservative."
+    if promoted_delta > 0:
+        return "Learning is moving forward cleanly."
+    return "Quiet and steady."
+
+
+def build_pulse_payload() -> dict:
+    audit = _promotion_audit_summary()
+    behavior = _load_json_file(BEHAVIOR_METRICS_FILE, {})
+    autonomy = _load_json_file(AUTONOMY_MAINTENANCE_FILE, {})
+    prior = _load_json_file(PULSE_SNAPSHOT_FILE, {})
+    patch = patch_status_payload()
+    patch_activity = _patch_activity_summary(window_hours=24)
+    ollama_up = bool(ollama_api_up())
+    routing_stable = bool(behavior.get("routing_stable", False))
+    fallback_score = float(autonomy.get("last_fallback_overuse_score") or 0.0)
+    promoted_total = int(audit.get("promoted_total", 0) or 0)
+    prior_promoted_total = int(prior.get("promoted_total", 0) or 0)
+    promoted_delta = promoted_total - prior_promoted_total if prior_promoted_total else 0
+    approved_update_zip = _latest_approved_update_zip(patch)
+
+    memory_payload = mem_stats_payload(emit_event=False)
+    kidney_summary = {}
+    safety_cfg = {}
+    try:
+        import kidney
+
+        kidney_summary = kidney.run_kidney(dry_run=True)
+    except Exception:
+        kidney_summary = {}
+    try:
+        import nova_safety_envelope
+
+        safety_cfg = nova_safety_envelope.policy_safety_envelope()
+    except Exception:
+        safety_cfg = {}
+
+    payload = {
+        "generated_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "promoted_total": promoted_total,
+        "promoted_delta": max(0, int(promoted_delta)),
+        "generated_total": int(audit.get("generated_total", 0) or 0),
+        "pending_review_total": int(audit.get("pending_review_total", 0) or 0),
+        "quarantine_total": int(audit.get("quarantine_total", 0) or 0),
+        "latest_audited_files": int(audit.get("latest_audited_files", 0) or 0),
+        "latest_audit_ts": str(audit.get("latest_audit_ts") or "unknown"),
+        "audit_status_counts": dict(audit.get("status_counts") or {}),
+        "routing_stable": routing_stable,
+        "tool_route_count": int(behavior.get("tool_route", 0) or 0),
+        "llm_fallback_count": int(behavior.get("llm_fallback", 0) or 0),
+        "last_reflection_at": str(behavior.get("last_reflection_at") or "unknown"),
+        "last_fallback_overuse_score": fallback_score,
+        "last_regression_status": str(autonomy.get("last_regression_status") or "unknown"),
+        "patch_revision": int(patch.get("current_revision", 0) or 0),
+        "approved_eligible_previews": int(patch.get("previews_approved_eligible", 0) or 0),
+        "ready_for_validated_apply": bool(patch.get("ready_for_validated_apply", False)),
+        "patch_activity": patch_activity,
+        "patch_last_line": str(patch.get("last_patch_log_line") or patch_activity.get("last_line") or "none"),
+        "ollama_up": ollama_up,
+        "memory_ok": bool(memory_payload.get("ok", False)),
+        "memory_total": int(memory_payload.get("total", 0) or 0) if memory_payload.get("ok") else 0,
+        "kidney_mode": str(kidney_summary.get("mode") or "unknown"),
+        "kidney_candidates": int(kidney_summary.get("candidate_count", 0) or 0),
+        "kidney_archive_count": int(kidney_summary.get("archive_count", 0) or 0),
+        "kidney_delete_count": int(kidney_summary.get("delete_count", 0) or 0),
+        "safety_enabled": bool(safety_cfg.get("enabled", True)) if isinstance(safety_cfg, dict) else True,
+        "safety_mode": str(safety_cfg.get("mode") or "unknown") if isinstance(safety_cfg, dict) else "unknown",
+        "update_zip_path": str(approved_update_zip) if approved_update_zip is not None else "",
+    }
+    payload["autonomy_level"] = _pulse_level(
+        payload["ollama_up"],
+        payload["routing_stable"],
+        payload["last_fallback_overuse_score"],
+        int((payload.get("patch_activity") or {}).get("rollback_count", 0) or 0),
+    )
+    payload["mood"] = _pulse_mood(
+        payload["ollama_up"],
+        payload["routing_stable"],
+        payload["promoted_delta"],
+        payload["last_fallback_overuse_score"],
+        int((payload.get("patch_activity") or {}).get("rollback_count", 0) or 0),
+    )
+    return payload
+
+
+def _write_pulse_snapshot(payload: dict) -> None:
+    snapshot = {
+        "generated_at": str(payload.get("generated_at") or ""),
+        "promoted_total": int(payload.get("promoted_total", 0) or 0),
+        "patch_revision": int(payload.get("patch_revision", 0) or 0),
+        "llm_fallback_count": int(payload.get("llm_fallback_count", 0) or 0),
+        "tool_route_count": int(payload.get("tool_route_count", 0) or 0),
+    }
+    try:
+        PULSE_SNAPSHOT_FILE.parent.mkdir(parents=True, exist_ok=True)
+        PULSE_SNAPSHOT_FILE.write_text(json.dumps(snapshot, ensure_ascii=True, indent=2), encoding="utf-8")
+    except Exception:
+        return
+
+
+def render_nova_pulse(payload: Optional[dict] = None) -> str:
+    data = payload if isinstance(payload, dict) else build_pulse_payload()
+    patch_activity = data.get("patch_activity") if isinstance(data.get("patch_activity"), dict) else {}
+    status_counts = data.get("audit_status_counts") if isinstance(data.get("audit_status_counts"), dict) else {}
+    if status_counts:
+        audit_status_text = ", ".join(f"{name}={status_counts[name]}" for name in sorted(status_counts))
+    else:
+        audit_status_text = "none"
+
+    lines = [
+        f"Nova Pulse - {data.get('generated_at')}",
+        "Core evolution:",
+        f"- promoted definitions: {int(data.get('promoted_total', 0) or 0)} (+{int(data.get('promoted_delta', 0) or 0)} since last pulse)",
+        f"- generated definitions: {int(data.get('generated_total', 0) or 0)}",
+        f"- pending review: {int(data.get('pending_review_total', 0) or 0)}",
+        f"- quarantine: {int(data.get('quarantine_total', 0) or 0)}",
+        f"- latest audited files: {int(data.get('latest_audited_files', 0) or 0)} at {data.get('latest_audit_ts')}",
+        f"- audit statuses: {audit_status_text}",
+        "Updates:",
+        f"- patch revision: {int(data.get('patch_revision', 0) or 0)}",
+        f"- ready for validated apply: {'yes' if data.get('ready_for_validated_apply') else 'no'}",
+        f"- approved eligible previews: {int(data.get('approved_eligible_previews', 0) or 0)}",
+        f"- patch activity last 24h: applies={int(patch_activity.get('apply_count', 0) or 0)}, apply_ok={int(patch_activity.get('apply_ok_count', 0) or 0)}, rollbacks={int(patch_activity.get('rollback_count', 0) or 0)}, behavior_failures={int(patch_activity.get('behavior_fail_count', 0) or 0)}",
+        f"- patch log tail: {data.get('patch_last_line')}",
+        "Support systems:",
+        f"- Ollama API: {'online' if data.get('ollama_up') else 'offline'}",
+        f"- memory: {'ok' if data.get('memory_ok') else 'unavailable'} (total={int(data.get('memory_total', 0) or 0)})",
+        f"- kidney: mode={data.get('kidney_mode')} candidates={int(data.get('kidney_candidates', 0) or 0)} archive={int(data.get('kidney_archive_count', 0) or 0)} delete={int(data.get('kidney_delete_count', 0) or 0)}",
+        f"- safety envelope: enabled={bool(data.get('safety_enabled'))} mode={data.get('safety_mode')}",
+        "Autonomy:",
+        f"- level: {data.get('autonomy_level')}",
+        f"- routing stable: {'yes' if data.get('routing_stable') else 'no'}",
+        f"- tool routes vs llm fallbacks: {int(data.get('tool_route_count', 0) or 0)} / {int(data.get('llm_fallback_count', 0) or 0)}",
+        f"- last fallback overuse score: {float(data.get('last_fallback_overuse_score', 0.0) or 0.0):.2f}",
+        f"- last regression status: {data.get('last_regression_status')}",
+        f"- last reflection: {data.get('last_reflection_at')}",
+        "Assessment:",
+        f"- {data.get('mood')}",
+    ]
+    update_zip_path = str(data.get("update_zip_path") or "").strip()
+    if update_zip_path:
+        lines.append('Type "update now" if you want me to apply the latest approved validated update.')
+    else:
+        lines.append("No approved validated update is queued right now.")
+    return "\n".join(lines)
+
+
+def tool_nova_pulse():
+    payload = build_pulse_payload()
+    _write_pulse_snapshot(payload)
+    return render_nova_pulse(payload)
+
+
+def _read_update_now_pending() -> dict:
+    return _load_json_file(UPDATE_NOW_PENDING_FILE, {}) if UPDATE_NOW_PENDING_FILE.exists() else {}
+
+
+def _write_update_now_pending(payload: dict) -> None:
+    try:
+        UPDATE_NOW_PENDING_FILE.parent.mkdir(parents=True, exist_ok=True)
+        UPDATE_NOW_PENDING_FILE.write_text(json.dumps(payload, ensure_ascii=True, indent=2), encoding="utf-8")
+    except Exception:
+        return
+
+
+def _clear_update_now_pending() -> None:
+    try:
+        if UPDATE_NOW_PENDING_FILE.exists():
+            UPDATE_NOW_PENDING_FILE.unlink()
+    except Exception:
+        return
+
+
+def update_now_pending_payload() -> dict:
+    data = _read_update_now_pending()
+    if not isinstance(data, dict) or not data:
+        return {"ok": False, "pending": False}
+    return {
+        "ok": True,
+        "pending": True,
+        "created_at": str(data.get("created_at") or ""),
+        "token": str(data.get("token") or ""),
+        "zip_path": str(data.get("zip_path") or ""),
+        "preview_status": str(data.get("preview_status") or ""),
+    }
+
+
+def _build_update_now_token(zip_path: Path) -> str:
+    seed = f"{str(zip_path)}|{time.time()}|{os.getpid()}"
+    return hashlib.sha1(seed.encode("utf-8")).hexdigest()[:8]
+
+
+def _extract_preview_status(preview_text: str) -> str:
+    m = re.search(r"^Status:\s*(.+)$", str(preview_text or ""), flags=re.M)
+    return str(m.group(1) or "").strip() if m else "unknown"
+
+
+def _extract_preview_zip(preview_text: str) -> str:
+    m = re.search(r"^Zip:\s*(.+)$", str(preview_text or ""), flags=re.M)
+    return str(m.group(1) or "").strip() if m else ""
+
+
+def tool_update_now():
+    patch_payload = patch_status_payload()
+    zip_path = _latest_approved_update_zip(patch_payload)
+    if zip_path is None:
+        _clear_update_now_pending()
+        return "No approved validated update is queued right now. Run pulse to inspect the current update pipeline."
+    preview_text = patch_preview(str(zip_path), write_report=False)
+    preview_status = _extract_preview_status(preview_text)
+    if not str(preview_status or "").lower().startswith("eligible"):
+        _clear_update_now_pending()
+        return (
+            "Update candidate is not eligible after dry-run preview.\n"
+            f"- zip: {zip_path}\n"
+            f"- status: {preview_status or 'unknown'}\n"
+            "Update not applied."
+        )
+
+    token = _build_update_now_token(zip_path)
+    _write_update_now_pending({
+        "created_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "token": token,
+        "zip_path": str(zip_path),
+        "preview_status": preview_status,
+        "preview_zip": _extract_preview_zip(preview_text),
+    })
+    return (
+        "Update dry-run ready.\n"
+        f"- zip: {zip_path}\n"
+        f"- status: {preview_status}\n"
+        f"Confirm with: update now confirm {token}\n"
+        "Cancel with: update now cancel"
+    )
+
+
+def tool_update_now_confirm(token: str = ""):
+    pending = _read_update_now_pending()
+    if not isinstance(pending, dict) or not pending:
+        return "No pending update confirmation. Start with: update now"
+
+    expected_token = str(pending.get("token") or "").strip()
+    provided_token = str(token or "").strip()
+    if not provided_token:
+        return f"Confirmation token required. Run: update now confirm {expected_token}"
+    if expected_token and provided_token != expected_token:
+        return "Confirmation token mismatch. Run update now again to refresh the token."
+
+    zip_path_text = str(pending.get("zip_path") or "").strip()
+    if not zip_path_text:
+        _clear_update_now_pending()
+        return "Pending update payload is invalid. Run update now to regenerate the dry-run confirmation."
+    zip_path = Path(zip_path_text)
+    if not zip_path.exists():
+        _clear_update_now_pending()
+        return f"Update package is missing: {zip_path}. Run update now to regenerate the dry-run confirmation."
+
+    patch_payload = patch_status_payload()
+    latest_zip = _latest_approved_update_zip(patch_payload)
+    if latest_zip is None or str(latest_zip) != str(zip_path):
+        _clear_update_now_pending()
+        return "Approved update candidate changed. Run update now again before confirming."
+
+    out = execute_patch_action("apply", str(zip_path), is_admin=True)
+    if str(out or "").lower().startswith("patch applied:"):
+        _clear_update_now_pending()
+    return out
+
+
+def tool_update_now_cancel():
+    had_pending = bool(_read_update_now_pending())
+    _clear_update_now_pending()
+    if had_pending:
+        return "Canceled pending update confirmation."
+    return "No pending update confirmation was active."
+
+
 def execute_planned_action(tool: str, args=None):
     tool_name = str(tool or "").strip()
     tool_args = list(args) if isinstance(args, (list, tuple)) else ([] if args in {None, ""} else [args])
@@ -10249,6 +10708,11 @@ def execute_planned_action(tool: str, args=None):
         "health": tool_health,
         "system_check": tool_system_check,
         "queue_status": tool_queue_status,
+        "phase2_audit": tool_phase2_audit,
+        "pulse": tool_nova_pulse,
+        "update_now": tool_update_now,
+        "update_now_confirm": tool_update_now_confirm,
+        "update_now_cancel": tool_update_now_cancel,
     }
     fn = tool_map.get(tool_name)
     if not fn:
@@ -11044,6 +11508,20 @@ def handle_commands(
     if low in {"queue", "queue status", "work queue", "show queue", "standing work queue"}:
         return str(execute_planned_action("queue_status") or "")
 
+    if low in {"pulse", "nova pulse", "show pulse", "system pulse"}:
+        return str(execute_planned_action("pulse") or "")
+
+    if low in {"update now", "apply update now", "apply updates now"}:
+        return str(execute_planned_action("update_now") or "")
+
+    if low.startswith("update now confirm"):
+        token = t.split(maxsplit=3)[3].strip() if len(t.split(maxsplit=3)) >= 4 else ""
+        args = [token] if token else []
+        return str(execute_planned_action("update_now_confirm", args) or "")
+
+    if low in {"update now cancel", "cancel update now"}:
+        return str(execute_planned_action("update_now_cancel") or "")
+
     if "domanins" in low and any(k in low for k in ["domain", "domanins", "allow", "policy", "list", "show"]):
         return "It looks like you meant \"domains\".\n" + list_allowed_domains()
 
@@ -11229,6 +11707,17 @@ def handle_commands(
         import kidney
 
         return kidney.render_status()
+
+    if low in {
+        "phase2",
+        "phase2 status",
+        "phase 2 status",
+        "phase2 audit",
+        "phase 2 audit",
+        "post phase 2 audit",
+        "post-phase-2 audit",
+    }:
+        return str(execute_planned_action("phase2_audit") or "")
 
     if low == "kidney now":
         import kidney

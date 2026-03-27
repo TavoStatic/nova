@@ -45,6 +45,15 @@ Every live-chat-derived or subconscious-generated definition is evaluated agains
 2. Review audit output for several cycles.
 3. Flip to `enforce` once replay stability and audit decisions match operator expectations.
 
+## Operator Status Check
+- `phase 2 status`
+- `phase2 audit`
+
+These commands print a combined post-Phase-2 view that includes:
+- system check
+- kidney status
+- safety envelope status
+
 ## Current Implementation
 - `nova_safety_envelope.py` evaluates, audits, promotes, or quarantines candidates.
 - `subconscious_runner.py` evaluates newly generated definitions after each unattended run.

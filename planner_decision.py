@@ -84,7 +84,7 @@ def _looks_like_explicit_web_research(low: str) -> bool:
     )
     if any(phrase in text for phrase in direct_phrases):
         return True
-    research_terms = ("research", "search", "find", "lookup", "look up", "browse", "fetch")
+    research_terms = ("research", "search", "lookup", "look up", "browse", "fetch")
     web_terms = ("web", "online", "internet", "website", "site", "tea.texas.gov", "txschools.gov")
     return any(term in text for term in research_terms) and any(term in text for term in web_terms)
 
@@ -203,6 +203,24 @@ def _looks_like_command_route(low: str) -> bool:
     return False
 
 
+def _looks_like_find_command(text: str) -> bool:
+    raw = str(text or "").strip()
+    low = raw.lower()
+    if not low.startswith("find "):
+        return False
+    if raw.endswith("?"):
+        return False
+    if any(mark in raw for mark in (",", ";", ":")):
+        return False
+    parts = raw.split()
+    if len(parts) < 2 or len(parts) > 3:
+        return False
+    first_arg = str(parts[1] or "").strip().lower()
+    if first_arg in {"a", "an", "the"}:
+        return False
+    return True
+
+
 def _last_assistant_turn(turns: object) -> str:
     if not isinstance(turns, list):
         return ""
@@ -288,6 +306,19 @@ def classify_route(turn: TurnUnderstanding) -> RouteDecision:
     t = turn.text
     low = turn.low
 
+    if low in {"pulse", "nova pulse", "show pulse", "system pulse"}:
+        return RouteDecision(kind="direct_tool", tool="pulse")
+
+    if low in {"update now", "apply update now", "apply updates now"}:
+        return RouteDecision(kind="direct_tool", tool="update_now")
+
+    if low.startswith("update now confirm"):
+        token = t.split(maxsplit=3)[3].strip() if len(t.split(maxsplit=3)) >= 4 else ""
+        return RouteDecision(kind="direct_tool", tool="update_now_confirm", args=((token,) if token else ()))
+
+    if low in {"update now cancel", "cancel update now"}:
+        return RouteDecision(kind="direct_tool", tool="update_now_cancel")
+
     if low in {"queue status", "show queue status", "work queue", "generated queue"}:
         return RouteDecision(kind="direct_tool", tool="queue_status")
     if any(
@@ -303,6 +334,17 @@ def classify_route(turn: TurnUnderstanding) -> RouteDecision:
         )
     ):
         return RouteDecision(kind="direct_tool", tool="queue_status")
+
+    if low in {
+        "phase2",
+        "phase2 status",
+        "phase 2 status",
+        "phase2 audit",
+        "phase 2 audit",
+        "post phase 2 audit",
+        "post-phase-2 audit",
+    }:
+        return RouteDecision(kind="direct_tool", tool="phase2_audit")
 
     if low in {"screen", "look at my screen"}:
         return RouteDecision(kind="direct_tool", tool="screen")
@@ -328,7 +370,7 @@ def classify_route(turn: TurnUnderstanding) -> RouteDecision:
     if low.startswith("read "):
         return RouteDecision(kind="direct_tool", tool="read", args=(t.split(maxsplit=1)[1].strip(),))
 
-    if low.startswith("find "):
+    if _looks_like_find_command(t):
         parts = t.split(maxsplit=2)
         keyword = parts[1] if len(parts) > 1 else ""
         folder = parts[2] if len(parts) > 2 else ""

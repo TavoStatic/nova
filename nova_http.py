@@ -3069,6 +3069,16 @@ def _control_status_payload() -> dict:
     payload["patch_last_log_line"] = str(patch_summary.get("last_patch_log_line") or "")
     payload["patch_previews"] = list(patch_summary.get("previews") or []) if isinstance(patch_summary.get("previews"), list) else []
     payload["patch_action_readiness"] = _patch_action_readiness_payload(patch_summary)
+    pulse_payload = nova_core.build_pulse_payload()
+    payload["pulse"] = pulse_payload
+    payload["pulse_summary"] = {
+        "generated_at": str(pulse_payload.get("generated_at") or ""),
+        "autonomy_level": str(pulse_payload.get("autonomy_level") or "unknown"),
+        "promoted_total": int(pulse_payload.get("promoted_total", 0) or 0),
+        "promoted_delta": int(pulse_payload.get("promoted_delta", 0) or 0),
+        "ready_for_validated_apply": bool(pulse_payload.get("ready_for_validated_apply", False)),
+    }
+    payload["update_now_pending"] = nova_core.update_now_pending_payload()
     core = _core_status_payload()
     payload["core"] = core
     payload["core_running"] = bool(core.get("running"))
@@ -3122,17 +3132,19 @@ def _control_action(action: str, payload: dict) -> tuple[bool, str, dict]:
                 return dict(item)
         return {}
 
-    def _patch_control_state() -> dict:
+    def _patch_control_state(*, include_readiness: bool = True) -> dict:
         patch = nova_core.patch_status_payload()
         previews = list(patch.get("previews") or []) if isinstance(patch.get("previews"), list) else []
         if not previews:
             previews = list(nova_core.patch_preview_summaries(40) or [])
             patch["previews"] = previews
-        return {
+        out = {
             "previews": previews,
             "patch": patch,
-            "patch_action_readiness": _patch_action_readiness_payload(patch),
         }
+        if include_readiness:
+            out["patch_action_readiness"] = _patch_action_readiness_payload(patch)
+        return out
 
     if act == "refresh_status":
         ok, msg, extra = True, "status_refreshed", _control_status_payload()
@@ -3156,7 +3168,7 @@ def _control_action(action: str, payload: dict) -> tuple[bool, str, dict]:
         return ok, msg, {
             "preview": target,
             "text": text,
-            **_patch_control_state(),
+            **_patch_control_state(include_readiness=False),
         }
 
     if act == "patch_preview_approve":
@@ -3243,6 +3255,46 @@ def _control_action(action: str, payload: dict) -> tuple[bool, str, dict]:
             "zip": str(zip_path),
             "text": result,
             **_patch_control_state(),
+        }
+
+    if act == "pulse_status":
+        pulse = nova_core.build_pulse_payload()
+        _record_control_action_event(act, "ok", "pulse_status_ok", payload)
+        return True, "pulse_status_ok", {
+            "pulse": pulse,
+            "text": nova_core.render_nova_pulse(pulse),
+            "update_now_pending": nova_core.update_now_pending_payload(),
+        }
+
+    if act == "update_now_dry_run":
+        text = str(nova_core.tool_update_now() or "")
+        ok = text.lower().startswith("update dry-run ready")
+        msg = "update_now_dry_run_ok" if ok else "update_now_dry_run_failed"
+        _record_control_action_event(act, "ok" if ok else "fail", msg, payload)
+        return ok, msg, {
+            "text": text,
+            "pending": nova_core.update_now_pending_payload(),
+            "patch": nova_core.patch_status_payload(),
+        }
+
+    if act == "update_now_confirm":
+        token = str(payload.get("token") or "").strip()
+        text = str(nova_core.tool_update_now_confirm(token) or "")
+        ok = text.lower().startswith("patch applied:")
+        msg = "update_now_confirm_ok" if ok else "update_now_confirm_failed"
+        _record_control_action_event(act, "ok" if ok else "fail", msg, payload)
+        return ok, msg, {
+            "text": text,
+            "pending": nova_core.update_now_pending_payload(),
+            "patch": nova_core.patch_status_payload(),
+        }
+
+    if act == "update_now_cancel":
+        text = str(nova_core.tool_update_now_cancel() or "")
+        _record_control_action_event(act, "ok", "update_now_cancel_ok", payload)
+        return True, "update_now_cancel_ok", {
+            "text": text,
+            "pending": nova_core.update_now_pending_payload(),
         }
 
     if act == "runtime_artifact_show":

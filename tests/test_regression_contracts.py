@@ -32,6 +32,31 @@ class TestRegressionContracts(unittest.TestCase):
         self.assertEqual(actions[0].get("type"), "run_tool")
         self.assertEqual(actions[0].get("tool"), "system_check")
 
+    def test_phase2_audit_phrase_routes_to_direct_tool(self):
+        actions = decide_turn("phase 2 status", config={})
+        self.assertTrue(actions)
+        self.assertEqual(actions[0].get("type"), "run_tool")
+        self.assertEqual(actions[0].get("tool"), "phase2_audit")
+
+    def test_pulse_phrase_routes_to_direct_tool(self):
+        actions = decide_turn("nova pulse", config={})
+        self.assertTrue(actions)
+        self.assertEqual(actions[0].get("type"), "run_tool")
+        self.assertEqual(actions[0].get("tool"), "pulse")
+
+    def test_update_now_confirm_phrase_routes_to_direct_tool(self):
+        actions = decide_turn("update now confirm abc12345", config={})
+        self.assertTrue(actions)
+        self.assertEqual(actions[0].get("type"), "run_tool")
+        self.assertEqual(actions[0].get("tool"), "update_now_confirm")
+        self.assertEqual(actions[0].get("args"), ["abc12345"])
+
+    def test_update_now_cancel_phrase_routes_to_direct_tool(self):
+        actions = decide_turn("update now cancel", config={})
+        self.assertTrue(actions)
+        self.assertEqual(actions[0].get("type"), "run_tool")
+        self.assertEqual(actions[0].get("tool"), "update_now_cancel")
+
     def test_pending_correction_target_tracks_conversation_state(self):
         session = ConversationSession()
         session.apply_state_update({"kind": "correction_pending", "target": "Old incorrect answer"})

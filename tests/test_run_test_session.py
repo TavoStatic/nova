@@ -87,3 +87,67 @@ class TestRunTestSessionIsolation(unittest.TestCase):
 
         self.assertTrue(comparison.get("turn_count_match"))
         self.assertEqual(comparison.get("diffs"), [])
+
+    def test_compare_sessions_ignores_route_summary_instrumentation_noise(self):
+        cli = {
+            "turns": [
+                {
+                    "assistant": "Not a file: C:/Nova/updates.zip",
+                    "planner_decision": "run_tool",
+                    "route_summary": "input:received -> direction_analysis:general_chat -> action_planner:run_tool -> tool_execution:ok -> finalize:run_tool",
+                    "active_subject": "",
+                    "continuation_used": False,
+                    "probe_summary": "All green",
+                    "probe_results": [],
+                }
+            ]
+        }
+        http = {
+            "turns": [
+                {
+                    "assistant": "Not a file: C:/Nova/updates.zip",
+                    "planner_decision": "run_tool",
+                    "route_summary": "input:received -> direction_analysis:general_chat -> truth_hierarchy:not_matched -> hard_answer:not_matched -> action_planner:run_tool -> tool_execution:ok -> finalize:run_tool",
+                    "active_subject": "",
+                    "continuation_used": False,
+                    "probe_summary": "All green",
+                    "probe_results": [],
+                }
+            ]
+        }
+
+        comparison = compare_sessions(cli, http)
+
+        self.assertEqual(comparison.get("diffs"), [])
+
+    def test_compare_sessions_tolerates_llm_fallback_question_wording(self):
+        cli = {
+            "turns": [
+                {
+                    "assistant": "Nice. We were in the middle of a conversation, right?",
+                    "planner_decision": "llm_fallback",
+                    "route_summary": "input:received -> finalize:llm_fallback",
+                    "active_subject": "",
+                    "continuation_used": False,
+                    "probe_summary": "All green",
+                    "probe_results": [],
+                }
+            ]
+        }
+        http = {
+            "turns": [
+                {
+                    "assistant": "Nice. We were just chatting about something, right? What's on your mind now?",
+                    "planner_decision": "llm_fallback",
+                    "route_summary": "input:received -> finalize:llm_fallback",
+                    "active_subject": "",
+                    "continuation_used": False,
+                    "probe_summary": "All green",
+                    "probe_results": [],
+                }
+            ]
+        }
+
+        comparison = compare_sessions(cli, http)
+
+        self.assertEqual(comparison.get("diffs"), [])
