@@ -1,0 +1,21 @@
+{
+  "name": "Subconscious memory-capture-fallthrough-family :: location_fact",
+  "messages": [
+    "remember this Brownsville is my location"
+  ],
+  "source": "subconscious_generated",
+  "label": "hourly",
+  "family_id": "memory-capture-fallthrough-family",
+  "target_seam": "memory_capture_route_fallthrough",
+  "variation_id": "location_fact",
+  "training_priorities": [
+    {
+      "seam": "memory_capture_route_fallthrough",
+      "signal": "fallback_overuse",
+      "robustness": 0.97,
+      "suggested_test_name": "test_generic_fallback_does_not_hide_viable_specific_route",
+      "rationale": "Robust family pressure kept surfacing fallback_overuse.",
+      "urgency": "high"
+    }
+  ]
+}

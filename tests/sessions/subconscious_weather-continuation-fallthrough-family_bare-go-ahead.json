@@ -1,0 +1,21 @@
+{
+  "name": "Subconscious weather-continuation-fallthrough-family :: bare_go_ahead",
+  "messages": [
+    "go ahead"
+  ],
+  "source": "subconscious_generated",
+  "label": "hourly",
+  "family_id": "weather-continuation-fallthrough-family",
+  "target_seam": "weather_continuation_route_fallthrough",
+  "variation_id": "bare_go_ahead",
+  "training_priorities": [
+    {
+      "seam": "weather_continuation_route_fallthrough",
+      "signal": "fallback_overuse",
+      "robustness": 0.97,
+      "suggested_test_name": "test_generic_fallback_does_not_hide_viable_specific_route",
+      "rationale": "Robust family pressure kept surfacing fallback_overuse.",
+      "urgency": "high"
+    }
+  ]
+}

@@ -1,0 +1,21 @@
+{
+  "name": "Subconscious patch-routing-fallthrough-family :: patch_apply_direct_tool",
+  "messages": [
+    "please patch apply updates.zip"
+  ],
+  "source": "subconscious_generated",
+  "label": "phase1_auto",
+  "family_id": "patch-routing-fallthrough-family",
+  "target_seam": "patch_routing_fallthrough",
+  "variation_id": "patch_apply_direct_tool",
+  "training_priorities": [
+    {
+      "seam": "patch_routing_fallthrough",
+      "signal": "fallback_overuse",
+      "robustness": 0.97,
+      "suggested_test_name": "test_generic_fallback_does_not_hide_viable_specific_route",
+      "rationale": "Robust family pressure kept surfacing fallback_overuse.",
+      "urgency": "high"
+    }
+  ]
+}
