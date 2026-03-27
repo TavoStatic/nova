@@ -1,6 +1,62 @@
 # Nova Status
 
-Date: 2026-03-25
+Date: 2026-03-26
+
+## Shipped State (March 26, 2026)
+
+This is the current shipped checkpoint after the locked push of Nova Pulse, the guarded update flow, and the broader Phase 2 status slice.
+
+Verified now:
+
+- full discovered suite is green on the current shipped repo: `568` tests, `OK`
+- post-push HTTP self-check is green: `15/15` checks passed, health score `100`
+- Nova Pulse is live in both chat/CLI and the HTTP control plane
+- `update now` no longer applies directly; it now requires a dry-run plus token confirmation before patch apply
+- the control room now exposes structured Pulse state and update-now dry-run / confirm / cancel actions
+
+Current shipped runtime posture:
+
+- autonomy is currently `guarded`
+- routing is stable
+- Ollama API is online
+- memory is healthy
+- kidney remains active in `enforce` mode with `0` current candidates
+- safety envelope is active in `enforce` mode
+- patch pipeline still reports approved eligible previews, but recent patch history shows rollback pressure and failed behavioral validations; keep operator review in the loop
+
+Current shipped Pulse read:
+
+- promoted definitions: `20`
+- generated definitions: `2`
+- pending review: `13`
+- latest audited files: `23`
+- approved eligible previews: `14`
+- patch revision: `0`
+- last fallback overuse score: `0.97`
+
+Shipped in this checkpoint:
+
+- `nova_core.py`
+- `nova_http.py`
+- `planner_decision.py`
+- `nova_safety_envelope.py`
+- `supervisor.py`
+- `scripts/run_test_session.py`
+- `policy.json`
+- `docs/PHASE2_SAFETY_ENVELOPE.md`
+- updated regression coverage for Pulse, guarded update flow, patch preview behavior, routing, parity normalization, and safety-envelope retry / diversity behavior
+
+Operational meaning of this checkpoint:
+
+- Nova now has a first-class runtime pulse that reports current evolution, governance, patch readiness, and support-system health from live artifacts rather than hand-written status text
+- update application is safer because operator intent must cross an explicit dry-run confirmation boundary
+- the Phase 2/operator status path is documented and shipped alongside the new control-plane surfaces
+
+Latest shipped commit:
+
+- branch: `main`
+- commit: `e20a665`
+- message: `Add Nova Pulse status and guarded update flow`
 
 ## Stabilization Checkpoint (March 25, 2026)
 

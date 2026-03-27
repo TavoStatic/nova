@@ -1,0 +1,29 @@
+{
+  "name": "Subconscious fulfillment-fallthrough-family :: polite_compare_request",
+  "messages": [
+    "Can you compare a few viable ways forward before picking one for me ?"
+  ],
+  "source": "subconscious_generated",
+  "label": "hourly",
+  "family_id": "fulfillment-fallthrough-family",
+  "target_seam": "fulfillment_bridge_entry_fallthrough",
+  "variation_id": "polite_compare_request",
+  "training_priorities": [
+    {
+      "seam": "fulfillment_bridge_entry_fallthrough",
+      "signal": "fallback_overuse",
+      "robustness": 0.97,
+      "suggested_test_name": "test_generic_fallback_does_not_hide_viable_specific_route",
+      "rationale": "Robust family pressure kept surfacing fallback_overuse.",
+      "urgency": "high"
+    },
+    {
+      "seam": "fulfillment_bridge_entry_fallthrough",
+      "signal": "fulfillment_missed",
+      "robustness": 0.97,
+      "suggested_test_name": "test_route_probe_surfaces_clear_fulfillment_without_fallback_loss",
+      "rationale": "Robust family pressure kept surfacing fulfillment_missed.",
+      "urgency": "high"
+    }
+  ]
+}
