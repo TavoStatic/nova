@@ -3077,6 +3077,138 @@ class TestCoreIdentityLearning(unittest.TestCase):
         self.assertIn("action_planner:run_tool", payload.get("route_summary", ""))
         self.assertIn("tool_execution:ok", payload.get("route_summary", ""))
 
+    def test_cli_phase2_audit_runs_direct_tool_and_records_ledger(self):
+        with mock.patch.object(nova_core, "VOICE_OK", False), \
+             mock.patch.object(nova_core, "speak_chunked", lambda *_args, **_kwargs: None), \
+             mock.patch.object(nova_core, "tool_phase2_audit", return_value="Post-Phase-2 audit:\n\nSystem check: ok\n\nKidney status:\n- enabled: True\n\nSafety envelope status:\n- enabled: True"), \
+             mock.patch("builtins.input", side_effect=["phase 2 status", "q"]), \
+             mock.patch("sys.stdout", new_callable=io.StringIO) as stdout:
+            nova_core.run_loop(self._SilentTTS())
+
+        output = stdout.getvalue()
+        self.assertIn("Post-Phase-2 audit", output)
+        payload = self._latest_action_payload()
+        self.assertEqual(payload.get("planner_decision"), "run_tool")
+        self.assertEqual(payload.get("tool"), "phase2_audit")
+        self.assertIn("action_planner:run_tool", payload.get("route_summary", ""))
+        self.assertIn("tool_execution:ok", payload.get("route_summary", ""))
+
+    def test_cli_pulse_runs_direct_tool_and_records_ledger(self):
+        pulse_output = (
+            "Nova Pulse - 2026-03-27 10:00:00\n"
+            "Core evolution:\n"
+            "- promoted definitions: 4 (+1 since last pulse)\n"
+            "Updates:\n"
+            "- ready for validated apply: no\n"
+            "Assessment:\n"
+            "- Quiet and steady."
+        )
+
+        with mock.patch.object(nova_core, "VOICE_OK", False), \
+             mock.patch.object(nova_core, "speak_chunked", lambda *_args, **_kwargs: None), \
+             mock.patch.object(nova_core, "tool_nova_pulse", return_value=pulse_output), \
+             mock.patch("builtins.input", side_effect=["nova pulse", "q"]), \
+             mock.patch("sys.stdout", new_callable=io.StringIO) as stdout:
+            nova_core.run_loop(self._SilentTTS())
+
+        output = stdout.getvalue()
+        self.assertIn("Nova Pulse", output)
+        payload = self._latest_action_payload()
+        self.assertEqual(payload.get("planner_decision"), "run_tool")
+        self.assertEqual(payload.get("tool"), "pulse")
+        self.assertIn("action_planner:run_tool", payload.get("route_summary", ""))
+        self.assertIn("tool_execution:ok", payload.get("route_summary", ""))
+
+    def test_render_nova_pulse_reports_live_sections(self):
+        rendered = nova_core.render_nova_pulse({
+            "generated_at": "2026-03-27 10:00:00",
+            "promoted_total": 7,
+            "promoted_delta": 2,
+            "generated_total": 12,
+            "pending_review_total": 3,
+            "quarantine_total": 1,
+            "latest_audited_files": 10,
+            "latest_audit_ts": "2026-03-27 09:30:00",
+            "audit_status_counts": {"promoted": 4, "pending_review": 3},
+            "patch_revision": 5,
+            "ready_for_validated_apply": True,
+            "approved_eligible_previews": 1,
+            "patch_activity": {"apply_count": 1, "apply_ok_count": 1, "rollback_count": 0, "behavior_fail_count": 0},
+            "patch_last_line": "2026-03-27 09:59:00 | APPLY_OK files=3",
+            "ollama_up": True,
+            "memory_ok": True,
+            "memory_total": 42,
+            "kidney_mode": "enforce",
+            "kidney_candidates": 5,
+            "kidney_archive_count": 4,
+            "kidney_delete_count": 1,
+            "safety_enabled": True,
+            "safety_mode": "observe",
+            "autonomy_level": "operational",
+            "routing_stable": True,
+            "tool_route_count": 6,
+            "llm_fallback_count": 2,
+            "last_fallback_overuse_score": 0.25,
+            "last_regression_status": "OK",
+            "last_reflection_at": "2026-03-27 09:58:00",
+            "mood": "Learning is moving forward cleanly.",
+            "update_zip_path": "C:/Nova/updates/example.zip",
+        })
+
+        self.assertIn("Nova Pulse - 2026-03-27 10:00:00", rendered)
+        self.assertIn("promoted definitions: 7 (+2 since last pulse)", rendered)
+        self.assertIn("patch activity last 24h: applies=1, apply_ok=1, rollbacks=0, behavior_failures=0", rendered)
+        self.assertIn('Type "update now" if you want me to apply the latest approved validated update.', rendered)
+
+    def test_tool_update_now_requires_confirmation_before_apply(self):
+        zip_path = Path(self._tmp_dir.name) / "candidate_patch.zip"
+        zip_path.write_bytes(b"zip")
+        pending_path = Path(self._tmp_dir.name) / "update_now_pending.json"
+
+        with mock.patch.object(nova_core, "UPDATE_NOW_PENDING_FILE", pending_path), \
+             mock.patch.object(nova_core, "patch_status_payload", return_value={"ok": True}), \
+             mock.patch.object(nova_core, "_latest_approved_update_zip", return_value=zip_path), \
+             mock.patch.object(nova_core, "patch_preview", return_value="Patch Preview\nZip: candidate_patch.zip\nStatus: eligible"), \
+             mock.patch.object(nova_core, "execute_patch_action") as apply_mock:
+            dry_run = nova_core.tool_update_now()
+
+        self.assertIn("Update dry-run ready", dry_run)
+        self.assertIn("update now confirm", dry_run)
+        apply_mock.assert_not_called()
+
+    def test_tool_update_now_confirm_applies_with_token(self):
+        zip_path = Path(self._tmp_dir.name) / "candidate_patch.zip"
+        zip_path.write_bytes(b"zip")
+        pending_path = Path(self._tmp_dir.name) / "update_now_pending.json"
+
+        with mock.patch.object(nova_core, "UPDATE_NOW_PENDING_FILE", pending_path), \
+             mock.patch.object(nova_core, "patch_status_payload", return_value={"ok": True}), \
+             mock.patch.object(nova_core, "_latest_approved_update_zip", return_value=zip_path), \
+             mock.patch.object(nova_core, "patch_preview", return_value="Patch Preview\nZip: candidate_patch.zip\nStatus: eligible"), \
+             mock.patch.object(nova_core, "execute_patch_action", return_value="Patch applied: 1 file(s). Compile check OK.") as apply_mock:
+            dry_run = nova_core.tool_update_now()
+            token = ""
+            for line in str(dry_run).splitlines():
+                if line.lower().startswith("confirm with:"):
+                    token = line.split()[-1].strip()
+                    break
+            self.assertTrue(token)
+
+            confirmed = nova_core.tool_update_now_confirm(token)
+
+        self.assertTrue(str(confirmed).lower().startswith("patch applied:"))
+        apply_mock.assert_called_once_with("apply", str(zip_path), is_admin=True)
+
+    def test_tool_update_now_cancel_clears_pending(self):
+        pending_path = Path(self._tmp_dir.name) / "update_now_pending.json"
+        pending_path.write_text(json.dumps({"token": "abcd1234", "zip_path": "C:/Nova/updates/x.zip"}), encoding="utf-8")
+
+        with mock.patch.object(nova_core, "UPDATE_NOW_PENDING_FILE", pending_path):
+            msg = nova_core.tool_update_now_cancel()
+
+        self.assertIn("Canceled pending update confirmation", msg)
+        self.assertFalse(pending_path.exists())
+
     def test_cli_queue_status_followup_uses_structured_tool_state(self):
         queue_payload = {
             "count": 4,

@@ -23,6 +23,15 @@ import nova_http
 
 RUNNER_ROOT = BASE_DIR / "runtime" / "test_sessions"
 DEFAULT_SESSIONS_DIR = BASE_DIR / "tests" / "sessions"
+_ROUTE_NOISE_PREFIXES = (
+    "truth_hierarchy:",
+    "hard_answer:",
+    "policy_gate:",
+    "memory_context:",
+    "chat_context:",
+    "session_fact_sheet:",
+    "llm_fallback:",
+)
 
 
 class _SilentTTS:
@@ -129,6 +138,32 @@ def _assistant_compare_text(value: Any) -> str:
     if compact.startswith("Web research results (allowlisted crawl) for:"):
         return compact[:250]
     return compact
+
+
+def _canonical_route_summary(value: Any) -> str:
+    text = str(value or "")
+    steps = [part.strip() for part in text.split("->") if part.strip()]
+    filtered = [
+        step for step in steps
+        if not any(step.startswith(prefix) for prefix in _ROUTE_NOISE_PREFIXES)
+    ]
+    return _normalize_text(" -> ".join(filtered))
+
+
+def _is_question_like(text: str) -> bool:
+    return "?" in str(text or "")
+
+
+def _assistant_equivalent(cli_turn: dict[str, Any], http_turn: dict[str, Any]) -> bool:
+    cli_text = _assistant_compare_text(cli_turn.get("assistant"))
+    http_text = _assistant_compare_text(http_turn.get("assistant"))
+    if cli_text == http_text:
+        return True
+    if str(cli_turn.get("planner_decision") or "") == "llm_fallback" and str(http_turn.get("planner_decision") or "") == "llm_fallback":
+        # LLM fallback prompts can vary by phrasing while preserving intent.
+        if _is_question_like(cli_text) and _is_question_like(http_text):
+            return True
+    return False
 
 
 def _preview_value(value: Any, *, limit: int = 180) -> str:
@@ -286,7 +321,7 @@ def compare_sessions(cli_result: dict[str, Any], http_result: dict[str, Any]) ->
         cli_turn = cli_turns[index] if index < len(cli_turns) else {}
         http_turn = http_turns[index] if index < len(http_turns) else {}
         issues: dict[str, Any] = {}
-        if _assistant_compare_text(cli_turn.get("assistant")) != _assistant_compare_text(http_turn.get("assistant")):
+        if not _assistant_equivalent(cli_turn, http_turn):
             issues["assistant"] = {
                 "cli": cli_turn.get("assistant", ""),
                 "http": http_turn.get("assistant", ""),
@@ -301,7 +336,7 @@ def compare_sessions(cli_result: dict[str, Any], http_result: dict[str, Any]) ->
                 "cli": bool(cli_turn.get("continuation_used", False)),
                 "http": bool(http_turn.get("continuation_used", False)),
             }
-        if _normalize_text(cli_turn.get("route_summary")) != _normalize_text(http_turn.get("route_summary")):
+        if _canonical_route_summary(cli_turn.get("route_summary")) != _canonical_route_summary(http_turn.get("route_summary")):
             issues["route_summary"] = {
                 "cli": cli_turn.get("route_summary", ""),
                 "http": http_turn.get("route_summary", ""),

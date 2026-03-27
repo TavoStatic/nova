@@ -116,3 +116,69 @@ class TestSafetyEnvelope(unittest.TestCase):
         selected = nova_safety_envelope.select_patch_candidate_definition_paths(nova_safety_envelope.GENERATED_DEFINITIONS_ROOT)
 
         self.assertEqual(selected, [self.definition_path])
+
+    def test_short_single_turn_candidate_skips_diversity_gate(self):
+        self.definition_path.write_text(
+            json.dumps(
+                {
+                    "name": "short",
+                    "messages": ["go ahead"],
+                    "family_id": "weather-continuation-fallthrough-family",
+                    "variation_id": "bare_go_ahead",
+                }
+            ),
+            encoding="utf-8",
+        )
+        self._write_policy({"enabled": True, "mode": "enforce", "human_veto_first_n": 0, "diversity_min_messages": 3})
+        with mock.patch("nova_safety_envelope._run_replay", return_value={"ok": True, "reason": "ok", "comparison": {}, "report_path": ""}), \
+            mock.patch("nova_safety_envelope._pool_similarity", return_value=(0.2, "other.json")), \
+            mock.patch("nova_safety_envelope._family_fallback_score", return_value=0.2):
+            result = nova_safety_envelope.promote_or_quarantine(self.definition_path)
+
+        self.assertEqual(result.get("status"), "promoted")
+        gates = result.get("gates") or {}
+        self.assertFalse((gates.get("diversity") or {}).get("measured"))
+
+    def test_pending_review_history_satisfies_human_veto_window(self):
+        self._write_policy({"enabled": True, "mode": "enforce", "human_veto_first_n": 3, "diversity_min_messages": 3})
+        nova_safety_envelope.AUDIT_LOG.parent.mkdir(parents=True, exist_ok=True)
+        rows = [
+            {"file": "a.json", "family_id": "new-family", "status": "pending_review"},
+            {"file": "b.json", "family_id": "new-family", "status": "pending_review"},
+            {"file": "c.json", "family_id": "new-family", "status": "pending_review"},
+        ]
+        nova_safety_envelope.AUDIT_LOG.write_text("\n".join(json.dumps(row) for row in rows) + "\n", encoding="utf-8")
+
+        with mock.patch("nova_safety_envelope._run_replay", return_value={"ok": True, "reason": "ok", "comparison": {}, "report_path": ""}), \
+            mock.patch("nova_safety_envelope._pool_similarity", return_value=(0.2, "other.json")), \
+            mock.patch("nova_safety_envelope._family_fallback_score", return_value=0.2), \
+            mock.patch("nova_safety_envelope._diversity_score", return_value=3.1):
+            result = nova_safety_envelope.promote_or_quarantine(self.definition_path)
+
+        self.assertEqual(result.get("status"), "promoted")
+        self.assertFalse(result.get("review_required"))
+
+    def test_replay_retry_recovers_transient_failure(self):
+        self._write_policy({
+            "enabled": True,
+            "mode": "enforce",
+            "human_veto_first_n": 0,
+            "replay_attempts": 2,
+            "diversity_min_messages": 3,
+        })
+
+        with mock.patch(
+            "nova_safety_envelope._run_replay",
+            side_effect=[
+                {"ok": False, "reason": "replay_failed:exit:0", "comparison": {}, "report_path": ""},
+                {"ok": True, "reason": "ok", "comparison": {}, "report_path": ""},
+            ],
+        ), mock.patch("nova_safety_envelope._pool_similarity", return_value=(0.2, "other.json")), mock.patch(
+            "nova_safety_envelope._family_fallback_score", return_value=0.2
+        ):
+            result = nova_safety_envelope.promote_or_quarantine(self.definition_path)
+
+        self.assertEqual(result.get("status"), "promoted")
+        replay_gate = (result.get("gates") or {}).get("replay_stability") or {}
+        self.assertTrue(replay_gate.get("passed"))
+        self.assertEqual(replay_gate.get("attempts_used"), 2)

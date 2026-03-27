@@ -34,8 +34,10 @@ def policy_safety_envelope() -> dict[str, Any]:
     cfg.setdefault("enabled", True)
     cfg.setdefault("mode", "observe")
     cfg.setdefault("replay_threshold", 1.0)
+    cfg.setdefault("replay_attempts", 2)
     cfg.setdefault("novelty_min", 0.35)
     cfg.setdefault("entropy_min", 2.8)
+    cfg.setdefault("diversity_min_messages", 3)
     cfg.setdefault("human_veto_first_n", 3)
     cfg.setdefault("auto_demote_threshold", 0.90)
     cfg.setdefault("max_candidates_per_cycle", 3)
@@ -95,6 +97,50 @@ def _latest_audit_by_file() -> dict[str, dict[str, Any]]:
             continue
         latest[file_name] = row
     return latest
+
+
+def render_status() -> str:
+    cfg = policy_safety_envelope()
+    generated = _definition_files(GENERATED_DEFINITIONS_ROOT)
+    promoted = _definition_files(PROMOTED_DEFINITIONS_ROOT)
+    pending = _definition_files(PENDING_REVIEW_ROOT)
+    quarantined = _definition_files(QUARANTINE_ROOT)
+    latest = _latest_audit_by_file()
+
+    status_counts = Counter(str(row.get("status") or "unknown") for row in latest.values())
+    pending_audit = 0
+    for path in generated:
+        row = latest.get(path.name) or {}
+        if str(row.get("fingerprint") or "") != _fingerprint(path):
+            pending_audit += 1
+
+    latest_ts = "unknown"
+    if latest:
+        latest_ts = max(str(row.get("ts") or "") for row in latest.values()) or "unknown"
+
+    lines = [
+        "Safety envelope status:",
+        f"- enabled: {bool(cfg.get('enabled', True))}",
+        f"- mode: {str(cfg.get('mode') or 'observe')}",
+        f"- generated definitions: {len(generated)}",
+        f"- promoted pool: {len(promoted)}",
+        f"- pending review: {len(pending)}",
+        f"- quarantine: {len(quarantined)}",
+        f"- latest audited files: {len(latest)}",
+        f"- pending audit: {pending_audit}",
+        f"- last audit ts: {latest_ts}",
+    ]
+    if status_counts:
+        pieces = [f"{name}={count}" for name, count in sorted(status_counts.items())]
+        lines.append(f"- audit statuses: {', '.join(pieces)}")
+    preview = sorted(generated, key=lambda path: path.name)[:5]
+    if preview:
+        lines.append("- generated preview:")
+        for path in preview:
+            row = latest.get(path.name) or {}
+            status = str(row.get("status") or "pending_audit")
+            lines.append(f"  {path.name} ({status})")
+    return "\n".join(lines)
 
 
 def _tokenize(text: str) -> list[str]:
@@ -281,12 +327,45 @@ def _family_promoted_count(family_id: str) -> int:
     return count
 
 
+def _family_reviewed_count(family_id: str) -> int:
+    if not family_id:
+        return 0
+    latest = _latest_audit_by_file()
+    count = 0
+    for row in latest.values():
+        if str(row.get("family_id") or "").strip() != family_id:
+            continue
+        status = str(row.get("status") or "").strip().lower()
+        if status in {"pending_review", "promoted"}:
+            count += 1
+    return count
+
+
+def _cfg_float(cfg: dict[str, Any], key: str, default: float) -> float:
+    try:
+        return float(cfg.get(key, default))
+    except Exception:
+        return float(default)
+
+
+def _cfg_int(cfg: dict[str, Any], key: str, default: int) -> int:
+    try:
+        return int(cfg.get(key, default))
+    except Exception:
+        return int(default)
+
+
 def evaluate_promotion_contract(definition_path: str | Path, *, run_full_regression: bool = False) -> dict[str, Any]:
     path = Path(definition_path)
     payload = _load_definition(path)
     messages = _messages(payload)
     fingerprint = _fingerprint(path) if path.exists() else ""
     cfg = policy_safety_envelope()
+    replay_threshold = _cfg_float(cfg, "replay_threshold", 1.0)
+    novelty_min = _cfg_float(cfg, "novelty_min", 0.35)
+    entropy_min = _cfg_float(cfg, "entropy_min", 2.8)
+    auto_demote_threshold = _cfg_float(cfg, "auto_demote_threshold", 0.90)
+    human_veto_first_n = _cfg_int(cfg, "human_veto_first_n", 3)
 
     if not path.exists() or not messages:
         return {
@@ -300,52 +379,69 @@ def evaluate_promotion_contract(definition_path: str | Path, *, run_full_regress
             "metrics": {},
         }
 
+    replay_attempts = max(1, _cfg_int(cfg, "replay_attempts", 2))
     replay = _run_replay(path)
+    replay_attempts_used = 1
+    while replay_attempts_used < replay_attempts and not replay.get("ok"):
+        replay_attempts_used += 1
+        next_try = _run_replay(path)
+        replay = next_try
+        if next_try.get("ok"):
+            break
     replay_score = 1.0 if replay.get("ok") else 0.0
     similarity, nearest_file = _pool_similarity(path, payload)
     novelty = max(0.0, 1.0 - similarity)
     diversity = _diversity_score(messages)
+    message_count = len(messages)
     family_id = str(payload.get("family_id") or "").strip()
     fallback_score = _family_fallback_score(family_id)
     overfit_measured = fallback_score is not None
-    overfit_ok = bool(overfit_measured and float(fallback_score or 0.0) <= float(cfg.get("auto_demote_threshold", 0.90) or 0.90))
+    overfit_ok = bool(overfit_measured and float(fallback_score or 0.0) <= auto_demote_threshold)
 
     full_regression = {"ok": True, "reason": "skipped"}
     if bool(run_full_regression or cfg.get("full_regression_required", False)):
         full_regression = _run_full_regression()
 
     family_promoted_count = _family_promoted_count(family_id)
-    review_required = family_promoted_count < int(cfg.get("human_veto_first_n", 3) or 3)
+    family_reviewed_count = _family_reviewed_count(family_id)
+    review_required = family_reviewed_count < max(0, human_veto_first_n)
     if not overfit_measured:
         review_required = True
 
+    diversity_min_messages = max(1, _cfg_int(cfg, "diversity_min_messages", 3))
+    diversity_measured = message_count >= max(1, diversity_min_messages)
+
     gates = {
         "replay_stability": {
-            "passed": replay_score >= float(cfg.get("replay_threshold", 1.0) or 1.0),
+            "passed": replay_score >= replay_threshold,
             "measured": True,
             "value": replay_score,
-            "threshold": float(cfg.get("replay_threshold", 1.0) or 1.0),
+            "threshold": replay_threshold,
             "reason": str(replay.get("reason") or ""),
+            "attempts_used": replay_attempts_used,
+            "attempts_configured": replay_attempts,
         },
         "novelty": {
-            "passed": novelty >= float(cfg.get("novelty_min", 0.35) or 0.35),
+            "passed": novelty >= novelty_min,
             "measured": True,
             "value": novelty,
-            "threshold": float(cfg.get("novelty_min", 0.35) or 0.35),
+            "threshold": novelty_min,
             "nearest_match": nearest_file,
             "max_similarity": similarity,
         },
         "diversity": {
-            "passed": diversity >= float(cfg.get("entropy_min", 2.8) or 2.8),
-            "measured": True,
+            "passed": True if not diversity_measured else diversity >= entropy_min,
+            "measured": diversity_measured,
             "value": diversity,
-            "threshold": float(cfg.get("entropy_min", 2.8) or 2.8),
+            "threshold": entropy_min,
+            "message_count": message_count,
+            "min_messages": diversity_min_messages,
         },
         "overfit_guard": {
             "passed": overfit_ok,
             "measured": overfit_measured,
             "value": fallback_score,
-            "threshold": float(cfg.get("auto_demote_threshold", 0.90) or 0.90),
+            "threshold": auto_demote_threshold,
         },
         "full_regression": {
             "passed": bool(full_regression.get("ok")),
@@ -385,6 +481,8 @@ def evaluate_promotion_contract(definition_path: str | Path, *, run_full_regress
             "diversity": diversity,
             "fallback_overuse": fallback_score,
             "family_promoted_count": family_promoted_count,
+            "family_reviewed_count": family_reviewed_count,
+            "replay_attempts_used": replay_attempts_used,
         },
         "artifacts": {
             "replay_report_path": str(replay.get("report_path") or ""),

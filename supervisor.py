@@ -408,6 +408,20 @@ def _looks_like_saved_location_weather_query(low: str) -> bool:
 _looks_like_affirmative_followup = followup_moves.looks_like_affirmative_followup
 
 
+def _looks_like_saved_location_weather_confirmation(low: str) -> bool:
+    """Return True when the user is confirming they want to use the saved location for weather."""
+    normalized = _normalize_text(low)
+    if not normalized:
+        return False
+    if "saved location" not in normalized:
+        return False
+    return (
+        _looks_like_affirmative_followup(normalized)
+        or "use the saved location" in normalized
+        or "using the saved location" in normalized
+    )
+
+
 def _looks_like_weather_lookup_request(low: str) -> bool:
     if not low or low.startswith("web ") or "weather" not in low:
         return False
@@ -581,6 +595,18 @@ def weather_lookup_rule(
             "handled": True,
             **pending_followup,
         }
+
+    # Handle "yes please use the saved location" after a weather context turn
+    if _looks_like_saved_location_weather_confirmation(low):
+        active_subject = _manager_active_subject(manager)
+        if "weather" in str(active_subject).lower():
+            return {
+                "handled": True,
+                "intent": "weather_lookup",
+                "weather_mode": "current_location",
+                "ledger_stage": "weather_lookup",
+                "grounded": True,
+            }
 
     if _looks_like_saved_location_weather_query(low):
         return {"handled": False}

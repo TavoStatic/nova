@@ -622,6 +622,37 @@ class TestHttpSessionManager(unittest.TestCase):
         self.assertIn("Status: eligible", extra.get("text", ""))
         show_mock.assert_called_once_with("preview_a.txt")
 
+    def test_control_action_pulse_status_returns_structured_payload(self):
+        pulse_payload = {"generated_at": "2026-03-26 23:10:00", "autonomy_level": "guarded", "promoted_total": 20}
+        pending_payload = {"ok": False, "pending": False}
+
+        with mock.patch("nova_http.nova_core.build_pulse_payload", return_value=pulse_payload) as pulse_mock, \
+            mock.patch("nova_http.nova_core.render_nova_pulse", return_value="Nova Pulse - 2026-03-26 23:10:00") as render_mock, \
+            mock.patch("nova_http.nova_core.update_now_pending_payload", return_value=pending_payload):
+            ok, msg, extra = nova_http._control_action("pulse_status", {})
+
+        self.assertTrue(ok)
+        self.assertEqual(msg, "pulse_status_ok")
+        self.assertEqual(extra.get("pulse"), pulse_payload)
+        self.assertIn("Nova Pulse", extra.get("text", ""))
+        self.assertEqual(extra.get("update_now_pending"), pending_payload)
+        pulse_mock.assert_called_once_with()
+        render_mock.assert_called_once_with(pulse_payload)
+
+    def test_control_action_update_now_dry_run_returns_pending_payload(self):
+        pending_payload = {"ok": True, "pending": True, "token": "abcd1234"}
+
+        with mock.patch("nova_http.nova_core.tool_update_now", return_value="Update dry-run ready.\nConfirm with: update now confirm abcd1234") as dry_mock, \
+            mock.patch("nova_http.nova_core.update_now_pending_payload", return_value=pending_payload), \
+            mock.patch("nova_http.nova_core.patch_status_payload", return_value={"ok": True, "previews_total": 1}):
+            ok, msg, extra = nova_http._control_action("update_now_dry_run", {})
+
+        self.assertTrue(ok)
+        self.assertEqual(msg, "update_now_dry_run_ok")
+        self.assertIn("Update dry-run ready", extra.get("text", ""))
+        self.assertEqual(extra.get("pending"), pending_payload)
+        dry_mock.assert_called_once_with()
+
     def test_control_action_patch_preview_approve_records_decision(self):
         previews = [{"name": "preview_a.txt", "status": "eligible", "decision": "approved"}]
         patch_payload = {"ok": True, "previews_total": 1, "last_preview_decision": "approved"}
