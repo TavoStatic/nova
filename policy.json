@@ -14,7 +14,8 @@
       "texasstudentdatasystem.org",
       "tsds.txschools.gov",
       "weather.com",
-      "api.weather.gov"
+      "api.weather.gov",
+      "esp.bisd.us"
     ],
     "max_bytes": 20000000,
     "research_domains_limit": 4,
@@ -23,7 +24,16 @@
     "research_max_depth": 1,
     "research_seeds_per_domain": 8,
     "research_max_results": 8,
-    "research_min_score": 3.0
+    "research_min_score": 3.0,
+    "search_provider_priority": [
+      "wikipedia",
+      "stackexchange",
+      "general_web"
+    ],
+    "stackexchange_site": "stackoverflow",
+    "stackexchange_api_endpoint": "https://api.stackexchange.com/2.3/search/advanced",
+    "stackexchange_api_key_env": "STACKEXCHANGE_API_KEY",
+    "github_api_key_env": "GITHUB_TOKEN"
   },
   "allowed_root": "C:\\Nova",
   "tools_enabled": {
@@ -41,7 +51,7 @@
   "memory": {
     "enabled": true,
     "mode": "B",
-    "scope": "private",
+    "scope": "hybrid",
     "top_k": 5,
     "context_top_k": 3,
     "min_score": 0.18,

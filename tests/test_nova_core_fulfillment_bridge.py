@@ -4,6 +4,7 @@ from unittest.mock import patch
 import nova_core
 from conversation_manager import ConversationSession
 from fulfillment_contracts import ChoiceMode, ChoiceSet, CollapseStatus, FitAssessment, FrameScore, FulfillmentModel, Intent
+from services.subconscious_runtime import SUBCONSCIOUS_SERVICE
 from subconscious_live_simulator import build_default_live_scenario_families, simulate_live_family
 
 
@@ -99,13 +100,15 @@ class TestNovaCoreFulfillmentBridge(unittest.TestCase):
         )
 
         probe = nova_core._probe_turn_routes("go ahead", session, [], pending_action=session.pending_action)
-        nova_core._update_subconscious_state(session, probe, chosen_route="supervisor_owned")
+        SUBCONSCIOUS_SERVICE.update_state(session, probe, chosen_route="supervisor_owned")
 
-        snapshot = nova_core._get_subconscious_snapshot(session)
+        snapshot = SUBCONSCIOUS_SERVICE.get_snapshot(session)
 
         self.assertFalse(snapshot.get("replan_requested"))
+        self.assertEqual(snapshot.get("replan_reasons"), [])
         self.assertEqual(snapshot.get("active_recent_signals"), [])
         self.assertEqual(snapshot.get("crack_counts"), {})
+        self.assertEqual(snapshot.get("weak_signal_window_counts"), {})
         self.assertEqual(snapshot.get("record_window"), {"count": 1, "cap": 12})
         self.assertEqual(snapshot.get("recent_pressure_records")[0].get("chosen_route"), "supervisor_owned")
 
@@ -119,15 +122,16 @@ class TestNovaCoreFulfillmentBridge(unittest.TestCase):
             "fit_evaluator.FitEvaluator.evaluate",
             return_value=_assessments(),
         ):
-            nova_core._maybe_run_fulfillment_flow(
+            nova_core._fulfillment_flow_service().maybe_run_fulfillment_flow(
                 "Show me the workable options without collapsing too early.",
                 session,
                 [("user", "Show me the workable options without collapsing too early.")],
             )
 
-        snapshot = nova_core._get_subconscious_snapshot(session)
+        snapshot = SUBCONSCIOUS_SERVICE.get_snapshot(session)
 
         self.assertFalse(snapshot.get("replan_requested"))
+        self.assertEqual(snapshot.get("replan_reasons"), [])
         self.assertEqual(snapshot.get("active_recent_signals"), [])
         self.assertEqual(snapshot.get("record_window"), {"count": 1, "cap": 12})
         self.assertEqual(snapshot.get("recent_pressure_records")[0].get("chosen_route"), "fulfillment_applicable")
@@ -135,25 +139,26 @@ class TestNovaCoreFulfillmentBridge(unittest.TestCase):
     def test_snapshot_is_readable_after_fallback_pressure(self):
         session = ConversationSession()
 
-        nova_core._maybe_run_fulfillment_flow("how are you doing today ?", session, [])
+        nova_core._fulfillment_flow_service().maybe_run_fulfillment_flow("how are you doing today ?", session, [])
 
-        snapshot = nova_core._get_subconscious_snapshot(session)
+        snapshot = SUBCONSCIOUS_SERVICE.get_snapshot(session)
 
         self.assertFalse(snapshot.get("replan_requested"))
         self.assertIn("route_unclear", snapshot.get("active_recent_signals") or [])
         self.assertEqual(snapshot.get("crack_counts", {}).get("route_unclear"), 1)
+        self.assertEqual(snapshot.get("weak_signal_window_counts", {}).get("route_unclear"), 1)
         self.assertEqual(snapshot.get("recent_pressure_records")[0].get("chosen_route"), "generic_fallback")
 
     def test_update_subconscious_state_accumulates_repeated_weak_cracks(self):
         session = ConversationSession()
         probe = nova_core._probe_turn_routes("how are you doing today ?", session, [])
 
-        first = nova_core._update_subconscious_state(session, probe, chosen_route="generic_fallback")
+        first = SUBCONSCIOUS_SERVICE.update_state(session, probe, chosen_route="generic_fallback")
         self.assertIsInstance(first, nova_core.SubconsciousState)
         self.assertFalse(first.replan_requested)
         self.assertEqual(first.crack_counts.get("route_unclear"), 1)
         self.assertEqual(len(first.recent_pressure_records), 1)
-        second = nova_core._update_subconscious_state(session, probe, chosen_route="generic_fallback")
+        second = SUBCONSCIOUS_SERVICE.update_state(session, probe, chosen_route="generic_fallback")
 
         self.assertIs(second, getattr(session, "subconscious_state", None))
         self.assertTrue(second.replan_requested)
@@ -161,9 +166,17 @@ class TestNovaCoreFulfillmentBridge(unittest.TestCase):
         self.assertEqual(second.crack_counts.get("route_fit_weak"), 2)
         self.assertEqual(len(second.recent_pressure_records), 2)
 
-        snapshot = nova_core._get_subconscious_snapshot(session)
+        snapshot = SUBCONSCIOUS_SERVICE.get_snapshot(session)
         self.assertEqual(snapshot.get("crack_counts", {}).get("route_unclear"), 2)
         self.assertEqual(snapshot.get("crack_counts", {}).get("route_fit_weak"), 2)
+        self.assertEqual(snapshot.get("weak_signal_window_counts", {}).get("route_unclear"), 2)
+        self.assertEqual(snapshot.get("weak_signal_window_counts", {}).get("route_fit_weak"), 2)
+        self.assertEqual(
+            snapshot.get("replan_reasons"),
+            [
+                {"kind": "weak_signal_threshold", "signal": "route_fit_weak", "window_count": 2, "threshold": 2},
+            ],
+        )
 
     def test_update_subconscious_state_requests_replan_for_clear_fulfillment_miss(self):
         session = ConversationSession()
@@ -173,39 +186,44 @@ class TestNovaCoreFulfillmentBridge(unittest.TestCase):
             [("user", "Show me workable options without collapsing too early.")],
         )
 
-        state = nova_core._update_subconscious_state(session, probe, chosen_route="generic_fallback")
+        state = SUBCONSCIOUS_SERVICE.update_state(session, probe, chosen_route="generic_fallback")
 
         self.assertIsInstance(state, nova_core.SubconsciousState)
         self.assertTrue(state.replan_requested)
         self.assertEqual(state.crack_counts.get("fulfillment_missed"), 1)
         self.assertEqual(state.crack_counts.get("fallback_overuse"), 1)
 
-        snapshot = nova_core._get_subconscious_snapshot(session)
+        snapshot = SUBCONSCIOUS_SERVICE.get_snapshot(session)
         self.assertTrue(snapshot.get("replan_requested"))
         self.assertIn("fulfillment_missed", snapshot.get("active_recent_signals") or [])
+        self.assertIn({"kind": "immediate_signal", "signal": "fulfillment_missed"}, snapshot.get("replan_reasons") or [])
 
     def test_snapshot_is_read_only_and_does_not_mutate_subconscious_state(self):
         session = ConversationSession()
         probe = nova_core._probe_turn_routes("how are you doing today ?", session, [])
-        nova_core._update_subconscious_state(session, probe, chosen_route="generic_fallback")
+        SUBCONSCIOUS_SERVICE.update_state(session, probe, chosen_route="generic_fallback")
 
-        snapshot = nova_core._get_subconscious_snapshot(session)
+        snapshot = SUBCONSCIOUS_SERVICE.get_snapshot(session)
         snapshot["replan_requested"] = True
+        snapshot["replan_reasons"].append({"kind": "synthetic", "signal": "synthetic"})
         snapshot["active_recent_signals"].append("synthetic")
         snapshot["crack_counts"]["route_unclear"] = 99
+        snapshot["weak_signal_window_counts"]["route_unclear"] = 99
         snapshot["recent_pressure_records"][0]["signals"].append("synthetic")
 
-        fresh_snapshot = nova_core._get_subconscious_snapshot(session)
+        fresh_snapshot = SUBCONSCIOUS_SERVICE.get_snapshot(session)
 
         self.assertFalse(fresh_snapshot.get("replan_requested"))
+        self.assertEqual(fresh_snapshot.get("replan_reasons"), [])
         self.assertNotIn("synthetic", fresh_snapshot.get("active_recent_signals") or [])
         self.assertEqual(fresh_snapshot.get("crack_counts", {}).get("route_unclear"), 1)
+        self.assertEqual(fresh_snapshot.get("weak_signal_window_counts", {}).get("route_unclear"), 1)
         self.assertNotIn("synthetic", fresh_snapshot.get("recent_pressure_records")[0].get("signals") or [])
 
     def test_build_turn_reflection_exposes_subconscious_snapshot_without_mutation(self):
         session = ConversationSession()
         probe = nova_core._probe_turn_routes("how are you doing today ?", session, [])
-        nova_core._update_subconscious_state(session, probe, chosen_route="generic_fallback")
+        SUBCONSCIOUS_SERVICE.update_state(session, probe, chosen_route="generic_fallback")
 
         with patch.object(nova_core.TURN_SUPERVISOR, "process_turn", return_value={"probe_summary": "All green", "probe_results": []}) as mocked_process:
             reflection = nova_core.build_turn_reflection(
@@ -219,8 +237,30 @@ class TestNovaCoreFulfillmentBridge(unittest.TestCase):
         session_summary = mocked_process.call_args.kwargs.get("session_summary") or {}
         snapshot = session_summary.get("subconscious_snapshot") or {}
         self.assertEqual(snapshot.get("crack_counts", {}).get("route_unclear"), 1)
+        self.assertEqual(snapshot.get("weak_signal_window_counts", {}).get("route_unclear"), 1)
         self.assertEqual(snapshot.get("record_window"), {"count": 1, "cap": 12})
         self.assertEqual(getattr(session.subconscious_state, "crack_counts", {}).get("route_unclear"), 1)
+
+    def test_build_turn_reflection_exposes_subconscious_replan_reasons(self):
+        session = ConversationSession()
+        probe = nova_core._probe_turn_routes(
+            "Show me workable options without collapsing too early.",
+            session,
+            [("user", "Show me workable options without collapsing too early.")],
+        )
+        SUBCONSCIOUS_SERVICE.update_state(session, probe, chosen_route="generic_fallback")
+
+        with patch.object(nova_core.TURN_SUPERVISOR, "process_turn", return_value={"probe_summary": "All green", "probe_results": []}):
+            reflection = nova_core.build_turn_reflection(
+                session,
+                entry_point="cli",
+                session_id="session-reasons",
+                current_decision={"planner_decision": "llm_fallback"},
+            )
+
+        reasons = reflection.get("subconscious_replan_reasons") or []
+        self.assertIn({"kind": "immediate_signal", "signal": "fulfillment_missed"}, reasons)
+        self.assertIn({"kind": "immediate_signal", "signal": "fallback_overuse"}, reasons)
 
     def test_reflection_stays_quiet_when_no_training_backlog_candidates_exist(self):
         session = ConversationSession()
@@ -233,7 +273,7 @@ class TestNovaCoreFulfillmentBridge(unittest.TestCase):
             }
         )
         probe = nova_core._probe_turn_routes("go ahead", session, [], pending_action=session.pending_action)
-        nova_core._update_subconscious_state(session, probe, chosen_route="supervisor_owned")
+        SUBCONSCIOUS_SERVICE.update_state(session, probe, chosen_route="supervisor_owned")
 
         with patch.object(nova_core.TURN_SUPERVISOR, "process_turn", return_value={"probe_summary": "All green", "probe_results": []}):
             reflection = nova_core.build_turn_reflection(
@@ -248,8 +288,8 @@ class TestNovaCoreFulfillmentBridge(unittest.TestCase):
     def test_reflection_exposes_training_backlog_when_candidates_exist(self):
         session = ConversationSession()
         probe = nova_core._probe_turn_routes("how are you doing today ?", session, [])
-        nova_core._update_subconscious_state(session, probe, chosen_route="generic_fallback")
-        nova_core._update_subconscious_state(session, probe, chosen_route="generic_fallback")
+        SUBCONSCIOUS_SERVICE.update_state(session, probe, chosen_route="generic_fallback")
+        SUBCONSCIOUS_SERVICE.update_state(session, probe, chosen_route="generic_fallback")
 
         with patch.object(nova_core.TURN_SUPERVISOR, "process_turn", return_value={"probe_summary": "All green", "probe_results": []}):
             reflection = nova_core.build_turn_reflection(
@@ -344,6 +384,8 @@ class TestNovaCoreFulfillmentBridge(unittest.TestCase):
                 "probe_summary": "All green",
                 "probe_results": [],
                 "subconscious_robust_weakness": {
+                    "target_seam": "fulfillment_bridge_entry_fallthrough",
+                    "seam_label": "fulfillment bridge entry fallthrough",
                     "robust_signals": [
                         {
                             "signal": "fallback_overuse",
@@ -370,9 +412,31 @@ class TestNovaCoreFulfillmentBridge(unittest.TestCase):
         )
 
         ranking = payload.get("subconscious_robust_weakness") or {}
+        self.assertEqual(ranking.get("target_seam"), "fulfillment_bridge_entry_fallthrough")
         self.assertEqual(ranking.get("robust_signals")[0].get("signal"), "fallback_overuse")
         self.assertEqual(ranking.get("robust_backlog_candidates")[0].get("suggested_test_name"), "test_generic_fallback_does_not_hide_viable_specific_route")
         self.assertEqual(ranking.get("quiet_control_verdict", {}).get("status"), "low_noise")
+
+    def test_reflection_calls_out_session_fact_recall_seam_separately(self):
+        session = ConversationSession()
+        family = next(
+            item for item in build_default_live_scenario_families()
+            if item.family_id == "session-fact-recall-fallthrough-family"
+        )
+        session.subconscious_live_family_summary = simulate_live_family(family)
+
+        with patch.object(nova_core.TURN_SUPERVISOR, "process_turn", return_value={"probe_summary": "All green", "probe_results": []}):
+            reflection = nova_core.build_turn_reflection(
+                session,
+                entry_point="cli",
+                session_id="session-session-fact-recall",
+                current_decision={"planner_decision": "llm_fallback"},
+            )
+
+        ranking = reflection.get("subconscious_robust_weakness") or {}
+        self.assertEqual(ranking.get("target_seam"), "session_fact_recall_route_fallthrough")
+        self.assertEqual(ranking.get("ownership_focus"), "session_fact_recall")
+        self.assertEqual(ranking.get("robust_signals")[0].get("signal"), "fallback_overuse")
 
     def test_probe_turn_routes_reports_supervisor_owned_without_claiming(self):
         session = ConversationSession()
@@ -480,7 +544,7 @@ class TestNovaCoreFulfillmentBridge(unittest.TestCase):
             "fit_evaluator.FitEvaluator.evaluate",
             return_value=_assessments(),
         ):
-            result = nova_core._maybe_run_fulfillment_flow(
+            result = nova_core._fulfillment_flow_service().maybe_run_fulfillment_flow(
                 "Show me the workable options without collapsing too early.",
                 session,
                 [("user", "Show me the workable options without collapsing too early.")],
@@ -520,7 +584,7 @@ class TestNovaCoreFulfillmentBridge(unittest.TestCase):
             "dynamic_replanner.DynamicReplanner.replan",
             return_value=(_intent(), [_models()[0]], [_assessments()[0]], replanned_choice),
         ):
-            result = nova_core._maybe_run_fulfillment_flow(
+            result = nova_core._fulfillment_flow_service().maybe_run_fulfillment_flow(
                 "New information makes the faster path less safe.",
                 session,
                 [("assistant", "I see multiple meaningful fulfillment paths right now:")],
@@ -535,7 +599,7 @@ class TestNovaCoreFulfillmentBridge(unittest.TestCase):
         session = ConversationSession()
 
         with patch("intent_interpreter.IntentInterpreter.interpret") as mocked_interpret:
-            result = nova_core._maybe_run_fulfillment_flow(
+            result = nova_core._fulfillment_flow_service().maybe_run_fulfillment_flow(
                 "how are you doing today ?",
                 session,
                 [],
@@ -556,7 +620,7 @@ class TestNovaCoreFulfillmentBridge(unittest.TestCase):
             "intent_interpreter.IntentInterpreter.interpret",
             side_effect=NotImplementedError("not implemented"),
         ):
-            result = nova_core._maybe_run_fulfillment_flow(
+            result = nova_core._fulfillment_flow_service().maybe_run_fulfillment_flow(
                 "Help me compare possible ways to solve this.",
                 session,
                 [],

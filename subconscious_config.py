@@ -53,6 +53,11 @@ SUBCONSCIOUS_CHARTER = {
     },
     "crack_accumulation_rules": {
         "recent_pressure_window_cap": 12,
+        "weak_crack_repeat_threshold": 3,
+        "weak_crack_repeat_thresholds": {
+            "route_unclear": 3,
+            "route_fit_weak": 2,
+        },
     },
     "re_evaluation_request_rules": {
         "advisory_only": True,

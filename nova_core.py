@@ -12,11 +12,14 @@
 from __future__ import annotations
 
 import argparse
+import importlib
+import asyncio
 import ast
-from dataclasses import dataclass, field
+import importlib.util
 import io
 import json
 import os
+import math
 import queue
 import re
 import socket
@@ -42,23 +45,55 @@ from env_inspector import inspect_environment, format_report
 import requests
 import psutil
 from tools import ToolContext, ToolInvocationError, build_default_registry
+from services.behavior_metrics import BehaviorMetricsStore
+from services.policy_manager import PolicyManager
+from services.web_research_session import WebResearchSessionStore
+from services.identity_memory import IdentityMemoryService
+from services.tool_registry import ToolRegistryService
+from services.tool_execution import ToolExecutionService
+from services.memory_adapter import MemoryAdapterService
+from services.session_state import SessionStateService, SubconsciousState
+from services.fulfillment_flow import FulfillmentFlowService
+from services.subconscious_runtime import SUBCONSCIOUS_SERVICE
+from services.subconscious_reporting import build_robust_weakness_summary, build_training_backlog_summary
+from services.nova_fulfillment_routing import evaluate_fulfillment_route_viability
+from services.nova_route_probing import build_probe_turn_routes
+from services.nova_route_probing import evaluate_deterministic_route_viability
+from services.nova_service_builders import build_fulfillment_flow_service
+from services.nova_service_builders import build_identity_memory_service
+from services.nova_service_builders import build_policy_manager
+from services.nova_turn_direction import analyze_routing_text
+from services.nova_turn_direction import determine_turn_direction
+from services.nova_turn_direction import is_explicit_command_like
+from services.nova_runtime_context import ACTION_LEDGER_DIR
+from services.nova_runtime_context import AUTONOMY_MAINTENANCE_FILE
+from services.nova_runtime_context import BASE_DIR
+from services.nova_runtime_context import BEHAVIOR_METRICS_FILE
+from services.nova_runtime_context import DEVICE_LOCATION_FILE
+from services.nova_runtime_context import GENERATED_DEFINITIONS_DIR
+from services.nova_runtime_context import HEALTH_LOG
+from services.nova_runtime_context import IDENTITY_FILE
+from services.nova_runtime_context import LEARNED_FACTS_FILE
+from services.nova_runtime_context import LOG_DIR
+from services.nova_runtime_context import MEMORY_DIR
+from services.nova_runtime_context import MEMORY_EVENTS_LOG
+from services.nova_runtime_context import PENDING_REVIEW_DIR
+from services.nova_runtime_context import POLICY_PATH
+from services.nova_runtime_context import PROMOTED_DEFINITIONS_DIR
+from services.nova_runtime_context import PROMOTION_AUDIT_LOG
+from services.nova_runtime_context import PULSE_SNAPSHOT_FILE
+from services.nova_runtime_context import PYTHON
+from services.nova_runtime_context import QUARANTINE_DIR
+from services.nova_runtime_context import RUNTIME_DIR
+from services.nova_runtime_context import SELF_REFLECTION_LOG
+from services.nova_runtime_context import TEST_SESSIONS_DIR
+from services.nova_runtime_context import UPDATE_NOW_PENDING_FILE
+from services.nova_runtime_context import get_active_user
+from services.nova_runtime_context import set_active_user
 try:
     import memory as memory_mod
 except Exception:
     memory_mod = None
-
-# Active session user id (thread-local so concurrent HTTP requests cannot bleed identity)
-_ACTIVE_USER_LOCAL = threading.local()
-
-def set_active_user(name: Optional[str]):
-    if not name:
-        _ACTIVE_USER_LOCAL.value = None
-    else:
-        _ACTIVE_USER_LOCAL.value = str(name).strip()
-
-def get_active_user() -> Optional[str]:
-    v = getattr(_ACTIVE_USER_LOCAL, "value", None)
-    return str(v).strip() if v else None
 
 # -------------------------
 # Voice deps are optional
@@ -98,56 +133,12 @@ def _ensure_voice_deps() -> bool:
 
     return VOICE_OK
 
-
+import sys
 
 
 # =========================
 # Config / Policy
 # =========================
-import sys
-
-# Robust BASE_DIR detection
-if getattr(sys, "frozen", False):
-    # Running as compiled executable
-    BASE_DIR = Path(sys.executable).resolve().parent
-else:
-    # Running as normal Python script
-    BASE_DIR = Path(__file__).resolve().parent
-
-RUNTIME_DIR = BASE_DIR / "runtime"
-LOG_DIR = BASE_DIR / "logs"
-MEMORY_DIR = BASE_DIR / "memory"
-ACTION_LEDGER_DIR = RUNTIME_DIR / "actions"
-MEMORY_EVENTS_LOG = RUNTIME_DIR / "memory_events.jsonl"
-HEALTH_LOG = RUNTIME_DIR / "health.log"
-IDENTITY_FILE = MEMORY_DIR / "identity.json"
-LEARNED_FACTS_FILE = MEMORY_DIR / "learned_facts.json"
-BEHAVIOR_METRICS_FILE = RUNTIME_DIR / "behavior_metrics.json"
-SELF_REFLECTION_LOG = RUNTIME_DIR / "self_reflection.jsonl"
-AUTONOMY_MAINTENANCE_FILE = RUNTIME_DIR / "autonomy_maintenance_state.json"
-PULSE_SNAPSHOT_FILE = RUNTIME_DIR / "pulse_snapshot.json"
-UPDATE_NOW_PENDING_FILE = RUNTIME_DIR / "update_now_pending.json"
-TEST_SESSIONS_DIR = RUNTIME_DIR / "test_sessions"
-GENERATED_DEFINITIONS_DIR = TEST_SESSIONS_DIR / "generated_definitions"
-PENDING_REVIEW_DIR = TEST_SESSIONS_DIR / "pending_review"
-QUARANTINE_DIR = TEST_SESSIONS_DIR / "quarantine"
-PROMOTION_AUDIT_LOG = TEST_SESSIONS_DIR / "promotion_audit.jsonl"
-PROMOTED_DEFINITIONS_DIR = BASE_DIR / "tests" / "sessions"
-POLICY_PATH = BASE_DIR / "policy.json"
-
-
-def _resolve_python_executable() -> str:
-    candidates = [
-        BASE_DIR / ".venv" / "Scripts" / "python.exe",
-        BASE_DIR / ".venv" / "bin" / "python",
-    ]
-    for path in candidates:
-        if path.exists():
-            return str(path)
-    return str(Path(sys.executable).resolve())
-
-
-PYTHON = _resolve_python_executable()
 OLLAMA_BASE = "http://127.0.0.1:11434"
 
 SAMPLE_RATE = 16000
@@ -191,47 +182,40 @@ PATCH_MANIFEST_NAME = "nova_patch.json"
 POLICY_AUDIT_LOG = RUNTIME_DIR / "policy_changes.jsonl"
 
 # Session-scoped web research continuation cache.
-WEB_RESEARCH_LAST_QUERY: str = ""
-WEB_RESEARCH_LAST_RESULTS: list[tuple[float, str, str]] = []
-WEB_RESEARCH_CURSOR: int = 0
+WEB_RESEARCH_SESSION = WebResearchSessionStore()
+
+
 TOOL_REGISTRY = build_default_registry()
 
-BEHAVIOR_METRICS: dict = {
-    "deterministic_hit": 0,
-    "tool_route": 0,
-    "llm_fallback": 0,
-    "low_confidence_block": 0,
-    "correction_learned": 0,
-    "correction_applied": 0,
-    "self_correction_applied": 0,
-    "conflict_detected": 0,
-    "top_repeated_failure_class": "",
-    "top_repeated_correction_class": "",
-    "routing_stable": True,
-    "unsupported_claims_blocked": False,
-    "last_reflection_turn": 0,
-    "last_reflection_at": "",
-    "last_event": "",
-    "updated_at": "",
-}
+# Tool registry service with event logging and manifest management
+TOOL_MANIFEST_FILE = BASE_DIR / "TOOL_MANIFEST.json"
+TOOL_EVENTS_FILE = RUNTIME_DIR / "tool_events.jsonl"
+TOOL_REGISTRY_SERVICE = ToolRegistryService(TOOL_REGISTRY, TOOL_MANIFEST_FILE, TOOL_EVENTS_FILE)
+
+BEHAVIOR_METRICS_STORE = BehaviorMetricsStore(BEHAVIOR_METRICS_FILE)
+BEHAVIOR_METRICS: dict = BEHAVIOR_METRICS_STORE.metrics
+
+def _policy_manager() -> PolicyManager:
+    return build_policy_manager(POLICY_PATH, POLICY_AUDIT_LOG, BASE_DIR)
+
+# Identity and memory service for clean-slate session enforcement
+def _identity_memory_service() -> IdentityMemoryService:
+    """Dynamic service creation with test-time path override support."""
+    service = build_identity_memory_service(
+        normalize_text_fn=_normalize_turn_text,
+        location_query_fn=_is_location_recall_query,
+        location_name_fn=_is_location_name_query,
+        saved_location_weather_fn=_is_saved_location_weather_query,
+        peims_query_fn=_is_peims_broad_query,
+        declarative_info_fn=_is_declarative_info,
+    )
+    return service
 
 TURN_SUPERVISOR = Supervisor()
 
 
 def _identity_memory_text_allowed(kind: str, text: str) -> bool:
-    if str(kind or "").strip().lower() != "identity":
-        return True
-    low = re.sub(r"\s+", " ", str(text or "").strip().lower())
-    if not low:
-        return False
-    if "nova_name_origin:" in low:
-        return True
-    return low.startswith((
-        "learned_fact: assistant_name=",
-        "learned_fact: developer_name=",
-        "learned_fact: developer_nickname=",
-        "learned_fact: identity_binding=developer",
-    ))
+    return _identity_memory_service().is_identity_memory_text_allowed(kind, text)
 
 
 def _session_identity_only_mode(session_id: str) -> bool:
@@ -242,261 +226,33 @@ def _session_identity_only_mode(session_id: str) -> bool:
 
 
 def _looks_like_identity_only_location_text(user_text: str) -> bool:
-    raw = str(user_text or "").strip()
-    if not raw:
-        return False
-    explicit_patterns = (
-        r"^\s*the\s+(\d{5})\s+is\s+the\s+zip\s+code\s+for\s+your\s+current\s+physical\s+location\s*[.!?]*$",
-        r"^\s*my\s+zip\s+is\s+(.+?)\s*[.!?]*$",
-        r"^\s*set\s+location\s+to\s+(.+?)\s*[.!?]*$",
-        r"^\s*(?:my|your|the)(?:\s+(?:current|physical))?\s+location\s+is\s+(.+?)\s*[.!?]*$",
-        r"^\s*i\s*(?:am|m)\s+in\s+(.+?)\s*[.!?]*$",
-        r"^\s*i\s+am\s+located\s+in\s+(.+?)\s*[.!?]*$",
-        r"^\s*you\s+are\s+located\s+in\s+(.+?)\s*[.!?]*$",
-        r"^\s*(?:living|based)\s+in\s+(.+?)\s*[.!?]*$",
-    )
-    return any(re.match(pattern, raw, flags=re.I) for pattern in explicit_patterns)
+    return _identity_memory_service().looks_like_identity_only_location_text(user_text)
 
 
 def _identity_only_block_kind(user_text: str, *, intent_result: Optional[dict] = None) -> str:
-    text = str(user_text or "").strip()
-    low = _normalize_turn_text(text).strip().lower()
-    intent = str((intent_result or {}).get("intent") or "").strip().lower()
-    if not low and not intent:
-        return ""
-
-    if intent in {"set_location", "weather_lookup", "store_fact", "web_research_family"}:
-        return {
-            "set_location": "location",
-            "weather_lookup": "weather",
-            "store_fact": "memory",
-            "web_research_family": "web",
-        }.get(intent, "") or ""
-
-    if _looks_like_identity_only_location_text(text) or _is_location_recall_query(text) or _is_location_name_query(text):
-        return "location"
-    if "weather" in low or _is_saved_location_weather_query(text):
-        return "weather"
-    if _is_peims_broad_query(text) or "peims" in low or "tsds" in low:
-        return "knowledge"
-    if _is_declarative_info(text):
-        return "memory"
-    return ""
+    return _identity_memory_service().get_identity_only_block_kind(user_text, intent_result=intent_result)
 
 
 def _identity_only_block_reply(block_kind: str) -> str:
-    domain = str(block_kind or "").strip().lower()
-    if domain == "location":
-        return "This clean session is identity-only, so I won't store or use location here."
-    if domain == "weather":
-        return "This clean session is identity-only, so I won't run weather lookups here."
-    if domain == "web":
-        return "This clean session is identity-only, so I won't run web research here."
-    if domain == "knowledge":
-        return "This clean session is identity-only, so I won't use local knowledge grounding here."
-    if domain == "memory":
-        return "This clean session is identity-only, so I won't store general memory here."
-    return "This clean session is identity-only, so I won't run non-identity routing here."
+    return _identity_memory_service().get_identity_only_block_reply(block_kind)
 
 
 def _save_behavior_metrics() -> None:
-    try:
-        RUNTIME_DIR.mkdir(parents=True, exist_ok=True)
-        tmp = BEHAVIOR_METRICS_FILE.with_suffix(".json.tmp")
-        tmp.write_text(json.dumps(BEHAVIOR_METRICS, ensure_ascii=True, indent=2), encoding="utf-8")
-        tmp.replace(BEHAVIOR_METRICS_FILE)
-    except Exception:
-        pass
+    BEHAVIOR_METRICS_STORE.save()
 
 
-def _get_session_fulfillment_state(session: object) -> Optional[dict]:
-    state = getattr(session, "fulfillment_state", None)
-    return state if isinstance(state, dict) else None
+_FULFILLMENT_FLOW_SERVICE: Optional[FulfillmentFlowService] = None
 
 
-def _set_session_fulfillment_state(session: object, state: Optional[dict]) -> None:
-    try:
-        setattr(session, "fulfillment_state", state if isinstance(state, dict) else None)
-    except Exception:
-        pass
-
-
-@dataclass(slots=True)
-class SubconsciousState:
-    replan_requested: bool = False
-    crack_counts: dict[str, int] = field(default_factory=dict)
-    recent_pressure_records: list[object] = field(default_factory=list)
-
-
-_SUBCONSCIOUS_IMMEDIATE_REPLAN_SIGNALS = set(SUBCONSCIOUS_CHARTER["signal_handling_rules"]["replan_immediate_signals"])
-_SUBCONSCIOUS_WEAK_CRACK_SIGNALS = set(SUBCONSCIOUS_CHARTER["signal_handling_rules"]["weak_crack_signals"])
-_MAX_RECENT_PRESSURE_RECORDS = int(SUBCONSCIOUS_CHARTER["crack_accumulation_rules"]["recent_pressure_window_cap"])
-
-
-def _get_subconscious_snapshot(session: object) -> dict:
-    state = getattr(session, "subconscious_state", None)
-    if not isinstance(state, SubconsciousState):
-        return {
-            "replan_requested": False,
-            "active_recent_signals": [],
-            "crack_counts": {},
-            "recent_pressure_records": [],
-            "record_window": {"count": 0, "cap": _MAX_RECENT_PRESSURE_RECORDS},
-        }
-
-    recent_records = list(state.recent_pressure_records or [])
-    recent_summaries = []
-    active_recent_signals: list[str] = []
-    for record in recent_records[-3:]:
-        signals = [str(signal).strip() for signal in list(getattr(record, "signals", []) or []) if str(signal).strip()]
-        for signal in signals:
-            if signal not in active_recent_signals:
-                active_recent_signals.append(signal)
-        recent_summaries.append(
-            {
-                "chosen_route": str(getattr(record, "chosen_route", "") or "") or None,
-                "comparison_strength": str(getattr(record, "comparison_strength", "") or "").strip().lower() or "weak",
-                "signals": list(signals),
-                "weak_spots": [
-                    str(item).strip()
-                    for item in list(getattr(record, "weak_spots", []) or [])
-                    if str(item).strip()
-                ],
-            }
+def _fulfillment_flow_service() -> FulfillmentFlowService:
+    global _FULFILLMENT_FLOW_SERVICE
+    if _FULFILLMENT_FLOW_SERVICE is None:
+        _FULFILLMENT_FLOW_SERVICE = build_fulfillment_flow_service(
+            probe_turn_routes_fn=_probe_turn_routes,
+            update_subconscious_state_fn=SUBCONSCIOUS_SERVICE.update_state,
+            session_state_service=SessionStateService,
         )
-
-    return {
-        "replan_requested": bool(state.replan_requested),
-        "active_recent_signals": active_recent_signals,
-        "crack_counts": {str(key): int(value) for key, value in dict(state.crack_counts or {}).items()},
-        "recent_pressure_records": recent_summaries,
-        "record_window": {
-            "count": len(recent_records),
-            "cap": _MAX_RECENT_PRESSURE_RECORDS,
-        },
-    }
-
-
-def _get_subconscious_training_backlog_summary(session: object) -> Optional[dict]:
-    snapshot = _get_subconscious_snapshot(session)
-    try:
-        from subconscious_training_backlog import build_training_backlog
-    except Exception:
-        return None
-
-    backlog = build_training_backlog(snapshot)
-    candidate_tests = list(getattr(backlog, "candidate_tests", []) or [])
-    if not candidate_tests:
-        return None
-
-    return {
-        "replan_requested": bool(getattr(backlog, "replan_requested", False)),
-        "candidate_tests": [
-            {
-                "signal": str(getattr(item, "signal", "") or "").strip(),
-                "occurrences": max(0, int(getattr(item, "occurrences", 0) or 0)),
-                "priority": str(getattr(item, "priority", "") or "").strip().lower() or "low",
-                "suggested_test_name": str(getattr(item, "suggested_test_name", "") or "").strip(),
-                "rationale": str(getattr(item, "rationale", "") or "").strip(),
-            }
-            for item in candidate_tests
-            if str(getattr(item, "signal", "") or "").strip()
-        ],
-    }
-
-
-def _get_subconscious_robust_weakness_summary(session: object) -> Optional[dict]:
-    family_summary = getattr(session, "subconscious_live_family_summary", None)
-    if family_summary is None:
-        return None
-
-    def _extract_items(name: str) -> list[dict]:
-        values = getattr(family_summary, name, None)
-        if values is None and isinstance(family_summary, dict):
-            values = family_summary.get(name)
-        items = []
-        for item in list(values or []):
-            payload = dict(item) if isinstance(item, dict) else None
-            if payload is None:
-                continue
-            cleaned = {
-                "signal": str(payload.get("signal") or "").strip(),
-                "classification": str(payload.get("classification") or "").strip(),
-                "robustness_score": round(float(payload.get("robustness_score", 0.0) or 0.0), 4),
-            }
-            if str(payload.get("suggested_test_name") or "").strip():
-                cleaned["suggested_test_name"] = str(payload.get("suggested_test_name") or "").strip()
-            if cleaned["signal"]:
-                items.append(cleaned)
-        return items
-
-    quiet_control_verdict = getattr(family_summary, "quiet_control_verdict", None)
-    if quiet_control_verdict is None and isinstance(family_summary, dict):
-        quiet_control_verdict = family_summary.get("quiet_control_verdict")
-    quiet_control_payload = dict(quiet_control_verdict) if isinstance(quiet_control_verdict, dict) else {}
-
-    robust_signals = _extract_items("robust_signals")
-    script_specific_signals = _extract_items("script_specific_signals")
-    robust_backlog_candidates = _extract_items("robust_backlog_candidates")
-
-    if not robust_signals and not script_specific_signals and not robust_backlog_candidates and not quiet_control_payload:
-        return None
-
-    summary = {
-        "robust_signals": robust_signals,
-        "script_specific_signals": script_specific_signals,
-        "robust_backlog_candidates": robust_backlog_candidates,
-        "quiet_control_verdict": {
-            "quiet_control": bool(quiet_control_payload.get("quiet_control", False)),
-            "status": str(quiet_control_payload.get("status") or "").strip(),
-        },
-    }
-    if str(quiet_control_payload.get("reason") or "").strip():
-        summary["quiet_control_verdict"]["reason"] = str(quiet_control_payload.get("reason") or "").strip()
-    return summary
-
-
-def _update_subconscious_state(
-    session: object,
-    probe_result: dict,
-    *,
-    chosen_route: Optional[str] = None,
-) -> Optional[SubconsciousState]:
-    if not isinstance(probe_result, dict):
-        return None
-
-    try:
-        from subconscious_route_probe import analyze_route_pressure
-    except Exception:
-        return None
-
-    existing_state = getattr(session, "subconscious_state", None)
-    state = existing_state if isinstance(existing_state, SubconsciousState) else SubconsciousState()
-    record = analyze_route_pressure(probe_result, chosen_route=chosen_route)
-
-    for signal in list(record.signals or []):
-        cleaned = str(signal or "").strip()
-        if cleaned:
-            state.crack_counts[cleaned] = int(state.crack_counts.get(cleaned, 0)) + 1
-
-    state.recent_pressure_records.append(record)
-    if len(state.recent_pressure_records) > _MAX_RECENT_PRESSURE_RECORDS:
-        state.recent_pressure_records = state.recent_pressure_records[-_MAX_RECENT_PRESSURE_RECORDS:]
-
-    repeated_weak_crack = any(
-        state.crack_counts.get(signal, 0) >= 2
-        for signal in list(record.signals or [])
-        if signal in _SUBCONSCIOUS_WEAK_CRACK_SIGNALS
-    )
-    state.replan_requested = any(
-        signal in _SUBCONSCIOUS_IMMEDIATE_REPLAN_SIGNALS for signal in list(record.signals or [])
-    ) or repeated_weak_crack
-
-    try:
-        setattr(session, "subconscious_state", state)
-    except Exception:
-        return state
-    return state
+    return _FULFILLMENT_FLOW_SERVICE
 
 
 def _fulfillment_route_viability(
@@ -506,87 +262,14 @@ def _fulfillment_route_viability(
     *,
     pending_action: Optional[dict] = None,
 ) -> dict:
-    state = _get_session_fulfillment_state(session)
-    text = str(user_text or "").strip()
-    low = text.lower()
-    conversation_state = getattr(session, "conversation_state", None)
-    state_kind = str(conversation_state.get("kind") or "").strip().lower() if isinstance(conversation_state, dict) else ""
-
-    if state is not None:
-        return {
-            "viable": True,
-            "fit_notes": ["existing fulfillment state present", "follow-up can replan current fulfillment space"],
-            "comparison_strength": "clear",
-        }
-    if isinstance(pending_action, dict):
-        return {
-            "viable": False,
-            "fit_notes": ["pending action is active", "fulfillment should not interrupt explicit continuation"],
-            "comparison_strength": "clear",
-        }
-    if state_kind and state_kind != "fulfillment":
-        return {
-            "viable": False,
-            "fit_notes": [f"active conversation state is {state_kind}", "fulfillment should not take over another active thread"],
-            "comparison_strength": "clear",
-        }
-    if len(text.split()) < 4:
-        return {
-            "viable": False,
-            "fit_notes": ["turn is too short", "not enough information to open a fulfillment space"],
-            "comparison_strength": "weak",
-        }
-    if low in {"yes", "no", "ok", "okay", "continue", "go ahead"} or _looks_like_affirmative_followup(text):
-        return {
-            "viable": False,
-            "fit_notes": ["turn looks like a short continuation", "fulfillment should not guess from a minimal follow-up"],
-            "comparison_strength": "weak",
-        }
-
-    model_space_cues = (
-        " options",
-        " option ",
-        " ways",
-        " way to",
-        " approaches",
-        " approach ",
-        " compare ",
-        " tradeoff",
-        " trade-off",
-        " path ",
-        " paths",
-        " best way",
-        " how should i",
-        " what are my options",
-        " help me decide",
-        " help me figure out",
-        " help me choose",
-        " show me workable",
-        " show me options",
+    return evaluate_fulfillment_route_viability(
+        user_text,
+        session,
+        recent_turns,
+        pending_action=pending_action,
+        get_fulfillment_state_fn=SessionStateService.get_fulfillment_state,
+        looks_like_affirmative_followup_fn=_looks_like_affirmative_followup,
     )
-    starts_like_model_space = low.startswith((
-        "compare ",
-        "show me ",
-        "help me decide",
-        "help me choose",
-        "how should i ",
-        "what are my options",
-    ))
-    cue_match = any(cue in f" {low} " for cue in model_space_cues)
-    if starts_like_model_space or cue_match:
-        notes = ["turn suggests multiple possible ways forward", "fulfillment comparison may be useful"]
-        if recent_turns:
-            notes.append("recent turns are available for intent context")
-        return {
-            "viable": True,
-            "fit_notes": notes,
-            "comparison_strength": "clear",
-        }
-    return {
-        "viable": False,
-        "fit_notes": ["no model-space cues detected", "generic fallback is a safer default"],
-        "comparison_strength": "weak",
-    }
 
 
 def _deterministic_route_viability(
@@ -596,108 +279,20 @@ def _deterministic_route_viability(
     *,
     pending_action: Optional[dict] = None,
 ) -> dict:
-    intent_result = TURN_SUPERVISOR.evaluate_rules(
-        user_text,
-        manager=session,
-        turns=recent_turns,
-        phase="intent",
-        entry_point="probe",
-    )
-    handle_result = TURN_SUPERVISOR.evaluate_rules(
-        user_text,
-        manager=session,
-        turns=recent_turns,
-        phase="handle",
-        entry_point="probe",
-    )
-
-    owned_result = intent_result if _supervisor_result_has_route(intent_result) else handle_result
-    if _supervisor_result_has_route(owned_result):
-        notes = [
-            note for note in [
-                f"explicit supervisor rule: {str(owned_result.get('rule_name') or '').strip()}",
-                f"intent: {str(owned_result.get('intent') or '').strip()}" if str(owned_result.get("intent") or "").strip() else "",
-                f"action: {str(owned_result.get('action') or '').strip()}" if str(owned_result.get("action") or "").strip() else "",
-            ] if note
-        ]
-        return {
-            "viable": True,
-            "fit_notes": notes,
-            "comparison_strength": "clear",
-            "owner_kind": "supervisor",
-            "intent_result": intent_result,
-            "handle_result": handle_result,
-            "owned_result": owned_result,
-        }
-
     try:
         from planner_decision import decide_turn
     except Exception:
-        return {
-            "viable": False,
-            "fit_notes": [],
-            "comparison_strength": "weak",
-            "owner_kind": "",
-            "intent_result": intent_result,
-            "handle_result": handle_result,
-            "owned_result": {},
-        }
+        decide_turn = None
 
-    planner_actions = decide_turn(
+    return evaluate_deterministic_route_viability(
         user_text,
-        config={
-            "session_turns": list(recent_turns or []),
-            "pending_action": dict(pending_action) if isinstance(pending_action, dict) else None,
-        },
+        session,
+        recent_turns,
+        pending_action=pending_action,
+        evaluate_rules_fn=TURN_SUPERVISOR.evaluate_rules,
+        supervisor_result_has_route_fn=_supervisor_result_has_route,
+        planner_decide_turn_fn=decide_turn,
     )
-    first_action = planner_actions[0] if isinstance(planner_actions, list) and planner_actions else {}
-    action_type = str(first_action.get("type") or "").strip()
-    tool_name = str(first_action.get("tool") or "").strip()
-
-    if action_type == "route_keyword":
-        return {
-            "viable": True,
-            "fit_notes": ["planner keyword route is deterministic", "keyword route keeps follow-up handling out of fallback"],
-            "comparison_strength": "clear",
-            "owner_kind": "planner_keyword",
-            "intent_result": intent_result,
-            "handle_result": handle_result,
-            "owned_result": {"action": "route_keyword", "rule_name": "planner_keyword"},
-        }
-
-    if action_type == "run_tool" and tool_name in {"patch_apply", "patch_rollback"}:
-        return {
-            "viable": True,
-            "fit_notes": ["planner direct-tool route is deterministic", "patch apply should not be treated as generic fallback"],
-            "comparison_strength": "clear",
-            "owner_kind": "planner_direct_tool",
-            "intent_result": intent_result,
-            "handle_result": handle_result,
-            "owned_result": {"action": tool_name, "rule_name": "planner_direct_tool", "intent": tool_name},
-        }
-
-    if action_type == "route_command":
-        normalized_text = str(user_text or "").strip().lower()
-        if normalized_text.startswith("patch ") or normalized_text == "patch rollback":
-            return {
-                "viable": True,
-                "fit_notes": ["planner command route is deterministic", "patch command should not be treated as generic fallback"],
-                "comparison_strength": "clear",
-                "owner_kind": "planner_command",
-                "intent_result": intent_result,
-                "handle_result": handle_result,
-                "owned_result": {"action": "route_command", "rule_name": "planner_command", "intent": "patch_command"},
-            }
-
-    return {
-        "viable": False,
-        "fit_notes": [],
-        "comparison_strength": "weak",
-        "owner_kind": "",
-        "intent_result": intent_result,
-        "handle_result": handle_result,
-        "owned_result": {},
-    }
 
 
 def _probe_turn_routes(
@@ -721,244 +316,15 @@ def _probe_turn_routes(
         recent_turns,
         pending_action=pending_action,
     )
-
-    generic_fallback_viable = True
-    generic_notes = ["generic fallback remains available if no explicit owner or useful fulfillment comparison exists"]
-    comparison_strength = "clear"
-    if supervisor_viable and fulfillment.get("viable"):
-        comparison_strength = "weak"
-        generic_notes.append("multiple routes are viable; no route should claim ownership in probe mode")
-    elif not supervisor_viable and not fulfillment.get("viable"):
-        comparison_strength = str(fulfillment.get("comparison_strength") or "weak")
-        generic_notes.append("fallback is the likely route because explicit ownership and fulfillment both look weak")
-
-    return {
-        "user_text": text if (text := str(user_text or "").strip()) else "",
-        "comparison_strength": comparison_strength,
-        "routes": {
-            "supervisor_owned": {
-                "viable": supervisor_viable,
-                "fit_notes": list(deterministic.get("fit_notes") or []),
-            },
-            "fulfillment_applicable": {
-                "viable": bool(fulfillment.get("viable")),
-                "fit_notes": list(fulfillment.get("fit_notes") or []),
-            },
-            "generic_fallback": {
-                "viable": generic_fallback_viable,
-                "fit_notes": generic_notes,
-            },
-        },
-    }
-
-
-def _should_attempt_fulfillment_flow(
-    user_text: str,
-    session: object,
-    recent_turns: list[tuple[str, str]],
-    *,
-    pending_action: Optional[dict] = None,
-) -> bool:
-    probe = _probe_turn_routes(
-        user_text,
-        session,
-        recent_turns,
-        pending_action=pending_action,
-    )
-    routes = probe.get("routes") if isinstance(probe.get("routes"), dict) else {}
-    supervisor_route = routes.get("supervisor_owned") if isinstance(routes.get("supervisor_owned"), dict) else {}
-    fulfillment_route = routes.get("fulfillment_applicable") if isinstance(routes.get("fulfillment_applicable"), dict) else {}
-    if bool(supervisor_route.get("viable")):
-        return False
-    if not bool(fulfillment_route.get("viable")):
-        return False
-    return str(probe.get("comparison_strength") or "weak").strip().lower() == "clear"
-
-
-def _build_fulfillment_state(
-    intent: object,
-    models: list[object],
-    assessments: list[object],
-    choice_set: object,
-) -> dict:
-    return {
-        "intent": intent,
-        "models": list(models or []),
-        "assessments": list(assessments or []),
-        "choice_set": choice_set,
-    }
-
-
-def _render_fulfillment_reply(choice_set: object) -> str:
-    options = list(getattr(choice_set, "options", []) or [])
-    if not options:
-        return ""
-
-    mode = str(getattr(getattr(choice_set, "mode", None), "value", getattr(choice_set, "mode", "")) or "")
-    selected_model_id = str(getattr(choice_set, "selected_model_id", "") or "")
-    if mode == "single_result":
-        option = next((item for item in options if str(getattr(item, "model_id", "") or "") == selected_model_id), options[0])
-        reply = f"I see one current fulfillment result: {str(getattr(option, 'label', '') or 'current path')}."
-        why_distinct = [str(item).strip() for item in list(getattr(option, "why_distinct", []) or []) if str(item).strip()]
-        tradeoffs = [str(item).strip() for item in list(getattr(option, "tradeoffs", []) or []) if str(item).strip()]
-        if why_distinct:
-            reply += f" Why this path: {'; '.join(why_distinct[:2])}."
-        if tradeoffs:
-            reply += f" Tradeoffs: {'; '.join(tradeoffs[:2])}."
-        return reply
-
-    lines = ["I see multiple meaningful fulfillment paths right now:"]
-    for option in options[:3]:
-        label = str(getattr(option, "label", "") or "option")
-        why_distinct = [str(item).strip() for item in list(getattr(option, "why_distinct", []) or []) if str(item).strip()]
-        tradeoffs = [str(item).strip() for item in list(getattr(option, "tradeoffs", []) or []) if str(item).strip()]
-        line = f"- {label}"
-        if why_distinct:
-            line += f": {why_distinct[0]}"
-        if tradeoffs:
-            line += f"; tradeoff: {tradeoffs[0]}"
-        lines.append(line)
-    plurality_reason = str(getattr(choice_set, "plurality_reason", "") or "").strip()
-    if plurality_reason:
-        lines.append(f"Why they remain distinct: {plurality_reason}.")
-    return "\n".join(lines)
-
-
-def _maybe_run_fulfillment_flow(
-    user_text: str,
-    session: object,
-    recent_turns: list[tuple[str, str]],
-    *,
-    pending_action: Optional[dict] = None,
-) -> Optional[dict]:
-    probe = _probe_turn_routes(
-        user_text,
-        session,
-        recent_turns,
-        pending_action=pending_action,
-    )
-    routes = probe.get("routes") if isinstance(probe.get("routes"), dict) else {}
-    supervisor_route = routes.get("supervisor_owned") if isinstance(routes.get("supervisor_owned"), dict) else {}
-    fulfillment_route = routes.get("fulfillment_applicable") if isinstance(routes.get("fulfillment_applicable"), dict) else {}
-    should_attempt = not bool(supervisor_route.get("viable")) and bool(fulfillment_route.get("viable")) and str(probe.get("comparison_strength") or "weak").strip().lower() == "clear"
-    if not should_attempt:
-        _update_subconscious_state(session, probe, chosen_route="generic_fallback")
-        return None
-
-    try:
-        from choice_presenter import ChoiceMode, ChoicePresenter
-        from dynamic_replanner import DynamicReplanner
-        from fit_evaluator import FitEvaluator
-        from fulfillment_contracts import CollapseStatus, ReplanContext, ReplanReason
-        from fulfillment_model_generator import FulfillmentModelGenerator
-        from intent_interpreter import IntentInterpreter
-    except Exception:
-        return None
-
-    state = _get_session_fulfillment_state(session)
-    try:
-        if state is None:
-            interpreter = IntentInterpreter()
-            generator = FulfillmentModelGenerator()
-            evaluator = FitEvaluator()
-            presenter = ChoicePresenter()
-
-            intent = interpreter.interpret(
-                user_text,
-                current_intent=None,
-                shared_context={"recent_turns": list(recent_turns or [])},
-            )
-            models = generator.generate(
-                intent,
-                existing_models=None,
-                shared_context={"recent_turns": list(recent_turns or [])},
-            )
-            assessments = evaluator.evaluate(
-                intent,
-                models,
-                shared_context={"recent_turns": list(recent_turns or [])},
-            )
-            choice_set = presenter.present(
-                intent,
-                models,
-                assessments,
-                current_choice_set=None,
-                shared_context={"recent_turns": list(recent_turns or [])},
-            )
-            state = _build_fulfillment_state(intent, models, assessments, choice_set)
-        else:
-            intent = state.get("intent")
-            models = list(state.get("models") or [])
-            assessments = list(state.get("assessments") or [])
-            choice_set = state.get("choice_set")
-            if intent is None or not models or choice_set is None:
-                return None
-
-            replanner = DynamicReplanner()
-            revised_intent, revised_models, revised_assessments, revised_choice_set = replanner.replan(
-                ReplanContext(
-                    replan_id=f"replan:{str(getattr(intent, 'intent_id', '') or 'intent')}:{int(time.time() * 1000)}",
-                    intent_id=str(getattr(intent, "intent_id", "") or ""),
-                    reason=ReplanReason.NEW_INFORMATION,
-                    trigger_summary=str(user_text or "")[:160],
-                    changed_facts={"new_information": str(user_text or "")},
-                    may_revise_fit=True,
-                    may_revise_choice=True,
-                    previous_active_model_ids=[str(getattr(model, "model_id", "") or "") for model in models],
-                    previous_selected_model_id=str(getattr(choice_set, "selected_model_id", "") or "") or None,
-                    previous_collapse_status=getattr(choice_set, "collapse_status", CollapseStatus.NOT_EVALUATED),
-                ),
-                intent=intent,
-                models=models,
-                assessments=assessments,
-                choice_set=choice_set,
-                shared_context={"recent_turns": list(recent_turns or []), "new_information": str(user_text or "")},
-            )
-            if revised_intent is None or revised_models is None or revised_assessments is None or revised_choice_set is None:
-                return None
-            state = _build_fulfillment_state(revised_intent, revised_models, revised_assessments, revised_choice_set)
-    except NotImplementedError:
-        _update_subconscious_state(session, probe, chosen_route="generic_fallback")
-        return None
-    except Exception:
-        _update_subconscious_state(session, probe, chosen_route="generic_fallback")
-        return None
-
-    _set_session_fulfillment_state(session, state)
-    choice_set = state.get("choice_set")
-    if choice_set is None or not list(getattr(choice_set, "options", []) or []):
-        _update_subconscious_state(session, probe, chosen_route="generic_fallback")
-        return None
-
-    mode = str(getattr(getattr(choice_set, "mode", None), "value", getattr(choice_set, "mode", "")) or "")
-    if mode not in {ChoiceMode.SINGLE_RESULT.value, ChoiceMode.MULTI_CHOICE.value}:
-        _update_subconscious_state(session, probe, chosen_route="generic_fallback")
-        return None
-
-    _update_subconscious_state(session, probe, chosen_route="fulfillment_applicable")
-
-    return {
-        "reply": _render_fulfillment_reply(choice_set),
-        "state": state,
-        "choice_set": choice_set,
-        "planner_decision": "fulfillment_single_result" if mode == ChoiceMode.SINGLE_RESULT.value else "fulfillment_choice",
-        "grounded": True,
-    }
+    return build_probe_turn_routes(user_text, deterministic, fulfillment)
 
 
 def behavior_record_event(event: str) -> None:
-    e = (event or "").strip()
-    if not e:
-        return
-    if e in BEHAVIOR_METRICS and isinstance(BEHAVIOR_METRICS.get(e), int):
-        BEHAVIOR_METRICS[e] = int(BEHAVIOR_METRICS.get(e, 0)) + 1
-    BEHAVIOR_METRICS["last_event"] = e
-    BEHAVIOR_METRICS["updated_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
-    _save_behavior_metrics()
+    BEHAVIOR_METRICS_STORE.record_event(event)
 
 
 def behavior_get_metrics() -> dict:
-    return dict(BEHAVIOR_METRICS)
+    return BEHAVIOR_METRICS_STORE.snapshot()
 
 
 def _infer_turn_intent(user_input: str) -> str:
@@ -1068,6 +434,8 @@ TOOL_INTENT_LABELS: dict[str, str] = {
     "web_search": "Web search route",
     "web_gather": "Web gather route",
     "web_research": "Web research route",
+    "wikipedia_lookup": "Wikipedia route",
+    "stackexchange_search": "StackExchange route",
 }
 
 
@@ -1345,6 +713,14 @@ def maybe_log_self_reflection(*, limit: int = 20, every: int = 5, records: Optio
         and bool(rec.get("continuation_used", False))
         and str(rec.get("active_subject") or "").startswith("retrieval")
     )
+    provider_hits_last_window: dict[str, int] = {}
+    for rec in recent:
+        if not isinstance(rec, dict):
+            continue
+        provider = str(rec.get("provider_used") or _provider_name_from_tool(rec.get("tool") or "")).strip().lower()
+        if not provider:
+            continue
+        provider_hits_last_window[provider] = int(provider_hits_last_window.get(provider, 0) or 0) + 1
     payload = {
         "ts": time.strftime("%Y-%m-%d %H:%M:%S"),
         "turn_count": count_total,
@@ -1372,6 +748,8 @@ def maybe_log_self_reflection(*, limit: int = 20, every: int = 5, records: Optio
         "continuations_last_window": int(continuation_count),
         "retrieval_continuations": int(retrieval_continuations),
         "sample_intents_last5": _sample_intents_last(recent, count=5),
+        "provider_hits_last_window": provider_hits_last_window,
+        "last_provider_used": str(latest_record.get("provider_used") or _provider_name_from_tool(latest_record.get("tool") or "")).strip(),
     }
     if isinstance(extra_payload, dict):
         for key, value in extra_payload.items():
@@ -1379,13 +757,7 @@ def maybe_log_self_reflection(*, limit: int = 20, every: int = 5, records: Optio
     _append_self_reflection(payload)
     if count_total % 10 == 0:
         record_health_snapshot(session_id=str(payload.get("session_id") or "default"), reflection=payload, session_end=False)
-    BEHAVIOR_METRICS["top_repeated_failure_class"] = payload["top_repeated_failure_class"]
-    BEHAVIOR_METRICS["top_repeated_correction_class"] = payload["top_repeated_correction_class"]
-    BEHAVIOR_METRICS["routing_stable"] = bool(payload["routing_stable"])
-    BEHAVIOR_METRICS["unsupported_claims_blocked"] = bool(payload["unsupported_claims_blocked"])
-    BEHAVIOR_METRICS["last_reflection_turn"] = count_total
-    BEHAVIOR_METRICS["last_reflection_at"] = payload["ts"]
-    _save_behavior_metrics()
+    BEHAVIOR_METRICS_STORE.update_from_reflection(payload, count_total)
     return payload
 
 
@@ -1397,7 +769,7 @@ def build_turn_reflection(
     current_decision: dict,
 ) -> dict:
     session_summary = session_state.reflection_summary()
-    session_summary["subconscious_snapshot"] = _get_subconscious_snapshot(session_state)
+    session_summary["subconscious_snapshot"] = SUBCONSCIOUS_SERVICE.get_snapshot(session_state)
     reflection = TURN_SUPERVISOR.process_turn(
         entry_point=entry_point,
         session_id=session_id,
@@ -1406,12 +778,15 @@ def build_turn_reflection(
         recent_records=_recent_action_ledger_records(limit=10),
         recent_reflections=_recent_self_reflection_rows(limit=3),
     )
-    subconscious_training_backlog = _get_subconscious_training_backlog_summary(session_state)
+    subconscious_training_backlog = build_training_backlog_summary(session_summary["subconscious_snapshot"])
     if isinstance(subconscious_training_backlog, dict):
         reflection["subconscious_training_backlog"] = subconscious_training_backlog
-    subconscious_robust_weakness = _get_subconscious_robust_weakness_summary(session_state)
+    subconscious_robust_weakness = build_robust_weakness_summary(getattr(session_state, "subconscious_live_family_summary", None))
     if isinstance(subconscious_robust_weakness, dict):
         reflection["subconscious_robust_weakness"] = subconscious_robust_weakness
+    subconscious_replan_reasons = list((session_summary["subconscious_snapshot"] or {}).get("replan_reasons") or [])
+    if subconscious_replan_reasons:
+        reflection["subconscious_replan_reasons"] = subconscious_replan_reasons
     reflection["session_id"] = str(session_id or "default").strip() or "default"
     reflection["entry_point"] = str(entry_point or "unknown").strip().lower() or "unknown"
     session_state.set_last_reflection(reflection)
@@ -1605,6 +980,18 @@ def _execute_registered_supervisor_rule(
             "intent": "last_question_recall",
             "kind": outcome_kind,
             "reply_contract": f"last_question.{outcome_kind}",
+            "reply_text": reply_text,
+            "state_delta": {},
+        }
+        _attach_reply_outcome(rule_result, outcome)
+        return True, reply_text, current_state
+
+    if action == "session_fact_recall":
+        reply_text, outcome_kind = _session_fact_recall_reply(rule_result)
+        outcome = {
+            "intent": "session_fact_recall",
+            "kind": outcome_kind,
+            "reply_contract": f"session_fact.{outcome_kind}",
             "reply_text": reply_text,
             "state_delta": {},
         }
@@ -2043,6 +1430,8 @@ def _llm_classify_routing_intent(
     raw = str(text or "").strip()
     if not raw:
         return None
+    if not _live_ollama_calls_allowed():
+        return None
     try:
         prompt = _ROUTING_INTENT_PROMPT.format(text=raw[:500])
         payload = {
@@ -2193,6 +1582,9 @@ def _handle_supervisor_intent(
 
     if intent == "weather_lookup":
         weather_mode = str((intent_result or {}).get("weather_mode") or "clarify").strip().lower() or "clarify"
+        if weather_mode == "clarify" and _weather_current_location_available():
+            intent_result = dict(intent_result or {})
+            intent_result["weather_mode"] = "current_location"
         outcome = _classify_weather_lookup_outcome(intent_result)
         reply_text, next_state, reply_outcome = _execute_weather_lookup_outcome(outcome)
         return True, reply_text, next_state, {
@@ -2510,7 +1902,7 @@ def _classify_weather_lookup_outcome(intent_result: dict) -> dict[str, object]:
             "kind": "current_location",
             "reply_contract": "weather_lookup.current_location",
             "weather_mode": weather_mode,
-            "location_value": "",
+            "location_value": location_value,
             "requires_tool": True,
             "pending_action": None,
             "next_state": next_state,
@@ -2549,8 +1941,16 @@ def _execute_weather_lookup_outcome(weather_outcome: dict[str, object]) -> tuple
         return render_reply(outcome), next_state, outcome
 
     if weather_mode == "current_location":
-        tool_result = execute_planned_action("weather_current_location")
-        next_state = _make_weather_result_state(weather_mode=weather_mode, tool_result=str(tool_result or ""))
+        location_value = str(outcome.get("location_value") or "").strip()
+        if location_value:
+            tool_result = execute_planned_action("weather_location", [location_value])
+        else:
+            tool_result = execute_planned_action("weather_current_location")
+        next_state = _make_weather_result_state(
+            weather_mode=weather_mode,
+            location_value=location_value,
+            tool_result=str(tool_result or ""),
+        )
         outcome["next_state"] = next_state
         outcome["state_delta"] = next_state
         outcome["tool_result"] = str(tool_result or "")
@@ -2776,6 +2176,14 @@ def _last_question_recall_reply(text: str, turns: Optional[list[tuple[str, str]]
     return "I don't have an earlier question in this active chat session.", "empty"
 
 
+def _session_fact_recall_reply(rule_result: dict) -> tuple[str, str]:
+    target = str((rule_result or {}).get("fact_target") or "").strip().lower()
+    value = str((rule_result or {}).get("fact_value") or "").strip()
+    if value:
+        return value.rstrip(".!?"), target or "fact"
+    return "I do not have that fact in this active chat session.", "empty"
+
+
 def _execute_retrieval_followup_outcome(state: dict, text: str) -> tuple[str, Optional[dict], dict[str, object]]:
     current_state = state if isinstance(state, dict) else {}
     urls = current_state.get("urls") if isinstance(current_state.get("urls"), list) else []
@@ -2818,14 +2226,14 @@ def _execute_retrieval_followup_outcome(state: dict, text: str) -> tuple[str, Op
     if source == "web_research" and _looks_like_retrieval_followup(text):
         result = tool_web_research("", continue_mode=True)
         if result and not result.lower().startswith("no active web research session"):
-            next_state = _make_retrieval_conversation_state("web_research", WEB_RESEARCH_LAST_QUERY, result) or current_state
+            next_state = _make_retrieval_conversation_state("web_research", WEB_RESEARCH_SESSION.query, result) or current_state
             outcome = {
                 "intent": "retrieval_followup",
                 "kind": "continued_results",
                 "reply_contract": "retrieval_followup.continued_results",
                 "reply_text": str(result or ""),
-                "query": str(WEB_RESEARCH_LAST_QUERY or query).strip(),
-                "result_count": len(WEB_RESEARCH_LAST_RESULTS) if WEB_RESEARCH_LAST_RESULTS else result_count,
+                "query": str(WEB_RESEARCH_SESSION.query or query).strip(),
+                "result_count": WEB_RESEARCH_SESSION.result_count() if WEB_RESEARCH_SESSION.has_results() else result_count,
                 "selected_index": None,
                 "state_delta": next_state,
             }
@@ -2865,16 +2273,24 @@ def _classify_web_research_outcome(
     payload = intent_result if isinstance(intent_result, dict) else {}
     request_kind = str(payload.get("web_request_kind") or "research_prompt").strip().lower() or "research_prompt"
     tool_name = str(payload.get("tool_name") or "web_research").strip().lower() or "web_research"
+    provider_candidates = payload.get("provider_candidates") if isinstance(payload.get("provider_candidates"), list) else []
+    provider_family = str(payload.get("provider_family") or "general_web").strip().lower() or "general_web"
     query = str(payload.get("query") or "").strip()
     if request_kind == "deep_search" and not query:
         query = _infer_research_query_from_turns(list(turns or []))
     if not query:
         query = str(user_text or "").strip()
+    resolved = _resolve_research_provider(provider_candidates, default_tool=tool_name)
+    tool_name = str(resolved.get("tool_name") or tool_name).strip().lower() or tool_name
+    provider_used = str(resolved.get("provider") or _provider_name_from_tool(tool_name)).strip().lower() or _provider_name_from_tool(tool_name)
     return {
         "intent": "web_research_family",
         "kind": request_kind,
         "reply_contract": f"web_research_family.{request_kind}",
         "tool_name": tool_name,
+        "provider_candidates": list(provider_candidates or []),
+        "provider_family": provider_family,
+        "provider_used": provider_used,
         "query": query,
         "requires_tool": True,
         "state_delta": {},
@@ -3014,6 +2430,10 @@ def finalize_action_ledger_record(
     rec["reply_contract"] = str(reply_contract or rec.get("reply_contract") or "").strip()
     outcome_payload = reply_outcome if isinstance(reply_outcome, dict) else rec.get("reply_outcome")
     rec["reply_outcome"] = dict(outcome_payload) if isinstance(outcome_payload, dict) else {}
+    rec["provider_used"] = str((rec.get("reply_outcome") or {}).get("provider_used") or rec.get("provider_used") or _provider_name_from_tool(rec.get("tool") or "")).strip()
+    provider_candidates = (rec.get("reply_outcome") or {}).get("provider_candidates") if isinstance(rec.get("reply_outcome"), dict) else rec.get("provider_candidates")
+    rec["provider_candidates"] = list(provider_candidates or []) if isinstance(provider_candidates or [], list) else []
+    rec["provider_family"] = str((rec.get("reply_outcome") or {}).get("provider_family") or rec.get("provider_family") or rec["provider_used"] or "").strip()
     acts = rec.get("turn_acts")
     rec["turn_acts"] = [str(item).strip() for item in acts if str(item).strip()] if isinstance(acts, list) else []
     finalized_routing_decision = _finalize_routing_decision(
@@ -3243,6 +2663,11 @@ def _is_location_request(user_text: str) -> bool:
 
 
 def _location_reply() -> str:
+    live = runtime_device_location_payload()
+    if live.get("available") and not live.get("stale"):
+        accuracy = live.get("accuracy_m")
+        accuracy_note = f" Accuracy about {int(round(float(accuracy)))}m." if accuracy is not None else ""
+        return f"My current device location is {live.get('coords_text')}.{accuracy_note}"
     preview = get_saved_location_text()
     if preview:
         return f"My location is {preview}."
@@ -3444,174 +2869,64 @@ def bad(msg): print(f"[FAIL] {msg}", flush=True)
 
 
 def load_policy() -> dict:
-    data = json.loads(POLICY_PATH.read_text(encoding="utf-8"))
-    if not isinstance(data, dict):
-        data = {}
-
-    data["allowed_root"] = str(Path(data.get("allowed_root", str(BASE_DIR))).resolve())
-
-    tools = data.get("tools_enabled") if isinstance(data.get("tools_enabled"), dict) else {}
-    tools.setdefault("screen", False)
-    tools.setdefault("camera", False)
-    tools.setdefault("files", False)
-    tools.setdefault("health", False)
-    tools.setdefault("web", False)
-    data["tools_enabled"] = tools
-
-    models = data.get("models") if isinstance(data.get("models"), dict) else {}
-    models.setdefault("chat", "llama3.1:8b")
-    models.setdefault("vision", "qwen2.5vl:7b")
-    models.setdefault("stt_size", "base")
-    data["models"] = models
-
-    memory = data.get("memory") if isinstance(data.get("memory"), dict) else {}
-    memory.setdefault("enabled", False)
-    memory.setdefault("mode", "B")
-    memory.setdefault("scope", "private")
-    memory.setdefault("top_k", 5)
-    memory.setdefault("context_top_k", 3)
-    memory.setdefault("min_score", 0.25)
-    memory.setdefault("store_min_chars", 12)
-    memory.setdefault("exclude_sources", [])
-    memory.setdefault("store_include_patterns", [])
-    memory.setdefault("store_exclude_patterns", [])
-    data["memory"] = memory
-
-    web = data.get("web") if isinstance(data.get("web"), dict) else {}
-    web.setdefault("enabled", False)
-    web.setdefault("search_provider", "html")
-    web.setdefault("search_api_endpoint", "")
-    web.setdefault("allow_domains", [])
-    web.setdefault("max_bytes", 20_000_000)
-    web.setdefault("research_domains_limit", 4)
-    web.setdefault("research_pages_per_domain", 8)
-    web.setdefault("research_scan_pages_per_domain", 12)
-    web.setdefault("research_max_depth", 1)
-    web.setdefault("research_seeds_per_domain", 8)
-    web.setdefault("research_max_results", 8)
-    web.setdefault("research_min_score", 3.0)
-    data["web"] = web
-
-    patch = data.get("patch") if isinstance(data.get("patch"), dict) else {}
-    patch.setdefault("enabled", True)
-    patch.setdefault("allow_force", False)
-    patch.setdefault("strict_manifest", True)
-    patch.setdefault("behavioral_check", True)
-    patch.setdefault("behavioral_check_timeout_sec", 600)
-    data["patch"] = patch
-
-    safety_envelope = data.get("safety_envelope") if isinstance(data.get("safety_envelope"), dict) else {}
-    safety_envelope.setdefault("enabled", True)
-    safety_envelope.setdefault("mode", "observe")
-    safety_envelope.setdefault("replay_threshold", 1.0)
-    safety_envelope.setdefault("replay_attempts", 2)
-    safety_envelope.setdefault("novelty_min", 0.35)
-    safety_envelope.setdefault("entropy_min", 2.8)
-    safety_envelope.setdefault("diversity_min_messages", 3)
-    safety_envelope.setdefault("human_veto_first_n", 3)
-    safety_envelope.setdefault("auto_demote_threshold", 0.90)
-    safety_envelope.setdefault("max_candidates_per_cycle", 3)
-    safety_envelope.setdefault("full_regression_required", False)
-    safety_envelope.setdefault("quarantine_root", str(BASE_DIR / "runtime" / "test_sessions" / "quarantine"))
-    safety_envelope.setdefault("pending_review_root", str(BASE_DIR / "runtime" / "test_sessions" / "pending_review"))
-    data["safety_envelope"] = safety_envelope
-
-    kidney = data.get("kidney") if isinstance(data.get("kidney"), dict) else {}
-    kidney.setdefault("enabled", True)
-    kidney.setdefault("mode", "observe")
-    kidney.setdefault("definition_max_age_days", 7)
-    kidney.setdefault("definition_novelty_min", 0.4)
-    kidney.setdefault("quarantine_max_age_hours", 48)
-    kidney.setdefault("preview_max_age_days", 3)
-    kidney.setdefault("snapshot_max_age_days", 30)
-    kidney.setdefault("temp_max_age_days", 14)
-    kidney.setdefault("temp_max_total_mb", 500)
-    kidney.setdefault("protect_patterns", [])
-    data["kidney"] = kidney
-
-    return data
+    return _policy_manager().load_policy()
 
 
 def _load_policy_raw() -> dict:
-    try:
-        # Use normalized policy view so mutating actions never drop required keys.
-        return load_policy()
-    except Exception:
-        return {}
+    return _policy_manager()._load_raw()
 
 
 def _save_policy_raw(data: dict) -> None:
-    POLICY_PATH.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    _policy_manager()._save_raw(data)
 
 
 def _record_policy_change(action: str, target: str, result: str, details: str = "") -> None:
-    entry = {
-        "ts": int(time.time()),
-        "user": get_active_user() or "unknown",
-        "action": str(action or "").strip(),
-        "target": str(target or "").strip(),
-        "result": str(result or "").strip(),
-        "details": str(details or "").strip(),
-    }
-    try:
-        POLICY_AUDIT_LOG.parent.mkdir(parents=True, exist_ok=True)
-        with open(POLICY_AUDIT_LOG, "a", encoding="utf-8") as f:
-            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
-    except Exception:
-        pass
+    _policy_manager().record_change(action, target, result, details, get_active_user())
 
 
 def policy_models():
-    p = load_policy()
-    return p.get("models") or {}
+    return _policy_manager().get_models()
 
 
 def policy_memory():
-    p = load_policy()
-    return p.get("memory") or {}
+    return _policy_manager().get_memory()
 
 
 def policy_tools_enabled():
-    p = load_policy()
-    return p.get("tools_enabled") or {}
+    return _policy_manager().get_tools_enabled()
 
 
-def build_tool_context(*, is_admin: bool = False, extra: Optional[dict] = None) -> ToolContext:
-    policy = load_policy()
-    extras = dict(extra or {})
-    return ToolContext(
-        user_id=get_active_user() or "",
-        session_id="",
-        policy=policy,
-        allowed_root=str(Path(policy.get("allowed_root") or str(BASE_DIR)).resolve()),
-        is_admin=bool(is_admin),
-        extra=extras,
+def _memory_adapter_service() -> MemoryAdapterService:
+    return MemoryAdapterService(
+        policy_memory_getter=policy_memory,
+        active_user_getter=get_active_user,
     )
 
 
+def _tool_execution_service() -> ToolExecutionService:
+    return ToolExecutionService(
+        policy_loader=load_policy,
+        active_user_getter=get_active_user,
+        base_dir=BASE_DIR,
+        registry_service=TOOL_REGISTRY_SERVICE,
+    )
+
+
+def build_tool_context(*, is_admin: bool = False, extra: Optional[dict] = None) -> ToolContext:
+    return _tool_execution_service().build_tool_context(is_admin=is_admin, extra=extra)
+
+
 def _tool_error_message(tool_name: str, reason: str) -> str:
-    r = str(reason or "tool_failed").strip()
-    mapping = {
-        "screen_tool_disabled": "Screen tool disabled by policy.",
-        "camera_tool_disabled": "Camera tool disabled by policy.",
-        "files_tool_disabled": "File tools disabled by policy.",
-        "health_tool_disabled": "Health tool disabled by policy.",
-        "patch_tool_disabled": "Patch tool disabled by policy.",
-        "patch_force_disabled": "Forced patch apply is disabled by policy.",
-        "admin_required": f"{tool_name} is restricted to admin-approved execution.",
-    }
-    return mapping.get(r, r)
+    return _tool_execution_service().tool_error_message(tool_name, reason)
 
 
 def execute_registered_tool(tool_name: str, args: dict, *, is_admin: bool = False, extra: Optional[dict] = None) -> str:
-    ctx = build_tool_context(is_admin=is_admin, extra=extra)
-    try:
-        result = TOOL_REGISTRY.run_tool(tool_name, args or {}, ctx)
-    except ToolInvocationError as e:
-        return _tool_error_message(tool_name, str(e))
-    except Exception as e:
-        return f"{tool_name} tool failed: {e}"
-    return str(result or "").strip()
+    return _tool_execution_service().execute_registered_tool(
+        tool_name,
+        args,
+        is_admin=is_admin,
+        extra=extra,
+    )
     
 def _research_handlers() -> dict[str, object]:
     return {
@@ -3619,6 +2934,8 @@ def _research_handlers() -> dict[str, object]:
         "web_search": tool_web_search,
         "web_research": tool_web_research,
         "web_gather": tool_web_gather,
+        "wikipedia_lookup": tool_wikipedia_lookup,
+        "stackexchange_search": tool_stackexchange_search,
     }
 
 def execute_research_action(action: str, value: str) -> str:
@@ -3651,29 +2968,19 @@ def execute_patch_action(action: str, value: str = "", *, force: bool = False, i
 
 
 def policy_web():
-    p = load_policy()
-    return (p.get("web") or {})
+    return _policy_manager().get_web()
 
 
 def policy_patch():
-    p = load_policy()
-    return (p.get("patch") or {})
+    return _policy_manager().get_patch()
 
 
 def web_enabled() -> bool:
-    p = load_policy()
-    return bool((p.get("tools_enabled") or {}).get("web")) and bool((p.get("web") or {}).get("enabled"))
+    return _policy_manager().is_web_enabled()
 
 
 def _host_allowed(host: str, allow_domains: list[str]) -> bool:
-    host = (host or "").lower()
-    for d in allow_domains:
-        d = (d or "").lower().strip()
-        if not d:
-            continue
-        if host == d or host.endswith("." + d):
-            return True
-    return False
+    return _policy_manager().host_allowed(host, allow_domains)
 
 
 def web_fetch(url: str, save_dir: Path) -> dict:
@@ -3823,6 +3130,246 @@ def _format_weather_output(label: str, summary: str) -> str:
     if style == "tool":
         return f"Forecast for {l}: {s}"
     return f"{l}: {s}"
+
+
+DEVICE_LOCATION_MAX_AGE_SEC = 300.0
+
+
+def _runtime_device_backend_provider() -> dict:
+    platform_supported = os.name == "nt"
+    winsdk_installed = False
+    if platform_supported:
+        try:
+            winsdk_installed = bool(
+                importlib.util.find_spec("winsdk.windows.devices.geolocation")
+                or importlib.util.find_spec("winsdk")
+            )
+        except Exception:
+            winsdk_installed = False
+    available = platform_supported and winsdk_installed
+    if available:
+        message = "Windows geolocation fallback is ready."
+    elif platform_supported:
+        message = "Windows geolocation fallback requires the winsdk package."
+    else:
+        message = "Windows geolocation fallback is only available on Windows hosts."
+    return {
+        "name": "windows_geolocator",
+        "platform_supported": platform_supported,
+        "winsdk_installed": winsdk_installed,
+        "available": available,
+        "message": message,
+    }
+
+
+def _coerce_bounded_float(value, *, minimum: float, maximum: float) -> Optional[float]:
+    try:
+        number = float(value)
+    except Exception:
+        return None
+    if not math.isfinite(number):
+        return None
+    if number < minimum or number > maximum:
+        return None
+    return number
+
+
+def _coerce_optional_metric(value) -> Optional[float]:
+    try:
+        if value in {None, ""}:
+            return None
+        number = float(value)
+    except Exception:
+        return None
+    if not math.isfinite(number):
+        return None
+    return number
+
+
+def _normalize_source_timestamp(value) -> float:
+    now = time.time()
+    try:
+        number = float(value)
+    except Exception:
+        return now
+    if not math.isfinite(number) or number <= 0:
+        return now
+    if number > 1_000_000_000_000:
+        number /= 1000.0
+    return min(number, now)
+
+
+def _format_runtime_coords(lat: float, lon: float) -> str:
+    return f"{lat:.5f},{lon:.5f}"
+
+
+def _device_location_status_payload(snapshot: Optional[dict], *, max_age_sec: float = DEVICE_LOCATION_MAX_AGE_SEC) -> dict:
+    backend_provider = _runtime_device_backend_provider()
+    if not isinstance(snapshot, dict):
+        return {
+            "available": False,
+            "status": "unavailable",
+            "stale": False,
+            "message": "No live device location fix is available.",
+            "backend_provider": backend_provider,
+        }
+
+    lat = _coerce_bounded_float(snapshot.get("lat"), minimum=-90.0, maximum=90.0)
+    lon = _coerce_bounded_float(snapshot.get("lon"), minimum=-180.0, maximum=180.0)
+    if lat is None or lon is None:
+        return {
+            "available": False,
+            "status": "invalid",
+            "stale": False,
+            "message": "Live device location data is invalid.",
+            "backend_provider": backend_provider,
+        }
+
+    captured_ts = _normalize_source_timestamp(snapshot.get("captured_ts"))
+    age_sec = max(0.0, time.time() - captured_ts)
+    stale = age_sec > max(0.0, float(max_age_sec))
+    accuracy_m = _coerce_optional_metric(snapshot.get("accuracy_m"))
+    speed_mps = _coerce_optional_metric(snapshot.get("speed_mps"))
+    heading_deg = _coerce_optional_metric(snapshot.get("heading_deg"))
+    altitude_m = _coerce_optional_metric(snapshot.get("altitude_m"))
+    coords_text = _format_runtime_coords(lat, lon)
+    source = str(snapshot.get("source") or "unknown").strip().lower() or "unknown"
+
+    payload = {
+        "available": True,
+        "status": "stale" if stale else "live",
+        "stale": stale,
+        "message": "Live device location is active." if not stale else "Live device location is stale.",
+        "lat": lat,
+        "lon": lon,
+        "coords_text": coords_text,
+        "source": source,
+        "permission_state": str(snapshot.get("permission_state") or "").strip().lower(),
+        "captured_ts": captured_ts,
+        "captured_at": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(captured_ts)),
+        "age_sec": round(age_sec, 1),
+        "backend_provider": backend_provider,
+    }
+    if accuracy_m is not None:
+        payload["accuracy_m"] = round(max(0.0, accuracy_m), 1)
+    if speed_mps is not None:
+        payload["speed_mps"] = round(max(0.0, speed_mps), 2)
+    if heading_deg is not None:
+        payload["heading_deg"] = round(heading_deg % 360.0, 1)
+    if altitude_m is not None:
+        payload["altitude_m"] = round(altitude_m, 1)
+    return payload
+
+
+def runtime_device_location_payload(*, max_age_sec: float = DEVICE_LOCATION_MAX_AGE_SEC) -> dict:
+    try:
+        if not DEVICE_LOCATION_FILE.exists():
+            return _device_location_status_payload(None, max_age_sec=max_age_sec)
+        raw = json.loads(DEVICE_LOCATION_FILE.read_text(encoding="utf-8") or "{}")
+    except Exception:
+        return {
+            "available": False,
+            "status": "error",
+            "stale": False,
+            "message": "Failed to read live device location state.",
+            "backend_provider": _runtime_device_backend_provider(),
+        }
+    return _device_location_status_payload(raw, max_age_sec=max_age_sec)
+
+
+def set_runtime_device_location(payload: dict) -> tuple[bool, str, dict]:
+    data = payload if isinstance(payload, dict) else {}
+    lat = _coerce_bounded_float(data.get("lat"), minimum=-90.0, maximum=90.0)
+    lon = _coerce_bounded_float(data.get("lon"), minimum=-180.0, maximum=180.0)
+    if lat is None or lon is None:
+        return False, "device_location_invalid", runtime_device_location_payload()
+
+    snapshot = {
+        "lat": lat,
+        "lon": lon,
+        "accuracy_m": _coerce_optional_metric(data.get("accuracy_m")),
+        "speed_mps": _coerce_optional_metric(data.get("speed_mps")),
+        "heading_deg": _coerce_optional_metric(data.get("heading_deg")),
+        "altitude_m": _coerce_optional_metric(data.get("altitude_m")),
+        "source": str(data.get("source") or "browser_watch").strip().lower() or "browser_watch",
+        "permission_state": str(data.get("permission_state") or "").strip().lower(),
+        "captured_ts": _normalize_source_timestamp(data.get("captured_ts")),
+        "updated_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+    }
+    try:
+        DEVICE_LOCATION_FILE.parent.mkdir(parents=True, exist_ok=True)
+        atomic_write_json(DEVICE_LOCATION_FILE, snapshot)
+    except Exception:
+        return False, "device_location_write_failed", runtime_device_location_payload()
+    return True, "device_location_updated", runtime_device_location_payload()
+
+
+def clear_runtime_device_location() -> dict:
+    try:
+        DEVICE_LOCATION_FILE.unlink(missing_ok=True)
+    except Exception:
+        pass
+    return runtime_device_location_payload()
+
+
+def _resolve_windows_device_coords(timeout_sec: float = 8.0) -> Optional[dict]:
+    provider = _runtime_device_backend_provider()
+    if not provider.get("available"):
+        return None
+    try:
+        wdg = importlib.import_module("winsdk.windows.devices.geolocation")
+    except Exception:
+        return None
+
+    async def _read_position() -> Optional[dict]:
+        locator = wdg.Geolocator()
+        try:
+            locator.desired_accuracy = wdg.PositionAccuracy.HIGH
+        except Exception:
+            pass
+        try:
+            position = await asyncio.wait_for(locator.get_geoposition_async(), timeout=float(timeout_sec))
+        except Exception:
+            return None
+        try:
+            point = position.coordinate.point.position
+            return {
+                "lat": float(point.latitude),
+                "lon": float(point.longitude),
+                "accuracy_m": _coerce_optional_metric(getattr(position.coordinate, "accuracy", None)),
+                "speed_mps": _coerce_optional_metric(getattr(position.coordinate, "speed", None)),
+                "heading_deg": _coerce_optional_metric(getattr(position.coordinate, "heading", None)),
+                "altitude_m": _coerce_optional_metric(getattr(point, "altitude", None)),
+                "source": "windows_geolocator",
+                "permission_state": "granted",
+                "captured_ts": time.time(),
+            }
+        except Exception:
+            return None
+
+    loop = asyncio.new_event_loop()
+    try:
+        return loop.run_until_complete(_read_position())
+    except Exception:
+        return None
+    finally:
+        try:
+            loop.close()
+        except Exception:
+            pass
+
+
+def resolve_current_device_coords(*, max_age_sec: float = DEVICE_LOCATION_MAX_AGE_SEC) -> Optional[tuple[float, float]]:
+    live = runtime_device_location_payload(max_age_sec=max_age_sec)
+    if live.get("available") and not live.get("stale"):
+        return (float(live.get("lat")), float(live.get("lon")))
+
+    windows_fix = _resolve_windows_device_coords()
+    if isinstance(windows_fix, dict):
+        ok, _msg, updated = set_runtime_device_location(windows_fix)
+        if ok and updated.get("available"):
+            return (float(updated.get("lat")), float(updated.get("lon")))
+    return None
 
 
 def _mentions_location_phrase(text: str) -> bool:
@@ -4462,7 +4009,15 @@ def _looks_like_retrieval_followup(text: str) -> bool:
 
 
 def _is_retrieval_tool(tool_name: str) -> bool:
-    return str(tool_name or "").strip().lower() in {"web_search", "web_research", "web_gather", "web_fetch", "search"}
+    return str(tool_name or "").strip().lower() in {
+        "web_search",
+        "web_research",
+        "web_gather",
+        "web_fetch",
+        "search",
+        "wikipedia_lookup",
+        "stackexchange_search",
+    }
 
 
 def _retrieval_query_from_text(tool_name: str, text: str) -> str:
@@ -4472,7 +4027,7 @@ def _retrieval_query_from_text(tool_name: str, text: str) -> str:
 
     if tool == "web_research":
         if low in {"web continue", "continue web", "continue web research"}:
-            return WEB_RESEARCH_LAST_QUERY
+            return WEB_RESEARCH_SESSION.query
         if low.startswith("web research "):
             return raw.split(maxsplit=2)[2].strip() if len(raw.split(maxsplit=2)) >= 3 else ""
     if tool == "web_search":
@@ -4486,7 +4041,29 @@ def _retrieval_query_from_text(tool_name: str, text: str) -> str:
     if tool == "web_fetch":
         if low.startswith("web "):
             return raw.split(maxsplit=1)[1].strip() if len(raw.split(maxsplit=1)) >= 2 else ""
+    if tool == "wikipedia_lookup":
+        if low.startswith("wikipedia "):
+            return raw.split(maxsplit=1)[1].strip() if len(raw.split(maxsplit=1)) >= 2 else ""
+        if low.startswith("wiki "):
+            return raw.split(maxsplit=1)[1].strip() if len(raw.split(maxsplit=1)) >= 2 else ""
+    if tool == "stackexchange_search":
+        if low.startswith("stackexchange "):
+            return raw[len("stackexchange "):].strip()
+        if low.startswith("stack overflow "):
+            return raw[len("stack overflow "):].strip()
     return raw
+
+
+def _provider_name_from_tool(tool_name: str) -> str:
+    mapping = {
+        "wikipedia_lookup": "wikipedia",
+        "stackexchange_search": "stackexchange",
+        "web_research": "general_web",
+        "web_search": "general_web",
+        "web_fetch": "general_web",
+        "web_gather": "general_web",
+    }
+    return str(mapping.get(str(tool_name or "").strip().lower(), "")).strip()
 
 
 def _make_retrieval_conversation_state(tool_name: str, query: str, tool_output: str) -> Optional[dict]:
@@ -4503,10 +4080,10 @@ def _make_retrieval_conversation_state(tool_name: str, query: str, tool_output: 
     effective_query = str(query or "").strip()
 
     if normalized_tool == "web_research":
-        if WEB_RESEARCH_LAST_RESULTS:
-            result_count = len(WEB_RESEARCH_LAST_RESULTS)
+        if WEB_RESEARCH_SESSION.has_results():
+            result_count = WEB_RESEARCH_SESSION.result_count()
         if not effective_query:
-            effective_query = WEB_RESEARCH_LAST_QUERY
+            effective_query = WEB_RESEARCH_SESSION.query
 
     if not urls and normalized_tool not in {"web_research", "web_gather", "web_fetch"}:
         return None
@@ -4612,7 +4189,7 @@ def _retrieval_followup_reply(state: dict, text: str) -> tuple[str, Optional[dic
     if source == "web_research" and _looks_like_retrieval_followup(text):
         result = tool_web_research("", continue_mode=True)
         if result and not result.lower().startswith("no active web research session"):
-            return result, (_make_retrieval_conversation_state("web_research", WEB_RESEARCH_LAST_QUERY, result) or state)
+            return result, (_make_retrieval_conversation_state("web_research", WEB_RESEARCH_SESSION.query, result) or state)
 
     parts = []
     if query:
@@ -4826,7 +4403,7 @@ def get_weather_for_location(lat: float, lon: float) -> str:
 
 
 def _need_confirmed_location_message() -> str:
-    return "I have a weather tool now, but I still need a confirmed location or coordinates."
+    return "I have a weather tool now, but I still need a confirmed location or coordinates for the current device."
 
 
 def tool_weather(location: str) -> str:
@@ -5034,80 +4611,43 @@ def speak_chunked(tts: SubprocessTTS, text: str, max_len: int = 220):
 # Memory hooks (optional)
 # =========================
 def mem_enabled() -> bool:
-    return bool(policy_memory().get("enabled", False))
+    return _memory_adapter_service().mem_enabled()
 
 
 def mem_top_k() -> int:
-    try:
-        return int(policy_memory().get("top_k", 5))
-    except Exception:
-        return 5
+    return _memory_adapter_service().mem_top_k()
 
 
 def mem_scope() -> str:
-    raw = str(policy_memory().get("scope", "private") or "private").strip().lower()
-    if raw not in {"private", "shared", "hybrid"}:
-        return "private"
-    return raw
+    return _memory_adapter_service().mem_scope()
 
 
 def mem_context_top_k() -> int:
-    try:
-        v = int(policy_memory().get("context_top_k", 3))
-        return max(1, min(v, 10))
-    except Exception:
-        return 3
+    return _memory_adapter_service().mem_context_top_k()
 
 
 def mem_min_score() -> float:
-    try:
-        return float(policy_memory().get("min_score", 0.25))
-    except Exception:
-        return 0.25
+    return _memory_adapter_service().mem_min_score()
 
 
 def mem_exclude_sources() -> list[str]:
-    xs = policy_memory().get("exclude_sources") or []
-    return [str(x) for x in xs if x]
+    return _memory_adapter_service().mem_exclude_sources()
 
 
 def mem_store_min_chars() -> int:
-    try:
-        return int(policy_memory().get("store_min_chars", 12))
-    except Exception:
-        return 12
+    return _memory_adapter_service().mem_store_min_chars()
 
 
 def mem_store_exclude_patterns() -> list[str]:
-    xs = policy_memory().get("store_exclude_patterns") or []
-    out = []
-    for x in xs:
-        s = str(x or "").strip()
-        if s:
-            out.append(s)
-    return out
+    return _memory_adapter_service().mem_store_exclude_patterns()
 
 
 def mem_store_include_patterns() -> list[str]:
-    xs = policy_memory().get("store_include_patterns") or []
-    out = []
-    for x in xs:
-        s = str(x or "").strip()
-        if s:
-            out.append(s)
-    return out
+    return _memory_adapter_service().mem_store_include_patterns()
 
 
 def _default_local_user_id() -> str:
-    raw = (
-        os.environ.get("NOVA_USER_ID")
-        or os.environ.get("NOVA_CHAT_USER")
-        or os.environ.get("USER")
-        or os.environ.get("LOGNAME")
-        or os.environ.get("USERNAME")
-        or ""
-    )
-    return re.sub(r"[^A-Za-z0-9._-]", "", str(raw).strip())[:64]
+    return _memory_adapter_service().default_local_user_id()
 
 
 def _memory_write_user() -> str | None:
@@ -5124,74 +4664,11 @@ def _memory_write_user() -> str | None:
 
 
 def _memory_should_keep_text(text: str) -> tuple[bool, str]:
-    t = (text or "").strip()
-    if not t:
-        return False, "empty"
-
-    low = t.lower()
-    if len(t) < mem_store_min_chars():
-        return False, "too_short"
-
-    # Never store questions as memory facts.
-    q_starts = (
-        "what ", "where ", "who ", "why ", "how ", "when ", "which ",
-        "do ", "did ", "can ", "could ", "would ", "is ", "are ", "should ",
-    )
-    if low.endswith("?") or any(low.startswith(q) for q in q_starts):
-        return False, "question"
-
-    # Drop common conversational noise.
-    low_value = {
-        "ok", "okay", "k", "kk", "yes", "no", "thanks", "thank you",
-        "done", "cool", "nice", "great", "sounds good", "got it", "understood",
-    }
-    if low in low_value:
-        return False, "ack"
-
-    noise_prefixes = (
-        "tip:", "nova:", "assistant:", "user:", "i couldn't find grounded sources",
-        "please try:", "network error:", "loading", "checking",
-    )
-    if any(low.startswith(p) for p in noise_prefixes):
-        return False, "ui_noise"
-
-    # Operator-controlled include/exclude patterns.
-    for pat in mem_store_exclude_patterns():
-        try:
-            if re.search(pat, t, flags=re.I):
-                return False, "policy_exclude"
-        except re.error:
-            if pat.lower() in low:
-                return False, "policy_exclude"
-
-    for pat in mem_store_include_patterns():
-        try:
-            if re.search(pat, t, flags=re.I):
-                return True, "policy_include"
-        except re.error:
-            if pat.lower() in low:
-                return True, "policy_include"
-
-    # Prefer durable facts/preferences over transient chat.
-    durable_markers = (
-        "my name is", "i am", "i'm", "i live in", "my location is", "i work",
-        "my favorite", "i like ", "developer", "gus", "gustavo", "peims",
-        "always", "never", "remember this", "learned_fact:",
-    )
-    has_number = bool(re.search(r"\b\d{2,}\b", t))
-    if any(m in low for m in durable_markers) or has_number:
-        return True, "durable_fact"
-
-    # Keep only medium/long declarative statements by default.
-    if len(t.split()) >= 8:
-        return True, "long_statement"
-
-    return False, "low_signal"
+    return _memory_adapter_service().memory_should_keep_text(text)
 
 
 def mem_should_store(text: str) -> bool:
-    keep, _reason = _memory_should_keep_text(text)
-    return keep
+    return _memory_adapter_service().mem_should_store(text)
 
 
 def _memory_runtime_user() -> str | None:
@@ -5204,21 +4681,7 @@ def _memory_runtime_user() -> str | None:
 
 
 def _format_memory_recall_hits(hits) -> str:
-    bullets = []
-    seen = set()
-    norm = lambda s: re.sub(r"\W+", " ", (s or "").lower()).strip()
-    for _score, _ts, _kind, _source, _user_row, text in (hits or []):
-        p = (text or "").strip()
-        if not p:
-            continue
-        one = re.sub(r"\s+", " ", p).strip()
-        n = norm(one)
-        if n in seen:
-            continue
-        seen.add(n)
-        bullets.append(f"- {one[:260]}")
-    bullets = bullets[:max(1, int(mem_context_top_k()))]
-    return "\n".join(bullets)[:2000] if bullets else ""
+    return _memory_adapter_service().format_memory_recall_hits(hits)
 
 
 def mem_stats_payload(emit_event: bool = True) -> dict:
@@ -6231,6 +5694,12 @@ def _sentence_supported_by_evidence(sentence: str, evidence_text: str, tool_cont
     if not low:
         return True
     if not _is_risky_claim_sentence(sentence):
+        quoted_spans = [span.strip().lower() for span in re.findall(r'"([^"]{8,})"', sentence or "") if span.strip()]
+        if quoted_spans:
+            combined_evidence = (evidence_low + "\n" + tool_low).strip()
+            for span in quoted_spans:
+                if span not in combined_evidence:
+                    return False
         return True
 
     impossible_claims = [
@@ -6565,128 +6034,23 @@ def _strip_invocation_prefix(text: str) -> str:
 
 
 def _normalize_domain_input(value: str) -> str:
-    s = (value or "").strip().lower()
-    if not s:
-        return ""
-
-    if not re.match(r"^[a-z][a-z0-9+.-]*://", s):
-        s = "https://" + s
-
-    try:
-        p = urlparse(s)
-        host = (p.hostname or "").strip().lower()
-    except Exception:
-        return ""
-
-    if not host:
-        return ""
-
-    # Basic host validation: labels with letters/numbers/hyphen, separated by dots.
-    if not re.match(r"^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)(?:\.(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?))*$", host):
-        return ""
-
-    return host
+    return _policy_manager().normalize_domain_input(value)
 
 
 def list_allowed_domains() -> str:
-    allow_domains = list(policy_web().get("allow_domains") or [])
-    if not allow_domains:
-        return "No allowed domains are configured in policy.json."
-
-    lines = ["Here are the domains I currently allow:"]
-    for d in allow_domains:
-        lines.append(f"- {d}")
-    return "\n".join(lines)
+    return _policy_manager().list_allowed_domains()
 
 
 def policy_allow_domain(value: str) -> str:
-    host = _normalize_domain_input(value)
-    if not host:
-        _record_policy_change("allow_domain", value, "failed", "invalid_domain_input")
-        return "Usage: policy allow <domain-or-url>"
-
-    data = _load_policy_raw()
-    web = data.get("web") if isinstance(data.get("web"), dict) else {}
-    allow_domains = list(web.get("allow_domains") or [])
-
-    existing = {str(x).strip().lower() for x in allow_domains if str(x).strip()}
-    if host in existing:
-        _record_policy_change("allow_domain", host, "skipped", "already_allowed")
-        return f"Domain already allowed: {host}"
-
-    allow_domains.append(host)
-    web["allow_domains"] = allow_domains
-    data["web"] = web
-    _save_policy_raw(data)
-    _record_policy_change("allow_domain", host, "success", "added_to_allow_domains")
-
-    return f"Added allowed domain: {host}\n{list_allowed_domains()}"
+    return _policy_manager().allow_domain(value, get_active_user())
 
 
 def policy_remove_domain(value: str) -> str:
-    host = _normalize_domain_input(value)
-    if not host:
-        _record_policy_change("remove_domain", value, "failed", "invalid_domain_input")
-        return "Usage: policy remove <domain-or-url>"
-
-    data = _load_policy_raw()
-    web = data.get("web") if isinstance(data.get("web"), dict) else {}
-    allow_domains = list(web.get("allow_domains") or [])
-
-    kept = []
-    removed = False
-    for d in allow_domains:
-        dd = str(d).strip()
-        if dd.lower() == host:
-            removed = True
-            continue
-        kept.append(dd)
-
-    if not removed:
-        _record_policy_change("remove_domain", host, "skipped", "not_found")
-        return f"Domain not found in allowlist: {host}"
-
-    web["allow_domains"] = kept
-    data["web"] = web
-    _save_policy_raw(data)
-    _record_policy_change("remove_domain", host, "success", "removed_from_allow_domains")
-    return f"Removed allowed domain: {host}\n{list_allowed_domains()}"
+    return _policy_manager().remove_domain(value, get_active_user())
 
 
 def policy_audit(limit: int = 20) -> str:
-    n = max(1, min(200, int(limit or 20)))
-    if not POLICY_AUDIT_LOG.exists():
-        return "No policy audit entries yet."
-
-    try:
-        lines = [ln for ln in POLICY_AUDIT_LOG.read_text(encoding="utf-8").splitlines() if ln.strip()]
-    except Exception as e:
-        return f"Failed to read policy audit log: {e}"
-
-    if not lines:
-        return "No policy audit entries yet."
-
-    rows = []
-    for ln in lines[-n:]:
-        try:
-            rows.append(json.loads(ln))
-        except Exception:
-            continue
-    if not rows:
-        return "No parseable policy audit entries found."
-
-    out = [f"Recent policy changes (last {len(rows)}):"]
-    for r in rows:
-        ts = int(r.get("ts") or 0)
-        tstr = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(ts)) if ts else "unknown-time"
-        user = str(r.get("user") or "unknown")
-        action = str(r.get("action") or "")
-        target = str(r.get("target") or "")
-        result = str(r.get("result") or "")
-        details = str(r.get("details") or "")
-        out.append(f"- {tstr} user={user} action={action} target={target} result={result} details={details}")
-
-    return "\n".join(out)
+    return _policy_manager().audit(limit)
 
 
 WEB_RESEARCH_PRESETS = {
@@ -6730,92 +6094,180 @@ def web_mode_status() -> str:
 
 
 def set_web_mode(mode: str) -> str:
-    m = (mode or "").strip().lower()
-    if m in {"balanced", "default"}:
-        m = "normal"
-    if m in {"deep", "full", "maxinput"}:
-        m = "max"
-
-    if m not in WEB_RESEARCH_PRESETS:
-        return "Usage: web mode <normal|max>"
-
-    data = _load_policy_raw()
-    web = data.get("web") if isinstance(data.get("web"), dict) else {}
-    for k, v in WEB_RESEARCH_PRESETS[m].items():
-        web[k] = v
-    data["web"] = web
-    _save_policy_raw(data)
-    _record_policy_change("web_mode", m, "success", "updated_research_limits")
-    return f"Web research mode set to {m}.\n" + web_mode_status()
+    result = _policy_manager().set_web_mode(mode, get_active_user())
+    if result.startswith("Web research mode set to"):
+        return result + "\n" + web_mode_status()
+    return result
 
 
 def set_memory_scope(scope: str) -> str:
-    value = (scope or "").strip().lower()
-    aliases = {
-        "per-user": "private",
-        "user": "private",
-        "global": "shared",
-        "both": "hybrid",
-    }
-    value = aliases.get(value, value)
-    if value not in {"private", "shared", "hybrid"}:
-        return "Usage: memory scope <private|shared|hybrid>"
-
-    data = _load_policy_raw()
-    memory = data.get("memory") if isinstance(data.get("memory"), dict) else {}
-    prev = str(memory.get("scope") or "private").strip().lower()
-    memory["scope"] = value
-    data["memory"] = memory
-    _save_policy_raw(data)
-    _record_policy_change("memory_scope", value, "success", f"from={prev}")
-    return f"Memory scope set to {value}."
+    return _policy_manager().set_memory_scope(scope, get_active_user())
 
 
 def get_search_provider() -> str:
-    provider = str((policy_web().get("search_provider") or "html")).strip().lower()
-    if provider not in {"html", "searxng"}:
-        return "html"
-    return provider
+    return _policy_manager().get_search_provider()
+
+
+def get_search_provider_priority() -> list[str]:
+    return _policy_manager().get_search_provider_priority()
 
 
 def set_search_provider(provider: str) -> str:
-    p = (provider or "").strip().lower()
-    if p in {"search", "web", "fallback", "default"}:
-        p = "html"
-    if p in {"searx", "searx-ng", "sxng"}:
-        p = "searxng"
+    return _policy_manager().set_search_provider(provider, get_active_user())
 
-    if p not in {"html", "searxng"}:
-        return "Usage: search provider <html|searxng>"
 
-    data = _load_policy_raw()
-    web = data.get("web") if isinstance(data.get("web"), dict) else {}
-    tools = data.get("tools_enabled") if isinstance(data.get("tools_enabled"), dict) else {}
-    prev = str(web.get("search_provider") or "html").strip().lower()
-    web["search_provider"] = p
-    # Operator intent: selecting a search provider should activate web path.
-    web["enabled"] = True
-    tools["web"] = True
-    data["web"] = web
-    data["tools_enabled"] = tools
-    _save_policy_raw(data)
-    _record_policy_change("search_provider", p, "success", f"from={prev}")
+def set_search_provider_priority(priority: str | list[str]) -> str:
+    return _policy_manager().set_search_provider_priority(priority, get_active_user())
 
-    endpoint = str(web.get("search_api_endpoint") or "").strip()
-    if p == "searxng":
-        if not endpoint:
-            return (
-                "Search provider set to searxng and web enabled. "
-                "Configure web.search_api_endpoint in policy.json."
+
+def get_search_endpoint() -> str:
+    return _policy_manager().get_search_endpoint()
+
+
+def set_search_endpoint(endpoint: str) -> str:
+    return _policy_manager().set_search_endpoint(endpoint, get_active_user())
+
+
+def auto_repair_search_endpoint(endpoint: str) -> str:
+    return _policy_manager().auto_repair_search_endpoint(endpoint, get_active_user())
+
+
+def _resolve_research_provider(candidates: list[str], *, default_tool: str = "web_research") -> dict[str, str]:
+    normalized_candidates: list[str] = []
+    seen: set[str] = set()
+    for item in list(candidates or []):
+        token = str(item or "").strip().lower()
+        if not token or token in seen:
+            continue
+        seen.add(token)
+        normalized_candidates.append(token)
+    if not normalized_candidates:
+        provider = _provider_name_from_tool(default_tool) or "general_web"
+        return {"provider": provider, "tool_name": default_tool}
+
+    chosen = next((item for item in get_search_provider_priority() if item in normalized_candidates), normalized_candidates[0])
+    tool_map = {
+        "wikipedia": "wikipedia_lookup",
+        "stackexchange": "stackexchange_search",
+        "general_web": "web_research",
+    }
+    return {"provider": chosen, "tool_name": tool_map.get(chosen, default_tool)}
+
+
+def _normalize_search_endpoint(endpoint: str) -> str:
+    raw = str(endpoint or "").strip()
+    if not raw:
+        return "http://127.0.0.1:8080/search"
+    if "://" not in raw:
+        raw = "http://" + raw
+    parsed = urlparse(raw)
+    scheme = str(parsed.scheme or "http").strip().lower() or "http"
+    host = str(parsed.hostname or "").strip()
+    if not host:
+        return raw
+    port = f":{parsed.port}" if parsed.port else ""
+    path = str(parsed.path or "/search").strip() or "/search"
+    return f"{scheme}://{host}{port}{path}"
+
+
+def _search_endpoint_candidates(endpoint: str) -> list[str]:
+    configured = _normalize_search_endpoint(endpoint)
+    candidates: list[str] = []
+
+    def _append(value: str) -> None:
+        normalized = _normalize_search_endpoint(value)
+        if normalized and normalized not in candidates:
+            candidates.append(normalized)
+
+    _append(configured)
+    parsed = urlparse(configured)
+    host = str(parsed.hostname or "").strip().lower()
+    if host not in {"127.0.0.1", "localhost"}:
+        return candidates
+
+    scheme = str(parsed.scheme or "http").strip().lower() or "http"
+    path = str(parsed.path or "/search").strip() or "/search"
+    current_port = int(parsed.port or (443 if scheme == "https" else 80))
+    ports: list[int] = []
+    for port in (current_port, 8080, 8081):
+        if port not in ports:
+            ports.append(port)
+    hosts: list[str] = [host]
+    for local_host in ("127.0.0.1", "localhost"):
+        if local_host not in hosts:
+            hosts.append(local_host)
+    for local_host in hosts:
+        for port in ports:
+            _append(f"{scheme}://{local_host}:{port}{path}")
+    return candidates
+
+
+def _is_local_search_endpoint(endpoint: str) -> bool:
+    parsed = urlparse(_normalize_search_endpoint(endpoint))
+    return str(parsed.hostname or "").strip().lower() in {"127.0.0.1", "localhost"}
+
+
+def probe_search_endpoint(endpoint: str = "", *, timeout: float = 2.5, persist_repair: bool = False) -> dict:
+    configured = _normalize_search_endpoint(endpoint or get_search_endpoint())
+    candidates = _search_endpoint_candidates(configured)
+    last_note = "endpoint_unreachable"
+    candidate_errors: list[dict[str, str]] = []
+    for candidate in candidates:
+        try:
+            r = requests.get(
+                candidate,
+                params={"q": "health", "format": "json"},
+                headers={"User-Agent": "Nova/1.0", "Accept": "application/json"},
+                timeout=timeout,
             )
-        if endpoint.endswith(":8080/search"):
-            return (
-                "Search provider set to searxng and web enabled. "
-                "Current endpoint is on Nova's own port (8080) and may return 404; set a real SearXNG endpoint."
-            )
-        return f"Search provider set to searxng and web enabled (endpoint: {endpoint})."
+            r.raise_for_status()
+            data = r.json()
+            if not isinstance(data, dict):
+                raise ValueError("non_json_response")
+            note = f"status={r.status_code}"
+            repair_message = ""
+            repaired = False
+            if candidate != configured:
+                note += f" auto-detected={candidate}"
+                if persist_repair and _is_local_search_endpoint(configured) and _is_local_search_endpoint(candidate):
+                    repair_message = auto_repair_search_endpoint(candidate)
+                    repaired = bool(repair_message)
+                    if repaired:
+                        note += " auto-repaired"
+            return {
+                "ok": True,
+                "endpoint": configured,
+                "resolved_endpoint": candidate,
+                "note": note,
+                "auto_detected": candidate != configured,
+                "repaired": repaired,
+                "repair_message": repair_message,
+                "candidate_errors": candidate_errors,
+                "checked_endpoints": candidates,
+                "message": f"SearXNG probe passed for {candidate} ({note}).",
+            }
+        except Exception as e:
+            last_note = f"error:{e}"
+            candidate_errors.append({"endpoint": candidate, "note": last_note})
 
-    return "Search provider set to html and web enabled."
+    configured_error = next((item for item in candidate_errors if str(item.get("endpoint") or "") == configured), None)
+    checked_summary = "; ".join(
+        f"{str(item.get('endpoint') or '')} => {str(item.get('note') or '')}"
+        for item in candidate_errors
+    )
+    note = str((configured_error or {}).get("note") or last_note)
+    if checked_summary:
+        note = f"configured_failed={note}; checked={checked_summary}"
+    return {
+        "ok": False,
+        "endpoint": configured,
+        "resolved_endpoint": "",
+        "note": note,
+        "auto_detected": False,
+        "candidate_errors": candidate_errors,
+        "checked_endpoints": candidates,
+        "message": f"SearXNG probe failed for {configured} ({note}).",
+    }
 
 
 def toggle_search_provider() -> str:
@@ -7672,48 +7124,15 @@ def _extract_last_user_question(turns: list[tuple[str, str]], current_text: str)
 
 
 def _analyze_routing_text(turns: list[tuple[str, str]], text: str) -> tuple[str, str]:
-    raw = (text or "").strip()
-    if not raw:
-        return raw, ""
-    rule_result = TURN_SUPERVISOR.evaluate_rules(raw, turns=turns, phase="rewrite")
-    rewrite_text = str(rule_result.get("rewrite_text") or "").strip()
-    if rewrite_text:
-        return rewrite_text, str(rule_result.get("analysis_reason") or rule_result.get("rule_name") or "")
-    return raw, ""
+    return analyze_routing_text(
+        turns,
+        text,
+        evaluate_rules_fn=lambda user_text, **kwargs: TURN_SUPERVISOR.evaluate_rules(user_text, **kwargs),
+    )
 
 
 def _is_explicit_command_like(text: str) -> bool:
-    low = (text or "").strip().lower()
-    if not low:
-        return False
-    command_prefixes = (
-        "screen",
-        "camera ",
-        "web ",
-        "weather",
-        "check weather",
-        "pulse",
-        "nova pulse",
-        "update now",
-        "update now confirm",
-        "update now cancel",
-        "apply update now",
-        "location coords",
-        "domains",
-        "policy allow",
-        "chat context",
-        "ls",
-        "read ",
-        "find ",
-        "health",
-        "capabilities",
-        "inspect",
-        "behavior ",
-        "learning ",
-        "memory ",
-        "mem ",
-    )
-    return any(low == p.strip() or low.startswith(p) for p in command_prefixes)
+    return is_explicit_command_like(text)
 
 
 def _determine_turn_direction(
@@ -7723,51 +7142,21 @@ def _determine_turn_direction(
     active_subject: str = "",
     pending_action: Optional[dict] = None,
 ) -> dict:
-    effective_query, analysis_reason = _analyze_routing_text(turns, text)
-    low = (effective_query or "").strip().lower()
-    raw_low = (text or "").strip().lower()
-    turn_acts = _classify_turn_acts(
-        effective_query,
-        turns=turns,
+    return determine_turn_direction(
+        turns,
+        text,
         active_subject=active_subject,
         pending_action=pending_action,
+        analyze_routing_text_fn=_analyze_routing_text,
+        classify_turn_acts_fn=_classify_turn_acts,
+        extract_memory_teach_text_fn=_extract_memory_teach_text,
+        is_identity_or_developer_query_fn=_is_identity_or_developer_query,
+        is_developer_color_lookup_request_fn=_is_developer_color_lookup_request,
+        is_developer_bilingual_request_fn=_is_developer_bilingual_request,
+        is_color_lookup_request_fn=_is_color_lookup_request,
+        build_greeting_reply_fn=_build_greeting_reply,
+        is_explicit_command_like_fn=_is_explicit_command_like,
     )
-
-    primary = "general_chat"
-    if "correct" in turn_acts:
-        primary = "correction_feedback"
-    elif _extract_memory_teach_text(text):
-        primary = "memory_teach"
-    elif "command" in turn_acts:
-        primary = "explicit_command"
-    elif _is_identity_or_developer_query(effective_query) or any(
-        q in low for q in ["what do you know about me", "what else do you know about me", "what do you know about gus"]
-    ):
-        primary = "identity_query"
-    elif _is_developer_color_lookup_request(effective_query) or _is_developer_bilingual_request(effective_query):
-        primary = "identity_query"
-    elif _is_color_lookup_request(effective_query):
-        primary = "identity_query"
-    elif bool(re.match(r"^i\s+am\s+([a-z][a-z '\-]{1,40})[.!?]*$", raw_low)):
-        primary = "identity_binding"
-    elif "inform" in turn_acts and "mixed" not in turn_acts:
-        if any(k in raw_low for k in ["my favorite", "my favourite", "creator", "developer", "gus", "gustavo"]):
-            primary = "identity_teach"
-        else:
-            primary = "generic_declarative"
-    elif _build_greeting_reply(effective_query, active_user=""):
-        primary = "greeting"
-
-    identity_focused = primary in {"identity_query", "identity_binding", "identity_teach"}
-    bypass_pattern_routes = identity_focused and not _is_explicit_command_like(effective_query)
-    return {
-        "primary": primary,
-        "effective_query": effective_query,
-        "analysis_reason": analysis_reason,
-        "turn_acts": turn_acts,
-        "identity_focused": identity_focused,
-        "bypass_pattern_routes": bypass_pattern_routes,
-    }
 
 
 def _extract_animal_preferences(session_turns: list[tuple[str, str]]) -> list[str]:
@@ -7892,7 +7281,16 @@ def tcp_listening(host="127.0.0.1", port=11434, timeout=1.0) -> bool:
         return False
 
 
+def _live_ollama_calls_allowed() -> bool:
+    argv_text = " ".join(str(arg or "") for arg in list(sys.argv or []))
+    if "unittest" not in argv_text.lower():
+        return True
+    return str(os.environ.get("NOVA_ALLOW_LIVE_OLLAMA_TESTS") or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
 def ollama_api_up(timeout=2.0) -> bool:
+    if not _live_ollama_calls_allowed():
+        return False
     try:
         r = requests.get(f"{OLLAMA_BASE}/api/tags", timeout=timeout)
         return r.status_code == 200
@@ -7920,6 +7318,8 @@ def kill_ollama() -> None:
 
 
 def ensure_ollama_boot():
+    if not _live_ollama_calls_allowed():
+        return False
     if not tcp_listening():
         warn("Ollama not listening on 11434. Starting ollama serve...")
         start_ollama_serve_detached()
@@ -7941,6 +7341,8 @@ def ensure_ollama_boot():
 
 
 def ensure_ollama():
+    if not _live_ollama_calls_allowed():
+        return
     if not tcp_listening():
         start_ollama_serve_detached()
     if tcp_listening() and not ollama_api_up():
@@ -8321,7 +7723,7 @@ def _snapshot_current() -> Path:
 
 def _overlay_zip(zip_path: Path) -> int:
     allowed_ext = {".py", ".json", ".md", ".txt", ".ps1", ".cmd"}
-    blocked_prefix = {".venv/", "runtime/", "logs/", "models/"}
+    blocked_prefix = {".git/", ".venv/", "runtime/", "logs/", "models/"}
 
     count = 0
     with zipfile.ZipFile(zip_path, "r") as z:
@@ -8863,7 +8265,7 @@ def patch_preview(zip_path: str, write_report: bool = False) -> str:
         pass
 
     # decide skipped prefixes and text extensions
-    skip_prefixes = ("runtime/", "logs/", "updates/", "piper/", "models/", "pkgconfig/")
+    skip_prefixes = (".git/", "runtime/", "logs/", "updates/", "piper/", "models/", "pkgconfig/")
     text_ext = {".py", ".md", ".txt", ".json", ".rst", ".yaml", ".yml", ".ini", ".cfg", ".html", ".css", ".js", ".csv"}
 
     added = []
@@ -9593,6 +8995,9 @@ def ollama_chat(text: str, retrieved_context: str = "", language_mix_spanish_pct
     Deterministic chat wrapper: strict non-hallucination rules and low temperature.
     This function avoids injecting memory and enforces a constrained system prompt.
     """
+    if not _live_ollama_calls_allowed():
+        return "(error: LLM service unavailable)"
+
     # Ensure the Ollama service is available (boot-time should have called ensure_ollama_boot)
     try:
         ensure_ollama()
@@ -10677,10 +10082,10 @@ def execute_planned_action(tool: str, args=None):
     tool_name = str(tool or "").strip()
     tool_args = list(args) if isinstance(args, (list, tuple)) else ([] if args in {None, ""} else [args])
 
-    if tool_name in {"web_fetch", "web_search", "web_research", "web_gather"}:
-        return ""
-
     if tool_name == "weather_current_location":
+        current_coords = resolve_current_device_coords()
+        if current_coords:
+            return str(tool_weather(f"{current_coords[0]},{current_coords[1]}") or "")
         saved_location = str(get_saved_location_text() or "").strip()
         if saved_location:
             return str(tool_weather(saved_location) or "")
@@ -10702,6 +10107,12 @@ def execute_planned_action(tool: str, args=None):
         "patch_rollback": patch_rollback,
         "camera": tool_camera,
         "screen": tool_screen,
+        "web_fetch": tool_web_fetch,
+        "web_search": tool_web_search,
+        "web_research": tool_web_research,
+        "web_gather": tool_web_gather,
+        "wikipedia_lookup": tool_wikipedia_lookup,
+        "stackexchange_search": tool_stackexchange_search,
         "read": tool_read,
         "ls": tool_ls,
         "find": tool_find,
@@ -10732,6 +10143,14 @@ def make_pending_weather_action() -> dict:
         "saved_location_available": bool(saved_location),
         "preferred_tool": "weather_current_location" if saved_location else "weather_location",
     }
+
+
+def _weather_current_location_available() -> bool:
+    if resolve_current_device_coords():
+        return True
+    if str(get_saved_location_text() or "").strip():
+        return True
+    return bool(_coords_from_saved_location())
 
 
 def web_search(query: str, save_dir: Path, max_results: int = 5) -> dict:
@@ -11109,6 +10528,174 @@ def tool_web_fetch(url: str):
 
     return f"[OK] Saved: {out['path']} ({out['content_type']}, {out['bytes']} bytes)"
 
+
+def _provider_request_headers(token: str = "") -> dict[str, str]:
+    headers = {
+        "Accept": "application/json",
+        "User-Agent": "Nova/1.0",
+    }
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+        headers["X-GitHub-Api-Version"] = "2022-11-28"
+    return headers
+
+
+def _clean_html_text(value: str) -> str:
+    text = html.unescape(str(value or "").strip())
+    return re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", text)).strip()
+
+
+def _looks_like_code_discovery_query(text: str) -> bool:
+    low = str(text or "").strip().lower()
+    if not low:
+        return False
+    code_markers = (
+        "github",
+        "repo",
+        "repository",
+        "source code",
+        "implementation",
+        "example repo",
+        "code example",
+        "sample project",
+        "issue",
+        "pull request",
+        "public repo",
+        "open source",
+        "function ",
+        "class ",
+    )
+    return any(marker in low for marker in code_markers)
+
+
+def tool_wikipedia_lookup(query: str):
+    missing = explain_missing("web_fetch", ["web_access"])
+    if missing:
+        return missing
+
+    if not policy_tools_enabled().get("web", False):
+        return "Web tool disabled by policy."
+    if not web_enabled():
+        return "Web tool disabled by policy."
+
+    q = str(query or "").strip()
+    if not q:
+        return "Usage: wikipedia <topic>"
+
+    try:
+        search_resp = requests.get(
+            "https://en.wikipedia.org/w/api.php",
+            params={
+                "action": "query",
+                "list": "search",
+                "srsearch": q,
+                "format": "json",
+                "utf8": 1,
+                "srlimit": 3,
+            },
+            headers=_provider_request_headers(),
+            timeout=20,
+        )
+        search_resp.raise_for_status()
+        search_data = search_resp.json()
+    except Exception as exc:
+        return f"[FAIL] Wikipedia lookup unavailable: {exc}"
+
+    matches = ((search_data.get("query") or {}).get("search") or []) if isinstance(search_data, dict) else []
+    if not matches:
+        return f"No Wikipedia results found for: {q}"
+
+    title = str((matches[0] or {}).get("title") or q).strip() or q
+    summary_url = f"https://en.wikipedia.org/api/rest_v1/page/summary/{quote(title.replace(' ', '_'), safe=':_()')}"
+    try:
+        summary_resp = requests.get(summary_url, headers=_provider_request_headers(), timeout=20)
+        summary_resp.raise_for_status()
+        summary_data = summary_resp.json()
+    except Exception as exc:
+        return f"[FAIL] Wikipedia summary unavailable: {exc}"
+
+    display_title = str(summary_data.get("title") or title).strip() or title
+    extract = str(summary_data.get("extract") or "").strip()
+    page_url = str((((summary_data.get("content_urls") or {}).get("desktop") or {}).get("page") or "")).strip()
+    if not page_url:
+        page_url = f"https://en.wikipedia.org/wiki/{quote(display_title.replace(' ', '_'))}"
+
+    lines = [f"Wikipedia summary for: {display_title}", page_url]
+    if extract:
+        lines.append(extract)
+
+    related = []
+    for item in matches[1:3]:
+        related_title = str((item or {}).get("title") or "").strip()
+        if not related_title:
+            continue
+        related.append((related_title, f"https://en.wikipedia.org/wiki/{quote(related_title.replace(' ', '_'))}"))
+    if related:
+        lines.append("Related pages:")
+        for idx, (related_title, related_url) in enumerate(related, start=1):
+            lines.append(f"{idx}. {related_title}")
+            lines.append(f"   {related_url}")
+    return "\n".join(lines)
+
+
+def tool_stackexchange_search(query: str):
+    missing = explain_missing("web_fetch", ["web_access"])
+    if missing:
+        return missing
+
+    if not policy_tools_enabled().get("web", False):
+        return "Web tool disabled by policy."
+    if not web_enabled():
+        return "Web tool disabled by policy."
+
+    q = str(query or "").strip()
+    if not q:
+        return "Usage: stackexchange <query>"
+
+    cfg = policy_web()
+    endpoint = str(cfg.get("stackexchange_api_endpoint") or "https://api.stackexchange.com/2.3/search/advanced").strip()
+    site = str(cfg.get("stackexchange_site") or "stackoverflow").strip() or "stackoverflow"
+    key_env = str(cfg.get("stackexchange_api_key_env") or "STACKEXCHANGE_API_KEY").strip() or "STACKEXCHANGE_API_KEY"
+    api_key = str(os.environ.get(key_env) or "").strip()
+    params = {
+        "order": "desc",
+        "sort": "relevance",
+        "site": site,
+        "q": q,
+        "pagesize": 5,
+        "accepted": "True",
+    }
+    if api_key:
+        params["key"] = api_key
+    try:
+        resp = requests.get(endpoint, params=params, headers=_provider_request_headers(), timeout=20)
+        resp.raise_for_status()
+        data = resp.json()
+    except Exception as exc:
+        return f"[FAIL] StackExchange search unavailable: {exc}"
+
+    items = data.get("items") if isinstance(data, dict) else []
+    if not items:
+        return f"No StackExchange results found for: {q}"
+
+    lines = [f"StackExchange results for: {q} (site={site})"]
+    for idx, item in enumerate(items[:5], start=1):
+        title = _clean_html_text(item.get("title") or "")
+        link = str(item.get("link") or "").strip()
+        score = int(item.get("score") or 0)
+        answer_count = int(item.get("answer_count") or 0)
+        answered = bool(item.get("is_answered"))
+        tags = [str(tag or "").strip() for tag in (item.get("tags") or []) if str(tag or "").strip()][:4]
+        if title:
+            lines.append(f"{idx}. {title}")
+        if link:
+            lines.append(f"   {link}")
+        meta = [f"score={score}", f"answers={answer_count}", f"answered={answered}"]
+        if tags:
+            meta.append("tags=" + ", ".join(tags))
+        lines.append(f"   {' | '.join(meta)}")
+    return "\n".join(lines)
+
 def tool_web_search(query: str):
     missing = explain_missing("web_fetch", ["web_access"])
     if missing:
@@ -11173,7 +10760,10 @@ def tool_web_search(query: str):
             return (items, None)
 
         # searxng provider: self-hosted instance, no API key required.
-        endpoint = str(cfg.get("search_api_endpoint") or "http://127.0.0.1:8080/search").strip()
+        endpoint_probe = probe_search_endpoint(str(cfg.get("search_api_endpoint") or "http://127.0.0.1:8080/search").strip(), timeout=5.0, persist_repair=True)
+        if not bool(endpoint_probe.get("ok")):
+            return ([], f"api_error:{endpoint_probe.get('note')}")
+        endpoint = str(endpoint_probe.get("resolved_endpoint") or endpoint_probe.get("endpoint") or "http://127.0.0.1:8080/search").strip()
         try:
             r = requests.get(
                 endpoint,
@@ -11328,8 +10918,6 @@ def tool_web_gather(url: str):
 
 
 def tool_web_research(query: str, continue_mode: bool = False):
-    global WEB_RESEARCH_LAST_QUERY, WEB_RESEARCH_LAST_RESULTS, WEB_RESEARCH_CURSOR
-
     missing = explain_missing("web_fetch", ["web_access"])
     if missing:
         return missing
@@ -11346,26 +10934,26 @@ def tool_web_research(query: str, continue_mode: bool = False):
 
     q = (query or "").strip()
     if continue_mode:
-        if not WEB_RESEARCH_LAST_RESULTS:
+        if not WEB_RESEARCH_SESSION.has_results():
             return "No active web research session. Start with: web research <query>"
 
         max_results = max(1, min(40, int((policy_web().get("research_max_results") or 8))))
-        start = WEB_RESEARCH_CURSOR
-        end = min(len(WEB_RESEARCH_LAST_RESULTS), start + max_results)
-        if start >= len(WEB_RESEARCH_LAST_RESULTS):
+        page = WEB_RESEARCH_SESSION.next_page(max_results)
+        if page is None:
+            return "No active web research session. Start with: web research <query>"
+        if not page.rows and page.start >= page.total:
             return "No more cached research results. Start a new search with: web research <query>"
 
-        lines = [f"Web research results (continued) for: {WEB_RESEARCH_LAST_QUERY}"]
-        rank = start
-        for score, url, snippet in WEB_RESEARCH_LAST_RESULTS[start:end]:
+        lines = [f"Web research results (continued) for: {WEB_RESEARCH_SESSION.query}"]
+        rank = page.start
+        for score, url, snippet in page.rows:
             rank += 1
             lines.append(f"{rank}. [{score:.1f}] {url}")
             if snippet:
                 lines.append(f"   {snippet[:220]}")
 
-        WEB_RESEARCH_CURSOR = end
-        if WEB_RESEARCH_CURSOR < len(WEB_RESEARCH_LAST_RESULTS):
-            remaining = len(WEB_RESEARCH_LAST_RESULTS) - WEB_RESEARCH_CURSOR
+        remaining = WEB_RESEARCH_SESSION.remaining_count()
+        if remaining > 0:
             lines.append(f"{remaining} more result(s) available. Type 'web continue' to keep going.")
         else:
             lines.append("End of cached research results.")
@@ -11411,25 +10999,23 @@ def tool_web_research(query: str, continue_mode: bool = False):
         used.add(url)
         ordered.append((score, url, snippet))
 
-    WEB_RESEARCH_LAST_QUERY = q
-    WEB_RESEARCH_LAST_RESULTS = ordered
-    WEB_RESEARCH_CURSOR = 0
+    WEB_RESEARCH_SESSION.set_results(q, ordered)
 
     max_results = max(1, min(40, int((cfg.get("research_max_results") or 8))))
-    start = WEB_RESEARCH_CURSOR
-    end = min(len(WEB_RESEARCH_LAST_RESULTS), start + max_results)
+    page = WEB_RESEARCH_SESSION.next_page(max_results)
+    if page is None:
+        return "No relevant pages found across allowlisted domains for that query."
 
     lines = [f"Web research results (allowlisted crawl) for: {q}"]
-    rank = start
-    for score, url, snippet in WEB_RESEARCH_LAST_RESULTS[start:end]:
+    rank = page.start
+    for score, url, snippet in page.rows:
         rank += 1
         lines.append(f"{rank}. [{score:.1f}] {url}")
         if snippet:
             lines.append(f"   {snippet[:220]}")
 
-    WEB_RESEARCH_CURSOR = end
-    if WEB_RESEARCH_CURSOR < len(WEB_RESEARCH_LAST_RESULTS):
-        remaining = len(WEB_RESEARCH_LAST_RESULTS) - WEB_RESEARCH_CURSOR
+    remaining = WEB_RESEARCH_SESSION.remaining_count()
+    if remaining > 0:
         lines.append(f"{remaining} more result(s) available. Type 'web continue' to keep going.")
     else:
         lines.append("No more results pending for this query.")
@@ -11581,9 +11167,10 @@ def handle_commands(
             "now",
         ))
     ):
-        if get_saved_location_text() or _coords_from_saved_location():
+        live = runtime_device_location_payload()
+        if (live.get("available") and not live.get("stale")) or get_saved_location_text() or _coords_from_saved_location():
             return str(execute_planned_action("weather_current_location") or "")
-        return _need_confirmed_location_message() + " My location is unknown until you tell me or save coordinates."
+        return _need_confirmed_location_message() + " My location is unknown until live tracking is active, or you tell me or save coordinates."
 
     if _is_location_request(normalized):
         return _location_reply()
@@ -12235,7 +11822,7 @@ def run_loop(tts):
             conversation_state,
             turns=session_turns,
             input_source=input_source,
-            allowed_actions={"name_origin_store", "self_location", "location_recall", "location_name", "weather_current_location", "apply_correction", "retrieval_followup", "identity_history_family", "open_probe_family", "last_question_recall", "rules_list", "developer_identity_followup", "identity_profile_followup", "developer_location"},
+            allowed_actions={"name_origin_store", "self_location", "location_recall", "location_name", "weather_current_location", "apply_correction", "retrieval_followup", "identity_history_family", "open_probe_family", "session_fact_recall", "last_question_recall", "rules_list", "developer_identity_followup", "identity_profile_followup", "developer_location"},
         )
         if pending_action_ledger is not None:
             pending_action_ledger["routing_decision"] = _build_routing_decision(
@@ -12267,7 +11854,7 @@ def run_loop(tts):
                 str(general_rule.get("rule_name") or "registered_rule"),
                 rule=str(general_rule.get("rule_name") or ""),
             )
-            _update_subconscious_state(
+            SUBCONSCIOUS_SERVICE.update_state(
                 session_state,
                 _probe_turn_routes(
                     routed_user_text,
@@ -12283,7 +11870,7 @@ def run_loop(tts):
             speak_chunked(tts, final)
             continue
 
-        fulfillment_result = _maybe_run_fulfillment_flow(
+        fulfillment_result = _fulfillment_flow_service().maybe_run_fulfillment_flow(
             routed_user_text,
             session_state,
             session_turns,

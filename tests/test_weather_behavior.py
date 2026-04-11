@@ -1,7 +1,9 @@
 import json
 import tempfile
+import time
 import unittest
 from pathlib import Path
+from unittest import mock
 
 import nova_core
 
@@ -21,19 +23,26 @@ class TestWeatherBehavior(unittest.TestCase):
     def setUp(self):
         self.orig_policy_path = nova_core.POLICY_PATH
         self.orig_statefile = nova_core.DEFAULT_STATEFILE
+        self.orig_device_location_file = nova_core.DEVICE_LOCATION_FILE
+        self.orig_windows_device_resolver = nova_core._resolve_windows_device_coords
         self.orig_mem_add = nova_core.mem_add
         self.orig_mem_audit = nova_core.mem_audit
         self.orig_requests_get = nova_core.requests.get
         self.tmp = tempfile.TemporaryDirectory()
         self.policy_path = Path(self.tmp.name) / "policy.json"
         self.state_path = Path(self.tmp.name) / "core_state.json"
+        self.device_location_path = Path(self.tmp.name) / "device_location.json"
         nova_core.DEFAULT_STATEFILE = self.state_path
+        nova_core.DEVICE_LOCATION_FILE = self.device_location_path
+        nova_core._resolve_windows_device_coords = lambda *args, **kwargs: None
         nova_core.mem_add = lambda *args, **kwargs: None
         nova_core.mem_audit = lambda _query: json.dumps({"results": []})
 
     def tearDown(self):
         nova_core.POLICY_PATH = self.orig_policy_path
         nova_core.DEFAULT_STATEFILE = self.orig_statefile
+        nova_core.DEVICE_LOCATION_FILE = self.orig_device_location_file
+        nova_core._resolve_windows_device_coords = self.orig_windows_device_resolver
         nova_core.mem_add = self.orig_mem_add
         nova_core.mem_audit = self.orig_mem_audit
         nova_core.requests.get = self.orig_requests_get
@@ -206,6 +215,76 @@ class TestWeatherBehavior(unittest.TestCase):
         self.assertIn("[source: api.weather.gov]", out)
         self.assertEqual(calls["n"], 2)
 
+    def test_weather_current_location_uses_live_runtime_location(self):
+        self._write_policy(["api.weather.gov"])
+        ok, msg, live = nova_core.set_runtime_device_location({
+            "lat": 30.2672,
+            "lon": -97.7431,
+            "accuracy_m": 18,
+            "source": "browser_watch",
+            "permission_state": "granted",
+            "captured_ts": time.time(),
+        })
+        self.assertTrue(ok)
+        self.assertEqual(msg, "device_location_updated")
+        self.assertTrue(live.get("available"))
+
+        calls = {"n": 0}
+
+        def fake_get(url, headers=None, timeout=0):
+            calls["n"] += 1
+            if "api.weather.gov/points/" in url:
+                self.assertIn("30.2672,-97.7431", url)
+                return _FakeResponse({"properties": {"forecast": "https://api.weather.gov/gridpoints/EWX/156,97/forecast"}})
+            return _FakeResponse(
+                {
+                    "properties": {
+                        "periods": [
+                            {
+                                "name": "Tonight",
+                                "temperature": 78,
+                                "temperatureUnit": "F",
+                                "shortForecast": "Mostly Clear",
+                                "windSpeed": "7 mph",
+                                "windDirection": "S",
+                            }
+                        ]
+                    }
+                }
+            )
+
+        nova_core.requests.get = fake_get
+        out = nova_core.handle_commands("weather current location")
+        self.assertIn("30.2672,-97.7431:", out)
+        self.assertIn("[source: api.weather.gov]", out)
+        self.assertEqual(calls["n"], 2)
+
+    def test_resolve_current_device_coords_uses_windows_fallback_and_persists_snapshot(self):
+        nova_core._resolve_windows_device_coords = lambda *args, **kwargs: {
+            "lat": 47.6062,
+            "lon": -122.3321,
+            "accuracy_m": 21,
+            "source": "windows_geolocator",
+            "permission_state": "granted",
+            "captured_ts": time.time(),
+        }
+
+        coords = nova_core.resolve_current_device_coords()
+
+        self.assertEqual(coords, (47.6062, -122.3321))
+        live = nova_core.runtime_device_location_payload()
+        self.assertTrue(live.get("available"))
+        self.assertEqual(live.get("source"), "windows_geolocator")
+
+    def test_runtime_device_location_payload_reports_backend_provider_status(self):
+        with mock.patch("nova_core.os.name", "nt"), mock.patch("nova_core.importlib.util.find_spec", return_value=object()):
+            live = nova_core.runtime_device_location_payload()
+
+        provider = live.get("backend_provider") or {}
+        self.assertTrue(provider.get("available"))
+        self.assertTrue(provider.get("winsdk_installed"))
+        self.assertEqual(provider.get("name"), "windows_geolocator")
+
     def test_natural_weather_phrase_routes_deterministically(self):
         self._write_policy(["api.weather.gov"])
         out = nova_core.handle_commands("nova give me the weather")
@@ -363,7 +442,8 @@ class TestLlmRoutingIntentClassifier(unittest.TestCase):
         """'should I bring a jacket?' — no keyword, LLM must classify it."""
         self._mock_llm_label("weather_lookup")
         nova_core.get_saved_location_text = lambda: ""
-        result = nova_core._llm_classify_routing_intent("should I bring a jacket today?")
+        with mock.patch.dict("os.environ", {"NOVA_ALLOW_LIVE_OLLAMA_TESTS": "1"}, clear=False):
+            result = nova_core._llm_classify_routing_intent("should I bring a jacket today?")
         self.assertIsNotNone(result)
         self.assertEqual(result.get("intent"), "weather_lookup")
         self.assertEqual(result.get("weather_mode"), "clarify")
@@ -372,7 +452,8 @@ class TestLlmRoutingIntentClassifier(unittest.TestCase):
         """'do I need an umbrella?' with saved location → current_location mode."""
         self._mock_llm_label("weather_lookup")
         nova_core.get_saved_location_text = lambda: "Brownsville TX"
-        result = nova_core._llm_classify_routing_intent("do I need an umbrella?")
+        with mock.patch.dict("os.environ", {"NOVA_ALLOW_LIVE_OLLAMA_TESTS": "1"}, clear=False):
+            result = nova_core._llm_classify_routing_intent("do I need an umbrella?")
         self.assertIsNotNone(result)
         self.assertEqual(result.get("intent"), "weather_lookup")
         self.assertEqual(result.get("weather_mode"), "current_location")
@@ -382,7 +463,8 @@ class TestLlmRoutingIntentClassifier(unittest.TestCase):
         """'how hot is it outside?' — implicit outdoor conditions, no keyword."""
         self._mock_llm_label("weather_lookup")
         nova_core.get_saved_location_text = lambda: "McAllen TX"
-        result = nova_core._llm_classify_routing_intent("how hot is it outside right now?")
+        with mock.patch.dict("os.environ", {"NOVA_ALLOW_LIVE_OLLAMA_TESTS": "1"}, clear=False):
+            result = nova_core._llm_classify_routing_intent("how hot is it outside right now?")
         self.assertIsNotNone(result)
         self.assertEqual(result.get("weather_mode"), "current_location")
         self.assertEqual(result.get("location_value"), "McAllen TX")
@@ -391,7 +473,8 @@ class TestLlmRoutingIntentClassifier(unittest.TestCase):
         """LLM says general_chat → no route returned (falls through to LLM chat)."""
         self._mock_llm_label("general_chat")
         nova_core.get_saved_location_text = lambda: ""
-        result = nova_core._llm_classify_routing_intent("tell me something interesting about the moon")
+        with mock.patch.dict("os.environ", {"NOVA_ALLOW_LIVE_OLLAMA_TESTS": "1"}, clear=False):
+            result = nova_core._llm_classify_routing_intent("tell me something interesting about the moon")
         self.assertIsNone(result)
 
     def test_ollama_failure_returns_none(self):
@@ -399,7 +482,8 @@ class TestLlmRoutingIntentClassifier(unittest.TestCase):
         def _fail(*a, **kw):
             raise ConnectionError("ollama down")
         nova_core.requests.post = _fail
-        result = nova_core._llm_classify_routing_intent("is it going to rain this afternoon?")
+        with mock.patch.dict("os.environ", {"NOVA_ALLOW_LIVE_OLLAMA_TESTS": "1"}, clear=False):
+            result = nova_core._llm_classify_routing_intent("is it going to rain this afternoon?")
         self.assertIsNone(result)
 
     def test_empty_text_returns_none(self):

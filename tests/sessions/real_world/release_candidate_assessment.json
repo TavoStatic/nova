@@ -1,0 +1,27 @@
+{
+  "name": "Real World :: release candidate assessment",
+  "task_id": "release_candidate_assessment",
+  "source": "real_world",
+  "category": "release",
+  "objective": "Ask Nova to assess whether the current release candidate is actually ready to ship and to separate blockers from deferrable work.",
+  "messages": [
+    "Assess whether the current NYO System release candidate is really ready to ship. Separate true blockers from important but deferrable work.",
+    "What is the single shortest next push if we only close one thing before shipping?"
+  ],
+  "success_signals": [
+    "Nova distinguishes release truth from general project quality.",
+    "Nova identifies installed-copy truth and handoff truth as central release concerns when they are still open.",
+    "Nova gives a short priority-ordered answer instead of an unbounded brainstorm."
+  ],
+  "failure_signals": [
+    "Nova treats every valid issue as equally urgent.",
+    "Nova ignores documented readiness or promotion evidence.",
+    "Nova gives vague motivational advice instead of operational triage."
+  ],
+  "evidence_to_review": [
+    "assistant answer quality",
+    "route summary",
+    "grounding in docs and runtime state"
+  ],
+  "notes": "This task should expose whether Nova can reason like a release operator instead of only a feature assistant."
+}

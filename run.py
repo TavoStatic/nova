@@ -1,57 +1,22 @@
-import io
-import requests
-import sounddevice as sd
-import scipy.io.wavfile as wav
-import pyttsx3
-from faster_whisper import WhisperModel
+from services.voice_interaction import VOICE_INTERACTION_SERVICE
 
-OLLAMA_URL = "http://localhost:11434/api/chat"
-LLM_MODEL  = "llama3.1:8b"
-
-WHISPER_SIZE = "small"
-SAMPLE_RATE = 16000
-CHANNELS = 1
+DEFAULT_RECORD_SECONDS = 6
 
 def record_seconds(seconds=6):
-    print(f"Nova: recording for {seconds} seconds... (talk now)")
-    audio = sd.rec(int(seconds * SAMPLE_RATE), samplerate=SAMPLE_RATE,
-                   channels=CHANNELS, dtype="int16")
-    sd.wait()
-    return audio
+    return VOICE_INTERACTION_SERVICE.record_seconds(seconds)
 
 def transcribe(model, audio_int16):
-    buf = io.BytesIO()
-    wav.write(buf, SAMPLE_RATE, audio_int16)
-    buf.seek(0)
-
-    segments, _ = model.transcribe(buf)
-    text = ""
-    for seg in segments:
-        text += seg.text.strip() + " "
-    return text.strip()
+    return VOICE_INTERACTION_SERVICE.transcribe(model, audio_int16)
 
 def ask_nova(text):
-    payload = {
-        "model": LLM_MODEL,
-        "stream": False,
-        "messages": [
-            {"role": "system", "content": "You are Nova. Be helpful, concise, practical."},
-            {"role": "user", "content": text},
-        ],
-    }
-    r = requests.post(OLLAMA_URL, json=payload, timeout=1800)
-    r.raise_for_status()
-    return r.json()["message"]["content"].strip()
+    return VOICE_INTERACTION_SERVICE.chat(text, session_id="run-cli")
 
 def speak(text):
-    engine = pyttsx3.init()
-    engine.setProperty("rate", 175)
-    engine.say(text)
-    engine.runAndWait()
+    VOICE_INTERACTION_SERVICE.speak(text)
 
 def main():
     print("Nova Orchestrator: loading Whisper (CPU mode)...")
-    whisper = WhisperModel(WHISPER_SIZE, device="cpu", compute_type="int8")
+    whisper = VOICE_INTERACTION_SERVICE.load_whisper(device="cpu", compute_type="int8")
 
     print("\nNova Orchestrator is ready.")
     print("Press ENTER to talk (records ~6 seconds). Type 'q' then ENTER to quit.\n")
@@ -61,7 +26,7 @@ def main():
         if cmd == "q":
             break
 
-        audio = record_seconds(6)
+        audio = record_seconds(DEFAULT_RECORD_SECONDS)
 
         print("Nova: transcribing...")
         text = transcribe(whisper, audio)

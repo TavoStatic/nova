@@ -1,0 +1,27 @@
+{
+  "name": "Real World :: queue item investigation plan",
+  "task_id": "queue_item_investigation_plan",
+  "source": "real_world",
+  "category": "investigation",
+  "objective": "Ask Nova to use the standing work queue as an operator input and turn the next open item into an actionable investigation plan.",
+  "messages": [
+    "Look at the standing work queue and tell me what we should investigate next and why.",
+    "Give me the shortest investigation plan that would let an operator confirm the issue and decide whether it blocks release."
+  ],
+  "success_signals": [
+    "Nova uses queue context rather than answering generically.",
+    "Nova explains why the next item matters.",
+    "Nova produces a short operator-usable plan instead of broad speculation."
+  ],
+  "failure_signals": [
+    "Nova ignores the queue surface entirely.",
+    "Nova provides a generic debugging list with no tie to the next item.",
+    "Nova cannot maintain the thread across the follow-up turn."
+  ],
+  "evidence_to_review": [
+    "queue-related route selection",
+    "assistant answer",
+    "follow-up continuity"
+  ],
+  "notes": "This task checks whether Nova can convert its own generated work queue into operator-grade execution guidance."
+}

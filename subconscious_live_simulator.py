@@ -13,6 +13,8 @@ from typing import Optional
 
 import nova_core
 from conversation_manager import ConversationSession
+from services.subconscious_reporting import build_training_backlog_summary
+from services.subconscious_runtime import SUBCONSCIOUS_SERVICE
 from subconscious_config import SUBCONSCIOUS_CHARTER
 
 
@@ -33,6 +35,7 @@ class LiveSimulationTurn:
 class LiveSimulationScenario:
     scenario_id: str
     target_seam: str
+    seed_turns: list[tuple[str, str]] = field(default_factory=list)
     turns: list[LiveSimulationTurn] = field(default_factory=list)
     variation_id: str = "baseline"
 
@@ -86,7 +89,11 @@ def simulate_live_scenario(
     """Run a single multi-turn scenario through Nova's current subconscious seam."""
 
     sim_session = session if isinstance(session, ConversationSession) else ConversationSession()
-    recent_turns: list[tuple[str, str]] = []
+    recent_turns: list[tuple[str, str]] = [
+        (str(role or "").strip().lower(), str(text or "").strip())
+        for role, text in list(scenario.seed_turns or [])
+        if str(role or "").strip() and str(text or "").strip()
+    ]
     pressure_records: list[object] = []
 
     for turn in list(scenario.turns or []):
@@ -102,7 +109,7 @@ def simulate_live_scenario(
             list(recent_turns),
             pending_action=pending_action,
         )
-        state = nova_core._update_subconscious_state(
+        state = SUBCONSCIOUS_SERVICE.update_state(
             sim_session,
             probe,
             chosen_route=turn.chosen_route,
@@ -115,8 +122,8 @@ def simulate_live_scenario(
         if assistant_reply:
             recent_turns.append(("assistant", assistant_reply))
 
-    snapshot = nova_core._get_subconscious_snapshot(sim_session)
-    backlog = nova_core._get_subconscious_training_backlog_summary(sim_session)
+    snapshot = SUBCONSCIOUS_SERVICE.get_snapshot(sim_session)
+    backlog = build_training_backlog_summary(snapshot)
     return LiveSimulationResult(
         scenario_id=str(scenario.scenario_id or "scenario").strip() or "scenario",
         target_seam=str(scenario.target_seam or "route_seam").strip() or "route_seam",
@@ -855,6 +862,72 @@ def build_default_live_scenario_families() -> list[LiveSimulationFamily]:
                     turns=[
                         LiveSimulationTurn(
                             user_text="patch rollback",
+                            chosen_route="generic_fallback",
+                        )
+                    ],
+                ),
+            ],
+        ),
+        LiveSimulationFamily(
+            family_id="session-fact-recall-fallthrough-family",
+            target_seam="session_fact_recall_route_fallthrough",
+            scenarios=[
+                LiveSimulationScenario(
+                    scenario_id="session-fact-recall-fallthrough",
+                    variation_id="codeword_recall",
+                    target_seam="session_fact_recall_route_fallthrough",
+                    seed_turns=[
+                        ("user", "For this session, remember the codeword cobalt sparrow and the topic packaging drift."),
+                        ("assistant", "Got it."),
+                    ],
+                    turns=[
+                        LiveSimulationTurn(
+                            user_text="What codeword did I just ask you to remember?",
+                            chosen_route="generic_fallback",
+                        )
+                    ],
+                ),
+                LiveSimulationScenario(
+                    scenario_id="session-fact-recall-fallthrough",
+                    variation_id="topic_recall",
+                    target_seam="session_fact_recall_route_fallthrough",
+                    seed_turns=[
+                        ("user", "For this session, remember the codeword cobalt sparrow and the topic packaging drift."),
+                        ("assistant", "Got it."),
+                    ],
+                    turns=[
+                        LiveSimulationTurn(
+                            user_text="What topic did I ask you to track?",
+                            chosen_route="generic_fallback",
+                        )
+                    ],
+                ),
+                LiveSimulationScenario(
+                    scenario_id="session-fact-recall-fallthrough",
+                    variation_id="review_recall",
+                    target_seam="session_fact_recall_route_fallthrough",
+                    seed_turns=[
+                        ("user", "Remember that the Atlas packaging review is blocked by packaging drift and owned by cobalt sparrow."),
+                        ("assistant", "Got it."),
+                    ],
+                    turns=[
+                        LiveSimulationTurn(
+                            user_text="Which review was blocked?",
+                            chosen_route="generic_fallback",
+                        )
+                    ],
+                ),
+                LiveSimulationScenario(
+                    scenario_id="session-fact-recall-fallthrough",
+                    variation_id="owner_recall",
+                    target_seam="session_fact_recall_route_fallthrough",
+                    seed_turns=[
+                        ("user", "Remember that the Atlas packaging review is blocked by packaging drift and owned by cobalt sparrow."),
+                        ("assistant", "Got it."),
+                    ],
+                    turns=[
+                        LiveSimulationTurn(
+                            user_text="Who owns it?",
                             chosen_route="generic_fallback",
                         )
                     ],

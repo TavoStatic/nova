@@ -6,18 +6,23 @@ import subprocess
 import time
 import zipfile
 from pathlib import Path
+from typing import Callable
 
 import kidney
 import nova_core
 from nova_safety_envelope import select_patch_candidate_definition_paths
+from services.test_session_control import TEST_SESSION_CONTROL_SERVICE
 
 
 ROOT = Path(__file__).resolve().parent
+RUNTIME_DIR = ROOT / "runtime"
 VENV_PY = ROOT / ".venv" / "Scripts" / "python.exe"
-STATE_FILE = ROOT / "runtime" / "autonomy_maintenance_state.json"
-MAINT_LOG = ROOT / "runtime" / "autonomy_maintenance.log"
-LATEST_SUBCONSCIOUS = ROOT / "runtime" / "subconscious_runs" / "latest.json"
-GENERATED_DEFS = ROOT / "runtime" / "test_sessions" / "generated_definitions"
+TEST_SESSIONS_ROOT = RUNTIME_DIR / "test_sessions"
+TEST_SESSION_RUNNER_PY = ROOT / "scripts" / "run_test_session.py"
+STATE_FILE = RUNTIME_DIR / "autonomy_maintenance_state.json"
+MAINT_LOG = RUNTIME_DIR / "autonomy_maintenance.log"
+LATEST_SUBCONSCIOUS = RUNTIME_DIR / "subconscious_runs" / "latest.json"
+GENERATED_DEFS = TEST_SESSIONS_ROOT / "generated_definitions"
 UPDATES_DIR = ROOT / "updates"
 
 AUTO_APPLY_THRESHOLD = 0.90
@@ -59,6 +64,101 @@ def _run_subconscious_pack() -> tuple[bool, str]:
         return False, str(exc)
 
 
+def _available_test_session_definitions(limit: int = 80) -> list[dict]:
+    return TEST_SESSION_CONTROL_SERVICE.available_test_session_definitions(
+        TEST_SESSION_CONTROL_SERVICE.all_test_session_definition_roots(
+            base_dir=ROOT,
+            runtime_dir=RUNTIME_DIR,
+        ),
+        limit=limit,
+    )
+
+
+def _resolve_test_session_definition(session_name: str) -> Path | None:
+    return TEST_SESSION_CONTROL_SERVICE.resolve_test_session_definition(
+        session_name,
+        _available_test_session_definitions(500),
+    )
+
+
+def _test_session_report_summaries(limit: int = 24) -> list[dict]:
+    return TEST_SESSION_CONTROL_SERVICE.test_session_report_summaries(TEST_SESSIONS_ROOT, limit=limit)
+
+
+def _generated_work_queue(limit: int = 24) -> dict:
+    definitions = _available_test_session_definitions(500)
+    return TEST_SESSION_CONTROL_SERVICE.generated_work_queue(
+        definitions,
+        _test_session_report_summaries(max(200, len(definitions) * 2)),
+        limit=limit,
+        runtime_dir=RUNTIME_DIR,
+    )
+
+
+def _run_test_session_definition(session_file: str) -> tuple[bool, str, dict]:
+    return TEST_SESSION_CONTROL_SERVICE.run_test_session_definition(
+        session_file,
+        runner_path=TEST_SESSION_RUNNER_PY,
+        venv_python=VENV_PY,
+        base_dir=ROOT,
+        resolve_definition_fn=_resolve_test_session_definition,
+        available_definitions_fn=_available_test_session_definitions,
+        report_summaries_fn=_test_session_report_summaries,
+        subprocess_run=subprocess.run,
+    )
+
+
+def _run_next_generated_work_queue_item() -> tuple[bool, str, dict]:
+    return TEST_SESSION_CONTROL_SERVICE.run_next_generated_work_queue_item(
+        generated_work_queue_fn=_generated_work_queue,
+        run_test_session_definition_fn=_run_test_session_definition,
+    )
+
+
+def _record_generated_queue_run(state: dict, ok: bool, msg: str, extra: dict | None = None) -> dict:
+    selected = dict((extra or {}).get("selected") or {})
+    latest_report = dict((extra or {}).get("latest_report") or {})
+    work_queue = dict((extra or {}).get("work_queue") or {})
+    raw_msg = str(msg or "")
+    if raw_msg == "generated_work_queue_clear":
+        status = "clear"
+    elif raw_msg == "generated_work_queue_blocked":
+        status = "blocked"
+    else:
+        status = "ok" if ok else "failed"
+    payload = {
+        "ts": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "status": status,
+        "message": str(msg or ""),
+        "selected_file": str(selected.get("file") or ""),
+        "selected_status": str(selected.get("latest_status") or ""),
+        "latest_report_status": str(latest_report.get("status") or ""),
+        "latest_report_run_id": str(latest_report.get("run_id") or ""),
+        "queue_open_count": int(work_queue.get("open_count", 0) or 0),
+        "queue_actionable_count": int(work_queue.get("actionable_count", 0) or 0),
+        "queue_count": int(work_queue.get("count", 0) or 0),
+    }
+    state["last_generated_queue_run"] = payload
+    return payload
+
+
+def _record_worker_cycle(*, cycle: int, interval_sec: int, status: str, code: int | None = None) -> None:
+    state = _load_state()
+    worker_state = dict(state.get("runtime_worker") or {})
+    worker_state["interval_sec"] = max(1, int(interval_sec or 300))
+    worker_state["last_cycle"] = max(1, int(cycle or 1))
+    worker_state["cycle_count"] = max(int(worker_state.get("cycle_count", 0) or 0), max(1, int(cycle or 1)))
+    if status == "running":
+        worker_state["last_started_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
+        worker_state["last_cycle_status"] = "running"
+    else:
+        worker_state["last_completed_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
+        worker_state["last_cycle_status"] = str(status or "unknown")
+        worker_state["last_cycle_code"] = int(code or 0)
+    state["runtime_worker"] = worker_state
+    _save_state(state)
+
+
 def _max_fallback_robustness(report: dict) -> float:
     best = 0.0
     for family in list(report.get("families") or []):
@@ -91,7 +191,7 @@ def _build_micro_patch_zip(state: dict) -> Path | None:
 
     with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
         for source in files:
-            zf.write(source, arcname=f"tests/sessions/{source.name}")
+            zf.write(source, arcname=f"runtime/test_sessions/promoted/{source.name}")
         zf.writestr("nova_patch.json", json.dumps(manifest, ensure_ascii=True, indent=2))
 
     state["last_micro_patch_zip"] = str(zip_path)
@@ -102,6 +202,9 @@ def _auto_apply_if_eligible(zip_path: Path) -> str:
     preview_out = nova_core.patch_preview(str(zip_path), write_report=True)
     if "Status: eligible" not in str(preview_out):
         return f"preview_not_eligible: {str(preview_out).strip()[:300]}"
+
+    if "runtime/test_sessions/promoted/" in str(preview_out):
+        return "skipped_generated_definitions_require_review"
 
     apply_out = nova_core.execute_patch_action("apply", str(zip_path), is_admin=True)
     return str(apply_out or "")
@@ -171,6 +274,15 @@ def run_once() -> int:
         "snapshot_path": kidney_summary.get("snapshot_path"),
     }
 
+    queue_ok, queue_msg, queue_extra = _run_next_generated_work_queue_item()
+    queue_state = _record_generated_queue_run(state, queue_ok, queue_msg, queue_extra)
+    _append_log(
+        "generated_queue_"
+        f"{queue_state.get('status')}"
+        f" file={queue_state.get('selected_file') or '-'}"
+        f" open={int(queue_state.get('queue_open_count', 0) or 0)}"
+    )
+
     regression_status = _run_daily_regression_if_due(state)
     _append_log(regression_status)
 
@@ -178,10 +290,49 @@ def run_once() -> int:
     return 0
 
 
+def run_worker(
+    *,
+    interval_sec: int = 300,
+    max_cycles: int = 0,
+    continue_on_error: bool = True,
+    run_once_fn: Callable[[], int] = run_once,
+    sleep_fn: Callable[[float], None] = time.sleep,
+) -> int:
+    normalized_interval = max(1, int(interval_sec or 300))
+    normalized_max_cycles = max(0, int(max_cycles or 0))
+    cycle = 0
+    last_code = 0
+
+    while True:
+        cycle += 1
+        _record_worker_cycle(cycle=cycle, interval_sec=normalized_interval, status="running")
+        _append_log(f"worker_cycle_start cycle={cycle}")
+        last_code = int(run_once_fn())
+        cycle_status = "ok" if last_code == 0 else "failed"
+        _record_worker_cycle(cycle=cycle, interval_sec=normalized_interval, status=cycle_status, code=last_code)
+        _append_log(f"worker_cycle_end cycle={cycle} code={last_code}")
+
+        if last_code != 0 and not continue_on_error:
+            return last_code
+        if normalized_max_cycles and cycle >= normalized_max_cycles:
+            return last_code
+        sleep_fn(float(normalized_interval))
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Nova Phase 1 autonomy maintenance")
     parser.add_argument("--once", action="store_true", help="Run one maintenance cycle")
+    parser.add_argument("--loop", action="store_true", help="Run maintenance continuously")
+    parser.add_argument("--interval-sec", type=int, default=300, help="Seconds between maintenance cycles in loop mode")
+    parser.add_argument("--max-cycles", type=int, default=0, help="Optional cycle cap for loop mode; 0 means run continuously")
+    parser.add_argument("--stop-on-error", action="store_true", help="Exit loop mode after the first failed cycle")
     args = parser.parse_args(argv)
+    if args.loop:
+        return run_worker(
+            interval_sec=args.interval_sec,
+            max_cycles=args.max_cycles,
+            continue_on_error=not bool(args.stop_on_error),
+        )
     if args.once:
         return run_once()
     return run_once()

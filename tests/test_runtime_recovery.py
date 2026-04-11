@@ -126,6 +126,21 @@ class TestRuntimeRecovery(unittest.TestCase):
             self.assertEqual(payload["pid"], 9000)
             self.assertEqual(payload["process_count"], 1)
 
+    def test_http_status_payload_reports_current_process_without_full_scan(self):
+        fake_process = mock.Mock()
+        fake_process.create_time.return_value = 321.5
+
+        with mock.patch("nova_http.os.getpid", return_value=2468), \
+            mock.patch("nova_http.psutil.Process", return_value=fake_process) as process_ctor:
+            payload = nova_http._http_status_payload()
+
+        self.assertTrue(payload["running"])
+        self.assertEqual(payload["status"], "running")
+        self.assertEqual(payload["pid"], 2468)
+        self.assertEqual(payload["create_time"], 321.5)
+        self.assertEqual(payload["process_count"], 1)
+        process_ctor.assert_called_once_with(2468)
+
     def test_guard_status_payload_prunes_orphaned_lock_and_pid_artifacts(self):
         with tempfile.TemporaryDirectory() as td:
             runtime_dir = Path(td)
@@ -145,6 +160,72 @@ class TestRuntimeRecovery(unittest.TestCase):
             self.assertFalse(payload["lock_exists"])
             self.assertFalse(lock_file.exists())
             self.assertFalse(pid_file.exists())
+
+    def test_cached_logical_service_processes_reuses_recent_fallback_scan(self):
+        first_result = [{"pid": 100, "ppid": 1, "create_time": 10.0, "cmdline": ["python", str(nova_http.GUARD_PY)]}]
+
+        with mock.patch.dict(nova_http._PROCESS_SCAN_CACHE, {}, clear=True), \
+            mock.patch("nova_http._logical_service_processes", return_value=first_result) as logical, \
+            mock.patch("nova_http.time.monotonic", side_effect=[100.0, 103.0]):
+            first = nova_http._cached_logical_service_processes(
+                nova_http.GUARD_PY,
+                cache_key="guard-steady-state",
+                max_age_seconds=5.0,
+            )
+            second = nova_http._cached_logical_service_processes(
+                nova_http.GUARD_PY,
+                cache_key="guard-steady-state",
+                max_age_seconds=5.0,
+            )
+
+        self.assertEqual(first, second)
+        self.assertIsNot(first, second)
+        logical.assert_called_once_with(nova_http.GUARD_PY, root_pid=None)
+
+    def test_guard_status_payload_uses_cached_fallback_only_without_runtime_artifacts(self):
+        with tempfile.TemporaryDirectory() as td:
+            runtime_dir = Path(td)
+
+            with mock.patch.object(nova_http, "RUNTIME_DIR", runtime_dir), \
+                mock.patch("nova_http._cached_logical_service_processes", return_value=[]) as cached, \
+                mock.patch("nova_http._logical_service_processes", return_value=[]) as logical:
+                payload = nova_http._guard_status_payload()
+
+            self.assertEqual(payload["status"], "stopped")
+            cached.assert_called_once_with(
+                nova_http.GUARD_PY,
+                cache_key="guard-steady-state",
+                max_age_seconds=nova_http.PROCESS_SCAN_CACHE_TTL_SECONDS,
+            )
+            logical.assert_not_called()
+
+        with tempfile.TemporaryDirectory() as td:
+            runtime_dir = Path(td)
+            (runtime_dir / "guard.lock").write_text("{}", encoding="utf-8")
+
+            with mock.patch.object(nova_http, "RUNTIME_DIR", runtime_dir), \
+                mock.patch("nova_http._cached_logical_service_processes", return_value=[]) as cached, \
+                mock.patch("nova_http._logical_service_processes", return_value=[]) as logical:
+                payload = nova_http._guard_status_payload()
+
+            self.assertEqual(payload["status"], "boot_timeout")
+            cached.assert_not_called()
+            logical.assert_called_once_with(nova_http.GUARD_PY, root_pid=None)
+
+    def test_guard_status_payload_can_skip_fallback_scan_for_fast_control_path(self):
+        with tempfile.TemporaryDirectory() as td:
+            runtime_dir = Path(td)
+
+            with mock.patch.object(nova_http, "RUNTIME_DIR", runtime_dir), \
+                mock.patch("nova_http._cached_logical_service_processes", return_value=[]) as cached, \
+                mock.patch("nova_http._logical_service_processes", return_value=[]) as logical:
+                payload = nova_http._guard_status_payload(include_fallback_scan=False)
+
+            self.assertEqual(payload["status"], "stopped")
+            self.assertFalse(payload["running"])
+            self.assertEqual(payload["process_count"], 0)
+            cached.assert_not_called()
+            logical.assert_not_called()
 
     def test_core_status_payload_prunes_orphaned_state_and_stale_heartbeat(self):
         with tempfile.TemporaryDirectory() as td:
@@ -426,8 +507,28 @@ class TestRuntimeRecovery(unittest.TestCase):
         script = (Path(__file__).resolve().parent.parent / "nova.ps1").read_text(encoding="utf-8")
 
         self.assertIn("function Get-NovaHttpLogicalProcesses", script)
+        self.assertIn("function Wait-NovaHttpStopped([int]$bindPort=0, [int]$timeoutSeconds=8)", script)
         self.assertIn("$leaf = @($all | Where-Object { -not $parentIds.ContainsKey([int]$_.ProcessId) })", script)
         self.assertIn('$procs = Get-NovaHttpLogicalProcesses', script)
+        self.assertIn('Stop-NovaHttpProcesses | Out-Null', script)
+        self.assertIn('if (-not (Wait-NovaHttpStopped ([int]$bindPort) 8)) {', script)
+        self.assertIn('function Wait-NovaHttpReady([string]$bindHost, [string]$bindPort, [int]$timeoutSeconds=18)', script)
+        self.assertIn('$url = "http://" + $bindHost + ":" + $bindPort + "/api/health"', script)
+        self.assertIn('$response = Invoke-WebRequest -UseBasicParsing $url -TimeoutSec 6', script)
+        self.assertIn('if (-not (Wait-NovaHttpReady $bindHost $bindPort 18)) {', script)
+        self.assertIn('Write-Host ("[FAIL] webui process did not become ready on http://" + $bindHost + ":" + $bindPort + "/api/health")', script)
+        self.assertIn('$r = Invoke-WebRequest -UseBasicParsing $url -TimeoutSec 8', script)
+        self.assertIn('Write-Host ("[FAIL] Requested port " + $bindPort + " is still occupied by non-Nova listener(s): " + $owners)', script)
+        self.assertIn('if (-not (Wait-NovaHttpStopped 0 8)) {', script)
+
+        stop_idx = script.index('Stop-NovaHttpProcesses | Out-Null')
+        wait_idx = script.index('if (-not (Wait-NovaHttpStopped ([int]$bindPort) 8)) {')
+        occupied_idx = script.index('$occupied = @(Get-NetTCPConnection -LocalPort ([int]$bindPort) -State Listen -ErrorAction SilentlyContinue)')
+        fail_idx = script.index('Write-Host ("[FAIL] Requested port " + $bindPort + " is still occupied by non-Nova listener(s): " + $owners)')
+
+        self.assertLess(stop_idx, wait_idx)
+        self.assertLess(wait_idx, occupied_idx)
+        self.assertLess(occupied_idx, fail_idx)
 
     def test_command_center_ui_renders_runtime_process_note(self):
         base = Path(__file__).resolve().parent.parent

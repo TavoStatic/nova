@@ -7,7 +7,7 @@ explicitly requested by the subconscious training-priority output.
 
 They work at two levels:
   1. Probe level  — _probe_turn_routes sees supervisor_viable or fulfillment_viable=True
-  2. Routing level — TURN_SUPERVISOR.evaluate_rules / _should_attempt_fulfillment_flow
+    2. Routing level — TURN_SUPERVISOR.evaluate_rules / FulfillmentFlowService.should_attempt_fulfillment_flow
      confirms the route is actually taken, not fallen through to fallback.
 """
 from __future__ import annotations
@@ -322,14 +322,15 @@ class TestFulfillmentFallthrough(unittest.TestCase):
                 )
 
     def test_fulfillment_flow_attempted_for_explicit_options_requests(self):
+        flow_service = nova_core._fulfillment_flow_service()
         for text in self.INPUTS:
             with self.subTest(text=text):
                 session = ConversationSession()
                 turns: list = []
-                should = nova_core._should_attempt_fulfillment_flow(text, session, turns)
+                should = flow_service.should_attempt_fulfillment_flow(text, session, turns)
                 self.assertTrue(
                     should,
-                    f"_should_attempt_fulfillment_flow returned False for '{text}'",
+                    f"FulfillmentFlowService.should_attempt_fulfillment_flow returned False for '{text}'",
                 )
 
     def test_fallback_pressure_raised_when_fulfillment_bypassed(self):

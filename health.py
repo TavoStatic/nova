@@ -195,16 +195,23 @@ def repair_ollama() -> bool:
     return False
 
 
-def run_check() -> int:
+def run_check(include_ollama: bool = True) -> int:
     hb_ok, hb_msg = check_heartbeat()
     st_ok, st_msg = check_state()
-    ol_ok, ol_msg = check_ollama()
+    profile = "runtime" if include_ollama else "base-package"
+    if include_ollama:
+        ol_ok, ol_msg = check_ollama()
+        ollama_payload = {"ok": ol_ok, "info": ol_msg, "required": True}
+    else:
+        ol_ok, ol_msg = True, "skipped"
+        ollama_payload = {"ok": None, "info": ol_msg, "required": False}
 
     all_ok = hb_ok and st_ok and ol_ok
     out = {
+        "profile": profile,
         "heartbeat": {"ok": hb_ok, "info": hb_msg},
         "core_state": {"ok": st_ok, "info": st_msg},
-        "ollama": {"ok": ol_ok, "info": ol_msg},
+        "ollama": ollama_payload,
         "ok": all_ok,
     }
     print(json.dumps(out, indent=2))
@@ -246,10 +253,11 @@ def run_diag() -> int:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("mode", nargs="?", default="check", choices=["check", "diag", "repair"])
+    parser.add_argument("--skip-ollama", action="store_true", help="Skip the Ollama requirement during check mode")
     args = parser.parse_args()
 
     if args.mode == "check":
-        return run_check()
+        return run_check(include_ollama=not args.skip_ollama)
 
     if args.mode == "repair":
         print("\n=== Repair Mode ===\n")

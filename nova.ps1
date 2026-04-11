@@ -36,6 +36,14 @@ $MEMORYPY  = Join-Path $ROOT "memory.py"      # optional
 $DOCTORPY  = Join-Path $ROOT "doctor.py"      # preflight validator
 $SUBCONSCIOUSRUNNER = Join-Path $ROOT "subconscious_runner.py"
 $OPERATORCLI = Join-Path $ROOT "scripts\operator_cli.py"
+$PACKAGEBUILDPS1 = Join-Path $ROOT "scripts\build_release_package.ps1"
+$PACKAGEVERIFYPS1 = Join-Path $ROOT "scripts\verify_release_package.ps1"
+$INSTALLERBUILDPS1 = Join-Path $ROOT "scripts\build_windows_installer.ps1"
+$INSTALLERVERIFYPS1 = Join-Path $ROOT "scripts\verify_windows_installer.ps1"
+$PACKAGELEDGERPS1 = Join-Path $ROOT "scripts\show_release_ledger.ps1"
+$PACKAGEPROMOTEPS1 = Join-Path $ROOT "scripts\promote_release_package.ps1"
+$PACKAGESTATUSPS1 = Join-Path $ROOT "scripts\show_release_status.ps1"
+$PACKAGEREADINESSPS1 = Join-Path $ROOT "scripts\show_release_readiness.ps1"
 $POLICY    = Join-Path $ROOT "policy.json"    # optional
 $LOG_DIR   = Join-Path $ROOT "logs"
 
@@ -58,10 +66,344 @@ function Ensure-Python {
   if (-not (Test-Path $venvPython)) {
     Write-Host ""
     Write-Host "[FAIL] venv python not found at: $venvPython"
-    Write-Host "       Make sure your venv exists at C:\Nova\.venv"
+    Write-Host "       Make sure your venv exists under: $ROOT"
     Write-Host ""
     exit 1
   }
+}
+
+function Get-NovaNormalizedPath([string]$pathValue) {
+  if ([string]::IsNullOrWhiteSpace($pathValue)) { return "" }
+
+  try {
+    return [System.IO.Path]::GetFullPath($pathValue).Replace('/', '\').ToLowerInvariant()
+  } catch {
+    return [string]$pathValue.Replace('/', '\').ToLowerInvariant()
+  }
+}
+
+function Test-NovaCommandLineHasPath([object]$process, [string]$expectedPath) {
+  if ($null -eq $process -or [string]::IsNullOrWhiteSpace($expectedPath)) { return $false }
+  $commandLine = [string]$process.CommandLine
+  if ([string]::IsNullOrWhiteSpace($commandLine)) { return $false }
+
+  $normalizedExpected = Get-NovaNormalizedPath $expectedPath
+  $normalizedCommand = $commandLine.Replace('/', '\').ToLowerInvariant()
+  return $normalizedCommand.Contains($normalizedExpected)
+}
+
+function Get-BootstrapPythonDescription {
+  if (Test-Path $venvPython) {
+    return $venvPython
+  }
+
+  $pyCmd = Get-Command py -ErrorAction SilentlyContinue
+  if ($pyCmd) {
+    return ($pyCmd.Source + " -3")
+  }
+
+  $pythonCmd = Get-Command python -ErrorAction SilentlyContinue
+  if ($pythonCmd) {
+    return $pythonCmd.Source
+  }
+
+  $python3Cmd = Get-Command python3 -ErrorAction SilentlyContinue
+  if ($python3Cmd) {
+    return $python3Cmd.Source
+  }
+
+  return ""
+}
+
+function Invoke-BootstrapPython([string[]]$pythonTokens=@()) {
+  if (Test-Path $venvPython) {
+    & $venvPython @pythonTokens
+    return $LASTEXITCODE
+  }
+
+  $pyCmd = Get-Command py -ErrorAction SilentlyContinue
+  if ($pyCmd) {
+    & $pyCmd.Source -3 @pythonTokens
+    return $LASTEXITCODE
+  }
+
+  $pythonCmd = Get-Command python -ErrorAction SilentlyContinue
+  if ($pythonCmd) {
+    & $pythonCmd.Source @pythonTokens
+    return $LASTEXITCODE
+  }
+
+  $python3Cmd = Get-Command python3 -ErrorAction SilentlyContinue
+  if ($python3Cmd) {
+    & $python3Cmd.Source @pythonTokens
+    return $LASTEXITCODE
+  }
+
+  Write-Host "[FAIL] No bootstrap Python was found on PATH."
+  Write-Host "       Install Python 3 with venv support, then run: nova install"
+  return 1
+}
+
+function Invoke-NovaInstall {
+  $requirementsPath = Join-Path $ROOT "requirements.txt"
+  $venvDir = Join-Path $ROOT ".venv"
+  $doctorArgs = @("--fix")
+
+  Write-Host ""
+  Write-Host "Nova Install"
+  Write-Host "------------"
+
+  if (-not (Test-Path $requirementsPath)) {
+    Write-Host ("[FAIL] Missing dependency manifest: " + $requirementsPath)
+    return 1
+  }
+
+  if (-not (Test-Path $venvPython)) {
+    $bootstrapSource = Get-BootstrapPythonDescription
+    if ([string]::IsNullOrWhiteSpace($bootstrapSource)) {
+      Write-Host "[FAIL] No bootstrap Python was found on PATH."
+      Write-Host "       Install Python 3 with venv support, then run: nova install"
+      return 1
+    }
+
+    Write-Host ("[INFO] Creating virtual environment with " + $bootstrapSource)
+    $createCode = Invoke-BootstrapPython @("-m", "venv", $venvDir)
+    if ($createCode -ne 0 -or -not (Test-Path $venvPython)) {
+      Write-Host "[FAIL] Virtual environment creation failed."
+      return 1
+    }
+  } else {
+    Write-Host ("[INFO] Using existing virtual environment at " + $venvDir)
+  }
+
+  Write-Host "[INFO] Upgrading pip ..."
+  & $venvPython -m pip install --upgrade pip
+  if ($LASTEXITCODE -ne 0) {
+    Write-Host "[FAIL] pip upgrade failed."
+    return $LASTEXITCODE
+  }
+
+  Write-Host ("[INFO] Installing dependencies from " + $requirementsPath)
+  & $venvPython -m pip install -r $requirementsPath
+  if ($LASTEXITCODE -ne 0) {
+    Write-Host "[FAIL] Dependency installation failed."
+    return $LASTEXITCODE
+  }
+
+  if (Test-Path $DOCTORPY) {
+    Write-Host "[INFO] Running doctor --fix ..."
+    & $venvPython $DOCTORPY @doctorArgs
+    if ($LASTEXITCODE -ne 0) {
+      Write-Host "[FAIL] Doctor validation failed after install."
+      return $LASTEXITCODE
+    }
+  } else {
+    Write-Host ("[WARN] doctor.py not found at " + $DOCTORPY)
+  }
+
+  $ollamaCmd = Get-Command ollama -ErrorAction SilentlyContinue
+  if (-not $ollamaCmd) {
+    Write-Host "[WARN] Optional dependency missing: ollama is not on PATH."
+    Write-Host "       Chat/runtime paths that need a local model backend will stay limited until Ollama is installed."
+  }
+
+  $piperExe = Join-Path $ROOT "piper\piper.exe"
+  $piperModel = Join-Path $ROOT "piper\models\en_US-lessac-medium.onnx"
+  if (-not (Test-Path $piperExe) -or -not (Test-Path $piperModel)) {
+    Write-Host "[WARN] Optional TTS assets are incomplete. Voice output may remain unavailable."
+  }
+
+  Write-Host ""
+  Write-Host "[OK] Install bootstrap completed."
+  Write-Host "[INFO] Next steps:"
+  Write-Host "       1. nova doctor"
+  Write-Host "       2. nova run"
+  Write-Host "       3. nova webui-start --host 127.0.0.1 --port 8080"
+  Write-Host "       4. nova smoke --fix"
+  Write-Host ""
+  return 0
+}
+
+function Invoke-NovaPackageBuild([string[]]$buildTokens=@()) {
+  if (-not (Test-Path $PACKAGEBUILDPS1)) {
+    Write-Host ("[FAIL] Missing package builder: " + $PACKAGEBUILDPS1)
+    return 1
+  }
+
+  & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $PACKAGEBUILDPS1 @buildTokens
+  return $LASTEXITCODE
+}
+
+function Invoke-NovaPackageVerify([string[]]$verifyTokens=@()) {
+  if (-not (Test-Path $PACKAGEVERIFYPS1)) {
+    Write-Host ("[FAIL] Missing package verifier: " + $PACKAGEVERIFYPS1)
+    return 1
+  }
+
+  & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $PACKAGEVERIFYPS1 @verifyTokens
+  return $LASTEXITCODE
+}
+
+function Invoke-NovaInstallerBuild([string[]]$installerTokens=@()) {
+  if (-not (Test-Path $INSTALLERBUILDPS1)) {
+    Write-Host ("[FAIL] Missing installer builder: " + $INSTALLERBUILDPS1)
+    return 1
+  }
+
+  & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $INSTALLERBUILDPS1 @installerTokens
+  return $LASTEXITCODE
+}
+
+function Invoke-NovaInstallerVerify([string[]]$verifyTokens=@()) {
+  if (-not (Test-Path $INSTALLERVERIFYPS1)) {
+    Write-Host ("[FAIL] Missing installer verifier: " + $INSTALLERVERIFYPS1)
+    return 1
+  }
+
+  & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $INSTALLERVERIFYPS1 @verifyTokens
+  return $LASTEXITCODE
+}
+
+function Invoke-NovaPackageLedger([string[]]$ledgerTokens=@()) {
+  if (-not (Test-Path $PACKAGELEDGERPS1)) {
+    Write-Host ("[FAIL] Missing package ledger tool: " + $PACKAGELEDGERPS1)
+    return 1
+  }
+
+  & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $PACKAGELEDGERPS1 @ledgerTokens
+  return $LASTEXITCODE
+}
+
+function Invoke-NovaInstallerLedger([string[]]$ledgerTokens=@()) {
+  if (-not (Test-Path $PACKAGELEDGERPS1)) {
+    Write-Host ("[FAIL] Missing package ledger tool: " + $PACKAGELEDGERPS1)
+    return 1
+  }
+
+  $args = @("-ArtifactKind", "windows-installer") + $ledgerTokens
+  & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $PACKAGELEDGERPS1 @args
+  return $LASTEXITCODE
+}
+
+function Invoke-NovaPackagePromote([string[]]$promoteTokens=@()) {
+  if (-not (Test-Path $PACKAGEPROMOTEPS1)) {
+    Write-Host ("[FAIL] Missing package promote tool: " + $PACKAGEPROMOTEPS1)
+    return 1
+  }
+
+  & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $PACKAGEPROMOTEPS1 @promoteTokens
+  return $LASTEXITCODE
+}
+
+function Invoke-NovaInstallerPromote([string[]]$promoteTokens=@()) {
+  if (-not (Test-Path $PACKAGEPROMOTEPS1)) {
+    Write-Host ("[FAIL] Missing package promote tool: " + $PACKAGEPROMOTEPS1)
+    return 1
+  }
+
+  $args = @("-ArtifactKind", "windows-installer") + $promoteTokens
+  & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $PACKAGEPROMOTEPS1 @args
+  return $LASTEXITCODE
+}
+
+function Invoke-NovaPackageStatus([string[]]$statusTokens=@()) {
+  if (-not (Test-Path $PACKAGESTATUSPS1)) {
+    Write-Host ("[FAIL] Missing package status tool: " + $PACKAGESTATUSPS1)
+    return 1
+  }
+
+  & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $PACKAGESTATUSPS1 @statusTokens
+  return $LASTEXITCODE
+}
+
+function Invoke-NovaInstallerStatus([string[]]$statusTokens=@()) {
+  if (-not (Test-Path $PACKAGESTATUSPS1)) {
+    Write-Host ("[FAIL] Missing package status tool: " + $PACKAGESTATUSPS1)
+    return 1
+  }
+
+  $args = @("-ArtifactKind", "windows-installer") + $statusTokens
+  & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $PACKAGESTATUSPS1 @args
+  return $LASTEXITCODE
+}
+
+function Invoke-NovaPackageReadiness([string[]]$readinessTokens=@()) {
+  if (-not (Test-Path $PACKAGEREADINESSPS1)) {
+    Write-Host ("[FAIL] Missing package readiness tool: " + $PACKAGEREADINESSPS1)
+    return 1
+  }
+
+  & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $PACKAGEREADINESSPS1 @readinessTokens
+  return $LASTEXITCODE
+}
+
+function Invoke-NovaInstallerReadiness([string[]]$readinessTokens=@()) {
+  if (-not (Test-Path $PACKAGEREADINESSPS1)) {
+    Write-Host ("[FAIL] Missing package readiness tool: " + $PACKAGEREADINESSPS1)
+    return 1
+  }
+
+  $args = @("-ArtifactKind", "windows-installer") + $readinessTokens
+  & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $PACKAGEREADINESSPS1 @args
+  return $LASTEXITCODE
+}
+
+function Wait-NovaCoreSignal([int]$timeoutSeconds=25) {
+  $heartbeatPath = Join-Path $ROOT "runtime\core.heartbeat"
+  $statePath = Join-Path $ROOT "runtime\core_state.json"
+  $deadline = (Get-Date).ToUniversalTime().AddSeconds($timeoutSeconds)
+
+  while ((Get-Date).ToUniversalTime() -lt $deadline) {
+    if ((Test-Path $heartbeatPath) -and (Test-Path $statePath)) {
+      return $true
+    }
+    Start-Sleep -Seconds 1
+  }
+
+  return $false
+}
+
+function Invoke-NovaSmoke([string]$tier="runtime", [bool]$useFix=$false) {
+  if (-not (Run-DoctorPreflight $useFix)) { exit 1 }
+
+  Ensure-Python
+  if (-not (Test-Path $GUARDPY)) {
+    Write-Host "[FAIL] Missing guard script: $GUARDPY"
+    exit 1
+  }
+  if (-not (Test-Path $SMOKEPY)) {
+    Write-Host "[FAIL] Missing smoke script: $SMOKEPY"
+    exit 1
+  }
+  if (-not (Test-Path $STOPPY)) {
+    Write-Host "[FAIL] Missing stop script: $STOPPY"
+    exit 1
+  }
+
+  Write-Host ("[INFO] Starting guard in background for smoke tier '" + $tier + "' ...")
+  try {
+    Remove-Item (Join-Path $ROOT "runtime\guard.stop") -Force -ErrorAction SilentlyContinue
+  } catch {}
+  $guardProc = Start-Process -FilePath $venvPython -ArgumentList @($GUARDPY) -PassThru -WindowStyle Hidden
+  if (-not (Wait-NovaCoreSignal 25)) {
+    Write-Host "[WARN] Core heartbeat/state did not appear before smoke execution. Continuing with smoke probe."
+  }
+
+  try {
+    Write-Host ("[INFO] Running smoke_test.py --tier " + $tier + " ...")
+    & $venvPython $SMOKEPY "--tier" $tier
+    $smokeCode = $LASTEXITCODE
+  }
+  finally {
+    Write-Host "[INFO] Stopping guard/core ..."
+    & $venvPython $STOPPY
+    Start-Sleep -Seconds 1
+    if ($guardProc -and -not $guardProc.HasExited) {
+      try { Stop-Process -Id $guardProc.Id -Force -ErrorAction SilentlyContinue } catch {}
+    }
+  }
+
+  exit $smokeCode
 }
 
 function Ensure-Logs {
@@ -109,20 +451,62 @@ function Run-DoctorPreflight([bool]$useFix=$false) {
 }
 
 function Get-NovaHttpProcesses {
+  $expectedWebuiPath = Get-NovaNormalizedPath $WEBUIPY
   return @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
     Where-Object {
       $_.Name -match '^python(\.exe)?$' -and
-      ($_.CommandLine -match 'nova_http\.py')
+      (Test-NovaCommandLineHasPath $_ $expectedWebuiPath)
     })
+}
+
+function Get-NovaProcessFamilyIds([int]$rootPid) {
+  if ($rootPid -le 0) { return @() }
+
+  $familyIds = New-Object System.Collections.Generic.HashSet[int]
+  $allProcesses = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue)
+  if (-not $allProcesses -or $allProcesses.Count -eq 0) {
+    [void]$familyIds.Add($rootPid)
+    return @($familyIds)
+  }
+
+  $childrenByParent = @{}
+  foreach ($proc in $allProcesses) {
+    $parentId = [int]$proc.ParentProcessId
+    if (-not $childrenByParent.ContainsKey($parentId)) {
+      $childrenByParent[$parentId] = New-Object System.Collections.Generic.List[int]
+    }
+    [void]$childrenByParent[$parentId].Add([int]$proc.ProcessId)
+  }
+
+  $queue = New-Object System.Collections.Generic.Queue[int]
+  $queue.Enqueue($rootPid)
+  while ($queue.Count -gt 0) {
+    $currentPid = $queue.Dequeue()
+    if ($familyIds.Contains($currentPid)) { continue }
+    [void]$familyIds.Add($currentPid)
+    if ($childrenByParent.ContainsKey($currentPid)) {
+      foreach ($childPid in $childrenByParent[$currentPid]) {
+        if (-not $familyIds.Contains([int]$childPid)) {
+          $queue.Enqueue([int]$childPid)
+        }
+      }
+    }
+  }
+
+  return @($familyIds)
 }
 
 function Get-NovaScriptProcesses([string]$scriptName) {
   if ([string]::IsNullOrWhiteSpace($scriptName)) { return @() }
-  $escaped = [regex]::Escape($scriptName)
+  $scriptPath = $scriptName
+  if (-not [System.IO.Path]::IsPathRooted($scriptPath)) {
+    $scriptPath = Join-Path $ROOT $scriptName
+  }
+  $expectedScriptPath = Get-NovaNormalizedPath $scriptPath
   return @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
     Where-Object {
       $_.Name -match '^python(\.exe)?$' -and
-      $_.CommandLine -match $escaped
+      (Test-NovaCommandLineHasPath $_ $expectedScriptPath)
     })
 }
 
@@ -146,13 +530,13 @@ function Read-NovaIdentityFile([string]$path) {
   }
   try {
     $raw = Get-Content -Raw -Encoding UTF8 $path | ConvertFrom-Json
-    $pid = $null
+    $storedPid = $null
     if ($raw.pid -is [int] -and $raw.pid -gt 0) {
-      $pid = [int]$raw.pid
+      $storedPid = [int]$raw.pid
     } elseif ($raw.pid) {
-      $parsedPid = 0
-      if ([int]::TryParse([string]$raw.pid, [ref]$parsedPid) -and $parsedPid -gt 0) {
-        $pid = $parsedPid
+      $candidatePid = 0
+      if ([int]::TryParse([string]$raw.pid, [ref]$candidatePid) -and $candidatePid -gt 0) {
+        $storedPid = $candidatePid
       }
     }
 
@@ -162,7 +546,7 @@ function Read-NovaIdentityFile([string]$path) {
     }
 
     return [pscustomobject]@{
-      pid = $pid
+      pid = $storedPid
       create_time = $createTime
       exists = $true
     }
@@ -171,40 +555,56 @@ function Read-NovaIdentityFile([string]$path) {
   }
 }
 
-function Select-NovaLogicalProcess($processes, [object]$targetPid, [object]$targetCreateTime) {
-  $items = @($processes)
-  if ($items.Count -eq 0) { return $null }
+function Convert-NovaCreationDateToUnixSeconds([object]$creationDate) {
+  if ($null -eq $creationDate -or [string]::IsNullOrWhiteSpace([string]$creationDate)) {
+    return $null
+  }
 
-  $hasPid = $null -ne $targetPid -and [int]$targetPid -gt 0
-  $hasCreateTime = $null -ne $targetCreateTime
+  try {
+    $parsedDate = [Management.ManagementDateTimeConverter]::ToDateTime([string]$creationDate).ToUniversalTime()
+    return [double][DateTimeOffset]$parsedDate.ToUnixTimeSeconds()
+  } catch {
+    return $null
+  }
+}
 
-  if ($hasPid) {
-    foreach ($item in $items) {
-      if ([int]$item.ProcessId -ne [int]$targetPid) { continue }
-      if (-not $hasCreateTime) { return $item }
-      $procCreate = $null
-      if ($item.CreationDate) {
-        $procCreate = [Management.ManagementDateTimeConverter]::ToDateTime($item.CreationDate).ToUniversalTime()
-        $procCreate = [double][DateTimeOffset]$procCreate.ToUnixTimeSeconds()
-      }
-      if ($null -eq $procCreate -or [math]::Abs([double]$procCreate - [double]$targetCreateTime) -lt 1.0) {
-        return $item
+function Select-NovaLogicalProcess($logicalProcesses, $identityPid, $identityCreateTime) {
+  $logical = @($logicalProcesses)
+  if (-not $logical -or $logical.Count -eq 0) {
+    return $null
+  }
+
+  $selected = $null
+  $expectedPid = 0
+  if ([int]::TryParse([string]$identityPid, [ref]$expectedPid) -and $expectedPid -gt 0) {
+    $selected = @($logical | Where-Object { [int]$_.ProcessId -eq $expectedPid } | Select-Object -First 1)
+    if ($selected -and $null -ne $identityCreateTime) {
+      $actualCreateTime = Convert-NovaCreationDateToUnixSeconds $selected.CreationDate
+      if ($null -ne $actualCreateTime) {
+        $timeDelta = [math]::Abs([double]$actualCreateTime - [double]$identityCreateTime)
+        if ($timeDelta -gt 2.0) {
+          $selected = $null
+        }
       }
     }
   }
 
-  if ($hasCreateTime) {
-    foreach ($item in $items) {
-      if (-not $item.CreationDate) { continue }
-      $procCreate = [Management.ManagementDateTimeConverter]::ToDateTime($item.CreationDate).ToUniversalTime()
-      $procCreate = [double][DateTimeOffset]$procCreate.ToUnixTimeSeconds()
-      if ([math]::Abs([double]$procCreate - [double]$targetCreateTime) -lt 1.0) {
-        return $item
-      }
-    }
+  if ($selected) {
+    return $selected
   }
 
-  return $items[0]
+  if ($logical.Count -eq 1) {
+    return $logical[0]
+  }
+
+  return @(
+    $logical |
+      Sort-Object -Property @(
+        @{ Expression = { Convert-NovaCreationDateToUnixSeconds $_.CreationDate }; Descending = $true },
+        @{ Expression = { [int]$_.ProcessId }; Descending = $true }
+      ) |
+      Select-Object -First 1
+  ) | Select-Object -First 1
 }
 
 function Get-NovaHeartbeatAgeSeconds {
@@ -301,12 +701,56 @@ function Stop-NovaHttpProcesses {
 
 function Stop-NovaHttpExcept([int]$keepPid) {
   $procs = Get-NovaHttpProcesses | Where-Object { $_.ProcessId -ne $keepPid }
+  $keepFamilyIds = @(Get-NovaProcessFamilyIds $keepPid)
+  $procs = Get-NovaHttpProcesses | Where-Object { $keepFamilyIds -notcontains [int]$_.ProcessId }
   foreach ($p in $procs) {
     try {
       Stop-Process -Id $p.ProcessId -Force -ErrorAction SilentlyContinue
       Write-Host ("[OK]   Stopped extra nova_http pid=" + $p.ProcessId)
     } catch {}
   }
+}
+
+function Wait-NovaHttpStopped([int]$bindPort=0, [int]$timeoutSeconds=8) {
+  $deadline = (Get-Date).ToUniversalTime().AddSeconds($timeoutSeconds)
+
+  while ((Get-Date).ToUniversalTime() -lt $deadline) {
+    $procs = @(Get-NovaHttpProcesses)
+    $listeners = @()
+    if ($bindPort -gt 0) {
+      try {
+        $listeners = @(Get-NetTCPConnection -LocalPort $bindPort -State Listen -ErrorAction SilentlyContinue)
+      } catch {
+        $listeners = @()
+      }
+    }
+
+    if ($procs.Count -eq 0 -and $listeners.Count -eq 0) {
+      return $true
+    }
+
+    Start-Sleep -Milliseconds 500
+  }
+
+  return $false
+}
+
+function Wait-NovaHttpReady([string]$bindHost, [string]$bindPort, [int]$timeoutSeconds=18) {
+  $deadline = (Get-Date).ToUniversalTime().AddSeconds($timeoutSeconds)
+  $url = "http://" + $bindHost + ":" + $bindPort + "/api/health"
+
+  while ((Get-Date).ToUniversalTime() -lt $deadline) {
+    try {
+      $response = Invoke-WebRequest -UseBasicParsing $url -TimeoutSec 6
+      if ($response.StatusCode -eq 200) {
+        return $true
+      }
+    } catch {
+    }
+    Start-Sleep -Milliseconds 500
+  }
+
+  return $false
 }
 
 function Show-Help {
@@ -326,6 +770,19 @@ function Show-Help {
   Write-Host "  nova find ""keyword"" [folder]"
   Write-Host ""
   Write-Host "Runtime:"
+  Write-Host "  nova install                   # create/refresh venv, install deps, run doctor --fix"
+  Write-Host "  nova package-build [--label rc1] [--version 2026.03.30] [--channel rc] [--output path]  # stage and zip base package artifact"
+  Write-Host "  nova package-verify [path]     # verify latest or selected release artifact manifest/content"
+  Write-Host "  nova installer-build [--artifact path] [--compiler path-to-ISCC.exe] [--output path]  # build Windows installer from a verified package zip"
+  Write-Host "  nova installer-verify [path]   # verify latest or selected Windows installer artifact/provenance"
+  Write-Host "  nova package-ledger [--count 10] [--channel rc] [--version 2026.03.30.2] [--event build]  # recent release artifact history"
+  Write-Host "  nova installer-ledger [--count 10] [--channel rc] [--version 2026.03.30.2] [--event build]  # recent Windows installer history"
+  Write-Host "  nova package-status            # latest release artifact and promotion state"
+  Write-Host "  nova installer-status          # latest Windows installer and promotion state"
+  Write-Host "  nova package-readiness         # ship-gate summary from latest build, verify, and promotion records"
+  Write-Host "  nova installer-readiness       # ship-gate summary for latest Windows installer"
+  Write-Host "  nova package-promote --result pass [--version 2026.03.30.2] [--note text]  # record RC validation outcome"
+  Write-Host "  nova installer-promote --result pass [--version 2026.03.30.2] [--note text]  # record installer validation outcome"
   Write-Host "  nova doctor [--fix]            # startup preflight validator"
   Write-Host "  nova run [--fix]               # Nova core (voice + tools)"
   Write-Host "  nova webui [--host 0.0.0.0 --port 8080]  # network web interface"
@@ -335,7 +792,9 @@ function Show-Help {
   Write-Host "  nova runtime-status            # logical guard/core/webui summary"
   Write-Host "  nova operator [--session <id>] [--macro <id>] [message]  # local operator CLI via /api/control/action"
   Write-Host "  nova operator --list-macros      # list saved operator macros"
+  Write-Host "  nova smoke-base [--fix]        # base package smoke without Ollama requirement"
   Write-Host "  nova smoke [--fix]             # doctor -> guard -> smoke_test -> stop"
+  Write-Host "  nova smoke-runtime [--fix]     # explicit Ollama-backed runtime smoke"
   Write-Host "  nova test                      # compact regression checks"
   Write-Host "  nova subconscious [--family <id>] [--label overnight]  # unattended subconscious batch report"
   Write-Host "  nova runtools                  # (optional) run_tools.py if you use it"
@@ -529,17 +988,23 @@ switch ($cmd.ToLower()) {
       }
     }
 
+    Stop-NovaHttpProcesses | Out-Null
+    if (-not (Wait-NovaHttpStopped ([int]$bindPort) 8)) {
+      Write-Host ("[WARN] Existing nova_http listeners did not clear from port " + $bindPort + " before restart.")
+    }
+
     $occupied = @(Get-NetTCPConnection -LocalPort ([int]$bindPort) -State Listen -ErrorAction SilentlyContinue)
     if ($occupied.Count -gt 0) {
       if ($portSpecified) {
-        Write-Host ("[WARN] Requested port " + $bindPort + " already has listeners. Trying anyway.")
+        $owners = (($occupied | ForEach-Object { [string]$_.OwningProcess }) | Select-Object -Unique) -join ", "
+        Write-Host ("[FAIL] Requested port " + $bindPort + " is still occupied by non-Nova listener(s): " + $owners)
+        exit 1
       } else {
         Write-Host ("[WARN] Port " + $bindPort + " is occupied; switching to 8090.")
         $bindPort = "8090"
       }
     }
 
-    Stop-NovaHttpProcesses | Out-Null
     try {
       Remove-Item (Join-Path $ROOT "runtime\guard.stop") -Force -ErrorAction SilentlyContinue
     } catch {}
@@ -556,6 +1021,11 @@ switch ($cmd.ToLower()) {
       Write-Host ("[INFO] Check logs: " + $errLog)
       exit 1
     }
+    if (-not (Wait-NovaHttpReady $bindHost $bindPort 18)) {
+      Write-Host ("[FAIL] webui process did not become ready on http://" + $bindHost + ":" + $bindPort + "/api/health")
+      Write-Host ("[INFO] Check logs: " + $errLog)
+      exit 1
+    }
     Write-Host ("[OK]   Started webui pid=" + $proc.Id)
     Write-Host ("[INFO] URL: http://" + $bindHost + ":" + $bindPort + "/control")
     break
@@ -563,6 +1033,9 @@ switch ($cmd.ToLower()) {
 
   "webui-stop" {
     Stop-NovaHttpProcesses | Out-Null
+    if (-not (Wait-NovaHttpStopped 0 8)) {
+      Write-Host "[WARN] Some nova_http processes or listeners may still be shutting down."
+    }
     break
   }
 
@@ -585,7 +1058,7 @@ switch ($cmd.ToLower()) {
 
     $url = "http://127.0.0.1:" + $port + "/api/control/status"
     try {
-      $r = Invoke-WebRequest -UseBasicParsing $url -TimeoutSec 4
+      $r = Invoke-WebRequest -UseBasicParsing $url -TimeoutSec 8
       Write-Host ("[OK]   " + $url + " => " + $r.StatusCode)
     } catch {
       Write-Host ("[WARN] " + $url + " unreachable")
@@ -601,45 +1074,26 @@ switch ($cmd.ToLower()) {
   "smoke" {
     $useFix = $false
     if ($remainingTokens -contains "--fix") { $useFix = $true }
-    if (-not (Run-DoctorPreflight $useFix)) { exit 1 }
+    Invoke-NovaSmoke "runtime" $useFix
+    break
+  }
 
-    Ensure-Python
-    if (-not (Test-Path $GUARDPY)) {
-      Write-Host "[FAIL] Missing guard script: $GUARDPY"
-      exit 1
-    }
-    if (-not (Test-Path $SMOKEPY)) {
-      Write-Host "[FAIL] Missing smoke script: $SMOKEPY"
-      exit 1
-    }
-    if (-not (Test-Path $STOPPY)) {
-      Write-Host "[FAIL] Missing stop script: $STOPPY"
-      exit 1
-    }
+  "smoke-base" {
+    $useFix = $false
+    if ($remainingTokens -contains "--fix") { $useFix = $true }
+    Invoke-NovaSmoke "base" $useFix
+    break
+  }
 
-    Write-Host "[INFO] Starting guard in background..."
-    $guardProc = Start-Process -FilePath $venvPython -ArgumentList @($GUARDPY) -PassThru -WindowStyle Hidden
-    Start-Sleep -Seconds 2
-
-    try {
-      Write-Host "[INFO] Running smoke_test.py ..."
-      & $venvPython $SMOKEPY
-      $smokeCode = $LASTEXITCODE
-    }
-    finally {
-      Write-Host "[INFO] Stopping guard/core ..."
-      & $venvPython $STOPPY
-      Start-Sleep -Seconds 1
-      if ($guardProc -and -not $guardProc.HasExited) {
-        try { Stop-Process -Id $guardProc.Id -Force -ErrorAction SilentlyContinue } catch {}
-      }
-    }
-
-    exit $smokeCode
+  "smoke-runtime" {
+    $useFix = $false
+    if ($remainingTokens -contains "--fix") { $useFix = $true }
+    Invoke-NovaSmoke "runtime" $useFix
+    break
   }
 
   "test" {
-    Run-Py $REGRESSION
+    Run-Py $REGRESSION $remainingTokens
     break
   }
 
@@ -772,14 +1226,68 @@ switch ($cmd.ToLower()) {
   # Future: install/update helpers (commented hooks)
   # ----------
   "install" {
-    Write-Host "[INFO] Reserved for future install helpers."
-    Write-Host "       Example future actions:"
-    Write-Host "       - pip install -r requirements.txt"
-    Write-Host "       - ollama pull llama3.1:8b"
-    Write-Host "       - ollama pull nomic-embed-text"
-    # Uncomment later when you create requirements.txt:
-    # Run-Py (Join-Path $ROOT "install.py")
-    break
+    $installCode = Invoke-NovaInstall
+    exit $installCode
+  }
+
+  "package-build" {
+    $buildCode = Invoke-NovaPackageBuild $remainingTokens
+    exit $buildCode
+  }
+
+  "package-verify" {
+    $verifyCode = Invoke-NovaPackageVerify $remainingTokens
+    exit $verifyCode
+  }
+
+  "installer-build" {
+    $installerCode = Invoke-NovaInstallerBuild $remainingTokens
+    exit $installerCode
+  }
+
+  "installer-verify" {
+    $installerVerifyCode = Invoke-NovaInstallerVerify $remainingTokens
+    exit $installerVerifyCode
+  }
+
+  "package-ledger" {
+    $ledgerCode = Invoke-NovaPackageLedger $remainingTokens
+    exit $ledgerCode
+  }
+
+  "installer-ledger" {
+    $ledgerCode = Invoke-NovaInstallerLedger $remainingTokens
+    exit $ledgerCode
+  }
+
+  "package-promote" {
+    $promoteCode = Invoke-NovaPackagePromote $remainingTokens
+    exit $promoteCode
+  }
+
+  "installer-promote" {
+    $promoteCode = Invoke-NovaInstallerPromote $remainingTokens
+    exit $promoteCode
+  }
+
+  "package-status" {
+    $statusCode = Invoke-NovaPackageStatus $remainingTokens
+    exit $statusCode
+  }
+
+  "installer-status" {
+    $statusCode = Invoke-NovaInstallerStatus $remainingTokens
+    exit $statusCode
+  }
+
+  "package-readiness" {
+    $readinessCode = Invoke-NovaPackageReadiness $remainingTokens
+    exit $readinessCode
+  }
+
+  "installer-readiness" {
+    $readinessCode = Invoke-NovaInstallerReadiness $remainingTokens
+    exit $readinessCode
   }
 
   "update" {

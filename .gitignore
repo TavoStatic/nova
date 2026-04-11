@@ -1,7 +1,14 @@
 ﻿# Runtime artifacts - never commit these
 runtime/
 updates/
+logs/
+memory/
+knowledge/web/
+LAST_SESSION.json
+RESUME_HERE.txt
 nova_memory.sqlite
+*.sqlite-shm
+*.sqlite-wal
 *.pyc
 *.pyo
 __pycache__/
@@ -20,3 +27,11 @@ Thumbs.db
 # Virtualenv
 .venv/
 venv/
+.ci_venv/
+
+# Test/tool caches
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/

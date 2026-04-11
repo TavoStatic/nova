@@ -182,8 +182,10 @@ class TestToolRegistry(unittest.TestCase):
             previous_user = nova_core.get_active_user()
             try:
                 nova_core.set_active_user("tester")
-                with patch("tools.registry.TOOL_EVENTS_PATH", event_path), \
-                     patch("nova_http.TOOL_EVENTS_LOG", event_path), \
+                # Patch the service instance's events_log_path directly
+                original_path = nova_core.TOOL_REGISTRY_SERVICE.events_log_path
+                nova_core.TOOL_REGISTRY_SERVICE.events_log_path = event_path
+                with patch("nova_http.TOOL_EVENTS_LOG", event_path), \
                      patch("nova_core.load_policy", return_value=policy), \
                      patch("nova_http.nova_core.load_policy", return_value=policy), \
                      patch("nova_http.nova_core.ollama_api_up", return_value=False), \
@@ -207,6 +209,7 @@ class TestToolRegistry(unittest.TestCase):
                     self.assertEqual(status["last_tool_name"], "filesystem")
                     self.assertEqual(status["last_tool_status"], "ok")
             finally:
+                nova_core.TOOL_REGISTRY_SERVICE.events_log_path = original_path
                 nova_core.set_active_user(previous_user)
 
 

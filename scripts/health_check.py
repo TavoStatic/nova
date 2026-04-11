@@ -9,7 +9,11 @@ WORKSPACE_ROOT = Path(__file__).resolve().parents[1]
 
 
 def _suite_command() -> list[str]:
-    return [sys.executable, "-m", "unittest", "discover", "-s", "tests", "-f"]
+    return [
+        sys.executable,
+        str(WORKSPACE_ROOT / "run_regression.py"),
+        "preflight",
+    ]
 
 
 def check_suite() -> tuple[bool, str]:

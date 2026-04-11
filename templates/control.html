@@ -1,541 +1,1039 @@
 <!doctype html>
 <html lang="en">
+
+
+<!--
+<i class="bi bi-menu-button-wide-fill"></i>
+<i class="bi bi-menu-button-wide"></i>
+<i class="bi bi-wrench-adjustable-circle"></i>
+<i class="bi bi-wrench-adjustable-circle-fill"></i>
+<i class="bi bi-bandaid-fill"></i>
+<i class="bi bi-bandaid"></i>
+<i class="bi bi-lungs-fill"></i>
+<i class="bi bi-lungs"></i>
+<i class="bi bi-file-earmark-medical"></i>
+<i class="bi bi-file-earmark-medical-fill"></i>
+<i class="bi bi-activity"></i>
+<i class="bi bi-heart-pulse"></i>
+<i class="bi bi-heart-pulse-fill"></i>
+<i class="bi bi-heartbreak"></i>
+<i class="bi bi-heartbreak"></i>
+<i class="bi bi-binoculars"></i>
+<i class="bi bi-binoculars-fill"></i>
+<i class="bi bi-arrow-clockwise"></i>
+<i class="bi bi-chat-dots-fill"></i>
+<i class="bi bi-chat-dots"></i>
+<i class="bi bi-layout-sidebar"></i>
+<i class="bi bi-layout-sidebar-inset-reverse"></i>
+<i class="bi bi-layout-sidebar-inset"></i>
+<i class="bi bi-layout-sidebar-reverse"></i>
+
+
+
+-->
+
 <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>NYO System Control</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-QWTKZyjpPEjISv5WaRU9OFeRpok6YctnYmDr5pNlyT2bRjXh0JMhjY6hW+ALEwIH" crossorigin="anonymous">
-    <link href="/static/control.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css" rel="stylesheet">
+    <link href="/static/control.css?v={{CONTROL_CSS_VERSION}}" rel="stylesheet">
 </head>
 <body>
     <div class="control-shell">
         <aside class="control-sidebar panel-card">
             <div class="brand-stack">
                 <div class="brand-kicker">NYO System</div>
-                <div class="brand-mark">Not Your Ordinary AI System</div>
-                <div class="brand-sub">NYO runtime operator console and behavior inspector</div>
-            </div>
-
-            <div class="sidebar-health-row">
-                <span id="healthBadge" class="status-pill status-pill-blue">Health --</span>
-                <button id="btnRefresh" class="btn btn-sm btn-operator-primary" type="button">Refresh</button>
+                <div class="brand-kicker">Menu</div>
+               
             </div>
 
             <nav class="nav-stack">
-                <button class="nav-pill active" data-view-target="overview" type="button">Overview</button>
-                <button class="nav-pill" data-view-target="operations" type="button">Tools</button>
-                <button class="nav-pill" data-view-target="sessions" type="button">Sessions</button>
-                <button class="nav-pill" data-view-target="logs" type="button">Logs</button>
-                <button class="nav-pill" data-view-target="health" type="button">Health</button>
+                <button class="nav-pill active" data-view-target="overview" type="button"><span class="nav-pill-icon-stack" aria-hidden="true"><i class="bi bi-menu-button-wide nav-pill-icon nav-pill-icon-outline"></i><i class="bi bi-menu-button-wide-fill nav-pill-icon nav-pill-icon-fill"></i></span><span class="nav-pill-copy"><span class="nav-pill-label">Overview</span><span class="nav-pill-meta">Signal hub</span></span></button>
+                <button class="nav-pill" data-view-target="operations" type="button"><span class="nav-pill-icon-stack" aria-hidden="true"><i class="bi bi-wrench-adjustable-circle nav-pill-icon nav-pill-icon-outline"></i><i class="bi bi-wrench-adjustable-circle-fill nav-pill-icon nav-pill-icon-fill"></i></span><span class="nav-pill-copy"><span class="nav-pill-label">Operations</span><span class="nav-pill-meta">Control plane</span></span></button>
+                <button class="nav-pill" data-view-target="sessions" type="button"><span class="nav-pill-icon-stack" aria-hidden="true"><i class="bi bi-binoculars nav-pill-icon nav-pill-icon-outline"></i><i class="bi bi-binoculars-fill nav-pill-icon nav-pill-icon-fill"></i></span><span class="nav-pill-copy"><span class="nav-pill-label">Sessions</span><span class="nav-pill-meta">Live threads</span></span></button>
+                <button class="nav-pill" data-view-target="logs" type="button"><span class="nav-pill-icon-stack" aria-hidden="true"><i class="bi bi-file-earmark-medical nav-pill-icon nav-pill-icon-outline"></i><i class="bi bi-file-earmark-medical-fill nav-pill-icon nav-pill-icon-fill"></i></span><span class="nav-pill-copy"><span class="nav-pill-label">Logs</span><span class="nav-pill-meta">Trace ledger</span></span></button>
+                <button class="nav-pill" data-view-target="health" type="button"><span class="nav-pill-icon-stack" aria-hidden="true"><i class="bi bi-heart-pulse nav-pill-icon nav-pill-icon-outline"></i><i class="bi bi-heart-pulse-fill nav-pill-icon nav-pill-icon-fill"></i></span><span class="nav-pill-copy"><span class="nav-pill-label">Health</span><span class="nav-pill-meta">Runtime status</span></span></button>
+                <a class="nav-pill nav-link-pill" href="/" target="_blank" rel="noopener noreferrer"><span class="nav-pill-icon-stack" aria-hidden="true"><i class="bi bi-chat-dots nav-pill-icon nav-pill-icon-outline"></i><i class="bi bi-chat-dots-fill nav-pill-icon nav-pill-icon-fill"></i></span><span class="nav-pill-copy"><span class="nav-pill-label">Ui Chat</span><span class="nav-pill-meta">External</span></span></a>
             </nav>
 
-            <div class="sidebar-meta">
-                <a href="/">Open NYO Chat</a>
-                <button id="btnInspectorToggle" class="btn btn-sm btn-operator-alt" type="button">Toggle Inspector</button>
-                <button id="btnLogout" class="btn btn-sm btn-operator-danger" type="button">Logout</button>
-            </div>
+            <div class="sidebar-summary-stack" aria-label="Overview summaries">
+                <div class="panel-card hero-card sidebar-hero-card">
+                    <div class="section-title"><span class="section-title-wrap"><i class="bi bi-heart-pulse section-title-icon" aria-hidden="true"></i><span>Core Pulse</span></span></div>
+                    <div id="heroHealthSummary" class="hero-value">Awaiting health feed.</div>
+                    <div id="heroHealthMeta" class="hero-meta-row"></div>
+                    <div class="hero-note">Score, pass ratio, and active alert load.</div>
+                </div>
 
-            <div class="panel-card compact-card">
-                <div class="section-title">Operator Access</div>
-                <label class="field-label" for="key">Operator key</label>
-                <input id="key" class="form-control form-control-sm" type="password" placeholder="NOVA_CONTROL_TOKEN" />
-            </div>
+                <div class="panel-card hero-card sidebar-hero-card">
+                    <div class="section-title"><span class="section-title-wrap"><i class="bi bi-signpost-split section-title-icon" aria-hidden="true"></i><span>Route Trace</span></span></div>
+                    <div id="heroRouteSummary" class="hero-value">Awaiting route trace.</div>
+                    <div id="heroRouteMeta" class="hero-meta-row"></div>
+                    <div class="hero-note">Intent, route chain, and the last tool used.</div>
+                </div>
 
-            <div class="panel-card compact-card sidebar-callout">
-                <div class="section-title">Operator Brief</div>
-                <div class="section-subtitle">Hybrid mission console: live health up front, actions centered, inspector always close to the work.</div>
+                <div class="panel-card hero-card sidebar-hero-card">
+                    <div class="section-title"><span class="section-title-wrap"><i class="bi bi-broadcast-pin section-title-icon" aria-hidden="true"></i><span>Ops Snapshot</span></span></div>
+                    <div id="heroOpsSummary" class="hero-value">Awaiting ops signal.</div>
+                    <div id="heroOpsMeta" class="hero-meta-row"></div>
+                    <div class="hero-note">Sessions, provider, memory scope, and runtime mode.</div>
+                </div>
+
+                <div class="hero-status-stack" aria-label="Runtime status summary">
+                    <div id="healthBadge" class="health-status-tile health-status-tile-neutral" title="Health status not loaded yet.">
+                        <span class="health-status-icon-wrap" aria-hidden="true">
+                            <i class="bi bi-heart-pulse-fill health-status-icon"></i>
+                        </span>
+                        <span class="health-status-copy">
+                            <span class="health-status-label">Health</span>
+                            <span class="health-status-value">--</span>
+                        </span>
+                    </div>
+                    <div id="overrideBadges" class="override-status-tile" title="Session override status.">
+                        <span class="override-status-icon-wrap" aria-hidden="true">
+                            <i class="bi bi-sliders2-vertical override-status-icon"></i>
+                        </span>
+                        <span class="override-status-copy">
+                            <span class="override-status-label">Overrides</span>
+                            <span class="override-status-value">No active overrides</span>
+                        </span>
+                    </div>
+                </div>
             </div>
         </aside>
 
         <main class="control-main">
             <header class="main-topbar panel-card">
-                <div class="topbar-copy">
-                    <div class="topbar-kicker">NYO System Control</div>
-                    <div class="topbar-title">Mission control for the NYO runtime</div>
-                    <div class="brand-sub">NOT YOUR ORDINARY AI SYSTEM</div>
+                <div class="topbar-heading-row" aria-label="Console layout toggles">
+                    <button id="btnSidebarToggle" class="console-toggle-button" type="button" aria-label="Toggle menu" aria-pressed="false" title="Collapse menu">
+                        <span class="console-toggle-icon-stack" aria-hidden="true">
+                            <i class="bi bi-layout-sidebar-inset console-toggle-icon console-toggle-icon-expanded"></i>
+                            <i class="bi bi-layout-sidebar console-toggle-icon console-toggle-icon-collapsed"></i>
+                        </span>
+                        <span class="visually-hidden">Toggle menu</span>
+                    </button>
+                    <div class="topbar-heading-copy">
+                        <div class="topbar-kicker">NYO System Control</div>
+                        <div class="brand-sub">NOT YOUR ORDINARY AI SYSTEM</div>
+                        <div class="topbar-title">Operator's Console</div>
+                    </div>
+                    <button id="btnInspectorToggle" class="console-toggle-button" type="button" aria-label="Toggle live inspector" aria-pressed="false" title="Collapse live inspector">
+                        <span class="console-toggle-icon-stack" aria-hidden="true">
+                            <i class="bi bi-layout-sidebar-inset-reverse console-toggle-icon console-toggle-icon-expanded"></i>
+                            <i class="bi bi-layout-sidebar-reverse console-toggle-icon console-toggle-icon-collapsed"></i>
+                        </span>
+                        <span class="visually-hidden">Toggle live inspector</span>
+                    </button>
                 </div>
-                <div id="overrideBadges" class="badge-tray"></div>
+                <div class="topbar-body-row">
+                    <div class="topbar-copy">
+                        <hr class="topbar-ecg-line">
+                    <table class="system-notes-table" aria-label="System notes">
+                         <caption>System Notes</caption>
+                        <tbody>
+                            <tr>
+                                <th scope="row">Live Status</th>
+                                <td><div id="feedbackBar" class="system-note-value system-note-info">Console link ready.</div></td>
+                            </tr>
+                            <tr>
+                                <th scope="row">Runtime Note</th>
+                                <td><div id="runtimeNoteBar" class="system-note-value system-note-muted">Runtime note pending.</div></td>
+                            </tr>
+                            <tr>
+                                <th scope="row">Operator Brief</th>
+                                <td><div class="system-note-value system-note-muted">Live health first. Action lanes centered. Inspector pinned to the work.</div></td>
+                            </tr>
+                        </tbody>
+                       
+                    </table>
+                    </div>
+                </div>
             </header>
 
-            <div id="feedbackBar" class="signal-bar signal-info">Control UI ready.</div>
-            <div id="runtimeNoteBar" class="signal-bar signal-muted"> Runtime note not loaded yet.</div>
-
             <section class="main-view" data-view="overview">
-                <div class="hero-deck mb-3">
-                    <div class="panel-card hero-card">
-                        <div class="section-title">Core Pulse</div>
-                        <div id="heroHealthSummary" class="hero-value">Waiting for health data.</div>
-                        <div class="hero-note">Health score, pass ratio, and live alerts.</div>
+                <div class="panel-card main-card signal-panel signal-panel-shell layer-tab-shell mb-3" data-layer-tabs="telemetry">
+                    <div class="layer-tab-bar" role="tablist" aria-label="Telemetry views">
+                        <button class="layer-tab-button active" type="button" role="tab" aria-selected="true" data-layer-tab="telemetry-live" tabindex="0">
+                            <i class="bi bi-activity"></i>
+                            <span class="layer-tab-copy"><span>Live</span><span>Trend</span></span>
+                        </button>
+                        <button class="layer-tab-button" type="button" role="tab" aria-selected="false" data-layer-tab="telemetry-snapshot" tabindex="-1">
+                            <i class="bi bi-grid-3x3-gap"></i>
+                            <span class="layer-tab-copy"><span>Signal</span><span>Snapshot</span></span>
+                        </button>
+                        <button class="layer-tab-button" type="button" role="tab" aria-selected="false" data-layer-tab="telemetry-pressure" tabindex="-1">
+                            <i class="bi bi-speedometer2"></i>
+                            <span class="layer-tab-copy"><span>Pressure</span><span>Matrix</span></span>
+                        </button>
+                        <button class="layer-tab-button" type="button" role="tab" aria-selected="false" data-layer-tab="telemetry-restarts" tabindex="-1">
+                            <i class="bi bi-arrow-repeat"></i>
+                            <span class="layer-tab-copy"><span>Restart</span><span>Analytics</span></span>
+                        </button>
                     </div>
+                    <div class="layer-tab-panels telemetry-tab-panels">
+                        <section class="layer-tab-panel" role="tabpanel" data-layer-panel="telemetry-live">
+                            <div class="section-head">
+                                <div>
+                                    <div class="section-title"><span class="section-title-wrap"><i class="bi bi-activity section-title-icon" aria-hidden="true"></i><span>Telemetry</span></span></div>
+                                    <div class="section-subtitle">Heartbeat, request volume, and errors over time.</div>
+                                </div>
+                            </div>
+                            <div id="telemetryGraphToolbar" class="telemetry-graph-toolbar" role="tablist" aria-label="Telemetry graph modes">
+                                <button class="telemetry-graph-toggle active" type="button" role="tab" aria-selected="true" data-telemetry-graph="combined" tabindex="0" onclick="window.setTelemetryGraphMode && window.setTelemetryGraphMode('combined')"><i class="bi bi-graph-up-arrow" aria-hidden="true"></i><span>Combined</span></button>
+                                <button class="telemetry-graph-toggle" type="button" role="tab" aria-selected="false" data-telemetry-graph="error-ratio" tabindex="-1" onclick="window.setTelemetryGraphMode && window.setTelemetryGraphMode('error-ratio')"><i class="bi bi-percent" aria-hidden="true"></i><span>Error Ratio</span></button>
+                                <button class="telemetry-graph-toggle" type="button" role="tab" aria-selected="false" data-telemetry-graph="heartbeat" tabindex="-1" onclick="window.setTelemetryGraphMode && window.setTelemetryGraphMode('heartbeat')"><i class="bi bi-heart-pulse" aria-hidden="true"></i><span>Heartbeat</span></button>
+                                <button class="telemetry-graph-toggle" type="button" role="tab" aria-selected="false" data-telemetry-graph="dependencies" tabindex="-1" onclick="window.setTelemetryGraphMode && window.setTelemetryGraphMode('dependencies')"><i class="bi bi-diagram-3" aria-hidden="true"></i><span>Dependencies</span></button>
+                            </div>
+                            <canvas id="metricsCanvas" class="telemetry-canvas" width="1100" height="160"></canvas>
+                            <div id="telemetryGraphFootnote" class="section-footnote">Green: heartbeat age | Blue: requests/min | Red: errors/min</div>
+                        </section>
 
-                    <div class="panel-card hero-card">
-                        <div class="section-title">Route Trace</div>
-                        <div id="heroRouteSummary" class="hero-value">Waiting for route data.</div>
-                        <div class="hero-note">Current intent, planner route, and last tool used.</div>
-                    </div>
+                        <section class="layer-tab-panel" role="tabpanel" data-layer-panel="telemetry-snapshot" hidden>
+                            <div class="section-head">
+                                <div>
+                                    <div class="section-title"><span class="section-title-wrap"><i class="bi bi-grid-3x3-gap section-title-icon" aria-hidden="true"></i><span>Signal Snapshot</span></span></div>
+                                    <div class="section-subtitle">Current heartbeat pressure, request pace, and error load distilled from the live telemetry stream.</div>
+                                </div>
+                            </div>
+                            <div id="telemetrySummary" class="telemetry-summary-grid">Snapshot feed pending.</div>
+                        </section>
 
-                    <div class="panel-card hero-card">
-                        <div class="section-title">Ops Snapshot</div>
-                        <div id="heroOpsSummary" class="hero-value">Waiting for operator data.</div>
-                        <div class="hero-note">Sessions, provider, memory scope, and runtime mode.</div>
+                        <section class="layer-tab-panel" role="tabpanel" data-layer-panel="telemetry-pressure" hidden>
+                            <div class="section-head">
+                                <div>
+                                    <div class="section-title"><span class="section-title-wrap"><i class="bi bi-speedometer2 section-title-icon" aria-hidden="true"></i><span>Pressure Matrix</span></span></div>
+                                    <div class="section-subtitle">Operator load windows for ingress pace, fault lift, and heartbeat drag across the live stream.</div>
+                                </div>
+                            </div>
+                            <div id="telemetryPressure" class="telemetry-pressure-grid">Pressure windows pending.</div>
+                        </section>
+
+                        <section class="layer-tab-panel" role="tabpanel" data-layer-panel="telemetry-restarts" hidden>
+                            <div class="section-head">
+                                <div>
+                                    <div class="section-title"><span class="section-title-wrap"><i class="bi bi-arrow-repeat section-title-icon" aria-hidden="true"></i><span>Restart Analytics</span></span></div>
+                                    <div class="section-subtitle">Recent restart pressure, flap detection, and latest guard boot outcomes.</div>
+                                </div>
+                            </div>
+                            <div id="restartAnalytics" class="inspector-stack signal-restart-stack">Restart trace pending.</div>
+                        </section>
                     </div>
                 </div>
 
-                <div class="panel-card main-card mb-3">
+                <div id="overviewFocusStrip" class="overview-focus-strip mb-3" aria-live="polite">Live focus pending.</div>
+
+                <div class="panel-card main-card live-tracking-panel mb-3">
                     <div class="section-head">
                         <div>
-                            <div class="section-title">System Matrix</div>
-                            <div class="section-subtitle">Live service state, policy posture, and control-plane telemetry.</div>
+                            <div class="section-title"><span class="section-title-wrap"><i class="bi bi-crosshair2 section-title-icon" aria-hidden="true"></i><span>Live Tracking</span></span></div>
+                            <div class="section-subtitle">Browser geolocation feeds a short-lived runtime fix so NYO System can show where this device is right now.</div>
+                        </div>
+                        <div class="button-row wrap-buttons live-tracking-actions">
+                            <span id="liveTrackingStatusBadge" class="status-pill status-pill-neutral">Idle</span>
+                            <button id="btnLocationTrackStart" class="btn btn-sm btn-operator-primary" type="button">Enable Tracking</button>
+                            <button id="btnLocationTrackAutoArm" class="btn btn-sm btn-operator-alt" type="button" aria-pressed="false">Auto-Arm Off</button>
+                            <button id="btnLocationTrackStop" class="btn btn-sm btn-operator-alt" type="button">Pause</button>
+                            <button id="btnLocationTrackClear" class="btn btn-sm btn-operator-warn" type="button">Clear Signal</button>
                         </div>
                     </div>
-                    <div id="statusKv" class="metric-grid"></div>
-                </div>
-
-                <div class="panel-card main-card mb-3">
-                    <div class="section-head">
-                        <div>
-                            <div class="section-title">Subconscious Watch</div>
-                            <div class="section-subtitle">Latest unattended seam run, generated regression bundle, and the highest-priority subconscious findings.</div>
+                    <div class="live-tracking-grid">
+                        <div class="live-tracking-card">
+                            <div class="overview-focus-key">Current Fix</div>
+                            <div id="liveTrackingSummary" class="live-tracking-coords">Tracking idle. Enable browser geolocation to stream the current device fix.</div>
+                            <div id="liveTrackingSignal" class="live-tracking-signal">The runtime will keep only a short-lived location snapshot for live operations.</div>
+                            <div id="liveTrackingConsentNote" class="live-tracking-consent-note">Auto-arm is off. Tracking starts only when you enable it in this browser.</div>
                         </div>
-                    </div>
-                    <div id="subconsciousStatusBox" class="runtime-summary-grid">Subconscious status not loaded yet.</div>
-                    <div class="section-title mt-3">Top Priorities</div>
-                    <div id="subconsciousPriorityList" class="inspector-stack">No subconscious priorities yet.</div>
-                    <div class="section-title mt-3">Standing Work Queue</div>
-                    <div class="button-row mb-2 wrap-buttons">
-                        <button id="btnGeneratedQueueRunNext" class="btn btn-sm btn-operator-warn" type="button">Run Next Queue Item</button>
-                        <button id="btnGeneratedQueueInvestigate" class="btn btn-sm btn-operator-primary" type="button">Investigate Next Queue Item</button>
-                    </div>
-                    <div id="generatedQueueBox" class="inspector-stack">No generated work queue yet.</div>
-                </div>
-
-                <div class="panel-card main-card mb-3 patch-panel">
-                    <div class="section-head">
-                        <div>
-                            <div class="section-title">Patch Readiness</div>
-                            <div class="section-subtitle">Validated-apply posture, preview queue state, and the latest patch governance signal.</div>
+                        <div id="liveTrackingMeta" class="runtime-summary-grid live-tracking-meta-grid">
+                            <div class="runtime-card">
+                                <div class="runtime-card-header">
+                                    <div class="runtime-card-label">Signal Details</div>
+                                </div>
+                                <div class="runtime-card-details">
+                                    <div class="runtime-detail-row"><div class="runtime-detail-value">Pending</div></div>
+                                    <div class="runtime-detail-row"><div class="runtime-detail-key">Location signal details pending.</div></div>
+                                </div>
+                            </div>
                         </div>
-                        <span id="patchStatusBadge" class="status-pill status-pill-neutral">Patch status unknown</span>
-                    </div>
-                    <div id="patchStatusNarrative" class="patch-narrative">Waiting for patch telemetry.</div>
-                    <div class="patch-actions mt-3">
-                        <div class="button-row wrap-buttons mb-2">
-                            <select id="patchPreviewSelect" class="form-select form-select-sm"></select>
-                            <input id="patchPreviewNote" class="form-control form-control-sm" placeholder="approval or rejection note" />
-                        </div>
-                        <div class="button-row wrap-buttons">
-                            <button id="btnPatchPreviewRefresh" class="btn btn-sm btn-operator-alt" type="button">Refresh Queue</button>
-                            <button id="btnPatchPreviewShow" class="btn btn-sm btn-operator-primary" type="button">Show Preview</button>
-                            <button id="btnPatchPreviewApprove" class="btn btn-sm btn-operator-primary" type="button">Approve Preview</button>
-                            <button id="btnPatchPreviewReject" class="btn btn-sm btn-operator-danger" type="button">Reject Preview</button>
-                            <button id="btnPatchPreviewApply" class="btn btn-sm btn-operator-warn" type="button">Apply Approved Preview</button>
-                        </div>
-                    </div>
-                    <div class="patch-grid mt-3">
-                        <div class="patch-column">
-                            <div class="patch-column-title">Validation Gate</div>
-                            <div id="patchSummaryGrid" class="inspector-stack"></div>
-                        </div>
-                        <div class="patch-column">
-                            <div class="patch-column-title">Preview Queue</div>
-                            <div id="patchPreviewGrid" class="inspector-stack"></div>
-                        </div>
-                    </div>
-                    <div class="patch-log-wrap mt-3">
-                        <div class="patch-column-title">Latest Patch Log</div>
-                        <pre id="patchLogBox" class="console-box compact-console">No patch log data yet.</pre>
-                    </div>
-                    <div class="patch-log-wrap mt-3">
-                        <div class="patch-column-title">Preview Viewer</div>
-                        <div id="patchPreviewSummary" class="inspector-stack">Load a preview to see what Nova is adding before approving it.</div>
-                        <pre id="patchPreviewBox" class="console-box compact-console">Select a preview and click Show Preview.</pre>
-                    </div>
-                    <div class="patch-log-wrap mt-3">
-                        <div class="patch-column-title">Patch Action Readiness</div>
-                        <div id="patchActionReadiness" class="inspector-stack">Patch action readiness has not been evaluated yet.</div>
                     </div>
                 </div>
 
-                <div class="panel-card main-card mb-3">
-                    <div class="section-head">
-                        <div>
-                            <div class="section-title">Action Stream</div>
-                            <div class="section-subtitle">Latest control actions, tool output, and operator feedback.</div>
+                <div class="center-tab-shell mb-3">
+                    <div class="center-tab-head">
+                        <div class="center-tab-bar" role="tablist" aria-label="Center sections">
+                            <button class="center-tab-button" type="button" role="tab" aria-selected="false" data-center-tab="system-matrix" tabindex="0">
+                                <i class="bi bi-grid-1x2"></i>
+                                <span class="center-tab-copy"><span>System</span><span>Matrix</span></span>
+                            </button>
+                            <button class="center-tab-button" type="button" role="tab" aria-selected="false" data-center-tab="subconscious-watch" tabindex="-1">
+                                <i class="bi bi-diagram-3"></i>
+                                <span class="center-tab-copy"><span>Subconscious</span><span>Watch</span></span>
+                            </button>
+                            <button class="center-tab-button" type="button" role="tab" aria-selected="false" data-center-tab="schedule-tree" tabindex="-1">
+                                <i class="bi bi-diagram-2"></i>
+                                <span class="center-tab-copy"><span>Schedule</span><span>Tree</span></span>
+                            </button>
+                            <button class="center-tab-button" type="button" role="tab" aria-selected="false" data-center-tab="patch-readiness" tabindex="-1">
+                                <i class="bi bi-shield-check"></i>
+                                <span class="center-tab-copy"><span>Patch</span><span>Readiness</span></span>
+                            </button>
+                            <button class="center-tab-button" type="button" role="tab" aria-selected="false" data-center-tab="action-stream" tabindex="-1">
+                                <i class="bi bi-terminal"></i>
+                                <span class="center-tab-copy"><span>Action</span><span>Stream</span></span>
+                            </button>
+                            <button class="center-tab-button" type="button" role="tab" aria-selected="false" data-center-tab="runtime-timeline" tabindex="-1">
+                                <i class="bi bi-clock-history"></i>
+                                <span class="center-tab-copy"><span>Runtime</span><span>Timeline</span></span>
+                            </button>
+                            <button class="center-tab-button" type="button" role="tab" aria-selected="false" data-center-tab="failure-reasons" tabindex="-1">
+                                <i class="bi bi-exclamation-diamond"></i>
+                                <span class="center-tab-copy"><span>Failure</span><span>Reasons</span></span>
+                            </button>
+                            <button class="center-tab-button" type="button" role="tab" aria-selected="false" data-center-tab="runtime-artifacts" tabindex="-1">
+                                <i class="bi bi-file-earmark-zip"></i>
+                                <span class="center-tab-copy"><span>Runtime</span><span>Artifacts</span></span>
+                            </button>
+                            <button class="center-tab-button" type="button" role="tab" aria-selected="false" data-center-tab="release-governance" tabindex="-1">
+                                <i class="bi bi-box-seam"></i>
+                                <span class="center-tab-copy"><span>Release</span><span>Ledger</span></span>
+                            </button>
+                            <button class="center-tab-button" type="button" role="tab" aria-selected="false" data-center-tab="artifact-drilldown" tabindex="-1">
+                                <i class="bi bi-search"></i>
+                                <span class="center-tab-copy"><span>Artifact</span><span>Drill-Down</span></span>
+                            </button>
                         </div>
                     </div>
-                    <pre id="actionBox" class="console-box">No actions yet.</pre>
+
+                    <div class="center-tab-panels is-empty">
+                        <div class="center-tab-empty-state" aria-live="polite">
+                            <div class="center-empty-head">
+                                <div class="center-empty-title">Mission Brief</div>
+                                <div class="center-empty-copy">Standby route, runtime posture, and the next operator surface worth opening.</div>
+                            </div>
+                            <div id="centerMissionBrief" class="center-brief-grid">Mission brief pending.</div>
+                        </div>
+                        <section class="center-tab-panel d-none" data-center-panel="system-matrix">
+                            <div class="section-head">
+                                <div>
+                                    <div class="section-title"><span class="section-title-wrap"><i class="bi bi-grid-1x2 section-title-icon" aria-hidden="true"></i><span>System Matrix</span></span></div>
+                                    <div class="section-subtitle">Live service state, policy posture, and control-plane telemetry.</div>
+                                </div>
+                            </div>
+                            <div class="system-matrix-wrap">
+                                <table id="statusKv" class="system-matrix-table" aria-label="System matrix"></table>
+                            </div>
+                        </section>
+
+                        <section class="center-tab-panel d-none" data-center-panel="subconscious-watch">
+                            <div class="section-head">
+                                <div>
+                                    <div class="section-title"><span class="section-title-wrap"><i class="bi bi-diagram-3 section-title-icon" aria-hidden="true"></i><span>Subconscious Watch</span></span></div>
+                                    <div class="section-subtitle">Latest unattended seam run, generated regression bundle, and the highest-priority subconscious findings.</div>
+                                </div>
+                            </div>
+                            <div class="system-matrix-wrap subconscious-watch-wrap">
+                                <table id="subconsciousStatusBox" class="system-matrix-table subconscious-watch-table" aria-label="Subconscious watch summary"></table>
+                            </div>
+                            <div class="section-title mt-3"><span class="section-title-wrap"><i class="bi bi-broadcast section-title-icon" aria-hidden="true"></i><span>Live Advisory Pressure</span></span></div>
+                            <div id="subconsciousLiveList" class="inspector-stack">No live subconscious pressure.</div>
+                            <div class="section-title mt-3"><span class="section-title-wrap"><i class="bi bi-stars section-title-icon" aria-hidden="true"></i><span>Top Priorities</span></span></div>
+                            <div id="subconsciousPriorityList" class="inspector-stack">Priority queue clear.</div>
+                            <div class="subconscious-queue-head mt-3">
+                                <div class="section-title"><span class="section-title-wrap"><i class="bi bi-list-ul section-title-icon" aria-hidden="true"></i><span>Standing Work Queue</span></span></div>
+                                <span id="generatedQueueCount" class="subconscious-queue-count">0 items</span>
+                            </div>
+                            <div class="button-row mb-2 wrap-buttons subconscious-queue-actions">
+                                <button id="btnMaintenanceWorkerStart" class="subconscious-action-button subconscious-action-button-primary" type="button"><i class="bi bi-broadcast-pin" aria-hidden="true"></i><span>Start Worker</span></button>
+                                <button id="btnMaintenanceWorkerStop" class="subconscious-action-button subconscious-action-button-warn" type="button"><i class="bi bi-stop-circle" aria-hidden="true"></i><span>Stop Worker</span></button>
+                                <button id="btnGeneratedQueueRunNext" class="subconscious-action-button subconscious-action-button-warn" type="button"><i class="bi bi-play-circle" aria-hidden="true"></i><span>Run Next Queue Item</span></button>
+                                <button id="btnGeneratedQueueInvestigate" class="subconscious-action-button subconscious-action-button-primary" type="button"><i class="bi bi-search" aria-hidden="true"></i><span>Investigate Next Queue Item</span></button>
+                            </div>
+                            <div id="generatedQueueBox" class="inspector-stack subconscious-queue-list">Work queue clear.</div>
+                        </section>
+
+                        <section class="center-tab-panel d-none" data-center-panel="schedule-tree">
+                            <div class="section-head">
+                                <div>
+                                    <div class="section-title"><span class="section-title-wrap"><i class="bi bi-diagram-2 section-title-icon" aria-hidden="true"></i><span>Schedule Tree</span></span></div>
+                                    <div class="section-subtitle">Published schedule tiers, cadence, and latest execution evidence.</div>
+                                </div>
+                            </div>
+                            <div id="scheduleTreeBox" class="inspector-stack">Schedule tree pending.</div>
+                        </section>
+
+                        <section class="center-tab-panel d-none patch-panel" data-center-panel="patch-readiness">
+                            <div class="section-head">
+                                <div>
+                                    <div class="section-title"><span class="section-title-wrap"><i class="bi bi-shield-check section-title-icon" aria-hidden="true"></i><span>Patch Readiness</span></span></div>
+                                    <div class="section-subtitle">Validated-apply posture, preview queue state, and the latest patch governance signal.</div>
+                                </div>
+                                <span id="patchStatusBadge" class="status-pill status-pill-neutral">Patch status unknown</span>
+                            </div>
+                            <div id="patchStatusNarrative" class="patch-narrative">Patch lane awaiting signal.</div>
+                            <div class="patch-actions mt-3">
+                                <div class="button-row wrap-buttons mb-2">
+                                    <select id="patchPreviewSelect" class="form-select form-select-sm"></select>
+                                    <input id="patchPreviewNote" class="form-control form-control-sm" placeholder="approval or rejection note" />
+                                </div>
+                                <div class="button-row wrap-buttons">
+                                    <button id="btnPatchPreviewRefresh" class="btn btn-sm btn-operator-alt" type="button">Refresh Queue</button>
+                                    <button id="btnPatchPreviewShow" class="btn btn-sm btn-operator-primary" type="button">Show Preview</button>
+                                    <button id="btnPatchPreviewApprove" class="btn btn-sm btn-operator-primary" type="button">Approve Preview</button>
+                                    <button id="btnPatchPreviewReject" class="btn btn-sm btn-operator-danger" type="button">Reject Preview</button>
+                                    <button id="btnPatchPreviewApply" class="btn btn-sm btn-operator-warn" type="button">Apply Approved Preview</button>
+                                </div>
+                            </div>
+                            <div class="patch-grid mt-3">
+                                <div class="patch-column">
+                                    <div class="patch-column-title">Validation Gate</div>
+                                    <div id="patchSummaryGrid" class="inspector-stack"></div>
+                                </div>
+                                <div class="patch-column">
+                                    <div class="patch-column-title">Preview Queue</div>
+                                    <div id="patchPreviewGrid" class="inspector-stack"></div>
+                                </div>
+                            </div>
+                            <div class="patch-log-wrap mt-3">
+                                <div class="patch-column-title">Latest Patch Log</div>
+                                <pre id="patchLogBox" class="console-box compact-console">Patch log quiet.</pre>
+                            </div>
+                            <div class="patch-log-wrap mt-3">
+                                <div class="patch-column-title">Preview Viewer</div>
+                                <div id="patchPreviewSummary" class="inspector-stack">Load a preview to inspect Nova's change set before approval.</div>
+                                <pre id="patchPreviewBox" class="console-box compact-console">Select a preview and run Show Preview.</pre>
+                            </div>
+                            <div class="patch-log-wrap mt-3">
+                                <div class="patch-column-title">Patch Action Readiness</div>
+                                <div id="patchActionReadiness" class="inspector-stack">Patch action gate pending.</div>
+                            </div>
+                        </section>
+
+                        <section class="center-tab-panel d-none" data-center-panel="action-stream">
+                            <div class="section-head">
+                                <div>
+                                    <div class="section-title"><span class="section-title-wrap"><i class="bi bi-terminal section-title-icon" aria-hidden="true"></i><span>Action Stream</span></span></div>
+                                    <div class="section-subtitle">Latest operator actions, tool traces, and command feedback.</div>
+                                </div>
+                            </div>
+                            <pre id="actionBox" class="console-box">Action channel idle.</pre>
+                        </section>
+
+                        <section class="center-tab-panel d-none" data-center-panel="runtime-timeline">
+                            <div class="section-head">
+                                <div>
+                                    <div class="section-title"><span class="section-title-wrap"><i class="bi bi-clock-history section-title-icon" aria-hidden="true"></i><span>Runtime Timeline</span></span></div>
+                                    <div class="section-subtitle">Operator actions, guard transitions, and boot outcomes in one runtime lane.</div>
+                                </div>
+                            </div>
+                            <div class="runtime-timeline-wrap">
+                                <table id="runtimeTimeline" class="runtime-timeline-table" aria-label="Runtime timeline"></table>
+                            </div>
+                        </section>
+
+                        <section class="center-tab-panel d-none" data-center-panel="failure-reasons">
+                            <div class="section-head">
+                                <div>
+                                    <div class="section-title"><span class="section-title-wrap"><i class="bi bi-exclamation-diamond section-title-icon" aria-hidden="true"></i><span>Failure Reasons</span></span></div>
+                                    <div class="section-subtitle">Current operator-facing cause for each service, based on live status and the latest runtime event.</div>
+                                </div>
+                            </div>
+                            <div id="runtimeFailures" class="runtime-summary-grid">No active fault trace.</div>
+                        </section>
+
+                        <section class="center-tab-panel d-none" data-center-panel="runtime-artifacts">
+                            <div class="section-head">
+                                <div>
+                                    <div class="section-title"><span class="section-title-wrap"><i class="bi bi-file-earmark-zip section-title-icon" aria-hidden="true"></i><span>Runtime Artifacts</span></span></div>
+                                    <div class="section-subtitle">Key runtime files and logs that explain the live system posture.</div>
+                                </div>
+                            </div>
+                            <div id="runtimeArtifacts" class="artifact-grid">Artifact index clear.</div>
+                        </section>
+
+                        <section class="center-tab-panel d-none" data-center-panel="release-governance">
+                            <div class="section-head">
+                                <div>
+                                    <div class="section-title"><span class="section-title-wrap"><i class="bi bi-box-seam section-title-icon" aria-hidden="true"></i><span>Release Governance</span></span></div>
+                                    <div class="section-subtitle">Latest package candidate, promotion state, and recent ledger entries from the release pipeline.</div>
+                                </div>
+                            </div>
+                            <div id="releaseStatusGrid" class="inspector-stack">Release status pending.</div>
+                            <div class="patch-log-wrap mt-3">
+                                <div class="patch-column-title">Release Narrative</div>
+                                <div id="releaseNarrative" class="patch-narrative">Release lane awaiting signal.</div>
+                            </div>
+                            <div class="patch-log-wrap mt-3">
+                                <div class="patch-column-title">Recent Release Ledger</div>
+                                <div id="releaseLedgerGrid" class="inspector-stack">Release ledger quiet.</div>
+                            </div>
+                        </section>
+
+                        <section class="center-tab-panel d-none" data-center-panel="artifact-drilldown">
+                            <div class="section-head">
+                                <div>
+                                    <div class="section-title"><span class="section-title-wrap"><i class="bi bi-search section-title-icon" aria-hidden="true"></i><span>Artifact Drill-Down</span></span></div>
+                                    <div class="section-subtitle">Inspect runtime evidence, artifact path, and related events without leaving the console.</div>
+                                </div>
+                            </div>
+                            <div id="artifactDetailMeta" class="inspector-stack">Select an artifact to open its trace.</div>
+                            <pre id="artifactDetailBox" class="console-box compact-console mt-3">Artifact trace will render here.</pre>
+                        </section>
+                    </div>
                 </div>
 
-                <div class="panel-card main-card mb-3">
-                    <div class="section-head">
-                        <div>
-                            <div class="section-title">Runtime Timeline</div>
-                            <div class="section-subtitle">Recent operator actions, guard lifecycle transitions, and boot outcomes in one stream.</div>
-                        </div>
-                    </div>
-                    <div id="runtimeTimeline" class="timeline-stack">No runtime events yet.</div>
-                </div>
-
-                <div class="panel-card main-card mb-3">
-                    <div class="section-head">
-                        <div>
-                            <div class="section-title">Failure Reasons</div>
-                            <div class="section-subtitle">Current operator-facing explanation for each service, based on live status and the latest runtime event.</div>
-                        </div>
-                    </div>
-                    <div id="runtimeFailures" class="runtime-summary-grid">No failure data yet.</div>
-                </div>
-
-                <div class="panel-card main-card mb-3">
-                    <div class="section-head">
-                        <div>
-                            <div class="section-title">Runtime Artifacts</div>
-                            <div class="section-subtitle">Key runtime files and logs that explain the current system state.</div>
-                        </div>
-                    </div>
-                    <div id="runtimeArtifacts" class="artifact-grid">No runtime artifacts yet.</div>
-                </div>
-
-                <div class="panel-card main-card mb-3">
-                    <div class="section-head">
-                        <div>
-                            <div class="section-title">Artifact Drill-Down</div>
-                            <div class="section-subtitle">Inspect full runtime evidence, artifact path, and related events without leaving the console.</div>
-                        </div>
-                    </div>
-                    <div id="artifactDetailMeta" class="inspector-stack">Select a runtime artifact to inspect it in detail.</div>
-                    <pre id="artifactDetailBox" class="console-box compact-console mt-3">Artifact detail will appear here.</pre>
-                </div>
-
-                <div class="panel-card main-card mb-3">
-                    <div class="section-head">
-                        <div>
-                            <div class="section-title">Restart Analytics</div>
-                            <div class="section-subtitle">Recent restart pressure, flap detection, and latest guard boot outcomes.</div>
-                        </div>
-                    </div>
-                    <div id="restartAnalytics" class="inspector-stack">Restart analytics not loaded yet.</div>
-                </div>
-
-                <div class="panel-card main-card">
-                    <div class="section-head">
-                        <div>
-                            <div class="section-title">Telemetry</div>
-                            <div class="section-subtitle">Heartbeat, request volume, and errors over time.</div>
-                        </div>
-                    </div>
-                    <canvas id="metricsCanvas" width="1100" height="220"></canvas>
-                    <div class="section-footnote">Green: heartbeat age | Blue: requests/min | Red: errors/min</div>
-                </div>
             </section>
 
             <section class="main-view d-none" data-view="operations">
-                <div class="ops-grid">
-                    <div class="panel-card main-card">
-                        <div class="section-title">Guard Control</div>
-                        <div class="button-row mb-2">
-                            <button id="btnGuardStatus" class="btn btn-sm btn-operator-alt" type="button">Guard Status</button>
-                            <button id="btnGuardStart" class="btn btn-sm btn-operator-primary" type="button">Start Guard</button>
-                            <button id="btnGuardStop" class="btn btn-sm btn-operator-danger" type="button">Stop Guard</button>
-                            <button id="btnGuardRestart" class="btn btn-sm btn-operator-warn" type="button">Restart Guard</button>
-                        </div>
-                            <div id="guardBox" class="runtime-summary-grid">No guard data yet.</div>
-                            <div class="section-title mt-3">Raw Runtime Fields</div>
-                            <pre id="guardRawBox" class="console-box compact-console">Click a runtime badge to inspect raw runtime fields.</pre>
-                    </div>
-
-                    <div class="panel-card main-card">
-                        <div class="section-title">Core Recovery</div>
-                        <div class="button-row mb-2 wrap-buttons">
-                            <button id="btnCoreStart" class="btn btn-sm btn-operator-primary" type="button">Start Core</button>
-                            <button id="btnCoreStop" class="btn btn-sm btn-operator-danger" type="button">Stop Core</button>
-                            <button id="btnCoreRestart" class="btn btn-sm btn-operator-warn" type="button">Restart Core</button>
-                        </div>
-                        <div class="section-subtitle">Direct runtime recovery actions for the supervised core process.</div>
-                    </div>
-
-                    <div class="panel-card main-card">
-                        <div class="section-title">Web UI Recovery</div>
-                        <div class="button-row mb-2 wrap-buttons">
-                            <button id="btnWebuiRestart" class="btn btn-sm btn-operator-warn" type="button">Restart Web UI</button>
-                        </div>
-                        <div class="section-subtitle">Restarts the control-plane HTTP process. The page will disconnect briefly and should recover on refresh.</div>
-                    </div>
-
-                    <div class="panel-card main-card span-2">
-                        <div class="section-title">Action Readiness</div>
-                        <div id="runtimeActionReadiness" class="inspector-stack">Action readiness has not been evaluated yet.</div>
-                    </div>
-
-                    <div class="panel-card main-card">
-                        <div class="section-title">Policy Controls</div>
-                        <div class="button-row mb-2">
-                            <input id="domainInput" class="form-control form-control-sm" placeholder="example.com" />
-                            <button id="btnAllow" class="btn btn-sm btn-operator-primary" type="button">Allow Domain</button>
-                            <button id="btnRemove" class="btn btn-sm btn-operator-alt" type="button">Remove Domain</button>
-                        </div>
-                        <div class="button-row">
-                            <select id="webMode" class="form-select form-select-sm">
-                                <option value="normal">web mode normal</option>
-                                <option value="max">web mode max</option>
-                            </select>
-                            <button id="btnMode" class="btn btn-sm btn-operator-warn" type="button">Apply Web Mode</button>
-                            <button id="btnAudit" class="btn btn-sm btn-operator-alt" type="button">Policy Audit</button>
+                <div class="layer-tab-shell mb-3" data-layer-tabs="operations">
+                    <div class="layer-tab-head">
+                        <div class="layer-tab-bar" role="tablist" aria-label="Operations sections">
+                            <button class="layer-tab-button active" type="button" role="tab" aria-selected="true" data-layer-tab="runtime-control" tabindex="0">
+                                <i class="bi bi-activity"></i>
+                                <span class="layer-tab-copy"><span>Runtime</span><span>Control</span></span>
+                            </button>
+                            <button class="layer-tab-button" type="button" role="tab" aria-selected="false" data-layer-tab="governance" tabindex="-1">
+                                <i class="bi bi-sliders"></i>
+                                <span class="layer-tab-copy"><span>Policy</span><span>Governance</span></span>
+                            </button>
+                            <button class="layer-tab-button" type="button" role="tab" aria-selected="false" data-layer-tab="operator-deck" tabindex="-1">
+                                <i class="bi bi-terminal-dash"></i>
+                                <span class="layer-tab-copy"><span>Operator</span><span>Deck</span></span>
+                            </button>
                         </div>
                     </div>
+                    <div class="layer-tab-panels">
+                        <section class="layer-tab-panel" role="tabpanel" data-layer-panel="runtime-control">
+                            <div class="ops-grid layer-panel-grid">
+                                <div class="panel-card main-card">
+                                    <div class="section-title"><span class="section-title-wrap"><i class="bi bi-shield-lock section-title-icon" aria-hidden="true"></i><span>Guard Control</span></span></div>
+                                    <div class="button-row mb-2">
+                                        <button id="btnGuardStatus" class="btn btn-sm btn-operator-alt" type="button">Guard Status</button>
+                                        <button id="btnGuardStart" class="btn btn-sm btn-operator-primary" type="button">Start Guard</button>
+                                        <button id="btnGuardStop" class="btn btn-sm btn-operator-danger" type="button">Stop Guard</button>
+                                        <button id="btnGuardRestart" class="btn btn-sm btn-operator-warn" type="button">Restart Guard</button>
+                                    </div>
+                                    <div id="guardBox" class="runtime-summary-grid">Guard signal pending.</div>
+                                    <div class="section-title mt-3"><span class="section-title-wrap"><i class="bi bi-braces section-title-icon" aria-hidden="true"></i><span>Raw Runtime Fields</span></span></div>
+                                    <pre id="guardRawBox" class="console-box compact-console">Click a runtime badge to inspect raw runtime fields.</pre>
+                                </div>
 
-                    <div class="panel-card main-card">
-                        <div class="section-title">Memory Governance</div>
-                        <div class="button-row mb-2">
-                            <select id="memoryScope" class="form-select form-select-sm">
-                                <option value="private">memory scope private</option>
-                                <option value="hybrid">memory scope hybrid</option>
-                                <option value="shared">memory scope shared</option>
-                            </select>
-                            <button id="btnMemoryScope" class="btn btn-sm btn-operator-primary" type="button">Apply Memory Scope</button>
-                        </div>
-                        <pre id="memoryScopeBox" class="console-box compact-console">Memory scope not loaded yet.</pre>
-                    </div>
+                                <div class="panel-card main-card">
+                                    <div class="section-title"><span class="section-title-wrap"><i class="bi bi-cpu section-title-icon" aria-hidden="true"></i><span>Core Recovery</span></span></div>
+                                    <div class="button-row mb-2 wrap-buttons">
+                                        <button id="btnCoreStart" class="btn btn-sm btn-operator-primary" type="button">Start Core</button>
+                                        <button id="btnCoreStop" class="btn btn-sm btn-operator-danger" type="button">Stop Core</button>
+                                        <button id="btnCoreRestart" class="btn btn-sm btn-operator-warn" type="button">Restart Core</button>
+                                    </div>
+                                    <div class="section-subtitle">Direct runtime recovery actions for the supervised core process.</div>
+                                </div>
 
-                    <div class="panel-card main-card">
-                        <div class="section-title">Search Provider</div>
-                        <div class="button-row">
-                            <select id="searchProvider" class="form-select form-select-sm">
-                                <option value="html">search provider html</option>
-                                <option value="searxng">search provider searxng</option>
-                            </select>
-                            <button id="btnSearchProvider" class="btn btn-sm btn-operator-primary" type="button">Apply Provider</button>
-                            <button id="btnSearchToggle" class="btn btn-sm btn-operator-alt" type="button">Toggle Provider</button>
-                        </div>
-                    </div>
+                                <div class="panel-card main-card">
+                                    <div class="section-title"><span class="section-title-wrap"><i class="bi bi-window-stack section-title-icon" aria-hidden="true"></i><span>Web UI Recovery</span></span></div>
+                                    <div class="button-row mb-2 wrap-buttons">
+                                        <button id="btnWebuiRestart" class="btn btn-sm btn-operator-warn" type="button">Restart Web UI</button>
+                                    </div>
+                                    <div class="section-subtitle">Restarts the control-plane HTTP process. The page will disconnect briefly and should recover on refresh.</div>
+                                </div>
 
-                    <div class="panel-card main-card">
-                        <div class="section-title">Chat Access</div>
-                        <div class="button-row mb-2">
-                            <select id="chatUserSelect" class="form-select form-select-sm"></select>
-                            <input id="chatUserName" class="form-control form-control-sm" placeholder="username" />
-                            <input id="chatUserPass" class="form-control form-control-sm" type="password" placeholder="new password" />
-                        </div>
-                        <div class="button-row mb-2">
-                            <button id="btnChatUserUpsert" class="btn btn-sm btn-operator-primary" type="button">Save Chat User</button>
-                            <button id="btnChatUserDelete" class="btn btn-sm btn-operator-danger" type="button">Delete Chat User</button>
-                            <button id="btnChatUserRefresh" class="btn btn-sm btn-operator-alt" type="button">Refresh Chat Users</button>
-                        </div>
-                        <pre id="chatAuthBox" class="console-box compact-console">Chat access not loaded yet.</pre>
-                    </div>
-
-                    <div class="panel-card main-card span-2">
-                        <div class="section-head">
-                            <div>
-                                <div class="section-title">Operator Command Deck</div>
-                                <div class="section-subtitle">Drive Nova from the operator console without opening the chat page. Commands stay in one persistent operator session so you can inspect the same thread in the Sessions view.</div>
+                                <div class="panel-card main-card span-2">
+                                    <div class="section-title"><span class="section-title-wrap"><i class="bi bi-check2-square section-title-icon" aria-hidden="true"></i><span>Action Readiness</span></span></div>
+                                    <div id="runtimeActionReadiness" class="inspector-stack">Readiness scan pending.</div>
+                                </div>
                             </div>
-                        </div>
-                        <div class="button-row mb-2 wrap-buttons">
-                            <input id="operatorSessionId" class="form-control form-control-sm" placeholder="operator session id" />
-                            <select id="operatorMacroSelect" class="form-select form-select-sm"></select>
-                            <button id="btnOperatorMacroApply" class="btn btn-sm btn-operator-alt" type="button">Load Macro</button>
-                            <button id="btnOperatorMacroRun" class="btn btn-sm btn-operator-warn" type="button">Run Macro</button>
-                            <button id="btnOperatorSend" class="btn btn-sm btn-operator-primary" type="button">Send To Nova</button>
-                            <button id="btnOperatorNewSession" class="btn btn-sm btn-operator-alt" type="button">New Session</button>
-                            <button id="btnOperatorInspect" class="btn btn-sm btn-operator-warn" type="button">Inspect Session</button>
-                            <button id="btnOperatorToggleAudio" class="btn btn-sm btn-operator-alt" type="button">Voice Off</button>
-                            <button id="btnOperatorMic" class="btn btn-sm btn-operator-alt" type="button">Mic Unavailable</button>
-                        </div>
-                        <div class="button-row mb-2">
-                            <textarea id="operatorPromptInput" class="form-control form-control-sm" rows="4" placeholder="Ask Nova to inspect, explain, plan, or act from the operator console..."></textarea>
-                        </div>
-                        <div class="section-title">Operator Reply</div>
-                        <pre id="operatorPromptReply" class="console-box compact-console">No operator prompt sent yet.</pre>
-                    </div>
+                        </section>
 
-                    <div class="panel-card main-card span-2">
-                        <div class="section-title">Operator Actions</div>
-                        <div class="button-row wrap-buttons">
-                            <button id="btnInspect" class="btn btn-sm btn-operator-warn" type="button">Inspect Environment</button>
-                            <button id="btnNovaStart" class="btn btn-sm btn-operator-primary" type="button">Start Runtime</button>
-                            <button id="btnSelfCheck" class="btn btn-sm btn-operator-primary" type="button">Run Self-Check</button>
-                            <button id="btnExportCaps" class="btn btn-sm btn-operator-alt" type="button">Export Capabilities</button>
-                            <button id="btnExportLedger" class="btn btn-sm btn-operator-alt" type="button">Export Ledger Summary</button>
-                            <button id="btnExportBundle" class="btn btn-sm btn-operator-warn" type="button">Export Diagnostics Bundle</button>
-                            <button id="btnOut" class="btn btn-sm btn-operator-alt" type="button">Tail HTTP OUT</button>
-                            <button id="btnErr" class="btn btn-sm btn-operator-danger" type="button">Tail HTTP ERR</button>
-                        </div>
-                    </div>
+                        <section class="layer-tab-panel" role="tabpanel" data-layer-panel="governance" hidden>
+                            <div class="ops-grid layer-panel-grid">
+                                <div class="panel-card main-card">
+                                    <div class="section-title"><span class="section-title-wrap"><i class="bi bi-sliders section-title-icon" aria-hidden="true"></i><span>Policy Controls</span></span></div>
+                                    <div class="button-row mb-2">
+                                        <input id="domainInput" class="form-control form-control-sm" placeholder="example.com" />
+                                        <button id="btnAllow" class="btn btn-sm btn-operator-primary" type="button">Allow Domain</button>
+                                        <button id="btnRemove" class="btn btn-sm btn-operator-alt" type="button">Remove Domain</button>
+                                    </div>
+                                    <div class="button-row">
+                                        <select id="webMode" class="form-select form-select-sm">
+                                            <option value="normal">web mode normal</option>
+                                            <option value="max">web mode max</option>
+                                        </select>
+                                        <button id="btnMode" class="btn btn-sm btn-operator-warn" type="button">Apply Web Mode</button>
+                                        <button id="btnAudit" class="btn btn-sm btn-operator-alt" type="button">Policy Audit</button>
+                                    </div>
+                                </div>
 
-                    <div class="panel-card main-card span-2">
-                        <div class="section-head">
-                            <div>
-                                <div class="section-title">Backend Command Console</div>
-                                <div class="section-subtitle">Run allowlisted backend commands from one control plane. Add new commands in backend_command_deck.json and they appear here.</div>
+                                <div class="panel-card main-card">
+                                    <div class="section-title"><span class="section-title-wrap"><i class="bi bi-database section-title-icon" aria-hidden="true"></i><span>Memory Governance</span></span></div>
+                                    <div class="button-row mb-2">
+                                        <select id="memoryScope" class="form-select form-select-sm">
+                                            <option value="private">memory scope private</option>
+                                            <option value="hybrid">memory scope hybrid</option>
+                                            <option value="shared">memory scope shared</option>
+                                        </select>
+                                        <button id="btnMemoryScope" class="btn btn-sm btn-operator-primary" type="button">Apply Memory Scope</button>
+                                    </div>
+                                    <pre id="memoryScopeBox" class="console-box compact-console">Memory scope pending.</pre>
+                                </div>
+
+                                <div class="panel-card main-card">
+                                    <div class="section-title"><span class="section-title-wrap"><i class="bi bi-globe2 section-title-icon" aria-hidden="true"></i><span>Search Provider</span></span></div>
+                                    <div class="button-row mb-2">
+                                        <select id="searchProvider" class="form-select form-select-sm">
+                                            <option value="html">search provider html</option>
+                                            <option value="searxng">search provider searxng</option>
+                                            <option value="brave">search provider brave</option>
+                                        </select>
+                                        <button id="btnSearchProvider" class="btn btn-sm btn-operator-primary" type="button">Apply Provider</button>
+                                        <button id="btnSearchToggle" class="btn btn-sm btn-operator-alt" type="button">Toggle Provider</button>
+                                    </div>
+                                    <div class="button-row mb-2">
+                                        <input id="searchEndpoint" class="form-control form-control-sm" placeholder="http://127.0.0.1:8080/search" />
+                                        <button id="btnSearchEndpoint" class="btn btn-sm btn-operator-primary" type="button">Apply Endpoint</button>
+                                        <button id="btnSearchProbe" class="btn btn-sm btn-operator-warn" type="button">Probe Endpoint</button>
+                                    </div>
+                                    <div class="button-row mb-2">
+                                        <input id="searchProviderPriority" class="form-control form-control-sm" placeholder="wikipedia, stackexchange, general_web" />
+                                        <button id="btnSearchPriority" class="btn btn-sm btn-operator-primary" type="button">Apply Priority</button>
+                                    </div>
+                                    <pre id="searchEndpointBox" class="console-box compact-console">Search endpoint pending.</pre>
+                                </div>
+
+                                <div class="panel-card main-card">
+                                    <div class="section-title"><span class="section-title-wrap"><i class="bi bi-person-circle section-title-icon" aria-hidden="true"></i><span>Chat Access</span></span></div>
+                                    <div class="button-row mb-2">
+                                        <select id="chatUserSelect" class="form-select form-select-sm"></select>
+                                        <input id="chatUserName" class="form-control form-control-sm" placeholder="username" />
+                                        <input id="chatUserPass" class="form-control form-control-sm" type="password" placeholder="new password" />
+                                    </div>
+                                    <div class="button-row mb-2">
+                                        <button id="btnChatUserUpsert" class="btn btn-sm btn-operator-primary" type="button">Save Chat User</button>
+                                        <button id="btnChatUserDelete" class="btn btn-sm btn-operator-danger" type="button">Delete Chat User</button>
+                                        <button id="btnChatUserRefresh" class="btn btn-sm btn-operator-alt" type="button">Refresh Chat Users</button>
+                                    </div>
+                                    <pre id="chatAuthBox" class="console-box compact-console">Chat access snapshot pending.</pre>
+                                </div>
                             </div>
-                        </div>
-                        <div class="button-row mb-2 wrap-buttons">
-                            <select id="backendCommandSelect" class="form-select form-select-sm"></select>
-                            <input id="backendCommandArgs" class="form-control form-control-sm" placeholder="optional args (only for commands that allow dynamic args)" />
-                            <button id="btnBackendCommandRefresh" class="btn btn-sm btn-operator-alt" type="button">Refresh Commands</button>
-                            <button id="btnBackendCommandRun" class="btn btn-sm btn-operator-primary" type="button">Run Command</button>
-                        </div>
-                        <pre id="backendCommandOutput" class="console-box compact-console">No backend command has run yet.</pre>
+                        </section>
+
+                        <section class="layer-tab-panel" role="tabpanel" data-layer-panel="operator-deck" hidden>
+                            <div class="ops-grid layer-panel-grid">
+                                <div class="panel-card main-card span-2">
+                                    <div class="section-head">
+                                        <div>
+                                            <div class="section-title"><span class="section-title-wrap"><i class="bi bi-terminal-dash section-title-icon" aria-hidden="true"></i><span>Operator Command Deck</span></span></div>
+                                            <div class="section-subtitle">Drive Nova from the operator console without opening the chat page. Commands stay in one persistent operator session so you can inspect the same thread in the Sessions view.</div>
+                                        </div>
+                                    </div>
+                                    <div class="button-row mb-2 wrap-buttons">
+                                        <input id="operatorSessionId" class="form-control form-control-sm" placeholder="operator session id" />
+                                        <select id="operatorMacroSelect" class="form-select form-select-sm"></select>
+                                        <button id="btnOperatorMacroApply" class="btn btn-sm btn-operator-alt" type="button">Load Macro</button>
+                                        <button id="btnOperatorMacroRun" class="btn btn-sm btn-operator-warn" type="button">Run Macro</button>
+                                        <button id="btnOperatorSend" class="btn btn-sm btn-operator-primary" type="button">Send To Nova</button>
+                                        <button id="btnOperatorNewSession" class="btn btn-sm btn-operator-alt" type="button">New Session</button>
+                                        <button id="btnOperatorInspect" class="btn btn-sm btn-operator-warn" type="button">Inspect Session</button>
+                                        <button id="btnOperatorToggleAudio" class="btn btn-sm btn-operator-alt" type="button">Voice Off</button>
+                                        <button id="btnOperatorMic" class="btn btn-sm btn-operator-alt" type="button">Mic Unavailable</button>
+                                    </div>
+                                    <div class="button-row mb-2">
+                                        <textarea id="operatorPromptInput" class="form-control form-control-sm" rows="4" placeholder="Ask Nova to inspect, explain, plan, or act from the operator console..."></textarea>
+                                    </div>
+                                    <div class="section-title"><span class="section-title-wrap"><i class="bi bi-reply section-title-icon" aria-hidden="true"></i><span>Operator Reply</span></span></div>
+                                    <pre id="operatorPromptReply" class="console-box compact-console">Operator channel idle.</pre>
+                                </div>
+
+                                <div class="panel-card main-card span-2">
+                                    <div class="section-title"><span class="section-title-wrap"><i class="bi bi-lightning-charge section-title-icon" aria-hidden="true"></i><span>Operator Actions</span></span></div>
+                                    <div class="button-row wrap-buttons">
+                                        <button id="btnInspect" class="btn btn-sm btn-operator-warn" type="button">Inspect Environment</button>
+                                        <button id="btnNovaStart" class="btn btn-sm btn-operator-primary" type="button">Start Runtime</button>
+                                        <button id="btnSelfCheck" class="btn btn-sm btn-operator-primary" type="button">Run Self-Check</button>
+                                        <button id="btnExportCaps" class="btn btn-sm btn-operator-alt" type="button">Export Capabilities</button>
+                                        <button id="btnExportLedger" class="btn btn-sm btn-operator-alt" type="button">Export Ledger Summary</button>
+                                        <button id="btnExportBundle" class="btn btn-sm btn-operator-warn" type="button">Export Diagnostics Bundle</button>
+                                        <button id="btnOut" class="btn btn-sm btn-operator-alt" type="button">Tail HTTP OUT</button>
+                                        <button id="btnErr" class="btn btn-sm btn-operator-danger" type="button">Tail HTTP ERR</button>
+                                    </div>
+                                </div>
+
+                                <div class="panel-card main-card span-2">
+                                    <div class="section-head">
+                                        <div>
+                                            <div class="section-title"><span class="section-title-wrap"><i class="bi bi-hdd-rack section-title-icon" aria-hidden="true"></i><span>Backend Command Console</span></span></div>
+                                            <div class="section-subtitle">Run allowlisted backend commands from one control plane. Add new commands in backend_command_deck.json and they appear here.</div>
+                                        </div>
+                                    </div>
+                                    <div class="button-row mb-2 wrap-buttons">
+                                        <select id="backendCommandSelect" class="form-select form-select-sm"></select>
+                                        <input id="backendCommandArgs" class="form-control form-control-sm" placeholder="optional args (only for commands that allow dynamic args)" />
+                                        <button id="btnBackendCommandRefresh" class="btn btn-sm btn-operator-alt" type="button">Refresh Commands</button>
+                                        <button id="btnBackendCommandRun" class="btn btn-sm btn-operator-primary" type="button">Run Command</button>
+                                    </div>
+                                    <pre id="backendCommandOutput" class="console-box compact-console">Command deck idle.</pre>
+                                </div>
+                            </div>
+                        </section>
                     </div>
                 </div>
             </section>
 
             <section class="main-view d-none" data-view="sessions">
-                <div class="ops-grid">
-                    <div class="panel-card main-card">
-                        <div class="section-head">
-                            <div>
-                                <div class="section-title">Live Sessions</div>
-                                <div class="section-subtitle">Open, inspect, copy, and delete live HTTP session traces.</div>
-                            </div>
+                <div class="layer-tab-shell mb-3" data-layer-tabs="sessions">
+                    <div class="layer-tab-head">
+                        <div class="layer-tab-bar" role="tablist" aria-label="Session sections">
+                            <button class="layer-tab-button active" type="button" role="tab" aria-selected="true" data-layer-tab="live-sessions" tabindex="0">
+                                <i class="bi bi-chat-left-text"></i>
+                                <span class="layer-tab-copy"><span>Live</span><span>Sessions</span></span>
+                            </button>
+                            <button class="layer-tab-button" type="button" role="tab" aria-selected="false" data-layer-tab="parity-runs" tabindex="-1">
+                                <i class="bi bi-bezier2"></i>
+                                <span class="layer-tab-copy"><span>Parity</span><span>Runs</span></span>
+                            </button>
+                            <button class="layer-tab-button" type="button" role="tab" aria-selected="false" data-layer-tab="task-manager" tabindex="-1">
+                                <i class="bi bi-list-task"></i>
+                                <span class="layer-tab-copy"><span>Task</span><span>Manager</span></span>
+                            </button>
                         </div>
-                        <div class="button-row mb-2">
-                            <select id="sessionFilterSelect" class="form-select form-select-sm">
-                                <option value="all">All Sessions</option>
-                                <option value="operator">Operator Sessions</option>
-                                <option value="non-operator">Non-Operator Sessions</option>
-                            </select>
-                            <select id="sessionSelect" class="form-select form-select-sm"></select>
-                        </div>
-                        <div class="button-row mb-2 wrap-buttons">
-                            <button id="btnSessionsRefresh" class="btn btn-sm btn-operator-alt" type="button">Refresh Sessions</button>
-                            <button id="btnSessionOpen" class="btn btn-sm btn-operator-primary" type="button">Open In Chat</button>
-                            <button id="btnSessionCopy" class="btn btn-sm btn-operator-warn" type="button">Copy Session ID</button>
-                            <button id="btnSessionDelete" class="btn btn-sm btn-operator-danger" type="button">Delete Session</button>
-                        </div>
-                        <pre id="sessionBox" class="console-box">No session selected.</pre>
-                        <div class="section-title mt-3">Live Probe Findings</div>
-                        <pre id="sessionProbeBox" class="console-box compact-console">No session selected.</pre>
                     </div>
-
-                    <div class="panel-card main-card">
-                        <div class="section-head">
-                            <div>
-                                <div class="section-title">Parity Test Runs</div>
-                                <div class="section-subtitle">Runner artifacts from runtime/test_sessions. Separate from live session traffic.</div>
+                    <div class="layer-tab-panels">
+                        <section class="layer-tab-panel" role="tabpanel" data-layer-panel="live-sessions">
+                            <div class="ops-grid layer-panel-grid">
+                                <div class="panel-card main-card">
+                                    <div class="section-head">
+                                        <div>
+                                            <div class="section-title"><span class="section-title-wrap"><i class="bi bi-chat-left-text section-title-icon" aria-hidden="true"></i><span>Live Sessions</span></span></div>
+                                            <div class="section-subtitle">Inspect live HTTP threads, pivot into chat context, and clear stale session traces.</div>
+                                        </div>
+                                    </div>
+                                    <div class="button-row mb-2">
+                                        <select id="sessionFilterSelect" class="form-select form-select-sm">
+                                            <option value="all">All Sessions</option>
+                                            <option value="operator">Operator Sessions</option>
+                                            <option value="non-operator">Non-Operator Sessions</option>
+                                        </select>
+                                        <select id="sessionSelect" class="form-select form-select-sm"></select>
+                                    </div>
+                                    <div class="button-row mb-2 wrap-buttons">
+                                        <button id="btnSessionsRefresh" class="btn btn-sm btn-operator-alt" type="button">Refresh Sessions</button>
+                                        <button id="btnSessionOpen" class="btn btn-sm btn-operator-primary" type="button">Open In Chat</button>
+                                        <button id="btnSessionCopy" class="btn btn-sm btn-operator-warn" type="button">Copy Session ID</button>
+                                        <button id="btnSessionDelete" class="btn btn-sm btn-operator-danger" type="button">Delete Session</button>
+                                    </div>
+                                    <pre id="sessionBox" class="console-box">Session focus pending.</pre>
+                                    <div class="section-title mt-3"><span class="section-title-wrap"><i class="bi bi-binoculars section-title-icon" aria-hidden="true"></i><span>Live Probe Findings</span></span></div>
+                                    <pre id="sessionProbeBox" class="console-box compact-console">Probe trace pending.</pre>
+                                </div>
                             </div>
-                        </div>
-                        <div id="testRunBadges" class="badge-tray mb-2"></div>
-                        <div class="button-row mb-2 wrap-buttons">
-                            <select id="testSessionDefinitionSelect" class="form-select form-select-sm"></select>
-                            <button id="btnTestRunExecute" class="btn btn-sm btn-operator-primary" type="button">Run Test Session</button>
-                            <button id="btnGeneratedQueueRunNextOps" class="btn btn-sm btn-operator-warn" type="button">Run Next Queue Item</button>
-                            <button id="btnGeneratedQueueInvestigateOps" class="btn btn-sm btn-operator-primary" type="button">Investigate Next Queue Item</button>
-                            <button id="btnGeneratedPackRun" class="btn btn-sm btn-operator-warn" type="button">Run Generated Pack</button>
-                            <button id="btnGeneratedPriorityRun" class="btn btn-sm btn-operator-danger" type="button">Run Highest Priority</button>
-                        </div>
-                        <div class="button-row mb-2">
-                            <select id="testRunSelect" class="form-select form-select-sm"></select>
-                        </div>
-                        <div class="button-row mb-2 wrap-buttons">
-                            <button id="btnTestRunsRefresh" class="btn btn-sm btn-operator-alt" type="button">Refresh Test Runs</button>
-                            <button id="btnTestRunCopy" class="btn btn-sm btn-operator-warn" type="button">Copy Report Path</button>
-                        </div>
-                        <pre id="testRunBox" class="console-box">No test run selected.</pre>
-                        <div class="section-title mt-3">Per-Turn Drift</div>
-                        <div id="testRunDriftGrid" class="inspector-stack">No test run selected.</div>
-                        <div class="section-title mt-3">Parity Findings</div>
-                        <pre id="testRunProbeBox" class="console-box compact-console">No test run selected.</pre>
+                        </section>
+
+                        <section class="layer-tab-panel" role="tabpanel" data-layer-panel="parity-runs" hidden>
+                            <div class="ops-grid layer-panel-grid">
+                                <div class="panel-card main-card">
+                                    <div class="section-head">
+                                        <div>
+                                            <div class="section-title"><span class="section-title-wrap"><i class="bi bi-bezier2 section-title-icon" aria-hidden="true"></i><span>Parity Test Runs</span></span></div>
+                                            <div class="section-subtitle">Generated and saved runtime/test_sessions traces, isolated from live operator traffic.</div>
+                                        </div>
+                                    </div>
+                                    <div id="testRunBadges" class="badge-tray mb-2"></div>
+                                    <div class="button-row mb-2 wrap-buttons">
+                                        <select id="testSessionDefinitionSelect" class="form-select form-select-sm"></select>
+                                        <button id="btnTestRunExecute" class="btn btn-sm btn-operator-primary" type="button">Run Test Session</button>
+                                        <button id="btnMaintenanceWorkerStartOps" class="btn btn-sm btn-operator-primary" type="button">Start Worker</button>
+                                        <button id="btnMaintenanceWorkerStopOps" class="btn btn-sm btn-operator-warn" type="button">Stop Worker</button>
+                                        <button id="btnGeneratedQueueRunNextOps" class="btn btn-sm btn-operator-warn" type="button">Run Next Queue Item</button>
+                                        <button id="btnGeneratedQueueInvestigateOps" class="btn btn-sm btn-operator-primary" type="button">Investigate Next Queue Item</button>
+                                        <button id="btnGeneratedPackRun" class="btn btn-sm btn-operator-warn" type="button">Run Generated Pack</button>
+                                        <button id="btnGeneratedPriorityRun" class="btn btn-sm btn-operator-danger" type="button">Run Highest Priority</button>
+                                    </div>
+                                    <div class="button-row mb-2">
+                                        <select id="testRunSelect" class="form-select form-select-sm"></select>
+                                    </div>
+                                    <div class="button-row mb-2 wrap-buttons">
+                                        <button id="btnTestRunsRefresh" class="btn btn-sm btn-operator-alt" type="button">Refresh Test Runs</button>
+                                        <button id="btnTestRunCopy" class="btn btn-sm btn-operator-warn" type="button">Copy Report Path</button>
+                                    </div>
+                                    <pre id="testRunBox" class="console-box">Parity run focus pending.</pre>
+                                    <div class="section-title mt-3"><span class="section-title-wrap"><i class="bi bi-arrow-left-right section-title-icon" aria-hidden="true"></i><span>Per-Turn Drift</span></span></div>
+                                    <div id="testRunDriftGrid" class="inspector-stack">Drift view pending.</div>
+                                    <div class="section-title mt-3"><span class="section-title-wrap"><i class="bi bi-clipboard-data section-title-icon" aria-hidden="true"></i><span>Parity Findings</span></span></div>
+                                    <pre id="testRunProbeBox" class="console-box compact-console">Parity trace pending.</pre>
+                                </div>
+                            </div>
+                        </section>
+
+                        <section class="layer-tab-panel" role="tabpanel" data-layer-panel="task-manager" hidden>
+                            <div class="ops-grid layer-panel-grid">
+                                <div class="panel-card main-card">
+                                    <div class="section-head">
+                                        <div>
+                                            <div class="section-title"><span class="section-title-wrap"><i class="bi bi-list-task section-title-icon" aria-hidden="true"></i><span>Real-World Task Library</span></span></div>
+                                            <div class="section-subtitle">Saved operator-grade tasks. Select one to preview it, then run it through the existing session runner.</div>
+                                        </div>
+                                    </div>
+                                    <div class="button-row mb-2 wrap-buttons">
+                                        <select id="taskManagerSelect" class="form-select form-select-sm"></select>
+                                        <button id="btnTaskManagerRefresh" class="btn btn-sm btn-operator-alt" type="button">Refresh Tasks</button>
+                                        <button id="btnTaskManagerRun" class="btn btn-sm btn-operator-primary" type="button">Run Task</button>
+                                    </div>
+                                    <pre id="taskManagerPreview" class="console-box compact-console">Task library pending.</pre>
+                                </div>
+
+                                <div class="panel-card main-card">
+                                    <div class="section-head">
+                                        <div>
+                                            <div class="section-title"><span class="section-title-wrap"><i class="bi bi-plus-square section-title-icon" aria-hidden="true"></i><span>Create Real-World Task</span></span></div>
+                                            <div class="section-subtitle">Add a new operator task without editing files by hand. New tasks are saved under runtime-generated definitions.</div>
+                                        </div>
+                                    </div>
+                                    <div class="button-row mb-2 wrap-buttons">
+                                        <input id="taskManagerName" class="form-control form-control-sm" placeholder="task name" />
+                                        <input id="taskManagerTaskId" class="form-control form-control-sm" placeholder="optional task id" />
+                                        <select id="taskManagerCategory" class="form-select form-select-sm">
+                                            <option value="operator">operator</option>
+                                            <option value="release">release</option>
+                                            <option value="investigation">investigation</option>
+                                            <option value="handoff">handoff</option>
+                                            <option value="research">research</option>
+                                        </select>
+                                    </div>
+                                    <div class="button-row mb-2">
+                                        <input id="taskManagerObjective" class="form-control form-control-sm" placeholder="objective" />
+                                    </div>
+                                    <div class="button-row mb-2">
+                                        <textarea id="taskManagerPrompt" class="form-control form-control-sm" rows="3" placeholder="first operator prompt"></textarea>
+                                    </div>
+                                    <div class="button-row mb-2">
+                                        <textarea id="taskManagerFollowup" class="form-control form-control-sm" rows="2" placeholder="optional follow-up prompt"></textarea>
+                                    </div>
+                                    <div class="button-row mb-2">
+                                        <input id="taskManagerNotes" class="form-control form-control-sm" placeholder="optional notes" />
+                                    </div>
+                                    <div class="button-row wrap-buttons">
+                                        <button id="btnTaskManagerCreate" class="btn btn-sm btn-operator-warn" type="button">Create Task</button>
+                                    </div>
+                                </div>
+                            </div>
+                        </section>
                     </div>
                 </div>
             </section>
 
             <section class="main-view d-none" data-view="logs">
-                <div class="panel-card main-card mb-3">
-                    <div class="section-head">
-                        <div>
-                            <div class="section-title">Policy Snapshot</div>
-                            <div class="section-subtitle">Current policy and auth configuration exposed to the control plane.</div>
+                <div class="layer-tab-shell mb-3" data-layer-tabs="logs">
+                    <div class="layer-tab-head">
+                        <div class="layer-tab-bar" role="tablist" aria-label="Log sections">
+                            <button class="layer-tab-button active" type="button" role="tab" aria-selected="true" data-layer-tab="policy-snapshot" tabindex="0">
+                                <i class="bi bi-shield-lock"></i>
+                                <span class="layer-tab-copy"><span>Policy</span><span>Snapshot</span></span>
+                            </button>
+                            <button class="layer-tab-button" type="button" role="tab" aria-selected="false" data-layer-tab="action-output" tabindex="-1">
+                                <i class="bi bi-journal-text"></i>
+                                <span class="layer-tab-copy"><span>Action</span><span>Output</span></span>
+                            </button>
                         </div>
                     </div>
-                    <pre id="policyBox" class="console-box">Loading...</pre>
-                </div>
-                <div class="panel-card main-card">
-                    <div class="section-title">Action Output</div>
-                    <pre id="actionBoxClone" class="console-box">No actions yet.</pre>
+                    <div class="layer-tab-panels">
+                        <section class="layer-tab-panel" role="tabpanel" data-layer-panel="policy-snapshot">
+                            <div class="panel-card main-card">
+                                <div class="section-head">
+                                    <div>
+                                        <div class="section-title"><span class="section-title-wrap"><i class="bi bi-file-earmark-medical section-title-icon" aria-hidden="true"></i><span>Policy Snapshot</span></span></div>
+                                        <div class="section-subtitle">Current policy, auth posture, and governance state exposed to the control plane.</div>
+                                    </div>
+                                </div>
+                                <pre id="policyBox" class="console-box">Policy trace pending.</pre>
+                            </div>
+                        </section>
+                        <section class="layer-tab-panel" role="tabpanel" data-layer-panel="action-output" hidden>
+                            <div class="panel-card main-card">
+                                <div class="section-head">
+                                    <div>
+                                        <div class="section-title"><span class="section-title-wrap"><i class="bi bi-terminal section-title-icon" aria-hidden="true"></i><span>Action Output</span></span></div>
+                                        <div class="section-subtitle">Latest backend command output and operator action trace in one feed.</div>
+                                    </div>
+                                </div>
+                                <pre id="actionBoxClone" class="console-box">Action channel idle.</pre>
+                            </div>
+                        </section>
+                    </div>
                 </div>
             </section>
 
             <section class="main-view d-none" data-view="health">
-                <div class="panel-card main-card mb-3">
-                    <div class="section-title">Health Summary</div>
-                    <div id="healthSummary" class="inspector-stack">Waiting for live status.</div>
-                </div>
-                <div class="panel-card main-card mb-3">
-                    <div class="section-title">Runtime Summary</div>
-                    <div id="runtimeSummary" class="inspector-stack">Waiting for runtime status.</div>
-                    <div class="section-title mt-3">Raw Runtime Fields</div>
-                    <pre id="runtimeRawBox" class="console-box compact-console">Click a runtime badge to inspect raw runtime fields.</pre>
-                    <div id="runtimeLegend" class="runtime-legend">
-                        <div class="runtime-legend-title">Badge Legend</div>
-                        <div class="runtime-legend-card">
-                            <div class="runtime-legend-row">
-                                <span class="status-pill status-pill-good">Running</span>
-                                <span class="runtime-legend-copy">Healthy process or logical service match.</span>
-                            </div>
-                        </div>
-                        <div class="runtime-legend-card">
-                            <div class="runtime-legend-row">
-                                <span class="status-pill status-pill-blue">Heartbeat Only</span>
-                                <span class="runtime-legend-copy">Live signal exists, but the logical process match is indirect or incomplete.</span>
-                            </div>
-                        </div>
-                        <div class="runtime-legend-card">
-                            <div class="runtime-legend-row">
-                                <span class="status-pill status-pill-warn">Starting / Stopping</span>
-                                <span class="runtime-legend-copy">Transition state or operator attention required.</span>
-                            </div>
-                        </div>
-                        <div class="runtime-legend-card">
-                            <div class="runtime-legend-row">
-                                <span class="status-pill status-pill-danger">Stale / Failed</span>
-                                <span class="runtime-legend-copy">Stale identity, heartbeat stale, boot timeout, or unhealthy runtime state.</span>
-                            </div>
-                        </div>
-                        <div class="runtime-legend-card">
-                            <div class="runtime-legend-row">
-                                <span class="status-pill status-pill-neutral">Stopped</span>
-                                <span class="runtime-legend-copy">Service is not running or was not detected.</span>
-                            </div>
+                <div class="layer-tab-shell mb-3" data-layer-tabs="health">
+                    <div class="layer-tab-head">
+                        <div class="layer-tab-bar" role="tablist" aria-label="Health sections">
+                            <button class="layer-tab-button active" type="button" role="tab" aria-selected="true" data-layer-tab="health-summary" tabindex="0">
+                                <i class="bi bi-heart-pulse"></i>
+                                <span class="layer-tab-copy"><span>Health</span><span>Summary</span></span>
+                            </button>
+                            <button class="layer-tab-button" type="button" role="tab" aria-selected="false" data-layer-tab="runtime-summary" tabindex="-1">
+                                <i class="bi bi-hdd-rack"></i>
+                                <span class="layer-tab-copy"><span>Runtime</span><span>Summary</span></span>
+                            </button>
+                            <button class="layer-tab-button" type="button" role="tab" aria-selected="false" data-layer-tab="supervisor-snapshot" tabindex="-1">
+                                <i class="bi bi-binoculars"></i>
+                                <span class="layer-tab-copy"><span>Supervisor</span><span>Snapshot</span></span>
+                            </button>
                         </div>
                     </div>
-                </div>
-                <div class="panel-card main-card">
-                    <div class="section-title">Supervisor Snapshot</div>
-                    <div id="supervisorSummaryMain" class="inspector-stack">No supervisor data yet.</div>
+                    <div class="layer-tab-panels">
+                        <section class="layer-tab-panel" role="tabpanel" data-layer-panel="health-summary">
+                            <div class="panel-card main-card">
+                                <div class="section-head">
+                                    <div>
+                                        <div class="section-title"><span class="section-title-wrap"><i class="bi bi-heart-pulse section-title-icon" aria-hidden="true"></i><span>Health Summary</span></span></div>
+                                        <div class="section-subtitle">Live score, self-check posture, and active alert load from the runtime control plane.</div>
+                                    </div>
+                                </div>
+                                <div id="healthSummary" class="inspector-stack">Health feed pending.</div>
+                            </div>
+                        </section>
+                        <section class="layer-tab-panel" role="tabpanel" data-layer-panel="runtime-summary" hidden>
+                            <div class="panel-card main-card">
+                                <div class="section-head">
+                                    <div>
+                                        <div class="section-title"><span class="section-title-wrap"><i class="bi bi-activity section-title-icon" aria-hidden="true"></i><span>Runtime Summary</span></span></div>
+                                        <div class="section-subtitle">Guard, core, and Web UI service posture with direct inspection of the raw runtime fields.</div>
+                                    </div>
+                                </div>
+                                <div id="runtimeSummary" class="inspector-stack">Runtime feed pending.</div>
+                                <div class="section-title mt-3"><span class="section-title-wrap"><i class="bi bi-braces section-title-icon" aria-hidden="true"></i><span>Raw Runtime Fields</span></span></div>
+                                <pre id="runtimeRawBox" class="console-box compact-console">Click a runtime badge to inspect raw runtime fields.</pre>
+                                <div id="runtimeLegend" class="runtime-legend">
+                                    <div class="runtime-legend-title">Badge Legend</div>
+                                    <div class="runtime-legend-card">
+                                        <div class="runtime-legend-row">
+                                            <span class="status-pill status-pill-good">Running</span>
+                                            <span class="runtime-legend-copy">Healthy process or logical service match.</span>
+                                        </div>
+                                    </div>
+                                    <div class="runtime-legend-card">
+                                        <div class="runtime-legend-row">
+                                            <span class="status-pill status-pill-blue">Heartbeat Only</span>
+                                            <span class="runtime-legend-copy">Live signal exists, but the logical process match is indirect or incomplete.</span>
+                                        </div>
+                                    </div>
+                                    <div class="runtime-legend-card">
+                                        <div class="runtime-legend-row">
+                                            <span class="status-pill status-pill-warn">Starting / Stopping</span>
+                                            <span class="runtime-legend-copy">Transition state or operator attention required.</span>
+                                        </div>
+                                    </div>
+                                    <div class="runtime-legend-card">
+                                        <div class="runtime-legend-row">
+                                            <span class="status-pill status-pill-danger">Stale / Failed</span>
+                                            <span class="runtime-legend-copy">Stale identity, heartbeat stale, boot timeout, or unhealthy runtime state.</span>
+                                        </div>
+                                    </div>
+                                    <div class="runtime-legend-card">
+                                        <div class="runtime-legend-row">
+                                            <span class="status-pill status-pill-neutral">Stopped</span>
+                                            <span class="runtime-legend-copy">Service is not running or was not detected.</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </section>
+                        <section class="layer-tab-panel" role="tabpanel" data-layer-panel="supervisor-snapshot" hidden>
+                            <div class="panel-card main-card">
+                                <div class="section-head">
+                                    <div>
+                                        <div class="section-title"><span class="section-title-wrap"><i class="bi bi-binoculars section-title-icon" aria-hidden="true"></i><span>Supervisor Snapshot</span></span></div>
+                                        <div class="section-subtitle">Probe signal, active findings, and the current supervisor read on the live session posture.</div>
+                                    </div>
+                                </div>
+                                <div id="supervisorSummaryMain" class="inspector-stack">Supervisor feed pending.</div>
+                            </div>
+                        </section>
+                    </div>
                 </div>
             </section>
         </main>
 
         <aside id="inspectorPanel" class="control-inspector panel-card">
+            <div class="panel-card inspector-card user-hub-card">
+                <div class="user-hub-head">
+                    <div class="section-title"><span class="section-title-wrap"><i class="bi bi-person-circle section-title-icon" aria-hidden="true"></i><span>User Hub</span></span></div>
+                    <div class="button-row user-hub-actions">
+                        <button id="btnRefresh" class="user-hub-icon-button" type="button" aria-label="Refresh" title="Refresh">
+                            <i class="bi bi-arrow-clockwise" aria-hidden="true"></i>
+                            <span class="visually-hidden">Refresh</span>
+                        </button>
+                        <button id="btnLogout" class="user-hub-icon-button user-hub-icon-button-danger" type="button" aria-label="Logout" title="Logout">
+                            <i class="bi bi-box-arrow-right" aria-hidden="true"></i>
+                            <span class="visually-hidden">Logout</span>
+                        </button>
+                    </div>
+                </div>
+                <div class="user-hub-access">
+                    <label class="field-label" for="key">Operator Access</label>
+                    <input id="key" class="form-control form-control-sm" type="password" placeholder="NOVA_CONTROL_TOKEN" />
+                </div>
+            </div>
+
             <div>
-                <div class="section-title">Live Inspector</div>
-                <div class="section-subtitle">Planner, ledger, supervisor, and live session state close to the action stream.</div>
+                <div class="section-title"><span class="section-title-wrap"><i class="bi bi-eye section-title-icon" aria-hidden="true"></i><span>Live Inspector</span></span></div>
+                <div class="section-subtitle">Planner, ledger, supervisor, and live session state kept on the same line of sight as the action stream.</div>
             </div>
 
-            <div class="panel-card inspector-card">
-                <div class="section-title">Planner Decision</div>
-                <div id="plannerInspector" class="inspector-stack">No planner data yet.</div>
-            </div>
+            <div class="inspector-tab-shell">
+                <div class="inspector-tab-bar" role="tablist" aria-label="Live inspector views">
+                    <button class="inspector-tab-button active" type="button" role="tab" aria-selected="true" tabindex="0" data-inspector-tab="planner">
+                        <span class="inspector-tab-node" aria-hidden="true"></span>
+                        <span class="inspector-tab-copy">
+                            <span class="inspector-tab-label">Planner</span>
+                            <span class="inspector-tab-meta">route</span>
+                        </span>
+                    </button>
+                    <button class="inspector-tab-button" type="button" role="tab" aria-selected="false" tabindex="-1" data-inspector-tab="ledger">
+                        <span class="inspector-tab-node" aria-hidden="true"></span>
+                        <span class="inspector-tab-copy">
+                            <span class="inspector-tab-label">Ledger</span>
+                            <span class="inspector-tab-meta">trace</span>
+                        </span>
+                    </button>
+                    <button class="inspector-tab-button" type="button" role="tab" aria-selected="false" tabindex="-1" data-inspector-tab="supervisor">
+                        <span class="inspector-tab-node" aria-hidden="true"></span>
+                        <span class="inspector-tab-copy">
+                            <span class="inspector-tab-label">Supervisor</span>
+                            <span class="inspector-tab-meta">watch</span>
+                        </span>
+                    </button>
+                    <button class="inspector-tab-button" type="button" role="tab" aria-selected="false" tabindex="-1" data-inspector-tab="session">
+                        <span class="inspector-tab-node" aria-hidden="true"></span>
+                        <span class="inspector-tab-copy">
+                            <span class="inspector-tab-label">Session</span>
+                            <span class="inspector-tab-meta">state</span>
+                        </span>
+                    </button>
+                </div>
 
-            <div class="panel-card inspector-card">
-                <div class="section-title">Ledger</div>
-                <div id="ledgerInspector" class="timeline-stack">No ledger data yet.</div>
-            </div>
+                <div class="panel-card inspector-card inspector-card-shell">
+                    <section class="inspector-tab-panel" role="tabpanel" data-inspector-panel="planner">
+                        <div class="section-title"><span class="section-title-wrap"><i class="bi bi-diagram-2 section-title-icon" aria-hidden="true"></i><span>Planner Decision</span></span></div>
+                        <div id="plannerInspector" class="inspector-stack">Planner feed pending.</div>
+                    </section>
 
-            <div class="panel-card inspector-card">
-                <div class="section-title">Supervisor</div>
-                <div id="supervisorInspector" class="inspector-stack">No supervisor data yet.</div>
-            </div>
+                    <section class="inspector-tab-panel" role="tabpanel" data-inspector-panel="ledger" hidden>
+                        <div class="section-title"><span class="section-title-wrap"><i class="bi bi-journal-text section-title-icon" aria-hidden="true"></i><span>Ledger</span></span></div>
+                        <div id="ledgerInspector" class="timeline-stack">Ledger feed pending.</div>
+                    </section>
 
-            <div class="panel-card inspector-card">
-                <div class="section-title">Session State</div>
-                <div id="sessionStateInspector" class="inspector-stack">No session selected.</div>
+                    <section class="inspector-tab-panel" role="tabpanel" data-inspector-panel="supervisor" hidden>
+                        <div class="section-title"><span class="section-title-wrap"><i class="bi bi-binoculars section-title-icon" aria-hidden="true"></i><span>Supervisor</span></span></div>
+                        <div id="supervisorInspector" class="inspector-stack">Supervisor feed pending.</div>
+                    </section>
+
+                    <section class="inspector-tab-panel" role="tabpanel" data-inspector-panel="session" hidden>
+                        <div class="section-title"><span class="section-title-wrap"><i class="bi bi-chat-left-text section-title-icon" aria-hidden="true"></i><span>Session State</span></span></div>
+                        <div id="sessionStateInspector" class="inspector-stack">Session focus pending.</div>
+                    </section>
+                </div>
             </div>
         </aside>
     </div>
 
-    <script src="/static/control.js"></script>
+    <script src="/static/control.js?v={{CONTROL_JS_VERSION}}"></script>
 </body>
 </html>

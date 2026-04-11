@@ -10,7 +10,7 @@ from typing import Optional
 
 import psutil
 
-ROOT = Path(r"C:\Nova")
+ROOT = Path(__file__).resolve().parent
 VENV_PY = ROOT / ".venv" / "Scripts" / "python.exe"
 NOVA_CORE = ROOT / "nova_core.py"
 GUARD_SCRIPT = Path(__file__).resolve()

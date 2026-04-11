@@ -20,6 +20,7 @@ Architecturally, that means Nova should be treated as a supervised local runtime
   - browser runtime console and operator console
   - persistent HTTP sessions and owner binding
   - optional control login and optional chat login
+  - thin transport wrappers over control, auth, telemetry, operator, session, subconscious, and asset services
   - admin actions for guard, policy, memory scope, and managed chat users
 
 - `memory.py`
@@ -124,6 +125,22 @@ Patch execution is still separately governed, but it is no longer outside the to
 
 The current architectural direction should be understood as a single decision spine, not a single monolithic processor.
 
+## Search Provider Architecture
+
+Nova's search stack should not be treated as one generic "web search" pipe.
+
+The target provider design is documented in [SEARCH_PROVIDER_ARCHITECTURE.md](SEARCH_PROVIDER_ARCHITECTURE.md).
+
+The short version is:
+
+- `SearXNG` is the default broad web broker
+- `Wikipedia` should become the structured knowledge provider
+- `StackExchange` should become the structured troubleshooting provider
+- `GitHub` should become the code and repository discovery provider
+- `Whoogle` should remain an optional fallback, not a primary dependency
+
+The decision spine should route between those providers intentionally based on turn type and research goal rather than flattening everything into one generic search lane.
+
 ## Supervisor Ownership Constitution
 
 Deterministic behavior ownership is governed by [SUPERVISOR_CONTRACT.md](SUPERVISOR_CONTRACT.md).
@@ -203,3 +220,19 @@ For the supervisor-owned continuation path, the current seam shape is now:
 5. Memory/context is added when appropriate.
 6. LLM fallback is used only when deterministic paths do not answer.
 7. The final route is written to the action ledger so operators can inspect why that path was chosen.
+
+## HTTP Boundary Status
+
+`nova_http.py` is now intentionally narrower than earlier revisions. It still owns request parsing, cookie and session handling, response writing, and the stable wrapper functions that existing tests patch directly.
+
+Deterministic operator and control-room ownership has been pushed into services, including:
+
+- `services/control_auth.py`
+- `services/chat_identity.py`
+- `services/control_telemetry.py`
+- `services/control_assets.py`
+- `services/subconscious_control.py`
+- `services/test_session_control.py`
+- `services/operator_control.py`
+
+That leaves the HTTP layer primarily as transport glue instead of a mixed transport-plus-business-logic module.

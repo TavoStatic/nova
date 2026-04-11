@@ -100,6 +100,8 @@ class TestNovaHttpProfile(unittest.TestCase):
         self.orig_handle_keywords = nova_http.nova_core.handle_keywords
         nova_http.SESSION_TURNS.clear()
         nova_http.SESSION_STATE_MANAGER.clear()
+        nova_http._CONTROL_STATUS_CACHE["computed_at"] = 0.0
+        nova_http._CONTROL_STATUS_CACHE["payload"] = None
 
     def tearDown(self):
         nova_http.nova_core.mem_recall = self.orig_mem_recall
@@ -111,6 +113,22 @@ class TestNovaHttpProfile(unittest.TestCase):
         nova_http.nova_core.handle_keywords = self.orig_handle_keywords
         nova_http.SESSION_TURNS.clear()
         nova_http.SESSION_STATE_MANAGER.clear()
+        nova_http._CONTROL_STATUS_CACHE["computed_at"] = 0.0
+        nova_http._CONTROL_STATUS_CACHE["payload"] = None
+
+    def test_cached_control_status_payload_reuses_recent_value(self):
+        payloads = [{"ok": True, "seq": 1}, {"ok": True, "seq": 2}]
+
+        with mock.patch("nova_http._control_status_payload", side_effect=payloads) as status_mock, \
+            mock.patch("nova_http.time.monotonic", side_effect=[100.0, 100.0, 100.1, 101.0, 103.5, 103.5, 103.6]):
+            first = nova_http._cached_control_status_payload(2.0)
+            second = nova_http._cached_control_status_payload(2.0)
+            third = nova_http._cached_control_status_payload(2.0)
+
+        self.assertEqual(first["seq"], 1)
+        self.assertEqual(second["seq"], 1)
+        self.assertEqual(third["seq"], 2)
+        self.assertEqual(status_mock.call_count, 2)
 
     def test_developer_who_is_answer_is_deterministic(self):
         nova_http.nova_core.mem_enabled = lambda: True
@@ -528,14 +546,17 @@ class TestNovaHttpProfile(unittest.TestCase):
     def test_location_self_diagnostic_when_missing(self):
         self.orig_mem_audit = nova_http.nova_core.mem_audit
         self.orig_get_saved_location_text = nova_http.nova_core.get_saved_location_text
+        self.orig_runtime_device_location_payload = nova_http.nova_core.runtime_device_location_payload
         try:
             nova_http.nova_core.mem_audit = lambda q: "{\"results\": []}"
             nova_http.nova_core.get_saved_location_text = lambda: ""
+            nova_http.nova_core.runtime_device_location_payload = lambda *args, **kwargs: {"available": False, "stale": True}
             reply = nova_http.process_chat("s7", "where is nova?")
             self.assertIn("I don't have a stored location yet.", reply)
         finally:
             nova_http.nova_core.mem_audit = self.orig_mem_audit
             nova_http.nova_core.get_saved_location_text = self.orig_get_saved_location_text
+            nova_http.nova_core.runtime_device_location_payload = self.orig_runtime_device_location_payload
 
     def test_read_text_safely_handles_utf16_without_null_padded_output(self):
         with tempfile.TemporaryDirectory() as td:
@@ -649,8 +670,10 @@ class TestNovaHttpProfile(unittest.TestCase):
     def test_http_pending_weather_action_uses_affirmative_followup(self):
         orig_get_saved_location_text = nova_http.nova_core.get_saved_location_text
         orig_execute_planned_action = nova_http.nova_core.execute_planned_action
+        orig_weather_current_location_available = nova_http.nova_core._weather_current_location_available
         try:
             nova_http.nova_core.get_saved_location_text = lambda: "Brownsville TX"
+            nova_http.nova_core._weather_current_location_available = lambda: False
             nova_http.nova_core.execute_planned_action = lambda tool, args=None: "Brownsville, TX: Today: 66°F, Sunny. [source: api.weather.gov]" if tool == "weather_current_location" else ""
             first = nova_http.process_chat("s11", "check the weather if you can please..")
             self.assertIn("location", first.lower())
@@ -662,12 +685,15 @@ class TestNovaHttpProfile(unittest.TestCase):
         finally:
             nova_http.nova_core.get_saved_location_text = orig_get_saved_location_text
             nova_http.nova_core.execute_planned_action = orig_execute_planned_action
+            nova_http.nova_core._weather_current_location_available = orig_weather_current_location_available
 
     def test_http_pending_weather_action_current_location_followup_matrix(self):
         orig_get_saved_location_text = nova_http.nova_core.get_saved_location_text
         orig_execute_planned_action = nova_http.nova_core.execute_planned_action
+        orig_weather_current_location_available = nova_http.nova_core._weather_current_location_available
         try:
             nova_http.nova_core.get_saved_location_text = lambda: "Brownsville TX"
+            nova_http.nova_core._weather_current_location_available = lambda: False
             nova_http.nova_core.execute_planned_action = lambda tool, args=None: "Brownsville, TX: Today: 66°F, Sunny. [source: api.weather.gov]" if tool == "weather_current_location" else ""
             cases = [
                 ("affirmative", "go ahead"),
@@ -686,12 +712,15 @@ class TestNovaHttpProfile(unittest.TestCase):
         finally:
             nova_http.nova_core.get_saved_location_text = orig_get_saved_location_text
             nova_http.nova_core.execute_planned_action = orig_execute_planned_action
+            nova_http.nova_core._weather_current_location_available = orig_weather_current_location_available
 
     def test_http_pending_weather_action_uses_direct_location_followup(self):
         orig_get_saved_location_text = nova_http.nova_core.get_saved_location_text
         orig_execute_planned_action = nova_http.nova_core.execute_planned_action
+        orig_weather_current_location_available = nova_http.nova_core._weather_current_location_available
         try:
             nova_http.nova_core.get_saved_location_text = lambda: ""
+            nova_http.nova_core._weather_current_location_available = lambda: False
             nova_http.nova_core.execute_planned_action = lambda tool, args=None: "Brownsville, TX 78521: Tomorrow: 72°F, Clear. [source: api.weather.gov]" if tool == "weather_location" else ""
             first = nova_http.process_chat("s11_direct", "check the weather if you can please..")
             self.assertIn("location", first.lower())
@@ -701,6 +730,23 @@ class TestNovaHttpProfile(unittest.TestCase):
             self.assertIsNone(session.pending_action)
             self.assertEqual((session.last_reflection or {}).get("reply_contract"), "weather_lookup.explicit_location")
             self.assertEqual((session.last_reflection or {}).get("reply_outcome_kind"), "explicit_location")
+        finally:
+            nova_http.nova_core.get_saved_location_text = orig_get_saved_location_text
+            nova_http.nova_core.execute_planned_action = orig_execute_planned_action
+            nova_http.nova_core._weather_current_location_available = orig_weather_current_location_available
+
+    def test_http_generic_weather_query_uses_current_location_when_available(self):
+        orig_get_saved_location_text = nova_http.nova_core.get_saved_location_text
+        orig_execute_planned_action = nova_http.nova_core.execute_planned_action
+        try:
+            nova_http.nova_core.get_saved_location_text = lambda: "Brownsville TX"
+            nova_http.nova_core.execute_planned_action = lambda tool, args=None: "Brownsville, TX: Today: 66°F, Sunny. [source: api.weather.gov]" if tool == "weather_current_location" else ""
+            reply = nova_http.process_chat("s11_generic_weather", "what is the weather like today ?")
+            self.assertIn("api.weather.gov", reply)
+            session = nova_http.SESSION_STATE_MANAGER.get("s11_generic_weather")
+            self.assertIsNotNone(session)
+            self.assertEqual((session.last_reflection or {}).get("reply_contract"), "weather_lookup.current_location")
+            self.assertEqual((session.last_reflection or {}).get("reply_outcome_kind"), "current_location")
         finally:
             nova_http.nova_core.get_saved_location_text = orig_get_saved_location_text
             nova_http.nova_core.execute_planned_action = orig_execute_planned_action

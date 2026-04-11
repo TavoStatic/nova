@@ -1,0 +1,14 @@
+{
+  "name": "Run Tools vs HTTP continuation parity",
+  "compare_modes": ["run_tools", "http"],
+  "source": "parity",
+  "category": "entrypoint",
+  "objective": "verify run_tools and HTTP keep the same subject-specific continuation thread across follow-up turns",
+  "messages": [
+    "For this session, remember that the Atlas packaging review is blocked by packaging drift and owned by cobalt sparrow.",
+    "What review did I say was blocked?",
+    "And what is blocking it?",
+    "Who owns that review?"
+  ],
+  "note": "Keep this chat-only so parity reflects the shared conversation path rather than the direct tool fast-path."
+}

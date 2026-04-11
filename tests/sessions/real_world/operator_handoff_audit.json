@@ -1,0 +1,27 @@
+{
+  "name": "Real World :: operator handoff audit",
+  "task_id": "operator_handoff_audit",
+  "source": "real_world",
+  "category": "handoff",
+  "objective": "Ask Nova to walk the operator handoff path and identify hidden assumptions or documentation drift.",
+  "messages": [
+    "Pretend I am a new operator using an extracted NYO System package. Audit the handoff flow against docs/HANDOFF.md. Use only the documented step titles, commands, and boundaries you can actually ground. If you find live-workspace assumptions or packaging drift, name the exact documented step or command instead of paraphrasing invented checklist text.",
+    "What is the single first fix you would make so the handoff path matches the shipped artifact instead of only the checkout? Answer with one concrete fix, the doc or command surface to change, and why. Do not give me a multiple-choice matrix."
+  ],
+  "success_signals": [
+    "Nova focuses on package truth and installed-copy truth, not only workspace behavior.",
+    "Nova identifies mismatches between docs and shipped behavior when they exist.",
+    "Nova recommends a concrete first fix."
+  ],
+  "failure_signals": [
+    "Nova answers as though the operator is still in the live workspace.",
+    "Nova ignores the extracted-package or installed-copy surface.",
+    "Nova gives only a generic setup explanation."
+  ],
+  "evidence_to_review": [
+    "assistant answer",
+    "grounding",
+    "operator usefulness"
+  ],
+  "notes": "This task should keep the project honest about whether docs and artifact behavior actually match."
+}

@@ -31,21 +31,29 @@ def main():
 
     results = []
 
-    # 1) Unit tests
-    print("1) Running unit tests: python -m unittest discover -v")
-    rc, out = run_cmd([PY, "-m", "unittest", "discover", "-v"]) 
+    # 1) Preflight lane
+    preflight_cmd = [PY, str(ROOT / "run_regression.py"), "preflight"]
+    print("1) Running preflight lane: " + " ".join(preflight_cmd))
+    rc, out = run_cmd(preflight_cmd)
     print(out)
-    results.append(("unittest", rc))
+    results.append(("preflight", rc))
 
-    # 2) Memory E2E script
+    # 2) Unit lane
+    unit_cmd = [PY, str(ROOT / "run_regression.py"), "unit"]
+    print("2) Running unit lane: " + " ".join(unit_cmd))
+    rc_unit, out_unit = run_cmd(unit_cmd)
+    print(out_unit)
+    results.append(("unit", rc_unit))
+
+    # 3) Memory E2E script
     mem_e2e = ROOT / "tests" / "run_memory_e2e.py"
     if mem_e2e.exists():
-        print("2) Running memory e2e: tests/run_memory_e2e.py")
+        print("3) Running memory e2e: tests/run_memory_e2e.py")
         rc2, out2 = run_cmd([PY, str(mem_e2e)])
         print(out2)
         results.append(("memory_e2e", rc2))
     else:
-        print("2) No memory e2e script found; skipping")
+        print("3) No memory e2e script found; skipping")
         results.append(("memory_e2e", 0))
 
     # Summary

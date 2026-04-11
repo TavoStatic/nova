@@ -13,6 +13,7 @@ POLICY_PATH = ROOT / "policy.json"
 RUNTIME_DIR = ROOT / "runtime"
 UPDATES_DIR = ROOT / "updates"
 GENERATED_DEFINITIONS_DIR = RUNTIME_DIR / "test_sessions" / "generated_definitions"
+PROMOTED_DEFINITIONS_DIR = RUNTIME_DIR / "test_sessions" / "promoted"
 PENDING_REVIEW_DIR = RUNTIME_DIR / "test_sessions" / "pending_review"
 QUARANTINE_DIR = RUNTIME_DIR / "test_sessions" / "quarantine"
 TEST_SESSIONS_DIR = RUNTIME_DIR / "test_sessions"
@@ -28,6 +29,7 @@ DEFAULT_TEMP_MAX_BYTES = 500 * 1024 * 1024
 _MANIFEST_NAMES = {"generated_manifest.json", "latest_manifest.json"}
 _PROTECTED_TEST_SESSION_DIRS = {
     "generated_definitions",
+    "promoted",
     "pending_review",
     "quarantine",
 }
@@ -177,6 +179,14 @@ def scan_candidates() -> list[dict[str, Any]]:
             reason = f"definition_novelty<{novelty_min:.2f}"
         if reason:
             out.append(_build_candidate(path, "old_definition", "archive", reason, extra={"novelty": novelty}))
+
+    promoted_dir = TEST_SESSIONS_DIR / "promoted"
+    for path in sorted(promoted_dir.glob("*.json")) if promoted_dir.exists() else []:
+        if path.name in _MANIFEST_NAMES or _is_protected(path, protect_patterns):
+            continue
+        age = _age_seconds(path, now)
+        if age > definition_max_age:
+            out.append(_build_candidate(path, "old_promoted_definition", "archive", f"definition_age_days>{cfg.get('definition_max_age_days', 7)}"))
 
     quarantine_max_age = float(cfg.get("quarantine_max_age_hours", 48) or 48) * 3600.0
     demote_threshold = 0.90

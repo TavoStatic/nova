@@ -1,6 +1,46 @@
 # Nova Status
 
-Date: 2026-03-25
+Date: 2026-03-30
+
+## Packaging Checkpoint (March 30, 2026)
+
+This checkpoint is the current canonical baseline for base-package readiness after the first productization pass.
+
+Verified now:
+
+- `nova install` is now a real bootstrap path rather than a placeholder
+- fresh canonical package docs now exist for bootstrap, handoff, and readiness:
+	- `docs/BOOTSTRAP.md`
+	- `docs/HANDOFF.md`
+	- `docs/BASE_PACKAGE_READINESS.md`
+- the release artifact strategy is now defined as a source-bootstrap zip built by `nova package-build`
+- release governance now includes `nova package-verify`, `nova package-ledger`, `nova package-status`, `nova package-promote`, auto-versioned daily RC builds, and a build ledger at `runtime/exports/release_packages/release_ledger.jsonl`
+- release governance now also tracks verification events and a ship-gate summary through `nova package-readiness`
+- the package validation gate is now split into `nova smoke-base --fix` and the Ollama-backed `nova smoke --fix`
+- the repo now has a real Windows installer build path via `nova installer-build`, which compiles the existing Inno Setup wrapper from a verified package zip when Inno Setup is installed
+- installer artifacts now participate in the shared release discipline through `nova installer-verify`, `nova installer-ledger`, `nova installer-status`, `nova installer-readiness`, and `nova installer-promote`
+- launcher validation is green on the current workspace path:
+	- `nova doctor`
+	- `nova runtime-status`
+	- `nova package-verify`
+	- `nova package-ledger`
+	- `nova smoke-base --fix`
+	- `nova smoke --fix`
+	- `nova test`
+- compact regression remains green on the latest run: `53` tests, `OK`
+- near-clean staged package validation is green:
+	- staged `nova package-verify .`
+	- staged `nova install`
+	- staged `nova doctor`
+	- staged `nova runtime-status`
+	- staged `nova test`
+
+Current packaging posture:
+
+- source package plus bootstrap command is now credible and documented
+- source-bootstrap zip artifact is now the canonical release candidate format
+- package boundary is defined and linked from the canonical docs index
+- remaining work is now about fresh-machine validation, dependency isolation, and release-candidate discipline
 
 ## Stabilization Checkpoint (March 25, 2026)
 
@@ -27,7 +67,6 @@ New canonical docs for this slice:
 
 - `docs/PHASE2_SAFETY_ENVELOPE.md`
 - `docs/KIDNEY_SYSTEM.md`
-- `docs/PHASE2_SELF_DIRECTED_IMPROVEMENT.md`
 - `docs/PACKAGE_PRODUCT_ROADMAP.md`
 
 Latest local audit artifact:
@@ -105,7 +144,7 @@ The single operator handoff flow now lives in `docs/HANDOFF.md`.
 - Latest focused operator-surface result: `60` tests, `OK`
 
 - Full discovered suite is green: `c:/Nova/.venv/Scripts/python.exe -m unittest discover -s tests -p "test_*.py"`
-- Latest full-suite result: `585` tests, `OK`
+- Latest full-suite result: `808` tests, `OK`
 - Latest focused runtime recovery result: `22` tests, `OK`
 - Latest focused domain-detachment results:
 	- `293` tests, `OK` for `tests.test_http_identity_chat tests.test_nova_http tests.test_core_identity_learning`
@@ -132,6 +171,7 @@ The single operator handoff flow now lives in `docs/HANDOFF.md`.
 - Architectural seams landed:
 	- followup move classification now lives in `followup_move_classifier.py` with direct seam coverage in `tests/test_followup_move_classifier.py`
 	- active-task context and binding rules now live in `active_task_constraints.py` with direct seam coverage in `tests/test_active_task_constraints.py`
+	- `nova_http.py` control-room ownership is now narrowed to transport/session glue plus stable wrappers; service modules own control auth, chat auth, telemetry and exports, control assets, subconscious live summaries, generated test-session investigation, test-session root discovery, and operator macro/backend command path logic
 - Enforcement: supervisor-bypass warnings now carry categorized allowlist metadata, dev mode raises on unallowlisted bypasses via `NOVA_DEV_MODE=1`, each turn records a structured `routing_decision`, and the closed answer-path slice now prefers supervisor-owned reply contracts over generic open fallback
 - Migrated families on the outcome + reply-contract layer:
 	- `set_location`
