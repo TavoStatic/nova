@@ -14,16 +14,19 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: '3.11'
 
-      - name: Install requirements (if present)
+      - name: Install cross-platform dependencies
         run: |
-          if [ -f requirements.txt ]; then python -m pip install -r requirements.txt; fi
+          python -m pip install --upgrade pip
+          # Install only cross-platform deps; skip Windows-only (winsdk) and
+          # audio deps that require system libs not present in CI.
+          python -m pip install requests psutil
 
       - name: Run smoke e2e
         run: |
