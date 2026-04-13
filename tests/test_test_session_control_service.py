@@ -286,14 +286,16 @@ class TestTestSessionControlService(unittest.TestCase):
         self.assertEqual(catalog, session_path)
 
     def test_run_test_session_definition_executes_runner_and_returns_reports(self):
+        import sys
         completed = SimpleNamespace(returncode=0, stdout="Saved full report", stderr="")
+        _py = Path(sys.executable)  # guaranteed to exist on any platform
 
         ok, msg, extra = TEST_SESSION_CONTROL_SERVICE.run_test_session_definition(
             "demo.json",
-            runner_path=Path("c:/Nova/scripts/run_test_session.py"),
-            venv_python=Path("c:/Nova/.venv/Scripts/python.exe"),
-            base_dir=Path("c:/Nova"),
-            resolve_definition_fn=lambda name: Path("c:/Nova/tests/sessions/demo.json"),
+            runner_path=_py,
+            venv_python=_py,
+            base_dir=_py.parent,
+            resolve_definition_fn=lambda name: _py,
             available_definitions_fn=lambda limit: [{"file": "demo.json"}],
             report_summaries_fn=lambda limit: [{"run_id": "demo_run", "status": "green"}],
             subprocess_run=lambda *args, **kwargs: completed,

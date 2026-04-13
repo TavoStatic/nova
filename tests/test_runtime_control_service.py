@@ -50,8 +50,9 @@ class TestRuntimeControlService(unittest.TestCase):
         self.assertEqual(detail, "runtime_artifact_show_ok:guard.log")
 
     def test_start_nova_core_routes_through_guard(self):
+        import sys
         ok, msg = RUNTIME_CONTROL_SERVICE.start_nova_core(
-            core_py=Path("c:/Nova/nova_core.py"),
+            core_py=Path(sys.executable),  # guaranteed to exist on any platform
             core_status_fn=lambda: {"running": False},
             start_guard_fn=lambda: (True, "guard_start_requested"),
         )
