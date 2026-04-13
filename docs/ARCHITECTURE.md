@@ -2,7 +2,7 @@
 
 ## System Direction
 
-Nova is becoming the runtime core of NYO System: a single decision spine with distributed execution, operator-visible telemetry, scoped memory, governed mutation paths, and optional domain extension points.
+Nova is becoming the runtime core of NYO AI SYSTEMS: a single decision spine with distributed execution, operator-visible telemetry, scoped memory, governed mutation paths, and optional domain extension points.
 
 Architecturally, that means Nova should be treated as a supervised local runtime and control surface, not just a conversational shell. The public runtime should remain generic while domain specialization is attached explicitly through policy, tools, and operator-loaded knowledge packs rather than bundled repo-local vertical content.
 

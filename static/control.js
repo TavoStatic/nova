@@ -4249,7 +4249,7 @@ window.addEventListener('unhandledrejection', (event) => {
     setFeedback('UI async error: ' + reason, 'danger');
 });
 
-setFeedback('NYO System control linked. Fetching live status...', 'muted');
+setFeedback('NYO AI SYSTEMS control linked. Fetching live status...', 'muted');
 setActiveView('overview');
 setInspectorTab('planner');
 renderLiveTracking(null);

@@ -95,7 +95,7 @@ This keeps the loop grounded in artifacts Nova already produces:
 
 ## Product Direction
 
-Nova is becoming the runtime core of NYO System: a supervised local runtime for routing, memory, research, tool execution, operator-console operations, and governed self-change.
+Nova is becoming the runtime core of NYO AI SYSTEMS: a supervised local runtime for routing, memory, research, tool execution, operator-console operations, and governed self-change.
 
 The current evaluation is:
 

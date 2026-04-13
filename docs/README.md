@@ -1,10 +1,10 @@
-# NYO System Documentation
+# NYO AI SYSTEMS Documentation
 
-This directory is the canonical documentation hub for NYO System.
+This directory is the canonical documentation hub for NYO AI SYSTEMS.
 
 ## Platform Direction
 
-Nova is becoming the runtime core of NYO System: an inspectable, operator-run local runtime with deterministic routing, scoped memory, tool execution, web research, operator-console operations, and governed patch flow.
+Nova is becoming the runtime core of NYO AI SYSTEMS: an inspectable, operator-run local runtime with deterministic routing, scoped memory, tool execution, web research, operator-console operations, and governed patch flow.
 
 It should be evaluated less like a chatbot and more like a supervised execution system with several interfaces.
 
@@ -14,7 +14,7 @@ Start here:
 
 - [HANDOFF.md](HANDOFF.md): single operator flow for install, bootstrap, run, verify, inspect, patch, and rollback
 - [BOOTSTRAP.md](BOOTSTRAP.md): fresh-machine bootstrap path for the current base package
-- [OPERATIONS.md](OPERATIONS.md): how to run, test, and operate NYO System
+- [OPERATIONS.md](OPERATIONS.md): how to run, test, and operate NYO AI SYSTEMS
 - [ARCHITECTURE.md](ARCHITECTURE.md): component map and request flow
 - [SEARCH_PROVIDER_ARCHITECTURE.md](SEARCH_PROVIDER_ARCHITECTURE.md): target provider stack, routing roles, fallback policy, and command-center governance for web, knowledge, and code search
 - [SUPERVISOR_CONTRACT.md](SUPERVISOR_CONTRACT.md): deterministic behavior ownership contract

@@ -4182,7 +4182,7 @@ CONTROL_LOGIN_HTML = """<!doctype html>
 <head>
     <meta charset=\"utf-8\" />
     <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" />
-    <title>NYO System Control Login</title>
+    <title>NYO AI SYSTEMS Control Login</title>
     <link href=\"https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css\" rel=\"stylesheet\" integrity=\"sha384-QWTKZyjpPEjISv5WaRU9OFeRpok6YctnYmDr5pNlyT2bRjXh0JMhjY6hW+ALEwIH\" crossorigin=\"anonymous\">
     <style>
         :root { --ink:#1f1d19; --bg:#f3efe6; --panel:#fffdf8; --line:#d9ceba; --accent:#0f7a5c; --danger:#a82720; }
@@ -4215,7 +4215,7 @@ CONTROL_LOGIN_HTML = """<!doctype html>
 </head>
 <body>
     <div class=\"login-card p-4\">
-        <h1>NYO System Control Login</h1>
+        <h1>NYO AI SYSTEMS Control Login</h1>
         <p>Sign in to access the branded operator console for the NYO runtime.</p>
         <form id=\"f\" class=\"d-grid gap-2\">
             <label for=\"u\" class=\"form-label mb-0\">Username</label>
