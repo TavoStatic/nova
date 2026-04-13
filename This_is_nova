@@ -2465,3 +2465,15 @@ Verification snapshot after pruning:
 Why this matters:
 - reduces historical artifact drag that was steering operators toward old diagnostics and stale run traces
 - preserves live execution backbone state while removing noisy historical debris that obscures current truth
+
+### 2026-04-13 — GitHub surface hardening: LFS migration + repo hygiene guard
+
+What changed:
+- migrated heavy `piper` binary assets to Git LFS tracking (`piper/models/*.onnx`, `piper/*.dll`, `piper/*.exe`) so they no longer behave as ordinary git blobs in active source commits
+- added `scripts/repo_hygiene_check.py` to enforce source-boundary rules against tracked runtime/log/memory/update artifacts and oversized non-LFS blobs
+- wired the hygiene guard into CI (`.github/workflows/ci.yml`) so pull requests fail fast if junk paths or large raw binaries are reintroduced
+
+Boundary intent:
+- runtime truth remains in runtime stores and operational ledgers, not tracked source
+- binary assets can remain in-repo only through explicit LFS governance
+- this keeps GitHub branch/review surface cleaner and reduces drift from accidental artifact commits

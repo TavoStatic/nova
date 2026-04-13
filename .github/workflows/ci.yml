@@ -46,6 +46,9 @@ jobs:
       - name: Verify core imports
         run: python -c "import requests, psutil; print('core_imports_ok')"
 
+      - name: Repo hygiene guard
+        run: python scripts/repo_hygiene_check.py
+
       - name: Static compile check
         run: python -m compileall -q .
 
