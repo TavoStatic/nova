@@ -53,6 +53,7 @@
                 <button class="nav-pill active" data-view-target="overview" type="button"><span class="nav-pill-icon-stack" aria-hidden="true"><i class="bi bi-menu-button-wide nav-pill-icon nav-pill-icon-outline"></i><i class="bi bi-menu-button-wide-fill nav-pill-icon nav-pill-icon-fill"></i></span><span class="nav-pill-copy"><span class="nav-pill-label">Overview</span><span class="nav-pill-meta">Signal hub</span></span></button>
                 <button class="nav-pill" data-view-target="operations" type="button"><span class="nav-pill-icon-stack" aria-hidden="true"><i class="bi bi-wrench-adjustable-circle nav-pill-icon nav-pill-icon-outline"></i><i class="bi bi-wrench-adjustable-circle-fill nav-pill-icon nav-pill-icon-fill"></i></span><span class="nav-pill-copy"><span class="nav-pill-label">Operations</span><span class="nav-pill-meta">Control plane</span></span></button>
                 <button class="nav-pill" data-view-target="sessions" type="button"><span class="nav-pill-icon-stack" aria-hidden="true"><i class="bi bi-binoculars nav-pill-icon nav-pill-icon-outline"></i><i class="bi bi-binoculars-fill nav-pill-icon nav-pill-icon-fill"></i></span><span class="nav-pill-copy"><span class="nav-pill-label">Sessions</span><span class="nav-pill-meta">Live threads</span></span></button>
+                <button class="nav-pill" data-view-target="scheduled-tree" type="button"><span class="nav-pill-icon-stack" aria-hidden="true"><i class="bi bi-diagram-2 nav-pill-icon nav-pill-icon-outline"></i><i class="bi bi-diagram-2-fill nav-pill-icon nav-pill-icon-fill"></i></span><span class="nav-pill-copy"><span class="nav-pill-label">Scheduled Tree</span><span class="nav-pill-meta">Work tree map</span></span></button>
                 <button class="nav-pill" data-view-target="logs" type="button"><span class="nav-pill-icon-stack" aria-hidden="true"><i class="bi bi-file-earmark-medical nav-pill-icon nav-pill-icon-outline"></i><i class="bi bi-file-earmark-medical-fill nav-pill-icon nav-pill-icon-fill"></i></span><span class="nav-pill-copy"><span class="nav-pill-label">Logs</span><span class="nav-pill-meta">Trace ledger</span></span></button>
                 <button class="nav-pill" data-view-target="health" type="button"><span class="nav-pill-icon-stack" aria-hidden="true"><i class="bi bi-heart-pulse nav-pill-icon nav-pill-icon-outline"></i><i class="bi bi-heart-pulse-fill nav-pill-icon nav-pill-icon-fill"></i></span><span class="nav-pill-copy"><span class="nav-pill-label">Health</span><span class="nav-pill-meta">Runtime status</span></span></button>
                 <a class="nav-pill nav-link-pill" href="/" target="_blank" rel="noopener noreferrer"><span class="nav-pill-icon-stack" aria-hidden="true"><i class="bi bi-chat-dots nav-pill-icon nav-pill-icon-outline"></i><i class="bi bi-chat-dots-fill nav-pill-icon nav-pill-icon-fill"></i></span><span class="nav-pill-copy"><span class="nav-pill-label">Ui Chat</span><span class="nav-pill-meta">External</span></span></a>
@@ -811,6 +812,45 @@
                                     <div class="button-row wrap-buttons">
                                         <button id="btnTaskManagerCreate" class="btn btn-sm btn-operator-warn" type="button">Create Task</button>
                                     </div>
+                                </div>
+                            </div>
+                        </section>
+                    </div>
+                </div>
+            </section>
+
+            <section class="main-view d-none" data-view="scheduled-tree">
+                <div class="layer-tab-shell mb-3" data-layer-tabs="scheduled-tree">
+                    <div class="layer-tab-panels">
+                        <section class="layer-tab-panel" role="tabpanel" data-layer-panel="scheduled-tree-main">
+                            <div class="ops-grid layer-panel-grid">
+                                <div class="panel-card main-card span-2">
+                                    <div class="section-head">
+                                        <div>
+                                            <div class="section-title"><span class="section-title-wrap"><i class="bi bi-diagram-2 section-title-icon" aria-hidden="true"></i><span>Scheduled Tree</span></span></div>
+                                            <div class="section-subtitle">Live work tree graph from the visual tree endpoint.</div>
+                                        </div>
+                                    </div>
+                                    <div class="button-row mb-2 wrap-buttons">
+                                        <select id="workTreeSelect" class="form-select form-select-sm"></select>
+                                        <button id="btnWorkTreeRefresh" class="btn btn-sm btn-operator-alt" type="button">Refresh</button>
+                                    </div>
+                                    <div class="work-tree-legend" aria-label="Tree status legend">
+                                        <span class="work-tree-legend-item"><span class="work-tree-legend-dot wt-node-complete"></span>Complete</span>
+                                        <span class="work-tree-legend-item"><span class="work-tree-legend-dot wt-node-blocked"></span>Blocked</span>
+                                        <span class="work-tree-legend-item"><span class="work-tree-legend-dot wt-node-ready"></span>Ready</span>
+                                        <span class="work-tree-legend-item"><span class="work-tree-legend-dot wt-node-active"></span>Active</span>
+                                        <span class="work-tree-legend-item"><span class="work-tree-legend-dot wt-node-dropped"></span>Dropped</span>
+                                        <span class="work-tree-legend-item"><span class="work-tree-legend-dot wt-node-archived"></span>Archived</span>
+                                    </div>
+                                    <div class="work-tree-canvas-wrap">
+                                        <svg id="workTreeSvg" class="work-tree-svg" viewBox="0 0 1200 720" preserveAspectRatio="xMinYMin meet" role="img" aria-label="Scheduled Tree graph"></svg>
+                                    </div>
+                                </div>
+
+                                <div class="panel-card main-card">
+                                    <div id="workTreeBranchInfo" class="section-title"><span class="section-title-wrap"><i class="bi bi-info-circle section-title-icon" aria-hidden="true"></i><span>Branch Inspector</span></span></div>
+                                    <div id="workTreeBranchInfoBody" class="inspector-stack">Select a node to inspect details.</div>
                                 </div>
                             </div>
                         </section>

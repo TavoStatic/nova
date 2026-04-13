@@ -21,6 +21,7 @@ import requests
 import capabilities as capabilities_mod
 import http_chat_flow
 import http_session_store
+import work_tree
 from conversation_manager import ConversationManager
 from services.control_assets import CONTROL_ASSETS_SERVICE
 from services.control_actions import CONTROL_ACTIONS_SERVICE
@@ -3546,6 +3547,64 @@ def resume_last_pending_turn(session_id: str, user_id: str = "") -> dict:
     )
 
 
+def _control_work_trees_payload() -> dict:
+    trees: list[dict] = []
+    tree_map = getattr(work_tree, "_TREES", {})
+    tree_ids = sorted(str(tree_id).strip() for tree_id in tree_map.keys() if str(tree_id).strip()) if isinstance(tree_map, dict) else []
+    for tree_id in tree_ids:
+        visual = work_tree.get_visual_tree_data(tree_id)
+        if not isinstance(visual, dict):
+            continue
+        nodes_in = visual.get("nodes") if isinstance(visual.get("nodes"), list) else []
+        nodes: list[dict] = []
+        for node in nodes_in:
+            if not isinstance(node, dict):
+                continue
+            preferred_tool = node.get("preferred_tool")
+            normalized_preferred_tool = str(preferred_tool).strip() if preferred_tool is not None and str(preferred_tool).strip() else None
+            nodes.append(
+                {
+                    "id": str(node.get("id") or ""),
+                    "title": str(node.get("title") or ""),
+                    "status": str(node.get("status") or ""),
+                    "parent_id": str(node.get("parent_id")) if node.get("parent_id") is not None else None,
+                    "depth": int(node.get("depth") or 0),
+                    "tasks_open": int(node.get("tasks_open") or 0),
+                    "tasks_total": int(node.get("tasks_total") or 0),
+                    "preferred_tool": normalized_preferred_tool,
+                    "required_tools": [str(item) for item in list(node.get("required_tools") or []) if str(item).strip()],
+                    "allowed_tools": [str(item) for item in list(node.get("allowed_tools") or []) if str(item).strip()],
+                    "blocked_by": [str(item) for item in list(node.get("blocked_by") or []) if str(item).strip()],
+                    "depends_on": [str(item) for item in list(node.get("depends_on") or []) if str(item).strip()],
+                }
+            )
+
+        edges_in = visual.get("dependency_edges") if isinstance(visual.get("dependency_edges"), list) else []
+        dependency_edges: list[dict] = []
+        for edge in edges_in:
+            if not isinstance(edge, dict):
+                continue
+            dependency_edges.append(
+                {
+                    "from": str(edge.get("from") or ""),
+                    "to": str(edge.get("to") or ""),
+                }
+            )
+
+        trees.append(
+            {
+                "tree_id": str(visual.get("tree_id") or tree_id),
+                "title": str(visual.get("title") or ""),
+                "status": str(visual.get("status") or ""),
+                "root_branch_id": str(visual.get("root_branch_id") or ""),
+                "updated_at": str(visual.get("updated_at") or ""),
+                "nodes": nodes,
+                "dependency_edges": dependency_edges,
+            }
+        )
+    return {"ok": True, "trees": trees}
+
+
 class NovaHttpHandler(BaseHTTPRequestHandler):
     server_version = "NovaHTTP/0.1"
 
@@ -3658,6 +3717,14 @@ class NovaHttpHandler(BaseHTTPRequestHandler):
                 _json_response(self, 403, {"ok": False, "error": reason})
                 return
             _json_response(self, 200, {"ok": True, "reports": _test_session_report_summaries(24), "definitions": _available_test_session_definitions(80)})
+            return
+
+        if path == "/api/control/work-trees":
+            ok, reason = _control_auth(self, qs)
+            if not ok:
+                _json_response(self, 403, {"ok": False, "error": reason})
+                return
+            _json_response(self, 200, _control_work_trees_payload())
             return
 
         _json_response(self, 404, {"ok": False, "error": "not_found"})

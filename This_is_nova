@@ -819,6 +819,39 @@ What changed:
 - the shared CLI loop service had to be repaired first because its `execute_reply_sequence(...)` call had drifted and was no longer even structurally valid
 - once the shared owner was repaired, the real work was restoring the core compatibility surface that the service expects instead of letting `nova_core.py` fall back to stale inline ownership
 
+APPEND-ONLY DOCUMENTATION RULE CHECKPOINT (2026-04-11)
+
+Operator rule reaffirmed:
+- This file is append-only.
+- We do not delete earlier checkpoints from this file.
+- If Work Tree or control-plan state is missing here, that is a documentation miss and must be appended in a new checkpoint block.
+
+Missing state that is now appended:
+
+1) Scheduled Tree control surface reality (current checked-out state)
+- Scheduled Tree is currently present in the center-tab shell, with dedicated tab/panel wiring.
+- Live UI anchors include `data-center-tab="schedule-tree"`, `data-center-panel="schedule-tree"`, and `#scheduleTreeBox`.
+- JS rendering includes `renderScheduleTree(status)` and refresh-path calls that populate the Scheduled Tree inspector content.
+
+2) Centralized control-plan payload contract (current checked-out state)
+- Control status payload now exposes top-level `schedule_tree`.
+- Control status payload now exposes `plans` as the centralized plan surface.
+- `plans` currently carries:
+  - `plans.schedule_tree`
+  - `plans.generated_work_queue`
+  - `plans.action_readiness`
+  - `plans.patch_action_readiness`
+- HTTP control status assembly now sources `schedule_tree` from `SCHEDULE_REGISTRY.get_schedule_status(autonomy_maintenance)` so scheduled-plan data comes from one registry owner.
+
+3) Why this append was required
+- Earlier sections in this file include historical checkpoints that describe different Scheduled Tree presentations.
+- Because this file is append-only, history remains intact; current truth must therefore be written as an additional checkpoint instead of editing or deleting old entries.
+
+Verification snapshot (2026-04-11):
+- Focused control payload tests passed after central-plan append work:
+  - `tests/test_control_status_service.py`
+  - `tests/test_http_session_manager.py -k control_status_payload`
+
 What had to be restored to make the live seam real:
 - deterministic identity/truth delegation stayed live through [services/nova_identity_answers.py](services/nova_identity_answers.py) and [services/nova_truth_hierarchy.py](services/nova_truth_hierarchy.py)
 - the restored core shell had to expose runtime helpers the shared loop actually uses, including device-location bindings and the fulfillment/subconscious service bridge
@@ -2184,17 +2217,17 @@ Latest checkpoint (2026-04-10): derived a repeatable shell-thinning instruction 
 
 Latest checkpoint (2026-04-10): derived shell-thinning instruction contract from This_is_nova in operator_macros.json (macro_id=shell-thin-slice) and seeded first internal system task tree_53dfe781 (kind=system, status=active) targeting one nova_http ownership-zone extraction with anti-drift + owner tests.
 
-=== Latest checkpoint: shell-thin-slice #1 ó _runtime_restart_analytics_payload extracted ===
+=== Latest checkpoint: shell-thin-slice #1 ÔøΩ _runtime_restart_analytics_payload extracted ===
 Date: 2026-04-10
 Operator: continue (resume from tree_53dfe781, first internal shell-thinning task)
 
 What was live before:
-- nova_http.py contained 111-line _runtime_restart_analytics_payload() inline ó all restart flap analytics logic direct in shell.
+- nova_http.py contained 111-line _runtime_restart_analytics_payload() inline ÔøΩ all restart flap analytics logic direct in shell.
 - Called once at line 1851 inside _control_status_payload() ? CONTROL_STATUS_SERVICE.status_payload(runtime_restart_analytics=...)
 - No service for this ownership zone existed.
 
 What the slice moved:
-- Created: services/runtime_analytics.py ó RuntimeAnalyticsService class
+- Created: services/runtime_analytics.py ÔøΩ RuntimeAnalyticsService class
   - Method: restart_analytics_payload(*, boot_history_path: Path, now: int | None = None) -> dict
   - Owner comment, anti-drift comment, docstring all in file.
   - Injected dependency: RUNTIME_TIMELINE_SERVICE.coerce_epoch_seconds (already in services/)
@@ -2204,22 +2237,22 @@ What the slice moved:
 - nova_http.py line count delta: ~106 lines removed from shell (111 inline ? 5 delegation wrapper)
 
 Anti-drift and tests:
-- Created: tests/test_runtime_analytics_service.py ó 11 tests all green
+- Created: tests/test_runtime_analytics_service.py ÔøΩ 11 tests all green
   - Covers: missing file, corrupt file, empty list, all-successes good-level, 3x consecutive danger, 1x failure warn, avg boot sec, capped recent_outcomes, last_success_age, anti-drift (inspects nova_http source for RUNTIME_ANALYTICS_SERVICE), singleton
 - Existing test: tests/test_http_session_manager.py::test_runtime_restart_analytics_payload_detects_flapping still PASSED (thin wrapper preserves nova_http.GUARD_BOOT_HISTORY_PATH patch target + now injection)
 - Full suite: 283+ passed. Pre-existing unrelated failure: test_health_check_script.py (not caused by this change).
 
 Macro contract compliance (shell-thin-slice):
 Rule 1: ONE ownership zone moved (restart analytics payload) ?
-Rule 2: Shell API identical ó nova_http._runtime_restart_analytics_payload still exists, same signature ?
+Rule 2: Shell API identical ÔøΩ nova_http._runtime_restart_analytics_payload still exists, same signature ?
 Rule 3: Anti-drift + owner tests in place ?
 Rule 4: Focused lane (11 tests) then broader lane (test_http_session_manager.py analytics tests + full suite) ?
 Rule 5: No stale copy issues ?
 Rule 6: This checkpoint appended ?
 
 Work tree state:
-- tree_53dfe781 (kind=system, status=active) ó step 1 branch (branch_64c6fe27) now executed
-- Next target if continuing: next largest inline zone ó _generate_chat_reply (532 lines) or _control_action dispatcher cleanup
+- tree_53dfe781 (kind=system, status=active) ÔøΩ step 1 branch (branch_64c6fe27) now executed
+- Next target if continuing: next largest inline zone ÔøΩ _generate_chat_reply (532 lines) or _control_action dispatcher cleanup
 
 === End checkpoint ===
 
@@ -2291,7 +2324,7 @@ Notes:
 - No source files modified in this step.
 === End checkpoint ===
 
-=== Latest checkpoint: real fix applied ó autonomous no-op read results now fail ===
+=== Latest checkpoint: real fix applied ÔøΩ autonomous no-op read results now fail ===
 Date: 2026-04-10
 Problem:
 - Work-tree autonomous execution treated read-tool no-op outputs (e.g., 'Not a file: ...') as successful execution and marked tasks complete.
@@ -2331,7 +2364,7 @@ State snapshot:
 - branch_fb48b4ab: blocked by branch_b04eb503
 === End checkpoint ===
 
-=== Latest checkpoint: kept Nova busy ó system scan tree fully executed ===
+=== Latest checkpoint: kept Nova busy ÔøΩ system scan tree fully executed ===
 Date: 2026-04-10
 Tree: tree_36785f40
 
@@ -2351,3 +2384,84 @@ Final state:
 - tree_36785f40 status: complete.
 - No shell logic changes were introduced during this execution run.
 === End checkpoint ===
+### 2026-04-11 ‚Äî Work Tree Subsystem Finalized & Live
+
+**Nova Work Tree**  
+The Work Tree is Nova‚Äôs structured execution lane for multi-step work. It gives each session a persistent, governed plan so Nova can move forward deterministically instead of drifting turn-to-turn.
+
+**What it does**
+- Maintains a persistent task tree per session (survives restarts via SQLite)
+- Selects the next executable branch/task deterministically
+- Enforces tool governance before any execution (required tools, allowed tools, preferred tool, explicit policy)
+- Provides concise snapshots for operator and session views
+
+**How it works**
+- Tree model defined in `work_tree_contracts.py`
+- Full runtime state (trees, branches, tasks, tooling, signals) persisted in `runtime/work_tree.sqlite3`
+- Each conversation session stores its `active_work_tree_id` in the session store
+- On first prompt Nova creates and binds a tree; on restart it resumes the same tree
+- Planning and execution live in `work_tree.py`:
+  - `next_open_branch()` / `next_autonomous_step()`
+  - `execute_autonomous_step()` (real tool execution via Nova‚Äôs existing tool path)
+  - Completion signals and verification
+- Planner hook in `nova_planner_contract.py` routes tree-aware prompts (‚Äúwhat next‚Äù, ‚Äúcontinue‚Äù, ‚Äúresume‚Äù)
+
+**Plain-English summary**  
+The Work Tree is Nova‚Äôs task spine. It turns ‚Äúhelp me with this‚Äù into a durable, inspectable, tool-governed sequence of steps. Nova can now continue intelligently across turns, handle blockers explicitly, and never lose thread context ‚Äî even after a restart.
+
+**Current status**  
+- Persistent across restarts  
+- Bound to both operator and general chat sessions  
+- Real tool execution + governance active  
+- 32+ focused tests green across work_tree, planner, http_session_store, and operator_control
+
+This checkpoint records the completion of the full Work Tree expansion.
+
+### 2026-04-13 ‚Äî Cleanup of stale root handoff artifacts and fallback plan noise
+
+What changed:
+- removed the old root handoff stack from the repo root: `PROJECT_STATUS.md`, `RESUME_HERE.txt`, and `LAST_SESSION.json`
+- those files were still pointing operators toward March-era planning/resume flows and were overlapping the current authority order already documented here
+- removed stale bundle-era root docs: `README.txt`, `README_NOVA_STRUCTURE.md`, and `README_PATCH.txt`
+- those files described older patching/package shapes and added more root-level entry points after the docs/ README consolidation already became the intended repo surface
+- preserved the older handoff material only in `docs/archive/handoff/` as history rather than letting it keep steering active work
+- removed the temporary Scheduled Tree fallback path from `static/control.js`; Scheduled Tree now depends on the real `/api/control/work-trees` endpoint instead of synthesizing plan state from generic control status payloads
+
+Authority order after cleanup:
+- `This_is_nova` remains the active continuity document
+- `docs/PHASE_CLOSEOUT_CHECKLIST.md` remains the active blocking checklist
+- `docs/HANDOFF.md` remains the operator runbook
+- `docs/STATUS.md` remains historical/project-state context, not the primary resume spine
+
+Reason for cleanup:
+- the repo had accumulated too many plan-like surfaces that were no longer current but still looked official enough to redirect work
+- the fix was to remove obsolete resume artifacts and fallback plan mirroring instead of layering new guidance on top of them
+
+### 2026-04-13 ‚Äî Second cleanup pass: runtime artifact pruning and noise reduction
+
+Scope:
+- runtime and logs artifact cleanup only
+- no core code-path logic changes
+- kept live state stores (`runtime/work_tree.sqlite3`, session/event ledgers, active test-session buckets)
+
+What was removed:
+- one-off installer and direct-validation leftovers in `runtime/` (focused installer text dumps, direct installer verify/build outputs, temp installer test files)
+- stale test/debug text outputs (`http_identity_suite_result.txt`, `http_resume_suite_result.txt`, `test_session_guard_result.txt`, `focused_refactor_tests.txt`, `full_test_scan.log`, verbose profile/debug text files)
+- obsolete `runtime/installer_validation/` directory
+- `runtime/__pycache__/`
+- zero-byte duplicate `runtime/work_tree.db`
+
+Retention rules applied:
+- `runtime/subconscious_runs`: pruned historical directories and retained the newest 40 run directories plus normal latest markers
+- `runtime/test_sessions`: retained canonical buckets (`generated_definitions`, `pending_review`, `promoted`, `quarantine`) and pruned historical run directories down to newest 30
+
+Verification snapshot after pruning:
+- stale known-file list remaining: 0
+- `runtime/installer_validation` present: false
+- `runtime/__pycache__` present: false
+- `runtime/subconscious_runs` directory count: 40
+- `runtime/test_sessions` run-directory count (non-bucket dirs): 30
+
+Why this matters:
+- reduces historical artifact drag that was steering operators toward old diagnostics and stale run traces
+- preserves live execution backbone state while removing noisy historical debris that obscures current truth

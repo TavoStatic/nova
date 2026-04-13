@@ -92,6 +92,10 @@ const subconsciousPriorityList = document.getElementById('subconsciousPriorityLi
 const generatedQueueBox = document.getElementById('generatedQueueBox');
 const generatedQueueCount = document.getElementById('generatedQueueCount');
 const scheduleTreeBox = document.getElementById('scheduleTreeBox');
+const workTreeSelect = document.getElementById('workTreeSelect');
+const btnWorkTreeRefresh = document.getElementById('btnWorkTreeRefresh');
+const workTreeSvg = document.getElementById('workTreeSvg');
+const workTreeBranchInfoBody = document.getElementById('workTreeBranchInfoBody');
 const overviewFocusStrip = document.getElementById('overviewFocusStrip');
 const centerMissionBrief = document.getElementById('centerMissionBrief');
 const liveTrackingSummary = document.getElementById('liveTrackingSummary');
@@ -144,6 +148,9 @@ let locationTrackingLastHopMeters = 0;
 let locationTrackingLastError = '';
 let locationTrackingSendInFlight = null;
 let liveTrackingAutoArmAttempted = false;
+let workTreesCache = [];
+let selectedWorkTreeId = '';
+let selectedWorkTreeNodeId = '';
 
 const LIVE_TRACKING_AUTO_ARM_KEY = 'nova_live_tracking_auto_arm';
 let liveTrackingAutoArmEnabled = localStorage.getItem(LIVE_TRACKING_AUTO_ARM_KEY) === 'on';
@@ -877,14 +884,295 @@ function renderPatchPreviewSummary(text, previewName = '') {
 }
 
 function setActiveView(name) {
+    const target = visibleViewName(name);
     navButtons.forEach((button) => {
-        const active = (button.getAttribute('data-view-target') || '') === name;
+        const active = (button.getAttribute('data-view-target') || '') === target;
         button.classList.toggle('active', active);
     });
     mainViews.forEach((view) => {
-        const visible = (view.getAttribute('data-view') || '') === name;
+        const visible = (view.getAttribute('data-view') || '') === target;
         view.classList.toggle('d-none', !visible);
     });
+    syncScheduledTreeView(target);
+    if (target === 'scheduled-tree') {
+        fetchWorkTrees();
+    }
+}
+
+function syncScheduledTreeView(activeView) {
+    const current = String(activeView || '').trim().toLowerCase();
+    if (!sessionFilterSelect) {
+        return;
+    }
+    if (current !== 'sessions') {
+        return;
+    }
+    if (String(sessionFilterSelect.value || '').trim().toLowerCase() === 'tree-backed') {
+        const fallback = Array.from(sessionFilterSelect.options || []).some((option) => String(option && option.value ? option.value : '').trim().toLowerCase() === 'all')
+            ? 'all'
+            : String((sessionFilterSelect.options && sessionFilterSelect.options[0] && sessionFilterSelect.options[0].value) || '');
+        sessionFilterSelect.value = fallback;
+        renderSessions();
+    }
+}
+
+function visibleViewName(name) {
+    const raw = String(name || '').trim().toLowerCase();
+    const mapped = {
+        overview: 'overview',
+        operations: 'operations',
+        sessions: 'sessions',
+        'scheduled-tree': 'scheduled-tree',
+        logs: 'logs',
+        health: 'health',
+    };
+    return mapped[raw] || 'overview';
+}
+
+function selectedWorkTree() {
+    if (!Array.isArray(workTreesCache) || !workTreesCache.length) {
+        return null;
+    }
+    if (selectedWorkTreeId) {
+        const direct = workTreesCache.find((tree) => String(tree && (tree.tree_id || tree.id) ? (tree.tree_id || tree.id) : '') === selectedWorkTreeId);
+        if (direct) return direct;
+    }
+    return workTreesCache[0] || null;
+}
+
+function workTreeNodeTone(status) {
+    const normalized = String(status || '').trim().toLowerCase();
+    if (normalized === 'complete') return 'wt-node-complete';
+    if (normalized === 'blocked') return 'wt-node-blocked';
+    if (normalized === 'ready' || normalized === 'open') return 'wt-node-ready';
+    if (normalized === 'active' || normalized === 'running') return 'wt-node-active';
+    if (normalized === 'dropped') return 'wt-node-dropped';
+    if (normalized === 'archived') return 'wt-node-archived';
+    return 'wt-node-ready';
+}
+
+function renderWorkTreeInspector(tree, node) {
+    if (!workTreeBranchInfoBody) return;
+    if (!tree) {
+        workTreeBranchInfoBody.textContent = 'No work trees available.';
+        return;
+    }
+    if (!node) {
+        workTreeBranchInfoBody.textContent = 'Select a node to inspect details.';
+        return;
+    }
+    const tasksOpen = Number(node && node.tasks_open != null ? node.tasks_open : 0);
+    const tasksTotal = Number(node && node.tasks_total != null ? node.tasks_total : 0);
+    const requiredTools = Array.isArray(node && node.required_tools) ? node.required_tools : [];
+    const allowedTools = Array.isArray(node && node.allowed_tools) ? node.allowed_tools : [];
+    const blockedBy = Array.isArray(node && node.blocked_by) ? node.blocked_by : [];
+    const dependsOn = Array.isArray(node && node.depends_on) ? node.depends_on : [];
+    const details = [
+        {label: 'Branch', value: String(node && node.title ? node.title : node && node.id ? node.id : 'branch')},
+        {label: 'Status', value: String(node && node.status ? node.status : 'unknown')},
+        {label: 'Depth', value: String(node && node.depth != null ? node.depth : 0)},
+        {label: 'Tasks', value: `${tasksOpen}/${tasksTotal}`},
+        {label: 'Preferred Tool', value: String(node && node.preferred_tool ? node.preferred_tool : 'n/a')},
+        {label: 'Required Tools', value: requiredTools.length ? requiredTools.join(', ') : 'none'},
+        {label: 'Allowed Tools', value: allowedTools.length ? allowedTools.join(', ') : 'none'},
+        {label: 'Blocked By', value: blockedBy.length ? blockedBy.join(', ') : 'none'},
+        {label: 'Depends On', value: dependsOn.length ? dependsOn.join(', ') : 'none'},
+        {label: 'Tree', value: String(tree && tree.title ? tree.title : tree && tree.tree_id ? tree.tree_id : 'work tree')},
+    ];
+    renderInspectorList(workTreeBranchInfoBody, details);
+}
+
+function renderTreeSvg(tree) {
+    if (!workTreeSvg) return;
+    const SVG_NS = 'http://www.w3.org/2000/svg';
+    const nodes = Array.isArray(tree && tree.nodes) ? tree.nodes : [];
+    const deps = Array.isArray(tree && tree.dependency_edges) ? tree.dependency_edges : [];
+
+    while (workTreeSvg.firstChild) {
+        workTreeSvg.removeChild(workTreeSvg.firstChild);
+    }
+
+    if (!nodes.length) {
+        const empty = document.createElementNS(SVG_NS, 'text');
+        empty.setAttribute('x', '20');
+        empty.setAttribute('y', '36');
+        empty.setAttribute('class', 'wt-text');
+        empty.textContent = 'No branches available for this tree.';
+        workTreeSvg.appendChild(empty);
+        renderWorkTreeInspector(tree, null);
+        return;
+    }
+
+    const depthBuckets = new Map();
+    nodes.forEach((node) => {
+        const depth = Number(node && node.depth != null ? node.depth : 0);
+        if (!depthBuckets.has(depth)) depthBuckets.set(depth, []);
+        depthBuckets.get(depth).push(node);
+    });
+
+    const depthKeys = Array.from(depthBuckets.keys()).sort((a, b) => a - b);
+    const positions = new Map();
+    const xGap = 240;
+    const yGap = 110;
+    const xStart = 90;
+    const yStart = 70;
+
+    depthKeys.forEach((depth) => {
+        const bucket = depthBuckets.get(depth) || [];
+        bucket.forEach((node, index) => {
+            const nodeId = String(node && node.id ? node.id : '');
+            positions.set(nodeId, {
+                x: xStart + depth * xGap,
+                y: yStart + index * yGap,
+                node,
+            });
+        });
+    });
+
+    const maxDepth = depthKeys.length ? Math.max(...depthKeys) : 0;
+    const maxHeight = Math.max(...Array.from(depthBuckets.values()).map((bucket) => bucket.length || 0));
+    const width = Math.max(1200, xStart + (maxDepth + 1) * xGap + 240);
+    const height = Math.max(720, yStart + maxHeight * yGap + 120);
+    workTreeSvg.setAttribute('viewBox', `0 0 ${width} ${height}`);
+
+    const edgeLayer = document.createElementNS(SVG_NS, 'g');
+    edgeLayer.setAttribute('class', 'wt-edge-layer');
+    nodes.forEach((node) => {
+        const childId = String(node && node.id ? node.id : '');
+        const parentId = String(node && node.parent_id ? node.parent_id : '');
+        if (!parentId) return;
+        const childPos = positions.get(childId);
+        const parentPos = positions.get(parentId);
+        if (!childPos || !parentPos) return;
+        const path = document.createElementNS(SVG_NS, 'path');
+        const midX = (parentPos.x + childPos.x) / 2;
+        path.setAttribute('d', `M ${parentPos.x} ${parentPos.y} C ${midX} ${parentPos.y}, ${midX} ${childPos.y}, ${childPos.x} ${childPos.y}`);
+        path.setAttribute('class', 'wt-edge');
+        edgeLayer.appendChild(path);
+    });
+    workTreeSvg.appendChild(edgeLayer);
+
+    const depLayer = document.createElementNS(SVG_NS, 'g');
+    depLayer.setAttribute('class', 'wt-dependency-layer');
+    deps.forEach((edge) => {
+        const fromId = String(edge && (edge.from || edge.source || edge.depends_on) ? (edge.from || edge.source || edge.depends_on) : '');
+        const toId = String(edge && (edge.to || edge.target || edge.branch_id) ? (edge.to || edge.target || edge.branch_id) : '');
+        const fromPos = positions.get(fromId);
+        const toPos = positions.get(toId);
+        if (!fromPos || !toPos) return;
+        const path = document.createElementNS(SVG_NS, 'path');
+        const midX = (fromPos.x + toPos.x) / 2;
+        path.setAttribute('d', `M ${fromPos.x} ${fromPos.y} C ${midX} ${fromPos.y - 24}, ${midX} ${toPos.y - 24}, ${toPos.x} ${toPos.y}`);
+        path.setAttribute('class', 'wt-edge wt-edge-dependency');
+        depLayer.appendChild(path);
+    });
+    workTreeSvg.appendChild(depLayer);
+
+    const nodeLayer = document.createElementNS(SVG_NS, 'g');
+    nodeLayer.setAttribute('class', 'wt-node-layer');
+    nodes.forEach((node) => {
+        const nodeId = String(node && node.id ? node.id : '');
+        const pos = positions.get(nodeId);
+        if (!pos) return;
+
+        const group = document.createElementNS(SVG_NS, 'g');
+        group.setAttribute('class', 'wt-node-group');
+        group.setAttribute('transform', `translate(${pos.x}, ${pos.y})`);
+        group.setAttribute('role', 'button');
+        group.setAttribute('tabindex', '0');
+
+        const circle = document.createElementNS(SVG_NS, 'circle');
+        const toneClass = workTreeNodeTone(node && node.status ? node.status : 'ready');
+        circle.setAttribute('r', '18');
+        circle.setAttribute('class', `wt-node ${toneClass}${selectedWorkTreeNodeId === nodeId ? ' wt-node-selected' : ''}`);
+        group.appendChild(circle);
+
+        const title = document.createElementNS(SVG_NS, 'text');
+        title.setAttribute('x', '30');
+        title.setAttribute('y', '-3');
+        title.setAttribute('class', 'wt-text');
+        title.textContent = String(node && node.title ? node.title : nodeId);
+        group.appendChild(title);
+
+        const meta = document.createElementNS(SVG_NS, 'text');
+        meta.setAttribute('x', '30');
+        meta.setAttribute('y', '14');
+        meta.setAttribute('class', 'wt-subtext');
+        meta.textContent = `${String(node && node.status ? node.status : 'unknown')} | ${Number(node && node.tasks_open != null ? node.tasks_open : 0)}/${Number(node && node.tasks_total != null ? node.tasks_total : 0)}`;
+        group.appendChild(meta);
+
+        const activate = () => selectWorkTreeNode(nodeId);
+        group.addEventListener('click', activate);
+        group.addEventListener('keydown', (event) => {
+            if (event.key === 'Enter' || event.key === ' ') {
+                event.preventDefault();
+                activate();
+            }
+        });
+        nodeLayer.appendChild(group);
+    });
+    workTreeSvg.appendChild(nodeLayer);
+
+    const selected = nodes.find((node) => String(node && node.id ? node.id : '') === selectedWorkTreeNodeId) || null;
+    renderWorkTreeInspector(tree, selected);
+}
+
+function renderWorkTreeView() {
+    const trees = Array.isArray(workTreesCache) ? workTreesCache : [];
+    if (workTreeSelect) {
+        const current = selectedWorkTreeId;
+        workTreeSelect.innerHTML = trees.length
+            ? trees.map((tree) => {
+                const treeId = String(tree && (tree.tree_id || tree.id) ? (tree.tree_id || tree.id) : '');
+                const title = String(tree && tree.title ? tree.title : treeId || 'work tree');
+                return `<option value="${escapeHtml(treeId)}">${escapeHtml(title)}</option>`;
+            }).join('')
+            : '<option value="">No trees available</option>';
+        selectedWorkTreeId = current && trees.some((tree) => String(tree && (tree.tree_id || tree.id) ? (tree.tree_id || tree.id) : '') === current)
+            ? current
+            : String((trees[0] && (trees[0].tree_id || trees[0].id)) || '');
+        workTreeSelect.value = selectedWorkTreeId;
+        workTreeSelect.disabled = !trees.length;
+    }
+
+    const tree = selectedWorkTree();
+    if (!tree) {
+        if (workTreeSvg) {
+            renderTreeSvg({nodes: []});
+        }
+        renderWorkTreeInspector(null, null);
+        return;
+    }
+
+    const nodes = Array.isArray(tree && tree.nodes) ? tree.nodes : [];
+    if (!selectedWorkTreeNodeId || !nodes.some((node) => String(node && node.id ? node.id : '') === selectedWorkTreeNodeId)) {
+        selectedWorkTreeNodeId = String((tree && tree.root_branch_id) || (nodes[0] && nodes[0].id) || '');
+    }
+    renderTreeSvg(tree);
+}
+
+function selectWorkTreeNode(nodeId) {
+    selectedWorkTreeNodeId = String(nodeId || '').trim();
+    renderWorkTreeView();
+}
+
+async function fetchWorkTrees() {
+    let payload = {ok: false, trees: []};
+    let trees = [];
+    try {
+        payload = await getJson('/api/control/work-trees');
+        trees = Array.isArray(payload && payload.trees) ? payload.trees : [];
+    } catch (_) {
+        trees = [];
+    }
+
+    workTreesCache = trees;
+    if (!selectedWorkTreeId || !trees.some((tree) => String(tree && (tree.tree_id || tree.id) ? (tree.tree_id || tree.id) : '') === selectedWorkTreeId)) {
+        selectedWorkTreeId = String((trees[0] && (trees[0].tree_id || trees[0].id)) || '');
+        selectedWorkTreeNodeId = '';
+    }
+    renderWorkTreeView();
+    return payload;
 }
 
 function setCenterTab(name) {
@@ -3252,6 +3540,13 @@ if (chatUserSelect && chatUserNameInput) {
 navButtons.forEach((button) => {
     button.addEventListener('click', () => setActiveView(button.getAttribute('data-view-target') || 'overview'));
 });
+if (workTreeSelect) {
+    workTreeSelect.addEventListener('change', () => {
+        selectedWorkTreeId = String(workTreeSelect.value || '').trim();
+        selectedWorkTreeNodeId = '';
+        renderWorkTreeView();
+    });
+}
 if (centerTabBar) {
     centerTabBar.addEventListener('click', (event) => {
         const button = resolveCenterTabButton(event.target);
@@ -3494,6 +3789,10 @@ bindClick('btnInspectorToggle', async () => {
     setFeedback(document.body.classList.contains('inspector-collapsed') ? 'Inspector collapsed.' : 'Inspector expanded.', 'muted');
 });
 bindClick('btnRefresh', refresh);
+bindClick('btnWorkTreeRefresh', async () => {
+    await fetchWorkTrees();
+    setAction('Scheduled Tree refreshed.');
+});
 bindClick('btnPatchPreviewRefresh', async () => {
     const payload = await postAction('patch_preview_list');
     if (payload.patch) {

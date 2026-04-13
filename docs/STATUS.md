@@ -346,18 +346,18 @@ Project documentation is centralized under `C:\Nova\docs`.
 
 - update `docs/STATUS.md` for project-state changes
 - update `docs/TOOLS.md` and `docs/TOOLING_ROADMAP.md` for tool changes
-- avoid adding new root-level project docs unless they are thin compatibility pointers
+- do not reintroduce root-level resume/status artifacts; the old March handoff files were removed because they created overlapping planning surfaces
 
 ## Resume Guidance
 
 Primary resume order:
 
-1. `C:\Nova\RESUME_HERE.txt`
-2. `C:\Nova\LAST_SESSION.json`
-3. `C:\Nova\docs\STATUS.md`
+1. `C:\Nova\This_is_nova`
+2. `C:\Nova\docs\PHASE_CLOSEOUT_CHECKLIST.md`
+3. `C:\Nova\docs\HANDOFF.md`
 
 Suggested resume prompt:
 
 ```text
-continue from C:\Nova\docs\STATUS.md
+continue from C:\Nova\This_is_nova
 ```
