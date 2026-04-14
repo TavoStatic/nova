@@ -1,5 +1,6 @@
 import inspect
 import unittest
+from pathlib import Path
 
 import memory
 import nova_core
@@ -68,6 +69,18 @@ class TestRegressionContracts(unittest.TestCase):
     def test_creator_hard_answer_contains_canonical_name(self):
         reply = nova_core.hard_answer("who made you?") or ""
         self.assertIn("my creator is gustavo uribe", reply.lower())
+
+    def test_control_template_uses_current_branding(self):
+        template = (Path(__file__).resolve().parents[1] / "templates" / "control.html").read_text(encoding="utf-8").lower()
+        self.assertIn("nyo ai systems", template)
+        self.assertNotIn("nyo system\n", template)
+
+    def test_smoke_workflow_uses_ci_safe_contract(self):
+        workflow = (Path(__file__).resolve().parents[1] / ".github" / "workflows" / "smoke_e2e.yml").read_text(encoding="utf-8").lower()
+        self.assertIn("actions/checkout@v6", workflow)
+        self.assertIn("actions/setup-python@v6", workflow)
+        self.assertIn("pip install requests psutil", workflow)
+        self.assertNotIn("pip install -r requirements.txt", workflow)
 
 
 if __name__ == "__main__":

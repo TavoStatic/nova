@@ -67,6 +67,7 @@ TEST_LANES: dict[str, list[str]] = {
         "tests.test_runtime_timeline_service",
         "tests.test_session_admin_service",
         "tests.test_session_state_service",
+        "tests.test_smoke_e2e_script",
         "tests.test_smoke_placeholder",
         "tests.test_subconscious_control_service",
         "tests.test_supervisor_intent_rules",

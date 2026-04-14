@@ -13,7 +13,7 @@ SPEC.loader.exec_module(SMOKE_E2E)
 
 
 class TestSmokeE2EScript(unittest.TestCase):
-    def test_main_runs_preflight_then_unit_before_optional_memory_check(self):
+    def test_main_runs_unit_before_optional_memory_check(self):
         commands = []
 
         with tempfile.TemporaryDirectory() as td:
@@ -23,9 +23,8 @@ class TestSmokeE2EScript(unittest.TestCase):
                 code = SMOKE_E2E.main()
 
         self.assertEqual(code, 0)
-        self.assertGreaterEqual(len(commands), 2)
-        self.assertEqual(commands[0], [SMOKE_E2E.PY, str(root / "run_regression.py"), "preflight"])
-        self.assertEqual(commands[1], [SMOKE_E2E.PY, str(root / "run_regression.py"), "unit"])
+        self.assertGreaterEqual(len(commands), 1)
+        self.assertEqual(commands[0], [SMOKE_E2E.PY, str(root / "run_regression.py"), "unit"])
 
 
 if __name__ == "__main__":
