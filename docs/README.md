@@ -1,10 +1,10 @@
-# NYO System Documentation
+# NYO AI SYSTEMS Documentation
 
-This directory is the canonical documentation hub for NYO System.
+This directory is the canonical documentation hub for NYO AI SYSTEMS.
 
 ## Platform Direction
 
-Nova is becoming the runtime core of NYO System: an inspectable, operator-run local runtime with deterministic routing, scoped memory, tool execution, web research, operator-console operations, and governed patch flow.
+Nova is becoming the runtime core of NYO AI SYSTEMS: an inspectable, operator-run local runtime with deterministic routing, scoped memory, tool execution, web research, operator-console operations, and governed patch flow.
 
 It should be evaluated less like a chatbot and more like a supervised execution system with several interfaces.
 

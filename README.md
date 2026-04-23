@@ -1,13 +1,13 @@
-# NYO System
+# NYO AI SYSTEMS
 
 Project documentation is now centralized under [docs/README.md](docs/README.md).
 
-Public branding uses NYO System.
+Public branding uses NYO AI SYSTEMS.
 Internal runtime and module names may still reference Nova.
 
 ## What Nova Has Become
 
-Nova is now the core runtime inside NYO System: a supervised local operations system with deterministic routing, operator control surfaces, patch governance, and self-maintenance loops.
+Nova is now the core runtime inside NYO AI SYSTEMS: a supervised local operations system with deterministic routing, operator control surfaces, patch governance, and self-maintenance loops.
 
 This repository is no longer best understood as a simple chat assistant project. It now centers on a runtime that can:
 
