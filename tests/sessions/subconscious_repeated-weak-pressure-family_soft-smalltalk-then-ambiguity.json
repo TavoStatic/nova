@@ -1,0 +1,38 @@
+﻿{
+  "name": "Subconscious repeated-weak-pressure-family :: soft_smalltalk_then_ambiguity",
+  "messages": [
+    "are you doing alright today nova ?",
+    "okay so what next ?"
+  ],
+  "source": "saved",
+  "label": "phase1_auto",
+  "family_id": "repeated-weak-pressure-family",
+  "target_seam": "subconscious_pressure_backlog_generation",
+  "variation_id": "soft_smalltalk_then_ambiguity",
+  "training_priorities": [
+    {
+      "seam": "subconscious_pressure_backlog_generation",
+      "signal": "fallback_overuse",
+      "robustness": 0.97,
+      "suggested_test_name": "test_generic_fallback_does_not_hide_viable_specific_route",
+      "rationale": "Robust family pressure kept surfacing fallback_overuse.",
+      "urgency": "high"
+    },
+    {
+      "seam": "subconscious_pressure_backlog_generation",
+      "signal": "route_fit_weak",
+      "robustness": 0.75,
+      "suggested_test_name": "test_route_probe_exposes_weak_fit_without_forcing_routing",
+      "rationale": "Robust family pressure kept surfacing route_fit_weak.",
+      "urgency": "medium"
+    },
+    {
+      "seam": "subconscious_pressure_backlog_generation",
+      "signal": "route_unclear",
+      "robustness": 0.75,
+      "suggested_test_name": "test_route_probe_marks_ambiguous_turns_without_overclaiming",
+      "rationale": "Robust family pressure kept surfacing route_unclear.",
+      "urgency": "medium"
+    }
+  ]
+}

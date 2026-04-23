@@ -1,4 +1,4 @@
-# NYO System Operations
+# NYO AI SYSTEMS Operations
 
 ## Environment
 
@@ -34,7 +34,7 @@ Run the Nova runtime core:
 C:\Nova\nova.cmd run
 ```
 
-Run the NYO System web UI:
+Run the NYO AI SYSTEMS web UI:
 
 ```powershell
 C:\Nova\nova.cmd webui --host 127.0.0.1 --port 8080

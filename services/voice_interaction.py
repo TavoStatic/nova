@@ -1,7 +1,14 @@
 from __future__ import annotations
 
-import pyttsx3
-from faster_whisper import WhisperModel
+try:
+    import pyttsx3 as _pyttsx3
+except ImportError:  # pragma: no cover
+    _pyttsx3 = None  # type: ignore[assignment]
+
+try:
+    from faster_whisper import WhisperModel as _WhisperModel
+except ImportError:  # pragma: no cover
+    _WhisperModel = None  # type: ignore[assignment]
 
 import nova_core
 
@@ -9,9 +16,9 @@ import nova_core
 class VoiceInteractionService:
     """Shared voice/chat runtime for CLI-style Nova entrypoints."""
 
-    def __init__(self, *, speaker_factory=pyttsx3.init, whisper_model_cls=WhisperModel) -> None:
-        self._speaker_factory = speaker_factory
-        self._whisper_model_cls = whisper_model_cls
+    def __init__(self, *, speaker_factory=None, whisper_model_cls=None) -> None:
+        self._speaker_factory = speaker_factory if speaker_factory is not None else (getattr(_pyttsx3, "init", None) if _pyttsx3 is not None else None)
+        self._whisper_model_cls = whisper_model_cls if whisper_model_cls is not None else _WhisperModel
 
     def whisper_size(self) -> str:
         return str(nova_core.whisper_size() or "small").strip() or "small"

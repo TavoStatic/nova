@@ -31,11 +31,12 @@ def main():
 
     results = []
 
-    # 1) Unit tests
-    print("1) Running unit tests: python -m unittest discover -v")
-    rc, out = run_cmd([PY, "-m", "unittest", "discover", "-v"]) 
-    print(out)
-    results.append(("unittest", rc))
+    # 1) Unit lane
+    unit_cmd = [PY, str(ROOT / "run_regression.py"), "unit"]
+    print("1) Running unit lane: " + " ".join(unit_cmd))
+    rc_unit, out_unit = run_cmd(unit_cmd)
+    print(out_unit)
+    results.append(("unit", rc_unit))
 
     # 2) Memory E2E script
     mem_e2e = ROOT / "tests" / "run_memory_e2e.py"
