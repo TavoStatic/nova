@@ -4,3 +4,4 @@ faster-whisper
 sounddevice
 scipy
 pyttsx3
+winsdk

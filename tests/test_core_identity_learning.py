@@ -22,11 +22,17 @@ class TestCoreIdentityLearning(unittest.TestCase):
         self.orig_action_ledger_dir = nova_core.ACTION_LEDGER_DIR
         self.orig_self_reflection_log = nova_core.SELF_REFLECTION_LOG
         self.orig_health_log = nova_core.HEALTH_LOG
+        self.orig_statefile = nova_core.DEFAULT_STATEFILE
+        self.orig_device_location_file = nova_core.DEVICE_LOCATION_FILE
+        self.orig_windows_device_resolver = nova_core._resolve_windows_device_coords
         self.orig_active_user = nova_core.get_active_user()
         self._tmp_dir = tempfile.TemporaryDirectory()
         nova_core.ACTION_LEDGER_DIR = Path(self._tmp_dir.name) / "actions"
         nova_core.SELF_REFLECTION_LOG = Path(self._tmp_dir.name) / "self_reflection.jsonl"
         nova_core.HEALTH_LOG = Path(self._tmp_dir.name) / "health.log"
+        nova_core.DEFAULT_STATEFILE = Path(self._tmp_dir.name) / "core_state.json"
+        nova_core.DEVICE_LOCATION_FILE = Path(self._tmp_dir.name) / "device_location.json"
+        nova_core._resolve_windows_device_coords = lambda *args, **kwargs: None
         nova_core.TURN_SUPERVISOR.reset()
 
     def tearDown(self):
@@ -35,6 +41,9 @@ class TestCoreIdentityLearning(unittest.TestCase):
         nova_core.ACTION_LEDGER_DIR = self.orig_action_ledger_dir
         nova_core.SELF_REFLECTION_LOG = self.orig_self_reflection_log
         nova_core.HEALTH_LOG = self.orig_health_log
+        nova_core.DEFAULT_STATEFILE = self.orig_statefile
+        nova_core.DEVICE_LOCATION_FILE = self.orig_device_location_file
+        nova_core._resolve_windows_device_coords = self.orig_windows_device_resolver
         nova_core.set_active_user(self.orig_active_user)
         nova_core.TURN_SUPERVISOR.reset()
         self._tmp_dir.cleanup()
@@ -638,16 +647,18 @@ class TestCoreIdentityLearning(unittest.TestCase):
             nova_core._developer_is_bilingual_from_memory = orig_developer_is_bilingual_from_memory
 
     def test_retrieval_followup_continues_cached_web_research(self):
-        orig_last_query = nova_core.WEB_RESEARCH_LAST_QUERY
-        orig_last_results = list(nova_core.WEB_RESEARCH_LAST_RESULTS)
-        orig_cursor = nova_core.WEB_RESEARCH_CURSOR
+        orig_query = nova_core.WEB_RESEARCH_SESSION.query
+        orig_results = nova_core.WEB_RESEARCH_SESSION.results
+        orig_cursor = nova_core.WEB_RESEARCH_SESSION.cursor
         try:
-            nova_core.WEB_RESEARCH_LAST_QUERY = "peims attendance"
-            nova_core.WEB_RESEARCH_LAST_RESULTS = [
+            nova_core.WEB_RESEARCH_SESSION.set_state(
+                "peims attendance",
+                [
                 (9.0, "https://tea.texas.gov/a", "First result snippet"),
                 (8.5, "https://tea.texas.gov/b", "Second result snippet"),
-            ]
-            nova_core.WEB_RESEARCH_CURSOR = 1
+                ],
+                1,
+            )
 
             handled, msg, next_state = nova_core._consume_conversation_followup(
                 {"kind": "retrieval", "subject": "web_research", "query": "peims attendance", "result_count": 2, "urls": ["https://tea.texas.gov/a"]},
@@ -665,9 +676,10 @@ class TestCoreIdentityLearning(unittest.TestCase):
             )[2]
             self.assertEqual(outcome.get("reply_contract"), "retrieval_followup.continued_results")
         finally:
-            nova_core.WEB_RESEARCH_LAST_QUERY = orig_last_query
-            nova_core.WEB_RESEARCH_LAST_RESULTS = orig_last_results
-            nova_core.WEB_RESEARCH_CURSOR = orig_cursor
+            if orig_results:
+                nova_core.WEB_RESEARCH_SESSION.set_state(orig_query, orig_results, orig_cursor)
+            else:
+                nova_core.WEB_RESEARCH_SESSION.clear()
 
     def test_retrieval_followup_gathers_selected_result(self):
         orig_tool_web_gather = nova_core.tool_web_gather
@@ -1336,6 +1348,10 @@ class TestCoreIdentityLearning(unittest.TestCase):
         )
         self.assertEqual(block_kind, "location")
 
+    def test_identity_memory_text_allowed_keeps_identity_origin_contract(self):
+        self.assertTrue(nova_core._identity_memory_text_allowed("identity", "nova_name_origin: from developer"))
+        self.assertFalse(nova_core._identity_memory_text_allowed("identity", "random identity fact"))
+
     def test_identity_only_block_kind_policy_matrix(self):
         cases = [
             ("my location is Brownsville Texas", {"intent": "set_location"}, "location"),
@@ -1798,6 +1814,37 @@ class TestCoreIdentityLearning(unittest.TestCase):
         self.assertEqual(result.get("tool_name"), "web_research")
         self.assertEqual(result.get("query"), "PEIMS")
 
+    def test_supervisor_web_research_rule_prefers_wikipedia_for_factual_lookup(self):
+        supervisor = Supervisor()
+        result = supervisor.evaluate_rules(
+            "research Ada Lovelace online",
+            phase="intent",
+        )
+        self.assertTrue(result.get("handled"))
+        self.assertEqual(result.get("intent"), "web_research_family")
+        self.assertEqual(result.get("tool_name"), "wikipedia_lookup")
+        self.assertEqual(result.get("query"), "Ada Lovelace")
+
+    def test_supervisor_web_research_rule_uses_general_web_for_repo_lookup(self):
+        supervisor = Supervisor()
+        result = supervisor.evaluate_rules(
+            "research GitHub repo for FastAPI auth online",
+            phase="intent",
+        )
+        self.assertTrue(result.get("handled"))
+        self.assertEqual(result.get("intent"), "web_research_family")
+        self.assertEqual(result.get("tool_name"), "web_research")
+
+    def test_supervisor_web_research_rule_prefers_stackexchange_for_technical_lookup(self):
+        supervisor = Supervisor()
+        result = supervisor.evaluate_rules(
+            "research how to fix fastapi oauth invalid_grant error online",
+            phase="intent",
+        )
+        self.assertTrue(result.get("handled"))
+        self.assertEqual(result.get("intent"), "web_research_family")
+        self.assertEqual(result.get("tool_name"), "stackexchange_search")
+
     def test_classify_web_research_outcome_uses_research_contract(self):
         outcome = nova_core._classify_web_research_outcome(
             {
@@ -2003,6 +2050,19 @@ class TestCoreIdentityLearning(unittest.TestCase):
         self.assertFalse(changed)
         self.assertEqual(reason, "")
         self.assertEqual(gated, reply)
+
+    def test_claim_gate_blocks_unsupported_quoted_operational_claim(self):
+        reply = (
+            'The handoff still assumes a live workspace in step 3, where it says '
+            '"Verify system connections to production databases."'
+        )
+        evidence = """## Handoff Sequence\n### 3. Start Runtime\nCore runtime:\n.\\nova.cmd run"""
+
+        gated, changed, reason = nova_core._apply_claim_gate(reply, evidence_text=evidence)
+
+        self.assertTrue(changed)
+        self.assertEqual(reason, "unsupported_claim_blocked")
+        self.assertIn("don't know", gated.lower())
 
     def test_truth_hierarchy_policy_query(self):
         orig_policy_web = nova_core.policy_web
@@ -2284,6 +2344,18 @@ class TestCoreIdentityLearning(unittest.TestCase):
         self.assertIn("action_planner:run_tool", payload.get("route_summary", ""))
         self.assertIn("tool_execution:ok", payload.get("route_summary", ""))
 
+    def test_cli_wikipedia_intent_records_provider_tool(self):
+        with mock.patch.object(nova_core, "VOICE_OK", False), \
+             mock.patch.object(nova_core, "speak_chunked", lambda *_args, **_kwargs: None), \
+             mock.patch.object(nova_core, "execute_planned_action", lambda tool, args=None: f"Wikipedia summary for {args[0] if args else tool}"), \
+             mock.patch("builtins.input", side_effect=["research Ada Lovelace online", "q"]), \
+             mock.patch("sys.stdout", new_callable=io.StringIO):
+            nova_core.run_loop(self._SilentTTS())
+
+        payload = self._latest_action_payload()
+        self.assertEqual(payload.get("tool"), "wikipedia_lookup")
+        self.assertEqual((payload.get("reply_outcome") or {}).get("query"), "Ada Lovelace")
+
     def test_cli_name_origin_turn_uses_supervisor_contract_without_bypass_warning(self):
         orig_get_name_origin_story = nova_core.get_name_origin_story
         try:
@@ -2447,6 +2519,7 @@ class TestCoreIdentityLearning(unittest.TestCase):
     def test_cli_weather_clarify_records_reply_contract(self):
         with mock.patch.object(nova_core, "VOICE_OK", False), \
              mock.patch.object(nova_core, "speak_chunked", lambda *_args, **_kwargs: None), \
+             mock.patch.object(nova_core, "_weather_current_location_available", lambda: False), \
              mock.patch("builtins.input", side_effect=["check the weather if you can please..", "q"]), \
              mock.patch("sys.stdout", new_callable=io.StringIO) as stdout:
             nova_core.run_loop(self._SilentTTS())
@@ -2712,8 +2785,6 @@ class TestCoreIdentityLearning(unittest.TestCase):
             nova_core.get_saved_location_text = orig_get_saved_location_text
 
     def test_cli_clean_slate_blocks_weather_request(self):
-        # Updated: LLM routing now correctly routes "weather now" to api.weather.gov on clean slate
-        # This is the desired behavior - weather intent is properly detected and executed
         with mock.patch.object(nova_core, "VOICE_OK", False), \
              mock.patch.object(nova_core, "speak_chunked", lambda *_args, **_kwargs: None), \
              mock.patch("builtins.input", side_effect=["weather now", "q"]), \
@@ -2721,8 +2792,7 @@ class TestCoreIdentityLearning(unittest.TestCase):
             nova_core.run_loop(self._SilentTTS())
 
         output = stdout.getvalue().lower()
-        # Now correctly routes weather intent via LLM fallback
-        self.assertIn("api.weather.gov", output)
+        self.assertIn("need a confirmed location or coordinates", output)
 
     def test_cli_bare_numeric_turn_clarifies_instead_of_using_saved_location(self):
         orig_get_saved_location_text = nova_core.get_saved_location_text
@@ -3390,6 +3460,7 @@ class TestCoreIdentityLearning(unittest.TestCase):
 
         orig_policy_path = nova_core.POLICY_PATH
         orig_requests_get = nova_core.requests.get
+        orig_weather_current_location_available = nova_core._weather_current_location_available
         policy_path = Path(self._tmp_dir.name) / "policy_weather_followup_test.json"
         policy_path.write_text(
             json.dumps(
@@ -3405,6 +3476,7 @@ class TestCoreIdentityLearning(unittest.TestCase):
         try:
             nova_core.POLICY_PATH = policy_path
             nova_core.requests.get = fake_get
+            nova_core._weather_current_location_available = lambda: False
             nova_core.set_location_text("Brownsville TX")
             with mock.patch.object(nova_core, "VOICE_OK", False), \
                  mock.patch.object(nova_core, "speak_chunked", lambda *_args, **_kwargs: None), \
@@ -3413,6 +3485,7 @@ class TestCoreIdentityLearning(unittest.TestCase):
         finally:
             nova_core.POLICY_PATH = orig_policy_path
             nova_core.requests.get = orig_requests_get
+            nova_core._weather_current_location_available = orig_weather_current_location_available
 
         payload = self._latest_action_payload()
         self.assertEqual(payload.get("user_input"), "our location nova ..")
@@ -3455,6 +3528,7 @@ class TestCoreIdentityLearning(unittest.TestCase):
 
         orig_policy_path = nova_core.POLICY_PATH
         orig_requests_get = nova_core.requests.get
+        orig_weather_current_location_available = nova_core._weather_current_location_available
         policy_path = Path(self._tmp_dir.name) / "policy_weather_affirm_test.json"
         policy_path.write_text(
             json.dumps(
@@ -3470,6 +3544,7 @@ class TestCoreIdentityLearning(unittest.TestCase):
         try:
             nova_core.POLICY_PATH = policy_path
             nova_core.requests.get = fake_get
+            nova_core._weather_current_location_available = lambda: False
             nova_core.set_location_text("Brownsville TX")
             with mock.patch.object(nova_core, "VOICE_OK", False), \
                  mock.patch.object(nova_core, "speak_chunked", lambda *_args, **_kwargs: None), \
@@ -3478,6 +3553,7 @@ class TestCoreIdentityLearning(unittest.TestCase):
         finally:
             nova_core.POLICY_PATH = orig_policy_path
             nova_core.requests.get = orig_requests_get
+            nova_core._weather_current_location_available = orig_weather_current_location_available
 
         payload = self._latest_action_payload()
         self.assertEqual(payload.get("user_input"), "yea please do that ..")

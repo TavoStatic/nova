@@ -1,0 +1,13 @@
+﻿student_data Data Standards
+
+The Texas Education Data Standards define:
+
+• Data element definitions
+• Code tables
+• Record layouts
+• Validation rules
+• Submission deadlines
+
+District Student Information Systems extract data and format it according to these standards before submission.
+
+

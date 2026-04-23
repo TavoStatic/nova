@@ -10,7 +10,7 @@ from typing import Optional
 
 import psutil
 
-ROOT = Path(r"C:\Nova")
+ROOT = Path(__file__).resolve().parent
 VENV_PY = ROOT / ".venv" / "Scripts" / "python.exe"
 NOVA_CORE = ROOT / "nova_core.py"
 GUARD_SCRIPT = Path(__file__).resolve()
@@ -504,11 +504,11 @@ def _runtime_state_matches_attempt(attempt: GuardAttempt, state: Optional[dict])
 
 
 def _observe_boot_progress(attempt: GuardAttempt) -> bool:
+    state = read_core_state()
+    _adopt_runtime_identity_from_state(attempt, state)
     if not _attempt_is_alive(attempt):
         return False
     now = time.time()
-    state = read_core_state()
-    _adopt_runtime_identity_from_state(attempt, state)
     state_matches = _runtime_state_matches_attempt(attempt, state)
     if state_matches and attempt.started_at is not None and attempt.state_seen_at is None:
         attempt.state_seen_at = now
@@ -525,17 +525,27 @@ def _boot_succeeded(attempt: GuardAttempt) -> bool:
 
 
 def _boot_failed(attempt: GuardAttempt) -> tuple[bool, str]:
-    if not _attempt_is_alive(attempt):
-        return True, "boot_pid_missing"
     if attempt.started_at is None:
         return True, "boot_missing_timestamp"
-    if (time.time() - attempt.started_at) > float(attempt.boot_timeout_seconds or BOOT_TIMEOUT_CEILING_SECONDS):
-        if attempt.state_seen_at is None:
-            return True, "boot_timeout_no_state"
-        if attempt.heartbeat_seen_at is None:
-            return True, "boot_timeout_no_heartbeat"
-        return True, "boot_timeout"
-    return False, ""
+    now = time.time()
+    state = read_core_state()
+    _adopt_runtime_identity_from_state(attempt, state)
+    alive = _attempt_is_alive(attempt)
+    if (now - attempt.started_at) <= float(attempt.boot_timeout_seconds or BOOT_TIMEOUT_CEILING_SECONDS):
+        return False, ""
+    if not alive:
+        return True, "boot_pid_missing"
+    state_matches = _runtime_state_matches_attempt(attempt, state)
+    if state_matches and attempt.state_seen_at is None:
+        attempt.state_seen_at = now
+    heartbeat_matches = bool(state_matches and is_heartbeat_fresh())
+    if heartbeat_matches and attempt.heartbeat_seen_at is None:
+        attempt.heartbeat_seen_at = now
+    if attempt.state_seen_at is None:
+        return True, "boot_timeout_no_state"
+    if attempt.heartbeat_seen_at is None:
+        return True, "boot_timeout_no_heartbeat"
+    return True, "boot_timeout"
 
 
 def _runtime_failed(attempt: GuardAttempt) -> tuple[bool, str]:

@@ -19,10 +19,13 @@ if str(BASE_DIR) not in sys.path:
 
 import nova_core
 import nova_http
+import run_tools
 
 
 RUNNER_ROOT = BASE_DIR / "runtime" / "test_sessions"
 DEFAULT_SESSIONS_DIR = BASE_DIR / "tests" / "sessions"
+DEFAULT_COMPARE_MODES = ("cli", "http")
+VALID_COMPARE_MODES = {"cli", "http", "run_tools"}
 _ROUTE_NOISE_PREFIXES = (
     "truth_hierarchy:",
     "hard_answer:",
@@ -43,6 +46,29 @@ class _SilentTTS:
 
     def say(self, _text: str) -> None:
         return None
+
+
+def _mode_label(mode: str) -> str:
+    return {
+        "cli": "CLI",
+        "http": "HTTP",
+        "run_tools": "Run Tools",
+    }.get(str(mode or "").strip().lower(), str(mode or "mode").replace("_", " ").title())
+
+
+def _parse_compare_modes(value: Any) -> list[str]:
+    if value is None:
+        return list(DEFAULT_COMPARE_MODES)
+    if not isinstance(value, list) or len(value) != 2:
+        raise ValueError("Session JSON compare_modes must contain exactly two modes")
+
+    modes = [str(item or "").strip().lower() for item in value]
+    if any(not item for item in modes):
+        raise ValueError("Session JSON compare_modes entries must be non-empty")
+    invalid = [item for item in modes if item not in VALID_COMPARE_MODES]
+    if invalid:
+        raise ValueError(f"Unsupported compare_modes entries: {', '.join(sorted(set(invalid)))}")
+    return modes
 
 
 def load_session(session_name: str) -> dict[str, Any]:
@@ -87,6 +113,7 @@ def load_session(session_name: str) -> dict[str, Any]:
         "path": candidate,
         "name": str(payload.get("name") or candidate.stem),
         "messages": messages,
+        "compare_modes": _parse_compare_modes(payload.get("compare_modes")),
     }
 
 
@@ -140,6 +167,25 @@ def _assistant_compare_text(value: Any) -> str:
     return compact
 
 
+def _canonical_fact_answer(value: Any) -> str:
+    text = _assistant_compare_text(value)
+    normalized = str(text or "").strip().strip('"\'')
+    normalized = re.sub(r"[.!?]+$", "", normalized).strip()
+    patterns = (
+        r"^You asked me to remember(?: the)? (?:codeword|topic) (?P<fact>.+)$",
+        r"^You said(?: that)? (?P<fact>.+)$",
+        r"^The (?:codeword|topic|review|owner|blocker) (?:was|is) (?P<fact>.+)$",
+        r"^It (?:was|is) (?P<fact>.+)$",
+    )
+    for pattern in patterns:
+        match = re.match(pattern, normalized, flags=re.I)
+        if match:
+            normalized = str(match.group("fact") or "").strip().strip('"\'')
+            normalized = re.sub(r"[.!?]+$", "", normalized).strip()
+            break
+    return _normalize_text(normalized).lower()
+
+
 def _canonical_route_summary(value: Any) -> str:
     text = str(value or "")
     steps = [part.strip() for part in text.split("->") if part.strip()]
@@ -158,6 +204,8 @@ def _assistant_equivalent(cli_turn: dict[str, Any], http_turn: dict[str, Any]) -
     cli_text = _assistant_compare_text(cli_turn.get("assistant"))
     http_text = _assistant_compare_text(http_turn.get("assistant"))
     if cli_text == http_text:
+        return True
+    if _canonical_fact_answer(cli_text) and _canonical_fact_answer(cli_text) == _canonical_fact_answer(http_text):
         return True
     if str(cli_turn.get("planner_decision") or "") == "llm_fallback" and str(http_turn.get("planner_decision") or "") == "llm_fallback":
         # LLM fallback prompts can vary by phrasing while preserving intent.
@@ -311,73 +359,128 @@ def run_http_session(messages: list[str], mode_dir: Path) -> dict[str, Any]:
         }
 
 
-def compare_sessions(cli_result: dict[str, Any], http_result: dict[str, Any]) -> dict[str, Any]:
-    cli_turns = list(cli_result.get("turns") or [])
-    http_turns = list(http_result.get("turns") or [])
-    turn_count = max(len(cli_turns), len(http_turns))
-    diffs: list[dict[str, Any]] = []
+def run_run_tools_session(messages: list[str], mode_dir: Path) -> dict[str, Any]:
+    with _isolated_runner_state(mode_dir) as paths:
+        turns: list[dict[str, Any]] = []
+        reflection_rows: list[dict[str, Any]] = []
 
-    for index in range(turn_count):
-        cli_turn = cli_turns[index] if index < len(cli_turns) else {}
-        http_turn = http_turns[index] if index < len(http_turns) else {}
-        issues: dict[str, Any] = {}
-        if not _assistant_equivalent(cli_turn, http_turn):
-            issues["assistant"] = {
-                "cli": cli_turn.get("assistant", ""),
-                "http": http_turn.get("assistant", ""),
-            }
-        if str(cli_turn.get("active_subject") or "") != str(http_turn.get("active_subject") or ""):
-            issues["active_subject"] = {
-                "cli": cli_turn.get("active_subject", ""),
-                "http": http_turn.get("active_subject", ""),
-            }
-        if bool(cli_turn.get("continuation_used", False)) != bool(http_turn.get("continuation_used", False)):
-            issues["continuation_used"] = {
-                "cli": bool(cli_turn.get("continuation_used", False)),
-                "http": bool(http_turn.get("continuation_used", False)),
-            }
-        if _canonical_route_summary(cli_turn.get("route_summary")) != _canonical_route_summary(http_turn.get("route_summary")):
-            issues["route_summary"] = {
-                "cli": cli_turn.get("route_summary", ""),
-                "http": http_turn.get("route_summary", ""),
-            }
-        if _normalize_text(cli_turn.get("probe_summary")) != _normalize_text(http_turn.get("probe_summary")):
-            issues["probe_summary"] = {
-                "cli": cli_turn.get("probe_summary", ""),
-                "http": http_turn.get("probe_summary", ""),
-            }
-        if issues:
-            diffs.append({"turn": index + 1, "issues": issues})
+        for index, message in enumerate(messages, start=1):
+            reply = run_tools.ask_nova(message)
+            ledgers = _read_ledger_rows(paths["action_dir"])
+            reflections = _read_jsonl(paths["reflection_log"])
+            ledger = ledgers[-1] if ledgers else {}
+            reflection = reflections[-1] if reflections else {}
+            reflection_rows = reflections
+            turns.append(_turn_record(index, message, reply, ledger, reflection))
 
+        return {
+            "mode": "run_tools",
+            "session_id": "run-tools",
+            "turns": turns,
+            "health_rows": _read_jsonl(paths["health_log"]),
+            "reflection_rows": reflection_rows,
+            "artifacts": {key: str(value) for key, value in paths.items()},
+        }
+
+
+def _run_mode_session(mode: str, messages: list[str], mode_dir: Path) -> dict[str, Any]:
+    normalized = str(mode or "").strip().lower()
+    if normalized == "cli":
+        return run_cli_session(messages, mode_dir)
+    if normalized == "http":
+        return run_http_session(messages, mode_dir)
+    if normalized == "run_tools":
+        return run_run_tools_session(messages, mode_dir)
+    raise ValueError(f"Unsupported session mode: {mode}")
+
+
+def _issue_values(left_mode: str, right_mode: str, left_value: Any, right_value: Any) -> dict[str, Any]:
     return {
-        "turn_count_match": len(cli_turns) == len(http_turns),
-        "cli_turns": len(cli_turns),
-        "http_turns": len(http_turns),
-        "diffs": diffs,
-        "cli_flagged_probes": _flagged_probe_lines(cli_turns),
-        "http_flagged_probes": _flagged_probe_lines(http_turns),
+        "left": left_value,
+        "right": right_value,
+        left_mode: left_value,
+        right_mode: right_value,
     }
 
 
-def _write_report(run_dir: Path, session_meta: dict[str, Any], cli_result: dict[str, Any], http_result: dict[str, Any], comparison: dict[str, Any]) -> Path:
+def compare_sessions(left_result: dict[str, Any], right_result: dict[str, Any]) -> dict[str, Any]:
+    left_mode = str(left_result.get("mode") or "left").strip().lower() or "left"
+    right_mode = str(right_result.get("mode") or "right").strip().lower() or "right"
+    left_turns = list(left_result.get("turns") or [])
+    right_turns = list(right_result.get("turns") or [])
+    turn_count = max(len(left_turns), len(right_turns))
+    diffs: list[dict[str, Any]] = []
+
+    for index in range(turn_count):
+        left_turn = left_turns[index] if index < len(left_turns) else {}
+        right_turn = right_turns[index] if index < len(right_turns) else {}
+        issues: dict[str, Any] = {}
+        if not _assistant_equivalent(left_turn, right_turn):
+            issues["assistant"] = _issue_values(left_mode, right_mode, left_turn.get("assistant", ""), right_turn.get("assistant", ""))
+        if str(left_turn.get("active_subject") or "") != str(right_turn.get("active_subject") or ""):
+            issues["active_subject"] = _issue_values(left_mode, right_mode, left_turn.get("active_subject", ""), right_turn.get("active_subject", ""))
+        if bool(left_turn.get("continuation_used", False)) != bool(right_turn.get("continuation_used", False)):
+            issues["continuation_used"] = _issue_values(left_mode, right_mode, bool(left_turn.get("continuation_used", False)), bool(right_turn.get("continuation_used", False)))
+        if _canonical_route_summary(left_turn.get("route_summary")) != _canonical_route_summary(right_turn.get("route_summary")):
+            issues["route_summary"] = _issue_values(left_mode, right_mode, left_turn.get("route_summary", ""), right_turn.get("route_summary", ""))
+        if _normalize_text(left_turn.get("probe_summary")) != _normalize_text(right_turn.get("probe_summary")):
+            issues["probe_summary"] = _issue_values(left_mode, right_mode, left_turn.get("probe_summary", ""), right_turn.get("probe_summary", ""))
+        if issues:
+            diffs.append({"turn": index + 1, "issues": issues})
+
+    comparison = {
+        "left_mode": left_mode,
+        "right_mode": right_mode,
+        "left_label": _mode_label(left_mode),
+        "right_label": _mode_label(right_mode),
+        "turn_count_match": len(left_turns) == len(right_turns),
+        "left_turns": len(left_turns),
+        "right_turns": len(right_turns),
+        "diffs": diffs,
+        "left_flagged_probes": _flagged_probe_lines(left_turns),
+        "right_flagged_probes": _flagged_probe_lines(right_turns),
+    }
+    for mode_name, turns, flagged in (
+        (left_mode, left_turns, comparison["left_flagged_probes"]),
+        (right_mode, right_turns, comparison["right_flagged_probes"]),
+    ):
+        comparison[f"{mode_name}_turns"] = len(turns)
+        comparison[f"{mode_name}_flagged_probes"] = flagged
+    return comparison
+
+
+def _write_report(run_dir: Path, session_meta: dict[str, Any], left_result: dict[str, Any], right_result: dict[str, Any], comparison: dict[str, Any]) -> Path:
+    left_mode = str(left_result.get("mode") or "left")
+    right_mode = str(right_result.get("mode") or "right")
     report = {
         "session": {
             "name": session_meta["name"],
             "path": str(session_meta["path"]),
             "messages": list(session_meta["messages"]),
+            "compare_modes": list(session_meta.get("compare_modes") or list(DEFAULT_COMPARE_MODES)),
         },
-        "cli": cli_result,
-        "http": http_result,
+        "runs": {
+            left_mode: left_result,
+            right_mode: right_result,
+        },
         "comparison": comparison,
         "generated_at": time.strftime("%Y-%m-%d %H:%M:%S"),
     }
+    if left_mode == "cli":
+        report["cli"] = left_result
+    if right_mode == "cli":
+        report["cli"] = right_result
+    if left_mode == "http":
+        report["http"] = left_result
+    if right_mode == "http":
+        report["http"] = right_result
     out = run_dir / "result.json"
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(report, ensure_ascii=True, indent=2), encoding="utf-8")
     return out
 
 
-def _print_drift_details(diffs: list[dict[str, Any]]) -> None:
+def _print_drift_details(diffs: list[dict[str, Any]], *, left_mode: str, right_mode: str, left_label: str, right_label: str) -> None:
     for item in diffs:
         turn = int(item.get("turn") or 0)
         print(f"- Turn {turn}:")
@@ -385,32 +488,36 @@ def _print_drift_details(diffs: list[dict[str, Any]]) -> None:
         for field_name in sorted(issues.keys()):
             field = issues.get(field_name) or {}
             print(f"  {field_name}:")
-            print(f"    CLI : {_preview_value(field.get('cli', ''))}")
-            print(f"    HTTP: {_preview_value(field.get('http', ''))}")
+            print(f"    {left_label}: {_preview_value(field.get(left_mode, field.get('left', '')))}")
+            print(f"    {right_label}: {_preview_value(field.get(right_mode, field.get('right', '')))}")
 
 
 def _print_summary(session_meta: dict[str, Any], comparison: dict[str, Any], report_path: Path) -> None:
+    left_label = str(comparison.get("left_label") or "Left")
+    right_label = str(comparison.get("right_label") or "Right")
+    left_mode = str(comparison.get("left_mode") or "left")
+    right_mode = str(comparison.get("right_mode") or "right")
     print(f"Running session: {session_meta['name']} ({len(session_meta['messages'])} turns)")
     print("")
     print("=== SESSION COMPARISON ===")
-    print(f"CLI turns:  {comparison['cli_turns']}")
-    print(f"HTTP turns: {comparison['http_turns']}")
+    print(f"{left_label} turns:  {comparison['left_turns']}")
+    print(f"{right_label} turns: {comparison['right_turns']}")
     print(f"Turn count parity: {'OK' if comparison['turn_count_match'] else 'MISMATCH'}")
 
     diffs = comparison.get("diffs") or []
     if diffs:
         print("")
         print("Drift detected:")
-        _print_drift_details(diffs)
+        _print_drift_details(diffs, left_mode=left_mode, right_mode=right_mode, left_label=left_label, right_label=right_label)
     else:
-        print("No CLI/HTTP drift detected in replies, route summaries, active subject, continuation flags, or probe summaries.")
+        print(f"No {left_label}/{right_label} drift detected in replies, route summaries, active subject, continuation flags, or probe summaries.")
 
-    cli_flagged = comparison.get("cli_flagged_probes") or []
-    http_flagged = comparison.get("http_flagged_probes") or []
-    if cli_flagged or http_flagged:
+    left_flagged = comparison.get("left_flagged_probes") or []
+    right_flagged = comparison.get("right_flagged_probes") or []
+    if left_flagged or right_flagged:
         print("")
         print("Flagged probes:")
-        for label, rows in (("CLI", cli_flagged), ("HTTP", http_flagged)):
+        for label, rows in ((left_label, left_flagged), (right_label, right_flagged)):
             for row in rows:
                 print(f"- {label} turn {row['turn']}: {' | '.join(row['lines'])}")
     else:
@@ -426,15 +533,17 @@ def main() -> int:
     args = parser.parse_args()
 
     session_meta = load_session(args.session_file)
+    compare_modes = list(session_meta.get("compare_modes") or list(DEFAULT_COMPARE_MODES))
+    left_mode, right_mode = compare_modes
     stamp = time.strftime("%Y%m%d_%H%M%S")
-    run_dir = RUNNER_ROOT / f"{Path(str(session_meta['path'])).stem}_{stamp}"
-    cli_dir = run_dir / "cli"
-    http_dir = run_dir / "http"
+    run_dir = RUNNER_ROOT / f"{Path(str(session_meta['path'])).stem}_{left_mode}_vs_{right_mode}_{stamp}"
+    left_dir = run_dir / left_mode
+    right_dir = run_dir / right_mode
 
-    cli_result = run_cli_session(session_meta["messages"], cli_dir)
-    http_result = run_http_session(session_meta["messages"], http_dir)
-    comparison = compare_sessions(cli_result, http_result)
-    report_path = _write_report(run_dir, session_meta, cli_result, http_result, comparison)
+    left_result = _run_mode_session(left_mode, session_meta["messages"], left_dir)
+    right_result = _run_mode_session(right_mode, session_meta["messages"], right_dir)
+    comparison = compare_sessions(left_result, right_result)
+    report_path = _write_report(run_dir, session_meta, left_result, right_result, comparison)
     _print_summary(session_meta, comparison, report_path)
     return 0
 

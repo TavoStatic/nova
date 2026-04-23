@@ -1,0 +1,10 @@
+﻿Common student_data Errors
+
+Typical issues include:
+
+• Missing student IDs
+• Invalid program codes
+• Incorrect attendance values
+• Staff certification mismatches
+
+

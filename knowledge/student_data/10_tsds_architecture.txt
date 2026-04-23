@@ -1,0 +1,12 @@
+﻿TSDS student_data Architecture
+
+Texas student_data System (TSDS) is the platform used to submit student_data data.
+
+It includes:
+
+• Data validation
+• Submission processing
+• Error reporting
+• TEA integration
+
+

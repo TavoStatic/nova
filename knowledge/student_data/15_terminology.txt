@@ -1,0 +1,10 @@
+﻿student_data Terminology
+
+ADA – Average Daily Attendance  
+LEA – Local Education Agency  
+TEA – Texas Education Agency  
+TSDS – Texas student_data System  
+SIS – Student Information System  
+TAPR – Texas Academic Performance Report
+
+

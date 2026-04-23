@@ -144,6 +144,26 @@ def run_preflight() -> list[CheckResult]:
     has_ollama = shutil.which("ollama") is not None
     results.append(CheckResult("runtime:ollama_on_path", has_ollama, False, "PATH"))
 
+    nova_http_path = BASE_DIR / "nova_http.py"
+    try:
+        nova_http_text = nova_http_path.read_text(encoding="utf-8")
+    except Exception as exc:
+        results.append(CheckResult("seam:nova_http_transport_boundary", False, True, f"{nova_http_path}: {exc}"))
+        results.append(CheckResult("seam:nova_http_control_delegation", False, True, f"{nova_http_path}: {exc}"))
+    else:
+        transport_boundary_ok = "from supervisor import Supervisor" not in nova_http_text and "Supervisor()" not in nova_http_text
+        control_delegation_ok = all(
+            token in nova_http_text
+            for token in (
+                "services.control_actions",
+                "CONTROL_ACTIONS_SERVICE",
+                "services.control_status",
+                "CONTROL_STATUS_SERVICE",
+            )
+        )
+        results.append(CheckResult("seam:nova_http_transport_boundary", transport_boundary_ok, True, str(nova_http_path)))
+        results.append(CheckResult("seam:nova_http_control_delegation", control_delegation_ok, True, str(nova_http_path)))
+
     return results
 
 

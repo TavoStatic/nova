@@ -1,0 +1,24 @@
+{
+  "name": "Run Tools vs HTTP parity",
+  "compare_modes": [
+    "run_tools",
+    "http"
+  ],
+  "source": "parity",
+  "category": "entrypoint",
+  "objective": "Verify that the run_tools chat surface preserves the same conversation state and answer path as HTTP for ordinary non-tool chat turns.",
+  "messages": [
+    "For this session, remember the codeword cobalt sparrow and the topic packaging drift.",
+    "What codeword did I just ask you to remember?",
+    "And what topic did I say we were tracking?"
+  ],
+  "success_signals": [
+    "Both paths preserve the same short-term session facts.",
+    "Both paths keep turn count parity and avoid drift in follow-up handling."
+  ],
+  "failure_signals": [
+    "run_tools loses the earlier session facts.",
+    "run_tools and HTTP diverge on continuation behavior or route summary."
+  ],
+  "notes": "Keep this chat-only so parity reflects the shared conversation path rather than the direct tool fast-path."
+}

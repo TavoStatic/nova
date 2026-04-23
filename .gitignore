@@ -1,7 +1,14 @@
 ﻿# Runtime artifacts - never commit these
 runtime/
 updates/
+logs/
+memory/
+knowledge/web/
+LAST_SESSION.json
+RESUME_HERE.txt
 nova_memory.sqlite
+*.sqlite-shm
+*.sqlite-wal
 *.pyc
 *.pyo
 __pycache__/
@@ -13,6 +20,20 @@ kidney/snapshots/
 disposal_snapshots/
 promotion_audit.jsonl
 
+# Local probe and scratch artifacts
+codex_ledger_*/
+codex_pulse_test_*/
+codex_probe_*.txt
+codex_probe_*.sqlite3
+codex_probe_*.sqlite3-journal
+probe_sqlite_*.sqlite
+probe_sqlite_*.sqlite-journal
+runtime_probe_cli_ledger/
+_handle_commands_current.txt
+_run_loop_current.txt
+knowledge/packs/test-pack*/
+knowledge/packs/test-pack_*/
+
 # OS
 .DS_Store
 Thumbs.db
@@ -20,3 +41,11 @@ Thumbs.db
 # Virtualenv
 .venv/
 venv/
+.ci_venv/
+
+# Test/tool caches
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/

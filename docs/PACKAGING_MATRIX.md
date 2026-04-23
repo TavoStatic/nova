@@ -72,6 +72,7 @@ Base-package intent today is:
 - keep machine-local state out of version control and out of the portable package boundary
 - treat domain specialization as explicit operator input rather than hidden bundled knowledge
 - keep safety-envelope and kidney governance logs as local runtime artifacts, not package payload
+- build the distributable candidate as a source-bootstrap zip via `nova package-build`
 
 ## Important Exceptions
 
@@ -93,17 +94,20 @@ That split is not final yet, so this matrix records current reality rather than 
 
 ## What This Matrix Still Does Not Solve
 
-This matrix defines the boundary, but not yet the full handoff flow.
+This matrix defines the boundary, but not future installer formats beyond the current source-bootstrap zip.
 
-Nova still needs separate canonical docs for:
+The remaining work is:
 
-1. fresh-machine bootstrap
-2. install/run/test/apply sequence
-3. final canonical product statement
+1. continued enforcement so new generated/runtime files do not drift back into the shipped boundary
+2. release-candidate validation of the produced zip artifact on a fresh machine or VM
+3. later decision on whether NYO System also needs a frozen installer or another higher-convenience artifact
 
 ## Related Docs
 
 - `docs/BASE_PACKAGE_READINESS.md`
+- `docs/BOOTSTRAP.md`
+- `docs/DEPENDENCY_CONTRACT.md`
+- `docs/HANDOFF.md`
 - `docs/OPERATIONS.md`
-- `docs/CLEANUP_AUDIT.md`
+- `docs/RELEASE_ARTIFACT.md`
 - `docs/PATCHING.md`

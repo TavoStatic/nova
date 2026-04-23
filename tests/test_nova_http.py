@@ -100,6 +100,8 @@ class TestNovaHttpProfile(unittest.TestCase):
         self.orig_handle_keywords = nova_http.nova_core.handle_keywords
         nova_http.SESSION_TURNS.clear()
         nova_http.SESSION_STATE_MANAGER.clear()
+        nova_http._CONTROL_STATUS_CACHE["computed_at"] = 0.0
+        nova_http._CONTROL_STATUS_CACHE["payload"] = None
 
     def tearDown(self):
         nova_http.nova_core.mem_recall = self.orig_mem_recall
@@ -111,6 +113,83 @@ class TestNovaHttpProfile(unittest.TestCase):
         nova_http.nova_core.handle_keywords = self.orig_handle_keywords
         nova_http.SESSION_TURNS.clear()
         nova_http.SESSION_STATE_MANAGER.clear()
+        nova_http._CONTROL_STATUS_CACHE["computed_at"] = 0.0
+        nova_http._CONTROL_STATUS_CACHE["payload"] = None
+
+    def test_generated_work_queue_uses_runtime_dir_for_blocked_metadata(self):
+        with mock.patch.object(nova_http.TEST_SESSION_CONTROL_SERVICE, "generated_work_queue", return_value={"status": "clear"}) as queue_mock, \
+            mock.patch("nova_http._available_test_session_definitions", return_value=[]), \
+            mock.patch("nova_http._test_session_report_summaries", return_value=[]):
+            payload = nova_http._generated_work_queue(12)
+
+        self.assertEqual(payload.get("status"), "clear")
+        self.assertEqual(queue_mock.call_args.kwargs.get("runtime_dir"), nova_http.RUNTIME_DIR)
+
+    def test_autonomy_maintenance_summary_flattens_queue_truth(self):
+        state = {
+            "runtime_worker": {"last_cycle_status": "ok"},
+            "last_regression_status": "FAILED",
+            "last_regression_stale": True,
+            "last_generated_queue_run": {
+                "status": "blocked",
+                "queue_open_count": 3,
+                "queue_actionable_count": 0,
+                "queue_blocked_count": 3,
+                "queue_blocked_reason_counts": {"parity_drift_locked": 3},
+                "queue_blocked_files": ["a.json", "b.json", "c.json"],
+            },
+            "last_work_tree_cycle": {"status": "idle"},
+            "last_error": "",
+        }
+        with mock.patch("nova_http._load_autonomy_maintenance_state", return_value=state), \
+            mock.patch("nova_http.runtime_processes.logical_service_processes", return_value=[]), \
+            mock.patch("nova_http.runtime_processes.select_logical_process", return_value=None):
+            payload = nova_http._autonomy_maintenance_summary()
+
+        self.assertEqual(payload.get("generated_queue_status"), "blocked")
+        self.assertEqual(payload.get("last_regression_status"), "FAILED")
+        self.assertTrue(payload.get("last_regression_stale"))
+        self.assertEqual(payload.get("queue_open_count"), 3)
+        self.assertEqual(payload.get("queue_actionable_count"), 0)
+        self.assertEqual(payload.get("queue_blocked_count"), 3)
+        self.assertEqual(payload.get("queue_blocked_reason_counts"), {"parity_drift_locked": 3})
+        self.assertEqual(payload.get("queue_blocked_files"), ["a.json", "b.json", "c.json"])
+        self.assertEqual(payload.get("work_tree_status"), "idle")
+        self.assertEqual(payload.get("last_error"), "")
+
+    def test_autonomy_maintenance_summary_clears_stale_worker_identity_when_process_missing(self):
+        state = {
+            "runtime_worker": {
+                "last_cycle_status": "running",
+                "pid": 4321,
+                "create_time": 12.5,
+            }
+        }
+        with mock.patch("nova_http._load_autonomy_maintenance_state", return_value=state), \
+            mock.patch("nova_http.runtime_processes.logical_service_processes", return_value=[]), \
+            mock.patch("nova_http.runtime_processes.select_logical_process", return_value=None):
+            payload = nova_http._autonomy_maintenance_summary()
+
+        worker = dict(payload.get("runtime_worker") or {})
+        self.assertEqual(worker.get("last_cycle_status"), "stopped")
+        self.assertFalse(worker.get("active"))
+        self.assertTrue(worker.get("stale_identity"))
+        self.assertIsNone(worker.get("pid"))
+        self.assertIsNone(worker.get("create_time"))
+
+    def test_cached_control_status_payload_reuses_recent_value(self):
+        payloads = [{"ok": True, "seq": 1}, {"ok": True, "seq": 2}]
+
+        with mock.patch("nova_http._control_status_payload", side_effect=payloads) as status_mock, \
+            mock.patch("nova_http.time.monotonic", side_effect=[100.0, 100.0, 100.1, 101.0, 103.5, 103.5, 103.6]):
+            first = nova_http._cached_control_status_payload(2.0)
+            second = nova_http._cached_control_status_payload(2.0)
+            third = nova_http._cached_control_status_payload(2.0)
+
+        self.assertEqual(first["seq"], 1)
+        self.assertEqual(second["seq"], 1)
+        self.assertEqual(third["seq"], 2)
+        self.assertEqual(status_mock.call_count, 2)
 
     def test_developer_who_is_answer_is_deterministic(self):
         nova_http.nova_core.mem_enabled = lambda: True
@@ -528,14 +607,17 @@ class TestNovaHttpProfile(unittest.TestCase):
     def test_location_self_diagnostic_when_missing(self):
         self.orig_mem_audit = nova_http.nova_core.mem_audit
         self.orig_get_saved_location_text = nova_http.nova_core.get_saved_location_text
+        self.orig_runtime_device_location_payload = nova_http.nova_core.runtime_device_location_payload
         try:
             nova_http.nova_core.mem_audit = lambda q: "{\"results\": []}"
             nova_http.nova_core.get_saved_location_text = lambda: ""
+            nova_http.nova_core.runtime_device_location_payload = lambda *args, **kwargs: {"available": False, "stale": True}
             reply = nova_http.process_chat("s7", "where is nova?")
             self.assertIn("I don't have a stored location yet.", reply)
         finally:
             nova_http.nova_core.mem_audit = self.orig_mem_audit
             nova_http.nova_core.get_saved_location_text = self.orig_get_saved_location_text
+            nova_http.nova_core.runtime_device_location_payload = self.orig_runtime_device_location_payload
 
     def test_read_text_safely_handles_utf16_without_null_padded_output(self):
         with tempfile.TemporaryDirectory() as td:
@@ -649,8 +731,10 @@ class TestNovaHttpProfile(unittest.TestCase):
     def test_http_pending_weather_action_uses_affirmative_followup(self):
         orig_get_saved_location_text = nova_http.nova_core.get_saved_location_text
         orig_execute_planned_action = nova_http.nova_core.execute_planned_action
+        orig_weather_current_location_available = nova_http.nova_core._weather_current_location_available
         try:
             nova_http.nova_core.get_saved_location_text = lambda: "Brownsville TX"
+            nova_http.nova_core._weather_current_location_available = lambda: False
             nova_http.nova_core.execute_planned_action = lambda tool, args=None: "Brownsville, TX: Today: 66°F, Sunny. [source: api.weather.gov]" if tool == "weather_current_location" else ""
             first = nova_http.process_chat("s11", "check the weather if you can please..")
             self.assertIn("location", first.lower())
@@ -662,12 +746,15 @@ class TestNovaHttpProfile(unittest.TestCase):
         finally:
             nova_http.nova_core.get_saved_location_text = orig_get_saved_location_text
             nova_http.nova_core.execute_planned_action = orig_execute_planned_action
+            nova_http.nova_core._weather_current_location_available = orig_weather_current_location_available
 
     def test_http_pending_weather_action_current_location_followup_matrix(self):
         orig_get_saved_location_text = nova_http.nova_core.get_saved_location_text
         orig_execute_planned_action = nova_http.nova_core.execute_planned_action
+        orig_weather_current_location_available = nova_http.nova_core._weather_current_location_available
         try:
             nova_http.nova_core.get_saved_location_text = lambda: "Brownsville TX"
+            nova_http.nova_core._weather_current_location_available = lambda: False
             nova_http.nova_core.execute_planned_action = lambda tool, args=None: "Brownsville, TX: Today: 66°F, Sunny. [source: api.weather.gov]" if tool == "weather_current_location" else ""
             cases = [
                 ("affirmative", "go ahead"),
@@ -686,12 +773,15 @@ class TestNovaHttpProfile(unittest.TestCase):
         finally:
             nova_http.nova_core.get_saved_location_text = orig_get_saved_location_text
             nova_http.nova_core.execute_planned_action = orig_execute_planned_action
+            nova_http.nova_core._weather_current_location_available = orig_weather_current_location_available
 
     def test_http_pending_weather_action_uses_direct_location_followup(self):
         orig_get_saved_location_text = nova_http.nova_core.get_saved_location_text
         orig_execute_planned_action = nova_http.nova_core.execute_planned_action
+        orig_weather_current_location_available = nova_http.nova_core._weather_current_location_available
         try:
             nova_http.nova_core.get_saved_location_text = lambda: ""
+            nova_http.nova_core._weather_current_location_available = lambda: False
             nova_http.nova_core.execute_planned_action = lambda tool, args=None: "Brownsville, TX 78521: Tomorrow: 72°F, Clear. [source: api.weather.gov]" if tool == "weather_location" else ""
             first = nova_http.process_chat("s11_direct", "check the weather if you can please..")
             self.assertIn("location", first.lower())
@@ -701,6 +791,23 @@ class TestNovaHttpProfile(unittest.TestCase):
             self.assertIsNone(session.pending_action)
             self.assertEqual((session.last_reflection or {}).get("reply_contract"), "weather_lookup.explicit_location")
             self.assertEqual((session.last_reflection or {}).get("reply_outcome_kind"), "explicit_location")
+        finally:
+            nova_http.nova_core.get_saved_location_text = orig_get_saved_location_text
+            nova_http.nova_core.execute_planned_action = orig_execute_planned_action
+            nova_http.nova_core._weather_current_location_available = orig_weather_current_location_available
+
+    def test_http_generic_weather_query_uses_current_location_when_available(self):
+        orig_get_saved_location_text = nova_http.nova_core.get_saved_location_text
+        orig_execute_planned_action = nova_http.nova_core.execute_planned_action
+        try:
+            nova_http.nova_core.get_saved_location_text = lambda: "Brownsville TX"
+            nova_http.nova_core.execute_planned_action = lambda tool, args=None: "Brownsville, TX: Today: 66°F, Sunny. [source: api.weather.gov]" if tool == "weather_current_location" else ""
+            reply = nova_http.process_chat("s11_generic_weather", "what is the weather like today ?")
+            self.assertIn("api.weather.gov", reply)
+            session = nova_http.SESSION_STATE_MANAGER.get("s11_generic_weather")
+            self.assertIsNotNone(session)
+            self.assertEqual((session.last_reflection or {}).get("reply_contract"), "weather_lookup.current_location")
+            self.assertEqual((session.last_reflection or {}).get("reply_outcome_kind"), "current_location")
         finally:
             nova_http.nova_core.get_saved_location_text = orig_get_saved_location_text
             nova_http.nova_core.execute_planned_action = orig_execute_planned_action
@@ -737,6 +844,107 @@ class TestNovaHttpProfile(unittest.TestCase):
         session = nova_http.SESSION_STATE_MANAGER.get("s_http_guess")
         self.assertIsNotNone(session)
         self.assertEqual("developer_role_guess:Gus", session.active_subject())
+
+
+class TestNovaHttpControlAssets(unittest.TestCase):
+    def test_work_trees_payload_summarizes_live_tree_counts(self):
+        payload = [
+            {
+                "tree_id": "tree_1",
+                "title": "Queue repair",
+                "status": "active",
+                "active_branch_id": "branch_1",
+                "counts": {
+                    "open_tasks": 2,
+                    "branches": {
+                        "active": 1,
+                        "ready": 2,
+                        "blocked": 1,
+                        "complete": 3,
+                    },
+                },
+            },
+            {
+                "tree_id": "tree_2",
+                "title": "Closed review",
+                "status": "complete",
+                "active_branch_id": "",
+                "counts": {
+                    "open_tasks": 0,
+                    "branches": {
+                        "complete": 2,
+                    },
+                },
+            },
+        ]
+
+        with mock.patch("nova_http.work_tree.list_visual_trees", return_value=payload):
+            result = nova_http._work_trees_payload()
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["counts"]["total"], 2)
+        self.assertEqual(result["counts"]["active"], 1)
+        self.assertEqual(result["counts"]["branches"], 9)
+        self.assertEqual(result["counts"]["open_tasks"], 2)
+        self.assertEqual(result["counts"]["working"], 1)
+        self.assertEqual(result["counts"]["pending"], 2)
+        self.assertEqual(result["counts"]["blocked"], 1)
+        self.assertEqual(result["counts"]["complete"], 5)
+        self.assertEqual(result["trees"], payload)
+
+    def test_work_trees_payload_keeps_generated_queue_tree_visible_when_trimmed(self):
+        limited_payload = [
+            {
+                "tree_id": "tree_1",
+                "title": "Queue repair",
+                "status": "active",
+                "active_branch_id": "branch_1",
+                "counts": {
+                    "open_tasks": 1,
+                    "branches": {"active": 1},
+                },
+            }
+        ]
+        generated_queue_tree = {
+            "tree_id": "tree_generated",
+            "title": "Generated Queue: governed self-repair",
+            "kind": "generated_queue",
+            "status": "complete",
+            "active_branch_id": "",
+            "counts": {
+                "open_tasks": 0,
+                "branches": {"complete": 1},
+            },
+        }
+
+        with mock.patch(
+            "nova_http.work_tree.list_visual_trees",
+            side_effect=[limited_payload, limited_payload + [generated_queue_tree]],
+        ):
+            result = nova_http._work_trees_payload()
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["counts"]["total"], 2)
+        self.assertEqual(
+            [tree.get("tree_id") for tree in result["trees"]],
+            ["tree_1", "tree_generated"],
+        )
+
+    def test_control_assets_keep_scheduled_tree_surface(self):
+        html = nova_http._render_control_html()
+        js = nova_http._read_asset_text(nova_http.CONTROL_JS_PATH)
+
+        self.assertIn('data-view-target="scheduled-tree"', html)
+        self.assertIn('data-view="scheduled-tree"', html)
+        self.assertIn('id="workTreeSelect"', html)
+        self.assertIn('id="workTreeSvg"', html)
+        self.assertIn('id="workTreeBranchInfo"', html)
+        self.assertIn("/api/control/work-trees", js)
+        self.assertIn("renderWorkTrees", js)
+        self.assertIn("renderTreeSvg", js)
+        self.assertIn("btnWorkTreesRefresh", js)
+        self.assertIn("function initialControlView()", js)
+        self.assertIn("setActiveView(initialControlView())", js)
 
 
 if __name__ == "__main__":

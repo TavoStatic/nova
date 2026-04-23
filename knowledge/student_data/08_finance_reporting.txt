@@ -1,0 +1,10 @@
+﻿Finance Reporting
+
+Financial student_data data includes:
+
+• District budgets
+• Payroll expenditures
+• Federal funding
+• Program allocations
+
+

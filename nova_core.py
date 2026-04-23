@@ -12,11 +12,14 @@
 from __future__ import annotations
 
 import argparse
+import importlib
+import asyncio
 import ast
-from dataclasses import dataclass, field
+import importlib.util
 import io
 import json
 import os
+import math
 import queue
 import re
 import socket
@@ -42,23 +45,119 @@ from env_inspector import inspect_environment, format_report
 import requests
 import psutil
 from tools import ToolContext, ToolInvocationError, build_default_registry
+from services.behavior_metrics import BehaviorMetricsStore
+from services.policy_manager import PolicyManager
+from services.web_research_session import WebResearchSessionStore
+from services.identity_memory import IdentityMemoryService
+from services.tool_registry import ToolRegistryService
+from services.tool_execution import ToolExecutionService
+from services.memory_adapter import MemoryAdapterService
+from services.session_state import SessionStateService, SubconsciousState
+from services.fulfillment_flow import FulfillmentFlowService
+from services.subconscious_runtime import SUBCONSCIOUS_SERVICE
+from services.subconscious_reporting import build_robust_weakness_summary, build_training_backlog_summary
+from services.nova_fulfillment_routing import evaluate_fulfillment_route_viability
+from services.nova_route_probing import build_probe_turn_routes
+from services.nova_route_probing import evaluate_deterministic_route_viability
+from services.nova_service_builders import build_fulfillment_flow_service
+from services.nova_service_builders import build_identity_memory_service
+from services.nova_service_builders import build_policy_manager
+from services.nova_turn_direction import analyze_routing_text
+from services.nova_turn_direction import determine_turn_direction
+from services.nova_turn_direction import is_explicit_command_like
+from services.nova_memory_learning import mem_get_recent_learned as service_mem_get_recent_learned
+from services.nova_memory_learning import mem_stats_payload as service_mem_stats_payload
+from services.nova_profile_followups import developer_identity_followup_reply as service_developer_identity_followup_reply
+from services.nova_profile_followups import developer_profile_reply as service_developer_profile_reply
+from services.nova_profile_followups import infer_profile_conversation_state as service_infer_profile_conversation_state
+from services.nova_pulse import _patch_activity_summary as service_patch_activity_summary
+from services.nova_pulse import _promotion_audit_summary as service_promotion_audit_summary
+from services.nova_pulse import render_nova_pulse as service_render_nova_pulse
+from services.nova_tool_dispatch import execute_planned_action as service_execute_planned_action
+from services.nova_action_ledger_helpers import action_ledger_add_step as service_action_ledger_add_step
+from services.nova_action_ledger_helpers import detect_repeated_tool_intent_without_execution as service_detect_repeated_tool_intent_without_execution
+from services.nova_identity_history import execute_identity_history_outcome as service_execute_identity_history_outcome
+from services.nova_knowledge_packs import build_local_topic_digest_answer as service_build_local_topic_digest_answer
+from services.nova_location_weather import tool_weather as service_tool_weather
+from services.nova_location_weather import device_location_status_payload as service_device_location_status_payload
+from services.nova_location_weather import resolve_windows_device_coords as service_resolve_windows_device_coords
+from services.nova_patching import behavioral_check as service_behavioral_check
+from services.nova_patching import interactive_preview_review as service_interactive_preview_review
+from services.nova_patching import teach_autoapply_proposal as service_teach_autoapply_proposal
+from services.nova_patching import teach_propose_patch as service_teach_propose_patch
+from services.nova_developer_profile import learn_contextual_developer_facts as service_learn_contextual_developer_facts
+from services.nova_profile_followups import identity_profile_followup_reply as service_identity_profile_followup_reply
+from services.nova_retrieval_followups import execute_retrieval_followup_outcome as service_execute_retrieval_followup_outcome
+from services.nova_reply_contracts import classify_weather_lookup_outcome as service_classify_weather_lookup_outcome
+from services.nova_reply_contracts import classify_correction_outcome as service_classify_correction_outcome
+from services.nova_reply_contracts import classify_store_fact_outcome as service_classify_store_fact_outcome
+from services.nova_reply_sanitizer import sanitize_llm_reply as service_sanitize_llm_reply
+from services.nova_routing_support import finalize_routing_decision as service_finalize_routing_decision
+from services.nova_routing_support import llm_classify_routing_intent as service_llm_classify_routing_intent
+from services.nova_routing_support import looks_like_open_fallback_turn as service_looks_like_open_fallback_turn
+from services.nova_tool_policy import web_fetch as service_web_fetch
+from services.nova_web_tools import fetch_sitemap_urls as service_fetch_sitemap_urls
+from services.nova_web_tools import scan_candidate_urls_for_query as service_scan_candidate_urls_for_query
+from services.nova_action_ledger import finalize_action_ledger_record as service_finalize_action_ledger_record
+from services.nova_knowledge_packs import kb_search as service_kb_search
+from services.patch_control import PATCH_CONTROL_SERVICE
+from services.nova_memory_learning import mem_audit as service_mem_audit
+from services.nova_memory_learning import mem_recall as service_mem_recall
+from services.nova_patching import patch_preview as service_patch_preview
+from services.nova_patching import patch_preview_summaries as service_patch_preview_summaries
+from services.nova_patching import patch_status_payload as service_patch_status_payload
+from services.nova_pulse import build_pulse_payload as service_build_pulse_payload
+from services.nova_reflection_health import maybe_log_self_reflection as service_maybe_log_self_reflection
+from services.nova_search_endpoint import probe_search_endpoint as service_probe_search_endpoint
+from services.nova_turn_heuristics import is_declarative_info as service_is_declarative_info
+from services.nova_command_handlers import handle_commands as service_handle_commands
+from services.nova_correction_parsing import safe_eval_arithmetic_expression as service_safe_eval_arithmetic_expression
+from services.nova_ollama_chat import ollama_chat as service_ollama_chat
+from services.nova_reply_guards import sentence_supported_by_evidence as service_sentence_supported_by_evidence
+from services.nova_session_followups import build_session_fact_sheet as service_build_session_fact_sheet
+from services.nova_truth_hierarchy import hard_answer as service_hard_answer
+from services.nova_truth_hierarchy import truth_hierarchy_answer as service_truth_hierarchy_answer
+from services.nova_web_tools import tool_stackexchange_search as service_tool_stackexchange_search
+from services.nova_web_tools import tool_web_gather as service_tool_web_gather
+from services.nova_web_tools import tool_web_research as service_tool_web_research
+from services.nova_web_tools import tool_web_search as service_tool_web_search
+from services.nova_web_tools import tool_wikipedia_lookup as service_tool_wikipedia_lookup
+from services.nova_cli_loop import run_loop as service_run_loop
+from services.nova_followup_dispatch import consume_conversation_followup as service_consume_conversation_followup
+from services.nova_memory_learning import learn_from_user_correction as service_learn_from_user_correction
+from services.nova_memory_learning import mem_add as service_mem_add
+from services.nova_patching import patch_apply as service_patch_apply
+from services.nova_supervisor_flow import execute_registered_supervisor_rule as service_execute_registered_supervisor_rule
+from services.nova_supervisor_flow import handle_supervisor_intent as service_handle_supervisor_intent
+from services.nova_runtime_context import ACTION_LEDGER_DIR
+from services.nova_runtime_context import AUTONOMY_MAINTENANCE_FILE
+from services.nova_runtime_context import BASE_DIR
+from services.nova_runtime_context import BEHAVIOR_METRICS_FILE
+from services.nova_runtime_context import DEVICE_LOCATION_FILE
+from services.nova_runtime_context import GENERATED_DEFINITIONS_DIR
+from services.nova_runtime_context import HEALTH_LOG
+from services.nova_runtime_context import IDENTITY_FILE
+from services.nova_runtime_context import LEARNED_FACTS_FILE
+from services.nova_runtime_context import LOG_DIR
+from services.nova_runtime_context import MEMORY_DIR
+from services.nova_runtime_context import MEMORY_EVENTS_LOG
+from services.nova_runtime_context import PENDING_REVIEW_DIR
+from services.nova_runtime_context import POLICY_PATH
+from services.nova_runtime_context import PROMOTED_DEFINITIONS_DIR
+from services.nova_runtime_context import PROMOTION_AUDIT_LOG
+from services.nova_runtime_context import PULSE_SNAPSHOT_FILE
+from services.nova_runtime_context import PYTHON
+from services.nova_runtime_context import QUARANTINE_DIR
+from services.nova_runtime_context import RUNTIME_DIR
+from services.nova_runtime_context import SELF_REFLECTION_LOG
+from services.nova_runtime_context import TEST_SESSIONS_DIR
+from services.nova_runtime_context import UPDATE_NOW_PENDING_FILE
+from services.nova_runtime_context import get_active_user
+from services.nova_runtime_context import set_active_user
 try:
     import memory as memory_mod
 except Exception:
     memory_mod = None
-
-# Active session user id (thread-local so concurrent HTTP requests cannot bleed identity)
-_ACTIVE_USER_LOCAL = threading.local()
-
-def set_active_user(name: Optional[str]):
-    if not name:
-        _ACTIVE_USER_LOCAL.value = None
-    else:
-        _ACTIVE_USER_LOCAL.value = str(name).strip()
-
-def get_active_user() -> Optional[str]:
-    v = getattr(_ACTIVE_USER_LOCAL, "value", None)
-    return str(v).strip() if v else None
 
 # -------------------------
 # Voice deps are optional
@@ -98,56 +197,12 @@ def _ensure_voice_deps() -> bool:
 
     return VOICE_OK
 
-
+import sys
 
 
 # =========================
 # Config / Policy
 # =========================
-import sys
-
-# Robust BASE_DIR detection
-if getattr(sys, "frozen", False):
-    # Running as compiled executable
-    BASE_DIR = Path(sys.executable).resolve().parent
-else:
-    # Running as normal Python script
-    BASE_DIR = Path(__file__).resolve().parent
-
-RUNTIME_DIR = BASE_DIR / "runtime"
-LOG_DIR = BASE_DIR / "logs"
-MEMORY_DIR = BASE_DIR / "memory"
-ACTION_LEDGER_DIR = RUNTIME_DIR / "actions"
-MEMORY_EVENTS_LOG = RUNTIME_DIR / "memory_events.jsonl"
-HEALTH_LOG = RUNTIME_DIR / "health.log"
-IDENTITY_FILE = MEMORY_DIR / "identity.json"
-LEARNED_FACTS_FILE = MEMORY_DIR / "learned_facts.json"
-BEHAVIOR_METRICS_FILE = RUNTIME_DIR / "behavior_metrics.json"
-SELF_REFLECTION_LOG = RUNTIME_DIR / "self_reflection.jsonl"
-AUTONOMY_MAINTENANCE_FILE = RUNTIME_DIR / "autonomy_maintenance_state.json"
-PULSE_SNAPSHOT_FILE = RUNTIME_DIR / "pulse_snapshot.json"
-UPDATE_NOW_PENDING_FILE = RUNTIME_DIR / "update_now_pending.json"
-TEST_SESSIONS_DIR = RUNTIME_DIR / "test_sessions"
-GENERATED_DEFINITIONS_DIR = TEST_SESSIONS_DIR / "generated_definitions"
-PENDING_REVIEW_DIR = TEST_SESSIONS_DIR / "pending_review"
-QUARANTINE_DIR = TEST_SESSIONS_DIR / "quarantine"
-PROMOTION_AUDIT_LOG = TEST_SESSIONS_DIR / "promotion_audit.jsonl"
-PROMOTED_DEFINITIONS_DIR = BASE_DIR / "tests" / "sessions"
-POLICY_PATH = BASE_DIR / "policy.json"
-
-
-def _resolve_python_executable() -> str:
-    candidates = [
-        BASE_DIR / ".venv" / "Scripts" / "python.exe",
-        BASE_DIR / ".venv" / "bin" / "python",
-    ]
-    for path in candidates:
-        if path.exists():
-            return str(path)
-    return str(Path(sys.executable).resolve())
-
-
-PYTHON = _resolve_python_executable()
 OLLAMA_BASE = "http://127.0.0.1:11434"
 
 SAMPLE_RATE = 16000
@@ -191,47 +246,40 @@ PATCH_MANIFEST_NAME = "nova_patch.json"
 POLICY_AUDIT_LOG = RUNTIME_DIR / "policy_changes.jsonl"
 
 # Session-scoped web research continuation cache.
-WEB_RESEARCH_LAST_QUERY: str = ""
-WEB_RESEARCH_LAST_RESULTS: list[tuple[float, str, str]] = []
-WEB_RESEARCH_CURSOR: int = 0
+WEB_RESEARCH_SESSION = WebResearchSessionStore()
+
+
 TOOL_REGISTRY = build_default_registry()
 
-BEHAVIOR_METRICS: dict = {
-    "deterministic_hit": 0,
-    "tool_route": 0,
-    "llm_fallback": 0,
-    "low_confidence_block": 0,
-    "correction_learned": 0,
-    "correction_applied": 0,
-    "self_correction_applied": 0,
-    "conflict_detected": 0,
-    "top_repeated_failure_class": "",
-    "top_repeated_correction_class": "",
-    "routing_stable": True,
-    "unsupported_claims_blocked": False,
-    "last_reflection_turn": 0,
-    "last_reflection_at": "",
-    "last_event": "",
-    "updated_at": "",
-}
+# Tool registry service with event logging and manifest management
+TOOL_MANIFEST_FILE = BASE_DIR / "TOOL_MANIFEST.json"
+TOOL_EVENTS_FILE = RUNTIME_DIR / "tool_events.jsonl"
+TOOL_REGISTRY_SERVICE = ToolRegistryService(TOOL_REGISTRY, TOOL_MANIFEST_FILE, TOOL_EVENTS_FILE)
+
+BEHAVIOR_METRICS_STORE = BehaviorMetricsStore(BEHAVIOR_METRICS_FILE)
+BEHAVIOR_METRICS: dict = BEHAVIOR_METRICS_STORE.metrics
+
+def _policy_manager() -> PolicyManager:
+    return build_policy_manager(POLICY_PATH, POLICY_AUDIT_LOG, BASE_DIR)
+
+# Identity and memory service for clean-slate session enforcement
+def _identity_memory_service() -> IdentityMemoryService:
+    """Dynamic service creation with test-time path override support."""
+    service = build_identity_memory_service(
+        normalize_text_fn=_normalize_turn_text,
+        location_query_fn=_is_location_recall_query,
+        location_name_fn=_is_location_name_query,
+        saved_location_weather_fn=_is_saved_location_weather_query,
+        peims_query_fn=_is_peims_broad_query,
+        declarative_info_fn=_is_declarative_info,
+    )
+    return service
 
 TURN_SUPERVISOR = Supervisor()
 
 
 def _identity_memory_text_allowed(kind: str, text: str) -> bool:
-    if str(kind or "").strip().lower() != "identity":
-        return True
-    low = re.sub(r"\s+", " ", str(text or "").strip().lower())
-    if not low:
-        return False
-    if "nova_name_origin:" in low:
-        return True
-    return low.startswith((
-        "learned_fact: assistant_name=",
-        "learned_fact: developer_name=",
-        "learned_fact: developer_nickname=",
-        "learned_fact: identity_binding=developer",
-    ))
+    return _identity_memory_service().is_identity_memory_text_allowed(kind, text)
 
 
 def _session_identity_only_mode(session_id: str) -> bool:
@@ -242,261 +290,33 @@ def _session_identity_only_mode(session_id: str) -> bool:
 
 
 def _looks_like_identity_only_location_text(user_text: str) -> bool:
-    raw = str(user_text or "").strip()
-    if not raw:
-        return False
-    explicit_patterns = (
-        r"^\s*the\s+(\d{5})\s+is\s+the\s+zip\s+code\s+for\s+your\s+current\s+physical\s+location\s*[.!?]*$",
-        r"^\s*my\s+zip\s+is\s+(.+?)\s*[.!?]*$",
-        r"^\s*set\s+location\s+to\s+(.+?)\s*[.!?]*$",
-        r"^\s*(?:my|your|the)(?:\s+(?:current|physical))?\s+location\s+is\s+(.+?)\s*[.!?]*$",
-        r"^\s*i\s*(?:am|m)\s+in\s+(.+?)\s*[.!?]*$",
-        r"^\s*i\s+am\s+located\s+in\s+(.+?)\s*[.!?]*$",
-        r"^\s*you\s+are\s+located\s+in\s+(.+?)\s*[.!?]*$",
-        r"^\s*(?:living|based)\s+in\s+(.+?)\s*[.!?]*$",
-    )
-    return any(re.match(pattern, raw, flags=re.I) for pattern in explicit_patterns)
+    return _identity_memory_service().looks_like_identity_only_location_text(user_text)
 
 
 def _identity_only_block_kind(user_text: str, *, intent_result: Optional[dict] = None) -> str:
-    text = str(user_text or "").strip()
-    low = _normalize_turn_text(text).strip().lower()
-    intent = str((intent_result or {}).get("intent") or "").strip().lower()
-    if not low and not intent:
-        return ""
-
-    if intent in {"set_location", "weather_lookup", "store_fact", "web_research_family"}:
-        return {
-            "set_location": "location",
-            "weather_lookup": "weather",
-            "store_fact": "memory",
-            "web_research_family": "web",
-        }.get(intent, "") or ""
-
-    if _looks_like_identity_only_location_text(text) or _is_location_recall_query(text) or _is_location_name_query(text):
-        return "location"
-    if "weather" in low or _is_saved_location_weather_query(text):
-        return "weather"
-    if _is_peims_broad_query(text) or "peims" in low or "tsds" in low:
-        return "knowledge"
-    if _is_declarative_info(text):
-        return "memory"
-    return ""
+    return _identity_memory_service().get_identity_only_block_kind(user_text, intent_result=intent_result)
 
 
 def _identity_only_block_reply(block_kind: str) -> str:
-    domain = str(block_kind or "").strip().lower()
-    if domain == "location":
-        return "This clean session is identity-only, so I won't store or use location here."
-    if domain == "weather":
-        return "This clean session is identity-only, so I won't run weather lookups here."
-    if domain == "web":
-        return "This clean session is identity-only, so I won't run web research here."
-    if domain == "knowledge":
-        return "This clean session is identity-only, so I won't use local knowledge grounding here."
-    if domain == "memory":
-        return "This clean session is identity-only, so I won't store general memory here."
-    return "This clean session is identity-only, so I won't run non-identity routing here."
+    return _identity_memory_service().get_identity_only_block_reply(block_kind)
 
 
 def _save_behavior_metrics() -> None:
-    try:
-        RUNTIME_DIR.mkdir(parents=True, exist_ok=True)
-        tmp = BEHAVIOR_METRICS_FILE.with_suffix(".json.tmp")
-        tmp.write_text(json.dumps(BEHAVIOR_METRICS, ensure_ascii=True, indent=2), encoding="utf-8")
-        tmp.replace(BEHAVIOR_METRICS_FILE)
-    except Exception:
-        pass
+    BEHAVIOR_METRICS_STORE.save()
 
 
-def _get_session_fulfillment_state(session: object) -> Optional[dict]:
-    state = getattr(session, "fulfillment_state", None)
-    return state if isinstance(state, dict) else None
+_FULFILLMENT_FLOW_SERVICE: Optional[FulfillmentFlowService] = None
 
 
-def _set_session_fulfillment_state(session: object, state: Optional[dict]) -> None:
-    try:
-        setattr(session, "fulfillment_state", state if isinstance(state, dict) else None)
-    except Exception:
-        pass
-
-
-@dataclass(slots=True)
-class SubconsciousState:
-    replan_requested: bool = False
-    crack_counts: dict[str, int] = field(default_factory=dict)
-    recent_pressure_records: list[object] = field(default_factory=list)
-
-
-_SUBCONSCIOUS_IMMEDIATE_REPLAN_SIGNALS = set(SUBCONSCIOUS_CHARTER["signal_handling_rules"]["replan_immediate_signals"])
-_SUBCONSCIOUS_WEAK_CRACK_SIGNALS = set(SUBCONSCIOUS_CHARTER["signal_handling_rules"]["weak_crack_signals"])
-_MAX_RECENT_PRESSURE_RECORDS = int(SUBCONSCIOUS_CHARTER["crack_accumulation_rules"]["recent_pressure_window_cap"])
-
-
-def _get_subconscious_snapshot(session: object) -> dict:
-    state = getattr(session, "subconscious_state", None)
-    if not isinstance(state, SubconsciousState):
-        return {
-            "replan_requested": False,
-            "active_recent_signals": [],
-            "crack_counts": {},
-            "recent_pressure_records": [],
-            "record_window": {"count": 0, "cap": _MAX_RECENT_PRESSURE_RECORDS},
-        }
-
-    recent_records = list(state.recent_pressure_records or [])
-    recent_summaries = []
-    active_recent_signals: list[str] = []
-    for record in recent_records[-3:]:
-        signals = [str(signal).strip() for signal in list(getattr(record, "signals", []) or []) if str(signal).strip()]
-        for signal in signals:
-            if signal not in active_recent_signals:
-                active_recent_signals.append(signal)
-        recent_summaries.append(
-            {
-                "chosen_route": str(getattr(record, "chosen_route", "") or "") or None,
-                "comparison_strength": str(getattr(record, "comparison_strength", "") or "").strip().lower() or "weak",
-                "signals": list(signals),
-                "weak_spots": [
-                    str(item).strip()
-                    for item in list(getattr(record, "weak_spots", []) or [])
-                    if str(item).strip()
-                ],
-            }
+def _fulfillment_flow_service() -> FulfillmentFlowService:
+    global _FULFILLMENT_FLOW_SERVICE
+    if _FULFILLMENT_FLOW_SERVICE is None:
+        _FULFILLMENT_FLOW_SERVICE = build_fulfillment_flow_service(
+            probe_turn_routes_fn=_probe_turn_routes,
+            update_subconscious_state_fn=SUBCONSCIOUS_SERVICE.update_state,
+            session_state_service=SessionStateService,
         )
-
-    return {
-        "replan_requested": bool(state.replan_requested),
-        "active_recent_signals": active_recent_signals,
-        "crack_counts": {str(key): int(value) for key, value in dict(state.crack_counts or {}).items()},
-        "recent_pressure_records": recent_summaries,
-        "record_window": {
-            "count": len(recent_records),
-            "cap": _MAX_RECENT_PRESSURE_RECORDS,
-        },
-    }
-
-
-def _get_subconscious_training_backlog_summary(session: object) -> Optional[dict]:
-    snapshot = _get_subconscious_snapshot(session)
-    try:
-        from subconscious_training_backlog import build_training_backlog
-    except Exception:
-        return None
-
-    backlog = build_training_backlog(snapshot)
-    candidate_tests = list(getattr(backlog, "candidate_tests", []) or [])
-    if not candidate_tests:
-        return None
-
-    return {
-        "replan_requested": bool(getattr(backlog, "replan_requested", False)),
-        "candidate_tests": [
-            {
-                "signal": str(getattr(item, "signal", "") or "").strip(),
-                "occurrences": max(0, int(getattr(item, "occurrences", 0) or 0)),
-                "priority": str(getattr(item, "priority", "") or "").strip().lower() or "low",
-                "suggested_test_name": str(getattr(item, "suggested_test_name", "") or "").strip(),
-                "rationale": str(getattr(item, "rationale", "") or "").strip(),
-            }
-            for item in candidate_tests
-            if str(getattr(item, "signal", "") or "").strip()
-        ],
-    }
-
-
-def _get_subconscious_robust_weakness_summary(session: object) -> Optional[dict]:
-    family_summary = getattr(session, "subconscious_live_family_summary", None)
-    if family_summary is None:
-        return None
-
-    def _extract_items(name: str) -> list[dict]:
-        values = getattr(family_summary, name, None)
-        if values is None and isinstance(family_summary, dict):
-            values = family_summary.get(name)
-        items = []
-        for item in list(values or []):
-            payload = dict(item) if isinstance(item, dict) else None
-            if payload is None:
-                continue
-            cleaned = {
-                "signal": str(payload.get("signal") or "").strip(),
-                "classification": str(payload.get("classification") or "").strip(),
-                "robustness_score": round(float(payload.get("robustness_score", 0.0) or 0.0), 4),
-            }
-            if str(payload.get("suggested_test_name") or "").strip():
-                cleaned["suggested_test_name"] = str(payload.get("suggested_test_name") or "").strip()
-            if cleaned["signal"]:
-                items.append(cleaned)
-        return items
-
-    quiet_control_verdict = getattr(family_summary, "quiet_control_verdict", None)
-    if quiet_control_verdict is None and isinstance(family_summary, dict):
-        quiet_control_verdict = family_summary.get("quiet_control_verdict")
-    quiet_control_payload = dict(quiet_control_verdict) if isinstance(quiet_control_verdict, dict) else {}
-
-    robust_signals = _extract_items("robust_signals")
-    script_specific_signals = _extract_items("script_specific_signals")
-    robust_backlog_candidates = _extract_items("robust_backlog_candidates")
-
-    if not robust_signals and not script_specific_signals and not robust_backlog_candidates and not quiet_control_payload:
-        return None
-
-    summary = {
-        "robust_signals": robust_signals,
-        "script_specific_signals": script_specific_signals,
-        "robust_backlog_candidates": robust_backlog_candidates,
-        "quiet_control_verdict": {
-            "quiet_control": bool(quiet_control_payload.get("quiet_control", False)),
-            "status": str(quiet_control_payload.get("status") or "").strip(),
-        },
-    }
-    if str(quiet_control_payload.get("reason") or "").strip():
-        summary["quiet_control_verdict"]["reason"] = str(quiet_control_payload.get("reason") or "").strip()
-    return summary
-
-
-def _update_subconscious_state(
-    session: object,
-    probe_result: dict,
-    *,
-    chosen_route: Optional[str] = None,
-) -> Optional[SubconsciousState]:
-    if not isinstance(probe_result, dict):
-        return None
-
-    try:
-        from subconscious_route_probe import analyze_route_pressure
-    except Exception:
-        return None
-
-    existing_state = getattr(session, "subconscious_state", None)
-    state = existing_state if isinstance(existing_state, SubconsciousState) else SubconsciousState()
-    record = analyze_route_pressure(probe_result, chosen_route=chosen_route)
-
-    for signal in list(record.signals or []):
-        cleaned = str(signal or "").strip()
-        if cleaned:
-            state.crack_counts[cleaned] = int(state.crack_counts.get(cleaned, 0)) + 1
-
-    state.recent_pressure_records.append(record)
-    if len(state.recent_pressure_records) > _MAX_RECENT_PRESSURE_RECORDS:
-        state.recent_pressure_records = state.recent_pressure_records[-_MAX_RECENT_PRESSURE_RECORDS:]
-
-    repeated_weak_crack = any(
-        state.crack_counts.get(signal, 0) >= 2
-        for signal in list(record.signals or [])
-        if signal in _SUBCONSCIOUS_WEAK_CRACK_SIGNALS
-    )
-    state.replan_requested = any(
-        signal in _SUBCONSCIOUS_IMMEDIATE_REPLAN_SIGNALS for signal in list(record.signals or [])
-    ) or repeated_weak_crack
-
-    try:
-        setattr(session, "subconscious_state", state)
-    except Exception:
-        return state
-    return state
+    return _FULFILLMENT_FLOW_SERVICE
 
 
 def _fulfillment_route_viability(
@@ -506,87 +326,14 @@ def _fulfillment_route_viability(
     *,
     pending_action: Optional[dict] = None,
 ) -> dict:
-    state = _get_session_fulfillment_state(session)
-    text = str(user_text or "").strip()
-    low = text.lower()
-    conversation_state = getattr(session, "conversation_state", None)
-    state_kind = str(conversation_state.get("kind") or "").strip().lower() if isinstance(conversation_state, dict) else ""
-
-    if state is not None:
-        return {
-            "viable": True,
-            "fit_notes": ["existing fulfillment state present", "follow-up can replan current fulfillment space"],
-            "comparison_strength": "clear",
-        }
-    if isinstance(pending_action, dict):
-        return {
-            "viable": False,
-            "fit_notes": ["pending action is active", "fulfillment should not interrupt explicit continuation"],
-            "comparison_strength": "clear",
-        }
-    if state_kind and state_kind != "fulfillment":
-        return {
-            "viable": False,
-            "fit_notes": [f"active conversation state is {state_kind}", "fulfillment should not take over another active thread"],
-            "comparison_strength": "clear",
-        }
-    if len(text.split()) < 4:
-        return {
-            "viable": False,
-            "fit_notes": ["turn is too short", "not enough information to open a fulfillment space"],
-            "comparison_strength": "weak",
-        }
-    if low in {"yes", "no", "ok", "okay", "continue", "go ahead"} or _looks_like_affirmative_followup(text):
-        return {
-            "viable": False,
-            "fit_notes": ["turn looks like a short continuation", "fulfillment should not guess from a minimal follow-up"],
-            "comparison_strength": "weak",
-        }
-
-    model_space_cues = (
-        " options",
-        " option ",
-        " ways",
-        " way to",
-        " approaches",
-        " approach ",
-        " compare ",
-        " tradeoff",
-        " trade-off",
-        " path ",
-        " paths",
-        " best way",
-        " how should i",
-        " what are my options",
-        " help me decide",
-        " help me figure out",
-        " help me choose",
-        " show me workable",
-        " show me options",
+    return evaluate_fulfillment_route_viability(
+        user_text,
+        session,
+        recent_turns,
+        pending_action=pending_action,
+        get_fulfillment_state_fn=SessionStateService.get_fulfillment_state,
+        looks_like_affirmative_followup_fn=_looks_like_affirmative_followup,
     )
-    starts_like_model_space = low.startswith((
-        "compare ",
-        "show me ",
-        "help me decide",
-        "help me choose",
-        "how should i ",
-        "what are my options",
-    ))
-    cue_match = any(cue in f" {low} " for cue in model_space_cues)
-    if starts_like_model_space or cue_match:
-        notes = ["turn suggests multiple possible ways forward", "fulfillment comparison may be useful"]
-        if recent_turns:
-            notes.append("recent turns are available for intent context")
-        return {
-            "viable": True,
-            "fit_notes": notes,
-            "comparison_strength": "clear",
-        }
-    return {
-        "viable": False,
-        "fit_notes": ["no model-space cues detected", "generic fallback is a safer default"],
-        "comparison_strength": "weak",
-    }
 
 
 def _deterministic_route_viability(
@@ -596,108 +343,20 @@ def _deterministic_route_viability(
     *,
     pending_action: Optional[dict] = None,
 ) -> dict:
-    intent_result = TURN_SUPERVISOR.evaluate_rules(
-        user_text,
-        manager=session,
-        turns=recent_turns,
-        phase="intent",
-        entry_point="probe",
-    )
-    handle_result = TURN_SUPERVISOR.evaluate_rules(
-        user_text,
-        manager=session,
-        turns=recent_turns,
-        phase="handle",
-        entry_point="probe",
-    )
-
-    owned_result = intent_result if _supervisor_result_has_route(intent_result) else handle_result
-    if _supervisor_result_has_route(owned_result):
-        notes = [
-            note for note in [
-                f"explicit supervisor rule: {str(owned_result.get('rule_name') or '').strip()}",
-                f"intent: {str(owned_result.get('intent') or '').strip()}" if str(owned_result.get("intent") or "").strip() else "",
-                f"action: {str(owned_result.get('action') or '').strip()}" if str(owned_result.get("action") or "").strip() else "",
-            ] if note
-        ]
-        return {
-            "viable": True,
-            "fit_notes": notes,
-            "comparison_strength": "clear",
-            "owner_kind": "supervisor",
-            "intent_result": intent_result,
-            "handle_result": handle_result,
-            "owned_result": owned_result,
-        }
-
     try:
         from planner_decision import decide_turn
     except Exception:
-        return {
-            "viable": False,
-            "fit_notes": [],
-            "comparison_strength": "weak",
-            "owner_kind": "",
-            "intent_result": intent_result,
-            "handle_result": handle_result,
-            "owned_result": {},
-        }
+        decide_turn = None
 
-    planner_actions = decide_turn(
+    return evaluate_deterministic_route_viability(
         user_text,
-        config={
-            "session_turns": list(recent_turns or []),
-            "pending_action": dict(pending_action) if isinstance(pending_action, dict) else None,
-        },
+        session,
+        recent_turns,
+        pending_action=pending_action,
+        evaluate_rules_fn=TURN_SUPERVISOR.evaluate_rules,
+        supervisor_result_has_route_fn=_supervisor_result_has_route,
+        planner_decide_turn_fn=decide_turn,
     )
-    first_action = planner_actions[0] if isinstance(planner_actions, list) and planner_actions else {}
-    action_type = str(first_action.get("type") or "").strip()
-    tool_name = str(first_action.get("tool") or "").strip()
-
-    if action_type == "route_keyword":
-        return {
-            "viable": True,
-            "fit_notes": ["planner keyword route is deterministic", "keyword route keeps follow-up handling out of fallback"],
-            "comparison_strength": "clear",
-            "owner_kind": "planner_keyword",
-            "intent_result": intent_result,
-            "handle_result": handle_result,
-            "owned_result": {"action": "route_keyword", "rule_name": "planner_keyword"},
-        }
-
-    if action_type == "run_tool" and tool_name in {"patch_apply", "patch_rollback"}:
-        return {
-            "viable": True,
-            "fit_notes": ["planner direct-tool route is deterministic", "patch apply should not be treated as generic fallback"],
-            "comparison_strength": "clear",
-            "owner_kind": "planner_direct_tool",
-            "intent_result": intent_result,
-            "handle_result": handle_result,
-            "owned_result": {"action": tool_name, "rule_name": "planner_direct_tool", "intent": tool_name},
-        }
-
-    if action_type == "route_command":
-        normalized_text = str(user_text or "").strip().lower()
-        if normalized_text.startswith("patch ") or normalized_text == "patch rollback":
-            return {
-                "viable": True,
-                "fit_notes": ["planner command route is deterministic", "patch command should not be treated as generic fallback"],
-                "comparison_strength": "clear",
-                "owner_kind": "planner_command",
-                "intent_result": intent_result,
-                "handle_result": handle_result,
-                "owned_result": {"action": "route_command", "rule_name": "planner_command", "intent": "patch_command"},
-            }
-
-    return {
-        "viable": False,
-        "fit_notes": [],
-        "comparison_strength": "weak",
-        "owner_kind": "",
-        "intent_result": intent_result,
-        "handle_result": handle_result,
-        "owned_result": {},
-    }
 
 
 def _probe_turn_routes(
@@ -721,244 +380,31 @@ def _probe_turn_routes(
         recent_turns,
         pending_action=pending_action,
     )
-
-    generic_fallback_viable = True
-    generic_notes = ["generic fallback remains available if no explicit owner or useful fulfillment comparison exists"]
-    comparison_strength = "clear"
-    if supervisor_viable and fulfillment.get("viable"):
-        comparison_strength = "weak"
-        generic_notes.append("multiple routes are viable; no route should claim ownership in probe mode")
-    elif not supervisor_viable and not fulfillment.get("viable"):
-        comparison_strength = str(fulfillment.get("comparison_strength") or "weak")
-        generic_notes.append("fallback is the likely route because explicit ownership and fulfillment both look weak")
-
-    return {
-        "user_text": text if (text := str(user_text or "").strip()) else "",
-        "comparison_strength": comparison_strength,
-        "routes": {
-            "supervisor_owned": {
-                "viable": supervisor_viable,
-                "fit_notes": list(deterministic.get("fit_notes") or []),
-            },
-            "fulfillment_applicable": {
-                "viable": bool(fulfillment.get("viable")),
-                "fit_notes": list(fulfillment.get("fit_notes") or []),
-            },
-            "generic_fallback": {
-                "viable": generic_fallback_viable,
-                "fit_notes": generic_notes,
-            },
-        },
-    }
-
-
-def _should_attempt_fulfillment_flow(
-    user_text: str,
-    session: object,
-    recent_turns: list[tuple[str, str]],
-    *,
-    pending_action: Optional[dict] = None,
-) -> bool:
-    probe = _probe_turn_routes(
-        user_text,
-        session,
-        recent_turns,
-        pending_action=pending_action,
-    )
-    routes = probe.get("routes") if isinstance(probe.get("routes"), dict) else {}
-    supervisor_route = routes.get("supervisor_owned") if isinstance(routes.get("supervisor_owned"), dict) else {}
-    fulfillment_route = routes.get("fulfillment_applicable") if isinstance(routes.get("fulfillment_applicable"), dict) else {}
-    if bool(supervisor_route.get("viable")):
-        return False
-    if not bool(fulfillment_route.get("viable")):
-        return False
-    return str(probe.get("comparison_strength") or "weak").strip().lower() == "clear"
-
-
-def _build_fulfillment_state(
-    intent: object,
-    models: list[object],
-    assessments: list[object],
-    choice_set: object,
-) -> dict:
-    return {
-        "intent": intent,
-        "models": list(models or []),
-        "assessments": list(assessments or []),
-        "choice_set": choice_set,
-    }
-
-
-def _render_fulfillment_reply(choice_set: object) -> str:
-    options = list(getattr(choice_set, "options", []) or [])
-    if not options:
-        return ""
-
-    mode = str(getattr(getattr(choice_set, "mode", None), "value", getattr(choice_set, "mode", "")) or "")
-    selected_model_id = str(getattr(choice_set, "selected_model_id", "") or "")
-    if mode == "single_result":
-        option = next((item for item in options if str(getattr(item, "model_id", "") or "") == selected_model_id), options[0])
-        reply = f"I see one current fulfillment result: {str(getattr(option, 'label', '') or 'current path')}."
-        why_distinct = [str(item).strip() for item in list(getattr(option, "why_distinct", []) or []) if str(item).strip()]
-        tradeoffs = [str(item).strip() for item in list(getattr(option, "tradeoffs", []) or []) if str(item).strip()]
-        if why_distinct:
-            reply += f" Why this path: {'; '.join(why_distinct[:2])}."
-        if tradeoffs:
-            reply += f" Tradeoffs: {'; '.join(tradeoffs[:2])}."
-        return reply
-
-    lines = ["I see multiple meaningful fulfillment paths right now:"]
-    for option in options[:3]:
-        label = str(getattr(option, "label", "") or "option")
-        why_distinct = [str(item).strip() for item in list(getattr(option, "why_distinct", []) or []) if str(item).strip()]
-        tradeoffs = [str(item).strip() for item in list(getattr(option, "tradeoffs", []) or []) if str(item).strip()]
-        line = f"- {label}"
-        if why_distinct:
-            line += f": {why_distinct[0]}"
-        if tradeoffs:
-            line += f"; tradeoff: {tradeoffs[0]}"
-        lines.append(line)
-    plurality_reason = str(getattr(choice_set, "plurality_reason", "") or "").strip()
-    if plurality_reason:
-        lines.append(f"Why they remain distinct: {plurality_reason}.")
-    return "\n".join(lines)
-
-
-def _maybe_run_fulfillment_flow(
-    user_text: str,
-    session: object,
-    recent_turns: list[tuple[str, str]],
-    *,
-    pending_action: Optional[dict] = None,
-) -> Optional[dict]:
-    probe = _probe_turn_routes(
-        user_text,
-        session,
-        recent_turns,
-        pending_action=pending_action,
-    )
-    routes = probe.get("routes") if isinstance(probe.get("routes"), dict) else {}
-    supervisor_route = routes.get("supervisor_owned") if isinstance(routes.get("supervisor_owned"), dict) else {}
-    fulfillment_route = routes.get("fulfillment_applicable") if isinstance(routes.get("fulfillment_applicable"), dict) else {}
-    should_attempt = not bool(supervisor_route.get("viable")) and bool(fulfillment_route.get("viable")) and str(probe.get("comparison_strength") or "weak").strip().lower() == "clear"
-    if not should_attempt:
-        _update_subconscious_state(session, probe, chosen_route="generic_fallback")
-        return None
-
-    try:
-        from choice_presenter import ChoiceMode, ChoicePresenter
-        from dynamic_replanner import DynamicReplanner
-        from fit_evaluator import FitEvaluator
-        from fulfillment_contracts import CollapseStatus, ReplanContext, ReplanReason
-        from fulfillment_model_generator import FulfillmentModelGenerator
-        from intent_interpreter import IntentInterpreter
-    except Exception:
-        return None
-
-    state = _get_session_fulfillment_state(session)
-    try:
-        if state is None:
-            interpreter = IntentInterpreter()
-            generator = FulfillmentModelGenerator()
-            evaluator = FitEvaluator()
-            presenter = ChoicePresenter()
-
-            intent = interpreter.interpret(
-                user_text,
-                current_intent=None,
-                shared_context={"recent_turns": list(recent_turns or [])},
-            )
-            models = generator.generate(
-                intent,
-                existing_models=None,
-                shared_context={"recent_turns": list(recent_turns or [])},
-            )
-            assessments = evaluator.evaluate(
-                intent,
-                models,
-                shared_context={"recent_turns": list(recent_turns or [])},
-            )
-            choice_set = presenter.present(
-                intent,
-                models,
-                assessments,
-                current_choice_set=None,
-                shared_context={"recent_turns": list(recent_turns or [])},
-            )
-            state = _build_fulfillment_state(intent, models, assessments, choice_set)
-        else:
-            intent = state.get("intent")
-            models = list(state.get("models") or [])
-            assessments = list(state.get("assessments") or [])
-            choice_set = state.get("choice_set")
-            if intent is None or not models or choice_set is None:
-                return None
-
-            replanner = DynamicReplanner()
-            revised_intent, revised_models, revised_assessments, revised_choice_set = replanner.replan(
-                ReplanContext(
-                    replan_id=f"replan:{str(getattr(intent, 'intent_id', '') or 'intent')}:{int(time.time() * 1000)}",
-                    intent_id=str(getattr(intent, "intent_id", "") or ""),
-                    reason=ReplanReason.NEW_INFORMATION,
-                    trigger_summary=str(user_text or "")[:160],
-                    changed_facts={"new_information": str(user_text or "")},
-                    may_revise_fit=True,
-                    may_revise_choice=True,
-                    previous_active_model_ids=[str(getattr(model, "model_id", "") or "") for model in models],
-                    previous_selected_model_id=str(getattr(choice_set, "selected_model_id", "") or "") or None,
-                    previous_collapse_status=getattr(choice_set, "collapse_status", CollapseStatus.NOT_EVALUATED),
-                ),
-                intent=intent,
-                models=models,
-                assessments=assessments,
-                choice_set=choice_set,
-                shared_context={"recent_turns": list(recent_turns or []), "new_information": str(user_text or "")},
-            )
-            if revised_intent is None or revised_models is None or revised_assessments is None or revised_choice_set is None:
-                return None
-            state = _build_fulfillment_state(revised_intent, revised_models, revised_assessments, revised_choice_set)
-    except NotImplementedError:
-        _update_subconscious_state(session, probe, chosen_route="generic_fallback")
-        return None
-    except Exception:
-        _update_subconscious_state(session, probe, chosen_route="generic_fallback")
-        return None
-
-    _set_session_fulfillment_state(session, state)
-    choice_set = state.get("choice_set")
-    if choice_set is None or not list(getattr(choice_set, "options", []) or []):
-        _update_subconscious_state(session, probe, chosen_route="generic_fallback")
-        return None
-
-    mode = str(getattr(getattr(choice_set, "mode", None), "value", getattr(choice_set, "mode", "")) or "")
-    if mode not in {ChoiceMode.SINGLE_RESULT.value, ChoiceMode.MULTI_CHOICE.value}:
-        _update_subconscious_state(session, probe, chosen_route="generic_fallback")
-        return None
-
-    _update_subconscious_state(session, probe, chosen_route="fulfillment_applicable")
-
-    return {
-        "reply": _render_fulfillment_reply(choice_set),
-        "state": state,
-        "choice_set": choice_set,
-        "planner_decision": "fulfillment_single_result" if mode == ChoiceMode.SINGLE_RESULT.value else "fulfillment_choice",
-        "grounded": True,
-    }
+    return build_probe_turn_routes(user_text, deterministic, fulfillment)
 
 
 def behavior_record_event(event: str) -> None:
-    e = (event or "").strip()
-    if not e:
+    BEHAVIOR_METRICS_STORE.record_event(event)
+
+
+def behavior_set_flag(name: str, value: object = True, **details) -> None:
+    normalized = str(name or "").strip()
+    if not normalized:
         return
-    if e in BEHAVIOR_METRICS and isinstance(BEHAVIOR_METRICS.get(e), int):
-        BEHAVIOR_METRICS[e] = int(BEHAVIOR_METRICS.get(e, 0)) + 1
-    BEHAVIOR_METRICS["last_event"] = e
-    BEHAVIOR_METRICS["updated_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
-    _save_behavior_metrics()
+    try:
+        BEHAVIOR_METRICS_STORE.metrics[normalized] = value
+        if details:
+            flag_details = dict(BEHAVIOR_METRICS_STORE.metrics.get("flag_details") or {})
+            flag_details[normalized] = dict(details)
+            BEHAVIOR_METRICS_STORE.metrics["flag_details"] = flag_details
+        BEHAVIOR_METRICS_STORE.metrics["updated_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
+        BEHAVIOR_METRICS_STORE.save()
+    except Exception:
+        pass
 
 
 def behavior_get_metrics() -> dict:
-    return dict(BEHAVIOR_METRICS)
+    return BEHAVIOR_METRICS_STORE.snapshot()
 
 
 def _infer_turn_intent(user_input: str) -> str:
@@ -989,57 +435,8 @@ def action_ledger_add_step(
     detail: str = "",
     **data,
 ) -> None:
-    if not isinstance(record, dict):
-        return
-    trace = record.get("route_trace")
-    if not isinstance(trace, list):
-        trace = []
-        record["route_trace"] = trace
+    return service_action_ledger_add_step(record, stage, outcome, detail, **data)
 
-    step = {
-        "stage": str(stage or "unknown").strip() or "unknown",
-        "outcome": str(outcome or "unknown").strip() or "unknown",
-    }
-    clean_detail = str(detail or "").strip()
-    if clean_detail:
-        step["detail"] = clean_detail[:220]
-
-    clean_data = {}
-    for key, value in data.items():
-        if value is None:
-            continue
-        if isinstance(value, str):
-            if value.strip():
-                clean_data[str(key)] = value[:220]
-            continue
-        if isinstance(value, bool):
-            clean_data[str(key)] = value
-            continue
-        if isinstance(value, int):
-            clean_data[str(key)] = value
-            continue
-        if isinstance(value, float):
-            clean_data[str(key)] = round(value, 4)
-            continue
-        if isinstance(value, (list, tuple)):
-            items = []
-            for item in list(value)[:8]:
-                if isinstance(item, (str, int, float, bool)):
-                    items.append(item if not isinstance(item, str) else item[:120])
-            if items:
-                clean_data[str(key)] = items
-            continue
-        if isinstance(value, dict):
-            items = {}
-            for sub_key, sub_value in list(value.items())[:8]:
-                if isinstance(sub_value, (str, int, float, bool)):
-                    items[str(sub_key)] = sub_value if not isinstance(sub_value, str) else sub_value[:120]
-            if items:
-                clean_data[str(key)] = items
-
-    if clean_data:
-        step["data"] = clean_data
-    trace.append(step)
 
 
 def action_ledger_route_summary(record_or_trace: Optional[object]) -> str:
@@ -1058,6 +455,8 @@ def action_ledger_route_summary(record_or_trace: Optional[object]) -> str:
         outcome = str(raw_step.get("outcome") or "").strip()
         if not stage:
             continue
+        if stage in {"timing", "timing_breakdown"}:
+            continue
         parts.append(f"{stage}:{outcome or 'unknown'}")
     return " -> ".join(parts[:16])[:600]
 
@@ -1068,6 +467,8 @@ TOOL_INTENT_LABELS: dict[str, str] = {
     "web_search": "Web search route",
     "web_gather": "Web gather route",
     "web_research": "Web research route",
+    "wikipedia_lookup": "Wikipedia route",
+    "stackexchange_search": "StackExchange route",
 }
 
 
@@ -1130,46 +531,12 @@ def _record_requested_tool_clarification(record: dict) -> bool:
 
 
 def _detect_repeated_tool_intent_without_execution(records: Optional[list[dict]] = None, limit: int = 20) -> dict:
-    recent = records if isinstance(records, list) else _recent_action_ledger_records(limit=limit)
-    counts: dict[str, dict[str, int]] = {}
-    for rec in recent:
-        if not isinstance(rec, dict):
-            continue
-        intent = str(rec.get("intent") or "").strip()
-        if intent not in TOOL_INTENT_LABELS:
-            continue
-        if _record_requested_tool_clarification(rec):
-            continue
-        bucket = counts.setdefault(intent, {"selected": 0, "completed": 0})
-        bucket["selected"] += 1
-        if _record_completed_tool_execution(rec):
-            bucket["completed"] += 1
-
-    best_intent = ""
-    best_gap = 0
-    best_selected = 0
-    best_completed = 0
-    for intent, bucket in counts.items():
-        selected = int(bucket.get("selected", 0) or 0)
-        completed = int(bucket.get("completed", 0) or 0)
-        gap = selected - completed
-        if selected >= 2 and gap > best_gap:
-            best_intent = intent
-            best_gap = gap
-            best_selected = selected
-            best_completed = completed
-
-    if not best_intent:
-        return {"class": "", "intent": "", "selected": 0, "completed": 0, "summary": ""}
-
-    label = TOOL_INTENT_LABELS.get(best_intent, best_intent)
-    return {
-        "class": "repeated_tool_intent_without_execution",
-        "intent": best_intent,
-        "selected": best_selected,
-        "completed": best_completed,
-        "summary": f"{label} selected {best_selected} times, execution completed {best_completed} times.",
-    }
+    return service_detect_repeated_tool_intent_without_execution(
+        ACTION_LEDGER_DIR,
+        records=records,
+        limit=limit,
+        tool_intent_labels=TOOL_INTENT_LABELS,
+    )
 
 
 def _top_repeated_correction_class(records: Optional[list[dict]] = None, limit: int = 20) -> dict:
@@ -1324,69 +691,26 @@ def _recent_self_reflection_rows(limit: int = 3) -> list[dict]:
 
 
 def maybe_log_self_reflection(*, limit: int = 20, every: int = 5, records: Optional[list[dict]] = None, total_records: Optional[int] = None, extra_payload: Optional[dict] = None) -> dict:
-    recent = records if isinstance(records, list) else _recent_action_ledger_records(limit=limit)
-    if total_records is None:
-        total_records = len(_recent_action_ledger_records(limit=1000000))
-    count_total = int(total_records or 0)
-    if count_total <= 0 or count_total % max(1, int(every)) != 0:
-        return {}
-
-    failure = _detect_repeated_tool_intent_without_execution(records=recent, limit=limit)
-    correction = _top_repeated_correction_class(records=recent, limit=limit)
-    routing_stable = _routing_stable_recently(records=recent, limit=limit)
-    claims_blocked = _count_unsupported_claim_blocks_recently(records=recent, limit=limit)
-    routing_overrides = _count_routing_overrides_recently(records=recent, limit=limit)
-    latest_record = recent[-1] if recent else {}
-    continuation_count = sum(1 for rec in recent if isinstance(rec, dict) and bool(rec.get("continuation_used", False)))
-    retrieval_continuations = sum(
-        1
-        for rec in recent
-        if isinstance(rec, dict)
-        and bool(rec.get("continuation_used", False))
-        and str(rec.get("active_subject") or "").startswith("retrieval")
+    return service_maybe_log_self_reflection(
+        limit=limit,
+        every=every,
+        records=records,
+        total_records=total_records,
+        extra_payload=extra_payload,
+        recent_action_ledger_records_fn=_recent_action_ledger_records,
+        detect_repeated_tool_intent_without_execution_fn=_detect_repeated_tool_intent_without_execution,
+        top_repeated_correction_class_fn=_top_repeated_correction_class,
+        routing_stable_recently_fn=_routing_stable_recently,
+        count_unsupported_claim_blocks_recently_fn=_count_unsupported_claim_blocks_recently,
+        count_routing_overrides_recently_fn=_count_routing_overrides_recently,
+        record_used_routing_override_fn=_record_used_routing_override,
+        sample_intents_last_fn=_sample_intents_last,
+        provider_name_from_tool_fn=_provider_name_from_tool,
+        append_self_reflection_fn=_append_self_reflection,
+        record_health_snapshot_fn=record_health_snapshot,
+        behavior_metrics_update_from_reflection_fn=BEHAVIOR_METRICS_STORE.update_from_reflection,
     )
-    payload = {
-        "ts": time.strftime("%Y-%m-%d %H:%M:%S"),
-        "turn_count": count_total,
-        "top_repeated_failure_class": str(failure.get("summary") or "none"),
-        "top_repeated_correction_class": str(correction.get("class") or "none"),
-        "failure_top": {
-            "class": str(failure.get("class") or "none"),
-            "intent": str(failure.get("intent") or ""),
-            "count": max(0, int(failure.get("selected", 0) or 0) - int(failure.get("completed", 0) or 0)),
-            "selected": int(failure.get("selected", 0) or 0),
-            "completed": int(failure.get("completed", 0) or 0),
-            "summary": str(failure.get("summary") or "none"),
-        },
-        "correction_top": {
-            "class": str(correction.get("class") or "none"),
-            "count": int(correction.get("count", 0) or 0),
-        },
-        "routing_stable": bool(routing_stable),
-        "unsupported_claims_blocked": bool(claims_blocked),
-        "claims_blocked": int(claims_blocked),
-        "routing_overrides": int(routing_overrides),
-        "routing_override_used_latest_turn": bool(_record_used_routing_override(latest_record)),
-        "active_subject": str(latest_record.get("active_subject") or ""),
-        "continuation_used": bool(latest_record.get("continuation_used", False)),
-        "continuations_last_window": int(continuation_count),
-        "retrieval_continuations": int(retrieval_continuations),
-        "sample_intents_last5": _sample_intents_last(recent, count=5),
-    }
-    if isinstance(extra_payload, dict):
-        for key, value in extra_payload.items():
-            payload[key] = value
-    _append_self_reflection(payload)
-    if count_total % 10 == 0:
-        record_health_snapshot(session_id=str(payload.get("session_id") or "default"), reflection=payload, session_end=False)
-    BEHAVIOR_METRICS["top_repeated_failure_class"] = payload["top_repeated_failure_class"]
-    BEHAVIOR_METRICS["top_repeated_correction_class"] = payload["top_repeated_correction_class"]
-    BEHAVIOR_METRICS["routing_stable"] = bool(payload["routing_stable"])
-    BEHAVIOR_METRICS["unsupported_claims_blocked"] = bool(payload["unsupported_claims_blocked"])
-    BEHAVIOR_METRICS["last_reflection_turn"] = count_total
-    BEHAVIOR_METRICS["last_reflection_at"] = payload["ts"]
-    _save_behavior_metrics()
-    return payload
+
 
 
 def build_turn_reflection(
@@ -1397,7 +721,7 @@ def build_turn_reflection(
     current_decision: dict,
 ) -> dict:
     session_summary = session_state.reflection_summary()
-    session_summary["subconscious_snapshot"] = _get_subconscious_snapshot(session_state)
+    session_summary["subconscious_snapshot"] = SUBCONSCIOUS_SERVICE.get_snapshot(session_state)
     reflection = TURN_SUPERVISOR.process_turn(
         entry_point=entry_point,
         session_id=session_id,
@@ -1406,12 +730,15 @@ def build_turn_reflection(
         recent_records=_recent_action_ledger_records(limit=10),
         recent_reflections=_recent_self_reflection_rows(limit=3),
     )
-    subconscious_training_backlog = _get_subconscious_training_backlog_summary(session_state)
+    subconscious_training_backlog = build_training_backlog_summary(session_summary["subconscious_snapshot"])
     if isinstance(subconscious_training_backlog, dict):
         reflection["subconscious_training_backlog"] = subconscious_training_backlog
-    subconscious_robust_weakness = _get_subconscious_robust_weakness_summary(session_state)
+    subconscious_robust_weakness = build_robust_weakness_summary(getattr(session_state, "subconscious_live_family_summary", None))
     if isinstance(subconscious_robust_weakness, dict):
         reflection["subconscious_robust_weakness"] = subconscious_robust_weakness
+    subconscious_replan_reasons = list((session_summary["subconscious_snapshot"] or {}).get("replan_reasons") or [])
+    if subconscious_replan_reasons:
+        reflection["subconscious_replan_reasons"] = subconscious_replan_reasons
     reflection["session_id"] = str(session_id or "default").strip() or "default"
     reflection["entry_point"] = str(entry_point or "unknown").strip().lower() or "unknown"
     session_state.set_last_reflection(reflection)
@@ -1427,215 +754,46 @@ def _execute_registered_supervisor_rule(
     input_source: str = "typed",
     allowed_actions: Optional[set[str]] = None,
 ) -> tuple[bool, str, Optional[dict]]:
-    action = str((rule_result or {}).get("action") or "").strip().lower()
-    if not action:
-        return False, "", current_state
-    if allowed_actions is not None and action not in allowed_actions:
-        return False, "", current_state
+    return service_execute_registered_supervisor_rule(
+        rule_result,
+        text,
+        current_state,
+        turns=turns,
+        input_source=input_source,
+        allowed_actions=allowed_actions,
+        remember_name_origin_fn=remember_name_origin,
+        make_conversation_state_fn=_make_conversation_state,
+        location_reply_fn=_location_reply,
+        is_location_name_query_fn=_is_location_name_query,
+        location_name_reply_fn=_location_name_reply,
+        location_recall_reply_fn=_location_recall_reply,
+        classify_weather_lookup_outcome_fn=_classify_weather_lookup_outcome,
+        attach_reply_outcome_fn=_attach_reply_outcome,
+        execute_planned_action_fn=execute_planned_action,
+        render_reply_fn=render_reply,
+        last_assistant_turn_text_fn=_last_assistant_turn_text,
+        parse_correction_fn=_parse_correction,
+        extract_authoritative_correction_text_fn=_extract_authoritative_correction_text,
+        store_supervisor_correction_record_fn=_store_supervisor_correction_record,
+        learn_from_user_correction_fn=learn_from_user_correction,
+        classify_correction_outcome_fn=_classify_correction_outcome,
+        mem_enabled_fn=mem_enabled,
+        normalize_correction_for_storage_fn=_normalize_correction_for_storage,
+        teach_store_example_fn=_teach_store_example,
+        get_active_user_fn=get_active_user,
+        looks_like_correction_cancel_fn=_looks_like_correction_cancel,
+        looks_like_pending_replacement_text_fn=_looks_like_pending_replacement_text,
+        execute_retrieval_followup_outcome_fn=_execute_retrieval_followup_outcome,
+        execute_identity_history_outcome_fn=_execute_identity_history_outcome,
+        open_probe_reply_fn=_open_probe_reply,
+        last_question_recall_reply_fn=_last_question_recall_reply,
+        session_fact_recall_reply_fn=_session_fact_recall_reply,
+        rules_reply_fn=_rules_reply,
+        developer_location_reply_fn=_developer_location_reply,
+        developer_identity_followup_reply_fn=_developer_identity_followup_reply,
+        identity_profile_followup_reply_fn=_identity_profile_followup_reply,
+    )
 
-    if action == "name_origin_store":
-        store_text = str((rule_result or {}).get("store_text") or text).strip()
-        if not store_text:
-            return False, "", current_state
-        return True, remember_name_origin(store_text), current_state
-
-    if action == "self_location":
-        next_state = (rule_result or {}).get("next_state") if isinstance((rule_result or {}).get("next_state"), dict) else _make_conversation_state("location_recall")
-        return True, _location_reply(), next_state
-
-    if action == "location_recall":
-        next_state = (rule_result or {}).get("next_state") if isinstance((rule_result or {}).get("next_state"), dict) else _make_conversation_state("location_recall")
-        if _is_location_name_query(text):
-            return True, _location_name_reply(), next_state
-        return True, _location_recall_reply(), next_state
-
-    if action == "location_name":
-        next_state = current_state if isinstance(current_state, dict) else _make_conversation_state("location_recall")
-        return True, _location_name_reply(), next_state
-
-    if action == "weather_current_location":
-        next_state = (rule_result or {}).get("next_state")
-        if not isinstance(next_state, dict):
-            next_state = _make_conversation_state("location_recall")
-        outcome = _classify_weather_lookup_outcome({
-            "weather_mode": "current_location",
-            "next_state": next_state,
-        })
-        _attach_reply_outcome(rule_result, outcome)
-        tool_result = execute_planned_action("weather_current_location")
-        return True, render_reply({**outcome, "tool_result": str(tool_result or "")}), next_state
-
-    if action == "apply_correction":
-        correction_text = str((rule_result or {}).get("user_correction_text") or text).strip()
-        pending_target = ""
-        pending_followup = isinstance(current_state, dict) and str(current_state.get("kind") or "") == "correction_pending"
-        if pending_followup:
-            pending_target = str(current_state.get("target") or "").strip()
-        last_assistant = pending_target or _last_assistant_turn_text(turns)
-        parsed = _parse_correction(correction_text)
-        authoritative = _extract_authoritative_correction_text(correction_text)
-        correction_value = parsed or authoritative
-
-        _store_supervisor_correction_record(
-            correction_text,
-            input_source=input_source,
-            last_assistant=last_assistant,
-            parsed_correction=(correction_value or ""),
-        )
-
-        learned_fact, learned_msg = learn_from_user_correction(correction_text)
-        if learned_fact:
-            outcome = _classify_correction_outcome(
-                correction_text=correction_text,
-                correction_value=correction_value,
-                last_assistant=last_assistant,
-                pending_followup=pending_followup,
-                learned_fact=True,
-                learned_message=learned_msg,
-            )
-            _attach_reply_outcome(rule_result, outcome)
-            return True, render_reply(outcome), None
-
-        if correction_value and last_assistant and mem_enabled():
-            corr_store = _normalize_correction_for_storage(correction_value)
-            _teach_store_example(last_assistant, corr_store, user=get_active_user() or None)
-            outcome = _classify_correction_outcome(
-                correction_text=correction_text,
-                correction_value=correction_value,
-                last_assistant=last_assistant,
-                pending_followup=pending_followup,
-                replacement_applied=True,
-            )
-            _attach_reply_outcome(rule_result, outcome)
-            return True, render_reply(outcome), None
-
-        if pending_followup and _looks_like_correction_cancel(correction_text):
-            reply_text = "Understood. I canceled that replacement request and did not learn anything from it."
-            outcome = {
-                "intent": "apply_correction",
-                "kind": "correction_cancelled",
-                "correction_kind": "cancel_pending_replacement",
-                "reply_contract": "correction.cancelled",
-                "reply_text": reply_text,
-                "state_delta": {},
-            }
-            _attach_reply_outcome(rule_result, outcome)
-            return True, reply_text, None
-
-        if pending_followup and not correction_value and _looks_like_pending_replacement_text(correction_text):
-            if last_assistant and mem_enabled():
-                corr_store = _normalize_correction_for_storage(correction_text)
-                _teach_store_example(last_assistant, corr_store, user=get_active_user() or None)
-                outcome = _classify_correction_outcome(
-                    correction_text=correction_text,
-                    correction_value=correction_text,
-                    last_assistant=last_assistant,
-                    pending_followup=True,
-                    replacement_applied=True,
-                )
-                _attach_reply_outcome(rule_result, outcome)
-                return True, render_reply(outcome), None
-
-        if pending_followup and not correction_value and correction_text and "?" not in correction_text:
-            reply_text = "I still need the exact replacement wording you want me to use."
-            outcome = {
-                "intent": "apply_correction",
-                "kind": "pending_replacement_reminder",
-                "correction_kind": "awaiting_replacement_text",
-                "reply_contract": "correction.pending_replacement",
-                "reply_text": reply_text,
-                "state_delta": {},
-            }
-            _attach_reply_outcome(rule_result, outcome)
-            return True, reply_text, current_state
-
-        if last_assistant:
-            next_state = _make_conversation_state("correction_pending", target=last_assistant)
-            outcome = _classify_correction_outcome(
-                correction_text=correction_text,
-                correction_value=correction_value,
-                last_assistant=last_assistant,
-                pending_followup=pending_followup,
-                replacement_pending=True,
-            )
-            _attach_reply_outcome(rule_result, outcome)
-            return True, render_reply(outcome), next_state
-
-        outcome = _classify_correction_outcome(
-            correction_text=correction_text,
-            correction_value=correction_value,
-            last_assistant=last_assistant,
-            pending_followup=pending_followup,
-        )
-        _attach_reply_outcome(rule_result, outcome)
-        return True, render_reply(outcome), None
-
-    if action == "retrieval_followup":
-        if not isinstance(current_state, dict) or str(current_state.get("kind") or "") != "retrieval":
-            return False, "", current_state
-        reply, next_state, outcome = _execute_retrieval_followup_outcome(current_state, text)
-        _attach_reply_outcome(rule_result, outcome)
-        return True, reply, next_state
-
-    if action == "identity_history_family":
-        reply, next_state, outcome = _execute_identity_history_outcome(
-            rule_result,
-            current_state,
-            text,
-            turns=turns,
-        )
-        _attach_reply_outcome(rule_result, outcome)
-        return True, reply, next_state
-
-    if action == "open_probe_family":
-        reply_text, outcome_kind = _open_probe_reply(text, turns=turns)
-        outcome = {
-            "intent": "open_probe_family",
-            "kind": outcome_kind,
-            "reply_contract": f"open_probe.{outcome_kind}",
-            "reply_text": reply_text,
-            "state_delta": {},
-        }
-        _attach_reply_outcome(rule_result, outcome)
-        return True, reply_text, current_state
-
-    if action == "last_question_recall":
-        reply_text, outcome_kind = _last_question_recall_reply(text, turns=turns)
-        outcome = {
-            "intent": "last_question_recall",
-            "kind": outcome_kind,
-            "reply_contract": f"last_question.{outcome_kind}",
-            "reply_text": reply_text,
-            "state_delta": {},
-        }
-        _attach_reply_outcome(rule_result, outcome)
-        return True, reply_text, current_state
-
-    if action == "rules_list":
-        outcome = {
-            "intent": "rules_list",
-            "kind": "list",
-            "reply_contract": "rules.list",
-            "reply_text": _rules_reply(),
-            "state_delta": {},
-        }
-        _attach_reply_outcome(rule_result, outcome)
-        return True, str(outcome.get("reply_text") or ""), current_state
-
-    if action == "developer_location":
-        next_state = current_state if isinstance(current_state, dict) else _make_conversation_state("identity_profile", subject="developer")
-        return True, _developer_location_reply(), next_state
-
-    if action == "developer_identity_followup":
-        next_state = current_state if isinstance(current_state, dict) else _make_conversation_state("developer_identity", subject="developer")
-        return True, _developer_identity_followup_reply(turns=turns, name_focus=bool((rule_result or {}).get("name_focus", False))), next_state
-
-    if action == "identity_profile_followup":
-        subject = str((rule_result or {}).get("subject") or "self").strip() or "self"
-        next_state = current_state if isinstance(current_state, dict) else _make_conversation_state("identity_profile", subject=subject)
-        return True, _identity_profile_followup_reply(subject, turns=turns), next_state
-
-    return False, "", current_state
 
 
 def _last_assistant_turn_text(turns: Optional[list[tuple[str, str]]]) -> str:
@@ -1707,50 +865,14 @@ _ALLOWED_SUPERVISOR_BYPASSES: tuple[dict[str, object], ...] = (
 
 
 def _looks_like_open_fallback_turn(text: str) -> bool:
-    candidate = str(text or "").strip()
-    if not candidate:
-        return False
-    if _is_explicit_command_like(candidate):
-        return False
-    if _is_location_request(candidate):
-        return False
-    normalized = _normalize_turn_text(candidate)
-    if normalized in {
-        "weather",
-        "weather now",
-        "weather current",
-        "weather today",
-        "current weather",
-        "what's the weather",
-        "what is the weather",
-        "what is the weather now",
-        "what's the weather now",
-    }:
-        return False
-    if _is_peims_broad_query(candidate) or _is_local_knowledge_topic_query(candidate):
-        return False
-    if re.match(r"^(hi|hello|hey)\b", normalized, flags=re.I):
-        return True
-    if candidate.endswith("?"):
-        return True
-    if len(normalized.split()) >= 3:
-        return True
-    return normalized.startswith((
-        "how ",
-        "why ",
-        "what ",
-        "who ",
-        "can you ",
-        "could you ",
-        "would you ",
-        "tell me ",
-        "explain ",
-        "help ",
-        "show me ",
-        "compare ",
-        "recap ",
-        "summarize ",
-    ))
+    return service_looks_like_open_fallback_turn(
+        text,
+        is_explicit_command_like_fn=_is_explicit_command_like,
+        is_location_request_fn=_is_location_request,
+        normalize_turn_text_fn=_normalize_turn_text,
+        is_student_data_broad_query_fn=_is_peims_broad_query,
+        is_local_knowledge_topic_query_fn=_is_local_knowledge_topic_query,
+    )
 
 
 def _normalize_bypass_phrase(text: str) -> str:
@@ -1864,41 +986,13 @@ def _finalize_routing_decision(
     reply_outcome: Optional[dict] = None,
     turn_acts: Optional[list[str]] = None,
 ) -> dict:
-    payload = dict(routing_decision or {})
-    if not payload:
-        return {}
-    intent_phase = payload.get("intent_phase") if isinstance(payload.get("intent_phase"), dict) else {}
-    handle_phase = payload.get("handle_phase") if isinstance(payload.get("handle_phase"), dict) else {}
-    final_owner = str(payload.get("final_owner") or "").strip().lower()
-    if final_owner in {"", "pending"}:
-        if bool(intent_phase.get("handled")):
-            final_owner = "supervisor_intent"
-        elif bool(handle_phase.get("handled")):
-            final_owner = "supervisor_handle"
-        elif str(planner_decision or "").strip().lower() in {
-            "llm_fallback",
-            "respond",
-            "run_tool",
-            "command",
-            "ask_clarify",
-            "grounded_lookup",
-            "truth_hierarchy",
-            "blocked_low_confidence",
-            "policy_block",
-            "conversation_followup",
-        }:
-            final_owner = "fallback"
-        else:
-            final_owner = "core_legacy"
-    payload["final_owner"] = final_owner
-    if reply_contract:
-        payload["reply_contract"] = str(reply_contract).strip()
-    outcome = reply_outcome if isinstance(reply_outcome, dict) else {}
-    if outcome:
-        payload["reply_outcome_kind"] = str(outcome.get("kind") or payload.get("reply_outcome_kind") or "").strip()
-    acts = turn_acts if isinstance(turn_acts, list) else payload.get("turn_acts")
-    payload["turn_acts"] = [str(item).strip() for item in acts if str(item).strip()] if isinstance(acts, list) else []
-    return payload
+    return service_finalize_routing_decision(
+        routing_decision,
+        planner_decision=planner_decision,
+        reply_contract=reply_contract,
+        reply_outcome=reply_outcome,
+        turn_acts=turn_acts,
+    )
 
 
 def _supervisor_bypass_warning(text: str, *, entry_point: str, routing_decision: Optional[dict] = None) -> str:
@@ -2034,60 +1128,14 @@ def _llm_classify_routing_intent(
     text: str,
     turns: Optional[list[tuple[str, str]]] = None,
 ) -> Optional[dict[str, object]]:
-    """Ask the LLM to classify routing intent for turns that rule-based routing misses.
-
-    This is the replacement for keyword-trigger routing: the LLM understands
-    'should I bring a jacket?' the same way it understands 'what's the weather?'.
-    Returns a supervisor-compatible dict or None (falls through to general chat).
-    """
-    raw = str(text or "").strip()
-    if not raw:
-        return None
-    try:
-        prompt = _ROUTING_INTENT_PROMPT.format(text=raw[:500])
-        payload = {
-            "model": chat_model(),
-            "stream": False,
-            "options": {"temperature": 0.0, "top_p": 1.0, "num_predict": 8},
-            "messages": [{"role": "user", "content": prompt}],
-        }
-        r = requests.post(
-            f"{OLLAMA_BASE}/api/chat",
-            json=payload,
-            timeout=8,
-        )
-        r.raise_for_status()
-        label = str(r.json().get("message", {}).get("content") or "").strip().lower()
-        label = re.sub(r"[^a-z_]", "", (label.split() or [""])[0])
-    except Exception:
-        return None
-
-    if label == "weather_lookup":
-        saved_location = ""
-        try:
-            saved_location = str(get_saved_location_text() or "").strip()
-        except Exception:
-            pass
-        if saved_location:
-            return {
-                "handled": True,
-                "intent": "weather_lookup",
-                "rule_name": "weather_lookup",
-                "matched_rule_name": "weather_lookup",
-                "weather_mode": "current_location",
-                "location_value": saved_location,
-            }
-        return {
-            "handled": True,
-            "intent": "weather_lookup",
-            "rule_name": "weather_lookup",
-            "matched_rule_name": "weather_lookup",
-            "weather_mode": "clarify",
-        }
-
-    # Future intents (web_research, store_fact, set_location) can be wired
-    # here without keyword lists once their action paths are validated.
-    return None
+    return service_llm_classify_routing_intent(
+        text,
+        turns,
+        live_ollama_calls_allowed_fn=_live_ollama_calls_allowed,
+        chat_model_fn=chat_model,
+        ollama_base=OLLAMA_BASE,
+        get_saved_location_text_fn=get_saved_location_text,
+    )
 
 
 def _unlabeled_numeric_turn_reply(text: str) -> str:
@@ -2156,148 +1204,43 @@ def _handle_supervisor_intent(
     input_source: str = "typed",
     entry_point: str = "",
 ) -> tuple[bool, str, Optional[dict], Optional[dict]]:
-    intent = str((intent_result or {}).get("intent") or "").strip().lower()
-    if not intent:
-        return False, "", None, None
+    return service_handle_supervisor_intent(
+        intent_result,
+        user_text,
+        turns=turns,
+        input_source=input_source,
+        entry_point=entry_point,
+        classify_web_research_outcome_fn=_classify_web_research_outcome,
+        execute_planned_action_fn=execute_planned_action,
+        make_retrieval_conversation_state_fn=_make_retrieval_conversation_state,
+        render_reply_fn=render_reply,
+        mem_enabled_fn=mem_enabled,
+        mem_add_fn=mem_add,
+        classify_store_fact_outcome_fn=_classify_store_fact_outcome,
+        classify_set_location_outcome_fn=_classify_set_location_outcome,
+        weather_current_location_available_fn=_weather_current_location_available,
+        classify_weather_lookup_outcome_fn=_classify_weather_lookup_outcome,
+        execute_weather_lookup_outcome_fn=_execute_weather_lookup_outcome,
+        set_location_text_fn=set_location_text,
+        make_conversation_state_fn=_make_conversation_state,
+        parse_correction_fn=_parse_correction,
+        last_assistant_turn_text_fn=_last_assistant_turn_text,
+        store_supervisor_correction_record_fn=_store_supervisor_correction_record,
+        teach_store_example_fn=_teach_store_example,
+        get_active_user_fn=get_active_user,
+        classify_correction_outcome_fn=_classify_correction_outcome,
+        quick_smalltalk_reply_fn=_quick_smalltalk_reply,
+        describe_capabilities_fn=describe_capabilities,
+        policy_web_fn=policy_web,
+        assistant_name_reply_fn=_assistant_name_reply,
+        self_identity_web_challenge_reply_fn=_self_identity_web_challenge_reply,
+        classify_name_origin_outcome_fn=_classify_name_origin_outcome,
+        developer_full_name_reply_fn=_developer_full_name_reply,
+        hard_answer_fn=hard_answer,
+        developer_profile_reply_fn=_developer_profile_reply,
+        session_recap_reply_fn=_session_recap_reply,
+    )
 
-    normalized_entry_point = str(entry_point or "").strip().lower()
-
-    if intent == "web_research_family":
-        outcome = _classify_web_research_outcome(intent_result, user_text, turns=turns)
-        tool_name = str(outcome.get("tool_name") or "web_research").strip().lower() or "web_research"
-        query = str(outcome.get("query") or "").strip()
-        tool_args = [query] if query else []
-        tool_result = execute_planned_action(tool_name, tool_args)
-        outcome["tool_result"] = str(tool_result or "")
-        next_state = _make_retrieval_conversation_state(tool_name, query, outcome["tool_result"])
-        return True, render_reply(outcome), next_state, {
-            "reply_contract": str(outcome.get("reply_contract") or ""),
-            "reply_outcome": outcome,
-        }
-
-    if intent == "store_fact":
-        fact_text = str((intent_result or {}).get("fact_text") or user_text).strip()
-        memory_kind = str((intent_result or {}).get("memory_kind") or "user_fact").strip() or "user_fact"
-        storage_performed = False
-        if fact_text and mem_enabled():
-            try:
-                mem_add(memory_kind, input_source, fact_text)
-                storage_performed = True
-            except Exception:
-                storage_performed = False
-        outcome = _classify_store_fact_outcome(intent_result, user_text, source="intent", storage_performed=storage_performed)
-        return True, render_reply(outcome), None, {
-            "reply_contract": str(outcome.get("reply_contract") or ""),
-            "reply_outcome": outcome,
-        }
-
-    if intent == "weather_lookup":
-        weather_mode = str((intent_result or {}).get("weather_mode") or "clarify").strip().lower() or "clarify"
-        outcome = _classify_weather_lookup_outcome(intent_result)
-        reply_text, next_state, reply_outcome = _execute_weather_lookup_outcome(outcome)
-        return True, reply_text, next_state, {
-            "reply_contract": str(reply_outcome.get("reply_contract") or ""),
-            "reply_outcome": reply_outcome,
-            "pending_action": reply_outcome.get("pending_action"),
-        }
-
-    if intent == "set_location":
-        location_value = str((intent_result or {}).get("location_value") or user_text).strip()
-        if location_value:
-            try:
-                set_location_text(location_value, input_source=input_source)
-            except Exception:
-                pass
-        outcome = _classify_set_location_outcome(intent_result, user_text)
-        return True, render_reply(outcome), _make_conversation_state("location_recall"), {
-            "reply_contract": str(outcome.get("reply_contract") or ""),
-            "reply_outcome": outcome,
-        }
-
-    if intent == "apply_correction":
-        correction_text = str((intent_result or {}).get("user_correction_text") or user_text).strip()
-        parsed = _parse_correction(correction_text)
-        last_assistant = _last_assistant_turn_text(turns)
-        _store_supervisor_correction_record(
-            correction_text,
-            input_source=input_source,
-            last_assistant=last_assistant,
-            parsed_correction=parsed or "",
-        )
-        if parsed and last_assistant and mem_enabled():
-            _teach_store_example(last_assistant, parsed, user=get_active_user() or None)
-            outcome = _classify_correction_outcome(
-                correction_text=correction_text,
-                correction_value=parsed,
-                last_assistant=last_assistant,
-                pending_followup=False,
-                replacement_applied=True,
-            )
-        else:
-            outcome = {
-                "intent": "apply_correction",
-                "kind": "intent_ack",
-                "correction_kind": "simple_negation",
-                "reply_contract": "correction.intent_ack",
-                "correction_text": correction_text,
-                "correction_value": str(parsed or "").strip(),
-                "learned_message": "",
-                "target_text": str(last_assistant or "").strip(),
-                "pending_followup": False,
-                "state_delta": {},
-            }
-        return True, render_reply(outcome), None, {
-            "reply_contract": str(outcome.get("reply_contract") or ""),
-            "reply_outcome": outcome,
-        }
-
-    if intent == "smalltalk":
-        reply = _quick_smalltalk_reply(user_text, active_user=get_active_user())
-        if reply:
-            return True, reply, None, None
-        return False, "", None, None
-
-    if intent == "capability_query":
-        return True, describe_capabilities(), None, None
-
-    if intent == "policy_domain_query":
-        web = policy_web()
-        domains = list(web.get("allow_domains") or [])
-        enabled = bool(web.get("enabled", False))
-        lines = [f"Policy web access enabled: {enabled}"]
-        if domains:
-            lines.append("Allowed domains: " + ", ".join(domains))
-        else:
-            lines.append("Allowed domains: none configured")
-        return True, "\n".join(lines), None, None
-
-    if intent == "assistant_name":
-        return True, _assistant_name_reply(user_text), None, None
-
-    if intent == "self_identity_web_challenge":
-        return True, _self_identity_web_challenge_reply(), None, None
-
-    if intent == "name_origin":
-        outcome = _classify_name_origin_outcome(intent_result)
-        return True, render_reply(outcome), None, {
-            "reply_contract": str(outcome.get("reply_contract") or ""),
-            "reply_outcome": outcome,
-        }
-
-    if intent == "developer_full_name":
-        return True, _developer_full_name_reply(), _make_conversation_state("identity_profile", subject="developer"), None
-
-    if intent == "creator_identity":
-        creator_reply = hard_answer(user_text) or _developer_profile_reply(turns=turns, user_text=user_text)
-        return True, creator_reply, _make_conversation_state("identity_profile", subject="developer"), None
-
-    if intent == "developer_profile":
-        return True, _developer_profile_reply(turns=turns, user_text=user_text), _make_conversation_state("identity_profile", subject="developer"), None
-
-    if intent == "session_summary":
-        return True, _session_recap_reply(list(turns or []), user_text), None, None
-
-    return False, "", None, None
 
 
 def _resolve_set_location_semantics(intent_result: dict, user_text: str = "") -> dict[str, str]:
@@ -2419,39 +1362,16 @@ def _classify_correction_outcome(
     replacement_applied: bool = False,
     replacement_pending: bool = False,
 ) -> dict[str, object]:
-    normalized_value = str(correction_value or "").strip()
-    if learned_fact:
-        correction_kind = "identity_correction"
-        kind = "identity_correction"
-        reply_contract = "correction.identity_correction"
-    elif replacement_applied:
-        correction_kind = "fact_replacement"
-        kind = "followup_replacement" if pending_followup else "explicit_replacement"
-        reply_contract = "correction.replacement_applied"
-    elif replacement_pending:
-        correction_kind = "simple_negation"
-        kind = "pending_replacement"
-        reply_contract = "correction.pending_replacement"
-    elif last_assistant:
-        correction_kind = "simple_negation"
-        kind = "pending_replacement"
-        reply_contract = "correction.pending_replacement"
-    else:
-        correction_kind = "simple_negation"
-        kind = "recorded_only"
-        reply_contract = "correction.recorded"
-    return {
-        "intent": "apply_correction",
-        "kind": kind,
-        "correction_kind": correction_kind,
-        "reply_contract": reply_contract,
-        "correction_text": str(correction_text or "").strip(),
-        "correction_value": normalized_value,
-        "learned_message": str(learned_message or "").strip(),
-        "target_text": str(last_assistant or "").strip(),
-        "pending_followup": bool(pending_followup),
-        "state_delta": {"kind": "correction_pending", "target": str(last_assistant or "").strip()} if kind == "pending_replacement" and last_assistant else {},
-    }
+    return service_classify_correction_outcome(
+        correction_text=correction_text,
+        correction_value=correction_value,
+        last_assistant=last_assistant,
+        pending_followup=pending_followup,
+        learned_fact=learned_fact,
+        learned_message=learned_message,
+        replacement_applied=replacement_applied,
+        replacement_pending=replacement_pending,
+    )
 
 
 def _classify_store_fact_outcome(
@@ -2461,84 +1381,19 @@ def _classify_store_fact_outcome(
     source: str = "intent",
     storage_performed: bool = False,
 ) -> dict[str, object]:
-    payload = intent_result if isinstance(intent_result, dict) else {}
-    fact_text = str(payload.get("fact_text") or user_text).strip()
-    requested_kind = str(payload.get("store_fact_kind") or "").strip().lower()
-    if requested_kind not in {"explicit_store", "prompted_store", "correctional_store", "declarative_ack"}:
-        requested_kind = "declarative_ack" if source == "declarative" else "explicit_store"
-    user_commitment = str(payload.get("user_commitment") or "").strip().lower()
-    if user_commitment not in {"explicit", "implied", "none"}:
-        user_commitment = "implied" if source == "declarative" else "explicit"
-    if not fact_text:
-        return {
-            "intent": "store_fact",
-            "kind": "missing_value",
-            "reply_contract": "store_fact.missing_value",
-            "fact_text": "",
-            "user_commitment": "none",
-            "storage_performed": False,
-            "memory_kind": str(payload.get("memory_kind") or "user_fact").strip() or "user_fact",
-            "state_delta": {},
-        }
-
-    outcome_kind = requested_kind
-    reply_contract = f"store_fact.{outcome_kind}"
-    if outcome_kind != "declarative_ack" and not storage_performed:
-        outcome_kind = "declarative_ack"
-        reply_contract = "store_fact.declarative_ack"
-
-    return {
-        "intent": "store_fact",
-        "kind": outcome_kind,
-        "reply_contract": reply_contract,
-        "fact_text": fact_text,
-        "user_commitment": user_commitment,
-        "storage_performed": bool(storage_performed),
-        "memory_kind": str(payload.get("memory_kind") or ("fact" if source == "declarative" else "user_fact")).strip() or ("fact" if source == "declarative" else "user_fact"),
-        "state_delta": {},
-    }
+    return service_classify_store_fact_outcome(
+        intent_result,
+        user_text,
+        source=source,
+        storage_performed=storage_performed,
+    )
 
 
 def _classify_weather_lookup_outcome(intent_result: dict) -> dict[str, object]:
-    payload = intent_result if isinstance(intent_result, dict) else {}
-    weather_mode = str(payload.get("weather_mode") or "clarify").strip().lower() or "clarify"
-    next_state = payload.get("next_state") if isinstance(payload.get("next_state"), dict) else None
-    location_value = str(payload.get("location_value") or "").strip()
-    if weather_mode == "current_location":
-        return {
-            "intent": "weather_lookup",
-            "kind": "current_location",
-            "reply_contract": "weather_lookup.current_location",
-            "weather_mode": weather_mode,
-            "location_value": "",
-            "requires_tool": True,
-            "pending_action": None,
-            "next_state": next_state,
-            "state_delta": next_state or {},
-        }
-    if weather_mode == "explicit_location" and location_value:
-        return {
-            "intent": "weather_lookup",
-            "kind": "explicit_location",
-            "reply_contract": "weather_lookup.explicit_location",
-            "weather_mode": weather_mode,
-            "location_value": location_value,
-            "requires_tool": True,
-            "pending_action": None,
-            "next_state": next_state,
-            "state_delta": next_state or {},
-        }
-    return {
-        "intent": "weather_lookup",
-        "kind": "clarify",
-        "reply_contract": "weather_lookup.clarify",
-        "weather_mode": "clarify",
-        "location_value": "",
-        "requires_tool": False,
-        "pending_action": make_pending_weather_action(),
-        "next_state": next_state,
-        "state_delta": next_state or {},
-    }
+    return service_classify_weather_lookup_outcome(
+        intent_result,
+        make_pending_weather_action_fn=make_pending_weather_action,
+    )
 
 
 def _execute_weather_lookup_outcome(weather_outcome: dict[str, object]) -> tuple[str, Optional[dict], dict[str, object]]:
@@ -2620,65 +1475,23 @@ def _execute_identity_history_outcome(
     *,
     turns: Optional[list[tuple[str, str]]] = None,
 ) -> tuple[str, Optional[dict], dict[str, object]]:
-    payload = rule_result if isinstance(rule_result, dict) else {}
-    outcome_kind = str(payload.get("identity_history_kind") or "history_recall").strip().lower() or "history_recall"
-    subject = str(payload.get("subject") or (current_state or {}).get("subject") or "developer").strip() or "developer"
-    state_kind = str((current_state or {}).get("kind") or "").strip()
-    normalized_text = _normalize_turn_text(text)
+    return service_execute_identity_history_outcome(
+        rule_result,
+        current_state,
+        text,
+        turns=turns,
+        normalize_turn_text_fn=_normalize_turn_text,
+        speaker_matches_developer_fn=_speaker_matches_developer,
+        make_conversation_state_fn=_make_conversation_state,
+        hard_answer_fn=hard_answer,
+        developer_profile_reply_fn=_developer_profile_reply,
+        developer_identity_followup_reply_fn=_developer_identity_followup_reply,
+        identity_name_followup_reply_fn=_identity_name_followup_reply,
+        identity_profile_followup_reply_fn=_identity_profile_followup_reply,
+        classify_name_origin_outcome_fn=_classify_name_origin_outcome,
+        render_reply_fn=render_reply,
+    )
 
-    if isinstance(current_state, dict):
-        next_state = current_state
-    elif subject == "developer" and _speaker_matches_developer():
-        next_state = _make_conversation_state("developer_identity", subject="developer")
-    else:
-        next_state = _make_conversation_state("identity_profile", subject=subject)
-
-    if outcome_kind == "creator_question":
-        reply_text = hard_answer(text) or _developer_profile_reply(turns=turns, user_text=text)
-        next_state = _make_conversation_state("identity_profile", subject="developer")
-        subject = "developer"
-    elif outcome_kind == "name_origin":
-        if state_kind == "developer_identity" or (subject == "developer" and _speaker_matches_developer()):
-            reply_text = _developer_identity_followup_reply(turns=turns, name_focus=True)
-            next_state = _make_conversation_state("developer_identity", subject="developer")
-            subject = "developer"
-        elif state_kind == "identity_profile":
-            reply_text = _identity_name_followup_reply(subject)
-        else:
-            name_origin_outcome = _classify_name_origin_outcome({
-                "name_origin_query_kind": str(payload.get("name_origin_query_kind") or "source_recall"),
-            })
-            reply_text = render_reply(name_origin_outcome)
-    else:
-        build_history_prompt = any(
-            phrase in normalized_text
-            for phrase in (
-                "how did he develop you",
-                "how did he developed you",
-                "how did he build you",
-                "how was he able to develop you",
-            )
-        )
-        if build_history_prompt:
-            reply_text = _developer_profile_reply(turns=turns, user_text=text)
-            next_state = _make_conversation_state("identity_profile", subject="developer")
-            subject = "developer"
-        elif state_kind == "developer_identity" or (subject == "developer" and _speaker_matches_developer()):
-            reply_text = _developer_identity_followup_reply(turns=turns, name_focus=False)
-            next_state = _make_conversation_state("developer_identity", subject="developer")
-            subject = "developer"
-        else:
-            reply_text = _identity_profile_followup_reply(subject, turns=turns)
-
-    outcome = {
-        "intent": "identity_history_family",
-        "kind": outcome_kind,
-        "reply_contract": f"identity_history.{outcome_kind}",
-        "reply_text": str(reply_text or "").strip(),
-        "subject": subject,
-        "state_delta": dict(next_state or {}) if isinstance(next_state, dict) else {},
-    }
-    return outcome["reply_text"], next_state, outcome
 
 
 def _open_probe_reply(text: str, turns: Optional[list[tuple[str, str]]] = None) -> tuple[str, str]:
@@ -2776,84 +1589,31 @@ def _last_question_recall_reply(text: str, turns: Optional[list[tuple[str, str]]
     return "I don't have an earlier question in this active chat session.", "empty"
 
 
+def _session_fact_recall_reply(rule_result: dict) -> tuple[str, str]:
+    target = str((rule_result or {}).get("fact_target") or "").strip().lower()
+    value = str((rule_result or {}).get("fact_value") or "").strip()
+    if value:
+        return value.rstrip(".!?"), target or "fact"
+    return "I do not have that fact in this active chat session.", "empty"
+
+
 def _execute_retrieval_followup_outcome(state: dict, text: str) -> tuple[str, Optional[dict], dict[str, object]]:
-    current_state = state if isinstance(state, dict) else {}
-    urls = current_state.get("urls") if isinstance(current_state.get("urls"), list) else []
-    query = str(current_state.get("query") or "").strip()
-    source = str(current_state.get("subject") or "retrieval").strip().lower()
-    result_count = max(0, int(current_state.get("result_count", 0) or 0))
-    index = _extract_retrieval_result_index(text)
+    return service_execute_retrieval_followup_outcome(
+        state,
+        text,
+        extract_retrieval_result_index_fn=_extract_retrieval_result_index,
+        is_retrieval_meta_question_fn=_is_retrieval_meta_question,
+        retrieval_meta_reply_fn=_retrieval_meta_reply,
+        tool_web_gather_fn=tool_web_gather,
+        make_retrieval_conversation_state_fn=_make_retrieval_conversation_state,
+        looks_like_retrieval_followup_fn=_looks_like_retrieval_followup,
+        tool_web_research_continue_fn=lambda: tool_web_research("", continue_mode=True),
+        web_research_query_fn=lambda: str(getattr(WEB_RESEARCH_SESSION, 'query', '') or ''),
+        web_research_result_count_fn=WEB_RESEARCH_SESSION.result_count,
+        web_research_has_results_fn=WEB_RESEARCH_SESSION.has_results,
+        render_reply_fn=render_reply,
+    )
 
-    if _is_retrieval_meta_question(text):
-        reply_text = _retrieval_meta_reply(current_state)
-        outcome = {
-            "intent": "retrieval_followup",
-            "kind": "meta_summary",
-            "reply_contract": "retrieval_followup.meta_summary",
-            "reply_text": reply_text,
-            "query": query,
-            "result_count": result_count,
-            "selected_index": None,
-            "state_delta": current_state,
-        }
-        return render_reply(outcome), current_state, outcome
-
-    if index is not None and 1 <= index <= len(urls):
-        selected_url = str(urls[index - 1])
-        result = tool_web_gather(selected_url)
-        next_state = _make_retrieval_conversation_state("web_gather", selected_url, result) or current_state
-        outcome = {
-            "intent": "retrieval_followup",
-            "kind": "selected_result",
-            "reply_contract": "retrieval_followup.selected_result",
-            "reply_text": str(result or ""),
-            "query": query,
-            "result_count": result_count,
-            "selected_index": index,
-            "selected_url": selected_url,
-            "state_delta": next_state,
-        }
-        return render_reply(outcome), next_state, outcome
-
-    if source == "web_research" and _looks_like_retrieval_followup(text):
-        result = tool_web_research("", continue_mode=True)
-        if result and not result.lower().startswith("no active web research session"):
-            next_state = _make_retrieval_conversation_state("web_research", WEB_RESEARCH_LAST_QUERY, result) or current_state
-            outcome = {
-                "intent": "retrieval_followup",
-                "kind": "continued_results",
-                "reply_contract": "retrieval_followup.continued_results",
-                "reply_text": str(result or ""),
-                "query": str(WEB_RESEARCH_LAST_QUERY or query).strip(),
-                "result_count": len(WEB_RESEARCH_LAST_RESULTS) if WEB_RESEARCH_LAST_RESULTS else result_count,
-                "selected_index": None,
-                "state_delta": next_state,
-            }
-            return render_reply(outcome), next_state, outcome
-
-    parts = []
-    if query:
-        parts.append(f"Continuing from your last retrieval for '{query}'.")
-    else:
-        parts.append("Continuing from your last retrieval thread.")
-    if result_count > 0:
-        parts.append(f"I have {result_count} source(s) in the current retrieval context.")
-    if urls:
-        parts.append("You can ask me about the first result, the second source, or tell me to gather one directly.")
-    else:
-        parts.append("If you want, I can run a more specific search or gather a particular source.")
-    reply_text = " ".join(parts)
-    outcome = {
-        "intent": "retrieval_followup",
-        "kind": "guidance",
-        "reply_contract": "retrieval_followup.guidance",
-        "reply_text": reply_text,
-        "query": query,
-        "result_count": result_count,
-        "selected_index": index,
-        "state_delta": current_state,
-    }
-    return render_reply(outcome), current_state, outcome
 
 
 def _classify_web_research_outcome(
@@ -2865,16 +1625,24 @@ def _classify_web_research_outcome(
     payload = intent_result if isinstance(intent_result, dict) else {}
     request_kind = str(payload.get("web_request_kind") or "research_prompt").strip().lower() or "research_prompt"
     tool_name = str(payload.get("tool_name") or "web_research").strip().lower() or "web_research"
+    provider_candidates = payload.get("provider_candidates") if isinstance(payload.get("provider_candidates"), list) else []
+    provider_family = str(payload.get("provider_family") or "general_web").strip().lower() or "general_web"
     query = str(payload.get("query") or "").strip()
     if request_kind == "deep_search" and not query:
         query = _infer_research_query_from_turns(list(turns or []))
     if not query:
         query = str(user_text or "").strip()
+    resolved = _resolve_research_provider(provider_candidates, default_tool=tool_name)
+    tool_name = str(resolved.get("tool_name") or tool_name).strip().lower() or tool_name
+    provider_used = str(resolved.get("provider") or _provider_name_from_tool(tool_name)).strip().lower() or _provider_name_from_tool(tool_name)
     return {
         "intent": "web_research_family",
         "kind": request_kind,
         "reply_contract": f"web_research_family.{request_kind}",
         "tool_name": tool_name,
+        "provider_candidates": list(provider_candidates or []),
+        "provider_family": provider_family,
+        "provider_used": provider_used,
         "query": query,
         "requires_tool": True,
         "state_delta": {},
@@ -2959,6 +1727,7 @@ def _record_memory_event(
     error: str = "",
     result_count: Optional[int] = None,
     duration_ms: Optional[int] = None,
+    lane: str = "",
     mode: str = "",
 ) -> None:
     payload = {
@@ -2973,6 +1742,7 @@ def _record_memory_event(
         "query_preview": " ".join(str(query or "").split())[:120],
         "reason": str(reason or "").strip(),
         "error": str(error or "").strip()[:300],
+        "lane": str(lane or "").strip(),
         "mode": str(mode or "").strip(),
         "ts": int(time.time()),
     }
@@ -3000,55 +1770,30 @@ def finalize_action_ledger_record(
     routing_decision: Optional[dict] = None,
     reflection_payload: Optional[dict] = None,
 ) -> Optional[Path]:
-    rec = dict(record or {})
-    if not isinstance(rec.get("route_trace"), list):
-        rec["route_trace"] = []
-    if intent:
-        rec["intent"] = str(intent).strip()
-    rec["planner_decision"] = str(planner_decision or rec.get("planner_decision") or "deterministic").strip()
-    rec["tool"] = str(tool or rec.get("tool") or "").strip()
-    args = tool_args if isinstance(tool_args, dict) else rec.get("tool_args")
-    rec["tool_args"] = args if isinstance(args, dict) else {}
-    rec["tool_result"] = str(tool_result or rec.get("tool_result") or "")
-    rec["final_answer"] = str(final_answer or "")
-    rec["reply_contract"] = str(reply_contract or rec.get("reply_contract") or "").strip()
-    outcome_payload = reply_outcome if isinstance(reply_outcome, dict) else rec.get("reply_outcome")
-    rec["reply_outcome"] = dict(outcome_payload) if isinstance(outcome_payload, dict) else {}
-    acts = rec.get("turn_acts")
-    rec["turn_acts"] = [str(item).strip() for item in acts if str(item).strip()] if isinstance(acts, list) else []
-    finalized_routing_decision = _finalize_routing_decision(
-        routing_decision if isinstance(routing_decision, dict) else rec.get("routing_decision"),
-        planner_decision=rec.get("planner_decision") or "",
-        reply_contract=rec.get("reply_contract") or "",
-        reply_outcome=rec.get("reply_outcome") if isinstance(rec.get("reply_outcome"), dict) else {},
+    return service_finalize_action_ledger_record(
+        record,
+        final_answer=final_answer,
+        planner_decision=planner_decision,
+        tool=tool,
+        tool_args=tool_args,
+        tool_result=tool_result,
+        grounded=grounded,
+        intent=intent,
+        active_subject=active_subject,
+        continuation_used=continuation_used,
+        reply_contract=reply_contract,
+        reply_outcome=reply_outcome,
+        routing_decision=routing_decision,
+        reflection_payload=reflection_payload,
+        provider_name_from_tool_fn=_provider_name_from_tool,
+        finalize_routing_decision_fn=_finalize_routing_decision,
+        action_ledger_add_step_fn=action_ledger_add_step,
+        action_ledger_route_summary_fn=action_ledger_route_summary,
+        write_action_ledger_record_fn=write_action_ledger_record,
+        recent_action_ledger_records_fn=_recent_action_ledger_records,
+        maybe_log_self_reflection_fn=maybe_log_self_reflection,
     )
-    if finalized_routing_decision:
-        rec["routing_decision"] = finalized_routing_decision
-    rec["active_subject"] = str(active_subject or rec.get("active_subject") or "").strip()
-    rec["continuation_used"] = bool(rec.get("continuation_used", False)) if continuation_used is None else bool(continuation_used)
-    if grounded is None:
-        fa = rec["final_answer"].lower()
-        tr = rec["tool_result"].strip()
-        rec["grounded"] = bool(tr) or "[source:" in fa or "[tool:" in fa
-    else:
-        rec["grounded"] = bool(grounded)
-    if not rec.get("route_trace"):
-        action_ledger_add_step(rec, "planner", rec.get("planner_decision") or "deterministic")
-    if not any(str((step or {}).get("stage") or "") == "finalize" for step in rec.get("route_trace") or [] if isinstance(step, dict)):
-        action_ledger_add_step(
-            rec,
-            "finalize",
-            rec.get("planner_decision") or "deterministic",
-            grounded=bool(rec.get("grounded")),
-            tool=rec.get("tool") or "",
-        )
-    rec["route_summary"] = action_ledger_route_summary(rec)
-    path = write_action_ledger_record(rec)
-    if path is not None:
-        all_records = _recent_action_ledger_records(limit=1000000)
-        recent_for_reflection = all_records[-20:]
-        maybe_log_self_reflection(limit=20, every=1, records=recent_for_reflection, total_records=len(all_records), extra_payload=reflection_payload)
-    return path
+
 
 
 def _is_factual_identity_or_policy_query(text: str) -> bool:
@@ -3243,6 +1988,11 @@ def _is_location_request(user_text: str) -> bool:
 
 
 def _location_reply() -> str:
+    live = runtime_device_location_payload()
+    if live.get("available") and not live.get("stale"):
+        accuracy = live.get("accuracy_m")
+        accuracy_note = f" Accuracy about {int(round(float(accuracy)))}m." if accuracy is not None else ""
+        return f"My current device location is {live.get('coords_text')}.{accuracy_note}"
     preview = get_saved_location_text()
     if preview:
         return f"My location is {preview}."
@@ -3346,45 +2096,18 @@ def _action_history_reply() -> str:
 
 
 def truth_hierarchy_answer(user_text: str) -> tuple[bool, str, str, bool]:
-    """Return deterministic answer for strict-truth query classes.
-
-    Source precedence for these classes:
-    1) verified tool/action ledger
-    2) structured learned facts / deterministic identity rules
-    3) capability registry
-    4) policy configuration
-    """
-    t = (user_text or "").strip()
-    if not t:
-        return False, "", "", False
-
-    if _is_action_history_query(t):
-        return True, _action_history_reply(), "action_ledger", True
-
-    if _is_identity_or_developer_query(t):
-        hard = hard_answer(t)
-        if hard:
-            return True, hard, "learned_facts", True
-        story = get_name_origin_story().strip()
-        if "did you learn about your name" in t.lower() and story:
-            return True, story, "learned_facts", True
-        return False, "", "", False
-
-    if _is_capability_query(t):
-        return True, describe_capabilities(), "capability_registry", True
-
-    if _is_policy_domain_query(t):
-        web = policy_web()
-        domains = list(web.get("allow_domains") or [])
-        enabled = bool(web.get("enabled", False))
-        lines = [f"Policy web access enabled: {enabled}"]
-        if domains:
-            lines.append("Allowed domains: " + ", ".join(domains))
-        else:
-            lines.append("Allowed domains: none configured")
-        return True, "\n".join(lines), "policy_json", True
-
-    return False, "", "", False
+    return service_truth_hierarchy_answer(
+        user_text,
+        is_action_history_query_fn=_is_action_history_query,
+        action_history_reply_fn=_action_history_reply,
+        is_identity_or_developer_query_fn=_is_identity_or_developer_query,
+        hard_answer_fn=hard_answer,
+        get_name_origin_story_fn=get_name_origin_story,
+        is_capability_query_fn=_is_capability_query,
+        describe_capabilities_fn=describe_capabilities,
+        is_policy_domain_query_fn=_is_policy_domain_query,
+        policy_web_fn=policy_web,
+    )
 
 
 def _self_correct_reply(user_text: str, reply: str) -> tuple[str, bool, str]:
@@ -3444,174 +2167,64 @@ def bad(msg): print(f"[FAIL] {msg}", flush=True)
 
 
 def load_policy() -> dict:
-    data = json.loads(POLICY_PATH.read_text(encoding="utf-8"))
-    if not isinstance(data, dict):
-        data = {}
-
-    data["allowed_root"] = str(Path(data.get("allowed_root", str(BASE_DIR))).resolve())
-
-    tools = data.get("tools_enabled") if isinstance(data.get("tools_enabled"), dict) else {}
-    tools.setdefault("screen", False)
-    tools.setdefault("camera", False)
-    tools.setdefault("files", False)
-    tools.setdefault("health", False)
-    tools.setdefault("web", False)
-    data["tools_enabled"] = tools
-
-    models = data.get("models") if isinstance(data.get("models"), dict) else {}
-    models.setdefault("chat", "llama3.1:8b")
-    models.setdefault("vision", "qwen2.5vl:7b")
-    models.setdefault("stt_size", "base")
-    data["models"] = models
-
-    memory = data.get("memory") if isinstance(data.get("memory"), dict) else {}
-    memory.setdefault("enabled", False)
-    memory.setdefault("mode", "B")
-    memory.setdefault("scope", "private")
-    memory.setdefault("top_k", 5)
-    memory.setdefault("context_top_k", 3)
-    memory.setdefault("min_score", 0.25)
-    memory.setdefault("store_min_chars", 12)
-    memory.setdefault("exclude_sources", [])
-    memory.setdefault("store_include_patterns", [])
-    memory.setdefault("store_exclude_patterns", [])
-    data["memory"] = memory
-
-    web = data.get("web") if isinstance(data.get("web"), dict) else {}
-    web.setdefault("enabled", False)
-    web.setdefault("search_provider", "html")
-    web.setdefault("search_api_endpoint", "")
-    web.setdefault("allow_domains", [])
-    web.setdefault("max_bytes", 20_000_000)
-    web.setdefault("research_domains_limit", 4)
-    web.setdefault("research_pages_per_domain", 8)
-    web.setdefault("research_scan_pages_per_domain", 12)
-    web.setdefault("research_max_depth", 1)
-    web.setdefault("research_seeds_per_domain", 8)
-    web.setdefault("research_max_results", 8)
-    web.setdefault("research_min_score", 3.0)
-    data["web"] = web
-
-    patch = data.get("patch") if isinstance(data.get("patch"), dict) else {}
-    patch.setdefault("enabled", True)
-    patch.setdefault("allow_force", False)
-    patch.setdefault("strict_manifest", True)
-    patch.setdefault("behavioral_check", True)
-    patch.setdefault("behavioral_check_timeout_sec", 600)
-    data["patch"] = patch
-
-    safety_envelope = data.get("safety_envelope") if isinstance(data.get("safety_envelope"), dict) else {}
-    safety_envelope.setdefault("enabled", True)
-    safety_envelope.setdefault("mode", "observe")
-    safety_envelope.setdefault("replay_threshold", 1.0)
-    safety_envelope.setdefault("replay_attempts", 2)
-    safety_envelope.setdefault("novelty_min", 0.35)
-    safety_envelope.setdefault("entropy_min", 2.8)
-    safety_envelope.setdefault("diversity_min_messages", 3)
-    safety_envelope.setdefault("human_veto_first_n", 3)
-    safety_envelope.setdefault("auto_demote_threshold", 0.90)
-    safety_envelope.setdefault("max_candidates_per_cycle", 3)
-    safety_envelope.setdefault("full_regression_required", False)
-    safety_envelope.setdefault("quarantine_root", str(BASE_DIR / "runtime" / "test_sessions" / "quarantine"))
-    safety_envelope.setdefault("pending_review_root", str(BASE_DIR / "runtime" / "test_sessions" / "pending_review"))
-    data["safety_envelope"] = safety_envelope
-
-    kidney = data.get("kidney") if isinstance(data.get("kidney"), dict) else {}
-    kidney.setdefault("enabled", True)
-    kidney.setdefault("mode", "observe")
-    kidney.setdefault("definition_max_age_days", 7)
-    kidney.setdefault("definition_novelty_min", 0.4)
-    kidney.setdefault("quarantine_max_age_hours", 48)
-    kidney.setdefault("preview_max_age_days", 3)
-    kidney.setdefault("snapshot_max_age_days", 30)
-    kidney.setdefault("temp_max_age_days", 14)
-    kidney.setdefault("temp_max_total_mb", 500)
-    kidney.setdefault("protect_patterns", [])
-    data["kidney"] = kidney
-
-    return data
+    return _policy_manager().load_policy()
 
 
 def _load_policy_raw() -> dict:
-    try:
-        # Use normalized policy view so mutating actions never drop required keys.
-        return load_policy()
-    except Exception:
-        return {}
+    return _policy_manager()._load_raw()
 
 
 def _save_policy_raw(data: dict) -> None:
-    POLICY_PATH.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    _policy_manager()._save_raw(data)
 
 
 def _record_policy_change(action: str, target: str, result: str, details: str = "") -> None:
-    entry = {
-        "ts": int(time.time()),
-        "user": get_active_user() or "unknown",
-        "action": str(action or "").strip(),
-        "target": str(target or "").strip(),
-        "result": str(result or "").strip(),
-        "details": str(details or "").strip(),
-    }
-    try:
-        POLICY_AUDIT_LOG.parent.mkdir(parents=True, exist_ok=True)
-        with open(POLICY_AUDIT_LOG, "a", encoding="utf-8") as f:
-            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
-    except Exception:
-        pass
+    _policy_manager().record_change(action, target, result, details, get_active_user())
 
 
 def policy_models():
-    p = load_policy()
-    return p.get("models") or {}
+    return _policy_manager().get_models()
 
 
 def policy_memory():
-    p = load_policy()
-    return p.get("memory") or {}
+    return _policy_manager().get_memory()
 
 
 def policy_tools_enabled():
-    p = load_policy()
-    return p.get("tools_enabled") or {}
+    return _policy_manager().get_tools_enabled()
 
 
-def build_tool_context(*, is_admin: bool = False, extra: Optional[dict] = None) -> ToolContext:
-    policy = load_policy()
-    extras = dict(extra or {})
-    return ToolContext(
-        user_id=get_active_user() or "",
-        session_id="",
-        policy=policy,
-        allowed_root=str(Path(policy.get("allowed_root") or str(BASE_DIR)).resolve()),
-        is_admin=bool(is_admin),
-        extra=extras,
+def _memory_adapter_service() -> MemoryAdapterService:
+    return MemoryAdapterService(
+        policy_memory_getter=policy_memory,
+        active_user_getter=get_active_user,
     )
 
 
+def _tool_execution_service() -> ToolExecutionService:
+    return ToolExecutionService(
+        policy_loader=load_policy,
+        active_user_getter=get_active_user,
+        base_dir=BASE_DIR,
+        registry_service=TOOL_REGISTRY_SERVICE,
+    )
+
+
+def build_tool_context(*, is_admin: bool = False, extra: Optional[dict] = None) -> ToolContext:
+    return _tool_execution_service().build_tool_context(is_admin=is_admin, extra=extra)
+
+
 def _tool_error_message(tool_name: str, reason: str) -> str:
-    r = str(reason or "tool_failed").strip()
-    mapping = {
-        "screen_tool_disabled": "Screen tool disabled by policy.",
-        "camera_tool_disabled": "Camera tool disabled by policy.",
-        "files_tool_disabled": "File tools disabled by policy.",
-        "health_tool_disabled": "Health tool disabled by policy.",
-        "patch_tool_disabled": "Patch tool disabled by policy.",
-        "patch_force_disabled": "Forced patch apply is disabled by policy.",
-        "admin_required": f"{tool_name} is restricted to admin-approved execution.",
-    }
-    return mapping.get(r, r)
+    return _tool_execution_service().tool_error_message(tool_name, reason)
 
 
 def execute_registered_tool(tool_name: str, args: dict, *, is_admin: bool = False, extra: Optional[dict] = None) -> str:
-    ctx = build_tool_context(is_admin=is_admin, extra=extra)
-    try:
-        result = TOOL_REGISTRY.run_tool(tool_name, args or {}, ctx)
-    except ToolInvocationError as e:
-        return _tool_error_message(tool_name, str(e))
-    except Exception as e:
-        return f"{tool_name} tool failed: {e}"
-    return str(result or "").strip()
+    return _tool_execution_service().execute_registered_tool(
+        tool_name,
+        args,
+        is_admin=is_admin,
+        extra=extra,
+    )
     
 def _research_handlers() -> dict[str, object]:
     return {
@@ -3619,6 +2232,8 @@ def _research_handlers() -> dict[str, object]:
         "web_search": tool_web_search,
         "web_research": tool_web_research,
         "web_gather": tool_web_gather,
+        "wikipedia_lookup": tool_wikipedia_lookup,
+        "stackexchange_search": tool_stackexchange_search,
     }
 
 def execute_research_action(action: str, value: str) -> str:
@@ -3651,99 +2266,30 @@ def execute_patch_action(action: str, value: str = "", *, force: bool = False, i
 
 
 def policy_web():
-    p = load_policy()
-    return (p.get("web") or {})
+    return _policy_manager().get_web()
 
 
 def policy_patch():
-    p = load_policy()
-    return (p.get("patch") or {})
+    return _policy_manager().get_patch()
 
 
 def web_enabled() -> bool:
-    p = load_policy()
-    return bool((p.get("tools_enabled") or {}).get("web")) and bool((p.get("web") or {}).get("enabled"))
+    return _policy_manager().is_web_enabled()
 
 
 def _host_allowed(host: str, allow_domains: list[str]) -> bool:
-    host = (host or "").lower()
-    for d in allow_domains:
-        d = (d or "").lower().strip()
-        if not d:
-            continue
-        if host == d or host.endswith("." + d):
-            return True
-    return False
+    return _policy_manager().host_allowed(host, allow_domains)
 
 
 def web_fetch(url: str, save_dir: Path) -> dict:
-    """
-    Fetch a URL (http/https only) if host is allowlisted.
-    Saves to save_dir with deterministic filename.
-    Never raises; always returns {"ok": bool, ...}.
-    """
-    if not web_enabled():
-        return {"ok": False, "error": "Web tool disabled by policy."}
+    return service_web_fetch(
+        url,
+        save_dir,
+        web_enabled_fn=web_enabled,
+        policy_web_fn=policy_web,
+        host_allowed_fn=_host_allowed,
+    )
 
-    cfg = policy_web()
-    allow_domains = cfg.get("allow_domains") or []
-    max_bytes = int(cfg.get("max_bytes") or 20_000_000)
-
-    u = urlparse(url.strip())
-    if u.scheme not in ("http", "https"):
-        return {"ok": False, "error": "Only http/https URLs are allowed."}
-    host = u.hostname or ""
-    if not _host_allowed(host, allow_domains):
-        return {"ok": False, "error": f"Domain not allowed: {host}"}
-
-    save_dir.mkdir(parents=True, exist_ok=True)
-
-    h = hashlib.sha256(url.encode("utf-8")).hexdigest()[:16]
-    ts = time.strftime("%Y%m%d_%H%M%S")
-    base = f"{ts}_{host}_{h}"
-
-    try:
-        r = requests.get(url, stream=True, timeout=60, headers={"User-Agent": "Nova/1.0"})
-    except requests.exceptions.RequestException as e:
-        return {"ok": False, "error": f"Request failed: {e}"}
-
-    try:
-        r.raise_for_status()
-        ctype = (r.headers.get("Content-Type") or "").split(";")[0].strip().lower()
-
-        if ctype == "application/pdf":
-            ext = ".pdf"
-        elif ctype in ("text/html", "application/xhtml+xml"):
-            ext = ".html"
-        elif ctype.startswith("text/"):
-            ext = ".txt"
-        else:
-            ext = mimetypes.guess_extension(ctype) or ".bin"
-
-        out_path = save_dir / (base + ext)
-
-        total = 0
-        with open(out_path, "wb") as f:
-            for chunk in r.iter_content(chunk_size=65536):
-                if not chunk:
-                    continue
-                total += len(chunk)
-                if total > max_bytes:
-                    out_path.unlink(missing_ok=True)
-                    return {"ok": False, "error": f"File too large (>{max_bytes} bytes)."}
-                f.write(chunk)
-
-        return {"ok": True, "url": url, "path": str(out_path), "content_type": ctype, "bytes": total}
-
-    except requests.exceptions.RequestException as e:
-        return {"ok": False, "error": f"HTTP error: {e}"}
-    except Exception as e:
-        return {"ok": False, "error": f"Unexpected error: {e}"}
-    finally:
-        try:
-            r.close()
-        except Exception:
-            pass
 
 
 def _web_allowlist_message(context: str = "") -> str:
@@ -3823,6 +2369,156 @@ def _format_weather_output(label: str, summary: str) -> str:
     if style == "tool":
         return f"Forecast for {l}: {s}"
     return f"{l}: {s}"
+
+
+DEVICE_LOCATION_MAX_AGE_SEC = 300.0
+
+
+def _runtime_device_backend_provider() -> dict:
+    platform_supported = os.name == "nt"
+    winsdk_installed = False
+    if platform_supported:
+        try:
+            winsdk_installed = bool(
+                importlib.util.find_spec("winsdk.windows.devices.geolocation")
+                or importlib.util.find_spec("winsdk")
+            )
+        except Exception:
+            winsdk_installed = False
+    available = platform_supported and winsdk_installed
+    if available:
+        message = "Windows geolocation fallback is ready."
+    elif platform_supported:
+        message = "Windows geolocation fallback requires the winsdk package."
+    else:
+        message = "Windows geolocation fallback is only available on Windows hosts."
+    return {
+        "name": "windows_geolocator",
+        "platform_supported": platform_supported,
+        "winsdk_installed": winsdk_installed,
+        "available": available,
+        "message": message,
+    }
+
+
+def _coerce_bounded_float(value, *, minimum: float, maximum: float) -> Optional[float]:
+    try:
+        number = float(value)
+    except Exception:
+        return None
+    if not math.isfinite(number):
+        return None
+    if number < minimum or number > maximum:
+        return None
+    return number
+
+
+def _coerce_optional_metric(value) -> Optional[float]:
+    try:
+        if value in {None, ""}:
+            return None
+        number = float(value)
+    except Exception:
+        return None
+    if not math.isfinite(number):
+        return None
+    return number
+
+
+def _normalize_source_timestamp(value) -> float:
+    now = time.time()
+    try:
+        number = float(value)
+    except Exception:
+        return now
+    if not math.isfinite(number) or number <= 0:
+        return now
+    if number > 1_000_000_000_000:
+        number /= 1000.0
+    return min(number, now)
+
+
+def _format_runtime_coords(lat: float, lon: float) -> str:
+    return f"{lat:.5f},{lon:.5f}"
+
+
+def _device_location_status_payload(snapshot: Optional[dict], *, max_age_sec: float = DEVICE_LOCATION_MAX_AGE_SEC) -> dict:
+    return service_device_location_status_payload(
+        snapshot,
+        max_age_sec=max_age_sec,
+        runtime_device_backend_provider_fn=_runtime_device_backend_provider,
+    )
+
+
+def runtime_device_location_payload(*, max_age_sec: float = DEVICE_LOCATION_MAX_AGE_SEC) -> dict:
+    try:
+        if not DEVICE_LOCATION_FILE.exists():
+            return _device_location_status_payload(None, max_age_sec=max_age_sec)
+        raw = json.loads(DEVICE_LOCATION_FILE.read_text(encoding="utf-8") or "{}")
+    except Exception:
+        return {
+            "available": False,
+            "status": "error",
+            "stale": False,
+            "message": "Failed to read live device location state.",
+            "backend_provider": _runtime_device_backend_provider(),
+        }
+    return _device_location_status_payload(raw, max_age_sec=max_age_sec)
+
+
+def set_runtime_device_location(payload: dict) -> tuple[bool, str, dict]:
+    data = payload if isinstance(payload, dict) else {}
+    lat = _coerce_bounded_float(data.get("lat"), minimum=-90.0, maximum=90.0)
+    lon = _coerce_bounded_float(data.get("lon"), minimum=-180.0, maximum=180.0)
+    if lat is None or lon is None:
+        return False, "device_location_invalid", runtime_device_location_payload()
+
+    snapshot = {
+        "lat": lat,
+        "lon": lon,
+        "accuracy_m": _coerce_optional_metric(data.get("accuracy_m")),
+        "speed_mps": _coerce_optional_metric(data.get("speed_mps")),
+        "heading_deg": _coerce_optional_metric(data.get("heading_deg")),
+        "altitude_m": _coerce_optional_metric(data.get("altitude_m")),
+        "source": str(data.get("source") or "browser_watch").strip().lower() or "browser_watch",
+        "permission_state": str(data.get("permission_state") or "").strip().lower(),
+        "captured_ts": _normalize_source_timestamp(data.get("captured_ts")),
+        "updated_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+    }
+    try:
+        DEVICE_LOCATION_FILE.parent.mkdir(parents=True, exist_ok=True)
+        atomic_write_json(DEVICE_LOCATION_FILE, snapshot)
+    except Exception:
+        return False, "device_location_write_failed", runtime_device_location_payload()
+    return True, "device_location_updated", runtime_device_location_payload()
+
+
+def clear_runtime_device_location() -> dict:
+    try:
+        DEVICE_LOCATION_FILE.unlink(missing_ok=True)
+    except Exception:
+        pass
+    return runtime_device_location_payload()
+
+
+def _resolve_windows_device_coords(timeout_sec: float = 8.0) -> Optional[dict]:
+    return service_resolve_windows_device_coords(
+        timeout_sec,
+        runtime_device_backend_provider_fn=_runtime_device_backend_provider,
+    )
+
+
+def resolve_current_device_coords(*, max_age_sec: float = DEVICE_LOCATION_MAX_AGE_SEC) -> Optional[tuple[float, float]]:
+    live = runtime_device_location_payload(max_age_sec=max_age_sec)
+    if live.get("available") and not live.get("stale"):
+        return (float(live.get("lat")), float(live.get("lon")))
+
+    windows_fix = _resolve_windows_device_coords()
+    if isinstance(windows_fix, dict):
+        ok, _msg, updated = set_runtime_device_location(windows_fix)
+        if ok and updated.get("available"):
+            return (float(updated.get("lat")), float(updated.get("lon")))
+    return None
 
 
 def _mentions_location_phrase(text: str) -> bool:
@@ -4050,6 +2746,13 @@ def _is_saved_location_weather_query(text: str) -> bool:
     normalized = _normalize_turn_text(text).strip(" .,!?")
     if not normalized:
         return False
+    if "saved location" in normalized and (
+        "use the saved location" in normalized
+        or "using the saved location" in normalized
+        or normalized.startswith("yes ")
+        or normalized in {"yes", "yeah", "yep", "ok", "okay", "sure", "please do", "go ahead"}
+    ):
+        return True
     return normalized in {
         "weather",
         "weather now",
@@ -4462,7 +3165,15 @@ def _looks_like_retrieval_followup(text: str) -> bool:
 
 
 def _is_retrieval_tool(tool_name: str) -> bool:
-    return str(tool_name or "").strip().lower() in {"web_search", "web_research", "web_gather", "web_fetch", "search"}
+    return str(tool_name or "").strip().lower() in {
+        "web_search",
+        "web_research",
+        "web_gather",
+        "web_fetch",
+        "search",
+        "wikipedia_lookup",
+        "stackexchange_search",
+    }
 
 
 def _retrieval_query_from_text(tool_name: str, text: str) -> str:
@@ -4472,7 +3183,7 @@ def _retrieval_query_from_text(tool_name: str, text: str) -> str:
 
     if tool == "web_research":
         if low in {"web continue", "continue web", "continue web research"}:
-            return WEB_RESEARCH_LAST_QUERY
+            return WEB_RESEARCH_SESSION.query
         if low.startswith("web research "):
             return raw.split(maxsplit=2)[2].strip() if len(raw.split(maxsplit=2)) >= 3 else ""
     if tool == "web_search":
@@ -4486,7 +3197,29 @@ def _retrieval_query_from_text(tool_name: str, text: str) -> str:
     if tool == "web_fetch":
         if low.startswith("web "):
             return raw.split(maxsplit=1)[1].strip() if len(raw.split(maxsplit=1)) >= 2 else ""
+    if tool == "wikipedia_lookup":
+        if low.startswith("wikipedia "):
+            return raw.split(maxsplit=1)[1].strip() if len(raw.split(maxsplit=1)) >= 2 else ""
+        if low.startswith("wiki "):
+            return raw.split(maxsplit=1)[1].strip() if len(raw.split(maxsplit=1)) >= 2 else ""
+    if tool == "stackexchange_search":
+        if low.startswith("stackexchange "):
+            return raw[len("stackexchange "):].strip()
+        if low.startswith("stack overflow "):
+            return raw[len("stack overflow "):].strip()
     return raw
+
+
+def _provider_name_from_tool(tool_name: str) -> str:
+    mapping = {
+        "wikipedia_lookup": "wikipedia",
+        "stackexchange_search": "stackexchange",
+        "web_research": "general_web",
+        "web_search": "general_web",
+        "web_fetch": "general_web",
+        "web_gather": "general_web",
+    }
+    return str(mapping.get(str(tool_name or "").strip().lower(), "")).strip()
 
 
 def _make_retrieval_conversation_state(tool_name: str, query: str, tool_output: str) -> Optional[dict]:
@@ -4503,10 +3236,10 @@ def _make_retrieval_conversation_state(tool_name: str, query: str, tool_output: 
     effective_query = str(query or "").strip()
 
     if normalized_tool == "web_research":
-        if WEB_RESEARCH_LAST_RESULTS:
-            result_count = len(WEB_RESEARCH_LAST_RESULTS)
+        if WEB_RESEARCH_SESSION.has_results():
+            result_count = WEB_RESEARCH_SESSION.result_count()
         if not effective_query:
-            effective_query = WEB_RESEARCH_LAST_QUERY
+            effective_query = WEB_RESEARCH_SESSION.query
 
     if not urls and normalized_tool not in {"web_research", "web_gather", "web_fetch"}:
         return None
@@ -4612,7 +3345,7 @@ def _retrieval_followup_reply(state: dict, text: str) -> tuple[str, Optional[dic
     if source == "web_research" and _looks_like_retrieval_followup(text):
         result = tool_web_research("", continue_mode=True)
         if result and not result.lower().startswith("no active web research session"):
-            return result, (_make_retrieval_conversation_state("web_research", WEB_RESEARCH_LAST_QUERY, result) or state)
+            return result, (_make_retrieval_conversation_state("web_research", WEB_RESEARCH_SESSION.query, result) or state)
 
     parts = []
     if query:
@@ -4826,59 +3559,22 @@ def get_weather_for_location(lat: float, lon: float) -> str:
 
 
 def _need_confirmed_location_message() -> str:
-    return "I have a weather tool now, but I still need a confirmed location or coordinates."
+    return "I have a weather tool now, but I still need a confirmed location or coordinates for the current device."
 
 
-def tool_weather(location: str) -> str:
-    if not policy_tools_enabled().get("web", False) or not web_enabled():
-        return "Weather lookup unavailable: web tool is disabled by policy."
+def tool_weather(location: str):
+    return service_tool_weather(
+        location,
+        policy_tools_enabled_fn=policy_tools_enabled,
+        web_enabled_fn=web_enabled,
+        weather_source_host_fn=_weather_source_host,
+        weather_unavailable_message_fn=_weather_unavailable_message,
+        coords_for_location_hint_fn=_coords_for_location_hint,
+        need_confirmed_location_message_fn=_need_confirmed_location_message,
+        get_weather_for_location_fn=get_weather_for_location,
+        format_weather_output_fn=_format_weather_output,
+    )
 
-    source = _weather_source_host()
-    if not source:
-        return _weather_unavailable_message()
-
-    loc = (location or "").strip()
-
-    if source == "api.weather.gov":
-        coords = _coords_for_location_hint(loc)
-        if not coords:
-            return _need_confirmed_location_message()
-        lat, lon = coords
-        try:
-            summary = get_weather_for_location(lat, lon)
-            label = loc if loc else f"{lat},{lon}"
-            return _format_weather_output(label, summary)
-        except Exception as e:
-            return f"Weather lookup failed: {e}"
-
-    if not loc:
-        return "Usage: weather <location-or-lat,lon>"
-
-    if source == "wttr.in":
-        url = f"https://wttr.in/{quote(loc)}?format=j1"
-        try:
-            r = requests.get(url, headers={"User-Agent": "Nova/1.0"}, timeout=25)
-            r.raise_for_status()
-            data = r.json()
-        except Exception as e:
-            return f"Weather lookup failed: {e}"
-
-        try:
-            cur = ((data.get("current_condition") or [{}])[0])
-            desc = (((cur.get("weatherDesc") or [{}])[0]).get("value") or "unknown").strip()
-            temp_f = (cur.get("temp_F") or "?").strip()
-            feels_f = (cur.get("FeelsLikeF") or "?").strip()
-            humidity = (cur.get("humidity") or "?").strip()
-            wind_mph = (cur.get("windspeedMiles") or "?").strip()
-
-            return _format_weather_output(
-                loc,
-                f"{desc}, {temp_f}F (feels like {feels_f}F), humidity {humidity}%, wind {wind_mph} mph. [source: wttr.in]",
-            )
-        except Exception:
-            return "Weather lookup succeeded but returned an unexpected payload format."
-
-    return _need_confirmed_location_message()
 
 def allowed_root() -> Path:
     p = load_policy()
@@ -5034,80 +3730,43 @@ def speak_chunked(tts: SubprocessTTS, text: str, max_len: int = 220):
 # Memory hooks (optional)
 # =========================
 def mem_enabled() -> bool:
-    return bool(policy_memory().get("enabled", False))
+    return _memory_adapter_service().mem_enabled()
 
 
 def mem_top_k() -> int:
-    try:
-        return int(policy_memory().get("top_k", 5))
-    except Exception:
-        return 5
+    return _memory_adapter_service().mem_top_k()
 
 
 def mem_scope() -> str:
-    raw = str(policy_memory().get("scope", "private") or "private").strip().lower()
-    if raw not in {"private", "shared", "hybrid"}:
-        return "private"
-    return raw
+    return _memory_adapter_service().mem_scope()
 
 
 def mem_context_top_k() -> int:
-    try:
-        v = int(policy_memory().get("context_top_k", 3))
-        return max(1, min(v, 10))
-    except Exception:
-        return 3
+    return _memory_adapter_service().mem_context_top_k()
 
 
 def mem_min_score() -> float:
-    try:
-        return float(policy_memory().get("min_score", 0.25))
-    except Exception:
-        return 0.25
+    return _memory_adapter_service().mem_min_score()
 
 
 def mem_exclude_sources() -> list[str]:
-    xs = policy_memory().get("exclude_sources") or []
-    return [str(x) for x in xs if x]
+    return _memory_adapter_service().mem_exclude_sources()
 
 
 def mem_store_min_chars() -> int:
-    try:
-        return int(policy_memory().get("store_min_chars", 12))
-    except Exception:
-        return 12
+    return _memory_adapter_service().mem_store_min_chars()
 
 
 def mem_store_exclude_patterns() -> list[str]:
-    xs = policy_memory().get("store_exclude_patterns") or []
-    out = []
-    for x in xs:
-        s = str(x or "").strip()
-        if s:
-            out.append(s)
-    return out
+    return _memory_adapter_service().mem_store_exclude_patterns()
 
 
 def mem_store_include_patterns() -> list[str]:
-    xs = policy_memory().get("store_include_patterns") or []
-    out = []
-    for x in xs:
-        s = str(x or "").strip()
-        if s:
-            out.append(s)
-    return out
+    return _memory_adapter_service().mem_store_include_patterns()
 
 
 def _default_local_user_id() -> str:
-    raw = (
-        os.environ.get("NOVA_USER_ID")
-        or os.environ.get("NOVA_CHAT_USER")
-        or os.environ.get("USER")
-        or os.environ.get("LOGNAME")
-        or os.environ.get("USERNAME")
-        or ""
-    )
-    return re.sub(r"[^A-Za-z0-9._-]", "", str(raw).strip())[:64]
+    return _memory_adapter_service().default_local_user_id()
 
 
 def _memory_write_user() -> str | None:
@@ -5124,74 +3783,11 @@ def _memory_write_user() -> str | None:
 
 
 def _memory_should_keep_text(text: str) -> tuple[bool, str]:
-    t = (text or "").strip()
-    if not t:
-        return False, "empty"
-
-    low = t.lower()
-    if len(t) < mem_store_min_chars():
-        return False, "too_short"
-
-    # Never store questions as memory facts.
-    q_starts = (
-        "what ", "where ", "who ", "why ", "how ", "when ", "which ",
-        "do ", "did ", "can ", "could ", "would ", "is ", "are ", "should ",
-    )
-    if low.endswith("?") or any(low.startswith(q) for q in q_starts):
-        return False, "question"
-
-    # Drop common conversational noise.
-    low_value = {
-        "ok", "okay", "k", "kk", "yes", "no", "thanks", "thank you",
-        "done", "cool", "nice", "great", "sounds good", "got it", "understood",
-    }
-    if low in low_value:
-        return False, "ack"
-
-    noise_prefixes = (
-        "tip:", "nova:", "assistant:", "user:", "i couldn't find grounded sources",
-        "please try:", "network error:", "loading", "checking",
-    )
-    if any(low.startswith(p) for p in noise_prefixes):
-        return False, "ui_noise"
-
-    # Operator-controlled include/exclude patterns.
-    for pat in mem_store_exclude_patterns():
-        try:
-            if re.search(pat, t, flags=re.I):
-                return False, "policy_exclude"
-        except re.error:
-            if pat.lower() in low:
-                return False, "policy_exclude"
-
-    for pat in mem_store_include_patterns():
-        try:
-            if re.search(pat, t, flags=re.I):
-                return True, "policy_include"
-        except re.error:
-            if pat.lower() in low:
-                return True, "policy_include"
-
-    # Prefer durable facts/preferences over transient chat.
-    durable_markers = (
-        "my name is", "i am", "i'm", "i live in", "my location is", "i work",
-        "my favorite", "i like ", "developer", "gus", "gustavo", "peims",
-        "always", "never", "remember this", "learned_fact:",
-    )
-    has_number = bool(re.search(r"\b\d{2,}\b", t))
-    if any(m in low for m in durable_markers) or has_number:
-        return True, "durable_fact"
-
-    # Keep only medium/long declarative statements by default.
-    if len(t.split()) >= 8:
-        return True, "long_statement"
-
-    return False, "low_signal"
+    return _memory_adapter_service().memory_should_keep_text(text)
 
 
 def mem_should_store(text: str) -> bool:
-    keep, _reason = _memory_should_keep_text(text)
-    return keep
+    return _memory_adapter_service().mem_should_store(text)
 
 
 def _memory_runtime_user() -> str | None:
@@ -5204,282 +3800,56 @@ def _memory_runtime_user() -> str | None:
 
 
 def _format_memory_recall_hits(hits) -> str:
-    bullets = []
-    seen = set()
-    norm = lambda s: re.sub(r"\W+", " ", (s or "").lower()).strip()
-    for _score, _ts, _kind, _source, _user_row, text in (hits or []):
-        p = (text or "").strip()
-        if not p:
-            continue
-        one = re.sub(r"\s+", " ", p).strip()
-        n = norm(one)
-        if n in seen:
-            continue
-        seen.add(n)
-        bullets.append(f"- {one[:260]}")
-    bullets = bullets[:max(1, int(mem_context_top_k()))]
-    return "\n".join(bullets)[:2000] if bullets else ""
+    return _memory_adapter_service().format_memory_recall_hits(hits)
 
 
 def mem_stats_payload(emit_event: bool = True) -> dict:
-    if not mem_enabled() or memory_mod is None:
-        return {"ok": False, "error": "memory_disabled"}
-    started = time.time()
-    try:
-        user = _memory_runtime_user()
-        data = memory_mod.stats(scope=mem_scope(), user=user)
-        if isinstance(data, dict):
-            out = dict(data)
-            out["ok"] = True
-            if emit_event:
-                _record_memory_event(
-                    "stats",
-                    "ok",
-                    user=user,
-                    scope=mem_scope(),
-                    backend="in_process",
-                    result_count=int(out.get("total", 0) or 0),
-                    duration_ms=int((time.time() - started) * 1000),
-                )
-            return out
-        if emit_event:
-            _record_memory_event(
-                "stats",
-                "error",
-                user=user,
-                scope=mem_scope(),
-                backend="in_process",
-                error="invalid_memory_stats",
-                duration_ms=int((time.time() - started) * 1000),
-            )
-        return {"ok": False, "error": "invalid_memory_stats"}
-    except Exception as e:
-        if emit_event:
-            _record_memory_event(
-                "stats",
-                "error",
-                user=_memory_runtime_user(),
-                scope=mem_scope(),
-                backend="in_process",
-                error=str(e),
-                duration_ms=int((time.time() - started) * 1000),
-            )
-        return {"ok": False, "error": str(e)}
+    return service_mem_stats_payload(
+        emit_event=emit_event,
+        mem_enabled_fn=mem_enabled,
+        memory_mod=memory_mod,
+        memory_runtime_user_fn=_memory_runtime_user,
+        mem_scope_fn=mem_scope,
+        record_memory_event_fn=_record_memory_event,
+    )
+
 
 
 def mem_add(kind: str, source: str, text: str):
-    if not mem_enabled():
-        return
-    started = time.time()
-    try:
-        if not _identity_memory_text_allowed(kind, text):
-            _record_memory_event(
-                "add",
-                "skipped",
-                scope=mem_scope(),
-                kind=kind,
-                source=source,
-                reason="identity_only_mode",
-                duration_ms=int((time.time() - started) * 1000),
-            )
-            return
-        # Avoid storing assistant outputs and obvious questions
-        if source and str(source).lower() in {"assistant", "nova"}:
-            _record_memory_event(
-                "add",
-                "skipped",
-                scope=mem_scope(),
-                kind=kind,
-                source=source,
-                reason="assistant_source",
-                duration_ms=int((time.time() - started) * 1000),
-            )
-            return
-        bypass_filter = str(kind or "").strip().lower() == "test" or str(source or "").strip().lower() in {"test", "unittest"}
-        keep, _reason = _memory_should_keep_text(text)
-        if bypass_filter:
-            keep, _reason = True, "test_bypass"
-        if not keep:
-            _record_memory_event(
-                "add",
-                "skipped",
-                scope=mem_scope(),
-                kind=kind,
-                source=source,
-                reason=_reason or "filtered_text",
-                duration_ms=int((time.time() - started) * 1000),
-            )
-            return
+    return service_mem_add(
+        kind,
+        source,
+        text,
+        mem_enabled_fn=mem_enabled,
+        identity_memory_text_allowed_fn=_identity_memory_text_allowed,
+        record_memory_event_fn=_record_memory_event,
+        mem_scope_fn=mem_scope,
+        memory_should_keep_text_fn=_memory_should_keep_text,
+        memory_write_user_fn=_memory_write_user,
+        memory_mod=memory_mod,
+        mem_min_score_fn=mem_min_score,
+        python_path=str(PYTHON),
+        base_dir=BASE_DIR,
+    )
 
-        # Duplicate check: run memory audit for same user and skip if near-duplicate exists
-        user = _memory_write_user()
-        if user is None:
-            _record_memory_event(
-                "add",
-                "skipped",
-                scope=mem_scope(),
-                kind=kind,
-                source=source,
-                reason="missing_user",
-                duration_ms=int((time.time() - started) * 1000),
-            )
-            return
-        if memory_mod is not None:
-            try:
-                j = memory_mod.recall_explain(
-                    text,
-                    top_k=1,
-                    min_score=mem_min_score(),
-                    user=user,
-                    scope=mem_scope(),
-                )
-                res = (j or {}).get("results") or []
-                if res:
-                    top = res[0]
-                    score = float(top.get("score") or 0.0)
-                    preview = (top.get("preview") or "").strip()
-                    def _norm(s: str) -> str:
-                        return re.sub(r"\W+", " ", (s or "").lower()).strip()
-                    if score >= 0.85 or _norm(preview) == _norm(text):
-                        _record_memory_event(
-                            "add",
-                            "skipped",
-                            user=user,
-                            scope=mem_scope(),
-                            backend="in_process",
-                            kind=kind,
-                            source=source,
-                            reason="duplicate",
-                            result_count=len(res),
-                            duration_ms=int((time.time() - started) * 1000),
-                        )
-                        return
-                memory_mod.add_memory(kind, source, text, user=user or "", scope=mem_scope())
-                _record_memory_event(
-                    "add",
-                    "ok",
-                    user=user,
-                    scope=mem_scope(),
-                    backend="in_process",
-                    kind=kind,
-                    source=source,
-                    duration_ms=int((time.time() - started) * 1000),
-                )
-                return
-            except Exception:
-                pass
-
-        cmd = [PYTHON, str(BASE_DIR / "memory.py"), "add", "--kind", kind, "--source", source, "--text", text]
-        cmd += ["--scope", mem_scope()]
-        if user:
-            cmd += ["--user", str(user)]
-        subprocess.run(cmd, capture_output=True, text=True, timeout=1800)
-        _record_memory_event(
-            "add",
-            "ok",
-            user=user,
-            scope=mem_scope(),
-            backend="subprocess",
-            kind=kind,
-            source=source,
-            duration_ms=int((time.time() - started) * 1000),
-        )
-    except Exception:
-        _record_memory_event(
-            "add",
-            "error",
-            user=_memory_write_user() or _memory_runtime_user(),
-            scope=mem_scope(),
-            kind=kind,
-            source=source,
-            error="mem_add_failed",
-            duration_ms=int((time.time() - started) * 1000),
-        )
 
 
 def mem_recall(query: str) -> str:
-    if not mem_enabled():
-        return ""
+    return service_mem_recall(
+        query,
+        mem_enabled_fn=mem_enabled,
+        memory_runtime_user_fn=_memory_runtime_user,
+        memory_mod=memory_mod,
+        mem_context_top_k_fn=mem_context_top_k,
+        mem_min_score_fn=mem_min_score,
+        mem_exclude_sources_fn=mem_exclude_sources,
+        mem_scope_fn=mem_scope,
+        format_memory_recall_hits_fn=_format_memory_recall_hits,
+        record_memory_event_fn=_record_memory_event,
+        python_path=str(PYTHON),
+        base_dir=BASE_DIR,
+    )
 
-    if len((query or "").strip()) < 8:
-        return ""
-
-    started = time.time()
-    try:
-        user = _memory_runtime_user()
-        if memory_mod is not None:
-            hits = memory_mod.recall(
-                query,
-                top_k=mem_context_top_k(),
-                min_score=mem_min_score(),
-                exclude_sources=mem_exclude_sources(),
-                user=user,
-                scope=mem_scope(),
-            )
-            out = _format_memory_recall_hits(hits)
-            _record_memory_event(
-                "recall",
-                "ok",
-                user=user,
-                scope=mem_scope(),
-                backend="in_process",
-                query=query,
-                result_count=len(hits or []),
-                duration_ms=int((time.time() - started) * 1000),
-            )
-            return out
-
-        cmd = [
-            PYTHON, str(BASE_DIR / "memory.py"), "recall",
-            "--query", query,
-            "--topk", str(mem_context_top_k()),
-            "--minscore", str(mem_min_score()),
-            "--scope", mem_scope(),
-        ]
-        if user:
-            cmd += ["--user", str(user)]
-        for s in mem_exclude_sources():
-            cmd += ["--exclude-source", s]
-
-        r = subprocess.run(cmd, capture_output=True, text=True, timeout=1800)
-        out = (r.stdout or "").strip()
-        if not out or "No memories" in out:
-            _record_memory_event(
-                "recall",
-                "ok",
-                user=user,
-                scope=mem_scope(),
-                backend="subprocess",
-                query=query,
-                result_count=0,
-                duration_ms=int((time.time() - started) * 1000),
-            )
-            return ""
-        parts = re.split(r"\n--- score=.*?---\n", "\n" + out + "\n")
-        parsed = [(0.0, 0, "", "", "", p.strip()) for p in parts if (p or "").strip()]
-        rendered = _format_memory_recall_hits(parsed)
-        _record_memory_event(
-            "recall",
-            "ok",
-            user=user,
-            scope=mem_scope(),
-            backend="subprocess",
-            query=query,
-            result_count=len(parsed),
-            duration_ms=int((time.time() - started) * 1000),
-        )
-        return rendered
-    except Exception:
-        _record_memory_event(
-            "recall",
-            "error",
-            user=_memory_runtime_user(),
-            scope=mem_scope(),
-            query=query,
-            error="mem_recall_failed",
-            duration_ms=int((time.time() - started) * 1000),
-        )
-        return ""
 
 
 def _prefix_from_earlier_memory(reply_text: str) -> str:
@@ -5516,60 +3886,17 @@ def _normalize_recent_learning_item(kind: str, text: str) -> str:
 
 
 def mem_get_recent_learned(limit: int = 5) -> list[str]:
-    requested = max(1, int(limit or 5))
-    items: list[str] = []
-    seen: set[str] = set()
+    return service_mem_get_recent_learned(
+        limit,
+        mem_enabled_fn=mem_enabled,
+        memory_mod=memory_mod,
+        memory_runtime_user_fn=_memory_runtime_user,
+        mem_scope_fn=mem_scope,
+        normalize_recent_learning_item_fn=_normalize_recent_learning_item,
+        load_learned_facts_fn=load_learned_facts,
+        record_memory_event_fn=_record_memory_event,
+    )
 
-    if mem_enabled() and memory_mod is not None:
-        con = None
-        try:
-            con = memory_mod.connect()
-            rows = memory_mod.select_memory_rows(con, _memory_runtime_user(), mem_scope())
-            for _ts, kind, source, _user_row, text, _vec in rows:
-                source_name = str(source or "").strip().lower()
-                kind_name = str(kind or "").strip().lower()
-                if source_name in {"assistant", "nova", "pinned"}:
-                    continue
-                if kind_name not in {"user_correction", "user_fact", "fact", "identity", "profile"}:
-                    continue
-                item = _normalize_recent_learning_item(kind_name, text)
-                if not item:
-                    continue
-                dedupe_key = re.sub(r"\s+", " ", item).strip().lower()
-                if dedupe_key in seen:
-                    continue
-                seen.add(dedupe_key)
-                items.append(item)
-                if len(items) >= requested:
-                    return items
-        except Exception:
-            pass
-        finally:
-            if con is not None:
-                try:
-                    con.close()
-                except Exception:
-                    pass
-
-    learned = load_learned_facts()
-    fallback_pairs = [
-        ("assistant_name", "Assistant name"),
-        ("developer_name", "Developer name"),
-        ("developer_nickname", "Developer nickname"),
-    ]
-    for key, label in fallback_pairs:
-        value = str(learned.get(key) or "").strip()
-        if not value:
-            continue
-        item = f"{label}: {value}"
-        dedupe_key = item.lower()
-        if dedupe_key in seen:
-            continue
-        seen.add(dedupe_key)
-        items.append(item)
-        if len(items) >= requested:
-            break
-    return items[:requested]
 
 
 def mem_stats() -> str:
@@ -5590,70 +3917,19 @@ def mem_stats() -> str:
 
 
 def mem_audit(query: str) -> str:
-    q = (query or "").strip()
-    if not q:
-        return "Usage: mem audit <query>"
-    started = time.time()
-    try:
-        user = _memory_runtime_user()
-        if memory_mod is not None:
-            out = memory_mod.recall_explain(
-                q,
-                top_k=mem_context_top_k(),
-                min_score=mem_min_score(),
-                exclude_sources=mem_exclude_sources(),
-                user=user,
-                scope=mem_scope(),
-            )
-            result_count = len((out or {}).get("results") or []) if isinstance(out, dict) else 0
-            _record_memory_event(
-                "audit",
-                "ok",
-                user=user,
-                scope=mem_scope(),
-                backend="in_process",
-                query=q,
-                result_count=result_count,
-                mode=str((out or {}).get("mode") or "") if isinstance(out, dict) else "",
-                duration_ms=int((time.time() - started) * 1000),
-            )
-            return json.dumps(out, indent=2)
+    return service_mem_audit(
+        query,
+        memory_runtime_user_fn=_memory_runtime_user,
+        memory_mod=memory_mod,
+        mem_context_top_k_fn=mem_context_top_k,
+        mem_min_score_fn=mem_min_score,
+        mem_exclude_sources_fn=mem_exclude_sources,
+        mem_scope_fn=mem_scope,
+        record_memory_event_fn=_record_memory_event,
+        python_path=str(PYTHON),
+        base_dir=BASE_DIR,
+    )
 
-        cmd = [
-            PYTHON, str(BASE_DIR / "memory.py"), "audit",
-            "--query", q,
-            "--topk", str(mem_context_top_k()),
-            "--minscore", str(mem_min_score()),
-            "--scope", mem_scope(),
-        ]
-        if user:
-            cmd += ["--user", str(user)]
-        for s in mem_exclude_sources():
-            cmd += ["--exclude-source", s]
-
-        r = subprocess.run(cmd, capture_output=True, text=True, timeout=1800)
-        out = (r.stdout or "").strip()
-        _record_memory_event(
-            "audit",
-            "ok",
-            user=user,
-            scope=mem_scope(),
-            backend="subprocess",
-            query=q,
-            duration_ms=int((time.time() - started) * 1000),
-        )
-        return out or "No memory audit output."
-    except Exception as e:
-        _record_memory_event(
-            "audit",
-            "error",
-            user=_memory_runtime_user(),
-            scope=mem_scope(),
-            query=q,
-            error=str(e),
-            duration_ms=int((time.time() - started) * 1000),
-        )
-        return f"Memory audit failed: {e}"
 
 
 def mem_remember_fact(text: str) -> str:
@@ -5769,124 +4045,16 @@ def _title_name(s: str) -> str:
 
 
 def learn_from_user_correction(text: str) -> tuple[bool, str]:
-    low = (text or "").strip().lower()
-    if not low:
-        return False, ""
-    normalized_low = re.sub(r"\byes\s+iam\b", "yes i am", low)
-    normalized_low = re.sub(r"\biam\b", "i am", normalized_low)
-    low = normalized_low
-
-    facts = load_learned_facts()
-    changed = []
-
-    m_assistant = re.search(r"\b(?:your name is|you are called|you're called)\s+([a-z][a-z '\-]{1,40})", low)
-    if m_assistant:
-        assistant_name = _title_name(m_assistant.group(1))
-        if assistant_name:
-            if facts.get("assistant_name") != assistant_name:
-                facts["assistant_name"] = assistant_name
-                changed.append(f"assistant_name={assistant_name}")
-
-    # Accept quoted assistant self-reference only in explicit correction context.
-    if not m_assistant and "your name" in low:
-        m_assistant_quoted = re.search(r"\bmy name is\s+([a-z][a-z '\-]{1,40})", low)
-        if m_assistant_quoted:
-            assistant_name = _title_name(m_assistant_quoted.group(1))
-            if assistant_name:
-                if facts.get("assistant_name") != assistant_name:
-                    facts["assistant_name"] = assistant_name
-                    changed.append(f"assistant_name={assistant_name}")
-
-    m_dev = re.search(
-        r"\b(?:developer(?:'s)? name is|develper(?:'s)? name is|his full name is|developer(?:'s)? full name is|develper(?:'s)? full name is|creator(?:'s)? full name is)\s+([a-z][a-z '\-]{1,60}(?:\s+(?:jr|sr|ii|iii|iv))?)",
-        low,
+    return service_learn_from_user_correction(
+        text,
+        load_learned_facts_fn=load_learned_facts,
+        get_learned_fact_fn=get_learned_fact,
+        save_learned_facts_fn=save_learned_facts,
+        set_active_user_fn=set_active_user,
+        mem_enabled_fn=mem_enabled,
+        mem_add_fn=mem_add,
     )
-    if m_dev:
-        developer_name = _title_name(m_dev.group(1))
-        if developer_name:
-            if facts.get("developer_name") != developer_name:
-                facts["developer_name"] = developer_name
-                changed.append(f"developer_name={developer_name}")
 
-    m_nick = re.search(r"\b(?:nick\s*name is|nickname is)\s+([a-z][a-z '\-]{1,40})", low)
-    if m_nick:
-        nickname = _title_name(m_nick.group(1))
-        if nickname:
-            if facts.get("developer_nickname") != nickname:
-                facts["developer_nickname"] = nickname
-                changed.append(f"developer_nickname={nickname}")
-
-    m_self_creator = re.search(
-        r"\bi am\s+([a-z][a-z '\-]{1,60}?)(?=\s+(?:the\s+)?(?:creator|developer)\b)(?:\s*,)?\s+(?:the\s+)?(?:creator|developer)(?:\s+and\s+(?:creator|developer))?(?:\s+of\s+nova)?\b",
-        low,
-    )
-    self_creator_bound = False
-    if m_self_creator:
-        person_name = _title_name(m_self_creator.group(1))
-        low_person_name = (person_name or "").strip().lower()
-        invalid_person_markers = {
-            "your",
-            "yours",
-            "nova's",
-            "nova",
-            "the same person",
-            "same person",
-        }
-        if low_person_name in invalid_person_markers or low_person_name.startswith("the same person"):
-            person_name = ""
-        if person_name:
-            name_parts = person_name.split()
-            if len(name_parts) >= 2:
-                if facts.get("developer_name") != person_name:
-                    facts["developer_name"] = person_name
-                    changed.append(f"developer_name={person_name}")
-                nickname = facts.get("developer_nickname") or name_parts[0]
-                nickname = _title_name(str(nickname))
-                if nickname and facts.get("developer_nickname") != nickname:
-                    facts["developer_nickname"] = nickname
-                    changed.append(f"developer_nickname={nickname}")
-                set_active_user(person_name)
-                self_creator_bound = True
-            else:
-                if facts.get("developer_nickname") != person_name:
-                    facts["developer_nickname"] = person_name
-                    changed.append(f"developer_nickname={person_name}")
-                set_active_user(person_name)
-                self_creator_bound = True
-
-    if not self_creator_bound:
-        implied_creator = bool(re.search(r"\bi am\s+(?:your|nova'?s)\s+(?:creator|developer)\b", low))
-        same_person_creator = (
-            "same person" in low
-            and any(k in low for k in ["developer", "creator"])
-        )
-        if implied_creator or same_person_creator:
-            developer_name = str(facts.get("developer_name") or get_learned_fact("developer_name", "Gustavo Uribe")).strip()
-            developer_nickname = str(facts.get("developer_nickname") or get_learned_fact("developer_nickname", "Gus")).strip()
-            bind_name = developer_name or developer_nickname
-            if bind_name:
-                set_active_user(bind_name)
-                if developer_nickname and developer_name and facts.get("developer_nickname") != developer_nickname:
-                    facts["developer_nickname"] = developer_nickname
-                if developer_name and facts.get("developer_name") != developer_name:
-                    facts["developer_name"] = developer_name
-                if "identity_binding=developer" not in changed:
-                    changed.append("identity_binding=developer")
-
-    if not changed:
-        return False, ""
-
-    facts["updated_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
-    save_learned_facts(facts)
-
-    try:
-        if mem_enabled():
-            for ch in changed:
-                mem_add("identity", "typed", f"learned_fact: {ch}")
-    except Exception:
-        pass
-
-    return True, "Understood. I learned: " + ", ".join(changed) + "."
 
 
 def get_learned_fact(key: str, default: str = "") -> str:
@@ -6135,55 +4303,21 @@ def build_fallback_context_details(query: str, turns: list[tuple[str, str]] | No
 
 
 def _build_session_fact_sheet(turns: list[tuple[str, str]], max_chars: int = 1200) -> str:
-    lines = []
+    return service_build_session_fact_sheet(
+        turns,
+        max_chars=max_chars,
+        get_learned_fact_fn=get_learned_fact,
+        get_active_user_fn=get_active_user,
+        get_name_origin_story_fn=get_name_origin_story,
+        get_saved_location_text_fn=get_saved_location_text,
+        extract_color_preferences_fn=_extract_color_preferences,
+        extract_developer_color_preferences_fn=_extract_developer_color_preferences,
+        extract_developer_color_preferences_from_memory_fn=_extract_developer_color_preferences_from_memory,
+        developer_is_bilingual_fn=_developer_is_bilingual,
+        developer_is_bilingual_from_memory_fn=_developer_is_bilingual_from_memory,
+        extract_animal_preferences_fn=_extract_animal_preferences,
+    )
 
-    assistant_name = get_learned_fact("assistant_name", "Nova").strip()
-    developer_name = get_learned_fact("developer_name", "Gustavo Uribe").strip()
-    developer_nickname = get_learned_fact("developer_nickname", "Gus").strip()
-    active_user = (get_active_user() or "").strip()
-    story = get_name_origin_story().strip()
-
-    if assistant_name:
-        lines.append(f"Assistant name: {assistant_name}")
-    if developer_name:
-        lines.append(f"Developer full name: {developer_name}")
-    if developer_nickname:
-        lines.append(f"Developer nickname: {developer_nickname}")
-    if active_user:
-        lines.append(f"Active speaker identity: {active_user}")
-    if story:
-        lines.append(f"Name origin: {story[:220]}")
-
-    saved_location = get_saved_location_text()
-    if saved_location:
-        lines.append(f"Stored assistant location: {saved_location}")
-
-    if get_learned_fact("developer_location_relation", "").strip().lower() == "same_as_assistant":
-        lines.append("Verified developer location relation: same as assistant")
-
-    user_colors = _extract_color_preferences(turns)
-    if user_colors:
-        lines.append("User-stated color preferences: " + ", ".join(user_colors))
-
-    developer_colors = _extract_developer_color_preferences(turns)
-    if not developer_colors:
-        developer_colors = _extract_developer_color_preferences_from_memory()
-    if developer_colors:
-        lines.append("Developer color preferences: " + ", ".join(developer_colors))
-
-    bilingual = _developer_is_bilingual(turns)
-    if bilingual is None:
-        bilingual = _developer_is_bilingual_from_memory()
-    if bilingual is True:
-        lines.append("Developer languages: English, Spanish")
-
-    animals = _extract_animal_preferences(turns)
-    if animals:
-        lines.append("User-stated animal preferences: " + ", ".join(animals))
-
-    if not lines:
-        return ""
-    return "\n".join(lines)[:max_chars]
 
 
 def _content_tokens(text: str) -> list[str]:
@@ -6225,36 +4359,13 @@ def _is_risky_claim_sentence(sentence: str) -> bool:
 
 
 def _sentence_supported_by_evidence(sentence: str, evidence_text: str, tool_context: str = "") -> bool:
-    low = (sentence or "").strip().lower()
-    evidence_low = (evidence_text or "").lower()
-    tool_low = (tool_context or "").lower()
-    if not low:
-        return True
-    if not _is_risky_claim_sentence(sentence):
-        return True
-
-    impossible_claims = [
-        r"\b(?:i am|i'm)\s+in\s+(?:a|the)\s+room\b",
-        r"\bsmell\b",
-        r"\bhear\b",
-        r"\bi can see\b",
-    ]
-    if any(re.search(p, low) for p in impossible_claims):
-        return False
-
-    tool_claims = [r"\bdownloaded\b", r"\bsaved\s+to\b", r"\bcreated\s+(?:file|folder|directory)\b"]
-    if any(re.search(p, low) for p in tool_claims):
-        return bool(tool_low)
-
-    tokens = _content_tokens(sentence)
-    if not tokens:
-        return False
-    overlap = [token for token in tokens if token in evidence_low]
-    if len(overlap) >= min(2, len(tokens)):
-        return True
-    if any(name in low and name in evidence_low for name in ["gustavo uribe", "brownsville", "english", "spanish", "silver", "blue", "red"]):
-        return True
-    return False
+    return service_sentence_supported_by_evidence(
+        sentence,
+        evidence_text,
+        tool_context,
+        is_risky_claim_sentence_fn=_is_risky_claim_sentence,
+        content_tokens_fn=_content_tokens,
+    )
 
 
 def _apply_claim_gate(reply: str, evidence_text: str = "", tool_context: str = "") -> tuple[str, bool, str]:
@@ -6293,46 +4404,7 @@ def _uses_prior_reference(user_text: str) -> bool:
 
 
 def _is_declarative_info(text: str) -> bool:
-    """Return True when the user is supplying info (not asking for an action).
-    Matches simple patterns like: "my name is X", "my location is X", "i live in X",
-    or statements that start with 'i am' and contain a noun phrase.
-    """
-    t = (text or "").strip()
-    if not t:
-        return False
-    low = t.lower()
-    if "?" in t:
-        return False
-
-    # Avoid swallowing request-like prompts that begin with "I am ...".
-    request_markers = [
-        "can you", "could you", "would you", "do you", "what ", "how ", "why ", "where ", "when ", "which ",
-        "curious", "capable", "abilities", "ability", "know what", "tell me", "give me",
-    ]
-    if any(m in low for m in request_markers):
-        return False
-    # common declarative prefixes
-    declarative_prefixes = [
-        "my name is",
-        "i am",
-        "i'm",
-        "my location is",
-        "i live in",
-        "i work at",
-        "i'm from",
-        "i was born",
-        "i have",
-        "this is",
-    ]
-    for p in declarative_prefixes:
-        if low.startswith(p):
-            # avoid treating imperative like "i am done" as info if very short
-            if len(t.split()) >= 2:
-                return True
-    # short factual sentences without question mark
-    if len(t.split()) <= 6 and any(w in low for w in ["live", "located", "from", "born", "work"]):
-        return True
-    return False
+    return service_is_declarative_info(text)
 
 
 def _is_explicit_request(text: str) -> bool:
@@ -6565,128 +4637,23 @@ def _strip_invocation_prefix(text: str) -> str:
 
 
 def _normalize_domain_input(value: str) -> str:
-    s = (value or "").strip().lower()
-    if not s:
-        return ""
-
-    if not re.match(r"^[a-z][a-z0-9+.-]*://", s):
-        s = "https://" + s
-
-    try:
-        p = urlparse(s)
-        host = (p.hostname or "").strip().lower()
-    except Exception:
-        return ""
-
-    if not host:
-        return ""
-
-    # Basic host validation: labels with letters/numbers/hyphen, separated by dots.
-    if not re.match(r"^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)(?:\.(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?))*$", host):
-        return ""
-
-    return host
+    return _policy_manager().normalize_domain_input(value)
 
 
 def list_allowed_domains() -> str:
-    allow_domains = list(policy_web().get("allow_domains") or [])
-    if not allow_domains:
-        return "No allowed domains are configured in policy.json."
-
-    lines = ["Here are the domains I currently allow:"]
-    for d in allow_domains:
-        lines.append(f"- {d}")
-    return "\n".join(lines)
+    return _policy_manager().list_allowed_domains()
 
 
 def policy_allow_domain(value: str) -> str:
-    host = _normalize_domain_input(value)
-    if not host:
-        _record_policy_change("allow_domain", value, "failed", "invalid_domain_input")
-        return "Usage: policy allow <domain-or-url>"
-
-    data = _load_policy_raw()
-    web = data.get("web") if isinstance(data.get("web"), dict) else {}
-    allow_domains = list(web.get("allow_domains") or [])
-
-    existing = {str(x).strip().lower() for x in allow_domains if str(x).strip()}
-    if host in existing:
-        _record_policy_change("allow_domain", host, "skipped", "already_allowed")
-        return f"Domain already allowed: {host}"
-
-    allow_domains.append(host)
-    web["allow_domains"] = allow_domains
-    data["web"] = web
-    _save_policy_raw(data)
-    _record_policy_change("allow_domain", host, "success", "added_to_allow_domains")
-
-    return f"Added allowed domain: {host}\n{list_allowed_domains()}"
+    return _policy_manager().allow_domain(value, get_active_user())
 
 
 def policy_remove_domain(value: str) -> str:
-    host = _normalize_domain_input(value)
-    if not host:
-        _record_policy_change("remove_domain", value, "failed", "invalid_domain_input")
-        return "Usage: policy remove <domain-or-url>"
-
-    data = _load_policy_raw()
-    web = data.get("web") if isinstance(data.get("web"), dict) else {}
-    allow_domains = list(web.get("allow_domains") or [])
-
-    kept = []
-    removed = False
-    for d in allow_domains:
-        dd = str(d).strip()
-        if dd.lower() == host:
-            removed = True
-            continue
-        kept.append(dd)
-
-    if not removed:
-        _record_policy_change("remove_domain", host, "skipped", "not_found")
-        return f"Domain not found in allowlist: {host}"
-
-    web["allow_domains"] = kept
-    data["web"] = web
-    _save_policy_raw(data)
-    _record_policy_change("remove_domain", host, "success", "removed_from_allow_domains")
-    return f"Removed allowed domain: {host}\n{list_allowed_domains()}"
+    return _policy_manager().remove_domain(value, get_active_user())
 
 
 def policy_audit(limit: int = 20) -> str:
-    n = max(1, min(200, int(limit or 20)))
-    if not POLICY_AUDIT_LOG.exists():
-        return "No policy audit entries yet."
-
-    try:
-        lines = [ln for ln in POLICY_AUDIT_LOG.read_text(encoding="utf-8").splitlines() if ln.strip()]
-    except Exception as e:
-        return f"Failed to read policy audit log: {e}"
-
-    if not lines:
-        return "No policy audit entries yet."
-
-    rows = []
-    for ln in lines[-n:]:
-        try:
-            rows.append(json.loads(ln))
-        except Exception:
-            continue
-    if not rows:
-        return "No parseable policy audit entries found."
-
-    out = [f"Recent policy changes (last {len(rows)}):"]
-    for r in rows:
-        ts = int(r.get("ts") or 0)
-        tstr = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(ts)) if ts else "unknown-time"
-        user = str(r.get("user") or "unknown")
-        action = str(r.get("action") or "")
-        target = str(r.get("target") or "")
-        result = str(r.get("result") or "")
-        details = str(r.get("details") or "")
-        out.append(f"- {tstr} user={user} action={action} target={target} result={result} details={details}")
-
-    return "\n".join(out)
+    return _policy_manager().audit(limit)
 
 
 WEB_RESEARCH_PRESETS = {
@@ -6730,92 +4697,129 @@ def web_mode_status() -> str:
 
 
 def set_web_mode(mode: str) -> str:
-    m = (mode or "").strip().lower()
-    if m in {"balanced", "default"}:
-        m = "normal"
-    if m in {"deep", "full", "maxinput"}:
-        m = "max"
-
-    if m not in WEB_RESEARCH_PRESETS:
-        return "Usage: web mode <normal|max>"
-
-    data = _load_policy_raw()
-    web = data.get("web") if isinstance(data.get("web"), dict) else {}
-    for k, v in WEB_RESEARCH_PRESETS[m].items():
-        web[k] = v
-    data["web"] = web
-    _save_policy_raw(data)
-    _record_policy_change("web_mode", m, "success", "updated_research_limits")
-    return f"Web research mode set to {m}.\n" + web_mode_status()
+    result = _policy_manager().set_web_mode(mode, get_active_user())
+    if result.startswith("Web research mode set to"):
+        return result + "\n" + web_mode_status()
+    return result
 
 
 def set_memory_scope(scope: str) -> str:
-    value = (scope or "").strip().lower()
-    aliases = {
-        "per-user": "private",
-        "user": "private",
-        "global": "shared",
-        "both": "hybrid",
-    }
-    value = aliases.get(value, value)
-    if value not in {"private", "shared", "hybrid"}:
-        return "Usage: memory scope <private|shared|hybrid>"
-
-    data = _load_policy_raw()
-    memory = data.get("memory") if isinstance(data.get("memory"), dict) else {}
-    prev = str(memory.get("scope") or "private").strip().lower()
-    memory["scope"] = value
-    data["memory"] = memory
-    _save_policy_raw(data)
-    _record_policy_change("memory_scope", value, "success", f"from={prev}")
-    return f"Memory scope set to {value}."
+    return _policy_manager().set_memory_scope(scope, get_active_user())
 
 
 def get_search_provider() -> str:
-    provider = str((policy_web().get("search_provider") or "html")).strip().lower()
-    if provider not in {"html", "searxng"}:
-        return "html"
-    return provider
+    return _policy_manager().get_search_provider()
+
+
+def get_search_provider_priority() -> list[str]:
+    return _policy_manager().get_search_provider_priority()
 
 
 def set_search_provider(provider: str) -> str:
-    p = (provider or "").strip().lower()
-    if p in {"search", "web", "fallback", "default"}:
-        p = "html"
-    if p in {"searx", "searx-ng", "sxng"}:
-        p = "searxng"
+    return _policy_manager().set_search_provider(provider, get_active_user())
 
-    if p not in {"html", "searxng"}:
-        return "Usage: search provider <html|searxng>"
 
-    data = _load_policy_raw()
-    web = data.get("web") if isinstance(data.get("web"), dict) else {}
-    tools = data.get("tools_enabled") if isinstance(data.get("tools_enabled"), dict) else {}
-    prev = str(web.get("search_provider") or "html").strip().lower()
-    web["search_provider"] = p
-    # Operator intent: selecting a search provider should activate web path.
-    web["enabled"] = True
-    tools["web"] = True
-    data["web"] = web
-    data["tools_enabled"] = tools
-    _save_policy_raw(data)
-    _record_policy_change("search_provider", p, "success", f"from={prev}")
+def set_search_provider_priority(priority: str | list[str]) -> str:
+    return _policy_manager().set_search_provider_priority(priority, get_active_user())
 
-    endpoint = str(web.get("search_api_endpoint") or "").strip()
-    if p == "searxng":
-        if not endpoint:
-            return (
-                "Search provider set to searxng and web enabled. "
-                "Configure web.search_api_endpoint in policy.json."
-            )
-        if endpoint.endswith(":8080/search"):
-            return (
-                "Search provider set to searxng and web enabled. "
-                "Current endpoint is on Nova's own port (8080) and may return 404; set a real SearXNG endpoint."
-            )
-        return f"Search provider set to searxng and web enabled (endpoint: {endpoint})."
 
-    return "Search provider set to html and web enabled."
+def get_search_endpoint() -> str:
+    return _policy_manager().get_search_endpoint()
+
+
+def set_search_endpoint(endpoint: str) -> str:
+    return _policy_manager().set_search_endpoint(endpoint, get_active_user())
+
+
+def auto_repair_search_endpoint(endpoint: str) -> str:
+    return _policy_manager().auto_repair_search_endpoint(endpoint, get_active_user())
+
+
+def _resolve_research_provider(candidates: list[str], *, default_tool: str = "web_research") -> dict[str, str]:
+    normalized_candidates: list[str] = []
+    seen: set[str] = set()
+    for item in list(candidates or []):
+        token = str(item or "").strip().lower()
+        if not token or token in seen:
+            continue
+        seen.add(token)
+        normalized_candidates.append(token)
+    if not normalized_candidates:
+        provider = _provider_name_from_tool(default_tool) or "general_web"
+        return {"provider": provider, "tool_name": default_tool}
+
+    chosen = next((item for item in get_search_provider_priority() if item in normalized_candidates), normalized_candidates[0])
+    tool_map = {
+        "wikipedia": "wikipedia_lookup",
+        "stackexchange": "stackexchange_search",
+        "general_web": "web_research",
+    }
+    return {"provider": chosen, "tool_name": tool_map.get(chosen, default_tool)}
+
+
+def _normalize_search_endpoint(endpoint: str) -> str:
+    raw = str(endpoint or "").strip()
+    if not raw:
+        return "http://127.0.0.1:8080/search"
+    if "://" not in raw:
+        raw = "http://" + raw
+    parsed = urlparse(raw)
+    scheme = str(parsed.scheme or "http").strip().lower() or "http"
+    host = str(parsed.hostname or "").strip()
+    if not host:
+        return raw
+    port = f":{parsed.port}" if parsed.port else ""
+    path = str(parsed.path or "/search").strip() or "/search"
+    return f"{scheme}://{host}{port}{path}"
+
+
+def _search_endpoint_candidates(endpoint: str) -> list[str]:
+    configured = _normalize_search_endpoint(endpoint)
+    candidates: list[str] = []
+
+    def _append(value: str) -> None:
+        normalized = _normalize_search_endpoint(value)
+        if normalized and normalized not in candidates:
+            candidates.append(normalized)
+
+    _append(configured)
+    parsed = urlparse(configured)
+    host = str(parsed.hostname or "").strip().lower()
+    if host not in {"127.0.0.1", "localhost"}:
+        return candidates
+
+    scheme = str(parsed.scheme or "http").strip().lower() or "http"
+    path = str(parsed.path or "/search").strip() or "/search"
+    current_port = int(parsed.port or (443 if scheme == "https" else 80))
+    ports: list[int] = []
+    for port in (current_port, 8080, 8081):
+        if port not in ports:
+            ports.append(port)
+    hosts: list[str] = [host]
+    for local_host in ("127.0.0.1", "localhost"):
+        if local_host not in hosts:
+            hosts.append(local_host)
+    for local_host in hosts:
+        for port in ports:
+            _append(f"{scheme}://{local_host}:{port}{path}")
+    return candidates
+
+
+def _is_local_search_endpoint(endpoint: str) -> bool:
+    parsed = urlparse(_normalize_search_endpoint(endpoint))
+    return str(parsed.hostname or "").strip().lower() in {"127.0.0.1", "localhost"}
+
+
+def probe_search_endpoint(endpoint: str = "", *, timeout: float = 2.5, persist_repair: bool = False) -> dict:
+    return service_probe_search_endpoint(
+        endpoint,
+        timeout=timeout,
+        persist_repair=persist_repair,
+        get_search_endpoint_fn=get_search_endpoint,
+        auto_repair_search_endpoint_fn=auto_repair_search_endpoint,
+        requests_get_fn=requests.get,
+    )
+
 
 
 def toggle_search_provider() -> str:
@@ -7176,49 +5180,19 @@ def _is_developer_profile_request(user_text: str) -> bool:
 
 
 def _developer_profile_reply(turns: Optional[list[tuple[str, str]]] = None, user_text: str = "") -> str:
-    low = (user_text or "").lower()
-    session_turns = turns if isinstance(turns, list) else []
+    return service_developer_profile_reply(
+        turns,
+        user_text,
+        get_learned_fact_fn=get_learned_fact,
+        extract_developer_roles_from_memory_fn=_extract_developer_roles_from_memory,
+        extract_developer_color_preferences_fn=_extract_developer_color_preferences,
+        extract_developer_color_preferences_from_memory_fn=_extract_developer_color_preferences_from_memory,
+        developer_is_bilingual_fn=_developer_is_bilingual,
+        developer_is_bilingual_from_memory_fn=_developer_is_bilingual_from_memory,
+        prefix_from_earlier_memory_fn=_prefix_from_earlier_memory,
+        format_fact_series_fn=_format_fact_series,
+    )
 
-    developer_name = get_learned_fact("developer_name", "Gustavo Uribe").strip()
-    developer_nickname = get_learned_fact("developer_nickname", "Gus").strip()
-    roles = _extract_developer_roles_from_memory()
-    colors = _extract_developer_color_preferences(session_turns)
-    if not colors:
-        colors = _extract_developer_color_preferences_from_memory()
-    bilingual = _developer_is_bilingual(session_turns)
-    if bilingual is None:
-        bilingual = _developer_is_bilingual_from_memory()
-
-    if developer_nickname and developer_nickname.lower() != developer_name.lower():
-        base_fact = f"His full name is {developer_name}, and he also goes by {developer_nickname}."
-    else:
-        base_fact = f"His full name is {developer_name}."
-
-    if "how did" in low or "developed you" in low or "built you" in low:
-        return _prefix_from_earlier_memory(f"{base_fact} He created me. I do not have detailed build-history notes in memory yet.")
-
-    if "who is" in low or "who's" in low or "creator" in low:
-        if developer_nickname and developer_nickname.lower() != developer_name.lower():
-            return _prefix_from_earlier_memory(f"My developer is {developer_name}. {developer_nickname} is his nickname. He created me.")
-        return _prefix_from_earlier_memory(f"My developer is {developer_name}. He created me.")
-
-    extra_facts: list[str] = []
-    if roles:
-        extra_facts.append(f"Known work roles: {_format_fact_series(roles)}.")
-    if colors:
-        if len(colors) == 1:
-            extra_facts.append(f"Known favorite color: {colors[0]}.")
-        else:
-            extra_facts.append(f"Known favorite colors: {_format_fact_series(colors)}.")
-    if bilingual is True:
-        extra_facts.append("He is bilingual in English and Spanish.")
-    elif bilingual is False:
-        extra_facts.append("Known bilingual note: not bilingual.")
-
-    lead = "Here are the verified facts I have about my developer, Gus."
-    if extra_facts:
-        return _prefix_from_earlier_memory(" ".join([lead, base_fact] + extra_facts))
-    return _prefix_from_earlier_memory(f"{lead} {base_fact} I don't have any additional verified information about him beyond that yet.")
 
 
 def _is_developer_location_request(
@@ -7275,62 +5249,25 @@ def _developer_location_turn(
 
 
 def _identity_profile_followup_reply(subject: str, turns: Optional[list[tuple[str, str]]] = None) -> str:
-    active_user_raw = str(get_active_user() or "").strip()
-    developer_name = get_learned_fact("developer_name", "Gustavo Uribe").strip()
-    developer_nickname = get_learned_fact("developer_nickname", "Gus").strip()
-    session_turns = turns if isinstance(turns, list) else []
+    return service_identity_profile_followup_reply(
+        subject,
+        turns=turns,
+        get_active_user_fn=get_active_user,
+        get_learned_fact_fn=get_learned_fact,
+        speaker_matches_developer_fn=_speaker_matches_developer,
+        extract_developer_roles_from_memory_fn=_extract_developer_roles_from_memory,
+        extract_developer_color_preferences_fn=_extract_developer_color_preferences,
+        extract_developer_color_preferences_from_memory_fn=_extract_developer_color_preferences_from_memory,
+        developer_is_bilingual_fn=_developer_is_bilingual,
+        developer_is_bilingual_from_memory_fn=_developer_is_bilingual_from_memory,
+        get_name_origin_story_fn=get_name_origin_story,
+        extract_color_preferences_fn=_extract_color_preferences,
+        extract_color_preferences_from_memory_fn=_extract_color_preferences_from_memory,
+        extract_animal_preferences_fn=_extract_animal_preferences,
+        extract_animal_preferences_from_memory_fn=_extract_animal_preferences_from_memory,
+        format_fact_series_fn=_format_fact_series,
+    )
 
-    if subject == "developer" or (subject == "self" and _speaker_matches_developer()):
-        facts: list[str] = []
-        roles = _extract_developer_roles_from_memory()
-        colors = _extract_developer_color_preferences(session_turns)
-        if not colors:
-            colors = _extract_developer_color_preferences_from_memory()
-        bilingual = _developer_is_bilingual(session_turns)
-        if bilingual is None:
-            bilingual = _developer_is_bilingual_from_memory()
-        story = get_name_origin_story().strip()
-
-        if developer_name:
-            facts.append(f"Developer full name: {developer_name}.")
-        if developer_nickname and developer_nickname.lower() != developer_name.lower():
-            facts.append(f"Developer nickname: {developer_nickname}.")
-        if roles:
-            facts.append(f"Known work roles: {_format_fact_series(roles)}.")
-        if colors:
-            facts.append(f"Known favorite colors: {_format_fact_series(colors)}.")
-        if bilingual is True:
-            facts.append("Known languages: English and Spanish.")
-        elif bilingual is False:
-            facts.append("Known language note: not bilingual.")
-        if story:
-            facts.append("Verified history: you gave me the name Nova.")
-
-        if facts:
-            lead = "Here are the other verified facts I have about you." if subject == "self" else "Here are the other verified facts I have about Gus."
-            return lead + " " + " ".join(facts)
-        return "I do not have more verified developer facts beyond the basics yet."
-
-    facts = []
-    colors = _extract_color_preferences(session_turns)
-    if not colors:
-        colors = _extract_color_preferences_from_memory()
-    animals = _extract_animal_preferences(session_turns)
-    if not animals:
-        animals = _extract_animal_preferences_from_memory()
-
-    if active_user_raw:
-        facts.append(f"Verified name: {active_user_raw}.")
-    if colors:
-        facts.append(f"Known color preferences: {_format_fact_series(colors)}.")
-    if animals:
-        facts.append(f"Known animal preferences: {_format_fact_series(animals)}.")
-
-    if facts:
-        return "Here are the other verified personal facts I have. " + " ".join(facts)
-    if active_user_raw:
-        return f"Beyond your session identity as {active_user_raw}, I do not have other verified personal facts yet."
-    return "I do not have more verified personal facts for this thread yet."
 
 
 def _identity_name_followup_reply(subject: str) -> str:
@@ -7365,83 +5302,31 @@ def _rules_reply() -> str:
 
 
 def _developer_identity_followup_reply(turns: Optional[list[tuple[str, str]]] = None, *, name_focus: bool = False) -> str:
-    developer_name = get_learned_fact("developer_name", "Gustavo Uribe").strip()
-    developer_nickname = get_learned_fact("developer_nickname", "Gus").strip()
-    assistant_name = get_learned_fact("assistant_name", "Nova").strip()
-    story = get_name_origin_story().strip()
-    session_turns = turns if isinstance(turns, list) else []
-    roles = _extract_developer_roles_from_memory()
-    colors = _extract_developer_color_preferences(session_turns)
-    if not colors:
-        colors = _extract_developer_color_preferences_from_memory()
-    bilingual = _developer_is_bilingual(session_turns)
-    if bilingual is None:
-        bilingual = _developer_is_bilingual_from_memory()
-
-    parts: list[str] = []
-    if developer_name:
-        parts.append(f"Your verified full name is {developer_name}.")
-    if developer_nickname and developer_nickname.lower() != developer_name.lower():
-        parts.append(f"You also go by {developer_nickname}.")
-    if story:
-        parts.append(f"You are the creator who gave me the name {assistant_name}. {story}")
-    elif assistant_name:
-        parts.append(f"You are confirmed as the creator tied to the name {assistant_name}.")
-
-    if not name_focus:
-        if roles:
-            parts.append(f"Known work roles: {_format_fact_series(roles)}.")
-        if colors:
-            parts.append(f"Known favorite colors: {_format_fact_series(colors)}.")
-        if bilingual is True:
-            parts.append("Known languages: English and Spanish.")
-        elif bilingual is False:
-            parts.append("Known language note: not bilingual.")
-
-    if parts:
-        if name_focus:
-            return "About your name and identity: " + " ".join(parts)
-        return "Here are the richer verified developer facts I have about you. " + " ".join(parts)
-
-    return "I have your name and creator role confirmed, but no deeper verified details yet."
+    return service_developer_identity_followup_reply(
+        turns,
+        name_focus=name_focus,
+        get_learned_fact_fn=get_learned_fact,
+        get_name_origin_story_fn=get_name_origin_story,
+        extract_developer_roles_from_memory_fn=_extract_developer_roles_from_memory,
+        extract_developer_color_preferences_fn=_extract_developer_color_preferences,
+        extract_developer_color_preferences_from_memory_fn=_extract_developer_color_preferences_from_memory,
+        developer_is_bilingual_fn=_developer_is_bilingual,
+        developer_is_bilingual_from_memory_fn=_developer_is_bilingual_from_memory,
+        format_fact_series_fn=_format_fact_series,
+    )
 
 
 def _infer_profile_conversation_state(text: str) -> Optional[dict]:
-    low = _normalize_turn_text(text)
-    if not low:
-        return None
-    rule_result = TURN_SUPERVISOR.evaluate_rules(text, phase="state")
-    state_update = rule_result.get("state_update") if isinstance(rule_result, dict) else None
-    if isinstance(state_update, dict):
-        return state_update
-    developer_confirmed = _speaker_matches_developer()
-    developer_cues = (
-        _is_developer_color_lookup_request(text)
-        or _is_developer_bilingual_request(text)
-        or "what do you know about gus" in low
-        or "what else do you know about gus" in low
-        or "who is your creator" in low
-        or "who made you" in low
-        or "creator" in low
+    return service_infer_profile_conversation_state(
+        text,
+        normalize_turn_text_fn=_normalize_turn_text,
+        evaluate_rule_state_fn=lambda candidate: TURN_SUPERVISOR.evaluate_rules(candidate, phase="state"),
+        speaker_matches_developer_fn=_speaker_matches_developer,
+        is_developer_color_lookup_request_fn=_is_developer_color_lookup_request,
+        is_developer_bilingual_request_fn=_is_developer_bilingual_request,
+        is_color_lookup_request_fn=_is_color_lookup_request,
+        make_conversation_state_fn=_make_conversation_state,
     )
-    self_cues = (
-        _is_color_lookup_request(text)
-        or "what animals do i like" in low
-        or "which animals do i like" in low
-        or "what do you know about me" in low
-        or "what else do you know about me" in low
-        or "what do you remember about me" in low
-        or "do you remember me" in low
-        or "what is my name" in low
-        or "do you know my name" in low
-    )
-    if developer_confirmed and (developer_cues or self_cues):
-        return _make_conversation_state("developer_identity", subject="developer")
-    if developer_cues:
-        return _make_conversation_state("identity_profile", subject="developer")
-    if self_cues:
-        return _make_conversation_state("identity_profile", subject="self")
-    return None
 
 
 def _is_developer_work_guess_query(text: str) -> bool:
@@ -7470,166 +5355,67 @@ def _developer_work_guess_turn(text: str) -> tuple[str, Optional[dict]]:
 
 
 def _consume_conversation_followup(state: Optional[dict], text: str, input_source: str = "typed", turns: Optional[list[tuple[str, str]]] = None) -> tuple[bool, str, Optional[dict]]:
-    if not isinstance(state, dict):
-        return False, "", state
-
-    rule_result = TURN_SUPERVISOR.evaluate_rules(text, manager=state, turns=turns, phase="handle")
-    handled_rule, rule_reply, rule_state = _execute_registered_supervisor_rule(
-        rule_result,
-        text,
+    return service_consume_conversation_followup(
         state,
-        turns=turns,
+        text,
         input_source=input_source,
-    )
-    if handled_rule:
-        return True, rule_reply, rule_state
-
-    kind = str(state.get("kind") or "")
-    if kind == "retrieval":
-        if _is_retrieval_meta_question(text):
-            return True, _retrieval_meta_reply(state), state
-        if _looks_like_retrieval_followup(text):
-            reply, next_state = _retrieval_followup_reply(state, text)
-            return True, reply, next_state
-        return False, "", state
-
-    if kind == "queue_status":
-        if _is_queue_status_reason_followup(text):
-            return True, _queue_status_reason_reply(state), state
-        if _is_queue_status_report_followup(text):
-            return True, _queue_status_report_reply(state), state
-        if _is_queue_status_seam_followup(text):
-            return True, _queue_status_seam_reply(state), state
-        return False, "", state
-
-    if kind == "location_recall":
-        handled_location, location_reply, location_state, _location_intent = _handle_location_conversation_turn(
-            state,
+        turns=turns,
+        evaluate_rules_fn=lambda text, manager, turns=None, phase="handle": TURN_SUPERVISOR.evaluate_rules(
             text,
+            manager=manager,
             turns=turns,
-        )
-        if handled_location:
-            return True, location_reply, location_state
-        return False, "", state
+            phase=phase,
+        ),
+        execute_registered_supervisor_rule_fn=_execute_registered_supervisor_rule,
+        is_retrieval_meta_question_fn=_is_retrieval_meta_question,
+        retrieval_meta_reply_fn=_retrieval_meta_reply,
+        looks_like_retrieval_followup_fn=_looks_like_retrieval_followup,
+        retrieval_followup_reply_fn=_retrieval_followup_reply,
+        is_queue_status_reason_followup_fn=_is_queue_status_reason_followup,
+        queue_status_reason_reply_fn=_queue_status_reason_reply,
+        is_queue_status_report_followup_fn=_is_queue_status_report_followup,
+        queue_status_report_reply_fn=_queue_status_report_reply,
+        is_queue_status_seam_followup_fn=_is_queue_status_seam_followup,
+        queue_status_seam_reply_fn=_queue_status_seam_reply,
+        handle_location_conversation_turn_fn=_handle_location_conversation_turn,
+        is_weather_meta_followup_fn=_is_weather_meta_followup,
+        weather_meta_reply_fn=_weather_meta_reply,
+        is_weather_status_followup_fn=_is_weather_status_followup,
+        weather_status_reply_fn=_weather_status_reply,
+        normalize_turn_text_fn=_normalize_turn_text,
+        numeric_reference_guess_reply_fn=_numeric_reference_guess_reply,
+        numeric_reference_binding_reply_fn=_numeric_reference_binding_reply,
+        make_conversation_state_fn=_make_conversation_state,
+        extract_work_role_parts_fn=_extract_work_role_parts,
+        store_developer_role_facts_fn=_store_developer_role_facts,
+        strip_confirmation_prefix_fn=_strip_confirmation_prefix,
+        looks_like_profile_followup_fn=_looks_like_profile_followup,
+        developer_identity_followup_reply_fn=_developer_identity_followup_reply,
+        non_retrieval_resource_meta_reply_fn=_non_retrieval_resource_meta_reply,
+        is_developer_location_request_fn=_is_developer_location_request,
+        developer_location_reply_fn=_developer_location_reply,
+        identity_name_followup_reply_fn=_identity_name_followup_reply,
+        identity_profile_followup_reply_fn=_identity_profile_followup_reply,
+    )
 
-    if kind == "weather_result":
-        if _is_weather_meta_followup(text):
-            return True, _weather_meta_reply(state), state
-        if _is_weather_status_followup(text):
-            return True, _weather_status_reply(state), state
-        return False, "", state
-
-    if kind == "numeric_reference_clarify":
-        value = str(state.get("value") or "").strip()
-        normalized = _normalize_turn_text(text)
-        raw = str(text or "").strip()
-        if not raw:
-            return False, "", state
-        if raw == value or "?" in raw or any(phrase in normalized for phrase in ("what do you think", "what is it", "what do you guess", "guess")):
-            return True, _numeric_reference_guess_reply(value), state
-        referent = raw.rstrip(".!? ")
-        if not referent:
-            return False, "", state
-        return True, _numeric_reference_binding_reply(value, referent), _make_conversation_state("numeric_reference", value=value, referent=referent)
-
-    if kind == "numeric_reference":
-        value = str(state.get("value") or "").strip()
-        referent = str(state.get("referent") or "").strip()
-        raw = str(text or "").strip()
-        if raw == value and referent:
-            return True, _numeric_reference_binding_reply(value, referent), state
-        return False, "", state
-
-    if kind == "developer_role_guess":
-        if "?" in (text or ""):
-            return False, "", None
-        roles = _extract_work_role_parts(text)
-        learned, learned_text = _store_developer_role_facts(roles, input_source=input_source)
-        if learned:
-            return True, "Understood. I learned: " + learned_text + ".", None
-        if _strip_confirmation_prefix(text):
-            return True, "I still need the actual role or job title to store, not just a confirmation.", state
-        return False, "", state
-
-    if kind == "developer_identity":
-        low = _normalize_turn_text(text)
-        if "my name" in low or ("name" in low and any(token in low for token in ("tell me more", "more about", "go on", "continue"))):
-            return True, _developer_identity_followup_reply(turns=turns, name_focus=True), state
-        if _looks_like_profile_followup(text):
-            return True, _developer_identity_followup_reply(turns=turns, name_focus=False), state
-        return False, "", state
-
-    if kind == "identity_profile":
-        low = _normalize_turn_text(text)
-        if _is_retrieval_meta_question(text):
-            return True, _non_retrieval_resource_meta_reply(), state
-        if str(state.get("subject") or "") == "developer":
-            if _is_developer_location_request(text, state=state, turns=turns):
-                return True, _developer_location_reply(), state
-        if "my name" in low or "name" in low and any(token in low for token in ("tell me more", "more about", "go on", "continue")):
-            subject = str(state.get("subject") or "self")
-            return True, _identity_name_followup_reply(subject), state
-        if _looks_like_profile_followup(text):
-            subject = str(state.get("subject") or "self")
-            return True, _identity_profile_followup_reply(subject, turns=turns), state
-        return False, "", state
-
-    return False, "", state
 
 
 def _learn_contextual_developer_facts(turns: list[tuple[str, str]], text: str, input_source: str = "typed") -> tuple[bool, str]:
-    raw = (text or "").strip()
-    low = _normalize_turn_text(raw)
-    if not raw:
-        return False, ""
-
-    relevant_context = _recent_turn_mentions(turns, ["gus", "gustavo", "developer", "creator"])
-    if not relevant_context and not any(k in low for k in ["gus", "gustavo", "developer", "creator"]):
-        return False, ""
-
-    learned: list[str] = []
-
-    color_match = re.search(r"\b(?:favorite|favourite)\s+colors?\s+are\s+(.+)$", raw, flags=re.I)
-    if color_match and mem_enabled():
-        colors_text = re.sub(r"\s+and\s+he(?:'s|\s+is)\b.*$", "", color_match.group(1), flags=re.I).strip(" .,:;")
-        colors = _extract_color_preferences_from_text(colors_text)
-        if colors:
-            pretty = ", ".join(colors[:-1]) + (f", and {colors[-1]}" if len(colors) > 1 else colors[0])
-            mem_add("identity", input_source, f"Gus favorite colors are {pretty}.")
-            learned.append(f"Gus favorite colors are {pretty}")
-
-    if "bilingual" in low and "english" in low and "spanish" in low and mem_enabled():
-        mem_add("identity", input_source, "Gus is bilingual in English and Spanish.")
-        learned.append("Gus is bilingual in English and Spanish")
-
-    role_parts = _extract_work_role_parts(raw)
-    learned_role, learned_role_text = _store_developer_role_facts(role_parts, input_source=input_source)
-    if learned_role:
-        learned.append(learned_role_text)
-
-    same_location_cues = (
-        "same as yours",
-        "same as your location",
-        "same location as yours",
-        "same location as you",
+    return service_learn_contextual_developer_facts(
+        turns,
+        text,
+        input_source=input_source,
+        normalize_turn_text_fn=_normalize_turn_text,
+        recent_turn_mentions_fn=_recent_turn_mentions,
+        mem_enabled_fn=mem_enabled,
+        mem_add_fn=mem_add,
+        extract_color_preferences_from_text_fn=_extract_color_preferences_from_text,
+        extract_work_role_parts_fn=_extract_work_role_parts,
+        store_developer_role_facts_fn=_store_developer_role_facts,
+        load_learned_facts_fn=load_learned_facts,
+        save_learned_facts_fn=save_learned_facts,
+        timestamp_fn=lambda: time.strftime("%Y-%m-%d %H:%M:%S"),
     )
-    references_developer_location = "location" in low and (
-        relevant_context or any(k in low for k in ["gus", "gustavo", "developer", "creator"])
-    )
-    if references_developer_location and any(cue in low for cue in same_location_cues):
-        facts = load_learned_facts()
-        if str(facts.get("developer_location_relation") or "").strip().lower() != "same_as_assistant":
-            facts["developer_location_relation"] = "same_as_assistant"
-            facts["updated_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
-            save_learned_facts(facts)
-            if mem_enabled():
-                mem_add("identity", input_source, "Gus location is the same as Nova's location.")
-            learned.append("Gus shares my location")
-
-    if not learned:
-        return False, ""
-
-    return True, "Understood. I learned: " + "; ".join(learned) + "."
 
 
 def _extract_memory_teach_text(text: str) -> str:
@@ -7672,48 +5458,15 @@ def _extract_last_user_question(turns: list[tuple[str, str]], current_text: str)
 
 
 def _analyze_routing_text(turns: list[tuple[str, str]], text: str) -> tuple[str, str]:
-    raw = (text or "").strip()
-    if not raw:
-        return raw, ""
-    rule_result = TURN_SUPERVISOR.evaluate_rules(raw, turns=turns, phase="rewrite")
-    rewrite_text = str(rule_result.get("rewrite_text") or "").strip()
-    if rewrite_text:
-        return rewrite_text, str(rule_result.get("analysis_reason") or rule_result.get("rule_name") or "")
-    return raw, ""
+    return analyze_routing_text(
+        turns,
+        text,
+        evaluate_rules_fn=lambda user_text, **kwargs: TURN_SUPERVISOR.evaluate_rules(user_text, **kwargs),
+    )
 
 
 def _is_explicit_command_like(text: str) -> bool:
-    low = (text or "").strip().lower()
-    if not low:
-        return False
-    command_prefixes = (
-        "screen",
-        "camera ",
-        "web ",
-        "weather",
-        "check weather",
-        "pulse",
-        "nova pulse",
-        "update now",
-        "update now confirm",
-        "update now cancel",
-        "apply update now",
-        "location coords",
-        "domains",
-        "policy allow",
-        "chat context",
-        "ls",
-        "read ",
-        "find ",
-        "health",
-        "capabilities",
-        "inspect",
-        "behavior ",
-        "learning ",
-        "memory ",
-        "mem ",
-    )
-    return any(low == p.strip() or low.startswith(p) for p in command_prefixes)
+    return is_explicit_command_like(text)
 
 
 def _determine_turn_direction(
@@ -7723,51 +5476,21 @@ def _determine_turn_direction(
     active_subject: str = "",
     pending_action: Optional[dict] = None,
 ) -> dict:
-    effective_query, analysis_reason = _analyze_routing_text(turns, text)
-    low = (effective_query or "").strip().lower()
-    raw_low = (text or "").strip().lower()
-    turn_acts = _classify_turn_acts(
-        effective_query,
-        turns=turns,
+    return determine_turn_direction(
+        turns,
+        text,
         active_subject=active_subject,
         pending_action=pending_action,
+        analyze_routing_text_fn=_analyze_routing_text,
+        classify_turn_acts_fn=_classify_turn_acts,
+        extract_memory_teach_text_fn=_extract_memory_teach_text,
+        is_identity_or_developer_query_fn=_is_identity_or_developer_query,
+        is_developer_color_lookup_request_fn=_is_developer_color_lookup_request,
+        is_developer_bilingual_request_fn=_is_developer_bilingual_request,
+        is_color_lookup_request_fn=_is_color_lookup_request,
+        build_greeting_reply_fn=_build_greeting_reply,
+        is_explicit_command_like_fn=_is_explicit_command_like,
     )
-
-    primary = "general_chat"
-    if "correct" in turn_acts:
-        primary = "correction_feedback"
-    elif _extract_memory_teach_text(text):
-        primary = "memory_teach"
-    elif "command" in turn_acts:
-        primary = "explicit_command"
-    elif _is_identity_or_developer_query(effective_query) or any(
-        q in low for q in ["what do you know about me", "what else do you know about me", "what do you know about gus"]
-    ):
-        primary = "identity_query"
-    elif _is_developer_color_lookup_request(effective_query) or _is_developer_bilingual_request(effective_query):
-        primary = "identity_query"
-    elif _is_color_lookup_request(effective_query):
-        primary = "identity_query"
-    elif bool(re.match(r"^i\s+am\s+([a-z][a-z '\-]{1,40})[.!?]*$", raw_low)):
-        primary = "identity_binding"
-    elif "inform" in turn_acts and "mixed" not in turn_acts:
-        if any(k in raw_low for k in ["my favorite", "my favourite", "creator", "developer", "gus", "gustavo"]):
-            primary = "identity_teach"
-        else:
-            primary = "generic_declarative"
-    elif _build_greeting_reply(effective_query, active_user=""):
-        primary = "greeting"
-
-    identity_focused = primary in {"identity_query", "identity_binding", "identity_teach"}
-    bypass_pattern_routes = identity_focused and not _is_explicit_command_like(effective_query)
-    return {
-        "primary": primary,
-        "effective_query": effective_query,
-        "analysis_reason": analysis_reason,
-        "turn_acts": turn_acts,
-        "identity_focused": identity_focused,
-        "bypass_pattern_routes": bypass_pattern_routes,
-    }
 
 
 def _extract_animal_preferences(session_turns: list[tuple[str, str]]) -> list[str]:
@@ -7892,7 +5615,16 @@ def tcp_listening(host="127.0.0.1", port=11434, timeout=1.0) -> bool:
         return False
 
 
+def _live_ollama_calls_allowed() -> bool:
+    argv_text = " ".join(str(arg or "") for arg in list(sys.argv or []))
+    if "unittest" not in argv_text.lower():
+        return True
+    return str(os.environ.get("NOVA_ALLOW_LIVE_OLLAMA_TESTS") or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
 def ollama_api_up(timeout=2.0) -> bool:
+    if not _live_ollama_calls_allowed():
+        return False
     try:
         r = requests.get(f"{OLLAMA_BASE}/api/tags", timeout=timeout)
         return r.status_code == 200
@@ -7920,6 +5652,8 @@ def kill_ollama() -> None:
 
 
 def ensure_ollama_boot():
+    if not _live_ollama_calls_allowed():
+        return False
     if not tcp_listening():
         warn("Ollama not listening on 11434. Starting ollama serve...")
         start_ollama_serve_detached()
@@ -7941,6 +5675,8 @@ def ensure_ollama_boot():
 
 
 def ensure_ollama():
+    if not _live_ollama_calls_allowed():
+        return
     if not tcp_listening():
         start_ollama_serve_detached()
     if tcp_listening() and not ollama_api_up():
@@ -8036,68 +5772,15 @@ def _active_knowledge_root() -> Optional[Path]:
 
 
 def kb_search(query: str, max_files: int = KB_MAX_FILES, max_chars: int = KB_MAX_CHARS) -> str:
-    pack = kb_active_pack()
-    if not pack:
-        return ""
-    root = PACKS_DIR / pack
-    if not root.exists():
-        return ""
+    return service_kb_search(
+        query,
+        packs_dir=PACKS_DIR,
+        kb_active_pack_fn=kb_active_pack,
+        tokenize_fn=_tokenize,
+        max_files=max_files,
+        max_chars=max_chars,
+    )
 
-    toks = _tokenize(query)
-    if not toks:
-        return ""
-
-    candidates = []
-    exts = {".txt", ".md"}
-
-    for p in root.rglob("*"):
-        if not p.is_file() or p.suffix.lower() not in exts:
-            continue
-        try:
-            text = p.read_text(encoding="utf-8", errors="ignore")
-        except Exception:
-            continue
-
-        low = text.lower()
-        score = 0
-        for t in toks:
-            score += low.count(t)
-
-        if score > 0:
-            candidates.append((score, p, text))
-
-    if not candidates:
-        return ""
-
-    candidates.sort(key=lambda x: x[0], reverse=True)
-    picked = candidates[:max_files]
-
-    blocks = []
-    used = 0
-    for score, path, text in picked:
-        low = text.lower()
-        idx = None
-        for t in toks:
-            j = low.find(t)
-            if j != -1:
-                idx = j
-                break
-        if idx is None:
-            idx = 0
-
-        start = max(0, idx - 250)
-        end = min(len(text), idx + 950)
-        snippet = text[start:end].strip().replace("\r\n", "\n")
-
-        chunk = f"[FILE] {path.name} (score={score})\n{snippet}\n"
-        if used + len(chunk) > max_chars:
-            break
-        blocks.append(chunk)
-        used += len(chunk)
-
-    if not blocks:
-        return ""
-    return f"REFERENCE (knowledge pack: {pack}):\n\n" + "\n---\n".join(blocks)
 
 
 def _read_text_safely(path: Path) -> str:
@@ -8170,60 +5853,18 @@ def _extract_matching_lines(text: str, tokens: list[str], max_lines: int = 3) ->
 
 
 def _build_local_topic_digest_answer(query_text: str, max_files: int = 4, max_points: int = 10) -> str:
-    q = (query_text or "").strip()
-    if not q:
-        return ""
+    return service_build_local_topic_digest_answer(
+        query_text,
+        packs_dir=PACKS_DIR,
+        base_dir=BASE_DIR,
+        active_knowledge_root_fn=_active_knowledge_root,
+        topic_tokens_fn=_topic_tokens,
+        read_text_safely_fn=_read_text_safely,
+        extract_matching_lines_fn=_extract_matching_lines,
+        max_files=max_files,
+        max_points=max_points,
+    )
 
-    root = _active_knowledge_root()
-    if root is None:
-        return ""
-
-    tokens = _topic_tokens(q)
-    candidates = [p for p in root.glob("**/*.txt") if p.is_file()]
-    if not candidates:
-        return ""
-
-    scored: list[tuple[int, Path, str]] = []
-    for path in candidates:
-        txt = _read_text_safely(path)
-        if not txt:
-            continue
-        hay = (path.name + " " + txt[:5000]).lower()
-        score = sum(2 if tok in path.name.lower() else 1 for tok in tokens if tok in hay)
-        if score > 0:
-            scored.append((score, path, txt))
-
-    if not scored:
-        return ""
-
-    scored.sort(key=lambda item: item[0], reverse=True)
-    top = scored[: max(1, int(max_files))]
-
-    try:
-        pack_name = root.relative_to(PACKS_DIR).as_posix()
-    except Exception:
-        pack_name = root.name
-
-    lines = [f"I found relevant details in the active knowledge pack ({pack_name}):"]
-    points = 0
-    cited: set[str] = set()
-    for _score, path, txt in top:
-        key_lines = _extract_matching_lines(txt, tokens, max_lines=3)
-        for key_line in key_lines:
-            lines.append(f"- {key_line}.")
-            points += 1
-            cited.add(str(path.relative_to(BASE_DIR)).replace("\\", "/"))
-            if points >= max(1, int(max_points)):
-                break
-        if points >= max(1, int(max_points)):
-            break
-
-    if points == 0:
-        return ""
-
-    for cited_path in sorted(cited):
-        lines.append(f"[source: {cited_path}]")
-    return "\n".join(lines)
 
 
 def _is_local_knowledge_topic_query(text: str) -> bool:
@@ -8321,7 +5962,7 @@ def _snapshot_current() -> Path:
 
 def _overlay_zip(zip_path: Path) -> int:
     allowed_ext = {".py", ".json", ".md", ".txt", ".ps1", ".cmd"}
-    blocked_prefix = {".venv/", "runtime/", "logs/", "models/"}
+    blocked_prefix = {".git/", ".venv/", "runtime/", "logs/", "models/"}
 
     count = 0
     with zipfile.ZipFile(zip_path, "r") as z:
@@ -8395,69 +6036,13 @@ def _behavioral_check_command(base_dir: Optional[Path] = None) -> list[str]:
 
 
 def _behavioral_check(*, base_dir: Optional[Path] = None, timeout_sec: Optional[int] = None) -> dict:
-    workspace = Path(base_dir or BASE_DIR)
-    tests_dir = workspace / "tests"
-    timeout_value = timeout_sec
-    if timeout_value is None:
-        timeout_value = int(policy_patch().get("behavioral_check_timeout_sec", 600) or 600)
-    timeout_value = max(1, int(timeout_value))
-    command = _behavioral_check_command(workspace)
+    return service_behavioral_check(
+        base_dir=Path(base_dir or BASE_DIR),
+        timeout_sec=timeout_sec,
+        policy_patch_fn=policy_patch,
+        behavioral_check_command_fn=_behavioral_check_command,
+    )
 
-    if not tests_dir.exists():
-        return {
-            "ok": True,
-            "ran": False,
-            "skipped": True,
-            "summary": "behavioral check skipped: tests directory not found",
-            "output": "",
-            "command": list(command),
-            "cwd": str(workspace),
-            "timeout_sec": timeout_value,
-        }
-
-    try:
-        proc = subprocess.run(
-            command,
-            cwd=str(workspace),
-            capture_output=True,
-            text=True,
-            timeout=timeout_value,
-        )
-        output = ((proc.stdout or "") + ("\n" + proc.stderr if proc.stderr else "")).strip()
-        summary = _last_nonempty_line(output) or f"exit:{proc.returncode}"
-        return {
-            "ok": proc.returncode == 0,
-            "ran": True,
-            "skipped": False,
-            "summary": summary,
-            "output": output,
-            "command": list(command),
-            "cwd": str(workspace),
-            "timeout_sec": timeout_value,
-        }
-    except subprocess.TimeoutExpired as e:
-        output = ((e.stdout or "") + ("\n" + e.stderr if e.stderr else "")).strip()
-        return {
-            "ok": False,
-            "ran": True,
-            "skipped": False,
-            "summary": f"behavioral check timed out after {timeout_value}s",
-            "output": output,
-            "command": list(command),
-            "cwd": str(workspace),
-            "timeout_sec": timeout_value,
-        }
-    except Exception as e:
-        return {
-            "ok": False,
-            "ran": False,
-            "skipped": False,
-            "summary": f"behavioral check failed to start: {e}",
-            "output": str(e),
-            "command": list(command),
-            "cwd": str(workspace),
-            "timeout_sec": timeout_value,
-        }
 
 
 def _read_patch_log_tail_line() -> str:
@@ -8469,115 +6054,46 @@ def _read_patch_log_tail_line() -> str:
         return ""
 
 
-def _preview_status_from_report(path: Path) -> str:
-    try:
-        for line in path.read_text(encoding="utf-8", errors="ignore").splitlines():
-            if line.lower().startswith("status:"):
-                return str(line.split(":", 1)[1] or "").strip()
-    except Exception:
-        return ""
-    return ""
-
-
 def patch_preview_summaries(limit: int = 40) -> list[dict]:
-    try:
-        previews = UPDATES_DIR / "previews"
-        if not previews.exists():
-            return []
-        files = sorted(previews.glob("*.txt"), key=lambda p: p.stat().st_mtime, reverse=True)
-        approvals = _read_approvals()
-        approval_map = {}
-        for item in approvals:
-            if not isinstance(item, dict):
-                continue
-            preview = str(item.get("preview") or "").strip()
-            if preview:
-                approval_map[preview] = item
-                approval_map[Path(preview).name] = item
-        summaries = []
-        for preview in files[: max(0, int(limit or 0))]:
-            approval = approval_map.get(str(preview)) or approval_map.get(preview.name) or {}
-            summaries.append({
-                "name": preview.name,
-                "path": str(preview),
-                "status": _preview_status_from_report(preview),
-                "decision": str(approval.get("decision") or "pending"),
-                "mtime": int(preview.stat().st_mtime),
-            })
-        return summaries
-    except Exception:
-        return []
+    return service_patch_preview_summaries(
+        updates_dir=UPDATES_DIR,
+        read_approvals_fn=_read_approvals,
+        limit=limit,
+    )
 
 
 def patch_status_payload() -> dict:
-    try:
-        cfg = policy_patch()
-        previews_dir = UPDATES_DIR / "previews"
-        files = sorted(previews_dir.glob("*.txt"), key=lambda p: p.stat().st_mtime, reverse=True) if previews_dir.exists() else []
-        approvals = _read_approvals()
-        approval_map = {}
-        for item in approvals:
-            if not isinstance(item, dict):
-                continue
-            preview = str(item.get("preview") or "").strip()
-            if preview:
-                approval_map[preview] = item
-                approval_map[Path(preview).name] = item
+    return service_patch_status_payload(
+        base_dir=BASE_DIR,
+        updates_dir=UPDATES_DIR,
+        read_approvals_fn=_read_approvals,
+        read_patch_revision_fn=_read_patch_revision,
+        read_patch_log_tail_line_fn=_read_patch_log_tail_line,
+        policy_patch_fn=policy_patch,
+        patch_preview_summaries_fn=patch_preview_summaries,
+    )
 
-        previews_pending = 0
-        previews_approved = 0
-        previews_rejected = 0
-        previews_eligible = 0
-        previews_approved_eligible = 0
-        last_preview_name = ""
-        last_preview_status = ""
-        last_preview_decision = ""
-        if files:
-            last_preview_name = files[0].name
-            last_preview_status = _preview_status_from_report(files[0])
-            last_preview_decision = str((approval_map.get(str(files[0])) or approval_map.get(files[0].name) or {}).get("decision") or "pending")
-        for preview in files:
-            decision = str((approval_map.get(str(preview)) or approval_map.get(preview.name) or {}).get("decision") or "pending").strip().lower()
-            status_text = _preview_status_from_report(preview)
-            if status_text.lower().startswith("eligible"):
-                previews_eligible += 1
-            if decision == "approved":
-                previews_approved += 1
-                if status_text.lower().startswith("eligible"):
-                    previews_approved_eligible += 1
-            elif decision == "rejected":
-                previews_rejected += 1
-            else:
-                previews_pending += 1
 
-        tests_available = (BASE_DIR / "tests").exists()
-        behavioral_check = bool(cfg.get("behavioral_check", True))
-        pipeline_ready = bool(cfg.get("enabled", True)) and bool(cfg.get("strict_manifest", True)) and behavioral_check and bool(tests_available)
-        return {
-            "ok": True,
-            "enabled": bool(cfg.get("enabled", True)),
-            "strict_manifest": bool(cfg.get("strict_manifest", True)),
-            "allow_force": bool(cfg.get("allow_force", False)),
-            "behavioral_check": behavioral_check,
-            "behavioral_check_timeout_sec": int(cfg.get("behavioral_check_timeout_sec", 600) or 600),
-            "tests_available": bool(tests_available),
-            "pipeline_ready": pipeline_ready,
-            "current_revision": _read_patch_revision(),
-            "previews_total": len(files),
-            "previews_pending": previews_pending,
-            "previews_approved": previews_approved,
-            "previews_rejected": previews_rejected,
-            "previews_eligible": previews_eligible,
-            "previews_approved_eligible": previews_approved_eligible,
-            "last_preview_name": last_preview_name,
-            "last_preview_status": last_preview_status,
-            "last_preview_decision": last_preview_decision,
-            "last_patch_log_line": _read_patch_log_tail_line(),
-            "previews": patch_preview_summaries(40),
-            "ready_for_validated_apply": pipeline_ready and previews_approved_eligible > 0,
-        }
-    except Exception as e:
-        return {"ok": False, "error": str(e)}
+def _patch_control_state(*, include_readiness: bool = True) -> dict:
+    patch = patch_status_payload()
+    previews = list(patch.get("previews") or []) if isinstance(patch.get("previews"), list) else []
+    if not previews:
+        previews = list(patch_preview_summaries(40) or [])
+    readiness = None
+    if include_readiness:
+        readiness = PATCH_CONTROL_SERVICE.patch_action_readiness_payload(
+            patch,
+            preview_summaries_fn=patch_preview_summaries,
+            show_preview_fn=show_preview,
+            updates_dir=UPDATES_DIR,
+        )
+    return PATCH_CONTROL_SERVICE.patch_control_state(
+        patch,
+        previews,
+        include_readiness=include_readiness,
+        readiness_payload=readiness,
+    )
+
 
 
 def _patch_reject_message(
@@ -8602,203 +6118,27 @@ def _patch_reject_message(
 
 
 def patch_apply(zip_path: str, force: bool = False) -> str:
-    z = safe_path(zip_path) if not Path(zip_path).is_absolute() else Path(zip_path)
-    if not z.exists() or not z.is_file():
-        return f"Not a file: {z}"
+    return service_patch_apply(
+        zip_path,
+        force=force,
+        safe_path_fn=safe_path,
+        policy_patch_fn=policy_patch,
+        read_patch_revision_fn=_read_patch_revision,
+        read_patch_manifest_fn=_read_patch_manifest,
+        log_patch_fn=_log_patch,
+        patch_reject_message_fn=_patch_reject_message,
+        read_approvals_fn=_read_approvals,
+        patch_preview_fn=patch_preview,
+        snapshot_current_fn=_snapshot_current,
+        overlay_zip_fn=_overlay_zip,
+        py_compile_check_fn=_py_compile_check,
+        patch_rollback_fn=patch_rollback,
+        behavioral_check_fn=_behavioral_check,
+        write_patch_revision_fn=_write_patch_revision,
+        patch_manifest_name=PATCH_MANIFEST_NAME,
+        base_dir=BASE_DIR,
+    )
 
-    # Run a preview check first to avoid blind applies and write a preview report.
-    try:
-        preview_out = patch_preview(str(z), write_report=True)
-        # Only proceed automatically if preview indicates eligible or force=True
-        if not force and "Status: eligible" not in preview_out:
-            # Try to return a structured rejection message consistent with previous behavior
-            strict_manifest = bool(policy_patch().get("strict_manifest", True))
-            current_revision = _read_patch_revision()
-            manifest, manifest_err = _read_patch_manifest(z)
-            if manifest_err:
-                _log_patch(f"APPLY_REJECT invalid_manifest {z.name} err={manifest_err}")
-                return _patch_reject_message(
-                    manifest_err,
-                    strict_manifest=strict_manifest,
-                    current_revision=current_revision,
-                    incoming_revision=None,
-                    required_base_revision=None,
-                )
-
-            # parse incoming revision and min_base if present
-            try:
-                incoming_rev = int(manifest.get("patch_revision", 0) or 0)
-            except Exception:
-                incoming_rev = None
-            try:
-                min_base = int(manifest.get("min_base_revision", 0) or 0)
-            except Exception:
-                min_base = None
-
-            if incoming_rev is not None and incoming_rev <= current_revision:
-                _log_patch(f"APPLY_REJECT downgrade current={current_revision} next={incoming_rev} zip={z.name}")
-                return _patch_reject_message(
-                    "non-forward revision (downgrade blocked).",
-                    strict_manifest=strict_manifest,
-                    current_revision=current_revision,
-                    incoming_revision=incoming_rev,
-                    required_base_revision=min_base,
-                )
-
-            if min_base is not None and current_revision < min_base:
-                _log_patch(f"APPLY_REJECT base_too_old current={current_revision} min_base={min_base} zip={z.name}")
-                return _patch_reject_message(
-                    "incompatible base state.",
-                    strict_manifest=strict_manifest,
-                    current_revision=current_revision,
-                    incoming_revision=incoming_rev,
-                    required_base_revision=min_base,
-                )
-
-            # Fallback: return preview output
-            # If preview was written to disk, require an explicit local approval
-            m = re.search(r"Preview written:\s*(.+)$", preview_out, flags=re.M)
-            if m:
-                preview_path = m.group(1).strip()
-                # check approvals
-                approved = False
-                for a in _read_approvals():
-                    if str(preview_path) == str(a.get("preview")) and a.get("decision") == "approved":
-                        approved = True
-                        break
-                if not approved:
-                    return (f"Patch rejected: preview check failed. A preview was generated at {preview_path} and requires local approval before applying.\n\nPreview output:\n{preview_out}\n\n"
-                            "Approve with: patch approve <preview_filename>\nOr re-run with --force to override.")
-
-            return (f"Patch rejected: preview check failed.\n\nPreview output:\n{preview_out}\n\n"
-                    "If you really want to apply anyway, re-run with: patch apply <zip_path> --force")
-    except Exception:
-        # If preview fails unexpectedly, block apply unless forced
-        if not force:
-            return "Patch preview failed; aborting apply. Use --force to override."
-
-    strict_manifest = bool(policy_patch().get("strict_manifest", True))
-    current_revision = _read_patch_revision()
-    manifest, manifest_err = _read_patch_manifest(z)
-    if manifest_err:
-        _log_patch(f"APPLY_REJECT invalid_manifest {z.name} err={manifest_err}")
-        return _patch_reject_message(
-            manifest_err,
-            strict_manifest=strict_manifest,
-            current_revision=current_revision,
-            incoming_revision=None,
-            required_base_revision=None,
-        )
-
-    next_revision = None
-    if manifest is None:
-        if strict_manifest:
-            _log_patch(f"APPLY_REJECT missing_manifest {z.name}")
-            return _patch_reject_message(
-                f"missing {PATCH_MANIFEST_NAME}. Include patch_revision > current revision.",
-                strict_manifest=strict_manifest,
-                current_revision=current_revision,
-                incoming_revision=None,
-                required_base_revision=None,
-            )
-    else:
-        try:
-            next_revision = int(manifest.get("patch_revision", 0) or 0)
-        except Exception:
-            _log_patch(f"APPLY_REJECT bad_revision {z.name}")
-            return _patch_reject_message(
-                "manifest field 'patch_revision' must be an integer.",
-                strict_manifest=strict_manifest,
-                current_revision=current_revision,
-                incoming_revision=None,
-                required_base_revision=None,
-            )
-
-        try:
-            min_base = int(manifest.get("min_base_revision", 0) or 0)
-        except Exception:
-            _log_patch(f"APPLY_REJECT bad_min_base {z.name}")
-            return _patch_reject_message(
-                "manifest field 'min_base_revision' must be an integer when provided.",
-                strict_manifest=strict_manifest,
-                current_revision=current_revision,
-                incoming_revision=next_revision,
-                required_base_revision=None,
-            )
-
-        if next_revision <= current_revision:
-            _log_patch(f"APPLY_REJECT downgrade current={current_revision} next={next_revision} zip={z.name}")
-            return _patch_reject_message(
-                "non-forward revision (downgrade blocked).",
-                strict_manifest=strict_manifest,
-                current_revision=current_revision,
-                incoming_revision=next_revision,
-                required_base_revision=min_base,
-            )
-        if current_revision < min_base:
-            _log_patch(f"APPLY_REJECT base_too_old current={current_revision} min_base={min_base} zip={z.name}")
-            return _patch_reject_message(
-                "incompatible base state.",
-                strict_manifest=strict_manifest,
-                current_revision=current_revision,
-                incoming_revision=next_revision,
-                required_base_revision=min_base,
-            )
-
-    snap = _snapshot_current()
-    _log_patch(f"APPLY {z.name} current_rev={current_revision} next_rev={next_revision if next_revision is not None else 'unversioned'}")
-
-    n = _overlay_zip(z)
-    if n == 0:
-        _log_patch("APPLY no files overlayed")
-        return "Patch zip contained no eligible files to apply."
-
-    ok_compile, out = _py_compile_check()
-    if not ok_compile:
-        _log_patch("COMPILE_FAIL -> rollback")
-        patch_rollback(str(snap))
-        return "Patch applied, but compile check failed. Rolled back.\n\nCompile output:\n" + out[-3500:]
-
-    patch_cfg = policy_patch()
-    behavioral_enabled = bool(patch_cfg.get("behavioral_check", True))
-    behavior_result = {
-        "ok": True,
-        "ran": False,
-        "skipped": True,
-        "summary": "behavioral check disabled by policy",
-        "output": "",
-    }
-    if behavioral_enabled:
-        behavior_result = _behavioral_check(
-            timeout_sec=int(patch_cfg.get("behavioral_check_timeout_sec", 600) or 600),
-        )
-        if not bool(behavior_result.get("ok")):
-            summary = str(behavior_result.get("summary") or "behavioral check failed")
-            _log_patch(f"BEHAVIOR_FAIL {summary} -> rollback")
-            patch_rollback(str(snap))
-            output = str(behavior_result.get("output") or "").strip()
-            msg = "Patch applied, but behavioral check failed. Rolled back.\n\nBehavioral summary:\n" + summary
-            if output:
-                msg += "\n\nBehavioral output:\n" + output[-3500:]
-            return msg
-        if bool(behavior_result.get("skipped")):
-            _log_patch(f"BEHAVIOR_SKIP {str(behavior_result.get('summary') or '').strip()}")
-        else:
-            _log_patch(f"BEHAVIOR_OK {str(behavior_result.get('summary') or '').strip()}")
-    else:
-        _log_patch("BEHAVIOR_SKIP disabled_by_policy")
-
-    if next_revision is not None:
-        _write_patch_revision(next_revision, source=z.name)
-
-    _log_patch(f"APPLY_OK files={n}")
-    rev_msg = f" Revision: {next_revision}." if next_revision is not None else ""
-    behavior_msg = ""
-    if behavioral_enabled:
-        behavior_msg = f" Behavioral check OK ({str(behavior_result.get('summary') or 'passed')})."
-    else:
-        behavior_msg = " Behavioral check skipped by policy."
-    return f"Patch applied: {n} file(s). Compile check OK.{behavior_msg} Snapshot: {snap.name}.{rev_msg}"
 
 
 def patch_rollback(snapshot_zip: Optional[str] = None) -> str:
@@ -8838,145 +6178,16 @@ def patch_rollback(snapshot_zip: Optional[str] = None) -> str:
 
 
 def patch_preview(zip_path: str, write_report: bool = False) -> str:
-    """Preview a patch zip against the current repo.
-    - lists manifest info (patch_revision, min_base_revision)
-    - lists added / changed / skipped files
-    - provides a short diff summary for text files
-    If `write_report` is True, writes a preview text into UPDATES_DIR/previews/.
-    """
-    z = safe_path(zip_path) if not Path(zip_path).is_absolute() else Path(zip_path)
-    if not z.exists() or not z.is_file():
-        return f"Not found: {z}"
+    return service_patch_preview(
+        zip_path,
+        write_report=write_report,
+        safe_path_fn=safe_path,
+        base_dir=BASE_DIR,
+        updates_dir=UPDATES_DIR,
+        read_patch_manifest_fn=_read_patch_manifest,
+        read_patch_revision_fn=_read_patch_revision,
+    )
 
-    manifest, manifest_err = _read_patch_manifest(z)
-    if manifest_err:
-        manifest = None
-
-    current_revision = _read_patch_revision()
-    patch_rev = None
-    min_base = None
-    try:
-        if manifest:
-            patch_rev = int(manifest.get("patch_revision", 0) or 0)
-            min_base = int(manifest.get("min_base_revision", 0) or 0)
-    except Exception:
-        pass
-
-    # decide skipped prefixes and text extensions
-    skip_prefixes = ("runtime/", "logs/", "updates/", "piper/", "models/", "pkgconfig/")
-    text_ext = {".py", ".md", ".txt", ".json", ".rst", ".yaml", ".yml", ".ini", ".cfg", ".html", ".css", ".js", ".csv"}
-
-    added = []
-    changed = []
-    skipped = []
-    diffs = {}
-
-    with tempfile.TemporaryDirectory() as td:
-        with zipfile.ZipFile(z, "r") as zz:
-            members = [m for m in zz.infolist() if not m.is_dir()]
-            for m in members:
-                fn = m.filename.replace("\\", "/")
-                # skip obvious runtime artifacts
-                if any(fn.startswith(p) for p in skip_prefixes):
-                    skipped.append(fn)
-                    continue
-
-                # target path in repo
-                target = BASE_DIR / fn
-
-                # extract member to tempdir
-                try:
-                    zz.extract(m, path=td)
-                except Exception:
-                    skipped.append(fn)
-                    continue
-
-                src = Path(td) / fn
-                if not src.exists():
-                    skipped.append(fn)
-                    continue
-
-                if target.exists():
-                    # compare
-                    try:
-                        if src.suffix.lower() in text_ext:
-                            a = target.read_text(encoding="utf-8", errors="ignore").splitlines()
-                            b = src.read_text(encoding="utf-8", errors="ignore").splitlines()
-                            if a != b:
-                                changed.append(fn)
-                                ud = difflib.unified_diff(a, b, fromfile=str(target), tofile=str(z.name + ":" + fn), lineterm="")
-                                diffs[fn] = "\n".join(list(ud)[:400])
-                        else:
-                            # binary or unknown - mark changed if bytes differ
-                            if target.read_bytes() != src.read_bytes():
-                                changed.append(fn)
-                    except Exception:
-                        changed.append(fn)
-                else:
-                    added.append(fn)
-
-    # prepare summary
-    status = "eligible"
-    if patch_rev is not None:
-        if patch_rev <= current_revision:
-            status = "rejected: non-forward revision"
-        elif min_base is not None and current_revision < min_base:
-            status = "rejected: incompatible base revision"
-
-    lines = []
-    lines.append("Patch Preview")
-    lines.append("-------------")
-    lines.append(f"Zip: {z.name}")
-    lines.append(f"Patch revision: {patch_rev if patch_rev is not None else 'unknown'}")
-    lines.append(f"Min base revision: {min_base if min_base is not None else 'not specified'}")
-    lines.append(f"Current revision: {current_revision}")
-    lines.append(f"Status: {status}")
-    lines.append("")
-
-    if changed:
-        lines.append("Changed files:")
-        for c in changed:
-            lines.append(f"- {c}")
-        lines.append("")
-
-    if added:
-        lines.append("Added files:")
-        for a in added:
-            lines.append(f"- {a}")
-        lines.append("")
-
-    if skipped:
-        lines.append("Skipped files:")
-        for s in skipped[:50]:
-            lines.append(f"- {s}")
-        if len(skipped) > 50:
-            lines.append(f"- ... and {len(skipped)-50} more")
-        lines.append("")
-
-    lines.append("Diff summary:")
-    if diffs:
-        for fn, d in diffs.items():
-            lines.append(f"- {fn}: modified")
-            lines.append("```")
-            lines.append(d)
-            lines.append("```")
-    else:
-        lines.append("- No text diffs available or all changes are binary/non-text")
-
-    out = "\n".join(lines)
-
-    if write_report:
-        try:
-            previews = UPDATES_DIR / "previews"
-            previews.mkdir(parents=True, exist_ok=True)
-            ts = time.strftime("%Y%m%d_%H%M%S")
-            fn = previews / f"preview_{ts}_{z.name}.txt"
-            fn.write_text(out, encoding="utf-8")
-            out = out + f"\n\nPreview written: {fn}"
-        except Exception:
-            pass
-
-    return out
 
 
 # -------------------------
@@ -9054,6 +6265,59 @@ def show_preview(path_or_name: str) -> str:
         return f"Failed to read preview: {e}"
 
 
+def tool_patch_preview_apply(preview: str) -> dict:
+    preview_name = str(preview or "").strip()
+    patch_summary = patch_status_payload()
+    preview_limit = max(200, int(patch_summary.get("previews_total", 0) or 0))
+    preview_rows = list(patch_preview_summaries(preview_limit) or [])
+    ok, msg, extra, detail = PATCH_CONTROL_SERVICE.patch_preview_apply(
+        {"preview": preview_name},
+        preview_target_fn=lambda payload: PATCH_CONTROL_SERVICE.patch_preview_target(payload, preview_rows),
+        preview_entry_fn=lambda target: PATCH_CONTROL_SERVICE.patch_preview_entry(target, preview_rows),
+        patch_control_state_fn=_patch_control_state,
+        show_preview_fn=show_preview,
+        updates_dir=UPDATES_DIR,
+        patch_apply_fn=patch_apply,
+    )
+    result = {
+        "ok": bool(ok),
+        "message": str(msg or ""),
+        "detail": str(detail or ""),
+    }
+    if isinstance(extra, dict):
+        result.update(extra)
+    if not ok:
+        result["error"] = str((extra or {}).get("text") or detail or msg or "patch_preview_apply_failed")
+    return result
+
+
+def tool_patch_preview_approve(preview: str) -> dict:
+    preview_name = str(preview or "").strip()
+    patch_summary = patch_status_payload()
+    preview_limit = max(200, int(patch_summary.get("previews_total", 0) or 0))
+    preview_rows = list(patch_preview_summaries(preview_limit) or [])
+    ok, msg, extra, detail = PATCH_CONTROL_SERVICE.patch_preview_decision(
+        "approve",
+        {
+            "preview": preview_name,
+            "note": "autonomy maintenance: governed work tree approval for base-compatible patch preview",
+        },
+        preview_target_fn=lambda payload: PATCH_CONTROL_SERVICE.patch_preview_target(payload, preview_rows),
+        patch_control_state_fn=_patch_control_state,
+        decision_fn=lambda target, note: approve_preview(target, note or "autonomy maintenance approved preview"),
+    )
+    result = {
+        "ok": bool(ok),
+        "message": str(msg or ""),
+        "detail": str(detail or ""),
+    }
+    if isinstance(extra, dict):
+        result.update(extra)
+    if not ok:
+        result["error"] = str((extra or {}).get("text") or detail or msg or "patch_preview_approve_failed")
+    return result
+
+
 def approve_preview(path_or_name: str, note: str = "") -> str:
     previews = UPDATES_DIR / "previews"
     p = Path(path_or_name)
@@ -9077,54 +6341,12 @@ def reject_preview(path_or_name: str, note: str = "") -> str:
 
 
 def interactive_preview_review(preview_path: str) -> str:
-    """TTY-only interactive review loop for a preview file.
-    Options: approve, reject, view, cancel
-    Records decision to approvals log.
-    Returns a short status message.
-    """
-    try:
-        import sys
-        p = Path(preview_path)
-        if not p.exists():
-            return f"Preview not found: {p}"
-        # show concise header
-        header = p.name
-        # read first ~2000 chars of preview for quick summary
-        text = p.read_text(encoding="utf-8")
-        summary = "\n".join(text.splitlines()[:40])
-        print("\nProposal review:\n", flush=True)
-        print(f"Name: {header}")
-        # try to extract patch revision line
-        mrev = re.search(r"Patch revision:\s*(.+)$", text, flags=re.M)
-        if mrev:
-            print(f"Revision: {mrev.group(1).strip()}")
-        # list changed/added counts
-        changed = re.findall(r"^Changed files:\s*$", text, flags=re.M)
-        # print short summary
-        print("Files / diff preview (first lines):")
-        print(summary)
+    return service_interactive_preview_review(
+        preview_path,
+        record_approval_fn=_record_approval,
+        get_active_user_fn=get_active_user,
+    )
 
-        while True:
-            try:
-                resp = input('\nDecision? (approve/reject/view/cancel): ').strip().lower()
-            except EOFError:
-                return "No interactive input; review aborted."
-            if resp in {"approve", "a"}:
-                ok = _record_approval(str(p), "approved", user=get_active_user())
-                return "Approved." if ok else "Failed to record approval."
-            if resp in {"reject", "r"}:
-                ok = _record_approval(str(p), "rejected", user=get_active_user())
-                return "Rejected." if ok else "Failed to record rejection."
-            if resp in {"view", "v"}:
-                print('\n---- Full preview ----\n')
-                print(text)
-                print('\n---- End preview ----\n')
-                continue
-            if resp in {"cancel", "c", "quit", "q"}:
-                return "Review canceled."
-            print("Unknown response. Enter 'approve', 'reject', 'view', or 'cancel'.")
-    except Exception as e:
-        return f"Interactive review failed: {e}"
 
 
 def _interactive_patch_review_enabled() -> bool:
@@ -9136,338 +6358,29 @@ def _interactive_patch_review_enabled() -> bool:
 # Deterministic answers & hallucination filters
 # =========================
 def hard_answer(user_text: str) -> Optional[str]:
-    t = (user_text or "").strip().lower()
-    t = re.sub(r"\byor\b", "your", t)
-
-    arithmetic_reply = _arithmetic_expression_reply(user_text)
-    if arithmetic_reply:
-        return arithmetic_reply
-
-    assistant_name = get_learned_fact("assistant_name", "Nova")
-    developer_name = get_learned_fact("developer_name", "Gustavo")
-    if str(developer_name or "").strip().lower() == "gustavo":
-        developer_name = "Gustavo Uribe"
-    developer_nickname = get_learned_fact("developer_nickname", "Gus")
-    active_user_raw = (get_active_user() or "").strip()
-    active_user = active_user_raw.lower()
-
-    if (
-        re.search(r"\b(what\s+is|what'?s)\s+your\s+name\b", t)
-        or re.search(r"\bwho\s+are\s+you\b", t)
-        or re.search(r"\bare\s+\w*ou\s+sure\b.*\bname\b", t)
-    ):
-        return f"My name is {assistant_name}."
-
-    if _is_self_identity_web_challenge(t):
-        return _self_identity_web_challenge_reply()
-
-    if bool(re.fullmatch(r"how\s+are\s+you\??", t)):
-        return "I'm doing well, thanks for asking."
-
-    if any(q in t for q in ["do you remember me", "do you know me"]):
-        if _speaker_matches_developer():
-            if developer_nickname and developer_nickname.lower() != developer_name.lower():
-                return f"Yes. I remember you as {developer_name}, and you also go by {developer_nickname}."
-            return f"Yes. I remember you as {developer_name}."
-        if active_user_raw:
-            return f"I remember your current session identity as {active_user_raw}. I do not have more verified personal facts yet."
-        return "Uncertain. I do not have a verified user identity bound for this session yet."
-
-    if re.search(r"\b(what\s+is|what'?s)\s+my\s+name\b", t) or "do you know my name" in t:
-        if _speaker_matches_developer():
-            return f"Your name is {developer_name}."
-        if active_user_raw:
-            return f"The only verified name I have for you in this session is {active_user_raw}."
-        return "Uncertain. I do not have a verified name for you yet."
-
-    why_name_query = (
-        (("why are you called" in t) and "nova" in t)
-        or (("why is your name" in t) and "nova" in t)
-        or bool(re.search(r"\bwhy\s+your\s+called\s+nova\b", t))
-        or bool(re.search(r"\bwhy\s+.*\bcalled\s+nova\b", t))
+    return service_hard_answer(
+        user_text,
+        arithmetic_expression_reply_fn=_arithmetic_expression_reply,
+        get_learned_fact_fn=get_learned_fact,
+        get_active_user_fn=get_active_user,
+        speaker_matches_developer_fn=_speaker_matches_developer,
+        self_identity_web_challenge_reply_fn=_self_identity_web_challenge_reply,
+        get_name_origin_story_fn=get_name_origin_story,
+        prefix_from_earlier_memory_fn=_prefix_from_earlier_memory,
+        extract_developer_color_preferences_from_memory_fn=_extract_developer_color_preferences_from_memory,
+        describe_capabilities_fn=describe_capabilities,
+        mem_get_recent_learned_fn=mem_get_recent_learned,
     )
-    if why_name_query:
-        story = get_name_origin_story().strip()
-        if story:
-            low_story = story.lower()
-            if "was given its name" in low_story and "creator" in low_story:
-                return story
-            return f"{assistant_name} was given its name by its creator, {developer_nickname}. {story}"
-        return "I do not have a saved name-origin story yet. You can teach me with: remember this ..."
 
-    full_story_query = (
-        "full story behind your name" in t
-        or "tell me the full story behind your name" in t
-        or ("full story" in t and "name" in t)
-    )
-    if full_story_query:
-        story = get_name_origin_story().strip()
-        if story:
-            return story
-        return "I do not have a saved full name-origin story yet. You can teach me with: remember this ..."
-
-    if (
-        "if you could name yourself" in t
-        or "what name would you give yourself" in t
-        or "if you had to rename yourself" in t
-    ):
-        return f"I would keep the name {assistant_name}."
-
-    if "would you like to know the story behind your name" in t:
-        return "Yes. Please share it, and I will remember it."
-
-    if "where your name comes from" in t or "where your name came from" in t:
-        story = get_name_origin_story().strip()
-        if story:
-            return story
-        return "I do not have a saved name-origin story yet. You can teach me with: remember this ..."
-
-    if "who gave you that name" in t or "who gave you your name" in t:
-        return _prefix_from_earlier_memory(f"My name was given by my developer, {developer_name} ({developer_nickname}).")
-
-    creator_query = (
-        bool(re.search(r"\bwho\s+is\s+your\s+creator\b", t))
-        or bool(re.search(r"\bwho\s+made\s+you\b", t))
-        or bool(re.search(r"\bwho\s+created\s+you\b", t))
-        or bool(re.search(r"\bso\s+gus\s+is\s+your\s+creator\b", t))
-        or bool(re.search(r"\bis\s+(?:gus|gustavo)\s+your\s+creator\b", t))
-    )
-    if creator_query:
-        if developer_nickname and developer_nickname.lower() != developer_name.lower():
-            return _prefix_from_earlier_memory(f"My creator is {developer_name}. He created me. {developer_nickname} is his nickname.")
-        return _prefix_from_earlier_memory(f"My creator is {developer_name}. He created me.")
-
-    if any(q in t for q in ["what do you know about me", "what else do you know about me", "what do you remember about me"]):
-        facts = []
-        if _speaker_matches_developer():
-            facts.append(f"You are {developer_name}.")
-            if developer_nickname and developer_nickname.lower() != developer_name.lower():
-                facts.append(f"You also go by {developer_nickname}.")
-            colors = _extract_developer_color_preferences_from_memory()
-            if colors:
-                if len(colors) == 1:
-                    facts.append(f"Your known favorite color is {colors[0]}.")
-                else:
-                    facts.append("Your known favorite colors are " + ", ".join(colors[:-1]) + f", and {colors[-1]}.")
-            story = get_name_origin_story().strip()
-            if story:
-                facts.append("You gave me the name Nova.")
-            if facts:
-                return " ".join(facts)
-        if active_user_raw:
-            return f"I have one verified personal fact for this session: your name is {active_user_raw}. I do not have enough other structured personal facts yet."
-        return "Uncertain. I do not have enough structured personal facts yet."
-
-    if (
-        "just knowing my name" in t
-        or ("find out more" in t and "my name" in t)
-        or ("know more about me" in t and "my name" in t)
-    ):
-        if _speaker_matches_developer():
-            return (
-                f"No. Knowing your name alone does not justify inventing more personal facts about you. "
-                f"I should only state verified facts I actually learned, such as that you are {developer_name}."
-            )
-        if active_user_raw:
-            return (
-                f"No. Knowing the name {active_user_raw} alone is not enough for me to claim more personal facts. "
-                "I should only use verified facts you explicitly gave me."
-            )
-        return "No. A name alone is not enough for me to claim personal facts. I should only use verified facts you explicitly gave me."
-
-    my_full_name_query = (
-        "my full name" in t
-        or bool(re.search(r"\bif i am\s+gus\b.*\bfull name\b", t))
-    )
-    if my_full_name_query:
-        developer_name_low = developer_name.lower()
-        developer_nickname_low = developer_nickname.lower()
-        if developer_name and (
-            "i am gus" in t
-            or (active_user and active_user in {developer_nickname_low, developer_name_low})
-            or (developer_nickname_low and developer_nickname_low in t)
-        ):
-            return f"Your full name is {developer_name}."
-
-    if "full name" in t and any(k in t for k in ["developer", "creator", "his", "gus", "nickname"]):
-        if developer_nickname and developer_nickname.lower() != developer_name.lower():
-            return _prefix_from_earlier_memory(f"My developer's full name is {developer_name}. {developer_nickname} is his nickname.")
-        return _prefix_from_earlier_memory(f"My developer's full name is {developer_name}.")
-
-    if any(k in t for k in ["what are your abilities", "what are you capable", "know what your capable", "know what you're capable", "what can you do"]):
-        return describe_capabilities()
-
-    if t in {
-        "what have you learned from me",
-        "what have you learned from me?",
-        "what did you learn from me",
-        "what did you learn from me?",
-        "show me what you've learned",
-        "show me what you have learned",
-    }:
-        learned_items = mem_get_recent_learned(5)
-        if not learned_items:
-            return "I haven't learned anything specific from you recently."
-        return "Here's what I've learned from you recently:\n- " + "\n- ".join(learned_items)
-
-    if t in {"can you code", "can you code?", "do you code", "do you code?"}:
-        return ("Yes. I can write code, debug it, and explain it. "
-                "I just can’t scan your machine or execute system actions unless you trigger an explicit tool command.")
-
-    if "scan my machine" in t or "scan my computer" in t or "run a scan" in t or "nmap" in t:
-        return ("No. I can’t scan your machine or run tools like nmap by myself. "
-                "Tell me what you want checked and I’ll give you safe commands to run, then paste the output and I’ll interpret it.")
-
-    return None
 
 
 def sanitize_llm_reply(reply: str, tool_context: str = "") -> str:
-    r = (reply or "").strip()
-    low = r.lower()
-
-    # Block obviously fabricated system-scan language.
-    scan_patterns = [
-        r"starting nmap",
-        r"nmap scan report",
-        r"c:\\>nmap",
-        r"host is up",
-        r"port\s+state\s+service",
-        r"i'm running a system scan",
-        r"scan report for",
-    ]
-    for p in scan_patterns:
-        if re.search(p, low):
-            return ("I didn’t run any scans or system commands. I won’t fabricate scan outputs. "
-                    "If you want a scan, run the tool and paste the real output and I’ll interpret it.")
-
-    # Prevent ungrounded weather success claims when no structured weather output exists.
-    if re.search(r"\bi\s+(?:fetched|retrieved|got)\s+(?:the\s+)?weather", low):
-        tc = (tool_context or "").lower()
-        if "weather for" not in tc and "source: wttr.in" not in tc:
-            return _weather_unavailable_message()
-
-    weather_promise_patterns = [
-        r"i(?:'| wi)?ll try to find out(?: the weather)?",
-        r"let me check(?: the weather)?",
-        r"i can try to find out(?: the weather)?",
-        r"i(?:'| wi)?ll check(?: the weather)?",
-        r"i(?:'| a)m going to check(?: the weather)?",
-    ]
-    if any(k in low for k in ("weather", "rain", "forecast")):
-        tc = (tool_context or "").lower()
-        if "weather for" not in tc and "source: wttr.in" not in tc:
-            for pattern in weather_promise_patterns:
-                if re.search(pattern, low):
-                    return "I haven't actually run the weather tool yet. Tell me what location to use, or ask for our current location if I already have it saved."
-
-    # Enforce explicit TOOL citation when assistant appears to reference tool-produced artifacts.
-    strong_patterns = [
-        r"\bsaved\s+to\b",
-        r"\bdownloaded\b",
-        r"\bpatch\s+appl(?:y|ied)\b",
-        r"\bsnapshot(?:_[\w\-]+)?\b",
-        r"\b(?:created|wrote)\s+(?:file|folder|directory)\b",
-        r"\b(?:/|\\)[\w\-\.\/]+\.[a-z0-9]{1,6}\b",
-    ]
-
-    def _needs_citation(text_lower: str) -> bool:
-        return any(re.search(p, text_lower) for p in strong_patterns)
-
-    if _needs_citation(low):
-        if "[tool:" not in low and "[tool:" not in r.lower():
-            return ("I can’t claim tool outputs unless I include an explicit TOOL citation. "
-                    "Please run the tool and paste its output or enable tool access; I won't fabricate results.")
-
-    # Verify any [TOOL:...] citations are grounded in the provided tool context.
-    cited = re.findall(r"\[TOOL:([a-zA-Z0-9_\-]+)\]", r)
-    if cited:
-        tc = (tool_context or "").lower()
-        bad_found = False
-        for name in cited:
-            token = f"[tool:{name.lower()}]"
-            if token not in tc:
-                bad_found = True
-        if bad_found:
-            cleaned = re.sub(r"\[TOOL:[^\]]+\]", "", r).strip()
-            cleaned = re.sub(r"\s+", " ", cleaned).strip()
-            if cleaned:
-                return cleaned
-            return ("I can’t claim tool outputs unless they come from a real tool run in this chat. "
-                    "I won’t fabricate TOOL citations.")
-
-    # --- Additional UX rules to strip auto-offer phrases, unsolicited links, and ungrounded capability claims ---
-    # Remove sentences that offer help unsolicitedly (unless we have tool context)
-    offer_patterns = [
-        r"how can i (help|assist)",
-        r"would you like me to",
-        r"do you want me to",
-        r"\bi can (help|assist)\b",
-        r"i(?:'| i)?ll start (?:research|researching)",
-        r"i will start (?:research|researching)",
-        r"i(?:'| i)?ll research",
-        r"i will research",
-        # remove terse "retrieving ..." or similar interim-status sentences when no tool ran
-        r"\bretriev(?:ing|e)?\b",
-    ]
-
-    def _sentence_filter(text: str) -> str:
-        parts = re.split(r'(?<=[.!?])\s+', text)
-        out = []
-        for s in parts:
-            low_s = s.lower()
-            skip = False
-            for p in offer_patterns:
-                if re.search(p, low_s):
-                    # if tool_context contains some tool token, keep; else skip
-                    if not (tool_context or ""):  # no tool context
-                        skip = True
-                        break
-            if not skip:
-                out.append(s)
-        return " ".join(out).strip()
-
-    # Remove sentences that promise future research or actions unless a tool ran
-    research_patterns = [
-        r"i\s*(?:'| i)?ll (?:research|look into|investigate|start researching|go research)",
-        r"i will (?:research|look into|investigate|start researching|go research)",
-        r"i(?:'| i)?m going to (?:research|look into|investigate)",
-    ]
-
-    def _remove_research_promises(text: str) -> str:
-        parts = re.split(r'(?<=[.!?])\s+', text)
-        out = []
-        for s in parts:
-            low_s = s.lower()
-            skip = False
-            for p in research_patterns:
-                if re.search(p, low_s):
-                    if not (tool_context or ""):
-                        skip = True
-                        break
-            if not skip:
-                out.append(s)
-        return " ".join(out).strip()
-
-    filtered = _sentence_filter(r)
-    filtered = _remove_research_promises(filtered)
-
-    # Remove raw URLs unless a TOOL citation is present or user requested sources
-    if re.search(r"https?://", filtered) and not (tool_context or ""):
-        # strip URLs
-        filtered = re.sub(r"https?://\S+", "[link removed]", filtered)
-
-    # If the assistant claims 'I can <action>' for capabilities, replace with known capabilities list
-    cap_match = re.search(r"\bi can (fetch|browse|search|lookup|open|download|run|apply|patch|install|scan)\b", filtered or "", flags=re.I)
-    if cap_match:
-        caps = describe_capabilities()
-        return caps
-
-    filtered = filtered.strip()
-    if not filtered:
-        # fallback to short acknowledgement
-        return "Okay."
-
-    return filtered
+    return service_sanitize_llm_reply(
+        reply,
+        tool_context,
+        weather_unavailable_message_fn=_weather_unavailable_message,
+        describe_capabilities_fn=describe_capabilities,
+    )
 
 
 def _strip_mem_leak(reply: str, mem_block: str) -> str:
@@ -9589,110 +6502,25 @@ def _language_mix_instruction(spanish_pct: int) -> str:
 # Ollama chat
 # =========================
 def ollama_chat(text: str, retrieved_context: str = "", language_mix_spanish_pct: int = 0) -> str:
-    """
-    Deterministic chat wrapper: strict non-hallucination rules and low temperature.
-    This function avoids injecting memory and enforces a constrained system prompt.
-    """
-    # Ensure the Ollama service is available (boot-time should have called ensure_ollama_boot)
-    try:
-        ensure_ollama()
-    except Exception:
-        # proceed; requests will surface an error which we retry below
-        pass
-
-    # Build a strict system message that prevents fabricated actions and enforces
-    # a specific TOOL citation format when referencing tool-produced outputs.
-    casual_prompt = (
-        "You are Nova, a friendly conversational assistant running locally on Windows.\n"
-        "Tone and behavior rules:\n"
-        "- Speak naturally and briefly like a person in the room; prefer short acknowledgements for casual statements.\n"
-        "- Do NOT repeatedly offer assistance or suggest actions unless the user explicitly asks for help. Avoid endings like 'Would you like me to...' in casual chat.\n"
-        "- Avoid formal task-oriented phrasing for ordinary conversation; use gentle acknowledgements (e.g., 'Got it.', 'She sounds tired.', 'Nice.').\n"
-        "- Never claim you performed actions on the PC (open, unzip, delete, move, install, browse, click, run commands) unless a tool was actually executed and its real output is available.\n"
-        "- Do NOT provide external links or URLs unless the user asks specifically for a link or sources. If asked for a source, provide one and include a TOOL citation only when the output is grounded.\n"
-        "- Never invent links, file paths, filenames, or results. If unsure, say you are unsure.\n"
-        "- Only ask clarifying questions sparingly and only when necessary to complete a requested task; do not ask follow-ups for simple observational statements.\n"
-        "- Keep answers concise and verifiable.\n"
-        "- IMPORTANT: If you reference results produced by tools (files saved, snapshots, patches, downloads, paths, etc.), include an exact citation line in this format: '[TOOL:<tool_name>] <short description or path>'.\n"
-        "  Example citations:\n"
-        "    [TOOL:web_fetch] runtime/web/20260101_example.html\n"
-        "    [TOOL:patch_apply] Patch applied: 3 files\n"
-        "- Do NOT fabricate any such citation — if you do not have a real tool output, say you don't have the output and provide the command the user should run to get it.\n"
+    return service_ollama_chat(
+        text,
+        retrieved_context=retrieved_context,
+        language_mix_spanish_pct=language_mix_spanish_pct,
+        live_ollama_calls_allowed_fn=_live_ollama_calls_allowed,
+        ensure_ollama_fn=ensure_ollama,
+        identity_context_for_prompt_fn=identity_context_for_prompt,
+        language_mix_instruction_fn=_language_mix_instruction,
+        chat_model_fn=chat_model,
+        requests_post_fn=requests.post,
+        ollama_base=OLLAMA_BASE,
+        ollama_req_timeout=OLLAMA_REQ_TIMEOUT,
+        warn_fn=warn,
+        kill_ollama_fn=kill_ollama,
+        start_ollama_serve_detached_fn=start_ollama_serve_detached,
+        sleep_fn=time.sleep,
+        env=os.environ,
     )
 
-    assist_prompt = (
-        "You are Nova, a helpful assistant running locally on Windows.\n"
-        "Tone and behavior rules:\n"
-        "- Be helpful and offer assistance when helpful, but avoid fabricating actions or results.\n"
-        "- If the user is vague and a follow-up is needed to complete a requested task, ask one concise clarifying question.\n"
-        "- For task-oriented requests, prioritize clear, actionable steps.\n"
-        "- Never claim you performed actions on the PC (open, unzip, delete, move, install, browse, click, run commands) unless a tool was actually executed and its real output is available.\n"
-        "- Do NOT provide external links unless the user requests sources; when providing tool outputs include TOOL citations.\n"
-        "- Keep answers concrete and verifiable.\n"
-        "- IMPORTANT: If you reference results produced by tools (files saved, snapshots, patches, downloads, paths, etc.), include an exact citation line in this format: '[TOOL:<tool_name>] <short description or path>'.\n"
-        "  Example citations:\n"
-        "    [TOOL:web_fetch] runtime/web/20260101_example.html\n"
-        "    [TOOL:patch_apply] Patch applied: 3 files\n"
-        "- Do NOT fabricate any such citation — if you do not have a real tool output, say you don't have the output and provide the command the user should run to get it.\n"
-    )
-
-    # Choose prompt variant via CASUAL_MODE env var (default: casual)
-    if os.environ.get("CASUAL_MODE", "1").lower() in {"1", "true", "yes"}:
-        system_msg = casual_prompt
-    else:
-        system_msg = assist_prompt
-
-    identity_ctx = identity_context_for_prompt()
-    if identity_ctx:
-        system_msg = f"{system_msg}\n\nPersistent identity memory:\n{identity_ctx}"
-
-    system_msg = f"{system_msg}\n\n{_language_mix_instruction(language_mix_spanish_pct)}"
-
-    # Build user content with optional retrieved context
-    user_content = text
-    if retrieved_context:
-        user_content = (
-            f"{text}\n\n"
-            "Retrieved context (use only if relevant; if uncertain, say uncertain):\n"
-            "<<<CONTEXT\n"
-            f"{retrieved_context[:6000]}\n"
-            ">>>"
-        )
-
-    payload = {
-        "model": chat_model(),
-        "stream": False,
-        "options": {"temperature": 0.2, "top_p": 0.9, "repeat_penalty": 1.1},
-        "messages": [
-            {"role": "system", "content": system_msg},
-            {"role": "user", "content": user_content},
-        ],
-    }
-
-    # Primary call with one deterministic retry after a service restart
-    try:
-        r = requests.post(f"{OLLAMA_BASE}/api/chat", json=payload, timeout=OLLAMA_REQ_TIMEOUT)
-        r.raise_for_status()
-        try:
-            return r.json()["message"]["content"].strip()
-        except Exception:
-            return None
-    except Exception:
-        warn("Ollama chat failed; attempting one restart and retry.")
-        try:
-            kill_ollama()
-            time.sleep(1.2)
-            start_ollama_serve_detached()
-            time.sleep(1.2)
-            r = requests.post(f"{OLLAMA_BASE}/api/chat", json=payload, timeout=OLLAMA_REQ_TIMEOUT)
-            r.raise_for_status()
-            try:
-                return r.json()["message"]["content"].strip()
-            except Exception:
-                return None
-        except Exception as e:
-            warn(f"Ollama chat final attempt failed: {e}")
-            return "(error: LLM service unavailable)"
 
 
 def _teach_store_example(original: str, correction: str, user: Optional[str] = None) -> str:
@@ -9768,40 +6596,7 @@ def _looks_like_pending_replacement_text(text: str) -> bool:
 
 
 def _safe_eval_arithmetic_expression(expr: str) -> Optional[float]:
-    text = str(expr or "").strip()
-    if not text:
-        return None
-    try:
-        node = ast.parse(text, mode="eval")
-    except Exception:
-        return None
-
-    def _eval(n: ast.AST) -> float:
-        if isinstance(n, ast.Expression):
-            return _eval(n.body)
-        if isinstance(n, ast.Constant) and isinstance(n.value, (int, float)):
-            return float(n.value)
-        if isinstance(n, ast.UnaryOp) and isinstance(n.op, (ast.UAdd, ast.USub)):
-            value = _eval(n.operand)
-            return value if isinstance(n.op, ast.UAdd) else -value
-        if isinstance(n, ast.BinOp) and isinstance(n.op, (ast.Add, ast.Sub, ast.Mult, ast.Div)):
-            left = _eval(n.left)
-            right = _eval(n.right)
-            if isinstance(n.op, ast.Add):
-                return left + right
-            if isinstance(n.op, ast.Sub):
-                return left - right
-            if isinstance(n.op, ast.Mult):
-                return left * right
-            if right == 0:
-                raise ZeroDivisionError()
-            return left / right
-        raise ValueError("unsupported_expression")
-
-    try:
-        return _eval(node)
-    except Exception:
-        return None
+    return service_safe_eval_arithmetic_expression(expr)
 
 
 def _arithmetic_expression_reply(user_text: str) -> Optional[str]:
@@ -9966,189 +6761,27 @@ def _teach_list_examples() -> str:
 
 
 def _teach_propose_patch(description: str) -> str:
-    try:
-        teach_dir = UPDATES_DIR / "teaching"
-        fn = teach_dir / "examples.jsonl"
-        if not fn.exists():
-            return "No teach examples to propose. Use: teach remember <orig> => <correction>"
-
-        ts = time.strftime("%Y%m%d_%H%M%S")
-        out_zip = UPDATES_DIR / f"teach_proposal_{ts}.zip"
-        current_revision = _read_patch_revision()
-        manifest = {
-            "name": f"teach_proposal_{ts}",
-            "notes": description or "Teach examples proposal",
-            "patch_revision": current_revision + 1,
-            "min_base_revision": current_revision,
-        }
-        tmp_manifest = UPDATES_DIR / f"teach_manifest_{ts}.json"
-        tmp_manifest.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
-
-        with zipfile.ZipFile(out_zip, "w", compression=zipfile.ZIP_DEFLATED) as z:
-            z.write(fn, arcname="examples.jsonl")
-            z.write(tmp_manifest, arcname=PATCH_MANIFEST_NAME)
-
-        try:
-            tmp_manifest.unlink()
-        except Exception:
-            pass
-
-        # generate preview report for this proposal
-        try:
-            preview_out = patch_preview(str(out_zip), write_report=True)
-        except Exception:
-            preview_out = "Preview generation failed."
-
-        # Only enter the blocking local review loop when explicitly enabled.
-        try:
-            import sys
-            if _interactive_patch_review_enabled() and sys.stdin and hasattr(sys.stdin, "isatty") and sys.stdin.isatty():
-                # extract preview filename if present
-                m = re.search(r"Preview written:\s*(.+)$", preview_out or "", flags=re.M)
-                preview_path = m.group(1).strip() if m else None
-                if preview_path:
-                    decision_msg = interactive_preview_review(preview_path)
-                else:
-                    decision_msg = "Preview saved but path not found. Use 'patch list-previews' to locate it."
-            else:
-                decision_msg = ""
-        except Exception:
-            decision_msg = ""
-
-        base_msg = f"Created proposal: {out_zip} — apply with: patch apply {out_zip}"
-        if decision_msg:
-            return base_msg + "\n" + decision_msg
-        return base_msg
-    except Exception as e:
-        return f"Failed to create teach proposal: {e}"
+    return service_teach_propose_patch(
+        description,
+        updates_dir=UPDATES_DIR,
+        read_patch_revision_fn=_read_patch_revision,
+        patch_manifest_name=PATCH_MANIFEST_NAME,
+        patch_preview_fn=patch_preview,
+        interactive_patch_review_enabled_fn=_interactive_patch_review_enabled,
+        interactive_preview_review_fn=interactive_preview_review,
+    )
 
 
 def _teach_autoapply_proposal(zip_path: str, apply_live: bool = False) -> str:
-    """Test a proposal zip in a staging copy of the repo first.
-    If tests pass in staging and `apply_live` is True, apply the patch to the live repo via patch_apply().
-    By default (`apply_live=False`) this runs staging and returns the test output and the suggested apply command
-    without modifying the live repository.
-    """
-    try:
-        z = Path(zip_path)
-        if not z.exists():
-            return f"Not found: {z}"
-
-        # Generate and save a preview report for this proposal
-        try:
-            preview_out = patch_preview(str(z), write_report=True)
-        except Exception as e:
-            # Save failure reason to previews
-            try:
-                previews = UPDATES_DIR / "previews"
-                previews.mkdir(parents=True, exist_ok=True)
-                tsf = time.strftime("%Y%m%d_%H%M%S")
-                fail_fn = previews / f"preview_fail_{tsf}_{z.name}.txt"
-                fail_fn.write_text(f"Preview generation failed: {e}", encoding="utf-8")
-            except Exception:
-                pass
-            return f"Preview generation failed: {e}"
-
-        # If preview indicates rejected status, save and abort autoapply
-        if "Status: eligible" not in (preview_out or ""):
-            return f"Preview indicates proposal is not eligible for autoapply. Preview saved.\n\n{preview_out}"
-
-        ts = time.strftime("%Y%m%d_%H%M%S")
-        staging = UPDATES_DIR / f"staging_{ts}"
-        # copy repo to staging
-        import shutil
-        staging.mkdir(parents=True, exist_ok=True)
-        # copytree requires empty target; copy contents instead
-        for item in BASE_DIR.iterdir():
-            if item.name in {"runtime", "logs", "updates", "piper", "models"}:
-                # skip large runtime artifacts
-                continue
-            dest = staging / item.name
-            if item.is_dir():
-                shutil.copytree(item, dest)
-            else:
-                shutil.copy2(item, dest)
-
-        # extract zip into staging (overlay)
-        with zipfile.ZipFile(z, "r") as zz:
-            zz.extractall(path=staging)
-
-        # run the same behavioral validation gate in staging before any live apply.
-        behavior_result = _behavioral_check(base_dir=staging)
-        if not bool(behavior_result.get("ok")):
-            # cleanup staging
-            try:
-                shutil.rmtree(staging)
-            except Exception:
-                pass
-            out = str(behavior_result.get("output") or "")
-            summary = str(behavior_result.get("summary") or "behavioral check failed")
-            return f"Behavioral check failed in staging:\n{summary}\n\n{out}"
-
-        # tests passed; either apply to live repo or return suggested command
-        if apply_live:
-            apply_out = patch_apply(str(z))
-
-            # cleanup staging
-            try:
-                shutil.rmtree(staging)
-            except Exception:
-                pass
-
-            return f"Staging tests passed. patch_apply result:\n{apply_out}"
-        else:
-            # cleanup staging
-            try:
-                shutil.rmtree(staging)
-            except Exception:
-                pass
-
-            return (
-                f"Staging behavioral check passed ({str(behavior_result.get('summary') or 'passed')}). To apply this proposal to the live repo run:\n"
-                f"  teach autoapply apply {zip_path}\n"
-                "Or run the suggested patch apply command directly: patch apply <zip_path>"
-            )
-    except Exception as e:
-        return f"Autoapply failed: {e}"
-
-    user_content = text
-    if retrieved_context:
-        user_content = (
-            f"{text}\n\n"
-            "Retrieved context (use only if relevant; if uncertain, say uncertain):\n"
-            "<<<CONTEXT\n"
-            f"{retrieved_context[:6000]}\n"
-            ">>>"
-        )
-
-    payload = {
-        "model": chat_model(),
-        "stream": False,
-        "options": {"temperature": 0.2, "top_p": 0.9, "repeat_penalty": 1.1},
-        "messages": [
-            {"role": "system", "content": system_msg},
-            {"role": "user", "content": user_content},
-        ],
-    }
-
-    # Primary call with one deterministic retry after a service restart
-    try:
-        r = requests.post(f"{OLLAMA_BASE}/api/chat", json=payload, timeout=OLLAMA_REQ_TIMEOUT)
-        r.raise_for_status()
-        return r.json()["message"]["content"].strip()
-    except Exception:
-        warn("Ollama chat failed; attempting one restart and retry.")
-        try:
-            kill_ollama()
-            time.sleep(1.2)
-            start_ollama_serve_detached()
-            time.sleep(1.2)
-            r = requests.post(f"{OLLAMA_BASE}/api/chat", json=payload, timeout=OLLAMA_REQ_TIMEOUT)
-            r.raise_for_status()
-            return r.json()["message"]["content"].strip()
-        except Exception as e:
-            warn(f"Ollama chat final attempt failed: {e}")
-            return "(error: LLM service unavailable)"
+    return service_teach_autoapply_proposal(
+        zip_path,
+        apply_live=apply_live,
+        updates_dir=UPDATES_DIR,
+        base_dir=BASE_DIR,
+        patch_preview_fn=patch_preview,
+        behavioral_check_fn=_behavioral_check,
+        patch_apply_fn=patch_apply,
+    )
 
 
 # =========================
@@ -10265,89 +6898,21 @@ def _count_definition_files(root: Path) -> int:
 
 
 def _promotion_audit_summary() -> dict:
-    latest_by_file = {}
-    if PROMOTION_AUDIT_LOG.exists():
-        try:
-            with PROMOTION_AUDIT_LOG.open("r", encoding="utf-8") as handle:
-                for line in handle:
-                    line = line.strip()
-                    if not line:
-                        continue
-                    try:
-                        row = json.loads(line)
-                    except Exception:
-                        continue
-                    if not isinstance(row, dict):
-                        continue
-                    file_name = str(row.get("file") or "").strip()
-                    if not file_name:
-                        continue
-                    latest_by_file[file_name] = row
-        except Exception:
-            latest_by_file = {}
-
-    status_counts = {}
-    latest_ts = ""
-    for row in latest_by_file.values():
-        status = str(row.get("status") or "unknown").strip() or "unknown"
-        status_counts[status] = int(status_counts.get(status, 0) or 0) + 1
-        row_ts = str(row.get("ts") or "").strip()
-        if row_ts > latest_ts:
-            latest_ts = row_ts
-
-    return {
-        "generated_total": _count_definition_files(GENERATED_DEFINITIONS_DIR),
-        "promoted_total": _count_definition_files(PROMOTED_DEFINITIONS_DIR),
-        "pending_review_total": _count_definition_files(PENDING_REVIEW_DIR),
-        "quarantine_total": _count_definition_files(QUARANTINE_DIR),
-        "latest_audited_files": len(latest_by_file),
-        "latest_audit_ts": latest_ts,
-        "status_counts": status_counts,
-    }
-
-
-def _parse_log_timestamp(ts_text: str) -> float:
-    try:
-        return time.mktime(time.strptime(str(ts_text or "").strip(), "%Y-%m-%d %H:%M:%S"))
-    except Exception:
-        return 0.0
+    return service_promotion_audit_summary(
+        promotion_audit_log=PROMOTION_AUDIT_LOG,
+        generated_definitions_dir=GENERATED_DEFINITIONS_DIR,
+        promoted_definitions_dir=PROMOTED_DEFINITIONS_DIR,
+        pending_review_dir=PENDING_REVIEW_DIR,
+        quarantine_dir=QUARANTINE_DIR,
+    )
 
 
 def _patch_activity_summary(window_hours: int = 24) -> dict:
-    summary = {
-        "apply_count": 0,
-        "apply_ok_count": 0,
-        "rollback_count": 0,
-        "behavior_fail_count": 0,
-        "last_line": _read_patch_log_tail_line(),
-    }
-    if not PATCH_LOG.exists():
-        return summary
-
-    window_seconds = max(1, int(window_hours or 24)) * 3600
-    cutoff = time.time() - window_seconds
-    try:
-        with PATCH_LOG.open("r", encoding="utf-8") as handle:
-            for raw_line in handle:
-                line = raw_line.strip()
-                if not line or "|" not in line:
-                    continue
-                ts_text, event = line.split("|", 1)
-                event = event.strip()
-                event_ts = _parse_log_timestamp(ts_text)
-                if event_ts and event_ts < cutoff:
-                    continue
-                if event.startswith("APPLY_OK"):
-                    summary["apply_ok_count"] += 1
-                elif event.startswith("APPLY "):
-                    summary["apply_count"] += 1
-                elif event.startswith("ROLLBACK"):
-                    summary["rollback_count"] += 1
-                elif event.startswith("BEHAVIOR_FAIL"):
-                    summary["behavior_fail_count"] += 1
-    except Exception:
-        return summary
-    return summary
+    return service_patch_activity_summary(
+        patch_log=PATCH_LOG,
+        read_patch_log_tail_line_fn=_read_patch_log_tail_line,
+        window_hours=window_hours,
+    )
 
 
 def _preview_name_to_zip_path(preview_name: str) -> Optional[Path]:
@@ -10403,82 +6968,26 @@ def _pulse_mood(ollama_up: bool, routing_stable: bool, promoted_delta: int, fall
 
 
 def build_pulse_payload() -> dict:
-    audit = _promotion_audit_summary()
-    behavior = _load_json_file(BEHAVIOR_METRICS_FILE, {})
-    autonomy = _load_json_file(AUTONOMY_MAINTENANCE_FILE, {})
-    prior = _load_json_file(PULSE_SNAPSHOT_FILE, {})
-    patch = patch_status_payload()
-    patch_activity = _patch_activity_summary(window_hours=24)
-    ollama_up = bool(ollama_api_up())
-    routing_stable = bool(behavior.get("routing_stable", False))
-    fallback_score = float(autonomy.get("last_fallback_overuse_score") or 0.0)
-    promoted_total = int(audit.get("promoted_total", 0) or 0)
-    prior_promoted_total = int(prior.get("promoted_total", 0) or 0)
-    promoted_delta = promoted_total - prior_promoted_total if prior_promoted_total else 0
-    approved_update_zip = _latest_approved_update_zip(patch)
-
-    memory_payload = mem_stats_payload(emit_event=False)
-    kidney_summary = {}
-    safety_cfg = {}
-    try:
-        import kidney
-
-        kidney_summary = kidney.run_kidney(dry_run=True)
-    except Exception:
-        kidney_summary = {}
-    try:
-        import nova_safety_envelope
-
-        safety_cfg = nova_safety_envelope.policy_safety_envelope()
-    except Exception:
-        safety_cfg = {}
-
-    payload = {
-        "generated_at": time.strftime("%Y-%m-%d %H:%M:%S"),
-        "promoted_total": promoted_total,
-        "promoted_delta": max(0, int(promoted_delta)),
-        "generated_total": int(audit.get("generated_total", 0) or 0),
-        "pending_review_total": int(audit.get("pending_review_total", 0) or 0),
-        "quarantine_total": int(audit.get("quarantine_total", 0) or 0),
-        "latest_audited_files": int(audit.get("latest_audited_files", 0) or 0),
-        "latest_audit_ts": str(audit.get("latest_audit_ts") or "unknown"),
-        "audit_status_counts": dict(audit.get("status_counts") or {}),
-        "routing_stable": routing_stable,
-        "tool_route_count": int(behavior.get("tool_route", 0) or 0),
-        "llm_fallback_count": int(behavior.get("llm_fallback", 0) or 0),
-        "last_reflection_at": str(behavior.get("last_reflection_at") or "unknown"),
-        "last_fallback_overuse_score": fallback_score,
-        "last_regression_status": str(autonomy.get("last_regression_status") or "unknown"),
-        "patch_revision": int(patch.get("current_revision", 0) or 0),
-        "approved_eligible_previews": int(patch.get("previews_approved_eligible", 0) or 0),
-        "ready_for_validated_apply": bool(patch.get("ready_for_validated_apply", False)),
-        "patch_activity": patch_activity,
-        "patch_last_line": str(patch.get("last_patch_log_line") or patch_activity.get("last_line") or "none"),
-        "ollama_up": ollama_up,
-        "memory_ok": bool(memory_payload.get("ok", False)),
-        "memory_total": int(memory_payload.get("total", 0) or 0) if memory_payload.get("ok") else 0,
-        "kidney_mode": str(kidney_summary.get("mode") or "unknown"),
-        "kidney_candidates": int(kidney_summary.get("candidate_count", 0) or 0),
-        "kidney_archive_count": int(kidney_summary.get("archive_count", 0) or 0),
-        "kidney_delete_count": int(kidney_summary.get("delete_count", 0) or 0),
-        "safety_enabled": bool(safety_cfg.get("enabled", True)) if isinstance(safety_cfg, dict) else True,
-        "safety_mode": str(safety_cfg.get("mode") or "unknown") if isinstance(safety_cfg, dict) else "unknown",
-        "update_zip_path": str(approved_update_zip) if approved_update_zip is not None else "",
-    }
-    payload["autonomy_level"] = _pulse_level(
-        payload["ollama_up"],
-        payload["routing_stable"],
-        payload["last_fallback_overuse_score"],
-        int((payload.get("patch_activity") or {}).get("rollback_count", 0) or 0),
+    return service_build_pulse_payload(
+        promotion_audit_log=PROMOTION_AUDIT_LOG,
+        generated_definitions_dir=GENERATED_DEFINITIONS_DIR,
+        promoted_definitions_dir=PROMOTED_DEFINITIONS_DIR,
+        pending_review_dir=PENDING_REVIEW_DIR,
+        quarantine_dir=QUARANTINE_DIR,
+        behavior_metrics_file=BEHAVIOR_METRICS_FILE,
+        autonomy_maintenance_file=AUTONOMY_MAINTENANCE_FILE,
+        pulse_snapshot_file=PULSE_SNAPSHOT_FILE,
+        patch_log=PATCH_LOG,
+        load_json_file_fn=_load_json_file,
+        patch_status_payload_fn=patch_status_payload,
+        read_patch_log_tail_line_fn=_read_patch_log_tail_line,
+        ollama_api_up_fn=ollama_api_up,
+        mem_stats_payload_fn=mem_stats_payload,
+        kidney_summary_fn=lambda: __import__('kidney').run_kidney(dry_run=True),
+        safety_policy_fn=lambda: __import__('nova_safety_envelope').policy_safety_envelope(),
+        latest_approved_update_zip_fn=_latest_approved_update_zip,
     )
-    payload["mood"] = _pulse_mood(
-        payload["ollama_up"],
-        payload["routing_stable"],
-        payload["promoted_delta"],
-        payload["last_fallback_overuse_score"],
-        int((payload.get("patch_activity") or {}).get("rollback_count", 0) or 0),
-    )
-    return payload
+
 
 
 def _write_pulse_snapshot(payload: dict) -> None:
@@ -10497,50 +7006,11 @@ def _write_pulse_snapshot(payload: dict) -> None:
 
 
 def render_nova_pulse(payload: Optional[dict] = None) -> str:
-    data = payload if isinstance(payload, dict) else build_pulse_payload()
-    patch_activity = data.get("patch_activity") if isinstance(data.get("patch_activity"), dict) else {}
-    status_counts = data.get("audit_status_counts") if isinstance(data.get("audit_status_counts"), dict) else {}
-    if status_counts:
-        audit_status_text = ", ".join(f"{name}={status_counts[name]}" for name in sorted(status_counts))
-    else:
-        audit_status_text = "none"
+    return service_render_nova_pulse(
+        payload,
+        build_pulse_payload_fn=build_pulse_payload,
+    )
 
-    lines = [
-        f"Nova Pulse - {data.get('generated_at')}",
-        "Core evolution:",
-        f"- promoted definitions: {int(data.get('promoted_total', 0) or 0)} (+{int(data.get('promoted_delta', 0) or 0)} since last pulse)",
-        f"- generated definitions: {int(data.get('generated_total', 0) or 0)}",
-        f"- pending review: {int(data.get('pending_review_total', 0) or 0)}",
-        f"- quarantine: {int(data.get('quarantine_total', 0) or 0)}",
-        f"- latest audited files: {int(data.get('latest_audited_files', 0) or 0)} at {data.get('latest_audit_ts')}",
-        f"- audit statuses: {audit_status_text}",
-        "Updates:",
-        f"- patch revision: {int(data.get('patch_revision', 0) or 0)}",
-        f"- ready for validated apply: {'yes' if data.get('ready_for_validated_apply') else 'no'}",
-        f"- approved eligible previews: {int(data.get('approved_eligible_previews', 0) or 0)}",
-        f"- patch activity last 24h: applies={int(patch_activity.get('apply_count', 0) or 0)}, apply_ok={int(patch_activity.get('apply_ok_count', 0) or 0)}, rollbacks={int(patch_activity.get('rollback_count', 0) or 0)}, behavior_failures={int(patch_activity.get('behavior_fail_count', 0) or 0)}",
-        f"- patch log tail: {data.get('patch_last_line')}",
-        "Support systems:",
-        f"- Ollama API: {'online' if data.get('ollama_up') else 'offline'}",
-        f"- memory: {'ok' if data.get('memory_ok') else 'unavailable'} (total={int(data.get('memory_total', 0) or 0)})",
-        f"- kidney: mode={data.get('kidney_mode')} candidates={int(data.get('kidney_candidates', 0) or 0)} archive={int(data.get('kidney_archive_count', 0) or 0)} delete={int(data.get('kidney_delete_count', 0) or 0)}",
-        f"- safety envelope: enabled={bool(data.get('safety_enabled'))} mode={data.get('safety_mode')}",
-        "Autonomy:",
-        f"- level: {data.get('autonomy_level')}",
-        f"- routing stable: {'yes' if data.get('routing_stable') else 'no'}",
-        f"- tool routes vs llm fallbacks: {int(data.get('tool_route_count', 0) or 0)} / {int(data.get('llm_fallback_count', 0) or 0)}",
-        f"- last fallback overuse score: {float(data.get('last_fallback_overuse_score', 0.0) or 0.0):.2f}",
-        f"- last regression status: {data.get('last_regression_status')}",
-        f"- last reflection: {data.get('last_reflection_at')}",
-        "Assessment:",
-        f"- {data.get('mood')}",
-    ]
-    update_zip_path = str(data.get("update_zip_path") or "").strip()
-    if update_zip_path:
-        lines.append('Type "update now" if you want me to apply the latest approved validated update.')
-    else:
-        lines.append("No approved validated update is queued right now.")
-    return "\n".join(lines)
 
 
 def tool_nova_pulse():
@@ -10674,54 +7144,40 @@ def tool_update_now_cancel():
 
 
 def execute_planned_action(tool: str, args=None):
-    tool_name = str(tool or "").strip()
-    tool_args = list(args) if isinstance(args, (list, tuple)) else ([] if args in {None, ""} else [args])
-
-    if tool_name in {"web_fetch", "web_search", "web_research", "web_gather"}:
-        return ""
-
-    if tool_name == "weather_current_location":
-        saved_location = str(get_saved_location_text() or "").strip()
-        if saved_location:
-            return str(tool_weather(saved_location) or "")
-        coords = _coords_from_saved_location()
-        if coords:
-            return str(tool_weather(f"{coords[0]},{coords[1]}") or "")
-        return _need_confirmed_location_message()
-
-    if tool_name == "weather_location":
-        location_value = str(tool_args[0] if tool_args else "").strip()
-        return str(tool_weather(location_value) or "")
-
-    if tool_name == "location_coords":
-        location_value = str(tool_args[0] if tool_args else "").strip()
-        return set_location_coords(location_value)
-
-    tool_map = {
-        "patch_apply": patch_apply,
-        "patch_rollback": patch_rollback,
-        "camera": tool_camera,
-        "screen": tool_screen,
-        "read": tool_read,
-        "ls": tool_ls,
+    planned_tool_map = {
         "find": tool_find,
-        "health": tool_health,
-        "system_check": tool_system_check,
+        "ls": tool_ls,
         "queue_status": tool_queue_status,
         "phase2_audit": tool_phase2_audit,
         "pulse": tool_nova_pulse,
+        "patch_preview_approve": tool_patch_preview_approve,
+        "patch_apply": patch_apply,
+        "patch_preview_apply": tool_patch_preview_apply,
+        "patch_rollback": patch_rollback,
+        "read": tool_read,
+        "system_check": tool_system_check,
         "update_now": tool_update_now,
         "update_now_confirm": tool_update_now_confirm,
         "update_now_cancel": tool_update_now_cancel,
+        "web_search": tool_web_search,
+        "web_research": tool_web_research,
+        "web_gather": tool_web_gather,
+        "wikipedia_lookup": tool_wikipedia_lookup,
+        "stackexchange_search": tool_stackexchange_search,
+        "health": tool_health,
     }
-    fn = tool_map.get(tool_name)
-    if not fn:
-        return {"ok": False, "error": f"Unknown planned tool: {tool_name}"}
+    return service_execute_planned_action(
+        tool,
+        args,
+        resolve_current_device_coords_fn=resolve_current_device_coords,
+        tool_weather_fn=tool_weather,
+        get_saved_location_text_fn=get_saved_location_text,
+        coords_from_saved_location_fn=_coords_from_saved_location,
+        need_confirmed_location_message_fn=_need_confirmed_location_message,
+        set_location_coords_fn=set_location_coords,
+        tool_map=planned_tool_map,
+    )
 
-    try:
-        return fn(*tool_args) if tool_args else fn()
-    except Exception as e:
-        return {"ok": False, "error": f"Tool error: {e}"}
 
 
 def make_pending_weather_action() -> dict:
@@ -10732,6 +7188,14 @@ def make_pending_weather_action() -> dict:
         "saved_location_available": bool(saved_location),
         "preferred_tool": "weather_current_location" if saved_location else "weather_location",
     }
+
+
+def _weather_current_location_available() -> bool:
+    if resolve_current_device_coords():
+        return True
+    if str(get_saved_location_text() or "").strip():
+        return True
+    return bool(_coords_from_saved_location())
 
 
 def web_search(query: str, save_dir: Path, max_results: int = 5) -> dict:
@@ -10955,106 +7419,27 @@ def _crawl_domain_for_query(start_url: str, query_tokens: list[str], max_pages: 
 
 
 def _scan_candidate_urls_for_query(urls: list[str], query_tokens: list[str], max_pages: int, min_score: float = 3.0) -> list[tuple[float, str, str]]:
-    terms = _expand_research_terms(query_tokens)
+    return service_scan_candidate_urls_for_query(
+        urls,
+        query_tokens,
+        max_pages,
+        min_score=min_score,
+        requests_get_fn=requests.get,
+        expand_research_terms_fn=_expand_research_terms,
+        extract_text_from_html_content_fn=_extract_text_from_html_content,
+        score_research_hit_fn=_score_research_hit,
+    )
 
-    def _url_candidate_score(u: str) -> float:
-        low = (u or "").lower()
-        p = urlparse(u)
-        score = 0.0
-        for t in terms:
-            score += low.count(t) * 2.0
-        for k in ("peims", "tsds", "attendance", "ada", "submission", "calendar", "timeline", "report", "student-data"):
-            if k in low:
-                score += 3.0
-        # Prefer content pages over domain root index pages.
-        if (p.path or "/") in {"", "/"}:
-            score -= 2.0
-        # De-prioritize non-html document links during candidate scan.
-        if re.search(r"\.(pdf|docx?|xlsx?|pptx?)($|\?)", low):
-            score -= 4.0
-        return score
-
-    ranked_urls = sorted(urls, key=_url_candidate_score, reverse=True)
-
-    hits = []
-    scanned = 0
-
-    for url in ranked_urls:
-        if scanned >= max_pages:
-            break
-        try:
-            r = requests.get(url, headers={"User-Agent": "Nova/1.0"}, timeout=20)
-            r.raise_for_status()
-        except Exception:
-            continue
-
-        ctype = (r.headers.get("Content-Type") or "").lower()
-        scanned += 1
-
-        if "html" in ctype:
-            text = _extract_text_from_html_content(r.text, max_chars=5000)
-            score = _score_research_hit(url, text, terms, primary_tokens=query_tokens)
-            if score >= min_score:
-                hits.append((score, url, text[:900]))
-        else:
-            # Keep high-relevance document links (pdf/doc/xls/etc.) as sources.
-            score = _score_research_hit(url, "", terms, primary_tokens=query_tokens)
-            if score >= min_score:
-                snippet = f"Non-HTML source ({ctype or 'unknown'}). Use web gather <url> to fetch and inspect."
-                hits.append((score, url, snippet))
-
-    return hits
 
 
 def _fetch_sitemap_urls(domain: str, limit: int = 80) -> list[str]:
-    urls = []
-    seen = set()
-    seen_sitemaps = set()
-    queue = [f"https://{domain}/sitemap.xml", f"https://{domain}/sitemap_index.xml"]
+    return service_fetch_sitemap_urls(
+        domain,
+        limit=limit,
+        requests_get_fn=requests.get,
+        host_allowed_fn=_host_allowed,
+    )
 
-    while queue and len(urls) < limit:
-        sm = queue.pop(0)
-        if sm in seen_sitemaps:
-            continue
-        seen_sitemaps.add(sm)
-
-        try:
-            r = requests.get(sm, headers={"User-Agent": "Nova/1.0"}, timeout=20)
-            if r.status_code != 200:
-                continue
-            body = r.text
-            locs = re.findall(r"<loc>\s*(.*?)\s*</loc>", body, flags=re.I)
-            for u in locs:
-                u = html.unescape((u or "").strip())
-                p = urlparse(u)
-                if p.scheme not in ("http", "https"):
-                    continue
-                if not p.hostname:
-                    continue
-                if not _host_allowed(p.hostname, [domain]):
-                    continue
-
-                clean = f"{p.scheme}://{p.netloc}{p.path}"
-                if p.query:
-                    clean += f"?{p.query}"
-
-                # Nested sitemap index entries often point to other XML sitemap files,
-                # including forms like sitemap.xml?page=2.
-                if Path(p.path).suffix.lower() == ".xml":
-                    if clean not in seen_sitemaps:
-                        queue.append(clean)
-                    continue
-
-                if clean in seen:
-                    continue
-                seen.add(clean)
-                urls.append(clean)
-                if len(urls) >= limit:
-                    break
-        except Exception:
-            continue
-
-    return urls
 
 
 def _seed_urls_for_domain(domain: str, query_tokens: list[str], max_seed: int = 30) -> list[str]:
@@ -11109,333 +7494,113 @@ def tool_web_fetch(url: str):
 
     return f"[OK] Saved: {out['path']} ({out['content_type']}, {out['bytes']} bytes)"
 
+
+def _provider_request_headers(token: str = "") -> dict[str, str]:
+    headers = {
+        "Accept": "application/json",
+        "User-Agent": "Nova/1.0",
+    }
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+        headers["X-GitHub-Api-Version"] = "2022-11-28"
+    return headers
+
+
+def _clean_html_text(value: str) -> str:
+    text = html.unescape(str(value or "").strip())
+    return re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", text)).strip()
+
+
+def _looks_like_code_discovery_query(text: str) -> bool:
+    low = str(text or "").strip().lower()
+    if not low:
+        return False
+    code_markers = (
+        "github",
+        "repo",
+        "repository",
+        "source code",
+        "implementation",
+        "example repo",
+        "code example",
+        "sample project",
+        "issue",
+        "pull request",
+        "public repo",
+        "open source",
+        "function ",
+        "class ",
+    )
+    return any(marker in low for marker in code_markers)
+
+
+def tool_wikipedia_lookup(query: str):
+    return service_tool_wikipedia_lookup(
+        query,
+        explain_missing_fn=explain_missing,
+        policy_tools_enabled_fn=policy_tools_enabled,
+        web_enabled_fn=web_enabled,
+        requests_get_fn=requests.get,
+    )
+
+
+
+def tool_stackexchange_search(query: str):
+    return service_tool_stackexchange_search(
+        query,
+        explain_missing_fn=explain_missing,
+        policy_tools_enabled_fn=policy_tools_enabled,
+        web_enabled_fn=web_enabled,
+        policy_web_fn=policy_web,
+        requests_get_fn=requests.get,
+        env=os.environ,
+    )
+
+
 def tool_web_search(query: str):
-    missing = explain_missing("web_fetch", ["web_access"])
-    if missing:
-        return missing
+    return service_tool_web_search(
+        query,
+        explain_missing_fn=explain_missing,
+        policy_tools_enabled_fn=policy_tools_enabled,
+        web_enabled_fn=web_enabled,
+        policy_web_fn=policy_web,
+        host_allowed_fn=_host_allowed,
+        decode_search_href_fn=_decode_search_href,
+        probe_search_endpoint_fn=probe_search_endpoint,
+        web_allowlist_message_fn=_web_allowlist_message,
+        requests_get_fn=requests.get,
+    )
 
-    if not policy_tools_enabled().get("web", False):
-        return "Web tool disabled by policy."
-    if not web_enabled():
-        return "Web tool disabled by policy."
-
-    cfg = policy_web()
-    allow_domains = cfg.get("allow_domains") or []
-    if not allow_domains:
-        return "Web search unavailable: no allow_domains configured in policy."
-
-    q = (query or "").strip()
-    if not q:
-        return "Usage: web search <query>"
-
-    def _search_via_api(query_text: str, domains: list[str], max_results: int = 5) -> tuple[list[tuple[str, str]], Optional[str]]:
-        provider = str(cfg.get("search_provider") or "").strip().lower()
-        if provider not in {"brave", "searxng"}:
-            return ([], None)
-
-        scoped_query = query_text + " " + " ".join(f"site:{d}" for d in domains[:8])
-
-        if provider == "brave":
-            key_env = str(cfg.get("search_api_key_env") or "BRAVE_SEARCH_API_KEY").strip() or "BRAVE_SEARCH_API_KEY"
-            api_key = (os.environ.get(key_env) or "").strip()
-            if not api_key:
-                return ([], f"missing_api_key_env:{key_env}")
-
-            endpoint = str(cfg.get("search_api_endpoint") or "https://api.search.brave.com/res/v1/web/search").strip()
-            try:
-                r = requests.get(
-                    endpoint,
-                    params={"q": scoped_query, "count": max(1, min(20, int(max_results)))},
-                    headers={
-                        "Accept": "application/json",
-                        "X-Subscription-Token": api_key,
-                        "User-Agent": "Nova/1.0",
-                    },
-                    timeout=30,
-                )
-                r.raise_for_status()
-                data = r.json()
-            except Exception as e:
-                return ([], f"api_error:{e}")
-
-            items = []
-            for it in ((data.get("web") or {}).get("results") or []):
-                url = str(it.get("url") or "").strip()
-                title = str(it.get("title") or "").strip() or url
-                if not url:
-                    continue
-                host = urlparse(url).hostname or ""
-                if not _host_allowed(host, domains):
-                    continue
-                items.append((title, url))
-                if len(items) >= max_results:
-                    break
-            return (items, None)
-
-        # searxng provider: self-hosted instance, no API key required.
-        endpoint = str(cfg.get("search_api_endpoint") or "http://127.0.0.1:8080/search").strip()
-        try:
-            r = requests.get(
-                endpoint,
-                params={"q": scoped_query, "format": "json"},
-                headers={"Accept": "application/json", "User-Agent": "Nova/1.0"},
-                timeout=30,
-            )
-            r.raise_for_status()
-            data = r.json()
-        except Exception as e:
-            return ([], f"api_error:{e}")
-
-        items = []
-        for it in (data.get("results") or []):
-            url = str(it.get("url") or "").strip()
-            title = str(it.get("title") or "").strip() or url
-            if not url:
-                continue
-            host = urlparse(url).hostname or ""
-            if not _host_allowed(host, domains):
-                continue
-            items.append((title, url))
-            if len(items) >= max_results:
-                break
-        return (items, None)
-
-    def _local_search_backend_message(api_err: object) -> str:
-        endpoint = str(cfg.get("search_api_endpoint") or "http://127.0.0.1:8080/search").strip()
-        err_text = str(api_err or "").strip()
-        endpoint_low = endpoint.lower()
-        is_local = any(host in endpoint_low for host in ("127.0.0.1", "localhost"))
-        if not is_local:
-            return ""
-        if any(token in err_text.lower() for token in ("404", "not found", "connection refused", "failed to establish a new connection", "max retries exceeded")):
-            return (
-                "[FAIL] Local web search backend is unavailable. The configured searxng service at "
-                f"{endpoint} did not respond correctly. If it runs in Docker, start that service first. "
-                "For now, try 'web research <query>' or fetch a specific URL with 'web <url>'."
-            )
-        return ""
-
-    def _search_via_html(query_text: str, domains: list[str], max_results: int = 5) -> tuple[list[tuple[str, str]], Optional[str]]:
-        scoped_query = query_text + " " + " ".join(f"site:{d}" for d in domains[:6])
-        try:
-            r = requests.get(
-                "https://duckduckgo.com/html/",
-                params={"q": scoped_query},
-                headers={"User-Agent": "Nova/1.0"},
-                timeout=30,
-            )
-            r.raise_for_status()
-            page = r.text
-        except Exception as e:
-            return ([], f"html_error:{e}")
-
-        hrefs = re.findall(r'href=["\']([^"\']+)["\']', page, flags=re.I)
-        direct_urls = re.findall(r"https?://[^\s\"'<>]+", page)
-        seen = set()
-        urls = []
-        for h in hrefs:
-            u = _decode_search_href(h)
-            if not u:
-                continue
-            host = urlparse(u).hostname or ""
-            if not _host_allowed(host, domains):
-                continue
-            if u in seen:
-                continue
-            seen.add(u)
-            urls.append((u, u))
-            if len(urls) >= max_results:
-                break
-
-        if len(urls) < max_results:
-            for u in direct_urls:
-                host = urlparse(u).hostname or ""
-                if not _host_allowed(host, domains):
-                    continue
-                if u in seen:
-                    continue
-                seen.add(u)
-                urls.append((u, u))
-                if len(urls) >= max_results:
-                    break
-        return (urls, None)
-
-    provider = str(cfg.get("search_provider") or "").strip().lower()
-    rows, api_err = _search_via_api(q, allow_domains, max_results=5)
-    provider_used = f"api:{provider}" if rows else "html"
-    if not rows:
-        rows, html_err = _search_via_html(q, allow_domains, max_results=5)
-        if not rows and api_err:
-            backend_msg = _local_search_backend_message(api_err)
-            if backend_msg:
-                return backend_msg
-            if "404" in str(api_err).lower() or "not found" in str(api_err).lower():
-                return (
-                    "[FAIL] Web search service returned 404. Try a different phrase, use 'web research <query>', "
-                    "or fetch a specific URL with 'web <url>'."
-                )
-            return f"[FAIL] Web search unavailable. API reason={api_err}; HTML fallback failed={html_err}"
-
-    if not rows:
-        msg = "No allowlisted web results found for that query."
-        # Offer a helpful allowlist explanation
-        msg += "\n\n" + _web_allowlist_message(query)
-        return msg
-
-    lines = [f"Web results (allowlisted, provider={provider_used}):"]
-    for i, (title, u) in enumerate(rows, start=1):
-        if title and title != u:
-            lines.append(f"{i}. {title}")
-            lines.append(f"   {u}")
-        else:
-            lines.append(f"{i}. {u}")
-    lines.append("Tip: run 'web gather <url>' to fetch and summarize one result.")
-    return "\n".join(lines)
 
 
 def tool_web_gather(url: str):
-    missing = explain_missing("web_fetch", ["web_access"])
-    if missing:
-        return missing
+    return service_tool_web_gather(
+        url,
+        explain_missing_fn=explain_missing,
+        policy_tools_enabled_fn=policy_tools_enabled,
+        web_fetch_fn=lambda target_url: web_fetch(target_url, WEB_CACHE_DIR),
+        web_allowlist_message_fn=_web_allowlist_message,
+        extract_text_from_path_fn=_extract_text_from_path,
+    )
 
-    if not policy_tools_enabled().get("web", False):
-        return "Web tool disabled by policy."
-
-    out = web_fetch(url, WEB_CACHE_DIR)
-    if not out.get("ok"):
-        err = out.get("error", "unknown error")
-        if isinstance(err, str) and "not allowed" in err.lower():
-            return _web_allowlist_message(url)
-        return f"[FAIL] {err}"
-
-    p = Path(out["path"])
-    snippet = _extract_text_from_path(p, max_chars=2200)
-    if snippet:
-        return (
-            f"[OK] Saved: {out['path']} ({out['content_type']}, {out['bytes']} bytes)\n"
-            f"Summary snippet:\n{snippet}"
-        )
-
-    ctype = str(out.get("content_type") or "").lower()
-    if "html" in ctype:
-        return (
-            f"[OK] Saved: {out['path']} ({out['content_type']}, {out['bytes']} bytes)\n"
-            "I could access the page, but I couldn't extract readable content. "
-            "It may be JavaScript-heavy/dynamic, and I do not run a browser renderer in this path."
-        )
-
-    return f"[OK] Saved: {out['path']} ({out['content_type']}, {out['bytes']} bytes)"
 
 
 def tool_web_research(query: str, continue_mode: bool = False):
-    global WEB_RESEARCH_LAST_QUERY, WEB_RESEARCH_LAST_RESULTS, WEB_RESEARCH_CURSOR
+    return service_tool_web_research(
+        query,
+        continue_mode=continue_mode,
+        explain_missing_fn=explain_missing,
+        policy_tools_enabled_fn=policy_tools_enabled,
+        web_enabled_fn=web_enabled,
+        policy_web_fn=policy_web,
+        tokenize_fn=_tokenize,
+        fetch_sitemap_urls_fn=_fetch_sitemap_urls,
+        scan_candidate_urls_for_query_fn=_scan_candidate_urls_for_query,
+        seed_urls_for_domain_fn=_seed_urls_for_domain,
+        crawl_domain_for_query_fn=_crawl_domain_for_query,
+        session_store=WEB_RESEARCH_SESSION,
+    )
 
-    missing = explain_missing("web_fetch", ["web_access"])
-    if missing:
-        return missing
-
-    if not policy_tools_enabled().get("web", False):
-        return "Web tool disabled by policy."
-    if not web_enabled():
-        return "Web tool disabled by policy."
-
-    cfg = policy_web()
-    allow_domains = cfg.get("allow_domains") or []
-    if not allow_domains:
-        return "Web research unavailable: no allow_domains configured in policy."
-
-    q = (query or "").strip()
-    if continue_mode:
-        if not WEB_RESEARCH_LAST_RESULTS:
-            return "No active web research session. Start with: web research <query>"
-
-        max_results = max(1, min(40, int((policy_web().get("research_max_results") or 8))))
-        start = WEB_RESEARCH_CURSOR
-        end = min(len(WEB_RESEARCH_LAST_RESULTS), start + max_results)
-        if start >= len(WEB_RESEARCH_LAST_RESULTS):
-            return "No more cached research results. Start a new search with: web research <query>"
-
-        lines = [f"Web research results (continued) for: {WEB_RESEARCH_LAST_QUERY}"]
-        rank = start
-        for score, url, snippet in WEB_RESEARCH_LAST_RESULTS[start:end]:
-            rank += 1
-            lines.append(f"{rank}. [{score:.1f}] {url}")
-            if snippet:
-                lines.append(f"   {snippet[:220]}")
-
-        WEB_RESEARCH_CURSOR = end
-        if WEB_RESEARCH_CURSOR < len(WEB_RESEARCH_LAST_RESULTS):
-            remaining = len(WEB_RESEARCH_LAST_RESULTS) - WEB_RESEARCH_CURSOR
-            lines.append(f"{remaining} more result(s) available. Type 'web continue' to keep going.")
-        else:
-            lines.append("End of cached research results.")
-
-        lines.append("Tip: run 'web gather <url>' for any source above to fetch and summarize it fully.")
-        return "\n".join(lines)
-
-    if not q:
-        return "Usage: web research <query>"
-
-    toks = _tokenize(q)
-    if not toks:
-        return "Query too short for web research."
-
-    domains_limit = max(1, min(12, int(cfg.get("research_domains_limit") or 4)))
-    pages_per_domain = max(2, min(50, int(cfg.get("research_pages_per_domain") or 8)))
-    max_depth = max(0, min(3, int(cfg.get("research_max_depth") or 1)))
-    max_results = max(1, min(40, int(cfg.get("research_max_results") or 8)))
-    seeds_per_domain = max(1, min(40, int(cfg.get("research_seeds_per_domain") or 8)))
-    scan_pages_per_domain = max(2, min(200, int(cfg.get("research_scan_pages_per_domain") or 12)))
-    min_score = max(0.0, min(10.0, float(cfg.get("research_min_score") or 3.0)))
-
-    domains = allow_domains[:max(1, min(domains_limit, len(allow_domains)))]
-    all_hits = []
-    for d in domains:
-        sitemap_urls = _fetch_sitemap_urls(d, limit=max(200, scan_pages_per_domain * 25))
-        if sitemap_urls:
-            all_hits.extend(_scan_candidate_urls_for_query(sitemap_urls, toks, max_pages=max(2, scan_pages_per_domain), min_score=min_score))
-
-        seeds = _seed_urls_for_domain(d, toks, max_seed=max(1, seeds_per_domain))
-        for start in seeds:
-            all_hits.extend(_crawl_domain_for_query(start, toks, max_pages=max(2, pages_per_domain), max_depth=max(0, max_depth)))
-
-    if not all_hits:
-        return "No relevant pages found across allowlisted domains for that query."
-
-    all_hits.sort(key=lambda x: x[0], reverse=True)
-    used = set()
-    ordered = []
-    for score, url, snippet in all_hits:
-        if url in used:
-            continue
-        used.add(url)
-        ordered.append((score, url, snippet))
-
-    WEB_RESEARCH_LAST_QUERY = q
-    WEB_RESEARCH_LAST_RESULTS = ordered
-    WEB_RESEARCH_CURSOR = 0
-
-    max_results = max(1, min(40, int((cfg.get("research_max_results") or 8))))
-    start = WEB_RESEARCH_CURSOR
-    end = min(len(WEB_RESEARCH_LAST_RESULTS), start + max_results)
-
-    lines = [f"Web research results (allowlisted crawl) for: {q}"]
-    rank = start
-    for score, url, snippet in WEB_RESEARCH_LAST_RESULTS[start:end]:
-        rank += 1
-        lines.append(f"{rank}. [{score:.1f}] {url}")
-        if snippet:
-            lines.append(f"   {snippet[:220]}")
-
-    WEB_RESEARCH_CURSOR = end
-    if WEB_RESEARCH_CURSOR < len(WEB_RESEARCH_LAST_RESULTS):
-        remaining = len(WEB_RESEARCH_LAST_RESULTS) - WEB_RESEARCH_CURSOR
-        lines.append(f"{remaining} more result(s) available. Type 'web continue' to keep going.")
-    else:
-        lines.append("No more results pending for this query.")
-
-    lines.append("Tip: run 'web gather <url>' for any source above to fetch and summarize it fully.")
-    return "\n".join(lines)
 
 
 def handle_keywords(text: str):
@@ -11496,1641 +7661,21 @@ def handle_commands(
     session_turns: Optional[list[tuple[str, str]]] = None,
     session: Optional[ConversationSession] = None,
 ) -> Optional[str]:
-    t = _strip_invocation_prefix((user_text or "").strip())
-    low = t.lower()
-
-    if low in {"chat context", "show chat context", "context", "chatctx"}:
-        rendered = _render_chat_context(session_turns or [])
-        if not rendered:
-            return "No chat context is available yet in this session."
-        return "Current chat context:\n" + rendered
-
-    if low in {"queue", "queue status", "work queue", "show queue", "standing work queue"}:
-        return str(execute_planned_action("queue_status") or "")
-
-    if low in {"pulse", "nova pulse", "show pulse", "system pulse"}:
-        return str(execute_planned_action("pulse") or "")
-
-    if low in {"update now", "apply update now", "apply updates now"}:
-        return str(execute_planned_action("update_now") or "")
-
-    if low.startswith("update now confirm"):
-        token = t.split(maxsplit=3)[3].strip() if len(t.split(maxsplit=3)) >= 4 else ""
-        args = [token] if token else []
-        return str(execute_planned_action("update_now_confirm", args) or "")
-
-    if low in {"update now cancel", "cancel update now"}:
-        return str(execute_planned_action("update_now_cancel") or "")
-
-    if "domanins" in low and any(k in low for k in ["domain", "domanins", "allow", "policy", "list", "show"]):
-        return "It looks like you meant \"domains\".\n" + list_allowed_domains()
-
-    if low in {"domains", "list domains", "show domains", "list the domains", "allowed domains", "allow domains", "policy domains"}:
-        return list_allowed_domains()
-
-    if low.startswith("policy allow "):
-        value = t.split(maxsplit=2)[2] if len(t.split(maxsplit=2)) >= 3 else ""
-        return policy_allow_domain(value)
-
-    if low.startswith("policy remove "):
-        value = t.split(maxsplit=2)[2] if len(t.split(maxsplit=2)) >= 3 else ""
-        return policy_remove_domain(value)
-
-    if low.startswith("policy audit"):
-        parts = t.split()
-        n = 20
-        if len(parts) >= 3:
-            try:
-                n = int(parts[2])
-            except Exception:
-                n = 20
-        return policy_audit(n)
-
-    if low in {"web mode", "web limits", "web research limits"}:
-        return web_mode_status()
-
-    if low.startswith("web mode "):
-        mode = t.split(maxsplit=2)[2] if len(t.split(maxsplit=2)) >= 3 else ""
-        return set_web_mode(mode)
-
-    if low.startswith("location coords ") or low.startswith("set location coords "):
-        value = t.split(maxsplit=2)[2] if len(t.split(maxsplit=2)) >= 3 else ""
-        return set_location_coords(value)
-
-    if low in {"weather", "check weather", "weather current location", "weather current"}:
-        return str(execute_planned_action("weather_current_location") or "")
-
-    if low.startswith("weather ") or low.startswith("check weather "):
-        parts = t.split(maxsplit=2)
-        location_value = parts[2] if len(parts) >= 3 else (parts[1] if len(parts) >= 2 else "")
-        return str(execute_planned_action("weather_location", [location_value]) or "")
-
-    normalized = _normalize_turn_text(t)
-    if normalized in {"use your physical location", "use your location nova", "use your location"}:
-        return str(execute_planned_action("weather_current_location") or "")
-
-    if _is_saved_location_weather_query(normalized) or (
-        "weather" in normalized and any(phrase in normalized for phrase in (
-            "give me",
-            "can you give me",
-            "what is",
-            "what's",
-            "forecast",
-            "current",
-            "today",
-            "now",
-        ))
-    ):
-        if get_saved_location_text() or _coords_from_saved_location():
-            return str(execute_planned_action("weather_current_location") or "")
-        return _need_confirmed_location_message() + " My location is unknown until you tell me or save coordinates."
-
-    if _is_location_request(normalized):
-        return _location_reply()
-
-    if low.startswith("remember:"):
-        return mem_remember_fact(t.split(":", 1)[1])
-
-    if low in {"what can you do", "capabilities", "show capabilities"}:
-        return describe_capabilities()
-
-    if low in {"mem stats", "memory stats"}:
-        return mem_stats()
-
-    if low in {"mix", "mix status", "language status", "spanglish status"}:
-        current = int(getattr(session, "language_mix_spanish_pct", 0) or 0)
-        return f"Language mix status: English default with Spanish mix at {current}%"
-
-    if low.startswith("set mix "):
-        m = re.search(r"set\s+mix\s+(\d{1,3})", low)
-        if not m:
-            return "Usage: set mix <0-100>"
-        value = _clamp_language_mix(int(m.group(1)))
-        if session is not None:
-            session.set_language_mix_spanish_pct(value)
-        return f"Language mix updated: Spanish {value}% (English {100 - value}%)"
-
-    if low in {"more spanish", "more espanol", "mas espanol"}:
-        current = int(getattr(session, "language_mix_spanish_pct", 0) or 0)
-        value = _clamp_language_mix(current + 20)
-        if session is not None:
-            session.set_language_mix_spanish_pct(value)
-        return f"Language mix nudged toward Spanish: {value}%"
-
-    if low in {"more english", "menos espanol"}:
-        current = int(getattr(session, "language_mix_spanish_pct", 0) or 0)
-        value = _clamp_language_mix(current - 20)
-        if session is not None:
-            session.set_language_mix_spanish_pct(value)
-        return f"Language mix nudged toward English: Spanish {value}%"
-
-    if low in {"english default", "default english", "english only"}:
-        if session is not None:
-            session.set_language_mix_spanish_pct(0)
-        return "English is now the default response language for this session."
-
-    if low.startswith("mem audit ") or low.startswith("memory audit "):
-        q = t.split(maxsplit=2)[2] if len(t.split(maxsplit=2)) >= 3 else ""
-        return mem_audit(q)
-
-    if low == "kb" or low == "kb help":
-        return ("KB commands:\n"
-                "  kb list\n"
-                "  kb use <pack>\n"
-                "  kb off\n"
-                "  kb add <zip_path> <pack_name>\n")
-
-    if low == "kb list":
-        return kb_list_packs()
-
-    if low.startswith("kb use "):
-        name = t.split(maxsplit=2)[2].strip()
-        return kb_set_active(name)
-
-    if low == "kb off":
-        return kb_set_active(None)
-
-    if low.startswith("kb add "):
-        parts = t.split(maxsplit=3)
-        if len(parts) < 4:
-            return "Usage: kb add <zip_path> <pack_name>"
-        return kb_add_zip(parts[2], parts[3])
-
-    if low == "patch" or low == "patch help":
-        return ("Patch commands:\n"
-            "  patch preview <zip_path>  # preview proposal without applying\n"
-            "  patch apply <zip_path> [--force]\n"
-            "      # preview runs automatically; use --force to bypass preview check\n"
-            "  patch rollback   (roll back to last snapshot)\n"
-            )
-    if low.startswith("patch apply "):
-        raw = t.split(maxsplit=2)[2].strip() if len(t.split(maxsplit=2)) >= 3 else ""
-        # detect --force flag
-        force = False
-        if "--force" in raw:
-            force = True
-            raw = raw.replace("--force", "").strip()
-        return execute_patch_action("apply", raw, force=force, is_admin=True)
-
-    if low.startswith("patch preview "):
-        p = t.split(maxsplit=2)[2].strip() if len(t.split(maxsplit=2)) >= 3 else ""
-        return execute_patch_action("preview", p, is_admin=True)
-
-    if low == "patch list-previews":
-        return execute_patch_action("list_previews", is_admin=True)
-
-    if low.startswith("patch show "):
-        p = t.split(maxsplit=2)[2].strip() if len(t.split(maxsplit=2)) >= 3 else ""
-        return execute_patch_action("show", p, is_admin=True)
-
-    if low.startswith("patch approve "):
-        p = t.split(maxsplit=2)[2].strip() if len(t.split(maxsplit=2)) >= 3 else ""
-        return execute_patch_action("approve", p, is_admin=True)
-
-    if low.startswith("patch reject "):
-        p = t.split(maxsplit=2)[2].strip() if len(t.split(maxsplit=2)) >= 3 else ""
-        return execute_patch_action("reject", p, is_admin=True)
-
-    if low == "patch rollback":
-        return execute_patch_action("rollback", is_admin=True)
-
-    if low == "kidney" or low == "kidney help":
-        return (
-            "Kidney commands:\n"
-            "  kidney status\n"
-            "  kidney now\n"
-            "  kidney dry-run\n"
-            "  kidney protect <pattern>\n"
-        )
-
-    if low == "kidney status":
-        import kidney
-
-        return kidney.render_status()
-
-    if low in {
-        "phase2",
-        "phase2 status",
-        "phase 2 status",
-        "phase2 audit",
-        "phase 2 audit",
-        "post phase 2 audit",
-        "post-phase-2 audit",
-    }:
-        return str(execute_planned_action("phase2_audit") or "")
-
-    if low == "kidney now":
-        import kidney
-
-        return kidney.render_run(dry_run=False)
-
-    if low == "kidney dry-run":
-        import kidney
-
-        return kidney.render_run(dry_run=True)
-
-    if low.startswith("kidney protect "):
-        import kidney
-
-        pattern = t.split(maxsplit=2)[2].strip() if len(t.split(maxsplit=2)) >= 3 else ""
-        return kidney.add_protect_pattern(pattern)
-
-    # Teach workflow: remember examples and propose patches
-    if low.startswith("teach "):
-        parts = t.split(maxsplit=1)
-        sub = parts[1].strip() if len(parts) > 1 else ""
-        if sub.startswith("remember "):
-            # format: teach remember <orig> => <correction>
-            body = sub[len("remember "):].strip()
-            if "=>" in body:
-                orig, corr = body.split("=>", 1)
-                orig = orig.strip().strip("\"'")
-                corr = corr.strip().strip("\"'")
-                return _teach_store_example(orig, corr)
-            return "Usage: teach remember <original text> => <correction text>"
-
-        if sub == "list":
-            return _teach_list_examples()
-
-        if sub.startswith("propose"):
-            desc = sub[len("propose"):].strip()
-            return _teach_propose_patch(desc)
-
-        if sub.startswith("autoapply "):
-            body = sub[len("autoapply "):].strip()
-            # support: "autoapply <zip>" (dry-run/staging only)
-            # and: "autoapply apply <zip>" or "autoapply <zip> --apply" to actually apply
-            apply_live = False
-            zp = body
-            if body.startswith("apply "):
-                apply_live = True
-                zp = body[len("apply "):].strip()
-            elif "--apply" in body:
-                apply_live = True
-                zp = body.replace("--apply", "").strip()
-            return _teach_autoapply_proposal(zp, apply_live=apply_live)
-
-        if sub.startswith("apply "):
-            zp = sub[len("apply "):].strip()
-            # direct apply (no staging tests) — still uses patch_apply
-            return execute_patch_action("apply", zp, is_admin=True)
-
-        return ("Teach commands:\n"
-            "  teach remember <orig> => <correction>\n"
-            "  teach list\n"
-            "  teach propose <description>\n"
-            "  teach autoapply <zip>              # run staging tests (safe)\n"
-            "  teach autoapply apply <zip>       # run staging tests and APPLY if tests pass\n"
-            "  teach autoapply <zip> --apply     # same as above\n"
+    return service_handle_commands(
+        user_text,
+        session_turns=session_turns,
+        session=session,
+        core=sys.modules[__name__],
     )
-    if low == "inspect":
-        data = inspect_environment()
-        return format_report(data)
 
-    # casual_mode control: casual_mode status|on|off|toggle
-    if low.startswith("casual_mode") or low.startswith("casual mode"):
-        parts = low.replace("casual mode", "casual_mode").split()
-        cmd = parts[1] if len(parts) > 1 else "status"
-        statefile = DEFAULT_STATEFILE
-        try:
-            if cmd in {"on", "1", "true"}:
-                os.environ["CASUAL_MODE"] = "1"
-                set_core_state(statefile, "casual_mode", True)
-                return "casual_mode enabled"
-            if cmd in {"off", "0", "false"}:
-                os.environ["CASUAL_MODE"] = "0"
-                set_core_state(statefile, "casual_mode", False)
-                return "casual_mode disabled"
-            if cmd == "toggle":
-                cur = os.environ.get("CASUAL_MODE", "1").lower() in {"1", "true"}
-                nxt = not cur
-                os.environ["CASUAL_MODE"] = "1" if nxt else "0"
-                set_core_state(statefile, "casual_mode", bool(nxt))
-                return f"casual_mode set to {os.environ['CASUAL_MODE']}"
-            # status
-            cur = os.environ.get("CASUAL_MODE", "1")
-            return f"casual_mode={cur}"
-        except Exception as e:
-            return f"Failed to set casual_mode: {e}"
-
-    if low in {"behavior stats", "behavior metrics", "behavior"}:
-        return json.dumps(behavior_get_metrics(), ensure_ascii=True, indent=2)
-
-    if low in {"learning state", "learning status", "self correction status", "what are you learning"}:
-        m = behavior_get_metrics()
-        return (
-            "Learning state:\n"
-            f"- correction_learned: {int(m.get('correction_learned', 0))}\n"
-            f"- correction_applied: {int(m.get('correction_applied', 0))}\n"
-            f"- self_correction_applied: {int(m.get('self_correction_applied', 0))}\n"
-            f"- deterministic_hit: {int(m.get('deterministic_hit', 0))}\n"
-            f"- llm_fallback: {int(m.get('llm_fallback', 0))}\n"
-            f"- top_repeated_failure_class: {m.get('top_repeated_failure_class', '') or 'none'}\n"
-            f"- top_repeated_correction_class: {m.get('top_repeated_correction_class', '') or 'none'}\n"
-            f"- routing_stable: {bool(m.get('routing_stable', True))}\n"
-            f"- unsupported_claims_blocked: {bool(m.get('unsupported_claims_blocked', False))}\n"
-            f"- last_event: {m.get('last_event', '')}"
-        )
-
-    return None
 
 
 # =========================
 # Main loop
 # =========================
 def run_loop(tts):
-    whisper = None
-    if _ensure_voice_deps() and WhisperModel is not None:
-        print("Nova Core: loading Whisper (CPU mode)...", flush=True)
-        whisper = WhisperModel(whisper_size(), device="cpu", compute_type="int8")
-    else:
-        warn(f"Voice mode disabled; typed chat still works. (Reason: {VOICE_IMPORT_ERR})")
+    return service_run_loop(tts, core=sys.modules[__name__])
 
-    print("\nNova Core is ready.", flush=True)
-    print("Commands: screen | camera <prompt> | web <url> | web search <query> | web research <query> | web gather <url> | weather <location-or-lat,lon> | check weather <location> | weather current location | location coords <lat,lon> | domains | policy allow <domain> | chat context | queue status | ls [folder] | read <file> | find <kw> [folder] | health | capabilities | inspect", flush=True)
-    print("Press ENTER for voice. Or type a message/command and press ENTER. Type 'q' to quit.\n", flush=True)
-
-    recent_tool_context = ""
-    recent_web_urls: list[str] = []
-    session_turns: list[tuple[str, str]] = []
-    session_state = ConversationSession()
-    pending_action_ledger: Optional[dict] = None
-    pending_action: Optional[dict] = session_state.pending_action
-    conversation_state: Optional[dict] = session_state.conversation_state
-    prefer_web_for_data_queries = session_state.prefer_web_for_data_queries
-    language_mix_spanish_pct = int(session_state.language_mix_spanish_pct or 0)
-
-    def _set_pending_action(value: Optional[dict]) -> None:
-        nonlocal pending_action
-        pending_action = value if isinstance(value, dict) else None
-        session_state.set_pending_action(pending_action)
-
-    def _set_conversation_state(value: Optional[dict]) -> None:
-        nonlocal conversation_state
-        conversation_state = value if isinstance(value, dict) else None
-        session_state.set_conversation_state(conversation_state)
-
-    def _set_prefer_web_for_data_queries(value: bool) -> None:
-        nonlocal prefer_web_for_data_queries
-        prefer_web_for_data_queries = bool(value)
-        session_state.set_prefer_web_for_data_queries(prefer_web_for_data_queries)
-
-    def _set_language_mix_spanish_pct(value: int) -> None:
-        nonlocal language_mix_spanish_pct
-        language_mix_spanish_pct = _clamp_language_mix(value)
-        session_state.set_language_mix_spanish_pct(language_mix_spanish_pct)
-
-    def _sync_pending_conversation_tracking() -> None:
-        if not pending_action_ledger:
-            return
-        subject = session_state.active_subject()
-        pending_action_ledger["active_subject"] = subject
-        record = pending_action_ledger.get("record")
-        if isinstance(record, dict):
-            record["active_subject"] = subject
-            record["continuation_used"] = bool(pending_action_ledger.get("continuation_used", False))
-
-    def _trace(stage: str, outcome: str, detail: str = "", **data) -> None:
-        if not pending_action_ledger:
-            return
-        action_ledger_add_step(pending_action_ledger.get("record"), stage, outcome, detail, **data)
-
-    def _flush_pending_action_ledger() -> None:
-        nonlocal pending_action_ledger
-        if not pending_action_ledger:
-            return
-        try:
-            start_idx = int(pending_action_ledger.get("start_idx", len(session_turns)))
-        except Exception:
-            start_idx = len(session_turns)
-
-        final_answer = ""
-        for role, txt in session_turns[start_idx:]:
-            if role == "assistant":
-                final_answer = txt
-
-        if not final_answer:
-            final_answer = str(pending_action_ledger.get("tool_result") or "")
-
-        finalize_action_ledger_record(
-            pending_action_ledger.get("record") or {},
-            final_answer=final_answer,
-            planner_decision=str(pending_action_ledger.get("planner_decision") or "deterministic"),
-            tool=str(pending_action_ledger.get("tool") or ""),
-            tool_args=pending_action_ledger.get("tool_args") if isinstance(pending_action_ledger.get("tool_args"), dict) else {},
-            tool_result=str(pending_action_ledger.get("tool_result") or ""),
-            grounded=pending_action_ledger.get("grounded") if isinstance(pending_action_ledger.get("grounded"), bool) else None,
-            intent=str(pending_action_ledger.get("intent") or ""),
-            active_subject=str(pending_action_ledger.get("active_subject") or ""),
-            continuation_used=bool(pending_action_ledger.get("continuation_used", False)),
-            reply_contract=str(pending_action_ledger.get("reply_contract") or ""),
-            reply_outcome=pending_action_ledger.get("reply_outcome") if isinstance(pending_action_ledger.get("reply_outcome"), dict) else {},
-            routing_decision=pending_action_ledger.get("routing_decision") if isinstance(pending_action_ledger.get("routing_decision"), dict) else {},
-            reflection_payload=build_turn_reflection(
-                session_state,
-                entry_point="cli",
-                session_id="cli",
-                current_decision={
-                    "user_input": str((pending_action_ledger.get("record") or {}).get("user_input") or ""),
-                    "planner_decision": str(pending_action_ledger.get("planner_decision") or "deterministic"),
-                    "tool": str(pending_action_ledger.get("tool") or ""),
-                    "tool_result": str(pending_action_ledger.get("tool_result") or ""),
-                    "final_answer": final_answer,
-                    "reply_contract": str(pending_action_ledger.get("reply_contract") or ""),
-                    "reply_outcome": pending_action_ledger.get("reply_outcome") if isinstance(pending_action_ledger.get("reply_outcome"), dict) else {},
-                    "turn_acts": list(pending_action_ledger.get("turn_acts") or []),
-                    "grounded": pending_action_ledger.get("grounded") if isinstance(pending_action_ledger.get("grounded"), bool) else None,
-                    "active_subject": str(pending_action_ledger.get("active_subject") or session_state.active_subject() or ""),
-                    "continuation_used": bool(pending_action_ledger.get("continuation_used", False)),
-                    "pending_action": session_state.pending_action,
-                    "routing_decision": _finalize_routing_decision(
-                        pending_action_ledger.get("routing_decision") if isinstance(pending_action_ledger.get("routing_decision"), dict) else {},
-                        planner_decision=str(pending_action_ledger.get("planner_decision") or "deterministic"),
-                        reply_contract=str(pending_action_ledger.get("reply_contract") or ""),
-                        reply_outcome=pending_action_ledger.get("reply_outcome") if isinstance(pending_action_ledger.get("reply_outcome"), dict) else {},
-                        turn_acts=list(pending_action_ledger.get("turn_acts") or []),
-                    ),
-                    "route_summary": action_ledger_route_summary((pending_action_ledger.get("record") or {}).get("route_trace")),
-                },
-            ),
-        )
-        pending_action_ledger = None
-
-    while True:
-        _flush_pending_action_ledger()
-        session_state.reset_turn_flags()
-        raw = input("> ").strip()
-        input_source = "typed"
-
-        if raw.lower() == "q":
-            break
-
-        if raw:
-            user_text = raw
-            m_idx = re.match(r"^\s*web\s+gather\s+(\d+)\s*$", user_text, flags=re.I)
-            if m_idx and recent_web_urls:
-                idx = int(m_idx.group(1))
-                if 1 <= idx <= len(recent_web_urls):
-                    user_text = f"web gather {recent_web_urls[idx - 1]}"
-            user_text = _strip_invocation_prefix(user_text)
-            print(f"You (typed): {user_text}", flush=True)
-        else:
-            input_source = "voice"
-            if not whisper:
-                print("Nova: voice is disabled on this machine right now. Type your message instead.\n", flush=True)
-                continue
-            audio = record_seconds(RECORD_SECONDS)
-            print("Nova: transcribing...", flush=True)
-            user_text = transcribe(whisper, audio)
-            if not user_text:
-                print("Nova: (heard nothing)\n", flush=True)
-                continue
-            user_text = _strip_invocation_prefix(user_text)
-            print(f"You: {user_text}", flush=True)
-
-        session_turns.append(("user", user_text))
-        pending_action_ledger = {
-            "record": start_action_ledger_record(
-                user_text,
-                channel="cli",
-                session_id=get_active_user() or "",
-                input_source=input_source,
-                active_subject=session_state.active_subject(),
-            ),
-            "start_idx": len(session_turns),
-            "intent": _infer_turn_intent(user_text),
-            "planner_decision": "deterministic",
-            "tool": "",
-            "tool_args": {},
-            "tool_result": "",
-            "grounded": None,
-            "active_subject": session_state.active_subject(),
-            "continuation_used": False,
-        }
-
-        routed_user_text = user_text
-        turn_direction = {
-            "primary": "general_chat",
-            "effective_query": user_text,
-            "analysis_reason": "",
-            "turn_acts": [],
-            "identity_focused": False,
-            "bypass_pattern_routes": False,
-        }
-        try:
-            turn_direction = _determine_turn_direction(
-                session_turns,
-                user_text,
-                active_subject=session_state.active_subject(),
-                pending_action=pending_action,
-            )
-            routed_user_text = str(turn_direction.get("effective_query") or user_text)
-            _set_language_mix_spanish_pct(_auto_adjust_language_mix(language_mix_spanish_pct, routed_user_text))
-            turn_acts = [str(item).strip() for item in list(turn_direction.get("turn_acts") or []) if str(item).strip()]
-            if pending_action_ledger is not None:
-                pending_action_ledger["turn_acts"] = turn_acts
-                record = pending_action_ledger.get("record")
-                if isinstance(record, dict):
-                    record["turn_acts"] = list(turn_acts)
-            _trace(
-                "direction_analysis",
-                str(turn_direction.get("primary") or "general_chat"),
-                str(turn_direction.get("analysis_reason") or "")[:120],
-                effective_query=routed_user_text[:180],
-                turn_acts=",".join(turn_acts),
-                identity_focused=bool(turn_direction.get("identity_focused")),
-                bypass_pattern_routes=bool(turn_direction.get("bypass_pattern_routes")),
-            )
-        except Exception:
-            routed_user_text = user_text
-            turn_acts = []
-
-        intent_rule = TURN_SUPERVISOR.evaluate_rules(
-            routed_user_text,
-            manager=session_state,
-            turns=session_turns,
-            phase="intent",
-            entry_point="cli",
-        )
-        if not _supervisor_result_has_route(intent_rule):
-            runtime_intent = _runtime_set_location_intent(routed_user_text, pending_action=pending_action)
-            if isinstance(runtime_intent, dict):
-                intent_rule = runtime_intent
-        if not _supervisor_result_has_route(intent_rule):
-            llm_intent = _llm_classify_routing_intent(routed_user_text, turns=session_turns)
-            if isinstance(llm_intent, dict) and _supervisor_result_has_route(llm_intent):
-                intent_rule = llm_intent
-                _trace("llm_routing", "matched", intent=str(intent_rule.get("intent") or ""))
-        if not _supervisor_result_has_route(intent_rule) and _should_clarify_unlabeled_numeric_turn(
-            routed_user_text,
-            pending_action=pending_action,
-            current_state=conversation_state,
-        ):
-            final = _ensure_reply(_unlabeled_numeric_turn_reply(routed_user_text))
-            _set_conversation_state(_make_conversation_state("numeric_reference_clarify", value=str(routed_user_text or "").strip()))
-            _sync_pending_conversation_tracking()
-            if pending_action_ledger is not None:
-                pending_action_ledger["planner_decision"] = "ask_clarify"
-                pending_action_ledger["grounded"] = False
-            _trace("numeric_clarify", "blocked")
-            print(f"Nova: {final}\n", flush=True)
-            session_turns.append(("assistant", final))
-            speak_chunked(tts, final)
-            continue
-        if "mixed" in turn_acts:
-            final = _ensure_reply(_mixed_info_request_clarify_reply(routed_user_text))
-            if pending_action_ledger is not None:
-                pending_action_ledger["planner_decision"] = "ask_clarify"
-                pending_action_ledger["grounded"] = False
-                pending_action_ledger["reply_contract"] = "turn.clarify_mixed_intent"
-                pending_action_ledger["reply_outcome"] = {
-                    "intent": "clarify_mixed_turn",
-                    "kind": "mixed_info_request",
-                    "reply_contract": "turn.clarify_mixed_intent",
-                }
-            _trace("mixed_turn_clarify", "blocked")
-            print(f"Nova: {final}\n", flush=True)
-            session_turns.append(("assistant", final))
-            speak_chunked(tts, final)
-            continue
-        # DO NOT add new deterministic phrase routing here.
-        # Add a supervisor rule plus shared core action execution instead.
-        # See docs/SUPERVISOR_CONTRACT.md.
-        handled_intent, intent_msg, intent_state, intent_effects = _handle_supervisor_intent(
-            intent_rule,
-            routed_user_text,
-            turns=session_turns,
-            input_source=input_source,
-            entry_point="cli",
-        )
-        if pending_action_ledger is not None:
-            pending_action_ledger["routing_decision"] = _build_routing_decision(
-                routed_user_text,
-                entry_point="cli",
-                intent_result=intent_rule,
-                handle_result=None,
-                reply_contract=str(intent_effects.get("reply_contract") or "") if isinstance(intent_effects, dict) else "",
-                reply_outcome=dict(intent_effects.get("reply_outcome") or {}) if isinstance(intent_effects, dict) and isinstance(intent_effects.get("reply_outcome"), dict) else {},
-                turn_acts=turn_acts,
-            )
-        if handled_intent:
-            weather_mode = str(intent_rule.get("weather_mode") or "").strip().lower()
-            intent_name = str(intent_rule.get("intent") or "").strip().lower()
-            _emit_supervisor_intent_trace(intent_rule, user_text=routed_user_text)
-            final = _ensure_reply(intent_msg)
-            if isinstance(intent_effects, dict) and "pending_action" in intent_effects:
-                _set_pending_action(intent_effects.get("pending_action"))
-            if isinstance(intent_effects, dict):
-                pending_action_ledger["reply_contract"] = str(intent_effects.get("reply_contract") or "")
-                pending_action_ledger["reply_outcome"] = dict(intent_effects.get("reply_outcome") or {}) if isinstance(intent_effects.get("reply_outcome"), dict) else {}
-            if pending_action_ledger is not None and intent_name == "web_research_family":
-                reply_outcome = pending_action_ledger.get("reply_outcome") if isinstance(pending_action_ledger.get("reply_outcome"), dict) else {}
-                tool_name = str((reply_outcome or {}).get("tool_name") or intent_rule.get("tool_name") or "web_research").strip().lower() or "web_research"
-                query = str((reply_outcome or {}).get("query") or intent_rule.get("query") or routed_user_text).strip()
-                pending_action_ledger["planner_decision"] = "run_tool"
-                pending_action_ledger["tool"] = tool_name
-                pending_action_ledger["tool_args"] = {"args": [query]} if query else {"args": []}
-                pending_action_ledger["tool_result"] = str(final or "")
-                pending_action_ledger["grounded"] = bool(str(final or "").strip())
-                _trace("action_planner", "run_tool", tool=tool_name)
-                _trace("tool_execution", "ok", tool=tool_name, grounded=bool(str(final or "").strip()))
-            elif pending_action_ledger is not None and intent_name == "weather_lookup" and weather_mode in {"current_location", "explicit_location"}:
-                tool_name = "weather_current_location" if weather_mode == "current_location" else "weather_location"
-                pending_action_ledger["planner_decision"] = "run_tool"
-                pending_action_ledger["tool"] = tool_name
-                if tool_name == "weather_location":
-                    pending_action_ledger["tool_args"] = {"args": [str(intent_rule.get("location_value") or "").strip()]}
-                pending_action_ledger["tool_result"] = str(final or "")
-                pending_action_ledger["grounded"] = bool(str(final or "").strip())
-                _trace("action_planner", "run_tool", tool=tool_name)
-                _trace("tool_execution", "ok", tool=tool_name, grounded=bool(str(final or "").strip()))
-            elif pending_action_ledger is not None and intent_name == "weather_lookup" and weather_mode == "clarify":
-                pending_action_ledger["planner_decision"] = "ask_clarify"
-                pending_action_ledger["grounded"] = False
-                _trace("action_planner", "ask_clarify")
-                _trace("pending_action", "awaiting_location", tool="weather")
-            if isinstance(intent_state, dict):
-                _set_conversation_state(intent_state)
-                _sync_pending_conversation_tracking()
-            _trace(
-                "supervisor_intent",
-                "handled",
-                str(intent_rule.get("intent") or "intent"),
-                rule=str(intent_rule.get("rule_name") or ""),
-            )
-            print(f"Nova: {final}\n", flush=True)
-            session_turns.append(("assistant", final))
-            speak_chunked(tts, final)
-            continue
-        warn_supervisor_bypass = not _supervisor_result_has_route(intent_rule) and _should_warn_supervisor_bypass(routed_user_text)
-
-        try:
-            identity_learned, identity_msg = _learn_self_identity_binding(user_text)
-            if identity_learned:
-                _trace("identity_binding", "stored", "bound simple self-identification to known developer")
-                final = _ensure_reply(identity_msg)
-                print(f"Nova: {final}\n", flush=True)
-                session_turns.append(("assistant", final))
-                speak_chunked(tts, final)
-                continue
-        except Exception:
-            pass
-
-        # Capture explicit/long name-origin teaching content deterministically.
-        try:
-            teach_text = extract_name_origin_teach_text(user_text)
-            if teach_text:
-                _trace("name_origin", "stored", "captured deterministic name-origin teaching content")
-                msg = remember_name_origin(teach_text)
-                final = _ensure_reply(msg)
-                print(f"Nova: {final}\n", flush=True)
-                session_turns.append(("assistant", final))
-                speak_chunked(tts, final)
-                continue
-        except Exception:
-            pass
-
-        try:
-            learned_profile, learned_profile_msg = _learn_contextual_developer_facts(session_turns, user_text, input_source=input_source)
-            if learned_profile:
-                _trace("developer_profile", "stored", "captured contextual developer facts")
-                _set_conversation_state(
-                    _infer_profile_conversation_state(user_text)
-                    or _make_conversation_state("identity_profile", subject="developer")
-                )
-                _sync_pending_conversation_tracking()
-                final = _ensure_reply(learned_profile_msg)
-                print(f"Nova: {final}\n", flush=True)
-                session_turns.append(("assistant", final))
-                speak_chunked(tts, final)
-                continue
-        except Exception:
-            pass
-
-        try:
-            learned_self, learned_self_msg = _learn_contextual_self_facts(user_text, input_source=input_source)
-            if learned_self:
-                _trace("self_profile", "stored", "captured contextual self facts for bound identity")
-                final = _ensure_reply(learned_self_msg)
-                print(f"Nova: {final}\n", flush=True)
-                session_turns.append(("assistant", final))
-                speak_chunked(tts, final)
-                continue
-        except Exception:
-            pass
-
-        general_rule = TURN_SUPERVISOR.evaluate_rules(
-            user_text,
-            manager=session_state,
-            turns=session_turns,
-            phase="handle",
-            entry_point="cli",
-        )
-        # DO NOT add new deterministic branching in this loop.
-        # New turn ownership must start in supervisor and flow through shared action execution.
-        # See docs/SUPERVISOR_CONTRACT.md.
-        handled_rule, rule_msg, rule_state = _execute_registered_supervisor_rule(
-            general_rule,
-            user_text,
-            conversation_state,
-            turns=session_turns,
-            input_source=input_source,
-            allowed_actions={"name_origin_store", "self_location", "location_recall", "location_name", "weather_current_location", "apply_correction", "retrieval_followup", "identity_history_family", "open_probe_family", "last_question_recall", "rules_list", "developer_identity_followup", "identity_profile_followup", "developer_location"},
-        )
-        if pending_action_ledger is not None:
-            pending_action_ledger["routing_decision"] = _build_routing_decision(
-                routed_user_text,
-                entry_point="cli",
-                intent_result=intent_rule,
-                handle_result=general_rule,
-                reply_contract=str(general_rule.get("reply_contract") or "") if isinstance(general_rule, dict) else "",
-                reply_outcome=dict(general_rule.get("reply_outcome") or {}) if isinstance(general_rule, dict) and isinstance(general_rule.get("reply_outcome"), dict) else {},
-                turn_acts=turn_acts,
-            )
-        if handled_rule:
-            try:
-                final = _apply_reply_overrides(rule_msg)
-            except Exception:
-                final = rule_msg
-            final = _ensure_reply(final)
-            if pending_action_ledger is not None:
-                pending_action_ledger["reply_contract"] = str(general_rule.get("reply_contract") or "")
-                pending_action_ledger["reply_outcome"] = dict(general_rule.get("reply_outcome") or {}) if isinstance(general_rule.get("reply_outcome"), dict) else {}
-            _set_conversation_state(rule_state)
-            if bool(general_rule.get("continuation")):
-                session_state.mark_continuation_used()
-                if pending_action_ledger is not None:
-                    pending_action_ledger["continuation_used"] = True
-            _trace(
-                str(general_rule.get("ledger_stage") or "registered_rule"),
-                "matched",
-                str(general_rule.get("rule_name") or "registered_rule"),
-                rule=str(general_rule.get("rule_name") or ""),
-            )
-            _update_subconscious_state(
-                session_state,
-                _probe_turn_routes(
-                    routed_user_text,
-                    session_state,
-                    session_turns,
-                    pending_action=pending_action,
-                ),
-                chosen_route="supervisor_owned",
-            )
-            _sync_pending_conversation_tracking()
-            print(f"Nova: {final}\n", flush=True)
-            session_turns.append(("assistant", final))
-            speak_chunked(tts, final)
-            continue
-
-        fulfillment_result = _maybe_run_fulfillment_flow(
-            routed_user_text,
-            session_state,
-            session_turns,
-            pending_action=pending_action,
-        )
-        if isinstance(fulfillment_result, dict):
-            final = _ensure_reply(str(fulfillment_result.get("reply") or ""))
-            if final:
-                if pending_action_ledger is not None:
-                    pending_action_ledger["planner_decision"] = str(fulfillment_result.get("planner_decision") or "fulfillment")
-                    pending_action_ledger["grounded"] = bool(fulfillment_result.get("grounded", True))
-                _trace(
-                    "fulfillment_flow",
-                    "handled",
-                    str(fulfillment_result.get("planner_decision") or "fulfillment"),
-                )
-                print(f"Nova: {final}\n", flush=True)
-                session_turns.append(("assistant", final))
-                speak_chunked(tts, final)
-                continue
-
-        try:
-            handled_followup, followup_msg, next_state = _consume_conversation_followup(
-                conversation_state,
-                routed_user_text,
-                input_source=input_source,
-                turns=session_turns,
-            )
-            if handled_followup:
-                _trace("conversation_followup", "used", active_subject=_conversation_active_subject(conversation_state))
-                _set_conversation_state(next_state)
-                session_state.mark_continuation_used()
-                if pending_action_ledger is not None:
-                    pending_action_ledger["planner_decision"] = "conversation_followup"
-                    pending_action_ledger["grounded"] = True
-                    pending_action_ledger["continuation_used"] = True
-                _sync_pending_conversation_tracking()
-                final = _ensure_reply(followup_msg)
-                if isinstance(final, str) and final.strip() and isinstance(conversation_state, dict) and str(conversation_state.get("kind") or "") == "retrieval":
-                    recent_tool_context = final.strip()[:2500]
-                    recent_web_urls = _extract_urls(final)
-                print(f"Nova: {final}\n", flush=True)
-                session_turns.append(("assistant", final))
-                speak_chunked(tts, final)
-                continue
-            _set_conversation_state(next_state)
-            _sync_pending_conversation_tracking()
-        except Exception:
-            pass
-
-        # Quick greeting fast-path (avoid LLM for simple salutations)
-        try:
-            msg = _quick_smalltalk_reply(routed_user_text, active_user=get_active_user() or "")
-            if msg:
-                _trace("fast_smalltalk", "matched")
-                if pending_action_ledger is not None:
-                    pending_action_ledger["planner_decision"] = "deterministic"
-                    pending_action_ledger["grounded"] = False
-
-                # Apply any stored reply overrides before sending
-                try:
-                    final = _apply_reply_overrides(msg)
-                except Exception:
-                    final = msg
-                final = _ensure_reply(final)
-                print(f"Nova: {final}\n", flush=True)
-                session_turns.append(("assistant", final))
-                speak_chunked(tts, final)
-                continue
-        except Exception:
-            pass
-
-        # Memory summary / operator query: handle without sending to LLM
-        try:
-            low_q = (routed_user_text or "").strip().lower()
-            if low_q.startswith("what else do you remember") or low_q.startswith("what do you remember") or "what else do you remember" in low_q:
-                stats = mem_stats()
-                brief = "I remember a few things about our conversations and some saved facts."
-                # include a short stats line if available
-                if stats and "No memory" not in stats:
-                    brief += " " + (stats.splitlines()[0] if stats else "")
-                brief += " You can ask me to audit specific items, e.g. 'mem audit location'."
-                final = _ensure_reply(brief)
-                session_turns.append(("assistant", final))
-                print(f"Nova: {final}\n", flush=True)
-                speak_chunked(tts, final)
-                continue
-        except Exception:
-            pass
-
-        # Small status fragments should ask for a concrete target, not improvise memory retrieval.
-        try:
-            status_msg = _retrieval_status_reply(routed_user_text)
-            if status_msg:
-                _set_conversation_state(_make_conversation_state("awaiting_retrieval_target"))
-                _sync_pending_conversation_tracking()
-                final = _ensure_reply(status_msg)
-                session_turns.append(("assistant", final))
-                print(f"Nova: {final}\n", flush=True)
-                speak_chunked(tts, final)
-                continue
-        except Exception:
-            pass
-
-        # Natural 'remember X' intent: ask a friendly follow-up
-        try:
-            m = re.match(r"^remember\s+(.+)$", (routed_user_text or "").strip(), flags=re.I)
-            if m:
-                subj = m.group(1).strip().strip('.!?,')
-                if subj:
-                    q = f"What would you like me to remember about {subj}?"
-                    final = _ensure_reply(q)
-                    session_turns.append(("assistant", final))
-                    print(f"Nova: {final}\n", flush=True)
-                    speak_chunked(tts, final)
-                    continue
-        except Exception:
-            pass
-
-        # Auto-capture simple identity phrases and store to memory so Nova can tie
-        # future conversation to the correct user. Matches: "my name is X", "i am X", "i'm X", "this is X".
-        try:
-            # Only capture explicit identity phrases to avoid false positives.
-            id_m = None
-            if id_m:
-                name = id_m.group(1).strip().strip(".!,")
-                if name:
-                    mem_add("profile", input_source, f"name: {name}")
-                    set_active_user(name)
-                    ack = f"Nice to meet you, {name}. I'll remember that and use that identity for this session."
-                    print(f"Nova: {ack}\n", flush=True)
-                    session_turns.append(("assistant", ack))
-                    speak_chunked(tts, ack)
-                    continue
-        except Exception:
-            pass
-
-        # Quick replies for explicit location queries using stored memory
-        try:
-            low_q = (routed_user_text or "").strip().lower()
-
-            handled_location, msg, next_location_state, _location_intent = _handle_location_conversation_turn(
-                conversation_state,
-                routed_user_text,
-                turns=session_turns,
-            )
-            if handled_location:
-                try:
-                    final = _apply_reply_overrides(msg)
-                except Exception:
-                    final = msg
-                final = _ensure_reply(final)
-                if isinstance(next_location_state, dict):
-                    _set_conversation_state(next_location_state)
-                    _sync_pending_conversation_tracking()
-                print(f"Nova: {final}\n", flush=True)
-                session_turns.append(("assistant", final))
-                speak_chunked(tts, final)
-                continue
-
-            # Follow-up/expansion triggers (ask for more info about location)
-            expand_triggers = ["what else", "other information", "anything else", "more about", "what other", "anything more"]
-            if "location" in low_q and any(t in low_q for t in expand_triggers):
-                try:
-                    audit_out = mem_audit("location")
-                    j = json.loads(audit_out) if audit_out else {}
-                    results = j.get("results") if isinstance(j, dict) else []
-                    previews = []
-                    seen = set()
-                    for r in results:
-                        p = (r.get("preview") or "").strip()
-                        n = re.sub(r"\W+", " ", p.lower()).strip()
-                        if not p or n in seen:
-                            continue
-                        seen.add(n)
-                        previews.append(p)
-
-                    if not previews:
-                        msg = "I don't have a stored location yet. You can tell me: 'My location is ...'"
-                    elif len(previews) == 1:
-                        msg = f"I only have one stored location fact right now: {_normalize_location_preview(previews[0])}"
-                    else:
-                        # summarize up to 3 entries
-                        summary = "; ".join(_normalize_location_preview(p) for p in previews[:3])
-                        msg = f"I have multiple stored location facts: {summary}"
-                except Exception:
-                    msg = "I don't have a stored location yet. You can tell me: 'My location is ...'"
-
-                try:
-                    final = _apply_reply_overrides(msg)
-                except Exception:
-                    final = msg
-                final = _ensure_reply(final)
-                _set_conversation_state(_make_conversation_state("location_recall"))
-                _sync_pending_conversation_tracking()
-                print(f"Nova: {final}\n", flush=True)
-                session_turns.append(("assistant", final))
-                speak_chunked(tts, final)
-                continue
-
-            # Primary direct-location triggers: only match if input starts with a direct phrasing
-            loc_triggers = [
-                "what is your location",
-                "where are you located",
-                "where are you",
-                "what is your location nova",
-            ]
-            if any(low_q.startswith(t) for t in loc_triggers):
-                try:
-                    preview = get_saved_location_text()
-                    if preview:
-                        msg = f"My location is {preview}."
-                    else:
-                        msg = "I don't have a stored location yet. You can tell me: 'My location is ...'"
-                except Exception:
-                    msg = "I don't have a stored location yet. You can tell me: 'My location is ...'"
-
-                try:
-                    final = _apply_reply_overrides(msg)
-                except Exception:
-                    final = msg
-                final = _ensure_reply(final)
-                print(f"Nova: {final}\n", flush=True)
-                session_turns.append(("assistant", final))
-                speak_chunked(tts, final)
-                continue
-        except Exception:
-            pass
-
-        try:
-            developer_guess, next_state = _developer_work_guess_turn(routed_user_text)
-            if developer_guess:
-                final = _ensure_reply(developer_guess)
-                _set_conversation_state(next_state)
-                _sync_pending_conversation_tracking()
-                print(f"Nova: {final}\n", flush=True)
-                session_turns.append(("assistant", final))
-                speak_chunked(tts, final)
-                continue
-        except Exception:
-            pass
-
-        try:
-            location_ack = _store_location_fact_reply(
-                user_text,
-                input_source=input_source,
-                pending_action=pending_action,
-            )
-            if location_ack:
-                _set_conversation_state(_make_conversation_state("location_recall"))
-                _sync_pending_conversation_tracking()
-                final = _ensure_reply(location_ack)
-                print(f"Nova: {final}\n", flush=True)
-                session_turns.append(("assistant", final))
-                speak_chunked(tts, final)
-                continue
-        except Exception:
-            pass
-
-        try:
-            if (
-                isinstance(conversation_state, dict)
-                and str(conversation_state.get("kind") or "") == "location_recall"
-                and _is_saved_location_weather_query(routed_user_text)
-            ):
-                weather_reply = _weather_for_saved_location()
-                if weather_reply:
-                    _set_conversation_state(_make_conversation_state("location_recall"))
-                    _sync_pending_conversation_tracking()
-                    final = _ensure_reply(weather_reply)
-                    print(f"Nova: {final}\n", flush=True)
-                    session_turns.append(("assistant", final))
-                    speak_chunked(tts, final)
-                    continue
-        except Exception:
-            pass
-
-        # Treat declarative info (not requests) as facts to store and acknowledge.
-        try:
-            declarative_outcome = _store_declarative_fact_outcome(user_text, input_source=input_source)
-            if isinstance(declarative_outcome, dict):
-                ack = render_reply(declarative_outcome)
-                if pending_action_ledger is not None:
-                    pending_action_ledger["reply_contract"] = str(declarative_outcome.get("reply_contract") or "")
-                    pending_action_ledger["reply_outcome"] = dict(declarative_outcome)
-                print(f"Nova: {ack}\n", flush=True)
-                session_turns.append(("assistant", ack))
-                speak_chunked(tts, ack)
-                continue
-        except Exception:
-            pass
-
-        # Reason-first action selection: let the planner choose clarify vs tool
-        # before legacy command/keyword handlers execute side effects.
-        if warn_supervisor_bypass:
-            safe_reply, safe_kind = _open_probe_reply(routed_user_text, turns=session_turns)
-            safe_outcome = {
-                "intent": "open_probe_family",
-                "kind": safe_kind,
-                "reply_contract": f"open_probe.{safe_kind}",
-                "reply_text": safe_reply,
-                "state_delta": {},
-            }
-            if pending_action_ledger is not None:
-                pending_action_ledger["planner_decision"] = "deterministic"
-                pending_action_ledger["grounded"] = False
-                pending_action_ledger["reply_contract"] = str(safe_outcome.get("reply_contract") or "")
-                pending_action_ledger["reply_outcome"] = dict(safe_outcome)
-                routing_decision = pending_action_ledger.get("routing_decision")
-                if isinstance(routing_decision, dict):
-                    routing_decision["final_owner"] = "supervisor_handle"
-            _trace("open_probe", "matched", safe_kind)
-            final = _ensure_reply(safe_reply)
-            print(f"Nova: {final}\n", flush=True)
-            session_turns.append(("assistant", final))
-            speak_chunked(tts, final)
-            continue
-        try:
-            actions = [] if turn_direction.get("bypass_pattern_routes") else decide_actions(
-                routed_user_text,
-                config={
-                    "session_turns": session_turns,
-                    "pending_action": pending_action,
-                    "prefer_web_for_data_queries": prefer_web_for_data_queries,
-                },
-            )
-        except Exception:
-            actions = []
-
-        if actions:
-            act = actions[0]
-            atype = act.get("type")
-            if atype == "ask_clarify":
-                if pending_action_ledger is not None:
-                    pending_action_ledger["planner_decision"] = "ask_clarify"
-                _trace("action_planner", "ask_clarify")
-                q = act.get("question") or act.get("note") or "Can you clarify?"
-                if "weather lookup" in (q or "").lower():
-                    _set_pending_action(make_pending_weather_action())
-                    _trace("pending_action", "awaiting_location", tool="weather")
-                try:
-                    final = _apply_reply_overrides(q)
-                except Exception:
-                    final = q
-                print(f"Nova: {final}\n", flush=True)
-                session_turns.append(("assistant", final))
-                speak_chunked(tts, final)
-                continue
-
-            if atype == "respond":
-                if pending_action_ledger is not None:
-                    pending_action_ledger["planner_decision"] = "respond"
-                    pending_action_ledger["grounded"] = False
-                _trace("action_planner", "respond")
-                msg = act.get("note") or act.get("message") or "Tell me a bit more about what you want me to inspect."
-                try:
-                    final = _apply_reply_overrides(msg)
-                except Exception:
-                    final = msg
-                print(f"Nova: {final}\n", flush=True)
-                session_turns.append(("assistant", final))
-                speak_chunked(tts, final)
-                continue
-
-            if atype == "route_command":
-                _trace("action_planner", "route_command")
-                cmd_out = handle_commands(routed_user_text, session_turns=session_turns, session=session_state)
-                if cmd_out:
-                    _trace("command", "matched", tool="weather" if "api.weather.gov" in str(cmd_out).lower() else "")
-                    if pending_action_ledger is not None:
-                        pending_action_ledger["planner_decision"] = "command"
-                        pending_action_ledger["tool_result"] = ""
-                        low_cmd = str(cmd_out).lower()
-                        if "api.weather.gov" in low_cmd:
-                            pending_action_ledger["tool"] = "weather"
-                            pending_action_ledger["tool_args"] = {"raw": user_text}
-                            pending_action_ledger["tool_result"] = str(cmd_out)
-                            pending_action_ledger["grounded"] = True
-                    print(f"Nova: {cmd_out}\n", flush=True)
-                    session_turns.append(("assistant", cmd_out))
-                    speak_chunked(tts, cmd_out)
-                    continue
-                _trace("command", "not_matched")
-
-            if atype == "route_keyword":
-                _trace("action_planner", "route_keyword")
-                routed = handle_keywords(routed_user_text)
-                if routed:
-                    behavior_record_event("tool_route")
-                    _, routed_tool, out = routed
-                    _trace("keyword_tool", "matched", tool=str(routed_tool or ""), grounded=bool(str(out or "").strip()))
-                    if pending_action_ledger is not None:
-                        pending_action_ledger["planner_decision"] = "run_tool"
-                        pending_action_ledger["tool"] = str(routed_tool or "")
-                        pending_action_ledger["tool_args"] = {"raw": user_text}
-                        pending_action_ledger["tool_result"] = str(out or "")
-                        pending_action_ledger["grounded"] = bool(str(out or "").strip())
-                    print(f"Nova (tool output):\n{out}\n", flush=True)
-                    if isinstance(out, str) and out.strip():
-                        recent_tool_context = out.strip()[:2500]
-                        recent_web_urls = _extract_urls(out)
-                        next_tool_state = _make_tool_conversation_state(str(routed_tool or ""), _retrieval_query_from_text(str(routed_tool or ""), routed_user_text), out)
-                        if next_tool_state is not None:
-                            if str(next_tool_state.get("kind") or "") == "retrieval":
-                                session_state.set_retrieval_state(next_tool_state)
-                            else:
-                                _set_conversation_state(next_tool_state)
-                            conversation_state = session_state.conversation_state
-                            _sync_pending_conversation_tracking()
-                        session_turns.append(("assistant", out.strip()[:350]))
-                    tts.say("Done.")
-                    continue
-                _trace("keyword_tool", "not_matched")
-
-            if atype == "run_tool":
-                behavior_record_event("tool_route")
-                tool = act.get("tool")
-                args = act.get("args") or []
-                _trace("action_planner", "run_tool", tool=str(tool or ""))
-                if pending_action_ledger is not None:
-                    pending_action_ledger["planner_decision"] = "run_tool"
-                    pending_action_ledger["tool"] = str(tool or "")
-                    pending_action_ledger["tool_args"] = {"args": list(args) if isinstance(args, (list, tuple)) else args}
-
-                out = execute_planned_action(str(tool or ""), args)
-                if str(tool or "") in {"weather_current_location", "weather_location"}:
-                    _set_pending_action(None)
-
-                if out is None or (isinstance(out, str) and not out.strip()):
-                    _trace("tool_execution", "empty_result", tool=str(tool or ""))
-                    if pending_action_ledger is not None:
-                        pending_action_ledger["tool_result"] = ""
-                        pending_action_ledger["grounded"] = False
-                    final_msg = _web_allowlist_message("requested resource") if str(tool or "").startswith("web") else f"The {tool} tool did not return a result. No data was available."
-                    try:
-                        final_msg = _apply_reply_overrides(final_msg)
-                    except Exception:
-                        pass
-                    print(f"Nova: {final_msg}\n", flush=True)
-                    session_turns.append(("assistant", final_msg))
-                    speak_chunked(tts, final_msg)
-                    continue
-
-                if isinstance(out, dict) and not out.get("ok", True):
-                    _trace("tool_execution", "error", tool=str(tool or ""), error=str(out.get("error") or "unknown error"))
-                    if pending_action_ledger is not None:
-                        pending_action_ledger["tool_result"] = json.dumps(out, ensure_ascii=True)
-                        pending_action_ledger["grounded"] = False
-                    err = out.get("error", "unknown error")
-                    if isinstance(err, str) and ("not allowed" in err.lower() or "domain not allowed" in err.lower()):
-                        final_msg = _web_allowlist_message(args[0] if args else "")
-                    else:
-                        final_msg = f"Tool {tool} failed: {err}"
-                    try:
-                        final_msg = _apply_reply_overrides(final_msg)
-                    except Exception:
-                        pass
-                    print(f"Nova: {final_msg}\n", flush=True)
-                    session_turns.append(("assistant", final_msg))
-                    speak_chunked(tts, final_msg)
-                    continue
-
-                citation = format_tool_citation(str(tool or ""), out)
-                _trace("tool_execution", "ok", tool=str(tool or ""), grounded=bool(str(out or "").strip()))
-                if pending_action_ledger is not None:
-                    pending_action_ledger["tool_result"] = str(out or "")
-                    pending_action_ledger["grounded"] = bool(str(out or "").strip())
-                if citation:
-                    print(f"Nova (tool output):\n{citation}{out}\n", flush=True)
-                else:
-                    print(f"Nova (tool output):\n{out}\n", flush=True)
-
-                if isinstance(out, str) and out.strip():
-                    recent_tool_context = out.strip()[:2500]
-                    recent_web_urls = _extract_urls(out)
-                    query_text = args[0] if isinstance(args, (list, tuple)) and args else user_text
-                    next_tool_state = _make_tool_conversation_state(str(tool or ""), str(query_text or ""), out)
-                    if next_tool_state is not None:
-                        if str(next_tool_state.get("kind") or "") == "retrieval":
-                            session_state.set_retrieval_state(next_tool_state)
-                        else:
-                            _set_conversation_state(next_tool_state)
-                        conversation_state = session_state.conversation_state
-                        _sync_pending_conversation_tracking()
-                    session_turns.append(("assistant", out.strip()[:350]))
-
-                tts.say("Done.")
-                continue
-
-        handled_truth, truth_reply, truth_source, truth_grounded = truth_hierarchy_answer(routed_user_text)
-        if handled_truth:
-            behavior_record_event("deterministic_hit")
-            _trace("truth_hierarchy", "matched", tool=str(truth_source or ""), grounded=bool(truth_grounded))
-            if pending_action_ledger is not None:
-                pending_action_ledger["planner_decision"] = "truth_hierarchy"
-                pending_action_ledger["tool"] = str(truth_source or "")
-                pending_action_ledger["tool_args"] = {"query": user_text}
-                pending_action_ledger["tool_result"] = str(truth_reply or "")
-                pending_action_ledger["grounded"] = bool(truth_grounded)
-            final = _ensure_reply(truth_reply)
-            next_profile_state = _infer_profile_conversation_state(routed_user_text)
-            if next_profile_state is not None:
-                _set_conversation_state(next_profile_state)
-                _sync_pending_conversation_tracking()
-            print(f"Nova: {final}\n", flush=True)
-            session_turns.append(("assistant", final))
-            speak_chunked(tts, final)
-            continue
-        _trace("truth_hierarchy", "not_matched")
-
-        ha = hard_answer(routed_user_text)
-        if ha:
-            if detect_identity_conflict():
-                behavior_record_event("conflict_detected")
-                _trace("identity_conflict", "detected")
-            behavior_record_event("deterministic_hit")
-            _trace("hard_answer", "matched", grounded=True)
-            if pending_action_ledger is not None:
-                pending_action_ledger["planner_decision"] = "deterministic"
-                pending_action_ledger["grounded"] = True
-            if _is_identity_stable_reply(ha):
-                final = ha
-            else:
-                try:
-                    final = _apply_reply_overrides(ha)
-                except Exception:
-                    final = ha
-            next_profile_state = _infer_profile_conversation_state(routed_user_text)
-            if next_profile_state is not None:
-                _set_conversation_state(next_profile_state)
-                _sync_pending_conversation_tracking()
-            print(f"Nova: {final}\n", flush=True)
-            session_turns.append(("assistant", final))
-            speak_chunked(tts, final)
-            continue
-        _trace("hard_answer", "not_matched")
-
-        if _is_local_knowledge_topic_query(routed_user_text):
-            local_topic = _build_local_topic_digest_answer(routed_user_text)
-            if local_topic:
-                behavior_record_event("deterministic_hit")
-                _trace("grounded_lookup", "matched", tool="local_knowledge")
-                if pending_action_ledger is not None:
-                    pending_action_ledger["planner_decision"] = "grounded_lookup"
-                    pending_action_ledger["tool"] = "local_knowledge"
-                    pending_action_ledger["tool_args"] = {"query": user_text}
-                    pending_action_ledger["tool_result"] = local_topic
-                    pending_action_ledger["grounded"] = True
-                print(f"Nova: {local_topic}\n", flush=True)
-                session_turns.append(("assistant", local_topic))
-                speak_chunked(tts, local_topic)
-                continue
-            _trace("grounded_lookup", "missed", tool="local_knowledge")
-
-        if _is_color_lookup_request(routed_user_text):
-            prefs = _extract_color_preferences(session_turns)
-            if not prefs:
-                prefs = _extract_color_preferences_from_memory()
-            if prefs:
-                if len(prefs) == 1:
-                    msg = f"You told me you like the color {prefs[0]}."
-                else:
-                    msg = "You told me you like these colors: " + ", ".join(prefs[:-1]) + f", and {prefs[-1]}."
-            else:
-                msg = "You haven't told me a color preference in this current chat yet."
-            try:
-                final = _apply_reply_overrides(msg)
-            except Exception:
-                final = msg
-            _set_conversation_state(_infer_profile_conversation_state(routed_user_text) or _make_conversation_state("identity_profile", subject="self"))
-            _sync_pending_conversation_tracking()
-            print(f"Nova: {final}\n", flush=True)
-            session_turns.append(("assistant", final))
-            speak_chunked(tts, final)
-            continue
-
-        if _is_developer_color_lookup_request(routed_user_text):
-            prefs = _extract_developer_color_preferences(session_turns)
-            if not prefs:
-                prefs = _extract_developer_color_preferences_from_memory()
-            if prefs:
-                if len(prefs) == 1:
-                    msg = f"From what you've told me, Gus likes {prefs[0]}."
-                else:
-                    msg = "From what you've told me, Gus likes these colors: " + ", ".join(prefs[:-1]) + f", and {prefs[-1]}."
-            else:
-                msg = "I don't have Gus's color preferences yet."
-            try:
-                final = _apply_reply_overrides(msg)
-            except Exception:
-                final = msg
-            _set_conversation_state(_infer_profile_conversation_state(routed_user_text) or _make_conversation_state("identity_profile", subject="developer"))
-            _sync_pending_conversation_tracking()
-            print(f"Nova: {final}\n", flush=True)
-            session_turns.append(("assistant", final))
-            speak_chunked(tts, final)
-            continue
-
-        if _is_developer_bilingual_request(routed_user_text):
-            known = _developer_is_bilingual(session_turns)
-            if known is None:
-                known = _developer_is_bilingual_from_memory()
-            if known is True:
-                msg = "Yes. From what you've told me, Gus is bilingual in English and Spanish."
-            elif known is False:
-                msg = "From what I have, Gus is not bilingual."
-            else:
-                msg = "I don't have confirmed language details for Gus yet."
-            try:
-                final = _apply_reply_overrides(msg)
-            except Exception:
-                final = msg
-            _set_conversation_state(_infer_profile_conversation_state(routed_user_text) or _make_conversation_state("identity_profile", subject="developer"))
-            _sync_pending_conversation_tracking()
-            print(f"Nova: {final}\n", flush=True)
-            session_turns.append(("assistant", final))
-            speak_chunked(tts, final)
-            continue
-
-        if _is_developer_profile_request(routed_user_text):
-            msg = _developer_profile_reply(session_turns, routed_user_text)
-            try:
-                final = _apply_reply_overrides(msg)
-            except Exception:
-                final = msg
-            _set_conversation_state(_infer_profile_conversation_state(routed_user_text) or _make_conversation_state("identity_profile", subject="developer"))
-            _sync_pending_conversation_tracking()
-            print(f"Nova: {final}\n", flush=True)
-            session_turns.append(("assistant", final))
-            speak_chunked(tts, final)
-            continue
-
-        msg, next_state = _developer_location_turn(
-            routed_user_text,
-            state=conversation_state,
-            turns=session_turns,
-        )
-        if msg:
-            try:
-                final = _apply_reply_overrides(msg)
-            except Exception:
-                final = msg
-            _set_conversation_state(next_state)
-            _sync_pending_conversation_tracking()
-            print(f"Nova: {final}\n", flush=True)
-            session_turns.append(("assistant", final))
-            speak_chunked(tts, final)
-            continue
-
-        low_user = (routed_user_text or "").lower()
-        if "what animals do i like" in low_user or "which animals do i like" in low_user:
-            animals = _extract_animal_preferences(session_turns)
-            if not animals:
-                animals = _extract_animal_preferences_from_memory()
-            if animals:
-                if len(animals) == 1:
-                    msg = f"You told me you like {animals[0]}."
-                else:
-                    msg = "You told me you like: " + ", ".join(animals[:-1]) + f", and {animals[-1]}."
-            else:
-                msg = "You haven't told me animal preferences yet in this chat, and I can't find them in saved memory."
-            try:
-                final = _apply_reply_overrides(msg)
-            except Exception:
-                final = msg
-            _set_conversation_state(_infer_profile_conversation_state(routed_user_text) or _make_conversation_state("identity_profile", subject="self"))
-            _sync_pending_conversation_tracking()
-            print(f"Nova: {final}\n", flush=True)
-            session_turns.append(("assistant", final))
-            speak_chunked(tts, final)
-            continue
-
-        if _is_color_animal_match_question(routed_user_text):
-            colors = _extract_color_preferences(session_turns)
-            if not colors:
-                colors = _extract_color_preferences_from_memory()
-            animals = _extract_animal_preferences(session_turns)
-            if not animals:
-                animals = _extract_animal_preferences_from_memory()
-
-            if not colors:
-                msg = "I can't pick a best color yet because I don't have your color preferences."
-            elif not animals:
-                msg = "I can't pick a best color for animals yet because I don't have your animal preferences."
-            else:
-                best = _pick_color_for_animals(colors, animals)
-                msg = f"Direct answer: {best} matches best with the animals you like ({', '.join(animals)})."
-                if len(colors) > 1:
-                    msg += f" I considered your options: {', '.join(colors)}."
-
-            print(f"Nova: {msg}\n", flush=True)
-            session_turns.append(("assistant", msg))
-            speak_chunked(tts, msg)
-            continue
-
-        last_assistant_text = _last_assistant_turn_text(session_turns[:-1])
-        pending_weather_followup = (
-            isinstance(pending_action, dict)
-            and str(pending_action.get("kind") or "") == "weather_lookup"
-            and str(pending_action.get("status") or "") == "awaiting_location"
-            and bool(pending_action.get("saved_location_available"))
-        )
-        pending_weather_cli_fallback = pending_weather_followup and (
-            _looks_like_affirmative_followup(routed_user_text)
-            or _looks_like_shared_location_reference(routed_user_text)
-        )
-        if pending_weather_cli_fallback or (
-            _looks_like_affirmative_followup((routed_user_text or "").lower())
-            and _assistant_offered_weather_lookup(last_assistant_text)
-        ):
-            if pending_action_ledger is not None:
-                pending_action_ledger["planner_decision"] = "llm_fallback"
-                pending_action_ledger["grounded"] = False
-            if pending_weather_followup:
-                _set_pending_action(None)
-                _sync_pending_conversation_tracking()
-            msg = "I can try to check the weather for you, but I need a specific weather source or tool available here first."
-            final = _ensure_reply(msg)
-            print(f"Nova: {final}\n", flush=True)
-            session_turns.append(("assistant", final))
-            speak_chunked(tts, final)
-            continue
-
-        task = analyze_request(
-            routed_user_text,
-            config={"prefer_web_for_data_queries": prefer_web_for_data_queries},
-        )
-        if not getattr(task, "allow_llm", False):
-            _trace("policy_gate", "blocked", detail=str(getattr(task, "message", "") or "")[:160])
-            if pending_action_ledger is not None:
-                pending_action_ledger["planner_decision"] = "policy_block"
-                pending_action_ledger["grounded"] = True
-            msg = getattr(task, "message", "")
-            try:
-                final = _apply_reply_overrides(msg)
-            except Exception:
-                final = msg
-            print(f"Nova: {final}\n", flush=True)
-            session_turns.append(("assistant", final))
-            speak_chunked(tts, final)
-            continue
-        _trace("policy_gate", "allowed")
-
-        fallback_context = build_fallback_context_details(routed_user_text, session_turns)
-        retrieved_context = str(fallback_context.get("context") or "")
-        _trace(
-            "memory_context",
-            "used" if str(fallback_context.get("learning_context") or "") else "empty",
-            memory_used=bool(fallback_context.get("memory_used")),
-            knowledge_used=bool(fallback_context.get("knowledge_used")),
-            memory_chars=int(fallback_context.get("memory_chars") or 0),
-            knowledge_chars=int(fallback_context.get("knowledge_chars") or 0),
-        )
-        chat_ctx = str(fallback_context.get("chat_context") or "")
-        if chat_ctx:
-            _trace("chat_context", "used", chars=len(chat_ctx))
-        session_fact_sheet = str(fallback_context.get("session_fact_sheet") or "")
-        if session_fact_sheet:
-            _trace("session_fact_sheet", "used", chars=len(session_fact_sheet))
-        if recent_tool_context and _uses_prior_reference(routed_user_text):
-            retrieved_context = (retrieved_context + "\n\nRECENT TOOL OUTPUT:\n" + recent_tool_context).strip()[:6000]
-            _trace("recent_tool_context", "used", chars=len(recent_tool_context))
-
-        if should_block_low_confidence(routed_user_text, retrieved_context=retrieved_context, tool_context=recent_tool_context):
-            behavior_record_event("low_confidence_block")
-            _trace("low_confidence_gate", "blocked")
-            truthful_outcome = _truthful_limit_outcome(routed_user_text)
-            if pending_action_ledger is not None:
-                pending_action_ledger["planner_decision"] = "blocked_low_confidence"
-                pending_action_ledger["grounded"] = False
-                pending_action_ledger["reply_contract"] = str(truthful_outcome.get("reply_contract") or "")
-                pending_action_ledger["reply_outcome"] = dict(truthful_outcome)
-            msg = str(truthful_outcome.get("reply_text") or _truthful_limit_reply(routed_user_text))
-            final = _ensure_reply(msg)
-            print(f"Nova: {final}\n", flush=True)
-            session_turns.append(("assistant", final))
-            speak_chunked(tts, final)
-            continue
-
-        behavior_record_event("llm_fallback")
-        _trace("llm_fallback", "invoked", retrieved_chars=len(retrieved_context))
-        if pending_action_ledger is not None:
-            pending_action_ledger["planner_decision"] = "llm_fallback"
-        reply = ollama_chat(
-            routed_user_text,
-            retrieved_context=retrieved_context,
-            language_mix_spanish_pct=language_mix_spanish_pct,
-        )
-        reply = sanitize_llm_reply(reply, tool_context=recent_tool_context)
-
-        if mem_enabled():
-            if mem_should_store(user_text):
-                mem_add("chat_user", input_source, user_text)
-            # Do not automatically store assistant replies to avoid clutter and duplicates.
-
-        # remove any raw memory dumps leaking into the assistant reply before showing
-        clean_reply = _strip_mem_leak(reply, retrieved_context)
-        corrected_reply, was_corrected, correction_reason = _self_correct_reply(routed_user_text, clean_reply)
-        if was_corrected:
-            behavior_record_event("correction_applied")
-            behavior_record_event("self_correction_applied")
-            _trace("llm_postprocess", "self_corrected", detail=str(correction_reason or "")[:120])
-            try:
-                # Persist a compact teach pair so similar drift gets corrected faster next time.
-                _teach_store_example(clean_reply, corrected_reply, user=get_active_user() or None)
-            except Exception:
-                pass
-            if pending_action_ledger is not None:
-                pending_action_ledger["planner_decision"] = "llm_self_corrected"
-                pending_action_ledger["grounded"] = True
-            clean_reply = corrected_reply
-        claim_gated_reply, claim_gate_changed, claim_gate_reason = _apply_claim_gate(
-            clean_reply,
-            evidence_text=retrieved_context,
-            tool_context=recent_tool_context,
-        )
-        if claim_gate_changed:
-            _trace("claim_gate", "adjusted", claim_gate_reason)
-            clean_reply = claim_gated_reply
-            if claim_gate_reason == "unsupported_claim_blocked" and pending_action_ledger is not None:
-                truthful_outcome = _truthful_limit_outcome(routed_user_text)
-                pending_action_ledger["grounded"] = False
-                pending_action_ledger["reply_contract"] = str(truthful_outcome.get("reply_contract") or "")
-                pending_action_ledger["reply_outcome"] = dict(truthful_outcome)
-        reply_contract = str(pending_action_ledger.get("reply_contract") or "").strip() if isinstance(pending_action_ledger, dict) else ""
-        # Shorten replies for ordinary conversation: if the user did not explicitly request an action,
-        # prefer a concise reply (first 1-2 sentences). Keep full replies for explicit requests.
-        try:
-            if not _is_explicit_request(routed_user_text):
-                # take up to first 2 sentences
-                sents = re.split(r'(?<=[.!?])\s+', (clean_reply or "").strip())
-                short = " ".join([s for s in sents if s])[:600]
-                if short:
-                    # prefer the short form unless it's obviously truncating a tool citation
-                    clean_reply = short
-        except Exception:
-            pass
-        try:
-            final = _apply_reply_overrides(clean_reply)
-        except Exception:
-            final = clean_reply
-        final = _ensure_reply(final)
-        print(f"Nova: {final}\n", flush=True)
-        session_turns.append(("assistant", final))
-        speak_chunked(tts, final)
-
-    _flush_pending_action_ledger()
 
 # =========================
 # Entrypoint

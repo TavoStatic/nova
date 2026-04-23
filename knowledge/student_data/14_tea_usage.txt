@@ -1,0 +1,10 @@
+﻿How TEA Uses student_data Data
+
+TEA uses student_data data for:
+
+• Accountability ratings
+• Texas Academic Performance Reports
+• State funding formulas
+• Legislative reports
+
+

@@ -1,4 +1,5 @@
 import unittest
+from unittest import mock
 
 import nova_http
 import nova_core
@@ -32,10 +33,12 @@ class TestHttpResumePending(unittest.TestCase):
     def test_resume_pending_user_turn(self):
         nova_http._append_session_turn("r1", "user", "pending question")
 
-        out = nova_http.resume_last_pending_turn("r1")
+        with mock.patch("nova_http._invalidate_control_status_cache") as invalidate_mock:
+            out = nova_http.resume_last_pending_turn("r1")
         self.assertTrue(out.get("ok"))
         self.assertTrue(out.get("resumed"))
         self.assertIn("LLM:pending question", out.get("reply", ""))
+        invalidate_mock.assert_called_once_with()
 
         turns = nova_http._get_session_turns("r1")
         self.assertEqual(turns[-1][0], "assistant")
@@ -44,10 +47,12 @@ class TestHttpResumePending(unittest.TestCase):
         nova_http._append_session_turn("r2", "user", "hello")
         nova_http._append_session_turn("r2", "assistant", "hi")
 
-        out = nova_http.resume_last_pending_turn("r2")
+        with mock.patch("nova_http._invalidate_control_status_cache") as invalidate_mock:
+            out = nova_http.resume_last_pending_turn("r2")
         self.assertTrue(out.get("ok"))
         self.assertFalse(out.get("resumed"))
         self.assertEqual(out.get("reason"), "no_pending_user_turn")
+        invalidate_mock.assert_not_called()
 
 
 if __name__ == "__main__":

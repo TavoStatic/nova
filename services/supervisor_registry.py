@@ -1,0 +1,33 @@
+from __future__ import annotations
+
+
+DEFAULT_SUPERVISOR_RULE_SPECS = [
+    {"name": "reflective_retry", "priority": 30, "phases": ("rewrite", "handle")},
+    {"name": "profile_certainty", "priority": 35, "phases": ("handle",)},
+    {"name": "identity_history_family", "priority": 36, "phases": ("handle",)},
+    {"name": "open_probe_family", "priority": 37, "phases": ("handle",)},
+    {"name": "session_fact_recall", "priority": 38, "phases": ("handle",)},
+    {"name": "developer_profile_state", "priority": 38, "phases": ("state",)},
+    {"name": "last_question_recall", "priority": 39, "phases": ("handle",)},
+    {"name": "self_location", "priority": 40, "phases": ("handle",)},
+    {"name": "rules_list", "priority": 41, "phases": ("handle",)},
+    {"name": "location_recall", "priority": 42, "phases": ("handle",)},
+    {"name": "location_name", "priority": 44, "phases": ("handle",)},
+    {"name": "location_weather", "priority": 46, "phases": ("handle",)},
+    {"name": "retrieval_followup", "priority": 47, "phases": ("handle",)},
+    {"name": "name_origin_store", "priority": 50, "phases": ("handle",)},
+    {"name": "apply_correction", "priority": 60, "phases": ("handle",)},
+    {"name": "smalltalk", "priority": 61, "phases": ("intent",)},
+    {"name": "store_fact", "priority": 62, "phases": ("intent",)},
+    {"name": "web_research_family", "priority": 62, "phases": ("intent",)},
+    {"name": "weather_lookup", "priority": 62, "phases": ("intent",)},
+    {"name": "set_location", "priority": 62, "phases": ("intent",)},
+    {"name": "capability_query", "priority": 63, "phases": ("intent",)},
+    {"name": "policy_domain_query", "priority": 64, "phases": ("intent",)},
+    {"name": "assistant_name", "priority": 66, "phases": ("intent",)},
+    {"name": "self_identity_web_challenge", "priority": 67, "phases": ("intent",)},
+    {"name": "name_origin", "priority": 68, "phases": ("intent",)},
+    {"name": "developer_full_name", "priority": 69, "phases": ("intent",)},
+    {"name": "developer_profile", "priority": 70, "phases": ("intent",)},
+    {"name": "session_summary", "priority": 71, "phases": ("intent",)},
+]

@@ -2,6 +2,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 import nova_core
 
@@ -96,6 +97,103 @@ class TestPolicyCommands(unittest.TestCase):
         out = nova_core.handle_commands("web mode")
         self.assertIn("Current web research limits", out)
         self.assertIn("research_max_depth", out)
+
+    def test_probe_search_endpoint_auto_detects_local_fallback_port(self):
+        class _Response:
+            status_code = 200
+
+            def raise_for_status(self):
+                return None
+
+            def json(self):
+                return {"results": []}
+
+        with mock.patch("nova_core.requests.get", side_effect=[RuntimeError("connection refused"), _Response()]):
+            probe = nova_core.probe_search_endpoint("http://127.0.0.1:8081/search", timeout=0.1, persist_repair=True)
+
+        self.assertTrue(probe.get("ok"))
+        self.assertTrue(probe.get("auto_detected"))
+        self.assertTrue(probe.get("repaired"))
+        self.assertEqual(probe.get("resolved_endpoint"), "http://127.0.0.1:8080/search")
+        self.assertIn("auto-detected=http://127.0.0.1:8080/search", str(probe.get("note") or ""))
+
+        saved = json.loads(self.policy_path.read_text(encoding="utf-8"))
+        self.assertEqual((saved.get("web") or {}).get("search_api_endpoint"), "http://127.0.0.1:8080/search")
+
+    def test_probe_search_endpoint_failure_reports_configured_endpoint_and_checked_candidates(self):
+        with mock.patch(
+            "nova_core.requests.get",
+            side_effect=[
+                RuntimeError("configured refused"),
+                RuntimeError("localhost refused"),
+                RuntimeError("fallback refused"),
+                RuntimeError("localhost fallback refused"),
+            ],
+        ):
+            probe = nova_core.probe_search_endpoint("http://127.0.0.1:8080/search", timeout=0.1, persist_repair=True)
+
+        self.assertFalse(probe.get("ok"))
+        self.assertEqual(probe.get("endpoint"), "http://127.0.0.1:8080/search")
+        self.assertIn("configured_failed=error:configured refused", str(probe.get("note") or ""))
+        self.assertIn("http://127.0.0.1:8080/search => error:configured refused", str(probe.get("note") or ""))
+        self.assertEqual(len(probe.get("candidate_errors") or []), 4)
+
+    def test_wikipedia_lookup_returns_summary_and_related_pages(self):
+        class _Response:
+            def __init__(self, payload):
+                self._payload = payload
+
+            def raise_for_status(self):
+                return None
+
+            def json(self):
+                return self._payload
+
+        search_payload = {
+            "query": {
+                "search": [
+                    {"title": "Ada Lovelace"},
+                    {"title": "Analytical Engine"},
+                ]
+            }
+        }
+        summary_payload = {
+            "title": "Ada Lovelace",
+            "extract": "Ada Lovelace was an English mathematician.",
+            "content_urls": {"desktop": {"page": "https://en.wikipedia.org/wiki/Ada_Lovelace"}},
+        }
+
+        with mock.patch("nova_core.requests.get", side_effect=[_Response(search_payload), _Response(summary_payload)]):
+            out = nova_core.tool_wikipedia_lookup("Ada Lovelace")
+
+        self.assertIn("Wikipedia summary for: Ada Lovelace", out)
+        self.assertIn("https://en.wikipedia.org/wiki/Ada_Lovelace", out)
+        self.assertIn("Analytical Engine", out)
+
+    def test_stackexchange_search_returns_ranked_results(self):
+        class _Response:
+            def raise_for_status(self):
+                return None
+
+            def json(self):
+                return {
+                    "items": [
+                        {
+                            "title": "FastAPI OAuth invalid_grant error",
+                            "link": "https://stackoverflow.com/questions/123",
+                            "score": 8,
+                            "answer_count": 2,
+                            "is_answered": True,
+                            "tags": ["python", "fastapi", "oauth-2.0"],
+                        }
+                    ]
+                }
+
+        with mock.patch("nova_core.requests.get", return_value=_Response()):
+            out = nova_core.tool_stackexchange_search("fastapi oauth invalid_grant")
+
+        self.assertIn("StackExchange results for: fastapi oauth invalid_grant", out)
+        self.assertIn("stackoverflow.com/questions/123", out)
 
     def test_load_policy_sets_safety_envelope_defaults(self):
         loaded = nova_core.load_policy()

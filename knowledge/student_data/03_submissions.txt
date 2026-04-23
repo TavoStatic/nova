@@ -1,0 +1,15 @@
+﻿student_data Submissions
+
+Submission 1 – Fall Submission
+Snapshot enrollment and staff data.
+
+Submission 2 – Mid-Year Submission
+Financial actuals for the prior year.
+
+Submission 3 – Summer Submission
+Attendance and course completion.
+
+Submission 4 – Extended Year Submission
+Special program reporting.
+
+

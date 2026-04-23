@@ -1,0 +1,18 @@
+﻿Public Education Information Management System (student_data)
+
+student_data is the statewide data collection system used by the Texas Education Agency (TEA) to collect information from Texas public school districts and charter schools.
+
+The system collects:
+
+• Student demographics
+• Student academic performance
+• Attendance records
+• Personnel data
+• Financial data
+• Organizational data
+
+student_data data is used for accountability ratings, state funding calculations, policy analysis, and statewide education reporting.
+
+All Local Education Agencies (LEAs) are required to submit student_data data to TEA.
+
+

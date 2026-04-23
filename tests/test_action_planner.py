@@ -42,6 +42,26 @@ class TestActionPlanner(unittest.TestCase):
         self.assertEqual(actions[0]["type"], "run_tool")
         self.assertEqual(actions[0]["tool"], "web_research")
 
+    def test_wikipedia_command_routes_to_provider(self):
+        actions = decide_actions("wikipedia Ada Lovelace")
+        self.assertEqual(actions[0]["type"], "run_tool")
+        self.assertEqual(actions[0]["tool"], "wikipedia_lookup")
+
+    def test_factual_prompt_prefers_wikipedia_provider(self):
+        actions = decide_actions("who is Ada Lovelace?")
+        self.assertEqual(actions[0]["type"], "run_tool")
+        self.assertEqual(actions[0]["tool"], "wikipedia_lookup")
+
+    def test_repo_prompt_prefers_general_web_research(self):
+        actions = decide_actions("find a GitHub repo for FastAPI OAuth examples")
+        self.assertEqual(actions[0]["type"], "run_tool")
+        self.assertEqual(actions[0]["tool"], "web_research")
+
+    def test_stackexchange_command_routes_to_provider(self):
+        actions = decide_actions("stackexchange fastapi oauth invalid_grant")
+        self.assertEqual(actions[0]["type"], "run_tool")
+        self.assertEqual(actions[0]["tool"], "stackexchange_search")
+
 
 if __name__ == "__main__":
     unittest.main()

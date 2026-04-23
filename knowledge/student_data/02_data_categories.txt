@@ -1,0 +1,18 @@
+﻿Major student_data Data Categories
+
+1. student_data
+Enrollment, demographics, attendance, course completion, graduation.
+
+2. Staff Data
+Staff demographics, certifications, job assignments.
+
+3. Financial Data
+Budgets, payroll, expenditures.
+
+4. Organizational Data
+Campus structure, district configuration.
+
+5. Course Section Data
+Course offerings, teacher assignments, schedules.
+
+

@@ -1,0 +1,353 @@
+﻿from __future__ import annotations
+
+import json
+import time
+from typing import Callable
+
+from services import nova_planner_contract
+from services.nova_fallback_flow import apply_low_confidence_block, finalize_llm_fallback_reply, prepare_fallback_flow
+from services.nova_reply_deterministic import maybe_handle_deterministic_sequence
+
+
+def execute_reply_sequence(
+    *,
+    turns: list[tuple[str, str]],
+    text: str,
+    pending_action: dict | None,
+    prefer_web_for_data_queries: bool,
+    language_mix_spanish_pct: int,
+    session,
+    trace: Callable[..., None],
+    normalize_reply: Callable[[str], str],
+    ensure_reply: Callable[[str], str],
+    core,
+    is_developer_profile_request: Callable[[str], bool],
+    developer_profile_reply: Callable[[list[tuple[str, str]], str], str],
+    is_location_request: Callable[[str], bool],
+    location_reply: Callable[[], str],
+    is_web_preferred_data_query: Callable[[str], bool],
+    is_session_recap_request: Callable[[str], bool],
+    session_recap_reply: Callable[[list[tuple[str, str]], str], str],
+    is_assistant_name_query: Callable[[str], bool],
+    assistant_name_reply: Callable[[str], str],
+    is_developer_full_name_query: Callable[[str], bool],
+    developer_full_name_reply: Callable[[], str],
+    is_name_origin_question: Callable[[str], bool],
+    is_student_data_attendance_rules_query: Callable[[str], bool],
+    student_data_attendance_rules_reply: Callable[[], str],
+    is_conversational_clarification: Callable[[str], bool],
+    clarification_reply: Callable[[list[tuple[str, str]]], str],
+    is_deep_search_followup_request: Callable[[str], bool],
+    infer_research_query_from_turns: Callable[[list[tuple[str, str]]], str],
+    build_grounded_answer: Callable[[str], str],
+    build_local_topic_digest_answer: Callable[[str], str],
+    is_groundable_factual_query: Callable[[str], bool],
+    developer_color_reply: Callable[[list[tuple[str, str]]], str],
+    developer_bilingual_reply: Callable[[list[tuple[str, str]]], str],
+    color_reply: Callable[[list[tuple[str, str]]], str],
+    animal_reply: Callable[[list[tuple[str, str]]], str],
+    ensure_active_work_tree_fn: Callable[[str], str] | None = None,
+    work_tree_seed_source: str = "",
+    work_tree_seed_mode: str = "",
+    planner_before_deterministic_content: bool = False,
+    stop_before_llm_fallback: bool = False,
+) -> tuple[str, dict]:
+    sequence_started = time.perf_counter()
+    timing_profile = {
+        "planner_time": 0,
+        "tool_selection_time": 0,
+        "tool_time": 0,
+        "llm_time": 0,
+        "post_time": 0,
+    }
+    planner_already_attempted = False
+
+    def _merge_timing(meta: dict | None) -> dict:
+        payload = dict(meta or {})
+        raw_timing = payload.get("timing") if isinstance(payload.get("timing"), dict) else {}
+        timing_profile["planner_time"] = int(raw_timing.get("planner_time") or timing_profile["planner_time"] or 0)
+        timing_profile["tool_selection_time"] = int(raw_timing.get("tool_selection_time") or timing_profile["tool_selection_time"] or 0)
+        timing_profile["tool_time"] = int(raw_timing.get("tool_time") or timing_profile["tool_time"] or 0)
+        return payload
+
+    def _complete_return(reply: str, meta: dict, *, record_high_latency: bool) -> tuple[str, dict]:
+        payload = _merge_timing(meta)
+        duration_ms = int((time.perf_counter() - sequence_started) * 1000)
+        execution_profile = {
+            "total_time": duration_ms,
+            "planner_time": int(timing_profile["planner_time"] or 0),
+            "llm_time": int(timing_profile["llm_time"] or 0),
+            "tool_time": int(timing_profile["tool_time"] or 0),
+            "post_time": int(timing_profile["post_time"] or 0),
+            "tool_selection_time": int(timing_profile["tool_selection_time"] or 0),
+        }
+        reply_outcome = dict(payload.get("reply_outcome") or {})
+        reply_outcome["execution_profile"] = execution_profile
+        payload["reply_outcome"] = reply_outcome
+        trace("timing", "completed", "execute_reply_sequence", duration_ms=duration_ms)
+        trace("timing_breakdown", "completed", "execute_reply_sequence", **execution_profile)
+        if record_high_latency and duration_ms > 10000:
+            core.behavior_set_flag("high_latency", layer="execute_reply_sequence", duration_ms=duration_ms)
+        return reply, payload
+
+    def _timed_return(reply: str, meta: dict) -> tuple[str, dict]:
+        return _complete_return(reply, meta, record_high_latency=True)
+
+    def _logged_return(reply: str, meta: dict) -> tuple[str, dict]:
+        return _complete_return(reply, meta, record_high_latency=False)
+
+    def _break_fallback_loop(reply_text: str, meta: dict) -> tuple[str, dict]:
+        normalized_reply = normalize_reply(reply_text)
+        last_reply = str(getattr(session, "last_fallback_reply", "") or "").strip()
+        current_reply = str(normalized_reply or "").strip()
+        planner_decision = str((meta or {}).get("planner_decision") or "").strip().lower()
+        degraded = planner_decision in {"llm_fallback", "fulfillment_choice", "respond", "ask_clarify", "blocked_low_confidence"}
+        if degraded and current_reply and current_reply == last_reply:
+            core.behavior_set_flag("fallback_loop_detected", detail=planner_decision)
+            trace("fallback_loop", "detected", planner_decision)
+            loop_reply = normalize_reply("I am hitting the same degraded path twice. Stopping the loop. Please restate the next concrete step.")
+            if hasattr(session, "last_fallback_reply"):
+                session.last_fallback_reply = loop_reply
+            meta = dict(meta or {})
+            meta["planner_decision"] = "degraded_fallback_break"
+            meta["tool_result"] = str(meta.get("tool_result") or "")
+            meta["grounded"] = False
+            meta["degraded_failure"] = True
+            return loop_reply, meta
+        if hasattr(session, "last_fallback_reply"):
+            session.last_fallback_reply = current_reply if degraded else ""
+        return normalized_reply, meta
+
+    low = text.lower()
+    handled_truth, truth_reply, truth_source, truth_grounded = core.truth_hierarchy_answer(text)
+    if handled_truth:
+        trace("truth_hierarchy", "matched", tool=str(truth_source or ""), grounded=bool(truth_grounded))
+        reply = truth_reply
+        used_hard_answer = False
+        if is_developer_profile_request(text):
+            hard = core.hard_answer(text)
+            if hard:
+                reply = hard
+                used_hard_answer = True
+            elif reply.lower().startswith("uncertain. no structured identity fact"):
+                reply = developer_profile_reply(turns, text)
+        elif reply.lower().startswith("uncertain. no structured identity fact"):
+            if is_location_request(text):
+                reply = location_reply()
+            else:
+                hard = core.hard_answer(text)
+                if hard:
+                    reply = hard
+                    used_hard_answer = True
+        final_reply = ensure_reply(reply) if used_hard_answer else normalize_reply(reply)
+        return _timed_return(final_reply, {
+            "planner_decision": "truth_hierarchy",
+            "tool": str(truth_source or ""),
+            "tool_args": {"query": text},
+            "tool_result": str(reply or ""),
+            "grounded": bool(truth_grounded),
+        })
+    trace("truth_hierarchy", "not_matched")
+
+    hard = core.hard_answer(text)
+    if hard:
+        trace("hard_answer", "matched", grounded=True)
+        reply = ensure_reply(hard)
+        return _timed_return(reply, {
+            "planner_decision": "deterministic",
+            "tool": "hard_answer",
+            "tool_args": {"query": text},
+            "tool_result": reply,
+            "grounded": True,
+        })
+    trace("hard_answer", "not_matched")
+
+    if planner_before_deterministic_content:
+        planner_already_attempted = True
+        planner_call_started = time.perf_counter()
+        planner_outcome = nova_planner_contract.maybe_handle_planner_sequence(
+            text=text,
+            turns=turns,
+            pending_action=pending_action,
+            prefer_web_for_data_queries=prefer_web_for_data_queries,
+            session=session,
+            core=core,
+            trace=trace,
+            normalize_reply=normalize_reply,
+            is_web_preferred_data_query=is_web_preferred_data_query,
+            ensure_active_work_tree_fn=ensure_active_work_tree_fn,
+            work_tree_seed_source=work_tree_seed_source,
+            work_tree_seed_mode=work_tree_seed_mode,
+        )
+        timing_profile["planner_time"] = int((time.perf_counter() - planner_call_started) * 1000)
+        trace("timing", "completed", "planner_call", duration_ms=timing_profile["planner_time"])
+        if planner_outcome is not None:
+            return _timed_return(*_break_fallback_loop(planner_outcome[0], planner_outcome[1]))
+
+    deterministic_outcome = maybe_handle_deterministic_sequence(
+        text=text,
+        turns=turns,
+        low=low,
+        trace=trace,
+        normalize_reply=normalize_reply,
+        is_session_recap_request=is_session_recap_request,
+        session_recap_reply=session_recap_reply,
+        is_assistant_name_query=is_assistant_name_query,
+        assistant_name_reply=assistant_name_reply,
+        is_developer_full_name_query=is_developer_full_name_query,
+        developer_full_name_reply=developer_full_name_reply,
+        is_name_origin_question=is_name_origin_question,
+        is_student_data_attendance_rules_query=is_student_data_attendance_rules_query,
+        student_data_attendance_rules_reply=student_data_attendance_rules_reply,
+        is_developer_profile_request=is_developer_profile_request,
+        developer_profile_reply=developer_profile_reply,
+        is_conversational_clarification=is_conversational_clarification,
+        clarification_reply=clarification_reply,
+        is_location_request=is_location_request,
+        location_reply=location_reply,
+        is_deep_search_followup_request=is_deep_search_followup_request,
+        infer_research_query_from_turns=infer_research_query_from_turns,
+        build_grounded_answer=build_grounded_answer,
+        build_local_topic_digest_answer=build_local_topic_digest_answer,
+        is_groundable_factual_query=is_groundable_factual_query,
+        developer_color_reply=developer_color_reply,
+        developer_bilingual_reply=developer_bilingual_reply,
+        color_reply=color_reply,
+        animal_reply=animal_reply,
+        core=core,
+    )
+    if deterministic_outcome is not None:
+        reply, meta, return_mode, tool_time_ms = deterministic_outcome
+        timing_profile["tool_time"] = int(tool_time_ms or timing_profile["tool_time"] or 0)
+        if return_mode == "logged":
+            return _logged_return(reply, meta)
+        return _timed_return(reply, meta)
+
+    if not planner_already_attempted:
+        planner_call_started = time.perf_counter()
+        planner_outcome = nova_planner_contract.maybe_handle_planner_sequence(
+            text=text,
+            turns=turns,
+            pending_action=pending_action,
+            prefer_web_for_data_queries=prefer_web_for_data_queries,
+            session=session,
+            core=core,
+            trace=trace,
+            normalize_reply=normalize_reply,
+            is_web_preferred_data_query=is_web_preferred_data_query,
+            ensure_active_work_tree_fn=ensure_active_work_tree_fn,
+            work_tree_seed_source=work_tree_seed_source,
+            work_tree_seed_mode=work_tree_seed_mode,
+        )
+        timing_profile["planner_time"] = int((time.perf_counter() - planner_call_started) * 1000)
+        trace("timing", "completed", "planner_call", duration_ms=timing_profile["planner_time"])
+        if planner_outcome is not None:
+            return _timed_return(*_break_fallback_loop(planner_outcome[0], planner_outcome[1]))
+
+    if stop_before_llm_fallback:
+        return _timed_return("", {"planner_decision": "unhandled"})
+
+    fallback_entry = prepare_fallback_flow(
+        text=text,
+        turns=turns,
+        recent_tool_context="",
+        prefer_web_for_data_queries=prefer_web_for_data_queries,
+        analyze_request_fn=core.analyze_request,
+        normalize_policy_reply_fn=normalize_reply,
+        build_fallback_context_details_fn=lambda user_text, session_turns: core.build_fallback_context_details(
+            user_text,
+            session_turns,
+            conversation_state=getattr(session, "conversation_state", None),
+            pending_action=pending_action,
+        ),
+        uses_prior_reference_fn=lambda _text: False,
+        action_ledger_add_step=lambda stage, outcome, detail="", **data: trace(stage, outcome, detail, **data),
+    )
+    if fallback_entry.get("handled"):
+        policy_block_outcome = fallback_entry.get("outcome") if isinstance(fallback_entry.get("outcome"), dict) else {}
+        return _timed_return(str(policy_block_outcome.get("reply") or ""), {
+            "planner_decision": str(policy_block_outcome.get("planner_decision") or "policy_block"),
+            "tool": "",
+            "tool_args": {},
+            "tool_result": "",
+            "grounded": bool(policy_block_outcome.get("grounded")),
+        })
+
+    retrieved = str(fallback_entry.get("retrieved_context") or "")
+    low_confidence_outcome = apply_low_confidence_block(
+        text=text,
+        retrieved_context=retrieved,
+        recent_tool_context="",
+        should_block_low_confidence_fn=lambda user_text, retrieved_context="", tool_context="": core.should_block_low_confidence(
+            user_text,
+            retrieved_context=retrieved_context,
+        ),
+        behavior_record_event_fn=getattr(core, "behavior_record_event", lambda *_args, **_kwargs: None),
+        truthful_limit_outcome_fn=core._truthful_limit_outcome,
+        truthful_limit_reply_fn=core._truthful_limit_reply,
+        action_ledger_add_step=lambda stage, outcome, detail="", **data: trace(stage, outcome, detail, **data),
+        ensure_reply=normalize_reply,
+    )
+    if low_confidence_outcome.get("handled"):
+        return _timed_return(str(low_confidence_outcome.get("reply") or ""), {
+            "planner_decision": str(low_confidence_outcome.get("planner_decision") or "blocked_low_confidence"),
+            "tool": "",
+            "tool_args": {},
+            "tool_result": "",
+            "grounded": False,
+            "reply_contract": str(low_confidence_outcome.get("reply_contract") or ""),
+            "reply_outcome": dict(low_confidence_outcome.get("reply_outcome") or {}),
+        })
+    trace("llm_fallback", "invoked", retrieved_chars=len(retrieved))
+    trace("llm_call", "started")
+    llm_fallback_outcome = finalize_llm_fallback_reply(
+        text=text,
+        raw_user_text="",
+        input_source="",
+        retrieved_context=retrieved,
+        recent_tool_context="",
+        language_mix_spanish_pct=int(language_mix_spanish_pct or 0),
+        active_user="",
+        ollama_chat_fn=core.ollama_chat,
+        sanitize_llm_reply_fn=lambda reply, tool_context: core.sanitize_llm_reply(reply, tool_context),
+        mem_enabled_fn=lambda: False,
+        mem_should_store_fn=lambda _text: False,
+        mem_add_fn=lambda *_args, **_kwargs: None,
+        strip_mem_leak_fn=lambda reply, _retrieved_context: reply,
+        self_correct_reply_fn=lambda _text, reply: (reply, False, ""),
+        behavior_record_event_fn=lambda *_args, **_kwargs: None,
+        action_ledger_add_step=lambda *_args, **_kwargs: None,
+        teach_store_example_fn=lambda *_args, **_kwargs: None,
+        truthful_limit_outcome_fn=core._truthful_limit_outcome,
+        apply_claim_gate_fn=lambda reply, evidence_text="", tool_context="": core._apply_claim_gate(
+            reply,
+            evidence_text=evidence_text,
+            tool_context=tool_context,
+        ),
+        post_claim_reply_transform_fn=lambda reply, reply_contract: reply if reply_contract else core._attach_learning_invitation(reply),
+        is_explicit_request_fn=lambda _text: True,
+        apply_reply_overrides_fn=lambda reply: reply,
+        ensure_reply_fn=lambda reply: reply,
+    )
+    timing_profile["llm_time"] = int(llm_fallback_outcome.get("llm_time_ms") or 0)
+    trace("timing", "completed", "llm_call", duration_ms=timing_profile["llm_time"])
+    if timing_profile["llm_time"] > 20000:
+        trace("llm_call", "slow", "llm_call_slow", duration_ms=timing_profile["llm_time"])
+    reply = str(llm_fallback_outcome.get("reply") or "")
+    reply_contract = str(llm_fallback_outcome.get("reply_contract") or "")
+    reply_outcome: dict[str, object] = dict(llm_fallback_outcome.get("reply_outcome") or {})
+    if reply_contract:
+        trace("claim_gate", "adjusted", "unsupported_claim_blocked")
+    reply, meta = _break_fallback_loop(reply, {
+        "planner_decision": str(llm_fallback_outcome.get("planner_decision") or "llm_fallback"),
+        "tool": "",
+        "tool_args": {},
+        "tool_result": "",
+        "grounded": llm_fallback_outcome.get("grounded"),
+        "reply_contract": reply_contract,
+        "reply_outcome": reply_outcome,
+    })
+    timing_profile["post_time"] = int(llm_fallback_outcome.get("post_time_ms") or 0)
+    trace("timing", "completed", "post_processing", duration_ms=timing_profile["post_time"])
+    return _timed_return(reply, meta)
+

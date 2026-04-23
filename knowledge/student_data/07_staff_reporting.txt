@@ -1,0 +1,11 @@
+﻿Staff Reporting
+
+student_data staff data includes:
+
+• Staff demographics
+• Certifications
+• Teaching assignments
+• Years of experience
+• Payroll information
+
+

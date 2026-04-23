@@ -34,6 +34,7 @@ Drive Nova from an actively evolving supervised runtime to a repeatable package 
 - Bootstrap flow documented and verified.
 - Operations runbook current.
 - Product status and roadmap docs reflect current code reality.
+- Release artifact is buildable from the canonical launcher flow.
 
 ## GitHub Update Protocol (Per Iteration)
 1. Update canonical docs after each meaningful architectural slice:
@@ -50,7 +51,8 @@ Drive Nova from an actively evolving supervised runtime to a repeatable package 
 1. Hold `safety_envelope.mode=observe` and `kidney.mode=observe` for one full monitored cycle.
 2. If stable, move Kidney to `enforce` first while keeping Safety Envelope in `observe`.
 3. Re-audit and then decide on Safety Envelope `enforce` transition.
-4. Once governance is stable, run a package-readiness pass and prepare a release candidate checklist.
+4. Keep the source-bootstrap zip as the current release artifact and rerun its validation for each candidate.
+5. Once governance is stable, run a package-readiness pass and prepare a release candidate checklist.
 
 ## Definition of "Close To Package Product"
 Nova is considered near package-ready when:

@@ -652,6 +652,17 @@ class TestHttpIdentityChat(unittest.TestCase):
         self.assertEqual(payload.get("planner_decision"), "respond")
         self.assertIn("action_planner:respond", payload.get("route_summary", ""))
 
+    def test_http_patch_rollback_uses_safe_fallback_without_tool_detour(self):
+        out = nova_http.process_chat("ledger_patch_safe", "patch rollback")
+        self.assertIn("don't know", out.lower())
+
+        payload = self._latest_action_payload()
+        self.assertEqual(payload.get("planner_decision"), "deterministic")
+        self.assertEqual(payload.get("reply_contract"), "open_probe.safe_fallback")
+        self.assertIn("open_probe:matched", payload.get("route_summary", ""))
+        self.assertNotIn("action_planner:run_tool", payload.get("route_summary", ""))
+        self.assertNotIn("tool_execution:error", payload.get("route_summary", ""))
+
     def test_http_capability_self_correction(self):
         nova_core.remember_name_origin = lambda _text: "Stored"
         nova_core.get_name_origin_story = lambda: ""

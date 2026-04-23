@@ -1,0 +1,26 @@
+{
+  "name": "Real World :: template",
+  "task_id": "template_real_world_task",
+  "source": "real_world",
+  "category": "operator",
+  "objective": "Replace this with a real operator goal.",
+  "messages": [
+    "Describe the real task here.",
+    "Optional follow-up turn here."
+  ],
+  "success_signals": [
+    "Nova understands the operator goal instead of only matching keywords.",
+    "Nova gives an outcome the operator can actually use."
+  ],
+  "failure_signals": [
+    "Nova falls back to generic chat without engaging the actual task.",
+    "Nova invents repo or runtime state instead of grounding the answer."
+  ],
+  "evidence_to_review": [
+    "planner decision",
+    "route summary",
+    "assistant answer",
+    "grounding"
+  ],
+  "notes": "Use this file as the starting point for new real-world task definitions."
+}

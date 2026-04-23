@@ -1,8 +1,10 @@
 import json
+import io
 import os
 import tempfile
 import time
 import unittest
+from contextlib import redirect_stdout
 from pathlib import Path
 from unittest.mock import patch
 
@@ -37,6 +39,35 @@ class TestHealthCheck(unittest.TestCase):
                 ok, info = health.check_heartbeat(max_age=10)
                 self.assertFalse(ok)
                 self.assertTrue(info.startswith("age="))
+
+    def test_run_check_skip_ollama_allows_base_package_profile(self):
+        with patch.object(health, "check_heartbeat", return_value=(True, "age=1s")), \
+             patch.object(health, "check_state", return_value=(True, "pid=123")), \
+             patch.object(health, "check_ollama", return_value=(False, "status=503")):
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                code = health.run_check(include_ollama=False)
+
+        self.assertEqual(code, 0)
+        payload = json.loads(buf.getvalue())
+        self.assertEqual(payload["profile"], "base-package")
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["ollama"]["info"], "skipped")
+        self.assertFalse(payload["ollama"]["required"])
+
+    def test_run_check_requires_ollama_by_default(self):
+        with patch.object(health, "check_heartbeat", return_value=(True, "age=1s")), \
+             patch.object(health, "check_state", return_value=(True, "pid=123")), \
+             patch.object(health, "check_ollama", return_value=(False, "status=503")):
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                code = health.run_check()
+
+        self.assertEqual(code, 1)
+        payload = json.loads(buf.getvalue())
+        self.assertEqual(payload["profile"], "runtime")
+        self.assertFalse(payload["ok"])
+        self.assertTrue(payload["ollama"]["required"])
 
 
 if __name__ == "__main__":

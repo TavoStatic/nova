@@ -10,6 +10,12 @@
 
 ## Quick Start
 
+Bootstrap the local package environment:
+
+```powershell
+C:\Nova\nova.cmd install
+```
+
 Install dependencies:
 
 ```powershell
@@ -37,25 +43,47 @@ C:\Nova\nova.cmd webui --host 127.0.0.1 --port 8080
 Run a smoke cycle:
 
 ```powershell
+C:\Nova\nova.cmd smoke-base --fix
 C:\Nova\nova.cmd smoke --fix
 ```
 
 ## Typical Startup Sequence
 
-1. `nova.cmd doctor`
-2. `nova.cmd run`
-3. `nova.cmd webui-start --host 127.0.0.1 --port 8080`
-4. `C:\Nova\.venv\Scripts\python.exe C:\Nova\health.py check`
+1. `nova.cmd install`
+2. `nova.cmd doctor`
+3. `nova.cmd run`
+4. `nova.cmd webui-start --host 127.0.0.1 --port 8080`
+5. `C:\Nova\.venv\Scripts\python.exe C:\Nova\health.py check`
 
 ## Common Commands
 
 ```powershell
 C:\Nova\nova.cmd help
+C:\Nova\nova.cmd install
+C:\Nova\nova.cmd package-build --label rc1
 C:\Nova\nova.cmd doctor --fix
+C:\Nova\nova.cmd smoke-base --fix
 C:\Nova\nova.cmd test
 C:\Nova\nova.cmd webui-start --host 127.0.0.1 --port 8080
 C:\Nova\nova.cmd webui-status --port 8080
 C:\Nova\nova.cmd webui-stop
+
+## Bootstrap Notes
+
+`nova install` is the canonical bootstrap entrypoint for the current source package.
+
+It will:
+
+1. create `.venv` if needed
+2. upgrade `pip`
+3. install `requirements.txt`
+4. run `doctor.py --fix`
+
+It does not install optional external services such as Ollama or SearXNG.
+
+`nova smoke-base --fix` is the package-level smoke gate that does not require Ollama.
+
+`nova smoke --fix` remains the model-backed runtime smoke gate.
 ```
 
 ## Central Backend Command Console
@@ -92,6 +120,18 @@ Run this checklist after changes to routing, session state, policy, telemetry, r
 3. Verify the operator console still points at the live control endpoints and still exposes the tabs operators use: Overview, Operations, Sessions, and Logs.
 4. If you changed session lifecycle behavior, verify session counts, session deletion, and any session-end telemetry still show up in the control surface.
 5. If you changed reflection, supervisor, or telemetry behavior, verify the control payload still reflects the new fields or summaries operators need.
+
+Control-status cache behavior:
+
+- Successful policy mutations through `POST /api/control/action` must invalidate the cached `GET /api/control/status` payload before returning so provider priority, endpoint, memory scope, and related governance values are visible on the next refresh.
+- Successful `POST /api/chat` and `POST /api/chat/resume` requests must also invalidate the cached control-status payload so provider telemetry and last-hit summaries update immediately after live chat traffic.
+- When validating provider routing, read `GET /api/control/status` immediately after both a governance mutation and a chat turn; a stale result after either path is a regression.
+
+Search-provider runtime notes:
+
+- Search-provider priority is now limited to `wikipedia`, `stackexchange`, and `general_web`. Code or repository discovery prompts should fall back to normal web research rather than requiring a separate GitHub-backed provider.
+- The SearXNG probe attempts the configured local endpoint first, then falls back across localhost `8080` and `8081` when the configured host is local. If the control surface reports an `8081` failure while policy shows `http://127.0.0.1:8080/search`, that usually means the probe repaired or compared against a previously configured local endpoint rather than a different active policy value.
+- For local SearXNG validation, use the `search_endpoint_probe` control action or inspect the `checked_endpoints`, `resolved_endpoint`, and `note` fields in the probe payload before assuming the policy itself is wrong.
 
 Focused operator-console regression:
 

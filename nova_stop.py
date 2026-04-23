@@ -4,7 +4,7 @@ from pathlib import Path
 import psutil
 import tools.runtime_processes as runtime_processes
 
-ROOT = Path(r"C:\Nova")
+ROOT = Path(__file__).resolve().parent
 RUNTIME = ROOT / "runtime"
 
 STOP_FILE = RUNTIME / "guard.stop"

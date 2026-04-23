@@ -16,16 +16,25 @@ Start here:
 - [BOOTSTRAP.md](BOOTSTRAP.md): fresh-machine bootstrap path for the current base package
 - [OPERATIONS.md](OPERATIONS.md): how to run, test, and operate NYO System
 - [ARCHITECTURE.md](ARCHITECTURE.md): component map and request flow
+- [SEARCH_PROVIDER_ARCHITECTURE.md](SEARCH_PROVIDER_ARCHITECTURE.md): target provider stack, routing roles, fallback policy, and command-center governance for web, knowledge, and code search
 - [SUPERVISOR_CONTRACT.md](SUPERVISOR_CONTRACT.md): deterministic behavior ownership contract
-- [QUALITY_BAR.md](QUALITY_BAR.md): hard acceptance bar for cleanup, routing, refactors, and patch work
 - [STATUS.md](STATUS.md): current project state and resume guidance
+- [PHASE_COMPLETION_ASSESSMENT.md](PHASE_COMPLETION_ASSESSMENT.md): step-back assessment of what is done, what is blocking completion, and what should be deferred
+- [PHASE_CLOSEOUT_CHECKLIST.md](PHASE_CLOSEOUT_CHECKLIST.md): master top-level checklist for deciding whether the current phase is actually complete
 - [BASE_PACKAGE_READINESS.md](BASE_PACKAGE_READINESS.md): package-candidate checklist and current readiness score
 - [PACKAGING_MATRIX.md](PACKAGING_MATRIX.md): canonical shipped-vs-local boundary for the base package
+- [DEPENDENCY_CONTRACT.md](DEPENDENCY_CONTRACT.md): required vs optional runtime dependencies and command-level expectations
+- [FRESH_MACHINE_VALIDATION.md](FRESH_MACHINE_VALIDATION.md): release-candidate checklist for validating a built artifact on a clean machine
+- [REAL_WORLD_TASKS.md](REAL_WORLD_TASKS.md): how to define and run realistic operator-grade task sessions instead of only seam regressions
+- [RELEASE_ARTIFACT.md](RELEASE_ARTIFACT.md): canonical base-package artifact format and build flow
+- [WINDOWS_INSTALLER_PLAN.md](WINDOWS_INSTALLER_PLAN.md): concrete plan for a Windows executable installer layered on top of the current package flow
+- `nova installer-build`: build the Windows installer executable from a verified package zip when Inno Setup is available
+- [RC_VALIDATION_TEMPLATE.md](RC_VALIDATION_TEMPLATE.md): result template for recording release-candidate validation runs
+- release ledger: `runtime/exports/release_packages/release_ledger.jsonl`
+- validation record seeds: `runtime/exports/release_packages/validation_records/`
 - [PATCHING.md](PATCHING.md): patch safety, teach proposals, and review flow
-- [SELF_FIX_READINESS.md](SELF_FIX_READINESS.md): bounded self-fix readiness checklist and current gate status
-- [SEARXNG_SETUP.md](SEARXNG_SETUP.md): self-hosted search provider setup
-- [CLEANUP_AUDIT.md](CLEANUP_AUDIT.md): cleanup findings and recommended next removals
-- [TOOLS.md](TOOLS.md): current documented tool surface
-- [TOOLING_ROADMAP.md](TOOLING_ROADMAP.md): planned tooling expansion
+- [PACKAGE_PRODUCT_ROADMAP.md](PACKAGE_PRODUCT_ROADMAP.md): release-gate roadmap from runtime to package product
+- [PHASE2_SAFETY_ENVELOPE.md](PHASE2_SAFETY_ENVELOPE.md): Phase 2 promotion and review governance
+- [KIDNEY_SYSTEM.md](KIDNEY_SYSTEM.md): cleanup and retention governance
 
 Root-level legacy docs are retained as compatibility pointers, but new updates should go here.

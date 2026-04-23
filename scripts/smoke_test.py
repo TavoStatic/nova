@@ -4,9 +4,10 @@
 Checks:
 - import `task_engine.analyze_request` and call it with a short prompt (safe, non-destructive)
 - import `capabilities.describe_capabilities`
-- run `health.py check` as a subprocess and report exit code/output
+- run `health.py check` in base-package or runtime mode and report exit code/output
 """
 
+import argparse
 from pathlib import Path
 import importlib
 import os
@@ -17,13 +18,17 @@ import sys
 BASE_DIR = Path(__file__).resolve().parents[1]
 
 
-def run_health_check():
+def run_health_check(tier: str = "runtime"):
     if os.environ.get("SKIP_HEALTH") or os.environ.get("CI"):
         print("Skipping health.py check (SKIP_HEALTH/CI set).")
         return True
 
+    cmd = [sys.executable, str(BASE_DIR / "health.py"), "check"]
+    if tier == "base":
+        cmd.append("--skip-ollama")
+
     process = subprocess.run(
-        [sys.executable, str(BASE_DIR / "health.py"), "check"],
+        cmd,
         capture_output=True,
         text=True,
     )
@@ -70,14 +75,19 @@ def import_checks():
 
 
 def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--tier", choices=["base", "runtime"], default="runtime")
+    args = parser.parse_args()
+
     print("Nova smoke test starting...", flush=True)
+    print(f"Smoke tier: {args.tier}", flush=True)
     imports_ok = import_checks()
-    health_ok = run_health_check()
+    health_ok = run_health_check(tier=args.tier)
     if imports_ok and health_ok:
-        print("SMOKE TEST: OK")
+        print(f"SMOKE TEST [{args.tier.upper()}]: OK")
         sys.exit(0)
 
-    print("SMOKE TEST: FAILED")
+    print(f"SMOKE TEST [{args.tier.upper()}]: FAILED")
     sys.exit(2)
 
 

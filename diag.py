@@ -4,7 +4,7 @@ import shutil
 from pathlib import Path
 import requests
 
-ROOT = Path(r"C:\Nova")
+ROOT = Path(__file__).resolve().parent
 OLLAMA_BASE = "http://127.0.0.1:11434"
 TAGS = f"{OLLAMA_BASE}/api/tags"
 
@@ -19,7 +19,7 @@ def main():
     try:
         usage = shutil.disk_usage(str(ROOT))
         free_gb = usage.free / (1024**3)
-        ok(f"Disk free under C:\\Nova: {free_gb:.2f} GB") if free_gb >= 2 else warn(f"Disk free under C:\\Nova: {free_gb:.2f} GB (low)")
+        ok(f"Disk free under {ROOT}: {free_gb:.2f} GB") if free_gb >= 2 else warn(f"Disk free under {ROOT}: {free_gb:.2f} GB (low)")
     except Exception as e:
         warn(f"Disk check skipped: {e}")
 

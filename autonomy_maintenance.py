@@ -6,21 +6,56 @@ import subprocess
 import time
 import zipfile
 from pathlib import Path
+from typing import Callable
 
 import kidney
 import nova_core
+import work_tree
 from nova_safety_envelope import select_patch_candidate_definition_paths
+from services.nova_patching import archive_preview_report as service_archive_preview_report
+from services.nova_patching import bulk_archive_superseded_previews as service_bulk_archive_superseded_previews
+from services.nova_patching import bulk_reject_orphaned_previews as service_bulk_reject_orphaned_previews
+from services.nova_patching import patch_preview_summaries as service_patch_preview_summaries
+from services.test_session_control import TEST_SESSION_CONTROL_SERVICE
+from work_tree_contracts import BranchStatus, TaskStatus
 
 
 ROOT = Path(__file__).resolve().parent
+RUNTIME_DIR = ROOT / "runtime"
 VENV_PY = ROOT / ".venv" / "Scripts" / "python.exe"
-STATE_FILE = ROOT / "runtime" / "autonomy_maintenance_state.json"
-MAINT_LOG = ROOT / "runtime" / "autonomy_maintenance.log"
-LATEST_SUBCONSCIOUS = ROOT / "runtime" / "subconscious_runs" / "latest.json"
-GENERATED_DEFS = ROOT / "runtime" / "test_sessions" / "generated_definitions"
+TEST_SESSIONS_ROOT = RUNTIME_DIR / "test_sessions"
+TEST_SESSION_RUNNER_PY = ROOT / "scripts" / "run_test_session.py"
+STATE_FILE = RUNTIME_DIR / "autonomy_maintenance_state.json"
+MAINT_LOG = RUNTIME_DIR / "autonomy_maintenance.log"
+LATEST_SUBCONSCIOUS = RUNTIME_DIR / "subconscious_runs" / "latest.json"
+GENERATED_DEFS = TEST_SESSIONS_ROOT / "generated_definitions"
 UPDATES_DIR = ROOT / "updates"
 
 AUTO_APPLY_THRESHOLD = 0.90
+PATCH_QUEUE_TREE_TITLE = "Patch Queue: governed review and apply"
+PATCH_QUEUE_TREE_KIND = "patch_queue"
+PATCH_QUEUE_TREE_SOURCE = "autonomy_maintenance"
+PATCH_QUEUE_SOURCE_TYPE = "patch_queue_preview"
+PATCH_QUEUE_BUCKET = "patch_queue"
+PATCH_QUEUE_ALLOWED_TOOLS = ["patch_preview_approve", "patch_preview_apply", "patch_rollback", "read", "find"]
+PATCH_QUEUE_EXECUTE_TOOLS = ["patch_preview_approve", "patch_preview_apply", "patch_rollback"]
+PATCH_QUEUE_REVIEW_TOOLS = ["read", "find"]
+PATCH_QUEUE_MAX_STEPS = 3
+GENERATED_QUEUE_TREE_TITLE = "Generated Queue: governed self-repair"
+GENERATED_QUEUE_TREE_KIND = "generated_queue"
+GENERATED_QUEUE_TREE_SOURCE = "autonomy_maintenance"
+GENERATED_QUEUE_SOURCE_TYPE = "generated_queue_item"
+GENERATED_QUEUE_BUCKET = "generated_queue"
+GENERATED_QUEUE_ALLOWED_TOOLS = ["generated_queue_run", "read", "find", "queue_status"]
+GENERATED_QUEUE_EXECUTE_TOOLS = ["generated_queue_run"]
+GENERATED_QUEUE_REVIEW_TOOLS = ["read", "find", "queue_status"]
+GENERATED_QUEUE_MAX_STEPS = 4
+ACTIVE_WORK_TREE_EXECUTE_TOOLS = ["health", "system_check", "queue_status", "pulse", "read", "ls", "find"]
+ACTIVE_WORK_TREE_MAX_TREES = 8
+ACTIVE_WORK_TREE_MAX_STEPS = 8
+LEGACY_PATCH_UPDATE_TOOLS = {"patch_apply", "patch_rollback", "update_now"}
+PROMOTED_PATCH_ENTRY_PREFIX = "runtime/test_sessions/promoted/"
+PATCH_MANIFEST_NAME = "nova_patch.json"
 
 
 def _append_log(message: str) -> None:
@@ -59,6 +94,108 @@ def _run_subconscious_pack() -> tuple[bool, str]:
         return False, str(exc)
 
 
+def _available_test_session_definitions(limit: int = 80) -> list[dict]:
+    return TEST_SESSION_CONTROL_SERVICE.available_test_session_definitions(
+        TEST_SESSION_CONTROL_SERVICE.all_test_session_definition_roots(
+            base_dir=ROOT,
+            runtime_dir=RUNTIME_DIR,
+        ),
+        limit=limit,
+    )
+
+
+def _resolve_test_session_definition(session_name: str) -> Path | None:
+    return TEST_SESSION_CONTROL_SERVICE.resolve_test_session_definition(
+        session_name,
+        _available_test_session_definitions(500),
+    )
+
+
+def _test_session_report_summaries(limit: int = 24) -> list[dict]:
+    return TEST_SESSION_CONTROL_SERVICE.test_session_report_summaries(TEST_SESSIONS_ROOT, limit=limit)
+
+
+def _generated_work_queue(limit: int = 24) -> dict:
+    definitions = _available_test_session_definitions(500)
+    return TEST_SESSION_CONTROL_SERVICE.generated_work_queue(
+        definitions,
+        _test_session_report_summaries(max(200, len(definitions) * 2)),
+        limit=limit,
+        runtime_dir=RUNTIME_DIR,
+    )
+
+
+def _run_test_session_definition(session_file: str) -> tuple[bool, str, dict]:
+    return TEST_SESSION_CONTROL_SERVICE.run_test_session_definition(
+        session_file,
+        runner_path=TEST_SESSION_RUNNER_PY,
+        venv_python=VENV_PY,
+        base_dir=ROOT,
+        resolve_definition_fn=_resolve_test_session_definition,
+        available_definitions_fn=_available_test_session_definitions,
+        report_summaries_fn=_test_session_report_summaries,
+        subprocess_run=subprocess.run,
+    )
+
+
+def _run_next_generated_work_queue_item() -> tuple[bool, str, dict]:
+    return TEST_SESSION_CONTROL_SERVICE.run_next_generated_work_queue_item(
+        generated_work_queue_fn=_generated_work_queue,
+        run_test_session_definition_fn=_run_test_session_definition,
+    )
+
+
+def _record_generated_queue_run(state: dict, ok: bool, msg: str, extra: dict | None = None) -> dict:
+    selected = dict((extra or {}).get("selected") or {})
+    latest_report = dict((extra or {}).get("latest_report") or {})
+    work_queue = dict((extra or {}).get("work_queue") or {})
+    if not selected and isinstance(work_queue.get("next_item"), dict):
+        selected = dict(work_queue.get("next_item") or {})
+    raw_msg = str(msg or "")
+    if str(work_queue.get("status") or "").strip():
+        status = str(work_queue.get("status") or "").strip()
+    elif raw_msg == "generated_work_queue_clear":
+        status = "clear"
+    elif raw_msg == "generated_work_queue_blocked":
+        status = "blocked"
+    else:
+        status = "ok" if ok else "failed"
+    payload = {
+        "ts": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "status": status,
+        "message": str(msg or ""),
+        "selected_file": str(selected.get("file") or ""),
+        "selected_status": str(selected.get("latest_status") or ""),
+        "latest_report_status": str(latest_report.get("status") or ""),
+        "latest_report_run_id": str(latest_report.get("run_id") or ""),
+        "queue_open_count": int(work_queue.get("open_count", 0) or 0),
+        "queue_actionable_count": int(work_queue.get("actionable_count", 0) or 0),
+        "queue_blocked_count": int(work_queue.get("blocked_count", 0) or 0),
+        "queue_blocked_reason_counts": dict(work_queue.get("blocked_reason_counts") or {}) if isinstance(work_queue.get("blocked_reason_counts"), dict) else {},
+        "queue_blocked_files": list(work_queue.get("blocked_files") or []) if isinstance(work_queue.get("blocked_files"), list) else [],
+        "queue_count": int(work_queue.get("count", 0) or 0),
+    }
+    state["last_generated_queue_run"] = payload
+    return payload
+
+
+def _record_worker_cycle(*, cycle: int, interval_sec: int, status: str, code: int | None = None) -> None:
+    state = _load_state()
+    worker_state = dict(state.get("runtime_worker") or {})
+    worker_state["interval_sec"] = max(1, int(interval_sec or 300))
+    worker_state["last_cycle"] = max(1, int(cycle or 1))
+    worker_state["cycle_count"] = max(int(worker_state.get("cycle_count", 0) or 0), max(1, int(cycle or 1)))
+    if status == "running":
+        worker_state["last_started_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
+        worker_state["last_cycle_status"] = "running"
+    else:
+        worker_state["last_completed_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
+        worker_state["last_cycle_status"] = str(status or "unknown")
+        worker_state["last_cycle_code"] = int(code or 0)
+    state["runtime_worker"] = worker_state
+    _save_state(state)
+
+
 def _max_fallback_robustness(report: dict) -> float:
     best = 0.0
     for family in list(report.get("families") or []):
@@ -91,18 +228,98 @@ def _build_micro_patch_zip(state: dict) -> Path | None:
 
     with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
         for source in files:
-            zf.write(source, arcname=f"tests/sessions/{source.name}")
+            zf.write(source, arcname=f"runtime/test_sessions/promoted/{source.name}")
         zf.writestr("nova_patch.json", json.dumps(manifest, ensure_ascii=True, indent=2))
 
     state["last_micro_patch_zip"] = str(zip_path)
     return zip_path
 
 
+def _micro_patch_candidates_require_review(files: list[Path]) -> bool:
+    candidates = [Path(item) for item in list(files or []) if Path(item).exists()]
+    if not candidates:
+        return False
+    try:
+        generated_root = GENERATED_DEFS.resolve()
+        return all(path.resolve().is_relative_to(generated_root) for path in candidates)
+    except Exception:
+        generated_text = str(GENERATED_DEFS.resolve()).replace("\\", "/").rstrip("/") + "/"
+        for path in candidates:
+            resolved = str(path.resolve()).replace("\\", "/")
+            if not resolved.startswith(generated_text):
+                return False
+        return True
+
+
+def _zip_contains_only_promoted_patch_entries(zip_path: Path) -> bool:
+    try:
+        with zipfile.ZipFile(zip_path, "r") as archive:
+            members = [
+                member.filename.replace("\\", "/").lstrip("/")
+                for member in archive.infolist()
+                if not member.is_dir()
+            ]
+    except Exception:
+        return False
+    payload_members = [
+        name for name in members
+        if name and Path(name).name.lower() != PATCH_MANIFEST_NAME.lower()
+    ]
+    return bool(payload_members) and all(name.startswith(PROMOTED_PATCH_ENTRY_PREFIX) for name in payload_members)
+
+
+def _is_patch_preview_definition_only_noop(row: dict) -> bool:
+    decision = str((row or {}).get("decision") or "pending").strip().lower() or "pending"
+    status = str((row or {}).get("status") or "").strip().lower()
+    artifact_state = str((row or {}).get("artifact_state") or "").strip().lower()
+    if decision == "rejected" or not status.startswith("eligible") or artifact_state != "ok":
+        return False
+    added_files = [
+        str(item).strip()
+        for item in list((row or {}).get("added_files") or [])
+        if str(item).strip()
+    ]
+    non_manifest_added = [
+        item for item in added_files
+        if Path(item).name.lower() != PATCH_MANIFEST_NAME.lower()
+    ]
+    skipped_files = [
+        str(item).strip()
+        for item in list((row or {}).get("skipped_files") or [])
+        if str(item).strip()
+    ]
+    if non_manifest_added:
+        return False
+    if not skipped_files:
+        return False
+    return all(item.startswith(PROMOTED_PATCH_ENTRY_PREFIX) for item in skipped_files)
+
+
+def _is_patch_preview_stale_noneligible(row: dict) -> bool:
+    decision = str((row or {}).get("decision") or "pending").strip().lower() or "pending"
+    status = str((row or {}).get("status") or "").strip().lower()
+    artifact_state = str((row or {}).get("artifact_state") or "").strip().lower()
+    if decision == "rejected":
+        return False
+    if artifact_state != "ok":
+        return False
+    if not status or status.startswith("eligible"):
+        return False
+    return status.startswith("rejected:")
+
+
 def _auto_apply_if_eligible(zip_path: Path) -> str:
-    preview_out = nova_core.patch_preview(str(zip_path), write_report=True)
+    if _zip_contains_only_promoted_patch_entries(zip_path):
+        return "skipped_generated_definitions_require_review"
+
+    preview_out = nova_core.patch_preview(str(zip_path), write_report=False)
     if "Status: eligible" not in str(preview_out):
         return f"preview_not_eligible: {str(preview_out).strip()[:300]}"
 
+    if PROMOTED_PATCH_ENTRY_PREFIX in str(preview_out):
+        return "skipped_generated_definitions_require_review"
+
+    preview_out = nova_core.patch_preview(str(zip_path), write_report=True)
     apply_out = nova_core.execute_patch_action("apply", str(zip_path), is_admin=True)
     return str(apply_out or "")
 
@@ -118,10 +335,1277 @@ def _run_daily_regression_if_due(state: dict) -> str:
     summary = "OK" if proc.returncode == 0 else "FAILED"
 
     state["last_regression_date"] = today
+    state["last_regression_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
     state["last_regression_status"] = summary
+    state["last_regression_stale"] = False
     state["last_regression_returncode"] = int(proc.returncode)
     state["last_regression_tail"] = output[-2000:]
     return f"daily_regression_{summary.lower()}"
+
+
+def _run_patch_queue_cleanup(state: dict) -> dict:
+    before = dict(nova_core.patch_status_payload() or {})
+    noop_targets = [
+        item for item in service_patch_preview_summaries(
+            updates_dir=UPDATES_DIR,
+            read_approvals_fn=nova_core._read_approvals,
+            limit=max(5000, len(before.get("previews", []) or []), int(before.get("previews_total", 0) or 0)),
+        )
+        if _is_patch_preview_definition_only_noop(item)
+    ]
+    noop_rejected: list[str] = []
+    noop_failed: list[str] = []
+    noop_note = "autonomy maintenance cleanup: no-op definition-only preview does not require patch apply review"
+    for item in noop_targets:
+        preview_path = str(item.get("path") or item.get("name") or "").strip()
+        if not preview_path:
+            continue
+        ok = nova_core._record_approval(
+            preview_path,
+            "rejected",
+            user=nova_core.get_active_user(),
+            note=noop_note,
+        )
+        if ok:
+            noop_rejected.append(str(item.get("name") or preview_path))
+        else:
+            noop_failed.append(str(item.get("name") or preview_path))
+    orphan_result = service_bulk_reject_orphaned_previews(
+        updates_dir=UPDATES_DIR,
+        read_approvals_fn=nova_core._read_approvals,
+        record_approval_fn=nova_core._record_approval,
+        get_active_user_fn=nova_core.get_active_user,
+        note="autonomy maintenance cleanup: orphaned patch preview references missing patch artifact",
+    )
+    superseded_result = service_bulk_archive_superseded_previews(
+        updates_dir=UPDATES_DIR,
+        read_approvals_fn=nova_core._read_approvals,
+    )
+    rejected_archive_targets = [
+        item for item in service_patch_preview_summaries(
+            updates_dir=UPDATES_DIR,
+            read_approvals_fn=nova_core._read_approvals,
+            limit=max(5000, len(before.get("previews", []) or []), int(before.get("previews_total", 0) or 0)),
+        )
+        if str(item.get("decision") or "").strip().lower() == "rejected"
+    ]
+    archived_rejected: list[str] = []
+    archive_rejected_failed: list[str] = []
+    for item in rejected_archive_targets:
+        preview_path = str(item.get("path") or item.get("name") or "").strip()
+        if not preview_path:
+            continue
+        result = service_archive_preview_report(preview_path, updates_dir=UPDATES_DIR)
+        if bool(result.get("ok")):
+            archived_rejected.append(str(item.get("name") or preview_path))
+        else:
+            archive_rejected_failed.append(str(item.get("name") or preview_path))
+    stale_noneligible_targets = [
+        item for item in service_patch_preview_summaries(
+            updates_dir=UPDATES_DIR,
+            read_approvals_fn=nova_core._read_approvals,
+            limit=max(5000, len(before.get("previews", []) or []), int(before.get("previews_total", 0) or 0)),
+        )
+        if _is_patch_preview_stale_noneligible(item)
+    ]
+    archived_stale_noneligible: list[str] = []
+    archive_stale_noneligible_failed: list[str] = []
+    for item in stale_noneligible_targets:
+        preview_path = str(item.get("path") or item.get("name") or "").strip()
+        if not preview_path:
+            continue
+        result = service_archive_preview_report(preview_path, updates_dir=UPDATES_DIR)
+        if bool(result.get("ok")):
+            archived_stale_noneligible.append(str(item.get("name") or preview_path))
+        else:
+            archive_stale_noneligible_failed.append(str(item.get("name") or preview_path))
+    after = dict(nova_core.patch_status_payload() or {})
+    payload = {
+        "ts": _patch_queue_timestamp(),
+        "status": "ok" if not noop_failed and not archive_rejected_failed and not archive_stale_noneligible_failed and orphan_result.get("ok") and superseded_result.get("ok") else "failed",
+        "noop_rejected_count": len(noop_rejected),
+        "noop_failed_count": len(noop_failed),
+        "orphan_rejected_count": int(orphan_result.get("count", 0) or 0),
+        "orphan_failed_count": len(list(orphan_result.get("failed") or [])),
+        "superseded_archived_count": int(superseded_result.get("count", 0) or 0),
+        "superseded_failed_count": len(list(superseded_result.get("failed") or [])),
+        "rejected_archived_count": len(archived_rejected),
+        "rejected_archive_failed_count": len(archive_rejected_failed),
+        "stale_noneligible_archived_count": len(archived_stale_noneligible),
+        "stale_noneligible_archive_failed_count": len(archive_stale_noneligible_failed),
+        "archive_dir": str(superseded_result.get("archive_dir") or ""),
+        "review_total_before": int(before.get("review_previews_total", 0) or 0),
+        "review_total_after": int(after.get("review_previews_total", 0) or 0),
+        "orphaned_before": int(before.get("review_previews_orphaned", 0) or 0),
+        "orphaned_after": int(after.get("review_previews_orphaned", 0) or 0),
+        "superseded_before": int(before.get("review_previews_superseded_total", 0) or 0),
+        "superseded_after": int(after.get("review_previews_superseded_total", 0) or 0),
+        "previews_total_before": int(before.get("previews_total", 0) or 0),
+        "previews_total_after": int(after.get("previews_total", 0) or 0),
+    }
+    state["last_patch_cleanup"] = payload
+    return payload
+
+
+def _patch_queue_execution_policy() -> dict:
+    return {
+        "allowed_tools": list(PATCH_QUEUE_ALLOWED_TOOLS),
+        "require_explicit_allow": True,
+    }
+
+
+def _patch_queue_timestamp() -> str:
+    return time.strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _patch_queue_preview_name(row: dict) -> str:
+    return str((row or {}).get("name") or (row or {}).get("path") or "").strip()
+
+
+def _patch_queue_source_key(row: dict) -> str:
+    preview_name = _patch_queue_preview_name(row)
+    if preview_name:
+        return f"patch_preview::{preview_name}"
+    return ""
+
+
+def _is_patch_preview_apply_ready(row: dict) -> bool:
+    decision = str((row or {}).get("decision") or "").strip().lower()
+    status = str((row or {}).get("status") or "").strip().lower()
+    artifact_state = str((row or {}).get("artifact_state") or "").strip().lower()
+    min_base_text = str((row or {}).get("min_base_revision") or "").strip()
+    current_revision = (row or {}).get("_current_revision", (row or {}).get("current_revision", 0))
+    base_compatible = True
+    if min_base_text:
+        try:
+            base_compatible = int(current_revision or 0) == int(min_base_text)
+        except Exception:
+            base_compatible = True
+    return (
+        decision == "approved"
+        and status.startswith("eligible")
+        and artifact_state == "ok"
+        and bool((row or {}).get("zip_exists"))
+        and base_compatible
+    )
+
+
+def _is_patch_preview_auto_approvable(row: dict) -> bool:
+    decision = str((row or {}).get("decision") or "").strip().lower()
+    status = str((row or {}).get("status") or "").strip().lower()
+    artifact_state = str((row or {}).get("artifact_state") or "").strip().lower()
+    preview_kind = str((row or {}).get("preview_kind") or "").strip().lower()
+    if decision != "pending":
+        return False
+    if not status.startswith("eligible"):
+        return False
+    if artifact_state != "ok":
+        return False
+    if not bool((row or {}).get("zip_exists")):
+        return False
+    if preview_kind not in {"autonomy_micro_patch", "teach_proposal"}:
+        return False
+    min_base_text = str((row or {}).get("min_base_revision") or "").strip()
+    patch_revision_text = str((row or {}).get("patch_revision") or "").strip()
+    current_revision = (row or {}).get("_current_revision", (row or {}).get("current_revision", 0))
+    try:
+        current_revision_int = int(current_revision or 0)
+    except Exception:
+        current_revision_int = 0
+    if min_base_text:
+        try:
+            if int(min_base_text) != current_revision_int:
+                return False
+        except Exception:
+            return False
+    if patch_revision_text:
+        try:
+            if int(patch_revision_text) != current_revision_int + 1:
+                return False
+        except Exception:
+            return False
+    return True
+
+
+def _select_patch_queue_auto_approval_target(review_rows: list[dict], current_revision: int) -> str:
+    candidates: list[dict] = []
+    for raw_row in review_rows:
+        row = dict(raw_row or {})
+        row["_current_revision"] = current_revision
+        if not _is_patch_preview_auto_approvable(row):
+            continue
+        candidates.append(row)
+    if not candidates:
+        return ""
+
+    def _sort_key(row: dict) -> tuple[int, int, str]:
+        preview_kind = str((row or {}).get("preview_kind") or "").strip().lower()
+        kind_rank = 0 if preview_kind == "autonomy_micro_patch" else 1
+        try:
+            mtime = int((row or {}).get("mtime", 0) or 0)
+        except Exception:
+            mtime = 0
+        name = _patch_queue_preview_name(row)
+        return kind_rank, -mtime, name
+
+    selected = sorted(candidates, key=_sort_key)[0]
+    return _patch_queue_source_key(selected)
+
+
+def _patch_queue_row_mode(row: dict) -> str:
+    decision = str((row or {}).get("decision") or "").strip().lower()
+    artifact_state = str((row or {}).get("artifact_state") or "").strip().lower()
+    if decision == "rejected":
+        return "retired"
+    if artifact_state and artifact_state != "ok":
+        return "orphaned"
+    if _is_patch_preview_apply_ready(row):
+        return "apply"
+    if bool((row or {}).get("_auto_approve_target")) and _is_patch_preview_auto_approvable(row):
+        return "approve"
+    return "review"
+
+
+def _patch_queue_branch_title(row: dict) -> str:
+    preview_name = _patch_queue_preview_name(row) or "unnamed-preview"
+    mode = _patch_queue_row_mode(row)
+    if mode == "apply":
+        return f"Apply preview: {preview_name}"
+    if mode == "approve":
+        return f"Approve preview: {preview_name}"
+    if mode == "orphaned":
+        return f"Resolve orphaned preview: {preview_name}"
+    if mode == "retired":
+        return f"Retired preview: {preview_name}"
+    return f"Review preview: {preview_name}"
+
+
+def _patch_queue_branch_notes(row: dict) -> str:
+    preview_name = _patch_queue_preview_name(row) or "unknown"
+    mode = _patch_queue_row_mode(row)
+    decision = str((row or {}).get("decision") or "pending").strip().lower() or "pending"
+    status = str((row or {}).get("status") or "unknown").strip()
+    review_bucket = str((row or {}).get("review_bucket") or "").strip()
+    artifact_state = str((row or {}).get("artifact_state") or "unknown").strip()
+    artifact_reason = str((row or {}).get("artifact_reason") or "").strip()
+    zip_name = str((row or {}).get("zip_name") or "").strip()
+    collapsed = int((row or {}).get("collapsed_count", 0) or 0)
+    min_base_text = str((row or {}).get("min_base_revision") or "").strip()
+    current_revision = str((row or {}).get("_current_revision", (row or {}).get("current_revision", "")) or "").strip()
+    lines = [
+        f"Preview: {preview_name}",
+        f"Decision: {decision}",
+        f"Status: {status or 'unknown'}",
+        f"Review bucket: {review_bucket or 'n/a'}",
+        f"Artifact: {artifact_state or 'unknown'}",
+    ]
+    if zip_name:
+        lines.append(f"Zip: {zip_name}")
+    if min_base_text:
+        lines.append(f"Required base revision: {min_base_text}")
+    if current_revision:
+        lines.append(f"Current base revision: {current_revision}")
+    if collapsed:
+        lines.append(f"Collapsed queue entries: {collapsed}")
+    if mode == "approve":
+        lines.append("Auto-approval lane: selected as the next governed preview to promote into apply.")
+    if decision == "approved" and str(status or "").lower().startswith("eligible") and min_base_text and current_revision:
+        try:
+            if int(current_revision) < int(min_base_text):
+                lines.append("Base compatibility: waiting for the required patch revision before auto-apply.")
+        except Exception:
+            pass
+    if artifact_reason:
+        lines.append(f"Artifact note: {artifact_reason}")
+    return "\n".join(lines)
+
+
+def _patch_queue_task_title(row: dict) -> str:
+    return f"apply approved preview {_patch_queue_preview_name(row)}"
+
+
+def _patch_queue_approve_task_title(row: dict) -> str:
+    return f"approve pending preview {_patch_queue_preview_name(row)}"
+
+
+def _patch_queue_review_task_title(row: dict) -> str:
+    preview_name = _patch_queue_preview_name(row)
+    if _patch_queue_row_mode(row) == "orphaned":
+        return f"inspect orphaned preview {preview_name}"
+    return f"review pending preview {preview_name}"
+
+
+def _decide_patch_queue_next_step(tree_id: str, options: list[dict]) -> dict | None:
+    candidates: list[tuple[int, int, str, dict]] = []
+    for option in list(options or []):
+        branch_id = str((option or {}).get("branch_id") or "").strip()
+        branch = work_tree.get_branch(branch_id) if branch_id else None
+        tool_name = str((option or {}).get("recommended_tool") or "").strip()
+        if tool_name not in {"patch_preview_apply", "patch_preview_approve"}:
+            continue
+        priority = int(getattr(branch, "priority", 0) or 0) if branch is not None else 0
+        rank = 0 if tool_name == "patch_preview_apply" else 1
+        created_sort = str(getattr(branch, "created_at", "") or "")
+        candidates.append((rank, -priority, created_sort, dict(option)))
+    if not candidates:
+        return None
+    candidates.sort(key=lambda item: (item[0], item[1], item[2]))
+    return candidates[0][3]
+
+
+def _ensure_patch_queue_tree():
+    desired_meta = {
+        "kind": PATCH_QUEUE_TREE_KIND,
+        "source": PATCH_QUEUE_TREE_SOURCE,
+        "patch_queue": True,
+        "execution_policy": _patch_queue_execution_policy(),
+    }
+    for tree in work_tree.list_trees():
+        meta = dict(getattr(tree, "meta", {}) or {})
+        if not (
+            bool(meta.get("patch_queue"))
+            or str(meta.get("kind") or "").strip().lower() == PATCH_QUEUE_TREE_KIND
+            or str(getattr(tree, "title", "") or "").strip().lower().startswith("patch queue:")
+        ):
+            continue
+        changed = False
+        merged_meta = dict(meta)
+        for key, value in desired_meta.items():
+            if merged_meta.get(key) != value:
+                merged_meta[key] = value
+                changed = True
+        if str(tree.title or "") != PATCH_QUEUE_TREE_TITLE:
+            tree.title = PATCH_QUEUE_TREE_TITLE
+            changed = True
+        if changed:
+            tree.meta = merged_meta
+            tree.updated_at = work_tree._now()
+            work_tree.save_tree(tree)
+        return tree
+    return work_tree.initialize_tree(PATCH_QUEUE_TREE_TITLE, meta=desired_meta)
+
+
+def _is_patch_queue_managed_branch(tree, branch) -> bool:
+    if branch is None or tree is None or branch.branch_id == tree.root_branch_id:
+        return False
+    if str(getattr(branch, "source_type", "") or "").strip() == PATCH_QUEUE_SOURCE_TYPE:
+        return True
+    title = str(getattr(branch, "title", "") or "").strip().lower()
+    return title.startswith(("apply preview:", "approve preview:", "review preview:", "resolve orphaned preview:", "retired preview:"))
+
+
+def _find_patch_queue_branch(tree_id: str, source_key: str, preview_name: str, *, open_only: bool) -> object | None:
+    tree = work_tree.get_tree(tree_id)
+    if tree is None:
+        return None
+    for branch in work_tree.list_tree_branches(tree_id):
+        if not _is_patch_queue_managed_branch(tree, branch):
+            continue
+        branch_source_key = str(getattr(branch, "source_key", "") or "").strip()
+        if branch_source_key != source_key:
+            title = str(getattr(branch, "title", "") or "").strip()
+            if not preview_name or not title.endswith(preview_name):
+                continue
+        resolution = str(getattr(branch, "resolution_state", "") or "").strip().lower()
+        if open_only and resolution in {"resolved", "retired"}:
+            continue
+        return branch
+    return None
+
+
+def _complete_open_branch_tasks(branch_id: str) -> int:
+    completed = 0
+    for task in work_tree.list_branch_tasks(branch_id):
+        status = str(getattr(getattr(task, "status", None), "value", getattr(task, "status", "")) or "").strip().lower()
+        if status in {"complete", "dropped"}:
+            continue
+        work_tree.mark_task_complete(task.task_id)
+        completed += 1
+    return completed
+
+
+def _apply_patch_queue_branch_state(branch, row: dict, *, first_seen: bool, reopen: bool) -> None:
+    now = work_tree._now()
+    mode = _patch_queue_row_mode(row)
+    preview_name = _patch_queue_preview_name(row)
+    branch.title = _patch_queue_branch_title(row)
+    branch.bucket = PATCH_QUEUE_BUCKET
+    branch.source_type = PATCH_QUEUE_SOURCE_TYPE
+    branch.source_key = _patch_queue_source_key(row) or None
+    branch.source_payload = dict(row or {})
+    branch.last_seen_at = now
+    branch.notes = _patch_queue_branch_notes(row)
+    branch.evidence_count = 1 if first_seen else int(branch.evidence_count or 0) + 1
+
+    if mode == "apply":
+        branch.work_class = "patch_apply"
+        branch.actionability = "safe_now"
+        branch.resolution_state = "open"
+        branch.status = BranchStatus.READY
+        branch.priority = 90
+        branch.required_tools = []
+        branch.allowed_tools = list(PATCH_QUEUE_EXECUTE_TOOLS)
+        branch.preferred_tool = "patch_preview_apply"
+    elif mode == "approve":
+        branch.work_class = "patch_approve"
+        branch.actionability = "safe_now"
+        branch.resolution_state = "open"
+        branch.status = BranchStatus.READY
+        branch.priority = 80
+        branch.required_tools = []
+        branch.allowed_tools = list(PATCH_QUEUE_EXECUTE_TOOLS)
+        branch.preferred_tool = "patch_preview_approve"
+    elif mode == "orphaned":
+        branch.work_class = "patch_orphaned_review"
+        branch.actionability = "safe_now"
+        branch.resolution_state = "open"
+        branch.status = BranchStatus.READY
+        branch.priority = 35
+        branch.required_tools = []
+        branch.allowed_tools = list(PATCH_QUEUE_REVIEW_TOOLS)
+        branch.preferred_tool = "find"
+    elif mode == "retired":
+        branch.work_class = "patch_retired"
+        branch.actionability = "dead_end"
+        branch.resolution_state = "retired"
+        branch.status = BranchStatus.COMPLETE
+        branch.priority = 0
+        branch.required_tools = []
+        branch.allowed_tools = []
+        branch.preferred_tool = None
+    else:
+        branch.work_class = "patch_review"
+        branch.actionability = "safe_now"
+        branch.resolution_state = "open"
+        branch.status = BranchStatus.READY
+        branch.priority = 50
+        branch.required_tools = []
+        branch.allowed_tools = list(PATCH_QUEUE_REVIEW_TOOLS)
+        branch.preferred_tool = "find"
+
+    if reopen and branch.status == BranchStatus.COMPLETE and mode != "retired":
+        branch.status = BranchStatus.READY if mode in {"apply", "approve", "review", "orphaned"} else BranchStatus.BLOCKED
+        branch.resolution_state = "open"
+
+    if mode == "apply" and preview_name:
+        desired_task = _patch_queue_task_title(row)
+        open_tasks = [
+            task for task in work_tree.list_branch_tasks(branch.branch_id)
+            if str(getattr(getattr(task, "status", None), "value", getattr(task, "status", "")) or "").strip().lower()
+            not in {"complete", "dropped"}
+        ]
+        has_desired_task = any(str(getattr(task, "title", "") or "").strip() == desired_task for task in open_tasks)
+        if not has_desired_task:
+            _complete_open_branch_tasks(branch.branch_id)
+            work_tree.add_task_to_branch(
+                branch.branch_id,
+                desired_task,
+                meta={"patch_preview": preview_name},
+            )
+        branch.allowed_tools = list(PATCH_QUEUE_EXECUTE_TOOLS)
+        branch.preferred_tool = "patch_preview_apply"
+    elif mode == "approve" and preview_name:
+        desired_task = _patch_queue_approve_task_title(row)
+        open_tasks = [
+            task for task in work_tree.list_branch_tasks(branch.branch_id)
+            if str(getattr(getattr(task, "status", None), "value", getattr(task, "status", "")) or "").strip().lower()
+            not in {"complete", "dropped"}
+        ]
+        has_desired_task = any(str(getattr(task, "title", "") or "").strip() == desired_task for task in open_tasks)
+        if not has_desired_task:
+            _complete_open_branch_tasks(branch.branch_id)
+            work_tree.add_task_to_branch(
+                branch.branch_id,
+                desired_task,
+                meta={"patch_preview": preview_name},
+            )
+        branch.allowed_tools = list(PATCH_QUEUE_EXECUTE_TOOLS)
+        branch.preferred_tool = "patch_preview_approve"
+    elif mode in {"review", "orphaned"} and preview_name:
+        desired_task = _patch_queue_review_task_title(row)
+        open_tasks = [
+            task for task in work_tree.list_branch_tasks(branch.branch_id)
+            if str(getattr(getattr(task, "status", None), "value", getattr(task, "status", "")) or "").strip().lower()
+            not in {"complete", "dropped"}
+        ]
+        has_desired_task = any(str(getattr(task, "title", "") or "").strip() == desired_task for task in open_tasks)
+        if not has_desired_task:
+            _complete_open_branch_tasks(branch.branch_id)
+            work_tree.add_task_to_branch(
+                branch.branch_id,
+                desired_task,
+                meta={"patch_preview": preview_name},
+            )
+    else:
+        _complete_open_branch_tasks(branch.branch_id)
+
+    work_tree.touch_branch(branch.branch_id)
+
+
+def _sync_patch_queue_work_tree(state: dict) -> dict:
+    patch_summary = nova_core.patch_status_payload()
+    review_rows = list(patch_summary.get("review_previews") or []) if isinstance(patch_summary, dict) else []
+    tree = _ensure_patch_queue_tree()
+    root_branch = work_tree.get_branch(tree.root_branch_id)
+    if root_branch is None:
+        payload = {
+            "ts": _patch_queue_timestamp(),
+            "status": "failed",
+            "tree_id": tree.tree_id,
+            "tree_title": tree.title,
+            "reason": "root_branch_missing",
+        }
+        state["last_patch_queue_sync"] = payload
+        return payload
+
+    seen_source_keys: set[str] = set()
+    matched_branch_ids: set[str] = set()
+    created_count = 0
+    updated_count = 0
+    reopened_count = 0
+    retired_count = 0
+    apply_ready_count = 0
+    approve_ready_count = 0
+    pending_count = 0
+    orphaned_count = 0
+
+    current_revision = int((patch_summary or {}).get("current_revision", 0) or 0)
+    normalized_rows: list[dict] = []
+    has_apply_ready = False
+    for raw_row in review_rows:
+        row = dict(raw_row or {})
+        row["_current_revision"] = current_revision
+        normalized_rows.append(row)
+        if _is_patch_preview_apply_ready(row):
+            has_apply_ready = True
+    auto_approve_source_key = ""
+    if not has_apply_ready:
+        auto_approve_source_key = _select_patch_queue_auto_approval_target(normalized_rows, current_revision)
+
+    for row in normalized_rows:
+        row["_auto_approve_target"] = _patch_queue_source_key(row) == auto_approve_source_key
+        source_key = _patch_queue_source_key(row)
+        preview_name = _patch_queue_preview_name(row)
+        if not source_key:
+            continue
+        seen_source_keys.add(source_key)
+        mode = _patch_queue_row_mode(row)
+        if mode == "apply":
+            apply_ready_count += 1
+        elif mode == "approve":
+            approve_ready_count += 1
+        elif mode == "orphaned":
+            orphaned_count += 1
+        elif mode != "retired":
+            pending_count += 1
+
+        open_branch = _find_patch_queue_branch(tree.tree_id, source_key, preview_name, open_only=True)
+        if open_branch is not None:
+            _apply_patch_queue_branch_state(open_branch, row, first_seen=False, reopen=False)
+            matched_branch_ids.add(open_branch.branch_id)
+            updated_count += 1
+            continue
+
+        closed_branch = _find_patch_queue_branch(tree.tree_id, source_key, preview_name, open_only=False)
+        if closed_branch is not None:
+            _apply_patch_queue_branch_state(closed_branch, row, first_seen=False, reopen=True)
+            matched_branch_ids.add(closed_branch.branch_id)
+            reopened_count += 1
+            continue
+
+        branch = work_tree.add_branch_to_tree(
+            tree.tree_id,
+            _patch_queue_branch_title(row),
+            PATCH_QUEUE_BUCKET,
+            root_branch.branch_id,
+        )
+        _apply_patch_queue_branch_state(branch, row, first_seen=True, reopen=False)
+        matched_branch_ids.add(branch.branch_id)
+        created_count += 1
+
+    for branch in work_tree.list_tree_branches(tree.tree_id):
+        if not _is_patch_queue_managed_branch(tree, branch):
+            continue
+        if branch.branch_id in matched_branch_ids:
+            continue
+        source_key = str(getattr(branch, "source_key", "") or "").strip()
+        if source_key and source_key in seen_source_keys:
+            continue
+        _complete_open_branch_tasks(branch.branch_id)
+        branch.status = BranchStatus.COMPLETE
+        branch.resolution_state = "resolved"
+        branch.priority = 0
+        branch.allowed_tools = []
+        branch.preferred_tool = None
+        existing = str(branch.notes or "").strip()
+        retire_note = "No longer present in the distinct patch review queue."
+        if retire_note not in existing:
+            branch.notes = f"{existing}\n{retire_note}".strip() if existing else retire_note
+        branch.last_seen_at = work_tree._now()
+        work_tree.touch_branch(branch.branch_id)
+        retired_count += 1
+
+    payload = {
+        "ts": _patch_queue_timestamp(),
+        "status": "ok",
+        "tree_id": tree.tree_id,
+        "tree_title": tree.title,
+        "review_previews_total": len(review_rows),
+        "apply_ready_count": apply_ready_count,
+        "approve_ready_count": approve_ready_count,
+        "pending_count": pending_count,
+        "orphaned_count": orphaned_count,
+        "created_count": created_count,
+        "updated_count": updated_count,
+        "reopened_count": reopened_count,
+        "retired_count": retired_count,
+    }
+    state["last_patch_queue_sync"] = payload
+    return payload
+
+
+def _run_patch_queue_work_tree_cycle(state: dict) -> dict:
+    sync_state = dict(state.get("last_patch_queue_sync") or {})
+    tree_id = str(sync_state.get("tree_id") or "").strip()
+    if not tree_id:
+        payload = {
+            "ts": _patch_queue_timestamp(),
+            "status": "idle",
+            "tree_count": 0,
+            "executed_count": 0,
+            "reason": "patch_queue_tree_missing",
+        }
+        state["last_work_tree_cycle"] = payload
+        return payload
+
+    executed_total = 0
+    full_history: list[dict] = []
+    last_action = ""
+
+    while executed_total < PATCH_QUEUE_MAX_STEPS:
+        apply_ready_count = int(sync_state.get("apply_ready_count", 0) or 0)
+        approve_ready_count = int(sync_state.get("approve_ready_count", 0) or 0)
+        if apply_ready_count + approve_ready_count <= 0:
+            if executed_total > 0:
+                break
+            payload = {
+                "ts": _patch_queue_timestamp(),
+                "status": "idle",
+                "tree_count": 1,
+                "executed_count": 0,
+                "reason": "no_apply_ready_preview",
+                "tree_id": tree_id,
+                "tree_title": str(sync_state.get("tree_title") or ""),
+                "apply_ready_count": apply_ready_count,
+                "approve_ready_count": approve_ready_count,
+            }
+            state["last_work_tree_cycle"] = payload
+            return payload
+
+        history = work_tree.run_autonomous_loop(
+            tree_id,
+            max_steps=1,
+            execute_planned_action_fn=nova_core.execute_planned_action,
+            decide_next_step_fn=_decide_patch_queue_next_step,
+        )
+        full_history.extend(history)
+        last_action = str((history[-1] if history else {}).get("action") or "").strip()
+        executed = [step for step in history if str(step.get("action") or "").strip() == "executed"]
+        executed_total += len(executed)
+        if not executed:
+            break
+        sync_state = _sync_patch_queue_work_tree(state)
+        tree_id = str(sync_state.get("tree_id") or tree_id).strip()
+
+    if executed_total:
+        status = "ok"
+    elif full_history:
+        status = last_action or "waiting"
+    else:
+        status = "idle"
+    payload = {
+        "ts": _patch_queue_timestamp(),
+        "status": status,
+        "tree_count": 1,
+        "executed_count": executed_total,
+        "history_count": len(full_history),
+        "last_action": last_action,
+        "tree_id": tree_id,
+        "tree_title": str(sync_state.get("tree_title") or ""),
+        "apply_ready_count": int(sync_state.get("apply_ready_count", 0) or 0),
+        "approve_ready_count": int(sync_state.get("approve_ready_count", 0) or 0),
+    }
+    if full_history:
+        payload["history"] = full_history
+    state["last_work_tree_cycle"] = payload
+    return payload
+
+
+def _generated_queue_execution_policy() -> dict:
+    return {
+        "allowed_tools": list(GENERATED_QUEUE_ALLOWED_TOOLS),
+        "require_explicit_allow": True,
+    }
+
+
+def _generated_queue_item_file(item: dict) -> str:
+    return str((item or {}).get("file") or (item or {}).get("path") or "").strip()
+
+
+def _generated_queue_source_key(item: dict) -> str:
+    session_file = _generated_queue_item_file(item)
+    if session_file:
+        return f"generated_session::{session_file}"
+    return ""
+
+
+def _generated_queue_priority(item: dict) -> int:
+    latest_status = str((item or {}).get("latest_status") or "never_run").strip().lower() or "never_run"
+    base = {
+        "drift": 95,
+        "warning": 85,
+        "never_run": 75,
+    }.get(latest_status, 65)
+    highest = dict((item or {}).get("highest_priority") or {}) if isinstance((item or {}).get("highest_priority"), dict) else {}
+    urgency = str(highest.get("urgency") or "").strip().lower()
+    bonus = {"high": 4, "medium": 2, "low": 1}.get(urgency, 0)
+    return min(99, max(10, base + bonus))
+
+
+def _generated_queue_branch_title(item: dict) -> str:
+    session_file = _generated_queue_item_file(item) or "unknown.json"
+    latest_status = str((item or {}).get("latest_status") or "never_run").strip().lower() or "never_run"
+    if latest_status == "drift":
+        return f"Repair generated session: {session_file}"
+    if latest_status == "warning":
+        return f"Review generated session: {session_file}"
+    return f"Run generated session: {session_file}"
+
+
+def _generated_queue_branch_notes(item: dict) -> str:
+    session_file = _generated_queue_item_file(item) or "unknown.json"
+    latest_status = str((item or {}).get("latest_status") or "never_run").strip().lower() or "never_run"
+    opportunity_reason = str((item or {}).get("opportunity_reason") or "").strip() or "queued"
+    family_id = str((item or {}).get("family_id") or "").strip()
+    variation_id = str((item or {}).get("variation_id") or "").strip()
+    highest = dict((item or {}).get("highest_priority") or {}) if isinstance((item or {}).get("highest_priority"), dict) else {}
+    latest_comparison = dict((item or {}).get("latest_comparison") or {}) if isinstance((item or {}).get("latest_comparison"), dict) else {}
+    lines = [
+        f"Session file: {session_file}",
+        f"Latest status: {latest_status}",
+        f"Queue reason: {opportunity_reason}",
+    ]
+    if family_id:
+        lines.append(f"Family: {family_id}")
+    if variation_id:
+        lines.append(f"Variation: {variation_id}")
+    if highest:
+        lines.append(
+            "Priority: "
+            f"{str(highest.get('signal') or 'unknown')} / "
+            f"{str(highest.get('seam') or 'unknown')} / "
+            f"{str(highest.get('urgency') or 'unknown')}"
+        )
+        rationale = str(highest.get("rationale") or "").strip()
+        if rationale:
+            lines.append(f"Rationale: {rationale}")
+    diff_count = int(latest_comparison.get("diff_count", 0) or 0)
+    flagged_probe_count = int(latest_comparison.get("flagged_probe_count", 0) or 0)
+    if diff_count or flagged_probe_count:
+        lines.append(f"Latest comparison: diff_count={diff_count}, flagged_probe_count={flagged_probe_count}")
+    return "\n".join(lines)
+
+
+def _generated_queue_task_title(item: dict) -> str:
+    return f"run generated session {_generated_queue_item_file(item)}"
+
+
+def _ensure_generated_queue_tree():
+    desired_meta = {
+        "kind": GENERATED_QUEUE_TREE_KIND,
+        "source": GENERATED_QUEUE_TREE_SOURCE,
+        "generated_queue": True,
+        "execution_policy": _generated_queue_execution_policy(),
+    }
+    for tree in work_tree.list_trees():
+        meta = dict(getattr(tree, "meta", {}) or {})
+        if not (
+            bool(meta.get("generated_queue"))
+            or str(meta.get("kind") or "").strip().lower() == GENERATED_QUEUE_TREE_KIND
+            or str(getattr(tree, "title", "") or "").strip().lower().startswith("generated queue:")
+        ):
+            continue
+        changed = False
+        merged_meta = dict(meta)
+        for key, value in desired_meta.items():
+            if merged_meta.get(key) != value:
+                merged_meta[key] = value
+                changed = True
+        if str(tree.title or "") != GENERATED_QUEUE_TREE_TITLE:
+            tree.title = GENERATED_QUEUE_TREE_TITLE
+            changed = True
+        if changed:
+            tree.meta = merged_meta
+            tree.updated_at = work_tree._now()
+            work_tree.save_tree(tree)
+        return tree
+    return work_tree.initialize_tree(GENERATED_QUEUE_TREE_TITLE, meta=desired_meta)
+
+
+def _is_generated_queue_managed_branch(tree, branch) -> bool:
+    if branch is None or tree is None or branch.branch_id == tree.root_branch_id:
+        return False
+    if str(getattr(branch, "source_type", "") or "").strip() == GENERATED_QUEUE_SOURCE_TYPE:
+        return True
+    title = str(getattr(branch, "title", "") or "").strip().lower()
+    return title.startswith(("run generated session:", "review generated session:", "repair generated session:"))
+
+
+def _find_generated_queue_branch(tree_id: str, source_key: str, session_file: str, *, open_only: bool) -> object | None:
+    tree = work_tree.get_tree(tree_id)
+    if tree is None:
+        return None
+    for branch in work_tree.list_tree_branches(tree_id):
+        if not _is_generated_queue_managed_branch(tree, branch):
+            continue
+        branch_source_key = str(getattr(branch, "source_key", "") or "").strip()
+        if branch_source_key != source_key:
+            title = str(getattr(branch, "title", "") or "").strip()
+            if not session_file or not title.endswith(session_file):
+                continue
+        resolution = str(getattr(branch, "resolution_state", "") or "").strip().lower()
+        if open_only and resolution in {"resolved", "retired"}:
+            continue
+        return branch
+    return None
+
+
+def _apply_generated_queue_branch_state(branch, item: dict, *, first_seen: bool, reopen: bool) -> None:
+    now = work_tree._now()
+    session_file = _generated_queue_item_file(item)
+    branch.title = _generated_queue_branch_title(item)
+    branch.bucket = GENERATED_QUEUE_BUCKET
+    branch.source_type = GENERATED_QUEUE_SOURCE_TYPE
+    branch.source_key = _generated_queue_source_key(item) or None
+    branch.source_payload = dict(item or {})
+    branch.last_seen_at = now
+    branch.notes = _generated_queue_branch_notes(item)
+    branch.evidence_count = 1 if first_seen else int(branch.evidence_count or 0) + 1
+    branch.work_class = "generated_session_repair"
+    branch.actionability = "safe_now"
+    branch.resolution_state = "open"
+    branch.status = BranchStatus.READY
+    branch.priority = _generated_queue_priority(item)
+    branch.required_tools = []
+    branch.allowed_tools = list(GENERATED_QUEUE_EXECUTE_TOOLS)
+    branch.preferred_tool = "generated_queue_run"
+
+    if reopen and branch.status == BranchStatus.COMPLETE:
+        branch.status = BranchStatus.READY
+        branch.resolution_state = "open"
+
+    if session_file:
+        desired_task = _generated_queue_task_title(item)
+        open_tasks = [
+            task for task in work_tree.list_branch_tasks(branch.branch_id)
+            if str(getattr(getattr(task, "status", None), "value", getattr(task, "status", "")) or "").strip().lower()
+            not in {"complete", "dropped"}
+        ]
+        has_desired_task = any(str(getattr(task, "title", "") or "").strip() == desired_task for task in open_tasks)
+        if not has_desired_task:
+            _complete_open_branch_tasks(branch.branch_id)
+            work_tree.add_task_to_branch(
+                branch.branch_id,
+                desired_task,
+                meta={
+                    "session_file": session_file,
+                    "family_id": str((item or {}).get("family_id") or ""),
+                    "variation_id": str((item or {}).get("variation_id") or ""),
+                    "latest_status": str((item or {}).get("latest_status") or ""),
+                    "opportunity_reason": str((item or {}).get("opportunity_reason") or ""),
+                },
+            )
+    else:
+        _complete_open_branch_tasks(branch.branch_id)
+
+    work_tree.touch_branch(branch.branch_id)
+
+
+def _sync_generated_queue_work_tree(state: dict) -> dict:
+    queue_payload = _generated_work_queue(limit=200)
+    actionable_items = [
+        dict(item or {})
+        for item in list(queue_payload.get("items") or [])
+        if isinstance(item, dict) and bool(item.get("actionable"))
+    ]
+    tree = _ensure_generated_queue_tree()
+    root_branch = work_tree.get_branch(tree.root_branch_id)
+    if root_branch is None:
+        payload = {
+            "ts": _patch_queue_timestamp(),
+            "status": "failed",
+            "tree_id": tree.tree_id,
+            "tree_title": tree.title,
+            "reason": "root_branch_missing",
+        }
+        state["last_generated_queue_sync"] = payload
+        return payload
+
+    seen_source_keys: set[str] = set()
+    matched_branch_ids: set[str] = set()
+    created_count = 0
+    updated_count = 0
+    reopened_count = 0
+    retired_count = 0
+
+    for item in actionable_items:
+        source_key = _generated_queue_source_key(item)
+        session_file = _generated_queue_item_file(item)
+        if not source_key or not session_file:
+            continue
+        seen_source_keys.add(source_key)
+
+        open_branch = _find_generated_queue_branch(tree.tree_id, source_key, session_file, open_only=True)
+        if open_branch is not None:
+            _apply_generated_queue_branch_state(open_branch, item, first_seen=False, reopen=False)
+            matched_branch_ids.add(open_branch.branch_id)
+            updated_count += 1
+            continue
+
+        closed_branch = _find_generated_queue_branch(tree.tree_id, source_key, session_file, open_only=False)
+        if closed_branch is not None:
+            _apply_generated_queue_branch_state(closed_branch, item, first_seen=False, reopen=True)
+            matched_branch_ids.add(closed_branch.branch_id)
+            reopened_count += 1
+            continue
+
+        branch = work_tree.add_branch_to_tree(
+            tree.tree_id,
+            _generated_queue_branch_title(item),
+            GENERATED_QUEUE_BUCKET,
+            root_branch.branch_id,
+        )
+        _apply_generated_queue_branch_state(branch, item, first_seen=True, reopen=False)
+        matched_branch_ids.add(branch.branch_id)
+        created_count += 1
+
+    for branch in work_tree.list_tree_branches(tree.tree_id):
+        if not _is_generated_queue_managed_branch(tree, branch):
+            continue
+        if branch.branch_id in matched_branch_ids:
+            continue
+        source_key = str(getattr(branch, "source_key", "") or "").strip()
+        if source_key and source_key in seen_source_keys:
+            continue
+        _complete_open_branch_tasks(branch.branch_id)
+        branch.status = BranchStatus.COMPLETE
+        branch.resolution_state = "resolved"
+        branch.priority = 0
+        branch.allowed_tools = []
+        branch.preferred_tool = None
+        existing = str(branch.notes or "").strip()
+        retire_note = "No longer actionable in the generated work queue."
+        if retire_note not in existing:
+            branch.notes = f"{existing}\n{retire_note}".strip() if existing else retire_note
+        branch.last_seen_at = work_tree._now()
+        work_tree.touch_branch(branch.branch_id)
+        retired_count += 1
+
+    payload = {
+        "ts": _patch_queue_timestamp(),
+        "status": "ok",
+        "tree_id": tree.tree_id,
+        "tree_title": tree.title,
+        "queue_status": str(queue_payload.get("status") or ""),
+        "queue_count": int(queue_payload.get("count", 0) or 0),
+        "open_count": int(queue_payload.get("open_count", 0) or 0),
+        "actionable_count": int(queue_payload.get("actionable_count", 0) or 0),
+        "blocked_count": int(queue_payload.get("blocked_count", 0) or 0),
+        "created_count": created_count,
+        "updated_count": updated_count,
+        "reopened_count": reopened_count,
+        "retired_count": retired_count,
+        "next_file": str((queue_payload.get("next_item") or {}).get("file") or ""),
+    }
+    state["last_generated_queue_sync"] = payload
+    return payload
+
+
+def _execute_generated_queue_planned_action(tool: str, args=None):
+    tool_name = str(tool or "").strip()
+    if tool_name != "generated_queue_run":
+        return nova_core.execute_planned_action(tool, args)
+
+    tool_args = list(args) if isinstance(args, (list, tuple)) else ([] if args in {None, ""} else [args])
+    session_file = str(tool_args[0] or "").strip() if tool_args else ""
+    if not session_file:
+        return {"ok": False, "error": "session_file_required"}
+
+    ok, msg, extra = _run_test_session_definition(session_file)
+    latest_report = dict((extra or {}).get("latest_report") or {})
+    runner_output = str((extra or {}).get("stdout") or "").strip()
+    if latest_report:
+        return {
+            "ok": True,
+            "message": str(msg or ""),
+            "session_file": session_file,
+            "runner_ok": bool(ok),
+            "report_status": str(latest_report.get("status") or ""),
+            "report_run_id": str(latest_report.get("run_id") or ""),
+            "report_path": str(latest_report.get("report_path") or ""),
+            "stdout_tail": runner_output[-500:],
+        }
+    if ok:
+        return {
+            "ok": True,
+            "message": str(msg or ""),
+            "session_file": session_file,
+            "stdout_tail": runner_output[-500:],
+        }
+    return {
+        "ok": False,
+        "error": str(msg or "generated_session_run_failed"),
+        "session_file": session_file,
+        "stdout_tail": runner_output[-500:],
+    }
+
+
+def _run_generated_queue_work_tree_cycle(state: dict) -> dict:
+    sync_state = dict(state.get("last_generated_queue_sync") or {})
+    tree_id = str(sync_state.get("tree_id") or "").strip()
+    if not tree_id:
+        queue_payload = _generated_work_queue(limit=200)
+        _record_generated_queue_run(
+            state,
+            True,
+            "generated_work_queue_tree_missing",
+            {
+                "selected": dict(queue_payload.get("next_item") or {}),
+                "work_queue": queue_payload,
+            },
+        )
+        payload = {
+            "ts": _patch_queue_timestamp(),
+            "status": "idle",
+            "tree_count": 0,
+            "executed_count": 0,
+            "reason": "generated_queue_tree_missing",
+        }
+        state["last_generated_queue_tree_cycle"] = payload
+        return payload
+
+    actionable_count = int(sync_state.get("actionable_count", 0) or 0)
+    if actionable_count <= 0:
+        queue_payload = _generated_work_queue(limit=200)
+        _record_generated_queue_run(
+            state,
+            True,
+            "generated_work_queue_clear" if str(queue_payload.get("status") or "") == "clear" else "generated_work_queue_blocked",
+            {
+                "selected": dict(queue_payload.get("next_item") or {}),
+                "work_queue": queue_payload,
+            },
+        )
+        payload = {
+            "ts": _patch_queue_timestamp(),
+            "status": "idle",
+            "tree_count": 1,
+            "executed_count": 0,
+            "reason": "no_actionable_generated_queue_item",
+            "tree_id": tree_id,
+            "tree_title": str(sync_state.get("tree_title") or ""),
+            "actionable_count": int(queue_payload.get("actionable_count", 0) or 0),
+            "queue_status": str(queue_payload.get("status") or ""),
+        }
+        state["last_generated_queue_tree_cycle"] = payload
+        return payload
+
+    history = work_tree.run_autonomous_loop(
+        tree_id,
+        max_steps=GENERATED_QUEUE_MAX_STEPS,
+        execute_planned_action_fn=_execute_generated_queue_planned_action,
+    )
+    executed = [step for step in history if str(step.get("action") or "").strip() == "executed"]
+    last_action = str((history[-1] if history else {}).get("action") or "").strip()
+    sync_state = _sync_generated_queue_work_tree(state)
+    queue_payload = _generated_work_queue(limit=200)
+    last_result = dict((executed[-1] if executed else {}).get("tool_result") or {}) if executed else {}
+    selected = {"file": str(last_result.get("session_file") or "")} if last_result else dict(queue_payload.get("next_item") or {})
+    latest_report = {}
+    if last_result:
+        latest_report = {
+            "status": str(last_result.get("report_status") or ""),
+            "run_id": str(last_result.get("report_run_id") or ""),
+            "report_path": str(last_result.get("report_path") or ""),
+        }
+        if latest_report["status"]:
+            selected["latest_status"] = latest_report["status"]
+    _record_generated_queue_run(
+        state,
+        True,
+        "generated_work_queue_cycle_executed" if executed else "generated_work_queue_cycle_waiting",
+        {
+            "selected": selected,
+            "latest_report": latest_report,
+            "work_queue": queue_payload,
+        },
+    )
+    payload = {
+        "ts": _patch_queue_timestamp(),
+        "status": "ok" if executed else (last_action or "idle"),
+        "tree_count": 1,
+        "executed_count": len(executed),
+        "history_count": len(history),
+        "last_action": last_action,
+        "tree_id": tree_id,
+        "tree_title": str(sync_state.get("tree_title") or ""),
+        "actionable_count": int(queue_payload.get("actionable_count", 0) or 0),
+        "queue_status": str(queue_payload.get("status") or ""),
+        "selected_file": str(selected.get("file") or ""),
+    }
+    if history:
+        payload["history"] = history
+    state["last_generated_queue_tree_cycle"] = payload
+    return payload
+
+
+def _active_work_tree_candidates(limit: int = ACTIVE_WORK_TREE_MAX_TREES) -> list[dict]:
+    candidates: list[dict] = []
+    for payload in work_tree.list_visual_trees(limit=max(int(limit or ACTIVE_WORK_TREE_MAX_TREES) * 4, 16)):
+        if not isinstance(payload, dict):
+            continue
+        if str(payload.get("status") or "").strip().lower() != "active":
+            continue
+        if str(payload.get("kind") or "").strip().lower() in {PATCH_QUEUE_TREE_KIND, GENERATED_QUEUE_TREE_KIND}:
+            continue
+        next_step = payload.get("next_step") if isinstance(payload.get("next_step"), dict) else {}
+        if not next_step:
+            continue
+        candidates.append(payload)
+        if len(candidates) >= max(1, int(limit or ACTIVE_WORK_TREE_MAX_TREES)):
+            break
+    return candidates
+
+
+def _run_active_work_tree_cycle(state: dict) -> dict:
+    candidates = _active_work_tree_candidates(ACTIVE_WORK_TREE_MAX_TREES)
+    executed_total = 0
+    full_history: list[dict] = []
+    processed: list[dict] = []
+    skipped: list[dict] = []
+    last_action = ""
+
+    for candidate in candidates:
+        if executed_total >= ACTIVE_WORK_TREE_MAX_STEPS:
+            break
+        tree_id = str(candidate.get("tree_id") or "").strip()
+        tree_title = str(candidate.get("title") or "").strip()
+        next_step = candidate.get("next_step") if isinstance(candidate.get("next_step"), dict) else {}
+        tool_name = str(next_step.get("recommended_tool") or "").strip()
+        if not tree_id or not tool_name:
+            continue
+        if tool_name not in ACTIVE_WORK_TREE_EXECUTE_TOOLS:
+            skipped.append(
+                {
+                    "tree_id": tree_id,
+                    "tree_title": tree_title,
+                    "tool": tool_name,
+                    "reason": "tool_not_in_safe_cycle",
+                }
+            )
+            continue
+        history = work_tree.run_autonomous_loop(
+            tree_id,
+            max_steps=1,
+            execute_planned_action_fn=nova_core.execute_planned_action,
+        )
+        full_history.extend(history)
+        last_action = str((history[-1] if history else {}).get("action") or "").strip()
+        executed = [step for step in history if str(step.get("action") or "").strip() == "executed"]
+        executed_total += len(executed)
+        processed.append(
+            {
+                "tree_id": tree_id,
+                "tree_title": tree_title,
+                "tool": tool_name,
+                "executed": len(executed),
+                "last_action": last_action,
+            }
+        )
+
+    if executed_total:
+        status = "ok"
+    elif full_history:
+        status = last_action or "waiting"
+    else:
+        status = "idle"
+    payload = {
+        "ts": _patch_queue_timestamp(),
+        "status": status,
+        "tree_count": len(candidates),
+        "executed_count": executed_total,
+        "history_count": len(full_history),
+        "processed_tree_count": len(processed),
+        "skipped_tree_count": len(skipped),
+        "last_action": last_action,
+        "processed": processed,
+        "skipped": skipped,
+    }
+    if full_history:
+        payload["history"] = full_history
+    state["last_active_work_tree_cycle"] = payload
+    return payload
+
+
+def _retire_legacy_patch_update_trees(state: dict) -> dict:
+    retired: list[dict] = []
+    now = work_tree._now()
+    reason = "Retired legacy patch/update shell after governed patch queue adoption."
+    for candidate in _active_work_tree_candidates(limit=64):
+        tree_id = str(candidate.get("tree_id") or "").strip()
+        tree_kind = str(candidate.get("kind") or "").strip().lower()
+        tree_source = str(candidate.get("source") or "").strip().lower()
+        next_step = candidate.get("next_step") if isinstance(candidate.get("next_step"), dict) else {}
+        tool_name = str(next_step.get("recommended_tool") or "").strip()
+        if not tree_id or tree_kind != "system" or tree_source != "cli":
+            continue
+        if tool_name not in LEGACY_PATCH_UPDATE_TOOLS:
+            continue
+        tree = work_tree.get_tree(tree_id)
+        if tree is None:
+            continue
+        dropped_tasks = 0
+        for branch in work_tree.list_tree_branches(tree_id):
+            existing_notes = str(branch.notes or "").strip()
+            if reason not in existing_notes:
+                branch.notes = f"{existing_notes}\n{reason}".strip() if existing_notes else reason
+            branch.resolution_state = "retired"
+            branch.last_seen_at = now
+            branch.updated_at = now
+            for task in work_tree.list_branch_tasks(branch.branch_id):
+                if task.status in {TaskStatus.COMPLETE, TaskStatus.DROPPED}:
+                    continue
+                task.status = TaskStatus.DROPPED
+                task.updated_at = now
+                dropped_tasks += 1
+        tree.updated_at = now
+        work_tree._refresh_tree_state(tree_id, persist=True)
+        retired.append(
+            {
+                "tree_id": tree_id,
+                "tree_title": str(tree.title or ""),
+                "tool": tool_name,
+                "dropped_tasks": dropped_tasks,
+            }
+        )
+    payload = {
+        "ts": _patch_queue_timestamp(),
+        "status": "ok" if retired else "idle",
+        "retired_count": len(retired),
+        "retired": retired,
+    }
+    state["last_legacy_tree_retirement"] = payload
+    return payload
 
 
 def run_once() -> int:
@@ -149,14 +1633,23 @@ def run_once() -> int:
     state["last_fallback_overuse_score"] = fallback_score
 
     if fallback_score >= threshold:
-        zip_path = _build_micro_patch_zip(state)
-        if zip_path is None:
+        patch_candidates = list(select_patch_candidate_definition_paths(GENERATED_DEFS) or [])
+        if not patch_candidates:
             state["last_auto_apply"] = "skipped_no_generated_defs"
             _append_log("auto_apply_skipped_no_generated_defs")
+        elif _micro_patch_candidates_require_review(patch_candidates):
+            state["last_auto_apply"] = "skipped_generated_definitions_require_review"
+            state["last_micro_patch_zip"] = ""
+            _append_log(f"auto_apply_skipped_generated_definitions_require_review count={len(patch_candidates)}")
         else:
-            apply_result = _auto_apply_if_eligible(zip_path)
-            state["last_auto_apply"] = apply_result[:500]
-            _append_log(f"auto_apply_result={apply_result[:200]}")
+            zip_path = _build_micro_patch_zip(state)
+            if zip_path is None:
+                state["last_auto_apply"] = "skipped_no_generated_defs"
+                _append_log("auto_apply_skipped_no_generated_defs")
+            else:
+                apply_result = _auto_apply_if_eligible(zip_path)
+                state["last_auto_apply"] = apply_result[:500]
+                _append_log(f"auto_apply_result={apply_result[:200]}")
     else:
         state["last_auto_apply"] = "skipped_threshold"
         _append_log(f"auto_apply_skipped_threshold score={fallback_score:.2f} threshold={threshold:.2f}")
@@ -171,17 +1664,189 @@ def run_once() -> int:
         "snapshot_path": kidney_summary.get("snapshot_path"),
     }
 
+    try:
+        patch_cleanup = _run_patch_queue_cleanup(state)
+        _append_log(
+            "patch_queue_cleanup"
+            f" status={patch_cleanup.get('status')}"
+            f" rejected={int(patch_cleanup.get('orphan_rejected_count', 0) or 0)}"
+            f" archived={int(patch_cleanup.get('superseded_archived_count', 0) or 0)}"
+            f" review={int(patch_cleanup.get('review_total_before', 0) or 0)}->{int(patch_cleanup.get('review_total_after', 0) or 0)}"
+        )
+    except Exception as exc:
+        patch_cleanup = {
+            "ts": _patch_queue_timestamp(),
+            "status": "failed",
+            "error": str(exc),
+        }
+        state["last_patch_cleanup"] = patch_cleanup
+        _append_log(f"patch_queue_cleanup_failed {exc}")
+
+    try:
+        patch_queue_sync = _sync_patch_queue_work_tree(state)
+        _append_log(
+            "patch_queue_sync"
+            f" status={patch_queue_sync.get('status')}"
+            f" apply_ready={int(patch_queue_sync.get('apply_ready_count', 0) or 0)}"
+            f" created={int(patch_queue_sync.get('created_count', 0) or 0)}"
+            f" updated={int(patch_queue_sync.get('updated_count', 0) or 0)}"
+        )
+    except Exception as exc:
+        patch_queue_sync = {
+            "ts": _patch_queue_timestamp(),
+            "status": "failed",
+            "error": str(exc),
+        }
+        state["last_patch_queue_sync"] = patch_queue_sync
+        _append_log(f"patch_queue_sync_failed {exc}")
+
+    try:
+        work_tree_cycle = _run_patch_queue_work_tree_cycle(state)
+        _append_log(
+            "work_tree_cycle"
+            f" status={work_tree_cycle.get('status')}"
+            f" executed={int(work_tree_cycle.get('executed_count', 0) or 0)}"
+            f" trees={int(work_tree_cycle.get('tree_count', 0) or 0)}"
+        )
+    except Exception as exc:
+        work_tree_cycle = {
+            "ts": _patch_queue_timestamp(),
+            "status": "failed",
+            "tree_count": 1,
+            "executed_count": 0,
+            "error": str(exc),
+        }
+        state["last_work_tree_cycle"] = work_tree_cycle
+        _append_log(f"work_tree_cycle_failed {exc}")
+
+    try:
+        generated_queue_sync = _sync_generated_queue_work_tree(state)
+        _append_log(
+            "generated_queue_sync"
+            f" status={generated_queue_sync.get('status')}"
+            f" actionable={int(generated_queue_sync.get('actionable_count', 0) or 0)}"
+            f" created={int(generated_queue_sync.get('created_count', 0) or 0)}"
+            f" updated={int(generated_queue_sync.get('updated_count', 0) or 0)}"
+        )
+    except Exception as exc:
+        generated_queue_sync = {
+            "ts": _patch_queue_timestamp(),
+            "status": "failed",
+            "error": str(exc),
+        }
+        state["last_generated_queue_sync"] = generated_queue_sync
+        _append_log(f"generated_queue_sync_failed {exc}")
+
+    try:
+        generated_queue_cycle = _run_generated_queue_work_tree_cycle(state)
+        _append_log(
+            "generated_queue_cycle"
+            f" status={generated_queue_cycle.get('status')}"
+            f" executed={int(generated_queue_cycle.get('executed_count', 0) or 0)}"
+            f" actionable={int(generated_queue_cycle.get('actionable_count', 0) or 0)}"
+        )
+    except Exception as exc:
+        generated_queue_cycle = {
+            "ts": _patch_queue_timestamp(),
+            "status": "failed",
+            "tree_count": 1,
+            "executed_count": 0,
+            "error": str(exc),
+        }
+        state["last_generated_queue_tree_cycle"] = generated_queue_cycle
+        _append_log(f"generated_queue_cycle_failed {exc}")
+
+    try:
+        active_work_tree_cycle = _run_active_work_tree_cycle(state)
+        _append_log(
+            "active_work_tree_cycle"
+            f" status={active_work_tree_cycle.get('status')}"
+            f" executed={int(active_work_tree_cycle.get('executed_count', 0) or 0)}"
+            f" trees={int(active_work_tree_cycle.get('tree_count', 0) or 0)}"
+        )
+    except Exception as exc:
+        active_work_tree_cycle = {
+            "ts": _patch_queue_timestamp(),
+            "status": "failed",
+            "tree_count": 0,
+            "executed_count": 0,
+            "error": str(exc),
+        }
+        state["last_active_work_tree_cycle"] = active_work_tree_cycle
+        _append_log(f"active_work_tree_cycle_failed {exc}")
+
+    try:
+        legacy_tree_retirement = _retire_legacy_patch_update_trees(state)
+        _append_log(
+            "legacy_tree_retirement"
+            f" status={legacy_tree_retirement.get('status')}"
+            f" retired={int(legacy_tree_retirement.get('retired_count', 0) or 0)}"
+        )
+    except Exception as exc:
+        legacy_tree_retirement = {
+            "ts": _patch_queue_timestamp(),
+            "status": "failed",
+            "retired_count": 0,
+            "error": str(exc),
+        }
+        state["last_legacy_tree_retirement"] = legacy_tree_retirement
+        _append_log(f"legacy_tree_retirement_failed {exc}")
+
     regression_status = _run_daily_regression_if_due(state)
+    if regression_status == "daily_regression_skipped_already_ran":
+        last_regression_status = str(state.get("last_regression_status") or "").strip()
+        state["last_regression_stale"] = bool(last_regression_status and "pass" not in last_regression_status.lower() and last_regression_status.lower() != "ok")
+    else:
+        state["last_regression_stale"] = False
     _append_log(regression_status)
 
     _save_state(state)
     return 0
 
 
+def run_worker(
+    *,
+    interval_sec: int = 300,
+    max_cycles: int = 0,
+    continue_on_error: bool = True,
+    run_once_fn: Callable[[], int] = run_once,
+    sleep_fn: Callable[[float], None] = time.sleep,
+) -> int:
+    normalized_interval = max(1, int(interval_sec or 300))
+    normalized_max_cycles = max(0, int(max_cycles or 0))
+    cycle = 0
+    last_code = 0
+
+    while True:
+        cycle += 1
+        _record_worker_cycle(cycle=cycle, interval_sec=normalized_interval, status="running")
+        _append_log(f"worker_cycle_start cycle={cycle}")
+        last_code = int(run_once_fn())
+        cycle_status = "ok" if last_code == 0 else "failed"
+        _record_worker_cycle(cycle=cycle, interval_sec=normalized_interval, status=cycle_status, code=last_code)
+        _append_log(f"worker_cycle_end cycle={cycle} code={last_code}")
+
+        if last_code != 0 and not continue_on_error:
+            return last_code
+        if normalized_max_cycles and cycle >= normalized_max_cycles:
+            return last_code
+        sleep_fn(float(normalized_interval))
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Nova Phase 1 autonomy maintenance")
     parser.add_argument("--once", action="store_true", help="Run one maintenance cycle")
+    parser.add_argument("--loop", action="store_true", help="Run maintenance continuously")
+    parser.add_argument("--interval-sec", type=int, default=300, help="Seconds between maintenance cycles in loop mode")
+    parser.add_argument("--max-cycles", type=int, default=0, help="Optional cycle cap for loop mode; 0 means run continuously")
+    parser.add_argument("--stop-on-error", action="store_true", help="Exit loop mode after the first failed cycle")
     args = parser.parse_args(argv)
+    if args.loop:
+        return run_worker(
+            interval_sec=args.interval_sec,
+            max_cycles=args.max_cycles,
+            continue_on_error=not bool(args.stop_on_error),
+        )
     if args.once:
         return run_once()
     return run_once()
