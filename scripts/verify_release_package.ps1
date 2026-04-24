@@ -184,6 +184,19 @@ function Test-PayloadContainsLeafPattern([hashtable]$payload, [string]$pattern) 
   return $false
 }
 
+function Test-PayloadContainsPathSegmentPattern([hashtable]$payload, [string]$pattern) {
+  if ([string]::IsNullOrWhiteSpace($pattern)) { return $false }
+
+  foreach ($entryPath in @($payload.relative_entry_paths)) {
+    foreach ($segment in ([string]$entryPath.Trim('/')).Split('/')) {
+      if ($segment -like $pattern) {
+        return $true
+      }
+    }
+  }
+  return $false
+}
+
 $targetPath = Resolve-VerificationTarget $Path
 $targetItem = Get-Item $targetPath
 $payload = if ($targetItem.PSIsContainer) {
@@ -229,8 +242,10 @@ $requiredPackageFiles = @(
   "docs/RC_VALIDATION_TEMPLATE.md"
 )
 $forbiddenPathPrefixes = @(
+  ".github",
   ".ci_venv",
   ".venv",
+  ".pytest_cache",
   "knowledge/packs",
   "knowledge/peims",
   "knowledge/web",
@@ -242,12 +257,19 @@ $forbiddenPathPrefixes = @(
 $forbiddenExactPaths = @(
   "LAST_SESSION.json",
   "RESUME_HERE.txt",
-  "nova_memory.sqlite"
+  "nova_memory.sqlite",
+  "This_is_nova",
+  "tests_to_review.txt"
+)
+$forbiddenSegmentPatterns = @(
+  "codex_pulse_test_*"
 )
 $forbiddenLeafPatterns = @(
   "*.log",
   "*.pyc",
-  "*.pyo"
+  "*.pyo",
+  "codex_health_*.jsonl",
+  "codex_reflection_*.jsonl"
 )
 
 Write-Host ""
@@ -297,6 +319,10 @@ foreach ($forbiddenPath in $forbiddenExactPaths) {
 }
 
 Add-CheckResult $failures (-not (Test-PayloadContainsPathSegment $payload "__pycache__")) "forbidden cache path absent: __pycache__" "forbidden cache path present: __pycache__"
+
+foreach ($forbiddenPattern in $forbiddenSegmentPatterns) {
+  Add-CheckResult $failures (-not (Test-PayloadContainsPathSegmentPattern $payload $forbiddenPattern)) ("forbidden segment pattern absent: " + $forbiddenPattern) ("forbidden segment pattern present: " + $forbiddenPattern)
+}
 
 foreach ($forbiddenPattern in $forbiddenLeafPatterns) {
   Add-CheckResult $failures (-not (Test-PayloadContainsLeafPattern $payload $forbiddenPattern)) ("forbidden file pattern absent: " + $forbiddenPattern) ("forbidden file pattern present: " + $forbiddenPattern)

@@ -115,8 +115,10 @@ function Remove-StageRelativePath([string]$rootPath, [string]$relativePath) {
 
 $excludeDirs = @(
   ".git",
+  ".github",
   ".ci_venv",
   ".venv",
+  ".pytest_cache",
   "__pycache__",
   "knowledge\packs",
   "knowledge\peims",
@@ -133,6 +135,8 @@ $excludeDirs = @(
 $excludeFiles = @(
   "LAST_SESSION.json",
   "RESUME_HERE.txt",
+  "This_is_nova",
+  "tests_to_review.txt",
   "full_suite_out.txt",
   "runtime_full_suite_out.txt",
   "discovery_results_phase_i.txt",
@@ -140,8 +144,10 @@ $excludeFiles = @(
 )
 
 $forbiddenStagePaths = @(
+  ".github",
   ".ci_venv",
   ".venv",
+  ".pytest_cache",
   "knowledge\packs",
   "knowledge\peims",
   "knowledge\web",
@@ -212,6 +218,19 @@ Get-ChildItem -Path $stageDir -Recurse -File -Force -Include *.pyc,*.pyo -ErrorA
 Get-ChildItem -Path $stageDir -Recurse -File -Force -Include *.log -ErrorAction SilentlyContinue |
   ForEach-Object { Remove-Item -Force $_.FullName }
 
+Get-ChildItem -Path $stageDir -Recurse -Directory -Force -ErrorAction SilentlyContinue |
+  Where-Object { $_.Name -like "codex_pulse_test_*" } |
+  ForEach-Object { Remove-Item -Recurse -Force $_.FullName }
+
+Get-ChildItem -Path $stageDir -Recurse -File -Force -ErrorAction SilentlyContinue |
+  Where-Object {
+    $_.Name -eq "This_is_nova" -or
+    $_.Name -eq "tests_to_review.txt" -or
+    $_.Name -like "codex_health_*.jsonl" -or
+    $_.Name -like "codex_reflection_*.jsonl"
+  } |
+  ForEach-Object { Remove-Item -Force $_.FullName }
+
 $manifestPath = Join-Path $stageDir "package_manifest.json"
 $manifest = [ordered]@{
   schema_version = 1
@@ -249,8 +268,10 @@ $manifest = [ordered]@{
     "piper runtime assets"
   )
   excludes = @(
+    ".github",
     ".ci_venv",
     ".venv",
+    ".pytest_cache",
     "knowledge/packs",
     "knowledge/peims",
     "knowledge/web",
@@ -260,7 +281,9 @@ $manifest = [ordered]@{
     "memory",
     "updates",
     "interpreter caches",
-    "ad hoc local status files"
+    "ad hoc local status files",
+    "operator-only notes",
+    "codex scratch telemetry"
   )
 }
 $manifest | ConvertTo-Json -Depth 6 | Set-Content -Encoding UTF8 $manifestPath
