@@ -7,15 +7,14 @@
     "enabled": true,
     "search_api_endpoint": "http://127.0.0.1:8081/search",
     "allow_domains": [
-      "tea.texas.gov",
-      "txschools.gov",
-      "tea4avcastro.tea.texas.gov",
-      "region1.net",
-      "texasstudentdatasystem.org",
-      "tsds.txschools.gov",
-      "weather.com",
       "api.weather.gov",
-      "esp.bisd.us"
+      "weather.com",
+      "wikipedia.org",
+      "stackoverflow.com",
+      "stackexchange.com",
+      "docs.python.org",
+      "python.org",
+      "github.com"
     ],
     "max_bytes": 20000000,
     "research_domains_limit": 4,

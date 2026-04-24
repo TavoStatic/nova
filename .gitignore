@@ -33,6 +33,11 @@ _handle_commands_current.txt
 _run_loop_current.txt
 knowledge/packs/test-pack*/
 knowledge/packs/test-pack_*/
+knowledge/peims/
+docs/archive/
+This_is_nova
+tests_to_review.txt
+.github/copilot-instructions.md
 
 # OS
 .DS_Store
