@@ -10,6 +10,7 @@ from typing import Callable
 
 import kidney
 import nova_core
+import nova_safety_envelope
 import work_tree
 from nova_safety_envelope import select_patch_candidate_definition_paths
 from services.nova_patching import archive_preview_report as service_archive_preview_report
@@ -54,6 +55,9 @@ ACTIVE_WORK_TREE_EXECUTE_TOOLS = ["health", "system_check", "queue_status", "pul
 ACTIVE_WORK_TREE_MAX_TREES = 8
 ACTIVE_WORK_TREE_MAX_STEPS = 8
 LEGACY_PATCH_UPDATE_TOOLS = {"patch_apply", "patch_rollback", "update_now"}
+COMPLETE_TREE_VISIBLE_KEEP = 12
+COMPLETE_TREE_ARCHIVE_MIN_AGE_SEC = 0
+COMPLETE_TREE_PROTECTED_KINDS = {"patch_queue", "generated_queue", "signal_ingestion"}
 PROMOTED_PATCH_ENTRY_PREFIX = "runtime/test_sessions/promoted/"
 PATCH_MANIFEST_NAME = "nova_patch.json"
 
@@ -444,6 +448,12 @@ def _run_patch_queue_cleanup(state: dict) -> dict:
         "previews_total_after": int(after.get("previews_total", 0) or 0),
     }
     state["last_patch_cleanup"] = payload
+    return payload
+
+
+def _reevaluate_pending_review_queue(state: dict) -> dict:
+    payload = dict(nova_safety_envelope.reevaluate_pending_reviews())
+    state["last_pending_review_recheck"] = payload
     return payload
 
 
@@ -1608,6 +1618,51 @@ def _retire_legacy_patch_update_trees(state: dict) -> dict:
     return payload
 
 
+def _archive_stale_complete_trees(state: dict) -> dict:
+    now = work_tree._now()
+    candidates: list[work_tree.WorkTree] = []
+    for tree in work_tree.list_trees():
+        if tree.status != work_tree.TreeStatus.COMPLETE:
+            continue
+        meta = dict(tree.meta or {}) if isinstance(tree.meta, dict) else {}
+        kind = str(meta.get("kind") or "").strip().lower()
+        if kind in COMPLETE_TREE_PROTECTED_KINDS:
+            continue
+        candidates.append(tree)
+    candidates.sort(key=lambda tree: (tree.updated_at, tree.tree_id), reverse=True)
+    retained_ids = {tree.tree_id for tree in candidates[: max(0, int(COMPLETE_TREE_VISIBLE_KEEP))]}
+    archived: list[dict] = []
+    skipped_recent = 0
+    reason = "Archived stale complete tree to keep the Scheduled Tree surface focused on current work."
+    for tree in candidates:
+        if tree.tree_id in retained_ids:
+            continue
+        age_sec = max(0.0, (now - tree.updated_at).total_seconds())
+        if age_sec < float(COMPLETE_TREE_ARCHIVE_MIN_AGE_SEC):
+            skipped_recent += 1
+            continue
+        work_tree.archive_tree(tree.tree_id, reason=reason)
+        archived.append(
+            {
+                "tree_id": tree.tree_id,
+                "tree_title": str(tree.title or ""),
+                "kind": str((tree.meta or {}).get("kind") or "") if isinstance(tree.meta, dict) else "",
+                "source": str((tree.meta or {}).get("source") or "") if isinstance(tree.meta, dict) else "",
+                "age_sec": int(age_sec),
+            }
+        )
+    payload = {
+        "ts": _patch_queue_timestamp(),
+        "status": "ok" if archived else "idle",
+        "archived_count": len(archived),
+        "retained_count": len(retained_ids),
+        "skipped_recent_count": skipped_recent,
+        "archived": archived,
+    }
+    state["last_complete_tree_archive"] = payload
+    return payload
+
+
 def run_once() -> int:
     state = _load_state()
 
@@ -1653,6 +1708,25 @@ def run_once() -> int:
     else:
         state["last_auto_apply"] = "skipped_threshold"
         _append_log(f"auto_apply_skipped_threshold score={fallback_score:.2f} threshold={threshold:.2f}")
+
+    try:
+        pending_review_recheck = _reevaluate_pending_review_queue(state)
+        _append_log(
+            "pending_review_recheck"
+            f" status={pending_review_recheck.get('status')}"
+            f" reevaluated={int(pending_review_recheck.get('reevaluated_count', 0) or 0)}"
+            f" promoted={int(pending_review_recheck.get('moved_promoted_count', 0) or 0)}"
+            f" quarantined={int(pending_review_recheck.get('moved_quarantined_count', 0) or 0)}"
+            f" pending={int(pending_review_recheck.get('pending_after', 0) or 0)}"
+        )
+    except Exception as exc:
+        pending_review_recheck = {
+            "ts": _patch_queue_timestamp(),
+            "status": "failed",
+            "error": str(exc),
+        }
+        state["last_pending_review_recheck"] = pending_review_recheck
+        _append_log(f"pending_review_recheck_failed {exc}")
 
     kidney_summary = kidney.run_kidney(logger=lambda message: _append_log(f"[KIDNEY] {message}"))
     state["last_kidney_status"] = {
@@ -1774,6 +1848,24 @@ def run_once() -> int:
         }
         state["last_active_work_tree_cycle"] = active_work_tree_cycle
         _append_log(f"active_work_tree_cycle_failed {exc}")
+
+    try:
+        complete_tree_archive = _archive_stale_complete_trees(state)
+        _append_log(
+            "complete_tree_archive"
+            f" status={complete_tree_archive.get('status')}"
+            f" archived={int(complete_tree_archive.get('archived_count', 0) or 0)}"
+            f" retained={int(complete_tree_archive.get('retained_count', 0) or 0)}"
+        )
+    except Exception as exc:
+        complete_tree_archive = {
+            "ts": _patch_queue_timestamp(),
+            "status": "failed",
+            "archived_count": 0,
+            "error": str(exc),
+        }
+        state["last_complete_tree_archive"] = complete_tree_archive
+        _append_log(f"complete_tree_archive_failed {exc}")
 
     try:
         legacy_tree_retirement = _retire_legacy_patch_update_trees(state)

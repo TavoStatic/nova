@@ -1433,13 +1433,16 @@ function renderSubconscious(status) {
     const workQueue = status && status.generated_work_queue ? status.generated_work_queue : {};
     const maintenance = status && status.autonomy_maintenance ? status.autonomy_maintenance : {};
     const runtimeWorker = maintenance && maintenance.runtime_worker ? maintenance.runtime_worker : {};
+    const maintenanceSchedulerStatus = status && status.maintenance_scheduler_status ? status.maintenance_scheduler_status : '';
+    const maintenanceSchedulerMode = status && status.maintenance_scheduler_mode ? status.maintenance_scheduler_mode : '';
     const lastQueueRun = maintenance && maintenance.last_generated_queue_run ? maintenance.last_generated_queue_run : {};
     const queueItems = Array.isArray(workQueue && workQueue.items) ? workQueue.items : [];
     const liveSessions = Array.isArray(liveSummary && liveSummary.sessions) ? liveSummary.sessions : [];
     const pressureConfig = liveSummary && liveSummary.pressure_config ? liveSummary.pressure_config : {};
     const weakSignalThresholds = pressureConfig && pressureConfig.weak_signal_thresholds ? pressureConfig.weak_signal_thresholds : {};
     const thresholdText = Object.entries(weakSignalThresholds).map(([signal, threshold]) => `${signal}:${threshold}`).join(' | ');
-    const workerStatus = runtimeWorker && runtimeWorker.last_cycle_status ? runtimeWorker.last_cycle_status : 'inactive';
+    const workerStatus = maintenanceSchedulerStatus || (runtimeWorker && runtimeWorker.last_cycle_status ? runtimeWorker.last_cycle_status : 'inactive');
+    const workerMode = maintenanceSchedulerMode || (runtimeWorker && runtimeWorker.active ? 'worker_loop' : 'inactive');
     const workerInterval = runtimeWorker && runtimeWorker.interval_sec != null ? `${runtimeWorker.interval_sec}s` : 'n/a';
     const workerCycles = runtimeWorker && runtimeWorker.cycle_count != null ? runtimeWorker.cycle_count : 0;
     const lastQueueRunText = lastQueueRun && lastQueueRun.selected_file
@@ -1454,7 +1457,8 @@ function renderSubconscious(status) {
         {label: 'Variations', value: summary.variation_count != null ? summary.variation_count : 0},
         {label: 'Priorities', value: summary.training_priority_count != null ? summary.training_priority_count : 0},
         {label: 'Definitions', value: summary.generated_definition_count != null ? summary.generated_definition_count : 0},
-        {label: 'Worker status', value: workerStatus},
+        {label: 'Maintenance status', value: workerStatus},
+        {label: 'Maintenance mode', value: workerMode},
         {label: 'Worker interval', value: workerInterval},
         {label: 'Worker cycles', value: workerCycles},
         {label: 'Live tracked', value: liveSummary.tracked_session_count != null ? liveSummary.tracked_session_count : 0},

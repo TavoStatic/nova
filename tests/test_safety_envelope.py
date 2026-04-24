@@ -158,6 +158,48 @@ class TestSafetyEnvelope(unittest.TestCase):
         self.assertEqual(result.get("status"), "promoted")
         self.assertFalse(result.get("review_required"))
 
+    def test_promoted_history_satisfies_human_veto_window(self):
+        self._write_policy({"enabled": True, "mode": "enforce", "human_veto_first_n": 3, "diversity_min_messages": 3})
+        nova_safety_envelope.PROMOTED_DEFINITIONS_ROOT.mkdir(parents=True, exist_ok=True)
+        for name in ("a.json", "b.json", "c.json"):
+            (nova_safety_envelope.PROMOTED_DEFINITIONS_ROOT / name).write_text(
+                json.dumps({"family_id": "new-family", "messages": ["promoted item"]}),
+                encoding="utf-8",
+            )
+
+        with mock.patch("nova_safety_envelope._run_replay", return_value={"ok": True, "reason": "ok", "comparison": {}, "report_path": ""}), \
+            mock.patch("nova_safety_envelope._pool_similarity", return_value=(0.2, "other.json")), \
+            mock.patch("nova_safety_envelope._family_fallback_score", return_value=0.2), \
+            mock.patch("nova_safety_envelope._diversity_score", return_value=3.1):
+            result = nova_safety_envelope.promote_or_quarantine(self.definition_path)
+
+        self.assertEqual(result.get("status"), "promoted")
+        self.assertFalse(result.get("review_required"))
+
+    def test_reevaluate_pending_reviews_moves_item_out_of_pending_when_window_is_satisfied(self):
+        self._write_policy({"enabled": True, "mode": "enforce", "human_veto_first_n": 3, "diversity_min_messages": 3})
+        nova_safety_envelope.PROMOTED_DEFINITIONS_ROOT.mkdir(parents=True, exist_ok=True)
+        for name in ("a.json", "b.json", "c.json"):
+            (nova_safety_envelope.PROMOTED_DEFINITIONS_ROOT / name).write_text(
+                json.dumps({"family_id": "new-family", "messages": ["promoted item"]}),
+                encoding="utf-8",
+            )
+        nova_safety_envelope.PENDING_REVIEW_ROOT.mkdir(parents=True, exist_ok=True)
+        pending_path = nova_safety_envelope.PENDING_REVIEW_ROOT / self.definition_path.name
+        pending_path.write_text(self.definition_path.read_text(encoding="utf-8"), encoding="utf-8")
+
+        with mock.patch("nova_safety_envelope._run_replay", return_value={"ok": True, "reason": "ok", "comparison": {}, "report_path": ""}), \
+            mock.patch("nova_safety_envelope._pool_similarity", return_value=(0.2, "other.json")), \
+            mock.patch("nova_safety_envelope._family_fallback_score", return_value=0.2), \
+            mock.patch("nova_safety_envelope._diversity_score", return_value=3.1):
+            summary = nova_safety_envelope.reevaluate_pending_reviews()
+
+        self.assertEqual(summary.get("status"), "ok")
+        self.assertEqual(summary.get("reevaluated_count"), 1)
+        self.assertEqual(summary.get("moved_promoted_count"), 1)
+        self.assertFalse(pending_path.exists())
+        self.assertTrue((nova_safety_envelope.PROMOTED_DEFINITIONS_ROOT / self.definition_path.name).exists())
+
     def test_replay_retry_recovers_transient_failure(self):
         self._write_policy({
             "enabled": True,

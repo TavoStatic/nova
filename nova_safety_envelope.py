@@ -331,14 +331,38 @@ def _family_reviewed_count(family_id: str) -> int:
     if not family_id:
         return 0
     latest = _latest_audit_by_file()
-    count = 0
+    pending_count = 0
+    promoted_audit_count = 0
     for row in latest.values():
         if str(row.get("family_id") or "").strip() != family_id:
             continue
         status = str(row.get("status") or "").strip().lower()
-        if status in {"pending_review", "promoted"}:
-            count += 1
-    return count
+        if status == "pending_review":
+            pending_count += 1
+        elif status == "promoted":
+            promoted_audit_count += 1
+    promoted_count = _family_promoted_count(family_id)
+    return max(promoted_count, promoted_audit_count) + pending_count
+
+
+def _same_path(left: Path, right: Path) -> bool:
+    try:
+        return left.resolve() == right.resolve()
+    except Exception:
+        return str(left).replace("\\", "/").rstrip("/").lower() == str(right).replace("\\", "/").rstrip("/").lower()
+
+
+def _is_managed_review_path(path: Path) -> bool:
+    for root in (GENERATED_DEFINITIONS_ROOT, PROMOTED_DEFINITIONS_ROOT, PENDING_REVIEW_ROOT, QUARANTINE_ROOT):
+        try:
+            if path.resolve().is_relative_to(root.resolve()):
+                return True
+        except Exception:
+            root_text = str(root.resolve()).replace("\\", "/").rstrip("/") + "/"
+            path_text = str(path.resolve()).replace("\\", "/")
+            if path_text.startswith(root_text):
+                return True
+    return False
 
 
 def _cfg_float(cfg: dict[str, Any], key: str, default: float) -> float:
@@ -497,6 +521,7 @@ def promote_or_quarantine(definition_path: str | Path, *, run_full_regression: b
     cfg = policy_safety_envelope()
     result = evaluate_promotion_contract(path, run_full_regression=run_full_regression)
     mode = str(cfg.get("mode") or "observe").strip().lower() or "observe"
+    managed_source = _is_managed_review_path(path)
 
     status = "observed"
     target_path = ""
@@ -508,22 +533,33 @@ def promote_or_quarantine(definition_path: str | Path, *, run_full_regression: b
         pending_root = Path(str(cfg.get("pending_review_root") or PENDING_REVIEW_ROOT))
         pending_root.mkdir(parents=True, exist_ok=True)
         target = pending_root / path.name
-        shutil.copy2(path, target)
+        if not _same_path(path, target):
+            shutil.copy2(path, target)
         status = "pending_review"
         target_path = str(target)
     elif result.get("passed"):
         PROMOTED_DEFINITIONS_ROOT.mkdir(parents=True, exist_ok=True)
         target = PROMOTED_DEFINITIONS_ROOT / path.name
-        shutil.copy2(path, target)
+        if not _same_path(path, target):
+            shutil.copy2(path, target)
         status = "promoted"
         target_path = str(target)
     else:
         quarantine_root = Path(str(cfg.get("quarantine_root") or QUARANTINE_ROOT))
         quarantine_root.mkdir(parents=True, exist_ok=True)
         target = quarantine_root / path.name
-        shutil.copy2(path, target)
+        if not _same_path(path, target):
+            shutil.copy2(path, target)
         status = "quarantined"
         target_path = str(target)
+
+    if managed_source and target_path:
+        target = Path(target_path)
+        if not _same_path(path, target):
+            try:
+                path.unlink()
+            except Exception:
+                pass
 
     audit_row = {
         "ts": time.strftime("%Y-%m-%d %H:%M:%S"),
@@ -546,6 +582,47 @@ def promote_or_quarantine(definition_path: str | Path, *, run_full_regression: b
     output["status"] = status
     output["target_path"] = target_path
     return output
+
+
+def reevaluate_pending_reviews(*, limit: int | None = None, run_full_regression: bool = False) -> dict[str, Any]:
+    pending_files = _definition_files(PENDING_REVIEW_ROOT)
+    if isinstance(limit, int) and limit > 0:
+        pending_files = pending_files[:limit]
+
+    reevaluated = 0
+    retained_pending = 0
+    moved_promoted = 0
+    moved_quarantined = 0
+    failed = 0
+    failures: list[dict[str, str]] = []
+
+    for path in pending_files:
+        try:
+            result = promote_or_quarantine(path, run_full_regression=run_full_regression)
+            reevaluated += 1
+            status = str(result.get("status") or "").strip().lower()
+            if status == "promoted":
+                moved_promoted += 1
+            elif status == "quarantined":
+                moved_quarantined += 1
+            elif status == "pending_review":
+                retained_pending += 1
+        except Exception as exc:
+            failed += 1
+            failures.append({"file": path.name, "error": str(exc)})
+
+    return {
+        "ts": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "status": "ok" if failed == 0 else ("partial" if reevaluated else "failed"),
+        "pending_before": len(_definition_files(PENDING_REVIEW_ROOT)) + moved_promoted + moved_quarantined,
+        "pending_after": len(_definition_files(PENDING_REVIEW_ROOT)),
+        "reevaluated_count": reevaluated,
+        "retained_pending_count": retained_pending,
+        "moved_promoted_count": moved_promoted,
+        "moved_quarantined_count": moved_quarantined,
+        "failed_count": failed,
+        "failures": failures,
+    }
 
 
 def evaluate_generated_definitions(paths: list[str] | list[Path], *, max_candidates: int | None = None) -> dict[str, Any]:

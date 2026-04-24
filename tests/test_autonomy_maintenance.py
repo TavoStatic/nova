@@ -1,6 +1,7 @@
 import json
 import tempfile
 import unittest
+from datetime import timedelta
 from pathlib import Path
 from unittest import mock
 import uuid
@@ -35,6 +36,36 @@ class TestAutonomyMaintenance(unittest.TestCase):
 
         self.addCleanup(_cleanup)
         return db_path
+
+    def test_archive_stale_complete_trees_keeps_recent_history_visible(self):
+        self._isolated_work_tree_db()
+        now = work_tree._now()
+        created_ids = []
+        for idx in range(4):
+            tree = work_tree.initialize_tree(
+                f"Cli: stale {idx}",
+                meta={"kind": "system", "source": "cli"},
+            )
+            work_tree._refresh_tree_state(tree.tree_id, persist=True)
+            tree.updated_at = now - timedelta(hours=idx + 1)
+            work_tree.save_tree(tree)
+            work_tree._persist_tree_state(tree.tree_id)
+            created_ids.append(tree.tree_id)
+
+        state: dict = {}
+        with mock.patch.object(autonomy_maintenance, "COMPLETE_TREE_VISIBLE_KEEP", 2), \
+             mock.patch.object(autonomy_maintenance, "COMPLETE_TREE_ARCHIVE_MIN_AGE_SEC", 0):
+            payload = autonomy_maintenance._archive_stale_complete_trees(state)
+
+        self.assertEqual(payload.get("archived_count"), 2)
+        self.assertEqual(payload.get("retained_count"), 2)
+        retained_ids = set(created_ids[:2])
+        archived_ids = set(created_ids[2:])
+        visible_ids = {item.get("tree_id") for item in work_tree.list_visual_trees(limit=None)}
+        self.assertTrue(retained_ids.issubset(visible_ids))
+        self.assertTrue(archived_ids.isdisjoint(visible_ids))
+        for tree_id in archived_ids:
+            self.assertEqual(work_tree.get_tree(tree_id).status, work_tree.TreeStatus.ARCHIVED)
 
     def test_run_once_records_generated_queue_outcome(self):
         with tempfile.TemporaryDirectory() as td:

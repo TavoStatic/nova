@@ -129,6 +129,7 @@ def _autonomy_maintenance_summary() -> dict:
     last_work_tree_cycle = dict(payload.get("last_work_tree_cycle") or {}) if isinstance(payload.get("last_work_tree_cycle"), dict) else {}
     last_patch_queue_sync = dict(payload.get("last_patch_queue_sync") or {}) if isinstance(payload.get("last_patch_queue_sync"), dict) else {}
     last_patch_cleanup = dict(payload.get("last_patch_cleanup") or {}) if isinstance(payload.get("last_patch_cleanup"), dict) else {}
+    last_complete_tree_archive = dict(payload.get("last_complete_tree_archive") or {}) if isinstance(payload.get("last_complete_tree_archive"), dict) else {}
     last_kidney_status = dict(payload.get("last_kidney_status") or {}) if isinstance(payload.get("last_kidney_status"), dict) else {}
     pid = runtime_worker.get("pid")
     create_time = runtime_worker.get("create_time")
@@ -194,6 +195,7 @@ def _autonomy_maintenance_summary() -> dict:
         "last_work_tree_cycle": last_work_tree_cycle,
         "last_patch_queue_sync": last_patch_queue_sync,
         "last_patch_cleanup": last_patch_cleanup,
+        "last_complete_tree_archive": last_complete_tree_archive,
         "last_kidney_status": last_kidney_status,
     }
 
@@ -1645,7 +1647,10 @@ def _runtime_process_note() -> str:
     return "Process counts reflect the active service process state."
 
 
-def _probe_searxng(endpoint: str, timeout: float = 2.5) -> tuple[bool, str]:
+SEARXNG_STATUS_TIMEOUT_SEC = 5.0
+
+
+def _probe_searxng(endpoint: str, timeout: float = SEARXNG_STATUS_TIMEOUT_SEC) -> tuple[bool, str]:
     probe = nova_core.probe_search_endpoint(endpoint, timeout=timeout, persist_repair=True)
     return bool(probe.get("ok")), str(probe.get("note") or "endpoint_unreachable")
 
@@ -1754,12 +1759,77 @@ def _cached_control_status_payload(max_age_seconds: float = CONTROL_STATUS_CACHE
 
 
 def _work_trees_payload(limit: int = 32) -> dict:
+    def _branch_total(tree_payload: dict) -> int:
+        counts = tree_payload.get("counts") if isinstance(tree_payload.get("counts"), dict) else {}
+        branch_counts = counts.get("branches") if isinstance(counts.get("branches"), dict) else {}
+        return sum(int(value or 0) for value in branch_counts.values())
+
+    def _semantic_family_key(tree_payload: dict) -> str:
+        if not isinstance(tree_payload, dict):
+            return ""
+        counts = tree_payload.get("counts") if isinstance(tree_payload.get("counts"), dict) else {}
+        status = str(tree_payload.get("status") or "").strip().lower()
+        open_tasks = int(counts.get("open_tasks") or 0)
+        if status != "complete" or open_tasks > 0 or _branch_total(tree_payload) > 0:
+            return ""
+        kind = str(tree_payload.get("kind") or "").strip().lower()
+        source = str(tree_payload.get("source") or "").strip().lower()
+        if kind != "system" or source not in {"chat", "health", "maintenance"}:
+            return ""
+        text = " ".join(
+            [
+                str(tree_payload.get("title") or ""),
+                str(tree_payload.get("work_identity_key") or ""),
+                str(tree_payload.get("work_identity_label") or ""),
+            ]
+        ).lower()
+        token_hits = {
+            token
+            for token in ("runtime", "health", "queue", "pressure", "heartbeat", "guard", "inspect", "monitor", "verify", "check", "system")
+            if token in text
+        }
+        if "runtime" in token_hits and len(token_hits) >= 3:
+            return "semantic:runtime-ops"
+        if {"health", "system"} <= token_hits and len(token_hits) >= 3:
+            return "semantic:runtime-ops"
+        return ""
+
     def _priority_tree(tree_payload: dict) -> bool:
         if not isinstance(tree_payload, dict):
             return False
         kind = str(tree_payload.get("kind") or "").strip().lower()
         title = str(tree_payload.get("title") or "").strip().lower()
         return kind in {"patch_queue", "generated_queue"} or title.startswith(("patch queue:", "generated queue:"))
+
+    def _dedupe_key(tree_payload: dict) -> str:
+        if not isinstance(tree_payload, dict):
+            return ""
+        semantic_family_key = _semantic_family_key(tree_payload)
+        if semantic_family_key:
+            return semantic_family_key
+        work_identity_key = str(tree_payload.get("work_identity_key") or "").strip().lower()
+        if work_identity_key:
+            return f"identity:{work_identity_key}"
+        kind = str(tree_payload.get("kind") or "").strip().lower()
+        source = str(tree_payload.get("source") or "").strip().lower()
+        title = str(tree_payload.get("title") or "").strip().lower()
+        if kind and source and title:
+            return f"shape:{kind}|{source}|{title}"
+        return ""
+
+    def _dedupe_visible_trees(items: list[dict]) -> list[dict]:
+        kept: list[dict] = []
+        seen: set[str] = set()
+        for item in list(items or []):
+            if not isinstance(item, dict):
+                continue
+            key = _dedupe_key(item)
+            if key and key in seen:
+                continue
+            if key:
+                seen.add(key)
+            kept.append(item)
+        return kept
 
     try:
         trees = work_tree.list_visual_trees(limit)
@@ -1787,6 +1857,8 @@ def _work_trees_payload(limit: int = 32) -> dict:
             safe_trees.append(tree_payload)
             seen_tree_ids.add(tree_id)
 
+    safe_trees = _dedupe_visible_trees(safe_trees)
+
     total = len(safe_trees)
     active = 0
     branch_total = 0
@@ -1805,7 +1877,7 @@ def _work_trees_payload(limit: int = 32) -> dict:
         active_branch_id = str(tree_payload.get("active_branch_id") or "").strip()
         if active_branch_id or status == "active":
             active += 1
-        branch_total += sum(int(value or 0) for value in branch_counts.values())
+        branch_total += _branch_total(tree_payload)
         open_task_total += int(counts.get("open_tasks") or 0)
         working_total += int(branch_counts.get("active") or 0)
         pending_total += int(branch_counts.get("ready") or 0)

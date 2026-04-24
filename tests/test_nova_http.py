@@ -139,6 +139,7 @@ class TestNovaHttpProfile(unittest.TestCase):
                 "queue_blocked_files": ["a.json", "b.json", "c.json"],
             },
             "last_work_tree_cycle": {"status": "idle"},
+            "last_complete_tree_archive": {"status": "ok", "archived_count": 12, "retained_count": 8},
             "last_error": "",
         }
         with mock.patch("nova_http._load_autonomy_maintenance_state", return_value=state), \
@@ -155,7 +156,16 @@ class TestNovaHttpProfile(unittest.TestCase):
         self.assertEqual(payload.get("queue_blocked_reason_counts"), {"parity_drift_locked": 3})
         self.assertEqual(payload.get("queue_blocked_files"), ["a.json", "b.json", "c.json"])
         self.assertEqual(payload.get("work_tree_status"), "idle")
+        self.assertEqual((payload.get("last_complete_tree_archive") or {}).get("archived_count"), 12)
         self.assertEqual(payload.get("last_error"), "")
+
+    def test_probe_searxng_uses_relaxed_timeout(self):
+        with mock.patch("nova_http.nova_core.probe_search_endpoint", return_value={"ok": True, "note": "status=200"}) as probe_mock:
+            ok, note = nova_http._probe_searxng("http://127.0.0.1:8081/search")
+
+        self.assertTrue(ok)
+        self.assertEqual(note, "status=200")
+        self.assertEqual(probe_mock.call_args.kwargs.get("timeout"), nova_http.SEARXNG_STATUS_TIMEOUT_SEC)
 
     def test_autonomy_maintenance_summary_clears_stale_worker_identity_when_process_missing(self):
         state = {
@@ -928,6 +938,145 @@ class TestNovaHttpControlAssets(unittest.TestCase):
         self.assertEqual(
             [tree.get("tree_id") for tree in result["trees"]],
             ["tree_1", "tree_generated"],
+        )
+
+    def test_work_trees_payload_dedupes_duplicate_identities_and_signal_shells(self):
+        rich_signal_tree = {
+            "tree_id": "tree_signal_rich",
+            "title": "Signal Intake: Runtime Governance",
+            "kind": "signal_ingestion",
+            "source": "runtime_signals",
+            "status": "complete",
+            "active_branch_id": "",
+            "counts": {
+                "open_tasks": 0,
+                "branches": {"complete": 5},
+            },
+        }
+        empty_signal_shell = {
+            "tree_id": "tree_signal_shell",
+            "title": "Signal Intake: Runtime Governance",
+            "kind": "signal_ingestion",
+            "source": "runtime_signals",
+            "status": "complete",
+            "active_branch_id": "",
+            "counts": {
+                "open_tasks": 0,
+                "branches": {"complete": 0},
+            },
+        }
+        newest_chat_tree = {
+            "tree_id": "tree_chat_new",
+            "title": "Chat: inspect runtime queue pressure",
+            "kind": "system",
+            "source": "chat",
+            "work_identity_key": "work:inspect-pressure-queue-runtime|terms:inspect|pressure|queue|runtime",
+            "status": "complete",
+            "active_branch_id": "",
+            "counts": {
+                "open_tasks": 0,
+                "branches": {"complete": 0},
+            },
+        }
+        older_chat_tree = {
+            "tree_id": "tree_chat_old",
+            "title": "Chat: inspect runtime queue pressure",
+            "kind": "system",
+            "source": "chat",
+            "work_identity_key": "work:inspect-pressure-queue-runtime|terms:inspect|pressure|queue|runtime",
+            "status": "complete",
+            "active_branch_id": "",
+            "counts": {
+                "open_tasks": 0,
+                "branches": {"complete": 0},
+            },
+        }
+        patch_queue_tree = {
+            "tree_id": "tree_patch",
+            "title": "Patch Queue: governed review and apply",
+            "kind": "patch_queue",
+            "source": "autonomy_maintenance",
+            "status": "complete",
+            "active_branch_id": "",
+            "counts": {
+                "open_tasks": 0,
+                "branches": {"complete": 2},
+            },
+        }
+
+        payload = [
+            patch_queue_tree,
+            rich_signal_tree,
+            empty_signal_shell,
+            newest_chat_tree,
+            older_chat_tree,
+        ]
+
+        with mock.patch("nova_http.work_tree.list_visual_trees", side_effect=[payload, payload]):
+            result = nova_http._work_trees_payload()
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["counts"]["total"], 3)
+        self.assertEqual(result["counts"]["branches"], 7)
+        self.assertEqual(
+            [tree.get("tree_id") for tree in result["trees"]],
+            ["tree_patch", "tree_signal_rich", "tree_chat_new"],
+        )
+
+    def test_work_trees_payload_semantically_dedupes_runtime_ops_shells(self):
+        runtime_ops_chat = {
+            "tree_id": "tree_chat_runtime_ops",
+            "title": "Chat: inspect runtime queue pressure",
+            "kind": "system",
+            "source": "chat",
+            "work_identity_key": "work:inspect-pressure-queue-runtime|terms:inspect|pressure|queue|runtime",
+            "work_identity_label": "inspect / pressure / queue / runtime",
+            "status": "complete",
+            "active_branch_id": "",
+            "counts": {
+                "open_tasks": 0,
+                "branches": {"complete": 0},
+            },
+        }
+        runtime_ops_health = {
+            "tree_id": "tree_health_runtime_ops",
+            "title": "Health: verify runtime heartbeat",
+            "kind": "system",
+            "source": "health",
+            "work_identity_key": "work:heartbeat-runtime-verify|terms:heartbeat|runtime|verify",
+            "work_identity_label": "heartbeat / runtime / verify",
+            "status": "complete",
+            "active_branch_id": "",
+            "counts": {
+                "open_tasks": 0,
+                "branches": {"complete": 0},
+            },
+        }
+        unrelated_tree = {
+            "tree_id": "tree_unrelated",
+            "title": "Chat: unrelated ui redesign",
+            "kind": "system",
+            "source": "chat",
+            "work_identity_key": "work:redesign-unrelated|terms:redesign|unrelated",
+            "work_identity_label": "redesign / unrelated",
+            "status": "complete",
+            "active_branch_id": "",
+            "counts": {
+                "open_tasks": 0,
+                "branches": {"complete": 0},
+            },
+        }
+
+        payload = [runtime_ops_chat, runtime_ops_health, unrelated_tree]
+
+        with mock.patch("nova_http.work_tree.list_visual_trees", side_effect=[payload, payload]):
+            result = nova_http._work_trees_payload()
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["counts"]["total"], 2)
+        self.assertEqual(
+            [tree.get("tree_id") for tree in result["trees"]],
+            ["tree_chat_runtime_ops", "tree_unrelated"],
         )
 
     def test_control_assets_keep_scheduled_tree_surface(self):

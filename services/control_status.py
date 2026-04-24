@@ -115,6 +115,7 @@ class ControlStatusService:
         last_generated_queue_run = autonomy_payload.get("last_generated_queue_run") if isinstance(autonomy_payload.get("last_generated_queue_run"), dict) else {}
         last_work_tree_cycle = autonomy_payload.get("last_work_tree_cycle") if isinstance(autonomy_payload.get("last_work_tree_cycle"), dict) else {}
         last_patch_cleanup = autonomy_payload.get("last_patch_cleanup") if isinstance(autonomy_payload.get("last_patch_cleanup"), dict) else {}
+        last_complete_tree_archive = autonomy_payload.get("last_complete_tree_archive") if isinstance(autonomy_payload.get("last_complete_tree_archive"), dict) else {}
         queue_status = str(generated_work_queue.get("status") or last_generated_queue_run.get("status") or "").strip()
         queue_open_count = int(generated_work_queue.get("open_count", 0) or 0)
         queue_actionable_count = int(generated_work_queue.get("actionable_count", 0) or 0)
@@ -147,6 +148,22 @@ class ControlStatusService:
         payload["runtime_worker_interval_sec"] = int(runtime_worker.get("interval_sec", 0) or 0)
         payload["runtime_worker_cycle_count"] = int(runtime_worker.get("cycle_count", 0) or 0)
         payload["runtime_worker_last_completed_at"] = str(runtime_worker.get("last_completed_at") or "")
+        guard_running = bool((guard_status or {}).get("running"))
+        if payload["runtime_worker_active"]:
+            maintenance_scheduler_mode = "worker_loop"
+            maintenance_scheduler_status = "running"
+        elif guard_running:
+            maintenance_scheduler_mode = "guard_tick"
+            maintenance_scheduler_status = "guard_scheduled"
+        else:
+            maintenance_scheduler_mode = "inactive"
+            maintenance_scheduler_status = "inactive"
+        payload["maintenance_scheduler_active"] = bool(payload["runtime_worker_active"] or guard_running)
+        payload["maintenance_scheduler_mode"] = maintenance_scheduler_mode
+        payload["maintenance_scheduler_status"] = maintenance_scheduler_status
+        autonomy_payload["maintenance_scheduler_active"] = payload["maintenance_scheduler_active"]
+        autonomy_payload["maintenance_scheduler_mode"] = maintenance_scheduler_mode
+        autonomy_payload["maintenance_scheduler_status"] = maintenance_scheduler_status
         payload["last_regression_status"] = str(autonomy_maintenance.get("last_regression_status") or "")
         payload["last_regression_stale"] = bool(autonomy_maintenance.get("last_regression_stale", False))
         payload["last_generated_queue_run_status"] = str(last_generated_queue_run.get("status") or "")
@@ -172,6 +189,10 @@ class ControlStatusService:
         payload["patch_cleanup_superseded_before"] = int(last_patch_cleanup.get("superseded_before", 0) or 0)
         payload["patch_cleanup_superseded_after"] = int(last_patch_cleanup.get("superseded_after", 0) or 0)
         payload["patch_cleanup_archive_dir"] = str(last_patch_cleanup.get("archive_dir") or "")
+        payload["complete_tree_archive_status"] = str(last_complete_tree_archive.get("status") or "")
+        payload["complete_tree_archive_at"] = str(last_complete_tree_archive.get("ts") or "")
+        payload["complete_tree_archived_count"] = int(last_complete_tree_archive.get("archived_count", 0) or 0)
+        payload["complete_tree_retained_count"] = int(last_complete_tree_archive.get("retained_count", 0) or 0)
 
         payload["memory_stats_ok"] = bool(memory_stats.get("ok", False))
         payload["memory_entries_total"] = int(memory_stats.get("total", 0) or 0)

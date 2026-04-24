@@ -820,7 +820,8 @@ def _refresh_tree_state(tree_id: str, persist: bool = False) -> bool:
     branches = _tree_branches(tree_id)
     for branch in branches:
         branch_dirty = _refresh_branch_state(branch) or branch_dirty
-    tree.status = TreeStatus.COMPLETE if is_tree_complete(tree_id) else TreeStatus.ACTIVE
+    if tree.status != TreeStatus.ARCHIVED:
+        tree.status = TreeStatus.COMPLETE if is_tree_complete(tree_id) else TreeStatus.ACTIVE
     dirty = branch_dirty or tree.status != previous_status
     if dirty:
         tree.updated_at = _now()
@@ -910,6 +911,8 @@ def list_visual_trees(limit: int | None = None) -> list[dict]:
     max_items = None if limit is None else max(1, int(limit))
     ranked_payloads: list[tuple[tuple[object, ...], dict]] = []
     for tree in _TREES.values():
+        if tree.status == TreeStatus.ARCHIVED:
+            continue
         payload = get_visual_tree_data(tree.tree_id)
         if payload is None:
             continue
@@ -947,6 +950,55 @@ def save_tree(tree: WorkTree) -> None:
     _ensure_db()
     with _db_transaction() as connection:
         _save_tree_record(connection, tree)
+
+
+def archive_tree(tree_id: str, reason: str | None = None) -> bool:
+    tree = get_tree(tree_id)
+    if tree is None:
+        return False
+    now = _now()
+    reason_text = str(reason or "").strip()
+    dirty = False
+    for branch in _tree_branches(tree_id):
+        if branch.status != BranchStatus.ARCHIVED:
+            branch.status = BranchStatus.ARCHIVED
+            dirty = True
+        if reason_text:
+            existing_notes = str(branch.notes or "").strip()
+            if reason_text not in existing_notes:
+                branch.notes = f"{existing_notes}\n{reason_text}".strip() if existing_notes else reason_text
+                dirty = True
+        if str(branch.resolution_state or "").strip().lower() != "archived":
+            branch.resolution_state = "archived"
+            dirty = True
+        branch.last_seen_at = now
+        branch.updated_at = now
+        branch.open_stem_count = 0
+        branch.blocked_by = []
+        branch.score = recompute_branch_score(branch)
+        _SCORES[branch.branch_id] = branch.score
+        for task in _branch_tasks(branch.branch_id):
+            if task.status in {TaskStatus.COMPLETE, TaskStatus.DROPPED}:
+                continue
+            task.status = TaskStatus.DROPPED
+            task.updated_at = now
+            dirty = True
+    meta = dict(tree.meta or {}) if isinstance(tree.meta, dict) else {}
+    if reason_text:
+        if str(meta.get("archive_reason") or "").strip() != reason_text:
+            meta["archive_reason"] = reason_text
+            dirty = True
+    archived_at = _dt(now)
+    if str(meta.get("archived_at") or "").strip() != archived_at:
+        meta["archived_at"] = archived_at
+        dirty = True
+    if tree.status != TreeStatus.ARCHIVED:
+        tree.status = TreeStatus.ARCHIVED
+        dirty = True
+    tree.meta = meta
+    tree.updated_at = now
+    _persist_tree_state(tree_id)
+    return dirty
 
 
 def add_branch_to_tree(tree_id: str, title: str, bucket: str, parent_branch_id: str | None = None) -> Branch:

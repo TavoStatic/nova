@@ -864,6 +864,25 @@ class TestWorkTree(unittest.TestCase):
         self.assertEqual(payloads[1]["tree_id"], shell_tree.tree_id)
         self.assertEqual(payloads[1]["nodes"], [])
 
+    def test_list_visual_trees_omits_archived_trees(self) -> None:
+        visible_tree = work_tree.initialize_tree("Visible tree")
+        visible_root = work_tree._BRANCHES[visible_tree.root_branch_id]
+        work_tree.add_task_to_branch(visible_root.branch_id, "Inspect queue")
+
+        archived_tree = work_tree.initialize_tree("Archived tree")
+        archived_root = work_tree._BRANCHES[archived_tree.root_branch_id]
+        work_tree.add_task_to_branch(archived_root.branch_id, "Already done")
+        archived_task = work_tree.list_branch_tasks(archived_root.branch_id)[0]
+        work_tree.mark_task_complete(archived_task.task_id)
+        work_tree.archive_tree(archived_tree.tree_id, reason="stale")
+
+        payloads = work_tree.list_visual_trees(limit=None)
+        payload_ids = [payload.get("tree_id") for payload in payloads]
+
+        self.assertIn(visible_tree.tree_id, payload_ids)
+        self.assertNotIn(archived_tree.tree_id, payload_ids)
+        self.assertEqual(work_tree.get_tree(archived_tree.tree_id).status, TreeStatus.ARCHIVED)
+
 
 class TestWorkTreeNotesPayload(unittest.TestCase):
     def setUp(self) -> None:
