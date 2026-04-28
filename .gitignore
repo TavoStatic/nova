@@ -38,6 +38,7 @@ docs/archive/
 This_is_nova
 tests_to_review.txt
 .github/copilot-instructions.md
+data_sources/*/local_config.json
 
 # OS
 .DS_Store

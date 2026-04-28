@@ -6,7 +6,123 @@ from typing import Callable
 
 from services import nova_planner_contract
 from services.nova_fallback_flow import apply_low_confidence_block, finalize_llm_fallback_reply, prepare_fallback_flow
-from services.nova_reply_deterministic import maybe_handle_deterministic_sequence
+from services.nova_reply_deterministic import (
+    _is_queue_pressure_justify_followup,
+    _is_queue_pressure_triage_query,
+    maybe_handle_deterministic_sequence,
+)
+
+
+def _runtime_fn(runtime_scope: dict[str, object], name: str):
+    return runtime_scope[name]
+
+
+def execute_reply_sequence_from_runtime(
+    *,
+    turns: list[tuple[str, str]],
+    text: str,
+    pending_action: dict | None,
+    prefer_web_for_data_queries: bool,
+    language_mix_spanish_pct: int,
+    session,
+    trace: Callable[..., None],
+    normalize_reply: Callable[[str], str],
+    ensure_reply: Callable[[str], str],
+    core,
+    runtime_scope: dict[str, object],
+    pre_planner_branch_group: str = "all",
+    post_planner_branch_group: str | None = None,
+    planner_before_deterministic_content: bool = False,
+    stop_before_llm_fallback: bool = False,
+) -> tuple[str, dict]:
+    return execute_reply_sequence(
+        turns=turns,
+        text=text,
+        pending_action=pending_action,
+        prefer_web_for_data_queries=prefer_web_for_data_queries,
+        language_mix_spanish_pct=language_mix_spanish_pct,
+        session=session,
+        trace=trace,
+        normalize_reply=normalize_reply,
+        ensure_reply=ensure_reply,
+        core=core,
+        is_developer_profile_request=_runtime_fn(runtime_scope, "_is_developer_profile_request"),
+        developer_profile_reply=_runtime_fn(runtime_scope, "_developer_profile_reply"),
+        is_location_request=_runtime_fn(runtime_scope, "_is_location_request"),
+        location_reply=_runtime_fn(runtime_scope, "_location_reply"),
+        is_web_preferred_data_query=_runtime_fn(runtime_scope, "nova_query_classifiers").is_web_preferred_data_query,
+        is_session_recap_request=_runtime_fn(runtime_scope, "_is_session_recap_request"),
+        session_recap_reply=_runtime_fn(runtime_scope, "_session_recap_reply"),
+        is_assistant_name_query=_runtime_fn(runtime_scope, "_is_assistant_name_query"),
+        assistant_name_reply=_runtime_fn(runtime_scope, "_assistant_name_reply"),
+        is_developer_full_name_query=_runtime_fn(runtime_scope, "_is_developer_full_name_query"),
+        developer_full_name_reply=_runtime_fn(runtime_scope, "_developer_full_name_reply"),
+        is_name_origin_question=_runtime_fn(runtime_scope, "_is_name_origin_question"),
+        is_student_data_attendance_rules_query=_runtime_fn(runtime_scope, "nova_query_classifiers").is_student_data_attendance_rules_query,
+        student_data_attendance_rules_reply=_runtime_fn(runtime_scope, "_peims_attendance_rules_reply"),
+        is_conversational_clarification=_runtime_fn(runtime_scope, "nova_query_classifiers").is_conversational_clarification,
+        clarification_reply=lambda turns: core._open_probe_reply("what are you talking about ?", turns=turns)[0],
+        is_deep_search_followup_request=_runtime_fn(runtime_scope, "_is_deep_search_followup_request"),
+        infer_research_query_from_turns=_runtime_fn(runtime_scope, "_infer_research_query_from_turns"),
+        build_grounded_answer=_runtime_fn(runtime_scope, "_build_grounded_answer"),
+        build_local_topic_digest_answer=_runtime_fn(runtime_scope, "_build_local_topic_digest_answer"),
+        is_groundable_factual_query=lambda _text: False,
+        developer_color_reply=_runtime_fn(runtime_scope, "_developer_color_reply"),
+        developer_bilingual_reply=_runtime_fn(runtime_scope, "_developer_bilingual_reply"),
+        color_reply=_runtime_fn(runtime_scope, "_color_reply"),
+        animal_reply=_runtime_fn(runtime_scope, "_animal_reply"),
+        pre_planner_branch_group=pre_planner_branch_group,
+        post_planner_branch_group=post_planner_branch_group,
+        planner_before_deterministic_content=planner_before_deterministic_content,
+        stop_before_llm_fallback=stop_before_llm_fallback,
+    )
+
+
+def execute_http_reply_sequence_from_runtime(
+    *,
+    turns: list[tuple[str, str]],
+    text: str,
+    ledger_record: dict | None,
+    pending_action: dict | None,
+    prefer_web_for_data_queries: bool,
+    language_mix_spanish_pct: int,
+    session,
+    ensure_reply: Callable[[str], str],
+    core,
+    runtime_scope: dict[str, object],
+    pre_planner_branch_group: str = "all",
+    post_planner_branch_group: str | None = None,
+) -> tuple[str, dict]:
+    def _trace(stage: str, outcome: str, detail: str = "", **data) -> None:
+        core.action_ledger_add_step(ledger_record, stage, outcome, detail, **data)
+
+    def _normalize_reply(reply_text: str) -> str:
+        reply_local = _runtime_fn(runtime_scope, "_strip_ui_tip_leak")(reply_text)
+        corrected_reply, was_corrected, _reason = core._self_correct_reply(text, reply_local)
+        if was_corrected:
+            core.behavior_record_event("correction_applied")
+            core.behavior_record_event("self_correction_applied")
+            _trace("llm_postprocess", "self_corrected")
+            reply_local = corrected_reply
+        if not core._is_identity_stable_reply(reply_local):
+            reply_local = core._apply_reply_overrides(reply_local)
+        return ensure_reply(reply_local)
+
+    return execute_reply_sequence_from_runtime(
+        turns=turns,
+        text=text,
+        pending_action=pending_action,
+        prefer_web_for_data_queries=prefer_web_for_data_queries,
+        language_mix_spanish_pct=language_mix_spanish_pct,
+        session=session,
+        trace=_trace,
+        normalize_reply=_normalize_reply,
+        ensure_reply=ensure_reply,
+        core=core,
+        runtime_scope=runtime_scope,
+        pre_planner_branch_group=pre_planner_branch_group,
+        post_planner_branch_group=post_planner_branch_group,
+    )
 
 
 def execute_reply_sequence(
@@ -49,6 +165,8 @@ def execute_reply_sequence(
     ensure_active_work_tree_fn: Callable[[str], str] | None = None,
     work_tree_seed_source: str = "",
     work_tree_seed_mode: str = "",
+    pre_planner_branch_group: str = "all",
+    post_planner_branch_group: str | None = None,
     planner_before_deterministic_content: bool = False,
     stop_before_llm_fallback: bool = False,
 ) -> tuple[str, dict]:
@@ -118,6 +236,18 @@ def execute_reply_sequence(
             session.last_fallback_reply = current_reply if degraded else ""
         return normalized_reply, meta
 
+    def _build_fallback_context_details(user_text: str, session_turns: list[tuple[str, str]]):
+        build_fn = core.build_fallback_context_details
+        try:
+            return build_fn(
+                user_text,
+                session_turns,
+                conversation_state=getattr(session, "conversation_state", None),
+                pending_action=pending_action,
+            )
+        except TypeError:
+            return build_fn(user_text, session_turns)
+
     low = text.lower()
     handled_truth, truth_reply, truth_source, truth_grounded = core.truth_hierarchy_answer(text)
     if handled_truth:
@@ -162,7 +292,9 @@ def execute_reply_sequence(
         })
     trace("hard_answer", "not_matched")
 
-    if planner_before_deterministic_content:
+    force_pre_planner_deterministic = _is_queue_pressure_triage_query(text) or _is_queue_pressure_justify_followup(text)
+
+    if planner_before_deterministic_content and not force_pre_planner_deterministic:
         planner_already_attempted = True
         planner_call_started = time.perf_counter()
         planner_outcome = nova_planner_contract.maybe_handle_planner_sequence(
@@ -215,6 +347,7 @@ def execute_reply_sequence(
         color_reply=color_reply,
         animal_reply=animal_reply,
         core=core,
+        branch_group=pre_planner_branch_group,
     )
     if deterministic_outcome is not None:
         reply, meta, return_mode, tool_time_ms = deterministic_outcome
@@ -244,6 +377,47 @@ def execute_reply_sequence(
         if planner_outcome is not None:
             return _timed_return(*_break_fallback_loop(planner_outcome[0], planner_outcome[1]))
 
+    if post_planner_branch_group:
+        deterministic_outcome = maybe_handle_deterministic_sequence(
+            text=text,
+            turns=turns,
+            low=low,
+            trace=trace,
+            normalize_reply=normalize_reply,
+            is_session_recap_request=is_session_recap_request,
+            session_recap_reply=session_recap_reply,
+            is_assistant_name_query=is_assistant_name_query,
+            assistant_name_reply=assistant_name_reply,
+            is_developer_full_name_query=is_developer_full_name_query,
+            developer_full_name_reply=developer_full_name_reply,
+            is_name_origin_question=is_name_origin_question,
+            is_student_data_attendance_rules_query=is_student_data_attendance_rules_query,
+            student_data_attendance_rules_reply=student_data_attendance_rules_reply,
+            is_developer_profile_request=is_developer_profile_request,
+            developer_profile_reply=developer_profile_reply,
+            is_conversational_clarification=is_conversational_clarification,
+            clarification_reply=clarification_reply,
+            is_location_request=is_location_request,
+            location_reply=location_reply,
+            is_deep_search_followup_request=is_deep_search_followup_request,
+            infer_research_query_from_turns=infer_research_query_from_turns,
+            build_grounded_answer=build_grounded_answer,
+            build_local_topic_digest_answer=build_local_topic_digest_answer,
+            is_groundable_factual_query=is_groundable_factual_query,
+            developer_color_reply=developer_color_reply,
+            developer_bilingual_reply=developer_bilingual_reply,
+            color_reply=color_reply,
+            animal_reply=animal_reply,
+            core=core,
+            branch_group=post_planner_branch_group,
+        )
+        if deterministic_outcome is not None:
+            reply, meta, return_mode, tool_time_ms = deterministic_outcome
+            timing_profile["tool_time"] = int(tool_time_ms or timing_profile["tool_time"] or 0)
+            if return_mode == "logged":
+                return _logged_return(reply, meta)
+            return _timed_return(reply, meta)
+
     if stop_before_llm_fallback:
         return _timed_return("", {"planner_decision": "unhandled"})
 
@@ -254,12 +428,7 @@ def execute_reply_sequence(
         prefer_web_for_data_queries=prefer_web_for_data_queries,
         analyze_request_fn=core.analyze_request,
         normalize_policy_reply_fn=normalize_reply,
-        build_fallback_context_details_fn=lambda user_text, session_turns: core.build_fallback_context_details(
-            user_text,
-            session_turns,
-            conversation_state=getattr(session, "conversation_state", None),
-            pending_action=pending_action,
-        ),
+        build_fallback_context_details_fn=_build_fallback_context_details,
         uses_prior_reference_fn=lambda _text: False,
         action_ledger_add_step=lambda stage, outcome, detail="", **data: trace(stage, outcome, detail, **data),
     )

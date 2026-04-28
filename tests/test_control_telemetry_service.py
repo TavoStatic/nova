@@ -140,6 +140,37 @@ class TestControlTelemetryService(unittest.TestCase):
         self.assertEqual(payload["errors_total"], 2)
         self.assertEqual(payload["points"][0]["ts"], 123)
 
+    def test_provider_telemetry_payload_filters_to_active_provider_family(self):
+        payload = ControlTelemetryService.provider_telemetry_payload(
+            ledger_summary={
+                "last_record": {
+                    "tool": "tool_web_search",
+                    "provider_family": "legacy",
+                    "provider_candidates": ["general_web", "legacy", "stackexchange"],
+                    "reply_outcome": {"query": "attendance rules"},
+                }
+            },
+            tool_summary={"avg_latency_ms_by_tool": {"tool_web_search": 42}},
+            search_provider_priority_fn=lambda: ["general_web", "stackexchange"],
+            provider_name_from_tool_fn=lambda tool: "general_web" if tool == "tool_web_search" else "",
+            recent_action_ledger_records_fn=lambda limit=80: [
+                {"tool": "tool_web_search"},
+                {"provider_used": "stackexchange"},
+                {"provider_used": "legacy"},
+                "skip-me",
+            ],
+            policy_web_fn=lambda: {"stackexchange_site": "superuser"},
+        )
+
+        self.assertEqual(payload["priority"], ["general_web", "stackexchange"])
+        self.assertEqual(payload["last_provider_used"], "general_web")
+        self.assertEqual(payload["last_provider_family"], "")
+        self.assertEqual(payload["last_provider_query"], "attendance rules")
+        self.assertEqual(payload["last_provider_candidates"], ["general_web", "stackexchange"])
+        self.assertEqual(payload["hits_last_window"], {"general_web": 1, "stackexchange": 1})
+        self.assertEqual(payload["tool_latency_ms_by_tool"], {"tool_web_search": 42})
+        self.assertEqual(payload["stackexchange_site"], "superuser")
+
     def test_tail_log_action_rejects_unknown_names(self):
         events = []
         ok, msg, extra = ControlTelemetryService.tail_log_action(
@@ -172,6 +203,47 @@ class TestControlTelemetryService(unittest.TestCase):
             self.assertTrue(written.exists())
             self.assertEqual(json.loads(written.read_text(encoding="utf-8"))["count"], 2)
             self.assertEqual(events, [("export_ledger_summary", "ok", "action_ledger_export_ok")])
+
+    def test_export_diagnostics_bundle_action_from_runtime_writes_bundle(self):
+        service = ControlTelemetryService(list_capabilities_fn=lambda: {"cap": {"name": "cap"}})
+        events = []
+
+        class _Core:
+            @staticmethod
+            def behavior_get_metrics():
+                return {"ok": True}
+
+        with tempfile.TemporaryDirectory() as td:
+            runtime_dir = Path(td) / "runtime"
+            log_dir = Path(td) / "logs"
+            runtime_dir.mkdir(parents=True, exist_ok=True)
+            log_dir.mkdir(parents=True, exist_ok=True)
+
+            ok, msg, extra = service.export_diagnostics_bundle_action_from_runtime(
+                {"limit": 3},
+                runtime_scope={
+                    "RUNTIME_DIR": runtime_dir,
+                    "LOG_DIR": log_dir,
+                    "_control_status_payload": lambda: {"ok": True},
+                    "_control_policy_payload": lambda: {"ok": True},
+                    "_metrics_payload": lambda: {"ok": True},
+                    "_build_self_check": lambda status, policy, metrics: {"health_score": 100},
+                    "_action_ledger_summary": lambda limit=80: {"ok": True, "count": limit},
+                    "_tool_events_summary": lambda limit=120: {"ok": True, "count": limit},
+                    "_safe_tail_lines": lambda path, n=80: [f"tail:{Path(path).name}:{n}"],
+                    "_record_control_action_event": lambda action, result, detail, payload: events.append((action, result, detail)),
+                    "time": type("_Time", (), {"time": staticmethod(lambda: 1234567890)})(),
+                },
+                core_module=_Core(),
+            )
+
+            self.assertTrue(ok)
+            self.assertIn("diagnostics_bundle_exported", msg)
+            written = Path(extra["path"])
+            self.assertTrue(written.exists())
+            payload = json.loads(written.read_text(encoding="utf-8"))
+            self.assertEqual(payload["self_check"]["health_score"], 100)
+            self.assertEqual(events, [("export_diagnostics_bundle", "ok", msg)])
 
 
 if __name__ == "__main__":

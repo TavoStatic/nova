@@ -4,6 +4,149 @@ from services.control_status import CONTROL_STATUS_SERVICE
 
 
 class TestControlStatusService(unittest.TestCase):
+    def test_runtime_supplier_fns_from_scope_collects_http_supplier_contract(self):
+        scope = {
+            "_probe_searxng": object(),
+            "_guard_status_payload": object(),
+            "_core_status_payload": object(),
+            "_http_status_payload": object(),
+            "_runtime_timeline_payload": object(),
+            "_subconscious_status_summary": object(),
+            "_subconscious_live_summary": object(),
+            "_generated_work_queue": object(),
+            "_autonomy_maintenance_summary": object(),
+            "_load_operator_macros": object(),
+            "_load_backend_commands": object(),
+            "_memory_events_summary": object(),
+            "_tool_events_summary": object(),
+            "_action_ledger_summary": object(),
+            "_provider_telemetry_payload": object(),
+            "_runtime_summary_payload": object(),
+            "_runtime_artifacts_payload": object(),
+            "_runtime_restart_analytics_payload": object(),
+            "_runtime_failure_reasons_payload": object(),
+            "_action_readiness_payload": object(),
+            "_release_status_payload": object(),
+            "_patch_action_readiness_payload": object(),
+            "_storage_watch_summary": object(),
+            "_runtime_process_note": object(),
+            "_heartbeat_age_seconds": object(),
+            "_chat_login_enabled": object(),
+            "_chat_auth_source": object(),
+            "_chat_users": object(),
+            "_append_metrics_snapshot": object(),
+            "_build_self_check": object(),
+            "_control_policy_payload": object(),
+            "_metrics_payload": object(),
+        }
+
+        payload = CONTROL_STATUS_SERVICE.runtime_supplier_fns_from_scope(scope)
+
+        self.assertIs(payload["probe_searxng"], scope["_probe_searxng"])
+        self.assertIs(payload["provider_telemetry_payload"], scope["_provider_telemetry_payload"])
+        self.assertIs(payload["metrics_payload"], scope["_metrics_payload"])
+        self.assertEqual(len(payload), 32)
+
+    def test_runtime_status_payload_collects_supplier_outputs(self):
+        class _Core:
+            @staticmethod
+            def load_policy():
+                return {
+                    "memory": {"scope": "private"},
+                    "tools_enabled": {"web": True},
+                    "web": {
+                        "enabled": True,
+                        "search_provider": "searxng",
+                        "search_api_endpoint": "http://127.0.0.1:8081/search",
+                        "allow_domains": ["example.org"],
+                    },
+                }
+
+            @staticmethod
+            def get_search_provider_priority():
+                return ["general_web"]
+
+            @staticmethod
+            def ollama_api_up():
+                return True
+
+            @staticmethod
+            def chat_model():
+                return "test-model"
+
+            @staticmethod
+            def mem_enabled():
+                return True
+
+            @staticmethod
+            def mem_stats_payload(*, emit_event=False):
+                return {"ok": True, "total": 1, "by_user": {"u1": 1}}
+
+            @staticmethod
+            def patch_status_payload():
+                return {"ok": True, "enabled": True}
+
+            @staticmethod
+            def build_pulse_payload():
+                return {"generated_at": "now", "autonomy_level": "guarded"}
+
+            @staticmethod
+            def update_now_pending_payload():
+                return {"pending": False}
+
+            @staticmethod
+            def runtime_device_location_payload():
+                return {"available": False}
+
+        payload = CONTROL_STATUS_SERVICE.runtime_status_payload(
+            core_module=_Core(),
+            session_turns={"s1": [], "s2": []},
+            metrics_totals=(5, 1),
+            supplier_fns={
+                "probe_searxng": lambda endpoint: (True, f"ok:{endpoint}"),
+                "guard_status_payload": lambda: {"running": True, "status": "running"},
+                "core_status_payload": lambda: {"running": True, "status": "running", "pid": 123, "heartbeat_age_sec": 1},
+                "http_status_payload": lambda: {"running": True, "status": "running", "pid": 456},
+                "runtime_timeline_payload": lambda: {"count": 0, "events": []},
+                "subconscious_status_summary": lambda: {"ok": True},
+                "subconscious_live_summary": lambda: {},
+                "generated_work_queue": lambda limit: {"status": "clear", "open_count": 0, "actionable_count": 0, "next_item": {}},
+                "autonomy_maintenance_summary": lambda: {},
+                "load_operator_macros": lambda limit: [],
+                "load_backend_commands": lambda limit: [],
+                "memory_events_summary": lambda limit: {"ok": True, "count": 0},
+                "tool_events_summary": lambda limit: {"ok": True, "count": 0, "status_counts": {}},
+                "action_ledger_summary": lambda limit: {"ok": True, "count": 0},
+                "provider_telemetry_payload": lambda **kwargs: {"last_provider_used": "general_web"},
+                "runtime_summary_payload": lambda **kwargs: {"guard": kwargs.get("guard")},
+                "runtime_artifacts_payload": lambda: {"count": 0, "items": []},
+                "runtime_restart_analytics_payload": lambda: {},
+                "runtime_failure_reasons_payload": lambda guard, core, webui, timeline: {},
+                "action_readiness_payload": lambda guard, core, webui: {},
+                "release_status_payload": lambda: {},
+                "patch_action_readiness_payload": lambda patch_summary: {"ready": True},
+                "storage_watch_summary": lambda: {"status": "ok", "note": "fine", "total_bytes": 128},
+                "runtime_process_note": lambda: "note",
+                "heartbeat_age_seconds": lambda: 1,
+                "chat_login_enabled": lambda: False,
+                "chat_auth_source": lambda: "disabled",
+                "chat_users": lambda: ["user-a"],
+                "append_metrics_snapshot": lambda payload: payload.update({"metrics_snapshot_test": True}),
+                "build_self_check": lambda payload, policy, metrics: {"health_score": 97, "pass_ratio": 0.75, "alerts": ["warn"]},
+                "control_policy_payload": lambda: {"ok": True},
+                "metrics_payload": lambda: {"ok": True},
+            },
+        )
+
+        self.assertEqual(payload.get("requests_total"), 5)
+        self.assertEqual(payload.get("errors_total"), 1)
+        self.assertEqual(payload.get("active_http_sessions"), 2)
+        self.assertEqual(payload.get("health_score"), 97)
+        self.assertEqual(payload.get("self_check_pass_ratio"), 0.75)
+        self.assertEqual(payload.get("alerts"), ["warn"])
+        self.assertTrue(payload.get("metrics_snapshot_test"))
+        self.assertEqual(payload.get("searxng_note"), "ok:http://127.0.0.1:8081/search")
+
     def test_status_payload_includes_runtime_timeline_and_patch_fields(self):
         payload = CONTROL_STATUS_SERVICE.status_payload(
             policy={"memory": {"scope": "private"}},
@@ -335,6 +478,70 @@ class TestControlStatusService(unittest.TestCase):
         self.assertEqual(payload.get("maintenance_scheduler_mode"), "guard_tick")
         self.assertEqual(payload.get("maintenance_scheduler_status"), "guard_scheduled")
         self.assertEqual((payload.get("autonomy_maintenance") or {}).get("maintenance_scheduler_mode"), "guard_tick")
+
+    def test_status_payload_includes_storage_watch_fields_when_provided(self):
+        payload = CONTROL_STATUS_SERVICE.status_payload(
+            policy={"memory": {"scope": "private"}},
+            provider="html",
+            endpoint="",
+            searx_ok=None,
+            searx_note="n/a",
+            search_provider_priority=[],
+            provider_telemetry={},
+            ollama_api_up=False,
+            chat_model="test-model",
+            memory_enabled=False,
+            subconscious_summary={"ok": True},
+            subconscious_live_summary={},
+            generated_work_queue={},
+            autonomy_maintenance={},
+            operator_macros=[],
+            backend_commands=[],
+            memory_scope="private",
+            web_enabled=False,
+            allow_domains_count=0,
+            process_counting_mode="logical_leaf_processes",
+            runtime_process_note="",
+            heartbeat_age_sec=0,
+            active_http_sessions=0,
+            chat_login_enabled=False,
+            chat_auth_source="disabled",
+            chat_users_count=0,
+            guard_status={"running": True},
+            core_status={"running": True},
+            webui_status={"running": True},
+            runtime_summary={},
+            timeline_payload={},
+            runtime_artifacts={},
+            runtime_restart_analytics={},
+            runtime_failures={},
+            live_tracking={},
+            action_readiness={},
+            release_status={},
+            memory_stats={},
+            memory_summary={},
+            tool_summary={},
+            ledger_summary={},
+            patch_summary={},
+            patch_action_readiness={},
+            pulse_payload={},
+            update_now_pending={},
+            requests_total=0,
+            errors_total=0,
+            storage_watch_summary={
+                "status": "warn",
+                "note": "25 kidney cleanup snapshots retained",
+                "total_bytes": 12345,
+                "patch_snapshot_count": 2,
+                "kidney_snapshot_count": 25,
+            },
+        )
+
+        self.assertEqual(payload.get("storage_watch_status"), "warn")
+        self.assertEqual(payload.get("storage_watch_note"), "25 kidney cleanup snapshots retained")
+        self.assertEqual(payload.get("storage_watch_total_bytes"), 12345)
+        self.assertEqual(payload.get("patch_snapshot_count"), 2)
+        self.assertEqual(payload.get("kidney_snapshot_count"), 25)
 
 
 if __name__ == "__main__":

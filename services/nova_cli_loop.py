@@ -21,6 +21,7 @@ from services.nova_profile_followups import color_reply as service_color_reply
 from services.nova_profile_followups import color_animal_match_reply as service_color_animal_match_reply
 from services.nova_profile_followups import developer_bilingual_reply as service_developer_bilingual_reply
 from services.nova_profile_followups import developer_color_reply as service_developer_color_reply
+from services.nova_reply_deterministic import _should_skip_mixed_turn_clarify
 from services.nova_supervisor_flow import apply_cli_supervisor_intent
 from services.nova_turn_outcomes import apply_declarative_store_outcome
 from services.nova_turn_outcomes import apply_developer_guess_outcome
@@ -394,7 +395,7 @@ def run_loop(tts, *, core: object) -> None:
             session_turns.append(("assistant", final))
             core.speak_chunked(tts, final)
             continue
-        if "mixed" in turn_acts:
+        if "mixed" in turn_acts and not _should_skip_mixed_turn_clarify(routed_user_text):
             final = core._ensure_reply(core._mixed_info_request_clarify_reply(routed_user_text))
             if pending_action_ledger is not None:
                 pending_action_ledger["planner_decision"] = "ask_clarify"

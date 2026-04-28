@@ -1,8 +1,12 @@
 ﻿import unittest
 from types import SimpleNamespace
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from unittest import mock
 
 from services.nova_reply_sequence import execute_reply_sequence
+from services.nova_reply_sequence import execute_http_reply_sequence_from_runtime
+from services.nova_reply_sequence import execute_reply_sequence_from_runtime
 
 
 class TestNovaReplySequence(unittest.TestCase):
@@ -64,6 +68,129 @@ class TestNovaReplySequence(unittest.TestCase):
         options.update(overrides)
         return execute_reply_sequence(**options)
 
+    def test_execute_reply_sequence_from_runtime_resolves_http_callback_bundle(self):
+        runtime_scope = {
+            "_is_developer_profile_request": lambda _text: False,
+            "_developer_profile_reply": lambda turns, user_text: "developer profile",
+            "_is_location_request": lambda _text: False,
+            "_location_reply": lambda: "location reply",
+            "_is_session_recap_request": lambda _text: False,
+            "_session_recap_reply": lambda turns, user_text: "session recap",
+            "_is_assistant_name_query": lambda _text: False,
+            "_assistant_name_reply": lambda user_text: "Nova",
+            "_is_developer_full_name_query": lambda _text: False,
+            "_developer_full_name_reply": lambda: "Gustavo Rivera",
+            "_is_name_origin_question": lambda _text: False,
+            "_peims_attendance_rules_reply": lambda: "attendance reply",
+            "_is_deep_search_followup_request": lambda _text: False,
+            "_infer_research_query_from_turns": lambda turns: "",
+            "_build_grounded_answer": lambda query, max_sources=2: "",
+            "_build_local_topic_digest_answer": lambda query: "",
+            "_developer_color_reply": lambda turns: "developer color",
+            "_developer_bilingual_reply": lambda turns: "developer bilingual",
+            "_color_reply": lambda turns: "color reply",
+            "_animal_reply": lambda turns: "animal reply",
+            "nova_query_classifiers": SimpleNamespace(
+                is_web_preferred_data_query=lambda _text: False,
+                is_student_data_attendance_rules_query=lambda _text: False,
+                is_conversational_clarification=lambda _text: False,
+            ),
+        }
+        core = SimpleNamespace(_open_probe_reply=lambda prompt, turns=None: ("clarify", "probe"))
+
+        with mock.patch(
+            "services.nova_reply_sequence.execute_reply_sequence",
+            return_value=("ok", {"planner_decision": "deterministic"}),
+        ) as execute_mock:
+            reply, meta = execute_reply_sequence_from_runtime(
+                turns=[],
+                text="hello",
+                pending_action=None,
+                prefer_web_for_data_queries=False,
+                language_mix_spanish_pct=0,
+                session=None,
+                trace=lambda *args, **kwargs: None,
+                normalize_reply=lambda reply: reply,
+                ensure_reply=lambda reply: reply,
+                core=core,
+                runtime_scope=runtime_scope,
+                pre_planner_branch_group="operational",
+                post_planner_branch_group="general",
+            )
+
+        self.assertEqual(reply, "ok")
+        self.assertEqual(meta.get("planner_decision"), "deterministic")
+        self.assertIs(execute_mock.call_args.kwargs.get("is_developer_profile_request"), runtime_scope["_is_developer_profile_request"])
+        self.assertIs(execute_mock.call_args.kwargs.get("developer_profile_reply"), runtime_scope["_developer_profile_reply"])
+        self.assertEqual(execute_mock.call_args.kwargs.get("pre_planner_branch_group"), "operational")
+        self.assertEqual(execute_mock.call_args.kwargs.get("post_planner_branch_group"), "general")
+
+    def test_execute_http_reply_sequence_from_runtime_builds_http_normalizer(self):
+        runtime_scope = {
+            "_strip_ui_tip_leak": lambda text: text.replace(" UI-TIP", ""),
+            "_is_developer_profile_request": lambda _text: False,
+            "_developer_profile_reply": lambda turns, user_text: "developer profile",
+            "_is_location_request": lambda _text: False,
+            "_location_reply": lambda: "location reply",
+            "_is_session_recap_request": lambda _text: False,
+            "_session_recap_reply": lambda turns, user_text: "session recap",
+            "_is_assistant_name_query": lambda _text: False,
+            "_assistant_name_reply": lambda user_text: "Nova",
+            "_is_developer_full_name_query": lambda _text: False,
+            "_developer_full_name_reply": lambda: "Gustavo Rivera",
+            "_is_name_origin_question": lambda _text: False,
+            "_peims_attendance_rules_reply": lambda: "attendance reply",
+            "_is_deep_search_followup_request": lambda _text: False,
+            "_infer_research_query_from_turns": lambda turns: "",
+            "_build_grounded_answer": lambda query, max_sources=2: "",
+            "_build_local_topic_digest_answer": lambda query: "",
+            "_developer_color_reply": lambda turns: "developer color",
+            "_developer_bilingual_reply": lambda turns: "developer bilingual",
+            "_color_reply": lambda turns: "color reply",
+            "_animal_reply": lambda turns: "animal reply",
+            "nova_query_classifiers": SimpleNamespace(
+                is_web_preferred_data_query=lambda _text: False,
+                is_student_data_attendance_rules_query=lambda _text: False,
+                is_conversational_clarification=lambda _text: False,
+            ),
+        }
+        events = []
+        traces = []
+        core = SimpleNamespace(
+            action_ledger_add_step=lambda ledger, stage, outcome, detail="", **data: traces.append((stage, outcome, detail)),
+            _self_correct_reply=lambda user_text, reply: ("corrected reply", True, "fix"),
+            behavior_record_event=lambda name: events.append(name),
+            _is_identity_stable_reply=lambda reply: False,
+            _apply_reply_overrides=lambda reply: reply + " +override",
+            _open_probe_reply=lambda prompt, turns=None: ("clarify", "probe"),
+        )
+
+        with mock.patch(
+            "services.nova_reply_sequence.execute_reply_sequence_from_runtime",
+            return_value=("ok", {"planner_decision": "deterministic"}),
+        ) as execute_mock:
+            reply, meta = execute_http_reply_sequence_from_runtime(
+                turns=[],
+                text="hello",
+                ledger_record={},
+                pending_action=None,
+                prefer_web_for_data_queries=False,
+                language_mix_spanish_pct=0,
+                session=None,
+                ensure_reply=lambda reply: f"ENSURE:{reply}",
+                core=core,
+                runtime_scope=runtime_scope,
+                pre_planner_branch_group="operational",
+                post_planner_branch_group="general",
+            )
+
+        self.assertEqual(reply, "ok")
+        self.assertEqual(meta.get("planner_decision"), "deterministic")
+        normalize_reply = execute_mock.call_args.kwargs.get("normalize_reply")
+        self.assertEqual(normalize_reply("draft UI-TIP"), "ENSURE:corrected reply +override")
+        self.assertEqual(events, ["correction_applied", "self_correction_applied"])
+        self.assertIn(("llm_postprocess", "self_corrected", ""), traces)
+
     def test_session_recap_beats_planner_run_tool(self):
         core = SimpleNamespace(
             truth_hierarchy_answer=lambda _text: (False, "", "", False),
@@ -87,6 +214,37 @@ class TestNovaReplySequence(unittest.TestCase):
             core=core,
             is_session_recap_request=lambda _text: True,
         )
+        self.assertEqual(reply, "Recap of this session.")
+        self.assertEqual(meta.get("planner_decision"), "deterministic")
+        self.assertEqual(meta.get("tool"), "session_recap")
+
+    def test_post_planner_general_branch_group_handles_session_recap(self):
+        core = SimpleNamespace(
+            truth_hierarchy_answer=lambda _text: (False, "", "", False),
+            hard_answer=lambda _text: None,
+            decide_actions=lambda _text, config=None: [],
+            analyze_request=lambda _text, config=None: SimpleNamespace(allow_llm=False, message="blocked"),
+            build_fallback_context_details=lambda _text, _turns: {},
+            should_block_low_confidence=lambda _text, retrieved_context="": False,
+            _truthful_limit_outcome=lambda _text: {},
+            _truthful_limit_reply=lambda _text: "",
+            ollama_chat=lambda _text, retrieved_context="", language_mix_spanish_pct=0: "",
+            sanitize_llm_reply=lambda reply, _tool: reply,
+            _apply_claim_gate=lambda reply, evidence_text="", tool_context="": (reply, False, ""),
+            _attach_learning_invitation=lambda reply: reply,
+            _is_developer_color_lookup_request=lambda _text: False,
+            _is_developer_bilingual_request=lambda _text: False,
+            _is_color_lookup_request=lambda _text: False,
+        )
+
+        reply, meta = self._call(
+            "give me a recap of this chat",
+            core=core,
+            is_session_recap_request=lambda _text: True,
+            pre_planner_branch_group="operational",
+            post_planner_branch_group="general",
+        )
+
         self.assertEqual(reply, "Recap of this session.")
         self.assertEqual(meta.get("planner_decision"), "deterministic")
         self.assertEqual(meta.get("tool"), "session_recap")
@@ -227,6 +385,103 @@ class TestNovaReplySequence(unittest.TestCase):
         self.assertIn("Brownsville", reply)
         self.assertEqual(meta.get("planner_decision"), "deterministic")
         self.assertEqual(meta.get("tool"), "location")
+
+    def test_queue_pressure_triage_beats_planner_when_planner_runs_early(self):
+        with TemporaryDirectory() as td:
+            runtime_dir = Path(td)
+            (runtime_dir / "autonomy_maintenance_state.json").write_text(
+                '{"last_work_tree_cycle": {"status": "idle"}}',
+                encoding="utf-8",
+            )
+            core = SimpleNamespace(
+                RUNTIME_DIR=str(runtime_dir),
+                truth_hierarchy_answer=lambda _text: (False, "", "", False),
+                hard_answer=lambda _text: None,
+                decide_actions=lambda _text, config=None: [{"type": "run_tool", "tool": "git_status", "args": []}],
+                analyze_request=lambda _text, config=None: SimpleNamespace(allow_llm=False, message="blocked"),
+                build_fallback_context_details=lambda _text, _turns: {},
+                should_block_low_confidence=lambda _text, retrieved_context="": False,
+                _truthful_limit_outcome=lambda _text: {},
+                _truthful_limit_reply=lambda _text: "",
+                ollama_chat=lambda _text, retrieved_context="", language_mix_spanish_pct=0: "",
+                sanitize_llm_reply=lambda reply, _tool: reply,
+                _apply_claim_gate=lambda reply, evidence_text="", tool_context="": (reply, False, ""),
+                _attach_learning_invitation=lambda reply: reply,
+                _is_developer_color_lookup_request=lambda _text: False,
+                _is_developer_bilingual_request=lambda _text: False,
+                _is_color_lookup_request=lambda _text: False,
+                tool_queue_status=lambda: (
+                    "Standing work queue:\n"
+                    "- open: 3 of 9\n"
+                    "- green: 6\n"
+                    "- drift: 3\n"
+                    "Next item: real_world/stress_queue_pressure_triage.json\n"
+                ),
+                patch_status_payload=lambda: {
+                    "review_previews_pending_distinct": 1,
+                    "review_previews_orphaned": 1,
+                    "previews_approved_eligible": 0,
+                },
+            )
+
+            reply, meta = self._call(
+                "Inspect the generated queue, patch queue, and work tree pressure. Tell me the single most important next move and why.",
+                core=core,
+                planner_before_deterministic_content=True,
+            )
+
+        self.assertIn("stress_queue_pressure_triage", reply)
+        self.assertEqual(meta.get("planner_decision"), "deterministic")
+        self.assertEqual(meta.get("tool"), "queue_pressure_triage")
+
+    def test_pre_planner_operational_branch_group_handles_runtime_audit(self):
+        core = SimpleNamespace(
+            runtime_audit_snapshot=lambda: {
+                "source": "control_status_api",
+                "control_status_url": "http://127.0.0.1:8080/api/control/status",
+                "guard_running": True,
+                "guard_status": "running",
+                "guard_pid": 1001,
+                "core_running": True,
+                "core_status": "running",
+                "core_pid": 1002,
+                "core_heartbeat_age_sec": 0,
+                "search_ok": True,
+                "search_note": "status=200",
+                "search_endpoint": "http://127.0.0.1:8081/search",
+                "maintenance_active": True,
+                "maintenance_status": "guard_scheduled",
+                "maintenance_mode": "guard_tick",
+                "queue_status": "clear",
+                "queue_open_count": 0,
+                "queue_actionable_count": 0,
+            },
+            truth_hierarchy_answer=lambda _text: (False, "", "", False),
+            hard_answer=lambda _text: None,
+            decide_actions=lambda _text, config=None: [{"type": "run_tool", "tool": "git_status", "args": []}],
+            analyze_request=lambda _text, config=None: SimpleNamespace(allow_llm=False, message="blocked"),
+            build_fallback_context_details=lambda _text, _turns: {},
+            should_block_low_confidence=lambda _text, retrieved_context="": False,
+            _truthful_limit_outcome=lambda _text: {},
+            _truthful_limit_reply=lambda _text: "",
+            ollama_chat=lambda _text, retrieved_context="", language_mix_spanish_pct=0: "",
+            sanitize_llm_reply=lambda reply, _tool: reply,
+            _apply_claim_gate=lambda reply, evidence_text="", tool_context="": (reply, False, ""),
+            _attach_learning_invitation=lambda reply: reply,
+            _is_developer_color_lookup_request=lambda _text: False,
+            _is_developer_bilingual_request=lambda _text: False,
+            _is_color_lookup_request=lambda _text: False,
+        )
+
+        reply, meta = self._call(
+            "Inspect the live runtime and tell me whether guard, core, search, and maintenance are healthy. Use only the current live state.",
+            core=core,
+            pre_planner_branch_group="operational",
+            post_planner_branch_group="general",
+        )
+
+        self.assertIn("guard is healthy", reply.lower())
+        self.assertEqual(meta.get("tool"), "runtime_audit")
 
     def test_assistant_name_beats_planner_wikipedia_route(self):
         core = SimpleNamespace(

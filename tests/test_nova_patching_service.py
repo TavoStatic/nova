@@ -91,6 +91,39 @@ class TestNovaPatchingService(unittest.TestCase):
         self.assertIsNone(error)
         self.assertEqual(manifest, {"patch_revision": 3, "min_base_revision": 1})
 
+    def test_snapshot_current_skips_git_and_local_baggage(self):
+        base_dir = _workspace_case_dir("nova_patching_service")
+        try:
+            snapshots_dir = base_dir / "updates" / "snapshots"
+            (base_dir / ".git" / "objects" / "aa").mkdir(parents=True, exist_ok=True)
+            (base_dir / ".git" / "objects" / "aa" / "blob").write_text("git object", encoding="utf-8")
+            (base_dir / ".pytest_cache").mkdir(parents=True, exist_ok=True)
+            (base_dir / ".pytest_cache" / "cache.txt").write_text("cache", encoding="utf-8")
+            (base_dir / "codex_probe_file.txt").write_text("probe", encoding="utf-8")
+            (base_dir / "real_file.txt").write_text("real", encoding="utf-8")
+
+            snapshot = nova_patching.snapshot_current(
+                base_dir=base_dir,
+                snapshots_dir=snapshots_dir,
+                write_snapshot_meta_fn=lambda path, base_revision: nova_patching.write_snapshot_meta(
+                    path,
+                    base_revision,
+                    snapshot_meta_path_fn=nova_patching.snapshot_meta_path,
+                ),
+                read_patch_revision_fn=lambda: 7,
+                log_patch_fn=lambda _msg: None,
+            )
+
+            with zipfile.ZipFile(snapshot, "r") as archive:
+                names = set(archive.namelist())
+        finally:
+            shutil.rmtree(base_dir, ignore_errors=True)
+
+        self.assertIn("real_file.txt", names)
+        self.assertNotIn(".git/objects/aa/blob", names)
+        self.assertNotIn(".pytest_cache/cache.txt", names)
+        self.assertNotIn("codex_probe_file.txt", names)
+
     def test_patch_preview_summaries_merges_decision_by_name(self):
         updates_dir = _workspace_case_dir("nova_patching_service")
         try:
@@ -315,6 +348,43 @@ class TestNovaPatchingService(unittest.TestCase):
 
         mocked.assert_called_once_with("test_generic_fallback")
         self.assertEqual(out, "find ok")
+
+    def test_patch_apply_skips_snapshot_when_zip_has_no_real_changes(self):
+        base_dir = _workspace_case_dir("nova_patching_service")
+        try:
+            patch_zip = base_dir / "patch_no_change.zip"
+            manifest = {"patch_revision": 4, "min_base_revision": 0}
+            (base_dir / "same.txt").write_text("hello", encoding="utf-8")
+            with zipfile.ZipFile(patch_zip, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+                archive.writestr("nova_patch.json", json.dumps(manifest))
+                archive.writestr("same.txt", "hello")
+
+            snapshot_mock = mock.Mock(return_value=base_dir / "updates" / "snapshots" / "snap.zip")
+            result = nova_patching.patch_apply(
+                str(patch_zip),
+                force=False,
+                safe_path_fn=lambda value: Path(value),
+                policy_patch_fn=lambda: {"strict_manifest": True, "behavioral_check": True, "behavioral_check_timeout_sec": 60},
+                read_patch_revision_fn=lambda: 3,
+                read_patch_manifest_fn=lambda path: nova_patching.read_patch_manifest(path, patch_manifest_name="nova_patch.json"),
+                log_patch_fn=lambda _msg: None,
+                patch_reject_message_fn=lambda reason, **kwargs: reason,
+                read_approvals_fn=lambda: [],
+                patch_preview_fn=lambda _path, _write_report=False: "Status: eligible",
+                snapshot_current_fn=snapshot_mock,
+                overlay_zip_fn=lambda _path: 99,
+                py_compile_check_fn=lambda: (True, "ok"),
+                patch_rollback_fn=lambda _path=None: "rolled back",
+                behavioral_check_fn=lambda **kwargs: {"ok": True, "summary": "ok", "output": ""},
+                write_patch_revision_fn=lambda revision, source: None,
+                patch_manifest_name="nova_patch.json",
+                base_dir=base_dir,
+            )
+        finally:
+            shutil.rmtree(base_dir, ignore_errors=True)
+
+        snapshot_mock.assert_not_called()
+        self.assertEqual(result, "Patch zip contained no changed eligible files to apply.")
 
     def test_bulk_reject_orphaned_previews_records_rejections(self):
         updates_dir = _workspace_case_dir("nova_patching_service")

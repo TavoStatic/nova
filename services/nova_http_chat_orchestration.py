@@ -1,6 +1,12 @@
 from __future__ import annotations
 
 import http_chat_flow
+from services.nova_reply_deterministic import (
+    _is_restart_advice_query,
+    _is_restart_condition_followup,
+    _restart_advice_reply,
+    _restart_condition_reply,
+)
 
 
 class NovaHttpChatOrchestrationService:
@@ -13,6 +19,7 @@ class NovaHttpChatOrchestrationService:
         routed_text: str,
         turns: list[tuple[str, str]],
         session,
+        core_module=None,
         ledger: dict,
         conversation_state,
         intent_rule: dict,
@@ -39,6 +46,7 @@ class NovaHttpChatOrchestrationService:
         store_location_fact_reply_fn,
         weather_for_saved_location_fn,
         is_saved_location_weather_query_fn,
+        get_saved_location_text_fn=None,
         store_declarative_fact_outcome_fn,
         render_reply_fn,
         consume_conversation_followup_fn,
@@ -100,6 +108,7 @@ class NovaHttpChatOrchestrationService:
             input_source="typed",
             allowed_actions={
                 "name_origin_store",
+                "self_location",
                 "location_recall",
                 "location_name",
                 "weather_current_location",
@@ -171,6 +180,36 @@ class NovaHttpChatOrchestrationService:
                     "intent": "developer_profile",
                 },
                 "conversation_state": session.conversation_state,
+                "routing_decision": routing_decision,
+                "warn_supervisor_bypass": warn_supervisor_bypass,
+            }
+
+        if core_module is not None and _is_restart_advice_query(text):
+            action_ledger_add_step_fn(ledger, "deterministic_reply", "matched", "restart_advice")
+            return {
+                "handled": True,
+                "flow_result": {
+                    "reply": ensure_reply_fn(_restart_advice_reply(core_module)),
+                    "planner_decision": "deterministic",
+                    "grounded": True,
+                    "intent": "deterministic",
+                },
+                "conversation_state": conversation_state,
+                "routing_decision": routing_decision,
+                "warn_supervisor_bypass": warn_supervisor_bypass,
+            }
+
+        if core_module is not None and _is_restart_condition_followup(text):
+            action_ledger_add_step_fn(ledger, "deterministic_reply", "matched", "restart_condition")
+            return {
+                "handled": True,
+                "flow_result": {
+                    "reply": ensure_reply_fn(_restart_condition_reply(core_module)),
+                    "planner_decision": "deterministic",
+                    "grounded": True,
+                    "intent": "deterministic",
+                },
+                "conversation_state": conversation_state,
                 "routing_decision": routing_decision,
                 "warn_supervisor_bypass": warn_supervisor_bypass,
             }

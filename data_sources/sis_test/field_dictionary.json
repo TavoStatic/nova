@@ -1,0 +1,281 @@
+{
+  "source_summary": {
+    "primary_shape": "eschoolplus",
+    "comparison_shape": "powerschool",
+    "notes": [
+      "The live BISD test SIS references REG-style eSchoolPlus tables rather than classic PowerSchool student tables.",
+      "PowerSchool mappings are kept only as comparison aliases where that helps translation."
+    ],
+    "references": [
+      "https://ps.powerschool-docs.com/naviance/latest/common-eschoolplus-sis-student-tables-names-and-fi",
+      "https://ps.powerschool-docs.com/naviance/latest/eschoolplus-sis-student-field-mapping",
+      "https://ps.powerschool-docs.com/naviance/latest/common-powerschool-sis-student-table-names-and-fie",
+      "https://ps.powerschool-docs.com/naviance/latest/powerschool-sis-student-field-mapping"
+    ]
+  },
+  "table_families": [
+    {
+      "table": "dbo.REG",
+      "role": "master_registration",
+      "meaning": "Latest captured student registration snapshot and campus assignment record."
+    },
+    {
+      "table": "dbo.REG_BUILDING",
+      "role": "campus_reference",
+      "meaning": "Campus/building lookup and naming reference."
+    },
+    {
+      "table": "dbo.REG_PROGRAMS",
+      "role": "program_membership",
+      "meaning": "Program participation and value assignments for students."
+    },
+    {
+      "table": "dbo.REG_ENTRY_WITH",
+      "role": "registration_history",
+      "meaning": "District enrollment history timeline tracking student enrollment within the school district, including campus/date history and in-year grade movement."
+    }
+  ],
+  "usage_patterns": [
+    {
+      "question_type": "latest_student_snapshot",
+      "preferred_table": "dbo.REG",
+      "why": "REG reflects the latest captured student record."
+    },
+    {
+      "question_type": "current_year_grade_change_history",
+      "preferred_table": "dbo.REG_ENTRY_WITH",
+      "why": "REG_ENTRY_WITH preserves when and where the grade change happened during the year."
+    },
+    {
+      "question_type": "district_enrollment_timeline",
+      "preferred_table": "dbo.REG_ENTRY_WITH",
+      "why": "REG_ENTRY_WITH is the stronger source for enrollment movement across time and campuses."
+    }
+  ],
+  "status_codes": {
+    "reg.current_status": {
+      "P": "Preregistered",
+      "A": "Active",
+      "G": "Graduated",
+      "I": "Inactive"
+    }
+  },
+  "fields": [
+    {
+      "entity": "student_registration",
+      "field": "reg.student_id",
+      "label": "Student ID",
+      "required": true,
+      "definition": "Student number known to students and staff, not an internally generated identifier.",
+      "default_selection": "Student ID",
+      "powerschool_analog": "Student_Number"
+    },
+    {
+      "entity": "student_registration",
+      "field": "reg.last_name",
+      "label": "Last Name",
+      "required": true,
+      "definition": "Legal last name of the student.",
+      "default_selection": "Last Name",
+      "powerschool_analog": "Last_Name"
+    },
+    {
+      "entity": "student_registration",
+      "field": "reg.first_name",
+      "label": "First Name",
+      "required": false,
+      "definition": "First name of the student.",
+      "default_selection": "First Name",
+      "powerschool_analog": "First_Name"
+    },
+    {
+      "entity": "student_registration",
+      "field": "reg.building",
+      "label": "School ID / Building",
+      "required": true,
+      "definition": "ID of the school the student attends within the district.",
+      "default_selection": "Building",
+      "powerschool_analog": null
+    },
+    {
+      "entity": "student_registration",
+      "field": "reg.current_status",
+      "label": "Enrollment Status",
+      "required": true,
+      "definition": "Tracks whether the student is preregistered, active, graduated, or inactive.",
+      "default_selection": "Status",
+      "powerschool_analog": null
+    },
+    {
+      "entity": "student_registration",
+      "field": "reg.birthdate",
+      "label": "Birthdate",
+      "required": false,
+      "definition": "Student date of birth.",
+      "default_selection": "Birthdate",
+      "powerschool_analog": "DOB"
+    },
+    {
+      "entity": "student_registration",
+      "field": "reg.counselor",
+      "label": "Counselor",
+      "required": false,
+      "definition": "Assigned counselor name or employee identifier.",
+      "default_selection": "(Do not import)",
+      "powerschool_analog": null
+    },
+    {
+      "entity": "student_contact_and_identity",
+      "field": "reg_contact.city",
+      "label": "Mailing Address (City)",
+      "required": false,
+      "definition": "Student physical or mailing city.",
+      "default_selection": "Mailing Address (City)",
+      "powerschool_analog": "City / Mailing_City"
+    },
+    {
+      "entity": "student_contact_and_identity",
+      "field": "reg_contact.state",
+      "label": "Mailing Address (State)",
+      "required": false,
+      "definition": "Student physical or mailing state.",
+      "default_selection": "Mailing Address (State)",
+      "powerschool_analog": null
+    },
+    {
+      "entity": "student_contact_and_identity",
+      "field": "reg_contact.zip",
+      "label": "Mailing Address (Zip)",
+      "required": false,
+      "definition": "Student physical or mailing ZIP code.",
+      "default_selection": "Mailing Address (Zip)",
+      "powerschool_analog": "Zip / Mailing_Zip"
+    },
+    {
+      "entity": "student_contact_and_identity",
+      "field": "reg_contact.email",
+      "label": "Email Address",
+      "required": false,
+      "definition": "Preferred student email for school communication.",
+      "default_selection": "Email Address",
+      "powerschool_analog": null
+    },
+    {
+      "entity": "student_contact_and_identity",
+      "field": "reg_contact.login_id",
+      "label": "Naviance Student Username",
+      "required": false,
+      "definition": "Student login identifier used when federated IDs are required.",
+      "default_selection": "No student login created",
+      "powerschool_analog": "Student_Web_ID"
+    },
+    {
+      "entity": "student_contact_and_identity",
+      "field": "reg_personal.hispanic",
+      "label": "Ethnicity",
+      "required": false,
+      "definition": "Ethnicity marker used in standard reporting categories.",
+      "default_selection": "(Do not import)",
+      "powerschool_analog": "Ethnicity"
+    },
+    {
+      "entity": "student_contact_and_identity",
+      "field": "reg_personal.state_report_id",
+      "label": "State Reporting ID",
+      "required": false,
+      "definition": "State-issued student identifier used for reporting.",
+      "default_selection": "State Reporting ID",
+      "powerschool_analog": "State_StudentNumber"
+    },
+    {
+      "entity": "student_contact_and_identity",
+      "field": "sec_global_id.global_id",
+      "label": "Global ID",
+      "required": false,
+      "definition": "Global identity value tied to secure SIS identity layers.",
+      "default_selection": "(Do not import)",
+      "powerschool_analog": null
+    },
+    {
+      "entity": "student_gpa_and_rank",
+      "field": "mr_stu_gpa.cum_gpa",
+      "label": "Cumulative GPA",
+      "required": false,
+      "definition": "Student GPA value used for weighted or unweighted GPA depending on GPA type code.",
+      "default_selection": "(Do not import)",
+      "powerschool_analog": "~(*gpa method=\"...\")"
+    },
+    {
+      "entity": "student_gpa_and_rank",
+      "field": "mr_stu_gpa.cum_rank",
+      "label": "Cumulative Rank",
+      "required": false,
+      "definition": "Student class rank value.",
+      "default_selection": "(Do not import)",
+      "powerschool_analog": "~(*classrank method=\"...\")"
+    },
+    {
+      "entity": "student_gpa_and_rank",
+      "field": "mr_stu_gpa.cum_decile",
+      "label": "Cumulative Decile",
+      "required": false,
+      "definition": "Student rank position by decile.",
+      "default_selection": "(Do not import)",
+      "powerschool_analog": null
+    },
+    {
+      "entity": "student_gpa_and_rank",
+      "field": "reg_academic.graduation_year",
+      "label": "Graduation Year",
+      "required": false,
+      "definition": "Graduation year or class-year style academic summary field.",
+      "default_selection": "(Do not import)",
+      "powerschool_analog": "Sched_YearOfGraduation / ClassOf"
+    },
+    {
+      "entity": "district_registration_history",
+      "field": "reg_entry_with.*",
+      "label": "District Enrollment History",
+      "required": false,
+      "definition": "District enrollment timeline records for students within the school district. Use this table for enrollment-history and current-year grade-change questions, while REG remains the latest captured student record.",
+      "default_selection": "(Schema inventory needed)",
+      "powerschool_analog": null
+    },
+    {
+      "entity": "district_registration_history",
+      "field": "reg_entry_with.grade",
+      "label": "Historical Grade Level",
+      "required": false,
+      "definition": "Grade value as recorded at that point in the student enrollment timeline. This is the better source for identifying when a grade change happened during the year.",
+      "default_selection": "(Schema inventory needed)",
+      "powerschool_analog": null
+    },
+    {
+      "entity": "district_registration_history",
+      "field": "reg_entry_with.building",
+      "label": "Historical Campus / Building",
+      "required": false,
+      "definition": "Campus or building recorded for that timeline event, useful for where a grade or enrollment change happened.",
+      "default_selection": "(Schema inventory needed)",
+      "powerschool_analog": null
+    },
+    {
+      "entity": "district_registration_history",
+      "field": "reg_entry_with.entry_date",
+      "label": "Entry Date",
+      "required": false,
+      "definition": "Date associated with the start of that enrollment timeline record.",
+      "default_selection": "(Schema inventory needed)",
+      "powerschool_analog": null
+    },
+    {
+      "entity": "district_registration_history",
+      "field": "reg_entry_with.withdraw_date",
+      "label": "Withdraw Date",
+      "required": false,
+      "definition": "Date associated with the end of that enrollment timeline record when applicable.",
+      "default_selection": "(Schema inventory needed)",
+      "powerschool_analog": null
+    }
+  ]
+}

@@ -1,6 +1,58 @@
 from __future__ import annotations
 
-from typing import Callable, Optional
+from typing import Any, Callable, Mapping, Optional
+
+from services.nova_runtime_hooks import resolve_runtime_hooks
+
+
+_CONVERSATION_FOLLOWUP_HOOKS = {
+    "evaluate_rules_fn": "TURN_SUPERVISOR",
+    "execute_registered_supervisor_rule_fn": "_execute_registered_supervisor_rule",
+    "is_retrieval_meta_question_fn": "_is_retrieval_meta_question",
+    "retrieval_meta_reply_fn": "_retrieval_meta_reply",
+    "looks_like_retrieval_followup_fn": "_looks_like_retrieval_followup",
+    "retrieval_followup_reply_fn": "_retrieval_followup_reply",
+    "is_queue_status_reason_followup_fn": "_is_queue_status_reason_followup",
+    "queue_status_reason_reply_fn": "_queue_status_reason_reply",
+    "is_queue_status_report_followup_fn": "_is_queue_status_report_followup",
+    "queue_status_report_reply_fn": "_queue_status_report_reply",
+    "is_queue_status_seam_followup_fn": "_is_queue_status_seam_followup",
+    "queue_status_seam_reply_fn": "_queue_status_seam_reply",
+    "handle_location_conversation_turn_fn": "_handle_location_conversation_turn",
+    "is_weather_meta_followup_fn": "_is_weather_meta_followup",
+    "weather_meta_reply_fn": "_weather_meta_reply",
+    "is_weather_status_followup_fn": "_is_weather_status_followup",
+    "weather_status_reply_fn": "_weather_status_reply",
+    "normalize_turn_text_fn": "_normalize_turn_text",
+    "numeric_reference_guess_reply_fn": "_numeric_reference_guess_reply",
+    "numeric_reference_binding_reply_fn": "_numeric_reference_binding_reply",
+    "make_conversation_state_fn": "_make_conversation_state",
+    "extract_work_role_parts_fn": "_extract_work_role_parts",
+    "store_developer_role_facts_fn": "_store_developer_role_facts",
+    "strip_confirmation_prefix_fn": "_strip_confirmation_prefix",
+    "looks_like_profile_followup_fn": "_looks_like_profile_followup",
+    "developer_identity_followup_reply_fn": "_developer_identity_followup_reply",
+    "non_retrieval_resource_meta_reply_fn": "_non_retrieval_resource_meta_reply",
+    "is_developer_location_request_fn": "_is_developer_location_request",
+    "developer_location_reply_fn": "_developer_location_reply",
+    "identity_name_followup_reply_fn": "_identity_name_followup_reply",
+    "identity_profile_followup_reply_fn": "_identity_profile_followup_reply",
+}
+
+
+def _evaluate_rules_hook(runtime_scope: Mapping[str, Any]):
+    supervisor = runtime_scope["TURN_SUPERVISOR"]
+    return lambda text, manager, turns=None, phase="handle": supervisor.evaluate_rules(
+        text,
+        manager=manager,
+        turns=turns,
+        phase=phase,
+    )
+
+
+_CONVERSATION_FOLLOWUP_HOOK_FACTORIES = {
+    "evaluate_rules_fn": _evaluate_rules_hook,
+}
 
 
 def consume_conversation_followup(
@@ -165,3 +217,27 @@ def consume_conversation_followup(
         return False, "", state
 
     return False, "", state
+
+
+def consume_conversation_followup_from_runtime(
+    state: Optional[dict],
+    text: str,
+    *,
+    input_source: str = "typed",
+    turns: Optional[list[tuple[str, str]]] = None,
+    runtime_scope: Optional[Mapping[str, Any]] = None,
+    **explicit_hooks,
+) -> tuple[bool, str, Optional[dict]]:
+    hooks = resolve_runtime_hooks(
+        _CONVERSATION_FOLLOWUP_HOOKS,
+        explicit_hooks=explicit_hooks,
+        runtime_scope=runtime_scope,
+        factories=_CONVERSATION_FOLLOWUP_HOOK_FACTORIES,
+    )
+    return consume_conversation_followup(
+        state,
+        text,
+        input_source=input_source,
+        turns=turns,
+        **hooks,
+    )

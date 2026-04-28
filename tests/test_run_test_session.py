@@ -193,7 +193,7 @@ class TestRunTestSessionIsolation(unittest.TestCase):
                 {
                     "assistant": "Not a file: C:/Nova/updates.zip",
                     "planner_decision": "run_tool",
-                    "route_summary": "input:received -> direction_analysis:general_chat -> truth_hierarchy:not_matched -> hard_answer:not_matched -> action_planner:run_tool -> tool_execution:ok -> finalize:run_tool",
+                    "route_summary": "input:received -> direction_analysis:general_chat -> truth_hierarchy:not_matched -> hard_answer:not_matched -> llm_call:started -> action_planner:run_tool -> tool_execution:ok -> finalize:run_tool",
                     "active_subject": "",
                     "continuation_used": False,
                     "probe_summary": "All green",

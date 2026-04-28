@@ -42,6 +42,40 @@ class _SessionManager:
 
 
 class TestNovaHttpChatRuntimeService(unittest.TestCase):
+    def test_process_chat_from_runtime_resolves_http_runtime_bundle(self):
+        with patch.object(
+            HTTP_CHAT_RUNTIME_SERVICE,
+            "process_chat",
+            return_value="runtime ok",
+        ) as process_mock:
+            reply = HTTP_CHAT_RUNTIME_SERVICE.process_chat_from_runtime(
+                "sid",
+                "hello",
+                user_id="runner",
+                core_module=nova_http.nova_core,
+                runtime_scope={
+                    "SESSION_STATE_MANAGER": nova_http.SESSION_STATE_MANAGER,
+                    "HTTP_TURN_ENTRY_SERVICE": nova_http.HTTP_TURN_ENTRY_SERVICE,
+                    "HTTP_CHAT_ORCHESTRATION_SERVICE": nova_http.HTTP_CHAT_ORCHESTRATION_SERVICE,
+                    "HTTP_TURN_FINALIZATION_SERVICE": nova_http.HTTP_TURN_FINALIZATION_SERVICE,
+                    "http_chat_flow": nova_http.http_chat_flow,
+                    "_append_session_turn": nova_http._append_session_turn,
+                    "_generate_chat_reply": nova_http._generate_chat_reply,
+                    "_invalidate_control_status_cache": nova_http._invalidate_control_status_cache,
+                    "_fast_smalltalk_reply": nova_http._fast_smalltalk_reply,
+                    "_is_developer_profile_request": nova_http._is_developer_profile_request,
+                    "_developer_profile_reply": nova_http._developer_profile_reply,
+                    "_learn_contextual_developer_facts": nova_http._learn_contextual_developer_facts,
+                },
+            )
+
+        self.assertEqual(reply, "runtime ok")
+        self.assertEqual(process_mock.call_args.args[:2], ("sid", "hello"))
+        self.assertEqual(process_mock.call_args.kwargs.get("user_id"), "runner")
+        self.assertIs(process_mock.call_args.kwargs.get("session_state_manager"), nova_http.SESSION_STATE_MANAGER)
+        self.assertIs(process_mock.call_args.kwargs.get("generate_chat_reply_fn"), nova_http._generate_chat_reply)
+        self.assertIs(process_mock.call_args.kwargs.get("extract_memory_teach_text_fn"), nova_http.nova_core._extract_memory_teach_text)
+
     def test_process_chat_returns_ok_for_empty_text_and_restores_active_user(self):
         invalidations = []
 
@@ -65,7 +99,7 @@ class TestNovaHttpChatRuntimeService(unittest.TestCase):
                 is_developer_profile_request_fn=nova_http._is_developer_profile_request,
                 developer_profile_reply_fn=nova_http._developer_profile_reply,
                 learn_contextual_developer_facts_fn=nova_http._learn_contextual_developer_facts,
-                extract_memory_teach_text_fn=nova_http._extract_memory_teach_text,
+                extract_memory_teach_text_fn=nova_http.nova_core._extract_memory_teach_text,
             )
 
         self.assertEqual(reply, "Okay.")
@@ -112,7 +146,7 @@ class TestNovaHttpChatRuntimeService(unittest.TestCase):
                 is_developer_profile_request_fn=nova_http._is_developer_profile_request,
                 developer_profile_reply_fn=nova_http._developer_profile_reply,
                 learn_contextual_developer_facts_fn=nova_http._learn_contextual_developer_facts,
-                extract_memory_teach_text_fn=nova_http._extract_memory_teach_text,
+                extract_memory_teach_text_fn=nova_http.nova_core._extract_memory_teach_text,
             )
 
         self.assertEqual(reply, "runtime delegated")

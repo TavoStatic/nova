@@ -12,6 +12,44 @@ from pathlib import Path
 from typing import Callable, Optional, Tuple
 
 
+_SNAPSHOT_SKIP_DIRS = {
+    ".venv",
+    ".git",
+    ".ci_venv",
+    ".pytest_cache",
+    "runtime",
+    "logs",
+    "models",
+    "updates",
+    "__pycache__",
+    "knowledge",
+    "installer",
+}
+_SNAPSHOT_SKIP_ROOT_PREFIXES = ("codex_", "probe_sqlite_")
+_SNAPSHOT_SKIP_ROOT_NAMES = {
+    "This_is_nova",
+    "tests_to_review.txt",
+    "_handle_commands_current.txt",
+    "_run_loop_current.txt",
+}
+
+
+def snapshot_should_skip_relpath(rel: Path) -> bool:
+    if "__pycache__" in rel.parts:
+        return True
+    if not rel.parts:
+        return False
+    first = rel.parts[0]
+    if first in _SNAPSHOT_SKIP_DIRS:
+        return True
+    if len(rel.parts) == 1:
+        if first in _SNAPSHOT_SKIP_ROOT_NAMES:
+            return True
+        if any(first.startswith(prefix) for prefix in _SNAPSHOT_SKIP_ROOT_PREFIXES):
+            return True
+    return False
+
+
 def parse_scoped_patch_payload(value: object) -> dict[str, object]:
     candidate: object = value
     if isinstance(value, str):
@@ -175,15 +213,12 @@ def snapshot_current(
     snapshots_dir.mkdir(parents=True, exist_ok=True)
     ts = time.strftime("%Y%m%d_%H%M%S")
     snap = snapshots_dir / f"snapshot_{ts}.zip"
-    skip_dirs = {".venv", "runtime", "logs", "models", "updates", "__pycache__", "knowledge"}
     with zipfile.ZipFile(snap, "w", compression=zipfile.ZIP_DEFLATED) as archive:
         for path in base_dir.rglob("*"):
             if path.is_dir():
                 continue
             rel = path.relative_to(base_dir)
-            if rel.parts and rel.parts[0] in skip_dirs:
-                continue
-            if "__pycache__" in rel.parts:
+            if snapshot_should_skip_relpath(rel):
                 continue
             archive.write(path, arcname=str(rel))
     write_snapshot_meta_fn(snap, read_patch_revision_fn())
@@ -191,10 +226,10 @@ def snapshot_current(
     return snap
 
 
-def overlay_zip(zip_path: Path, *, base_dir: Path, patch_manifest_name: str) -> int:
+def overlay_change_candidates(zip_path: Path, *, base_dir: Path, patch_manifest_name: str) -> list[tuple[str, bytes]]:
     allowed_ext = {".py", ".json", ".md", ".txt", ".ps1", ".cmd"}
-    blocked_prefix = {".git/", ".venv/", "runtime/", "logs/", "models/"}
-    count = 0
+    blocked_prefix = {".git/", ".venv/", "runtime/", "logs/", "models/", "updates/"}
+    changed: list[tuple[str, bytes]] = []
     with zipfile.ZipFile(zip_path, "r") as archive:
         for info in archive.infolist():
             if info.is_dir():
@@ -206,10 +241,25 @@ def overlay_zip(zip_path: Path, *, base_dir: Path, patch_manifest_name: str) -> 
                 continue
             if Path(name).suffix.lower() not in allowed_ext:
                 continue
-            out = base_dir / name
-            out.parent.mkdir(parents=True, exist_ok=True)
-            out.write_bytes(archive.read(info))
-            count += 1
+            payload = archive.read(info)
+            target = base_dir / name
+            if target.exists():
+                try:
+                    if target.read_bytes() == payload:
+                        continue
+                except Exception:
+                    pass
+            changed.append((name, payload))
+    return changed
+
+
+def overlay_zip(zip_path: Path, *, base_dir: Path, patch_manifest_name: str) -> int:
+    count = 0
+    for name, payload in overlay_change_candidates(zip_path, base_dir=base_dir, patch_manifest_name=patch_manifest_name):
+        out = base_dir / name
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_bytes(payload)
+        count += 1
     return count
 
 
@@ -955,6 +1005,11 @@ def patch_apply(
                 incoming_revision=next_revision,
                 required_base_revision=min_base,
             )
+
+    planned_changes = overlay_change_candidates(zip_file, base_dir=base_dir, patch_manifest_name=patch_manifest_name)
+    if not planned_changes:
+        log_patch_fn(f"APPLY_SKIP no_changed_files zip={zip_file.name}")
+        return "Patch zip contained no changed eligible files to apply."
 
     snap = snapshot_current_fn()
     log_patch_fn(f"APPLY {zip_file.name} current_rev={current_revision} next_rev={next_revision if next_revision is not None else 'unversioned'}")

@@ -337,12 +337,13 @@ def apply_mixed_turn_clarify(
     *,
     turn_acts: list[str],
     correction_pending: bool,
+    skip_mixed_turn_clarify: bool = False,
     routed_text: str,
     ledger: dict,
     mixed_info_request_clarify_reply: Callable[[str], str],
     action_ledger_add_step: Callable[..., None],
 ) -> dict:
-    if "mixed" not in turn_acts or correction_pending:
+    if "mixed" not in turn_acts or correction_pending or skip_mixed_turn_clarify:
         return {"handled": False}
 
     action_ledger_add_step(ledger, "mixed_turn_clarify", "blocked")
@@ -760,3 +761,22 @@ def resume_last_pending_turn(
         return {"ok": True, "resumed": True, "session_id": sid, "reply": reply}
     finally:
         set_active_user(previous_user)
+
+
+def resume_last_pending_turn_from_runtime(
+    session_id: str,
+    user_id: str = "",
+    *,
+    runtime_scope: dict[str, object],
+) -> dict:
+    return resume_last_pending_turn(
+        session_id,
+        user_id,
+        get_active_user=runtime_scope["nova_core"].get_active_user,
+        set_active_user=runtime_scope["nova_core"].set_active_user,
+        get_last_session_turn=runtime_scope["_get_last_session_turn"],
+        get_session_turns=runtime_scope["_get_session_turns"],
+        generate_chat_reply=runtime_scope["_generate_chat_reply"],
+        append_session_turn=runtime_scope["_append_session_turn"],
+        invalidate_control_status_cache=runtime_scope.get("_invalidate_control_status_cache"),
+    )

@@ -4,9 +4,21 @@ import hashlib
 import json
 import time
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Any, Callable, Mapping, Optional
 
 from services.ops_journal import append_ops_event
+from services.nova_runtime_hooks import resolve_runtime_hooks
+
+
+_FINALIZE_ACTION_LEDGER_RECORD_HOOKS = {
+    "provider_name_from_tool_fn": "_provider_name_from_tool",
+    "finalize_routing_decision_fn": "_finalize_routing_decision",
+    "action_ledger_add_step_fn": "action_ledger_add_step",
+    "action_ledger_route_summary_fn": "action_ledger_route_summary",
+    "write_action_ledger_record_fn": "write_action_ledger_record",
+    "recent_action_ledger_records_fn": "_recent_action_ledger_records",
+    "maybe_log_self_reflection_fn": "maybe_log_self_reflection",
+}
 
 
 def start_action_ledger_record(
@@ -163,3 +175,46 @@ def finalize_action_ledger_record(
         recent_for_reflection = all_records[-20:]
         maybe_log_self_reflection_fn(limit=20, every=1, records=recent_for_reflection, total_records=len(all_records), extra_payload=reflection_payload)
     return path
+
+
+def finalize_action_ledger_record_from_runtime(
+    record: dict,
+    *,
+    final_answer: str,
+    planner_decision: str = "",
+    tool: str = "",
+    tool_args: Optional[dict] = None,
+    tool_result: str = "",
+    grounded: Optional[bool] = None,
+    intent: str = "",
+    active_subject: str = "",
+    continuation_used: Optional[bool] = None,
+    reply_contract: str = "",
+    reply_outcome: Optional[dict] = None,
+    routing_decision: Optional[dict] = None,
+    reflection_payload: Optional[dict] = None,
+    runtime_scope: Optional[Mapping[str, Any]] = None,
+    **explicit_hooks,
+) -> Optional[Path]:
+    hooks = resolve_runtime_hooks(
+        _FINALIZE_ACTION_LEDGER_RECORD_HOOKS,
+        explicit_hooks=explicit_hooks,
+        runtime_scope=runtime_scope,
+    )
+    return finalize_action_ledger_record(
+        record,
+        final_answer=final_answer,
+        planner_decision=planner_decision,
+        tool=tool,
+        tool_args=tool_args,
+        tool_result=tool_result,
+        grounded=grounded,
+        intent=intent,
+        active_subject=active_subject,
+        continuation_used=continuation_used,
+        reply_contract=reply_contract,
+        reply_outcome=reply_outcome,
+        routing_decision=routing_decision,
+        reflection_payload=reflection_payload,
+        **hooks,
+    )

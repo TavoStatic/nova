@@ -38,6 +38,106 @@ class _FakePsutil:
 
 
 class TestRuntimeControlService(unittest.TestCase):
+    def test_autonomy_maintenance_summary_flattens_queue_truth(self):
+        runtime_processes = SimpleNamespace(
+            logical_service_processes=lambda _script: [],
+            select_logical_process=lambda logical, pid=None, create_time=None: None,
+        )
+        state = {
+            "runtime_worker": {"last_cycle_status": "ok"},
+            "last_regression_status": "FAILED",
+            "last_regression_stale": True,
+            "last_generated_queue_run": {
+                "status": "blocked",
+                "queue_open_count": 3,
+                "queue_actionable_count": 0,
+                "queue_blocked_count": 3,
+                "queue_blocked_reason_counts": {"parity_drift_locked": 3},
+                "queue_blocked_files": ["a.json", "b.json", "c.json"],
+            },
+            "last_work_tree_cycle": {"status": "idle"},
+            "last_complete_tree_archive": {"status": "ok", "archived_count": 12, "retained_count": 8},
+            "last_error": "",
+        }
+
+        payload = RUNTIME_CONTROL_SERVICE.autonomy_maintenance_summary(
+            state_payload=state,
+            maintenance_py=Path("c:/Nova/autonomy_maintenance.py"),
+            runtime_processes_module=runtime_processes,
+            strftime_fn=lambda _fmt: "2026-04-27",
+        )
+
+        self.assertEqual(payload.get("generated_queue_status"), "blocked")
+        self.assertEqual(payload.get("last_regression_status"), "FAILED")
+        self.assertTrue(payload.get("last_regression_stale"))
+        self.assertEqual(payload.get("queue_open_count"), 3)
+        self.assertEqual(payload.get("queue_actionable_count"), 0)
+        self.assertEqual(payload.get("queue_blocked_count"), 3)
+        self.assertEqual(payload.get("queue_blocked_reason_counts"), {"parity_drift_locked": 3})
+        self.assertEqual(payload.get("queue_blocked_files"), ["a.json", "b.json", "c.json"])
+        self.assertEqual(payload.get("work_tree_status"), "idle")
+        self.assertEqual((payload.get("last_complete_tree_archive") or {}).get("archived_count"), 12)
+
+    def test_autonomy_maintenance_summary_marks_missing_runtime_worker_stale(self):
+        runtime_processes = SimpleNamespace(
+            logical_service_processes=lambda _script: [],
+            select_logical_process=lambda logical, pid=None, create_time=None: None,
+        )
+        state = {
+            "runtime_worker": {
+                "last_cycle_status": "running",
+                "pid": 4321,
+                "create_time": 12.5,
+            }
+        }
+
+        payload = RUNTIME_CONTROL_SERVICE.autonomy_maintenance_summary(
+            state_payload=state,
+            maintenance_py=Path("c:/Nova/autonomy_maintenance.py"),
+            runtime_processes_module=runtime_processes,
+            strftime_fn=lambda _fmt: "2026-04-27",
+        )
+
+        worker = dict(payload.get("runtime_worker") or {})
+        self.assertEqual(worker.get("last_cycle_status"), "stopped")
+        self.assertFalse(worker.get("active"))
+        self.assertTrue(worker.get("stale_identity"))
+        self.assertIsNone(worker.get("pid"))
+        self.assertIsNone(worker.get("create_time"))
+
+    def test_autonomy_maintenance_summary_preserves_patch_queue_fields(self):
+        runtime_processes = SimpleNamespace(
+            logical_service_processes=lambda _script: [],
+            select_logical_process=lambda logical, pid=None, create_time=None: None,
+        )
+        state = {
+            "runtime_worker": {"last_cycle_status": "ok", "interval_sec": 300},
+            "last_generated_queue_run": {"status": "blocked", "queue_open_count": 3},
+            "last_work_tree_cycle": {"status": "idle", "executed_count": 0, "tree_count": 1},
+            "last_patch_queue_sync": {"status": "ok", "review_previews_total": 17},
+            "last_patch_cleanup": {
+                "status": "ok",
+                "orphan_rejected_count": 238,
+                "superseded_archived_count": 347,
+                "review_total_before": 29,
+                "review_total_after": 17,
+            },
+            "last_kidney_status": {"mode": "enforce", "candidate_count": 19},
+        }
+
+        payload = RUNTIME_CONTROL_SERVICE.autonomy_maintenance_summary(
+            state_payload=state,
+            maintenance_py=Path("c:/Nova/autonomy_maintenance.py"),
+            runtime_processes_module=runtime_processes,
+            strftime_fn=lambda _fmt: "2026-04-27",
+        )
+
+        self.assertEqual((payload.get("last_work_tree_cycle") or {}).get("status"), "idle")
+        self.assertEqual((payload.get("last_patch_queue_sync") or {}).get("review_previews_total"), 17)
+        self.assertEqual((payload.get("last_patch_cleanup") or {}).get("orphan_rejected_count"), 238)
+        self.assertEqual((payload.get("last_patch_cleanup") or {}).get("superseded_archived_count"), 347)
+        self.assertEqual((payload.get("last_kidney_status") or {}).get("candidate_count"), 19)
+
     def test_runtime_artifact_show_action_preserves_message_and_detail(self):
         ok, msg, extra, detail = RUNTIME_CONTROL_SERVICE.runtime_artifact_show_action(
             {"artifact": "guard.log", "lines": 20},
@@ -48,6 +148,50 @@ class TestRuntimeControlService(unittest.TestCase):
         self.assertEqual(msg, "runtime_artifact_show_ok")
         self.assertEqual((extra.get("artifact") or {}).get("name"), "guard.log")
         self.assertEqual(detail, "runtime_artifact_show_ok:guard.log")
+
+    def test_guard_control_action_from_runtime_routes_restart(self):
+        ok, msg, extra, detail = RUNTIME_CONTROL_SERVICE.guard_control_action_from_runtime(
+            {"_action": "guard_restart"},
+            runtime_scope={
+                "_restart_guard": lambda: (True, "guard_restart_requested"),
+                "_guard_status_payload": lambda: {"running": True},
+                "_core_status_payload": lambda: {"running": True, "pid": 321},
+            },
+        )
+
+        self.assertTrue(ok)
+        self.assertEqual(msg, "guard_restart_requested")
+        self.assertEqual((extra.get("guard") or {}).get("running"), True)
+        self.assertEqual((extra.get("core") or {}).get("pid"), 321)
+        self.assertEqual(detail, "guard_restart_requested")
+
+    def test_core_runtime_action_from_runtime_routes_webui_restart(self):
+        ok, msg, extra, detail = RUNTIME_CONTROL_SERVICE.core_runtime_action_from_runtime(
+            {"_action": "webui_restart"},
+            runtime_scope={
+                "_restart_webui": lambda: (True, "webui_restart_requested"),
+                "_http_status_payload": lambda: {"running": True, "pid": 8080},
+            },
+        )
+
+        self.assertTrue(ok)
+        self.assertEqual(msg, "webui_restart_requested")
+        self.assertEqual((extra.get("webui") or {}).get("pid"), 8080)
+        self.assertEqual(detail, "webui_restart_requested")
+
+    def test_autonomy_runtime_action_from_runtime_routes_start(self):
+        ok, msg, extra, detail = RUNTIME_CONTROL_SERVICE.autonomy_runtime_action_from_runtime(
+            {"_action": "autonomy_maintenance_start"},
+            runtime_scope={
+                "_start_autonomy_maintenance_worker": lambda: (True, "autonomy_maintenance_start_requested"),
+                "_autonomy_maintenance_summary": lambda: {"ok": True, "generated_queue_status": "clear"},
+            },
+        )
+
+        self.assertTrue(ok)
+        self.assertEqual(msg, "autonomy_maintenance_start_requested")
+        self.assertEqual((extra.get("autonomy_maintenance") or {}).get("generated_queue_status"), "clear")
+        self.assertEqual(detail, "autonomy_maintenance_start_requested")
 
     def test_start_nova_core_routes_through_guard(self):
         import sys

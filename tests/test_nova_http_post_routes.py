@@ -54,3 +54,24 @@ class TestNovaHttpPostRoutesService(unittest.TestCase):
         )
 
         self.assertEqual(result, {"kind": "json", "code": 200, "body": {"ok": True, "message": "refresh_ok", "status": "fresh"}})
+
+    def test_handle_basic_post_route_from_runtime_resolves_scope(self):
+        result = HTTP_POST_ROUTES_SERVICE.handle_basic_post_route_from_runtime(
+            "/api/control/action",
+            handler=object(),
+            qs={},
+            payload={"action": "refresh_status"},
+            runtime_scope={
+                "_control_login_action": lambda payload: (200, payload, {}),
+                "_control_logout_action": lambda handler: (200, {"ok": True}, {}),
+                "_chat_login_action": lambda payload: (200, payload, {}),
+                "_chat_logout_action": lambda handler: (200, {"ok": True}, {}),
+                "_control_auth": lambda handler, qs: (True, ""),
+                "_control_action": lambda action, payload: (True, "runtime_ok", {"action": action}),
+            },
+        )
+
+        self.assertEqual(
+            result,
+            {"kind": "json", "code": 200, "body": {"ok": True, "message": "runtime_ok", "action": "refresh_status"}},
+        )

@@ -39,6 +39,15 @@ class TestSupervisorRoutingRules(unittest.TestCase):
         self.assertTrue(result.get("handled"))
         self.assertEqual(result.get("tool_name"), "stackexchange_search")
 
+    def test_search_provider_keeps_generic_explain_prompt_off_wikipedia(self):
+        tool = supervisor_routing_rules.search_provider_tool_for_query(
+            "Explain photosynthesis briefly.",
+            "Explain photosynthesis briefly.",
+            "search",
+        )
+
+        self.assertEqual(tool, "web_research")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -14,6 +14,94 @@ class RuntimeControlService:
     """Own runtime lifecycle control helpers outside the HTTP layer."""
 
     @staticmethod
+    def _runtime_fn(runtime_scope: dict[str, object], name: str):
+        return runtime_scope[name]
+
+    def autonomy_maintenance_summary(
+        self,
+        *,
+        state_payload: dict,
+        maintenance_py: Path,
+        runtime_processes_module,
+        strftime_fn=time.strftime,
+    ) -> dict:
+        payload = dict(state_payload or {}) if isinstance(state_payload, dict) else {}
+        runtime_worker = dict(payload.get("runtime_worker") or {}) if isinstance(payload.get("runtime_worker"), dict) else {}
+        last_generated_queue_run = dict(payload.get("last_generated_queue_run") or {}) if isinstance(payload.get("last_generated_queue_run"), dict) else {}
+        last_work_tree_cycle = dict(payload.get("last_work_tree_cycle") or {}) if isinstance(payload.get("last_work_tree_cycle"), dict) else {}
+        last_patch_queue_sync = dict(payload.get("last_patch_queue_sync") or {}) if isinstance(payload.get("last_patch_queue_sync"), dict) else {}
+        last_patch_cleanup = dict(payload.get("last_patch_cleanup") or {}) if isinstance(payload.get("last_patch_cleanup"), dict) else {}
+        last_complete_tree_archive = dict(payload.get("last_complete_tree_archive") or {}) if isinstance(payload.get("last_complete_tree_archive"), dict) else {}
+        last_kidney_status = dict(payload.get("last_kidney_status") or {}) if isinstance(payload.get("last_kidney_status"), dict) else {}
+        pid = runtime_worker.get("pid")
+        create_time = runtime_worker.get("create_time")
+        selected = runtime_processes_module.select_logical_process(
+            runtime_processes_module.logical_service_processes(maintenance_py),
+            pid=int(pid) if isinstance(pid, int) else (int(pid) if isinstance(pid, str) and pid.isdigit() else None),
+            create_time=float(create_time) if isinstance(create_time, (int, float)) else None,
+        )
+        if selected is not None:
+            runtime_worker["active"] = True
+            runtime_worker["stale_identity"] = False
+            runtime_worker["pid"] = int(selected.get("pid") or runtime_worker.get("pid") or 0)
+            runtime_worker["create_time"] = float(selected.get("create_time") or runtime_worker.get("create_time") or 0.0) or runtime_worker.get("create_time")
+            runtime_worker["script_path"] = str(runtime_worker.get("script_path") or maintenance_py)
+            if str(runtime_worker.get("last_cycle_status") or "").strip().lower() in {"", "stopped"}:
+                runtime_worker["last_cycle_status"] = "running"
+        else:
+            runtime_worker["active"] = False
+            runtime_worker["stale_identity"] = bool(runtime_worker.get("pid") or runtime_worker.get("create_time"))
+            runtime_worker["pid"] = None
+            runtime_worker["create_time"] = None
+            runtime_worker["script_path"] = str(runtime_worker.get("script_path") or maintenance_py)
+            if str(runtime_worker.get("last_cycle_status") or "").strip().lower() == "running":
+                runtime_worker["last_cycle_status"] = "stopped"
+        last_regression_status = str(payload.get("last_regression_status") or "").strip()
+        stale_value = payload.get("last_regression_stale")
+        if isinstance(stale_value, bool):
+            last_regression_stale = stale_value
+        else:
+            last_regression_stale = bool(
+                last_regression_status
+                and "pass" not in last_regression_status.lower()
+                and last_regression_status.lower() != "ok"
+                and str(payload.get("last_regression_date") or "") != strftime_fn("%Y-%m-%d")
+            )
+        queue_status = str(last_generated_queue_run.get("status") or "").strip().lower()
+        queue_open_count = int(last_generated_queue_run.get("queue_open_count", 0) or 0)
+        queue_actionable_count = int(last_generated_queue_run.get("queue_actionable_count", 0) or 0)
+        queue_blocked_count = int(last_generated_queue_run.get("queue_blocked_count", 0) or 0)
+        if queue_open_count > 0 and queue_blocked_count <= 0 and queue_actionable_count <= 0:
+            queue_blocked_count = queue_open_count
+        queue_blocked_reason_counts = dict(last_generated_queue_run.get("queue_blocked_reason_counts") or {}) if isinstance(last_generated_queue_run.get("queue_blocked_reason_counts"), dict) else {}
+        queue_blocked_files = list(last_generated_queue_run.get("queue_blocked_files") or []) if isinstance(last_generated_queue_run.get("queue_blocked_files"), list) else []
+        last_error = str(payload.get("last_error") or "")
+        return {
+            "ok": bool(payload),
+            "last_generated_at": str(payload.get("last_generated_at") or ""),
+            "last_regression_status": last_regression_status,
+            "last_regression_stale": last_regression_stale,
+            "last_auto_apply": str(payload.get("last_auto_apply") or ""),
+            "generated_queue_status": queue_status,
+            "queue_open_count": queue_open_count,
+            "queue_actionable_count": queue_actionable_count,
+            "queue_blocked_count": queue_blocked_count,
+            "queue_blocked_reason_counts": queue_blocked_reason_counts,
+            "queue_blocked_files": queue_blocked_files,
+            "work_tree_status": str(last_work_tree_cycle.get("status") or ""),
+            "last_error": last_error,
+            "last_error_stale": False if not last_error else False,
+            "runtime_worker": runtime_worker,
+            "last_generated_queue_run": last_generated_queue_run,
+            "last_generated_queue_run_stale": False,
+            "last_work_tree_cycle": last_work_tree_cycle,
+            "last_patch_queue_sync": last_patch_queue_sync,
+            "last_patch_cleanup": last_patch_cleanup,
+            "last_complete_tree_archive": last_complete_tree_archive,
+            "last_kidney_status": last_kidney_status,
+        }
+
+    @staticmethod
     def runtime_artifact_show_action(payload: dict, *, runtime_artifact_detail_payload_fn) -> tuple[bool, str, dict, str]:
         target = str(payload.get("artifact") or payload.get("name") or "").strip()
         detail = runtime_artifact_detail_payload_fn(target, max_lines=int(payload.get("lines") or 120))
@@ -78,6 +166,85 @@ class RuntimeControlService:
     ) -> tuple[bool, str, dict, str]:
         ok, msg = stop_autonomy_maintenance_worker_fn()
         return ok, msg, {"autonomy_maintenance": autonomy_maintenance_summary_fn()}, msg
+
+    def guard_control_action_from_runtime(
+        self,
+        payload: dict,
+        *,
+        runtime_scope: dict[str, object],
+    ) -> tuple[bool, str, dict, str]:
+        action = str(payload.get("_action") or "").strip().lower()
+        if action == "guard_status":
+            return self.guard_status_action(
+                guard_status_payload_fn=self._runtime_fn(runtime_scope, "_guard_status_payload"),
+            )
+        if action == "guard_start":
+            return self.guard_start_action(
+                start_guard_fn=self._runtime_fn(runtime_scope, "_start_guard"),
+                guard_status_payload_fn=self._runtime_fn(runtime_scope, "_guard_status_payload"),
+            )
+        if action == "guard_stop":
+            return self.guard_stop_action(
+                stop_guard_fn=self._runtime_fn(runtime_scope, "_stop_guard"),
+                guard_status_payload_fn=self._runtime_fn(runtime_scope, "_guard_status_payload"),
+            )
+        if action == "guard_restart":
+            return self.guard_restart_action(
+                restart_guard_fn=self._runtime_fn(runtime_scope, "_restart_guard"),
+                guard_status_payload_fn=self._runtime_fn(runtime_scope, "_guard_status_payload"),
+                core_status_payload_fn=self._runtime_fn(runtime_scope, "_core_status_payload"),
+            )
+        return False, "runtime_action_unknown", {}, "runtime_action_unknown"
+
+    def core_runtime_action_from_runtime(
+        self,
+        payload: dict,
+        *,
+        runtime_scope: dict[str, object],
+    ) -> tuple[bool, str, dict, str]:
+        action = str(payload.get("_action") or "").strip().lower()
+        if action == "nova_start":
+            return self.nova_start_action(
+                start_nova_core_fn=self._runtime_fn(runtime_scope, "_start_nova_core"),
+                core_status_payload_fn=self._runtime_fn(runtime_scope, "_core_status_payload"),
+            )
+        if action == "core_stop":
+            return self.core_stop_action(
+                stop_core_owned_process_fn=self._runtime_fn(runtime_scope, "_stop_core_owned_process"),
+                guard_status_payload_fn=self._runtime_fn(runtime_scope, "_guard_status_payload"),
+                core_status_payload_fn=self._runtime_fn(runtime_scope, "_core_status_payload"),
+            )
+        if action == "core_restart":
+            return self.core_restart_action(
+                restart_core_fn=self._runtime_fn(runtime_scope, "_restart_core"),
+                guard_status_payload_fn=self._runtime_fn(runtime_scope, "_guard_status_payload"),
+                core_status_payload_fn=self._runtime_fn(runtime_scope, "_core_status_payload"),
+            )
+        if action == "webui_restart":
+            return self.webui_restart_action(
+                restart_webui_fn=self._runtime_fn(runtime_scope, "_restart_webui"),
+                http_status_payload_fn=self._runtime_fn(runtime_scope, "_http_status_payload"),
+            )
+        return False, "runtime_action_unknown", {}, "runtime_action_unknown"
+
+    def autonomy_runtime_action_from_runtime(
+        self,
+        payload: dict,
+        *,
+        runtime_scope: dict[str, object],
+    ) -> tuple[bool, str, dict, str]:
+        action = str(payload.get("_action") or "").strip().lower()
+        if action == "autonomy_maintenance_start":
+            return self.autonomy_maintenance_start_action(
+                start_autonomy_maintenance_worker_fn=self._runtime_fn(runtime_scope, "_start_autonomy_maintenance_worker"),
+                autonomy_maintenance_summary_fn=self._runtime_fn(runtime_scope, "_autonomy_maintenance_summary"),
+            )
+        if action == "autonomy_maintenance_stop":
+            return self.autonomy_maintenance_stop_action(
+                stop_autonomy_maintenance_worker_fn=self._runtime_fn(runtime_scope, "_stop_autonomy_maintenance_worker"),
+                autonomy_maintenance_summary_fn=self._runtime_fn(runtime_scope, "_autonomy_maintenance_summary"),
+            )
+        return False, "runtime_action_unknown", {}, "runtime_action_unknown"
 
     @staticmethod
     def _coerce_identity_pid(value) -> int | None:

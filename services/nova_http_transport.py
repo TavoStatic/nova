@@ -32,7 +32,7 @@ class NovaHttpTransportService:
             json_response_fn(handler, code, response_payload)
             return
 
-        control_get_result = control_api_request_fn(path, qs)
+        control_get_result = control_api_request_fn(path, handler, qs)
         if control_get_result is not None:
             code, response_payload = control_get_result
             json_response_fn(handler, code, response_payload)

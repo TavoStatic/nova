@@ -1,7 +1,10 @@
+import base64
 import io
 import json
 import tempfile
+import threading
 import unittest
+import urllib.request
 from pathlib import Path
 from unittest import mock
 from unittest.mock import patch
@@ -255,6 +258,197 @@ class TestNovaHttpProfile(unittest.TestCase):
         session = nova_http.SESSION_STATE_MANAGER.get("s6_subject")
         self.assertIsNotNone(session)
         self.assertEqual("identity_profile:developer", session.active_subject())
+
+    def test_generate_chat_reply_runtime_audit_is_deterministic(self):
+        with patch(
+            "nova_http.execute_http_reply_sequence_from_runtime",
+            return_value=(
+                "runtime audit reply",
+                {
+                    "planner_decision": "deterministic",
+                    "tool": "runtime_audit",
+                    "tool_args": {"query": "show me the live runtime state of guard core search and maintenance"},
+                    "tool_result": "runtime audit reply",
+                    "grounded": True,
+                },
+            ),
+        ) as sequence_mock:
+            reply, meta = nova_http._generate_chat_reply([], "show me the live runtime state of guard core search and maintenance")
+
+        self.assertEqual(reply, "runtime audit reply")
+        self.assertEqual(meta.get("planner_decision"), "deterministic")
+        self.assertEqual(meta.get("tool"), "runtime_audit")
+        self.assertTrue(meta.get("grounded"))
+        self.assertEqual(sequence_mock.call_args.kwargs.get("pre_planner_branch_group"), "operational")
+        self.assertEqual(sequence_mock.call_args.kwargs.get("post_planner_branch_group"), "general")
+
+    def test_generate_chat_reply_runtime_audit_evidence_is_deterministic(self):
+        with patch(
+            "nova_http.execute_http_reply_sequence_from_runtime",
+            return_value=(
+                "runtime evidence reply",
+                {
+                    "planner_decision": "deterministic",
+                    "tool": "runtime_audit_evidence",
+                    "tool_args": {"query": "what evidence did you use and what still worries you"},
+                    "tool_result": "runtime evidence reply",
+                    "grounded": True,
+                },
+            ),
+        ):
+            reply, meta = nova_http._generate_chat_reply([], "what evidence did you use and what still worries you")
+
+        self.assertEqual(reply, "runtime evidence reply")
+        self.assertEqual(meta.get("planner_decision"), "deterministic")
+        self.assertEqual(meta.get("tool"), "runtime_audit_evidence")
+        self.assertTrue(meta.get("grounded"))
+
+    def test_generate_chat_reply_tool_path_is_deterministic(self):
+        with patch(
+            "nova_http.execute_http_reply_sequence_from_runtime",
+            return_value=(
+                "tool path reply",
+                {
+                    "planner_decision": "deterministic",
+                    "tool": "tool_path_disambiguation",
+                    "tool_args": {"query": "tell me the exact file and service name for patch preview approval"},
+                    "tool_result": "tool path reply",
+                    "grounded": True,
+                },
+            ),
+        ):
+            reply, meta = nova_http._generate_chat_reply([], "tell me the exact file and service name for patch preview approval")
+
+        self.assertEqual(reply, "tool path reply")
+        self.assertEqual(meta.get("planner_decision"), "deterministic")
+        self.assertEqual(meta.get("tool"), "tool_path_disambiguation")
+        self.assertTrue(meta.get("grounded"))
+
+    def test_generate_chat_reply_tool_path_safe_step_is_deterministic(self):
+        with patch(
+            "nova_http.execute_http_reply_sequence_from_runtime",
+            return_value=(
+                "tool path safe step reply",
+                {
+                    "planner_decision": "deterministic",
+                    "tool": "tool_path_safe_step",
+                    "tool_args": {"query": "what is the next safe operator step without pretending you changed anything"},
+                    "tool_result": "tool path safe step reply",
+                    "grounded": True,
+                },
+            ),
+        ):
+            reply, meta = nova_http._generate_chat_reply([], "what is the next safe operator step without pretending you changed anything")
+
+        self.assertEqual(reply, "tool path safe step reply")
+        self.assertEqual(meta.get("planner_decision"), "deterministic")
+        self.assertEqual(meta.get("tool"), "tool_path_safe_step")
+        self.assertTrue(meta.get("grounded"))
+
+    def test_generate_chat_reply_maintenance_mode_truth_is_deterministic(self):
+        with patch(
+            "nova_http.execute_http_reply_sequence_from_runtime",
+            return_value=(
+                "maintenance mode reply",
+                {
+                    "planner_decision": "deterministic",
+                    "tool": "maintenance_mode_truth",
+                    "tool_args": {"query": "Is Nova maintenance running through a separate worker or through the guard tick right now?"},
+                    "tool_result": "maintenance mode reply",
+                    "grounded": True,
+                },
+            ),
+        ):
+            reply, meta = nova_http._generate_chat_reply([], "Is Nova maintenance running through a separate worker or through the guard tick right now?")
+
+        self.assertEqual(reply, "maintenance mode reply")
+        self.assertEqual(meta.get("planner_decision"), "deterministic")
+        self.assertEqual(meta.get("tool"), "maintenance_mode_truth")
+        self.assertTrue(meta.get("grounded"))
+
+    def test_generate_chat_reply_storage_watch_truth_is_deterministic(self):
+        with patch(
+            "nova_http.execute_http_reply_sequence_from_runtime",
+            return_value=(
+                "storage watch truth reply",
+                {
+                    "planner_decision": "deterministic",
+                    "tool": "storage_watch_truth",
+                    "tool_args": {"query": "Tell me whether Nova's snapshot storage is healthy right now and what numbers prove it."},
+                    "tool_result": "storage watch truth reply",
+                    "grounded": True,
+                },
+            ),
+        ):
+            reply, meta = nova_http._generate_chat_reply([], "Tell me whether Nova's snapshot storage is healthy right now and what numbers prove it.")
+
+        self.assertEqual(reply, "storage watch truth reply")
+        self.assertEqual(meta.get("planner_decision"), "deterministic")
+        self.assertEqual(meta.get("tool"), "storage_watch_truth")
+        self.assertTrue(meta.get("grounded"))
+
+    def test_generate_chat_reply_heartbeat_forensics_is_deterministic(self):
+        with patch(
+            "nova_http.execute_http_reply_sequence_from_runtime",
+            return_value=(
+                "heartbeat forensics reply",
+                {
+                    "planner_decision": "deterministic",
+                    "tool": "heartbeat_forensics",
+                    "tool_args": {"query": "Check whether Nova's heartbeat is healthy right now and tell me exactly what proves it."},
+                    "tool_result": "heartbeat forensics reply",
+                    "grounded": True,
+                },
+            ),
+        ):
+            reply, meta = nova_http._generate_chat_reply([], "Check whether Nova's heartbeat is healthy right now and tell me exactly what proves it.")
+
+        self.assertEqual(reply, "heartbeat forensics reply")
+        self.assertEqual(meta.get("planner_decision"), "deterministic")
+        self.assertEqual(meta.get("tool"), "heartbeat_forensics")
+        self.assertTrue(meta.get("grounded"))
+
+    def test_generate_chat_reply_runtime_artifact_grounding_is_deterministic(self):
+        with patch(
+            "nova_http.execute_http_reply_sequence_from_runtime",
+            return_value=(
+                "runtime artifact grounding reply",
+                {
+                    "planner_decision": "deterministic",
+                    "tool": "runtime_artifact_grounding",
+                    "tool_args": {"query": "If we needed to inspect runtime truth right now, which exact runtime artifact files would you look at first?"},
+                    "tool_result": "runtime artifact grounding reply",
+                    "grounded": True,
+                },
+            ),
+        ):
+            reply, meta = nova_http._generate_chat_reply([], "If we needed to inspect runtime truth right now, which exact runtime artifact files would you look at first?")
+
+        self.assertEqual(reply, "runtime artifact grounding reply")
+        self.assertEqual(meta.get("planner_decision"), "deterministic")
+        self.assertEqual(meta.get("tool"), "runtime_artifact_grounding")
+        self.assertTrue(meta.get("grounded"))
+
+    def test_generate_chat_reply_general_deterministic_sequence_runs_after_planner(self):
+        with patch(
+            "nova_http.execute_http_reply_sequence_from_runtime",
+            return_value=(
+                "session recap reply",
+                {
+                    "planner_decision": "deterministic",
+                    "tool": "session_recap",
+                    "tool_args": {"query": "give me a session recap"},
+                    "tool_result": "session recap reply",
+                    "grounded": True,
+                },
+            ),
+        ) as sequence_mock:
+            reply, meta = nova_http._generate_chat_reply([], "give me a session recap")
+
+        self.assertEqual(reply, "session recap reply")
+        self.assertEqual(meta.get("tool"), "session_recap")
+        self.assertEqual(sequence_mock.call_args.kwargs.get("pre_planner_branch_group"), "operational")
+        self.assertEqual(sequence_mock.call_args.kwargs.get("post_planner_branch_group"), "general")
 
     def test_developer_profile_certainty_challenge_stays_on_profile_thread(self):
         nova_http.process_chat("s6_cert", "what do you know about Gus?")
@@ -1094,6 +1288,261 @@ class TestNovaHttpControlAssets(unittest.TestCase):
         self.assertIn("btnWorkTreesRefresh", js)
         self.assertIn("function initialControlView()", js)
         self.assertIn("setActiveView(initialControlView())", js)
+
+
+class TestNovaHttpLeahRoutes(unittest.TestCase):
+    def setUp(self):
+        self.tempdir = tempfile.TemporaryDirectory()
+        self.leah_service = nova_http.LeahFrontdoorService(
+            asset_service=nova_http.CONTROL_ASSETS_SERVICE,
+            template_path_provider=lambda: nova_http.LEAH_TEMPLATE_PATH,
+            css_path_provider=lambda: nova_http.LEAH_CSS_PATH,
+            js_path_provider=lambda: nova_http.LEAH_JS_PATH,
+            fx_js_path_provider=lambda: nova_http.LEAH_FX_JS_PATH,
+            upload_root_provider=lambda: Path(self.tempdir.name),
+        )
+        self.service_patch = patch.object(nova_http, "LEAH_FRONTDOOR_SERVICE", self.leah_service)
+        self.service_patch.start()
+        self.chat_login_patch = patch("nova_http._chat_login_enabled", return_value=False)
+        self.chat_login_patch.start()
+        nova_http.SESSION_TURNS.clear()
+        nova_http.SESSION_STATE_MANAGER.clear()
+
+    def tearDown(self):
+        self.chat_login_patch.stop()
+        self.service_patch.stop()
+        self.tempdir.cleanup()
+        nova_http.SESSION_TURNS.clear()
+        nova_http.SESSION_STATE_MANAGER.clear()
+
+    def _start_server(self):
+        server = nova_http.ThreadingHTTPServer(("127.0.0.1", 0), nova_http.NovaHttpHandler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        return server, thread
+
+    def _stop_server(self, server, thread):
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2.0)
+
+    def _request(self, server, path, *, payload=None):
+        port = int(server.server_address[1])
+        url = f"http://127.0.0.1:{port}{path}"
+        data = None if payload is None else json.dumps(payload).encode("utf-8")
+        headers = {"Content-Type": "application/json"} if data is not None else {}
+        req = urllib.request.Request(url, data=data, headers=headers, method="POST" if data is not None else "GET")
+        with urllib.request.urlopen(req, timeout=10) as response:
+            body = response.read().decode("utf-8", errors="replace")
+            return response.status, body
+
+    def test_leah_route_and_assets_are_served(self):
+        server, thread = self._start_server()
+        try:
+            status, body = self._request(server, "/leah")
+            self.assertEqual(status, 200)
+            self.assertIn("L.A.E.H.", body)
+            self.assertIn("/static/leah.css", body)
+            self.assertIn("/static/leah_fx.js", body)
+            self.assertIn("/static/leah.js", body)
+
+            css_status, css_body = self._request(server, "/static/leah.css")
+            self.assertEqual(css_status, 200)
+            self.assertIn("--bg:", css_body)
+
+            js_status, js_body = self._request(server, "/static/leah.js")
+            self.assertEqual(js_status, 200)
+            self.assertIn('/api/chat/upload', js_body)
+
+            fx_status, fx_body = self._request(server, "/static/leah_fx.js")
+            self.assertEqual(fx_status, 200)
+            self.assertIn('getContext("webgl2"', fx_body)
+        finally:
+            self._stop_server(server, thread)
+
+    def test_leah_upload_endpoint_stages_items(self):
+        server, thread = self._start_server()
+        try:
+            payload = {
+                "session_id": "sid-upload",
+                "user_id": "web-test",
+                "items": [
+                    {
+                        "name": "note.txt",
+                        "mime": "text/plain",
+                        "source": "upload",
+                        "content_b64": base64.b64encode(b"hello from leah").decode("ascii"),
+                    }
+                ],
+            }
+            status, body = self._request(server, "/api/chat/upload", payload=payload)
+            data = json.loads(body)
+
+            self.assertEqual(status, 200)
+            self.assertTrue(data["ok"])
+            self.assertEqual(data["session_id"], "sid-upload")
+            self.assertEqual(len(data["items"]), 1)
+            stored = data["items"][0]
+            self.assertEqual(stored["original_name"], "note.txt")
+            self.assertTrue(Path(stored["path"]).exists())
+            self.assertIn(self.tempdir.name, stored["path"])
+            remembered, stage = self.leah_service.recent_session_context("sid-upload")
+            self.assertEqual(stage, "staged")
+            self.assertEqual(len(remembered), 1)
+        finally:
+            self._stop_server(server, thread)
+
+    def test_leah_chat_uses_attachment_handoff_reply(self):
+        server, thread = self._start_server()
+        try:
+            upload_payload = {
+                "session_id": "sid-handoff",
+                "user_id": "web-test",
+                "items": [
+                    {
+                        "name": "note.txt",
+                        "mime": "text/plain",
+                        "source": "upload",
+                        "content_b64": base64.b64encode(b"hello from leah").decode("ascii"),
+                    }
+                ],
+            }
+            _, upload_body = self._request(server, "/api/chat/upload", payload=upload_payload)
+            upload_data = json.loads(upload_body)
+            stored_items = upload_data["items"]
+
+            chat_payload = {
+                "session_id": "sid-handoff",
+                "user_id": "web-test",
+                "message": "can you read it?",
+                "attachments": stored_items,
+            }
+            status, body = self._request(server, "/api/chat", payload=chat_payload)
+            data = json.loads(body)
+
+            self.assertEqual(status, 200)
+            self.assertTrue(data["ok"])
+            self.assertIn("I can read it directly.", data["reply"])
+            self.assertIn("hello from leah", data["reply"])
+        finally:
+            self._stop_server(server, thread)
+
+
+class TestNovaHttpRouteContracts(unittest.TestCase):
+    def test_http_route_contract_keeps_frontdoor_and_control_surfaces(self):
+        contract = nova_http.http_route_contract()
+
+        self.assertIn("/", contract["public_pages"])
+        self.assertIn("/leah", contract["public_pages"])
+        self.assertIn("/control", contract["protected_pages"])
+        self.assertIn("/static/leah.css", contract["static_assets"])
+        self.assertIn("/static/leah.js", contract["static_assets"])
+        self.assertIn("/static/leah_fx.js", contract["static_assets"])
+        self.assertIn("/api/health", contract["public_api_get"])
+        self.assertIn("/api/control/work-trees", contract["control_api_get"])
+        self.assertIn("/api/chat/upload", contract["chat_api_post"])
+
+    def test_runtime_console_root_is_served(self):
+        server = nova_http.ThreadingHTTPServer(("127.0.0.1", 0), nova_http.NovaHttpHandler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            port = int(server.server_address[1])
+            with urllib.request.urlopen(f"http://127.0.0.1:{port}/", timeout=10) as response:
+                body = response.read().decode("utf-8", errors="replace")
+
+            self.assertEqual(response.status, 200)
+            self.assertIn("NYO Runtime Console", body)
+            self.assertIn("/api/chat", body)
+            self.assertIn("Open Operator Console", body)
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2.0)
+
+    def test_control_login_page_is_served_when_enabled(self):
+        server = nova_http.ThreadingHTTPServer(("127.0.0.1", 0), nova_http.NovaHttpHandler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            port = int(server.server_address[1])
+            with patch("nova_http._control_login_enabled", return_value=True), \
+                patch("nova_http._control_page_gate", return_value=(True, "")):
+                with urllib.request.urlopen(f"http://127.0.0.1:{port}/control/login", timeout=10) as response:
+                    body = response.read().decode("utf-8", errors="replace")
+
+            self.assertEqual(response.status, 200)
+            self.assertIn("NYO System Control Login", body)
+            self.assertIn("/api/control/login", body)
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2.0)
+
+    def test_control_page_is_served_when_authorized(self):
+        server = nova_http.ThreadingHTTPServer(("127.0.0.1", 0), nova_http.NovaHttpHandler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            port = int(server.server_address[1])
+            with patch("nova_http._control_page_gate", return_value=(True, "")):
+                with urllib.request.urlopen(f"http://127.0.0.1:{port}/control", timeout=10) as response:
+                    body = response.read().decode("utf-8", errors="replace")
+
+            self.assertEqual(response.status, 200)
+            self.assertIn('data-view-target="scheduled-tree"', body)
+            self.assertIn("NYO System Control", body)
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2.0)
+
+    def test_control_work_trees_route_is_served_when_authorized(self):
+        server = nova_http.ThreadingHTTPServer(("127.0.0.1", 0), nova_http.NovaHttpHandler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            port = int(server.server_address[1])
+            payload = {"ok": True, "trees": [{"tree_id": "tree_1"}], "counts": {"total": 1}}
+            with patch("nova_http._control_auth", return_value=(True, "")), \
+                patch("nova_http._work_trees_payload", return_value=payload):
+                with urllib.request.urlopen(f"http://127.0.0.1:{port}/api/control/work-trees", timeout=10) as response:
+                    body = json.loads(response.read().decode("utf-8", errors="replace"))
+
+            self.assertEqual(response.status, 200)
+            self.assertTrue(body["ok"])
+            self.assertEqual(body["counts"]["total"], 1)
+            self.assertEqual(body["trees"][0]["tree_id"], "tree_1")
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2.0)
+
+    def test_control_action_post_route_is_served_when_authorized(self):
+        server = nova_http.ThreadingHTTPServer(("127.0.0.1", 0), nova_http.NovaHttpHandler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            port = int(server.server_address[1])
+            request = urllib.request.Request(
+                f"http://127.0.0.1:{port}/api/control/action",
+                data=json.dumps({"action": "refresh_status"}).encode("utf-8"),
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            with patch("nova_http._control_auth", return_value=(True, "")), \
+                patch("nova_http._control_action", return_value=(True, "refresh_ok", {"status": "fresh"})):
+                with urllib.request.urlopen(request, timeout=10) as response:
+                    body = json.loads(response.read().decode("utf-8", errors="replace"))
+
+            self.assertEqual(response.status, 200)
+            self.assertTrue(body["ok"])
+            self.assertEqual(body["message"], "refresh_ok")
+            self.assertEqual(body["status"], "fresh")
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2.0)
 
 
 if __name__ == "__main__":

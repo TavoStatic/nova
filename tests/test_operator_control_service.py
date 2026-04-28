@@ -171,6 +171,38 @@ class TestOperatorControlService(unittest.TestCase):
         self.assertEqual((extra.get("session") or {}).get("turn_count"), 2)
         self.assertIn("Inspect restart pressure.", extra.get("reply"))
 
+    def test_operator_prompt_action_from_runtime_resolves_scope(self):
+        macro = {
+            "macro_id": "inspect-runtime",
+            "prompt_template": "Inspect {focus_area}.",
+            "placeholders": [{"name": "focus_area", "required": True}],
+        }
+
+        ok, msg, extra, detail, audit_payload = OPERATOR_CONTROL_SERVICE.operator_prompt_action_from_runtime(
+            {
+                "macro": "inspect-runtime",
+                "session_id": "operator-xyz789",
+                "message": "include status",
+                "macro_values": {"focus_area": "runtime"},
+            },
+            runtime_scope={
+                "_resolve_operator_macro": lambda _macro_id: macro,
+                "_render_operator_macro_prompt": OPERATOR_CONTROL_SERVICE.render_operator_macro_prompt,
+                "_load_operator_macros": lambda _limit: [macro],
+                "_normalize_user_id": lambda value: value.strip().lower(),
+                "_assert_session_owner": lambda _session_id, _user_id, allow_bind=True: (True, "owner_bound"),
+                "process_chat": lambda _session_id, message, user_id=None: f"reply:{message}:{user_id}",
+                "_session_summaries": lambda _limit: [{"session_id": "operator-xyz789", "turn_count": 1}],
+                "secrets": SimpleNamespace(token_hex=lambda _size: "xyz789"),
+            },
+        )
+
+        self.assertTrue(ok)
+        self.assertEqual(msg, "operator_prompt_ok")
+        self.assertEqual(detail, "operator_prompt_ok:operator-xyz789")
+        self.assertEqual(audit_payload.get("operator_mode"), "macro")
+        self.assertEqual((extra.get("session") or {}).get("turn_count"), 1)
+
 
 if __name__ == "__main__":
     unittest.main()

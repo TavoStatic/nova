@@ -11,6 +11,10 @@ class OperatorControlService:
     """Load operator macros and backend command decks outside the HTTP transport layer."""
 
     @staticmethod
+    def _runtime_fn(runtime_scope: dict[str, object], name: str):
+        return runtime_scope[name]
+
+    @staticmethod
     def operator_macros_path(base_dir: Path) -> Path:
         return Path(base_dir) / "operator_macros.json"
 
@@ -90,6 +94,21 @@ class OperatorControlService:
         except Exception as exc:
             detail = f"operator_prompt_failed:{exc}"
             return False, detail, {"session_id": session_id}, detail, {**payload, "operator_mode": operator_mode}
+
+    @staticmethod
+    def operator_prompt_action_from_runtime(payload: dict, *, runtime_scope: dict[str, object]) -> tuple[bool, str, dict, str, dict]:
+        runtime_fn = OperatorControlService._runtime_fn
+        return OperatorControlService.operator_prompt_action(
+            payload,
+            resolve_operator_macro_fn=runtime_fn(runtime_scope, "_resolve_operator_macro"),
+            render_operator_macro_prompt_fn=runtime_fn(runtime_scope, "_render_operator_macro_prompt"),
+            load_operator_macros_fn=runtime_fn(runtime_scope, "_load_operator_macros"),
+            normalize_user_id_fn=runtime_fn(runtime_scope, "_normalize_user_id"),
+            assert_session_owner_fn=runtime_fn(runtime_scope, "_assert_session_owner"),
+            process_chat_fn=runtime_fn(runtime_scope, "process_chat"),
+            session_summaries_fn=runtime_fn(runtime_scope, "_session_summaries"),
+            token_hex_fn=runtime_fn(runtime_scope, "secrets").token_hex,
+        )
 
     def load_operator_macros(self, path: Path, limit: int = 24) -> list[dict]:
         macro_path = Path(path)

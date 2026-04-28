@@ -1,10 +1,183 @@
 from __future__ import annotations
 
+import os
 import time
 
 
 class ControlStatusService:
     """Own HTTP control-status payload assembly outside the transport layer."""
+
+    @staticmethod
+    def runtime_supplier_fns_from_scope(runtime_scope: dict[str, object]) -> dict[str, object]:
+        names = (
+            "probe_searxng",
+            "guard_status_payload",
+            "core_status_payload",
+            "http_status_payload",
+            "runtime_timeline_payload",
+            "subconscious_status_summary",
+            "subconscious_live_summary",
+            "generated_work_queue",
+            "autonomy_maintenance_summary",
+            "load_operator_macros",
+            "load_backend_commands",
+            "memory_events_summary",
+            "tool_events_summary",
+            "action_ledger_summary",
+            "provider_telemetry_payload",
+            "runtime_summary_payload",
+            "runtime_artifacts_payload",
+            "runtime_restart_analytics_payload",
+            "runtime_failure_reasons_payload",
+            "action_readiness_payload",
+            "release_status_payload",
+            "patch_action_readiness_payload",
+            "storage_watch_summary",
+            "runtime_process_note",
+            "heartbeat_age_seconds",
+            "chat_login_enabled",
+            "chat_auth_source",
+            "chat_users",
+            "append_metrics_snapshot",
+            "build_self_check",
+            "control_policy_payload",
+            "metrics_payload",
+        )
+        return {
+            name: runtime_scope[f"_{name}"]
+            for name in names
+        }
+
+    def runtime_status_payload(
+        self,
+        *,
+        core_module,
+        session_turns,
+        metrics_totals: tuple[int, int],
+        supplier_fns: dict[str, object] | None = None,
+    ) -> dict:
+        supplier_fns = dict(supplier_fns or {})
+        probe_searxng_fn = supplier_fns["probe_searxng"]
+        guard_status_payload_fn = supplier_fns["guard_status_payload"]
+        core_status_payload_fn = supplier_fns["core_status_payload"]
+        http_status_payload_fn = supplier_fns["http_status_payload"]
+        runtime_timeline_payload_fn = supplier_fns["runtime_timeline_payload"]
+        subconscious_status_summary_fn = supplier_fns["subconscious_status_summary"]
+        subconscious_live_summary_fn = supplier_fns["subconscious_live_summary"]
+        generated_work_queue_fn = supplier_fns["generated_work_queue"]
+        autonomy_maintenance_summary_fn = supplier_fns["autonomy_maintenance_summary"]
+        load_operator_macros_fn = supplier_fns["load_operator_macros"]
+        load_backend_commands_fn = supplier_fns["load_backend_commands"]
+        memory_events_summary_fn = supplier_fns["memory_events_summary"]
+        tool_events_summary_fn = supplier_fns["tool_events_summary"]
+        action_ledger_summary_fn = supplier_fns["action_ledger_summary"]
+        provider_telemetry_payload_fn = supplier_fns["provider_telemetry_payload"]
+        runtime_summary_payload_fn = supplier_fns["runtime_summary_payload"]
+        runtime_artifacts_payload_fn = supplier_fns["runtime_artifacts_payload"]
+        runtime_restart_analytics_payload_fn = supplier_fns["runtime_restart_analytics_payload"]
+        runtime_failure_reasons_payload_fn = supplier_fns["runtime_failure_reasons_payload"]
+        action_readiness_payload_fn = supplier_fns["action_readiness_payload"]
+        release_status_payload_fn = supplier_fns["release_status_payload"]
+        patch_action_readiness_payload_fn = supplier_fns["patch_action_readiness_payload"]
+        storage_watch_summary_fn = supplier_fns["storage_watch_summary"]
+        runtime_process_note_fn = supplier_fns["runtime_process_note"]
+        heartbeat_age_seconds_fn = supplier_fns["heartbeat_age_seconds"]
+        chat_login_enabled_fn = supplier_fns["chat_login_enabled"]
+        chat_auth_source_fn = supplier_fns["chat_auth_source"]
+        chat_users_fn = supplier_fns["chat_users"]
+        append_metrics_snapshot_fn = supplier_fns["append_metrics_snapshot"]
+        build_self_check_fn = supplier_fns["build_self_check"]
+        control_policy_payload_fn = supplier_fns["control_policy_payload"]
+        metrics_payload_fn = supplier_fns["metrics_payload"]
+
+        policy = core_module.load_policy()
+        web_cfg = policy.get("web") or {}
+        provider = str(web_cfg.get("search_provider") or "html").strip().lower()
+        endpoint = str(web_cfg.get("search_api_endpoint") or "").strip()
+
+        searx_ok = None
+        searx_note = "n/a"
+        if provider == "searxng":
+            if endpoint:
+                searx_ok, searx_note = probe_searxng_fn(endpoint)
+            else:
+                searx_ok, searx_note = None, "endpoint_missing"
+
+        guard_status = guard_status_payload_fn()
+        core_status = core_status_payload_fn()
+        webui_status = http_status_payload_fn()
+        timeline_payload = runtime_timeline_payload_fn()
+        subconscious_summary = subconscious_status_summary_fn()
+        subconscious_live_summary = subconscious_live_summary_fn()
+        generated_work_queue = generated_work_queue_fn(24)
+        autonomy_maintenance = autonomy_maintenance_summary_fn()
+        operator_macros = load_operator_macros_fn(24)
+        backend_commands = load_backend_commands_fn(40)
+        memory_stats = core_module.mem_stats_payload(emit_event=False)
+        memory_summary = memory_events_summary_fn(80)
+        tool_summary = tool_events_summary_fn(80)
+        ledger_summary = action_ledger_summary_fn(80)
+        patch_summary = core_module.patch_status_payload()
+        pulse_payload = core_module.build_pulse_payload()
+        update_now_pending = core_module.update_now_pending_payload()
+        requests_total, errors_total = metrics_totals
+
+        payload = self.status_payload(
+            policy=policy,
+            provider=provider,
+            endpoint=endpoint,
+            searx_ok=searx_ok,
+            searx_note=searx_note,
+            search_provider_priority=list(core_module.get_search_provider_priority()),
+            provider_telemetry=provider_telemetry_payload_fn(ledger_summary=ledger_summary, tool_summary=tool_summary),
+            ollama_api_up=bool(core_module.ollama_api_up()),
+            chat_model=core_module.chat_model(),
+            memory_enabled=bool(core_module.mem_enabled()),
+            subconscious_summary=subconscious_summary,
+            subconscious_live_summary=subconscious_live_summary,
+            generated_work_queue=generated_work_queue,
+            autonomy_maintenance=autonomy_maintenance,
+            operator_macros=operator_macros,
+            backend_commands=backend_commands,
+            memory_scope=str((policy.get("memory") or {}).get("scope") or "private"),
+            web_enabled=bool((policy.get("tools_enabled") or {}).get("web")) and bool(web_cfg.get("enabled")),
+            allow_domains_count=len(web_cfg.get("allow_domains") or []),
+            process_counting_mode="logical_leaf_processes" if os.name == "nt" else "direct_process_state",
+            runtime_process_note=runtime_process_note_fn(),
+            heartbeat_age_sec=heartbeat_age_seconds_fn(),
+            active_http_sessions=len(session_turns),
+            chat_login_enabled=bool(chat_login_enabled_fn()),
+            chat_auth_source=chat_auth_source_fn(),
+            chat_users_count=len(chat_users_fn()),
+            guard_status=guard_status,
+            core_status=core_status,
+            webui_status=webui_status,
+            runtime_summary=runtime_summary_payload_fn(guard=guard_status, core=core_status, webui=webui_status),
+            timeline_payload=timeline_payload,
+            runtime_artifacts=runtime_artifacts_payload_fn(),
+            runtime_restart_analytics=runtime_restart_analytics_payload_fn(),
+            runtime_failures=runtime_failure_reasons_payload_fn(guard_status, core_status, webui_status, timeline_payload),
+            live_tracking=core_module.runtime_device_location_payload(),
+            action_readiness=action_readiness_payload_fn(guard_status, core_status, webui_status),
+            release_status=release_status_payload_fn(),
+            memory_stats=memory_stats,
+            memory_summary=memory_summary,
+            tool_summary=tool_summary,
+            ledger_summary=ledger_summary,
+            patch_summary=patch_summary,
+            patch_action_readiness=patch_action_readiness_payload_fn(patch_summary),
+            pulse_payload=pulse_payload,
+            update_now_pending=update_now_pending,
+            requests_total=requests_total,
+            errors_total=errors_total,
+            storage_watch_summary=storage_watch_summary_fn(),
+        )
+        append_metrics_snapshot_fn(payload)
+        self_check = build_self_check_fn(payload, control_policy_payload_fn(), metrics_payload_fn())
+        payload["health_score"] = int(self_check.get("health_score", 0))
+        payload["self_check_pass_ratio"] = float(self_check.get("pass_ratio", 0.0))
+        payload["alerts"] = list(self_check.get("alerts") or [])
+        return payload
 
     @staticmethod
     def status_payload(
@@ -56,6 +229,7 @@ class ControlStatusService:
         update_now_pending: dict,
         requests_total: int,
         errors_total: int,
+        storage_watch_summary: dict | None = None,
     ) -> dict:
         autonomy_payload = autonomy_maintenance.copy() if isinstance(autonomy_maintenance, dict) else {}
         payload = {
@@ -193,6 +367,12 @@ class ControlStatusService:
         payload["complete_tree_archive_at"] = str(last_complete_tree_archive.get("ts") or "")
         payload["complete_tree_archived_count"] = int(last_complete_tree_archive.get("archived_count", 0) or 0)
         payload["complete_tree_retained_count"] = int(last_complete_tree_archive.get("retained_count", 0) or 0)
+        storage_watch = storage_watch_summary if isinstance(storage_watch_summary, dict) else {}
+        payload["storage_watch_status"] = str(storage_watch.get("status") or "")
+        payload["storage_watch_note"] = str(storage_watch.get("note") or "")
+        payload["storage_watch_total_bytes"] = int(storage_watch.get("total_bytes", 0) or 0)
+        payload["patch_snapshot_count"] = int(storage_watch.get("patch_snapshot_count", 0) or 0)
+        payload["kidney_snapshot_count"] = int(storage_watch.get("kidney_snapshot_count", 0) or 0)
 
         payload["memory_stats_ok"] = bool(memory_stats.get("ok", False))
         payload["memory_entries_total"] = int(memory_stats.get("total", 0) or 0)

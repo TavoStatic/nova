@@ -225,6 +225,32 @@ class TestNovaWebToolsService(unittest.TestCase):
         self.assertIn("Summary snippet:", out)
         self.assertIn("Short summary", out)
 
+    def test_build_grounded_answer_formats_strong_sources_and_filters_weak_ones(self):
+        out = nova_web_tools.build_grounded_answer(
+            "PEIMS attendance reporting rules Texas TEA",
+            max_sources=3,
+            tool_web_research_fn=lambda _query: "\n".join(
+                [
+                    "https://tea.texas.gov/reports-and-data/data-submission/peims",
+                    "https://txschools.gov/attendance",
+                    "https://example.org/cookies",
+                ]
+            ),
+            tool_web_gather_fn=lambda url: {
+                "https://tea.texas.gov/reports-and-data/data-submission/peims": "Summary snippet: TEA explains PEIMS attendance submission requirements.",
+                "https://txschools.gov/attendance": "Summary snippet: TXSchools documents attendance coding windows.",
+                "https://example.org/cookies": "Summary snippet: You need to enable JavaScript and accept our cookie policy.",
+            }[url],
+        )
+
+        self.assertIn("I found sourced information from allowlisted references:", out)
+        self.assertIn("- TEA explains PEIMS attendance submission requirements.", out)
+        self.assertIn("- TXSchools documents attendance coding windows.", out)
+        self.assertIn("[source: tea.texas.gov]", out)
+        self.assertIn("[source: txschools.gov]", out)
+        self.assertNotIn("cookie policy", out.lower())
+        self.assertNotIn("example.org", out.lower())
+
     def test_scan_candidate_urls_for_query_keeps_html_and_non_html_hits(self):
         responses = {
             "https://tea.texas.gov/peims/guide": _FakeResponse(

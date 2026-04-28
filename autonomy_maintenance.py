@@ -18,6 +18,7 @@ from services.nova_patching import bulk_archive_superseded_previews as service_b
 from services.nova_patching import bulk_reject_orphaned_previews as service_bulk_reject_orphaned_previews
 from services.nova_patching import patch_preview_summaries as service_patch_preview_summaries
 from services.test_session_control import TEST_SESSION_CONTROL_SERVICE
+from services.work_tree_signal_ingestion import WORK_TREE_SIGNAL_INGESTION_SERVICE
 from work_tree_contracts import BranchStatus, TaskStatus
 
 
@@ -345,6 +346,49 @@ def _run_daily_regression_if_due(state: dict) -> str:
     state["last_regression_returncode"] = int(proc.returncode)
     state["last_regression_tail"] = output[-2000:]
     return f"daily_regression_{summary.lower()}"
+
+
+def _sync_signal_intake_work_tree(state: dict) -> dict:
+    maintenance_payload = {
+        "last_regression_status": str(state.get("last_regression_status") or ""),
+        "last_regression_stale": bool(state.get("last_regression_stale", False)),
+    }
+    status_payload = {
+        "alerts": [],
+        "self_check_pass_ratio": 1.0,
+        "autonomy_maintenance": maintenance_payload,
+    }
+    results = WORK_TREE_SIGNAL_INGESTION_SERVICE.sync_status_snapshot(status_payload)
+    tree = None
+    for candidate in work_tree.list_trees():
+        meta = dict(getattr(candidate, "meta", {}) or {})
+        if str(meta.get("kind") or "").strip().lower() == WORK_TREE_SIGNAL_INGESTION_SERVICE.SIGNAL_TREE_KIND:
+            tree = candidate
+            break
+    active_regression = bool(
+        maintenance_payload["last_regression_status"]
+        and "pass" not in maintenance_payload["last_regression_status"].lower()
+        and maintenance_payload["last_regression_status"].lower() != "ok"
+        and not maintenance_payload["last_regression_stale"]
+    )
+    payload = {
+        "ts": _patch_queue_timestamp(),
+        "status": "ok",
+        "tree_id": str(getattr(tree, "tree_id", "") or ""),
+        "tree_title": str(getattr(tree, "title", "") or ""),
+        "result_count": len(results),
+        "created_count": sum(1 for item in results if str((item or {}).get("action") or "") == "created"),
+        "updated_count": sum(1 for item in results if str((item or {}).get("action") or "") == "updated"),
+        "reopened_count": sum(1 for item in results if str((item or {}).get("action") or "") == "reopened"),
+        "resolved_count": sum(1 for item in results if str((item or {}).get("action") or "") == "resolved"),
+        "active_regression_failure": active_regression,
+        "last_regression_status": maintenance_payload["last_regression_status"],
+        "last_regression_stale": maintenance_payload["last_regression_stale"],
+    }
+    if results:
+        payload["results"] = list(results)
+    state["last_signal_ingestion"] = payload
+    return payload
 
 
 def _run_patch_queue_cleanup(state: dict) -> dict:
@@ -1891,6 +1935,26 @@ def run_once() -> int:
     else:
         state["last_regression_stale"] = False
     _append_log(regression_status)
+
+    try:
+        signal_ingestion = _sync_signal_intake_work_tree(state)
+        _append_log(
+            "signal_ingestion"
+            f" status={signal_ingestion.get('status')}"
+            f" results={int(signal_ingestion.get('result_count', 0) or 0)}"
+            f" resolved={int(signal_ingestion.get('resolved_count', 0) or 0)}"
+            f" active_regression={bool(signal_ingestion.get('active_regression_failure'))}"
+        )
+    except Exception as exc:
+        signal_ingestion = {
+            "ts": _patch_queue_timestamp(),
+            "status": "failed",
+            "result_count": 0,
+            "resolved_count": 0,
+            "error": str(exc),
+        }
+        state["last_signal_ingestion"] = signal_ingestion
+        _append_log(f"signal_ingestion_failed {exc}")
 
     _save_state(state)
     return 0

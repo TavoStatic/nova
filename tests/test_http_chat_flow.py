@@ -410,6 +410,41 @@ class TestHttpChatFlow(unittest.TestCase):
         self.assertEqual(invalidations, ["called"])
         self.assertEqual(active["value"], "old")
 
+    def test_resume_success_from_runtime_scope(self):
+        added = []
+        active = {"value": "old"}
+        invalidations = []
+
+        def _set(value):
+            active["value"] = value
+
+        out = http_chat_flow.resume_last_pending_turn_from_runtime(
+            "s1",
+            "gus",
+            runtime_scope={
+                "nova_core": type(
+                    "CoreStub",
+                    (),
+                    {
+                        "get_active_user": staticmethod(lambda: active["value"]),
+                        "set_active_user": staticmethod(_set),
+                    },
+                )(),
+                "_get_last_session_turn": lambda _sid: ("user", "hello"),
+                "_get_session_turns": lambda _sid: [("user", "hello")],
+                "_generate_chat_reply": lambda turns, text: ("reply", {}),
+                "_append_session_turn": lambda sid, role, text: added.append((sid, role, text)) or [],
+                "_invalidate_control_status_cache": lambda: invalidations.append("called"),
+            },
+        )
+
+        self.assertTrue(out.get("ok"))
+        self.assertTrue(out.get("resumed"))
+        self.assertEqual(out.get("reply"), "reply")
+        self.assertEqual(added, [("s1", "assistant", "reply")])
+        self.assertEqual(invalidations, ["called"])
+        self.assertEqual(active["value"], "old")
+
     def test_apply_fulfillment_flow_not_dict_result(self):
         ledger = {}
         out = http_chat_flow.apply_fulfillment_flow(
@@ -763,6 +798,18 @@ class TestHttpChatFlow(unittest.TestCase):
             make_conversation_state=lambda kind: {"kind": kind},
             action_ledger_add_step=lambda *a, **k: None,
             ensure_reply=lambda text: text,
+        )
+        self.assertFalse(out.get("handled"))
+
+    def test_apply_mixed_turn_clarify_not_handled_when_exempt(self):
+        out = http_chat_flow.apply_mixed_turn_clarify(
+            turn_acts=["command", "inform", "mixed"],
+            correction_pending=False,
+            skip_mixed_turn_clarify=True,
+            routed_text="Inspect the live runtime and tell me whether guard, core, search, and maintenance are healthy. Use only the current live state.",
+            ledger={},
+            mixed_info_request_clarify_reply=lambda text: text,
+            action_ledger_add_step=lambda *a, **k: None,
         )
         self.assertFalse(out.get("handled"))
 

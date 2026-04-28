@@ -5,6 +5,10 @@ class SessionAdminService:
     """Own session deletion and chat-user admin orchestration outside the HTTP layer."""
 
     @staticmethod
+    def _runtime_fn(runtime_scope: dict[str, object], name: str):
+        return runtime_scope[name]
+
+    @staticmethod
     def delete_session(
         session_id: str,
         *,
@@ -25,6 +29,24 @@ class SessionAdminService:
                 persist_callback=persist_callback,
                 on_session_end=on_session_end,
             )
+
+    @staticmethod
+    def delete_session_from_runtime(session_id: str, *, runtime_scope: dict[str, object], core_module) -> tuple[bool, str]:
+        runtime_fn = SessionAdminService._runtime_fn
+        return SessionAdminService.delete_session(
+            session_id,
+            session_lock=runtime_fn(runtime_scope, "_SESSION_LOCK"),
+            delete_session_fn=runtime_fn(runtime_scope, "http_session_store").delete_session,
+            session_turns=runtime_fn(runtime_scope, "SESSION_TURNS"),
+            session_owners=runtime_fn(runtime_scope, "SESSION_OWNERS"),
+            state_manager=runtime_fn(runtime_scope, "SESSION_STATE_MANAGER"),
+            persist_callback=runtime_fn(runtime_scope, "_persist_sessions"),
+            on_session_end=lambda sid, session: core_module.record_health_snapshot(
+                session_id=sid,
+                reflection=session.last_reflection,
+                session_end=True,
+            ),
+        )
 
     @staticmethod
     def chat_auth_payload(*, chat_users_fn, chat_auth_source_fn, chat_users_path_fn) -> dict:

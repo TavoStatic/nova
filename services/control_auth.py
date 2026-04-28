@@ -66,6 +66,33 @@ class ControlAuthService:
             return True, ""
         return False, "control_local_only_set_NOVA_CONTROL_TOKEN"
 
+    def control_api_auth(
+        self,
+        handler,
+        qs: dict,
+        *,
+        control_login_auth_fn,
+        is_local_client_fn,
+        request_control_key_fn,
+        environ=None,
+        compare_digest_fn=secrets.compare_digest,
+    ) -> tuple[bool, str]:
+        env = environ if environ is not None else os.environ
+        ok_login, reason_login = control_login_auth_fn(handler)
+        if not ok_login:
+            return False, reason_login
+
+        expected = str(env.get("NOVA_CONTROL_TOKEN") or "").strip()
+        if expected:
+            got = request_control_key_fn(handler, qs)
+            if got and compare_digest_fn(got, expected):
+                return True, ""
+            return False, "control_auth_failed"
+
+        if is_local_client_fn(handler):
+            return True, ""
+        return False, "control_local_only_set_NOVA_CONTROL_TOKEN"
+
     @staticmethod
     def new_control_session(*, control_sessions: dict, ttl_seconds: int, token_hex_fn=secrets.token_hex, now_fn=time.time) -> str:
         sid = token_hex_fn(24)

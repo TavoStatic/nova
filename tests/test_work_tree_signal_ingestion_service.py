@@ -268,6 +268,68 @@ class TestWorkTreeSignalIngestionService(unittest.TestCase):
         self.assertEqual(results, [])
         self.assertNotIn("regression_failure", classes)
 
+    def test_status_snapshot_uses_stable_regression_branch_identity(self) -> None:
+        first = self.service.sync_status_snapshot(
+            {
+                "alerts": [],
+                "self_check_pass_ratio": 1.0,
+                "autonomy_maintenance": {
+                    "last_regression_status": "FAILED",
+                    "last_regression_stale": False,
+                },
+            }
+        )
+        second = self.service.sync_status_snapshot(
+            {
+                "alerts": [],
+                "self_check_pass_ratio": 1.0,
+                "autonomy_maintenance": {
+                    "last_regression_status": "failed: tests.test_runtime_recovery",
+                    "last_regression_stale": False,
+                },
+            }
+        )
+
+        created = [item for item in first if str(item.get("action") or "") == "created"]
+        updated = [item for item in second if str(item.get("action") or "") == "updated"]
+        self.assertEqual(len(created), 1)
+        self.assertEqual(len(updated), 1)
+        self.assertEqual(created[0].get("branch_id"), updated[0].get("branch_id"))
+        branch = self._signal_branches()[0]
+        self.assertEqual(str(branch.source_key or ""), "regression_failure:maintenance_cycle:regression_failure:daily_regression")
+        self.assertEqual(str((branch.source_payload or {}).get("last_regression_status") or ""), "failed: tests.test_runtime_recovery")
+
+    def test_sync_status_snapshot_resolves_regression_branch_when_stale(self) -> None:
+        self.service.sync_status_snapshot(
+            {
+                "alerts": [],
+                "self_check_pass_ratio": 1.0,
+                "autonomy_maintenance": {
+                    "last_regression_status": "FAILED",
+                    "last_regression_stale": False,
+                },
+            }
+        )
+
+        results = self.service.sync_status_snapshot(
+            {
+                "alerts": [],
+                "self_check_pass_ratio": 1.0,
+                "autonomy_maintenance": {
+                    "last_regression_status": "FAILED",
+                    "last_regression_stale": True,
+                },
+            }
+        )
+
+        resolved = [item for item in results if str(item.get("action") or "") == "resolved"]
+        self.assertEqual(len(resolved), 1)
+        branch = self._signal_branches()[0]
+        self.assertEqual(str(branch.work_class or ""), "regression_failure")
+        self.assertEqual(str(branch.resolution_state or ""), "resolved")
+        self.assertEqual(branch.status, work_tree.BranchStatus.COMPLETE)
+        self.assertIn("Regression failure aged stale", str(branch.notes or ""))
+
     def test_created_signal_branch_gets_explicit_tool_assignment(self) -> None:
         signal = {
             "source": "control_status",

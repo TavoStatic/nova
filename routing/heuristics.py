@@ -73,7 +73,6 @@ def looks_like_wikipedia_lookup(low: str) -> bool:
         "background on ",
         "overview of ",
         "history of ",
-        "explain ",
     )
     return text.startswith(prompts)
 

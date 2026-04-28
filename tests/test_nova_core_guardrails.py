@@ -8,8 +8,15 @@ from pathlib import Path
 NOVA_CORE_PATH = Path(r"C:\Nova\nova_core.py")
 MAX_NOVA_CORE_LINES = 8000
 EXPECTED_SERVICE_DELEGATES = {
-    "_execute_registered_supervisor_rule": "service_execute_registered_supervisor_rule",
-    "_consume_conversation_followup": "service_consume_conversation_followup",
+    "_execute_registered_supervisor_rule": "service_execute_registered_supervisor_rule_from_runtime",
+    "_handle_supervisor_intent": "service_handle_supervisor_intent_from_runtime",
+    "_consume_conversation_followup": "service_consume_conversation_followup_from_runtime",
+    "start_action_ledger_record": "service_start_action_ledger_record",
+    "finalize_action_ledger_record": "service_finalize_action_ledger_record_from_runtime",
+    "_record_memory_event": "service_record_memory_event",
+    "execute_planned_action": "service_execute_planned_action_from_runtime",
+    "web_search": "service_web_search",
+    "tool_search": "service_tool_search",
     "patch_preview": "service_patch_preview",
     "hard_answer": "service_hard_answer",
     "ollama_chat": "service_ollama_chat",

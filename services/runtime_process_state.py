@@ -8,6 +8,10 @@ class RuntimeProcessStateService:
     """Own low-level logical process scanning and orphan artifact pruning."""
 
     @staticmethod
+    def _runtime_fn(runtime_scope: dict[str, object], name: str):
+        return runtime_scope[name]
+
+    @staticmethod
     def matches_script_process(cmdline: list[str], script_path: Path) -> bool:
         normalized_script = os.path.normcase(os.path.normpath(str(script_path)))
         for arg in list(cmdline or [])[1:]:
@@ -125,6 +129,26 @@ class RuntimeProcessStateService:
         process_scan_cache[cache_key] = (now, [dict(item) for item in processes])
         return processes
 
+    def cached_logical_service_processes_from_runtime(
+        self,
+        script_path: Path,
+        *,
+        runtime_scope: dict[str, object],
+        root_pid: int | None = None,
+        cache_key: str | None = None,
+        max_age_seconds: float = 0.0,
+    ) -> list[dict]:
+        runtime_fn = self._runtime_fn
+        return self.cached_logical_service_processes(
+            script_path,
+            root_pid=root_pid,
+            cache_key=cache_key,
+            max_age_seconds=max_age_seconds,
+            process_scan_cache=runtime_fn(runtime_scope, "_PROCESS_SCAN_CACHE"),
+            monotonic_fn=runtime_fn(runtime_scope, "time").monotonic,
+            logical_service_processes_fn=runtime_fn(runtime_scope, "_logical_service_processes"),
+        )
+
     @staticmethod
     def select_logical_process(processes: list[dict], *, pid: int | None = None, create_time: float | None = None) -> dict | None:
         if not processes:
@@ -152,6 +176,24 @@ class RuntimeProcessStateService:
         remove_runtime_artifact_fn(pid_file)
 
     @staticmethod
+    def prune_orphaned_guard_artifacts_from_runtime(
+        logical_processes: list[dict],
+        pid: int | None,
+        pid_live: bool,
+        *,
+        runtime_scope: dict[str, object],
+    ) -> None:
+        runtime_fn = RuntimeProcessStateService._runtime_fn
+        RuntimeProcessStateService.prune_orphaned_guard_artifacts(
+            logical_processes,
+            pid,
+            pid_live,
+            runtime_dir=runtime_fn(runtime_scope, "RUNTIME_DIR"),
+            artifact_age_seconds_fn=runtime_fn(runtime_scope, "_artifact_age_seconds"),
+            remove_runtime_artifact_fn=runtime_fn(runtime_scope, "_remove_runtime_artifact"),
+        )
+
+    @staticmethod
     def prune_orphaned_core_artifacts(logical_processes: list[dict], pid: int | None, pid_live: bool, heartbeat_age: int | None, *, runtime_dir: Path, artifact_age_seconds_fn, remove_runtime_artifact_fn) -> None:
         state_path = Path(runtime_dir) / "core_state.json"
         heartbeat_path = Path(runtime_dir) / "core.heartbeat"
@@ -163,6 +205,26 @@ class RuntimeProcessStateService:
         remove_runtime_artifact_fn(state_path)
         if isinstance(heartbeat_age, int) and heartbeat_age >= 15:
             remove_runtime_artifact_fn(heartbeat_path)
+
+    @staticmethod
+    def prune_orphaned_core_artifacts_from_runtime(
+        logical_processes: list[dict],
+        pid: int | None,
+        pid_live: bool,
+        heartbeat_age: int | None,
+        *,
+        runtime_scope: dict[str, object],
+    ) -> None:
+        runtime_fn = RuntimeProcessStateService._runtime_fn
+        RuntimeProcessStateService.prune_orphaned_core_artifacts(
+            logical_processes,
+            pid,
+            pid_live,
+            heartbeat_age,
+            runtime_dir=runtime_fn(runtime_scope, "RUNTIME_DIR"),
+            artifact_age_seconds_fn=runtime_fn(runtime_scope, "_artifact_age_seconds"),
+            remove_runtime_artifact_fn=runtime_fn(runtime_scope, "_remove_runtime_artifact"),
+        )
 
 
 RUNTIME_PROCESS_STATE_SERVICE = RuntimeProcessStateService()

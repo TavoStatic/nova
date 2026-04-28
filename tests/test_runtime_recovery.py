@@ -556,10 +556,12 @@ class TestRuntimeRecovery(unittest.TestCase):
         self.assertIn("bindClick('btnTestRunsRefresh'", script)
 
     def test_chat_ui_includes_browser_voice_controls(self):
-        script = (Path(__file__).resolve().parent.parent / "nova_http.py").read_text(encoding="utf-8")
+        base = Path(__file__).resolve().parent.parent
+        html = (base / "templates" / "leah.html").read_text(encoding="utf-8")
+        script = (base / "static" / "leah.js").read_text(encoding="utf-8")
 
-        self.assertIn('id="btnToggleAudio"', script)
-        self.assertIn('id="btnMic"', script)
+        self.assertIn('id="btnVoice"', html)
+        self.assertIn('id="btnMic"', html)
         self.assertIn("const SpeechRecognitionCtor = window.SpeechRecognition || window.webkitSpeechRecognition || null;", script)
         self.assertIn("window.speechSynthesis.speak(utterance);", script)
 

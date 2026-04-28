@@ -52,6 +52,40 @@ class TestSessionAdminService(unittest.TestCase):
         self.assertEqual(calls[0][0], "sA")
         self.assertIn("persist_callback", calls[0][1])
 
+    def test_delete_session_from_runtime_uses_runtime_scope(self):
+        calls = []
+        lock = threading.Lock()
+
+        class _Core:
+            @staticmethod
+            def record_health_snapshot(**kwargs):
+                calls.append(("snapshot", kwargs.get("session_id"), kwargs.get("session_end")))
+
+        ok, msg = SESSION_ADMIN_SERVICE.delete_session_from_runtime(
+            "sA",
+            runtime_scope={
+                "_SESSION_LOCK": lock,
+                "http_session_store": type(
+                    "_Store",
+                    (),
+                    {
+                        "delete_session": staticmethod(
+                            lambda session_id, **kwargs: calls.append(("delete", session_id, sorted(kwargs.keys()))) or (True, "session_deleted")
+                        )
+                    },
+                )(),
+                "SESSION_TURNS": {},
+                "SESSION_OWNERS": {},
+                "SESSION_STATE_MANAGER": object(),
+                "_persist_sessions": lambda: None,
+            },
+            core_module=_Core(),
+        )
+
+        self.assertTrue(ok)
+        self.assertEqual(msg, "session_deleted")
+        self.assertEqual(calls[0][0], "delete")
+
 
 if __name__ == "__main__":
     unittest.main()

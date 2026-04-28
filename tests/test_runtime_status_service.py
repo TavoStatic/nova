@@ -77,6 +77,24 @@ class TestRuntimeStatusService(unittest.TestCase):
         self.assertEqual(payload.get("status"), "stopped")
         self.assertEqual(calls, {"cached": 1, "logical": 0})
 
+    def test_guard_status_payload_from_runtime_resolves_scope(self):
+        payload = RUNTIME_STATUS_SERVICE.guard_status_payload_from_runtime(
+            {
+                "RUNTIME_DIR": Path("c:/tmp/runtime"),
+                "GUARD_PY": Path("c:/Nova/nova_guard.py"),
+                "psutil": type("PsutilStub", (), {"pid_exists": staticmethod(lambda _pid: False)})(),
+                "_cached_logical_service_processes": lambda *args, **kwargs: [],
+                "_logical_service_processes": lambda *args, **kwargs: [],
+                "_prune_orphaned_guard_artifacts": lambda *_args, **_kwargs: None,
+                "_select_logical_process": lambda *_args, **_kwargs: None,
+                "PROCESS_SCAN_CACHE_TTL_SECONDS": 5.0,
+            },
+            include_fallback_scan=False,
+        )
+
+        self.assertFalse(payload.get("running"))
+        self.assertEqual(payload.get("status"), "stopped")
+
 
 if __name__ == "__main__":
     unittest.main()

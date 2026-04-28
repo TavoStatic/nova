@@ -5,6 +5,8 @@ import os
 import re
 from typing import Callable, Optional
 
+from services.nova_reply_deterministic import should_skip_llm_routing_for_deterministic_query
+
 import requests
 
 
@@ -442,6 +444,8 @@ def llm_classify_routing_intent(
 ) -> Optional[dict[str, object]]:
     raw = str(text or "").strip()
     if not raw:
+        return None
+    if should_skip_llm_routing_for_deterministic_query(raw):
         return None
     if not live_ollama_calls_allowed_fn():
         return None

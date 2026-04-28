@@ -64,6 +64,65 @@ def is_action_history_query(text: str) -> bool:
     return any(cue in candidate for cue in cues)
 
 
+def is_student_data_attendance_rules_query(text: str) -> bool:
+    candidate = (text or "").strip().lower()
+    if not candidate:
+        return False
+    return "peims" in candidate and "attendance" in candidate and any(
+        token in candidate for token in ("rule", "rules", "reporting", "report")
+    )
+
+
+def is_web_preferred_data_query(text: str) -> bool:
+    candidate = (text or "").strip().lower()
+    if not candidate:
+        return False
+    data_terms = (
+        "peims",
+        "tsds",
+        "attendance",
+        "ada",
+        "submission",
+        "submissions",
+        "student data",
+        "records",
+        "reporting",
+        "data system",
+    )
+    if not any(term in candidate for term in data_terms):
+        return False
+    broad_cues = (
+        "anything about",
+        "what do you know about",
+        "tell me about",
+        "explain",
+        "overview",
+        "summary",
+        "information",
+        "anything",
+    )
+    return any(cue in candidate for cue in broad_cues)
+
+
+def is_conversational_clarification(text: str) -> bool:
+    candidate = (text or "").strip().lower()
+    if not candidate:
+        return False
+    cues = (
+        "what are you talking about",
+        "what are you talking",
+        "are you sure about that information",
+        "are you sure about that",
+        "why i am not asking you",
+        "why am i not asking you",
+        "you will not find that information",
+        "do you need help",
+        "what ?",
+        "what?",
+    )
+    return any(cue in candidate for cue in cues)
+
+
 def is_identity_or_developer_query(text: str) -> bool:
     candidate = (text or "").strip().lower()
     candidate = re.sub(r"\byor\b", "your", candidate)

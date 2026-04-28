@@ -1,0 +1,138 @@
+{
+  "source": {
+    "family": "student_information_system",
+    "dialect": "sqlserver",
+    "scope": "district_test",
+    "vendor_shape": "eschoolplus_aligned",
+    "notes": [
+      "Read-only pipeline scaffold.",
+      "Live connectivity is expected only on the district network.",
+      "Table grounding comes from the local UniServer dashboard references.",
+      "Field grounding is enriched from PowerSchool Naviance eSchoolPlus student mapping docs."
+    ],
+    "references": [
+      "https://ps.powerschool-docs.com/naviance/latest/common-eschoolplus-sis-student-tables-names-and-fi",
+      "https://ps.powerschool-docs.com/naviance/latest/eschoolplus-sis-student-field-mapping",
+      "https://ps.powerschool-docs.com/naviance/latest/common-powerschool-sis-student-table-names-and-fie"
+    ]
+  },
+  "entities": [
+    {
+      "name": "student_registration",
+      "tables": [
+        "dbo.REG",
+        "dbo.REG_BUILDING"
+      ],
+      "description": "Latest captured student registration snapshot and campus assignment record for the student.",
+      "lookup_keys": [
+        "student_id",
+        "campus_id",
+        "current_status"
+      ],
+      "core_fields": [
+        "reg.student_id",
+        "reg.last_name",
+        "reg.first_name",
+        "reg.building",
+        "reg.current_status",
+        "reg.birthdate",
+        "reg.counselor"
+      ],
+      "redaction_profile": "student_default"
+    },
+    {
+      "name": "program_memberships",
+      "tables": [
+        "dbo.REG_PROGRAMS"
+      ],
+      "description": "Program-level student associations that can be summarized or filtered by campus and year.",
+      "lookup_keys": [
+        "student_id",
+        "program_id",
+        "program_value",
+        "campus_id",
+        "active_only"
+      ],
+      "core_fields": [
+        "reg_programs.program_id",
+        "reg_programs.program_value",
+        "reg_programs.start_date",
+        "reg_programs.end_date",
+        "reg.student_id",
+        "reg.building"
+      ],
+      "redaction_profile": "student_default"
+    },
+    {
+      "name": "student_contact_and_identity",
+      "tables": [
+        "dbo.REG_CONTACT",
+        "dbo.REG_PERSONAL",
+        "dbo.SEC_GLOBAL_ID"
+      ],
+      "description": "Student contact, login, state reporting, and identity fields used by downstream integrations.",
+      "lookup_keys": [
+        "student_id",
+        "state_report_id",
+        "login_id"
+      ],
+      "core_fields": [
+        "reg_contact.city",
+        "reg_contact.state",
+        "reg_contact.zip",
+        "reg_contact.email",
+        "reg_contact.login_id",
+        "reg_personal.state_report_id",
+        "sec_global_id.global_id"
+      ],
+      "redaction_profile": "student_default"
+    },
+    {
+      "name": "student_gpa_and_rank",
+      "tables": [
+        "dbo.MR_STU_GPA",
+        "dbo.REG_ACADEMIC"
+      ],
+      "description": "Student GPA, class rank, decile, and graduation-year style academic summary fields.",
+      "lookup_keys": [
+        "student_id",
+        "gpa_type",
+        "graduation_year"
+      ],
+      "core_fields": [
+        "mr_stu_gpa.cum_gpa",
+        "mr_stu_gpa.cum_rank",
+        "mr_stu_gpa.cum_decile",
+        "reg_academic.graduation_year"
+      ],
+      "redaction_profile": "summary_only"
+    },
+    {
+      "name": "district_registration_history",
+      "tables": [
+        "dbo.REG_ENTRY_WITH"
+      ],
+      "description": "District enrollment history timeline tracking student enrollment, campus movement, and in-year grade movement within the school district over time.",
+      "lookup_keys": [
+        "student_id",
+        "building",
+        "entry_date",
+        "withdraw_date"
+      ],
+      "core_fields": [
+        "reg_entry_with.student_id",
+        "reg_entry_with.building",
+        "reg_entry_with.grade",
+        "reg_entry_with.entry_date",
+        "reg_entry_with.withdraw_date"
+      ],
+      "redaction_profile": "student_default",
+      "notes": [
+        "Treat as the district enrollment timeline rather than the latest captured student snapshot.",
+        "Use this table for current-year grade change history, including when and where the change happened.",
+        "REG may show only the latest captured student state, while REG_ENTRY_WITH preserves the movement history that led to it.",
+        "Exact live column inventory should be confirmed through schema_inventory before adding direct query templates."
+      ]
+    }
+  ]
+}

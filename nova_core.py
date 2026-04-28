@@ -73,7 +73,7 @@ from services.nova_profile_followups import infer_profile_conversation_state as 
 from services.nova_pulse import _patch_activity_summary as service_patch_activity_summary
 from services.nova_pulse import _promotion_audit_summary as service_promotion_audit_summary
 from services.nova_pulse import render_nova_pulse as service_render_nova_pulse
-from services.nova_tool_dispatch import execute_planned_action as service_execute_planned_action
+from services.nova_tool_dispatch import execute_planned_action_from_runtime as service_execute_planned_action_from_runtime
 from services.nova_action_ledger_helpers import action_ledger_add_step as service_action_ledger_add_step
 from services.nova_action_ledger_helpers import detect_repeated_tool_intent_without_execution as service_detect_repeated_tool_intent_without_execution
 from services.nova_identity_history import execute_identity_history_outcome as service_execute_identity_history_outcome
@@ -98,7 +98,8 @@ from services.nova_routing_support import looks_like_open_fallback_turn as servi
 from services.nova_tool_policy import web_fetch as service_web_fetch
 from services.nova_web_tools import fetch_sitemap_urls as service_fetch_sitemap_urls
 from services.nova_web_tools import scan_candidate_urls_for_query as service_scan_candidate_urls_for_query
-from services.nova_action_ledger import finalize_action_ledger_record as service_finalize_action_ledger_record
+from services.nova_action_ledger import finalize_action_ledger_record_from_runtime as service_finalize_action_ledger_record_from_runtime
+from services.nova_action_ledger import start_action_ledger_record as service_start_action_ledger_record
 from services.nova_knowledge_packs import kb_search as service_kb_search
 from services.patch_control import PATCH_CONTROL_SERVICE
 from services.nova_memory_learning import mem_audit as service_mem_audit
@@ -106,6 +107,8 @@ from services.nova_memory_learning import mem_recall as service_mem_recall
 from services.nova_patching import patch_preview as service_patch_preview
 from services.nova_patching import patch_preview_summaries as service_patch_preview_summaries
 from services.nova_patching import patch_status_payload as service_patch_status_payload
+from services.nova_patching import overlay_change_candidates as service_overlay_change_candidates
+from services.nova_patching import snapshot_should_skip_relpath as service_snapshot_should_skip_relpath
 from services.nova_pulse import build_pulse_payload as service_build_pulse_payload
 from services.nova_reflection_health import maybe_log_self_reflection as service_maybe_log_self_reflection
 from services.nova_search_endpoint import probe_search_endpoint as service_probe_search_endpoint
@@ -119,16 +122,20 @@ from services.nova_truth_hierarchy import hard_answer as service_hard_answer
 from services.nova_truth_hierarchy import truth_hierarchy_answer as service_truth_hierarchy_answer
 from services.nova_web_tools import tool_stackexchange_search as service_tool_stackexchange_search
 from services.nova_web_tools import tool_web_gather as service_tool_web_gather
+from services.nova_web_tools import tool_search as service_tool_search
 from services.nova_web_tools import tool_web_research as service_tool_web_research
 from services.nova_web_tools import tool_web_search as service_tool_web_search
 from services.nova_web_tools import tool_wikipedia_lookup as service_tool_wikipedia_lookup
+from services.nova_web_tools import web_search as service_web_search
 from services.nova_cli_loop import run_loop as service_run_loop
-from services.nova_followup_dispatch import consume_conversation_followup as service_consume_conversation_followup
+from services.nova_followup_dispatch import consume_conversation_followup_from_runtime as service_consume_conversation_followup_from_runtime
+from services.nova_memory_events import append_memory_event as service_append_memory_event
+from services.nova_memory_events import record_memory_event as service_record_memory_event
 from services.nova_memory_learning import learn_from_user_correction as service_learn_from_user_correction
 from services.nova_memory_learning import mem_add as service_mem_add
 from services.nova_patching import patch_apply as service_patch_apply
-from services.nova_supervisor_flow import execute_registered_supervisor_rule as service_execute_registered_supervisor_rule
-from services.nova_supervisor_flow import handle_supervisor_intent as service_handle_supervisor_intent
+from services.nova_supervisor_flow import execute_registered_supervisor_rule_from_runtime as service_execute_registered_supervisor_rule_from_runtime
+from services.nova_supervisor_flow import handle_supervisor_intent_from_runtime as service_handle_supervisor_intent_from_runtime
 from services.nova_runtime_context import ACTION_LEDGER_DIR
 from services.nova_runtime_context import AUTONOMY_MAINTENANCE_FILE
 from services.nova_runtime_context import BASE_DIR
@@ -754,44 +761,14 @@ def _execute_registered_supervisor_rule(
     input_source: str = "typed",
     allowed_actions: Optional[set[str]] = None,
 ) -> tuple[bool, str, Optional[dict]]:
-    return service_execute_registered_supervisor_rule(
+    return service_execute_registered_supervisor_rule_from_runtime(
         rule_result,
         text,
         current_state,
         turns=turns,
         input_source=input_source,
         allowed_actions=allowed_actions,
-        remember_name_origin_fn=remember_name_origin,
-        make_conversation_state_fn=_make_conversation_state,
-        location_reply_fn=_location_reply,
-        is_location_name_query_fn=_is_location_name_query,
-        location_name_reply_fn=_location_name_reply,
-        location_recall_reply_fn=_location_recall_reply,
-        classify_weather_lookup_outcome_fn=_classify_weather_lookup_outcome,
-        attach_reply_outcome_fn=_attach_reply_outcome,
-        execute_planned_action_fn=execute_planned_action,
-        render_reply_fn=render_reply,
-        last_assistant_turn_text_fn=_last_assistant_turn_text,
-        parse_correction_fn=_parse_correction,
-        extract_authoritative_correction_text_fn=_extract_authoritative_correction_text,
-        store_supervisor_correction_record_fn=_store_supervisor_correction_record,
-        learn_from_user_correction_fn=learn_from_user_correction,
-        classify_correction_outcome_fn=_classify_correction_outcome,
-        mem_enabled_fn=mem_enabled,
-        normalize_correction_for_storage_fn=_normalize_correction_for_storage,
-        teach_store_example_fn=_teach_store_example,
-        get_active_user_fn=get_active_user,
-        looks_like_correction_cancel_fn=_looks_like_correction_cancel,
-        looks_like_pending_replacement_text_fn=_looks_like_pending_replacement_text,
-        execute_retrieval_followup_outcome_fn=_execute_retrieval_followup_outcome,
-        execute_identity_history_outcome_fn=_execute_identity_history_outcome,
-        open_probe_reply_fn=_open_probe_reply,
-        last_question_recall_reply_fn=_last_question_recall_reply,
-        session_fact_recall_reply_fn=_session_fact_recall_reply,
-        rules_reply_fn=_rules_reply,
-        developer_location_reply_fn=_developer_location_reply,
-        developer_identity_followup_reply_fn=_developer_identity_followup_reply,
-        identity_profile_followup_reply_fn=_identity_profile_followup_reply,
+        runtime_scope=globals(),
     )
 
 
@@ -1204,41 +1181,13 @@ def _handle_supervisor_intent(
     input_source: str = "typed",
     entry_point: str = "",
 ) -> tuple[bool, str, Optional[dict], Optional[dict]]:
-    return service_handle_supervisor_intent(
+    return service_handle_supervisor_intent_from_runtime(
         intent_result,
         user_text,
         turns=turns,
         input_source=input_source,
         entry_point=entry_point,
-        classify_web_research_outcome_fn=_classify_web_research_outcome,
-        execute_planned_action_fn=execute_planned_action,
-        make_retrieval_conversation_state_fn=_make_retrieval_conversation_state,
-        render_reply_fn=render_reply,
-        mem_enabled_fn=mem_enabled,
-        mem_add_fn=mem_add,
-        classify_store_fact_outcome_fn=_classify_store_fact_outcome,
-        classify_set_location_outcome_fn=_classify_set_location_outcome,
-        weather_current_location_available_fn=_weather_current_location_available,
-        classify_weather_lookup_outcome_fn=_classify_weather_lookup_outcome,
-        execute_weather_lookup_outcome_fn=_execute_weather_lookup_outcome,
-        set_location_text_fn=set_location_text,
-        make_conversation_state_fn=_make_conversation_state,
-        parse_correction_fn=_parse_correction,
-        last_assistant_turn_text_fn=_last_assistant_turn_text,
-        store_supervisor_correction_record_fn=_store_supervisor_correction_record,
-        teach_store_example_fn=_teach_store_example,
-        get_active_user_fn=get_active_user,
-        classify_correction_outcome_fn=_classify_correction_outcome,
-        quick_smalltalk_reply_fn=_quick_smalltalk_reply,
-        describe_capabilities_fn=describe_capabilities,
-        policy_web_fn=policy_web,
-        assistant_name_reply_fn=_assistant_name_reply,
-        self_identity_web_challenge_reply_fn=_self_identity_web_challenge_reply,
-        classify_name_origin_outcome_fn=_classify_name_origin_outcome,
-        developer_full_name_reply_fn=_developer_full_name_reply,
-        hard_answer_fn=hard_answer,
-        developer_profile_reply_fn=_developer_profile_reply,
-        session_recap_reply_fn=_session_recap_reply,
+        runtime_scope=globals(),
     )
 
 
@@ -1657,35 +1606,15 @@ def start_action_ledger_record(
     input_source: str = "typed",
     active_subject: str = "",
 ) -> dict:
-    record = {
-        "ts": time.strftime("%Y-%m-%d %H:%M:%S"),
-        "channel": str(channel or "cli").strip().lower() or "cli",
-        "session_id": str(session_id or "").strip(),
-        "input_source": str(input_source or "typed").strip().lower() or "typed",
-        "user_input": str(user_input or "").strip(),
-        "intent": _infer_turn_intent(user_input),
-        "planner_decision": "",
-        "tool": "",
-        "tool_args": {},
-        "tool_result": "",
-        "final_answer": "",
-        "reply_contract": "",
-        "reply_outcome": {},
-        "turn_acts": [],
-        "grounded": False,
-        "active_subject": str(active_subject or "").strip(),
-        "continuation_used": False,
-        "route_trace": [],
-    }
-    action_ledger_add_step(
-        record,
-        "input",
-        "received",
-        channel=str(channel or "cli"),
-        input_source=str(input_source or "typed"),
-        intent=record.get("intent") or "",
+    return service_start_action_ledger_record(
+        user_input,
+        channel=channel,
+        session_id=session_id,
+        input_source=input_source,
+        active_subject=active_subject,
+        infer_turn_intent_fn=_infer_turn_intent,
+        action_ledger_add_step_fn=action_ledger_add_step,
     )
-    return record
 
 
 def write_action_ledger_record(record: dict) -> Optional[Path]:
@@ -1705,12 +1634,7 @@ def write_action_ledger_record(record: dict) -> Optional[Path]:
 
 
 def _append_memory_event(payload: dict) -> None:
-    try:
-        MEMORY_EVENTS_LOG.parent.mkdir(parents=True, exist_ok=True)
-        with open(MEMORY_EVENTS_LOG, "a", encoding="utf-8") as f:
-            f.write(json.dumps(payload, ensure_ascii=True) + "\n")
-    except Exception:
-        pass
+    return service_append_memory_event(payload, memory_events_log=MEMORY_EVENTS_LOG)
 
 
 def _record_memory_event(
@@ -1730,27 +1654,23 @@ def _record_memory_event(
     lane: str = "",
     mode: str = "",
 ) -> None:
-    payload = {
-        "event": "memory_operation",
-        "action": str(action or "").strip() or "unknown",
-        "status": str(status or "").strip() or "unknown",
-        "user": str(user or "").strip(),
-        "scope": str(scope or "private").strip() or "private",
-        "backend": str(backend or "").strip(),
-        "kind": str(kind or "").strip(),
-        "source": str(source or "").strip(),
-        "query_preview": " ".join(str(query or "").split())[:120],
-        "reason": str(reason or "").strip(),
-        "error": str(error or "").strip()[:300],
-        "lane": str(lane or "").strip(),
-        "mode": str(mode or "").strip(),
-        "ts": int(time.time()),
-    }
-    if result_count is not None:
-        payload["result_count"] = int(result_count)
-    if duration_ms is not None:
-        payload["duration_ms"] = int(duration_ms)
-    _append_memory_event(payload)
+    return service_record_memory_event(
+        action,
+        status,
+        user=user,
+        scope=scope,
+        backend=backend,
+        kind=kind,
+        source=source,
+        query=query,
+        reason=reason,
+        error=error,
+        result_count=result_count,
+        duration_ms=duration_ms,
+        lane=lane,
+        mode=mode,
+        append_memory_event_fn=_append_memory_event,
+    )
 
 
 def finalize_action_ledger_record(
@@ -1770,7 +1690,7 @@ def finalize_action_ledger_record(
     routing_decision: Optional[dict] = None,
     reflection_payload: Optional[dict] = None,
 ) -> Optional[Path]:
-    return service_finalize_action_ledger_record(
+    return service_finalize_action_ledger_record_from_runtime(
         record,
         final_answer=final_answer,
         planner_decision=planner_decision,
@@ -1785,13 +1705,7 @@ def finalize_action_ledger_record(
         reply_outcome=reply_outcome,
         routing_decision=routing_decision,
         reflection_payload=reflection_payload,
-        provider_name_from_tool_fn=_provider_name_from_tool,
-        finalize_routing_decision_fn=_finalize_routing_decision,
-        action_ledger_add_step_fn=action_ledger_add_step,
-        action_ledger_route_summary_fn=action_ledger_route_summary,
-        write_action_ledger_record_fn=write_action_ledger_record,
-        recent_action_ledger_records_fn=_recent_action_ledger_records,
-        maybe_log_self_reflection_fn=maybe_log_self_reflection,
+        runtime_scope=globals(),
     )
 
 
@@ -5355,47 +5269,12 @@ def _developer_work_guess_turn(text: str) -> tuple[str, Optional[dict]]:
 
 
 def _consume_conversation_followup(state: Optional[dict], text: str, input_source: str = "typed", turns: Optional[list[tuple[str, str]]] = None) -> tuple[bool, str, Optional[dict]]:
-    return service_consume_conversation_followup(
+    return service_consume_conversation_followup_from_runtime(
         state,
         text,
         input_source=input_source,
         turns=turns,
-        evaluate_rules_fn=lambda text, manager, turns=None, phase="handle": TURN_SUPERVISOR.evaluate_rules(
-            text,
-            manager=manager,
-            turns=turns,
-            phase=phase,
-        ),
-        execute_registered_supervisor_rule_fn=_execute_registered_supervisor_rule,
-        is_retrieval_meta_question_fn=_is_retrieval_meta_question,
-        retrieval_meta_reply_fn=_retrieval_meta_reply,
-        looks_like_retrieval_followup_fn=_looks_like_retrieval_followup,
-        retrieval_followup_reply_fn=_retrieval_followup_reply,
-        is_queue_status_reason_followup_fn=_is_queue_status_reason_followup,
-        queue_status_reason_reply_fn=_queue_status_reason_reply,
-        is_queue_status_report_followup_fn=_is_queue_status_report_followup,
-        queue_status_report_reply_fn=_queue_status_report_reply,
-        is_queue_status_seam_followup_fn=_is_queue_status_seam_followup,
-        queue_status_seam_reply_fn=_queue_status_seam_reply,
-        handle_location_conversation_turn_fn=_handle_location_conversation_turn,
-        is_weather_meta_followup_fn=_is_weather_meta_followup,
-        weather_meta_reply_fn=_weather_meta_reply,
-        is_weather_status_followup_fn=_is_weather_status_followup,
-        weather_status_reply_fn=_weather_status_reply,
-        normalize_turn_text_fn=_normalize_turn_text,
-        numeric_reference_guess_reply_fn=_numeric_reference_guess_reply,
-        numeric_reference_binding_reply_fn=_numeric_reference_binding_reply,
-        make_conversation_state_fn=_make_conversation_state,
-        extract_work_role_parts_fn=_extract_work_role_parts,
-        store_developer_role_facts_fn=_store_developer_role_facts,
-        strip_confirmation_prefix_fn=_strip_confirmation_prefix,
-        looks_like_profile_followup_fn=_looks_like_profile_followup,
-        developer_identity_followup_reply_fn=_developer_identity_followup_reply,
-        non_retrieval_resource_meta_reply_fn=_non_retrieval_resource_meta_reply,
-        is_developer_location_request_fn=_is_developer_location_request,
-        developer_location_reply_fn=_developer_location_reply,
-        identity_name_followup_reply_fn=_identity_name_followup_reply,
-        identity_profile_followup_reply_fn=_identity_profile_followup_reply,
+        runtime_scope=globals(),
     )
 
 
@@ -5944,15 +5823,12 @@ def _snapshot_current() -> Path:
     SNAPSHOTS_DIR.mkdir(parents=True, exist_ok=True)
     ts = time.strftime("%Y%m%d_%H%M%S")
     snap = SNAPSHOTS_DIR / f"snapshot_{ts}.zip"
-    skip_dirs = {".venv", "runtime", "logs", "models", "updates", "__pycache__", "knowledge"}
     with zipfile.ZipFile(snap, "w", compression=zipfile.ZIP_DEFLATED) as z:
         for p in BASE_DIR.rglob("*"):
             if p.is_dir():
                 continue
             rel = p.relative_to(BASE_DIR)
-            if rel.parts and rel.parts[0] in skip_dirs:
-                continue
-            if "__pycache__" in rel.parts:
+            if service_snapshot_should_skip_relpath(rel):
                 continue
             z.write(p, arcname=str(rel))
     _write_snapshot_meta(snap, _read_patch_revision())
@@ -5961,26 +5837,16 @@ def _snapshot_current() -> Path:
 
 
 def _overlay_zip(zip_path: Path) -> int:
-    allowed_ext = {".py", ".json", ".md", ".txt", ".ps1", ".cmd"}
-    blocked_prefix = {".git/", ".venv/", "runtime/", "logs/", "models/"}
-
     count = 0
-    with zipfile.ZipFile(zip_path, "r") as z:
-        for info in z.infolist():
-            if info.is_dir():
-                continue
-            name = info.filename.replace("\\", "/").lstrip("/")
-            if name == PATCH_MANIFEST_NAME:
-                continue
-            if any(name.startswith(bp) for bp in blocked_prefix):
-                continue
-            ext = Path(name).suffix.lower()
-            if ext not in allowed_ext:
-                continue
-            out = BASE_DIR / name
-            out.parent.mkdir(parents=True, exist_ok=True)
-            out.write_bytes(z.read(info))
-            count += 1
+    for name, payload in service_overlay_change_candidates(
+        zip_path,
+        base_dir=BASE_DIR,
+        patch_manifest_name=PATCH_MANIFEST_NAME,
+    ):
+        out = BASE_DIR / name
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_bytes(payload)
+        count += 1
 
     return count
 
@@ -7144,38 +7010,10 @@ def tool_update_now_cancel():
 
 
 def execute_planned_action(tool: str, args=None):
-    planned_tool_map = {
-        "find": tool_find,
-        "ls": tool_ls,
-        "queue_status": tool_queue_status,
-        "phase2_audit": tool_phase2_audit,
-        "pulse": tool_nova_pulse,
-        "patch_preview_approve": tool_patch_preview_approve,
-        "patch_apply": patch_apply,
-        "patch_preview_apply": tool_patch_preview_apply,
-        "patch_rollback": patch_rollback,
-        "read": tool_read,
-        "system_check": tool_system_check,
-        "update_now": tool_update_now,
-        "update_now_confirm": tool_update_now_confirm,
-        "update_now_cancel": tool_update_now_cancel,
-        "web_search": tool_web_search,
-        "web_research": tool_web_research,
-        "web_gather": tool_web_gather,
-        "wikipedia_lookup": tool_wikipedia_lookup,
-        "stackexchange_search": tool_stackexchange_search,
-        "health": tool_health,
-    }
-    return service_execute_planned_action(
+    return service_execute_planned_action_from_runtime(
         tool,
         args,
-        resolve_current_device_coords_fn=resolve_current_device_coords,
-        tool_weather_fn=tool_weather,
-        get_saved_location_text_fn=get_saved_location_text,
-        coords_from_saved_location_fn=_coords_from_saved_location,
-        need_confirmed_location_message_fn=_need_confirmed_location_message,
-        set_location_coords_fn=set_location_coords,
-        tool_map=planned_tool_map,
+        runtime_scope=globals(),
     )
 
 
@@ -7199,55 +7037,22 @@ def _weather_current_location_available() -> bool:
 
 
 def web_search(query: str, save_dir: Path, max_results: int = 5) -> dict:
-    save_dir.mkdir(parents=True, exist_ok=True)
-    try:
-        url = "https://html.duckduckgo.com/html/"
-        r = requests.post(url, data={"q": query}, timeout=30, headers={"User-Agent": "Nova/1.0"})
-    except requests.RequestException as e:
-        return {"ok": False, "error": f"Search request failed: {e}"}
-
-    try:
-        r.raise_for_status()
-        text = r.text or ""
-
-        # crude parse for DuckDuckGo result links/titles (no external parser)
-        entries = []
-        for m in re.finditer(r'<a[^>]+class="result__a"[^>]*href="([^"]+)"[^>]*>(.*?)</a>', text, re.I | re.S):
-            href = m.group(1)
-            title_html = m.group(2)
-            title = re.sub(r'<.*?>', '', title_html).strip()
-            entries.append((title, href))
-            if len(entries) >= int(max_results):
-                break
-
-        ts = time.strftime("%Y%m%d_%H%M%S")
-        h = hashlib.sha256(query.encode("utf-8")).hexdigest()[:12]
-        out_path = save_dir / f"search_{ts}_{h}.txt"
-
-        with open(out_path, "w", encoding="utf-8") as f:
-            f.write(f"Search results for: {query}\n\n")
-            for i, (title, href) in enumerate(entries, start=1):
-                f.write(f"{i}. {title}\n   {href}\n\n")
-
-        size = out_path.stat().st_size
-        return {"ok": True, "query": query, "path": str(out_path), "bytes": int(size)}
-
-    except Exception as e:
-        return {"ok": False, "error": f"Parsing error: {e}"}
+    return service_web_search(
+        query,
+        save_dir,
+        requests_post_fn=requests.post,
+        max_results=max_results,
+    )
 
 
 def tool_search(query: str):
-    missing = explain_missing("web_fetch", ["web_access"])
-    if missing:
-        return missing
-
-    if not policy_tools_enabled().get("web", False):
-        return "Web tool disabled by policy."
-
-    out = web_search(query, WEB_CACHE_DIR, max_results=5)
-    if not out.get("ok"):
-        return f"[FAIL] {out.get('error', 'unknown error')}"
-    return f"[OK] Saved: {out['path']} (text, {out['bytes']} bytes)"
+    return service_tool_search(
+        query,
+        explain_missing_fn=explain_missing,
+        policy_tools_enabled_fn=policy_tools_enabled,
+        web_search_fn=web_search,
+        web_cache_dir=WEB_CACHE_DIR,
+    )
 
 
 def _decode_search_href(href: str) -> str:

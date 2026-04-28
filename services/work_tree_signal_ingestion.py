@@ -239,7 +239,7 @@ class WorkTreeSignalIngestionService:
                     "class": "regression_failure",
                     "surface": "maintenance_cycle",
                     "error": "regression_failure",
-                    "symbol": last_regression,
+                    "symbol": "daily_regression",
                 },
                 "payload": {
                     "last_regression_status": last_regression,
@@ -254,11 +254,96 @@ class WorkTreeSignalIngestionService:
             results.append(self.ingest_signal(signal))
         return results
 
-    def _ensure_signal_tree(self):
+    def sync_status_snapshot(self, status_payload: dict[str, Any]) -> list[dict[str, Any]]:
+        results = list(self.ingest_status_snapshot(status_payload))
+        maintenance = status_payload.get("autonomy_maintenance") if isinstance(status_payload.get("autonomy_maintenance"), dict) else {}
+        last_regression = str(maintenance.get("last_regression_status") or "").strip()
+        last_regression_stale = bool(maintenance.get("last_regression_stale", False))
+        regression_active = bool(
+            last_regression
+            and "pass" not in last_regression.lower()
+            and last_regression.lower() != "ok"
+            and not last_regression_stale
+        )
+        if not regression_active:
+            if last_regression_stale:
+                reason = "Regression failure aged stale in maintenance state."
+            elif last_regression:
+                reason = "Regression failure cleared in maintenance state."
+            else:
+                reason = "No active regression failure remains in maintenance state."
+            results.extend(
+                self.resolve_signal_branches(
+                    signal_class="regression_failure",
+                    source="regression",
+                    reason=reason,
+                )
+            )
+        return results
+
+    def resolve_signal_branches(
+        self,
+        *,
+        signal_class: str,
+        source: str = "",
+        reason: str = "",
+    ) -> list[dict[str, Any]]:
+        tree = self._find_signal_tree()
+        if tree is None:
+            return []
+
+        target_work_class = _SIGNAL_TO_WORK_CLASS.get(str(signal_class or "").strip().lower(), "")
+        normalized_source = str(source or "").strip().lower()
+        note = str(reason or "").strip() or "Signal no longer active."
+        results: list[dict[str, Any]] = []
+        now = datetime.now()
+
+        for branch in work_tree.list_tree_branches(tree.tree_id):
+            if branch.branch_id == tree.root_branch_id:
+                continue
+            if target_work_class and str(getattr(branch, "work_class", "") or "").strip().lower() != target_work_class:
+                continue
+            if normalized_source and str(getattr(branch, "source_type", "") or "").strip().lower() != normalized_source:
+                continue
+            resolution = str(getattr(branch, "resolution_state", "") or "").strip().lower()
+            if resolution in {"resolved", "retired"} and branch.status == BranchStatus.COMPLETE:
+                continue
+            for task in work_tree.list_branch_tasks(branch.branch_id):
+                status = str(getattr(getattr(task, "status", None), "value", getattr(task, "status", "")) or "").strip().lower()
+                if status in {"complete", "dropped"}:
+                    continue
+                work_tree.mark_task_complete(task.task_id)
+            branch.status = BranchStatus.COMPLETE
+            branch.resolution_state = "resolved"
+            branch.priority = 0
+            branch.allowed_tools = []
+            branch.preferred_tool = None
+            branch.last_seen_at = now
+            existing_notes = str(branch.notes or "").strip()
+            if note and note not in existing_notes:
+                branch.notes = f"{existing_notes}\nResolution: {note}".strip() if existing_notes else f"Resolution: {note}"
+            work_tree.touch_branch(branch.branch_id)
+            results.append(
+                {
+                    "action": "resolved",
+                    "tree_id": tree.tree_id,
+                    "branch_id": branch.branch_id,
+                    "reason": note,
+                }
+            )
+        return results
+
+    def _find_signal_tree(self):
         for tree in work_tree.list_trees():
             meta = dict(getattr(tree, "meta", {}) or {})
             if str(meta.get("kind") or "").strip().lower() == self.SIGNAL_TREE_KIND:
                 return tree
+        return None
+
+    def _ensure_signal_tree(self):
+        existing = self._find_signal_tree()
+        if existing is not None:
+            return existing
         return work_tree.initialize_tree(
             self.SIGNAL_TREE_TITLE,
             meta={

@@ -891,7 +891,7 @@ class TestHttpSessionManager(unittest.TestCase):
         apply_mock.assert_not_called()
 
     def test_control_html_smoke_keeps_core_endpoints_and_tabs(self):
-        html = nova_http.CONTROL_HTML
+        html = nova_http._render_control_html()
         script = (nova_http.STATIC_DIR / "control.js").read_text(encoding="utf-8")
 
         self.assertIn("/api/control/status", script)

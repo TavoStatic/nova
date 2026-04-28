@@ -1,8 +1,102 @@
 from __future__ import annotations
 
+from services.nova_runtime_hooks import resolve_runtime_hooks
+
+
+_CONTROL_ACTION_RUNTIME_HOOKS = {
+    "patch_status_payload_fn": "_unused_runtime_factory",
+    "patch_preview_summaries_fn": "_unused_runtime_factory",
+    "patch_action_readiness_payload_fn": "_patch_action_readiness_payload",
+    "patch_preview_target_fn": "_unused_runtime_factory",
+    "show_preview_fn": "_unused_runtime_factory",
+    "approve_preview_fn": "_unused_runtime_factory",
+    "reject_preview_fn": "_unused_runtime_factory",
+    "patch_apply_fn": "_unused_runtime_factory",
+    "refresh_status_action_fn": "_refresh_status_action",
+    "device_location_update_action_fn": "_device_location_update_action",
+    "device_location_clear_action_fn": "_device_location_clear_action",
+    "patch_preview_list_action_fn": "_patch_preview_list_action",
+    "pulse_status_action_fn": "_pulse_status_action",
+    "update_now_dry_run_action_fn": "_update_now_dry_run_action",
+    "update_now_confirm_action_fn": "_update_now_confirm_action",
+    "update_now_cancel_action_fn": "_update_now_cancel_action",
+    "runtime_artifact_show_action_fn": "_runtime_artifact_show_action",
+    "guard_control_action_fn": "_guard_control_action",
+    "core_runtime_action_fn": "_core_runtime_action",
+    "autonomy_runtime_action_fn": "_autonomy_runtime_action",
+    "test_session_run_action_fn": "_test_session_run_action",
+    "generated_pack_run_action_fn": "_generated_pack_run_action",
+    "generated_queue_run_next_action_fn": "_generated_queue_run_next_action",
+    "generated_queue_investigate_action_fn": "_generated_queue_investigate_action",
+    "real_world_task_create_action_fn": "_real_world_task_create_action",
+    "backend_command_list_action_fn": "_backend_command_list_action",
+    "backend_command_run_action_fn": "_backend_command_run_action",
+    "operator_prompt_action_fn": "_operator_prompt_action",
+    "session_delete_action_fn": "_session_delete_action",
+    "policy_allow_action_fn": "_policy_allow_action",
+    "policy_remove_action_fn": "_policy_remove_action",
+    "web_mode_action_fn": "_web_mode_action",
+    "memory_scope_set_action_fn": "_memory_scope_set_action",
+    "search_provider_action_fn": "_search_provider_action",
+    "search_provider_toggle_action_fn": "_search_provider_toggle_action",
+    "search_endpoint_set_action_fn": "_search_endpoint_set_action",
+    "search_provider_priority_set_action_fn": "_search_provider_priority_set_action",
+    "search_endpoint_probe_action_fn": "_search_endpoint_probe_action",
+    "chat_user_list_action_fn": "_chat_user_list_action",
+    "chat_user_upsert_action_fn": "_chat_user_upsert_action",
+    "chat_user_delete_action_fn": "_chat_user_delete_action",
+    "self_check_action_fn": "_self_check_action",
+    "export_capabilities_snapshot_fn": "_export_capabilities_snapshot",
+    "export_ledger_summary_action_fn": "_export_ledger_summary_action",
+    "export_diagnostics_bundle_action_fn": "_export_diagnostics_bundle_action",
+    "tail_log_action_fn": "_tail_log_action",
+    "metrics_action_fn": "_metrics_action",
+    "inspect_environment_fn": "_unused_runtime_factory",
+    "format_report_fn": "_unused_runtime_factory",
+    "policy_audit_fn": "_unused_runtime_factory",
+    "record_control_action_event_fn": "_record_control_action_event",
+    "invalidate_control_status_cache_fn": "_invalidate_control_status_cache",
+}
+
 
 class NovaControlActionDispatcher:
     """Own the complete control action dispatch ladder outside the HTTP transport shell."""
+
+    @staticmethod
+    def dispatch_control_action_from_runtime(
+        act: str,
+        payload: dict,
+        *,
+        patch_control_service,
+        updates_dir,
+        runtime_scope,
+        explicit_hooks: dict | None = None,
+    ) -> tuple[bool, str, dict]:
+        runtime_scope = runtime_scope or {}
+        hooks = resolve_runtime_hooks(
+            _CONTROL_ACTION_RUNTIME_HOOKS,
+            explicit_hooks=explicit_hooks or {},
+            runtime_scope=runtime_scope,
+            factories={
+                "patch_status_payload_fn": lambda scope: scope["nova_core"].patch_status_payload,
+                "patch_preview_summaries_fn": lambda scope: scope["nova_core"].patch_preview_summaries,
+                "patch_preview_target_fn": lambda scope: scope["PATCH_CONTROL_SERVICE"].patch_preview_target,
+                "show_preview_fn": lambda scope: scope["nova_core"].show_preview,
+                "approve_preview_fn": lambda scope: scope["nova_core"].approve_preview,
+                "reject_preview_fn": lambda scope: scope["nova_core"].reject_preview,
+                "patch_apply_fn": lambda scope: scope["nova_core"].patch_apply,
+                "inspect_environment_fn": lambda scope: scope["nova_core"].inspect_environment,
+                "format_report_fn": lambda scope: scope["nova_core"].format_report,
+                "policy_audit_fn": lambda scope: scope["nova_core"].policy_audit,
+            },
+        )
+        return NovaControlActionDispatcher.dispatch_control_action(
+            act,
+            payload,
+            patch_control_service=patch_control_service,
+            updates_dir=updates_dir,
+            **hooks,
+        )
 
     @staticmethod
     def dispatch_control_action(

@@ -44,6 +44,19 @@ class TestControlAuthService(unittest.TestCase):
         self.assertFalse(ok)
         self.assertEqual(reason, "control_local_only_set_NOVA_CONTROL_TOKEN")
 
+    def test_control_api_auth_accepts_matching_token(self):
+        ok, reason = CONTROL_AUTH_SERVICE.control_api_auth(
+            object(),
+            {"key": ["secret-token"]},
+            control_login_auth_fn=lambda handler: (True, ""),
+            is_local_client_fn=lambda handler: False,
+            request_control_key_fn=lambda handler, qs: str((qs.get("key") or [""])[0]),
+            environ={"NOVA_CONTROL_TOKEN": "secret-token"},
+        )
+
+        self.assertTrue(ok)
+        self.assertEqual(reason, "")
+
     def test_control_login_action_returns_cookie_header_on_success(self):
         code, payload, headers = CONTROL_AUTH_SERVICE.control_login_action(
             {"username": "admin", "password": "secret"},

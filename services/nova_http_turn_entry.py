@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import http_chat_flow
+from services.nova_reply_deterministic import _should_skip_mixed_turn_clarify
 
 
 class NovaHttpTurnEntryService:
@@ -108,6 +109,7 @@ class NovaHttpTurnEntryService:
         flow_result = http_chat_flow.apply_mixed_turn_clarify(
             turn_acts=turn_acts,
             correction_pending=correction_pending,
+            skip_mixed_turn_clarify=_should_skip_mixed_turn_clarify(routed_text),
             routed_text=routed_text,
             ledger=ledger,
             mixed_info_request_clarify_reply=mixed_info_request_clarify_reply_fn,

@@ -167,6 +167,90 @@ def scan_candidate_urls_for_query(
     return hits
 
 
+def extract_urls(text: str) -> list[str]:
+    seen = set()
+    out = []
+    for match in re.findall(r"https?://[^\s)>\]]+", text or "", flags=re.I):
+        url = match.rstrip(".,;:")
+        if url not in seen:
+            seen.add(url)
+            out.append(url)
+    return out
+
+
+def host_label(url: str) -> str:
+    try:
+        return (urlparse(url).hostname or "source").lower()
+    except Exception:
+        return "source"
+
+
+def summary_from_gather_output(raw: str) -> str:
+    txt = (raw or "").strip()
+    if not txt:
+        return ""
+    match = re.search(r"Summary snippet:\s*(.+)$", txt, flags=re.I | re.S)
+    if match:
+        txt = match.group(1).strip()
+    txt = re.sub(r"\s+", " ", txt)
+    return txt[:280].strip()
+
+
+def is_weak_grounded_snippet(value: str) -> bool:
+    low = (value or "").strip().lower()
+    if not low:
+        return True
+    weak_markers = (
+        "you need to enable javascript",
+        "welcome to texas education agency",
+        "skip to main content",
+        "cookie",
+        "privacy policy",
+        "all rights reserved",
+    )
+    return any(marker in low for marker in weak_markers)
+
+
+def build_grounded_answer(
+    query_text: str,
+    *,
+    max_sources: int = 2,
+    tool_web_research_fn: Callable[[str], str],
+    tool_web_gather_fn: Callable[[str], str],
+) -> str:
+    research = tool_web_research_fn(query_text)
+    if not isinstance(research, str) or not research.strip():
+        return ""
+
+    urls = extract_urls(research)
+    if not urls:
+        return ""
+
+    snippets: list[tuple[str, str]] = []
+    for url in urls[: max(1, int(max_sources))]:
+        gathered = tool_web_gather_fn(url)
+        snippet = summary_from_gather_output(gathered if isinstance(gathered, str) else "")
+        if snippet and not is_weak_grounded_snippet(snippet):
+            snippets.append((url, snippet))
+
+    if not snippets:
+        return ""
+
+    lines = ["I found sourced information from allowlisted references:"]
+    for _url, snippet in snippets:
+        lines.append(f"- {snippet}")
+
+    cited_hosts: list[str] = []
+    for url, _snippet in snippets:
+        host = host_label(url)
+        if host not in cited_hosts:
+            cited_hosts.append(host)
+    for host in cited_hosts:
+        lines.append(f"[source: {host}]")
+
+    return "\n".join(lines)
+
+
 def fetch_sitemap_urls(
     domain: str,
     limit: int = 80,

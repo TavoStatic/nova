@@ -1,6 +1,7 @@
 import json
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
 from subconscious_runner import (
@@ -62,7 +63,8 @@ class TestSubconsciousRunner(unittest.TestCase):
         families = select_live_scenario_families(["fulfillment-fallthrough-family"])
         report = build_unattended_report(simulate_live_families(families), label="overnight")
 
-        generated = build_generated_session_definitions(report)
+        with mock.patch("subconscious_runner.load_retired_generated_definition_index", return_value={}):
+            generated = build_generated_session_definitions(report)
 
         self.assertTrue(generated)
         payload = dict(generated[0]["payload"])
@@ -76,7 +78,8 @@ class TestSubconsciousRunner(unittest.TestCase):
         report = build_unattended_report(simulate_live_families(families), label="overnight")
 
         with tempfile.TemporaryDirectory() as tmp:
-            paths = write_generated_session_definitions(report, output_root=Path(tmp))
+            with mock.patch("subconscious_runner.load_retired_generated_definition_index", return_value={}):
+                paths = write_generated_session_definitions(report, output_root=Path(tmp))
 
             manifest_path = Path(paths["manifest"])
             latest_manifest_path = Path(paths["latest_manifest"])
@@ -88,10 +91,28 @@ class TestSubconsciousRunner(unittest.TestCase):
             self.assertEqual(payload.get("source"), "subconscious_generated")
             self.assertTrue(payload.get("messages"))
 
+    def test_write_generated_session_definitions_skips_recently_retired_files(self):
+        families = select_live_scenario_families(["fulfillment-fallthrough-family"])
+        report = build_unattended_report(simulate_live_families(families), label="overnight")
+        with mock.patch("subconscious_runner.load_retired_generated_definition_index", return_value={}):
+            generated = build_generated_session_definitions(report)
+        self.assertTrue(generated)
+        retired_file = str(generated[0].get("file") or "")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            with mock.patch(
+                "subconscious_runner.load_retired_generated_definition_index",
+                return_value={retired_file: {"file": retired_file, "reason": "definition_novelty<0.40"}},
+            ):
+                paths = write_generated_session_definitions(report, output_root=Path(tmp))
+
+            self.assertLess(paths["definition_count"], len(generated))
+            self.assertTrue(all(Path(path).name != retired_file for path in paths["files"]))
+
     def test_main_runs_and_writes_requested_family_bundle(self):
         with tempfile.TemporaryDirectory() as tmp:
             generated_dir = Path(tmp) / "generated_defs"
-            with unittest.mock.patch(
+            with mock.patch(
                 "subconscious_runner.evaluate_generated_definitions",
                 return_value={
                     "evaluated_count": 1,
@@ -100,7 +121,7 @@ class TestSubconsciousRunner(unittest.TestCase):
                     "promoted_count": 0,
                     "quarantined_count": 0,
                 },
-            ) as evaluate_mock:
+            ) as evaluate_mock, mock.patch("subconscious_runner.load_retired_generated_definition_index", return_value={}):
                 exit_code = main([
                     "--output-dir",
                     tmp,

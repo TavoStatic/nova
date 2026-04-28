@@ -330,6 +330,61 @@ class TestAutonomyMaintenance(unittest.TestCase):
             state = json.loads(state_path.read_text(encoding="utf-8"))
             self.assertTrue(state.get("last_regression_stale"))
             self.assertEqual((state.get("last_generated_queue_run") or {}).get("status"), "clear")
+            self.assertTrue(bool((state.get("last_signal_ingestion") or {}).get("last_regression_stale")))
+
+    def test_sync_signal_intake_work_tree_creates_regression_branch_for_live_failure(self):
+        self._isolated_work_tree_db()
+        state = {
+            "last_regression_status": "FAILED",
+            "last_regression_stale": False,
+        }
+
+        payload = autonomy_maintenance._sync_signal_intake_work_tree(state)
+
+        self.assertEqual(payload.get("status"), "ok")
+        self.assertTrue(payload.get("active_regression_failure"))
+        self.assertEqual(payload.get("created_count"), 1)
+        tree = work_tree.get_tree(str(payload.get("tree_id") or ""))
+        self.assertIsNotNone(tree)
+        branches = [
+            branch for branch in work_tree.list_tree_branches(tree.tree_id)
+            if branch.branch_id != tree.root_branch_id
+        ]
+        self.assertEqual(len(branches), 1)
+        branch = branches[0]
+        self.assertEqual(str(branch.work_class or ""), "regression_failure")
+        self.assertEqual(str(branch.source_type or ""), "regression")
+        self.assertEqual(str(branch.resolution_state or ""), "open")
+        self.assertEqual(branch.status, work_tree.BranchStatus.READY)
+
+    def test_sync_signal_intake_work_tree_resolves_stale_regression_branch(self):
+        self._isolated_work_tree_db()
+        live_state = {
+            "last_regression_status": "FAILED",
+            "last_regression_stale": False,
+        }
+        autonomy_maintenance._sync_signal_intake_work_tree(live_state)
+
+        stale_state = {
+            "last_regression_status": "FAILED",
+            "last_regression_stale": True,
+        }
+        payload = autonomy_maintenance._sync_signal_intake_work_tree(stale_state)
+
+        self.assertEqual(payload.get("status"), "ok")
+        self.assertFalse(payload.get("active_regression_failure"))
+        self.assertEqual(payload.get("resolved_count"), 1)
+        tree = work_tree.get_tree(str(payload.get("tree_id") or ""))
+        self.assertIsNotNone(tree)
+        branches = [
+            branch for branch in work_tree.list_tree_branches(tree.tree_id)
+            if branch.branch_id != tree.root_branch_id
+        ]
+        self.assertEqual(len(branches), 1)
+        branch = branches[0]
+        self.assertEqual(str(branch.work_class or ""), "regression_failure")
+        self.assertEqual(str(branch.resolution_state or ""), "resolved")
+        self.assertEqual(branch.status, work_tree.BranchStatus.COMPLETE)
 
     def test_sync_generated_queue_work_tree_creates_actionable_branch(self):
         self._isolated_work_tree_db()

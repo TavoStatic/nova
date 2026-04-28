@@ -7,6 +7,7 @@ import time
 from dataclasses import asdict
 from pathlib import Path
 
+from kidney import load_retired_generated_definition_index
 from nova_safety_envelope import evaluate_generated_definitions
 from subconscious_live_simulator import (
     TrainingPriorityItem,
@@ -164,6 +165,7 @@ def build_generated_session_definitions(report: dict) -> list[dict]:
         str(getattr(family, "family_id", "") or "").strip(): family
         for family in build_default_live_scenario_families()
     }
+    retired_index = load_retired_generated_definition_index()
     generated: list[dict] = []
     for family_payload in list(report.get("families") or []):
         family_id = str(family_payload.get("family_id") or "").strip()
@@ -182,9 +184,13 @@ def build_generated_session_definitions(report: dict) -> list[dict]:
             if not messages:
                 continue
             variation_id = str(getattr(scenario, "variation_id", "baseline") or "baseline")
+            file_name = _session_definition_filename(family_id, variation_id)
+            retired = dict(retired_index.get(file_name) or {})
+            if retired:
+                continue
             generated.append(
                 {
-                    "file": _session_definition_filename(family_id, variation_id),
+                    "file": file_name,
                     "payload": {
                         "name": f"Subconscious {family_id} :: {variation_id}",
                         "messages": messages,

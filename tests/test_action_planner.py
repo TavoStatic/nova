@@ -52,6 +52,10 @@ class TestActionPlanner(unittest.TestCase):
         self.assertEqual(actions[0]["type"], "run_tool")
         self.assertEqual(actions[0]["tool"], "wikipedia_lookup")
 
+    def test_generic_explain_prompt_stays_off_wikipedia_provider(self):
+        actions = decide_actions("Explain photosynthesis briefly.")
+        self.assertFalse(actions and actions[0].get("tool") == "wikipedia_lookup")
+
     def test_repo_prompt_prefers_general_web_research(self):
         actions = decide_actions("find a GitHub repo for FastAPI OAuth examples")
         self.assertEqual(actions[0]["type"], "run_tool")

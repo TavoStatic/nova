@@ -8,6 +8,10 @@ class RuntimeStatusService:
     """Own runtime readiness and failure-reason summaries outside the HTTP layer."""
 
     @staticmethod
+    def _runtime_fn(runtime_scope: dict[str, object], name: str):
+        return runtime_scope[name]
+
+    @staticmethod
     def guard_status_payload(
         *,
         runtime_dir: Path,
@@ -95,6 +99,25 @@ class RuntimeStatusService:
             "lock_exists": lock_exists,
             "stop_flag": stop_file.exists(),
         }
+
+    @staticmethod
+    def guard_status_payload_from_runtime(
+        runtime_scope: dict[str, object],
+        *,
+        include_fallback_scan: bool = True,
+    ) -> dict:
+        runtime_fn = RuntimeStatusService._runtime_fn
+        return RuntimeStatusService.guard_status_payload(
+            runtime_dir=runtime_fn(runtime_scope, "RUNTIME_DIR"),
+            guard_py=runtime_fn(runtime_scope, "GUARD_PY"),
+            include_fallback_scan=include_fallback_scan,
+            pid_exists_fn=runtime_fn(runtime_scope, "psutil").pid_exists,
+            cached_logical_service_processes_fn=runtime_fn(runtime_scope, "_cached_logical_service_processes"),
+            logical_service_processes_fn=runtime_fn(runtime_scope, "_logical_service_processes"),
+            prune_orphaned_guard_artifacts_fn=runtime_fn(runtime_scope, "_prune_orphaned_guard_artifacts"),
+            select_logical_process_fn=runtime_fn(runtime_scope, "_select_logical_process"),
+            process_scan_cache_ttl_seconds=runtime_fn(runtime_scope, "PROCESS_SCAN_CACHE_TTL_SECONDS"),
+        )
 
     @staticmethod
     def core_status_payload(

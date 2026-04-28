@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import shutil
 import time
 import zipfile
@@ -24,6 +25,7 @@ KIDNEY_ARCHIVE_DIR = KIDNEY_ROOT / "archive"
 KIDNEY_SNAPSHOTS_DIR = KIDNEY_ROOT / "snapshots"
 KIDNEY_STATUS_PATH = KIDNEY_ROOT / "status.json"
 KIDNEY_PROTECT_PATH = KIDNEY_ROOT / "protect_patterns.json"
+KIDNEY_RETIRED_DEFINITIONS_PATH = KIDNEY_ROOT / "retired_generated_definitions.json"
 PROMOTION_AUDIT_PATH = TEST_SESSIONS_DIR / "promotion_audit.jsonl"
 DEFAULT_TEMP_MAX_BYTES = 500 * 1024 * 1024
 _MANIFEST_NAMES = {"generated_manifest.json", "latest_manifest.json"}
@@ -53,9 +55,15 @@ def policy_kidney() -> dict[str, Any]:
     cfg.setdefault("quarantine_max_age_hours", 48)
     cfg.setdefault("preview_max_age_days", 3)
     cfg.setdefault("snapshot_max_age_days", 30)
+    cfg.setdefault("snapshot_max_count", 3)
+    cfg.setdefault("snapshot_max_total_gb", 8)
+    cfg.setdefault("cleanup_snapshot_max_age_days", 7)
+    cfg.setdefault("cleanup_snapshot_max_count", 24)
+    cfg.setdefault("cleanup_snapshot_max_total_mb", 128)
     cfg.setdefault("temp_max_age_days", 14)
     cfg.setdefault("temp_max_total_mb", 500)
     cfg.setdefault("protect_patterns", [])
+    cfg.setdefault("generated_definition_retire_cooldown_hours", 24)
     return cfg
 
 
@@ -88,6 +96,91 @@ def _load_protect_patterns() -> list[str]:
         if pattern and pattern not in merged:
             merged.append(pattern)
     return merged
+
+
+def _save_json(path: Path, payload: Any) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, ensure_ascii=True, indent=2), encoding="utf-8")
+
+
+def _load_retired_generated_definition_index(*, now: float | None = None) -> dict[str, dict[str, Any]]:
+    stored = _load_json(KIDNEY_RETIRED_DEFINITIONS_PATH, {})
+    if not isinstance(stored, dict):
+        stored = {}
+
+    cooldown_hours = float(policy_kidney().get("generated_definition_retire_cooldown_hours", 24) or 24)
+    cooldown_seconds = max(0.0, cooldown_hours) * 3600.0
+    current = float(now if now is not None else _now_ts())
+    filtered: dict[str, dict[str, Any]] = {}
+    changed = False
+
+    for key, value in stored.items():
+        if not isinstance(value, dict):
+            changed = True
+            continue
+        retired_at_ts = float(value.get("retired_at_ts", 0.0) or 0.0)
+        if cooldown_seconds > 0.0 and retired_at_ts > 0.0 and (current - retired_at_ts) > cooldown_seconds:
+            changed = True
+            continue
+        filtered[str(key)] = value
+
+    if changed:
+        _save_json(KIDNEY_RETIRED_DEFINITIONS_PATH, filtered)
+    return filtered
+
+
+def load_retired_generated_definition_index() -> dict[str, dict[str, Any]]:
+    return _load_retired_generated_definition_index()
+
+
+def _definition_metadata(path: Path) -> dict[str, Any]:
+    payload = _load_json(path, {})
+    if not isinstance(payload, dict):
+        payload = {}
+    return {
+        "source": str(payload.get("source") or "").strip(),
+        "family_id": str(payload.get("family_id") or "").strip(),
+        "variation_id": str(payload.get("variation_id") or "").strip(),
+        "label": str(payload.get("label") or "").strip(),
+    }
+
+
+def _record_retired_generated_definition(
+    path: Path,
+    item: dict[str, Any],
+    *,
+    target_path: str = "",
+    now: float | None = None,
+) -> None:
+    metadata = _definition_metadata(path)
+    if metadata.get("source") != "subconscious_generated":
+        return
+
+    current = float(now if now is not None else _now_ts())
+    index = _load_retired_generated_definition_index(now=current)
+    index[path.name] = {
+        "file": path.name,
+        "fingerprint": _file_fingerprint(path),
+        "family_id": metadata.get("family_id") or "",
+        "variation_id": metadata.get("variation_id") or "",
+        "label": metadata.get("label") or "",
+        "source": metadata.get("source") or "",
+        "category": str(item.get("category") or "").strip(),
+        "action": str(item.get("action") or "").strip(),
+        "reason": str(item.get("reason") or "").strip(),
+        "retired_at": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(current)),
+        "retired_at_ts": current,
+        "source_path": str(path),
+        "target_path": str(target_path or ""),
+    }
+    _save_json(KIDNEY_RETIRED_DEFINITIONS_PATH, index)
+
+
+def _file_fingerprint(path: Path) -> str:
+    try:
+        return hashlib.sha1(path.read_bytes()).hexdigest()
+    except Exception:
+        return ""
 
 
 def add_protect_pattern(pattern: str) -> str:
@@ -234,11 +327,38 @@ def scan_candidates() -> list[dict[str, Any]]:
         out.append(_build_candidate(path, "preview_junk", "delete", "preview_stale_not_eligible"))
 
     snapshot_max_age = float(cfg.get("snapshot_max_age_days", 30) or 30) * 86400.0
-    for path in sorted(SNAPSHOTS_DIR.glob("snapshot_*.zip")) if SNAPSHOTS_DIR.exists() else []:
+    snapshot_max_count = max(1, int(cfg.get("snapshot_max_count", 3) or 3))
+    snapshot_max_total_bytes = max(0, int(float(cfg.get("snapshot_max_total_gb", 8) or 8) * 1024 * 1024 * 1024))
+    retained_snapshot_count = 0
+    retained_snapshot_bytes = 0
+    stale_snapshot_paths: set[str] = set()
+    snapshot_paths = sorted(
+        SNAPSHOTS_DIR.glob("snapshot_*.zip"),
+        key=lambda path: path.stat().st_mtime if path.exists() else 0,
+        reverse=True,
+    ) if SNAPSHOTS_DIR.exists() else []
+    for path in snapshot_paths:
         if _is_protected(path, protect_patterns):
             continue
-        if _age_seconds(path, now) > snapshot_max_age:
+        age_seconds = _age_seconds(path, now)
+        if age_seconds > snapshot_max_age:
+            stale_snapshot_paths.add(str(path))
             out.append(_build_candidate(path, "stale_snapshot", "delete", "snapshot_age_limit"))
+            continue
+
+        size_bytes = _path_size_bytes(path)
+        keep_by_count = retained_snapshot_count < snapshot_max_count
+        keep_by_size = (retained_snapshot_count == 0) or (retained_snapshot_bytes + size_bytes <= snapshot_max_total_bytes)
+        if keep_by_count and keep_by_size:
+            retained_snapshot_count += 1
+            retained_snapshot_bytes += size_bytes
+            continue
+
+        reason = "snapshot_count_limit"
+        if not keep_by_size:
+            reason = "snapshot_total_size_limit"
+        stale_snapshot_paths.add(str(path))
+        out.append(_build_candidate(path, "stale_snapshot", "delete", reason))
     for path in sorted(RUNTIME_DIR.glob("core_state*.json")) if RUNTIME_DIR.exists() else []:
         if path.name == "core_state.json" or _is_protected(path, protect_patterns):
             continue
@@ -297,6 +417,73 @@ def _snapshot_paths(candidates: list[dict[str, Any]]) -> str:
     return str(snapshot_path)
 
 
+def _skip_cleanup_snapshot(candidates: list[dict[str, Any]], *, cfg: dict[str, Any]) -> str:
+    if not candidates:
+        return ""
+    if all(
+        str(item.get("category") or "") == "stale_snapshot"
+        and str(item.get("action") or "") == "delete"
+        for item in candidates
+    ):
+        return "stale_snapshot_batch"
+    total_bytes = sum(int(item.get("size_bytes", 0) or 0) for item in candidates)
+    max_total_bytes = _cleanup_snapshot_max_total_bytes(cfg)
+    if max_total_bytes and total_bytes > max_total_bytes:
+        return "cleanup_snapshot_total_size_limit"
+    return ""
+
+
+def _cleanup_snapshot_max_total_bytes(cfg: dict[str, Any]) -> int:
+    if "cleanup_snapshot_max_total_mb" in cfg:
+        return max(0, int(float(cfg.get("cleanup_snapshot_max_total_mb", 128) or 128) * 1024 * 1024))
+    if "cleanup_snapshot_max_total_gb" in cfg:
+        return max(0, int(float(cfg.get("cleanup_snapshot_max_total_gb", 4) or 4) * 1024 * 1024 * 1024))
+    return 128 * 1024 * 1024
+
+
+def _prune_cleanup_snapshots(*, cfg: dict[str, Any]) -> dict[str, Any]:
+    KIDNEY_SNAPSHOTS_DIR.mkdir(parents=True, exist_ok=True)
+    max_age_seconds = max(0.0, float(cfg.get("cleanup_snapshot_max_age_days", 7) or 7) * 86400.0)
+    max_count = max(0, int(cfg.get("cleanup_snapshot_max_count", 24) or 24))
+    max_total_bytes = _cleanup_snapshot_max_total_bytes(cfg)
+    now = _now_ts()
+    snapshot_paths = sorted(
+        [path for path in KIDNEY_SNAPSHOTS_DIR.iterdir() if path.is_file()],
+        key=lambda path: path.stat().st_mtime if path.exists() else 0,
+        reverse=True,
+    )
+    kept: list[Path] = []
+    kept_bytes = 0
+    removed: list[str] = []
+    for path in snapshot_paths:
+        try:
+            age_seconds = _age_seconds(path, now)
+            size_bytes = int(path.stat().st_size or 0)
+        except Exception:
+            age_seconds = 0.0
+            size_bytes = 0
+        keep_by_age = max_age_seconds <= 0.0 or age_seconds <= max_age_seconds
+        keep_by_count = max_count <= 0 or len(kept) < max_count
+        keep_by_size = max_total_bytes <= 0 or (kept_bytes + size_bytes) <= max_total_bytes
+        if keep_by_age and keep_by_count and keep_by_size:
+            kept.append(path)
+            kept_bytes += size_bytes
+            continue
+        try:
+            path.unlink()
+            removed.append(str(path))
+        except Exception:
+            continue
+    return {
+        "removed_count": len(removed),
+        "removed_paths": removed,
+        "retained_count": len(kept),
+        "retained_total_bytes": kept_bytes,
+        "max_count": max_count,
+        "max_total_bytes": max_total_bytes,
+    }
+
+
 def _archive_target_for(path: Path) -> Path:
     KIDNEY_ARCHIVE_DIR.mkdir(parents=True, exist_ok=True)
     stamped_name = f"{path.stem}_{time.strftime('%Y%m%d_%H%M%S')}{path.suffix}"
@@ -313,14 +500,20 @@ def _apply_candidate(item: dict[str, Any]) -> dict[str, Any]:
     try:
         if action == "archive":
             target = _archive_target_for(path)
+            _record_retired_generated_definition(path, item, target_path=str(target))
             shutil.move(str(path), str(target))
             result["target_path"] = str(target)
             result["result"] = "archived"
             return result
+        _record_retired_generated_definition(path, item)
         if path.is_dir():
             shutil.rmtree(path)
         else:
             path.unlink()
+            if path.name.startswith("snapshot_") and path.suffix == ".zip":
+                meta_path = path.with_suffix(path.suffix + ".json")
+                if meta_path.exists():
+                    meta_path.unlink()
         result["result"] = "deleted"
     except Exception as exc:
         result["result"] = f"error:{exc}"
@@ -343,25 +536,42 @@ def run_kidney(*, dry_run: bool = False, logger: Callable[[str], None] | None = 
         "delete_count": sum(1 for item in candidates if str(item.get("action") or "") == "delete"),
         "candidates": candidates,
         "snapshot_path": "",
+        "snapshot_skipped_reason": "",
+        "cleanup_snapshot_pruned_count": 0,
+        "cleanup_snapshot_retained_count": 0,
         "applied": [],
     }
     if logger is not None:
         logger(f"mode={mode} dry_run={bool(dry_run)} candidates={len(candidates)}")
-    if not enabled or dry_run or mode != "enforce" or not candidates:
+    if not enabled or dry_run or mode != "enforce":
         KIDNEY_STATUS_PATH.parent.mkdir(parents=True, exist_ok=True)
         KIDNEY_STATUS_PATH.write_text(json.dumps(summary, ensure_ascii=True, indent=2), encoding="utf-8")
         return summary
-
-    summary["snapshot_path"] = _snapshot_paths(candidates)
-    if logger is not None:
-        logger(f"snapshot={summary['snapshot_path']}")
-    applied = [_apply_candidate(item) for item in candidates]
-    summary["applied"] = applied
+    if candidates:
+        snapshot_skip_reason = _skip_cleanup_snapshot(candidates, cfg=cfg)
+        if snapshot_skip_reason:
+            summary["snapshot_skipped_reason"] = snapshot_skip_reason
+            if logger is not None:
+                logger(f"snapshot_skipped={snapshot_skip_reason}")
+        else:
+            summary["snapshot_path"] = _snapshot_paths(candidates)
+            if logger is not None:
+                logger(f"snapshot={summary['snapshot_path']}")
+        applied = [_apply_candidate(item) for item in candidates]
+        summary["applied"] = applied
+        for item in applied:
+            if logger is not None:
+                logger(f"{item.get('result')} {item.get('category')} {item.get('name')} reason={item.get('reason')}")
+    prune_summary = _prune_cleanup_snapshots(cfg=cfg)
+    summary["cleanup_snapshot_pruned_count"] = int(prune_summary.get("removed_count", 0) or 0)
+    summary["cleanup_snapshot_retained_count"] = int(prune_summary.get("retained_count", 0) or 0)
+    if logger is not None and summary["cleanup_snapshot_pruned_count"] > 0:
+        logger(
+            "cleanup_snapshot_prune "
+            f"removed={summary['cleanup_snapshot_pruned_count']} retained={summary['cleanup_snapshot_retained_count']}"
+        )
     KIDNEY_STATUS_PATH.parent.mkdir(parents=True, exist_ok=True)
     KIDNEY_STATUS_PATH.write_text(json.dumps(summary, ensure_ascii=True, indent=2), encoding="utf-8")
-    for item in applied:
-        if logger is not None:
-            logger(f"{item.get('result')} {item.get('category')} {item.get('name')} reason={item.get('reason')}")
     return summary
 
 

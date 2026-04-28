@@ -1,0 +1,25 @@
+{
+  "pipeline_id": "sis_test",
+  "display_name": "District SIS Test",
+  "kind": "sqlserver",
+  "version": "0.1.0",
+  "description": "Read-only SQL Server pipeline scaffold for district-network SIS test access.",
+  "read_only": true,
+  "network_scope": "district_only",
+  "safe_operations": [
+    "status",
+    "schema_probe",
+    "safe_query",
+    "student_lookup",
+    "campus_enrollment_summary",
+    "program_membership_lookup"
+  ],
+  "connector_module": "data_sources.sis_test.connector",
+  "connector_class": "SisTestPipeline",
+  "schema_manifest": "schema_manifest.json",
+  "query_templates": "query_templates.json",
+  "field_dictionary": "field_dictionary.json",
+  "config_example": "local_config.example.json",
+  "local_config": "local_config.json",
+  "audit_log": "..\\..\\runtime\\pipelines\\sis_test_audit.jsonl"
+}

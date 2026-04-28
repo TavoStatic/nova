@@ -1,5 +1,6 @@
 import io
 import unittest
+from unittest import mock
 
 from services.nova_http_post_dispatch import HTTP_POST_DISPATCH_SERVICE
 
@@ -66,3 +67,28 @@ class TestNovaHttpPostDispatchService(unittest.TestCase):
         )
 
         self.assertEqual(result, {"kind": "with_headers", "code": 200, "body": {"ok": True, "user": "gus"}, "headers": {"Set-Cookie": "x=y"}})
+
+    def test_handle_post_request_from_runtime_routes_to_peer_services(self):
+        handler = _Handler(b'{"message":"hi"}')
+
+        with mock.patch(
+            "services.nova_http_post_dispatch.HTTP_POST_ROUTES_SERVICE.handle_basic_post_route_from_runtime",
+            return_value=None,
+        ) as basic_mock, mock.patch(
+            "services.nova_http_post_dispatch.HTTP_REQUEST_BINDING_SERVICE.handle_resume_request_from_runtime",
+            return_value=(200, {"ok": True, "resumed": True}),
+        ) as resume_mock, mock.patch(
+            "services.nova_http_post_dispatch.HTTP_REQUEST_BINDING_SERVICE.handle_chat_request_from_runtime",
+            return_value=(200, {"ok": True, "reply": "hello"}),
+        ) as chat_mock:
+            result = HTTP_POST_DISPATCH_SERVICE.handle_post_request_from_runtime(
+                handler=handler,
+                path="/api/chat",
+                qs={"session_id": ["s1"]},
+                runtime_scope={"marker": "runtime"},
+            )
+
+        self.assertEqual(result, {"kind": "json", "code": 200, "body": {"ok": True, "reply": "hello"}})
+        self.assertEqual(basic_mock.call_args.kwargs["runtime_scope"], {"marker": "runtime"})
+        self.assertEqual(chat_mock.call_args.kwargs["runtime_scope"], {"marker": "runtime"})
+        self.assertFalse(resume_mock.called)

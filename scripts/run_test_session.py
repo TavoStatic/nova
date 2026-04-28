@@ -34,6 +34,7 @@ _ROUTE_NOISE_PREFIXES = (
     "chat_context:",
     "session_fact_sheet:",
     "llm_fallback:",
+    "llm_call:",
 )
 
 

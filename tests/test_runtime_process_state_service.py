@@ -38,6 +38,48 @@ class TestRuntimeProcessStateService(unittest.TestCase):
             self.assertFalse(lock_file.exists())
             self.assertFalse(pid_file.exists())
 
+    def test_cached_logical_service_processes_from_runtime_uses_cache_bundle(self):
+        cache = {}
+        service_calls = []
+
+        out = RUNTIME_PROCESS_STATE_SERVICE.cached_logical_service_processes_from_runtime(
+            Path("guard.py"),
+            runtime_scope={
+                "_PROCESS_SCAN_CACHE": cache,
+                "time": SimpleNamespace(monotonic=lambda: 100.0),
+                "_logical_service_processes": lambda script_path, root_pid=None: service_calls.append((script_path, root_pid)) or [{"pid": 10}],
+            },
+            cache_key="guard",
+            max_age_seconds=5.0,
+        )
+
+        self.assertEqual(out, [{"pid": 10}])
+        self.assertEqual(service_calls, [(Path("guard.py"), None)])
+        self.assertIn("guard", cache)
+
+    def test_prune_orphaned_core_artifacts_from_runtime_uses_runtime_scope(self):
+        with tempfile.TemporaryDirectory() as td:
+            runtime_dir = Path(td)
+            state_file = runtime_dir / "core_state.json"
+            heartbeat_file = runtime_dir / "core.heartbeat"
+            state_file.write_text("{}", encoding="utf-8")
+            heartbeat_file.write_text("123", encoding="utf-8")
+
+            RUNTIME_PROCESS_STATE_SERVICE.prune_orphaned_core_artifacts_from_runtime(
+                [],
+                None,
+                False,
+                20,
+                runtime_scope={
+                    "RUNTIME_DIR": runtime_dir,
+                    "_artifact_age_seconds": lambda path: 20,
+                    "_remove_runtime_artifact": lambda path: Path(path).unlink(),
+                },
+            )
+
+            self.assertFalse(state_file.exists())
+            self.assertFalse(heartbeat_file.exists())
+
 
 if __name__ == "__main__":
     unittest.main()

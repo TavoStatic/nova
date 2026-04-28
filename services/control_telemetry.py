@@ -243,6 +243,56 @@ class ControlTelemetryService:
             return False, f"capabilities_export_failed:{exc}", {}
 
     @staticmethod
+    def provider_telemetry_payload(
+        *,
+        ledger_summary: dict,
+        tool_summary: dict,
+        search_provider_priority_fn: Callable[[], list[str] | tuple[str, ...] | Any],
+        provider_name_from_tool_fn: Callable[[str], str],
+        recent_action_ledger_records_fn: Callable[..., list[dict] | Any],
+        policy_web_fn: Callable[[], dict],
+    ) -> dict:
+        active_priority = [
+            str(item or "").strip().lower()
+            for item in list(search_provider_priority_fn())
+            if str(item or "").strip()
+        ]
+        active_provider_set = {item for item in active_priority if item}
+        last_record = ledger_summary.get("last_record") if isinstance(ledger_summary.get("last_record"), dict) else {}
+        last_tool = str(last_record.get("tool") or "").strip()
+        last_provider_used = str(last_record.get("provider_used") or provider_name_from_tool_fn(last_tool)).strip().lower()
+        if last_provider_used and last_provider_used not in active_provider_set:
+            last_provider_used = ""
+        last_query = str(((last_record.get("reply_outcome") or {}).get("query") or "")).strip() if isinstance(last_record.get("reply_outcome"), dict) else ""
+        hits: dict[str, int] = {}
+        for rec in recent_action_ledger_records_fn(limit=80):
+            if not isinstance(rec, dict):
+                continue
+            provider = str(rec.get("provider_used") or provider_name_from_tool_fn(rec.get("tool") or "")).strip().lower()
+            if not provider or provider not in active_provider_set:
+                continue
+            hits[provider] = int(hits.get(provider, 0) or 0) + 1
+        web_cfg = policy_web_fn()
+        last_provider_family = str(last_record.get("provider_family") or last_provider_used or "").strip().lower()
+        if last_provider_family and last_provider_family not in active_provider_set:
+            last_provider_family = ""
+        candidates = [
+            str(item or "").strip().lower()
+            for item in list(last_record.get("provider_candidates") or [])
+            if str(item or "").strip().lower() in active_provider_set
+        ] if isinstance(last_record.get("provider_candidates"), list) else []
+        return {
+            "priority": active_priority,
+            "last_provider_used": last_provider_used,
+            "last_provider_family": last_provider_family,
+            "last_provider_query": last_query,
+            "last_provider_candidates": candidates,
+            "hits_last_window": hits,
+            "tool_latency_ms_by_tool": dict(tool_summary.get("avg_latency_ms_by_tool") or {}),
+            "stackexchange_site": str(web_cfg.get("stackexchange_site") or "stackoverflow").strip() or "stackoverflow",
+        }
+
+    @staticmethod
     def append_metrics_snapshot(
         status_payload: dict,
         *,
@@ -369,6 +419,29 @@ class ControlTelemetryService:
         except Exception as exc:
             record_control_action_event_fn(action, "fail", str(exc), payload)
             return False, f"diagnostics_bundle_export_failed:{exc}", {}
+
+    def export_diagnostics_bundle_action_from_runtime(
+        self,
+        payload: dict,
+        *,
+        runtime_scope: dict[str, object],
+        core_module,
+    ) -> tuple[bool, str, dict]:
+        return self.export_diagnostics_bundle_action(
+            payload,
+            runtime_dir=runtime_scope["RUNTIME_DIR"],
+            log_dir=runtime_scope["LOG_DIR"],
+            control_status_payload_fn=runtime_scope["_control_status_payload"],
+            control_policy_payload_fn=runtime_scope["_control_policy_payload"],
+            metrics_payload_fn=runtime_scope["_metrics_payload"],
+            build_self_check_fn=runtime_scope["_build_self_check"],
+            behavior_get_metrics_fn=core_module.behavior_get_metrics,
+            action_ledger_summary_fn=runtime_scope["_action_ledger_summary"],
+            tool_events_summary_fn=runtime_scope["_tool_events_summary"],
+            safe_tail_lines_fn=runtime_scope["_safe_tail_lines"],
+            record_control_action_event_fn=runtime_scope["_record_control_action_event"],
+            now_fn=runtime_scope["time"].time,
+        )
 
     def build_self_check(self, status: dict, policy: dict, metrics: dict) -> dict:
         checks: list[dict] = []

@@ -4,6 +4,10 @@ from __future__ import annotations
 class NovaHttpChatRuntimeService:
     """Own the top-level HTTP chat session coordinator outside the transport shell."""
 
+    @staticmethod
+    def _runtime_fn(runtime_scope: dict[str, object], name: str):
+        return runtime_scope[name]
+
     def process_chat(
         self,
         session_id: str,
@@ -102,6 +106,7 @@ class NovaHttpChatRuntimeService:
                 routed_text=routed_text,
                 turns=turns,
                 session=session,
+                core_module=core_module,
                 ledger=ledger,
                 conversation_state=conversation_state,
                 intent_rule=intent_rule,
@@ -128,6 +133,7 @@ class NovaHttpChatRuntimeService:
                 store_location_fact_reply_fn=core_module._store_location_fact_reply,
                 weather_for_saved_location_fn=core_module._weather_for_saved_location,
                 is_saved_location_weather_query_fn=core_module._is_saved_location_weather_query,
+                get_saved_location_text_fn=core_module.get_saved_location_text,
                 store_declarative_fact_outcome_fn=core_module._store_declarative_fact_outcome,
                 render_reply_fn=core_module.render_reply,
                 consume_conversation_followup_fn=core_module._consume_conversation_followup,
@@ -143,33 +149,58 @@ class NovaHttpChatRuntimeService:
                 flow_result = post_intent_result.get("flow_result") if isinstance(post_intent_result.get("flow_result"), dict) else {}
                 return _finalize_flow_reply(flow_result)
 
-            reply, meta = generate_chat_reply_fn(
-                turns,
-                routed_text,
-                ledger_record=ledger,
-                pending_action=session.pending_action,
-                prefer_web_for_data_queries=session.prefer_web_for_data_queries,
-                language_mix_spanish_pct=int(session.language_mix_spanish_pct or 0),
-                session=session,
+            normalized_routed_text = str(routed_text or "").strip().lower()
+            patch_command_like = bool(
+                normalized_routed_text == "patch rollback"
+                or normalized_routed_text.startswith("patch ")
+                or " patch apply " in f" {normalized_routed_text} "
+                or " patch preview " in f" {normalized_routed_text} "
+                or " patch show " in f" {normalized_routed_text} "
+                or " patch approve " in f" {normalized_routed_text} "
+                or " patch reject " in f" {normalized_routed_text} "
             )
-            reply_contract = str(meta.get("reply_contract") or "") if isinstance(meta, dict) else ""
-            planner_decision = str(meta.get("planner_decision") or "deterministic")
-            flow_result = http_chat_flow_module.apply_supervisor_bypass_safe_fallback(
-                warn_supervisor_bypass=warn_supervisor_bypass,
-                reply_contract=reply_contract,
-                routed_text=routed_text,
-                turns=turns,
-                routing_decision=routing_decision,
-                ledger=ledger,
-                open_probe_reply=core_module._open_probe_reply,
-                action_ledger_add_step=core_module.action_ledger_add_step,
-            )
-            if flow_result.get("handled"):
-                reply = str(flow_result.get("reply") or reply)
-                reply_contract = str(flow_result.get("reply_contract") or reply_contract)
-                planner_decision = str(flow_result.get("planner_decision") or planner_decision)
-                meta = flow_result.get("meta") if isinstance(flow_result.get("meta"), dict) else meta
+            if warn_supervisor_bypass and patch_command_like:
+                flow_result = http_chat_flow_module.apply_supervisor_bypass_safe_fallback(
+                    warn_supervisor_bypass=True,
+                    reply_contract="",
+                    routed_text=routed_text,
+                    turns=turns,
+                    routing_decision=routing_decision,
+                    ledger=ledger,
+                    open_probe_reply=core_module._open_probe_reply,
+                    action_ledger_add_step=core_module.action_ledger_add_step,
+                )
+                reply = str(flow_result.get("reply") or "")
+                meta = flow_result.get("meta") if isinstance(flow_result.get("meta"), dict) else {}
                 routing_decision = flow_result.get("routing_decision") if isinstance(flow_result.get("routing_decision"), dict) else routing_decision
+            else:
+                reply, meta = generate_chat_reply_fn(
+                    turns,
+                    routed_text,
+                    ledger_record=ledger,
+                    pending_action=session.pending_action,
+                    prefer_web_for_data_queries=session.prefer_web_for_data_queries,
+                    language_mix_spanish_pct=int(session.language_mix_spanish_pct or 0),
+                    session=session,
+                )
+                reply_contract = str(meta.get("reply_contract") or "") if isinstance(meta, dict) else ""
+                planner_decision = str(meta.get("planner_decision") or "deterministic")
+                flow_result = http_chat_flow_module.apply_supervisor_bypass_safe_fallback(
+                    warn_supervisor_bypass=warn_supervisor_bypass,
+                    reply_contract=reply_contract,
+                    routed_text=routed_text,
+                    turns=turns,
+                    routing_decision=routing_decision,
+                    ledger=ledger,
+                    open_probe_reply=core_module._open_probe_reply,
+                    action_ledger_add_step=core_module.action_ledger_add_step,
+                )
+                if flow_result.get("handled"):
+                    reply = str(flow_result.get("reply") or reply)
+                    reply_contract = str(flow_result.get("reply_contract") or reply_contract)
+                    planner_decision = str(flow_result.get("planner_decision") or planner_decision)
+                    meta = flow_result.get("meta") if isinstance(flow_result.get("meta"), dict) else meta
+                    routing_decision = flow_result.get("routing_decision") if isinstance(flow_result.get("routing_decision"), dict) else routing_decision
             reply_text = turn_finalization_service.finalize_reply_sequence_result(
                 reply,
                 session=session,
@@ -193,6 +224,35 @@ class NovaHttpChatRuntimeService:
             return reply_text
         finally:
             core_module.set_active_user(previous_user)
+
+    def process_chat_from_runtime(
+        self,
+        session_id: str,
+        user_text: str,
+        *,
+        user_id: str = "",
+        core_module,
+        runtime_scope: dict[str, object],
+    ) -> str:
+        return self.process_chat(
+            session_id,
+            user_text,
+            user_id=user_id,
+            core_module=core_module,
+            session_state_manager=runtime_scope["SESSION_STATE_MANAGER"],
+            turn_entry_service=runtime_scope["HTTP_TURN_ENTRY_SERVICE"],
+            chat_orchestration_service=runtime_scope["HTTP_CHAT_ORCHESTRATION_SERVICE"],
+            turn_finalization_service=runtime_scope["HTTP_TURN_FINALIZATION_SERVICE"],
+            http_chat_flow_module=runtime_scope["http_chat_flow"],
+            append_session_turn_fn=self._runtime_fn(runtime_scope, "_append_session_turn"),
+            generate_chat_reply_fn=self._runtime_fn(runtime_scope, "_generate_chat_reply"),
+            invalidate_control_status_cache_fn=self._runtime_fn(runtime_scope, "_invalidate_control_status_cache"),
+            fast_smalltalk_reply_fn=self._runtime_fn(runtime_scope, "_fast_smalltalk_reply"),
+            is_developer_profile_request_fn=self._runtime_fn(runtime_scope, "_is_developer_profile_request"),
+            developer_profile_reply_fn=self._runtime_fn(runtime_scope, "_developer_profile_reply"),
+            learn_contextual_developer_facts_fn=self._runtime_fn(runtime_scope, "_learn_contextual_developer_facts"),
+            extract_memory_teach_text_fn=core_module._extract_memory_teach_text,
+        )
 
 
 HTTP_CHAT_RUNTIME_SERVICE = NovaHttpChatRuntimeService()

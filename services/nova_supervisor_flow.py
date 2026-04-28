@@ -1,6 +1,75 @@
 from __future__ import annotations
 
-from typing import Callable, Optional
+from typing import Any, Callable, Mapping, Optional
+
+from services.nova_runtime_hooks import resolve_runtime_hooks
+
+
+_EXECUTE_REGISTERED_SUPERVISOR_RULE_HOOKS = {
+    "remember_name_origin_fn": "remember_name_origin",
+    "make_conversation_state_fn": "_make_conversation_state",
+    "location_reply_fn": "_location_reply",
+    "is_location_name_query_fn": "_is_location_name_query",
+    "location_name_reply_fn": "_location_name_reply",
+    "location_recall_reply_fn": "_location_recall_reply",
+    "classify_weather_lookup_outcome_fn": "_classify_weather_lookup_outcome",
+    "attach_reply_outcome_fn": "_attach_reply_outcome",
+    "execute_planned_action_fn": "execute_planned_action",
+    "render_reply_fn": "render_reply",
+    "last_assistant_turn_text_fn": "_last_assistant_turn_text",
+    "parse_correction_fn": "_parse_correction",
+    "extract_authoritative_correction_text_fn": "_extract_authoritative_correction_text",
+    "store_supervisor_correction_record_fn": "_store_supervisor_correction_record",
+    "learn_from_user_correction_fn": "learn_from_user_correction",
+    "classify_correction_outcome_fn": "_classify_correction_outcome",
+    "mem_enabled_fn": "mem_enabled",
+    "normalize_correction_for_storage_fn": "_normalize_correction_for_storage",
+    "teach_store_example_fn": "_teach_store_example",
+    "get_active_user_fn": "get_active_user",
+    "looks_like_correction_cancel_fn": "_looks_like_correction_cancel",
+    "looks_like_pending_replacement_text_fn": "_looks_like_pending_replacement_text",
+    "execute_retrieval_followup_outcome_fn": "_execute_retrieval_followup_outcome",
+    "execute_identity_history_outcome_fn": "_execute_identity_history_outcome",
+    "open_probe_reply_fn": "_open_probe_reply",
+    "last_question_recall_reply_fn": "_last_question_recall_reply",
+    "session_fact_recall_reply_fn": "_session_fact_recall_reply",
+    "rules_reply_fn": "_rules_reply",
+    "developer_location_reply_fn": "_developer_location_reply",
+    "developer_identity_followup_reply_fn": "_developer_identity_followup_reply",
+    "identity_profile_followup_reply_fn": "_identity_profile_followup_reply",
+}
+
+_HANDLE_SUPERVISOR_INTENT_HOOKS = {
+    "classify_web_research_outcome_fn": "_classify_web_research_outcome",
+    "execute_planned_action_fn": "execute_planned_action",
+    "make_retrieval_conversation_state_fn": "_make_retrieval_conversation_state",
+    "render_reply_fn": "render_reply",
+    "mem_enabled_fn": "mem_enabled",
+    "mem_add_fn": "mem_add",
+    "classify_store_fact_outcome_fn": "_classify_store_fact_outcome",
+    "classify_set_location_outcome_fn": "_classify_set_location_outcome",
+    "weather_current_location_available_fn": "_weather_current_location_available",
+    "classify_weather_lookup_outcome_fn": "_classify_weather_lookup_outcome",
+    "execute_weather_lookup_outcome_fn": "_execute_weather_lookup_outcome",
+    "set_location_text_fn": "set_location_text",
+    "make_conversation_state_fn": "_make_conversation_state",
+    "parse_correction_fn": "_parse_correction",
+    "last_assistant_turn_text_fn": "_last_assistant_turn_text",
+    "store_supervisor_correction_record_fn": "_store_supervisor_correction_record",
+    "teach_store_example_fn": "_teach_store_example",
+    "get_active_user_fn": "get_active_user",
+    "classify_correction_outcome_fn": "_classify_correction_outcome",
+    "quick_smalltalk_reply_fn": "_quick_smalltalk_reply",
+    "describe_capabilities_fn": "describe_capabilities",
+    "policy_web_fn": "policy_web",
+    "assistant_name_reply_fn": "_assistant_name_reply",
+    "self_identity_web_challenge_reply_fn": "_self_identity_web_challenge_reply",
+    "classify_name_origin_outcome_fn": "_classify_name_origin_outcome",
+    "developer_full_name_reply_fn": "_developer_full_name_reply",
+    "hard_answer_fn": "hard_answer",
+    "developer_profile_reply_fn": "_developer_profile_reply",
+    "session_recap_reply_fn": "_session_recap_reply",
+}
 
 
 def execute_registered_supervisor_rule(
@@ -260,6 +329,33 @@ def execute_registered_supervisor_rule(
     return False, "", current_state
 
 
+def execute_registered_supervisor_rule_from_runtime(
+    rule_result: dict,
+    text: str,
+    current_state: Optional[dict],
+    *,
+    turns: Optional[list[tuple[str, str]]] = None,
+    input_source: str = "typed",
+    allowed_actions: Optional[set[str]] = None,
+    runtime_scope: Optional[Mapping[str, Any]] = None,
+    **explicit_hooks,
+) -> tuple[bool, str, Optional[dict]]:
+    hooks = resolve_runtime_hooks(
+        _EXECUTE_REGISTERED_SUPERVISOR_RULE_HOOKS,
+        explicit_hooks=explicit_hooks,
+        runtime_scope=runtime_scope,
+    )
+    return execute_registered_supervisor_rule(
+        rule_result,
+        text,
+        current_state,
+        turns=turns,
+        input_source=input_source,
+        allowed_actions=allowed_actions,
+        **hooks,
+    )
+
+
 def handle_supervisor_intent(
     intent_result: dict,
     user_text: str,
@@ -443,6 +539,31 @@ def handle_supervisor_intent(
         return True, session_recap_reply_fn(list(turns or []), user_text), None, None
 
     return False, "", None, None
+
+
+def handle_supervisor_intent_from_runtime(
+    intent_result: dict,
+    user_text: str,
+    *,
+    turns: Optional[list[tuple[str, str]]] = None,
+    input_source: str = "typed",
+    entry_point: str = "",
+    runtime_scope: Optional[Mapping[str, Any]] = None,
+    **explicit_hooks,
+) -> tuple[bool, str, Optional[dict], Optional[dict]]:
+    hooks = resolve_runtime_hooks(
+        _HANDLE_SUPERVISOR_INTENT_HOOKS,
+        explicit_hooks=explicit_hooks,
+        runtime_scope=runtime_scope,
+    )
+    return handle_supervisor_intent(
+        intent_result,
+        user_text,
+        turns=turns,
+        input_source=input_source,
+        entry_point=entry_point,
+        **hooks,
+    )
 
 
 def apply_cli_supervisor_intent(

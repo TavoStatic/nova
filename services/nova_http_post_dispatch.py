@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import json
 
+from services.nova_http_post_routes import HTTP_POST_ROUTES_SERVICE
+from services.nova_http_request_binding import HTTP_REQUEST_BINDING_SERVICE
+
 
 class NovaHttpPostDispatchService:
     """Own POST-side route gating, JSON decode, and high-level dispatch outside the transport shell."""
@@ -21,6 +24,7 @@ class NovaHttpPostDispatchService:
             "/api/chat/resume",
             "/api/chat/login",
             "/api/chat/logout",
+            "/api/chat/upload",
             "/api/control/action",
             "/api/control/login",
             "/api/control/logout",
@@ -45,6 +49,39 @@ class NovaHttpPostDispatchService:
 
         code, response_payload = handle_chat_request_fn(handler, qs, payload)
         return {"kind": "json", "code": code, "body": response_payload}
+
+    @staticmethod
+    def handle_post_request_from_runtime(
+        *,
+        handler,
+        path: str,
+        qs: dict,
+        runtime_scope: dict[str, object],
+    ) -> dict:
+        return NovaHttpPostDispatchService.handle_post_request(
+            handler=handler,
+            path=path,
+            qs=qs,
+            basic_post_route_fn=lambda handler_, path_, qs_, payload_: HTTP_POST_ROUTES_SERVICE.handle_basic_post_route_from_runtime(
+                path_,
+                handler=handler_,
+                qs=qs_,
+                payload=payload_,
+                runtime_scope=runtime_scope,
+            ),
+            handle_resume_request_fn=lambda handler_, qs_, payload_: HTTP_REQUEST_BINDING_SERVICE.handle_resume_request_from_runtime(
+                handler=handler_,
+                qs=qs_,
+                payload=payload_,
+                runtime_scope=runtime_scope,
+            ),
+            handle_chat_request_fn=lambda handler_, qs_, payload_: HTTP_REQUEST_BINDING_SERVICE.handle_chat_request_from_runtime(
+                handler=handler_,
+                qs=qs_,
+                payload=payload_,
+                runtime_scope=runtime_scope,
+            ),
+        )
 
 
 HTTP_POST_DISPATCH_SERVICE = NovaHttpPostDispatchService()

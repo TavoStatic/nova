@@ -4,6 +4,7 @@ import unittest
 import uuid
 from pathlib import Path
 
+from services.nova_action_ledger import finalize_action_ledger_record_from_runtime
 from services.nova_action_ledger import write_action_ledger_record
 
 
@@ -18,6 +19,41 @@ def _workspace_case_dir(prefix: str) -> Path:
 
 
 class TestNovaActionLedgerService(unittest.TestCase):
+    def test_finalize_action_ledger_record_from_runtime_uses_scope_hooks(self):
+        case_dir = _workspace_case_dir("action_ledger_runtime")
+        try:
+            written: list[dict] = []
+            reflection_calls: list[dict] = []
+            runtime_scope = {
+                "_provider_name_from_tool": lambda tool: f"provider:{tool}",
+                "_finalize_routing_decision": lambda routing_decision, **kwargs: {"path": "runtime"},
+                "action_ledger_add_step": lambda record, stage, status, **kwargs: record.setdefault("route_trace", []).append(
+                    {"stage": stage, "status": status, **kwargs}
+                ),
+                "action_ledger_route_summary": lambda record: f"summary:{record.get('planner_decision')}",
+                "write_action_ledger_record": lambda record: written.append(dict(record)) or (case_dir / "record.json"),
+                "_recent_action_ledger_records": lambda limit=20: [{"planner_decision": "deterministic"}],
+                "maybe_log_self_reflection": lambda **kwargs: reflection_calls.append(dict(kwargs)) or {"ok": True},
+            }
+
+            out = finalize_action_ledger_record_from_runtime(
+                {"user_input": "check queue", "route_trace": []},
+                final_answer="done",
+                planner_decision="run_tool",
+                tool="queue_status",
+                reply_contract="queue.status",
+                runtime_scope=runtime_scope,
+            )
+
+            self.assertEqual(out, case_dir / "record.json")
+            self.assertEqual(len(written), 1)
+            self.assertEqual(written[0].get("provider_used"), "provider:queue_status")
+            self.assertEqual(written[0].get("routing_decision"), {"path": "runtime"})
+            self.assertEqual(written[0].get("route_summary"), "summary:run_tool")
+            self.assertEqual(len(reflection_calls), 1)
+        finally:
+            shutil.rmtree(case_dir, ignore_errors=True)
+
     def test_write_action_ledger_record_appends_ops_journal_event(self):
         case_dir = _workspace_case_dir("action_ledger")
         try:

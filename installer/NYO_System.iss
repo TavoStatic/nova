@@ -39,9 +39,9 @@ UninstallDisplayIcon={app}\nova.cmd
 Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Tasks]
-Name: "route_guided"; Description: "Install route: recommended guided setup"; Flags: exclusive checkedonce
-Name: "route_baseonly"; Description: "Install route: base package only"; Flags: exclusive
-Name: "route_manual"; Description: "Install route: manual / advanced setup"; Flags: exclusive
+Name: "route_guided"; Description: "Install route: recommended guided setup (verify, bootstrap, runtime check)"; Flags: exclusive checkedonce
+Name: "route_baseonly"; Description: "Install route: base runtime bootstrap (verify, bootstrap, smoke check)"; Flags: exclusive
+Name: "route_manual"; Description: "Install route: manual / advanced setup (copy files only)"; Flags: exclusive
 Name: "desktopicon"; Description: "Create a desktop shortcut"; Flags: unchecked
 
 [Files]
@@ -55,9 +55,10 @@ Name: "{commondesktop}\NYO System Shell"; Filename: "{app}\nova.cmd"; WorkingDir
 
 [Run]
 Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\scripts\installer_hardware_check.ps1"""; StatusMsg: "Checking hardware and environment readiness..."; Flags: postinstall waituntilterminated runhidden
-Filename: "{app}\nova.cmd"; Parameters: "install"; WorkingDir: "{app}"; StatusMsg: "Bootstrapping NYO System environment..."; Flags: postinstall waituntilterminated; Tasks: route_guided
-Filename: "{app}\nova.cmd"; Parameters: "doctor"; WorkingDir: "{app}"; StatusMsg: "Running NYO System doctor..."; Flags: postinstall waituntilterminated; Tasks: route_guided
+Filename: "{app}\nova.cmd"; Parameters: "package-verify ."; WorkingDir: "{app}"; StatusMsg: "Verifying NYO System package payload..."; Flags: postinstall waituntilterminated; Tasks: route_guided route_baseonly
+Filename: "{app}\nova.cmd"; Parameters: "install"; WorkingDir: "{app}"; StatusMsg: "Bootstrapping NYO System environment..."; Flags: postinstall waituntilterminated; Tasks: route_guided route_baseonly
 Filename: "{app}\nova.cmd"; Parameters: "runtime-status"; WorkingDir: "{app}"; StatusMsg: "Collecting runtime readiness status..."; Flags: postinstall waituntilterminated; Tasks: route_guided
+Filename: "{app}\nova.cmd"; Parameters: "smoke-base --fix"; WorkingDir: "{app}"; StatusMsg: "Running NYO System base smoke check..."; Flags: postinstall waituntilterminated; Tasks: route_guided route_baseonly
 
 [Code]
 function InitializeSetup(): Boolean;
@@ -71,8 +72,8 @@ begin
   begin
     WizardForm.TasksList.Hint :=
       'Choose one install route. ' +
-      'Recommended guided setup runs nova install, doctor, and runtime-status automatically. ' +
-      'Base package only copies files and runs the readiness check. ' +
+      'Recommended guided setup runs package verify, bootstrap install, runtime-status, and smoke-base automatically. ' +
+      'Base runtime bootstrap runs package verify, bootstrap install, and smoke-base automatically. ' +
       'Manual setup copies files and leaves bootstrap to the operator.';
   end;
 end;

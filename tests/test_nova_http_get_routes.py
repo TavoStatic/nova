@@ -1,5 +1,6 @@
 import unittest
 
+from services.nova_http_frontdoor import NOVA_HTTP_FRONTDOOR_SERVICE
 from services.nova_http_get_routes import HTTP_GET_ROUTES_SERVICE
 
 
@@ -112,6 +113,29 @@ class TestNovaHttpGetRoutesService(unittest.TestCase):
         )
 
         self.assertEqual(result, (403, {"ok": False, "error": "denied"}))
+
+    def test_handle_basic_route_request_from_runtime_resolves_scope(self):
+        result = HTTP_GET_ROUTES_SERVICE.handle_basic_route_request_from_runtime(
+            "/api/health",
+            handler=object(),
+            runtime_scope={
+                "NOVA_HTTP_FRONTDOOR_SERVICE": NOVA_HTTP_FRONTDOOR_SERVICE,
+                "_render_runtime_console_html": lambda: "index",
+                "_render_leah_html": lambda: "leah",
+                "CONTROL_CSS_PATH": "control.css",
+                "CONTROL_JS_PATH": "control.js",
+                "LEAH_CSS_PATH": "leah.css",
+                "LEAH_JS_PATH": "leah.js",
+                "LEAH_FX_JS_PATH": "leah_fx.js",
+                "_control_login_enabled": lambda: True,
+                "_control_page_gate": lambda _handler: (True, ""),
+                "_render_control_login_html": lambda: "login",
+                "_render_control_html": lambda: "control",
+                "_health_payload": lambda: {"ok": True, "source": "runtime"},
+            },
+        )
+
+        self.assertEqual(result, {"kind": "json", "code": 200, "body": {"ok": True, "source": "runtime"}})
 
     def test_handle_control_status_request_preserves_richer_maintenance_truth(self):
         status_payload = {
