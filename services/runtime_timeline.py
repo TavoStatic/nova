@@ -47,7 +47,6 @@ class RuntimeTimelineService:
                 and service in {"guard", "core"}
                 and ts < anchor_ts
                 and level in {"warn", "danger"}
-                and str(event.get("action") or "").strip().lower() != "boot_failure"
             ):
                 continue
             filtered.append(event)
