@@ -15,6 +15,8 @@ def is_location_request(user_text: str, *, normalize_turn_text_fn: Callable[[str
     normalized = normalize_turn_text_fn(user_text)
     if not normalized:
         return False
+    if normalized.startswith("use "):
+        return False
     return any(
         cue in normalized
         for cue in (
@@ -34,12 +36,23 @@ def location_reply(
     *,
     runtime_device_location_payload_fn: Callable[[], dict],
     get_saved_location_text_fn: Callable[[], str],
+    resolve_current_device_coords_fn: Callable[[], object] | None = None,
 ) -> str:
     live = runtime_device_location_payload_fn()
+    if (not live.get("available") or live.get("stale")) and callable(resolve_current_device_coords_fn):
+        try:
+            resolve_current_device_coords_fn()
+            live = runtime_device_location_payload_fn()
+        except Exception:
+            pass
     if live.get("available") and not live.get("stale"):
         accuracy = live.get("accuracy_m")
         accuracy_note = f" Accuracy about {int(round(float(accuracy)))}m." if accuracy is not None else ""
         return f"My current device location is {live.get('coords_text')}.{accuracy_note}"
+    if live.get("available") and live.get("stale"):
+        accuracy = live.get("accuracy_m")
+        accuracy_note = f" Accuracy about {int(round(float(accuracy)))}m." if accuracy is not None else ""
+        return f"My last device location fix is {live.get('coords_text')}.{accuracy_note} It is stale, so I won't call it current."
     preview = get_saved_location_text_fn()
     if preview:
         return f"My location is {preview}."
@@ -57,9 +70,6 @@ def is_web_research_override_request(text: str, *, normalize_turn_text_fn: Calla
         "all you need is the web",
         "all you need is web",
         "need is the web",
-        "no database",
-        "dont use the database",
-        "don't use the database",
         "use web instead",
         "search online instead",
     )

@@ -13,6 +13,10 @@ import nova_core
 from services.subconscious_runtime import SUBCONSCIOUS_SERVICE
 
 
+_ORIGINAL_RUNTIME_DEVICE_LOCATION_PAYLOAD = nova_core.runtime_device_location_payload
+_ORIGINAL_RESOLVE_CURRENT_DEVICE_COORDS = nova_core.resolve_current_device_coords
+
+
 class TestHttpSessionManager(unittest.TestCase):
     def setUp(self):
         self.orig_store = nova_http.SESSION_STORE_PATH
@@ -26,6 +30,8 @@ class TestHttpSessionManager(unittest.TestCase):
         self.orig_env_json = os.environ.get("NOVA_CHAT_USERS_JSON")
         self.orig_env_user = os.environ.get("NOVA_CHAT_USER")
         self.orig_env_pass = os.environ.get("NOVA_CHAT_PASS")
+        nova_core.runtime_device_location_payload = _ORIGINAL_RUNTIME_DEVICE_LOCATION_PAYLOAD
+        nova_core.resolve_current_device_coords = _ORIGINAL_RESOLVE_CURRENT_DEVICE_COORDS
         os.environ.pop("NOVA_CHAT_USERS_JSON", None)
         os.environ.pop("NOVA_CHAT_USER", None)
         os.environ.pop("NOVA_CHAT_PASS", None)
@@ -53,6 +59,8 @@ class TestHttpSessionManager(unittest.TestCase):
             os.environ.pop("NOVA_CHAT_PASS", None)
         else:
             os.environ["NOVA_CHAT_PASS"] = self.orig_env_pass
+        nova_core.runtime_device_location_payload = _ORIGINAL_RUNTIME_DEVICE_LOCATION_PAYLOAD
+        nova_core.resolve_current_device_coords = _ORIGINAL_RESOLVE_CURRENT_DEVICE_COORDS
         nova_http.SESSION_TURNS.clear()
         nova_http.SESSION_TURNS.update(self.orig_turns)
         nova_http.SESSION_OWNERS.clear()
@@ -396,7 +404,9 @@ class TestHttpSessionManager(unittest.TestCase):
         self.assertTrue(any(item.get("source") == "operator" and item.get("title") == "Guard Start" for item in events))
         self.assertTrue(any(item.get("title") == "Operator Prompt [MACRO]" and item.get("operator_source") == "cli" and item.get("operator_macro") == "inspect-runtime" for item in events))
         self.assertTrue(any(item.get("service") == "patch" and item.get("level") == "danger" for item in events))
-        self.assertTrue(any(item.get("title") == "Boot observation failed" for item in events))
+        self.assertFalse(any(item.get("title") == "Boot observation failed" for item in events))
+        self.assertFalse(any(item.get("title") == "Core attempt failed" for item in events))
+        self.assertFalse(any(item.get("title") == "Restart backoff armed" for item in events))
 
     def test_runtime_artifacts_payload_summarizes_runtime_files(self):
         with tempfile.TemporaryDirectory() as td:
@@ -927,7 +937,7 @@ class TestHttpSessionManager(unittest.TestCase):
         self.assertIn("real_world_task_create", script)
         self.assertIn("renderRealWorldTasks", script)
         self.assertIn("taskManagerSelect", script)
-        self.assertIn("NYO System Control", html)
+        self.assertIn("NYO AI Systems Control", html)
         self.assertIn("NOT YOUR ORDINARY AI SYSTEM", html)
         self.assertIn("Overview", html)
         self.assertIn("Operations", html)

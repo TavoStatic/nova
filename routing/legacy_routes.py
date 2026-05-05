@@ -2,12 +2,7 @@ from __future__ import annotations
 
 
 def looks_like_keyword_route(low: str) -> bool:
-    return (
-        low in {"web continue", "continue web", "continue web research"}
-        or low.startswith("search ")
-        or low.startswith("findweb ")
-        or low.startswith("web ")
-    )
+    return low in {"web continue", "continue web", "continue web research"}
 
 
 def looks_like_command_route(low: str) -> bool:

@@ -162,12 +162,14 @@ class NovaHttpGetRoutesService:
         session_summaries_fn,
         test_session_report_summaries_fn,
         available_test_session_definitions_fn,
+        control_pipelines_payload_fn=None,
     ) -> tuple[int, dict] | None:
         if path not in {
             "/api/control/status",
             "/api/control/policy",
             "/api/control/metrics",
             "/api/control/work-trees",
+            "/api/control/pipelines",
             "/api/control/sessions",
             "/api/control/test-sessions",
         }:
@@ -188,6 +190,9 @@ class NovaHttpGetRoutesService:
             return 200, metrics_payload_fn()
         if path == "/api/control/work-trees":
             return 200, work_trees_payload_fn()
+        if path == "/api/control/pipelines":
+            selected = str((qs.get("pipeline_id") or [""])[0]).strip()
+            return 200, control_pipelines_payload_fn(selected) if control_pipelines_payload_fn else {"ok": True, "pipelines": []}
         if path == "/api/control/sessions":
             return 200, {"ok": True, "sessions": session_summaries_fn(80)}
         return 200, {
@@ -205,6 +210,14 @@ class NovaHttpGetRoutesService:
         runtime_scope: dict[str, object],
     ) -> tuple[int, dict] | None:
         runtime_fn = NovaHttpGetRoutesService._runtime_fn
+        control_pipelines_payload_fn = runtime_scope.get("_control_pipelines_payload")
+        if not callable(control_pipelines_payload_fn):
+            pipeline_control_service = runtime_scope.get("HTTP_PIPELINE_CONTROL_SERVICE")
+            if pipeline_control_service is not None:
+                control_pipelines_payload_fn = lambda selected="": pipeline_control_service.payload_from_runtime(
+                    runtime_scope,
+                    selected_pipeline_id=selected,
+                )
         return NovaHttpGetRoutesService.handle_control_api_request(
             path,
             handler=handler,
@@ -214,6 +227,7 @@ class NovaHttpGetRoutesService:
             control_policy_payload_fn=runtime_fn(runtime_scope, "_control_policy_payload"),
             metrics_payload_fn=runtime_fn(runtime_scope, "_metrics_payload"),
             work_trees_payload_fn=runtime_fn(runtime_scope, "_work_trees_payload"),
+            control_pipelines_payload_fn=control_pipelines_payload_fn,
             session_summaries_fn=runtime_fn(runtime_scope, "_session_summaries"),
             test_session_report_summaries_fn=runtime_fn(runtime_scope, "_test_session_report_summaries"),
             available_test_session_definitions_fn=runtime_fn(runtime_scope, "_available_test_session_definitions"),

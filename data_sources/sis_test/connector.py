@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import re
 import socket
 from pathlib import Path
@@ -23,6 +24,25 @@ def _load_local_config(path: Optional[Path]) -> dict[str, Any]:
     except Exception:
         return {}
     return data if isinstance(data, dict) else {}
+
+
+def _like_pattern(value: Any, default: str) -> str:
+    text = str(value or "").strip()
+    return text or default
+
+
+def _validate_like_pattern(name: str, value: str) -> str:
+    if not re.fullmatch(r"[A-Za-z0-9_\[\]%.]+", value):
+        raise QueryGuardError(f"Invalid {name}; use only letters, numbers, underscore, brackets, percent, and dot.")
+    return value
+
+
+def _current_windows_identity() -> str:
+    domain = str(os.environ.get("USERDOMAIN") or "").strip()
+    user = str(os.environ.get("USERNAME") or "").strip()
+    if domain and user:
+        return f"{domain}\\{user}"
+    return user
 
 
 class SisTestPipeline(BaseDataPipeline):
@@ -75,6 +95,15 @@ class SisTestPipeline(BaseDataPipeline):
     def _auth_mode(self, config: Mapping[str, Any]) -> str:
         return str(config.get("auth_mode") or "sqlserver").strip().lower()
 
+    def _intended_windows_identity(self, config: Mapping[str, Any]) -> str:
+        explicit = str(config.get("intended_windows_identity") or "").strip()
+        if explicit:
+            return explicit.replace("/", "\\")
+        username = str(config.get("username") or "").strip()
+        if not username:
+            return ""
+        return username.replace("/", "\\")
+
     def _build_connection_string(self, config: Mapping[str, Any], driver_name: str) -> str:
         host = str(config.get("host") or "").strip()
         database = str(config.get("database") or "").strip()
@@ -98,10 +127,17 @@ class SisTestPipeline(BaseDataPipeline):
         text = str(exc)
         password = str(config.get("password") or "")
         username = str(config.get("username") or "").strip()
+        auth_mode = self._auth_mode(config)
         if password:
             text = text.replace(password, "***")
         text = re.sub(r"Pwd=[^;\"']*", "Pwd=***", text, flags=re.IGNORECASE)
         if "Login failed for user" in text:
+            if auth_mode in {"trusted", "windows", "integrated"}:
+                match = re.search(r"Login failed for user ['\"]([^'\"]+)['\"]", text, flags=re.IGNORECASE)
+                identity = match.group(1) if match else ""
+                if identity:
+                    return f"Login failed for Windows integrated SIS identity ({identity})."
+                return "Login failed for Windows integrated SIS identity."
             if username:
                 return f"Login failed for configured SIS read-only user ({username})."
             return "Login failed for configured SIS read-only user."
@@ -222,6 +258,43 @@ class SisTestPipeline(BaseDataPipeline):
             sql += " ORDER BY r.LAST_NAME, r.FIRST_NAME, p.PROGRAM_ID"
             return sql, args
 
+        if operation == "schema_inventory":
+            schema_like = _validate_like_pattern("schema_like", _like_pattern(params.get("schema_like"), "dbo"))
+            table_like = _validate_like_pattern("table_like", _like_pattern(params.get("table_like"), "%"))
+            sql = (
+                f"SELECT TOP {row_limit} "
+                "s.name AS SchemaName, "
+                "t.name AS TableName, "
+                "c.column_id AS OrdinalPosition, "
+                "c.name AS ColumnName, "
+                "ty.name AS DataType, "
+                "CASE "
+                "WHEN ty.name IN ('varchar','char','nvarchar','nchar') THEN c.max_length "
+                "ELSE NULL "
+                "END AS MaxLength, "
+                "c.precision, "
+                "c.scale, "
+                "c.is_nullable AS IsNullable, "
+                "c.is_identity AS IsIdentity, "
+                "dc.definition AS DefaultValue, "
+                "CASE WHEN pk.column_id IS NOT NULL THEN 1 ELSE 0 END AS IsPrimaryKey "
+                "FROM sys.tables t "
+                "JOIN sys.schemas s ON s.schema_id = t.schema_id "
+                "JOIN sys.columns c ON c.object_id = t.object_id "
+                "JOIN sys.types ty ON c.user_type_id = ty.user_type_id "
+                "LEFT JOIN sys.default_constraints dc "
+                "ON dc.parent_object_id = c.object_id AND dc.parent_column_id = c.column_id "
+                "LEFT JOIN ("
+                "SELECT ic.object_id, ic.column_id "
+                "FROM sys.indexes i "
+                "JOIN sys.index_columns ic ON i.object_id = ic.object_id AND i.index_id = ic.index_id "
+                "WHERE i.is_primary_key = 1"
+                ") pk ON pk.object_id = c.object_id AND pk.column_id = c.column_id "
+                "WHERE s.name LIKE ? AND t.name LIKE ? "
+                "ORDER BY s.name, t.name, c.column_id"
+            )
+            return sql, [schema_like, table_like]
+
         raise QueryGuardError(f"Live query builder not implemented for operation: {operation}")
 
     def _execute_live_query(
@@ -258,6 +331,18 @@ class SisTestPipeline(BaseDataPipeline):
         configured = bool(host and database)
         driver_requested = str(config.get("driver") or "").strip() or None
         driver_selected = self._resolve_driver_name(driver_requested or "")
+        auth_mode = self._auth_mode(config)
+        current_windows_identity = _current_windows_identity()
+        intended_windows_identity = (
+            self._intended_windows_identity(config)
+            if auth_mode in {"trusted", "windows", "integrated"}
+            else ""
+        )
+        identity_mismatch = bool(
+            intended_windows_identity
+            and current_windows_identity
+            and intended_windows_identity.lower() != current_windows_identity.lower()
+        )
         network_probe = (
             self._network_probe(host, port, timeout_sec)
             if configured
@@ -291,7 +376,10 @@ class SisTestPipeline(BaseDataPipeline):
             "host": host or None,
             "database": database or None,
             "port": port,
-            "auth_mode": self._auth_mode(config),
+            "auth_mode": auth_mode,
+            "current_windows_identity": current_windows_identity if auth_mode in {"trusted", "windows", "integrated"} else "",
+            "intended_windows_identity": intended_windows_identity,
+            "windows_identity_mismatch": identity_mismatch,
             "local_config_path": str(self.manifest.local_config_path) if self.manifest.local_config_path else None,
             "config_example_path": str(self.manifest.config_example_path) if self.manifest.config_example_path else None,
             "query_template_count": len(self.load_query_templates()),
@@ -414,11 +502,7 @@ class SisTestPipeline(BaseDataPipeline):
             "ok": True,
             **base_payload,
             "execution_mode": "dry_run",
-            "next_step": (
-                "Add local_config.json on the district network to enable connectivity checks."
-                if not ready
-                else "Live execution is ready; rerun this operation with dry_run=False to query the SIS test database."
-            ),
+            "next_step": self._safe_query_next_step(status, ready),
         }
         self.audit.append(
             pipeline_id=self.manifest.pipeline_id,
@@ -432,3 +516,29 @@ class SisTestPipeline(BaseDataPipeline):
             },
         )
         return payload
+
+    def _safe_query_next_step(self, status: Mapping[str, Any], ready: bool) -> str:
+        if ready:
+            return "Live execution is ready; rerun this operation with dry_run=False to query the SIS test database."
+        if not bool(status.get("configured")):
+            return "Add local_config.json on the district network to enable connectivity checks."
+        network = status.get("network_probe") if isinstance(status.get("network_probe"), Mapping) else {}
+        if not bool(network.get("reachable")):
+            reason = str(network.get("reason") or "network_unreachable")
+            return f"Fix SIS network reachability before live execution: {reason}"
+        auth = status.get("auth_probe") if isinstance(status.get("auth_probe"), Mapping) else {}
+        if not bool(auth.get("authenticated")):
+            reason = str(auth.get("reason") or "auth_not_ready")
+            if bool(status.get("windows_identity_mismatch")):
+                return (
+                    "Run the SIS pipeline under the intended Windows identity "
+                    f"{status.get('intended_windows_identity')} instead of "
+                    f"{status.get('current_windows_identity')}; trusted auth uses the process identity. "
+                    f"Current auth result: {reason}"
+                )
+            return f"Fix SIS read-only authentication before live execution: {reason}"
+        if not bool(status.get("driver_available")):
+            return "Install or configure an available SIS ODBC driver before live execution."
+        if not bool(status.get("client_module_available")):
+            return "Install the SIS database client module before live execution."
+        return "Fix pipeline readiness before live execution."

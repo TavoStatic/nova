@@ -45,6 +45,13 @@ _CONTROL_ACTION_RUNTIME_HOOKS = {
     "chat_user_list_action_fn": "_chat_user_list_action",
     "chat_user_upsert_action_fn": "_chat_user_upsert_action",
     "chat_user_delete_action_fn": "_chat_user_delete_action",
+    "pipeline_note_append_action_fn": "_pipeline_note_append_action",
+    "pipeline_create_action_fn": "_pipeline_create_action",
+    "pipeline_start_action_fn": "_pipeline_start_action",
+    "pipeline_pause_action_fn": "_pipeline_pause_action",
+    "pipeline_update_action_fn": "_pipeline_update_action",
+    "pipeline_population_upsert_action_fn": "_pipeline_population_upsert_action",
+    "pipeline_archive_action_fn": "_pipeline_archive_action",
     "self_check_action_fn": "_self_check_action",
     "export_capabilities_snapshot_fn": "_export_capabilities_snapshot",
     "export_ledger_summary_action_fn": "_export_ledger_summary_action",
@@ -146,6 +153,13 @@ class NovaControlActionDispatcher:
         chat_user_list_action_fn,
         chat_user_upsert_action_fn,
         chat_user_delete_action_fn,
+        pipeline_note_append_action_fn,
+        pipeline_create_action_fn,
+        pipeline_start_action_fn,
+        pipeline_pause_action_fn,
+        pipeline_update_action_fn,
+        pipeline_population_upsert_action_fn,
+        pipeline_archive_action_fn,
         self_check_action_fn,
         export_capabilities_snapshot_fn,
         export_ledger_summary_action_fn,
@@ -387,6 +401,41 @@ class NovaControlActionDispatcher:
 
         if act == "chat_user_delete":
             ok, msg, extra, detail = chat_user_delete_action_fn(payload)
+            record_control_action_event_fn(act, "ok" if ok else "fail", detail, payload)
+            return ok, msg, extra
+
+        if act == "pipeline_note_append":
+            ok, msg, extra, detail = pipeline_note_append_action_fn(payload)
+            record_control_action_event_fn(act, "ok" if ok else "fail", detail, payload)
+            return ok, msg, extra
+
+        if act == "pipeline_create":
+            ok, msg, extra, detail = pipeline_create_action_fn(payload)
+            record_control_action_event_fn(act, "ok" if ok else "fail", detail, payload)
+            return ok, msg, extra
+
+        if act == "pipeline_start":
+            ok, msg, extra, detail = pipeline_start_action_fn(payload)
+            record_control_action_event_fn(act, "ok" if ok else "fail", detail, payload)
+            return ok, msg, extra
+
+        if act == "pipeline_pause":
+            ok, msg, extra, detail = pipeline_pause_action_fn(payload)
+            record_control_action_event_fn(act, "ok" if ok else "fail", detail, payload)
+            return ok, msg, extra
+
+        if act == "pipeline_update":
+            ok, msg, extra, detail = pipeline_update_action_fn(payload)
+            record_control_action_event_fn(act, "ok" if ok else "fail", detail, payload)
+            return ok, msg, extra
+
+        if act == "pipeline_population_upsert":
+            ok, msg, extra, detail = pipeline_population_upsert_action_fn(payload)
+            record_control_action_event_fn(act, "ok" if ok else "fail", detail, payload)
+            return ok, msg, extra
+
+        if act == "pipeline_archive":
+            ok, msg, extra, detail = pipeline_archive_action_fn(payload)
             record_control_action_event_fn(act, "ok" if ok else "fail", detail, payload)
             return ok, msg, extra
 

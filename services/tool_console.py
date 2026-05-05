@@ -6,6 +6,8 @@ from typing import Callable
 
 DEFAULT_DIRECT_TOOLS = [
     "camera",
+    "core_health",
+    "core_thinning",
     "find",
     "health",
     "ls",
@@ -16,6 +18,7 @@ DEFAULT_DIRECT_TOOLS = [
     "queue_status",
     "read",
     "screen",
+    "self_status",
     "system_check",
     "update_now",
     "update_now_cancel",

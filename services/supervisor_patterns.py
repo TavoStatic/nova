@@ -31,6 +31,8 @@ def looks_like_reflective_retry(low: str) -> bool:
 def looks_like_self_location(low: str) -> bool:
     if not low:
         return False
+    if low.startswith("use "):
+        return False
     triggers = (
         "where is nova",
         "where are you",

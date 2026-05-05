@@ -31,6 +31,7 @@ from services.control_auth import CONTROL_AUTH_SERVICE
 from services.control_telemetry import ControlTelemetryService
 from services.control_status import CONTROL_STATUS_SERVICE
 from services.control_status_cache import CONTROL_STATUS_CACHE_SERVICE
+from services.control_pipelines import CONTROL_PIPELINES_SERVICE
 from services.chat_identity import CHAT_IDENTITY_SERVICE
 from services.control_login_frontdoor import CONTROL_LOGIN_FRONTDOOR_SERVICE
 from services.control_work_trees import CONTROL_WORK_TREES_SERVICE
@@ -38,13 +39,15 @@ from services.leah_frontdoor import LeahFrontdoorService
 from services.nova_control_action_dispatcher import NOVA_CONTROL_ACTION_DISPATCHER
 from services.nova_http_get_routes import HTTP_GET_ROUTES_SERVICE
 from services.nova_http_frontdoor import NOVA_HTTP_FRONTDOOR_SERVICE
+from services.nova_http_generated_work import HTTP_GENERATED_WORK_SERVICE
+from services.nova_http_pipeline_control import HTTP_PIPELINE_CONTROL_SERVICE
+from services.nova_http_policy_search import HTTP_POLICY_SEARCH_SERVICE
 from services.nova_http_post_dispatch import HTTP_POST_DISPATCH_SERVICE
 from services.nova_http_request_binding import HTTP_REQUEST_BINDING_SERVICE
 from services.nova_http_responses import HTTP_RESPONSE_SERVICE
 from services.nova_http_transport import HTTP_TRANSPORT_SERVICE
 from services.operator_control import OPERATOR_CONTROL_SERVICE
 from services.patch_control import PATCH_CONTROL_SERVICE
-from services.policy_control import POLICY_CONTROL_SERVICE
 from services.nova_http_chat_orchestration import HTTP_CHAT_ORCHESTRATION_SERVICE
 from services.nova_http_chat_runtime import HTTP_CHAT_RUNTIME_SERVICE
 from services.nova_http_turn_entry import HTTP_TURN_ENTRY_SERVICE
@@ -59,6 +62,9 @@ from services.runtime_process_state import RUNTIME_PROCESS_STATE_SERVICE
 from services.runtime_status import RUNTIME_STATUS_SERVICE
 from services.runtime_timeline import RUNTIME_TIMELINE_SERVICE
 from services.session_admin import SESSION_ADMIN_SERVICE
+from services.data_pipeline_registry import get_pipeline_schema_probe as pipeline_get_schema_probe
+from services.data_pipeline_registry import get_pipeline_status as pipeline_get_status
+from services.data_pipeline_registry import list_pipeline_summaries as pipeline_list_summaries
 from services.subconscious_control import SUBCONSCIOUS_CONTROL_SERVICE
 from services.test_session_control import TEST_SESSION_CONTROL_SERVICE
 from services.subconscious_runtime import SUBCONSCIOUS_SERVICE
@@ -88,6 +94,7 @@ SESSION_STORE_PATH = RUNTIME_DIR / "http_chat_sessions.json"
 MAX_STORED_SESSIONS = 120
 MAX_STORED_TURNS_PER_SESSION = MAX_TURNS * 2
 KNOWLEDGE_DIR = BASE_DIR / "knowledge"
+DATA_SOURCES_DIR = BASE_DIR / "data_sources"
 LEAH_FRONTDOOR_SERVICE = LeahFrontdoorService(
     asset_service=CONTROL_ASSETS_SERVICE,
     template_path_provider=lambda: LEAH_TEMPLATE_PATH,
@@ -400,81 +407,6 @@ def _operator_prompt_action(payload: dict) -> tuple[bool, str, dict, str, dict]:
     return OPERATOR_CONTROL_SERVICE.operator_prompt_action_from_runtime(payload, runtime_scope=globals())
 
 
-def _policy_allow_action(payload: dict) -> tuple[bool, str, dict, str]:
-    return POLICY_CONTROL_SERVICE.policy_allow_action(
-        payload,
-        policy_allow_domain_fn=nova_core.policy_allow_domain,
-    )
-
-
-def _policy_remove_action(payload: dict) -> tuple[bool, str, dict, str]:
-    return POLICY_CONTROL_SERVICE.policy_remove_action(
-        payload,
-        policy_remove_domain_fn=nova_core.policy_remove_domain,
-    )
-
-
-def _web_mode_action(payload: dict) -> tuple[bool, str, dict, str]:
-    return POLICY_CONTROL_SERVICE.web_mode_action(
-        payload,
-        set_web_mode_fn=nova_core.set_web_mode,
-    )
-
-
-def _memory_scope_set_action(payload: dict) -> tuple[bool, str, dict, str]:
-    return POLICY_CONTROL_SERVICE.memory_scope_set_action(
-        payload,
-        set_memory_scope_fn=nova_core.set_memory_scope,
-        control_policy_payload_fn=_control_policy_payload,
-        invalidate_control_status_cache_fn=_invalidate_control_status_cache,
-    )
-
-
-def _search_provider_action(payload: dict) -> tuple[bool, str, dict, str]:
-    return POLICY_CONTROL_SERVICE.search_provider_action(
-        payload,
-        set_search_provider_fn=nova_core.set_search_provider,
-        control_policy_payload_fn=_control_policy_payload,
-        invalidate_control_status_cache_fn=_invalidate_control_status_cache,
-    )
-
-
-def _search_provider_toggle_action(payload: dict) -> tuple[bool, str, dict, str]:
-    return POLICY_CONTROL_SERVICE.search_provider_toggle_action(
-        toggle_search_provider_fn=nova_core.toggle_search_provider,
-        control_policy_payload_fn=_control_policy_payload,
-        invalidate_control_status_cache_fn=_invalidate_control_status_cache,
-    )
-
-
-def _search_endpoint_set_action(payload: dict) -> tuple[bool, str, dict, str]:
-    return POLICY_CONTROL_SERVICE.search_endpoint_set_action(
-        payload,
-        set_search_endpoint_fn=nova_core.set_search_endpoint,
-        control_policy_payload_fn=_control_policy_payload,
-        invalidate_control_status_cache_fn=_invalidate_control_status_cache,
-    )
-
-
-def _search_provider_priority_set_action(payload: dict) -> tuple[bool, str, dict, str]:
-    return POLICY_CONTROL_SERVICE.search_provider_priority_set_action(
-        payload,
-        set_search_provider_priority_fn=nova_core.set_search_provider_priority,
-        control_policy_payload_fn=_control_policy_payload,
-        invalidate_control_status_cache_fn=_invalidate_control_status_cache,
-    )
-
-
-def _search_endpoint_probe_action(payload: dict) -> tuple[bool, str, dict, str]:
-    def _probe(endpoint: str) -> dict:
-        return nova_core.probe_search_endpoint(str(endpoint or nova_core.get_search_endpoint() or "").strip())
-
-    return POLICY_CONTROL_SERVICE.search_endpoint_probe_action(
-        payload,
-        probe_search_endpoint_fn=_probe,
-    )
-
-
 def _latest_subconscious_report() -> dict:
     return SUBCONSCIOUS_CONTROL_SERVICE.latest_report(_subconscious_runs_root())
 
@@ -495,21 +427,6 @@ def _subconscious_live_summary(limit: int = 6) -> dict:
         session_owner_lookup=SESSION_OWNERS,
         session_state_peek_fn=SESSION_STATE_MANAGER.peek,
         get_snapshot_fn=SUBCONSCIOUS_SERVICE.get_snapshot,
-    )
-
-
-def _generated_definition_priority_tuple(item: dict) -> tuple[int, float, int, str]:
-    return TEST_SESSION_CONTROL_SERVICE.generated_definition_priority_tuple(item)
-
-
-def _generated_work_queue_status_rank(status: str) -> int:
-    return TEST_SESSION_CONTROL_SERVICE.generated_work_queue_status_rank(status)
-
-
-def _latest_generated_report_by_file(limit: int = 200) -> dict[str, dict]:
-    return TEST_SESSION_CONTROL_SERVICE.latest_generated_report_by_file(
-        _test_session_report_summaries(max(24, int(limit or 200))),
-        limit=limit,
     )
 
 
@@ -543,67 +460,10 @@ def _run_test_session_definition(session_file: str) -> tuple[bool, str, dict]:
     )
 
 
-def _run_generated_test_session_pack(limit: int = 12, *, mode: str = "recent") -> tuple[bool, str, dict]:
-    return TEST_SESSION_CONTROL_SERVICE.run_generated_test_session_pack(
-        limit,
-        mode=mode,
-        available_definitions_fn=_available_test_session_definitions,
-        run_test_session_definition_fn=_run_test_session_definition,
-        report_summaries_fn=_test_session_report_summaries,
-        generated_work_queue_fn=_generated_work_queue,
-    )
-
-
-def _run_next_generated_work_queue_item() -> tuple[bool, str, dict]:
-    return TEST_SESSION_CONTROL_SERVICE.run_next_generated_work_queue_item(
-        generated_work_queue_fn=_generated_work_queue,
-        run_test_session_definition_fn=_run_test_session_definition,
-    )
-
-
-def _generated_queue_operator_note(item: Mapping[str, Any]) -> str:
-    return TEST_SESSION_CONTROL_SERVICE.generated_queue_operator_note(dict(item) if isinstance(item, Mapping) else {})
-
-
-def _investigate_generated_work_queue_item(session_file: str = "", *, session_id: str = "", user_id: str = "operator") -> tuple[bool, str, dict]:
-    return TEST_SESSION_CONTROL_SERVICE.investigate_generated_work_queue_item(
-        session_file=session_file,
-        session_id=session_id,
-        user_id=user_id,
-        generated_work_queue_fn=_generated_work_queue,
-        resolve_operator_macro_fn=_resolve_operator_macro,
-        render_operator_macro_prompt_fn=_render_operator_macro_prompt,
-        normalize_user_id_fn=_normalize_user_id,
-        assert_session_owner_fn=lambda sid, uid: _assert_session_owner(sid, uid, allow_bind=True),
-        process_chat_fn=process_chat,
-        session_summaries_fn=_session_summaries,
-    )
-
-
 def _test_session_run_action(payload: dict) -> tuple[bool, str, dict, str]:
     return TEST_SESSION_CONTROL_SERVICE.test_session_run_action(
         payload,
         run_test_session_definition_fn=_run_test_session_definition,
-    )
-
-
-def _generated_pack_run_action(payload: dict) -> tuple[bool, str, dict, str]:
-    return TEST_SESSION_CONTROL_SERVICE.generated_pack_run_action(
-        payload,
-        run_generated_test_session_pack_fn=_run_generated_test_session_pack,
-    )
-
-
-def _generated_queue_run_next_action(payload: dict) -> tuple[bool, str, dict, str]:
-    return TEST_SESSION_CONTROL_SERVICE.generated_queue_run_next_action(
-        run_next_generated_work_queue_item_fn=_run_next_generated_work_queue_item,
-    )
-
-
-def _generated_queue_investigate_action(payload: dict) -> tuple[bool, str, dict, str]:
-    return TEST_SESSION_CONTROL_SERVICE.generated_queue_investigate_action(
-        payload,
-        investigate_generated_work_queue_item_fn=_investigate_generated_work_queue_item,
     )
 
 
@@ -1555,12 +1415,18 @@ def _control_status_suppliers() -> dict[str, object]:
 
 
 def _control_action(action: str, payload: dict) -> tuple[bool, str, dict]:
+    control_hooks = {
+        **HTTP_PIPELINE_CONTROL_SERVICE.action_hooks_from_runtime(globals()),
+        **HTTP_GENERATED_WORK_SERVICE.action_hooks_from_runtime(globals()),
+        **HTTP_POLICY_SEARCH_SERVICE.action_hooks_from_runtime(globals()),
+    }
     return NOVA_CONTROL_ACTION_DISPATCHER.dispatch_control_action_from_runtime(
         action,
         payload,
         patch_control_service=PATCH_CONTROL_SERVICE,
         updates_dir=nova_core.UPDATES_DIR,
         runtime_scope=globals(),
+        explicit_hooks=control_hooks,
     )
 
 

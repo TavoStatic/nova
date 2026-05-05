@@ -1,6 +1,28 @@
 # Nova Status
 
-Date: 2026-03-30
+Date: 2026-05-05
+
+## Release-Clean Candidate (May 5, 2026)
+
+Current release-clean read:
+
+- workspace runtime validation is green:
+	- `python health.py`
+	- `python doctor.py`
+	- `python smoke_test.py --tier base`
+	- `python scripts\run_regression.py`
+- `nova runtime-status` now reports the live guard and core processes as `running` when Windows hides command-line details but the runtime identity PID and creation time still match
+- package boundary enforcement now excludes and verifies absence of local `codex_reflect_*` scratch directories, matching the documented disposable-artifact boundary in `docs/PACKAGING_MATRIX.md`
+- latest release-clean package candidate:
+	- version: `2026.05.05.2`
+	- label: `release_clean_20260505`
+	- artifact: `runtime\exports\release_packages\nyo-system-base-rc-2026.05.05.2-release_clean_20260505-20260505_125953.zip`
+	- readiness: `ready-with-notes`
+- promotion note is intentionally limited: workspace doctor, runtime-status, base smoke, regression, and package verification passed on May 5, 2026; fresh-machine validation is still pending
+
+Current remaining release note:
+
+- treat `2026.05.05.2` as a release-clean candidate, not a final broadly deployable release, until the fresh-machine validation checklist is completed.
 
 ## Packaging Checkpoint (March 30, 2026)
 

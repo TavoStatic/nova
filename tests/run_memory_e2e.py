@@ -1,7 +1,16 @@
 import time
+import tempfile
+from pathlib import Path
+import sys
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import nova_core
 
 def main():
+    if nova_core.memory_mod is not None:
+        tmp = tempfile.TemporaryDirectory()
+        nova_core.memory_mod.DB_PATH = Path(tmp.name) / "nova_memory_e2e.sqlite"
+
     nova_core.set_active_user('gus')
     print('Set active user: gus')
 

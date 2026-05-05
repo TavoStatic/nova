@@ -1,0 +1,2451 @@
+{
+  "source": {
+    "kind": "dashboard_predefined_reports",
+    "root": "C:\\Users\\guribe\\Desktop\\dashboard\\inc\\Reports",
+    "generated_at": "2026-04-30T19:49:13.449564+00:00",
+    "notes": [
+      "Read-only catalog of existing dashboard report code.",
+      "Use this as report-pattern grounding, not as permission to run raw SQL.",
+      "Generated Excel archives, logs, token files, PDFs, and JSON debug files are excluded.",
+      "Grounded table counts are filtered against the vendor dictionary when one is supplied."
+    ],
+    "vendor_dictionary_filter": "C:\\Nova\\data_sources\\sis_test\\vendor_dictionary_index.json"
+  },
+  "summary": {
+    "module_count": 21,
+    "file_count": 84,
+    "table_count": 25,
+    "population_filter_count": 23
+  },
+  "top_tables": [
+    {
+      "table": "dbo.REG",
+      "file_count": 53
+    },
+    {
+      "table": "dbo.REG_ENTRY_WITH",
+      "file_count": 35
+    },
+    {
+      "table": "dbo.REG_PROGRAMS",
+      "file_count": 26
+    },
+    {
+      "table": "dbo.REG_PERSONAL",
+      "file_count": 19
+    },
+    {
+      "table": "dbo.REG_BUILDING",
+      "file_count": 13
+    },
+    {
+      "table": "dbo.REG_CONTACT",
+      "file_count": 11
+    },
+    {
+      "table": "dbo.REG_STU_CONTACT",
+      "file_count": 11
+    },
+    {
+      "table": "dbo.REGTB_LANGUAGE",
+      "file_count": 8
+    },
+    {
+      "table": "dbo.REG_STAFF",
+      "file_count": 7
+    },
+    {
+      "table": "dbo.SCHD_MS",
+      "file_count": 5
+    },
+    {
+      "table": "dbo.SCHD_STU_COURSE",
+      "file_count": 5
+    },
+    {
+      "table": "dbo.SCHD_MS_SESSION",
+      "file_count": 5
+    },
+    {
+      "table": "dbo.REG_USER_STAFF",
+      "file_count": 5
+    },
+    {
+      "table": "dbo.REG_USER",
+      "file_count": 4
+    },
+    {
+      "table": "dbo.REG_STAFF_BLDGS",
+      "file_count": 4
+    },
+    {
+      "table": "dbo.DISC_INCIDENT",
+      "file_count": 3
+    },
+    {
+      "table": "dbo.DISC_OFFENDER",
+      "file_count": 3
+    },
+    {
+      "table": "dbo.DISC_OFF_ACTION",
+      "file_count": 3
+    },
+    {
+      "table": "dbo.REG_CONTACT_PHONE",
+      "file_count": 3
+    },
+    {
+      "table": "dbo.DISCTB_LOCATION",
+      "file_count": 2
+    },
+    {
+      "table": "dbo.REGTB_ETHNICITY",
+      "file_count": 2
+    },
+    {
+      "table": "dbo.SCHD_MS_MP",
+      "file_count": 2
+    },
+    {
+      "table": "dbo.ATT_STU_DAY_TOTALS",
+      "file_count": 1
+    },
+    {
+      "table": "dbo.DISC_USER",
+      "file_count": 1
+    },
+    {
+      "table": "dbo.REGTB_WITHDRAWAL",
+      "file_count": 1
+    }
+  ],
+  "top_population_filters": [
+    {
+      "program_id": "146",
+      "field_number": "4",
+      "file_count": 10
+    },
+    {
+      "program_id": "145",
+      "field_number": "1",
+      "file_count": 8
+    },
+    {
+      "program_id": "146",
+      "field_number": "32",
+      "file_count": 8
+    },
+    {
+      "program_id": "146",
+      "field_number": "5",
+      "file_count": 8
+    },
+    {
+      "program_id": "148",
+      "field_number": "4",
+      "file_count": 8
+    },
+    {
+      "program_id": "146",
+      "field_number": "33",
+      "file_count": 6
+    },
+    {
+      "program_id": "146",
+      "field_number": "116",
+      "file_count": 6
+    },
+    {
+      "program_id": "146",
+      "field_number": "11",
+      "file_count": 6
+    },
+    {
+      "program_id": "146",
+      "field_number": "6",
+      "file_count": 6
+    },
+    {
+      "program_id": "146",
+      "field_number": "12",
+      "file_count": 6
+    },
+    {
+      "program_id": "146",
+      "field_number": "7",
+      "file_count": 6
+    },
+    {
+      "program_id": "146",
+      "field_number": "128",
+      "file_count": 6
+    },
+    {
+      "program_id": "146",
+      "field_number": "117",
+      "file_count": 5
+    },
+    {
+      "program_id": "146",
+      "field_number": "31",
+      "file_count": 3
+    },
+    {
+      "program_id": "146",
+      "field_number": "30",
+      "file_count": 2
+    },
+    {
+      "program_id": "146",
+      "field_number": "13",
+      "file_count": 2
+    },
+    {
+      "program_id": "147",
+      "field_number": "10",
+      "file_count": 2
+    },
+    {
+      "program_id": "148",
+      "field_number": "10",
+      "file_count": 2
+    },
+    {
+      "program_id": "147",
+      "field_number": "11",
+      "file_count": 1
+    },
+    {
+      "program_id": "146",
+      "field_number": "131",
+      "file_count": 1
+    },
+    {
+      "program_id": "1300",
+      "field_number": "1",
+      "file_count": 1
+    },
+    {
+      "program_id": "146",
+      "field_number": "26",
+      "file_count": 1
+    },
+    {
+      "program_id": "146",
+      "field_number": "1",
+      "file_count": 1
+    }
+  ],
+  "modules": [
+    {
+      "name": "DISC",
+      "file_count": 9,
+      "tables": [
+        {
+          "table": "dbo.DISC_INCIDENT",
+          "file_count": 2
+        },
+        {
+          "table": "dbo.DISC_OFFENDER",
+          "file_count": 2
+        },
+        {
+          "table": "dbo.DISC_OFF_ACTION",
+          "file_count": 2
+        },
+        {
+          "table": "dbo.REG",
+          "file_count": 2
+        },
+        {
+          "table": "dbo.REG_BUILDING",
+          "file_count": 2
+        },
+        {
+          "table": "dbo.REG_PERSONAL",
+          "file_count": 2
+        },
+        {
+          "table": "dbo.DISC_USER",
+          "file_count": 1
+        },
+        {
+          "table": "dbo.DISCTB_LOCATION",
+          "file_count": 1
+        },
+        {
+          "table": "dbo.REG_PROGRAMS",
+          "file_count": 1
+        }
+      ],
+      "population_filters": [
+        {
+          "program_id": "147",
+          "field_number": "11",
+          "file_count": 1
+        }
+      ]
+    },
+    {
+      "name": "Enrollment",
+      "file_count": 16,
+      "tables": [
+        {
+          "table": "dbo.REG",
+          "file_count": 10
+        },
+        {
+          "table": "dbo.REG_ENTRY_WITH",
+          "file_count": 10
+        },
+        {
+          "table": "dbo.REG_PERSONAL",
+          "file_count": 10
+        },
+        {
+          "table": "dbo.REGTB_ETHNICITY",
+          "file_count": 2
+        },
+        {
+          "table": "dbo.REG_PROGRAMS",
+          "file_count": 2
+        }
+      ],
+      "population_filters": [
+        {
+          "program_id": "1300",
+          "field_number": "1",
+          "file_count": 1
+        }
+      ]
+    },
+    {
+      "name": "OFSDP",
+      "file_count": 2,
+      "tables": [
+        {
+          "table": "dbo.REG",
+          "file_count": 1
+        },
+        {
+          "table": "dbo.REG_BUILDING",
+          "file_count": 1
+        },
+        {
+          "table": "dbo.REG_ENTRY_WITH",
+          "file_count": 1
+        },
+        {
+          "table": "dbo.REG_PROGRAMS",
+          "file_count": 1
+        },
+        {
+          "table": "dbo.SCHD_MS",
+          "file_count": 1
+        },
+        {
+          "table": "dbo.SCHD_STU_COURSE",
+          "file_count": 1
+        }
+      ],
+      "population_filters": [
+        {
+          "program_id": "146",
+          "field_number": "4",
+          "file_count": 1
+        },
+        {
+          "program_id": "146",
+          "field_number": "26",
+          "file_count": 1
+        }
+      ]
+    },
+    {
+      "name": "Pkcode",
+      "file_count": 13,
+      "tables": [
+        {
+          "table": "dbo.REG",
+          "file_count": 2
+        },
+        {
+          "table": "dbo.REG_ENTRY_WITH",
+          "file_count": 2
+        },
+        {
+          "table": "dbo.REG_PROGRAMS",
+          "file_count": 2
+        },
+        {
+          "table": "dbo.REG_USER",
+          "file_count": 2
+        },
+        {
+          "table": "dbo.REG_BUILDING",
+          "file_count": 1
+        }
+      ],
+      "population_filters": [
+        {
+          "program_id": "146",
+          "field_number": "13",
+          "file_count": 2
+        },
+        {
+          "program_id": "146",
+          "field_number": "4",
+          "file_count": 2
+        },
+        {
+          "program_id": "146",
+          "field_number": "5",
+          "file_count": 2
+        },
+        {
+          "program_id": "147",
+          "field_number": "10",
+          "file_count": 2
+        },
+        {
+          "program_id": "148",
+          "field_number": "10",
+          "file_count": 2
+        },
+        {
+          "program_id": "148",
+          "field_number": "4",
+          "file_count": 2
+        },
+        {
+          "program_id": "146",
+          "field_number": "31",
+          "file_count": 2
+        },
+        {
+          "program_id": "145",
+          "field_number": "1",
+          "file_count": 2
+        },
+        {
+          "program_id": "146",
+          "field_number": "32",
+          "file_count": 2
+        },
+        {
+          "program_id": "146",
+          "field_number": "1",
+          "file_count": 1
+        }
+      ]
+    },
+    {
+      "name": "Reports",
+      "file_count": 1,
+      "tables": [],
+      "population_filters": []
+    },
+    {
+      "name": "ada",
+      "file_count": 4,
+      "tables": [
+        {
+          "table": "dbo.REG",
+          "file_count": 2
+        },
+        {
+          "table": "dbo.REG_ENTRY_WITH",
+          "file_count": 2
+        },
+        {
+          "table": "dbo.REG_BUILDING",
+          "file_count": 1
+        },
+        {
+          "table": "dbo.REG_PROGRAMS",
+          "file_count": 1
+        },
+        {
+          "table": "dbo.SCHD_MS",
+          "file_count": 1
+        },
+        {
+          "table": "dbo.SCHD_STU_COURSE",
+          "file_count": 1
+        }
+      ],
+      "population_filters": [
+        {
+          "program_id": "146",
+          "field_number": "4",
+          "file_count": 1
+        }
+      ]
+    },
+    {
+      "name": "adsy",
+      "file_count": 8,
+      "tables": [
+        {
+          "table": "dbo.ATT_STU_DAY_TOTALS",
+          "file_count": 1
+        },
+        {
+          "table": "dbo.REG",
+          "file_count": 1
+        },
+        {
+          "table": "dbo.REG_ENTRY_WITH",
+          "file_count": 1
+        },
+        {
+          "table": "dbo.REG_PROGRAMS",
+          "file_count": 1
+        }
+      ],
+      "population_filters": []
+    },
+    {
+      "name": "census",
+      "file_count": 20,
+      "tables": [
+        {
+          "table": "dbo.REG",
+          "file_count": 4
+        },
+        {
+          "table": "dbo.REGTB_LANGUAGE",
+          "file_count": 4
+        },
+        {
+          "table": "dbo.REG_CONTACT",
+          "file_count": 4
+        },
+        {
+          "table": "dbo.REG_ENTRY_WITH",
+          "file_count": 4
+        },
+        {
+          "table": "dbo.REG_STU_CONTACT",
+          "file_count": 4
+        },
+        {
+          "table": "dbo.REG_BUILDING",
+          "file_count": 1
+        }
+      ],
+      "population_filters": []
+    },
+    {
+      "name": "census_2",
+      "file_count": 20,
+      "tables": [
+        {
+          "table": "dbo.REG",
+          "file_count": 4
+        },
+        {
+          "table": "dbo.REGTB_LANGUAGE",
+          "file_count": 4
+        },
+        {
+          "table": "dbo.REG_CONTACT",
+          "file_count": 4
+        },
+        {
+          "table": "dbo.REG_ENTRY_WITH",
+          "file_count": 4
+        },
+        {
+          "table": "dbo.REG_STU_CONTACT",
+          "file_count": 4
+        },
+        {
+          "table": "dbo.REG_BUILDING",
+          "file_count": 1
+        }
+      ],
+      "population_filters": []
+    },
+    {
+      "name": "disc2",
+      "file_count": 4,
+      "tables": [
+        {
+          "table": "dbo.DISCTB_LOCATION",
+          "file_count": 1
+        },
+        {
+          "table": "dbo.DISC_INCIDENT",
+          "file_count": 1
+        },
+        {
+          "table": "dbo.DISC_OFFENDER",
+          "file_count": 1
+        },
+        {
+          "table": "dbo.DISC_OFF_ACTION",
+          "file_count": 1
+        },
+        {
+          "table": "dbo.REG",
+          "file_count": 1
+        },
+        {
+          "table": "dbo.REG_BUILDING",
+          "file_count": 1
+        },
+        {
+          "table": "dbo.REG_PERSONAL",
+          "file_count": 1
+        }
+      ],
+      "population_filters": []
+    },
+    {
+      "name": "dyslexia",
+      "file_count": 5,
+      "tables": [
+        {
+          "table": "dbo.REG",
+          "file_count": 1
+        },
+        {
+          "table": "dbo.REG_BUILDING",
+          "file_count": 1
+        },
+        {
+          "table": "dbo.REG_ENTRY_WITH",
+          "file_count": 1
+        },
+        {
+          "table": "dbo.REG_PROGRAMS",
+          "file_count": 1
+        }
+      ],
+      "population_filters": [
+        {
+          "program_id": "146",
+          "field_number": "131",
+          "file_count": 1
+        }
+      ]
+    },
+    {
+      "name": "earlyreading",
+      "file_count": 6,
+      "tables": [
+        {
+          "table": "dbo.REG",
+          "file_count": 2
+        },
+        {
+          "table": "dbo.REG_ENTRY_WITH",
+          "file_count": 2
+        },
+        {
+          "table": "dbo.REG_PROGRAMS",
+          "file_count": 2
+        }
+      ],
+      "population_filters": [
+        {
+          "program_id": "146",
+          "field_number": "30",
+          "file_count": 2
+        }
+      ]
+    },
+    {
+      "name": "econ",
+      "file_count": 6,
+      "tables": [
+        {
+          "table": "dbo.REG",
+          "file_count": 5
+        },
+        {
+          "table": "dbo.REG_PROGRAMS",
+          "file_count": 5
+        }
+      ],
+      "population_filters": []
+    },
+    {
+      "name": "econ2",
+      "file_count": 5,
+      "tables": [
+        {
+          "table": "dbo.REG",
+          "file_count": 4
+        },
+        {
+          "table": "dbo.REG_PROGRAMS",
+          "file_count": 4
+        }
+      ],
+      "population_filters": []
+    },
+    {
+      "name": "front_end_moduels",
+      "file_count": 1,
+      "tables": [],
+      "population_filters": []
+    },
+    {
+      "name": "indicator",
+      "file_count": 11,
+      "tables": [
+        {
+          "table": "dbo.REG",
+          "file_count": 7
+        },
+        {
+          "table": "dbo.REG_PERSONAL",
+          "file_count": 6
+        },
+        {
+          "table": "dbo.REG_PROGRAMS",
+          "file_count": 6
+        },
+        {
+          "table": "dbo.REG_STAFF",
+          "file_count": 2
+        },
+        {
+          "table": "dbo.SCHD_MS",
+          "file_count": 2
+        },
+        {
+          "table": "dbo.SCHD_MS_MP",
+          "file_count": 2
+        },
+        {
+          "table": "dbo.SCHD_MS_SESSION",
+          "file_count": 2
+        },
+        {
+          "table": "dbo.SCHD_STU_COURSE",
+          "file_count": 2
+        },
+        {
+          "table": "dbo.REG_ENTRY_WITH",
+          "file_count": 1
+        },
+        {
+          "table": "dbo.REG_USER",
+          "file_count": 1
+        }
+      ],
+      "population_filters": [
+        {
+          "program_id": "145",
+          "field_number": "1",
+          "file_count": 6
+        },
+        {
+          "program_id": "146",
+          "field_number": "33",
+          "file_count": 6
+        },
+        {
+          "program_id": "146",
+          "field_number": "32",
+          "file_count": 6
+        },
+        {
+          "program_id": "146",
+          "field_number": "116",
+          "file_count": 6
+        },
+        {
+          "program_id": "146",
+          "field_number": "11",
+          "file_count": 6
+        },
+        {
+          "program_id": "146",
+          "field_number": "6",
+          "file_count": 6
+        },
+        {
+          "program_id": "146",
+          "field_number": "4",
+          "file_count": 6
+        },
+        {
+          "program_id": "146",
+          "field_number": "5",
+          "file_count": 6
+        },
+        {
+          "program_id": "146",
+          "field_number": "12",
+          "file_count": 6
+        },
+        {
+          "program_id": "146",
+          "field_number": "7",
+          "file_count": 6
+        },
+        {
+          "program_id": "148",
+          "field_number": "4",
+          "file_count": 6
+        },
+        {
+          "program_id": "146",
+          "field_number": "128",
+          "file_count": 6
+        },
+        {
+          "program_id": "146",
+          "field_number": "117",
+          "file_count": 5
+        },
+        {
+          "program_id": "146",
+          "field_number": "31",
+          "file_count": 1
+        }
+      ]
+    },
+    {
+      "name": "leaver",
+      "file_count": 7,
+      "tables": [
+        {
+          "table": "dbo.REG",
+          "file_count": 6
+        },
+        {
+          "table": "dbo.REG_ENTRY_WITH",
+          "file_count": 6
+        },
+        {
+          "table": "dbo.REG_CONTACT",
+          "file_count": 3
+        },
+        {
+          "table": "dbo.REG_CONTACT_PHONE",
+          "file_count": 3
+        },
+        {
+          "table": "dbo.REG_STU_CONTACT",
+          "file_count": 3
+        },
+        {
+          "table": "dbo.REGTB_WITHDRAWAL",
+          "file_count": 1
+        }
+      ],
+      "population_filters": []
+    },
+    {
+      "name": "no_unique",
+      "file_count": 3,
+      "tables": [
+        {
+          "table": "dbo.REG",
+          "file_count": 1
+        },
+        {
+          "table": "dbo.REG_ENTRY_WITH",
+          "file_count": 1
+        },
+        {
+          "table": "dbo.REG_USER",
+          "file_count": 1
+        }
+      ],
+      "population_filters": []
+    },
+    {
+      "name": "sped",
+      "file_count": 2,
+      "tables": [],
+      "population_filters": []
+    },
+    {
+      "name": "staff",
+      "file_count": 11,
+      "tables": [
+        {
+          "table": "dbo.REG_STAFF",
+          "file_count": 5
+        },
+        {
+          "table": "dbo.REG_USER_STAFF",
+          "file_count": 5
+        },
+        {
+          "table": "dbo.REG_BUILDING",
+          "file_count": 4
+        },
+        {
+          "table": "dbo.REG_STAFF_BLDGS",
+          "file_count": 4
+        },
+        {
+          "table": "dbo.SCHD_MS_SESSION",
+          "file_count": 3
+        },
+        {
+          "table": "dbo.SCHD_MS",
+          "file_count": 1
+        },
+        {
+          "table": "dbo.SCHD_STU_COURSE",
+          "file_count": 1
+        }
+      ],
+      "population_filters": []
+    },
+    {
+      "name": "usps",
+      "file_count": 7,
+      "tables": [],
+      "population_filters": []
+    }
+  ],
+  "files": [
+    {
+      "path": "ada/fun.php",
+      "module": "ada",
+      "tables": [
+        "dbo.REG",
+        "dbo.REG_BUILDING",
+        "dbo.REG_ENTRY_WITH",
+        "dbo.REG_PROGRAMS",
+        "dbo.SCHD_MS",
+        "dbo.SCHD_STU_COURSE"
+      ],
+      "population_filters": [
+        {
+          "program_id": "146",
+          "field_number": "4"
+        }
+      ],
+      "unknown_table_like_tokens": [
+        "dbo.DATERANGES",
+        "dbo.FILTEREDDATES",
+        "dbo.MERGEDRANGES",
+        "dbo.RECURSIVEDATES",
+        "dbo.SYS",
+        "dbo.THE"
+      ],
+      "sql_hint_count": 78
+    },
+    {
+      "path": "ada/missing_ada_days.php",
+      "module": "ada",
+      "tables": [
+        "dbo.REG",
+        "dbo.REG_ENTRY_WITH"
+      ],
+      "population_filters": [],
+      "unknown_table_like_tokens": [],
+      "sql_hint_count": 5
+    },
+    {
+      "path": "ada/missing_index.php",
+      "module": "ada",
+      "tables": [],
+      "population_filters": [],
+      "unknown_table_like_tokens": [],
+      "sql_hint_count": 1
+    },
+    {
+      "path": "adsy/ajax/district.php",
+      "module": "adsy",
+      "tables": [],
+      "population_filters": [],
+      "unknown_table_like_tokens": [
+        "dbo.BREAKING"
+      ],
+      "sql_hint_count": 1
+    },
+    {
+      "path": "adsy/fun.php",
+      "module": "adsy",
+      "tables": [
+        "dbo.ATT_STU_DAY_TOTALS",
+        "dbo.REG",
+        "dbo.REG_ENTRY_WITH",
+        "dbo.REG_PROGRAMS"
+      ],
+      "population_filters": [],
+      "unknown_table_like_tokens": [
+        "dbo.ADSY_DATES",
+        "dbo.ADSY_PROGRAM",
+        "dbo.ATT_5DAYS",
+        "dbo.CONFIGURED",
+        "dbo.ENR_LATEST",
+        "dbo.FIRST",
+        "dbo.LATEST_ENT",
+        "dbo.THESE",
+        "dbo.TX_400"
+      ],
+      "sql_hint_count": 38
+    },
+    {
+      "path": "census/c_s.php",
+      "module": "census",
+      "tables": [
+        "dbo.REG",
+        "dbo.REGTB_LANGUAGE",
+        "dbo.REG_CONTACT",
+        "dbo.REG_ENTRY_WITH",
+        "dbo.REG_STU_CONTACT"
+      ],
+      "population_filters": [],
+      "unknown_table_like_tokens": [
+        "dbo.CENSUS_DATA"
+      ],
+      "sql_hint_count": 9
+    },
+    {
+      "path": "census/fun.php",
+      "module": "census",
+      "tables": [
+        "dbo.REG_BUILDING"
+      ],
+      "population_filters": [],
+      "unknown_table_like_tokens": [
+        "dbo.CENSUS_DATA"
+      ],
+      "sql_hint_count": 49
+    },
+    {
+      "path": "census/genfile.php",
+      "module": "census",
+      "tables": [],
+      "population_filters": [],
+      "unknown_table_like_tokens": [
+        "dbo.CENSUS_DATA"
+      ],
+      "sql_hint_count": 3
+    },
+    {
+      "path": "census/getNew_Records.php",
+      "module": "census",
+      "tables": [
+        "dbo.REG",
+        "dbo.REGTB_LANGUAGE",
+        "dbo.REG_CONTACT",
+        "dbo.REG_ENTRY_WITH",
+        "dbo.REG_STU_CONTACT"
+      ],
+      "population_filters": [],
+      "unknown_table_like_tokens": [
+        "dbo.CENSUS_DATA",
+        "dbo.THE"
+      ],
+      "sql_hint_count": 7
+    },
+    {
+      "path": "census/index3.php",
+      "module": "census",
+      "tables": [],
+      "population_filters": [],
+      "unknown_table_like_tokens": [
+        "dbo.AN",
+        "dbo.BEGINNING",
+        "dbo.CENSUS_DATA",
+        "dbo.THE"
+      ],
+      "sql_hint_count": 2
+    },
+    {
+      "path": "census/run_all_records.php",
+      "module": "census",
+      "tables": [
+        "dbo.REG",
+        "dbo.REGTB_LANGUAGE",
+        "dbo.REG_CONTACT",
+        "dbo.REG_ENTRY_WITH",
+        "dbo.REG_STU_CONTACT"
+      ],
+      "population_filters": [],
+      "unknown_table_like_tokens": [
+        "dbo.CENSUS_DATA",
+        "dbo.THE"
+      ],
+      "sql_hint_count": 7
+    },
+    {
+      "path": "census/run_invalid_records.php",
+      "module": "census",
+      "tables": [
+        "dbo.REG",
+        "dbo.REGTB_LANGUAGE",
+        "dbo.REG_CONTACT",
+        "dbo.REG_ENTRY_WITH",
+        "dbo.REG_STU_CONTACT"
+      ],
+      "population_filters": [],
+      "unknown_table_like_tokens": [
+        "dbo.CENSUS_DATA",
+        "dbo.DATA"
+      ],
+      "sql_hint_count": 9
+    },
+    {
+      "path": "census/tool.php",
+      "module": "census",
+      "tables": [],
+      "population_filters": [],
+      "unknown_table_like_tokens": [
+        "dbo.ACTUALLY",
+        "dbo.INPUT",
+        "dbo.OTHER",
+        "dbo.STUDENT",
+        "dbo.THE"
+      ],
+      "sql_hint_count": 14
+    },
+    {
+      "path": "census/update_geo.php",
+      "module": "census",
+      "tables": [],
+      "population_filters": [],
+      "unknown_table_like_tokens": [
+        "dbo.CENSUS_DATA",
+        "dbo.DATA"
+      ],
+      "sql_hint_count": 4
+    },
+    {
+      "path": "census/update_record.php",
+      "module": "census",
+      "tables": [],
+      "population_filters": [],
+      "unknown_table_like_tokens": [
+        "dbo.CENSUS_DATA",
+        "dbo.DATA"
+      ],
+      "sql_hint_count": 5
+    },
+    {
+      "path": "census/view.php",
+      "module": "census",
+      "tables": [],
+      "population_filters": [],
+      "unknown_table_like_tokens": [],
+      "sql_hint_count": 12
+    },
+    {
+      "path": "census_2/c_s.php",
+      "module": "census_2",
+      "tables": [
+        "dbo.REG",
+        "dbo.REGTB_LANGUAGE",
+        "dbo.REG_CONTACT",
+        "dbo.REG_ENTRY_WITH",
+        "dbo.REG_STU_CONTACT"
+      ],
+      "population_filters": [],
+      "unknown_table_like_tokens": [
+        "dbo.CENSUS_DATA"
+      ],
+      "sql_hint_count": 9
+    },
+    {
+      "path": "census_2/fun.php",
+      "module": "census_2",
+      "tables": [
+        "dbo.REG_BUILDING"
+      ],
+      "population_filters": [],
+      "unknown_table_like_tokens": [
+        "dbo.CENSUS_DATA"
+      ],
+      "sql_hint_count": 48
+    },
+    {
+      "path": "census_2/genfile.php",
+      "module": "census_2",
+      "tables": [],
+      "population_filters": [],
+      "unknown_table_like_tokens": [
+        "dbo.CENSUS_DATA"
+      ],
+      "sql_hint_count": 3
+    },
+    {
+      "path": "census_2/getNew_Records.php",
+      "module": "census_2",
+      "tables": [
+        "dbo.REG",
+        "dbo.REGTB_LANGUAGE",
+        "dbo.REG_CONTACT",
+        "dbo.REG_ENTRY_WITH",
+        "dbo.REG_STU_CONTACT"
+      ],
+      "population_filters": [],
+      "unknown_table_like_tokens": [
+        "dbo.CENSUS_DATA",
+        "dbo.THE"
+      ],
+      "sql_hint_count": 7
+    },
+    {
+      "path": "census_2/index3.php",
+      "module": "census_2",
+      "tables": [],
+      "population_filters": [],
+      "unknown_table_like_tokens": [
+        "dbo.AN",
+        "dbo.BEGINNING",
+        "dbo.CENSUS_DATA",
+        "dbo.THE"
+      ],
+      "sql_hint_count": 2
+    },
+    {
+      "path": "census_2/run_all_records.php",
+      "module": "census_2",
+      "tables": [
+        "dbo.REG",
+        "dbo.REGTB_LANGUAGE",
+        "dbo.REG_CONTACT",
+        "dbo.REG_ENTRY_WITH",
+        "dbo.REG_STU_CONTACT"
+      ],
+      "population_filters": [],
+      "unknown_table_like_tokens": [
+        "dbo.CENSUS_DATA",
+        "dbo.THE"
+      ],
+      "sql_hint_count": 7
+    },
+    {
+      "path": "census_2/run_invalid_records.php",
+      "module": "census_2",
+      "tables": [
+        "dbo.REG",
+        "dbo.REGTB_LANGUAGE",
+        "dbo.REG_CONTACT",
+        "dbo.REG_ENTRY_WITH",
+        "dbo.REG_STU_CONTACT"
+      ],
+      "population_filters": [],
+      "unknown_table_like_tokens": [
+        "dbo.CENSUS_DATA",
+        "dbo.DATA"
+      ],
+      "sql_hint_count": 9
+    },
+    {
+      "path": "census_2/tool.php",
+      "module": "census_2",
+      "tables": [],
+      "population_filters": [],
+      "unknown_table_like_tokens": [
+        "dbo.ACTUALLY",
+        "dbo.INPUT",
+        "dbo.OTHER",
+        "dbo.STUDENT",
+        "dbo.THE"
+      ],
+      "sql_hint_count": 14
+    },
+    {
+      "path": "census_2/update_geo.php",
+      "module": "census_2",
+      "tables": [],
+      "population_filters": [],
+      "unknown_table_like_tokens": [
+        "dbo.CENSUS_DATA",
+        "dbo.DATA"
+      ],
+      "sql_hint_count": 4
+    },
+    {
+      "path": "census_2/update_record.php",
+      "module": "census_2",
+      "tables": [],
+      "population_filters": [],
+      "unknown_table_like_tokens": [
+        "dbo.CENSUS_DATA",
+        "dbo.DATA"
+      ],
+      "sql_hint_count": 5
+    },
+    {
+      "path": "census_2/view.php",
+      "module": "census_2",
+      "tables": [],
+      "population_filters": [],
+      "unknown_table_like_tokens": [],
+      "sql_hint_count": 12
+    },
+    {
+      "path": "DISC/all_records.php",
+      "module": "DISC",
+      "tables": [
+        "dbo.DISC_INCIDENT",
+        "dbo.DISC_OFFENDER",
+        "dbo.DISC_OFF_ACTION",
+        "dbo.DISC_USER",
+        "dbo.REG",
+        "dbo.REG_BUILDING",
+        "dbo.REG_PERSONAL"
+      ],
+      "population_filters": [],
+      "unknown_table_like_tokens": [],
+      "sql_hint_count": 21
+    },
+    {
+      "path": "DISC/fun.php",
+      "module": "DISC",
+      "tables": [
+        "dbo.DISCTB_LOCATION",
+        "dbo.DISC_INCIDENT",
+        "dbo.DISC_OFFENDER",
+        "dbo.DISC_OFF_ACTION",
+        "dbo.REG",
+        "dbo.REG_BUILDING",
+        "dbo.REG_PERSONAL",
+        "dbo.REG_PROGRAMS"
+      ],
+      "population_filters": [
+        {
+          "program_id": "147",
+          "field_number": "11"
+        }
+      ],
+      "unknown_table_like_tokens": [
+        "dbo.THE"
+      ],
+      "sql_hint_count": 30
+    },
+    {
+      "path": "DISC/templates/function_table_display.twig",
+      "module": "DISC",
+      "tables": [],
+      "population_filters": [],
+      "unknown_table_like_tokens": [],
+      "sql_hint_count": 3
+    },
+    {
+      "path": "disc2/fun.php",
+      "module": "disc2",
+      "tables": [
+        "dbo.DISCTB_LOCATION",
+        "dbo.DISC_INCIDENT",
+        "dbo.DISC_OFFENDER",
+        "dbo.DISC_OFF_ACTION",
+        "dbo.REG",
+        "dbo.REG_BUILDING",
+        "dbo.REG_PERSONAL"
+      ],
+      "population_filters": [],
+      "unknown_table_like_tokens": [
+        "dbo.SCHEDULE",
+        "dbo.THE",
+        "dbo.UNWANTED"
+      ],
+      "sql_hint_count": 73
+    },
+    {
+      "path": "dyslexia/fun.php",
+      "module": "dyslexia",
+      "tables": [
+        "dbo.REG",
+        "dbo.REG_BUILDING",
+        "dbo.REG_ENTRY_WITH",
+        "dbo.REG_PROGRAMS"
+      ],
+      "population_filters": [
+        {
+          "program_id": "146",
+          "field_number": "131"
+        }
+      ],
+      "unknown_table_like_tokens": [
+        "dbo.LATESTENROLLMENT"
+      ],
+      "sql_hint_count": 35
+    },
+    {
+      "path": "earlyreading/fun.php",
+      "module": "earlyreading",
+      "tables": [
+        "dbo.REG",
+        "dbo.REG_ENTRY_WITH",
+        "dbo.REG_PROGRAMS"
+      ],
+      "population_filters": [
+        {
+          "program_id": "146",
+          "field_number": "30"
+        }
+      ],
+      "unknown_table_like_tokens": [],
+      "sql_hint_count": 29
+    },
+    {
+      "path": "earlyreading/linkview.php",
+      "module": "earlyreading",
+      "tables": [
+        "dbo.REG",
+        "dbo.REG_ENTRY_WITH",
+        "dbo.REG_PROGRAMS"
+      ],
+      "population_filters": [
+        {
+          "program_id": "146",
+          "field_number": "30"
+        }
+      ],
+      "unknown_table_like_tokens": [],
+      "sql_hint_count": 12
+    },
+    {
+      "path": "econ/coded.php",
+      "module": "econ",
+      "tables": [
+        "dbo.REG",
+        "dbo.REG_PROGRAMS"
+      ],
+      "population_filters": [],
+      "unknown_table_like_tokens": [
+        "dbo.AN",
+        "dbo.THE"
+      ],
+      "sql_hint_count": 4
+    },
+    {
+      "path": "econ/fun.php",
+      "module": "econ",
+      "tables": [
+        "dbo.REG",
+        "dbo.REG_PROGRAMS"
+      ],
+      "population_filters": [],
+      "unknown_table_like_tokens": [],
+      "sql_hint_count": 25
+    },
+    {
+      "path": "econ/mainview.php",
+      "module": "econ",
+      "tables": [
+        "dbo.REG",
+        "dbo.REG_PROGRAMS"
+      ],
+      "population_filters": [],
+      "unknown_table_like_tokens": [],
+      "sql_hint_count": 7
+    },
+    {
+      "path": "econ/notcoded.php",
+      "module": "econ",
+      "tables": [
+        "dbo.REG",
+        "dbo.REG_PROGRAMS"
+      ],
+      "population_filters": [],
+      "unknown_table_like_tokens": [],
+      "sql_hint_count": 15
+    },
+    {
+      "path": "econ/pivot.php",
+      "module": "econ",
+      "tables": [
+        "dbo.REG",
+        "dbo.REG_PROGRAMS"
+      ],
+      "population_filters": [],
+      "unknown_table_like_tokens": [],
+      "sql_hint_count": 26
+    },
+    {
+      "path": "econ2/coded.php",
+      "module": "econ2",
+      "tables": [
+        "dbo.REG",
+        "dbo.REG_PROGRAMS"
+      ],
+      "population_filters": [],
+      "unknown_table_like_tokens": [],
+      "sql_hint_count": 15
+    },
+    {
+      "path": "econ2/mainview.php",
+      "module": "econ2",
+      "tables": [
+        "dbo.REG",
+        "dbo.REG_PROGRAMS"
+      ],
+      "population_filters": [],
+      "unknown_table_like_tokens": [],
+      "sql_hint_count": 7
+    },
+    {
+      "path": "econ2/notcoded.php",
+      "module": "econ2",
+      "tables": [
+        "dbo.REG",
+        "dbo.REG_PROGRAMS"
+      ],
+      "population_filters": [],
+      "unknown_table_like_tokens": [],
+      "sql_hint_count": 15
+    },
+    {
+      "path": "econ2/pivot.php",
+      "module": "econ2",
+      "tables": [
+        "dbo.REG",
+        "dbo.REG_PROGRAMS"
+      ],
+      "population_filters": [],
+      "unknown_table_like_tokens": [],
+      "sql_hint_count": 26
+    },
+    {
+      "path": "Enrollment/campus_enroll.php",
+      "module": "Enrollment",
+      "tables": [
+        "dbo.REG",
+        "dbo.REG_ENTRY_WITH",
+        "dbo.REG_PERSONAL"
+      ],
+      "population_filters": [],
+      "unknown_table_like_tokens": [],
+      "sql_hint_count": 6
+    },
+    {
+      "path": "Enrollment/DailyEnrollment.php",
+      "module": "Enrollment",
+      "tables": [
+        "dbo.REG",
+        "dbo.REG_ENTRY_WITH",
+        "dbo.REG_PERSONAL"
+      ],
+      "population_filters": [],
+      "unknown_table_like_tokens": [],
+      "sql_hint_count": 5
+    },
+    {
+      "path": "Enrollment/Elementary copy.php",
+      "module": "Enrollment",
+      "tables": [
+        "dbo.REG",
+        "dbo.REGTB_ETHNICITY",
+        "dbo.REG_ENTRY_WITH",
+        "dbo.REG_PERSONAL"
+      ],
+      "population_filters": [],
+      "unknown_table_like_tokens": [],
+      "sql_hint_count": 12
+    },
+    {
+      "path": "Enrollment/Elementary.php",
+      "module": "Enrollment",
+      "tables": [
+        "dbo.REG",
+        "dbo.REGTB_ETHNICITY",
+        "dbo.REG_ENTRY_WITH",
+        "dbo.REG_PERSONAL"
+      ],
+      "population_filters": [],
+      "unknown_table_like_tokens": [],
+      "sql_hint_count": 12
+    },
+    {
+      "path": "Enrollment/fun copy.php",
+      "module": "Enrollment",
+      "tables": [
+        "dbo.REG",
+        "dbo.REG_ENTRY_WITH",
+        "dbo.REG_PERSONAL",
+        "dbo.REG_PROGRAMS"
+      ],
+      "population_filters": [],
+      "unknown_table_like_tokens": [],
+      "sql_hint_count": 65
+    },
+    {
+      "path": "Enrollment/fun.php",
+      "module": "Enrollment",
+      "tables": [
+        "dbo.REG",
+        "dbo.REG_ENTRY_WITH",
+        "dbo.REG_PERSONAL",
+        "dbo.REG_PROGRAMS"
+      ],
+      "population_filters": [
+        {
+          "program_id": "1300",
+          "field_number": "1"
+        }
+      ],
+      "unknown_table_like_tokens": [],
+      "sql_hint_count": 79
+    },
+    {
+      "path": "Enrollment/Peak_Enrollment copy.php",
+      "module": "Enrollment",
+      "tables": [
+        "dbo.REG",
+        "dbo.REG_ENTRY_WITH",
+        "dbo.REG_PERSONAL"
+      ],
+      "population_filters": [],
+      "unknown_table_like_tokens": [],
+      "sql_hint_count": 10
+    },
+    {
+      "path": "Enrollment/Peak_Enrollment.php",
+      "module": "Enrollment",
+      "tables": [
+        "dbo.REG",
+        "dbo.REG_ENTRY_WITH",
+        "dbo.REG_PERSONAL"
+      ],
+      "population_filters": [],
+      "unknown_table_like_tokens": [],
+      "sql_hint_count": 10
+    },
+    {
+      "path": "Enrollment/Peak_Enrollment_break_down copy.php",
+      "module": "Enrollment",
+      "tables": [
+        "dbo.REG",
+        "dbo.REG_ENTRY_WITH",
+        "dbo.REG_PERSONAL"
+      ],
+      "population_filters": [],
+      "unknown_table_like_tokens": [],
+      "sql_hint_count": 10
+    },
+    {
+      "path": "Enrollment/Peak_Enrollment_break_down.php",
+      "module": "Enrollment",
+      "tables": [
+        "dbo.REG",
+        "dbo.REG_ENTRY_WITH",
+        "dbo.REG_PERSONAL"
+      ],
+      "population_filters": [],
+      "unknown_table_like_tokens": [],
+      "sql_hint_count": 10
+    },
+    {
+      "path": "Enrollment/TotalEnrollment.php",
+      "module": "Enrollment",
+      "tables": [],
+      "population_filters": [],
+      "unknown_table_like_tokens": [
+        "dbo.AN",
+        "dbo.THE"
+      ],
+      "sql_hint_count": 2
+    },
+    {
+      "path": "Enrollment/TotalEnrollmentcopy.php",
+      "module": "Enrollment",
+      "tables": [],
+      "population_filters": [],
+      "unknown_table_like_tokens": [],
+      "sql_hint_count": 1
+    },
+    {
+      "path": "indicator/excelview.php",
+      "module": "indicator",
+      "tables": [
+        "dbo.REG",
+        "dbo.REG_PERSONAL",
+        "dbo.REG_PROGRAMS"
+      ],
+      "population_filters": [
+        {
+          "program_id": "145",
+          "field_number": "1"
+        },
+        {
+          "program_id": "146",
+          "field_number": "33"
+        },
+        {
+          "program_id": "146",
+          "field_number": "32"
+        },
+        {
+          "program_id": "146",
+          "field_number": "116"
+        },
+        {
+          "program_id": "146",
+          "field_number": "11"
+        },
+        {
+          "program_id": "146",
+          "field_number": "6"
+        },
+        {
+          "program_id": "146",
+          "field_number": "4"
+        },
+        {
+          "program_id": "146",
+          "field_number": "5"
+        },
+        {
+          "program_id": "146",
+          "field_number": "12"
+        },
+        {
+          "program_id": "146",
+          "field_number": "117"
+        },
+        {
+          "program_id": "146",
+          "field_number": "7"
+        },
+        {
+          "program_id": "148",
+          "field_number": "4"
+        },
+        {
+          "program_id": "146",
+          "field_number": "128"
+        }
+      ],
+      "unknown_table_like_tokens": [],
+      "sql_hint_count": 58
+    },
+    {
+      "path": "indicator/fun.php",
+      "module": "indicator",
+      "tables": [
+        "dbo.REG",
+        "dbo.REG_ENTRY_WITH",
+        "dbo.REG_PERSONAL",
+        "dbo.REG_PROGRAMS",
+        "dbo.REG_STAFF",
+        "dbo.SCHD_MS",
+        "dbo.SCHD_MS_MP",
+        "dbo.SCHD_MS_SESSION",
+        "dbo.SCHD_STU_COURSE"
+      ],
+      "population_filters": [
+        {
+          "program_id": "145",
+          "field_number": "1"
+        },
+        {
+          "program_id": "146",
+          "field_number": "31"
+        },
+        {
+          "program_id": "146",
+          "field_number": "33"
+        },
+        {
+          "program_id": "146",
+          "field_number": "32"
+        },
+        {
+          "program_id": "146",
+          "field_number": "116"
+        },
+        {
+          "program_id": "146",
+          "field_number": "11"
+        },
+        {
+          "program_id": "146",
+          "field_number": "6"
+        },
+        {
+          "program_id": "146",
+          "field_number": "4"
+        },
+        {
+          "program_id": "146",
+          "field_number": "5"
+        },
+        {
+          "program_id": "146",
+          "field_number": "12"
+        },
+        {
+          "program_id": "146",
+          "field_number": "117"
+        },
+        {
+          "program_id": "146",
+          "field_number": "7"
+        },
+        {
+          "program_id": "148",
+          "field_number": "4"
+        },
+        {
+          "program_id": "146",
+          "field_number": "128"
+        }
+      ],
+      "unknown_table_like_tokens": [],
+      "sql_hint_count": 335
+    },
+    {
+      "path": "indicator/indicatorview.php",
+      "module": "indicator",
+      "tables": [
+        "dbo.REG",
+        "dbo.REG_PERSONAL",
+        "dbo.REG_PROGRAMS",
+        "dbo.REG_USER"
+      ],
+      "population_filters": [
+        {
+          "program_id": "145",
+          "field_number": "1"
+        },
+        {
+          "program_id": "146",
+          "field_number": "33"
+        },
+        {
+          "program_id": "146",
+          "field_number": "32"
+        },
+        {
+          "program_id": "146",
+          "field_number": "116"
+        },
+        {
+          "program_id": "146",
+          "field_number": "11"
+        },
+        {
+          "program_id": "146",
+          "field_number": "6"
+        },
+        {
+          "program_id": "146",
+          "field_number": "4"
+        },
+        {
+          "program_id": "146",
+          "field_number": "5"
+        },
+        {
+          "program_id": "146",
+          "field_number": "12"
+        },
+        {
+          "program_id": "146",
+          "field_number": "117"
+        },
+        {
+          "program_id": "146",
+          "field_number": "7"
+        },
+        {
+          "program_id": "148",
+          "field_number": "4"
+        },
+        {
+          "program_id": "146",
+          "field_number": "128"
+        }
+      ],
+      "unknown_table_like_tokens": [],
+      "sql_hint_count": 63
+    },
+    {
+      "path": "indicator/indicatorview_A.php",
+      "module": "indicator",
+      "tables": [
+        "dbo.REG",
+        "dbo.REG_PERSONAL",
+        "dbo.REG_PROGRAMS"
+      ],
+      "population_filters": [
+        {
+          "program_id": "145",
+          "field_number": "1"
+        },
+        {
+          "program_id": "146",
+          "field_number": "33"
+        },
+        {
+          "program_id": "146",
+          "field_number": "32"
+        },
+        {
+          "program_id": "146",
+          "field_number": "116"
+        },
+        {
+          "program_id": "146",
+          "field_number": "11"
+        },
+        {
+          "program_id": "146",
+          "field_number": "6"
+        },
+        {
+          "program_id": "146",
+          "field_number": "4"
+        },
+        {
+          "program_id": "146",
+          "field_number": "5"
+        },
+        {
+          "program_id": "146",
+          "field_number": "12"
+        },
+        {
+          "program_id": "146",
+          "field_number": "7"
+        },
+        {
+          "program_id": "148",
+          "field_number": "4"
+        },
+        {
+          "program_id": "146",
+          "field_number": "128"
+        }
+      ],
+      "unknown_table_like_tokens": [],
+      "sql_hint_count": 59
+    },
+    {
+      "path": "indicator/mainview.php",
+      "module": "indicator",
+      "tables": [
+        "dbo.REG",
+        "dbo.REG_PERSONAL",
+        "dbo.REG_PROGRAMS"
+      ],
+      "population_filters": [
+        {
+          "program_id": "145",
+          "field_number": "1"
+        },
+        {
+          "program_id": "146",
+          "field_number": "33"
+        },
+        {
+          "program_id": "146",
+          "field_number": "32"
+        },
+        {
+          "program_id": "146",
+          "field_number": "116"
+        },
+        {
+          "program_id": "146",
+          "field_number": "11"
+        },
+        {
+          "program_id": "146",
+          "field_number": "6"
+        },
+        {
+          "program_id": "146",
+          "field_number": "4"
+        },
+        {
+          "program_id": "146",
+          "field_number": "5"
+        },
+        {
+          "program_id": "146",
+          "field_number": "12"
+        },
+        {
+          "program_id": "146",
+          "field_number": "117"
+        },
+        {
+          "program_id": "146",
+          "field_number": "7"
+        },
+        {
+          "program_id": "148",
+          "field_number": "4"
+        },
+        {
+          "program_id": "146",
+          "field_number": "128"
+        }
+      ],
+      "unknown_table_like_tokens": [
+        "dbo.HTML"
+      ],
+      "sql_hint_count": 60
+    },
+    {
+      "path": "indicator/pivot.php",
+      "module": "indicator",
+      "tables": [
+        "dbo.REG",
+        "dbo.REG_PERSONAL",
+        "dbo.REG_PROGRAMS"
+      ],
+      "population_filters": [
+        {
+          "program_id": "145",
+          "field_number": "1"
+        },
+        {
+          "program_id": "146",
+          "field_number": "33"
+        },
+        {
+          "program_id": "146",
+          "field_number": "32"
+        },
+        {
+          "program_id": "146",
+          "field_number": "116"
+        },
+        {
+          "program_id": "146",
+          "field_number": "11"
+        },
+        {
+          "program_id": "146",
+          "field_number": "6"
+        },
+        {
+          "program_id": "146",
+          "field_number": "4"
+        },
+        {
+          "program_id": "146",
+          "field_number": "5"
+        },
+        {
+          "program_id": "146",
+          "field_number": "12"
+        },
+        {
+          "program_id": "146",
+          "field_number": "117"
+        },
+        {
+          "program_id": "146",
+          "field_number": "7"
+        },
+        {
+          "program_id": "148",
+          "field_number": "4"
+        },
+        {
+          "program_id": "146",
+          "field_number": "128"
+        }
+      ],
+      "unknown_table_like_tokens": [],
+      "sql_hint_count": 58
+    },
+    {
+      "path": "indicator/teacher.php",
+      "module": "indicator",
+      "tables": [],
+      "population_filters": [],
+      "unknown_table_like_tokens": [],
+      "sql_hint_count": 14
+    },
+    {
+      "path": "indicator/teacherview.php",
+      "module": "indicator",
+      "tables": [
+        "dbo.REG",
+        "dbo.REG_STAFF",
+        "dbo.SCHD_MS",
+        "dbo.SCHD_MS_MP",
+        "dbo.SCHD_MS_SESSION",
+        "dbo.SCHD_STU_COURSE"
+      ],
+      "population_filters": [],
+      "unknown_table_like_tokens": [],
+      "sql_hint_count": 9
+    },
+    {
+      "path": "leaver/District_View.php",
+      "module": "leaver",
+      "tables": [
+        "dbo.REG",
+        "dbo.REG_CONTACT",
+        "dbo.REG_CONTACT_PHONE",
+        "dbo.REG_ENTRY_WITH",
+        "dbo.REG_STU_CONTACT"
+      ],
+      "population_filters": [],
+      "unknown_table_like_tokens": [
+        "dbo.LASTCODE_ROW"
+      ],
+      "sql_hint_count": 36
+    },
+    {
+      "path": "leaver/fun.php",
+      "module": "leaver",
+      "tables": [
+        "dbo.REG",
+        "dbo.REG_ENTRY_WITH"
+      ],
+      "population_filters": [],
+      "unknown_table_like_tokens": [
+        "dbo.FILTEREDENTRIES",
+        "dbo.RANKEDENTRIES"
+      ],
+      "sql_hint_count": 26
+    },
+    {
+      "path": "leaver/mainview.php",
+      "module": "leaver",
+      "tables": [
+        "dbo.REG",
+        "dbo.REGTB_WITHDRAWAL",
+        "dbo.REG_ENTRY_WITH"
+      ],
+      "population_filters": [],
+      "unknown_table_like_tokens": [
+        "dbo.LASTCODE_ROW"
+      ],
+      "sql_hint_count": 29
+    },
+    {
+      "path": "leaver/pivot.php",
+      "module": "leaver",
+      "tables": [
+        "dbo.REG",
+        "dbo.REG_ENTRY_WITH"
+      ],
+      "population_filters": [],
+      "unknown_table_like_tokens": [
+        "dbo.LASTCODE_ROW"
+      ],
+      "sql_hint_count": 29
+    },
+    {
+      "path": "leaver/Print.php",
+      "module": "leaver",
+      "tables": [
+        "dbo.REG",
+        "dbo.REG_CONTACT",
+        "dbo.REG_CONTACT_PHONE",
+        "dbo.REG_ENTRY_WITH",
+        "dbo.REG_STU_CONTACT"
+      ],
+      "population_filters": [],
+      "unknown_table_like_tokens": [
+        "dbo.CURRENT",
+        "dbo.LASTCODE_ROW"
+      ],
+      "sql_hint_count": 14
+    },
+    {
+      "path": "leaver/view.php",
+      "module": "leaver",
+      "tables": [
+        "dbo.REG",
+        "dbo.REG_CONTACT",
+        "dbo.REG_CONTACT_PHONE",
+        "dbo.REG_ENTRY_WITH",
+        "dbo.REG_STU_CONTACT"
+      ],
+      "population_filters": [],
+      "unknown_table_like_tokens": [
+        "dbo.COUNT",
+        "dbo.DISPLAYING",
+        "dbo.LASTCODE_ROW",
+        "dbo.THE"
+      ],
+      "sql_hint_count": 91
+    },
+    {
+      "path": "no_unique/fun.php",
+      "module": "no_unique",
+      "tables": [
+        "dbo.REG",
+        "dbo.REG_ENTRY_WITH",
+        "dbo.REG_USER"
+      ],
+      "population_filters": [],
+      "unknown_table_like_tokens": [],
+      "sql_hint_count": 9
+    },
+    {
+      "path": "OFSDP/fun.php",
+      "module": "OFSDP",
+      "tables": [
+        "dbo.REG",
+        "dbo.REG_BUILDING",
+        "dbo.REG_ENTRY_WITH",
+        "dbo.REG_PROGRAMS",
+        "dbo.SCHD_MS",
+        "dbo.SCHD_STU_COURSE"
+      ],
+      "population_filters": [
+        {
+          "program_id": "146",
+          "field_number": "4"
+        },
+        {
+          "program_id": "146",
+          "field_number": "26"
+        }
+      ],
+      "unknown_table_like_tokens": [],
+      "sql_hint_count": 33
+    },
+    {
+      "path": "Pkcode/fun.php",
+      "module": "Pkcode",
+      "tables": [
+        "dbo.REG",
+        "dbo.REG_BUILDING",
+        "dbo.REG_ENTRY_WITH",
+        "dbo.REG_PROGRAMS",
+        "dbo.REG_USER"
+      ],
+      "population_filters": [
+        {
+          "program_id": "146",
+          "field_number": "13"
+        },
+        {
+          "program_id": "146",
+          "field_number": "4"
+        },
+        {
+          "program_id": "146",
+          "field_number": "5"
+        },
+        {
+          "program_id": "147",
+          "field_number": "10"
+        },
+        {
+          "program_id": "148",
+          "field_number": "10"
+        },
+        {
+          "program_id": "148",
+          "field_number": "4"
+        },
+        {
+          "program_id": "146",
+          "field_number": "31"
+        },
+        {
+          "program_id": "145",
+          "field_number": "1"
+        },
+        {
+          "program_id": "146",
+          "field_number": "32"
+        },
+        {
+          "program_id": "146",
+          "field_number": "1"
+        }
+      ],
+      "unknown_table_like_tokens": [
+        "dbo.INTRO_DIS_LATEST",
+        "dbo.PROGRAMDATA",
+        "dbo.PROGRAMS",
+        "dbo.USERDATA",
+        "dbo.USERS"
+      ],
+      "sql_hint_count": 88
+    },
+    {
+      "path": "Pkcode/main.php",
+      "module": "Pkcode",
+      "tables": [],
+      "population_filters": [],
+      "unknown_table_like_tokens": [],
+      "sql_hint_count": 4
+    },
+    {
+      "path": "Pkcode/report.php",
+      "module": "Pkcode",
+      "tables": [
+        "dbo.REG",
+        "dbo.REG_ENTRY_WITH",
+        "dbo.REG_PROGRAMS",
+        "dbo.REG_USER"
+      ],
+      "population_filters": [
+        {
+          "program_id": "146",
+          "field_number": "13"
+        },
+        {
+          "program_id": "146",
+          "field_number": "4"
+        },
+        {
+          "program_id": "146",
+          "field_number": "5"
+        },
+        {
+          "program_id": "147",
+          "field_number": "10"
+        },
+        {
+          "program_id": "148",
+          "field_number": "10"
+        },
+        {
+          "program_id": "148",
+          "field_number": "4"
+        },
+        {
+          "program_id": "146",
+          "field_number": "31"
+        },
+        {
+          "program_id": "145",
+          "field_number": "1"
+        },
+        {
+          "program_id": "146",
+          "field_number": "32"
+        }
+      ],
+      "unknown_table_like_tokens": [
+        "dbo.INTRO_DIS_LATEST",
+        "dbo.PROGRAMS",
+        "dbo.USERS"
+      ],
+      "sql_hint_count": 29
+    },
+    {
+      "path": "sped/grads.php",
+      "module": "sped",
+      "tables": [],
+      "population_filters": [],
+      "unknown_table_like_tokens": [],
+      "sql_hint_count": 6
+    },
+    {
+      "path": "staff/composite_fun.php",
+      "module": "staff",
+      "tables": [
+        "dbo.REG_BUILDING",
+        "dbo.REG_STAFF",
+        "dbo.REG_STAFF_BLDGS",
+        "dbo.REG_USER_STAFF"
+      ],
+      "population_filters": [],
+      "unknown_table_like_tokens": [
+        "dbo.CTE",
+        "dbo.TIA_CTE",
+        "dbo.WHERE"
+      ],
+      "sql_hint_count": 18
+    },
+    {
+      "path": "staff/drilldown.php",
+      "module": "staff",
+      "tables": [
+        "dbo.REG_BUILDING"
+      ],
+      "population_filters": [],
+      "unknown_table_like_tokens": [],
+      "sql_hint_count": 3
+    },
+    {
+      "path": "staff/drilldown_data.php",
+      "module": "staff",
+      "tables": [
+        "dbo.REG_STAFF",
+        "dbo.REG_STAFF_BLDGS",
+        "dbo.REG_USER_STAFF"
+      ],
+      "population_filters": [],
+      "unknown_table_like_tokens": [
+        "dbo.TIA_CTE"
+      ],
+      "sql_hint_count": 15
+    },
+    {
+      "path": "staff/fun.php",
+      "module": "staff",
+      "tables": [
+        "dbo.REG_BUILDING",
+        "dbo.REG_STAFF",
+        "dbo.REG_STAFF_BLDGS",
+        "dbo.REG_USER_STAFF",
+        "dbo.SCHD_MS_SESSION"
+      ],
+      "population_filters": [],
+      "unknown_table_like_tokens": [
+        "dbo.TIA_CTE"
+      ],
+      "sql_hint_count": 20
+    },
+    {
+      "path": "staff/main.php",
+      "module": "staff",
+      "tables": [],
+      "population_filters": [],
+      "unknown_table_like_tokens": [],
+      "sql_hint_count": 3
+    },
+    {
+      "path": "staff/PK_Fetch_Teachers.php",
+      "module": "staff",
+      "tables": [
+        "dbo.REG_STAFF",
+        "dbo.REG_USER_STAFF",
+        "dbo.SCHD_MS",
+        "dbo.SCHD_MS_SESSION",
+        "dbo.SCHD_STU_COURSE"
+      ],
+      "population_filters": [],
+      "unknown_table_like_tokens": [],
+      "sql_hint_count": 21
+    },
+    {
+      "path": "staff/value_check_fun.php",
+      "module": "staff",
+      "tables": [
+        "dbo.REG_BUILDING",
+        "dbo.REG_STAFF",
+        "dbo.REG_STAFF_BLDGS",
+        "dbo.REG_USER_STAFF",
+        "dbo.SCHD_MS_SESSION"
+      ],
+      "population_filters": [],
+      "unknown_table_like_tokens": [
+        "dbo.TIA_CTE"
+      ],
+      "sql_hint_count": 17
+    },
+    {
+      "path": "usps/index.php",
+      "module": "usps",
+      "tables": [],
+      "population_filters": [],
+      "unknown_table_like_tokens": [],
+      "sql_hint_count": 2
+    },
+    {
+      "path": "usps/validate_manual.php",
+      "module": "usps",
+      "tables": [],
+      "population_filters": [],
+      "unknown_table_like_tokens": [
+        "dbo.FORM"
+      ],
+      "sql_hint_count": 1
+    }
+  ]
+}

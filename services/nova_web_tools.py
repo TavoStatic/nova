@@ -7,7 +7,7 @@ import re
 import time
 from pathlib import Path
 from typing import Any, Callable, Optional
-from urllib.parse import quote, urlparse
+from urllib.parse import parse_qs, quote, unquote, urljoin, urlparse
 
 from services.web_research_session import WebResearchSessionStore
 
@@ -176,6 +176,238 @@ def extract_urls(text: str) -> list[str]:
             seen.add(url)
             out.append(url)
     return out
+
+
+def decode_search_href(href: str) -> str:
+    candidate = (href or "").strip()
+    if not candidate:
+        return ""
+    if candidate.startswith("/l/?"):
+        params = parse_qs(urlparse("https://duckduckgo.com" + candidate).query)
+        return unquote((params.get("uddg") or [""])[0])
+    if candidate.startswith("http://") or candidate.startswith("https://"):
+        return candidate
+    return ""
+
+
+def extract_text_from_path(path: Path, max_chars: int = 2000) -> str:
+    try:
+        suffix = path.suffix.lower()
+        if suffix in {".txt", ".md", ".log"}:
+            text = path.read_text(encoding="utf-8", errors="ignore")
+            return re.sub(r"\s+", " ", text).strip()[:max_chars]
+        if suffix in {".html", ".htm"}:
+            return extract_text_from_html_content(
+                path.read_text(encoding="utf-8", errors="ignore"),
+                max_chars=max_chars,
+            )
+        return ""
+    except Exception:
+        return ""
+
+
+def extract_text_from_html_content(raw_html: str, max_chars: int = 2000) -> str:
+    raw = raw_html or ""
+    raw = re.sub(r"(?is)<script.*?>.*?</script>", " ", raw)
+    raw = re.sub(r"(?is)<style.*?>.*?</style>", " ", raw)
+    raw = re.sub(r"(?is)<[^>]+>", " ", raw)
+    raw = html.unescape(raw)
+    return re.sub(r"\s+", " ", raw).strip()[:max_chars]
+
+
+def extract_same_host_links(raw_html: str, base_url: str, host: str) -> list[str]:
+    links: list[str] = []
+    seen: set[str] = set()
+    for href in re.findall(r'href=["\']([^"\']+)["\']', raw_html or "", flags=re.I):
+        href = (href or "").strip()
+        if not href or href.startswith("#"):
+            continue
+        if href.startswith("javascript:") or href.startswith("mailto:"):
+            continue
+
+        absolute_url = urljoin(base_url, href)
+        parsed = urlparse(absolute_url)
+        if parsed.scheme not in ("http", "https") or not parsed.hostname:
+            continue
+        if parsed.hostname.lower() != str(host or "").lower():
+            continue
+
+        clean = f"{parsed.scheme}://{parsed.netloc}{parsed.path}"
+        if parsed.query:
+            clean += f"?{parsed.query}"
+        if clean in seen:
+            continue
+        seen.add(clean)
+        links.append(clean)
+    return links
+
+
+def expand_research_terms(tokens: list[str]) -> list[str]:
+    terms = {token for token in tokens if token}
+    if "peims" in terms:
+        terms.update({"tsds", "submission", "interchange", "student", "reporting"})
+    if "attendance" in terms:
+        terms.update({"ada", "attendance", "reporting"})
+    if "timeline" in terms:
+        terms.update({"calendar", "deadline", "dates"})
+    if "reporting" in terms:
+        terms.update({"submission", "report"})
+    return list(terms)
+
+
+def score_research_hit(
+    url: str,
+    text: str,
+    terms: list[str],
+    primary_tokens: Optional[list[str]] = None,
+) -> float:
+    low_url = (url or "").lower()
+    low_text = (text or "").lower()
+    primary_tokens = [token for token in (primary_tokens or []) if token]
+    parsed = urlparse(url or "")
+
+    unique_text_hits = sum(1 for token in terms if token in low_text)
+    unique_url_hits = sum(1 for token in terms if token in low_url)
+    total_text_hits = sum(low_text.count(token) for token in terms)
+    total_url_hits = sum(low_url.count(token) for token in terms)
+
+    boost_patterns = ["peims", "tsds", "attendance", "ada", "submission", "calendar", "timeline", "report", "student-data"]
+    path_boost = sum(1 for token in boost_patterns if token in low_url)
+
+    score = (
+        unique_text_hits * 4.0
+        + unique_url_hits * 6.0
+        + min(30.0, float(total_text_hits) * 0.25)
+        + min(20.0, float(total_url_hits) * 0.75)
+        + path_boost * 1.5
+    )
+    if primary_tokens and not any(token in low_text or token in low_url for token in primary_tokens):
+        score -= 8.0
+    if (parsed.path or "/") in {"", "/"} and primary_tokens and not any(token in low_text or token in low_url for token in primary_tokens):
+        score -= 12.0
+    return score
+
+
+def crawl_domain_for_query(
+    start_url: str,
+    query_tokens: list[str],
+    max_pages: int,
+    max_depth: int,
+    *,
+    requests_get_fn: Callable[..., Any],
+    expand_research_terms_fn: Callable[[list[str]], list[str]],
+    extract_text_from_html_content_fn: Callable[[str, int], str],
+    score_research_hit_fn: Callable[..., float],
+    extract_same_host_links_fn: Callable[[str, str, str], list[str]],
+) -> list[tuple[float, str, str]]:
+    parsed = urlparse(start_url)
+    host = parsed.hostname or ""
+    if not host:
+        return []
+
+    terms = expand_research_terms_fn(query_tokens)
+    queue: list[tuple[str, int]] = [(start_url, 0)]
+    seen = {start_url}
+    fetched = 0
+    hits: list[tuple[float, str, str]] = []
+
+    while queue and fetched < max_pages:
+        url, depth = queue.pop(0)
+        try:
+            response = requests_get_fn(url, headers={"User-Agent": "Nova/1.0"}, timeout=25)
+            response.raise_for_status()
+        except Exception:
+            continue
+
+        fetched += 1
+        content_type = str((getattr(response, "headers", {}) or {}).get("Content-Type") or "").lower()
+        if "html" not in content_type:
+            continue
+
+        raw = str(getattr(response, "text", "") or "")
+        text = extract_text_from_html_content_fn(raw, 5000)
+        score = score_research_hit_fn(url, text, terms, primary_tokens=query_tokens)
+        if score >= 3.0:
+            hits.append((score, url, text[:900]))
+
+        if depth >= max_depth:
+            continue
+        for next_url in extract_same_host_links_fn(raw, url, host):
+            if next_url in seen:
+                continue
+            seen.add(next_url)
+            queue.append((next_url, depth + 1))
+
+    return hits
+
+
+def seed_urls_for_domain(
+    domain: str,
+    query_tokens: list[str],
+    max_seed: int = 30,
+    *,
+    fetch_sitemap_urls_fn: Callable[[str, int], list[str]],
+    expand_research_terms_fn: Callable[[list[str]], list[str]],
+) -> list[str]:
+    seeds = [f"https://{domain}/"]
+    candidates = fetch_sitemap_urls_fn(domain, max_seed * 3)
+    if not candidates:
+        return seeds
+
+    terms = expand_research_terms_fn(query_tokens)
+    scored: list[tuple[int, str]] = []
+    for url in candidates:
+        low = url.lower()
+        score = sum(low.count(term) for term in terms)
+        for token in ("peims", "tsds", "attendance", "ada", "submission", "calendar", "timeline", "report"):
+            if token in low:
+                score += 2
+        if score > 0:
+            scored.append((score, url))
+
+    scored.sort(key=lambda item: item[0], reverse=True)
+    for _score, url in scored[:max_seed]:
+        if url not in seeds:
+            seeds.append(url)
+
+    if len(seeds) < (max_seed + 1):
+        for url in candidates:
+            if url in seeds:
+                continue
+            seeds.append(url)
+            if len(seeds) >= (max_seed + 1):
+                break
+    return seeds
+
+
+def looks_like_code_discovery_query(text: str) -> bool:
+    low = str(text or "").strip().lower()
+    if not low:
+        return False
+    code_markers = (
+        "github",
+        "repo",
+        "repository",
+        "source code",
+        "implementation",
+        "example repo",
+        "code example",
+        "sample project",
+        "issue",
+        "codebase",
+        "api docs",
+        "documentation",
+        "sdk",
+        "package",
+        "module",
+        "library",
+        "pull request",
+        "public repo",
+        "open source",
+        "function ",
+        "class ",
+    )
+    return any(marker in low for marker in code_markers)
 
 
 def host_label(url: str) -> str:

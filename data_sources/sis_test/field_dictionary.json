@@ -22,12 +22,12 @@
     {
       "table": "dbo.REG_BUILDING",
       "role": "campus_reference",
-      "meaning": "Campus/building lookup and naming reference."
+      "meaning": "Supportive campus/building lookup table. Other SIS tables link to it by building/location number; use it for campus name, abbreviation, address, building type, and campus metadata rather than as the main fact table for student reports."
     },
     {
       "table": "dbo.REG_PROGRAMS",
       "role": "program_membership",
-      "meaning": "Program participation and value assignments for students."
+      "meaning": "Program participation and value assignments for students, including district population indicators defined by PROGRAM_ID and FIELD_NUMBER pairs."
     },
     {
       "table": "dbo.REG_ENTRY_WITH",
@@ -50,8 +50,58 @@
       "question_type": "district_enrollment_timeline",
       "preferred_table": "dbo.REG_ENTRY_WITH",
       "why": "REG_ENTRY_WITH is the stronger source for enrollment movement across time and campuses."
+    },
+    {
+      "question_type": "district_population_reports",
+      "preferred_table": "dbo.REG_PROGRAMS",
+      "why": "District-provided population definitions use REG_PROGRAMS filtered by PROGRAM_ID, FIELD_NUMBER, START_DATE, and END_DATE."
+    },
+    {
+      "question_type": "campus_name_or_metadata_lookup",
+      "preferred_table": "dbo.REG_BUILDING",
+      "why": "REG_BUILDING is the supportive campus lookup joined by building/location number. Use it to translate building IDs into campus names and metadata."
     }
   ],
+  "support_tables": {
+    "dbo.REG_BUILDING": {
+      "role": "campus_lookup",
+      "join_key": "BUILDING",
+      "linked_from_examples": [
+        "dbo.REG.BUILDING",
+        "dbo.REG_ENTRY_WITH.BUILDING"
+      ],
+      "known_metadata_fields": [
+        "BUILDING",
+        "NAME",
+        "ABBREVIATION",
+        "BUILDING_TYPE",
+        "STREET1",
+        "CITY",
+        "STATE",
+        "ZIP",
+        "OUT_OF_DISTRICT"
+      ],
+      "active_status_note": "Campus active/inactive status is expected to come from another table or district rule, not directly from dbo.REG_BUILDING. Verify the exact live source before filtering reports by active campus.",
+      "activity_inference": {
+        "signal": "current_student_records_by_building",
+        "evidence_tables": [
+          "dbo.REG"
+        ],
+        "join_rule": "dbo.REG.BUILDING = dbo.REG_BUILDING.BUILDING",
+        "student_status_rule": "Use current/active student registration records, such as REG.CURRENT_STATUS = 'A', once the district's live status rule is confirmed.",
+        "meaning": "If a building/location number has current student records tied to it, that is strong evidence the campus is active or operational. Treat this as inferred activity evidence, not as the official active-campus flag."
+      },
+      "active_status_candidates_to_verify": [
+        {
+          "table": "dbo.REGTB_BLDG_TYPES",
+          "field": "ACTIVE",
+          "meaning": "Vendor dictionary says this marks whether the building-type code is active for the current school year.",
+          "caution": "This may not mean an individual campus/building is active. Do not use as the campus active filter until live SIS behavior confirms it."
+        }
+      ],
+      "unresolved_status_question": "Which live table/field or district rule identifies active versus inactive individual campuses?"
+    }
+  },
   "status_codes": {
     "reg.current_status": {
       "P": "Preregistered",
@@ -125,114 +175,6 @@
       "powerschool_analog": null
     },
     {
-      "entity": "student_contact_and_identity",
-      "field": "reg_contact.city",
-      "label": "Mailing Address (City)",
-      "required": false,
-      "definition": "Student physical or mailing city.",
-      "default_selection": "Mailing Address (City)",
-      "powerschool_analog": "City / Mailing_City"
-    },
-    {
-      "entity": "student_contact_and_identity",
-      "field": "reg_contact.state",
-      "label": "Mailing Address (State)",
-      "required": false,
-      "definition": "Student physical or mailing state.",
-      "default_selection": "Mailing Address (State)",
-      "powerschool_analog": null
-    },
-    {
-      "entity": "student_contact_and_identity",
-      "field": "reg_contact.zip",
-      "label": "Mailing Address (Zip)",
-      "required": false,
-      "definition": "Student physical or mailing ZIP code.",
-      "default_selection": "Mailing Address (Zip)",
-      "powerschool_analog": "Zip / Mailing_Zip"
-    },
-    {
-      "entity": "student_contact_and_identity",
-      "field": "reg_contact.email",
-      "label": "Email Address",
-      "required": false,
-      "definition": "Preferred student email for school communication.",
-      "default_selection": "Email Address",
-      "powerschool_analog": null
-    },
-    {
-      "entity": "student_contact_and_identity",
-      "field": "reg_contact.login_id",
-      "label": "Naviance Student Username",
-      "required": false,
-      "definition": "Student login identifier used when federated IDs are required.",
-      "default_selection": "No student login created",
-      "powerschool_analog": "Student_Web_ID"
-    },
-    {
-      "entity": "student_contact_and_identity",
-      "field": "reg_personal.hispanic",
-      "label": "Ethnicity",
-      "required": false,
-      "definition": "Ethnicity marker used in standard reporting categories.",
-      "default_selection": "(Do not import)",
-      "powerschool_analog": "Ethnicity"
-    },
-    {
-      "entity": "student_contact_and_identity",
-      "field": "reg_personal.state_report_id",
-      "label": "State Reporting ID",
-      "required": false,
-      "definition": "State-issued student identifier used for reporting.",
-      "default_selection": "State Reporting ID",
-      "powerschool_analog": "State_StudentNumber"
-    },
-    {
-      "entity": "student_contact_and_identity",
-      "field": "sec_global_id.global_id",
-      "label": "Global ID",
-      "required": false,
-      "definition": "Global identity value tied to secure SIS identity layers.",
-      "default_selection": "(Do not import)",
-      "powerschool_analog": null
-    },
-    {
-      "entity": "student_gpa_and_rank",
-      "field": "mr_stu_gpa.cum_gpa",
-      "label": "Cumulative GPA",
-      "required": false,
-      "definition": "Student GPA value used for weighted or unweighted GPA depending on GPA type code.",
-      "default_selection": "(Do not import)",
-      "powerschool_analog": "~(*gpa method=\"...\")"
-    },
-    {
-      "entity": "student_gpa_and_rank",
-      "field": "mr_stu_gpa.cum_rank",
-      "label": "Cumulative Rank",
-      "required": false,
-      "definition": "Student class rank value.",
-      "default_selection": "(Do not import)",
-      "powerschool_analog": "~(*classrank method=\"...\")"
-    },
-    {
-      "entity": "student_gpa_and_rank",
-      "field": "mr_stu_gpa.cum_decile",
-      "label": "Cumulative Decile",
-      "required": false,
-      "definition": "Student rank position by decile.",
-      "default_selection": "(Do not import)",
-      "powerschool_analog": null
-    },
-    {
-      "entity": "student_gpa_and_rank",
-      "field": "reg_academic.graduation_year",
-      "label": "Graduation Year",
-      "required": false,
-      "definition": "Graduation year or class-year style academic summary field.",
-      "default_selection": "(Do not import)",
-      "powerschool_analog": "Sched_YearOfGraduation / ClassOf"
-    },
-    {
       "entity": "district_registration_history",
       "field": "reg_entry_with.*",
       "label": "District Enrollment History",
@@ -275,6 +217,15 @@
       "required": false,
       "definition": "Date associated with the end of that enrollment timeline record when applicable.",
       "default_selection": "(Schema inventory needed)",
+      "powerschool_analog": null
+    },
+    {
+      "entity": "program_memberships",
+      "field": "reg_programs.field_number",
+      "label": "Program Field Number",
+      "required": false,
+      "definition": "District population discriminator used with PROGRAM_ID to identify populations such as foster, dyslexia, military, 504, GT, EB, at-risk, and special education.",
+      "default_selection": "Field Number",
       "powerschool_analog": null
     }
   ]

@@ -781,6 +781,18 @@ class TestCoreIdentityLearning(unittest.TestCase):
         self.assertEqual(out.get("primary"), "explicit_command")
         self.assertFalse(out.get("bypass_pattern_routes"))
 
+    def test_infer_turn_intent_does_not_treat_ambiguous_web_prefix_as_fetch(self):
+        self.assertEqual(nova_core._infer_turn_intent("web peims attendance rules"), "chat")
+
+    def test_infer_turn_intent_treats_url_as_fetch(self):
+        self.assertEqual(nova_core._infer_turn_intent("web https://example.com"), "web_fetch")
+
+    def test_infer_turn_intent_does_not_force_all_information_to_web(self):
+        self.assertEqual(nova_core._infer_turn_intent("get me all the information you can about peims"), "chat")
+
+    def test_infer_turn_intent_does_not_force_deep_research_to_web(self):
+        self.assertEqual(nova_core._infer_turn_intent("do a deep research pass on peims"), "chat")
+
     def test_web_override_request_detects_all_you_need_is_the_web_phrase(self):
         self.assertTrue(nova_core._is_web_research_override_request(
             "you do not need all those tools to know more about PEIMS.. all you need is the Web"
@@ -1240,6 +1252,15 @@ class TestCoreIdentityLearning(unittest.TestCase):
         self.assertTrue(result.get("handled"))
         self.assertEqual(result.get("action"), "self_location")
         self.assertEqual(result.get("next_state"), {"kind": "location_recall"})
+
+    def test_supervisor_self_location_rule_rejects_use_location_without_task(self):
+        supervisor = Supervisor()
+        result = supervisor.evaluate_rules(
+            "use your location",
+            phase="handle",
+        )
+
+        self.assertFalse(result.get("handled"))
 
     def test_supervisor_location_recall_rule_handles_continuation_move(self):
         supervisor = Supervisor()
@@ -2220,6 +2241,35 @@ class TestCoreIdentityLearning(unittest.TestCase):
         reply, state = nova_core._developer_location_turn("where is gus right now?")
         self.assertIn("uncertain about gus's current location", reply.lower())
         self.assertEqual({"kind": "identity_profile", "subject": "developer"}, state)
+
+    def test_developer_location_relation_prefers_live_device_location(self):
+        orig_get_learned_fact = nova_core.get_learned_fact
+        orig_runtime_device_location_payload = nova_core.runtime_device_location_payload
+        orig_resolve_current_device_coords = nova_core.resolve_current_device_coords
+        orig_get_saved_location_text = nova_core.get_saved_location_text
+        try:
+            nova_core.get_learned_fact = lambda key, default="": "same_as_assistant" if key == "developer_location_relation" else default
+            nova_core.runtime_device_location_payload = lambda *args, **kwargs: {
+                "available": True,
+                "stale": False,
+                "lat": 25.93832,
+                "lon": -97.45515,
+                "coords_text": "25.93832,-97.45515",
+                "accuracy_m": 128,
+            }
+            nova_core.resolve_current_device_coords = lambda *args, **kwargs: (25.93832, -97.45515)
+            nova_core.get_saved_location_text = lambda: "Saved Old Place"
+
+            reply = nova_core._developer_location_reply()
+
+            self.assertIn("gus's current location matches my current device location", reply.lower())
+            self.assertIn("25.93832,-97.45515", reply)
+            self.assertIn("Saved location label: Saved Old Place.", reply)
+        finally:
+            nova_core.get_learned_fact = orig_get_learned_fact
+            nova_core.runtime_device_location_payload = orig_runtime_device_location_payload
+            nova_core.resolve_current_device_coords = orig_resolve_current_device_coords
+            nova_core.get_saved_location_text = orig_get_saved_location_text
 
     def test_core_read_text_safely_handles_utf16_without_null_padded_output(self):
         with tempfile.TemporaryDirectory() as td:

@@ -4,11 +4,12 @@
     "dialect": "sqlserver",
     "scope": "district_test",
     "vendor_shape": "eschoolplus_aligned",
+    "verification_status": "seeded_unverified",
     "notes": [
       "Read-only pipeline scaffold.",
       "Live connectivity is expected only on the district network.",
-      "Table grounding comes from the local UniServer dashboard references.",
-      "Field grounding is enriched from PowerSchool Naviance eSchoolPlus student mapping docs."
+      "Table grounding is seeded from operator-provided project context and must be verified against the live SIS schema inventory before being treated as database truth.",
+      "External eSchoolPlus mapping docs are comparison hints only; they are not proof that a table or column exists in this district database."
     ],
     "references": [
       "https://ps.powerschool-docs.com/naviance/latest/common-eschoolplus-sis-student-tables-names-and-fi",
@@ -20,13 +21,38 @@
     {
       "name": "student_registration",
       "tables": [
-        "dbo.REG",
-        "dbo.REG_BUILDING"
+        "dbo.REG"
       ],
-      "description": "Latest captured student registration snapshot and campus assignment record for the student.",
+      "support_tables": [
+        {
+          "table": "dbo.REG_BUILDING",
+          "role": "campus_lookup",
+          "join_key": "BUILDING",
+          "description": "Supportive campus/building reference table. Other SIS tables link to it by building/location number for campus name, address, building type, and campus metadata.",
+          "active_status_note": "Campus active/inactive status is not proven to live in dbo.REG_BUILDING. Treat active campus filtering as a separate status lookup/rule that must be verified against live schema and district practice.",
+          "activity_inference": {
+            "signal": "current_student_records_by_building",
+            "evidence_tables": [
+              "dbo.REG"
+            ],
+            "join_rule": "dbo.REG.BUILDING = dbo.REG_BUILDING.BUILDING",
+            "student_status_rule": "Use current/active student registration records, such as REG.CURRENT_STATUS = 'A', once the district's live status rule is confirmed.",
+            "meaning": "A building with current student records tied to its building/location number is operational evidence that the campus is active or in use. This is inferred activity evidence, not the official campus active flag."
+          },
+          "active_status_candidates_to_verify": [
+            {
+              "table": "dbo.REGTB_BLDG_TYPES",
+              "field": "ACTIVE",
+              "caution": "This appears to mark building-type code activity, not necessarily an individual campus/building as active."
+            }
+          ]
+        }
+      ],
+      "description": "Latest captured student registration snapshot and student campus assignment by building/location number.",
+      "verification_status": "seeded_unverified",
       "lookup_keys": [
         "student_id",
-        "campus_id",
+        "building",
         "current_status"
       ],
       "core_fields": [
@@ -45,16 +71,19 @@
       "tables": [
         "dbo.REG_PROGRAMS"
       ],
-      "description": "Program-level student associations that can be summarized or filtered by campus and year.",
+      "description": "Program-level student associations that can be summarized or filtered by campus and year. District population indicators such as foster, dyslexia, military, 504, GT, EB, at-risk, and special education are grounded by PROGRAM_ID/FIELD_NUMBER pairs in population_definitions.json.",
+      "verification_status": "operator_grounded_unverified_columns",
       "lookup_keys": [
         "student_id",
         "program_id",
+        "field_number",
         "program_value",
         "campus_id",
         "active_only"
       ],
       "core_fields": [
         "reg_programs.program_id",
+        "reg_programs.field_number",
         "reg_programs.program_value",
         "reg_programs.start_date",
         "reg_programs.end_date",
@@ -64,55 +93,12 @@
       "redaction_profile": "student_default"
     },
     {
-      "name": "student_contact_and_identity",
-      "tables": [
-        "dbo.REG_CONTACT",
-        "dbo.REG_PERSONAL",
-        "dbo.SEC_GLOBAL_ID"
-      ],
-      "description": "Student contact, login, state reporting, and identity fields used by downstream integrations.",
-      "lookup_keys": [
-        "student_id",
-        "state_report_id",
-        "login_id"
-      ],
-      "core_fields": [
-        "reg_contact.city",
-        "reg_contact.state",
-        "reg_contact.zip",
-        "reg_contact.email",
-        "reg_contact.login_id",
-        "reg_personal.state_report_id",
-        "sec_global_id.global_id"
-      ],
-      "redaction_profile": "student_default"
-    },
-    {
-      "name": "student_gpa_and_rank",
-      "tables": [
-        "dbo.MR_STU_GPA",
-        "dbo.REG_ACADEMIC"
-      ],
-      "description": "Student GPA, class rank, decile, and graduation-year style academic summary fields.",
-      "lookup_keys": [
-        "student_id",
-        "gpa_type",
-        "graduation_year"
-      ],
-      "core_fields": [
-        "mr_stu_gpa.cum_gpa",
-        "mr_stu_gpa.cum_rank",
-        "mr_stu_gpa.cum_decile",
-        "reg_academic.graduation_year"
-      ],
-      "redaction_profile": "summary_only"
-    },
-    {
       "name": "district_registration_history",
       "tables": [
         "dbo.REG_ENTRY_WITH"
       ],
       "description": "District enrollment history timeline tracking student enrollment, campus movement, and in-year grade movement within the school district over time.",
+      "verification_status": "seeded_unverified",
       "lookup_keys": [
         "student_id",
         "building",

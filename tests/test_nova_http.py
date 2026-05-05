@@ -101,10 +101,14 @@ class TestNovaHttpProfile(unittest.TestCase):
         self.orig_dev_colors = nova_http.nova_core._extract_developer_color_preferences
         self.orig_dev_colors_mem = nova_http.nova_core._extract_developer_color_preferences_from_memory
         self.orig_handle_keywords = nova_http.nova_core.handle_keywords
+        self.orig_runtime_device_location_payload = nova_http.nova_core.runtime_device_location_payload
+        self.orig_resolve_current_device_coords = nova_http.nova_core.resolve_current_device_coords
         nova_http.SESSION_TURNS.clear()
         nova_http.SESSION_STATE_MANAGER.clear()
         nova_http._CONTROL_STATUS_CACHE["computed_at"] = 0.0
         nova_http._CONTROL_STATUS_CACHE["payload"] = None
+        nova_http.nova_core.runtime_device_location_payload = lambda *args, **kwargs: {"available": False, "stale": True}
+        nova_http.nova_core.resolve_current_device_coords = lambda *args, **kwargs: None
 
     def tearDown(self):
         nova_http.nova_core.mem_recall = self.orig_mem_recall
@@ -114,6 +118,8 @@ class TestNovaHttpProfile(unittest.TestCase):
         nova_http.nova_core._extract_developer_color_preferences = self.orig_dev_colors
         nova_http.nova_core._extract_developer_color_preferences_from_memory = self.orig_dev_colors_mem
         nova_http.nova_core.handle_keywords = self.orig_handle_keywords
+        nova_http.nova_core.runtime_device_location_payload = self.orig_runtime_device_location_payload
+        nova_http.nova_core.resolve_current_device_coords = self.orig_resolve_current_device_coords
         nova_http.SESSION_TURNS.clear()
         nova_http.SESSION_STATE_MANAGER.clear()
         nova_http._CONTROL_STATUS_CACHE["computed_at"] = 0.0
@@ -626,6 +632,8 @@ class TestNovaHttpProfile(unittest.TestCase):
     def test_http_where_am_i_uses_deterministic_location_recall(self):
         orig_set_location_text = nova_http.nova_core.set_location_text
         orig_get_saved_location_text = nova_http.nova_core.get_saved_location_text
+        orig_runtime_device_location_payload = nova_http.nova_core.runtime_device_location_payload
+        orig_resolve_current_device_coords = nova_http.nova_core.resolve_current_device_coords
         try:
             saved = {"value": ""}
 
@@ -635,6 +643,8 @@ class TestNovaHttpProfile(unittest.TestCase):
 
             nova_http.nova_core.set_location_text = _store_location
             nova_http.nova_core.get_saved_location_text = lambda: saved["value"]
+            nova_http.nova_core.runtime_device_location_payload = lambda *args, **kwargs: {"available": False, "stale": True}
+            nova_http.nova_core.resolve_current_device_coords = lambda *args, **kwargs: None
 
             first = nova_http.process_chat("s5_where_am_i", "78521")
             second = nova_http.process_chat("s5_where_am_i", "where am I")
@@ -644,6 +654,8 @@ class TestNovaHttpProfile(unittest.TestCase):
         finally:
             nova_http.nova_core.set_location_text = orig_set_location_text
             nova_http.nova_core.get_saved_location_text = orig_get_saved_location_text
+            nova_http.nova_core.runtime_device_location_payload = orig_runtime_device_location_payload
+            nova_http.nova_core.resolve_current_device_coords = orig_resolve_current_device_coords
 
     def test_http_location_name_followup_uses_saved_location(self):
         orig_set_location_text = nova_http.nova_core.set_location_text
@@ -689,6 +701,34 @@ class TestNovaHttpProfile(unittest.TestCase):
             self.assertNotIn("local knowledge files", second.lower())
         finally:
             nova_http.nova_core.set_location_text = orig_set_location_text
+            nova_http.nova_core.get_saved_location_text = orig_get_saved_location_text
+
+    def test_http_location_context_city_name_followup_avoids_wikipedia(self):
+        orig_runtime_device_location_payload = nova_http.nova_core.runtime_device_location_payload
+        orig_resolve_current_device_coords = nova_http.nova_core.resolve_current_device_coords
+        orig_get_saved_location_text = nova_http.nova_core.get_saved_location_text
+        try:
+            nova_http.nova_core.get_saved_location_text = lambda: ""
+            nova_http.nova_core.resolve_current_device_coords = lambda *args, **kwargs: (25.93832, -97.45515)
+            nova_http.nova_core.runtime_device_location_payload = lambda *args, **kwargs: {
+                "available": True,
+                "stale": False,
+                "lat": 25.93832,
+                "lon": -97.45515,
+                "coords_text": "25.93832,-97.45515",
+                "accuracy_m": 128,
+            }
+
+            first = nova_http.process_chat("s5_location_city_context", "your location")
+            second = nova_http.process_chat("s5_location_city_context", "what is the name of the city")
+
+            self.assertIn("My current device location", first)
+            self.assertEqual("That location is Brownsville, TX.", second)
+            self.assertNotIn("Wikipedia", second)
+            self.assertNotIn("Killing in the Name", second)
+        finally:
+            nova_http.nova_core.runtime_device_location_payload = orig_runtime_device_location_payload
+            nova_http.nova_core.resolve_current_device_coords = orig_resolve_current_device_coords
             nova_http.nova_core.get_saved_location_text = orig_get_saved_location_text
 
     def test_http_clean_slate_blocks_location_storage(self):
@@ -1440,6 +1480,7 @@ class TestNovaHttpRouteContracts(unittest.TestCase):
         self.assertIn("/static/leah_fx.js", contract["static_assets"])
         self.assertIn("/api/health", contract["public_api_get"])
         self.assertIn("/api/control/work-trees", contract["control_api_get"])
+        self.assertIn("/api/control/pipelines", contract["control_api_get"])
         self.assertIn("/api/chat/upload", contract["chat_api_post"])
 
     def test_runtime_console_root_is_served(self):
@@ -1472,7 +1513,7 @@ class TestNovaHttpRouteContracts(unittest.TestCase):
                     body = response.read().decode("utf-8", errors="replace")
 
             self.assertEqual(response.status, 200)
-            self.assertIn("NYO System Control Login", body)
+            self.assertIn("NYO AI Systems Control Login", body)
             self.assertIn("/api/control/login", body)
         finally:
             server.shutdown()
@@ -1491,7 +1532,7 @@ class TestNovaHttpRouteContracts(unittest.TestCase):
 
             self.assertEqual(response.status, 200)
             self.assertIn('data-view-target="scheduled-tree"', body)
-            self.assertIn("NYO System Control", body)
+            self.assertIn("NYO AI Systems Control", body)
         finally:
             server.shutdown()
             server.server_close()

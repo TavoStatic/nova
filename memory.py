@@ -1,6 +1,7 @@
 import argparse
 import json
 import math
+import os
 import re
 import sqlite3
 import time
@@ -10,7 +11,7 @@ from typing import List, Tuple, Iterable, Optional
 import requests
 
 BASE_DIR = Path(__file__).resolve().parent
-DB_PATH = BASE_DIR / "nova_memory.sqlite"
+DB_PATH = Path(os.environ.get("NOVA_MEMORY_DB") or (BASE_DIR / "nova_memory.sqlite"))
 POLICY_PATH = BASE_DIR / "policy.json"
 
 OLLAMA_BASE = "http://127.0.0.1:11434"

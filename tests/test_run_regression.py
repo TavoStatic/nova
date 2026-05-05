@@ -1,5 +1,6 @@
 import importlib.util
 import io
+import json
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -30,6 +31,7 @@ class TestRunRegressionScript(unittest.TestCase):
         lane_calls = []
 
         with patch.object(RUN_REGRESSION, "run_step", return_value=0), \
+             patch.object(RUN_REGRESSION, "write_regression_status") as status_mock, \
              patch.object(
                  RUN_REGRESSION,
                  "run_test_lane",
@@ -39,6 +41,7 @@ class TestRunRegressionScript(unittest.TestCase):
 
         self.assertEqual(code, 0)
         self.assertEqual(lane_calls, [("behavior", 2)])
+        status_mock.assert_called_once()
 
     def test_main_lists_available_lanes(self):
         with patch("sys.stdout", new_callable=io.StringIO) as stdout:
@@ -50,6 +53,24 @@ class TestRunRegressionScript(unittest.TestCase):
         self.assertIn("- unit:", output)
         self.assertIn("- behavior:", output)
         self.assertIn("- integration:", output)
+
+    def test_write_regression_status_records_validation_marker(self):
+        marker = Path("C:/Nova/runtime/_test_tmp") / "regression_status_test.json"
+        marker.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            with patch.object(RUN_REGRESSION, "REGRESSION_STATUS_FILE", marker):
+                RUN_REGRESSION.write_regression_status(status="OK", lanes=["unit"], returncode=0)
+
+            payload = json.loads(marker.read_text(encoding="utf-8"))
+            self.assertEqual(payload["status"], "OK")
+            self.assertEqual(payload["lanes"], ["unit"])
+            self.assertEqual(payload["returncode"], 0)
+            self.assertEqual(payload["source"], "scripts/run_regression.py")
+        finally:
+            try:
+                marker.unlink()
+            except Exception:
+                pass
 
 
 if __name__ == "__main__":

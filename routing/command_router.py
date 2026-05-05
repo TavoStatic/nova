@@ -88,7 +88,7 @@ def classify_direct_tool_route(turn: TurnUnderstanding, *, looks_like_find_comma
         return RouteDecision(kind="direct_tool", tool="weather_current_location")
 
     if ("use your" in low or low.startswith("use ")) and turn.mentions_location:
-        return RouteDecision(kind="direct_tool", tool="weather_current_location")
+        return RouteDecision(kind="clarify", message="What do you want me to use my location for?")
 
     if turn.mentions_shared_location and (turn.mentions_weather or any(p in low for p in ("rain", "raining", "forecast", "temperature"))):
         return RouteDecision(kind="direct_tool", tool="weather_current_location")
@@ -148,18 +148,16 @@ def classify_direct_tool_route(turn: TurnUnderstanding, *, looks_like_find_comma
         query = t[len("stack overflow "):].strip()
         return RouteDecision(kind="direct_tool", tool="stackexchange_search", args=((query,) if query else ()))
 
-    if low.startswith("web search ") or "search the web" in low or "web search" in low:
-        query = t[11:].strip() if low.startswith("web search ") else t
+    if low.startswith("web search "):
+        query = t[11:].strip()
         return RouteDecision(kind="direct_tool", tool="web_search", args=(query,))
+    search_web_match = re.search(r"\bsearch\s+the\s+web(?:\s+for)?\s+(.+)", t, flags=re.I)
+    if search_web_match:
+        query = str(search_web_match.group(1) or "").strip(" .!?")
+        if query:
+            return RouteDecision(kind="direct_tool", tool="web_search", args=(query,))
 
-    research_intent = (
-        low.startswith("web research ")
-        or "research this" in low
-        or "do research" in low
-        or "deep research" in low
-        or "all the information" in low
-        or "all the information on" in low
-    )
+    research_intent = low.startswith("web research ")
     if research_intent:
         query = t[13:].strip() if low.startswith("web research ") else t
         return RouteDecision(kind="direct_tool", tool="web_research", args=(query,))

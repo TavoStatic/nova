@@ -320,7 +320,7 @@ class TestWeatherBehavior(unittest.TestCase):
         self.assertIn("Brownsville, TX:", out)
         self.assertIn("[source: api.weather.gov]", out)
 
-    def test_use_physical_location_routes_to_brownsville(self):
+    def test_use_physical_location_without_task_context_clarifies(self):
         self._write_policy(["api.weather.gov"])
         nova_core.set_location_text("Brownsville TX")
 
@@ -347,13 +347,11 @@ class TestWeatherBehavior(unittest.TestCase):
                 }
             )
 
-        nova_core.requests.get = fake_get
         out = nova_core.handle_commands("use your physical location")
-        self.assertIn("Brownsville, TX:", out)
-        self.assertIn("[source: api.weather.gov]", out)
-        self.assertEqual(calls["n"], 2)
+        self.assertEqual(out, "What do you want me to use my location for?")
+        self.assertEqual(calls["n"], 0)
 
-    def test_use_your_location_nova_routes_to_brownsville(self):
+    def test_use_your_location_nova_without_task_context_clarifies(self):
         self._write_policy(["api.weather.gov"])
         nova_core.set_location_text("Brownsville TX")
 
@@ -377,10 +375,8 @@ class TestWeatherBehavior(unittest.TestCase):
                 }
             )
 
-        nova_core.requests.get = fake_get
         out = nova_core.handle_commands("use your location nova")
-        self.assertIn("Brownsville, TX:", out)
-        self.assertIn("[source: api.weather.gov]", out)
+        self.assertEqual(out, "What do you want me to use my location for?")
 
     def test_weather_for_current_physical_locaiton_typo_routes_to_brownsville(self):
         self._write_policy(["api.weather.gov"])

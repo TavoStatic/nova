@@ -1,4 +1,5 @@
 import unittest
+from unittest import mock
 from pathlib import Path
 
 from services.patch_control import PATCH_CONTROL_SERVICE
@@ -32,7 +33,7 @@ class TestPatchControlService(unittest.TestCase):
         self.assertFalse(extra.get("update_now_pending", {}).get("pending", True))
 
     def test_patch_action_readiness_payload_explains_preview_controls(self):
-        with unittest.mock.patch("pathlib.Path.exists", return_value=True):
+        with mock.patch("pathlib.Path.exists", return_value=True):
             payload = PATCH_CONTROL_SERVICE.patch_action_readiness_payload(
                 {
                     "enabled": True,

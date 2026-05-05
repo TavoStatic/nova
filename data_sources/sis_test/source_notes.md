@@ -42,3 +42,26 @@ Nova should reason about this pipeline primarily with **eSchoolPlus-style field 
   - district enrollment presence checks
 - If you need to know whether a student had a grade change during the current year, `dbo.REG_ENTRY_WITH` is the better source because it can show when and where that change happened.
 - `dbo.REG_ENTRY_WITH` should not replace `dbo.REG` when Nova needs the latest captured student snapshot.
+
+## District Population Grounding
+
+District-provided population flags are grounded in `dbo.REG_PROGRAMS`.
+
+Use `PROGRAM_ID`, `FIELD_NUMBER`, `START_DATE IS NOT NULL`, and `END_DATE IS NULL` to identify active population membership. The current grounded population map lives in:
+
+- `data_sources/sis_test/population_definitions.json`
+
+Known active population keys include:
+
+- `foster`: `PROGRAM_ID = 146`, `FIELD_NUMBER = 31`
+- `dyslexia`: `PROGRAM_ID = 146`, `FIELD_NUMBER = 33`
+- `military`: `PROGRAM_ID = 146`, `FIELD_NUMBER = 32`
+- `plan504`: `PROGRAM_ID = 146`, `FIELD_NUMBER = 116`
+- `gt`: `PROGRAM_ID = 146`, `FIELD_NUMBER = 11`
+- `parentalper`: `PROGRAM_ID = 146`, `FIELD_NUMBER = 6`
+- `ada`: `PROGRAM_ID = 146`, `FIELD_NUMBER = 4`
+- `eb`: `PROGRAM_ID = 146`, `FIELD_NUMBER = 5`
+- `immigrant`: `PROGRAM_ID = 146`, `FIELD_NUMBER = 12`
+- `intervention`: `PROGRAM_ID = 146`, `FIELD_NUMBER = 117`
+- `at_risk`: `PROGRAM_ID = 146`, `FIELD_NUMBER = 7`
+- `sped`: `PROGRAM_ID = 148`, `FIELD_NUMBER = 4`

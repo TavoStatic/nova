@@ -85,6 +85,41 @@ class TestNovaConversationFollowupsService(unittest.TestCase):
         )
         self.assertEqual(tool_state, {"kind": "queue_status", "subject": "generated_work_queue"})
 
+    def test_retrieval_query_requires_explicit_web_search_command(self):
+        query = nova_conversation_followups.retrieval_query_from_text(
+            "web_search",
+            "web search peims attendance rules",
+            web_research_query_fn=lambda: "",
+        )
+        self.assertEqual(query, "peims attendance rules")
+
+        self.assertEqual(
+            nova_conversation_followups.retrieval_query_from_text(
+                "web_search",
+                "search peims attendance rules",
+                web_research_query_fn=lambda: "",
+            ),
+            "search peims attendance rules",
+        )
+
+    def test_retrieval_query_requires_url_for_web_fetch_command(self):
+        self.assertEqual(
+            nova_conversation_followups.retrieval_query_from_text(
+                "web_fetch",
+                "web https://example.com/report",
+                web_research_query_fn=lambda: "",
+            ),
+            "https://example.com/report",
+        )
+        self.assertEqual(
+            nova_conversation_followups.retrieval_query_from_text(
+                "web_fetch",
+                "web peims attendance rules",
+                web_research_query_fn=lambda: "",
+            ),
+            "web peims attendance rules",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

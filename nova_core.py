@@ -16,25 +16,19 @@ import importlib
 import asyncio
 import ast
 import importlib.util
-import io
 import json
 import os
 import math
-import queue
 import re
 import socket
 import subprocess
 import threading
 import time
 import zipfile
-import hashlib
 import mimetypes
-import html
 import tempfile
-import difflib
 from pathlib import Path
 from typing import Any, Optional, Tuple
-from urllib.parse import urlparse, parse_qs, unquote, urljoin, quote
 from conversation_manager import ConversationSession
 from subconscious_config import SUBCONSCIOUS_CHARTER
 from supervisor import Supervisor
@@ -67,39 +61,131 @@ from services.nova_turn_direction import determine_turn_direction
 from services.nova_turn_direction import is_explicit_command_like
 from services.nova_memory_learning import mem_get_recent_learned as service_mem_get_recent_learned
 from services.nova_memory_learning import mem_stats_payload as service_mem_stats_payload
+from services.nova_prompt_replies import attach_learning_invitation as service_attach_learning_invitation
+from services.nova_prompt_replies import last_question_recall_reply as service_last_question_recall_reply
+from services.nova_prompt_replies import open_probe_reply as service_open_probe_reply
+from services.nova_prompt_replies import session_fact_recall_reply as service_session_fact_recall_reply
+from services.nova_prompt_replies import truthful_limit_outcome as service_truthful_limit_outcome
+from services.nova_prompt_replies import truthful_limit_reply as service_truthful_limit_reply
+from services.nova_pipeline_tools import handle_pipeline_command as service_handle_pipeline_command
 from services.nova_profile_followups import developer_identity_followup_reply as service_developer_identity_followup_reply
 from services.nova_profile_followups import developer_profile_reply as service_developer_profile_reply
 from services.nova_profile_followups import infer_profile_conversation_state as service_infer_profile_conversation_state
-from services.nova_pulse import _patch_activity_summary as service_patch_activity_summary
-from services.nova_pulse import _promotion_audit_summary as service_promotion_audit_summary
+from services.nova_query_classifiers import is_action_history_query as service_is_action_history_query
+from services.nova_query_classifiers import is_assistant_name_query as service_is_assistant_name_query
+from services.nova_query_classifiers import is_capability_query as service_is_capability_query
+from services.nova_query_classifiers import is_developer_full_name_query as service_is_developer_full_name_query
+from services.nova_query_classifiers import is_factual_identity_or_policy_query as service_is_factual_identity_or_policy_query
+from services.nova_query_classifiers import is_identity_or_developer_query as service_is_identity_or_developer_query
+from services.nova_query_classifiers import is_name_origin_question as service_is_name_origin_question
+from services.nova_query_classifiers import is_policy_domain_query as service_is_policy_domain_query
+from services.nova_query_classifiers import is_self_identity_web_challenge as service_is_self_identity_web_challenge
 from services.nova_pulse import render_nova_pulse as service_render_nova_pulse
+from services.nova_pulse import tool_nova_pulse as service_tool_nova_pulse
+from services.nova_pulse import write_pulse_snapshot as service_write_pulse_snapshot
+from services.nova_self_status import build_self_status_payload as service_build_self_status_payload
+from services.nova_self_status import read_recent_ops_events as service_read_recent_ops_events
+from services.nova_self_status import render_self_status as service_render_self_status
+from services.core_health_brief import build_core_health_brief as service_build_core_health_brief
+from services.core_health_brief import feed_core_health_brief_to_work_tree as service_feed_core_health_brief_to_work_tree
+from services.core_health_brief import render_core_health_brief as service_render_core_health_brief
+from services.core_health_brief import write_core_health_brief as service_write_core_health_brief
+from services.core_steward import build_core_steward_payload as service_build_core_steward_payload
+from services.core_thinning import build_core_thinning_brief as service_build_core_thinning_brief
+from services.core_thinning import execute_core_thinning_order as service_execute_core_thinning_order
+from services.core_thinning import feed_core_thinning_brief_to_work_tree as service_feed_core_thinning_brief_to_work_tree
+from services.core_thinning import render_core_thinning_brief as service_render_core_thinning_brief
 from services.nova_tool_dispatch import execute_planned_action_from_runtime as service_execute_planned_action_from_runtime
 from services.nova_action_ledger_helpers import action_ledger_add_step as service_action_ledger_add_step
+from services.nova_action_ledger_helpers import action_ledger_route_summary as service_action_ledger_route_summary
+from services.nova_action_ledger_helpers import count_routing_overrides_recently as service_count_routing_overrides_recently
+from services.nova_action_ledger_helpers import count_unsupported_claim_blocks_recently as service_count_unsupported_claim_blocks_recently
 from services.nova_action_ledger_helpers import detect_repeated_tool_intent_without_execution as service_detect_repeated_tool_intent_without_execution
+from services.nova_action_ledger_helpers import recent_action_ledger_records as service_recent_action_ledger_records
+from services.nova_action_ledger_helpers import record_completed_tool_execution as service_record_completed_tool_execution
+from services.nova_action_ledger_helpers import record_requested_tool_clarification as service_record_requested_tool_clarification
+from services.nova_action_ledger_helpers import record_used_routing_override as service_record_used_routing_override
+from services.nova_action_ledger_helpers import routing_stable_recently as service_routing_stable_recently
+from services.nova_action_ledger_helpers import sample_intents_last as service_sample_intents_last
+from services.nova_action_ledger_helpers import top_repeated_correction_class as service_top_repeated_correction_class
+from services.nova_action_ledger_helpers import unsupported_claims_blocked_recently as service_unsupported_claims_blocked_recently
+from services.nova_identity_history import classify_name_origin_outcome as service_classify_name_origin_outcome
 from services.nova_identity_history import execute_identity_history_outcome as service_execute_identity_history_outcome
 from services.nova_knowledge_packs import build_local_topic_digest_answer as service_build_local_topic_digest_answer
-from services.nova_location_weather import tool_weather as service_tool_weather
 from services.nova_location_weather import device_location_status_payload as service_device_location_status_payload
+from services.nova_location_weather import clear_runtime_device_location as service_clear_runtime_device_location
+from services.nova_location_weather import coords_for_location_hint as service_coords_for_location_hint
+from services.nova_location_weather import coords_from_saved_location as service_coords_from_saved_location
+from services.nova_location_weather import extract_location_fact as service_extract_location_fact
+from services.nova_location_weather import extract_weather_source_host as service_extract_weather_source_host
+from services.nova_location_weather import get_saved_location_text as service_get_saved_location_text
+from services.nova_location_weather import handle_location_conversation_turn as service_handle_location_conversation_turn
+from services.nova_location_weather import is_location_name_query as service_is_location_name_query
+from services.nova_location_weather import is_location_recall_query as service_is_location_recall_query
+from services.nova_location_weather import infer_location_turn_intent as service_infer_location_turn_intent
+from services.nova_location_weather import is_saved_location_weather_query as service_is_saved_location_weather_query
+from services.nova_location_weather import is_weather_meta_followup as service_is_weather_meta_followup
+from services.nova_location_weather import is_weather_status_followup as service_is_weather_status_followup
+from services.nova_location_weather import live_device_location_summary as service_live_device_location_summary
+from services.nova_location_weather import location_name_reply as service_location_name_reply
+from services.nova_location_weather import location_recall_reply as service_location_recall_reply
+from services.nova_location_weather import make_weather_result_state as service_make_weather_result_state
+from services.nova_location_weather import mentions_location_phrase as service_mentions_location_phrase
+from services.nova_location_weather import parse_lat_lon as service_parse_lat_lon
+from services.nova_location_weather import resolve_current_device_coords as service_resolve_current_device_coords
 from services.nova_location_weather import resolve_windows_device_coords as service_resolve_windows_device_coords
+from services.nova_location_weather import runtime_device_backend_provider as service_runtime_device_backend_provider
+from services.nova_location_weather import runtime_device_location_payload as service_runtime_device_location_payload
+from services.nova_location_weather import set_location_text as service_set_location_text
+from services.nova_location_weather import set_runtime_device_location as service_set_runtime_device_location
+from services.nova_location_weather import store_declarative_fact_outcome as service_store_declarative_fact_outcome
+from services.nova_location_weather import store_declarative_fact_reply as service_store_declarative_fact_reply
+from services.nova_location_weather import store_location_fact_reply as service_store_location_fact_reply
+from services.nova_location_weather import tool_weather as service_tool_weather
+from services.nova_location_weather import weather_for_saved_location as service_weather_for_saved_location
+from services.nova_location_weather import weather_location_label as service_weather_location_label
+from services.nova_location_weather import weather_meta_reply as service_weather_meta_reply
+from services.nova_location_weather import weather_status_reply as service_weather_status_reply
 from services.nova_patching import behavioral_check as service_behavioral_check
 from services.nova_patching import interactive_preview_review as service_interactive_preview_review
 from services.nova_patching import teach_autoapply_proposal as service_teach_autoapply_proposal
 from services.nova_patching import teach_propose_patch as service_teach_propose_patch
 from services.nova_developer_profile import learn_contextual_developer_facts as service_learn_contextual_developer_facts
+from services.nova_identity_preferences import extract_animal_preferences as service_extract_animal_preferences
+from services.nova_identity_preferences import extract_animal_preferences_from_memory as service_extract_animal_preferences_from_memory
+from services.nova_identity_preferences import extract_animal_preferences_from_text as service_extract_animal_preferences_from_text
+from services.nova_identity_preferences import extract_color_preferences as service_extract_color_preferences
+from services.nova_identity_preferences import extract_color_preferences_from_memory as service_extract_color_preferences_from_memory
+from services.nova_identity_preferences import extract_color_preferences_from_text as service_extract_color_preferences_from_text
+from services.nova_identity_preferences import extract_last_user_question as service_extract_last_user_question
+from services.nova_identity_preferences import is_color_animal_match_question as service_is_color_animal_match_question
+from services.nova_identity_preferences import is_color_lookup_request as service_is_color_lookup_request
+from services.nova_identity_preferences import pick_color_for_animals as service_pick_color_for_animals
+from services.nova_identity_answers import assistant_name_reply as service_assistant_name_reply
+from services.nova_identity_answers import developer_full_name_reply as service_developer_full_name_reply
+from services.nova_identity_answers import self_identity_web_challenge_reply as service_self_identity_web_challenge_reply
+from services.nova_keyword_tools import handle_keywords as service_handle_keywords
+from services.nova_keyword_tools import is_brief_command_form as service_is_brief_command_form
 from services.nova_profile_followups import identity_profile_followup_reply as service_identity_profile_followup_reply
 from services.nova_retrieval_followups import execute_retrieval_followup_outcome as service_execute_retrieval_followup_outcome
 from services.nova_reply_contracts import classify_weather_lookup_outcome as service_classify_weather_lookup_outcome
 from services.nova_reply_contracts import classify_correction_outcome as service_classify_correction_outcome
 from services.nova_reply_contracts import classify_store_fact_outcome as service_classify_store_fact_outcome
+from services.nova_reply_contracts import attach_reply_outcome as service_attach_reply_outcome
+from services.nova_reply_contracts import classify_set_location_outcome as service_classify_set_location_outcome
+from services.nova_reply_contracts import execute_weather_lookup_outcome as service_execute_weather_lookup_outcome
+from services.nova_reply_contracts import render_reply as service_render_reply_contract
 from services.nova_reply_sanitizer import sanitize_llm_reply as service_sanitize_llm_reply
 from services.nova_routing_support import finalize_routing_decision as service_finalize_routing_decision
 from services.nova_routing_support import llm_classify_routing_intent as service_llm_classify_routing_intent
 from services.nova_routing_support import looks_like_open_fallback_turn as service_looks_like_open_fallback_turn
 from services.nova_tool_policy import web_fetch as service_web_fetch
+from services import nova_conversation_followups as service_conversation_followups
 from services.nova_web_tools import fetch_sitemap_urls as service_fetch_sitemap_urls
 from services.nova_web_tools import scan_candidate_urls_for_query as service_scan_candidate_urls_for_query
 from services.nova_action_ledger import finalize_action_ledger_record_from_runtime as service_finalize_action_ledger_record_from_runtime
 from services.nova_action_ledger import start_action_ledger_record as service_start_action_ledger_record
+from services.nova_action_ledger import write_action_ledger_record as service_write_action_ledger_record
 from services.nova_knowledge_packs import kb_search as service_kb_search
 from services.patch_control import PATCH_CONTROL_SERVICE
 from services.nova_memory_learning import mem_audit as service_mem_audit
@@ -111,16 +197,62 @@ from services.nova_patching import overlay_change_candidates as service_overlay_
 from services.nova_patching import snapshot_should_skip_relpath as service_snapshot_should_skip_relpath
 from services.nova_pulse import build_pulse_payload as service_build_pulse_payload
 from services.nova_reflection_health import maybe_log_self_reflection as service_maybe_log_self_reflection
+from services.nova_research_contracts import classify_web_research_outcome as service_classify_web_research_outcome
+from services.nova_search_endpoint import is_local_search_endpoint as service_is_local_search_endpoint
+from services.nova_search_endpoint import normalize_search_endpoint as service_normalize_search_endpoint
 from services.nova_search_endpoint import probe_search_endpoint as service_probe_search_endpoint
+from services.nova_search_endpoint import search_endpoint_candidates as service_search_endpoint_candidates
+from services.nova_turn_heuristics import classify_turn_acts as service_classify_turn_acts
+from services.nova_turn_heuristics import build_greeting_reply as service_build_greeting_reply
 from services.nova_turn_heuristics import is_declarative_info as service_is_declarative_info
+from services.nova_turn_helpers import extract_memory_teach_text as service_extract_memory_teach_text
+from services.nova_turn_helpers import is_location_request as service_is_location_request
+from services.nova_turn_helpers import is_web_research_override_request as service_is_web_research_override_request
+from services.nova_turn_helpers import location_reply as service_location_reply
+from services.nova_turn_helpers import retrieval_status_reply as service_retrieval_status_reply
+from services.nova_turn_helpers import uses_prior_reference as service_uses_prior_reference
 from services.nova_command_handlers import handle_commands as service_handle_commands
+from services.nova_correction_parsing import extract_authoritative_correction_text as service_extract_authoritative_correction_text
+from services.nova_correction_parsing import is_negative_feedback as service_is_negative_feedback
+from services.nova_correction_parsing import looks_like_correction_cancel as service_looks_like_correction_cancel
+from services.nova_correction_parsing import looks_like_correction_turn as service_looks_like_correction_turn
+from services.nova_correction_parsing import looks_like_pending_replacement_text as service_looks_like_pending_replacement_text
+from services.nova_correction_parsing import normalize_correction_for_storage as service_normalize_correction_for_storage
+from services.nova_correction_parsing import parse_correction as service_parse_correction
 from services.nova_correction_parsing import safe_eval_arithmetic_expression as service_safe_eval_arithmetic_expression
 from services.nova_ollama_chat import ollama_chat as service_ollama_chat
+from services.nova_reply_guards import apply_claim_gate as service_apply_claim_gate
+from services.nova_reply_guards import content_tokens as service_content_tokens
+from services.nova_reply_guards import is_risky_claim_sentence as service_is_risky_claim_sentence
 from services.nova_reply_guards import sentence_supported_by_evidence as service_sentence_supported_by_evidence
+from services.nova_reply_guards import self_correct_reply as service_self_correct_reply
 from services.nova_session_followups import build_session_fact_sheet as service_build_session_fact_sheet
+from services.nova_session_followups import session_recap_reply as service_session_recap_reply
+from services.nova_teaching import apply_reply_overrides as service_apply_reply_overrides
 from services.nova_truth_hierarchy import hard_answer as service_hard_answer
 from services.nova_truth_hierarchy import truth_hierarchy_answer as service_truth_hierarchy_answer
+from services.nova_update_now import build_update_now_token as service_build_update_now_token
+from services.nova_update_now import clear_update_now_pending as service_clear_update_now_pending
+from services.nova_update_now import read_update_now_pending as service_read_update_now_pending
+from services.nova_update_now import tool_update_now as service_tool_update_now
+from services.nova_update_now import tool_update_now_cancel as service_tool_update_now_cancel
+from services.nova_update_now import tool_update_now_confirm as service_tool_update_now_confirm
+from services.nova_update_now import update_now_pending_payload as service_update_now_pending_payload
+from services.nova_update_now import write_update_now_pending as service_write_update_now_pending
+from services.nova_web_tools import _clean_html_text as service_clean_html_text
+from services.nova_web_tools import _provider_request_headers as service_provider_request_headers
+from services.nova_web_tools import crawl_domain_for_query as service_crawl_domain_for_query
+from services.nova_web_tools import decode_search_href as service_decode_search_href
+from services.nova_web_tools import expand_research_terms as service_expand_research_terms
+from services.nova_web_tools import extract_same_host_links as service_extract_same_host_links
+from services.nova_web_tools import extract_text_from_html_content as service_extract_text_from_html_content
+from services.nova_web_tools import extract_text_from_path as service_extract_text_from_path
+from services.nova_web_tools import extract_urls as service_extract_urls
+from services.nova_web_tools import looks_like_code_discovery_query as service_looks_like_code_discovery_query
+from services.nova_web_tools import score_research_hit as service_score_research_hit
+from services.nova_web_tools import seed_urls_for_domain as service_seed_urls_for_domain
 from services.nova_web_tools import tool_stackexchange_search as service_tool_stackexchange_search
+from services.nova_web_tools import tool_web_fetch as service_tool_web_fetch
 from services.nova_web_tools import tool_web_gather as service_tool_web_gather
 from services.nova_web_tools import tool_search as service_tool_search
 from services.nova_web_tools import tool_web_research as service_tool_web_research
@@ -134,6 +266,13 @@ from services.nova_memory_events import record_memory_event as service_record_me
 from services.nova_memory_learning import learn_from_user_correction as service_learn_from_user_correction
 from services.nova_memory_learning import mem_add as service_mem_add
 from services.nova_patching import patch_apply as service_patch_apply
+from services.data_pipeline_registry import get_pipeline_schema_probe as service_get_pipeline_schema_probe
+from services.data_pipeline_registry import get_pipeline_status as service_get_pipeline_status
+from services.data_pipeline_registry import list_pipeline_summaries as service_list_pipeline_summaries
+from services.data_pipeline_registry import plan_pipeline_report as service_plan_pipeline_report
+from services.data_pipeline_registry import preview_pipeline_query as service_preview_pipeline_query
+from services.data_pipeline_registry import search_pipeline_vendor_dictionary as service_search_pipeline_vendor_dictionary
+from services.pipeline_privileged_bridge import run_privileged_pipeline_query as service_run_privileged_pipeline_query
 from services.nova_supervisor_flow import execute_registered_supervisor_rule_from_runtime as service_execute_registered_supervisor_rule_from_runtime
 from services.nova_supervisor_flow import handle_supervisor_intent_from_runtime as service_handle_supervisor_intent_from_runtime
 from services.nova_runtime_context import ACTION_LEDGER_DIR
@@ -161,6 +300,11 @@ from services.nova_runtime_context import TEST_SESSIONS_DIR
 from services.nova_runtime_context import UPDATE_NOW_PENDING_FILE
 from services.nova_runtime_context import get_active_user
 from services.nova_runtime_context import set_active_user
+from services.nova_voice_runtime import SubprocessTTS as ServiceSubprocessTTS
+from services.nova_voice_runtime import ensure_voice_deps as service_ensure_voice_deps
+from services.nova_voice_runtime import record_seconds as service_record_seconds
+from services.nova_voice_runtime import speak_chunked as service_speak_chunked
+from services.nova_voice_runtime import transcribe as service_transcribe
 try:
     import memory as memory_mod
 except Exception:
@@ -179,30 +323,7 @@ WhisperModel = None
 
 def _ensure_voice_deps() -> bool:
     """Import voice dependencies only when voice features are actually used."""
-    global VOICE_OK, VOICE_READY, VOICE_IMPORT_ERR, sd, wav, WhisperModel
-
-    if VOICE_READY:
-        return VOICE_OK
-
-    VOICE_READY = True
-    try:
-        import sounddevice as _sd
-        import scipy.io.wavfile as _wav
-        from faster_whisper import WhisperModel as _WhisperModel
-
-        sd = _sd
-        wav = _wav
-        WhisperModel = _WhisperModel
-        VOICE_OK = True
-        VOICE_IMPORT_ERR = ""
-    except Exception as e:
-        VOICE_OK = False
-        VOICE_IMPORT_ERR = str(e)
-        sd = None
-        wav = None
-        WhisperModel = None
-
-    return VOICE_OK
+    return service_ensure_voice_deps(globals())
 
 import sys
 
@@ -243,6 +364,7 @@ KNOWN_ANIMALS = {
 
 # Web cache folder
 WEB_CACHE_DIR = KNOWLEDGE_ROOT / "web"
+DATA_SOURCES_ROOT = BASE_DIR / "data_sources"
 
 # Self patching
 UPDATES_DIR = BASE_DIR / "updates"
@@ -420,13 +542,13 @@ def _infer_turn_intent(user_input: str) -> str:
         return "empty"
     if "weather" in t:
         return "weather_lookup"
-    if t.startswith("web research ") or "deep research" in t or "all the information" in t:
+    if t.startswith("web research "):
         return "web_research"
-    if t.startswith("web search ") or t.startswith("search "):
+    if t.startswith("web search ") or "search the web" in t:
         return "web_search"
     if t.startswith("web gather "):
         return "web_gather"
-    if t.startswith("web ") or "http://" in t or "https://" in t:
+    if "http://" in t or "https://" in t:
         return "web_fetch"
     if "my name is" in t or "your name is" in t or "full name" in t:
         return "identity_update_or_query"
@@ -447,25 +569,7 @@ def action_ledger_add_step(
 
 
 def action_ledger_route_summary(record_or_trace: Optional[object]) -> str:
-    if isinstance(record_or_trace, dict):
-        trace = record_or_trace.get("route_trace")
-    else:
-        trace = record_or_trace
-    if not isinstance(trace, list):
-        return ""
-
-    parts = []
-    for raw_step in trace:
-        if not isinstance(raw_step, dict):
-            continue
-        stage = str(raw_step.get("stage") or "").strip()
-        outcome = str(raw_step.get("outcome") or "").strip()
-        if not stage:
-            continue
-        if stage in {"timing", "timing_breakdown"}:
-            continue
-        parts.append(f"{stage}:{outcome or 'unknown'}")
-    return " -> ".join(parts[:16])[:600]
+    return service_action_ledger_route_summary(record_or_trace)
 
 
 TOOL_INTENT_LABELS: dict[str, str] = {
@@ -480,61 +584,15 @@ TOOL_INTENT_LABELS: dict[str, str] = {
 
 
 def _recent_action_ledger_records(limit: int = 20) -> list[dict]:
-    try:
-        if not ACTION_LEDGER_DIR.exists():
-            return []
-        files = sorted(ACTION_LEDGER_DIR.glob("*.json"))[-max(1, int(limit)):]
-        records = []
-        for path in files:
-            try:
-                payload = json.loads(path.read_text(encoding="utf-8"))
-            except Exception:
-                continue
-            if isinstance(payload, dict):
-                records.append(payload)
-        return records
-    except Exception:
-        return []
+    return service_recent_action_ledger_records(ACTION_LEDGER_DIR, limit=limit)
 
 
 def _record_completed_tool_execution(record: dict) -> bool:
-    if not isinstance(record, dict):
-        return False
-    trace = record.get("route_trace")
-    if not isinstance(trace, list):
-        return False
-    for step in trace:
-        if not isinstance(step, dict):
-            continue
-        stage = str(step.get("stage") or "").strip()
-        outcome = str(step.get("outcome") or "").strip()
-        if stage == "tool_execution" and outcome == "ok":
-            return True
-        if stage in {"keyword_tool", "command"} and outcome == "matched" and str(record.get("tool_result") or "").strip():
-            return True
-    return False
+    return service_record_completed_tool_execution(record)
 
 
 def _record_requested_tool_clarification(record: dict) -> bool:
-    if not isinstance(record, dict):
-        return False
-    if str(record.get("planner_decision") or "").strip() == "ask_clarify":
-        return True
-    trace = record.get("route_trace")
-    if not isinstance(trace, list):
-        return False
-    for step in trace:
-        if not isinstance(step, dict):
-            continue
-        stage = str(step.get("stage") or "").strip()
-        outcome = str(step.get("outcome") or "").strip()
-        if stage == "action_planner" and outcome == "ask_clarify":
-            return True
-        if stage == "pending_action" and outcome == "awaiting_location":
-            return True
-        if stage == "finalize" and outcome == "ask_clarify":
-            return True
-    return False
+    return service_record_requested_tool_clarification(record)
 
 
 def _detect_repeated_tool_intent_without_execution(records: Optional[list[dict]] = None, limit: int = 20) -> dict:
@@ -547,100 +605,38 @@ def _detect_repeated_tool_intent_without_execution(records: Optional[list[dict]]
 
 
 def _top_repeated_correction_class(records: Optional[list[dict]] = None, limit: int = 20) -> dict:
-    recent = records if isinstance(records, list) else _recent_action_ledger_records(limit=limit)
-    counts: dict[str, int] = {}
-    for rec in recent:
-        trace = rec.get("route_trace") if isinstance(rec, dict) else None
-        if not isinstance(trace, list):
-            continue
-        for step in trace:
-            if not isinstance(step, dict):
-                continue
-            stage = str(step.get("stage") or "").strip()
-            outcome = str(step.get("outcome") or "").strip()
-            detail = str(step.get("detail") or "").strip()
-            if stage == "llm_postprocess" and outcome == "self_corrected" and detail:
-                counts[detail] = int(counts.get(detail, 0)) + 1
-            elif stage == "claim_gate" and outcome == "adjusted":
-                key = detail or "claim_gate_adjusted"
-                counts[key] = int(counts.get(key, 0)) + 1
-
-    if not counts:
-        return {"class": "", "count": 0}
-    reason, count = max(counts.items(), key=lambda item: item[1])
-    return {"class": reason, "count": int(count)}
+    return service_top_repeated_correction_class(ACTION_LEDGER_DIR, records=records, limit=limit)
 
 
 def _count_unsupported_claim_blocks_recently(records: Optional[list[dict]] = None, limit: int = 20) -> int:
-    recent = records if isinstance(records, list) else _recent_action_ledger_records(limit=limit)
-    count = 0
-    for rec in recent:
-        trace = rec.get("route_trace") if isinstance(rec, dict) else None
-        if not isinstance(trace, list):
-            continue
-        for step in trace:
-            if not isinstance(step, dict):
-                continue
-            stage = str(step.get("stage") or "").strip()
-            outcome = str(step.get("outcome") or "").strip()
-            detail = str(step.get("detail") or "").strip().lower()
-            if stage == "claim_gate" and outcome == "adjusted":
-                count += 1
-            if stage == "llm_postprocess" and outcome == "self_corrected" and detail == "autonomy_guard":
-                count += 1
-    return count
-
-
-def _unsupported_claims_blocked_recently(records: Optional[list[dict]] = None, limit: int = 20) -> bool:
-    return _count_unsupported_claim_blocks_recently(records=records, limit=limit) > 0
+    return service_count_unsupported_claim_blocks_recently(ACTION_LEDGER_DIR, records=records, limit=limit)
 
 
 def _count_routing_overrides_recently(records: Optional[list[dict]] = None, limit: int = 20) -> int:
-    recent = records if isinstance(records, list) else _recent_action_ledger_records(limit=limit)
-    count = 0
-    for rec in recent:
-        trace = rec.get("route_trace") if isinstance(rec, dict) else None
-        if not isinstance(trace, list):
-            continue
-        for step in trace:
-            if not isinstance(step, dict):
-                continue
-            stage = str(step.get("stage") or "").strip()
-            outcome = str(step.get("outcome") or "").strip()
-            if stage == "routing_override" and outcome == "enabled":
-                count += 1
-                break
-    return count
+    return service_count_routing_overrides_recently(ACTION_LEDGER_DIR, records=records, limit=limit)
+
+
+def _unsupported_claims_blocked_recently(records: Optional[list[dict]] = None, limit: int = 20) -> bool:
+    return service_unsupported_claims_blocked_recently(ACTION_LEDGER_DIR, records=records, limit=limit)
+
+
 
 
 def _record_used_routing_override(record: Optional[dict]) -> bool:
-    trace = record.get("route_trace") if isinstance(record, dict) else None
-    if not isinstance(trace, list):
-        return False
-    for step in trace:
-        if not isinstance(step, dict):
-            continue
-        stage = str(step.get("stage") or "").strip()
-        outcome = str(step.get("outcome") or "").strip()
-        if stage == "routing_override" and outcome == "enabled":
-            return True
-    return False
+    return service_record_used_routing_override(record)
 
 
 def _routing_stable_recently(records: Optional[list[dict]] = None, limit: int = 20) -> bool:
-    failure = _detect_repeated_tool_intent_without_execution(records=records, limit=limit)
-    return not bool(failure.get("summary"))
+    return service_routing_stable_recently(
+        ACTION_LEDGER_DIR,
+        records=records,
+        limit=limit,
+        tool_intent_labels=TOOL_INTENT_LABELS,
+    )
 
 
 def _sample_intents_last(records: Optional[list[dict]] = None, count: int = 5) -> list[str]:
-    recent = records if isinstance(records, list) else _recent_action_ledger_records(limit=max(1, int(count)))
-    intents: list[str] = []
-    for rec in recent[-max(1, int(count)):]:
-        if not isinstance(rec, dict):
-            continue
-        intent = str(rec.get("intent") or "").strip()
-        intents.append(intent or "unknown")
-    return intents
+    return service_sample_intents_last(ACTION_LEDGER_DIR, records=records, count=count)
 
 
 def _append_self_reflection(payload: dict) -> None:
@@ -1247,57 +1243,17 @@ REPLY_TEMPLATES: dict[str, str] = {
 
 
 def render_reply(outcome: Optional[dict]) -> str:
-    payload = outcome if isinstance(outcome, dict) else {}
-    contract = str(payload.get("reply_contract") or "").strip()
-    if not contract:
-        return "Internal reply error - missing contract."
-    template = REPLY_TEMPLATES.get(contract)
-    if not template:
-        return "Internal reply error - missing template."
-    try:
-        return template.format(**payload)
-    except Exception:
-        return "Internal reply error - invalid template data."
+    return service_render_reply_contract(outcome, reply_templates=REPLY_TEMPLATES)
 
 
 def _attach_reply_outcome(result_payload: Optional[dict], outcome: Optional[dict]) -> None:
-    if not isinstance(result_payload, dict) or not isinstance(outcome, dict):
-        return
-    result_payload["reply_contract"] = str(outcome.get("reply_contract") or "")
-    result_payload["reply_outcome"] = dict(outcome)
+    return service_attach_reply_outcome(result_payload, outcome)
+
+
 
 
 def _classify_set_location_outcome(intent_result: dict, user_text: str = "") -> dict[str, object]:
-    semantics = _resolve_set_location_semantics(intent_result, user_text)
-    payload = intent_result if isinstance(intent_result, dict) else {}
-    location_value = str(semantics.get("location_value") or "").strip()
-    if not location_value:
-        return {
-            "intent": "set_location",
-            "kind": "missing_value",
-            "reply_contract": "set_location.missing_value",
-            "location_value": "",
-            "location_kind": str(semantics.get("location_kind") or "").strip().lower(),
-            "location_ack_kind": str(semantics.get("location_ack_kind") or "").strip().lower(),
-            "user_commitment": "none",
-            "state_delta": {},
-        }
-
-    location_kind = str(semantics.get("location_kind") or "place").strip().lower()
-    ack_kind = str(semantics.get("location_ack_kind") or "confirmed_location").strip().lower()
-    rule_name = str(payload.get("rule_name") or "").strip().lower()
-    user_commitment = "implied" if rule_name == "set_location_zip" else "explicit"
-    outcome_kind = "observed_zip" if location_kind == "zip" or ack_kind == "fact_only" else "explicit_location"
-    return {
-        "intent": "set_location",
-        "kind": outcome_kind,
-        "reply_contract": f"set_location.{outcome_kind}",
-        "location_value": location_value,
-        "location_kind": location_kind,
-        "location_ack_kind": ack_kind,
-        "user_commitment": user_commitment,
-        "state_delta": {"location": location_value},
-    }
+    return service_classify_set_location_outcome(intent_result, user_text)
 
 
 def _classify_correction_outcome(
@@ -1346,75 +1302,21 @@ def _classify_weather_lookup_outcome(intent_result: dict) -> dict[str, object]:
 
 
 def _execute_weather_lookup_outcome(weather_outcome: dict[str, object]) -> tuple[str, Optional[dict], dict[str, object]]:
-    outcome = dict(weather_outcome or {})
-    weather_mode = str(outcome.get("weather_mode") or "clarify").strip().lower() or "clarify"
-    next_state = outcome.get("next_state") if isinstance(outcome.get("next_state"), dict) else None
-    if weather_mode == "clarify":
-        return render_reply(outcome), next_state, outcome
-
-    if weather_mode == "current_location":
-        tool_result = execute_planned_action("weather_current_location")
-        next_state = _make_weather_result_state(weather_mode=weather_mode, tool_result=str(tool_result or ""))
-        outcome["next_state"] = next_state
-        outcome["state_delta"] = next_state
-        outcome["tool_result"] = str(tool_result or "")
-        return render_reply(outcome), next_state, outcome
-
-    if weather_mode == "explicit_location":
-        location_value = str(outcome.get("location_value") or "").strip()
-        if not location_value:
-            fallback = _classify_weather_lookup_outcome({"weather_mode": "clarify", "next_state": next_state})
-            return render_reply(fallback), next_state, fallback
-        tool_result = execute_planned_action("weather_location", [location_value])
-        next_state = _make_weather_result_state(
-            weather_mode=weather_mode,
-            location_value=location_value,
-            tool_result=str(tool_result or ""),
-        )
-        outcome["next_state"] = next_state
-        outcome["state_delta"] = next_state
-        outcome["tool_result"] = str(tool_result or "")
-        return render_reply(outcome), next_state, outcome
-
-    fallback = _classify_weather_lookup_outcome({"weather_mode": "clarify", "next_state": next_state})
-    return render_reply(fallback), next_state, fallback
+    return service_execute_weather_lookup_outcome(
+        weather_outcome,
+        render_reply_fn=render_reply,
+        execute_planned_action_fn=execute_planned_action,
+        make_weather_result_state_fn=_make_weather_result_state,
+        classify_weather_lookup_outcome_fn=_classify_weather_lookup_outcome,
+    )
 
 
 def _classify_name_origin_outcome(intent_result: dict) -> dict[str, object]:
-    payload = intent_result if isinstance(intent_result, dict) else {}
-    query_kind = str(payload.get("name_origin_query_kind") or "source_recall").strip().lower() or "source_recall"
-    assistant_name = str(get_learned_fact("assistant_name", "Nova") or "Nova").strip() or "Nova"
-    developer_name = str(get_learned_fact("developer_name", "Gustavo Uribe") or "Gustavo Uribe").strip() or "Gustavo Uribe"
-    developer_nickname = str(get_learned_fact("developer_nickname", "Gus") or developer_name).strip() or developer_name
-    story = get_name_origin_story().strip()
-    if story:
-        if query_kind == "why_called":
-            low_story = story.lower()
-            if "was given its name" in low_story and "creator" in low_story:
-                reply_text = story
-            else:
-                reply_text = f"{assistant_name} was given its name by its creator, {developer_nickname}. {story}"
-        else:
-            reply_text = story
-        contract = "name_origin.full_story" if query_kind == "full_story" else "name_origin.story_known"
-        outcome_kind = "full_story" if query_kind == "full_story" else "story_known"
-    else:
-        if query_kind == "full_story":
-            reply_text = "I do not have a saved full name-origin story yet. You can teach me with: remember this ..."
-        else:
-            reply_text = "I do not have a saved name-origin story yet. You can teach me with: remember this ..."
-        contract = "name_origin.story_missing"
-        outcome_kind = "story_missing"
-    return {
-        "intent": "name_origin",
-        "kind": outcome_kind,
-        "query_kind": query_kind,
-        "reply_contract": contract,
-        "reply_text": reply_text,
-        "story_known": bool(story),
-        "story_text": story,
-        "state_delta": {},
-    }
+    return service_classify_name_origin_outcome(
+        intent_result,
+        get_learned_fact_fn=get_learned_fact,
+        get_name_origin_story_fn=get_name_origin_story,
+    )
 
 
 def _execute_identity_history_outcome(
@@ -1444,37 +1346,11 @@ def _execute_identity_history_outcome(
 
 
 def _open_probe_reply(text: str, turns: Optional[list[tuple[str, str]]] = None) -> tuple[str, str]:
-    normalized = _normalize_turn_text(text)
-    normalized_key = re.sub(r"[^a-z0-9 ]+", " ", normalized)
-    normalized_key = re.sub(r"\s+", " ", normalized_key).strip()
-    if normalized_key in {"can you help me a little here", "can you help me here"}:
-        return (
-            "What kind of help do you want?",
-            "safe_fallback",
-        )
-    if normalized_key in {"what do you think then", "what now", "what next", "okay so what next", "where does that leave us"}:
-        return (
-            "I don't have enough context to answer that yet. Tell me the topic or decision you want help with, and I'll stay on it.",
-            "safe_fallback",
-        )
-    if any(cue in normalized for cue in ("what are you talking about", "what are you talking", "what ?", "what?")):
-        last_assistant = ""
-        for role, txt in reversed(list(turns or [])):
-            if str(role or "").strip().lower() == "assistant":
-                last_assistant = str(txt or "").strip()
-                break
-        if last_assistant and any(token in last_assistant.lower() for token in ("allowlisted references", "web lookup", "web research")):
-            return (
-                "You're right. That response drifted into web lookup when you were asking a direct chat question. Ask it again and I'll answer it directly.",
-                "clarification",
-            )
-        return (
-            "You're right. I should stay with the current chat instead of jumping to web lookup for that kind of question.",
-            "clarification",
-        )
-    return (
-        _truthful_limit_reply(text),
-        "safe_fallback",
+    return service_open_probe_reply(
+        text,
+        turns,
+        normalize_turn_text_fn=_normalize_turn_text,
+        truthful_limit_reply_fn=_truthful_limit_reply,
     )
 
 
@@ -1484,38 +1360,22 @@ def _truthful_limit_reply(
     limitation: str = "cannot_verify",
     include_next_step: bool = True,
 ) -> str:
-    normalized = _normalize_turn_text(text)
-    limitation_kind = str(limitation or "cannot_verify").strip().lower() or "cannot_verify"
-    if limitation_kind == "cannot_do":
-        base = "I can't do that with the tools or permissions I have available right now, and I don't want to pretend I can."
-    else:
-        base = "I don't know that based on what I can verify right now, and I don't want to make it up."
-
-    learning_invitation = "If you know the answer or want to correct me, tell me and I'll store it so I do better next time."
-
-    if not include_next_step:
-        return base + " " + learning_invitation
-    if _looks_like_mixed_info_request_turn(normalized):
-        return base + " Please split the request or tell me which part you want me to handle first. " + learning_invitation
-    if _is_explicit_request(normalized) or "?" in normalized:
-        return base + " If you want, I can ask a clarifying question or use a grounded source or tool if one is available. " + learning_invitation
-    return base + " If you want, I can stay on the current thread, ask a clarifying question, or use a grounded source or tool if one is available. " + learning_invitation
+    return service_truthful_limit_reply(
+        text,
+        limitation=limitation,
+        include_next_step=include_next_step,
+        normalize_turn_text_fn=_normalize_turn_text,
+        looks_like_mixed_info_request_turn_fn=_looks_like_mixed_info_request_turn,
+        is_explicit_request_fn=_is_explicit_request,
+    )
 
 
 def _attach_learning_invitation(reply_text: str, *, truthful_limit: bool = False) -> str:
-    reply = str(reply_text or "").strip()
-    if not reply:
-        return reply
-
-    normalized = _normalize_turn_text(reply)
-    if "correct me" in normalized and ("store it" in normalized or "do better next time" in normalized):
-        return reply
-
-    if not truthful_limit:
-        return reply
-
-    suffix = "If you know the answer or want to correct me, tell me and I'll store it so I do better next time."
-    return reply + " " + suffix
+    return service_attach_learning_invitation(
+        reply_text,
+        truthful_limit=truthful_limit,
+        normalize_turn_text_fn=_normalize_turn_text,
+    )
 
 
 def _truthful_limit_outcome(
@@ -1523,27 +1383,23 @@ def _truthful_limit_outcome(
     *,
     limitation: str = "cannot_verify",
 ) -> dict[str, str]:
-    return {
-        "intent": "truthful_limit",
-        "kind": str(limitation or "cannot_verify").strip().lower() or "cannot_verify",
-        "reply_contract": "turn.truthful_limit",
-        "reply_text": _truthful_limit_reply(text, limitation=limitation),
-    }
+    return service_truthful_limit_outcome(
+        text,
+        limitation=limitation,
+        truthful_limit_reply_fn=_truthful_limit_reply,
+    )
 
 
 def _last_question_recall_reply(text: str, turns: Optional[list[tuple[str, str]]] = None) -> tuple[str, str]:
-    last_question = _extract_last_user_question(list(turns or []), text)
-    if last_question:
-        return f"Your last question before this one was: {last_question}", "recall"
-    return "I don't have an earlier question in this active chat session.", "empty"
+    return service_last_question_recall_reply(
+        text,
+        turns,
+        extract_last_user_question_fn=_extract_last_user_question,
+    )
 
 
 def _session_fact_recall_reply(rule_result: dict) -> tuple[str, str]:
-    target = str((rule_result or {}).get("fact_target") or "").strip().lower()
-    value = str((rule_result or {}).get("fact_value") or "").strip()
-    if value:
-        return value.rstrip(".!?"), target or "fact"
-    return "I do not have that fact in this active chat session.", "empty"
+    return service_session_fact_recall_reply(rule_result)
 
 
 def _execute_retrieval_followup_outcome(state: dict, text: str) -> tuple[str, Optional[dict], dict[str, object]]:
@@ -1571,31 +1427,14 @@ def _classify_web_research_outcome(
     *,
     turns: Optional[list[tuple[str, str]]] = None,
 ) -> dict[str, object]:
-    payload = intent_result if isinstance(intent_result, dict) else {}
-    request_kind = str(payload.get("web_request_kind") or "research_prompt").strip().lower() or "research_prompt"
-    tool_name = str(payload.get("tool_name") or "web_research").strip().lower() or "web_research"
-    provider_candidates = payload.get("provider_candidates") if isinstance(payload.get("provider_candidates"), list) else []
-    provider_family = str(payload.get("provider_family") or "general_web").strip().lower() or "general_web"
-    query = str(payload.get("query") or "").strip()
-    if request_kind == "deep_search" and not query:
-        query = _infer_research_query_from_turns(list(turns or []))
-    if not query:
-        query = str(user_text or "").strip()
-    resolved = _resolve_research_provider(provider_candidates, default_tool=tool_name)
-    tool_name = str(resolved.get("tool_name") or tool_name).strip().lower() or tool_name
-    provider_used = str(resolved.get("provider") or _provider_name_from_tool(tool_name)).strip().lower() or _provider_name_from_tool(tool_name)
-    return {
-        "intent": "web_research_family",
-        "kind": request_kind,
-        "reply_contract": f"web_research_family.{request_kind}",
-        "tool_name": tool_name,
-        "provider_candidates": list(provider_candidates or []),
-        "provider_family": provider_family,
-        "provider_used": provider_used,
-        "query": query,
-        "requires_tool": True,
-        "state_delta": {},
-    }
+    return service_classify_web_research_outcome(
+        intent_result,
+        user_text,
+        turns=turns,
+        infer_research_query_from_turns_fn=_infer_research_query_from_turns,
+        resolve_research_provider_fn=_resolve_research_provider,
+        provider_name_from_tool_fn=_provider_name_from_tool,
+    )
 
 
 def start_action_ledger_record(
@@ -1618,23 +1457,13 @@ def start_action_ledger_record(
 
 
 def write_action_ledger_record(record: dict) -> Optional[Path]:
-    try:
-        ACTION_LEDGER_DIR.mkdir(parents=True, exist_ok=True)
-        ts = time.strftime("%Y-%m-%d_%H-%M-%S")
-        ms = int((time.time() % 1) * 1000)
-        digest = hashlib.sha1(
-            str(record.get("user_input", "")).encode("utf-8", errors="ignore")
-            + str(time.time_ns()).encode("ascii", errors="ignore")
-        ).hexdigest()[:8]
-        out = ACTION_LEDGER_DIR / f"{ts}_{ms:03d}_{digest}.json"
-        out.write_text(json.dumps(record, ensure_ascii=True, indent=2), encoding="utf-8")
-        return out
-    except Exception:
-        return None
+    return service_write_action_ledger_record(record, action_ledger_dir=ACTION_LEDGER_DIR)
 
 
 def _append_memory_event(payload: dict) -> None:
     return service_append_memory_event(payload, memory_events_log=MEMORY_EVENTS_LOG)
+
+
 
 
 def _record_memory_event(
@@ -1711,168 +1540,49 @@ def finalize_action_ledger_record(
 
 
 def _is_factual_identity_or_policy_query(text: str) -> bool:
-    t = (text or "").strip().lower()
-    if not t:
-        return False
-    cues = [
-        "what is", "why is", "who is", "full name", "rules", "policy", "requirements",
-        "attendance", "peims", "tsds", "tea",
-    ]
-    return any(c in t for c in cues)
+    return service_is_factual_identity_or_policy_query(text)
 
 
 def _is_capability_query(text: str) -> bool:
-    t = (text or "").strip().lower()
-    if not t:
-        return False
-    cues = [
-        "what can you do",
-        "what do you do",
-        "what do you do nova",
-        "what do you do?",
-        "your abilities",
-        "your ability",
-        "what do you help with",
-        "what do you do here",
-        "what are you capable",
-        "know what your capable",
-        "know what you're capable",
-        "capabilities",
-    ]
-    return any(c in t for c in cues)
+    return service_is_capability_query(text)
 
 
 def _is_policy_domain_query(text: str) -> bool:
-    t = (text or "").strip().lower()
-    if not t:
-        return False
-    cues = [
-        "domain access",
-        "allowed domains",
-        "what domains",
-        "policy",
-        "web access",
-        "which domains",
-    ]
-    return any(c in t for c in cues)
+    return service_is_policy_domain_query(text)
 
 
 def _is_action_history_query(text: str) -> bool:
-    t = (text or "").strip().lower()
-    if not t:
-        return False
-    cues = [
-        "what did you just do",
-        "what did you do",
-        "last action",
-        "last tool",
-        "what did you just run",
-    ]
-    return any(c in t for c in cues)
+    return service_is_action_history_query(text)
 
 
 def _is_identity_or_developer_query(text: str) -> bool:
-    t = (text or "").strip().lower()
-    t = re.sub(r"\byor\b", "your", t)
-    if not t:
-        return False
-    cues = [
-        "your name",
-        "who are you",
-        "developer",
-        "creator",
-        "full name",
-        "name origin",
-        "why are you called",
-        "why is your name",
-        "did you learn about your name",
-        "do you remember me",
-        "do you know me",
-        "what is my name",
-        "what's my name",
-        "know my name",
-        "just knowing my name",
-        "what do you know about me",
-        "what else do you know about me",
-        "what do you remember about me",
-    ]
-    return any(c in t for c in cues)
+    return service_is_identity_or_developer_query(text)
 
 
 def _is_name_origin_question(text: str) -> bool:
-    low = (text or "").strip().lower()
-    cues = [
-        "where your name comes from",
-        "where does your name come from",
-        "story behind your name",
-        "story behing your name",
-        "why are you called nova",
-        "why nova",
-        "do you know where your name comes from",
-        "what does your name mean",
-    ]
-    return any(c in low for c in cues)
+    return service_is_name_origin_question(text)
 
 
 def _is_assistant_name_query(text: str) -> bool:
-    low = (text or "").strip().lower()
-    low = re.sub(r"\byor\b", "your", low)
-    cues = [
-        "what is your name",
-        "what's your name",
-        "are you sure that is your name",
-        "your name is not",
-        "is your name",
-    ]
-    if any(c in low for c in cues):
-        return True
-    if re.search(r"\bare\s+\w*ou\s+sure\b.*\bname\b", low):
-        return True
-    return False
+    return service_is_assistant_name_query(text)
 
 
 def _is_self_identity_web_challenge(text: str) -> bool:
-    low = (text or "").strip().lower()
-    low = re.sub(r"\byor\b", "your", low)
-    if "web" not in low:
-        return False
-    identity_cues = (
-        "your name",
-        "who you are",
-        "who are you",
-    )
-    challenge_cues = (
-        "why should i",
-        "why would i",
-        "why do i need",
-        "why use the web",
-        "try to use the web",
-    )
-    return any(cue in low for cue in identity_cues) and any(cue in low for cue in challenge_cues)
+    return service_is_self_identity_web_challenge(text)
 
 
 def _self_identity_web_challenge_reply() -> str:
     assistant_name = get_learned_fact("assistant_name", "Nova")
-    return f"You should not need web research for my name. I already know my name is {assistant_name}, so that should be answered directly from my verified identity facts."
+    return service_self_identity_web_challenge_reply(assistant_name=assistant_name)
 
 
 def _assistant_name_reply(text: str) -> str:
     assistant_name = get_learned_fact("assistant_name", "Nova")
-    low = (text or "").strip().lower()
-    if "your name is nova" in low:
-        return f"Correct. My name is {assistant_name}."
-    return f"My name is {assistant_name}."
+    return service_assistant_name_reply(text, assistant_name=assistant_name)
 
 
 def _is_developer_full_name_query(text: str) -> bool:
-    low = (text or "").strip().lower()
-    if "full name" not in low:
-        return False
-    query_cues = ["what is", "what's", "tell me", "do you know", "can you tell me"]
-    if "?" not in text and not any(cue in low for cue in query_cues):
-        return False
-    cues = ["developer", "gus", "nickname", "nick name", "his full name"]
-    return any(c in low for c in cues)
+    return service_is_developer_full_name_query(text)
 
 
 def _developer_full_name_reply() -> str:
@@ -1880,37 +1590,22 @@ def _developer_full_name_reply() -> str:
     if str(full_name or "").strip().lower() == "gustavo":
         full_name = "Gustavo Uribe"
     nickname = get_learned_fact("developer_nickname", "Gus")
-    if nickname and nickname.lower() != full_name.lower():
-        return f"My developer's full name is {full_name}. {nickname} is his nickname."
-    return f"My developer's full name is {full_name}."
+    return service_developer_full_name_reply(
+        developer_name=full_name,
+        developer_nickname=nickname,
+    )
 
 
 def _is_location_request(user_text: str) -> bool:
-    normalized = _normalize_turn_text(user_text)
-    if not normalized:
-        return False
-    return any(cue in normalized for cue in (
-        "where is nova",
-        "where are you",
-        "your location",
-        "what is your location",
-        "what is your current location",
-        "what is your current physical location",
-        "where are you located",
-        "where is nova located",
-    ))
+    return service_is_location_request(user_text, normalize_turn_text_fn=_normalize_turn_text)
 
 
 def _location_reply() -> str:
-    live = runtime_device_location_payload()
-    if live.get("available") and not live.get("stale"):
-        accuracy = live.get("accuracy_m")
-        accuracy_note = f" Accuracy about {int(round(float(accuracy)))}m." if accuracy is not None else ""
-        return f"My current device location is {live.get('coords_text')}.{accuracy_note}"
-    preview = get_saved_location_text()
-    if preview:
-        return f"My location is {preview}."
-    return "I don't have a stored location yet. You can tell me: 'My location is ...'"
+    return service_location_reply(
+        runtime_device_location_payload_fn=runtime_device_location_payload,
+        get_saved_location_text_fn=get_saved_location_text,
+        resolve_current_device_coords_fn=resolve_current_device_coords,
+    )
 
 
 def _is_session_recap_request(text: str) -> bool:
@@ -1928,32 +1623,11 @@ def _is_session_recap_request(text: str) -> bool:
 
 
 def _session_recap_reply(turns: list[tuple[str, str]], current_text: str) -> str:
-    current_low = (current_text or "").strip().lower()
-    topics: list[str] = []
-
-    for role, txt in turns:
-        if role != "user":
-            continue
-        clean = re.sub(r"\s+", " ", (txt or "").strip())
-        if not clean:
-            continue
-        low = clean.lower()
-        if low == current_low:
-            continue
-        if _is_session_recap_request(clean):
-            continue
-        if len(clean) > 180:
-            clean = clean[:177] + "..."
-        topics.append(clean)
-
-    if not topics:
-        return "I do not have enough prior user turns in this session to recap yet."
-
-    recent = topics[-6:]
-    lines = ["Recap of this session so far:"]
-    for index, topic in enumerate(recent, start=1):
-        lines.append(f"{index}. {topic}")
-    return "\n".join(lines)
+    return service_session_recap_reply(
+        turns,
+        current_text,
+        is_session_recap_request_fn=_is_session_recap_request,
+    )
 
 
 def _is_deep_search_followup_request(text: str) -> bool:
@@ -2025,33 +1699,12 @@ def truth_hierarchy_answer(user_text: str) -> tuple[bool, str, str, bool]:
 
 
 def _self_correct_reply(user_text: str, reply: str) -> tuple[str, bool, str]:
-    out = (reply or "").strip()
-    if not out:
-        return out, False, ""
-
-    # Capability questions must resolve to the deterministic capability model.
-    if _is_capability_query(user_text):
-        target = describe_capabilities().strip()
-        if target and re.sub(r"\s+", " ", out).lower() != re.sub(r"\s+", " ", target).lower():
-            return target, True, "capability_alignment"
-
-    # Guard against autonomy claims outside Nova's controlled execution model.
-    low = out.lower()
-    bad_autonomy = [
-        "enhance myself on my own",
-        "enhance myself autonomously",
-        "i can enhance myself",
-        "i will enhance myself",
-        "self-sustenance",
-    ]
-    if any(b in low for b in bad_autonomy):
-        corrected = (
-            "I cannot self-enhance on my own. I can only improve through your explicit guidance, "
-            "validated tool runs, and saved corrections."
-        )
-        return corrected, True, "autonomy_guard"
-
-    return out, False, ""
+    return service_self_correct_reply(
+        user_text,
+        reply,
+        is_capability_query_fn=_is_capability_query,
+        describe_capabilities_fn=describe_capabilities,
+    )
 
 
 def should_block_low_confidence(user_text: str, retrieved_context: str = "", tool_context: str = "") -> bool:
@@ -2289,30 +1942,7 @@ DEVICE_LOCATION_MAX_AGE_SEC = 300.0
 
 
 def _runtime_device_backend_provider() -> dict:
-    platform_supported = os.name == "nt"
-    winsdk_installed = False
-    if platform_supported:
-        try:
-            winsdk_installed = bool(
-                importlib.util.find_spec("winsdk.windows.devices.geolocation")
-                or importlib.util.find_spec("winsdk")
-            )
-        except Exception:
-            winsdk_installed = False
-    available = platform_supported and winsdk_installed
-    if available:
-        message = "Windows geolocation fallback is ready."
-    elif platform_supported:
-        message = "Windows geolocation fallback requires the winsdk package."
-    else:
-        message = "Windows geolocation fallback is only available on Windows hosts."
-    return {
-        "name": "windows_geolocator",
-        "platform_supported": platform_supported,
-        "winsdk_installed": winsdk_installed,
-        "available": available,
-        "message": message,
-    }
+    return service_runtime_device_backend_provider()
 
 
 def _coerce_bounded_float(value, *, minimum: float, maximum: float) -> Optional[float]:
@@ -2365,54 +1995,28 @@ def _device_location_status_payload(snapshot: Optional[dict], *, max_age_sec: fl
 
 
 def runtime_device_location_payload(*, max_age_sec: float = DEVICE_LOCATION_MAX_AGE_SEC) -> dict:
-    try:
-        if not DEVICE_LOCATION_FILE.exists():
-            return _device_location_status_payload(None, max_age_sec=max_age_sec)
-        raw = json.loads(DEVICE_LOCATION_FILE.read_text(encoding="utf-8") or "{}")
-    except Exception:
-        return {
-            "available": False,
-            "status": "error",
-            "stale": False,
-            "message": "Failed to read live device location state.",
-            "backend_provider": _runtime_device_backend_provider(),
-        }
-    return _device_location_status_payload(raw, max_age_sec=max_age_sec)
+    return service_runtime_device_location_payload(
+        device_location_file=DEVICE_LOCATION_FILE,
+        max_age_sec=max_age_sec,
+        device_location_status_payload_fn=_device_location_status_payload,
+        runtime_device_backend_provider_fn=_runtime_device_backend_provider,
+    )
 
 
 def set_runtime_device_location(payload: dict) -> tuple[bool, str, dict]:
-    data = payload if isinstance(payload, dict) else {}
-    lat = _coerce_bounded_float(data.get("lat"), minimum=-90.0, maximum=90.0)
-    lon = _coerce_bounded_float(data.get("lon"), minimum=-180.0, maximum=180.0)
-    if lat is None or lon is None:
-        return False, "device_location_invalid", runtime_device_location_payload()
-
-    snapshot = {
-        "lat": lat,
-        "lon": lon,
-        "accuracy_m": _coerce_optional_metric(data.get("accuracy_m")),
-        "speed_mps": _coerce_optional_metric(data.get("speed_mps")),
-        "heading_deg": _coerce_optional_metric(data.get("heading_deg")),
-        "altitude_m": _coerce_optional_metric(data.get("altitude_m")),
-        "source": str(data.get("source") or "browser_watch").strip().lower() or "browser_watch",
-        "permission_state": str(data.get("permission_state") or "").strip().lower(),
-        "captured_ts": _normalize_source_timestamp(data.get("captured_ts")),
-        "updated_at": time.strftime("%Y-%m-%d %H:%M:%S"),
-    }
-    try:
-        DEVICE_LOCATION_FILE.parent.mkdir(parents=True, exist_ok=True)
-        atomic_write_json(DEVICE_LOCATION_FILE, snapshot)
-    except Exception:
-        return False, "device_location_write_failed", runtime_device_location_payload()
-    return True, "device_location_updated", runtime_device_location_payload()
+    return service_set_runtime_device_location(
+        payload,
+        device_location_file=DEVICE_LOCATION_FILE,
+        atomic_write_json_fn=atomic_write_json,
+        runtime_device_location_payload_fn=runtime_device_location_payload,
+    )
 
 
 def clear_runtime_device_location() -> dict:
-    try:
-        DEVICE_LOCATION_FILE.unlink(missing_ok=True)
-    except Exception:
-        pass
-    return runtime_device_location_payload()
+    return service_clear_runtime_device_location(
+        device_location_file=DEVICE_LOCATION_FILE,
+        runtime_device_location_payload_fn=runtime_device_location_payload,
+    )
 
 
 def _resolve_windows_device_coords(timeout_sec: float = 8.0) -> Optional[dict]:
@@ -2423,26 +2027,16 @@ def _resolve_windows_device_coords(timeout_sec: float = 8.0) -> Optional[dict]:
 
 
 def resolve_current_device_coords(*, max_age_sec: float = DEVICE_LOCATION_MAX_AGE_SEC) -> Optional[tuple[float, float]]:
-    live = runtime_device_location_payload(max_age_sec=max_age_sec)
-    if live.get("available") and not live.get("stale"):
-        return (float(live.get("lat")), float(live.get("lon")))
-
-    windows_fix = _resolve_windows_device_coords()
-    if isinstance(windows_fix, dict):
-        ok, _msg, updated = set_runtime_device_location(windows_fix)
-        if ok and updated.get("available"):
-            return (float(updated.get("lat")), float(updated.get("lon")))
-    return None
+    return service_resolve_current_device_coords(
+        max_age_sec=max_age_sec,
+        runtime_device_location_payload_fn=runtime_device_location_payload,
+        resolve_windows_device_coords_fn=_resolve_windows_device_coords,
+        set_runtime_device_location_fn=set_runtime_device_location,
+    )
 
 
 def _mentions_location_phrase(text: str) -> bool:
-    low = (text or "").lower()
-    return any(p in low for p in [
-        "location",
-        "locaiton",  # common typo seen in transcript
-        "physical location",
-        "physical locaiton",
-    ])
+    return service_mentions_location_phrase(text)
 
 
 BROWNSVILLE_LAT = 25.9017
@@ -2456,147 +2050,47 @@ _LOCATION_HINT_LABELS = {
 
 
 def _parse_lat_lon(text: str) -> Optional[tuple[float, float]]:
-    m = re.search(r"(-?\d{1,2}(?:\.\d+)?)\s*,\s*(-?\d{1,3}(?:\.\d+)?)", (text or ""))
-    if not m:
-        return None
-    try:
-        lat = float(m.group(1))
-        lon = float(m.group(2))
-    except Exception:
-        return None
-    if not (-90.0 <= lat <= 90.0 and -180.0 <= lon <= 180.0):
-        return None
-    return (lat, lon)
+    return service_parse_lat_lon(text)
 
 
 def _coords_for_location_hint(location: str) -> Optional[tuple[float, float]]:
-    loc = (location or "").strip().lower()
-    if not loc:
-        return None
-    parsed = _parse_lat_lon(loc)
-    if parsed:
-        return parsed
-
-    if loc in _LOCATION_HINT_COORDS:
-        return _LOCATION_HINT_COORDS[loc]
-
-    if "brownsville" in loc:
-        return (BROWNSVILLE_LAT, BROWNSVILLE_LON)
-
-    return None
+    return service_coords_for_location_hint(location)
 
 
 def _coords_from_saved_location() -> Optional[tuple[float, float]]:
-    # Prefer explicit operator-set coordinates stored in core state.
-    try:
-        st = read_core_state(DEFAULT_STATEFILE)
-        c = st.get("location_coords") if isinstance(st, dict) else None
-        if isinstance(c, dict):
-            lat = float(c.get("lat"))
-            lon = float(c.get("lon"))
-            if -90.0 <= lat <= 90.0 and -180.0 <= lon <= 180.0:
-                return (lat, lon)
-    except Exception:
-        pass
-
-    try:
-        audit_out = mem_audit("location coordinates lat lon")
-        j = json.loads(audit_out) if audit_out else {}
-        results = j.get("results") if isinstance(j, dict) else []
-        for r in results:
-            preview = (r.get("preview") or "").strip()
-            parsed = _parse_lat_lon(preview)
-            if parsed:
-                return parsed
-    except Exception:
-        return None
-
-    try:
-        saved_text = get_saved_location_text()
-        if saved_text:
-            return _coords_for_location_hint(saved_text)
-    except Exception:
-        return None
-    return None
+    return service_coords_from_saved_location(
+        read_core_state_fn=read_core_state,
+        default_statefile=DEFAULT_STATEFILE,
+        mem_audit_fn=mem_audit,
+        get_saved_location_text_fn=get_saved_location_text,
+    )
 
 
 def get_saved_location_text() -> str:
-    try:
-        st = read_core_state(DEFAULT_STATEFILE)
-        raw = st.get("location_text") if isinstance(st, dict) else ""
-        cleaned = _normalize_location_preview(str(raw or ""))
-        if cleaned:
-            return cleaned
-    except Exception:
-        pass
-
-    try:
-        audit_out = mem_audit("location")
-        j = json.loads(audit_out) if audit_out else {}
-        results = j.get("results") if isinstance(j, dict) else []
-        for row in results:
-            preview = _normalize_location_preview((row.get("preview") or "").strip())
-            low = preview.lower()
-            if not preview:
-                continue
-            if low.startswith("name:"):
-                continue
-            if "coordinates" in low:
-                continue
-            if _parse_lat_lon(preview):
-                continue
-            return preview
-    except Exception:
-        pass
-    return ""
+    return service_get_saved_location_text(
+        read_core_state_fn=read_core_state,
+        default_statefile=DEFAULT_STATEFILE,
+        normalize_location_preview_fn=_normalize_location_preview,
+        mem_audit_fn=mem_audit,
+    )
 
 
 def set_location_text(value: str, input_source: str = "typed") -> str:
-    cleaned = _normalize_location_preview(value)
-    if not cleaned:
-        return "Usage: my location is <place>"
-
-    try:
-        set_core_state(DEFAULT_STATEFILE, "location_text", cleaned)
-    except Exception:
-        pass
-
-    try:
-        mem_add("profile", input_source, f"location: {cleaned}")
-    except Exception:
-        pass
-
-    try:
-        mem_add("user_fact", input_source, f"My location is {cleaned}")
-    except Exception:
-        pass
-
-    try:
-        coords = _coords_for_location_hint(cleaned)
-        if coords:
-            lat, lon = coords
-            set_core_state(DEFAULT_STATEFILE, "location_coords", {"lat": lat, "lon": lon})
-    except Exception:
-        pass
-
-    return f"Saved current location: {cleaned}"
+    return service_set_location_text(
+        value,
+        input_source=input_source,
+        normalize_location_preview_fn=_normalize_location_preview,
+        set_core_state_fn=set_core_state,
+        default_statefile=DEFAULT_STATEFILE,
+        mem_add_fn=mem_add,
+    )
 
 
 def _extract_location_fact(text: str) -> str:
-    raw = (text or "").strip()
-    if not raw or "?" in raw:
-        return ""
-
-    patterns = [
-        r"^\s*(?:my|your)(?:\s+(?:current|physical))?\s+location\s+is\s+(.+?)\s*[.!?]*$",
-        r"^\s*i\s+am\s+located\s+in\s+(.+?)\s*[.!?]*$",
-        r"^\s*you\s+are\s+located\s+in\s+(.+?)\s*[.!?]*$",
-    ]
-    for pattern in patterns:
-        m = re.match(pattern, raw, flags=re.I)
-        if m:
-            return _normalize_location_preview(m.group(1))
-    return ""
+    return service_extract_location_fact(
+        text,
+        normalize_location_preview_fn=_normalize_location_preview,
+    )
 
 
 def _store_location_fact_reply(
@@ -2605,239 +2099,130 @@ def _store_location_fact_reply(
     input_source: str = "typed",
     pending_action: Optional[dict] = None,
 ) -> str:
-    action = pending_action if isinstance(pending_action, dict) else {}
-    if (
-        str(action.get("kind") or "") == "weather_lookup"
-        and str(action.get("status") or "") == "awaiting_location"
-    ):
-        return ""
-
-    location_value = _extract_location_fact(text)
-    if not location_value:
-        return ""
-
-    try:
-        set_location_text(location_value, input_source=input_source)
-    except Exception:
-        return ""
-    return "Noted."
+    return service_store_location_fact_reply(
+        text,
+        input_source=input_source,
+        pending_action=pending_action,
+        extract_location_fact_fn=_extract_location_fact,
+        set_location_text_fn=set_location_text,
+    )
 
 
 def _store_declarative_fact_reply(text: str, *, input_source: str = "typed") -> str:
-    outcome = _store_declarative_fact_outcome(text, input_source=input_source)
-    if not isinstance(outcome, dict):
-        return ""
-    return render_reply(outcome)
+    return service_store_declarative_fact_reply(
+        text,
+        input_source=input_source,
+        store_declarative_fact_outcome_fn=_store_declarative_fact_outcome,
+        render_reply_fn=render_reply,
+    )
 
 
 def _store_declarative_fact_outcome(text: str, *, input_source: str = "typed") -> Optional[dict[str, object]]:
-    fact_text = str(text or "").strip()
-    if not fact_text or not _is_declarative_info(fact_text):
-        return None
-
-    storage_performed = False
-    try:
-        if mem_should_store(fact_text):
-            mem_add("fact", input_source, fact_text)
-            storage_performed = True
-    except Exception:
-        storage_performed = False
-
-    return _classify_store_fact_outcome(
-        {
-            "fact_text": fact_text,
-            "store_fact_kind": "declarative_ack",
-            "user_commitment": "implied",
-            "memory_kind": "fact",
-        },
-        fact_text,
-        source="declarative",
-        storage_performed=storage_performed,
+    return service_store_declarative_fact_outcome(
+        text,
+        input_source=input_source,
+        is_declarative_info_fn=_is_declarative_info,
+        mem_should_store_fn=mem_should_store,
+        mem_add_fn=mem_add,
+        classify_store_fact_outcome_fn=_classify_store_fact_outcome,
     )
 
 
 def _is_saved_location_weather_query(text: str) -> bool:
-    normalized = _normalize_turn_text(text).strip(" .,!?")
-    if not normalized:
-        return False
-    if "saved location" in normalized and (
-        "use the saved location" in normalized
-        or "using the saved location" in normalized
-        or normalized.startswith("yes ")
-        or normalized in {"yes", "yeah", "yep", "ok", "okay", "sure", "please do", "go ahead"}
-    ):
-        return True
-    return normalized in {
-        "weather",
-        "weather now",
-        "weather current",
-        "weather today",
-        "current weather",
-        "what's the weather",
-        "what is the weather",
-        "what is the weather now",
-        "what's the weather now",
-    }
+    return service_is_saved_location_weather_query(text, normalize_turn_text_fn=_normalize_turn_text)
 
 
 def _weather_for_saved_location() -> str:
-    saved_location = str(get_saved_location_text() or "").strip()
-    if not saved_location:
-        return ""
-    try:
-        return str(tool_weather(saved_location) or "")
-    except Exception:
-        return ""
+    return service_weather_for_saved_location(
+        get_saved_location_text_fn=get_saved_location_text,
+        tool_weather_fn=tool_weather,
+    )
 
 
 def _extract_weather_source_host(tool_result: str) -> str:
-    text = str(tool_result or "").strip()
-    if not text:
-        return ""
-    match = re.search(r"\[source:\s*([^\]]+)\]", text, flags=re.I)
-    if not match:
-        return ""
-    return str(match.group(1) or "").strip().lower()
+    return service_extract_weather_source_host(tool_result)
 
 
 def _weather_location_label(weather_mode: str, location_value: str = "") -> str:
-    mode = str(weather_mode or "").strip().lower()
-    explicit_value = str(location_value or "").strip()
-    if mode == "explicit_location" and explicit_value:
-        return explicit_value
-    saved_location = str(get_saved_location_text() or "").strip()
-    if saved_location:
-        return saved_location
-    coords = _coords_from_saved_location()
-    if coords:
-        return f"{coords[0]},{coords[1]}"
-    return explicit_value
+    return service_weather_location_label(
+        weather_mode,
+        location_value,
+        get_saved_location_text_fn=get_saved_location_text,
+        coords_from_saved_location_fn=_coords_from_saved_location,
+    )
 
 
 def _make_weather_result_state(*, weather_mode: str, location_value: str = "", tool_result: str = "") -> dict:
-    return _make_conversation_state(
-        "weather_result",
-        subject="weather",
-        weather_mode=str(weather_mode or "").strip().lower(),
-        location_value=_weather_location_label(weather_mode, location_value),
-        source_host=_extract_weather_source_host(tool_result) or str(_weather_source_host() or "").strip().lower(),
-        tool_result=str(tool_result or "").strip(),
+    return service_make_weather_result_state(
+        weather_mode=weather_mode,
+        location_value=location_value,
+        tool_result=tool_result,
+        make_conversation_state_fn=_make_conversation_state,
+        weather_location_label_fn=_weather_location_label,
+        extract_weather_source_host_fn=_extract_weather_source_host,
+        weather_source_host_fn=_weather_source_host,
     )
 
 
 def _is_weather_meta_followup(text: str) -> bool:
-    normalized = _normalize_turn_text(text)
-    if not normalized or "weather" not in normalized:
-        return False
-    return any(phrase in normalized for phrase in (
-        "how did you get the weather",
-        "how did you get that weather",
-        "how did you get the weather information",
-        "where did you get the weather",
-        "where did you get that weather",
-        "what source did you use for the weather",
-        "weather tool",
-    ))
+    return service_is_weather_meta_followup(text, normalize_turn_text_fn=_normalize_turn_text)
 
 
 def _is_weather_status_followup(text: str) -> bool:
-    normalized = _normalize_turn_text(text)
-    if not normalized or "weather" not in normalized:
-        return False
-    return any(phrase in normalized for phrase in (
-        "what happened to my weather",
-        "what happened to the weather",
-        "what happened to that weather",
-        "what happened to my weather information",
-        "what happened to the weather information",
-        "did you get the weather",
-        "did you get my weather",
-    ))
+    return service_is_weather_status_followup(text, normalize_turn_text_fn=_normalize_turn_text)
 
 
 def _weather_meta_reply(state: dict) -> str:
-    source_host = str(state.get("source_host") or "").strip()
-    location_value = str(state.get("location_value") or "").strip()
-    if source_host and location_value:
-        return f"I got that weather information from the weather tool using {source_host} for {location_value}."
-    if source_host:
-        return f"I got that weather information from the weather tool using {source_host}."
-    if location_value:
-        return f"I got that weather information from the weather tool for {location_value}."
-    return "I got that weather information from the weather tool."
+    return service_weather_meta_reply(state)
 
 
 def _weather_status_reply(state: dict) -> str:
-    location_value = str(state.get("location_value") or "").strip()
-    tool_result = str(state.get("tool_result") or "").strip()
-    if tool_result and location_value:
-        return f"The last weather lookup I handled was for {location_value}. Result: {tool_result}"
-    if tool_result:
-        return f"The last weather lookup I handled returned: {tool_result}"
-    if location_value:
-        return f"The last weather lookup I handled was for {location_value}, but I do not have the final result cached here."
-    return "I do not have a completed weather result cached for this thread yet."
+    return service_weather_status_reply(state)
 
 
 def _is_location_recall_query(text: str) -> bool:
-    t = (text or "").strip().lower()
-    if not t:
-        return False
-    cues = [
-        "where am i",
-        "where am i located",
-        "what's my location",
-        "recall my location",
-        "remember my location",
-        "what is my location",
-        "where is my location",
-        "do you know my location",
-        "can you recall my location",
-        "can you remember my location",
-    ]
-    return any(c in t for c in cues)
+    return service_is_location_recall_query(text)
 
 
 def _location_recall_reply() -> str:
-    preview = get_saved_location_text()
-    if preview:
-        expanded = _LOCATION_HINT_LABELS.get(str(preview or "").strip().lower())
-        if expanded and expanded.lower() not in str(preview or "").strip().lower():
-            return f"Your saved location is {preview} ({expanded})."
-        return f"Your saved location is {preview}."
-    return "I don't have a stored location yet. You can tell me: 'My location is ...'"
+    return service_location_recall_reply(
+        get_saved_location_text_fn=get_saved_location_text,
+        runtime_device_location_payload_fn=runtime_device_location_payload,
+        resolve_current_device_coords_fn=resolve_current_device_coords,
+    )
 
 
 def _is_location_name_query(text: str) -> bool:
-    normalized = _normalize_turn_text(text).strip(" .,!?")
-    if not normalized:
-        return False
-    explicit_cues = [
-        "give me the name to that location",
-        "give me the name of that location",
-        "whats the name of that location",
-        "what's the name of that location",
-        "what is the name of that location",
-        "what location is that",
-        "which location is that",
-        "what city is that zip",
-        "what city is that location",
-        "name of that location",
-        "name to that location",
-    ]
-    if any(cue in normalized for cue in explicit_cues):
-        return True
-    return "location" in normalized and "name" in normalized and _uses_prior_reference(normalized)
+    return service_is_location_name_query(
+        text,
+        normalize_turn_text_fn=_normalize_turn_text,
+        uses_prior_reference_fn=_uses_prior_reference,
+    )
 
 
 def _location_name_reply() -> str:
-    preview = get_saved_location_text()
-    if not preview:
-        return "I don't have a stored location yet. You can tell me: 'My location is ...'"
-    expanded = _LOCATION_HINT_LABELS.get(str(preview or "").strip().lower())
-    if expanded:
-        return f"That location is {expanded}."
-    return f"The location I have saved is {preview}."
+    return service_location_name_reply(
+        get_saved_location_text_fn=get_saved_location_text,
+        runtime_device_location_payload_fn=runtime_device_location_payload,
+        resolve_current_device_coords_fn=resolve_current_device_coords,
+    )
+
+
+def _infer_location_turn_intent(
+    state: Optional[dict],
+    text: str,
+    turns: Optional[list[tuple[str, str]]] = None,
+) -> dict:
+    return service_infer_location_turn_intent(
+        state,
+        text,
+        turns=turns,
+        normalize_turn_text_fn=_normalize_turn_text,
+        is_location_name_query_fn=_is_location_name_query,
+        is_location_recall_query_fn=_is_location_recall_query,
+        is_location_recall_state_fn=_is_location_recall_state,
+        looks_like_location_recall_followup_fn=_looks_like_location_recall_followup,
+    )
 
 
 def _handle_location_conversation_turn(
@@ -2845,16 +2230,20 @@ def _handle_location_conversation_turn(
     text: str,
     turns: Optional[list[tuple[str, str]]] = None,
 ) -> tuple[bool, str, Optional[dict], str]:
-    next_state = state if isinstance(state, dict) else _make_conversation_state("location_recall")
-    if _is_location_name_query(text):
-        return True, _location_name_reply(), next_state, "location_name"
-    if _is_location_recall_query(text):
-        return True, _location_recall_reply(), _make_conversation_state("location_recall"), "location_recall"
-    if _looks_like_contextual_followup(text) and (
-        _is_location_recall_state(state) or _looks_like_location_recall_followup(list(turns or []), text)
-    ):
-        return True, _location_recall_reply(), _make_conversation_state("location_recall"), "location_recall"
-    return False, "", next_state, ""
+    return service_handle_location_conversation_turn(
+        state,
+        text,
+        turns=turns,
+        make_conversation_state_fn=_make_conversation_state,
+        is_location_name_query_fn=_is_location_name_query,
+        location_name_reply_fn=_location_name_reply,
+        is_location_recall_query_fn=_is_location_recall_query,
+        location_recall_reply_fn=_location_recall_reply,
+        looks_like_contextual_followup_fn=_looks_like_contextual_followup,
+        is_location_recall_state_fn=_is_location_recall_state,
+        looks_like_location_recall_followup_fn=_looks_like_location_recall_followup,
+        infer_location_turn_intent_fn=_infer_location_turn_intent,
+    )
 
 
 def _make_conversation_state(kind: str, **data) -> dict:
@@ -2874,300 +2263,93 @@ def _conversation_active_subject(state: Optional[dict]) -> str:
     return kind
 
 
-_TURN_TEXT_TOKEN_FIXES = {
-    "yor": "your",
-    "hou": "you",
-    "locaiton": "location",
-    "retreiving": "retrieving",
-    "tring": "trying",
-    "behing": "behind",
-    "teh": "the",
-}
-
-
-_TURN_TEXT_ROUTING_VOCAB = {
-    "a", "all", "allowlisted", "am", "and", "answer", "anything", "are", "assistant", "can",
-    "chat", "continue", "creator", "current", "data", "developer", "do", "does", "else",
-    "fetch", "find", "for", "gather", "grounded", "hello", "help", "hi", "how", "i", "info",
-    "information", "is", "it", "kind", "know", "last", "local", "location", "me", "more",
-    "name", "next", "not", "nova", "of", "on", "online", "physical", "please", "profile",
-    "question", "recap", "remember", "research", "resource", "resources", "result", "results",
-    "retrieve", "retrieving", "search", "session", "should", "source", "sources", "sure", "tell",
-    "that", "the", "then", "this", "topic", "trying", "tsds", "use", "web", "what", "where",
-    "which", "who", "why", "you", "your",
-}
-
-
 def _normalize_turn_token(token: str) -> str:
-    core = str(token or "").strip().lower()
-    if not core:
-        return core
-    if core in _TURN_TEXT_TOKEN_FIXES:
-        return _TURN_TEXT_TOKEN_FIXES[core]
-    if len(core) < 4 or core in _TURN_TEXT_ROUTING_VOCAB:
-        return core
-    matches = difflib.get_close_matches(core, sorted(_TURN_TEXT_ROUTING_VOCAB), n=1, cutoff=0.89)
-    if matches and abs(len(matches[0]) - len(core)) <= 2:
-        return matches[0]
-    return core
+    return service_conversation_followups.normalize_turn_token(token)
 
 
 def _normalize_turn_text(text: str) -> str:
-    raw = re.sub(r"\s+", " ", (text or "").strip().lower())
-    if not raw:
-        return ""
-
-    normalized_chunks: list[str] = []
-    for chunk in raw.split(" "):
-        if not chunk or any(marker in chunk for marker in ("://", "/", "@")):
-            normalized_chunks.append(chunk)
-            continue
-        match = re.match(r"^([^a-z']*)([a-z']+)([^a-z']*)$", chunk)
-        if not match:
-            normalized_chunks.append(chunk)
-            continue
-        prefix, core, suffix = match.groups()
-        normalized_chunks.append(prefix + _normalize_turn_token(core) + suffix)
-    return " ".join(normalized_chunks)
+    return service_conversation_followups.normalize_turn_text(text)
 
 
 def _looks_like_contextual_followup(text: str) -> bool:
-    normalized = _normalize_turn_text(text).strip(" .,!?")
-    if not normalized:
-        return False
-    if normalized in {
-        "what did you find",
-        "well what did you find",
-        "what else",
-        "anything else",
-        "go on",
-        "continue",
-        "ok and then",
-        "and then",
-        "and",
-    }:
-        return True
-    return len(normalized.split()) <= 4 and _uses_prior_reference(normalized)
+    return service_conversation_followups.looks_like_contextual_followup(
+        text,
+        normalize_turn_text_fn=_normalize_turn_text,
+        uses_prior_reference_fn=_uses_prior_reference,
+    )
 
 
 def _looks_like_contextual_continuation(text: str) -> bool:
-    normalized = _normalize_turn_text(text).strip(" .,!?")
-    return normalized in {
-        "what did you find",
-        "well what did you find",
-        "what else",
-        "anything else",
-        "go on",
-        "continue",
-        "ok and then",
-        "and then",
-        "and",
-    }
+    return service_conversation_followups.looks_like_contextual_continuation(
+        text,
+        normalize_turn_text_fn=_normalize_turn_text,
+    )
 
 
 def _looks_like_profile_followup(text: str) -> bool:
-    normalized = _normalize_turn_text(text).strip(" .,!?")
-    if not normalized:
-        return False
-    if normalized in {
-        "what else",
-        "anything else",
-        "what more",
-        "anything more",
-        "go on",
-        "continue",
-        "and then",
-        "ok and then",
-        "tell me more",
-    }:
-        return True
-    return False
+    return service_conversation_followups.looks_like_profile_followup(
+        text,
+        normalize_turn_text_fn=_normalize_turn_text,
+    )
 
 
 def _is_retrieval_meta_question(text: str) -> bool:
-    normalized = _normalize_turn_text(text)
-    if not normalized:
-        return False
-    return any(phrase in normalized for phrase in (
-        "what type of resources",
-        "what resources are you trying to fetch",
-        "what kind of resources",
-        "what sources are you trying to fetch",
-        "what are you trying to fetch",
-    ))
+    return service_conversation_followups.is_retrieval_meta_question(
+        text,
+        normalize_turn_text_fn=_normalize_turn_text,
+    )
 
 
 def _retrieval_meta_reply(state: dict) -> str:
-    query = str(state.get("query") or "").strip()
-    urls = state.get("urls") if isinstance(state.get("urls"), list) else []
-    hosts: list[str] = []
-    for url in urls:
-        host = (urlparse(str(url)).hostname or "").strip().lower()
-        if host and host not in hosts:
-            hosts.append(host)
-    parts = ["I was trying to fetch allowlisted web sources related to your last question"]
-    if query:
-        parts[0] += f" about '{query}'"
-    parts[0] += "."
-    if hosts:
-        if len(hosts) == 1:
-            parts.append(f"Right now the active source host is {hosts[0]}.")
-        else:
-            parts.append("Right now the active source hosts are " + ", ".join(hosts[:-1]) + f", and {hosts[-1]}.")
-    else:
-        parts.append("I was looking for grounded web sources rather than local knowledge files.")
-    parts.append("If you want, I can gather one of the listed sources or answer the original question directly from the current chat context.")
-    return " ".join(parts)
+    return service_conversation_followups.retrieval_meta_reply(state)
 
 
 def _non_retrieval_resource_meta_reply() -> str:
-    return (
-        "I'm not trying to fetch web resources for this question right now. "
-        "I should stay with the current chat and the verified facts I already have unless you explicitly ask me to do web research."
-    )
+    return service_conversation_followups.non_retrieval_resource_meta_reply()
 
 
 def _extract_retrieval_result_index(text: str) -> Optional[int]:
-    normalized = _normalize_turn_text(text)
-    if not normalized:
-        return None
-
-    match = re.search(r"\b(?:result|source|link|item)\s*(\d{1,2})\b", normalized)
-    if match:
-        try:
-            return max(1, int(match.group(1)))
-        except Exception:
-            return None
-
-    ordinal_map = {
-        "first": 1,
-        "second": 2,
-        "third": 3,
-        "fourth": 4,
-        "fifth": 5,
-    }
-    for word, index in ordinal_map.items():
-        if re.search(rf"\b{word}\b", normalized):
-            return index
-    return None
+    return service_conversation_followups.extract_retrieval_result_index(
+        text,
+        normalize_turn_text_fn=_normalize_turn_text,
+    )
 
 
 def _looks_like_retrieval_followup(text: str) -> bool:
-    normalized = _normalize_turn_text(text).strip(" .,!?")
-    if not normalized:
-        return False
-    if _extract_retrieval_result_index(normalized) is not None:
-        return True
-    triggers = {
-        "what else",
-        "anything else",
-        "go on",
-        "continue",
-        "tell me more",
-        "more results",
-        "another result",
-        "another source",
-        "next",
-        "next result",
-        "next source",
-        "more sources",
-        "and then",
-    }
-    if normalized in triggers:
-        return True
-    return any(token in normalized for token in ("more result", "another source", "another result", "next source", "next result"))
+    return service_conversation_followups.looks_like_retrieval_followup(
+        text,
+        normalize_turn_text_fn=_normalize_turn_text,
+        extract_retrieval_result_index_fn=_extract_retrieval_result_index,
+    )
 
 
 def _is_retrieval_tool(tool_name: str) -> bool:
-    return str(tool_name or "").strip().lower() in {
-        "web_search",
-        "web_research",
-        "web_gather",
-        "web_fetch",
-        "search",
-        "wikipedia_lookup",
-        "stackexchange_search",
-    }
+    return service_conversation_followups.is_retrieval_tool(tool_name)
 
 
 def _retrieval_query_from_text(tool_name: str, text: str) -> str:
-    raw = str(text or "").strip()
-    low = raw.lower()
-    tool = str(tool_name or "").strip().lower()
-
-    if tool == "web_research":
-        if low in {"web continue", "continue web", "continue web research"}:
-            return WEB_RESEARCH_SESSION.query
-        if low.startswith("web research "):
-            return raw.split(maxsplit=2)[2].strip() if len(raw.split(maxsplit=2)) >= 3 else ""
-    if tool == "web_search":
-        if low.startswith("web search "):
-            return raw.split(maxsplit=2)[2].strip() if len(raw.split(maxsplit=2)) >= 3 else ""
-        if low.startswith("findweb ") or low.startswith("search "):
-            return raw.split(maxsplit=1)[1].strip() if len(raw.split(maxsplit=1)) >= 2 else ""
-    if tool == "web_gather":
-        if low.startswith("web gather "):
-            return raw.split(maxsplit=2)[2].strip() if len(raw.split(maxsplit=2)) >= 3 else ""
-    if tool == "web_fetch":
-        if low.startswith("web "):
-            return raw.split(maxsplit=1)[1].strip() if len(raw.split(maxsplit=1)) >= 2 else ""
-    if tool == "wikipedia_lookup":
-        if low.startswith("wikipedia "):
-            return raw.split(maxsplit=1)[1].strip() if len(raw.split(maxsplit=1)) >= 2 else ""
-        if low.startswith("wiki "):
-            return raw.split(maxsplit=1)[1].strip() if len(raw.split(maxsplit=1)) >= 2 else ""
-    if tool == "stackexchange_search":
-        if low.startswith("stackexchange "):
-            return raw[len("stackexchange "):].strip()
-        if low.startswith("stack overflow "):
-            return raw[len("stack overflow "):].strip()
-    return raw
+    return service_conversation_followups.retrieval_query_from_text(
+        tool_name,
+        text,
+        web_research_query_fn=lambda: WEB_RESEARCH_SESSION.query,
+    )
 
 
 def _provider_name_from_tool(tool_name: str) -> str:
-    mapping = {
-        "wikipedia_lookup": "wikipedia",
-        "stackexchange_search": "stackexchange",
-        "web_research": "general_web",
-        "web_search": "general_web",
-        "web_fetch": "general_web",
-        "web_gather": "general_web",
-    }
-    return str(mapping.get(str(tool_name or "").strip().lower(), "")).strip()
+    return service_conversation_followups.provider_name_from_tool(tool_name)
 
 
 def _make_retrieval_conversation_state(tool_name: str, query: str, tool_output: str) -> Optional[dict]:
-    if not _is_retrieval_tool(tool_name):
-        return None
-
-    output = str(tool_output or "")
-    if not output.strip():
-        return None
-
-    urls = _extract_urls(output)[:8]
-    result_count = len(urls)
-    normalized_tool = str(tool_name or "").strip().lower()
-    effective_query = str(query or "").strip()
-
-    if normalized_tool == "web_research":
-        if WEB_RESEARCH_SESSION.has_results():
-            result_count = WEB_RESEARCH_SESSION.result_count()
-        if not effective_query:
-            effective_query = WEB_RESEARCH_SESSION.query
-
-    if not urls and normalized_tool not in {"web_research", "web_gather", "web_fetch"}:
-        return None
-
-    state = _make_conversation_state(
-        "retrieval",
-        subject=normalized_tool or "retrieval",
-        query=effective_query,
-        result_count=max(result_count, 0),
-        urls=urls,
+    return service_conversation_followups.make_retrieval_conversation_state(
+        tool_name,
+        query,
+        tool_output,
+        extract_urls_fn=_extract_urls,
+        make_conversation_state_fn=_make_conversation_state,
+        web_research_has_results_fn=WEB_RESEARCH_SESSION.has_results,
+        web_research_result_count_fn=WEB_RESEARCH_SESSION.result_count,
+        web_research_query_fn=lambda: WEB_RESEARCH_SESSION.query,
     )
-    if urls:
-        state["top_url"] = urls[0]
-    return state
 
 
 def _load_generated_queue_payload(limit: int = 12) -> dict:
@@ -3181,43 +2363,21 @@ def _load_generated_queue_payload(limit: int = 12) -> dict:
 
 
 def _make_queue_status_conversation_state(tool_output: str) -> Optional[dict]:
-    if not str(tool_output or "").strip():
-        return None
-
-    queue = _load_generated_queue_payload(12)
-    if not queue:
-        return None
-
-    next_item = queue.get("next_item") if isinstance(queue.get("next_item"), dict) else {}
-    highest = next_item.get("highest_priority") if isinstance(next_item.get("highest_priority"), dict) else {}
-    return _make_conversation_state(
-        "queue_status",
-        subject="generated_work_queue",
-        count=int(queue.get("count", 0) or 0),
-        open_count=int(queue.get("open_count", 0) or 0),
-        green_count=int(queue.get("green_count", 0) or 0),
-        drift_count=int(queue.get("drift_count", 0) or 0),
-        warning_count=int(queue.get("warning_count", 0) or 0),
-        never_run_count=int(queue.get("never_run_count", 0) or 0),
-        next_item=dict(next_item),
-        next_file=str(next_item.get("file") or "").strip(),
-        next_family=str(next_item.get("family_id") or "").strip(),
-        next_status=str(next_item.get("latest_status") or "").strip(),
-        next_reason=str(next_item.get("opportunity_reason") or "").strip(),
-        next_report_path=str(next_item.get("latest_report_path") or "").strip(),
-        next_signal=str(highest.get("signal") or "").strip(),
-        next_urgency=str(highest.get("urgency") or "").strip(),
-        next_seam=str(highest.get("seam") or "").strip(),
+    return service_conversation_followups.make_queue_status_conversation_state(
+        tool_output,
+        load_generated_queue_payload_fn=_load_generated_queue_payload,
+        make_conversation_state_fn=_make_conversation_state,
     )
 
 
 def _make_tool_conversation_state(tool_name: str, query: str, tool_output: str) -> Optional[dict]:
-    next_state = _make_retrieval_conversation_state(tool_name, query, tool_output)
-    if next_state is not None:
-        return next_state
-    if str(tool_name or "").strip().lower() == "queue_status":
-        return _make_queue_status_conversation_state(tool_output)
-    return None
+    return service_conversation_followups.make_tool_conversation_state(
+        tool_name,
+        query,
+        tool_output,
+        make_retrieval_conversation_state_fn=_make_retrieval_conversation_state,
+        make_queue_status_conversation_state_fn=_make_queue_status_conversation_state,
+    )
 
 
 def _infer_post_reply_conversation_state(
@@ -3230,204 +2390,86 @@ def _infer_post_reply_conversation_state(
     turns: Optional[list[tuple[str, str]]] = None,
     fallback_state: Optional[dict] = None,
 ) -> Optional[dict]:
-    next_state = None
-    if planner_decision == "run_tool":
-        args_dict = tool_args if isinstance(tool_args, dict) else {}
-        action_args = args_dict.get("args") if isinstance(args_dict.get("args"), list) else []
-        action_query = str(action_args[0] if action_args else routed_text)
-        next_state = _make_tool_conversation_state(tool, action_query, tool_result)
-    if next_state is None:
-        inferred_profile_state = _infer_profile_conversation_state(routed_text)
-        if inferred_profile_state is not None:
-            next_state = inferred_profile_state
-        elif _is_location_recall_query(routed_text) or _looks_like_location_recall_followup(turns or [], routed_text):
-            next_state = _make_conversation_state("location_recall")
-    return next_state if isinstance(next_state, dict) else (fallback_state if isinstance(fallback_state, dict) else None)
+    return service_conversation_followups.infer_post_reply_conversation_state(
+        routed_text,
+        planner_decision=planner_decision,
+        tool=tool,
+        tool_args=tool_args,
+        tool_result=tool_result,
+        turns=turns,
+        fallback_state=fallback_state,
+        make_tool_conversation_state_fn=_make_tool_conversation_state,
+        infer_profile_conversation_state_fn=_infer_profile_conversation_state,
+        is_location_recall_query_fn=_is_location_recall_query,
+        looks_like_location_recall_followup_fn=_looks_like_location_recall_followup,
+        make_conversation_state_fn=_make_conversation_state,
+    )
 
 
 def _retrieval_followup_reply(state: dict, text: str) -> tuple[str, Optional[dict]]:
-    urls = state.get("urls") if isinstance(state.get("urls"), list) else []
-    query = str(state.get("query") or "").strip()
-    source = str(state.get("subject") or "retrieval").strip().lower()
-    result_count = max(0, int(state.get("result_count", 0) or 0))
-    index = _extract_retrieval_result_index(text)
-
-    if index is not None and 1 <= index <= len(urls):
-        result = tool_web_gather(str(urls[index - 1]))
-        return result, (_make_retrieval_conversation_state("web_gather", str(urls[index - 1]), result) or state)
-
-    if source == "web_research" and _looks_like_retrieval_followup(text):
-        result = tool_web_research("", continue_mode=True)
-        if result and not result.lower().startswith("no active web research session"):
-            return result, (_make_retrieval_conversation_state("web_research", WEB_RESEARCH_SESSION.query, result) or state)
-
-    parts = []
-    if query:
-        parts.append(f"Continuing from your last retrieval for '{query}'.")
-    else:
-        parts.append("Continuing from your last retrieval thread.")
-    if result_count > 0:
-        parts.append(f"I have {result_count} source(s) in the current retrieval context.")
-    if urls:
-        parts.append("You can ask me about the first result, the second source, or tell me to gather one directly.")
-    else:
-        parts.append("If you want, I can run a more specific search or gather a particular source.")
-    return " ".join(parts), state
+    return service_conversation_followups.retrieval_followup_reply(
+        state,
+        text,
+        extract_retrieval_result_index_fn=_extract_retrieval_result_index,
+        make_retrieval_conversation_state_fn=_make_retrieval_conversation_state,
+        looks_like_retrieval_followup_fn=_looks_like_retrieval_followup,
+        tool_web_gather_fn=tool_web_gather,
+        tool_web_research_continue_fn=lambda: tool_web_research("", continue_mode=True),
+        web_research_query_fn=lambda: WEB_RESEARCH_SESSION.query,
+    )
 
 
 def _is_queue_status_reason_followup(text: str) -> bool:
-    normalized = _normalize_turn_text(text).strip(" .,!?")
-    if not normalized:
-        return False
-    return any(
-        phrase in normalized
-        for phrase in (
-            "why is that the next item in the queue",
-            "why is that next in the queue",
-            "why is that next",
-            "why is that the next item",
-            "why is that next item",
-            "why that item",
-            "why this item",
-        )
+    return service_conversation_followups.is_queue_status_reason_followup(
+        text,
+        normalize_turn_text_fn=_normalize_turn_text,
     )
 
 
 def _queue_status_reason_reply(state: dict) -> str:
-    next_file = str(state.get("next_file") or "").strip()
-    next_status = str(state.get("next_status") or "unknown").strip() or "unknown"
-    next_reason = str(state.get("next_reason") or "unknown").strip() or "unknown"
-    next_signal = str(state.get("next_signal") or "").strip()
-    next_urgency = str(state.get("next_urgency") or "").strip()
-    next_seam = str(state.get("next_seam") or "").strip()
-    next_family = str(state.get("next_family") or "").strip()
-
-    if not next_file:
-        return "There is no next open queue item right now because the generated work queue is clear."
-
-    parts = [f"{next_file} is next because it is still open with status {next_status} and reason {next_reason}."]
-    if next_signal:
-        signal_text = f"Its highest-priority signal is {next_signal}"
-        if next_urgency:
-            signal_text += f" at {next_urgency} urgency"
-        if next_seam:
-            signal_text += f" on seam {next_seam}"
-        parts.append(signal_text + ".")
-    if next_family:
-        parts.append(f"It currently leads the {next_family} family among open generated queue items.")
-    return " ".join(parts)
+    return service_conversation_followups.queue_status_reason_reply(state)
 
 
 def _is_queue_status_report_followup(text: str) -> bool:
-    normalized = _normalize_turn_text(text).strip(" .,!?")
-    if not normalized:
-        return False
-    return any(
-        phrase in normalized
-        for phrase in (
-            "show me the report path",
-            "what is the report path",
-            "where is the report",
-            "where is the latest report",
-            "show me the latest report",
-        )
+    return service_conversation_followups.is_queue_status_report_followup(
+        text,
+        normalize_turn_text_fn=_normalize_turn_text,
     )
 
 
 def _queue_status_report_reply(state: dict) -> str:
-    next_file = str(state.get("next_file") or "").strip()
-    report_path = str(state.get("next_report_path") or "").strip()
-    if not report_path:
-        if next_file:
-            return f"I don't have a saved report path yet for {next_file}."
-        return "I don't have a saved report path because there is no current open queue item."
-    if next_file:
-        return f"The latest report for {next_file} is at {report_path}"
-    return f"The latest queue report path is {report_path}"
+    return service_conversation_followups.queue_status_report_reply(state)
 
 
 def _is_queue_status_seam_followup(text: str) -> bool:
-    normalized = _normalize_turn_text(text).strip(" .,!?")
-    if not normalized:
-        return False
-    return any(
-        phrase in normalized
-        for phrase in (
-            "what seam is it failing on",
-            "what seam is it on",
-            "which seam is failing",
-            "what seam",
-        )
+    return service_conversation_followups.is_queue_status_seam_followup(
+        text,
+        normalize_turn_text_fn=_normalize_turn_text,
     )
 
 
 def _queue_status_seam_reply(state: dict) -> str:
-    next_file = str(state.get("next_file") or "").strip()
-    next_seam = str(state.get("next_seam") or "").strip()
-    next_signal = str(state.get("next_signal") or "").strip()
-    if not next_seam:
-        if next_file:
-            return f"I don't have a recorded seam yet for {next_file}."
-        return "I don't have a recorded seam because there is no current open queue item."
-    if next_signal:
-        return f"{next_file or 'That queue item'} is currently failing on seam {next_seam} with signal {next_signal}."
-    return f"{next_file or 'That queue item'} is currently failing on seam {next_seam}."
+    return service_conversation_followups.queue_status_seam_reply(state)
 
 
 def _is_location_recall_state(state: Optional[dict]) -> bool:
-    return isinstance(state, dict) and str(state.get("kind") or "") == "location_recall"
+    return service_conversation_followups.is_location_recall_state(state)
 
 
 def _looks_like_location_recall_followup(session_turns: list[tuple[str, str]], text: str) -> bool:
-    if _looks_like_contextual_continuation(text):
-        recent = session_turns[-6:] if isinstance(session_turns, list) else []
-        for role, content in reversed(recent):
-            low = str(content or "").strip().lower()
-            if not low:
-                continue
-            if low.startswith("your saved location is") or low.startswith("i don't have a stored location yet"):
-                return True
-    t = re.sub(r"\s+", " ", (text or "").strip().lower())
-    t = re.sub(r"\s*\?+$", "", t).strip()
-    if t not in {"what did you find", "well what did you find"}:
-        return False
-    recent = session_turns[-6:] if isinstance(session_turns, list) else []
-    for role, content in reversed(recent):
-        low = str(content or "").strip().lower()
-        if not low:
-            continue
-        if "location" in low and any(cue in low for cue in ("recall", "remember", "saved", "stored", "current physical location")):
-            return True
-        if low.startswith("your saved location is") or low.startswith("i don't have a stored location yet"):
-            return True
-    return False
+    return service_conversation_followups.looks_like_location_recall_followup(
+        session_turns,
+        text,
+        looks_like_contextual_continuation_fn=_looks_like_contextual_continuation,
+    )
 
 
 def _retrieval_status_reply(text: str) -> str:
-    t = (text or "").strip().lower()
-    if t in {"retrieving data", "retreiving data", "retrieving info", "retrieving information"}:
-        return "What data do you want me to retrieve?"
-    return ""
+    return service_retrieval_status_reply(text)
 
 
 def _is_web_research_override_request(text: str) -> bool:
-    low = _normalize_turn_text(text)
-    if not low:
-        return False
-    phrases = (
-        "just use the web",
-        "use the web for this",
-        "only need web",
-        "all you need is the web",
-        "all you need is web",
-        "need is the web",
-        "no database",
-        "dont use the database",
-        "don't use the database",
-        "use web instead",
-        "search online instead",
-    )
-    return any(phrase in low for phrase in phrases)
+    return service_is_web_research_override_request(text, normalize_turn_text_fn=_normalize_turn_text)
 
 
 def set_location_coords(value: str) -> str:
@@ -3570,74 +2612,15 @@ def start_heartbeat(heartbeat_file: Path, interval_sec: float = 1.0):
 
 
 # =========================
-# Subprocess TTS (Piper oneshot)
+# Voice runtime compatibility
 # =========================
-class SubprocessTTS:
-    """Piper oneshot wrapper: python tts_piper.py "text"""
-
+class SubprocessTTS(ServiceSubprocessTTS):
     def __init__(self, python_exe: str, oneshot_script: Path, timeout_sec: float = 25.0):
-        self.python_exe = python_exe
-        self.oneshot_script = oneshot_script
-        self.timeout_sec = float(timeout_sec)
-        self.q = queue.Queue()
-        self.stop_evt = threading.Event()
-        self.t = threading.Thread(target=self._run, name="tts-worker", daemon=True)
-
-    def start(self):
-        self.t.start()
-
-    def stop(self):
-        self.stop_evt.set()
-        self.q.put(None)
-
-    def say(self, text: str):
-        if text:
-            self.q.put(str(text))
-
-    def _run(self):
-        while not self.stop_evt.is_set():
-            item = self.q.get()
-            if item is None:
-                break
-
-            try:
-                creationflags = 0x08000000 if os.name == "nt" else 0  # CREATE_NO_WINDOW
-                p = subprocess.Popen(
-                    [self.python_exe, str(self.oneshot_script), item],
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.PIPE,
-                    creationflags=creationflags,
-                )
-                try:
-                    _, err = p.communicate(timeout=self.timeout_sec)
-                except subprocess.TimeoutExpired:
-                    p.kill()
-                    warn("TTS timed out; killed piper subprocess.")
-                    continue
-
-                if p.returncode != 0:
-                    msg = (err or b"").decode("utf-8", errors="ignore").strip()
-                    warn(f"TTS failed rc={p.returncode}: {msg}")
-
-            except Exception as e:
-                warn(f"TTS error: {e}")
+        super().__init__(python_exe, oneshot_script, timeout_sec, warn_fn=warn)
 
 
 def speak_chunked(tts: SubprocessTTS, text: str, max_len: int = 220):
-    text = (text or "").strip()
-    if not text:
-        return
-    parts = re.split(r'(?<=[.!?])\s+', text)
-    buf = ""
-    for p in parts:
-        if len(buf) + len(p) + 1 <= max_len:
-            buf = (buf + " " + p).strip()
-        else:
-            if buf:
-                tts.say(buf)
-            buf = p.strip()
-    if buf:
-        tts.say(buf)
+    return service_speak_chunked(tts, text, max_len=max_len)
 
 
 # =========================
@@ -4235,41 +3218,11 @@ def _build_session_fact_sheet(turns: list[tuple[str, str]], max_chars: int = 120
 
 
 def _content_tokens(text: str) -> list[str]:
-    raw = re.findall(r"[a-z0-9]{3,}", (text or "").lower())
-    ignore = {
-        "that", "this", "with", "from", "have", "your", "you", "are", "was", "were", "they",
-        "them", "then", "than", "what", "when", "where", "which", "would", "could", "should",
-        "about", "into", "also", "just", "told", "known", "know", "remember", "recall", "said",
-        "made", "make", "gave", "name", "like", "likes", "favorite", "favourite", "colors", "color",
-        "developer", "creator", "nova", "gus",
-    }
-    out = []
-    for token in raw:
-        if token in ignore:
-            continue
-        if token not in out:
-            out.append(token)
-    return out
+    return service_content_tokens(text)
 
 
 def _is_risky_claim_sentence(sentence: str) -> bool:
-    low = (sentence or "").strip().lower()
-    if not low:
-        return False
-    if any(low.startswith(p) for p in [
-        "i don't know", "i do not know", "i'm not sure", "i am not sure", "uncertain", "that would be a guess",
-    ]):
-        return False
-    risky_patterns = [
-        r"\b(i remember|i recall|we'?ve had|we have had)\b",
-        r"\bcreator\b|\bdeveloper\b|\bfull name\b|\bnickname\b",
-        r"\bfavorite\b|\bfavourite\b|\bcolors?\b|\bbilingual\b|\blanguages?\b",
-        r"\b(?:i am|i'm)\s+in\s+(?:a|the)\s+room\b|\bwith gus\b",
-        r"\bsmell\b|\bcoffee\b|\bhear\b|\bsee\b",
-        r"\bcurrent physical location\b|\bmy location is\b|\bI am located\b",
-        r"\bdownloaded\b|\bsaved\s+to\b|\bcreated\s+(?:file|folder|directory)\b",
-    ]
-    return any(re.search(p, low) for p in risky_patterns)
+    return service_is_risky_claim_sentence(sentence)
 
 
 def _sentence_supported_by_evidence(sentence: str, evidence_text: str, tool_context: str = "") -> bool:
@@ -4283,38 +3236,17 @@ def _sentence_supported_by_evidence(sentence: str, evidence_text: str, tool_cont
 
 
 def _apply_claim_gate(reply: str, evidence_text: str = "", tool_context: str = "") -> tuple[str, bool, str]:
-    raw = (reply or "").strip()
-    if not raw:
-        return raw, False, ""
-
-    parts = [p.strip() for p in re.split(r'(?<=[.!?])\s+', raw) if (p or "").strip()]
-    kept = []
-    blocked = False
-    for part in parts:
-        if _sentence_supported_by_evidence(part, evidence_text, tool_context=tool_context):
-            kept.append(part)
-        else:
-            blocked = True
-
-    if not blocked:
-        return raw, False, ""
-
-    if kept:
-        return " ".join(kept).strip(), True, "unsupported_claim_removed"
-
-    return _truthful_limit_reply("", include_next_step=False), True, "unsupported_claim_blocked"
+    return service_apply_claim_gate(
+        reply,
+        evidence_text,
+        tool_context,
+        sentence_supported_by_evidence_fn=_sentence_supported_by_evidence,
+        truthful_limit_reply_fn=_truthful_limit_reply,
+    )
 
 
 def _uses_prior_reference(user_text: str) -> bool:
-    t = (user_text or "").strip().lower()
-    if not t:
-        return False
-    triggers = [
-        "that information", "that info", "that", "those", "it",
-        "from that", "from those", "summarize that", "give me that",
-        "can you give me that", "use that",
-    ]
-    return any(x in t for x in triggers)
+    return service_uses_prior_reference(user_text)
 
 
 def _is_declarative_info(text: str) -> bool:
@@ -4386,35 +3318,7 @@ def _is_statement_like_clause(text: str) -> bool:
 
 
 def _looks_like_correction_turn(text: str) -> bool:
-    raw = str(text or "").strip()
-    if not raw:
-        return False
-    low = raw.lower()
-    identity_correction_patterns = (
-        r"\byour\s+name\s+is\s+[a-z]",
-        r"\b(?:his|the\s+developer(?:'s)?)\s+full\s+name\s+is\s+[a-z]",
-        r"\bdeveloper(?:'s)?\s+name\s+is\s+[a-z]",
-        r"\bcreator(?:'s)?\s+full\s+name\s+is\s+[a-z]",
-    )
-    triggers = (
-        "wrong",
-        "no,",
-        "actually",
-        "that's not",
-        "that is not",
-        "not true",
-        "incorrect",
-        "mistake",
-        "you lied",
-        "correction:",
-        "you gave me garbage",
-        "garbage back",
-    )
-    if _is_negative_feedback(raw) or _parse_correction(raw):
-        return True
-    if any(trigger in low for trigger in triggers):
-        return True
-    return "?" not in raw and any(re.search(pattern, low) for pattern in identity_correction_patterns)
+    return service_looks_like_correction_turn(text)
 
 
 def _looks_like_continue_thread_turn(
@@ -4465,35 +3369,18 @@ def _classify_turn_acts(
     active_subject: str = "",
     pending_action: Optional[dict] = None,
 ) -> list[str]:
-    raw = str(text or "").strip()
-    if not raw:
-        return []
-    clauses = _split_turn_clauses(raw) or [raw]
-    has_command = _is_explicit_command_like(raw)
-    has_correct = _looks_like_correction_turn(raw)
-    has_ask = any(_is_explicit_request(clause) for clause in clauses)
-    has_inform = any(_is_statement_like_clause(clause) for clause in clauses)
-    has_continue_thread = _looks_like_continue_thread_turn(
-        raw,
+    return service_classify_turn_acts(
+        text,
         turns=turns,
         active_subject=active_subject,
         pending_action=pending_action,
+        split_turn_clauses_fn=_split_turn_clauses,
+        is_explicit_command_like_fn=_is_explicit_command_like,
+        looks_like_correction_turn_fn=_looks_like_correction_turn,
+        is_explicit_request_fn=_is_explicit_request,
+        is_statement_like_clause_fn=_is_statement_like_clause,
+        looks_like_continue_thread_turn_fn=_looks_like_continue_thread_turn,
     )
-
-    acts: list[str] = []
-    if has_correct:
-        acts.append("correct")
-    if has_command:
-        acts.append("command")
-    elif has_ask:
-        acts.append("ask")
-    if has_inform:
-        acts.append("inform")
-    if has_continue_thread:
-        acts.append("continue_thread")
-    if has_inform and (has_ask or has_command):
-        acts.append("mixed")
-    return acts
 
 
 def _looks_like_mixed_info_request_turn(text: str) -> bool:
@@ -4510,15 +3397,7 @@ def _mixed_info_request_clarify_reply(text: str) -> str:
 
 
 def _extract_urls(text: str) -> list[str]:
-    found = re.findall(r"https?://[^\s\)\]>\"']+", text or "")
-    urls = []
-    seen = set()
-    for u in found:
-        if u in seen:
-            continue
-        seen.add(u)
-        urls.append(u)
-    return urls
+    return service_extract_urls(text)
 
 
 def _strip_invocation_prefix(text: str) -> str:
@@ -4672,56 +3551,15 @@ def _resolve_research_provider(candidates: list[str], *, default_tool: str = "we
 
 
 def _normalize_search_endpoint(endpoint: str) -> str:
-    raw = str(endpoint or "").strip()
-    if not raw:
-        return "http://127.0.0.1:8080/search"
-    if "://" not in raw:
-        raw = "http://" + raw
-    parsed = urlparse(raw)
-    scheme = str(parsed.scheme or "http").strip().lower() or "http"
-    host = str(parsed.hostname or "").strip()
-    if not host:
-        return raw
-    port = f":{parsed.port}" if parsed.port else ""
-    path = str(parsed.path or "/search").strip() or "/search"
-    return f"{scheme}://{host}{port}{path}"
+    return service_normalize_search_endpoint(endpoint)
 
 
 def _search_endpoint_candidates(endpoint: str) -> list[str]:
-    configured = _normalize_search_endpoint(endpoint)
-    candidates: list[str] = []
-
-    def _append(value: str) -> None:
-        normalized = _normalize_search_endpoint(value)
-        if normalized and normalized not in candidates:
-            candidates.append(normalized)
-
-    _append(configured)
-    parsed = urlparse(configured)
-    host = str(parsed.hostname or "").strip().lower()
-    if host not in {"127.0.0.1", "localhost"}:
-        return candidates
-
-    scheme = str(parsed.scheme or "http").strip().lower() or "http"
-    path = str(parsed.path or "/search").strip() or "/search"
-    current_port = int(parsed.port or (443 if scheme == "https" else 80))
-    ports: list[int] = []
-    for port in (current_port, 8080, 8081):
-        if port not in ports:
-            ports.append(port)
-    hosts: list[str] = [host]
-    for local_host in ("127.0.0.1", "localhost"):
-        if local_host not in hosts:
-            hosts.append(local_host)
-    for local_host in hosts:
-        for port in ports:
-            _append(f"{scheme}://{local_host}:{port}{path}")
-    return candidates
+    return service_search_endpoint_candidates(endpoint)
 
 
 def _is_local_search_endpoint(endpoint: str) -> bool:
-    parsed = urlparse(_normalize_search_endpoint(endpoint))
-    return str(parsed.hostname or "").strip().lower() in {"127.0.0.1", "localhost"}
+    return service_is_local_search_endpoint(endpoint)
 
 
 def probe_search_endpoint(endpoint: str = "", *, timeout: float = 2.5, persist_repair: bool = False) -> dict:
@@ -4743,39 +3581,11 @@ def toggle_search_provider() -> str:
 
 
 def _build_greeting_reply(user_text: str, active_user: Optional[str] = None) -> Optional[str]:
-    t = (user_text or "").strip().lower()
-    greet_regex = re.compile(r"^(hi|hello|hey|good morning|good afternoon|good evening)([\s!,\.]|$)")
-    m = greet_regex.match(t)
-    if not m:
-        return None
-
-    # If this utterance includes an actual request after the greeting, do not
-    # short-circuit here; let deterministic command routing handle it.
-    rest = t[m.end():].strip()
-    rest = re.sub(r"^nova\b[\s,:\-]*", "", rest, flags=re.I).strip()
-    request_markers = [
-        "can you", "could you", "would you", "please", "give me", "check", "show", "tell me",
-        "weather", "web", "search", "find", "read", "list", "inspect", "health", "help",
-    ]
-    if rest and any(k in rest for k in request_markers):
-        return None
-
-    who = (active_user or "").strip()
-    if who and who.lower() == _default_local_user_id().lower():
-        who = ""
-    has_how_are_you = bool(re.search(r"\bhow\s+are\s+you\b", t))
-
-    if has_how_are_you:
-        if who:
-            return f"Hey {who}. I'm doing good today. What's going on?"
-        return "Hey. I'm doing good today. What's going on?"
-
-    word = m.group(1)
-    if word in {"hi", "hello"}:
-        return f"Hi {who}." if who else "Hello."
-    if word == "hey":
-        return f"Hey {who}. What do you need?" if who else "Hey, what do you need?"
-    return f"{word.capitalize()}, {who}." if who else f"{word.capitalize()}."
+    return service_build_greeting_reply(
+        user_text,
+        active_user=active_user,
+        default_local_user_id_fn=_default_local_user_id,
+    )
 
 
 def _quick_smalltalk_reply(user_text: str, active_user: Optional[str] = None) -> Optional[str]:
@@ -4809,48 +3619,19 @@ def _quick_smalltalk_reply(user_text: str, active_user: Optional[str] = None) ->
 
 
 def _extract_color_preferences(session_turns: list[tuple[str, str]]) -> list[str]:
-    colors = []
-    seen = set()
-    for role, text in session_turns:
-        if role != "user":
-            continue
-        t = (text or "").lower().strip()
-
-        has_preference_signal = any(s in t for s in [
-            "i like", "i love", "i prefer", "favorite color", "favourite color", "like the color",
-        ]) or bool(re.search(r"\bi\s+(?:\w+\s+){0,3}like\b", t))
-        if not has_preference_signal:
-            continue
-
-        toks = re.findall(r"[a-z]{3,20}", t)
-        found = [w for w in toks if w in KNOWN_COLORS]
-        if not found:
-            continue
-
-        for c in found:
-            if c in seen:
-                continue
-            seen.add(c)
-            colors.append(c)
-    return colors
+    return service_extract_color_preferences(session_turns, known_colors=KNOWN_COLORS)
 
 
 def _extract_color_preferences_from_text(text: str) -> list[str]:
-    toks = re.findall(r"[a-z]{3,20}", (text or "").lower())
-    out = []
-    seen = set()
-    for t in toks:
-        if t in KNOWN_COLORS and t not in seen:
-            seen.add(t)
-            out.append(t)
-    return out
+    return service_extract_color_preferences_from_text(text, known_colors=KNOWN_COLORS)
 
 
 def _extract_color_preferences_from_memory() -> list[str]:
-    if not mem_enabled():
-        return []
-    probe = mem_recall("what colors does the user like favorite color preference")
-    return _extract_color_preferences_from_text(probe)
+    return service_extract_color_preferences_from_memory(
+        mem_enabled_fn=mem_enabled,
+        mem_recall_fn=mem_recall,
+        extract_color_preferences_from_text_fn=_extract_color_preferences_from_text,
+    )
 
 
 def _extract_developer_color_preferences(session_turns: list[tuple[str, str]]) -> list[str]:
@@ -5143,6 +3924,25 @@ def _is_developer_location_request(
 def _developer_location_reply() -> str:
     relation = get_learned_fact("developer_location_relation", "").strip().lower()
     if relation == "same_as_assistant":
+        live = service_live_device_location_summary(
+            runtime_device_location_payload_fn=runtime_device_location_payload,
+            resolve_current_device_coords_fn=resolve_current_device_coords,
+            allow_stale=True,
+        )
+        if live:
+            preview = str(get_saved_location_text() or "").strip()
+            saved_note = f" Saved location label: {preview}." if preview else ""
+            accuracy = live.get("accuracy_m")
+            accuracy_note = f" Accuracy about {int(round(float(accuracy)))}m." if accuracy is not None else ""
+            label = str(live.get("label") or "").strip()
+            label_note = f" That is near {label}." if label else ""
+            if live.get("stale"):
+                return _prefix_from_earlier_memory(
+                    f"Based on the verified relation you gave me, Gus's last shared device location fix is {live.get('coords_text')}.{accuracy_note} It is stale, so I won't call it current.{label_note}{saved_note}"
+                )
+            return _prefix_from_earlier_memory(
+                f"Based on the verified relation you gave me, Gus's current location matches my current device location: {live.get('coords_text')}.{accuracy_note}{label_note}{saved_note}"
+            )
         preview = get_saved_location_text()
         if preview:
             return _prefix_from_earlier_memory(f"Based on the verified relation you gave me, Gus's location is {preview}.")
@@ -5298,42 +4098,21 @@ def _learn_contextual_developer_facts(turns: list[tuple[str, str]], text: str, i
 
 
 def _extract_memory_teach_text(text: str) -> str:
-    raw = (text or "").strip()
-    if not raw:
-        return ""
-    low = raw.lower()
-    cues = ["remember that", "remember this", "can you remember", "think you can remember"]
-    if not any(c in low for c in cues):
-        return ""
-
-    cleaned = re.sub(r"(?is)\b(?:can\s+you\s+remember\s+that|think\s+you\s+can\s+remember\s+that|remember\s+that|remember\s+this)\b\s*\??", "", raw).strip(" .,!?")
-    if not cleaned:
-        return ""
-    keep, _reason = _memory_should_keep_text(cleaned)
-    return cleaned if keep else ""
+    return service_extract_memory_teach_text(
+        text,
+        memory_should_keep_text_fn=_memory_should_keep_text,
+    )
 
 
 def _extract_last_user_question(turns: list[tuple[str, str]], current_text: str) -> str:
-    target = (current_text or "").strip().lower()
-    for role, text in reversed(turns[:-1]):
-        if role != "user":
-            continue
-        candidate = (text or "").strip()
-        if not candidate:
-            continue
-        low = candidate.lower()
-        if low == target:
-            continue
-        if (
-            "?" in candidate
-            or low.startswith(("what ", "who ", "why ", "how ", "when ", "where ", "which ", "do ", "does ", "did ", "can ", "could ", "would ", "will ", "are ", "is "))
-            or _is_identity_or_developer_query(candidate)
-            or _is_color_lookup_request(candidate)
-            or _is_developer_color_lookup_request(candidate)
-            or _is_developer_bilingual_request(candidate)
-        ):
-            return candidate
-    return ""
+    return service_extract_last_user_question(
+        turns,
+        current_text,
+        is_identity_or_developer_query_fn=_is_identity_or_developer_query,
+        is_color_lookup_request_fn=_is_color_lookup_request,
+        is_developer_color_lookup_request_fn=_is_developer_color_lookup_request,
+        is_developer_bilingual_request_fn=_is_developer_bilingual_request,
+    )
 
 
 def _analyze_routing_text(turns: list[tuple[str, str]], text: str) -> tuple[str, str]:
@@ -5373,93 +4152,31 @@ def _determine_turn_direction(
 
 
 def _extract_animal_preferences(session_turns: list[tuple[str, str]]) -> list[str]:
-    animals = []
-    seen = set()
-    for role, text in session_turns:
-        if role != "user":
-            continue
-        t = (text or "").lower().strip()
-        has_signal = any(s in t for s in ["i like", "i love", "i prefer", "favorite animal", "favourite animal"]) \
-            or bool(re.search(r"\bi\s+(?:\w+\s+){0,3}like\b", t))
-        if not has_signal:
-            continue
-        toks = re.findall(r"[a-z]{3,20}", t)
-        for w in toks:
-            if w not in KNOWN_ANIMALS:
-                continue
-            norm = "birds" if w in {"bird", "birds"} else ("dogs" if w in {"dog", "dogs"} else w)
-            if norm in seen:
-                continue
-            seen.add(norm)
-            animals.append(norm)
-    return animals
+    return service_extract_animal_preferences(session_turns, known_animals=KNOWN_ANIMALS)
 
 
 def _extract_animal_preferences_from_text(text: str) -> list[str]:
-    toks = re.findall(r"[a-z]{3,20}", (text or "").lower())
-    out = []
-    seen = set()
-    for w in toks:
-        if w not in KNOWN_ANIMALS:
-            continue
-        norm = "birds" if w in {"bird", "birds"} else ("dogs" if w in {"dog", "dogs"} else w)
-        if norm in seen:
-            continue
-        seen.add(norm)
-        out.append(norm)
-    return out
+    return service_extract_animal_preferences_from_text(text, known_animals=KNOWN_ANIMALS)
 
 
 def _extract_animal_preferences_from_memory() -> list[str]:
-    if not mem_enabled():
-        return []
-    probe = mem_recall("what animals does the user like favorite animal preference")
-    return _extract_animal_preferences_from_text(probe)
-
-
-def _is_color_animal_match_question(user_text: str) -> bool:
-    t = (user_text or "").lower()
-    return ("what color" in t or "which color" in t) and ("animal" in t or "animals" in t) and any(
-        k in t for k in ["match", "best", "goes", "fit", "fits"]
+    return service_extract_animal_preferences_from_memory(
+        mem_enabled_fn=mem_enabled,
+        mem_recall_fn=mem_recall,
+        extract_animal_preferences_from_text_fn=_extract_animal_preferences_from_text,
     )
 
 
-def _pick_color_for_animals(colors: list[str], animals: list[str]) -> str:
-    if not colors:
-        return ""
-    if len(colors) == 1:
-        return colors[0]
+def _is_color_animal_match_question(user_text: str) -> bool:
+    return service_is_color_animal_match_question(user_text)
 
-    score = {c: 0 for c in colors}
-    for c in colors:
-        cl = c.lower()
-        for a in animals:
-            al = a.lower()
-            if al in {"birds", "parrots", "eagles", "hawks"} and cl in {"red", "blue", "green", "yellow", "orange"}:
-                score[c] += 2
-            if al in {"dogs", "cats", "horses"} and cl in {"brown", "black", "white", "gray", "grey", "silver", "gold"}:
-                score[c] += 1
-    best = sorted(colors, key=lambda c: score.get(c, 0), reverse=True)
-    return best[0]
+
+def _pick_color_for_animals(colors: list[str], animals: list[str]) -> str:
+    return service_pick_color_for_animals(colors, animals)
 
 
 def _is_color_lookup_request(user_text: str) -> bool:
-    t = (user_text or "").lower()
-    direct = [
-        "what color do i like",
-        "what colors do i like",
-        "which color do i like",
-        "which colors do i like",
-        "color i like",
-        "colors i like",
-    ]
-    if any(x in t for x in direct):
-        return True
-    if "go back" in t and "color" in t:
-        return True
-    if "past chat" in t and "color" in t:
-        return True
-    return False
+    return service_is_color_lookup_request(user_text)
 
 
 # =========================
@@ -6390,14 +5107,11 @@ def ollama_chat(text: str, retrieved_context: str = "", language_mix_spanish_pct
 
 
 def _teach_store_example(original: str, correction: str, user: Optional[str] = None) -> str:
-    """Store a teach example both in memory and as a local examples file for patch proposals."""
+    """Store a teach example in the local examples file for overrides and patch proposals."""
     try:
         user = user or get_active_user() or ""
         ex = {"orig": original, "corr": correction, "user": user, "ts": int(time.time())}
-        # store in memory for runtime learning
-        mem_add("teach", "user_teach", json.dumps(ex))
 
-        # also append to local examples file for patch proposals
         teach_dir = UPDATES_DIR / "teaching"
         teach_dir.mkdir(parents=True, exist_ok=True)
         fn = teach_dir / "examples.jsonl"
@@ -6409,56 +5123,15 @@ def _teach_store_example(original: str, correction: str, user: Optional[str] = N
 
 
 def _parse_correction(text: str) -> Optional[str]:
-    """Parse a freeform correction and return the corrected reply if found."""
-    if not text:
-        return None
-    t = text.strip()
-    # common patterns
-    patterns = [
-        r"^(?:no|nah|nope|that's wrong|wrong|not quite|don't)\b.*(?:say|respond|reply|use)\s+[\"'](.+?)[\"'](?:\s*instead)?$",
-        r"^(?:say|respond|reply|use)\s+[\"'](.+?)[\"']\s*(?:instead)?$",
-        r".*instead[,:\s]+[\"']?(.+?)[\"']?$",
-    ]
-    for pat in patterns:
-        m = re.match(pat, t, flags=re.I)
-        if m:
-            corr = m.group(1).strip()
-            if corr:
-                return corr
-    return None
+    return service_parse_correction(text)
 
 
 def _looks_like_correction_cancel(text: str) -> bool:
-    low = _normalize_turn_text(text)
-    if not low:
-        return False
-    cues = (
-        "dont have to replace",
-        "don't have to replace",
-        "no need to replace",
-        "you dont have to replace",
-        "you don't have to replace",
-        "i was just small talk",
-        "it was just small talk",
-        "just small talk",
-        "leave it alone",
-        "never mind that correction",
-        "nevermind that correction",
-    )
-    return any(cue in low for cue in cues)
+    return service_looks_like_correction_cancel(text, normalize_turn_text=_normalize_turn_text)
 
 
 def _looks_like_pending_replacement_text(text: str) -> bool:
-    raw = str(text or "").strip()
-    if not raw or "?" in raw:
-        return False
-    if bool(re.fullmatch(r"['\"].+['\"]", raw)):
-        return True
-    normalized = _normalize_turn_text(raw)
-    words = [word for word in normalized.split() if word]
-    if not words:
-        return False
-    return len(words) <= 4
+    return service_looks_like_pending_replacement_text(text, normalize_turn_text=_normalize_turn_text)
 
 
 def _safe_eval_arithmetic_expression(expr: str) -> Optional[float]:
@@ -6484,69 +5157,15 @@ def _arithmetic_expression_reply(user_text: str) -> Optional[str]:
 
 
 def _is_negative_feedback(text: str) -> bool:
-    t = (text or "").strip().lower()
-    cues = [
-        "you are wrong",
-        "you're wrong",
-        "that is wrong",
-        "you gave me garbage",
-        "that is garbage",
-        "not correct",
-        "not right",
-        "that is not true",
-        "you made that up",
-        "what happen",
-        "what happened",
-    ]
-    return any(c in t for c in cues)
+    return service_is_negative_feedback(text)
 
 
 def _extract_authoritative_correction_text(text: str) -> Optional[str]:
-    t = (text or "").strip()
-    if not t:
-        return None
-
-    # First, try explicit correction forms.
-    c = _parse_correction(t)
-    if c:
-        return c
-
-    low = t.lower()
-    if "?" in t and len(t) < 220:
-        return None
-
-    # Long declarative statements are likely intended corrections/ground truth.
-    if len(t) >= 80:
-        # Drop conversational lead-ins.
-        cleaned = re.sub(r"(?is)^\s*(you're right about something|you are right about something|listen|look)\s*[,:.-]*\s*", "", t).strip()
-        return cleaned or None
-
-    # Short, direct declarative corrections should also be accepted.
-    short_decl_patterns = [
-        r"^\s*my\s+name\s+is\s+.+",
-        r"^\s*your\s+name\s+is\s+.+",
-        r"^\s*please\s+use\s+.+",
-    ]
-    if any(re.match(p, low) for p in short_decl_patterns):
-        return t
-
-    return None
+    return service_extract_authoritative_correction_text(text)
 
 
 def _normalize_correction_for_storage(correction: str) -> str:
-    c = re.sub(r"\s+", " ", (correction or "").strip())
-    if not c:
-        return c
-
-    # Keep only the key identity sentence when user includes extra coaching text.
-    m_name = re.search(r"(?i)\bmy\s+name\s+is\s+[^.?!]+", c)
-    if m_name:
-        out = m_name.group(0).strip().rstrip(".?!") + "."
-        return out
-
-    # Keep the first sentence as a concise reusable correction.
-    parts = re.split(r"(?<=[.!?])\s+", c)
-    return (parts[0] if parts else c).strip()
+    return service_normalize_correction_for_storage(correction)
 
 
 def _is_identity_stable_reply(reply: str) -> bool:
@@ -6563,48 +5182,7 @@ def _is_identity_stable_reply(reply: str) -> bool:
 
 
 def _apply_reply_overrides(reply: str) -> str:
-    """Check stored teach examples and return an overridden reply if a matching original is found."""
-    try:
-        teach_dir = UPDATES_DIR / "teaching"
-        fn = teach_dir / "examples.jsonl"
-        if not fn.exists():
-            return reply
-        def _norm(s: str) -> str:
-            return re.sub(r"\s+", " ", (s or "").strip())
-
-        def _loose_norm(s: str) -> str:
-            base = _norm(s).lower()
-            base = re.sub(r"[^a-z0-9 ]+", " ", base)
-            return re.sub(r"\s+", " ", base).strip()
-
-        target = _norm(reply)
-        target_loose = _loose_norm(reply)
-        best_ratio = 0.0
-        best_corr = ""
-
-        with open(fn, "r", encoding="utf-8") as f:
-            for ln in f:
-                try:
-                    j = json.loads(ln)
-                    orig = _norm(j.get("orig") or "")
-                    corr = j.get("corr") or ""
-                    if orig and orig == target:
-                        return corr
-                    orig_loose = _loose_norm(orig)
-                    if orig_loose and orig_loose == target_loose:
-                        return corr
-                    if orig_loose and target_loose:
-                        ratio = difflib.SequenceMatcher(None, target_loose, orig_loose).ratio()
-                        if ratio > best_ratio:
-                            best_ratio = ratio
-                            best_corr = corr
-                except Exception:
-                    continue
-        if best_ratio >= 0.94 and best_corr:
-            return best_corr
-    except Exception:
-        pass
-    return reply
+    return service_apply_reply_overrides(reply, updates_dir=UPDATES_DIR)
 
 
 def _teach_list_examples() -> str:
@@ -6654,27 +5232,23 @@ def _teach_autoapply_proposal(zip_path: str, apply_live: bool = False) -> str:
 # Voice (STT)
 # =========================
 def record_seconds(seconds=3):
-    if not _ensure_voice_deps() or sd is None:
-        raise RuntimeError(f"Voice is disabled (import error: {VOICE_IMPORT_ERR})")
-    print(f"Nova: recording for {seconds} seconds... (talk now)", flush=True)
-    audio = sd.rec(
-        int(seconds * SAMPLE_RATE),
-        samplerate=SAMPLE_RATE,
+    return service_record_seconds(
+        seconds,
+        ensure_voice_deps_fn=_ensure_voice_deps,
+        runtime_scope=globals(),
+        sample_rate=SAMPLE_RATE,
         channels=CHANNELS,
-        dtype="int16",
     )
-    sd.wait()
-    return audio
 
 
 def transcribe(model, audio_int16):
-    if not _ensure_voice_deps() or wav is None:
-        raise RuntimeError(f"Voice is disabled (import error: {VOICE_IMPORT_ERR})")
-    buf = io.BytesIO()
-    wav.write(buf, SAMPLE_RATE, audio_int16)
-    buf.seek(0)
-    segments, _ = model.transcribe(buf)
-    return " ".join(seg.text.strip() for seg in segments).strip()
+    return service_transcribe(
+        model,
+        audio_int16,
+        ensure_voice_deps_fn=_ensure_voice_deps,
+        runtime_scope=globals(),
+        sample_rate=SAMPLE_RATE,
+    )
 
 
 # =========================
@@ -6730,6 +5304,20 @@ def tool_queue_status():
     return execute_registered_tool("system", {"action": "queue_status"})
 
 
+def tool_pipeline(command_text: str = "pipeline help"):
+    return service_handle_pipeline_command(
+        command_text,
+        data_sources_root=DATA_SOURCES_ROOT,
+        list_pipeline_summaries_fn=service_list_pipeline_summaries,
+        get_pipeline_status_fn=service_get_pipeline_status,
+        get_pipeline_schema_probe_fn=service_get_pipeline_schema_probe,
+        preview_pipeline_query_fn=service_preview_pipeline_query,
+        run_privileged_pipeline_query_fn=service_run_privileged_pipeline_query,
+        search_pipeline_vendor_dictionary_fn=service_search_pipeline_vendor_dictionary,
+        plan_pipeline_report_fn=service_plan_pipeline_report,
+    )
+
+
 def tool_phase2_audit():
     import kidney
     import nova_safety_envelope
@@ -6751,34 +5339,6 @@ def _load_json_file(path: Path, default: Any) -> Any:
         return default if data is None else data
     except Exception:
         return default
-
-
-def _count_definition_files(root: Path) -> int:
-    manifest_names = {"generated_manifest.json", "latest_manifest.json"}
-    try:
-        if not root.exists():
-            return 0
-        return sum(1 for path in root.glob("*.json") if path.is_file() and path.name not in manifest_names)
-    except Exception:
-        return 0
-
-
-def _promotion_audit_summary() -> dict:
-    return service_promotion_audit_summary(
-        promotion_audit_log=PROMOTION_AUDIT_LOG,
-        generated_definitions_dir=GENERATED_DEFINITIONS_DIR,
-        promoted_definitions_dir=PROMOTED_DEFINITIONS_DIR,
-        pending_review_dir=PENDING_REVIEW_DIR,
-        quarantine_dir=QUARANTINE_DIR,
-    )
-
-
-def _patch_activity_summary(window_hours: int = 24) -> dict:
-    return service_patch_activity_summary(
-        patch_log=PATCH_LOG,
-        read_patch_log_tail_line_fn=_read_patch_log_tail_line,
-        window_hours=window_hours,
-    )
 
 
 def _preview_name_to_zip_path(preview_name: str) -> Optional[Path]:
@@ -6813,26 +5373,6 @@ def _latest_approved_update_zip(patch_payload: Optional[dict] = None) -> Optiona
     return None
 
 
-def _pulse_level(ollama_up: bool, routing_stable: bool, fallback_score: float, rollback_count: int) -> str:
-    if not ollama_up:
-        return "deterministic-only"
-    if not routing_stable or fallback_score >= 0.9 or rollback_count > 0:
-        return "guarded"
-    return "operational"
-
-
-def _pulse_mood(ollama_up: bool, routing_stable: bool, promoted_delta: int, fallback_score: float, rollback_count: int) -> str:
-    if not ollama_up:
-        return "LLM link is down, so I am holding to deterministic paths only."
-    if rollback_count > 0 or fallback_score >= 0.9:
-        return "Stable, but I am watching rollback pressure and fallback drift closely."
-    if not routing_stable:
-        return "Routing is unsettled, so I am staying conservative."
-    if promoted_delta > 0:
-        return "Learning is moving forward cleanly."
-    return "Quiet and steady."
-
-
 def build_pulse_payload() -> dict:
     return service_build_pulse_payload(
         promotion_audit_log=PROMOTION_AUDIT_LOG,
@@ -6854,23 +5394,6 @@ def build_pulse_payload() -> dict:
         latest_approved_update_zip_fn=_latest_approved_update_zip,
     )
 
-
-
-def _write_pulse_snapshot(payload: dict) -> None:
-    snapshot = {
-        "generated_at": str(payload.get("generated_at") or ""),
-        "promoted_total": int(payload.get("promoted_total", 0) or 0),
-        "patch_revision": int(payload.get("patch_revision", 0) or 0),
-        "llm_fallback_count": int(payload.get("llm_fallback_count", 0) or 0),
-        "tool_route_count": int(payload.get("tool_route_count", 0) or 0),
-    }
-    try:
-        PULSE_SNAPSHOT_FILE.parent.mkdir(parents=True, exist_ok=True)
-        PULSE_SNAPSHOT_FILE.write_text(json.dumps(snapshot, ensure_ascii=True, indent=2), encoding="utf-8")
-    except Exception:
-        return
-
-
 def render_nova_pulse(payload: Optional[dict] = None) -> str:
     return service_render_nova_pulse(
         payload,
@@ -6880,133 +5403,174 @@ def render_nova_pulse(payload: Optional[dict] = None) -> str:
 
 
 def tool_nova_pulse():
-    payload = build_pulse_payload()
-    _write_pulse_snapshot(payload)
-    return render_nova_pulse(payload)
+    return service_tool_nova_pulse(
+        build_pulse_payload_fn=build_pulse_payload,
+        write_pulse_snapshot_fn=lambda payload: service_write_pulse_snapshot(payload, pulse_snapshot_file=PULSE_SNAPSHOT_FILE),
+        render_nova_pulse_fn=render_nova_pulse,
+    )
 
 
-def _read_update_now_pending() -> dict:
-    return _load_json_file(UPDATE_NOW_PENDING_FILE, {}) if UPDATE_NOW_PENDING_FILE.exists() else {}
+def tool_nova_self_status():
+    payload = service_build_self_status_payload(
+        pulse_payload=build_pulse_payload(),
+        recent_ops_events=service_read_recent_ops_events(RUNTIME_DIR / "ops_journal.jsonl", limit=60),
+    )
+    return service_render_self_status(payload)
 
 
-def _write_update_now_pending(payload: dict) -> None:
+def _core_health_runtime_health() -> dict:
     try:
-        UPDATE_NOW_PENDING_FILE.parent.mkdir(parents=True, exist_ok=True)
-        UPDATE_NOW_PENDING_FILE.write_text(json.dumps(payload, ensure_ascii=True, indent=2), encoding="utf-8")
-    except Exception:
-        return
+        import health as health_module
 
-
-def _clear_update_now_pending() -> None:
-    try:
-        if UPDATE_NOW_PENDING_FILE.exists():
-            UPDATE_NOW_PENDING_FILE.unlink()
-    except Exception:
-        return
-
-
-def update_now_pending_payload() -> dict:
-    data = _read_update_now_pending()
-    if not isinstance(data, dict) or not data:
-        return {"ok": False, "pending": False}
+        hb_ok, hb_msg = health_module.check_heartbeat()
+        st_ok, st_msg = health_module.check_state()
+        ol_ok, ol_msg = health_module.check_ollama()
+    except Exception as exc:
+        return {
+            "heartbeat": {"ok": False, "info": f"error:{exc}"},
+            "core_state": {"ok": False, "info": f"error:{exc}"},
+            "ollama": {"ok": False, "info": f"error:{exc}"},
+        }
     return {
-        "ok": True,
-        "pending": True,
-        "created_at": str(data.get("created_at") or ""),
-        "token": str(data.get("token") or ""),
-        "zip_path": str(data.get("zip_path") or ""),
-        "preview_status": str(data.get("preview_status") or ""),
+        "heartbeat": {"ok": bool(hb_ok), "info": str(hb_msg or "")},
+        "core_state": {"ok": bool(st_ok), "info": str(st_msg or "")},
+        "ollama": {"ok": bool(ol_ok), "info": str(ol_msg or "")},
     }
 
 
+def _core_health_kidney_summary() -> dict:
+    try:
+        import kidney as kidney_module
+
+        summary = kidney_module.run_kidney(dry_run=True)
+        return dict(summary or {}) if isinstance(summary, dict) else {}
+    except Exception as exc:
+        return {"mode": "unknown", "candidate_count": 0, "error": str(exc)}
+
+
+def _apply_latest_regression_validation(pulse_payload: dict) -> dict:
+    payload = dict(pulse_payload or {})
+    marker = _load_json_file(RUNTIME_DIR / "regression_status.json", {}) or {}
+    if not isinstance(marker, dict):
+        return payload
+    marker_status = str(marker.get("status") or "").strip().upper()
+    marker_date = str(marker.get("date") or "").strip()
+    marker_lanes = [str(item).strip() for item in list(marker.get("lanes") or []) if str(item).strip()]
+    if marker_status != "OK" or marker_date != time.strftime("%Y-%m-%d"):
+        return payload
+    if "unit" not in marker_lanes and "all" not in marker_lanes:
+        return payload
+    payload["last_regression_status"] = "OK"
+    payload["last_regression_stale"] = False
+    payload["last_regression_source"] = "scripts/run_regression.py"
+    payload["last_regression_at"] = str(marker.get("generated_at") or "")
+    return payload
+
+
+def build_core_health_brief_payload() -> dict:
+    try:
+        import doctor as doctor_module
+
+        preflight_checks = list(doctor_module.run_preflight() or [])
+    except Exception:
+        preflight_checks = []
+
+    runtime_health = _core_health_runtime_health()
+    pulse_payload = _apply_latest_regression_validation(build_pulse_payload())
+    self_status = service_build_self_status_payload(
+        pulse_payload=pulse_payload,
+        recent_ops_events=service_read_recent_ops_events(RUNTIME_DIR / "ops_journal.jsonl", limit=60),
+    )
+    autonomy_maintenance = _load_json_file(AUTONOMY_MAINTENANCE_FILE, {}) or {}
+    core_steward = service_build_core_steward_payload(
+        preflight_checks=preflight_checks,
+        runtime_health=runtime_health,
+        pulse_payload=pulse_payload,
+        autonomy_maintenance=autonomy_maintenance if isinstance(autonomy_maintenance, dict) else {},
+        kidney_summary=_core_health_kidney_summary(),
+    )
+    core_status = "running" if bool((runtime_health.get("core_state") or {}).get("ok")) else "heartbeat_stale"
+    return service_build_core_health_brief(
+        core_steward=core_steward,
+        self_status=self_status,
+        runtime_summary={"core": {"status": core_status}},
+    )
+
+
+def tool_core_health_brief(feed: str = ""):
+    brief = build_core_health_brief_payload()
+    service_write_core_health_brief(RUNTIME_DIR / "core_health_brief.json", brief)
+
+    feed_result = None
+    if str(feed or "").strip().lower() in {"feed", "work_tree", "worktree", "seed"}:
+        import work_tree
+
+        feed_result = service_feed_core_health_brief_to_work_tree(brief, work_tree_module=work_tree)
+    return service_render_core_health_brief(brief, feed_result=feed_result)
+
+
+def tool_core_thinning(feed: str = ""):
+    raw = str(feed or "").strip()
+    if raw.startswith("{"):
+        return service_execute_core_thinning_order(raw)
+
+    core_path = Path(__file__).resolve()
+    brief = service_build_core_thinning_brief([core_path, core_path.with_name("nova_http.py")])
+    feed_result = None
+    if raw.lower() in {"feed", "work_tree", "worktree", "seed"}:
+        import work_tree
+
+        feed_result = service_feed_core_thinning_brief_to_work_tree(brief, work_tree_module=work_tree)
+    return service_render_core_thinning_brief(brief, feed_result=feed_result)
+
+
+def _read_update_now_pending() -> dict:
+    return service_read_update_now_pending(UPDATE_NOW_PENDING_FILE, load_json_file_fn=_load_json_file)
+
+
+def _write_update_now_pending(payload: dict) -> None:
+    return service_write_update_now_pending(UPDATE_NOW_PENDING_FILE, payload)
+
+
+def _clear_update_now_pending() -> None:
+    return service_clear_update_now_pending(UPDATE_NOW_PENDING_FILE)
+
+
+def update_now_pending_payload() -> dict:
+    return service_update_now_pending_payload(UPDATE_NOW_PENDING_FILE, read_pending_fn=_read_update_now_pending)
+
+
 def _build_update_now_token(zip_path: Path) -> str:
-    seed = f"{str(zip_path)}|{time.time()}|{os.getpid()}"
-    return hashlib.sha1(seed.encode("utf-8")).hexdigest()[:8]
-
-
-def _extract_preview_status(preview_text: str) -> str:
-    m = re.search(r"^Status:\s*(.+)$", str(preview_text or ""), flags=re.M)
-    return str(m.group(1) or "").strip() if m else "unknown"
-
-
-def _extract_preview_zip(preview_text: str) -> str:
-    m = re.search(r"^Zip:\s*(.+)$", str(preview_text or ""), flags=re.M)
-    return str(m.group(1) or "").strip() if m else ""
+    return service_build_update_now_token(zip_path)
 
 
 def tool_update_now():
-    patch_payload = patch_status_payload()
-    zip_path = _latest_approved_update_zip(patch_payload)
-    if zip_path is None:
-        _clear_update_now_pending()
-        return "No approved validated update is queued right now. Run pulse to inspect the current update pipeline."
-    preview_text = patch_preview(str(zip_path), write_report=False)
-    preview_status = _extract_preview_status(preview_text)
-    if not str(preview_status or "").lower().startswith("eligible"):
-        _clear_update_now_pending()
-        return (
-            "Update candidate is not eligible after dry-run preview.\n"
-            f"- zip: {zip_path}\n"
-            f"- status: {preview_status or 'unknown'}\n"
-            "Update not applied."
-        )
-
-    token = _build_update_now_token(zip_path)
-    _write_update_now_pending({
-        "created_at": time.strftime("%Y-%m-%d %H:%M:%S"),
-        "token": token,
-        "zip_path": str(zip_path),
-        "preview_status": preview_status,
-        "preview_zip": _extract_preview_zip(preview_text),
-    })
-    return (
-        "Update dry-run ready.\n"
-        f"- zip: {zip_path}\n"
-        f"- status: {preview_status}\n"
-        f"Confirm with: update now confirm {token}\n"
-        "Cancel with: update now cancel"
+    return service_tool_update_now(
+        patch_status_payload_fn=patch_status_payload,
+        latest_approved_update_zip_fn=_latest_approved_update_zip,
+        patch_preview_fn=patch_preview,
+        clear_pending_fn=_clear_update_now_pending,
+        write_pending_fn=_write_update_now_pending,
+        build_token_fn=_build_update_now_token,
     )
 
 
 def tool_update_now_confirm(token: str = ""):
-    pending = _read_update_now_pending()
-    if not isinstance(pending, dict) or not pending:
-        return "No pending update confirmation. Start with: update now"
-
-    expected_token = str(pending.get("token") or "").strip()
-    provided_token = str(token or "").strip()
-    if not provided_token:
-        return f"Confirmation token required. Run: update now confirm {expected_token}"
-    if expected_token and provided_token != expected_token:
-        return "Confirmation token mismatch. Run update now again to refresh the token."
-
-    zip_path_text = str(pending.get("zip_path") or "").strip()
-    if not zip_path_text:
-        _clear_update_now_pending()
-        return "Pending update payload is invalid. Run update now to regenerate the dry-run confirmation."
-    zip_path = Path(zip_path_text)
-    if not zip_path.exists():
-        _clear_update_now_pending()
-        return f"Update package is missing: {zip_path}. Run update now to regenerate the dry-run confirmation."
-
-    patch_payload = patch_status_payload()
-    latest_zip = _latest_approved_update_zip(patch_payload)
-    if latest_zip is None or str(latest_zip) != str(zip_path):
-        _clear_update_now_pending()
-        return "Approved update candidate changed. Run update now again before confirming."
-
-    out = execute_patch_action("apply", str(zip_path), is_admin=True)
-    if str(out or "").lower().startswith("patch applied:"):
-        _clear_update_now_pending()
-    return out
+    return service_tool_update_now_confirm(
+        token,
+        read_pending_fn=_read_update_now_pending,
+        clear_pending_fn=_clear_update_now_pending,
+        patch_status_payload_fn=patch_status_payload,
+        latest_approved_update_zip_fn=_latest_approved_update_zip,
+        execute_patch_action_fn=execute_patch_action,
+    )
 
 
 def tool_update_now_cancel():
-    had_pending = bool(_read_update_now_pending())
-    _clear_update_now_pending()
-    if had_pending:
-        return "Canceled pending update confirmation."
-    return "No pending update confirmation was active."
+    return service_tool_update_now_cancel(
+        read_pending_fn=_read_update_now_pending,
+        clear_pending_fn=_clear_update_now_pending,
+    )
 
 
 def execute_planned_action(tool: str, args=None):
@@ -7056,171 +5620,41 @@ def tool_search(query: str):
 
 
 def _decode_search_href(href: str) -> str:
-    href = (href or "").strip()
-    if not href:
-        return ""
-
-    # DuckDuckGo style redirect: /l/?uddg=<encoded_url>
-    if href.startswith("/l/?"):
-        q = parse_qs(urlparse("https://duckduckgo.com" + href).query)
-        u = (q.get("uddg") or [""])[0]
-        return unquote(u)
-
-    if href.startswith("http://") or href.startswith("https://"):
-        return href
-
-    return ""
+    return service_decode_search_href(href)
 
 
 def _extract_text_from_path(path: Path, max_chars: int = 2000) -> str:
-    try:
-        suffix = path.suffix.lower()
-        if suffix in {".txt", ".md", ".log"}:
-            t = path.read_text(encoding="utf-8", errors="ignore")
-            return re.sub(r"\s+", " ", t).strip()[:max_chars]
-
-        if suffix in {".html", ".htm"}:
-            raw = path.read_text(encoding="utf-8", errors="ignore")
-            raw = re.sub(r"(?is)<script.*?>.*?</script>", " ", raw)
-            raw = re.sub(r"(?is)<style.*?>.*?</style>", " ", raw)
-            raw = re.sub(r"(?is)<[^>]+>", " ", raw)
-            raw = html.unescape(raw)
-            return re.sub(r"\s+", " ", raw).strip()[:max_chars]
-
-        return ""
-    except Exception:
-        return ""
+    return service_extract_text_from_path(path, max_chars)
 
 
 def _extract_text_from_html_content(raw_html: str, max_chars: int = 2000) -> str:
-    raw = raw_html or ""
-    raw = re.sub(r"(?is)<script.*?>.*?</script>", " ", raw)
-    raw = re.sub(r"(?is)<style.*?>.*?</style>", " ", raw)
-    raw = re.sub(r"(?is)<[^>]+>", " ", raw)
-    raw = html.unescape(raw)
-    return re.sub(r"\s+", " ", raw).strip()[:max_chars]
+    return service_extract_text_from_html_content(raw_html, max_chars)
 
 
 def _extract_same_host_links(raw_html: str, base_url: str, host: str) -> list[str]:
-    links = []
-    seen = set()
-    hrefs = re.findall(r'href=["\']([^"\']+)["\']', raw_html or "", flags=re.I)
-    for href in hrefs:
-        href = (href or "").strip()
-        if not href or href.startswith("#"):
-            continue
-        if href.startswith("javascript:") or href.startswith("mailto:"):
-            continue
-
-        abs_url = urljoin(base_url, href)
-        p = urlparse(abs_url)
-        if p.scheme not in ("http", "https"):
-            continue
-        if not p.hostname:
-            continue
-        if p.hostname.lower() != host.lower():
-            continue
-
-        clean = f"{p.scheme}://{p.netloc}{p.path}"
-        if p.query:
-            clean += f"?{p.query}"
-        if clean in seen:
-            continue
-        seen.add(clean)
-        links.append(clean)
-    return links
+    return service_extract_same_host_links(raw_html, base_url, host)
 
 
 def _expand_research_terms(tokens: list[str]) -> list[str]:
-    terms = set(t for t in tokens if t)
-    if "peims" in terms:
-        terms.update({"tsds", "submission", "interchange", "student", "reporting"})
-    if "attendance" in terms:
-        terms.update({"ada", "attendance", "reporting"})
-    if "timeline" in terms:
-        terms.update({"calendar", "deadline", "dates"})
-    if "reporting" in terms:
-        terms.update({"submission", "report"})
-    return list(terms)
+    return service_expand_research_terms(tokens)
 
 
 def _score_research_hit(url: str, text: str, terms: list[str], primary_tokens: Optional[list[str]] = None) -> float:
-    low_url = (url or "").lower()
-    low_text = (text or "").lower()
-    primary_tokens = [t for t in (primary_tokens or []) if t]
-    p = urlparse(url or "")
-
-    unique_text_hits = sum(1 for t in terms if t in low_text)
-    unique_url_hits = sum(1 for t in terms if t in low_url)
-    total_text_hits = sum(low_text.count(t) for t in terms)
-    total_url_hits = sum(low_url.count(t) for t in terms)
-
-    # Domain-specific boosts for likely data/reporting pages.
-    boost_patterns = ["peims", "tsds", "attendance", "ada", "submission", "calendar", "timeline", "report", "student-data"]
-    path_boost = sum(1 for p in boost_patterns if p in low_url)
-
-    score = (
-        unique_text_hits * 4.0
-        + unique_url_hits * 6.0
-        + min(30.0, float(total_text_hits) * 0.25)
-        + min(20.0, float(total_url_hits) * 0.75)
-        + path_boost * 1.5
-    )
-
-    # Penalize generic pages when none of the user's original query tokens are present.
-    if primary_tokens and not any(t in low_text or t in low_url for t in primary_tokens):
-        score -= 8.0
-
-    # Strongly de-prioritize homepage if it doesn't contain primary intent terms.
-    if (p.path or "/") in {"", "/"} and primary_tokens and not any(t in low_text or t in low_url for t in primary_tokens):
-        score -= 12.0
-
-    return score
+    return service_score_research_hit(url, text, terms, primary_tokens=primary_tokens)
 
 
 def _crawl_domain_for_query(start_url: str, query_tokens: list[str], max_pages: int, max_depth: int) -> list[tuple[float, str, str]]:
-    parsed = urlparse(start_url)
-    host = parsed.hostname or ""
-    if not host:
-        return []
-
-    terms = _expand_research_terms(query_tokens)
-    q = [(start_url, 0)]
-    seen = {start_url}
-    fetched = 0
-    hits = []
-
-    while q and fetched < max_pages:
-        url, depth = q.pop(0)
-
-        try:
-            r = requests.get(url, headers={"User-Agent": "Nova/1.0"}, timeout=25)
-            r.raise_for_status()
-        except Exception:
-            continue
-
-        fetched += 1
-        ctype = (r.headers.get("Content-Type") or "").lower()
-        if "html" not in ctype:
-            continue
-
-        raw = r.text
-        text = _extract_text_from_html_content(raw, max_chars=5000)
-        score = _score_research_hit(url, text, terms, primary_tokens=query_tokens)
-        if score >= 3.0:
-            snippet = text[:900]
-            hits.append((score, url, snippet))
-
-        if depth >= max_depth:
-            continue
-
-        for nxt in _extract_same_host_links(raw, url, host):
-            if nxt in seen:
-                continue
-            seen.add(nxt)
-            q.append((nxt, depth + 1))
-
-    return hits
+    return service_crawl_domain_for_query(
+        start_url,
+        query_tokens,
+        max_pages,
+        max_depth,
+        requests_get_fn=requests.get,
+        expand_research_terms_fn=_expand_research_terms,
+        extract_text_from_html_content_fn=_extract_text_from_html_content,
+        score_research_hit_fn=_score_research_hit,
+        extract_same_host_links_fn=_extract_same_host_links,
+    )
 
 
 def _scan_candidate_urls_for_query(urls: list[str], query_tokens: list[str], max_pages: int, min_score: float = 3.0) -> list[tuple[float, str, str]]:
@@ -7248,95 +5682,36 @@ def _fetch_sitemap_urls(domain: str, limit: int = 80) -> list[str]:
 
 
 def _seed_urls_for_domain(domain: str, query_tokens: list[str], max_seed: int = 30) -> list[str]:
-    seeds = [f"https://{domain}/"]
-    candidates = _fetch_sitemap_urls(domain, limit=max_seed * 3)
-    if not candidates:
-        return seeds
-
-    terms = _expand_research_terms(query_tokens)
-    scored = []
-    for u in candidates:
-        low = u.lower()
-        score = sum(low.count(t) for t in terms)
-        for p in ("peims", "tsds", "attendance", "ada", "submission", "calendar", "timeline", "report"):
-            if p in low:
-                score += 2
-        if score > 0:
-            scored.append((score, u))
-
-    scored.sort(key=lambda x: x[0], reverse=True)
-    for _, u in scored[:max_seed]:
-        if u not in seeds:
-            seeds.append(u)
-
-    # Fill remaining seed slots with earliest sitemap URLs even if token score is zero,
-    # so we still traverse deeper pages when URL text doesn't contain query tokens.
-    if len(seeds) < (max_seed + 1):
-        for u in candidates:
-            if u in seeds:
-                continue
-            seeds.append(u)
-            if len(seeds) >= (max_seed + 1):
-                break
-    return seeds
+    return service_seed_urls_for_domain(
+        domain,
+        query_tokens,
+        max_seed=max_seed,
+        fetch_sitemap_urls_fn=_fetch_sitemap_urls,
+        expand_research_terms_fn=_expand_research_terms,
+    )
 
 
 
 def tool_web_fetch(url: str):
-    missing = explain_missing("web_fetch", ["web_access"])
-    if missing:
-        return missing
-
-    if not policy_tools_enabled().get("web", False):
-        return "Web tool disabled by policy."
-
-    out = web_fetch(url, WEB_CACHE_DIR)
-    if not out.get("ok"):
-        err = out.get("error", "unknown error")
-        if isinstance(err, str) and "not allowed" in err.lower():
-            return _web_allowlist_message(url)
-        return f"[FAIL] {err}"
-
-    return f"[OK] Saved: {out['path']} ({out['content_type']}, {out['bytes']} bytes)"
+    return service_tool_web_fetch(
+        url,
+        explain_missing_fn=explain_missing,
+        policy_tools_enabled_fn=policy_tools_enabled,
+        web_fetch_fn=lambda target_url: web_fetch(target_url, WEB_CACHE_DIR),
+        web_allowlist_message_fn=_web_allowlist_message,
+    )
 
 
 def _provider_request_headers(token: str = "") -> dict[str, str]:
-    headers = {
-        "Accept": "application/json",
-        "User-Agent": "Nova/1.0",
-    }
-    if token:
-        headers["Authorization"] = f"Bearer {token}"
-        headers["X-GitHub-Api-Version"] = "2022-11-28"
-    return headers
+    return service_provider_request_headers(token)
 
 
 def _clean_html_text(value: str) -> str:
-    text = html.unescape(str(value or "").strip())
-    return re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", text)).strip()
+    return service_clean_html_text(value)
 
 
 def _looks_like_code_discovery_query(text: str) -> bool:
-    low = str(text or "").strip().lower()
-    if not low:
-        return False
-    code_markers = (
-        "github",
-        "repo",
-        "repository",
-        "source code",
-        "implementation",
-        "example repo",
-        "code example",
-        "sample project",
-        "issue",
-        "pull request",
-        "public repo",
-        "open source",
-        "function ",
-        "class ",
-    )
-    return any(marker in low for marker in code_markers)
+    return service_looks_like_code_discovery_query(text)
 
 
 def tool_wikipedia_lookup(query: str):
@@ -7409,53 +5784,20 @@ def tool_web_research(query: str, continue_mode: bool = False):
 
 
 def handle_keywords(text: str):
-    raw = str(text or "").strip()
-    low = raw.lower()
-
-    if low in {"screen", "look at my screen"}:
-        return ("tool", "screen", tool_screen())
-
-    if low.startswith("camera"):
-        prompt = text[len("camera"):].strip() or "what do you see"
-        return ("tool", "camera", tool_camera(prompt))
-
-    if low == "ls" or _is_brief_command_form(raw, "ls", max_tokens=2):
-        parts = raw.split(maxsplit=1)
-        sub = parts[1] if len(parts) > 1 else ""
-        return ("tool", "ls", tool_ls(sub))
-
-    if _is_brief_command_form(raw, "read", max_tokens=2):
-        path = raw.split(maxsplit=1)[1]
-        return ("tool", "read", tool_read(path))
-
-    if _is_brief_command_form(raw, "find", max_tokens=3):
-        parts = raw.split(maxsplit=2)
-        keyword = parts[1] if len(parts) > 1 else ""
-        folder = parts[2] if len(parts) > 2 else ""
-        return ("tool", "find", tool_find(keyword, folder))
-
-    if low in {"health", "status"}:
-        return ("tool", "health", tool_health())
-
-    return None
+    return service_handle_keywords(
+        text,
+        tool_screen_fn=tool_screen,
+        tool_camera_fn=tool_camera,
+        tool_ls_fn=tool_ls,
+        tool_read_fn=tool_read,
+        tool_find_fn=tool_find,
+        tool_health_fn=tool_health,
+        is_brief_command_form_fn=_is_brief_command_form,
+    )
 
 
 def _is_brief_command_form(text: str, command: str, max_tokens: int) -> bool:
-    raw = str(text or "").strip()
-    low = raw.lower()
-    if not low.startswith(f"{command} "):
-        return False
-    if raw.endswith("?"):
-        return False
-    tail = raw[len(command):].strip()
-    if not tail:
-        return False
-    tokens = tail.split()
-    if len(tokens) < 1 or len(tokens) + 1 > max_tokens:
-        return False
-    if any(mark in raw for mark in (",", ";", ":")):
-        return False
-    return True
+    return service_is_brief_command_form(text, command, max_tokens)
 
 
 # =========================

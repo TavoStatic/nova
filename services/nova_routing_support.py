@@ -162,7 +162,7 @@ def classify_supervisor_bypass(
             }
     if looks_like_open_fallback_turn_fn(text):
         return {
-            "allowed": True,
+            "allowed": False,
             "category": "intentional_fallback.open_fulfillment_or_model",
             "reason": "open_fallback_candidate",
             "normalized_input": normalized,
@@ -234,9 +234,24 @@ def build_routing_decision(
     reply_contract: str = "",
     reply_outcome: Optional[dict] = None,
     turn_acts: Optional[list[str]] = None,
-    intent_trace_preview_fn: Callable[[str], str],
-    supervisor_phase_record_fn: Callable[..., dict],
+    intent_trace_preview_fn: Callable[[str], str] | None = None,
+    supervisor_phase_record_fn: Callable[..., dict] | None = None,
+    runtime_scope: Optional[dict[str, object]] = None,
 ) -> dict:
+    scope = runtime_scope if isinstance(runtime_scope, dict) else {}
+    if intent_trace_preview_fn is None:
+        candidate = scope.get("_intent_trace_preview")
+        intent_trace_preview_fn = candidate if callable(candidate) else intent_trace_preview
+    if supervisor_phase_record_fn is None:
+        candidate = scope.get("_supervisor_phase_record")
+        supervisor_phase_record_fn = candidate if callable(candidate) else (
+            lambda payload, phase: supervisor_phase_record(
+                payload,
+                phase=phase,
+                supervisor_result_has_route_fn=supervisor_result_has_route,
+                supervisor_candidate_trace_fn=supervisor_candidate_trace,
+            )
+        )
     outcome = reply_outcome if isinstance(reply_outcome, dict) else {}
     acts = [str(item).strip() for item in list(turn_acts or []) if str(item).strip()]
     return {

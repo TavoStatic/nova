@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import json
 import re
 from typing import Callable, Optional
 
@@ -173,8 +174,8 @@ class MemoryAdapterService:
         bullets = []
         seen = set()
         norm = lambda s: re.sub(r"\W+", " ", (s or "").lower()).strip()
-        for _score, _ts, _kind, _source, _user_row, text in (hits or []):
-            p = (text or "").strip()
+        for _score, _ts, kind, _source, _user_row, text in (hits or []):
+            p = self._format_recall_text(kind, text)
             if not p:
                 continue
             one = re.sub(r"\s+", " ", p).strip()
@@ -185,3 +186,21 @@ class MemoryAdapterService:
             bullets.append(f"- {one[:260]}")
         bullets = bullets[:max(1, int(self.mem_context_top_k()))]
         return "\n".join(bullets)[:2000] if bullets else ""
+
+    @staticmethod
+    def _format_recall_text(kind: str, text: str) -> str:
+        raw = (text or "").strip()
+        if not raw:
+            return ""
+
+        if str(kind or "").strip().lower() == "user_correction":
+            try:
+                payload = json.loads(raw)
+            except Exception:
+                payload = {}
+            parsed = str(payload.get("parsed_correction") or "").strip()
+            if parsed:
+                return f"Correction: {parsed}"
+            return ""
+
+        return raw

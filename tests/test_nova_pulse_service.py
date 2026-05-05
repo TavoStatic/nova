@@ -85,6 +85,7 @@ def test_build_pulse_payload_and_render_roundtrip() -> None:
         assert payload["promoted_total"] == 1
         assert payload["generated_total"] == 1
         assert payload["patch_revision"] == 7
+        assert payload["last_regression_stale"] is False
         assert payload["autonomy_level"] == "operational"
 
         rendered = render_nova_pulse(payload)

@@ -24,6 +24,9 @@ _LOCATION_HINT_COORDS = {
 _LOCATION_HINT_LABELS = {
     "78521": "Brownsville, TX",
 }
+_KNOWN_LOCATION_CENTERS = [
+    ("Brownsville, TX", BROWNSVILLE_LAT, BROWNSVILLE_LON, 35_000.0),
+]
 
 
 def weather_source_host(*, policy_web_fn: Callable[[], dict]) -> Optional[str]:
@@ -143,6 +146,67 @@ def normalize_source_timestamp(value) -> float:
 
 def format_runtime_coords(lat: float, lon: float) -> str:
     return f"{lat:.5f},{lon:.5f}"
+
+
+def distance_meters(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    radius_m = 6_371_000.0
+    phi1 = math.radians(lat1)
+    phi2 = math.radians(lat2)
+    d_phi = math.radians(lat2 - lat1)
+    d_lambda = math.radians(lon2 - lon1)
+    a = (
+        math.sin(d_phi / 2.0) ** 2
+        + math.cos(phi1) * math.cos(phi2) * math.sin(d_lambda / 2.0) ** 2
+    )
+    return radius_m * 2.0 * math.atan2(math.sqrt(a), math.sqrt(1.0 - a))
+
+
+def location_label_for_coords(lat: float, lon: float) -> str:
+    for label, center_lat, center_lon, radius_m in _KNOWN_LOCATION_CENTERS:
+        try:
+            if distance_meters(lat, lon, center_lat, center_lon) <= radius_m:
+                return label
+        except Exception:
+            continue
+    return ""
+
+
+def live_device_location_summary(
+    *,
+    runtime_device_location_payload_fn: Optional[Callable[[], dict]] = None,
+    resolve_current_device_coords_fn: Optional[Callable[[], object]] = None,
+    allow_stale: bool = False,
+) -> dict:
+    if not callable(runtime_device_location_payload_fn):
+        return {}
+    try:
+        live = runtime_device_location_payload_fn()
+    except Exception:
+        return {}
+    if isinstance(live, dict) and (not live.get("available") or live.get("stale")) and callable(resolve_current_device_coords_fn):
+        try:
+            resolve_current_device_coords_fn()
+            live = runtime_device_location_payload_fn()
+        except Exception:
+            pass
+    if not isinstance(live, dict) or not live.get("available") or (live.get("stale") and not allow_stale):
+        return {}
+    lat = coerce_bounded_float(live.get("lat"), minimum=-90.0, maximum=90.0)
+    lon = coerce_bounded_float(live.get("lon"), minimum=-180.0, maximum=180.0)
+    if lat is None or lon is None:
+        return {}
+    coords_text = str(live.get("coords_text") or format_runtime_coords(lat, lon)).strip()
+    accuracy = coerce_optional_metric(live.get("accuracy_m"))
+    source = str(live.get("source") or "").strip()
+    return {
+        "lat": lat,
+        "lon": lon,
+        "coords_text": coords_text,
+        "accuracy_m": accuracy,
+        "source": source,
+        "stale": bool(live.get("stale")),
+        "label": location_label_for_coords(lat, lon),
+    }
 
 
 def device_location_status_payload(
@@ -446,7 +510,12 @@ def get_saved_location_text(
         payload = json.loads(audit_out) if audit_out else {}
         results = payload.get("results") if isinstance(payload, dict) else []
         for row in results:
-            preview = normalize_location_preview_fn((row.get("preview") or "").strip())
+            if _is_test_location_memory_row(row):
+                continue
+            raw_preview = (row.get("preview") or "").strip()
+            if not _looks_like_location_memory_preview(raw_preview):
+                continue
+            preview = normalize_location_preview_fn(raw_preview)
             low = preview.lower()
             if not preview:
                 continue
@@ -460,6 +529,40 @@ def get_saved_location_text(
     except Exception:
         pass
     return ""
+
+
+def _is_test_location_memory_row(row: dict) -> bool:
+    if not isinstance(row, dict):
+        return False
+    source = str(row.get("source") or "").strip().lower()
+    kind = str(row.get("kind") or "").strip().lower()
+    preview = str(row.get("preview") or "").strip().lower()
+    if source in {"unittest", "pytest", "test"} or kind == "test":
+        return True
+    return preview.startswith("integration-test-memory:") or "bravo-98765" in preview
+
+
+def _looks_like_location_memory_preview(preview: str) -> bool:
+    text = str(preview or "").strip()
+    if not text:
+        return False
+    low = text.lower()
+    if low.startswith("{") or low.startswith("["):
+        return False
+    if any(marker in low for marker in ("\"orig\"", "\"corr\"", "integration-test-memory:", "bravo-98765")):
+        return False
+    if parse_lat_lon(text):
+        return False
+    return any(
+        re.search(pattern, text, flags=re.I)
+        for pattern in (
+            r"^\s*location\s*:",
+            r"^\s*(?:my|your)(?:\s+(?:current|physical|full))?\s+location\s+is\b",
+            r"^\s*i\s+am\s+located\s+in\b",
+            r"^\s*you\s+are\s+located\s+in\b",
+            r"\b(?:city|town|county|state|zip|zipcode|address)\s*:",
+        )
+    )
 
 
 def set_location_text(
@@ -505,6 +608,10 @@ def extract_location_fact(text: str, *, normalize_location_preview_fn: Callable[
     raw = (text or "").strip()
     if not raw or "?" in raw:
         return ""
+    parsed = parse_lat_lon(raw)
+    if parsed:
+        lat, lon = parsed
+        return format_runtime_coords(lat, lon)
 
     patterns = [
         r"^\s*(?:my|your)(?:\s+(?:current|physical))?\s+location\s+is\s+(.+?)\s*[.!?]*$",
@@ -752,7 +859,25 @@ def is_location_recall_query(text: str) -> bool:
     return any(cue in lowered for cue in cues)
 
 
-def location_recall_reply(*, get_saved_location_text_fn: Callable[[], str]) -> str:
+def location_recall_reply(
+    *,
+    get_saved_location_text_fn: Callable[[], str],
+    runtime_device_location_payload_fn: Optional[Callable[[], dict]] = None,
+    resolve_current_device_coords_fn: Optional[Callable[[], object]] = None,
+) -> str:
+    live = live_device_location_summary(
+        runtime_device_location_payload_fn=runtime_device_location_payload_fn,
+        resolve_current_device_coords_fn=resolve_current_device_coords_fn,
+        allow_stale=True,
+    )
+    if live:
+        accuracy = live.get("accuracy_m")
+        accuracy_note = f" Accuracy about {int(round(float(accuracy)))}m." if accuracy is not None else ""
+        label = str(live.get("label") or "").strip()
+        label_note = f" That is near {label}." if label else ""
+        if live.get("stale"):
+            return f"Your last device location fix is {live.get('coords_text')}.{accuracy_note} It is stale, so I won't call it current.{label_note}"
+        return f"Your current device location is {live.get('coords_text')}.{accuracy_note}{label_note}"
     preview = get_saved_location_text_fn()
     if preview:
         expanded = _LOCATION_HINT_LABELS.get(str(preview or "").strip().lower())
@@ -789,7 +914,64 @@ def is_location_name_query(
     return "location" in normalized and "name" in normalized and uses_prior_reference_fn(normalized)
 
 
-def location_name_reply(*, get_saved_location_text_fn: Callable[[], str]) -> str:
+def infer_location_turn_intent(
+    state: Optional[dict],
+    text: str,
+    *,
+    turns: Optional[list[tuple[str, str]]] = None,
+    normalize_turn_text_fn: Callable[[str], str],
+    is_location_name_query_fn: Callable[[str], bool],
+    is_location_recall_query_fn: Callable[[str], bool],
+    is_location_recall_state_fn: Callable[[Optional[dict]], bool],
+    looks_like_location_recall_followup_fn: Callable[[list[tuple[str, str]], str], bool],
+) -> dict:
+    normalized = normalize_turn_text_fn(text).strip(" .,!?")
+    if not normalized:
+        return {"intent": "none", "confidence": 0.0}
+
+    active_location_context = is_location_recall_state_fn(state) or looks_like_location_recall_followup_fn(list(turns or []), text)
+    if is_location_name_query_fn(text):
+        return {"intent": "location_name", "confidence": 0.92, "context_fit": active_location_context}
+    if is_location_recall_query_fn(text):
+        return {"intent": "location_recall", "confidence": 0.92, "context_fit": True}
+
+    tokens = set(re.findall(r"[a-z0-9']+", normalized.lower()))
+    asks_identity = bool(tokens & {"name", "called", "which", "what"})
+    asks_location_label = bool(tokens & {"city", "place", "town", "area", "county", "zip", "zipcode"})
+    has_external_topic = bool(tokens & {"song", "book", "movie", "album", "person", "company", "band", "definition", "history"})
+
+    if asks_identity and asks_location_label and active_location_context:
+        return {"intent": "location_name", "confidence": 0.86, "context_fit": True}
+    if asks_identity and asks_location_label and not has_external_topic:
+        return {
+            "intent": "clarify_location_reference",
+            "confidence": 0.62,
+            "context_fit": False,
+            "clarifying_question": "Which location do you mean: your current device location, your saved location, or another place?",
+        }
+
+    return {"intent": "none", "confidence": 0.0, "context_fit": active_location_context}
+
+
+def location_name_reply(
+    *,
+    get_saved_location_text_fn: Callable[[], str],
+    runtime_device_location_payload_fn: Optional[Callable[[], dict]] = None,
+    resolve_current_device_coords_fn: Optional[Callable[[], object]] = None,
+) -> str:
+    live = live_device_location_summary(
+        runtime_device_location_payload_fn=runtime_device_location_payload_fn,
+        resolve_current_device_coords_fn=resolve_current_device_coords_fn,
+        allow_stale=True,
+    )
+    if live:
+        label = str(live.get("label") or "").strip()
+        coords_text = str(live.get("coords_text") or "").strip()
+        if label:
+            if live.get("stale"):
+                return f"That last device location is near {label}."
+            return f"That location is {label}."
+        return f"That live device location is {coords_text}, but I don't have a city label for it yet."
     preview = get_saved_location_text_fn()
     if not preview:
         return "I don't have a stored location yet. You can tell me: 'My location is ...'"
@@ -812,8 +994,28 @@ def handle_location_conversation_turn(
     looks_like_contextual_followup_fn: Callable[[str], bool],
     is_location_recall_state_fn: Callable[[Optional[dict]], bool],
     looks_like_location_recall_followup_fn: Callable[[list[tuple[str, str]], str], bool],
+    infer_location_turn_intent_fn: Optional[Callable[..., dict]] = None,
 ) -> tuple[bool, str, Optional[dict], str]:
     next_state = state if isinstance(state, dict) else make_conversation_state_fn("location_recall")
+    intent = (
+        infer_location_turn_intent_fn(
+            state,
+            text,
+            turns=turns,
+        )
+        if callable(infer_location_turn_intent_fn)
+        else {}
+    )
+    intent_name = str((intent or {}).get("intent") or "").strip()
+    if intent_name == "location_name":
+        return True, location_name_reply_fn(), next_state, "location_name"
+    if intent_name == "location_recall":
+        return True, location_recall_reply_fn(), make_conversation_state_fn("location_recall"), "location_recall"
+    if intent_name == "clarify_location_reference":
+        question = str((intent or {}).get("clarifying_question") or "").strip()
+        if not question:
+            question = "Which location do you mean?"
+        return True, question, state if isinstance(state, dict) else None, "location_clarify"
     if is_location_name_query_fn(text):
         return True, location_name_reply_fn(), next_state, "location_name"
     if is_location_recall_query_fn(text):

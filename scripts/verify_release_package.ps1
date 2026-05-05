@@ -262,7 +262,8 @@ $forbiddenExactPaths = @(
   "tests_to_review.txt"
 )
 $forbiddenSegmentPatterns = @(
-  "codex_pulse_test_*"
+  "codex_pulse_test_*",
+  "codex_reflect_*"
 )
 $forbiddenLeafPatterns = @(
   "*.log",

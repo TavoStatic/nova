@@ -67,6 +67,36 @@ class TestAutonomyMaintenance(unittest.TestCase):
         for tree_id in archived_ids:
             self.assertEqual(work_tree.get_tree(tree_id).status, work_tree.TreeStatus.ARCHIVED)
 
+    def test_archive_empty_active_trees_archives_only_old_root_shells(self):
+        self._isolated_work_tree_db()
+        now = work_tree._now()
+        old_empty = work_tree.initialize_tree("Cli: empty old")
+        old_empty.updated_at = now - timedelta(hours=2)
+        work_tree.save_tree(old_empty)
+        work_tree._persist_tree_state(old_empty.tree_id)
+
+        old_with_task = work_tree.initialize_tree("Cli: task old")
+        old_with_task.updated_at = now - timedelta(hours=2)
+        work_tree.add_task_to_branch(old_with_task.root_branch_id, "Keep this task")
+        work_tree.save_tree(old_with_task)
+        work_tree._persist_tree_state(old_with_task.tree_id)
+
+        recent_empty = work_tree.initialize_tree("Cli: empty recent")
+        recent_empty.updated_at = now
+        work_tree.save_tree(recent_empty)
+        work_tree._persist_tree_state(recent_empty.tree_id)
+
+        state: dict = {}
+        with mock.patch.object(autonomy_maintenance, "EMPTY_ACTIVE_TREE_ARCHIVE_MIN_AGE_SEC", 3600):
+            payload = autonomy_maintenance._archive_empty_active_trees(state)
+
+        self.assertEqual(payload.get("archived_count"), 1)
+        self.assertEqual(payload.get("skipped_recent_count"), 1)
+        self.assertEqual(work_tree.get_tree(old_empty.tree_id).status, work_tree.TreeStatus.ARCHIVED)
+        self.assertEqual(work_tree.get_tree(old_with_task.tree_id).status, work_tree.TreeStatus.ACTIVE)
+        self.assertEqual(work_tree.get_tree(recent_empty.tree_id).status, work_tree.TreeStatus.ACTIVE)
+        self.assertEqual((state.get("last_empty_active_tree_archive") or {}).get("archived_count"), 1)
+
     def test_run_once_records_generated_queue_outcome(self):
         with tempfile.TemporaryDirectory() as td:
             runtime_dir = Path(td) / "runtime"

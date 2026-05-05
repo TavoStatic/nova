@@ -12,13 +12,17 @@
     "safe_query",
     "student_lookup",
     "campus_enrollment_summary",
-    "program_membership_lookup"
+    "program_membership_lookup",
+    "schema_inventory"
   ],
   "connector_module": "data_sources.sis_test.connector",
   "connector_class": "SisTestPipeline",
   "schema_manifest": "schema_manifest.json",
   "query_templates": "query_templates.json",
   "field_dictionary": "field_dictionary.json",
+  "population_definitions": "population_definitions.json",
+  "vendor_dictionary": "vendor_dictionary_index.json",
+  "predefined_reports": "predefined_reports_index.json",
   "config_example": "local_config.example.json",
   "local_config": "local_config.json",
   "audit_log": "..\\..\\runtime\\pipelines\\sis_test_audit.jsonl"

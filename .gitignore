@@ -23,6 +23,7 @@ promotion_audit.jsonl
 # Local probe and scratch artifacts
 codex_ledger_*/
 codex_pulse_test_*/
+codex_reflect_*/
 codex_probe_*.txt
 codex_probe_*.sqlite3
 codex_probe_*.sqlite3-journal

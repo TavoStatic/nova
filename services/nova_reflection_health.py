@@ -3,7 +3,13 @@ from __future__ import annotations
 import json
 import time
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Callable, Mapping, Optional
+
+
+def _runtime_hook(runtime_scope: Optional[Mapping[str, object]], name: str, default=None):
+    if isinstance(runtime_scope, Mapping) and name in runtime_scope:
+        return runtime_scope.get(name)
+    return default
 
 
 def detect_repeated_tool_intent_without_execution(
@@ -251,19 +257,51 @@ def maybe_log_self_reflection(
     records: Optional[list[dict]] = None,
     total_records: Optional[int] = None,
     extra_payload: Optional[dict] = None,
-    recent_action_ledger_records_fn: Callable[[int], list[dict]],
-    detect_repeated_tool_intent_without_execution_fn: Callable[..., dict],
-    top_repeated_correction_class_fn: Callable[..., dict],
-    routing_stable_recently_fn: Callable[..., bool],
-    count_unsupported_claim_blocks_recently_fn: Callable[..., int],
-    count_routing_overrides_recently_fn: Callable[..., int],
-    record_used_routing_override_fn: Callable[[Optional[dict]], bool],
-    sample_intents_last_fn: Callable[..., list[str]],
-    provider_name_from_tool_fn: Callable[[str], str],
-    append_self_reflection_fn: Callable[[dict], None],
-    record_health_snapshot_fn: Callable[..., None],
-    behavior_metrics_update_from_reflection_fn: Callable[[dict, int], None],
+    runtime_scope: Optional[Mapping[str, object]] = None,
+    recent_action_ledger_records_fn: Optional[Callable[[int], list[dict]]] = None,
+    detect_repeated_tool_intent_without_execution_fn: Optional[Callable[..., dict]] = None,
+    top_repeated_correction_class_fn: Optional[Callable[..., dict]] = None,
+    routing_stable_recently_fn: Optional[Callable[..., bool]] = None,
+    count_unsupported_claim_blocks_recently_fn: Optional[Callable[..., int]] = None,
+    count_routing_overrides_recently_fn: Optional[Callable[..., int]] = None,
+    record_used_routing_override_fn: Optional[Callable[[Optional[dict]], bool]] = None,
+    sample_intents_last_fn: Optional[Callable[..., list[str]]] = None,
+    provider_name_from_tool_fn: Optional[Callable[[str], str]] = None,
+    append_self_reflection_fn: Optional[Callable[[dict], None]] = None,
+    record_health_snapshot_fn: Optional[Callable[..., None]] = None,
+    behavior_metrics_update_from_reflection_fn: Optional[Callable[[dict, int], None]] = None,
 ) -> dict:
+    recent_action_ledger_records_fn = _runtime_hook(runtime_scope, "_recent_action_ledger_records", recent_action_ledger_records_fn)
+    detect_repeated_tool_intent_without_execution_fn = _runtime_hook(runtime_scope, "_detect_repeated_tool_intent_without_execution", detect_repeated_tool_intent_without_execution_fn)
+    top_repeated_correction_class_fn = _runtime_hook(runtime_scope, "_top_repeated_correction_class", top_repeated_correction_class_fn)
+    routing_stable_recently_fn = _runtime_hook(runtime_scope, "_routing_stable_recently", routing_stable_recently_fn)
+    count_unsupported_claim_blocks_recently_fn = _runtime_hook(runtime_scope, "_count_unsupported_claim_blocks_recently", count_unsupported_claim_blocks_recently_fn)
+    count_routing_overrides_recently_fn = _runtime_hook(runtime_scope, "_count_routing_overrides_recently", count_routing_overrides_recently_fn)
+    record_used_routing_override_fn = _runtime_hook(runtime_scope, "_record_used_routing_override", record_used_routing_override_fn)
+    sample_intents_last_fn = _runtime_hook(runtime_scope, "_sample_intents_last", sample_intents_last_fn)
+    provider_name_from_tool_fn = _runtime_hook(runtime_scope, "_provider_name_from_tool", provider_name_from_tool_fn)
+    append_self_reflection_fn = _runtime_hook(runtime_scope, "_append_self_reflection", append_self_reflection_fn)
+    record_health_snapshot_fn = _runtime_hook(runtime_scope, "record_health_snapshot", record_health_snapshot_fn)
+    metrics_store = _runtime_hook(runtime_scope, "BEHAVIOR_METRICS_STORE")
+    if behavior_metrics_update_from_reflection_fn is None and metrics_store is not None:
+        behavior_metrics_update_from_reflection_fn = getattr(metrics_store, "update_from_reflection", None)
+    required = (
+        recent_action_ledger_records_fn,
+        detect_repeated_tool_intent_without_execution_fn,
+        top_repeated_correction_class_fn,
+        routing_stable_recently_fn,
+        count_unsupported_claim_blocks_recently_fn,
+        count_routing_overrides_recently_fn,
+        record_used_routing_override_fn,
+        sample_intents_last_fn,
+        provider_name_from_tool_fn,
+        append_self_reflection_fn,
+        record_health_snapshot_fn,
+        behavior_metrics_update_from_reflection_fn,
+    )
+    if not all(callable(fn) for fn in required):
+        raise TypeError("maybe_log_self_reflection requires reflection runtime hooks")
+
     recent = records if isinstance(records, list) else recent_action_ledger_records_fn(limit)
     if total_records is None:
         total_records = len(recent_action_ledger_records_fn(1000000))
@@ -339,13 +377,31 @@ def build_turn_reflection(
     entry_point: str,
     session_id: str,
     current_decision: dict,
-    subconscious_service,
-    supervisor,
-    recent_action_ledger_records_fn: Callable[[int], list[dict]],
-    recent_self_reflection_rows_fn: Callable[[int], list[dict]],
-    build_training_backlog_summary_fn: Callable[[dict], dict | None],
-    build_robust_weakness_summary_fn: Callable[[object], dict | None],
+    runtime_scope: Optional[Mapping[str, object]] = None,
+    subconscious_service=None,
+    supervisor=None,
+    recent_action_ledger_records_fn: Optional[Callable[[int], list[dict]]] = None,
+    recent_self_reflection_rows_fn: Optional[Callable[[int], list[dict]]] = None,
+    build_training_backlog_summary_fn: Optional[Callable[[dict], dict | None]] = None,
+    build_robust_weakness_summary_fn: Optional[Callable[[object], dict | None]] = None,
 ) -> dict:
+    subconscious_service = _runtime_hook(runtime_scope, "SUBCONSCIOUS_SERVICE", subconscious_service)
+    supervisor = _runtime_hook(runtime_scope, "TURN_SUPERVISOR", supervisor)
+    recent_action_ledger_records_fn = _runtime_hook(runtime_scope, "_recent_action_ledger_records", recent_action_ledger_records_fn)
+    recent_self_reflection_rows_fn = _runtime_hook(runtime_scope, "_recent_self_reflection_rows", recent_self_reflection_rows_fn)
+    build_training_backlog_summary_fn = _runtime_hook(runtime_scope, "build_training_backlog_summary", build_training_backlog_summary_fn)
+    build_robust_weakness_summary_fn = _runtime_hook(runtime_scope, "build_robust_weakness_summary", build_robust_weakness_summary_fn)
+    required = (
+        getattr(subconscious_service, "get_snapshot", None),
+        getattr(supervisor, "process_turn", None),
+        recent_action_ledger_records_fn,
+        recent_self_reflection_rows_fn,
+        build_training_backlog_summary_fn,
+        build_robust_weakness_summary_fn,
+    )
+    if not all(callable(fn) for fn in required):
+        raise TypeError("build_turn_reflection requires reflection runtime hooks")
+
     session_summary = session_state.reflection_summary()
     session_summary["subconscious_snapshot"] = subconscious_service.get_snapshot(session_state)
     reflection = supervisor.process_turn(

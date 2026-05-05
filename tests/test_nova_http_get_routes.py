@@ -271,6 +271,46 @@ class TestNovaHttpGetRoutesService(unittest.TestCase):
 
         self.assertEqual(result, (200, failure_payload))
 
+    def test_handle_control_pipelines_from_runtime_uses_pipeline_control_service(self):
+        class _PipelineControl:
+            @staticmethod
+            def payload_from_runtime(runtime_scope, *, selected_pipeline_id=""):
+                return {
+                    "ok": True,
+                    "source": runtime_scope["SOURCE"],
+                    "selected_pipeline_id": selected_pipeline_id,
+                }
+
+        result = HTTP_GET_ROUTES_SERVICE.handle_control_api_request_from_runtime(
+            "/api/control/pipelines",
+            handler=object(),
+            qs={"pipeline_id": ["sis_test"]},
+            runtime_scope={
+                "SOURCE": "runtime-pipeline-service",
+                "HTTP_PIPELINE_CONTROL_SERVICE": _PipelineControl(),
+                "_control_auth": lambda _handler, _qs: (True, ""),
+                "_cached_control_status_payload": lambda: {"ok": True},
+                "_control_policy_payload": lambda: {"ok": True},
+                "_metrics_payload": lambda: {"ok": True},
+                "_work_trees_payload": lambda: {"ok": True, "trees": []},
+                "_session_summaries": lambda _limit: [],
+                "_test_session_report_summaries": lambda _limit: [],
+                "_available_test_session_definitions": lambda _limit: [],
+            },
+        )
+
+        self.assertEqual(
+            result,
+            (
+                200,
+                {
+                    "ok": True,
+                    "source": "runtime-pipeline-service",
+                    "selected_pipeline_id": "sis_test",
+                },
+            ),
+        )
+
     def test_handle_control_test_sessions_request_shapes_payload(self):
         result = HTTP_GET_ROUTES_SERVICE.handle_control_api_request(
             "/api/control/test-sessions",

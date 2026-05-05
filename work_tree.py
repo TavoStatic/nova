@@ -37,6 +37,8 @@ _DEFAULT_TREE_ALLOWED_TOOLS = (
     "ls",
     "find",
     "health",
+    "core_health",
+    "core_thinning",
     "system_check",
     "queue_status",
     "phase2_audit",
@@ -49,6 +51,8 @@ _KNOWN_TOOL_NAMES = frozenset(
     _DEFAULT_TREE_ALLOWED_TOOLS
     + (
         "generated_queue_run",
+        "core_health",
+        "core_thinning",
         "patch_preview_approve",
         "patch_preview_apply",
         "patch_apply",
@@ -228,6 +232,9 @@ _DB_ACCESS_LOG = Path(__file__).resolve().parent / "runtime" / "work_tree_access
 
 
 def _log_db_access() -> None:
+    enabled = str(os.environ.get("NOVA_WORK_TREE_ACCESS_LOG") or "").strip().lower()
+    if enabled not in {"1", "true", "yes", "on"}:
+        return
     try:
         _DB_ACCESS_LOG.parent.mkdir(parents=True, exist_ok=True)
         with _DB_ACCESS_LOG.open("a", encoding="utf-8") as f:
@@ -1045,6 +1052,29 @@ def mark_task_complete(task_id: str) -> None:
     _refresh_tree_state(branch.tree_id, persist=True)
 
 
+def mark_task_dropped(task_id: str, reason: str = "") -> None:
+    task = _TASKS.get(task_id)
+    if task is None:
+        raise ValueError(f"Task {task_id} not found")
+
+    if task.status == TaskStatus.DROPPED:
+        return
+
+    now = _now()
+    task.status = TaskStatus.DROPPED
+    task.updated_at = now
+    if reason:
+        meta = dict(task.meta or {})
+        meta["drop_reason"] = str(reason)
+        task.meta = meta
+
+    branch = _BRANCHES.get(task.branch_id)
+    if branch is None:
+        return
+    branch.updated_at = now
+    _refresh_tree_state(branch.tree_id, persist=True)
+
+
 def next_open_branch(tree_id: str) -> Branch | None:
     tree = get_tree(tree_id)
     if tree is None:
@@ -1052,7 +1082,16 @@ def next_open_branch(tree_id: str) -> Branch | None:
 
     _refresh_tree_state(tree_id, persist=False)
     candidates: list[Branch] = []
-    for branch in _tree_branches(tree_id):
+    branches = list(_tree_branches(tree_id))
+    branches.sort(
+        key=lambda branch: (
+            branch.depth,
+            -branch.score,
+            branch.created_at,
+            branch.branch_id,
+        )
+    )
+    for branch in branches:
         if is_branch_ready(branch.branch_id) and branch.open_stem_count > 0:
             candidates.append(branch)
 
@@ -1408,6 +1447,8 @@ def _tool_args_for_task(tool_name: str, task: Task) -> list[str]:
             return [session_file]
     no_arg_tools = {
         "camera",
+        "core_health",
+        "core_thinning",
         "health",
         "phase2_audit",
         "pulse",
@@ -1513,6 +1554,8 @@ def _ordered_tool_suggestions_from_text(text: str) -> list[str]:
         _push("find")
         _push("read")
     if any(token in low for token in ("health", "heartbeat", "pulse", "runtime", "diagnose", "status", "check")):
+        if "core" in low or "repair" in low:
+            _push("core_health")
         _push("system_check")
         _push("health")
         _push("pulse")
@@ -1528,6 +1571,8 @@ def _ordered_tool_suggestions_from_text(text: str) -> list[str]:
         _push("patch_preview_apply")
     if any(token in low for token in ("patch", "fix", "apply", "diff", "regression")):
         _push("patch_apply")
+    if any(token in low for token in ("thin", "thinning", "extract", "wrapper", "large core")):
+        _push("core_thinning")
     if any(token in low for token in ("update", "upgrade", "install")):
         _push("update_now")
     if any(token in low for token in ("read", "inspect", "file", "log", "snapshot", "report")):
@@ -1602,7 +1647,16 @@ def list_autonomous_options(tree_id: str) -> list[dict]:
     if tree is None:
         return []
     options: list[dict] = []
-    for branch in _tree_branches(tree_id):
+    branches = list(_tree_branches(tree_id))
+    branches.sort(
+        key=lambda branch: (
+            branch.depth,
+            -branch.score,
+            branch.created_at,
+            branch.branch_id,
+        )
+    )
+    for branch in branches:
         if _next_open_task(branch.branch_id) is None:
             continue
         if not is_branch_ready(branch.branch_id):

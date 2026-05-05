@@ -219,7 +219,7 @@ Get-ChildItem -Path $stageDir -Recurse -File -Force -Include *.log -ErrorAction 
   ForEach-Object { Remove-Item -Force $_.FullName }
 
 Get-ChildItem -Path $stageDir -Recurse -Directory -Force -ErrorAction SilentlyContinue |
-  Where-Object { $_.Name -like "codex_pulse_test_*" } |
+  Where-Object { $_.Name -like "codex_pulse_test_*" -or $_.Name -like "codex_reflect_*" } |
   ForEach-Object { Remove-Item -Recurse -Force $_.FullName }
 
 Get-ChildItem -Path $stageDir -Recurse -File -Force -ErrorAction SilentlyContinue |

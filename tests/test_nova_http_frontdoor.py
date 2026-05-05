@@ -24,6 +24,7 @@ class TestNovaHttpFrontdoorService(unittest.TestCase):
         self.assertIn("/control", contract["protected_pages"])
         self.assertIn("/static/leah.css", contract["static_assets"])
         self.assertIn("/api/control/work-trees", contract["control_api_get"])
+        self.assertIn("/api/control/pipelines", contract["control_api_get"])
         self.assertIn("/api/chat/upload", contract["chat_api_post"])
 
     def test_startup_banner_lines_reflect_auth_and_lan_state(self):

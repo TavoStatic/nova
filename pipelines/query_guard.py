@@ -28,8 +28,9 @@ def _normalize_params(params: Optional[Mapping[str, Any]]) -> dict[str, Any]:
 class PipelineQueryGuard:
     """Validate governed pipeline query intents before execution."""
 
-    def __init__(self, *, max_rows_default: int = 100):
+    def __init__(self, *, max_rows_default: int = 100, max_rows_hard_cap: int = 20):
         self.max_rows_default = max(1, int(max_rows_default))
+        self.max_rows_hard_cap = max(1, int(max_rows_hard_cap))
 
     def validate(
         self,
@@ -79,8 +80,9 @@ class PipelineQueryGuard:
                 )
 
         template_cap = max(1, int(template.get("max_rows") or self.max_rows_default))
-        requested_rows = template_cap if row_limit is None else max(1, int(row_limit))
-        effective_rows = min(requested_rows, template_cap)
+        row_cap = min(template_cap, self.max_rows_hard_cap)
+        requested_rows = row_cap if row_limit is None else max(1, int(row_limit))
+        effective_rows = min(requested_rows, row_cap)
 
         return {
             "operation": op,
@@ -89,4 +91,5 @@ class PipelineQueryGuard:
             "requested_row_limit": requested_rows,
             "effective_row_limit": effective_rows,
             "row_limit_clamped": requested_rows != effective_rows,
+            "row_limit_hard_cap": self.max_rows_hard_cap,
         }

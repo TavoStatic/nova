@@ -18,6 +18,14 @@ class TestNovaTurnHelpers(unittest.TestCase):
             )
         )
 
+    def test_is_location_request_does_not_treat_use_location_as_recall(self):
+        self.assertFalse(
+            nova_turn_helpers.is_location_request(
+                "use your location",
+                normalize_turn_text_fn=lambda text: text.lower(),
+            )
+        )
+
     def test_location_reply_prefers_live_device_location(self):
         reply = nova_turn_helpers.location_reply(
             runtime_device_location_payload_fn=lambda: {
@@ -40,10 +48,59 @@ class TestNovaTurnHelpers(unittest.TestCase):
 
         self.assertEqual(reply, "My location is Brownsville, Texas.")
 
+    def test_location_reply_refreshes_stale_device_location(self):
+        calls = {"n": 0}
+
+        def live_payload():
+            if calls["n"] == 0:
+                return {"available": True, "stale": True, "coords_text": "25.90,-97.50"}
+            return {
+                "available": True,
+                "stale": False,
+                "coords_text": "25.90974,-97.50606",
+                "accuracy_m": 113,
+            }
+
+        def refresh():
+            calls["n"] += 1
+            return (25.90974, -97.50606)
+
+        reply = nova_turn_helpers.location_reply(
+            runtime_device_location_payload_fn=live_payload,
+            get_saved_location_text_fn=lambda: "",
+            resolve_current_device_coords_fn=refresh,
+        )
+
+        self.assertEqual(calls["n"], 1)
+        self.assertIn("My current device location is 25.90974,-97.50606.", reply)
+
+    def test_location_reply_reports_stale_device_fix_before_saved_location(self):
+        reply = nova_turn_helpers.location_reply(
+            runtime_device_location_payload_fn=lambda: {
+                "available": True,
+                "stale": True,
+                "coords_text": "25.90974,-97.50606",
+                "accuracy_m": 113,
+            },
+            get_saved_location_text_fn=lambda: "Brownsville, Texas",
+            resolve_current_device_coords_fn=lambda: None,
+        )
+
+        self.assertIn("My last device location fix is 25.90974,-97.50606.", reply)
+        self.assertIn("stale", reply)
+
     def test_is_web_research_override_request_matches_override_phrase(self):
         self.assertTrue(
             nova_turn_helpers.is_web_research_override_request(
                 "all you need is the Web",
+                normalize_turn_text_fn=lambda text: text.lower(),
+            )
+        )
+
+    def test_is_web_research_override_request_rejects_database_negation(self):
+        self.assertFalse(
+            nova_turn_helpers.is_web_research_override_request(
+                "no database for this one",
                 normalize_turn_text_fn=lambda text: text.lower(),
             )
         )

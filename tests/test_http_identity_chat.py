@@ -26,6 +26,8 @@ class TestHttpIdentityChat(unittest.TestCase):
         self.orig_tool_web_research = nova_core.tool_web_research
         self.orig_tool_web_gather = nova_core.tool_web_gather
         self.orig_mem_recall = nova_core.mem_recall
+        self.orig_runtime_device_location_payload = nova_core.runtime_device_location_payload
+        self.orig_resolve_current_device_coords = nova_core.resolve_current_device_coords
         self.orig_learned_facts_file = nova_core.LEARNED_FACTS_FILE
         self.orig_identity_file = nova_core.IDENTITY_FILE
         self.orig_action_ledger_dir = nova_core.ACTION_LEDGER_DIR
@@ -46,6 +48,8 @@ class TestHttpIdentityChat(unittest.TestCase):
         nova_core.ollama_chat = lambda text, retrieved_context="", **_kwargs: f"LLM:{text}"
         nova_core.sanitize_llm_reply = lambda text, _tool: text
         nova_core.tool_web_research = lambda _q: "Web research summary"
+        nova_core.runtime_device_location_payload = lambda *args, **kwargs: {"available": False, "stale": True}
+        nova_core.resolve_current_device_coords = lambda *args, **kwargs: None
 
     def tearDown(self):
         nova_core.remember_name_origin = self.orig_remember_name_origin
@@ -61,6 +65,8 @@ class TestHttpIdentityChat(unittest.TestCase):
         nova_core.tool_web_research = self.orig_tool_web_research
         nova_core.tool_web_gather = self.orig_tool_web_gather
         nova_core.mem_recall = self.orig_mem_recall
+        nova_core.runtime_device_location_payload = self.orig_runtime_device_location_payload
+        nova_core.resolve_current_device_coords = self.orig_resolve_current_device_coords
         nova_core.LEARNED_FACTS_FILE = self.orig_learned_facts_file
         nova_core.IDENTITY_FILE = self.orig_identity_file
         nova_core.ACTION_LEDGER_DIR = self.orig_action_ledger_dir

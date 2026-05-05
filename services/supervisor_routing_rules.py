@@ -35,6 +35,12 @@ def looks_like_location_recall_query(low: str) -> bool:
 def looks_like_location_name_query(low: str) -> bool:
     if not low:
         return False
+    tokens = set(re.findall(r"[a-z0-9']+", str(low or "").lower()))
+    asks_identity = bool(tokens & {"name", "called", "which", "what"})
+    asks_location_label = bool(tokens & {"city", "place", "town", "area", "county", "zip", "zipcode"})
+    has_external_topic = bool(tokens & {"song", "book", "movie", "album", "person", "company", "band", "definition", "history"})
+    if asks_identity and asks_location_label and not has_external_topic:
+        return True
     cues = (
         "give me the name to that location",
         "give me the name of that location",
@@ -223,8 +229,9 @@ def looks_like_deep_search_request(low: str) -> bool:
 def looks_like_online_research_request(low: str) -> bool:
     if not low:
         return False
+    if re.match(r"^research\s+.+\s+online\s*[.!?]*$", str(low or "").strip(), flags=re.I):
+        return True
     cues = (
-        "research ",
         "online about ",
         "search online",
         "look online",
@@ -261,7 +268,6 @@ def web_research_query_from_text(user_text: str, low: str) -> str:
 
     patterns = (
         r"^research\s+(.+?)\s+online\s*[.!?]*$",
-        r"^research\s+(.+?)\s*[.!?]*$",
         r"^give me anything online about\s+(.+?)\s*[.!?]*$",
         r"^search online for\s+(.+?)\s*[.!?]*$",
         r"^look online for\s+(.+?)\s*[.!?]*$",
@@ -344,20 +350,37 @@ def looks_like_wikipedia_lookup_request(text: str) -> bool:
         "wearing",
         "holding",
         "smell",
-        "hearing",
+            "hearing",
+        )):
+        return False
+    if any(token in low for token in (
+        " my ",
+        " your ",
+        " our ",
+        " this ",
+        " that ",
+        " device ",
+        " saved ",
+        " location ",
+        " city",
+        " place",
+        " town",
+        " zip",
+        " zipcode",
+        " name of",
     )):
         return False
-    prompts = (
-        "who is ",
-        "what is ",
-        "where is ",
-        "when was ",
-        "tell me about ",
-        "background on ",
-        "overview of ",
-        "history of ",
-    )
-    return low.startswith(prompts)
+
+    if low.startswith(("who is ", "who was ")):
+        subject = low.split(maxsplit=2)[2] if len(low.split(maxsplit=2)) >= 3 else ""
+        return len(subject.split()) >= 2 or any(ch.isdigit() for ch in subject)
+    if low.startswith(("tell me about ", "background on ", "overview of ", "history of ")):
+        subject = re.sub(r"^(tell me about|background on|overview of|history of)\s+", "", low).strip()
+        return len(subject) >= 4
+    if low.startswith(("when was ", "where is ")):
+        subject = low.split(maxsplit=2)[2] if len(low.split(maxsplit=2)) >= 3 else ""
+        return len(subject.split()) >= 2
+    return False
 
 
 def looks_like_proper_name_topic(text: str) -> bool:
@@ -532,7 +555,7 @@ def location_recall_rule(
     if looks_like_location_name_query(low):
         return {
             "handled": True,
-            "action": "location_recall",
+            "action": "location_name",
             "continuation": False,
             "next_state": {"kind": "location_recall"},
             "ledger_stage": "location_recall",

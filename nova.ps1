@@ -568,6 +568,47 @@ function Convert-NovaCreationDateToUnixSeconds([object]$creationDate) {
   }
 }
 
+function Convert-NovaDateTimeToUnixSeconds([object]$dateTimeValue) {
+  if ($null -eq $dateTimeValue) {
+    return $null
+  }
+
+  try {
+    $parsedDate = ([datetime]$dateTimeValue).ToUniversalTime()
+    return [double][DateTimeOffset]$parsedDate.ToUnixTimeSeconds()
+  } catch {
+    return $null
+  }
+}
+
+function Select-NovaIdentityProcess($identityPid, $identityCreateTime) {
+  $expectedPid = 0
+  if (-not ([int]::TryParse([string]$identityPid, [ref]$expectedPid) -and $expectedPid -gt 0)) {
+    return $null
+  }
+
+  $process = Get-Process -Id $expectedPid -ErrorAction SilentlyContinue
+  if (-not $process) {
+    return $null
+  }
+
+  if ($null -ne $identityCreateTime) {
+    $actualCreateTime = Convert-NovaDateTimeToUnixSeconds $process.StartTime
+    if ($null -ne $actualCreateTime) {
+      $timeDelta = [math]::Abs([double]$actualCreateTime - [double]$identityCreateTime)
+      if ($timeDelta -gt 2.0) {
+        return $null
+      }
+    }
+  }
+
+  return [pscustomobject]@{
+    ProcessId = $expectedPid
+    CreationDate = $process.StartTime
+    IdentityFallback = $true
+  }
+}
+
 function Select-NovaLogicalProcess($logicalProcesses, $identityPid, $identityCreateTime) {
   $logical = @($logicalProcesses)
   if (-not $logical -or $logical.Count -eq 0) {
@@ -627,6 +668,12 @@ function Show-NovaRuntimeStatus {
   $webLogical = @(Get-NovaHttpLogicalProcesses)
   $guardSelected = Select-NovaLogicalProcess $guardLogical $guardIdentity.pid $guardIdentity.create_time
   $coreSelected = Select-NovaLogicalProcess $coreLogical $coreIdentity.pid $coreIdentity.create_time
+  if (-not $guardSelected) {
+    $guardSelected = Select-NovaIdentityProcess $guardIdentity.pid $guardIdentity.create_time
+  }
+  if (-not $coreSelected) {
+    $coreSelected = Select-NovaIdentityProcess $coreIdentity.pid $coreIdentity.create_time
+  }
   $heartbeatAge = Get-NovaHeartbeatAgeSeconds
 
   $guardStatus = "stopped"
@@ -653,13 +700,13 @@ function Show-NovaRuntimeStatus {
   Write-Host "-------------------"
   Write-Host ("guard status      : " + $guardStatus)
   Write-Host ("guard pid         : " + ($(if ($guardSelected) { $guardSelected.ProcessId } elseif ($guardIdentity.pid) { $guardIdentity.pid } else { "-" })))
-  Write-Host ("guard count       : " + $guardLogical.Count)
+  Write-Host ("guard count       : " + ($(if ($guardLogical.Count -gt 0) { $guardLogical.Count } elseif ($guardSelected) { 1 } else { 0 })))
   Write-Host ("guard lock        : " + ($(if ($guardLock) { "present" } else { "missing" })))
   Write-Host ("guard stop flag   : " + ($(if ($stopFlag) { "present" } else { "missing" })))
   Write-Host ""
   Write-Host ("core status       : " + $coreStatus)
   Write-Host ("core pid          : " + ($(if ($coreSelected) { $coreSelected.ProcessId } elseif ($coreIdentity.pid) { $coreIdentity.pid } else { "-" })))
-  Write-Host ("core count        : " + $coreLogical.Count)
+  Write-Host ("core count        : " + ($(if ($coreLogical.Count -gt 0) { $coreLogical.Count } elseif ($coreSelected) { 1 } else { 0 })))
   Write-Host ("heartbeat age sec : " + ($(if ($null -ne $heartbeatAge) { $heartbeatAge } else { "-" })))
   Write-Host ""
   Write-Host ("webui status      : " + ($(if ($webLogical.Count -gt 0) { "running" } else { "stopped" })))

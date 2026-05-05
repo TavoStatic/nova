@@ -8,14 +8,19 @@ Exit code is non-zero if any step fails.
 from __future__ import annotations
 
 import argparse
+import json
 import subprocess
 import sys
+import time
 import unittest
 from pathlib import Path
 
 
 BASE = Path(__file__).resolve().parents[1]
 PY = str(Path(sys.executable).resolve())
+if str(BASE) not in sys.path:
+    sys.path.insert(0, str(BASE))
+REGRESSION_STATUS_FILE = BASE / "runtime" / "regression_status.json"
 
 COMPILE_TARGETS = [
     "nova_core.py",
@@ -207,6 +212,23 @@ def run_test_lane(lane: str, *, verbosity: int = 1) -> int:
     return 1
 
 
+def write_regression_status(*, status: str, lanes: list[str], returncode: int, detail: str = "") -> None:
+    payload = {
+        "generated_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "date": time.strftime("%Y-%m-%d"),
+        "status": str(status or "unknown").strip().upper() or "UNKNOWN",
+        "lanes": [str(lane) for lane in lanes],
+        "returncode": int(returncode),
+        "detail": str(detail or "").strip()[:500],
+        "source": "scripts/run_regression.py",
+    }
+    try:
+        REGRESSION_STATUS_FILE.parent.mkdir(parents=True, exist_ok=True)
+        REGRESSION_STATUS_FILE.write_text(json.dumps(payload, ensure_ascii=True, indent=2), encoding="utf-8")
+    except Exception:
+        pass
+
+
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     if args.list_lanes:
@@ -229,14 +251,17 @@ def main(argv: list[str] | None = None) -> int:
     for name, cmd in steps:
         code = run_step(name, cmd)
         if code != 0:
+            write_regression_status(status="FAILED", lanes=selected_lanes, returncode=code, detail=name)
             return code
 
     for lane in selected_lanes:
         code = run_test_lane(lane, verbosity=max(1, int(args.verbosity or 1)))
         if code != 0:
+            write_regression_status(status="FAILED", lanes=selected_lanes, returncode=code, detail=f"{lane} lane")
             return code
 
     print("\nAll selected regression checks passed.")
+    write_regression_status(status="OK", lanes=selected_lanes, returncode=0)
     return 0
 
 

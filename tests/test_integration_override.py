@@ -1,6 +1,7 @@
 import json
 import shutil
 import unittest
+from unittest import mock
 from pathlib import Path
 import nova_core
 
@@ -24,7 +25,8 @@ class TestIntegrationOverride(unittest.TestCase):
         orig = "Hello."
         corr = "Hi Gus."
         # store example
-        res = nova_core._teach_store_example(orig, corr, user="tester")
+        with mock.patch.object(nova_core, "mem_add", return_value=None):
+            res = nova_core._teach_store_example(orig, corr, user="tester")
         self.assertEqual(res, "OK")
         # ensure file exists
         self.assertTrue(EX_FILE.exists())
@@ -39,7 +41,8 @@ class TestIntegrationOverride(unittest.TestCase):
         parsed = nova_core._parse_correction(phrase)
         self.assertEqual(parsed, "Hi Gus")
         # store via helper
-        nova_core._teach_store_example(last, parsed, user="tester")
+        with mock.patch.object(nova_core, "mem_add", return_value=None):
+            nova_core._teach_store_example(last, parsed, user="tester")
         # verify override
         out = nova_core._apply_reply_overrides(last)
         self.assertEqual(out, "Hi Gus")
@@ -54,7 +57,8 @@ class TestIntegrationOverride(unittest.TestCase):
         try:
             orig = "Hello."
             corr = "Hi Gus."
-            nova_core._teach_store_example(orig, corr, user="tester")
+            with mock.patch.object(nova_core, "mem_add", return_value=None):
+                nova_core._teach_store_example(orig, corr, user="tester")
             out = nova_core._apply_reply_overrides(orig)
             self.assertEqual(out, corr)
         finally:
@@ -65,7 +69,8 @@ class TestIntegrationOverride(unittest.TestCase):
         # store an original with punctuation
         orig = "Hello there."
         corr = "Hi Gus."
-        nova_core._teach_store_example(orig, corr, user="tester")
+        with mock.patch.object(nova_core, "mem_add", return_value=None):
+            nova_core._teach_store_example(orig, corr, user="tester")
         # apply override with slightly different punctuation
         out1 = nova_core._apply_reply_overrides("Hello there")
         out2 = nova_core._apply_reply_overrides("Hello, there!")

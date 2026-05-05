@@ -5,6 +5,7 @@ import json
 import re
 import shutil
 import unittest
+from unittest import mock
 from pathlib import Path
 import nova_core
 
@@ -32,7 +33,8 @@ class TestTeachFlow(unittest.TestCase):
             pass
 
     def test_teach_store_example_and_file(self):
-        ok = nova_core._teach_store_example("orig text", "corrected reply", user="tester")
+        with mock.patch.object(nova_core, "mem_add", return_value=None):
+            ok = nova_core._teach_store_example("orig text", "corrected reply", user="tester")
         self.assertEqual(ok, "OK")
         self.assertTrue(EX_FILE.exists())
         lines = EX_FILE.read_text(encoding="utf-8").strip().splitlines()
@@ -44,7 +46,8 @@ class TestTeachFlow(unittest.TestCase):
 
     def test_teach_propose_creates_zip(self):
         # ensure at least one example exists
-        nova_core._teach_store_example("orig for propose", "corr for propose", user="tester")
+        with mock.patch.object(nova_core, "mem_add", return_value=None):
+            nova_core._teach_store_example("orig for propose", "corr for propose", user="tester")
         out = nova_core._teach_propose_patch("test proposal")
         m = re.search(r"teach_proposal_\d{8}_\d{6}\.zip", out)
         self.assertIsNotNone(m, f"No proposal zip mentioned in: {out}")

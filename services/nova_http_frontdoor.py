@@ -82,6 +82,7 @@ class NovaHttpFrontdoorService:
                 "/api/control/sessions",
                 "/api/control/test-sessions",
                 "/api/control/work-trees",
+                "/api/control/pipelines",
             ),
             "chat_api_post": (
                 "/api/chat",

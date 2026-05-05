@@ -19,6 +19,10 @@ class TestPipelineRegistry(unittest.TestCase):
         self.assertEqual(pipeline.manifest.pipeline_id, "sis_test")
         self.assertTrue(pipeline.manifest.read_only)
         self.assertIn("student_lookup", pipeline.load_query_templates())
+        self.assertIn("schema_inventory", pipeline.load_query_templates())
+        self.assertTrue(str(pipeline.manifest.population_definitions_path).endswith("population_definitions.json"))
+        self.assertTrue(str(pipeline.manifest.vendor_dictionary_path).endswith("vendor_dictionary_index.json"))
+        self.assertTrue(str(pipeline.manifest.predefined_reports_path).endswith("predefined_reports_index.json"))
 
 
 if __name__ == "__main__":

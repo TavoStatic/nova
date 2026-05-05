@@ -49,6 +49,33 @@ class TestMemoryAdapterService(unittest.TestCase):
         self.assertIn("Favorite color is teal", out)
         self.assertIn("Lives in Brownsville", out)
 
+    def test_format_memory_recall_hits_renders_corrections_without_json(self):
+        svc = self._service({"context_top_k": 3})
+        hits = [
+            (
+                0.9,
+                1,
+                "user_correction",
+                "typed",
+                "u",
+                '{"text": "no, wrong", "parsed_correction": "Say hello as Hi Gus."}',
+            ),
+            (
+                0.8,
+                2,
+                "user_correction",
+                "typed",
+                "u",
+                '{"text": "no, wrong", "parsed_correction": ""}',
+            ),
+        ]
+
+        out = svc.format_memory_recall_hits(hits)
+
+        self.assertIn("Correction: Say hello as Hi Gus.", out)
+        self.assertNotIn('{"text"', out)
+        self.assertNotIn("no, wrong", out)
+
 
 if __name__ == "__main__":
     unittest.main()

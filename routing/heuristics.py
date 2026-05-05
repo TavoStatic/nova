@@ -64,17 +64,37 @@ def looks_like_wikipedia_lookup(low: str) -> bool:
         "hearing",
     )):
         return False
-    prompts = (
-        "who is ",
-        "what is ",
-        "where is ",
-        "when was ",
-        "tell me about ",
-        "background on ",
-        "overview of ",
-        "history of ",
-    )
-    return text.startswith(prompts)
+    if any(token in text for token in (
+        " my ",
+        " your ",
+        " our ",
+        " this ",
+        " that ",
+        " device ",
+        " saved ",
+        " location ",
+        " city",
+        " place",
+        " town",
+        " zip",
+        " zipcode",
+        " name of",
+    )):
+        return False
+
+    if text.startswith(("who is ", "who was ")):
+        subject = text.split(maxsplit=2)[2] if len(text.split(maxsplit=2)) >= 3 else ""
+        return len(subject.split()) >= 2 or any(ch.isdigit() for ch in subject)
+
+    if text.startswith(("tell me about ", "background on ", "overview of ", "history of ")):
+        subject = re.sub(r"^(tell me about|background on|overview of|history of)\s+", "", text).strip()
+        return len(subject) >= 4
+
+    if text.startswith(("when was ", "where is ")):
+        subject = text.split(maxsplit=2)[2] if len(text.split(maxsplit=2)) >= 3 else ""
+        return len(subject.split()) >= 2
+
+    return False
 
 
 def looks_like_repo_discovery(low: str) -> bool:
@@ -238,7 +258,7 @@ def looks_like_find_command(text: str) -> bool:
     if len(parts) < 2 or len(parts) > 3:
         return False
     first_arg = str(parts[1] or "").strip().lower()
-    if first_arg in {"a", "an", "the"}:
+    if first_arg in {"a", "an", "the", "me", "more", "out"}:
         return False
     return True
 

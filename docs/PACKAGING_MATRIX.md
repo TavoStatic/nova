@@ -59,6 +59,7 @@ Inputs intentionally supplied by the operator or deployment environment, rather 
 | `runtime/test_sessions/pending_review/`, `runtime/test_sessions/quarantine/`, `runtime/test_sessions/promotion_audit.jsonl` | Disposable runtime artifacts | No | Safety-envelope governance outputs and review queues |
 | `runtime/kidney/` | Disposable runtime artifacts | No | Kidney status, protect patterns, snapshots, and archives |
 | `full_suite_out.txt`, `*.log`, ad hoc output captures | Disposable runtime artifacts | No | Debug output only |
+| `codex_*` scratch files and directories | Disposable runtime artifacts | No | Local agent probes, reflection scratch space, pulse tests, and health traces |
 | `knowledge/packs/*` active pack content | Operator-provided inputs | No by default | Optional domain extension points loaded explicitly by operators |
 | `knowledge/peims/`, `knowledge/peims_knowledge_pack.zip` | Operator-provided inputs | No | Public repo no longer treats PEIMS content as bundled product knowledge |
 | chat users, control credentials, env vars | Operator-provided inputs | No | Deployment-specific auth and secrets |

@@ -62,5 +62,24 @@
     "max_rows": 50,
     "result_shape": "program_rows",
     "redaction_profile": "student_default"
+  },
+  "schema_inventory": {
+    "description": "Read SQL Server metadata for tables and columns by schema/table pattern. Use this to verify the live SIS table and column inventory in chunks such as REG_%, SCHD_%, or TX_%.",
+    "tables": [
+      "sys.tables",
+      "sys.schemas",
+      "sys.columns",
+      "sys.types",
+      "sys.default_constraints",
+      "sys.indexes",
+      "sys.index_columns"
+    ],
+    "params": [
+      "schema_like",
+      "table_like"
+    ],
+    "max_rows": 500,
+    "result_shape": "schema_inventory_rows",
+    "redaction_profile": "metadata_only"
   }
 }

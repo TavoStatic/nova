@@ -23,6 +23,24 @@ def handle_commands(
     if low in {"pulse", "nova pulse", "show pulse", "system pulse"}:
         return str(core.execute_planned_action("pulse") or "")
 
+    if low == "pipeline" or low == "pipeline help" or low.startswith("pipeline "):
+        return str(core.tool_pipeline(t) or "")
+
+    if low in {
+        "nova status",
+        "self status",
+        "status events",
+        "nova self status",
+        "what hurts",
+        "what is hurting",
+        "are you hurting",
+        "what failed",
+        "what has failed",
+        "what are you updating",
+        "are you updating",
+    }:
+        return str(core.execute_planned_action("self_status") or "")
+
     if low in {"update now", "apply update now", "apply updates now"}:
         return str(core.execute_planned_action("update_now") or "")
 
@@ -69,7 +87,10 @@ def handle_commands(
         value = t.split(maxsplit=2)[2] if len(t.split(maxsplit=2)) >= 3 else ""
         return core.set_location_coords(value)
 
-    if low in {"weather", "check weather", "weather current location", "weather current"}:
+    if low in {"weather", "check weather"}:
+        return "What location should I use for the weather lookup?"
+
+    if low in {"weather current location", "weather current"}:
         return str(core.execute_planned_action("weather_current_location") or "")
 
     if low.startswith("weather ") or low.startswith("check weather "):
@@ -79,7 +100,7 @@ def handle_commands(
 
     normalized = core._normalize_turn_text(t)
     if normalized in {"use your physical location", "use your location nova", "use your location"}:
-        return str(core.execute_planned_action("weather_current_location") or "")
+        return "What do you want me to use my location for?"
 
     if core._is_saved_location_weather_query(normalized) or (
         "weather" in normalized and any(phrase in normalized for phrase in (

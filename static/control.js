@@ -28,6 +28,24 @@ const workTreeSelectedSummary = document.getElementById('workTreeSelectedSummary
 const workTreeEmptyState = document.getElementById('workTreeEmptyState');
 const workTreeSvg = document.getElementById('workTreeSvg');
 const workTreeBranchInfo = document.getElementById('workTreeBranchInfoBody') || document.getElementById('workTreeBranchInfo');
+const pipelineSelect = document.getElementById('pipelineSelect');
+const pipelineListSummary = document.getElementById('pipelineListSummary');
+const pipelineCards = document.getElementById('pipelineCards');
+const pipelineStatusGrid = document.getElementById('pipelineStatusGrid');
+const pipelineSchemaSummary = document.getElementById('pipelineSchemaSummary');
+const pipelineNoteType = document.getElementById('pipelineNoteType');
+const pipelineNoteInput = document.getElementById('pipelineNoteInput');
+const pipelineIntakeBox = document.getElementById('pipelineIntakeBox');
+const pipelineCreateId = document.getElementById('pipelineCreateId');
+const pipelineCreateName = document.getElementById('pipelineCreateName');
+const pipelineEditName = document.getElementById('pipelineEditName');
+const pipelineEditDescription = document.getElementById('pipelineEditDescription');
+const pipelineEditScope = document.getElementById('pipelineEditScope');
+const pipelinePopulationKey = document.getElementById('pipelinePopulationKey');
+const pipelinePopulationLabel = document.getElementById('pipelinePopulationLabel');
+const pipelinePopulationProgram = document.getElementById('pipelinePopulationProgram');
+const pipelinePopulationField = document.getElementById('pipelinePopulationField');
+const pipelinePopulationNotes = document.getElementById('pipelinePopulationNotes');
 const taskManagerSelect = document.getElementById('taskManagerSelect');
 const taskManagerPreview = document.getElementById('taskManagerPreview');
 const taskManagerName = document.getElementById('taskManagerName');
@@ -133,6 +151,9 @@ let latestStatus = null;
 let latestPolicy = null;
 let latestMetrics = null;
 let workTreesCache = [];
+let pipelinesCache = [];
+let selectedPipelineId = '';
+let pipelineDetailCache = null;
 let selectedWorkTreeId = '';
 let selectedWorkTreeNodeId = '';
 let refreshInFlight = null;
@@ -1571,6 +1592,125 @@ function renderInspectorList(container, items) {
         '</tbody>',
         '</table>'
     ].join('');
+}
+
+function selectedPipeline() {
+    return pipelinesCache.find((item) => String(item && item.pipeline_id ? item.pipeline_id : '') === selectedPipelineId) || null;
+}
+
+function renderPipelineCards() {
+    if (!pipelineCards) return;
+    if (!pipelinesCache.length) {
+        pipelineCards.textContent = 'No pipelines registered.';
+        return;
+    }
+    pipelineCards.innerHTML = pipelinesCache.map((pipeline) => {
+        const id = String(pipeline.pipeline_id || '').trim();
+        const active = id === selectedPipelineId ? ' active' : '';
+        const laneState = pipeline.lane_state && typeof pipeline.lane_state === 'object' ? pipeline.lane_state : {};
+        const state = String(laneState.state || (laneState.enabled === false ? 'paused' : 'running'));
+        const mode = pipeline.read_only ? 'read-only' : 'read/write';
+        const scope = String(pipeline.network_scope || 'unknown');
+        return [
+            `<button class="pipeline-card-button${active}" type="button" data-pipeline-id="${escapeHtml(id)}">`,
+            `<div class="pipeline-card-title">${escapeHtml(pipeline.display_name || id)}</div>`,
+            `<div class="pipeline-card-meta">${escapeHtml(id)} | ${escapeHtml(mode)} | ${escapeHtml(scope)} | ${escapeHtml(state)}</div>`,
+            '</button>'
+        ].join('');
+    }).join('');
+}
+
+function renderPipelineSelect() {
+    if (!pipelineSelect) return;
+    const previous = selectedPipelineId || String(pipelineSelect.value || '').trim();
+    pipelineSelect.innerHTML = '';
+    if (!pipelinesCache.length) {
+        const option = document.createElement('option');
+        option.value = '';
+        option.textContent = '(no pipelines)';
+        pipelineSelect.appendChild(option);
+        return;
+    }
+    pipelinesCache.forEach((pipeline) => {
+        const option = document.createElement('option');
+        option.value = String(pipeline.pipeline_id || '').trim();
+        option.textContent = `${pipeline.display_name || pipeline.pipeline_id} (${pipeline.pipeline_id})`;
+        pipelineSelect.appendChild(option);
+    });
+    if (previous && pipelinesCache.some((item) => String(item.pipeline_id || '') === previous)) {
+        pipelineSelect.value = previous;
+        selectedPipelineId = previous;
+    } else {
+        selectedPipelineId = String(pipelineSelect.value || '').trim();
+    }
+}
+
+function renderPipelineDetail(payload) {
+    const detail = payload && payload.detail && typeof payload.detail === 'object' ? payload.detail : {};
+    pipelineDetailCache = detail;
+    const status = detail.status && typeof detail.status === 'object' ? detail.status : {};
+    const probe = detail.schema_probe && typeof detail.schema_probe === 'object' ? detail.schema_probe : {};
+    const schema = probe.schema && typeof probe.schema === 'object' ? probe.schema : {};
+    const schemaSource = schema.source && typeof schema.source === 'object' ? schema.source : {};
+    const vendorDictionary = probe.vendor_dictionary && typeof probe.vendor_dictionary === 'object' ? probe.vendor_dictionary : {};
+    const vendorSource = vendorDictionary.source && typeof vendorDictionary.source === 'object' ? vendorDictionary.source : {};
+    const entities = Array.isArray(schema.entities) ? schema.entities : [];
+    const populations = probe.population_definitions && Array.isArray(probe.population_definitions.populations)
+        ? probe.population_definitions.populations
+        : [];
+    const intake = detail.intake && typeof detail.intake === 'object' ? detail.intake : {};
+    const laneState = detail.lane_state && typeof detail.lane_state === 'object' ? detail.lane_state : {};
+    const auth = status.auth_probe && typeof status.auth_probe === 'object' ? status.auth_probe : {};
+    const network = status.network_probe && typeof status.network_probe === 'object' ? status.network_probe : {};
+    const selectedSummary = selectedPipeline() || {};
+
+    if (pipelineEditName) pipelineEditName.value = String(status.display_name || selectedPipelineId || '');
+    if (pipelineEditDescription) pipelineEditDescription.value = String(status.description || selectedSummary.description || '');
+    if (pipelineEditScope) pipelineEditScope.value = String(status.network_scope || selectedSummary.network_scope || '');
+
+    renderInspectorList(pipelineStatusGrid, [
+        {label: 'Pipeline', value: selectedPipelineId || 'none'},
+        {label: 'Lane state', value: String(laneState.state || (laneState.enabled === false ? 'paused' : 'running'))},
+        {label: 'Read only', value: String(Boolean(status.read_only))},
+        {label: 'Configured', value: String(Boolean(status.configured))},
+        {label: 'Network', value: String(network.reason || 'unknown')},
+        {label: 'Auth', value: String(auth.reason || 'unknown')},
+        {label: 'Live ready', value: String(Boolean(status.live_query_ready))},
+        {label: 'Driver', value: String(status.driver_selected || 'none')},
+    ]);
+    renderInspectorList(pipelineSchemaSummary, [
+        {label: 'Schema status', value: String(schemaSource.verification_status || 'unknown')},
+        {label: 'Vendor dictionary', value: vendorDictionary.table_count ? `${vendorDictionary.table_count} tables | ${vendorSource.grounding_status || 'vendor_grounded'}` : 'not loaded'},
+        {label: 'Seeded groups', value: entities.map((entity) => `${entity.name}${entity.verification_status ? ' [' + entity.verification_status + ']' : ''}`).filter(Boolean).join(', ') || 'none'},
+        {label: 'Governed operations', value: (Array.isArray(probe.query_templates) ? probe.query_templates : []).join(', ') || 'none'},
+        {label: 'Population definitions', value: populations.map((item) => item.key).filter(Boolean).join(', ') || 'none'},
+        {label: 'Intake log', value: String(intake.path || 'not created yet')},
+    ]);
+    if (pipelineIntakeBox) {
+        const recent = Array.isArray(intake.recent) ? intake.recent : [];
+        pipelineIntakeBox.textContent = recent.length
+            ? recent.map((entry) => `[${entry.created_at || ''}] ${entry.note_type || 'note'}\n${entry.note || ''}`).join('\n\n')
+            : 'No scoped intake notes recorded for this pipeline yet.';
+    }
+}
+
+function renderPipelines(payload) {
+    pipelinesCache = Array.isArray(payload && payload.pipelines) ? payload.pipelines.filter((item) => item && typeof item === 'object') : [];
+    selectedPipelineId = String(payload && payload.selected_pipeline_id ? payload.selected_pipeline_id : selectedPipelineId || '').trim();
+    if (pipelineListSummary) {
+        pipelineListSummary.textContent = `${pipelinesCache.length} registered pipeline${pipelinesCache.length === 1 ? '' : 's'}. Notes are scoped to the selected pipeline.`;
+    }
+    renderPipelineSelect();
+    renderPipelineCards();
+    renderPipelineDetail(payload || {});
+}
+
+async function loadPipelines(selectedId = '') {
+    const target = String(selectedId || selectedPipelineId || '').trim();
+    const query = target ? `?pipeline_id=${encodeURIComponent(target)}` : '';
+    const payload = await getJson(`/api/control/pipelines${query}`);
+    renderPipelines(payload);
+    return payload;
 }
 
 function patchBadgeClass(status) {
@@ -3493,6 +3633,11 @@ async function fetchWorkTrees() {
     return getJson('/api/control/work-trees');
 }
 
+async function fetchPipelines() {
+    const query = selectedPipelineId ? `?pipeline_id=${encodeURIComponent(selectedPipelineId)}` : '';
+    return getJson(`/api/control/pipelines${query}`);
+}
+
 async function performRefresh() {
     try {
         const results = await Promise.allSettled([
@@ -3501,7 +3646,8 @@ async function performRefresh() {
             getJson('/api/control/metrics'),
             getJson('/api/control/sessions'),
             getJson('/api/control/test-sessions'),
-            fetchWorkTrees()
+            fetchWorkTrees(),
+            fetchPipelines()
         ]);
         latestStatus = results[0].status === 'fulfilled' ? results[0].value : null;
         latestPolicy = results[1].status === 'fulfilled' ? results[1].value : null;
@@ -3509,6 +3655,7 @@ async function performRefresh() {
         const sessions = results[3].status === 'fulfilled' ? results[3].value : null;
         const testRuns = results[4].status === 'fulfilled' ? results[4].value : null;
         const workTrees = results[5].status === 'fulfilled' ? results[5].value : null;
+        const pipelines = results[6].status === 'fulfilled' ? results[6].value : null;
         latestMetrics = metrics;
         if (latestStatus) {
             renderMetricGrid(latestStatus);
@@ -3564,12 +3711,17 @@ async function performRefresh() {
         } else {
             renderWorkTrees({ok: false, trees: [], counts: {total: 0, active: 0}});
         }
+        if (pipelines) {
+            renderPipelines(pipelines);
+        } else {
+            renderPipelines({ok: false, pipelines: [], detail: {}});
+        }
         renderOverviewFocus(latestStatus);
         renderCenterMissionBrief(latestStatus);
         decorateActionButtons(document);
             maybeAutoArmLiveTracking();
-        const failed = results.map((result, index) => ({result, index})).filter((entry) => entry.result.status !== 'fulfilled').map((entry) => ['status', 'policy', 'metrics', 'sessions', 'test-sessions', 'work-trees'][entry.index]);
-        if (!latestStatus && !latestPolicy && !metrics && !sessions && !testRuns && !workTrees) throw new Error('All control endpoints failed');
+        const failed = results.map((result, index) => ({result, index})).filter((entry) => entry.result.status !== 'fulfilled').map((entry) => ['status', 'policy', 'metrics', 'sessions', 'test-sessions', 'work-trees', 'pipelines'][entry.index]);
+        if (!latestStatus && !latestPolicy && !metrics && !sessions && !testRuns && !workTrees && !pipelines) throw new Error('All control endpoints failed');
         setFeedback(failed.length ? 'Partial refresh (' + failed.join(', ') + ' failed) at ' + new Date().toLocaleTimeString() : 'Live status refreshed at ' + new Date().toLocaleTimeString(), failed.length ? 'warn' : 'muted');
     } catch (error) {
         setAction('Refresh failed: ' + error.message);
@@ -3948,6 +4100,91 @@ bindClick('btnWorkTreeRefresh', async () => {
     await refresh();
     setAction('Scheduled Tree refreshed.');
 });
+bindClick('btnPipelinesRefresh', async () => {
+    await loadPipelines();
+    setAction('Data lanes refreshed.');
+});
+bindClick('btnPipelineCreate', async () => {
+    const pipelineId = pipelineCreateId ? pipelineCreateId.value.trim() : '';
+    const displayName = pipelineCreateName ? pipelineCreateName.value.trim() : '';
+    if (!pipelineId) return setAction('Add a lane id before creating a data lane.');
+    const payload = await postAction('pipeline_create', {pipeline_id: pipelineId, display_name: displayName});
+    if (pipelineCreateId) pipelineCreateId.value = '';
+    if (pipelineCreateName) pipelineCreateName.value = '';
+    selectedPipelineId = String(payload.pipeline_id || pipelineId).trim();
+    await loadPipelines(selectedPipelineId);
+    setAction(payload.message || 'pipeline_created');
+});
+bindClick('btnPipelineStart', async () => {
+    const pipelineId = pipelineSelect ? String(pipelineSelect.value || '').trim() : selectedPipelineId;
+    if (!pipelineId) return setAction('Select a data lane to start.');
+    const payload = await postAction('pipeline_start', {pipeline_id: pipelineId});
+    await loadPipelines(pipelineId);
+    setAction(payload.message || 'pipeline_started');
+});
+bindClick('btnPipelinePause', async () => {
+    const pipelineId = pipelineSelect ? String(pipelineSelect.value || '').trim() : selectedPipelineId;
+    if (!pipelineId) return setAction('Select a data lane to pause.');
+    const payload = await postAction('pipeline_pause', {pipeline_id: pipelineId});
+    await loadPipelines(pipelineId);
+    setAction(payload.message || 'pipeline_paused');
+});
+bindClick('btnPipelineUpdate', async () => {
+    const pipelineId = pipelineSelect ? String(pipelineSelect.value || '').trim() : selectedPipelineId;
+    if (!pipelineId) return setAction('Select a data lane to update.');
+    const payload = {
+        pipeline_id: pipelineId,
+        display_name: pipelineEditName ? pipelineEditName.value.trim() : '',
+        description: pipelineEditDescription ? pipelineEditDescription.value.trim() : '',
+        network_scope: pipelineEditScope ? pipelineEditScope.value.trim() : ''
+    };
+    const result = await postAction('pipeline_update', payload);
+    await loadPipelines(pipelineId);
+    setAction(result.message || 'pipeline_metadata_updated');
+});
+bindClick('btnPipelinePopulationSave', async () => {
+    const pipelineId = pipelineSelect ? String(pipelineSelect.value || '').trim() : selectedPipelineId;
+    if (!pipelineId) return setAction('Select a data lane before saving a population.');
+    const payload = {
+        pipeline_id: pipelineId,
+        key: pipelinePopulationKey ? pipelinePopulationKey.value.trim() : '',
+        label: pipelinePopulationLabel ? pipelinePopulationLabel.value.trim() : '',
+        program_id: pipelinePopulationProgram ? pipelinePopulationProgram.value.trim() : '',
+        field_number: pipelinePopulationField ? pipelinePopulationField.value.trim() : '',
+        notes: pipelinePopulationNotes ? pipelinePopulationNotes.value.trim() : ''
+    };
+    if (!payload.key) return setAction('Add a population key before saving.');
+    if (!payload.program_id || !payload.field_number) return setAction('Add PROGRAM_ID and FIELD_NUMBER before saving.');
+    const result = await postAction('pipeline_population_upsert', payload);
+    if (pipelinePopulationKey) pipelinePopulationKey.value = '';
+    if (pipelinePopulationLabel) pipelinePopulationLabel.value = '';
+    if (pipelinePopulationProgram) pipelinePopulationProgram.value = '';
+    if (pipelinePopulationField) pipelinePopulationField.value = '';
+    if (pipelinePopulationNotes) pipelinePopulationNotes.value = '';
+    await loadPipelines(pipelineId);
+    setAction(result.message || 'pipeline_population_saved');
+});
+bindClick('btnPipelineArchive', async () => {
+    const pipelineId = pipelineSelect ? String(pipelineSelect.value || '').trim() : selectedPipelineId;
+    if (!pipelineId) return setAction('Select a data lane to delete.');
+    const confirmed = window.confirm(`Archive data lane ${pipelineId}? It will be removed from active lanes but kept under data_sources/_archived.`);
+    if (!confirmed) return setAction('Data lane delete canceled.');
+    const payload = await postAction('pipeline_archive', {pipeline_id: pipelineId});
+    selectedPipelineId = '';
+    await loadPipelines();
+    setAction(payload.message || 'pipeline_archived');
+});
+bindClick('btnPipelineNoteSave', async () => {
+    const pipelineId = pipelineSelect ? String(pipelineSelect.value || '').trim() : selectedPipelineId;
+    const note = pipelineNoteInput ? pipelineNoteInput.value.trim() : '';
+    const noteType = pipelineNoteType ? pipelineNoteType.value : 'operator_grounding';
+    if (!pipelineId) return setAction('Select a pipeline before saving a note.');
+    if (!note) return setAction('Add a pipeline note before saving.');
+    const payload = await postAction('pipeline_note_append', {pipeline_id: pipelineId, note_type: noteType, note});
+    if (pipelineNoteInput) pipelineNoteInput.value = '';
+    await loadPipelines(pipelineId);
+    setAction(payload.message || 'pipeline_note_recorded');
+});
 bindClick('btnWorkTreesRefresh', async () => {
     await refresh();
     setAction('Scheduled Tree refreshed.');
@@ -4188,6 +4425,23 @@ bindClick('btnBackendCommandRun', async () => {
     setAction(payload.message || `${commandId} completed.`);
     await refresh();
 });
+if (pipelineSelect) {
+    pipelineSelect.addEventListener('change', async () => {
+        selectedPipelineId = String(pipelineSelect.value || '').trim();
+        await loadPipelines(selectedPipelineId);
+        setAction(`Pipeline selected: ${selectedPipelineId || 'none'}`);
+    });
+}
+if (pipelineCards) {
+    pipelineCards.addEventListener('click', async (event) => {
+        const button = event.target && event.target.closest ? event.target.closest('[data-pipeline-id]') : null;
+        if (!button) return;
+        selectedPipelineId = String(button.getAttribute('data-pipeline-id') || '').trim();
+        if (pipelineSelect) pipelineSelect.value = selectedPipelineId;
+        await loadPipelines(selectedPipelineId);
+        setAction(`Pipeline selected: ${selectedPipelineId || 'none'}`);
+    });
+}
 syncShellToggleState();
 decorateActionButtons(document);
 clearCenterTabs();

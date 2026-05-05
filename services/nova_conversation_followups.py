@@ -265,14 +265,15 @@ def retrieval_query_from_text(
     if tool == "web_search":
         if low.startswith("web search "):
             return raw.split(maxsplit=2)[2].strip() if len(raw.split(maxsplit=2)) >= 3 else ""
-        if low.startswith("findweb ") or low.startswith("search "):
-            return raw.split(maxsplit=1)[1].strip() if len(raw.split(maxsplit=1)) >= 2 else ""
     if tool == "web_gather":
         if low.startswith("web gather "):
             return raw.split(maxsplit=2)[2].strip() if len(raw.split(maxsplit=2)) >= 3 else ""
     if tool == "web_fetch":
         if low.startswith("web "):
-            return raw.split(maxsplit=1)[1].strip() if len(raw.split(maxsplit=1)) >= 2 else ""
+            candidate = raw.split(maxsplit=1)[1].strip() if len(raw.split(maxsplit=1)) >= 2 else ""
+            if candidate.lower().startswith(("http://", "https://")):
+                return candidate
+            return raw
     if tool == "wikipedia_lookup":
         if low.startswith("wikipedia "):
             return raw.split(maxsplit=1)[1].strip() if len(raw.split(maxsplit=1)) >= 2 else ""

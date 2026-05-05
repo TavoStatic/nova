@@ -198,6 +198,7 @@ def build_pulse_payload(
         "last_reflection_at": str(behavior.get("last_reflection_at") or "unknown"),
         "last_fallback_overuse_score": fallback_score,
         "last_regression_status": str(autonomy.get("last_regression_status") or "unknown"),
+        "last_regression_stale": bool(autonomy.get("last_regression_stale", False)),
         "patch_revision": int(patch.get("current_revision", 0) or 0),
         "approved_eligible_previews": int(patch.get("previews_approved_eligible", 0) or 0),
         "ready_for_validated_apply": bool(patch.get("ready_for_validated_apply", False)),

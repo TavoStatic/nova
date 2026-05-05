@@ -4,6 +4,7 @@
   "port": 1433,
   "driver": "ODBC Driver 17 for SQL Server",
   "auth_mode": "sqlserver",
+  "intended_windows_identity": "K12AD\\guribe.tst",
   "username": "REPLACE_WITH_READONLY_USER",
   "password": "",
   "trust_server_certificate": true,

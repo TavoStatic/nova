@@ -31,6 +31,9 @@ class _CoreStub:
         self.actions.append((tool, args))
         return f"action:{tool}:{args}"
 
+    def tool_pipeline(self, text):
+        return f"pipeline:{text}"
+
     def list_allowed_domains(self):
         return "example.com"
 
@@ -165,6 +168,29 @@ class TestNovaCommandHandlersService(unittest.TestCase):
 
         self.assertEqual(out, "Language mix updated: Spanish 35% (English 65%)")
         self.assertEqual(session.language_mix_spanish_pct, 35)
+
+    def test_pipeline_command_routes_to_pipeline_tool(self):
+        core = _CoreStub()
+
+        out = nova_command_handlers.handle_commands("pipeline status sis_test", core=core)
+
+        self.assertEqual(out, "pipeline:pipeline status sis_test")
+
+    def test_plain_weather_command_clarifies_location(self):
+        core = _CoreStub()
+
+        out = nova_command_handlers.handle_commands("weather", core=core)
+
+        self.assertEqual(out, "What location should I use for the weather lookup?")
+        self.assertEqual(core.actions, [])
+
+    def test_weather_current_command_uses_current_location(self):
+        core = _CoreStub()
+
+        out = nova_command_handlers.handle_commands("weather current location", core=core)
+
+        self.assertEqual(out, "action:weather_current_location:None")
+        self.assertEqual(core.actions, [("weather_current_location", None)])
 
 
 if __name__ == "__main__":

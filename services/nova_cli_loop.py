@@ -825,11 +825,7 @@ def run_loop(tts, *, core: object) -> None:
             ]
             if any(low_q.startswith(t) for t in loc_triggers):
                 try:
-                    preview = core.get_saved_location_text()
-                    if preview:
-                        msg = f"My location is {preview}."
-                    else:
-                        msg = "I don't have a stored location yet. You can tell me: 'My location is ...'"
+                    msg = core._location_reply()
                 except Exception:
                     msg = "I don't have a stored location yet. You can tell me: 'My location is ...'"
 

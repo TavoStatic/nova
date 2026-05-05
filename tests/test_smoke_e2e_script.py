@@ -37,7 +37,7 @@ class TestSmokeE2EScript(unittest.TestCase):
 
         self.assertEqual(code, 0)
         self.assertGreaterEqual(len(commands), 1)
-        self.assertEqual(commands[0], [SMOKE_E2E.PY, "-m", "unittest", "discover", "-v"])
+        self.assertEqual(commands[0], [SMOKE_E2E.PY, str(root / "run_regression.py"), "unit"])
 
 
 if __name__ == "__main__":

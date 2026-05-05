@@ -1,0 +1,94 @@
+from pathlib import Path
+
+from services.nova_self_status import build_self_status_payload, read_recent_ops_events, render_self_status
+
+
+def test_self_status_reports_hurt_failure_and_update_signals(tmp_path: Path) -> None:
+    payload = build_self_status_payload(
+        pulse_payload={
+            "ollama_up": False,
+            "memory_ok": True,
+            "routing_stable": True,
+            "last_fallback_overuse_score": 0.2,
+            "last_regression_status": "FAILED: test_runtime",
+            "approved_eligible_previews": 1,
+            "ready_for_validated_apply": True,
+            "update_zip_path": "C:/Nova/updates/demo.zip",
+            "patch_activity": {"rollback_count": 1, "behavior_fail_count": 0},
+        },
+        recent_ops_events=[],
+    )
+
+    assert payload["level"] == "failed"
+    titles = [event["title"] for event in payload["events"]]
+    assert "Model runtime is offline" in titles
+    assert "Patch rollback pressure is present" in titles
+    assert "Validated update is waiting" in titles
+
+    rendered = render_self_status(payload)
+    assert "Nova Self Status" in rendered
+    assert "Level: failed" in rendered
+    assert "update now" in rendered
+
+
+def test_self_status_reads_ops_journal_and_classifies_update_activity(tmp_path: Path) -> None:
+    journal = tmp_path / "ops_journal.jsonl"
+    journal.write_text(
+        '{"category":"patch","action":"preview","result":"ok","detail":"preview ready"}\n'
+        '{"category":"runtime","action":"health_check","result":"error","detail":"heartbeat stale"}\n',
+        encoding="utf-8",
+    )
+
+    events = read_recent_ops_events(journal)
+    payload = build_self_status_payload(
+        pulse_payload={
+            "ollama_up": True,
+            "memory_ok": True,
+            "routing_stable": True,
+            "last_fallback_overuse_score": 0.1,
+            "last_regression_status": "ok",
+            "patch_activity": {},
+        },
+        recent_ops_events=events,
+    )
+
+    assert payload["level"] == "failed"
+    rendered = render_self_status(payload)
+    assert "heartbeat stale" in rendered
+    assert "patch preview moved through ok" in rendered
+
+
+def test_self_status_is_steady_without_signals() -> None:
+    payload = build_self_status_payload(
+        pulse_payload={
+            "ollama_up": True,
+            "memory_ok": True,
+            "routing_stable": True,
+            "last_fallback_overuse_score": 0.1,
+            "last_regression_status": "ok",
+            "patch_activity": {},
+        },
+        recent_ops_events=[],
+    )
+
+    assert payload["level"] == "steady"
+    assert payload["events"] == []
+    assert "No current hurt" in render_self_status(payload)
+
+
+def test_self_status_ignores_stale_regression_failure() -> None:
+    payload = build_self_status_payload(
+        pulse_payload={
+            "ollama_up": True,
+            "memory_ok": True,
+            "routing_stable": True,
+            "last_fallback_overuse_score": 0.1,
+            "last_regression_status": "FAILED",
+            "last_regression_stale": True,
+            "patch_activity": {},
+        },
+        recent_ops_events=[],
+    )
+
+    assert payload["level"] == "steady"
+    assert "Latest regression is not green" not in render_self_status(payload)

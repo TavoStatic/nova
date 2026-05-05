@@ -44,8 +44,30 @@ class TestPipelineQueryGuard(unittest.TestCase):
             row_limit=200,
         )
         self.assertEqual(result["requested_row_limit"], 200)
-        self.assertEqual(result["effective_row_limit"], 25)
+        self.assertEqual(result["effective_row_limit"], 20)
         self.assertTrue(result["row_limit_clamped"])
+        self.assertEqual(result["row_limit_hard_cap"], 20)
+
+    def test_defaults_to_standard_twenty_row_limit(self):
+        result = self.guard.validate(
+            self.templates,
+            "campus_summary",
+            {"campus_id": "101", "school_year": "2026"},
+        )
+        self.assertEqual(result["requested_row_limit"], 20)
+        self.assertEqual(result["effective_row_limit"], 20)
+        self.assertFalse(result["row_limit_clamped"])
+
+    def test_allows_smaller_explicit_row_limit(self):
+        result = self.guard.validate(
+            self.templates,
+            "campus_summary",
+            {"campus_id": "101", "school_year": "2026"},
+            row_limit=5,
+        )
+        self.assertEqual(result["requested_row_limit"], 5)
+        self.assertEqual(result["effective_row_limit"], 5)
+        self.assertFalse(result["row_limit_clamped"])
 
 
 if __name__ == "__main__":

@@ -67,5 +67,6 @@ It now supports:
 - truthful connectivity/auth readiness checks
 - governed dry-run previews
 - live read-only execution for the allowlisted query templates once the local config, driver, and credentials are valid
+- a temporary 20-row hard cap on every governed query while the data shape is being verified
 
 The first live lane is intentionally small and grounded to the table usage already present in the local UniServer dashboard references.

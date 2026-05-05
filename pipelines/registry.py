@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib
+import importlib.util
 from pathlib import Path
 from typing import Optional
 
@@ -46,6 +47,17 @@ class PipelineRegistry:
 
     def instantiate(self, pipeline_id: str) -> BaseDataPipeline:
         manifest = self.get_manifest(pipeline_id)
-        module = importlib.import_module(manifest.connector_module)
+        try:
+            module = importlib.import_module(manifest.connector_module)
+        except ModuleNotFoundError:
+            connector_path = manifest.pipeline_dir / "connector.py"
+            if not connector_path.exists():
+                raise
+            module_name = f"_nova_pipeline_{manifest.pipeline_id}"
+            spec = importlib.util.spec_from_file_location(module_name, connector_path)
+            if spec is None or spec.loader is None:
+                raise
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
         pipeline_class = getattr(module, manifest.connector_class)
         return pipeline_class(manifest)

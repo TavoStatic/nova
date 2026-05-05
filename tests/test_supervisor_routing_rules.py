@@ -1,5 +1,7 @@
 import unittest
 
+from conversation_manager import ConversationSession
+from supervisor import Supervisor
 from services import supervisor_routing_rules
 
 
@@ -39,6 +41,17 @@ class TestSupervisorRoutingRules(unittest.TestCase):
         self.assertTrue(result.get("handled"))
         self.assertEqual(result.get("tool_name"), "stackexchange_search")
 
+    def test_web_research_family_rejects_bare_research_prompt(self):
+        result = supervisor_routing_rules.web_research_family_rule(
+            "research PEIMS attendance",
+            "research peims attendance",
+            None,
+            1,
+            phase="intent",
+        )
+
+        self.assertFalse(result.get("handled"))
+
     def test_search_provider_keeps_generic_explain_prompt_off_wikipedia(self):
         tool = supervisor_routing_rules.search_provider_tool_for_query(
             "Explain photosynthesis briefly.",
@@ -47,6 +60,31 @@ class TestSupervisorRoutingRules(unittest.TestCase):
         )
 
         self.assertEqual(tool, "web_research")
+
+    def test_search_provider_keeps_location_label_prompt_off_wikipedia(self):
+        tool = supervisor_routing_rules.search_provider_tool_for_query(
+            "what is the name of the city",
+            "what is the name of the city",
+            "search",
+        )
+
+        self.assertEqual(tool, "web_research")
+
+    def test_location_recall_context_handles_city_name_label_intent(self):
+        supervisor = Supervisor()
+        session = ConversationSession()
+        session.set_conversation_state({"kind": "location_recall"})
+
+        result = supervisor.evaluate_rules(
+            "what is the name of the city",
+            manager=session,
+            phase="handle",
+        )
+
+        self.assertEqual(result.get("rule_name"), "location_recall")
+        self.assertEqual(result.get("action"), "location_name")
+        self.assertTrue(result.get("handled"))
+        self.assertFalse(result.get("continuation", False))
 
 
 if __name__ == "__main__":
