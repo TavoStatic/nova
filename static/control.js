@@ -3199,12 +3199,12 @@ function preferredWorkTreeId(trees) {
 
 function formatWorkTreeLabel(tree) {
     const title = String(tree && tree.title ? tree.title : 'tree').trim() || 'tree';
-    const status = String(tree && tree.status ? tree.status : 'unknown').trim().toUpperCase();
+    const status = String(tree && tree.status ? tree.status : 'unknown').trim().toLowerCase();
     const counts = tree && tree.counts && typeof tree.counts === 'object' ? tree.counts : {};
     const branchCounts = counts && counts.branches && typeof counts.branches === 'object' ? counts.branches : {};
     const branchTotal = Object.values(branchCounts).reduce((sum, value) => sum + Number(value || 0), 0);
     const openTasks = Number(counts.open_tasks || 0);
-    return `${title} | ${status} | ${branchTotal} branches | ${openTasks} open`;
+    return `${title} | tree ${status} | ${branchTotal} total branches | ${openTasks} open tasks`;
 }
 
 function renderWorkTreeSelect() {
@@ -3246,8 +3246,8 @@ function renderWorkTreeAggregateSummary(payload) {
         workTreeGlobalCounts.innerHTML = [
             '<span class="scheduled-tree-count-label">All Trees</span>',
             `<span class="scheduled-tree-count-pill">${total} trees</span>`,
-            `<span class="scheduled-tree-count-pill is-active">${active} active</span>`,
-            `<span class="scheduled-tree-count-pill">${branches} branches</span>`,
+            `<span class="scheduled-tree-count-pill is-active">${active} active trees</span>`,
+            `<span class="scheduled-tree-count-pill">${branches} total branches</span>`,
             `<span class="scheduled-tree-count-pill">${openTasks} open tasks</span>`,
         ].join('');
     }
@@ -3278,10 +3278,10 @@ function renderSelectedWorkTreeSummary(tree) {
         workTreeSelectedCounts.innerHTML = [
             '<span class="scheduled-tree-count-label">Selected Tree</span>',
             `<span class="${escapeHtml(workTreeStatusClass(tree.status))}">${escapeHtml(String(tree.status || 'unknown').toUpperCase())}</span>`,
-            `<span class="scheduled-tree-count-pill">${branchTotal} branches</span>`,
-            `<span class="scheduled-tree-count-pill">${openTasks} open</span>`,
-            `<span class="scheduled-tree-count-pill">${Number(branchCounts.active || 0)} working</span>`,
-            `<span class="scheduled-tree-count-pill">${Number(branchCounts.ready || 0)} pending</span>`,
+            `<span class="scheduled-tree-count-pill">${branchTotal} total branches</span>`,
+            `<span class="scheduled-tree-count-pill">${openTasks} open tasks</span>`,
+            `<span class="scheduled-tree-count-pill">${Number(branchCounts.active || 0)} working branches</span>`,
+            `<span class="scheduled-tree-count-pill">${Number(branchCounts.ready || 0)} ready branches</span>`,
         ].join('');
     }
     if (workTreeSelectedSummary) {
