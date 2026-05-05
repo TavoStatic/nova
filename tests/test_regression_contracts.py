@@ -76,7 +76,10 @@ class TestRegressionContracts(unittest.TestCase):
         self.assertNotIn("nyo system\n", template)
 
     def test_smoke_workflow_uses_ci_safe_contract(self):
-        workflow = (Path(__file__).resolve().parents[1] / ".github" / "workflows" / "smoke_e2e.yml").read_text(encoding="utf-8").lower()
+        workflow_path = Path(__file__).resolve().parents[1] / ".github" / "workflows" / "smoke_e2e.yml"
+        if not workflow_path.exists():
+            self.skipTest("source-control workflow is intentionally excluded from release packages")
+        workflow = workflow_path.read_text(encoding="utf-8").lower()
         self.assertIn("actions/checkout@v6", workflow)
         self.assertIn("actions/setup-python@v6", workflow)
         self.assertIn("pip install requests psutil", workflow)

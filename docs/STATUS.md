@@ -12,17 +12,25 @@ Current release-clean read:
 	- `python smoke_test.py --tier base`
 	- `python scripts\run_regression.py`
 - `nova runtime-status` now reports the live guard and core processes as `running` when Windows hides command-line details but the runtime identity PID and creation time still match
+- `nova.ps1` now forwards launcher output while preserving child-process exit codes, so package/install commands no longer hide logs or turn dependency failures into false success
 - package boundary enforcement now excludes and verifies absence of local `codex_reflect_*` scratch directories, matching the documented disposable-artifact boundary in `docs/PACKAGING_MATRIX.md`
 - latest release-clean package candidate:
-	- version: `2026.05.05.2`
+	- version: `2026.05.05.5`
 	- label: `release_clean_20260505`
-	- artifact: `runtime\exports\release_packages\nyo-system-base-rc-2026.05.05.2-release_clean_20260505-20260505_125953.zip`
+	- artifact: `runtime\exports\release_packages\nyo-system-base-rc-2026.05.05.5-release_clean_20260505-20260505_133528.zip`
 	- readiness: `ready-with-notes`
-- promotion note is intentionally limited: workspace doctor, runtime-status, base smoke, regression, and package verification passed on May 5, 2026; fresh-machine validation is still pending
+- extracted-package validation passed from short path `C:\N\r5_133528`:
+	- `.\nova.cmd package-verify .`
+	- `.\nova.cmd install`
+	- `.\nova.cmd doctor`
+	- `.\nova.cmd runtime-status`
+	- `.\nova.cmd smoke-base --fix`
+	- `.\nova.cmd test`
+- promotion note is intentionally limited: workspace validation and same-machine short-path extracted-package validation passed on May 5, 2026; independent fresh-machine or VM validation is still pending
 
 Current remaining release note:
 
-- treat `2026.05.05.2` as a release-clean candidate, not a final broadly deployable release, until the fresh-machine validation checklist is completed.
+- treat `2026.05.05.5` as a release-clean candidate, not a final broadly deployable release, until the independent fresh-machine validation checklist is completed.
 
 ## Packaging Checkpoint (March 30, 2026)
 

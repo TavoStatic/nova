@@ -115,28 +115,31 @@ function Get-BootstrapPythonDescription {
   return ""
 }
 
+function Invoke-NovaNative([string]$executablePath, [string[]]$argumentList=@()) {
+  & $executablePath @argumentList | ForEach-Object { Write-Host $_ }
+  if ($null -eq $LASTEXITCODE) { return 0 }
+  return [int]$LASTEXITCODE
+}
+
 function Invoke-BootstrapPython([string[]]$pythonTokens=@()) {
   if (Test-Path $venvPython) {
-    & $venvPython @pythonTokens
-    return $LASTEXITCODE
+    return (Invoke-NovaNative $venvPython $pythonTokens)
   }
 
   $pyCmd = Get-Command py -ErrorAction SilentlyContinue
   if ($pyCmd) {
-    & $pyCmd.Source -3 @pythonTokens
-    return $LASTEXITCODE
+    $pyArgs = @("-3") + $pythonTokens
+    return (Invoke-NovaNative $pyCmd.Source $pyArgs)
   }
 
   $pythonCmd = Get-Command python -ErrorAction SilentlyContinue
   if ($pythonCmd) {
-    & $pythonCmd.Source @pythonTokens
-    return $LASTEXITCODE
+    return (Invoke-NovaNative $pythonCmd.Source $pythonTokens)
   }
 
   $python3Cmd = Get-Command python3 -ErrorAction SilentlyContinue
   if ($python3Cmd) {
-    & $python3Cmd.Source @pythonTokens
-    return $LASTEXITCODE
+    return (Invoke-NovaNative $python3Cmd.Source $pythonTokens)
   }
 
   Write-Host "[FAIL] No bootstrap Python was found on PATH."
@@ -177,25 +180,25 @@ function Invoke-NovaInstall {
   }
 
   Write-Host "[INFO] Upgrading pip ..."
-  & $venvPython -m pip install --upgrade pip
-  if ($LASTEXITCODE -ne 0) {
+  $pipUpgradeCode = Invoke-NovaNative $venvPython @("-m", "pip", "install", "--upgrade", "pip")
+  if ($pipUpgradeCode -ne 0) {
     Write-Host "[FAIL] pip upgrade failed."
-    return $LASTEXITCODE
+    return $pipUpgradeCode
   }
 
   Write-Host ("[INFO] Installing dependencies from " + $requirementsPath)
-  & $venvPython -m pip install -r $requirementsPath
-  if ($LASTEXITCODE -ne 0) {
+  $dependencyCode = Invoke-NovaNative $venvPython @("-m", "pip", "install", "-r", $requirementsPath)
+  if ($dependencyCode -ne 0) {
     Write-Host "[FAIL] Dependency installation failed."
-    return $LASTEXITCODE
+    return $dependencyCode
   }
 
   if (Test-Path $DOCTORPY) {
     Write-Host "[INFO] Running doctor --fix ..."
-    & $venvPython $DOCTORPY @doctorArgs
-    if ($LASTEXITCODE -ne 0) {
+    $doctorCode = Invoke-NovaNative $venvPython (@($DOCTORPY) + $doctorArgs)
+    if ($doctorCode -ne 0) {
       Write-Host "[FAIL] Doctor validation failed after install."
-      return $LASTEXITCODE
+      return $doctorCode
     }
   } else {
     Write-Host ("[WARN] doctor.py not found at " + $DOCTORPY)
@@ -230,8 +233,8 @@ function Invoke-NovaPackageBuild([string[]]$buildTokens=@()) {
     return 1
   }
 
-  & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $PACKAGEBUILDPS1 @buildTokens
-  return $LASTEXITCODE
+  $args = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $PACKAGEBUILDPS1) + $buildTokens
+  return (Invoke-NovaNative "powershell.exe" $args)
 }
 
 function Invoke-NovaPackageVerify([string[]]$verifyTokens=@()) {
@@ -240,8 +243,8 @@ function Invoke-NovaPackageVerify([string[]]$verifyTokens=@()) {
     return 1
   }
 
-  & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $PACKAGEVERIFYPS1 @verifyTokens
-  return $LASTEXITCODE
+  $args = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $PACKAGEVERIFYPS1) + $verifyTokens
+  return (Invoke-NovaNative "powershell.exe" $args)
 }
 
 function Invoke-NovaInstallerBuild([string[]]$installerTokens=@()) {
@@ -250,8 +253,8 @@ function Invoke-NovaInstallerBuild([string[]]$installerTokens=@()) {
     return 1
   }
 
-  & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $INSTALLERBUILDPS1 @installerTokens
-  return $LASTEXITCODE
+  $args = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $INSTALLERBUILDPS1) + $installerTokens
+  return (Invoke-NovaNative "powershell.exe" $args)
 }
 
 function Invoke-NovaInstallerVerify([string[]]$verifyTokens=@()) {
@@ -260,8 +263,8 @@ function Invoke-NovaInstallerVerify([string[]]$verifyTokens=@()) {
     return 1
   }
 
-  & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $INSTALLERVERIFYPS1 @verifyTokens
-  return $LASTEXITCODE
+  $args = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $INSTALLERVERIFYPS1) + $verifyTokens
+  return (Invoke-NovaNative "powershell.exe" $args)
 }
 
 function Invoke-NovaPackageLedger([string[]]$ledgerTokens=@()) {
@@ -270,8 +273,8 @@ function Invoke-NovaPackageLedger([string[]]$ledgerTokens=@()) {
     return 1
   }
 
-  & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $PACKAGELEDGERPS1 @ledgerTokens
-  return $LASTEXITCODE
+  $args = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $PACKAGELEDGERPS1) + $ledgerTokens
+  return (Invoke-NovaNative "powershell.exe" $args)
 }
 
 function Invoke-NovaInstallerLedger([string[]]$ledgerTokens=@()) {
@@ -280,9 +283,8 @@ function Invoke-NovaInstallerLedger([string[]]$ledgerTokens=@()) {
     return 1
   }
 
-  $args = @("-ArtifactKind", "windows-installer") + $ledgerTokens
-  & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $PACKAGELEDGERPS1 @args
-  return $LASTEXITCODE
+  $scriptArgs = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $PACKAGELEDGERPS1, "-ArtifactKind", "windows-installer") + $ledgerTokens
+  return (Invoke-NovaNative "powershell.exe" $scriptArgs)
 }
 
 function Invoke-NovaPackagePromote([string[]]$promoteTokens=@()) {
@@ -291,8 +293,8 @@ function Invoke-NovaPackagePromote([string[]]$promoteTokens=@()) {
     return 1
   }
 
-  & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $PACKAGEPROMOTEPS1 @promoteTokens
-  return $LASTEXITCODE
+  $args = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $PACKAGEPROMOTEPS1) + $promoteTokens
+  return (Invoke-NovaNative "powershell.exe" $args)
 }
 
 function Invoke-NovaInstallerPromote([string[]]$promoteTokens=@()) {
@@ -301,9 +303,8 @@ function Invoke-NovaInstallerPromote([string[]]$promoteTokens=@()) {
     return 1
   }
 
-  $args = @("-ArtifactKind", "windows-installer") + $promoteTokens
-  & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $PACKAGEPROMOTEPS1 @args
-  return $LASTEXITCODE
+  $scriptArgs = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $PACKAGEPROMOTEPS1, "-ArtifactKind", "windows-installer") + $promoteTokens
+  return (Invoke-NovaNative "powershell.exe" $scriptArgs)
 }
 
 function Invoke-NovaPackageStatus([string[]]$statusTokens=@()) {
@@ -312,8 +313,8 @@ function Invoke-NovaPackageStatus([string[]]$statusTokens=@()) {
     return 1
   }
 
-  & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $PACKAGESTATUSPS1 @statusTokens
-  return $LASTEXITCODE
+  $args = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $PACKAGESTATUSPS1) + $statusTokens
+  return (Invoke-NovaNative "powershell.exe" $args)
 }
 
 function Invoke-NovaInstallerStatus([string[]]$statusTokens=@()) {
@@ -322,9 +323,8 @@ function Invoke-NovaInstallerStatus([string[]]$statusTokens=@()) {
     return 1
   }
 
-  $args = @("-ArtifactKind", "windows-installer") + $statusTokens
-  & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $PACKAGESTATUSPS1 @args
-  return $LASTEXITCODE
+  $scriptArgs = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $PACKAGESTATUSPS1, "-ArtifactKind", "windows-installer") + $statusTokens
+  return (Invoke-NovaNative "powershell.exe" $scriptArgs)
 }
 
 function Invoke-NovaPackageReadiness([string[]]$readinessTokens=@()) {
@@ -333,8 +333,8 @@ function Invoke-NovaPackageReadiness([string[]]$readinessTokens=@()) {
     return 1
   }
 
-  & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $PACKAGEREADINESSPS1 @readinessTokens
-  return $LASTEXITCODE
+  $args = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $PACKAGEREADINESSPS1) + $readinessTokens
+  return (Invoke-NovaNative "powershell.exe" $args)
 }
 
 function Invoke-NovaInstallerReadiness([string[]]$readinessTokens=@()) {
@@ -343,9 +343,8 @@ function Invoke-NovaInstallerReadiness([string[]]$readinessTokens=@()) {
     return 1
   }
 
-  $args = @("-ArtifactKind", "windows-installer") + $readinessTokens
-  & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $PACKAGEREADINESSPS1 @args
-  return $LASTEXITCODE
+  $scriptArgs = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $PACKAGEREADINESSPS1, "-ArtifactKind", "windows-installer") + $readinessTokens
+  return (Invoke-NovaNative "powershell.exe" $scriptArgs)
 }
 
 function Wait-NovaCoreSignal([int]$timeoutSeconds=25) {
