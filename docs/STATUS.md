@@ -1,8 +1,8 @@
 # Nova Status
 
-Date: 2026-05-05
+Date: 2026-05-06
 
-## Release-Clean Candidate (May 5, 2026)
+## Release-Clean Candidate (May 6, 2026)
 
 Current release-clean read:
 
@@ -14,23 +14,23 @@ Current release-clean read:
 - `nova runtime-status` now reports the live guard and core processes as `running` when Windows hides command-line details but the runtime identity PID and creation time still match
 - `nova.ps1` now forwards launcher output while preserving child-process exit codes, so package/install commands no longer hide logs or turn dependency failures into false success
 - package boundary enforcement now excludes and verifies absence of local `codex_reflect_*` scratch directories, matching the documented disposable-artifact boundary in `docs/PACKAGING_MATRIX.md`
+- the control panel now labels work-tree counts as total, open, working, and ready branches so active trees do not look like every historical branch is running
+- autonomy maintenance now archives stale CLI prompt-shell work trees after they age out, keeping the scheduled-work surface focused on real lanes like Core Thinning and Generated Queue
 - latest release-clean package candidate:
-	- version: `2026.05.05.5`
-	- label: `release_clean_20260505`
-	- artifact: `runtime\exports\release_packages\nyo-system-base-rc-2026.05.05.5-release_clean_20260505-20260505_133528.zip`
-	- readiness: `ready-with-notes`
-- extracted-package validation passed from short path `C:\N\r5_133528`:
+	- label: `release_clean_20260506`
+	- exact artifact, version, verification, and promotion state are tracked by `.\nova.cmd package-readiness`
+- same-machine short-path extracted-package validation passed for the May 6 rebuild:
 	- `.\nova.cmd package-verify .`
 	- `.\nova.cmd install`
 	- `.\nova.cmd doctor`
 	- `.\nova.cmd runtime-status`
 	- `.\nova.cmd smoke-base --fix`
 	- `.\nova.cmd test`
-- promotion note is intentionally limited: workspace validation and same-machine short-path extracted-package validation passed on May 5, 2026; independent fresh-machine or VM validation is still pending
+- promotion note is intentionally limited: workspace validation and same-machine short-path extracted-package validation passed on May 6, 2026; independent fresh-machine or VM validation is still pending
 
 Current remaining release note:
 
-- treat `2026.05.05.5` as a release-clean candidate, not a final broadly deployable release, until the independent fresh-machine validation checklist is completed.
+- treat the May 6 release-clean package as a release candidate, not a final broadly deployable release, until the independent fresh-machine validation checklist is completed.
 
 ## Packaging Checkpoint (March 30, 2026)
 
