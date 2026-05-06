@@ -97,6 +97,69 @@ class TestAutonomyMaintenance(unittest.TestCase):
         self.assertEqual(work_tree.get_tree(recent_empty.tree_id).status, work_tree.TreeStatus.ACTIVE)
         self.assertEqual((state.get("last_empty_active_tree_archive") or {}).get("archived_count"), 1)
 
+    def test_archive_stale_cli_active_trees_archives_only_simple_prompt_shells(self):
+        self._isolated_work_tree_db()
+        now = work_tree._now()
+
+        stale_cli = work_tree.initialize_tree(
+            "Cli: stale prompt",
+            meta={"kind": "system", "source": "cli", "work_identity_key": "work:stale-prompt"},
+        )
+        work_tree.add_task_to_branch(stale_cli.root_branch_id, "stale followup")
+        stale_cli.created_at = now - timedelta(hours=13)
+        stale_cli.updated_at = now - timedelta(hours=13)
+        work_tree.save_tree(stale_cli)
+        work_tree._persist_tree_state(stale_cli.tree_id)
+
+        recent_cli = work_tree.initialize_tree(
+            "Cli: recent prompt",
+            meta={"kind": "system", "source": "cli", "work_identity_key": "work:recent-prompt"},
+        )
+        work_tree.add_task_to_branch(recent_cli.root_branch_id, "recent followup")
+        recent_cli.created_at = now - timedelta(minutes=10)
+        recent_cli.updated_at = now - timedelta(minutes=10)
+        work_tree.save_tree(recent_cli)
+        work_tree._persist_tree_state(recent_cli.tree_id)
+
+        core_thinning = work_tree.initialize_tree(
+            "Core Thinning",
+            meta={"source": "core_thinning", "work_identity_key": "system:core-thinning"},
+        )
+        work_tree.add_task_to_branch(core_thinning.root_branch_id, "keep thinning")
+        core_thinning.created_at = now - timedelta(hours=48)
+        core_thinning.updated_at = now - timedelta(hours=48)
+        work_tree.save_tree(core_thinning)
+        work_tree._persist_tree_state(core_thinning.tree_id)
+
+        complex_cli = work_tree.initialize_tree(
+            "Cli: complex prompt",
+            meta={"kind": "system", "source": "cli", "work_identity_key": "work:complex-prompt"},
+        )
+        for idx in range(5):
+            work_tree.add_branch_to_tree(complex_cli.tree_id, f"complex branch {idx}", "work", complex_cli.root_branch_id)
+        complex_cli.created_at = now - timedelta(hours=13)
+        complex_cli.updated_at = now - timedelta(hours=13)
+        work_tree.save_tree(complex_cli)
+        work_tree._persist_tree_state(complex_cli.tree_id)
+
+        state: dict = {}
+        with mock.patch.object(autonomy_maintenance, "STALE_CLI_ACTIVE_TREE_ARCHIVE_MIN_AGE_SEC", 3600), \
+             mock.patch.object(autonomy_maintenance, "STALE_CLI_ACTIVE_TREE_MAX_BRANCHES", 5), \
+             mock.patch.object(autonomy_maintenance, "STALE_CLI_ACTIVE_TREE_MAX_OPEN_TASKS", 2):
+            payload = autonomy_maintenance._archive_stale_cli_active_trees(state)
+
+        self.assertEqual(payload.get("archived_count"), 1)
+        self.assertEqual(payload.get("skipped_recent_count"), 1)
+        self.assertEqual(payload.get("skipped_complex_count"), 1)
+        self.assertEqual(work_tree.get_tree(stale_cli.tree_id).status, work_tree.TreeStatus.ARCHIVED)
+        self.assertEqual(work_tree.get_tree(recent_cli.tree_id).status, work_tree.TreeStatus.ACTIVE)
+        self.assertEqual(work_tree.get_tree(core_thinning.tree_id).status, work_tree.TreeStatus.ACTIVE)
+        self.assertEqual(work_tree.get_tree(complex_cli.tree_id).status, work_tree.TreeStatus.ACTIVE)
+        self.assertTrue(
+            all(task.status == work_tree.TaskStatus.DROPPED for task in work_tree.list_tree_tasks(stale_cli.tree_id))
+        )
+        self.assertEqual((state.get("last_stale_cli_tree_archive") or {}).get("archived_count"), 1)
+
     def test_run_once_records_generated_queue_outcome(self):
         with tempfile.TemporaryDirectory() as td:
             runtime_dir = Path(td) / "runtime"

@@ -60,6 +60,9 @@ COMPLETE_TREE_VISIBLE_KEEP = 12
 COMPLETE_TREE_ARCHIVE_MIN_AGE_SEC = 0
 COMPLETE_TREE_PROTECTED_KINDS = {"patch_queue", "generated_queue", "signal_ingestion"}
 EMPTY_ACTIVE_TREE_ARCHIVE_MIN_AGE_SEC = 3600
+STALE_CLI_ACTIVE_TREE_ARCHIVE_MIN_AGE_SEC = 12 * 3600
+STALE_CLI_ACTIVE_TREE_MAX_BRANCHES = 5
+STALE_CLI_ACTIVE_TREE_MAX_OPEN_TASKS = 2
 PROMOTED_PATCH_ENTRY_PREFIX = "runtime/test_sessions/promoted/"
 PATCH_MANIFEST_NAME = "nova_patch.json"
 
@@ -1744,6 +1747,56 @@ def _archive_empty_active_trees(state: dict) -> dict:
     return payload
 
 
+def _archive_stale_cli_active_trees(state: dict) -> dict:
+    now = work_tree._now()
+    archived: list[dict] = []
+    skipped_recent = 0
+    skipped_complex = 0
+    reason = "Archived stale CLI prompt shell; no longer current operator work."
+    for tree in work_tree.list_trees():
+        if tree.status != work_tree.TreeStatus.ACTIVE:
+            continue
+        meta = dict(tree.meta or {}) if isinstance(tree.meta, dict) else {}
+        kind = str(meta.get("kind") or "").strip().lower()
+        source = str(meta.get("source") or "").strip().lower()
+        title = str(tree.title or "").strip()
+        if kind != "system" or source != "cli" or not title.lower().startswith("cli:"):
+            continue
+        age_sec = max(0.0, (now - tree.created_at).total_seconds())
+        if age_sec < float(STALE_CLI_ACTIVE_TREE_ARCHIVE_MIN_AGE_SEC):
+            skipped_recent += 1
+            continue
+        branches = work_tree.list_tree_branches(tree.tree_id)
+        open_tasks = [
+            task for task in work_tree.list_tree_tasks(tree.tree_id)
+            if task.status not in {TaskStatus.COMPLETE, TaskStatus.DROPPED}
+        ]
+        if len(branches) > int(STALE_CLI_ACTIVE_TREE_MAX_BRANCHES) or len(open_tasks) > int(STALE_CLI_ACTIVE_TREE_MAX_OPEN_TASKS):
+            skipped_complex += 1
+            continue
+        work_tree.archive_tree(tree.tree_id, reason=reason)
+        archived.append(
+            {
+                "tree_id": tree.tree_id,
+                "tree_title": title,
+                "age_sec": int(age_sec),
+                "branch_count": len(branches),
+                "open_tasks": len(open_tasks),
+                "work_identity_key": str(meta.get("work_identity_key") or ""),
+            }
+        )
+    payload = {
+        "ts": _patch_queue_timestamp(),
+        "status": "ok" if archived else "idle",
+        "archived_count": len(archived),
+        "skipped_recent_count": skipped_recent,
+        "skipped_complex_count": skipped_complex,
+        "archived": archived,
+    }
+    state["last_stale_cli_tree_archive"] = payload
+    return payload
+
+
 def run_once() -> int:
     state = _load_state()
 
@@ -1965,6 +2018,25 @@ def run_once() -> int:
         }
         state["last_empty_active_tree_archive"] = empty_active_tree_archive
         _append_log(f"empty_active_tree_archive_failed {exc}")
+
+    try:
+        stale_cli_tree_archive = _archive_stale_cli_active_trees(state)
+        _append_log(
+            "stale_cli_tree_archive"
+            f" status={stale_cli_tree_archive.get('status')}"
+            f" archived={int(stale_cli_tree_archive.get('archived_count', 0) or 0)}"
+            f" skipped_recent={int(stale_cli_tree_archive.get('skipped_recent_count', 0) or 0)}"
+            f" skipped_complex={int(stale_cli_tree_archive.get('skipped_complex_count', 0) or 0)}"
+        )
+    except Exception as exc:
+        stale_cli_tree_archive = {
+            "ts": _patch_queue_timestamp(),
+            "status": "failed",
+            "archived_count": 0,
+            "error": str(exc),
+        }
+        state["last_stale_cli_tree_archive"] = stale_cli_tree_archive
+        _append_log(f"stale_cli_tree_archive_failed {exc}")
 
     try:
         legacy_tree_retirement = _retire_legacy_patch_update_trees(state)
