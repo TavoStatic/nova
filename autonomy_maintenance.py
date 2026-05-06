@@ -17,9 +17,10 @@ from services.nova_patching import archive_preview_report as service_archive_pre
 from services.nova_patching import bulk_archive_superseded_previews as service_bulk_archive_superseded_previews
 from services.nova_patching import bulk_reject_orphaned_previews as service_bulk_reject_orphaned_previews
 from services.nova_patching import patch_preview_summaries as service_patch_preview_summaries
-from services.autonomy_orchestrator import AUTONOMY_ORCHESTRATOR_SERVICE, GOVERNED_ACTION_TYPES
+from services.autonomy_orchestrator import AUTONOMY_ORCHESTRATOR_SERVICE
 from services.control_work_trees import CONTROL_WORK_TREES_SERVICE
 from services.core_steward import build_core_steward_payload as service_build_core_steward_payload
+from services.nova_control_action_dispatcher import autonomy_advisory_action_types
 from services.nova_runtime_context import AUTONOMY_ORCHESTRATOR_LEDGER_FILE
 from services.test_session_control import TEST_SESSION_CONTROL_SERVICE
 from services.work_tree_signal_ingestion import WORK_TREE_SIGNAL_INGESTION_SERVICE
@@ -285,7 +286,7 @@ def _runtime_guard_status_for_orchestrator(core_steward: dict, guard_health: dic
 def _policy_snapshot_for_orchestrator() -> dict:
     return {
         "autonomy_enabled": True,
-        "allowed_actions": list(GOVERNED_ACTION_TYPES),
+        "allowed_actions": list(autonomy_advisory_action_types()),
         "blocked_actions": [],
         "quiet_hours_active": False,
         "requires_operator_ack_for": ["update_now_dry_run"],

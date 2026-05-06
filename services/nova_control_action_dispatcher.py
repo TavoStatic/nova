@@ -3,6 +3,94 @@ from __future__ import annotations
 from services.nova_runtime_hooks import resolve_runtime_hooks
 
 
+AUTONOMY_ADVISORY_ACTION_CATALOG: dict[str, dict[str, object]] = {
+    "guard_start": {
+        "target_kind": "runtime",
+        "target_id": "guard",
+        "expected_effect": "Restore the runtime guard before higher autonomy work continues.",
+        "preconditions": ["guard_running_false", "policy_allows_guard_start"],
+        "requires_ack": False,
+        "cooldown_sec": 300,
+        "ttl_sec": 120,
+        "impact": 0.82,
+        "safety_risk": 0.25,
+    },
+    "autonomy_maintenance_start": {
+        "target_kind": "runtime",
+        "target_id": "autonomy_maintenance",
+        "expected_effect": "Restart the maintenance worker so advisory posture stays fresh.",
+        "preconditions": ["maintenance_worker_not_running", "policy_allows_autonomy_maintenance_start"],
+        "requires_ack": False,
+        "cooldown_sec": 300,
+        "ttl_sec": 120,
+        "impact": 0.76,
+        "safety_risk": 0.2,
+    },
+    "generated_queue_run_next": {
+        "target_kind": "queue",
+        "target_id": "generated_work_queue",
+        "expected_effect": "Advance the next governed generated work item.",
+        "preconditions": ["queue_has_actionable_items", "policy_allows_generated_queue_run_next"],
+        "requires_ack": False,
+        "cooldown_sec": 180,
+        "ttl_sec": 120,
+        "impact": 0.72,
+        "safety_risk": 0.12,
+    },
+    "generated_queue_investigate": {
+        "target_kind": "queue",
+        "target_id": "generated_work_queue",
+        "expected_effect": "Inspect blocked or stale queue pressure without mutating runtime state.",
+        "preconditions": ["queue_or_work_tree_has_blocked_signal", "policy_allows_generated_queue_investigate"],
+        "requires_ack": False,
+        "cooldown_sec": 180,
+        "ttl_sec": 120,
+        "impact": 0.62,
+        "safety_risk": 0.06,
+    },
+    "update_now_dry_run": {
+        "target_kind": "runtime",
+        "target_id": "patch_preview",
+        "expected_effect": "Dry-run approved update work through the governed dispatcher.",
+        "preconditions": ["approved_preview_exists", "policy_allows_update_now_dry_run"],
+        "requires_ack": True,
+        "cooldown_sec": 600,
+        "ttl_sec": 180,
+        "impact": 0.7,
+        "safety_risk": 0.35,
+    },
+    "pulse_status": {
+        "target_kind": "runtime",
+        "target_id": "pulse",
+        "expected_effect": "Refresh operator posture around elevated pressure signals.",
+        "preconditions": ["pulse_pressure_detected", "policy_allows_pulse_status"],
+        "requires_ack": False,
+        "cooldown_sec": 120,
+        "ttl_sec": 120,
+        "impact": 0.5,
+        "safety_risk": 0.03,
+    },
+}
+
+
+def autonomy_advisory_action_catalog() -> dict[str, dict[str, object]]:
+    return {
+        action_type: {
+            key: list(value) if isinstance(value, list) else value
+            for key, value in metadata.items()
+        }
+        for action_type, metadata in AUTONOMY_ADVISORY_ACTION_CATALOG.items()
+    }
+
+
+def autonomy_advisory_action_types() -> tuple[str, ...]:
+    return tuple(AUTONOMY_ADVISORY_ACTION_CATALOG.keys())
+
+
+def is_autonomy_advisory_action(action_type: str) -> bool:
+    return str(action_type or "").strip() in AUTONOMY_ADVISORY_ACTION_CATALOG
+
+
 _CONTROL_ACTION_RUNTIME_HOOKS = {
     "patch_status_payload_fn": "_unused_runtime_factory",
     "patch_preview_summaries_fn": "_unused_runtime_factory",
@@ -68,6 +156,18 @@ _CONTROL_ACTION_RUNTIME_HOOKS = {
 
 class NovaControlActionDispatcher:
     """Own the complete control action dispatch ladder outside the HTTP transport shell."""
+
+    @staticmethod
+    def autonomy_advisory_action_catalog() -> dict[str, dict[str, object]]:
+        return autonomy_advisory_action_catalog()
+
+    @staticmethod
+    def autonomy_advisory_action_types() -> tuple[str, ...]:
+        return autonomy_advisory_action_types()
+
+    @staticmethod
+    def is_autonomy_advisory_action(action_type: str) -> bool:
+        return is_autonomy_advisory_action(action_type)
 
     @staticmethod
     def dispatch_control_action_from_runtime(

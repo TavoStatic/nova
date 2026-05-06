@@ -11,6 +11,7 @@ from services.autonomy_orchestrator import (
     SPEC_DECISION_DEFER,
     SPEC_DECISION_RECOMMEND_ACTION,
 )
+from services.nova_control_action_dispatcher import autonomy_advisory_action_types
 
 
 def _core_steward(
@@ -126,14 +127,7 @@ def _spec_envelope(
         },
         "policy_snapshot": {
             "autonomy_enabled": True,
-            "allowed_actions": [
-                "guard_start",
-                "autonomy_maintenance_start",
-                "generated_queue_run_next",
-                "generated_queue_investigate",
-                "update_now_dry_run",
-                "pulse_status",
-            ],
+            "allowed_actions": list(autonomy_advisory_action_types()),
             "blocked_actions": [],
             "quiet_hours_active": False,
             "requires_operator_ack_for": ["update_now_dry_run"],
@@ -182,6 +176,16 @@ class TestAutonomyOrchestratorService(unittest.TestCase):
         self.assertEqual(service.get_last_decision()["cycle_id"], "cycle-test-001")
         self.assertEqual(len(service.get_decision_history(limit=5)), 1)
         self.assertEqual(service.get_health()["cycle_count"], 1)
+
+    def test_evaluate_next_action_only_recommends_dispatcher_owned_action(self):
+        service = AutonomyOrchestratorService()
+
+        packet = service.evaluate_next_action(
+            _spec_envelope(queue={"pending_count": 3, "high_priority_count": 1, "pressure_band": "high"})
+        )
+
+        self.assertEqual(packet["decision_type"], SPEC_DECISION_RECOMMEND_ACTION)
+        self.assertIn(packet["recommended_action"]["action_type"], autonomy_advisory_action_types())
 
     def test_evaluate_next_action_blocks_when_policy_disables_autonomy(self):
         service = AutonomyOrchestratorService()

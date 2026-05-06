@@ -54,6 +54,7 @@ TEST_LANES: dict[str, list[str]] = {
         "tests.test_identity_memory_service",
         "tests.test_memory_adapter_service",
         "tests.test_memory_scope",
+        "tests.test_nova_control_action_dispatcher",
         "tests.test_nova_fulfillment_routing",
         "tests.test_nova_query_classifiers",
         "tests.test_nova_route_probing",
