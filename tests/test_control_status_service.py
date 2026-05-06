@@ -165,6 +165,14 @@ class TestControlStatusService(unittest.TestCase):
             autonomy_maintenance={
                 "runtime_worker": {"last_cycle_status": "ok", "interval_sec": 300, "cycle_count": 4, "last_completed_at": "2026-04-04 02:10:00"},
                 "last_generated_queue_run": {"status": "ok", "selected_file": "demo.json", "ts": "2026-04-04 02:09:00", "latest_report_status": "green"},
+                "last_autonomy_orchestrator": {
+                    "ts": "2026-05-06 12:30:00",
+                    "mode": "advisory",
+                    "decision": "recommend_action",
+                    "action": {"act": "generated_queue_run_next"},
+                    "reason": "Generated Work Queue has 1 actionable item.",
+                    "ledger_status": "recorded",
+                },
                 "last_patch_cleanup": {
                     "status": "ok",
                     "ts": "2026-04-04 02:08:00",
@@ -261,6 +269,10 @@ class TestControlStatusService(unittest.TestCase):
         self.assertFalse(payload.get("runtime_worker_stale_identity"))
         self.assertEqual(payload.get("last_generated_queue_run_file"), "demo.json")
         self.assertFalse(payload.get("last_generated_queue_run_stale"))
+        self.assertEqual(payload.get("autonomy_orchestrator_decision"), "recommend_action")
+        self.assertEqual(payload.get("autonomy_orchestrator_action"), "generated_queue_run_next")
+        self.assertEqual(payload.get("autonomy_orchestrator_ledger_status"), "recorded")
+        self.assertEqual((payload.get("autonomy_orchestrator") or {}).get("mode"), "advisory")
 
     def test_status_payload_includes_subconscious_and_queue_fields(self):
         payload = CONTROL_STATUS_SERVICE.status_payload(

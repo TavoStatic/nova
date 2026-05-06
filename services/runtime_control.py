@@ -33,6 +33,7 @@ class RuntimeControlService:
         last_patch_cleanup = dict(payload.get("last_patch_cleanup") or {}) if isinstance(payload.get("last_patch_cleanup"), dict) else {}
         last_complete_tree_archive = dict(payload.get("last_complete_tree_archive") or {}) if isinstance(payload.get("last_complete_tree_archive"), dict) else {}
         last_kidney_status = dict(payload.get("last_kidney_status") or {}) if isinstance(payload.get("last_kidney_status"), dict) else {}
+        last_autonomy_orchestrator = dict(payload.get("last_autonomy_orchestrator") or {}) if isinstance(payload.get("last_autonomy_orchestrator"), dict) else {}
         pid = runtime_worker.get("pid")
         create_time = runtime_worker.get("create_time")
         selected = runtime_processes_module.select_logical_process(
@@ -99,6 +100,15 @@ class RuntimeControlService:
             "last_patch_cleanup": last_patch_cleanup,
             "last_complete_tree_archive": last_complete_tree_archive,
             "last_kidney_status": last_kidney_status,
+            "last_autonomy_orchestrator": {
+                "ts": str(last_autonomy_orchestrator.get("ts") or ""),
+                "mode": str(last_autonomy_orchestrator.get("mode") or ""),
+                "decision": str(last_autonomy_orchestrator.get("decision") or ""),
+                "action": dict(last_autonomy_orchestrator.get("action") or {}) if isinstance(last_autonomy_orchestrator.get("action"), dict) else {},
+                "reason": str(last_autonomy_orchestrator.get("reason") or ""),
+                "rejection_reasons": list(last_autonomy_orchestrator.get("rejection_reasons") or []) if isinstance(last_autonomy_orchestrator.get("rejection_reasons"), list) else [],
+                "ledger_status": str(last_autonomy_orchestrator.get("ledger_status") or ""),
+            },
         }
 
     @staticmethod

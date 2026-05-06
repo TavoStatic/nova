@@ -57,6 +57,15 @@ class TestRuntimeControlService(unittest.TestCase):
             },
             "last_work_tree_cycle": {"status": "idle"},
             "last_complete_tree_archive": {"status": "ok", "archived_count": 12, "retained_count": 8},
+            "last_autonomy_orchestrator": {
+                "ts": "2026-05-06 12:30:00",
+                "mode": "advisory",
+                "decision": "recommend_action",
+                "action": {"act": "generated_queue_run_next"},
+                "reason": "Generated Work Queue has 1 actionable item.",
+                "rejection_reasons": [],
+                "ledger_status": "recorded",
+            },
             "last_error": "",
         }
 
@@ -77,6 +86,9 @@ class TestRuntimeControlService(unittest.TestCase):
         self.assertEqual(payload.get("queue_blocked_files"), ["a.json", "b.json", "c.json"])
         self.assertEqual(payload.get("work_tree_status"), "idle")
         self.assertEqual((payload.get("last_complete_tree_archive") or {}).get("archived_count"), 12)
+        self.assertEqual((payload.get("last_autonomy_orchestrator") or {}).get("decision"), "recommend_action")
+        self.assertEqual(((payload.get("last_autonomy_orchestrator") or {}).get("action") or {}).get("act"), "generated_queue_run_next")
+        self.assertEqual((payload.get("last_autonomy_orchestrator") or {}).get("ledger_status"), "recorded")
 
     def test_autonomy_maintenance_summary_marks_missing_runtime_worker_stale(self):
         runtime_processes = SimpleNamespace(

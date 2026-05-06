@@ -290,6 +290,7 @@ class ControlStatusService:
         last_work_tree_cycle = autonomy_payload.get("last_work_tree_cycle") if isinstance(autonomy_payload.get("last_work_tree_cycle"), dict) else {}
         last_patch_cleanup = autonomy_payload.get("last_patch_cleanup") if isinstance(autonomy_payload.get("last_patch_cleanup"), dict) else {}
         last_complete_tree_archive = autonomy_payload.get("last_complete_tree_archive") if isinstance(autonomy_payload.get("last_complete_tree_archive"), dict) else {}
+        last_autonomy_orchestrator = autonomy_payload.get("last_autonomy_orchestrator") if isinstance(autonomy_payload.get("last_autonomy_orchestrator"), dict) else {}
         queue_status = str(generated_work_queue.get("status") or last_generated_queue_run.get("status") or "").strip()
         queue_open_count = int(generated_work_queue.get("open_count", 0) or 0)
         queue_actionable_count = int(generated_work_queue.get("actionable_count", 0) or 0)
@@ -338,6 +339,20 @@ class ControlStatusService:
         autonomy_payload["maintenance_scheduler_active"] = payload["maintenance_scheduler_active"]
         autonomy_payload["maintenance_scheduler_mode"] = maintenance_scheduler_mode
         autonomy_payload["maintenance_scheduler_status"] = maintenance_scheduler_status
+        autonomy_payload["last_autonomy_orchestrator"] = last_autonomy_orchestrator
+        autonomy_orchestrator_action = last_autonomy_orchestrator.get("action") if isinstance(last_autonomy_orchestrator.get("action"), dict) else {}
+        payload["autonomy_orchestrator"] = last_autonomy_orchestrator
+        payload["autonomy_orchestrator_ts"] = str(last_autonomy_orchestrator.get("ts") or "")
+        payload["autonomy_orchestrator_mode"] = str(last_autonomy_orchestrator.get("mode") or "")
+        payload["autonomy_orchestrator_decision"] = str(last_autonomy_orchestrator.get("decision") or "")
+        payload["autonomy_orchestrator_action"] = str(autonomy_orchestrator_action.get("act") or "")
+        payload["autonomy_orchestrator_reason"] = str(last_autonomy_orchestrator.get("reason") or "")
+        payload["autonomy_orchestrator_ledger_status"] = str(last_autonomy_orchestrator.get("ledger_status") or "")
+        payload["autonomy_orchestrator_rejection_reasons"] = (
+            list(last_autonomy_orchestrator.get("rejection_reasons") or [])
+            if isinstance(last_autonomy_orchestrator.get("rejection_reasons"), list)
+            else []
+        )
         payload["last_regression_status"] = str(autonomy_maintenance.get("last_regression_status") or "")
         payload["last_regression_stale"] = bool(autonomy_maintenance.get("last_regression_stale", False))
         payload["last_generated_queue_run_status"] = str(last_generated_queue_run.get("status") or "")

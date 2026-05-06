@@ -1457,6 +1457,10 @@ function renderSubconscious(status) {
     const maintenanceSchedulerStatus = status && status.maintenance_scheduler_status ? status.maintenance_scheduler_status : '';
     const maintenanceSchedulerMode = status && status.maintenance_scheduler_mode ? status.maintenance_scheduler_mode : '';
     const lastQueueRun = maintenance && maintenance.last_generated_queue_run ? maintenance.last_generated_queue_run : {};
+    const advisor = status && status.autonomy_orchestrator
+        ? status.autonomy_orchestrator
+        : (maintenance && maintenance.last_autonomy_orchestrator ? maintenance.last_autonomy_orchestrator : {});
+    const advisorAction = advisor && advisor.action ? advisor.action : {};
     const queueItems = Array.isArray(workQueue && workQueue.items) ? workQueue.items : [];
     const liveSessions = Array.isArray(liveSummary && liveSummary.sessions) ? liveSummary.sessions : [];
     const pressureConfig = liveSummary && liveSummary.pressure_config ? liveSummary.pressure_config : {};
@@ -1470,6 +1474,9 @@ function renderSubconscious(status) {
         ? `${lastQueueRun.status || 'n/a'} | ${lastQueueRun.selected_file}`
         : (lastQueueRun && lastQueueRun.status ? `${lastQueueRun.status} | none selected` : 'n/a');
     const lastQueueReport = lastQueueRun && lastQueueRun.latest_report_status ? lastQueueRun.latest_report_status : 'n/a';
+    const advisorDecision = advisor && advisor.decision ? advisor.decision : 'n/a';
+    const advisorActionText = advisorAction && advisorAction.act ? advisorAction.act : 'none';
+    const advisorLedger = advisor && advisor.ledger_status ? advisor.ledger_status : 'n/a';
 
     renderMatrixTable(subconsciousStatusBox, [
         {label: 'Latest run', value: summary.generated_at || 'not available'},
@@ -1489,6 +1496,9 @@ function renderSubconscious(status) {
         {label: 'Next item', value: workQueue.next_item && workQueue.next_item.file ? workQueue.next_item.file : 'none'},
         {label: 'Last queue run', value: lastQueueRunText},
         {label: 'Last queue report', value: lastQueueReport},
+        {label: 'Advisor decision', value: advisorDecision},
+        {label: 'Advisor action', value: advisorActionText},
+        {label: 'Advisor ledger', value: advisorLedger},
         {label: 'Report path', value: summary.latest_report_path || 'n/a'},
     ], 3);
 
