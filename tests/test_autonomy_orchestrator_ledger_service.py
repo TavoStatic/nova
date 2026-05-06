@@ -61,6 +61,37 @@ class TestAutonomyOrchestratorLedgerService(unittest.TestCase):
         self.assertTrue(summary.get("stable_recommendation"))
         self.assertEqual(summary.get("last_decision"), "")
 
+    def test_summary_accepts_spec_v01_rows(self):
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "autonomy_orchestrator_ledger.jsonl"
+            rows = [
+                {
+                    "timestamp_utc": "2026-05-06T12:00:00Z",
+                    "decision_type": "Defer",
+                    "recommended_action_summary": {},
+                    "refusal_reasons": ["runtime_evidence_stale"],
+                    "explain_text": "Runtime stale.",
+                    "evidence": {"steward_posture": {"health_score": 90, "posture_band": "green"}},
+                },
+                {
+                    "timestamp_utc": "2026-05-06T12:01:00Z",
+                    "decision_type": "RecommendAction",
+                    "recommended_action_summary": {"action_type": "generated_queue_run_next"},
+                    "refusal_reasons": [],
+                    "explain_text": "Run next queue item.",
+                    "evidence": {"steward_posture": {"health_score": 95, "posture_band": "green"}},
+                },
+            ]
+            path.write_text("\n".join(json.dumps(row, ensure_ascii=True) for row in rows), encoding="utf-8")
+
+            summary = AUTONOMY_ORCHESTRATOR_LEDGER_SERVICE.summary(path, limit=10)
+
+        self.assertEqual(summary.get("decision_counts"), {"defer_with_reason": 1, "recommend_action": 1})
+        self.assertEqual(summary.get("action_counts"), {"none": 1, "generated_queue_run_next": 1})
+        self.assertEqual(summary.get("last_decision"), "recommend_action")
+        self.assertEqual(summary.get("last_action"), "generated_queue_run_next")
+        self.assertEqual(summary.get("last_reason"), "Run next queue item.")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -17,7 +17,7 @@ from services.nova_patching import archive_preview_report as service_archive_pre
 from services.nova_patching import bulk_archive_superseded_previews as service_bulk_archive_superseded_previews
 from services.nova_patching import bulk_reject_orphaned_previews as service_bulk_reject_orphaned_previews
 from services.nova_patching import patch_preview_summaries as service_patch_preview_summaries
-from services.autonomy_orchestrator import AUTONOMY_ORCHESTRATOR_SERVICE
+from services.autonomy_orchestrator import AUTONOMY_ORCHESTRATOR_SERVICE, GOVERNED_ACTION_TYPES
 from services.control_work_trees import CONTROL_WORK_TREES_SERVICE
 from services.core_steward import build_core_steward_payload as service_build_core_steward_payload
 from services.nova_runtime_context import AUTONOMY_ORCHESTRATOR_LEDGER_FILE
@@ -101,6 +101,20 @@ def _append_autonomy_orchestrator_ledger(row: dict) -> None:
         fh.write(json.dumps(dict(row or {}), ensure_ascii=True) + "\n")
 
 
+def _safe_int(value, default: int = 0) -> int:
+    try:
+        return int(value)
+    except Exception:
+        return default
+
+
+def _safe_float(value, default: float = 0.0) -> float:
+    try:
+        return float(value)
+    except Exception:
+        return default
+
+
 def _guard_health_for_orchestrator() -> dict:
     pid_file = RUNTIME_DIR / "guard_pid.json"
     lock_file = RUNTIME_DIR / "guard.lock"
@@ -158,23 +172,207 @@ def _core_steward_for_orchestrator(state: dict, kidney_summary: dict) -> dict:
     )
 
 
+def _orchestrator_posture_band(core_steward: dict) -> str:
+    score = _safe_int((core_steward or {}).get("score"), 0)
+    level = str((core_steward or {}).get("level") or "").strip().lower()
+    if level in {"repair", "red"} or score < 70:
+        return "red"
+    if level in {"watch", "yellow"} or score < 85:
+        return "yellow"
+    return "green"
+
+
+def _work_tree_snapshot_for_orchestrator(work_tree_state: dict) -> dict:
+    payload = dict(work_tree_state or {}) if isinstance(work_tree_state, dict) else {}
+    counts = dict(payload.get("counts") or {}) if isinstance(payload.get("counts"), dict) else {}
+    branches: list[dict] = []
+    for tree in list(payload.get("trees") or [])[:64]:
+        if not isinstance(tree, dict):
+            continue
+        tree_counts = dict(tree.get("counts") or {}) if isinstance(tree.get("counts"), dict) else {}
+        branches.append(
+            {
+                "branch_id": str(tree.get("active_branch_id") or tree.get("tree_id") or ""),
+                "title": str(tree.get("title") or ""),
+                "status": str(tree.get("status") or ""),
+                "owner": str(tree.get("kind") or ""),
+                "age_min": _safe_int(tree.get("age_min") or tree_counts.get("oldest_open_age_min"), 0),
+            }
+        )
+    return {
+        "open_count": _safe_int(counts.get("open_tasks") or counts.get("pending") or counts.get("active"), 0),
+        "working_count": _safe_int(counts.get("working"), 0),
+        "blocked_count": _safe_int(counts.get("blocked"), 0),
+        "stale_count": _safe_int(counts.get("stale"), 0),
+        "oldest_open_age_min": _safe_int(counts.get("oldest_open_age_min"), 0),
+        "branches": branches,
+        "source_freshness_sec": 0,
+    }
+
+
+def _steward_posture_for_orchestrator(core_steward: dict) -> dict:
+    runtime = dict((core_steward or {}).get("runtime") or {}) if isinstance((core_steward or {}).get("runtime"), dict) else {}
+    alerts = list((core_steward or {}).get("alerts") or []) if isinstance((core_steward or {}).get("alerts"), list) else []
+    core_state = dict(runtime.get("core_state") or {}) if isinstance(runtime.get("core_state"), dict) else {}
+    heartbeat = dict(runtime.get("heartbeat") or {}) if isinstance(runtime.get("heartbeat"), dict) else {}
+    critical_alerts = 0
+    if core_state.get("ok") is False or heartbeat.get("ok") is False:
+        critical_alerts += 1
+    critical_alerts += sum(
+        1
+        for alert in alerts
+        if "critical" in str(alert or "").strip().lower()
+        or "failed" in str(alert or "").strip().lower()
+    )
+    score = _safe_int((core_steward or {}).get("score"), 0)
+    return {
+        "health_score": score,
+        "alert_count": len(alerts),
+        "critical_alerts": critical_alerts,
+        "pass_ratio": round(max(0.0, min(1.0, score / 100.0)), 4),
+        "posture_band": _orchestrator_posture_band(core_steward),
+        "source_freshness_sec": 0,
+    }
+
+
+def _queue_pressure_for_orchestrator(generated_queue: dict) -> dict:
+    queue = dict(generated_queue or {}) if isinstance(generated_queue, dict) else {}
+    pending = _safe_int(queue.get("open_count") or queue.get("count"), 0)
+    actionable = _safe_int(queue.get("actionable_count"), 0)
+    blocked = _safe_int(queue.get("blocked_count"), 0)
+    aging = _safe_int(queue.get("drift_count"), 0) + _safe_int(queue.get("warning_count"), 0)
+    if actionable > 0 or aging > 0:
+        pressure_band = "high"
+    elif pending > 0 or blocked > 0:
+        pressure_band = "medium"
+    else:
+        pressure_band = "low"
+    return {
+        "pending_count": pending,
+        "aging_items_count": aging,
+        "high_priority_count": actionable,
+        "pressure_band": pressure_band,
+        "approved_eligible_previews": 0,
+        "source_freshness_sec": 0,
+    }
+
+
+def _runtime_guard_status_for_orchestrator(core_steward: dict, guard_health: dict) -> dict:
+    runtime = dict((core_steward or {}).get("runtime") or {}) if isinstance((core_steward or {}).get("runtime"), dict) else {}
+    core_state = dict(runtime.get("core_state") or {}) if isinstance(runtime.get("core_state"), dict) else {}
+    heartbeat = dict(runtime.get("heartbeat") or {}) if isinstance(runtime.get("heartbeat"), dict) else {}
+    core_running = core_state.get("ok")
+    if core_running is None:
+        core_running = heartbeat.get("ok")
+    guard = dict(guard_health or {}) if isinstance(guard_health, dict) else {}
+    guard_running = guard.get("running")
+    if guard_running is None:
+        status = str(guard.get("status") or guard.get("state") or "").strip().lower()
+        if status in {"ok", "ready", "healthy", "running", "active"}:
+            guard_running = True
+        elif status in {"stopped", "inactive", "not_running", "failed", "error", "degraded", "boot_timeout"}:
+            guard_running = False
+    return {
+        "guard_running": guard_running,
+        "core_running": core_running,
+        "webui_running": True,
+        "restart_in_progress": False,
+        "stop_flag": bool(guard.get("stop_flag", False)),
+        "source_freshness_sec": 0,
+    }
+
+
+def _policy_snapshot_for_orchestrator() -> dict:
+    return {
+        "autonomy_enabled": True,
+        "allowed_actions": list(GOVERNED_ACTION_TYPES),
+        "blocked_actions": [],
+        "quiet_hours_active": False,
+        "requires_operator_ack_for": ["update_now_dry_run"],
+        "source_freshness_sec": 0,
+    }
+
+
+def _triage_hints_for_orchestrator(core_steward: dict, generated_queue: dict) -> dict:
+    pulse = dict((core_steward or {}).get("pulse") or {}) if isinstance((core_steward or {}).get("pulse"), dict) else {}
+    queue = dict(generated_queue or {}) if isinstance(generated_queue, dict) else {}
+    fallback_score = _safe_float(pulse.get("fallback_overuse_score"), 0.0)
+    drift_score = min(1.0, _safe_int(queue.get("drift_count"), 0) / 10.0)
+    return {
+        "likely_owner_by_branch": {},
+        "seam_pressure_scores": {
+            "fallback_overuse": fallback_score,
+            "generated_queue_drift": drift_score,
+        },
+        "confidence": 0.6,
+        "source_freshness_sec": 0,
+    }
+
+
+def _last_action_context_for_orchestrator(state: dict) -> dict:
+    last = dict((state or {}).get("last_autonomy_orchestrator") or {}) if isinstance((state or {}).get("last_autonomy_orchestrator"), dict) else {}
+    action = dict(last.get("action") or {}) if isinstance(last.get("action"), dict) else {}
+    return {
+        "last_action_type": str(action.get("act") or ""),
+        "last_action_at_utc": str(last.get("created_at_utc") or last.get("ts") or ""),
+        "cooldown_active": False,
+        "cooldown_remaining_sec": 0,
+        "last_result": "unknown",
+        "source_freshness_sec": 0,
+    }
+
+
+def _autonomy_orchestrator_input_envelope(
+    *,
+    state: dict,
+    core_steward: dict,
+    work_tree_state: dict,
+    generated_queue: dict,
+    guard_health: dict,
+) -> dict:
+    return {
+        "cycle_id": f"autonomy-maintenance-{time.strftime('%Y%m%d%H%M%S')}",
+        "timestamp_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "work_tree_snapshot": _work_tree_snapshot_for_orchestrator(work_tree_state),
+        "steward_posture": _steward_posture_for_orchestrator(core_steward),
+        "queue_pressure": _queue_pressure_for_orchestrator(generated_queue),
+        "runtime_guard_status": _runtime_guard_status_for_orchestrator(core_steward, guard_health),
+        "policy_snapshot": _policy_snapshot_for_orchestrator(),
+        "triage_hints": _triage_hints_for_orchestrator(core_steward, generated_queue),
+        "last_action_context": _last_action_context_for_orchestrator(state),
+    }
+
+
 def _run_autonomy_orchestrator_advisory(state: dict, kidney_summary: dict) -> dict:
-    packet = AUTONOMY_ORCHESTRATOR_SERVICE.evaluate_cycle(
-        core_steward=_core_steward_for_orchestrator(state, kidney_summary),
-        work_tree_state=CONTROL_WORK_TREES_SERVICE.payload(
-            list_visual_trees_fn=work_tree.list_visual_trees,
-            limit=64,
+    core_steward = _core_steward_for_orchestrator(state, kidney_summary)
+    work_tree_state = CONTROL_WORK_TREES_SERVICE.payload(
+        list_visual_trees_fn=work_tree.list_visual_trees,
+        limit=64,
+    )
+    generated_queue = _generated_work_queue(limit=200)
+    guard_health = _guard_health_for_orchestrator()
+    packet = AUTONOMY_ORCHESTRATOR_SERVICE.evaluate_next_action(
+        _autonomy_orchestrator_input_envelope(
+            state=state,
+            core_steward=core_steward,
+            work_tree_state=work_tree_state,
+            generated_queue=generated_queue,
+            guard_health=guard_health,
         ),
-        queue_pressure=_generated_work_queue(limit=200),
-        guard_health=_guard_health_for_orchestrator(),
         record_ledger_fn=_append_autonomy_orchestrator_ledger,
     )
+    recommended_action = dict(packet.get("recommended_action") or {}) if isinstance(packet.get("recommended_action"), dict) else {}
     state["last_autonomy_orchestrator"] = {
         "ts": str(((packet.get("ledger") or {}).get("row") or {}).get("ts") or ""),
+        "created_at_utc": str(packet.get("created_at_utc") or ""),
         "mode": str(packet.get("mode") or ""),
+        "decision_type": str(packet.get("decision_type") or ""),
         "decision": str(packet.get("decision") or ""),
+        "recommended_action": recommended_action,
+        "confidence": _safe_float(packet.get("confidence"), 0.0),
         "action": dict(packet.get("action") or {}),
         "reason": str(packet.get("reason") or ""),
+        "explain_text": str(packet.get("explain_text") or ""),
         "rejection_reasons": list(packet.get("rejection_reasons") or []),
         "ledger_status": str((packet.get("ledger") or {}).get("status") or ""),
     }

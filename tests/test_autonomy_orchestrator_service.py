@@ -3,9 +3,13 @@ import unittest
 from services.autonomy_orchestrator import (
     ALLOWED_DECISIONS,
     AUTONOMY_ORCHESTRATOR_SERVICE,
+    AutonomyOrchestratorService,
     DECISION_BLOCK_WITH_REASON,
     DECISION_DEFER_WITH_REASON,
     DECISION_RECOMMEND_ACTION,
+    SPEC_DECISION_BLOCK,
+    SPEC_DECISION_DEFER,
+    SPEC_DECISION_RECOMMEND_ACTION,
 )
 
 
@@ -71,7 +75,194 @@ def _guard(**overrides):
     return payload
 
 
+def _spec_envelope(
+    *,
+    policy=None,
+    queue=None,
+    runtime=None,
+    posture=None,
+    work_tree=None,
+    triage=None,
+    last_action=None,
+):
+    return {
+        "cycle_id": "cycle-test-001",
+        "timestamp_utc": "2026-05-06T12:00:00Z",
+        "work_tree_snapshot": {
+            "open_count": 0,
+            "working_count": 0,
+            "blocked_count": 0,
+            "stale_count": 0,
+            "oldest_open_age_min": 0,
+            "branches": [],
+            "source_freshness_sec": 0,
+            **(work_tree or {}),
+        },
+        "steward_posture": {
+            "health_score": 96,
+            "alert_count": 0,
+            "critical_alerts": 0,
+            "pass_ratio": 0.96,
+            "posture_band": "green",
+            "source_freshness_sec": 0,
+            **(posture or {}),
+        },
+        "queue_pressure": {
+            "pending_count": 0,
+            "aging_items_count": 0,
+            "high_priority_count": 0,
+            "pressure_band": "low",
+            "source_freshness_sec": 0,
+            **(queue or {}),
+        },
+        "runtime_guard_status": {
+            "guard_running": True,
+            "core_running": True,
+            "webui_running": True,
+            "restart_in_progress": False,
+            "stop_flag": False,
+            "source_freshness_sec": 0,
+            **(runtime or {}),
+        },
+        "policy_snapshot": {
+            "autonomy_enabled": True,
+            "allowed_actions": [
+                "guard_start",
+                "autonomy_maintenance_start",
+                "generated_queue_run_next",
+                "generated_queue_investigate",
+                "update_now_dry_run",
+                "pulse_status",
+            ],
+            "blocked_actions": [],
+            "quiet_hours_active": False,
+            "requires_operator_ack_for": ["update_now_dry_run"],
+            "source_freshness_sec": 0,
+            **(policy or {}),
+        },
+        "triage_hints": {
+            "likely_owner_by_branch": {},
+            "seam_pressure_scores": {},
+            "confidence": 0.6,
+            "source_freshness_sec": 0,
+            **(triage or {}),
+        },
+        "last_action_context": {
+            "last_action_type": "",
+            "last_action_at_utc": "",
+            "cooldown_active": False,
+            "cooldown_remaining_sec": 0,
+            "last_result": "unknown",
+            "source_freshness_sec": 0,
+            **(last_action or {}),
+        },
+    }
+
+
 class TestAutonomyOrchestratorService(unittest.TestCase):
+    def test_evaluate_next_action_recommends_single_spec_action_and_records_ledger(self):
+        service = AutonomyOrchestratorService()
+        ledger_rows = []
+
+        packet = service.evaluate_next_action(
+            _spec_envelope(queue={"pending_count": 3, "high_priority_count": 1, "pressure_band": "high"}),
+            record_ledger_fn=ledger_rows.append,
+        )
+
+        self.assertEqual(packet["decision_type"], SPEC_DECISION_RECOMMEND_ACTION)
+        self.assertEqual(packet["decision"], DECISION_RECOMMEND_ACTION)
+        self.assertEqual(packet["recommended_action"]["action_type"], "generated_queue_run_next")
+        self.assertEqual(packet["action"]["act"], "generated_queue_run_next")
+        self.assertGreater(packet["confidence"], 0.55)
+        self.assertEqual(packet["ledger"]["status"], "recorded")
+        self.assertEqual(len(ledger_rows), 1)
+        self.assertEqual(ledger_rows[0]["decision_type"], SPEC_DECISION_RECOMMEND_ACTION)
+        self.assertIn("recommended_action_summary", ledger_rows[0])
+        self.assertIn("candidates_considered", ledger_rows[0])
+        self.assertEqual(service.get_last_decision()["cycle_id"], "cycle-test-001")
+        self.assertEqual(len(service.get_decision_history(limit=5)), 1)
+        self.assertEqual(service.get_health()["cycle_count"], 1)
+
+    def test_evaluate_next_action_blocks_when_policy_disables_autonomy(self):
+        service = AutonomyOrchestratorService()
+
+        packet = service.evaluate_next_action(
+            _spec_envelope(
+                policy={"autonomy_enabled": False},
+                queue={"pending_count": 1, "pressure_band": "medium"},
+            )
+        )
+
+        self.assertEqual(packet["decision_type"], SPEC_DECISION_BLOCK)
+        self.assertEqual(packet["decision"], DECISION_BLOCK_WITH_REASON)
+        self.assertIn("policy_autonomy_disabled", packet["refusal_reasons"])
+        self.assertIsNone(packet["recommended_action"])
+
+    def test_evaluate_next_action_defers_when_runtime_evidence_is_stale(self):
+        service = AutonomyOrchestratorService()
+
+        packet = service.evaluate_next_action(
+            _spec_envelope(
+                runtime={"source_freshness_sec": 121},
+                queue={"pending_count": 1, "pressure_band": "medium"},
+            )
+        )
+
+        self.assertEqual(packet["decision_type"], SPEC_DECISION_DEFER)
+        self.assertIn("runtime_evidence_stale", packet["refusal_reasons"])
+
+    def test_evaluate_next_action_blocks_disallowed_candidate(self):
+        service = AutonomyOrchestratorService()
+
+        packet = service.evaluate_next_action(
+            _spec_envelope(
+                policy={"allowed_actions": ["guard_start"]},
+                queue={"pending_count": 1, "pressure_band": "medium"},
+            )
+        )
+
+        self.assertEqual(packet["decision_type"], SPEC_DECISION_BLOCK)
+        self.assertIn("action_not_allowed", packet["refusal_reasons"])
+
+    def test_evaluate_next_action_defers_when_ack_required(self):
+        service = AutonomyOrchestratorService()
+
+        packet = service.evaluate_next_action(
+            _spec_envelope(
+                queue={"approved_eligible_previews": 1},
+            )
+        )
+
+        self.assertEqual(packet["decision_type"], SPEC_DECISION_DEFER)
+        self.assertIn("operator_ack_required", packet["refusal_reasons"])
+
+    def test_evaluate_next_action_defers_for_active_cooldown(self):
+        service = AutonomyOrchestratorService()
+
+        packet = service.evaluate_next_action(
+            _spec_envelope(
+                queue={"pending_count": 1, "pressure_band": "medium"},
+                last_action={
+                    "last_action_type": "generated_queue_run_next",
+                    "cooldown_active": True,
+                    "cooldown_remaining_sec": 90,
+                },
+            )
+        )
+
+        self.assertEqual(packet["decision_type"], SPEC_DECISION_DEFER)
+        self.assertIn("cooldown_active", packet["refusal_reasons"])
+
+    def test_set_mode_keeps_execution_policy_guarded(self):
+        service = AutonomyOrchestratorService()
+
+        blocked = service.set_mode("execute", {"autonomy_enabled": True})
+        self.assertFalse(blocked["ok"])
+        self.assertEqual(blocked["mode"], "advisory")
+        allowed = service.set_mode("execute", {"autonomy_enabled": True, "allow_execute_mode": True})
+        self.assertTrue(allowed["ok"])
+        self.assertEqual(service.get_health()["mode"], "execute")
+
     def test_recommends_next_generated_queue_action_and_records_ledger(self):
         ledger_rows = []
 

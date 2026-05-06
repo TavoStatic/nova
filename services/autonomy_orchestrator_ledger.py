@@ -20,6 +20,13 @@ def _as_dict(value: Any) -> dict[str, Any]:
     return dict(value) if isinstance(value, dict) else {}
 
 
+SPEC_TO_LEGACY_DECISION = {
+    "RecommendAction": "recommend_action",
+    "Defer": "defer_with_reason",
+    "Block": "block_with_reason",
+}
+
+
 class AutonomyOrchestratorLedgerService:
     """Summarize advisory autonomy ledger rows for operator readback."""
 
@@ -46,9 +53,48 @@ class AutonomyOrchestratorLedgerService:
         return rows
 
     @staticmethod
-    def _recommendation_key(row: dict[str, Any]) -> str:
-        decision = _safe_text(row.get("decision"), 80) or "unknown"
+    def _row_decision(row: dict[str, Any]) -> str:
+        decision = _safe_text(row.get("decision"), 80)
+        if decision:
+            return decision
+        decision_type = _safe_text(row.get("decision_type"), 80)
+        return SPEC_TO_LEGACY_DECISION.get(decision_type, decision_type or "unknown")
+
+    @staticmethod
+    def _row_action(row: dict[str, Any]) -> str:
         action = _safe_text(_as_dict(row.get("action")).get("act"), 80)
+        if action:
+            return action
+        summary = _as_dict(row.get("recommended_action_summary"))
+        action = _safe_text(summary.get("action_type"), 80)
+        if action:
+            return action
+        recommended = _as_dict(row.get("recommended_action"))
+        return _safe_text(recommended.get("action_type"), 80)
+
+    @staticmethod
+    def _row_rejection_reasons(row: dict[str, Any]) -> list[str]:
+        reasons = row.get("rejection_reasons")
+        if not isinstance(reasons, list):
+            reasons = row.get("refusal_reasons")
+        return [
+            _safe_text(item, 120)
+            for item in list(reasons or [])
+            if _safe_text(item, 120)
+        ]
+
+    @staticmethod
+    def _row_reason(row: dict[str, Any]) -> str:
+        return _safe_text(row.get("reason") or row.get("explain_text"), 360)
+
+    @staticmethod
+    def _row_ts(row: dict[str, Any]) -> str:
+        return _safe_text(row.get("ts") or row.get("timestamp_utc"), 80)
+
+    @staticmethod
+    def _recommendation_key(row: dict[str, Any]) -> str:
+        decision = AutonomyOrchestratorLedgerService._row_decision(row)
+        action = AutonomyOrchestratorLedgerService._row_action(row)
         if decision == "recommend_action" and action:
             return f"{decision}:{action}"
         return decision
@@ -57,11 +103,13 @@ class AutonomyOrchestratorLedgerService:
     def _weak_posture(row: dict[str, Any]) -> bool:
         evidence = _as_dict(row.get("evidence"))
         posture = _as_dict(evidence.get("posture"))
+        if not posture:
+            posture = _as_dict(evidence.get("steward_posture"))
         conflicts = evidence.get("conflicts") if isinstance(evidence.get("conflicts"), list) else []
-        score = _as_int(posture.get("score"))
+        score = _as_int(posture.get("score") if "score" in posture else posture.get("health_score"))
         threshold = _as_int(posture.get("threshold"), 85)
-        level = _safe_text(posture.get("level"), 80).lower()
-        return bool(conflicts) or score < threshold or level in {"", "unknown", "repair", "watch"}
+        level = _safe_text(posture.get("level") or posture.get("posture_band"), 80).lower()
+        return bool(conflicts) or score < threshold or level in {"", "unknown", "repair", "watch", "yellow", "red"}
 
     def summary(self, ledger_path: Path, *, limit: int = 80) -> dict[str, Any]:
         rows = self.recent_rows(ledger_path, limit=limit)
@@ -93,8 +141,8 @@ class AutonomyOrchestratorLedgerService:
         transitions = 0
 
         for row in rows:
-            decision = _safe_text(row.get("decision"), 80) or "unknown"
-            action = _safe_text(_as_dict(row.get("action")).get("act"), 80) or "none"
+            decision = self._row_decision(row) or "unknown"
+            action = self._row_action(row) or "none"
             recommendation_key = self._recommendation_key(row)
             out["decision_counts"][decision] = int(out["decision_counts"].get(decision, 0)) + 1
             out["action_counts"][action] = int(out["action_counts"].get(action, 0)) + 1
@@ -109,7 +157,7 @@ class AutonomyOrchestratorLedgerService:
             else:
                 out["refusal_count"] += 1
 
-            for reason in list(row.get("rejection_reasons") or []):
+            for reason in self._row_rejection_reasons(row):
                 clean = _safe_text(reason, 120)
                 if clean:
                     out["rejection_reason_counts"][clean] = int(out["rejection_reason_counts"].get(clean, 0)) + 1
@@ -136,15 +184,11 @@ class AutonomyOrchestratorLedgerService:
 
         if rows:
             last = rows[-1]
-            out["last_ts"] = _safe_text(last.get("ts"), 80)
-            out["last_decision"] = _safe_text(last.get("decision"), 80)
-            out["last_action"] = _safe_text(_as_dict(last.get("action")).get("act"), 80)
-            out["last_reason"] = _safe_text(last.get("reason"), 360)
-            out["last_rejection_reasons"] = [
-                _safe_text(item, 120)
-                for item in list(last.get("rejection_reasons") or [])[:8]
-                if _safe_text(item, 120)
-            ]
+            out["last_ts"] = self._row_ts(last)
+            out["last_decision"] = self._row_decision(last)
+            out["last_action"] = self._row_action(last)
+            out["last_reason"] = self._row_reason(last)
+            out["last_rejection_reasons"] = self._row_rejection_reasons(last)[:8]
             out["last_recommendation_key"] = self._recommendation_key(last)
         return out
 

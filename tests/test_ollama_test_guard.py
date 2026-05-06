@@ -46,6 +46,14 @@ class TestOllamaTestGuard(unittest.TestCase):
             self.assertEqual(reply, "(error: LLM service unavailable)")
             post_mock.assert_not_called()
 
+    def test_ollama_chat_is_blocked_under_regression_runner_test_mode(self):
+        with mock.patch.object(nova_core.sys, "argv", ["scripts/run_regression.py", "behavior"]), \
+             mock.patch.dict(os.environ, {"NOVA_TEST_RUNNER": "1"}, clear=False), \
+             mock.patch("nova_core.requests.post") as post_mock:
+            reply = nova_core.ollama_chat("hello")
+            self.assertEqual(reply, "(error: LLM service unavailable)")
+            post_mock.assert_not_called()
+
     def test_ollama_api_up_can_be_opted_in_for_unittest(self):
         class _Resp:
             status_code = 200

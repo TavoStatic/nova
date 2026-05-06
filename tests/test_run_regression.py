@@ -1,6 +1,7 @@
 import importlib.util
 import io
 import json
+import os
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -53,6 +54,35 @@ class TestRunRegressionScript(unittest.TestCase):
         self.assertIn("- unit:", output)
         self.assertIn("- behavior:", output)
         self.assertIn("- integration:", output)
+
+    def test_run_unittest_suite_marks_regression_test_mode(self):
+        observed = []
+
+        class _Result:
+            failures = []
+            errors = []
+
+            @staticmethod
+            def wasSuccessful():
+                return True
+
+        class _Runner:
+            def __init__(self, verbosity=1):
+                self.verbosity = verbosity
+
+            def run(self, suite):
+                observed.append(os.environ.get("NOVA_TEST_RUNNER"))
+                return _Result()
+
+        with patch.object(RUN_REGRESSION.unittest, "TextTestRunner", _Runner), \
+             patch.dict(os.environ, {}, clear=True):
+            ok, failed = RUN_REGRESSION.run_unittest_suite(["tests.test_smoke_placeholder"], verbosity=1)
+            restored = os.environ.get("NOVA_TEST_RUNNER")
+
+        self.assertTrue(ok)
+        self.assertEqual(failed, [])
+        self.assertEqual(observed, ["1"])
+        self.assertIsNone(restored)
 
     def test_write_regression_status_records_validation_marker(self):
         marker = Path("C:/Nova/runtime/_test_tmp") / "regression_status_test.json"

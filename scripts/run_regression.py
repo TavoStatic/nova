@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 import time
@@ -173,7 +174,15 @@ def run_unittest_suite(test_names: list[str], *, verbosity: int = 1) -> tuple[bo
     loader = unittest.defaultTestLoader
     suite = loader.loadTestsFromNames(test_names)
     runner = unittest.TextTestRunner(verbosity=verbosity)
-    result = runner.run(suite)
+    previous_test_runner = os.environ.get("NOVA_TEST_RUNNER")
+    os.environ["NOVA_TEST_RUNNER"] = "1"
+    try:
+        result = runner.run(suite)
+    finally:
+        if previous_test_runner is None:
+            os.environ.pop("NOVA_TEST_RUNNER", None)
+        else:
+            os.environ["NOVA_TEST_RUNNER"] = previous_test_runner
     failed_ids: list[str] = []
     for case, _ in list(result.failures) + list(result.errors):
         try:

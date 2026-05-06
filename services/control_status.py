@@ -341,6 +341,11 @@ class ControlStatusService:
         autonomy_payload["maintenance_scheduler_status"] = maintenance_scheduler_status
         autonomy_payload["last_autonomy_orchestrator"] = last_autonomy_orchestrator
         autonomy_orchestrator_action = last_autonomy_orchestrator.get("action") if isinstance(last_autonomy_orchestrator.get("action"), dict) else {}
+        autonomy_orchestrator_recommended_action = (
+            last_autonomy_orchestrator.get("recommended_action")
+            if isinstance(last_autonomy_orchestrator.get("recommended_action"), dict)
+            else {}
+        )
         autonomy_orchestrator_summary = (
             autonomy_payload.get("autonomy_orchestrator_summary")
             if isinstance(autonomy_payload.get("autonomy_orchestrator_summary"), dict)
@@ -351,7 +356,14 @@ class ControlStatusService:
         payload["autonomy_orchestrator_ts"] = str(last_autonomy_orchestrator.get("ts") or "")
         payload["autonomy_orchestrator_mode"] = str(last_autonomy_orchestrator.get("mode") or "")
         payload["autonomy_orchestrator_decision"] = str(last_autonomy_orchestrator.get("decision") or "")
-        payload["autonomy_orchestrator_action"] = str(autonomy_orchestrator_action.get("act") or "")
+        payload["autonomy_orchestrator_decision_type"] = str(last_autonomy_orchestrator.get("decision_type") or "")
+        payload["autonomy_orchestrator_confidence"] = float(last_autonomy_orchestrator.get("confidence", 0.0) or 0.0)
+        payload["autonomy_orchestrator_recommended_action"] = autonomy_orchestrator_recommended_action
+        payload["autonomy_orchestrator_action"] = str(
+            autonomy_orchestrator_action.get("act")
+            or autonomy_orchestrator_recommended_action.get("action_type")
+            or ""
+        )
         payload["autonomy_orchestrator_reason"] = str(last_autonomy_orchestrator.get("reason") or "")
         payload["autonomy_orchestrator_ledger_status"] = str(last_autonomy_orchestrator.get("ledger_status") or "")
         payload["autonomy_orchestrator_rejection_reasons"] = (

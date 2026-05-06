@@ -4213,7 +4213,8 @@ def tcp_listening(host="127.0.0.1", port=11434, timeout=1.0) -> bool:
 
 def _live_ollama_calls_allowed() -> bool:
     argv_text = " ".join(str(arg or "") for arg in list(sys.argv or []))
-    if "unittest" not in argv_text.lower():
+    test_runner = str(os.environ.get("NOVA_TEST_RUNNER") or "").strip().lower() in {"1", "true", "yes", "on"}
+    if "unittest" not in argv_text.lower() and not test_runner:
         return True
     return str(os.environ.get("NOVA_ALLOW_LIVE_OLLAMA_TESTS") or "").strip().lower() in {"1", "true", "yes", "on"}
 
