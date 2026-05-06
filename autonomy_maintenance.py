@@ -17,6 +17,9 @@ from services.nova_patching import archive_preview_report as service_archive_pre
 from services.nova_patching import bulk_archive_superseded_previews as service_bulk_archive_superseded_previews
 from services.nova_patching import bulk_reject_orphaned_previews as service_bulk_reject_orphaned_previews
 from services.nova_patching import patch_preview_summaries as service_patch_preview_summaries
+from services.autonomy_orchestrator import AUTONOMY_ORCHESTRATOR_SERVICE
+from services.control_work_trees import CONTROL_WORK_TREES_SERVICE
+from services.core_steward import build_core_steward_payload as service_build_core_steward_payload
 from services.test_session_control import TEST_SESSION_CONTROL_SERVICE
 from services.work_tree_signal_ingestion import WORK_TREE_SIGNAL_INGESTION_SERVICE
 from work_tree_contracts import BranchStatus, TaskStatus
@@ -29,6 +32,7 @@ TEST_SESSIONS_ROOT = RUNTIME_DIR / "test_sessions"
 TEST_SESSION_RUNNER_PY = ROOT / "scripts" / "run_test_session.py"
 STATE_FILE = RUNTIME_DIR / "autonomy_maintenance_state.json"
 MAINT_LOG = RUNTIME_DIR / "autonomy_maintenance.log"
+AUTONOMY_ORCHESTRATOR_LEDGER = RUNTIME_DIR / "autonomy_orchestrator_ledger.jsonl"
 LATEST_SUBCONSCIOUS = RUNTIME_DIR / "subconscious_runs" / "latest.json"
 GENERATED_DEFS = TEST_SESSIONS_ROOT / "generated_definitions"
 UPDATES_DIR = ROOT / "updates"
@@ -88,6 +92,92 @@ def _load_state() -> dict:
 def _save_state(state: dict) -> None:
     STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
     STATE_FILE.write_text(json.dumps(state, ensure_ascii=True, indent=2), encoding="utf-8")
+
+
+def _append_autonomy_orchestrator_ledger(row: dict) -> None:
+    AUTONOMY_ORCHESTRATOR_LEDGER.parent.mkdir(parents=True, exist_ok=True)
+    with open(AUTONOMY_ORCHESTRATOR_LEDGER, "a", encoding="utf-8") as fh:
+        fh.write(json.dumps(dict(row or {}), ensure_ascii=True) + "\n")
+
+
+def _guard_health_for_orchestrator() -> dict:
+    pid_file = RUNTIME_DIR / "guard_pid.json"
+    lock_file = RUNTIME_DIR / "guard.lock"
+    stop_file = RUNTIME_DIR / "guard.stop"
+    pid = 0
+    pid_live = False
+    if pid_file.exists():
+        try:
+            payload = json.loads(pid_file.read_text(encoding="utf-8"))
+            pid = int((payload or {}).get("pid", 0) or 0)
+            if pid > 0:
+                try:
+                    import psutil
+
+                    pid_live = bool(psutil.pid_exists(pid))
+                except Exception:
+                    pid_live = False
+        except Exception:
+            pid = 0
+
+    status = "stopped"
+    if pid_live:
+        status = "running"
+    elif stop_file.exists():
+        status = "stopping"
+    elif lock_file.exists() or pid_file.exists():
+        status = "boot_timeout"
+    return {
+        "running": bool(pid_live),
+        "status": status,
+        "pid": pid or None,
+        "lock_exists": lock_file.exists(),
+        "stop_flag": stop_file.exists(),
+    }
+
+
+def _preflight_checks_for_orchestrator() -> list:
+    try:
+        import doctor as doctor_module
+
+        return list(doctor_module.run_preflight() or [])
+    except Exception:
+        return []
+
+
+def _core_steward_for_orchestrator(state: dict, kidney_summary: dict) -> dict:
+    runtime_health = nova_core._core_health_runtime_health()
+    pulse_payload = nova_core.build_pulse_payload()
+    return service_build_core_steward_payload(
+        preflight_checks=_preflight_checks_for_orchestrator(),
+        runtime_health=runtime_health,
+        pulse_payload=pulse_payload if isinstance(pulse_payload, dict) else {},
+        autonomy_maintenance=state if isinstance(state, dict) else {},
+        kidney_summary=kidney_summary if isinstance(kidney_summary, dict) else {},
+    )
+
+
+def _run_autonomy_orchestrator_advisory(state: dict, kidney_summary: dict) -> dict:
+    packet = AUTONOMY_ORCHESTRATOR_SERVICE.evaluate_cycle(
+        core_steward=_core_steward_for_orchestrator(state, kidney_summary),
+        work_tree_state=CONTROL_WORK_TREES_SERVICE.payload(
+            list_visual_trees_fn=work_tree.list_visual_trees,
+            limit=64,
+        ),
+        queue_pressure=_generated_work_queue(limit=200),
+        guard_health=_guard_health_for_orchestrator(),
+        record_ledger_fn=_append_autonomy_orchestrator_ledger,
+    )
+    state["last_autonomy_orchestrator"] = {
+        "ts": str(((packet.get("ledger") or {}).get("row") or {}).get("ts") or ""),
+        "mode": str(packet.get("mode") or ""),
+        "decision": str(packet.get("decision") or ""),
+        "action": dict(packet.get("action") or {}),
+        "reason": str(packet.get("reason") or ""),
+        "rejection_reasons": list(packet.get("rejection_reasons") or []),
+        "ledger_status": str((packet.get("ledger") or {}).get("status") or ""),
+    }
+    return packet
 
 
 def _run_subconscious_pack() -> tuple[bool, str]:
@@ -2082,6 +2172,26 @@ def run_once() -> int:
         }
         state["last_signal_ingestion"] = signal_ingestion
         _append_log(f"signal_ingestion_failed {exc}")
+
+    try:
+        autonomy_orchestrator = _run_autonomy_orchestrator_advisory(state, kidney_summary)
+        _append_log(
+            "autonomy_orchestrator"
+            f" decision={autonomy_orchestrator.get('decision')}"
+            f" action={str((autonomy_orchestrator.get('action') or {}).get('act') or 'none')}"
+            f" ledger={str((autonomy_orchestrator.get('ledger') or {}).get('status') or '')}"
+        )
+    except Exception as exc:
+        state["last_autonomy_orchestrator"] = {
+            "ts": _patch_queue_timestamp(),
+            "mode": "advisory",
+            "decision": "block_with_reason",
+            "action": {},
+            "reason": f"autonomy_orchestrator_failed:{exc}",
+            "rejection_reasons": ["orchestrator_cycle_failed"],
+            "ledger_status": "record_failed",
+        }
+        _append_log(f"autonomy_orchestrator_failed {exc}")
 
     _save_state(state)
     return 0

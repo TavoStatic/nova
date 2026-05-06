@@ -305,7 +305,20 @@ class TestAutonomyMaintenance(unittest.TestCase):
                          "retired_count": 0,
                      },
                  ), \
-                 mock.patch.object(autonomy_maintenance, "_run_daily_regression_if_due", return_value="daily_regression_ok"):
+                 mock.patch.object(autonomy_maintenance, "_run_daily_regression_if_due", return_value="daily_regression_ok"), \
+                 mock.patch.object(
+                     autonomy_maintenance,
+                     "_run_autonomy_orchestrator_advisory",
+                     side_effect=lambda state, _kidney: state.setdefault(
+                         "last_autonomy_orchestrator",
+                         {
+                             "decision": "defer_with_reason",
+                             "action": {},
+                             "reason": "test advisory",
+                             "ledger_status": "recorded",
+                         },
+                     ),
+                 ):
                 code = autonomy_maintenance.run_once()
 
             self.assertEqual(code, 0)
@@ -352,6 +365,61 @@ class TestAutonomyMaintenance(unittest.TestCase):
             self.assertEqual(worker.get("cycle_count"), 2)
             self.assertEqual(worker.get("last_cycle_status"), "ok")
             self.assertEqual(worker.get("last_cycle_code"), 0)
+
+    def test_autonomy_orchestrator_advisory_records_state_and_ledger(self):
+        with tempfile.TemporaryDirectory() as td:
+            ledger_path = Path(td) / "runtime" / "autonomy_orchestrator_ledger.jsonl"
+            state: dict = {}
+            core_steward = {
+                "score": 100,
+                "level": "strong",
+                "summary": "core surfaces look stable",
+                "runtime": {
+                    "heartbeat": {"ok": True, "info": "heartbeat ok"},
+                    "core_state": {"ok": True, "info": "core ok"},
+                    "ollama": {"ok": True, "info": "ollama ok"},
+                },
+                "autonomy_maintenance": {"worker_status": "running"},
+                "pulse": {"fallback_overuse_score": 0.0, "approved_eligible_previews": 0},
+            }
+
+            with mock.patch.object(autonomy_maintenance, "AUTONOMY_ORCHESTRATOR_LEDGER", ledger_path), \
+                 mock.patch.object(autonomy_maintenance, "_core_steward_for_orchestrator", return_value=core_steward), \
+                 mock.patch.object(
+                     autonomy_maintenance.CONTROL_WORK_TREES_SERVICE,
+                     "payload",
+                     return_value={
+                         "ok": True,
+                         "counts": {"total": 0, "active": 0, "branches": 0, "open_tasks": 0, "working": 0},
+                         "trees": [],
+                     },
+                 ), \
+                 mock.patch.object(
+                     autonomy_maintenance,
+                     "_generated_work_queue",
+                     return_value={
+                         "status": "ready",
+                         "count": 1,
+                         "open_count": 1,
+                         "actionable_count": 1,
+                         "blocked_count": 0,
+                         "next_item": {"file": "generated_demo.json"},
+                     },
+                 ), \
+                 mock.patch.object(
+                     autonomy_maintenance,
+                     "_guard_health_for_orchestrator",
+                     return_value={"running": True, "status": "running"},
+                 ):
+                packet = autonomy_maintenance._run_autonomy_orchestrator_advisory(state, {"mode": "enforce"})
+
+            self.assertEqual(packet.get("decision"), "recommend_action")
+            self.assertEqual((packet.get("action") or {}).get("act"), "generated_queue_run_next")
+            self.assertEqual((state.get("last_autonomy_orchestrator") or {}).get("ledger_status"), "recorded")
+            rows = [json.loads(line) for line in ledger_path.read_text(encoding="utf-8").splitlines()]
+            self.assertEqual(len(rows), 1)
+            self.assertEqual(rows[0].get("decision"), "recommend_action")
+            self.assertIn("candidate_actions", rows[0])
 
     def test_run_once_marks_failed_regression_stale_when_regression_is_skipped(self):
         with tempfile.TemporaryDirectory() as td:
@@ -416,7 +484,20 @@ class TestAutonomyMaintenance(unittest.TestCase):
                  mock.patch.object(autonomy_maintenance, "_run_patch_queue_work_tree_cycle", return_value={"ts": "2026-04-23 08:00:01", "status": "idle", "tree_count": 1, "executed_count": 0}), \
                  mock.patch.object(autonomy_maintenance, "_run_active_work_tree_cycle", return_value={"ts": "2026-04-23 08:00:01", "status": "idle", "tree_count": 0, "executed_count": 0}), \
                  mock.patch.object(autonomy_maintenance, "_retire_legacy_patch_update_trees", return_value={"ts": "2026-04-23 08:00:01", "status": "idle", "retired_count": 0}), \
-                 mock.patch.object(autonomy_maintenance, "_run_daily_regression_if_due", return_value="daily_regression_skipped_already_ran"):
+                 mock.patch.object(autonomy_maintenance, "_run_daily_regression_if_due", return_value="daily_regression_skipped_already_ran"), \
+                 mock.patch.object(
+                     autonomy_maintenance,
+                     "_run_autonomy_orchestrator_advisory",
+                     side_effect=lambda state, _kidney: state.setdefault(
+                         "last_autonomy_orchestrator",
+                         {
+                             "decision": "defer_with_reason",
+                             "action": {},
+                             "reason": "test advisory",
+                             "ledger_status": "recorded",
+                         },
+                     ),
+                 ):
                 code = autonomy_maintenance.run_once()
 
             self.assertEqual(code, 0)

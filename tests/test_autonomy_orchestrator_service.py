@@ -1,0 +1,244 @@
+import unittest
+
+from services.autonomy_orchestrator import (
+    ALLOWED_DECISIONS,
+    AUTONOMY_ORCHESTRATOR_SERVICE,
+    DECISION_BLOCK_WITH_REASON,
+    DECISION_DEFER_WITH_REASON,
+    DECISION_RECOMMEND_ACTION,
+)
+
+
+def _core_steward(
+    *,
+    score=100,
+    level="strong",
+    worker_status="running",
+    fallback_overuse_score=0.0,
+    approved_eligible_previews=0,
+):
+    return {
+        "score": score,
+        "level": level,
+        "summary": "core surfaces look stable",
+        "runtime": {
+            "heartbeat": {"ok": True, "info": "heartbeat ok"},
+            "core_state": {"ok": True, "info": "core state ok"},
+            "ollama": {"ok": True, "info": "ollama ok"},
+        },
+        "autonomy_maintenance": {
+            "worker_status": worker_status,
+            "last_completed_at": "2026-05-06 12:00:00",
+        },
+        "pulse": {
+            "fallback_overuse_score": fallback_overuse_score,
+            "approved_eligible_previews": approved_eligible_previews,
+        },
+    }
+
+
+def _work_tree(*, active=0, working=0, total=0):
+    return {
+        "ok": True,
+        "counts": {
+            "total": total,
+            "active": active,
+            "branches": active + working,
+            "open_tasks": active + working,
+            "working": working,
+            "pending": 0,
+            "blocked": 0,
+            "complete": 0,
+        },
+        "trees": [],
+    }
+
+
+def _queue(*, status="ready", open_count=0, actionable_count=0, blocked_count=0, next_item=None):
+    return {
+        "status": status,
+        "count": open_count,
+        "open_count": open_count,
+        "actionable_count": actionable_count,
+        "blocked_count": blocked_count,
+        "next_item": next_item or {},
+    }
+
+
+def _guard(**overrides):
+    payload = {"ok": True, "running": True, "status": "running", "info": "guard running"}
+    payload.update(overrides)
+    return payload
+
+
+class TestAutonomyOrchestratorService(unittest.TestCase):
+    def test_recommends_next_generated_queue_action_and_records_ledger(self):
+        ledger_rows = []
+
+        packet = AUTONOMY_ORCHESTRATOR_SERVICE.evaluate_cycle(
+            core_steward=_core_steward(),
+            work_tree_state=_work_tree(),
+            queue_pressure=_queue(
+                open_count=2,
+                actionable_count=1,
+                next_item={
+                    "title": "Weather continuation review",
+                    "payload": {
+                        "preferred_owner": "supervisor",
+                        "route_hint": "supervisor_owned",
+                        "review_contract": "subconscious.review.supervisor",
+                    },
+                },
+            ),
+            guard_health=_guard(),
+            record_ledger_fn=ledger_rows.append,
+        )
+
+        self.assertEqual(packet["decision"], DECISION_RECOMMEND_ACTION)
+        self.assertEqual(packet["action"]["act"], "generated_queue_run_next")
+        self.assertEqual(packet["mode"], "advisory")
+        self.assertEqual(packet["ledger"]["status"], "recorded")
+        self.assertEqual(len(ledger_rows), 1)
+        self.assertIn("evidence", ledger_rows[0])
+        self.assertIn("candidate_actions", ledger_rows[0])
+        self.assertEqual((packet["evidence"]["ownership"] or {}).get("preferred_owner"), "supervisor")
+
+    def test_blocks_when_posture_is_below_threshold(self):
+        packet = AUTONOMY_ORCHESTRATOR_SERVICE.evaluate_cycle(
+            core_steward=_core_steward(score=70, level="watch"),
+            work_tree_state=_work_tree(),
+            queue_pressure=_queue(open_count=1, actionable_count=1),
+            guard_health=_guard(),
+        )
+
+        self.assertEqual(packet["decision"], DECISION_BLOCK_WITH_REASON)
+        self.assertEqual(packet["action"], {})
+        self.assertIn("posture_below_threshold", packet["rejection_reasons"])
+        self.assertEqual(packet["candidate_actions"][0]["rejection_reason"], "blocked_by_posture")
+
+    def test_blocks_when_evidence_conflicts(self):
+        packet = AUTONOMY_ORCHESTRATOR_SERVICE.evaluate_cycle(
+            core_steward=_core_steward(),
+            work_tree_state=_work_tree(),
+            queue_pressure=_queue(status="clear", open_count=1, actionable_count=1),
+            guard_health=_guard(),
+        )
+
+        self.assertEqual(packet["decision"], DECISION_BLOCK_WITH_REASON)
+        self.assertIn("queue_reports_clear_with_actionable_items", packet["rejection_reasons"])
+        self.assertEqual(packet["candidate_actions"][0]["rejection_reason"], "blocked_by_evidence_conflict")
+
+    def test_blocks_when_runtime_evidence_disagrees(self):
+        packet = AUTONOMY_ORCHESTRATOR_SERVICE.evaluate_cycle(
+            core_steward=_core_steward(),
+            work_tree_state=_work_tree(),
+            queue_pressure=_queue(open_count=1, actionable_count=1),
+            guard_health=_guard(),
+            runtime_health={"heartbeat": {"ok": False, "info": "explicit probe failed"}},
+        )
+
+        self.assertEqual(packet["decision"], DECISION_BLOCK_WITH_REASON)
+        self.assertIn("heartbeat_evidence_disagrees", packet["rejection_reasons"])
+
+    def test_defers_when_work_tree_is_already_active(self):
+        packet = AUTONOMY_ORCHESTRATOR_SERVICE.evaluate_cycle(
+            core_steward=_core_steward(),
+            work_tree_state=_work_tree(total=1, active=1),
+            queue_pressure=_queue(open_count=1, actionable_count=1),
+            guard_health=_guard(),
+        )
+
+        self.assertEqual(packet["decision"], DECISION_DEFER_WITH_REASON)
+        self.assertIn("work_tree_already_active", packet["rejection_reasons"])
+        self.assertEqual(packet["candidate_actions"][0]["rejection_reason"], "deferred_active_work_tree")
+
+    def test_managed_generated_queue_tree_does_not_block_queue_recommendation(self):
+        packet = AUTONOMY_ORCHESTRATOR_SERVICE.evaluate_cycle(
+            core_steward=_core_steward(),
+            work_tree_state={
+                "ok": True,
+                "counts": {"total": 1, "active": 1, "branches": 1, "open_tasks": 1, "working": 0},
+                "trees": [
+                    {
+                        "tree_id": "tree_generated",
+                        "kind": "generated_queue",
+                        "status": "active",
+                        "active_branch_id": "branch_generated",
+                        "title": "Generated Queue: governed self-repair",
+                    }
+                ],
+            },
+            queue_pressure=_queue(open_count=1, actionable_count=1),
+            guard_health=_guard(),
+        )
+
+        self.assertEqual(packet["decision"], DECISION_RECOMMEND_ACTION)
+        self.assertEqual(packet["action"]["act"], "generated_queue_run_next")
+
+    def test_defers_when_guard_health_is_missing(self):
+        packet = AUTONOMY_ORCHESTRATOR_SERVICE.evaluate_cycle(
+            core_steward=_core_steward(),
+            work_tree_state=_work_tree(),
+            queue_pressure=_queue(open_count=1, actionable_count=1),
+        )
+
+        self.assertEqual(packet["decision"], DECISION_DEFER_WITH_REASON)
+        self.assertIn("guard_health_unavailable", packet["rejection_reasons"])
+        self.assertEqual(packet["action"], {})
+
+    def test_recommends_guard_start_when_guard_is_stopped(self):
+        packet = AUTONOMY_ORCHESTRATOR_SERVICE.evaluate_cycle(
+            core_steward=_core_steward(),
+            work_tree_state=_work_tree(),
+            queue_pressure=_queue(),
+            guard_health={"running": False, "status": "stopped"},
+        )
+
+        self.assertEqual(packet["decision"], DECISION_RECOMMEND_ACTION)
+        self.assertEqual(packet["action"]["act"], "guard_start")
+
+    def test_recommends_maintenance_worker_start_when_worker_is_stopped(self):
+        packet = AUTONOMY_ORCHESTRATOR_SERVICE.evaluate_cycle(
+            core_steward=_core_steward(score=95, level="watch", worker_status="stopped"),
+            work_tree_state=_work_tree(),
+            queue_pressure=_queue(),
+            guard_health=_guard(),
+        )
+
+        self.assertEqual(packet["decision"], DECISION_RECOMMEND_ACTION)
+        self.assertEqual(packet["action"]["act"], "autonomy_maintenance_start")
+
+    def test_recommends_investigation_for_blocked_queue(self):
+        packet = AUTONOMY_ORCHESTRATOR_SERVICE.evaluate_cycle(
+            core_steward=_core_steward(),
+            work_tree_state=_work_tree(),
+            queue_pressure=_queue(status="blocked", open_count=2, blocked_count=2),
+            guard_health=_guard(),
+        )
+
+        self.assertEqual(packet["decision"], DECISION_RECOMMEND_ACTION)
+        self.assertEqual(packet["action"]["act"], "generated_queue_investigate")
+
+    def test_decision_contract_only_emits_allowed_decisions(self):
+        packets = [
+            AUTONOMY_ORCHESTRATOR_SERVICE.evaluate_cycle(
+                core_steward=_core_steward(),
+                work_tree_state=_work_tree(),
+                queue_pressure=_queue(),
+                guard_health=_guard(),
+            ),
+            AUTONOMY_ORCHESTRATOR_SERVICE.evaluate_cycle(
+                core_steward=_core_steward(score=60, level="repair"),
+                work_tree_state=_work_tree(),
+                queue_pressure=_queue(open_count=1, actionable_count=1),
+                guard_health=_guard(),
+            ),
+        ]
+
+        self.assertEqual(packets[0]["decision"], DECISION_DEFER_WITH_REASON)
+        for packet in packets:
+            self.assertIn(packet["decision"], ALLOWED_DECISIONS)
+
+
+if __name__ == "__main__":
+    unittest.main()

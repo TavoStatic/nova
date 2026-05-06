@@ -37,6 +37,7 @@ TEST_LANES: dict[str, list[str]] = {
         "tests.test_smoke_test",
         "tests.test_action_planner",
         "tests.test_autonomy_maintenance",
+        "tests.test_autonomy_orchestrator_service",
         "tests.test_behavior_metrics_service",
         "tests.test_chat_identity_service",
         "tests.test_control_actions_service",
