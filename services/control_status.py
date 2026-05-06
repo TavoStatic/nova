@@ -341,7 +341,13 @@ class ControlStatusService:
         autonomy_payload["maintenance_scheduler_status"] = maintenance_scheduler_status
         autonomy_payload["last_autonomy_orchestrator"] = last_autonomy_orchestrator
         autonomy_orchestrator_action = last_autonomy_orchestrator.get("action") if isinstance(last_autonomy_orchestrator.get("action"), dict) else {}
+        autonomy_orchestrator_summary = (
+            autonomy_payload.get("autonomy_orchestrator_summary")
+            if isinstance(autonomy_payload.get("autonomy_orchestrator_summary"), dict)
+            else {}
+        )
         payload["autonomy_orchestrator"] = last_autonomy_orchestrator
+        payload["autonomy_orchestrator_summary"] = autonomy_orchestrator_summary
         payload["autonomy_orchestrator_ts"] = str(last_autonomy_orchestrator.get("ts") or "")
         payload["autonomy_orchestrator_mode"] = str(last_autonomy_orchestrator.get("mode") or "")
         payload["autonomy_orchestrator_decision"] = str(last_autonomy_orchestrator.get("decision") or "")
@@ -353,6 +359,11 @@ class ControlStatusService:
             if isinstance(last_autonomy_orchestrator.get("rejection_reasons"), list)
             else []
         )
+        payload["autonomy_orchestrator_count"] = int(autonomy_orchestrator_summary.get("count", 0) or 0)
+        payload["autonomy_orchestrator_recommendation_changes"] = int(autonomy_orchestrator_summary.get("recommendation_changes", 0) or 0)
+        payload["autonomy_orchestrator_change_rate"] = float(autonomy_orchestrator_summary.get("recommendation_change_rate", 0.0) or 0.0)
+        payload["autonomy_orchestrator_stable"] = bool(autonomy_orchestrator_summary.get("stable_recommendation", True))
+        payload["autonomy_orchestrator_weak_refusal_rate"] = float(autonomy_orchestrator_summary.get("weak_posture_refusal_rate", 0.0) or 0.0)
         payload["last_regression_status"] = str(autonomy_maintenance.get("last_regression_status") or "")
         payload["last_regression_stale"] = bool(autonomy_maintenance.get("last_regression_stale", False))
         payload["last_generated_queue_run_status"] = str(last_generated_queue_run.get("status") or "")

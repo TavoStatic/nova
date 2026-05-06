@@ -153,7 +153,8 @@ class TestNovaHttpProfile(unittest.TestCase):
         }
         with mock.patch("nova_http._load_autonomy_maintenance_state", return_value=state), \
             mock.patch("nova_http.runtime_processes.logical_service_processes", return_value=[]), \
-            mock.patch("nova_http.runtime_processes.select_logical_process", return_value=None):
+            mock.patch("nova_http.runtime_processes.select_logical_process", return_value=None), \
+            mock.patch("nova_http.AUTONOMY_ORCHESTRATOR_LEDGER_SERVICE.summary", return_value={"ok": True, "count": 2, "stable_recommendation": True}):
             payload = nova_http._autonomy_maintenance_summary()
 
         self.assertEqual(payload.get("generated_queue_status"), "blocked")
@@ -166,6 +167,7 @@ class TestNovaHttpProfile(unittest.TestCase):
         self.assertEqual(payload.get("queue_blocked_files"), ["a.json", "b.json", "c.json"])
         self.assertEqual(payload.get("work_tree_status"), "idle")
         self.assertEqual((payload.get("last_complete_tree_archive") or {}).get("archived_count"), 12)
+        self.assertEqual((payload.get("autonomy_orchestrator_summary") or {}).get("count"), 2)
         self.assertEqual(payload.get("last_error"), "")
 
     def test_probe_searxng_uses_relaxed_timeout(self):

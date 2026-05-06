@@ -61,6 +61,8 @@ from services.runtime_control import RUNTIME_CONTROL_SERVICE
 from services.runtime_process_state import RUNTIME_PROCESS_STATE_SERVICE
 from services.runtime_status import RUNTIME_STATUS_SERVICE
 from services.runtime_timeline import RUNTIME_TIMELINE_SERVICE
+from services.autonomy_orchestrator_ledger import AUTONOMY_ORCHESTRATOR_LEDGER_SERVICE
+from services.nova_runtime_context import AUTONOMY_ORCHESTRATOR_LEDGER_FILE
 from services.session_admin import SESSION_ADMIN_SERVICE
 from services.data_pipeline_registry import get_pipeline_schema_probe as pipeline_get_schema_probe
 from services.data_pipeline_registry import get_pipeline_status as pipeline_get_status
@@ -158,12 +160,17 @@ def _load_autonomy_maintenance_state() -> dict:
 
 
 def _autonomy_maintenance_summary() -> dict:
-    return RUNTIME_CONTROL_SERVICE.autonomy_maintenance_summary(
+    payload = RUNTIME_CONTROL_SERVICE.autonomy_maintenance_summary(
         state_payload=_load_autonomy_maintenance_state(),
         maintenance_py=AUTONOMY_MAINTENANCE_PY,
         runtime_processes_module=runtime_processes,
         strftime_fn=time.strftime,
     )
+    payload["autonomy_orchestrator_summary"] = AUTONOMY_ORCHESTRATOR_LEDGER_SERVICE.summary(
+        AUTONOMY_ORCHESTRATOR_LEDGER_FILE,
+        limit=80,
+    )
+    return payload
 
 _METRICS_LOCK = threading.Lock()
 _HTTP_REQUESTS_TOTAL = 0

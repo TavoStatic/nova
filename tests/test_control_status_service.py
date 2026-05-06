@@ -173,6 +173,13 @@ class TestControlStatusService(unittest.TestCase):
                     "reason": "Generated Work Queue has 1 actionable item.",
                     "ledger_status": "recorded",
                 },
+                "autonomy_orchestrator_summary": {
+                    "count": 4,
+                    "recommendation_changes": 1,
+                    "recommendation_change_rate": 0.3333,
+                    "stable_recommendation": False,
+                    "weak_posture_refusal_rate": 1.0,
+                },
                 "last_patch_cleanup": {
                     "status": "ok",
                     "ts": "2026-04-04 02:08:00",
@@ -273,6 +280,11 @@ class TestControlStatusService(unittest.TestCase):
         self.assertEqual(payload.get("autonomy_orchestrator_action"), "generated_queue_run_next")
         self.assertEqual(payload.get("autonomy_orchestrator_ledger_status"), "recorded")
         self.assertEqual((payload.get("autonomy_orchestrator") or {}).get("mode"), "advisory")
+        self.assertEqual(payload.get("autonomy_orchestrator_count"), 4)
+        self.assertEqual(payload.get("autonomy_orchestrator_recommendation_changes"), 1)
+        self.assertEqual(payload.get("autonomy_orchestrator_change_rate"), 0.3333)
+        self.assertFalse(payload.get("autonomy_orchestrator_stable"))
+        self.assertEqual(payload.get("autonomy_orchestrator_weak_refusal_rate"), 1.0)
 
     def test_status_payload_includes_subconscious_and_queue_fields(self):
         payload = CONTROL_STATUS_SERVICE.status_payload(

@@ -20,6 +20,7 @@ from services.nova_patching import patch_preview_summaries as service_patch_prev
 from services.autonomy_orchestrator import AUTONOMY_ORCHESTRATOR_SERVICE
 from services.control_work_trees import CONTROL_WORK_TREES_SERVICE
 from services.core_steward import build_core_steward_payload as service_build_core_steward_payload
+from services.nova_runtime_context import AUTONOMY_ORCHESTRATOR_LEDGER_FILE
 from services.test_session_control import TEST_SESSION_CONTROL_SERVICE
 from services.work_tree_signal_ingestion import WORK_TREE_SIGNAL_INGESTION_SERVICE
 from work_tree_contracts import BranchStatus, TaskStatus
@@ -32,7 +33,7 @@ TEST_SESSIONS_ROOT = RUNTIME_DIR / "test_sessions"
 TEST_SESSION_RUNNER_PY = ROOT / "scripts" / "run_test_session.py"
 STATE_FILE = RUNTIME_DIR / "autonomy_maintenance_state.json"
 MAINT_LOG = RUNTIME_DIR / "autonomy_maintenance.log"
-AUTONOMY_ORCHESTRATOR_LEDGER = RUNTIME_DIR / "autonomy_orchestrator_ledger.jsonl"
+AUTONOMY_ORCHESTRATOR_LEDGER = AUTONOMY_ORCHESTRATOR_LEDGER_FILE
 LATEST_SUBCONSCIOUS = RUNTIME_DIR / "subconscious_runs" / "latest.json"
 GENERATED_DEFS = TEST_SESSIONS_ROOT / "generated_definitions"
 UPDATES_DIR = ROOT / "updates"

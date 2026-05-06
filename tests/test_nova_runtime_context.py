@@ -20,6 +20,10 @@ class TestNovaRuntimeContext(unittest.TestCase):
         self.assertEqual(nova_runtime_context.MEMORY_DIR, nova_runtime_context.BASE_DIR / "memory")
         self.assertEqual(nova_runtime_context.POLICY_PATH, nova_runtime_context.BASE_DIR / "policy.json")
         self.assertEqual(
+            nova_runtime_context.AUTONOMY_ORCHESTRATOR_LEDGER_FILE,
+            nova_runtime_context.RUNTIME_DIR / "autonomy_orchestrator_ledger.jsonl",
+        )
+        self.assertEqual(
             nova_runtime_context.PROMOTED_DEFINITIONS_DIR,
             nova_runtime_context.TEST_SESSIONS_DIR / "promoted",
         )

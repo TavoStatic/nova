@@ -1460,6 +1460,9 @@ function renderSubconscious(status) {
     const advisor = status && status.autonomy_orchestrator
         ? status.autonomy_orchestrator
         : (maintenance && maintenance.last_autonomy_orchestrator ? maintenance.last_autonomy_orchestrator : {});
+    const advisorSummary = status && status.autonomy_orchestrator_summary
+        ? status.autonomy_orchestrator_summary
+        : (maintenance && maintenance.autonomy_orchestrator_summary ? maintenance.autonomy_orchestrator_summary : {});
     const advisorAction = advisor && advisor.action ? advisor.action : {};
     const queueItems = Array.isArray(workQueue && workQueue.items) ? workQueue.items : [];
     const liveSessions = Array.isArray(liveSummary && liveSummary.sessions) ? liveSummary.sessions : [];
@@ -1477,6 +1480,13 @@ function renderSubconscious(status) {
     const advisorDecision = advisor && advisor.decision ? advisor.decision : 'n/a';
     const advisorActionText = advisorAction && advisorAction.act ? advisorAction.act : 'none';
     const advisorLedger = advisor && advisor.ledger_status ? advisor.ledger_status : 'n/a';
+    const advisorChurn = advisorSummary && advisorSummary.count
+        ? `${advisorSummary.recommendation_changes || 0}/${Math.max(0, Number(advisorSummary.count || 0) - 1)}`
+        : 'n/a';
+    const advisorStable = advisorSummary && advisorSummary.count ? (advisorSummary.stable_recommendation ? 'stable' : 'churn') : 'n/a';
+    const advisorWeakRefusal = advisorSummary && advisorSummary.weak_posture_count
+        ? `${Math.round(Number(advisorSummary.weak_posture_refusal_rate || 0) * 100)}%`
+        : 'n/a';
 
     renderMatrixTable(subconsciousStatusBox, [
         {label: 'Latest run', value: summary.generated_at || 'not available'},
@@ -1499,6 +1509,9 @@ function renderSubconscious(status) {
         {label: 'Advisor decision', value: advisorDecision},
         {label: 'Advisor action', value: advisorActionText},
         {label: 'Advisor ledger', value: advisorLedger},
+        {label: 'Advisor churn', value: advisorChurn},
+        {label: 'Advisor stability', value: advisorStable},
+        {label: 'Weak refusals', value: advisorWeakRefusal},
         {label: 'Report path', value: summary.latest_report_path || 'n/a'},
     ], 3);
 
