@@ -7,10 +7,12 @@ Nova should be read here as a supervised local AI runtime with an operator contr
 ## Start Here
 
 - [ARCHITECTURE.md](ARCHITECTURE.md): runtime shape, component map, and request flow
+- [SERVICES_INDEX.md](SERVICES_INDEX.md): services-by-domain map for the extracted service layer
 - [OPERATIONS.md](OPERATIONS.md): how to run, test, and operate the system
 - [SUPERVISOR_CONTRACT.md](SUPERVISOR_CONTRACT.md): deterministic ownership and routing contract
 - [PATCHING.md](PATCHING.md): governed change proposal, review, apply, and rollback flow
 - [STATUS.md](STATUS.md): current project posture and resume guidance
+- [DOC_OWNERSHIP.md](DOC_OWNERSHIP.md): where each kind of documentation update belongs
 - [SEARCH_PROVIDER_ARCHITECTURE.md](SEARCH_PROVIDER_ARCHITECTURE.md): search/research routing and provider roles
 
 ## Build And Package
@@ -21,6 +23,7 @@ Nova should be read here as a supervised local AI runtime with an operator contr
 - [RELEASE_ARTIFACT.md](RELEASE_ARTIFACT.md): release artifact format and build flow
 - [WINDOWS_INSTALLER_PLAN.md](WINDOWS_INSTALLER_PLAN.md): installer direction for Windows packaging
 - [PACKAGE_PRODUCT_ROADMAP.md](PACKAGE_PRODUCT_ROADMAP.md): path from runtime to package product
+- [DATA_PIPELINES.md](DATA_PIPELINES.md): governed data-lane structure and SIS test lane posture
 
 ## Governance And Runtime Health
 

@@ -34,9 +34,9 @@ Current remaining release note:
 
 ## Packaging Checkpoint (March 30, 2026)
 
-This checkpoint is the current canonical baseline for base-package readiness after the first productization pass.
+This checkpoint is historical context for the first productization pass. Current base-package readiness is tracked by the May 6 release-clean section above and by `.\nova.cmd package-readiness`.
 
-Verified now:
+Verified then:
 
 - `nova install` is now a real bootstrap path rather than a placeholder
 - fresh canonical package docs now exist for bootstrap, handoff, and readiness:
@@ -74,24 +74,23 @@ Current packaging posture:
 
 ## Stabilization Checkpoint (March 25, 2026)
 
-This checkpoint is the current canonical baseline after the Phase 1/2 acceleration slice.
+This checkpoint is historical context for the Phase 1/2 acceleration slice. The current release-clean posture is the May 6 section at the top of this file.
 
-Verified now:
+Verified then:
 
-- full regression is green on the latest run: `672` tests, `OK`
-- representative runtime path smoke remains green:
+- full regression was green on that pass: `672` tests, `OK`
+- representative runtime path smoke remained green:
 	- `tests.test_run_test_session`
 	- `tests.test_http_identity_chat`
 	- `52` tests, `OK`
-- maintenance loop is still healthy and applying validated micro-patches
-- safety envelope is active in `observe` mode and writing promotion audit rows
-- kidney system is active in `observe` mode and reporting cleanup candidates without destructive actions
+- maintenance loop was healthy and applying validated micro-patches
+- safety envelope and kidney were still in `observe`
 
-Current runtime posture:
+Current governance posture as of May 6, 2026:
 
-- keep both `safety_envelope.mode` and `kidney.mode` in `observe` for one more full cycle
-- keep feature churn paused during the stabilization window
-- continue logging audited results before switching any governance subsystem to `enforce`
+- `policy.json` has `safety_envelope.mode` set to `enforce`
+- `policy.json` has `kidney.mode` set to `enforce`
+- release claims still need the May 6 package-readiness gate plus independent fresh-machine or VM validation before broad deployment language is appropriate
 
 New canonical docs for this slice:
 
@@ -196,11 +195,11 @@ The single operator handoff flow now lives in `docs/HANDOFF.md`.
 	- `c:/Nova/.venv/Scripts/python.exe -m unittest tests.test_action_planner tests.test_task_engine`
 - Broad rerun of the three answer-path suites no longer showed the prior assertion failures, but the run was interrupted later by a live `ollama_chat(...)` dependency during an unrelated test; do not treat that interruption as an answer-path regression
 - Supervisor contract: documented in `docs/SUPERVISOR_CONTRACT.md`
-- Hard quality bar: documented in `docs/QUALITY_BAR.md`
-- Move-first stress harness: `tests/test_move_first_stress_harness.py`
+- Hard quality bar: documented through `docs/SUPERVISOR_CONTRACT.md`, the regression contracts, and the compact `nova test` lane
+- Move-first and continuation coverage now lives in the supervisor, turn-direction, and followup service tests instead of a standalone stress-harness file
 - Architectural seams landed:
-	- followup move classification now lives in `followup_move_classifier.py` with direct seam coverage in `tests/test_followup_move_classifier.py`
-	- active-task context and binding rules now live in `active_task_constraints.py` with direct seam coverage in `tests/test_active_task_constraints.py`
+	- followup move classification now lives in `followup_move_classifier.py` and is covered through the supervisor/turn-direction regression lane
+	- active-task context and binding rules now live in `active_task_constraints.py` and are covered through the supervisor/turn-direction regression lane
 	- `nova_http.py` control-room ownership is now narrowed to transport/session glue plus stable wrappers; service modules own control auth, chat auth, telemetry and exports, control assets, subconscious live summaries, generated test-session investigation, test-session root discovery, and operator macro/backend command path logic
 - Enforcement: supervisor-bypass warnings now carry categorized allowlist metadata, dev mode raises on unallowlisted bypasses via `NOVA_DEV_MODE=1`, each turn records a structured `routing_decision`, and the closed answer-path slice now prefers supervisor-owned reply contracts over generic open fallback
 - Migrated families on the outcome + reply-contract layer:
@@ -246,9 +245,9 @@ Nova now has:
 - kept CLI and HTTP aligned on migrated deterministic behavior
 - added an initial move-first stress harness covering bare values, corrections, declarations, selections, continuations, meta/challenge turns, active-task ambiguity, retrieval followups, weather followups, and conversational non-tool statements
 - extracted the first architectural seam by moving followup move classification and its supporting heuristics into `followup_move_classifier.py`, while keeping supervisor-compatible entry points stable
-- added a direct seam test pack in `tests/test_followup_move_classifier.py` so classifier behavior stays locked independently of supervisor rule wiring
+- added regression coverage through the supervisor/turn-direction lane so classifier behavior stays locked independently of ad hoc route ordering
 - extracted the next architectural seam by moving active-task context resolution and pending-thread bindings into `active_task_constraints.py`, while keeping supervisor rule entry points stable
-- added a direct seam test pack in `tests/test_active_task_constraints.py` so active-task bindings stay locked independently of supervisor rule ordering
+- added regression coverage through the supervisor/turn-direction lane so active-task bindings stay locked independently of supervisor rule ordering
 - kept sqlite cleanup stable and avoided reintroducing the prior connection leak / resource-warning path
 - fixed teach-proposal manifests so generated proposal zips carry forward `patch_revision` metadata and preview as eligible patches
 - hardened live patch apply with a behavioral validation gate plus rollback on behavioral regression
@@ -281,55 +280,20 @@ Nova now has:
 
 ## Validation
 
-Latest focused queue/parity run:
+Current compact validation:
 
-- `c:/Nova/.venv/Scripts/python.exe -m unittest tests.test_run_test_session tests.test_http_identity_chat tests.test_http_session_manager`
-- `96` tests, `OK`
+- date: `2026-05-06`
+- `.\nova.cmd test`: `319` tests, `OK`
+- data-lane focused suite: `52` tests, `OK`
+- `.\nova.cmd package-readiness`: `ready-with-notes` for `2026.05.06.2`
 
-Latest focused queue/operator/repeated-weak-pressure rerun:
+Current full-discovery status:
 
-- `c:/Nova/.venv/Scripts/python.exe -m unittest tests.test_http_session_manager tests.test_run_test_session tests.test_http_identity_chat tests.test_core_identity_learning tests.test_move_first_stress_harness`
-- `306` tests, `OK`
-
-Latest queue-capability validation:
-
-- `c:/Nova/.venv/Scripts/python.exe -m unittest tests.test_action_planner tests.test_tool_registry tests.test_http_identity_chat tests.test_core_identity_learning`
-- `281` tests, `OK`
-- live chat experiment now shows `queue_status` in the capability registry and answers `what should you work on next` via `action_planner:run_tool -> tool_execution:ok`
-- follow-up diagnostic now stays on structured queue state: `what should you work on next` -> `why is that the next item in the queue?` now resolves through `conversation_followup:used` with active subject `queue_status:generated_work_queue`
-
-Checkpoint for next chat:
-
-- the `queue_status` root follow-up seam fix is implemented and locked for both CLI and HTTP paths
-- deterministic queue follow-ups for `why is that the next item`, `what seam is it failing on`, and `show me the report path` are implemented and validated
-- focused lock-in validation passed under a local fake-audio import shim after direct targeted test entry hit import-time `sounddevice` / PortAudio initialization in `nova_core.py`
-- current remaining engineering task: harden the import/test path so focused tests can run directly without the shim
-
-Latest generated-pack priority sweep after parity hardening:
-
-- `22` generated definitions executed through the existing runner
-- fulfillment-fallthrough family is green, including the pinned clarified-second-turn canary
-- remaining non-green generated sessions now surface as standing queue work instead of passive backlog only
-
-Latest live queue execution check:
-
-- standing queue selected `subconscious_repeated-weak-pressure-family_ambiguous-clarification.json` as the next open item
-- execution completed through the existing session runner and wrote a fresh report artifact
-- the item remained open because it still reports CLI/HTTP assistant drift, which is the intended queue behavior
-
-Latest repeated-weak-pressure family rerun after the shared deterministic fix:
-
-- `subconscious_repeated-weak-pressure-family_ambiguous-clarification.json`: green
-- `subconscious_repeated-weak-pressure-family_casual-checkin.json`: green
-- `subconscious_repeated-weak-pressure-family_plain-followup.json`: green
-- `subconscious_repeated-weak-pressure-family_soft-smalltalk-then-ambiguity.json`: green
-
-Latest verified full-suite run:
-
-- date: `2026-03-23`
-- tests: `585`
-- result: `OK`
-- runtime observed: about `127` seconds on the latest full discovery verification pass
+- date: `2026-05-06`
+- command: `.\.venv\Scripts\python.exe -m unittest discover -s tests`
+- observed result: `1694` tests, `OK`
+- cleanup closed stale full-discovery expectations plus test-isolation leaks in HTTP/weather, Kidney promoted-definition scanning, legacy control branding/timeline expectations, and CLI clean-slate weather assertion coverage
+- full-discovery is now green on the local workspace; independent fresh-machine or VM validation remains the final release-readiness gap
 
 Run manually:
 
@@ -375,19 +339,24 @@ Closed answer-path expectations now are:
 Project documentation is centralized under `C:\Nova\docs`.
 
 - update `docs/STATUS.md` for project-state changes
-- update `docs/TOOLS.md` and `docs/TOOLING_ROADMAP.md` for tool changes
+- update `docs/ARCHITECTURE.md`, `docs/SERVICES_INDEX.md`, `docs/OPERATIONS.md`, and tool/service tests for tool changes
+- use `docs/DOC_OWNERSHIP.md` to decide which doc owns a change
 - do not reintroduce root-level resume/status artifacts; the old March handoff files were removed because they created overlapping planning surfaces
 
 ## Resume Guidance
 
-Primary resume order:
+Primary current-state order:
 
-1. `C:\Nova\This_is_nova`
-2. `C:\Nova\docs\PHASE_CLOSEOUT_CHECKLIST.md`
-3. `C:\Nova\docs\HANDOFF.md`
+1. `C:\Nova\docs\STATUS.md`
+2. `.\nova.cmd package-readiness`
+3. `C:\Nova\docs\PHASE_CLOSEOUT_CHECKLIST.md`
+4. `C:\Nova\docs\HANDOFF.md`
+5. `C:\Nova\This_is_nova`
+
+`This_is_nova` is append-only build history and a cross-system context guide. It is not the authority for current governance, release readiness, policy, runtime truth, or test results.
 
 Suggested resume prompt:
 
 ```text
-continue from C:\Nova\This_is_nova
+review C:\Nova\docs\STATUS.md, then consult C:\Nova\This_is_nova for append-only build history
 ```

@@ -9,18 +9,16 @@ class TestNovaIdentityHistory(unittest.TestCase):
             {"identity_history_kind": "name_origin", "subject": "self"},
             {"kind": "identity_profile", "subject": "self"},
             "why that name?",
-            runtime_scope={
-                "_normalize_turn_text": lambda text: text.lower().strip(),
-                "_speaker_matches_developer": lambda: False,
-                "_make_conversation_state": lambda kind, **data: {"kind": kind, **data},
-                "hard_answer": lambda _text: "",
-                "_developer_profile_reply": lambda **_kwargs: "profile reply",
-                "_developer_identity_followup_reply": lambda **_kwargs: "developer identity reply",
-                "_identity_name_followup_reply": lambda subject: f"name followup for {subject}",
-                "_identity_profile_followup_reply": lambda subject, **_kwargs: f"profile followup for {subject}",
-                "_classify_name_origin_outcome": lambda payload: {"reply_text": "origin story", "kind": "story_known"},
-                "render_reply": lambda payload: str(payload.get("reply_text") or ""),
-            },
+            normalize_turn_text_fn=lambda text: text.lower().strip(),
+            speaker_matches_developer_fn=lambda: False,
+            make_conversation_state_fn=lambda kind, **data: {"kind": kind, **data},
+            hard_answer_fn=lambda _text: "",
+            developer_profile_reply_fn=lambda **_kwargs: "profile reply",
+            developer_identity_followup_reply_fn=lambda **_kwargs: "developer identity reply",
+            identity_name_followup_reply_fn=lambda subject: f"name followup for {subject}",
+            identity_profile_followup_reply_fn=lambda subject, **_kwargs: f"profile followup for {subject}",
+            classify_name_origin_outcome_fn=lambda payload: {"reply_text": "origin story", "kind": "story_known"},
+            render_reply_fn=lambda payload: str(payload.get("reply_text") or ""),
         )
 
         self.assertEqual(reply, "name followup for self")

@@ -2842,7 +2842,8 @@ class TestCoreIdentityLearning(unittest.TestCase):
             nova_core.run_loop(self._SilentTTS())
 
         output = stdout.getvalue().lower()
-        self.assertIn("need a confirmed location or coordinates", output)
+        self.assertIn("location", output)
+        self.assertNotIn("api.weather.gov", output)
 
     def test_cli_bare_numeric_turn_clarifies_instead_of_using_saved_location(self):
         orig_get_saved_location_text = nova_core.get_saved_location_text

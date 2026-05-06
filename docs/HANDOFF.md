@@ -1,6 +1,7 @@
 # NYO System Handoff
 
 Date: 2026-03-30
+Last verified: 2026-05-06
 
 ## Purpose
 
@@ -75,13 +76,13 @@ If the candidate came from the local packaging flow rather than an extracted zip
 After a fresh-machine or staged validation pass is complete, record the result:
 
 ```powershell
-.\nova.cmd package-promote --result pass --version 2026.03.30.2 --note "validated on operator VM"
+.\nova.cmd package-promote --result pass --version <candidate-version> --note "validated on operator VM"
 ```
 
 If the operator completed a filled validation record, promote directly from the record:
 
 ```powershell
-.\nova.cmd package-promote --record runtime\exports\release_packages\validation_records\nyo-system-base-rc-2026.03.30.2-validation-seed-fix-20260330_161051.md --result pass-with-notes
+.\nova.cmd package-promote --record runtime\exports\release_packages\validation_records\<candidate-validation-record>.md --result pass-with-notes
 ```
 
 Use the package-readiness gate in [BASE_PACKAGE_READINESS.md](BASE_PACKAGE_READINESS.md) to decide whether the package candidate is acceptable.
@@ -119,6 +120,18 @@ Stop guard/core:
 ```powershell
 .\nova.cmd stop
 ```
+
+## Historical Build Log
+
+`C:\Nova\This_is_nova` is append-only build history and a cross-system context guide. It can help a new operator understand how the project got here, but it is not the authority for current release readiness, policy, runtime truth, or test results.
+
+Use current commands and docs for authority:
+
+- `.\nova.cmd package-readiness`
+- `.\nova.cmd runtime-status`
+- `.\nova.cmd test`
+- [STATUS.md](STATUS.md)
+- [BASE_PACKAGE_READINESS.md](BASE_PACKAGE_READINESS.md)
 
 ## Handoff Boundaries
 

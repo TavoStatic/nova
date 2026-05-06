@@ -33,10 +33,10 @@ Architecturally, that means Nova should be treated as a supervised local runtime
   - process supervision
   - heartbeat and runtime state tracking
 
-- `run_tools.py` and `chat_client.py`
-  - client-side access to `/api/chat`
-  - identity propagation
-  - optional login when chat auth is enabled
+- `run.py` and `run_tools.py`
+  - voice chat and tool-runner entrypoints
+  - shared voice interaction service access
+  - tool-console dispatch for local tool-assisted flows
 
 - `tools/`
   - shared tool contract via `NovaTool` and `ToolContext`
@@ -85,7 +85,7 @@ User Input
   ↓
 HTTP UI / CLI / Tool Runner
   ↓
-nova_http.py / chat_client.py / run_tools.py
+nova_http.py / run.py / run_tools.py
   ↓
 nova_core.py
   ↓
@@ -105,7 +105,7 @@ UI / CLI output
 Nova is currently closer to a consolidating `B` shape than a fully layered `A` shape.
 
 - `nova_core.py` is the de facto center of gravity and is absorbing more of the policy, memory, deterministic routing, and tool orchestration logic.
-- `nova_http.py`, `chat_client.py`, and `run_tools.py` still interact with multiple cross-cutting concerns rather than through a strict interface boundary.
+- `nova_http.py`, `run.py`, and `run_tools.py` still interact with multiple cross-cutting concerns rather than through a strict interface boundary.
 - The project is entering the architecture consolidation phase, but it is not yet a clean interface-to-core-to-tools stack.
 
 The likely next turning point is to formalize clearer boundaries around:
@@ -140,6 +140,32 @@ The short version is:
 - `Whoogle` should remain an optional fallback, not a primary dependency
 
 The decision spine should route between those providers intentionally based on turn type and research goal rather than flattening everything into one generic search lane.
+
+## Routing Module Map
+
+The current routing surface is a concrete subsystem, not just helper code inside `nova_core.py`.
+
+- `routing/turn_parser.py`: turns raw input into structured turn text and candidate metadata.
+- `routing/turn_model.py`: shared turn data structures.
+- `routing/heuristics.py`: reusable routing heuristics that should not drift back into HTTP or UI code.
+- `routing/command_router.py`: command-oriented route decisions.
+- `routing/context_router.py`: context and continuation routing support.
+- `routing/execution_plan.py`: execution-plan representation for downstream handlers.
+- `routing/legacy_routes.py`: compatibility layer for older routes that have not fully moved into the newer spine.
+
+Related top-level routing modules:
+
+- `planner_decision.py`: planner-owned turn classification and route choice.
+- `action_planner.py`: compatibility adapter over planner decisions.
+- `supervisor.py` and `services/supervisor_*.py`: deterministic rule arbitration and rule-family ownership.
+- `followup_move_classifier.py`: continuation move classification.
+- `active_task_constraints.py`: active-task and pending-thread constraints.
+
+## Services Module Map
+
+The `services/` directory is now the main extraction surface for behavior that used to crowd `nova_core.py` and `nova_http.py`.
+
+See [SERVICES_INDEX.md](SERVICES_INDEX.md) for the maintained services-by-domain index. Keep that index concise and clustered; it should explain ownership without becoming a line-by-line inventory.
 
 ## Supervisor Ownership Constitution
 

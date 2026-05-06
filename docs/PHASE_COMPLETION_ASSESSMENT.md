@@ -1,6 +1,7 @@
 # NYO System Phase Completion Assessment
 
 Date: 2026-04-01
+Last verified: 2026-05-06
 
 ## Purpose
 
@@ -143,16 +144,16 @@ That matters because `nova_http.py` is one of the largest sources of branching w
 
 Until the boundary cleanup is finished, changes in adjacent areas will keep reopening HTTP concerns.
 
-### 3. Governance Is Operational But Not Fully Mature
+### 3. Governance Is Enforced But Still Needs Monitored Release Confidence
 
-The repo has meaningful governance layers, but the docs still treat some of them as not fully mature:
+The repo has meaningful governance layers and the current policy has moved them into enforce mode:
 
-- Safety Envelope still in `observe`
-- Kidney still in `observe`
+- Safety Envelope is in `enforce`
+- Kidney is in `enforce`
 
 That does not mean governance is weak.
 
-It means the project should avoid claiming final governance maturity for this phase until the monitored cycle is complete and the release posture is re-verified.
+It means the project should avoid claiming final governance maturity until enforced-mode behavior is monitored and the release posture is re-verified from the promoted artifact.
 
 ### 4. Release Discipline Still Depends Too Much On Local Context
 
@@ -243,7 +244,7 @@ This phase should be considered complete only when these are true:
 
 ### Should Continue, But Behind The Main Objective
 
-1. governance hardening after the observed cycle completes
+1. governance monitoring after the enforced cycle completes
 2. dependency isolation cleanup
 3. additional installer convenience and polish
 

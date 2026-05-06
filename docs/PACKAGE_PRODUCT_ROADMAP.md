@@ -1,6 +1,7 @@
 # Nova Package Product Roadmap
 
 Date: 2026-03-25
+Last verified: 2026-05-06
 
 ## Goal
 Drive Nova from an actively evolving supervised runtime to a repeatable package product with clear release gates, documented operations, and stable governance defaults.
@@ -48,11 +49,11 @@ Drive Nova from an actively evolving supervised runtime to a repeatable package 
 3. Keep product-facing docs consistent with shipped behavior, not aspirational behavior.
 
 ## Near-Term Plan
-1. Hold `safety_envelope.mode=observe` and `kidney.mode=observe` for one full monitored cycle.
-2. If stable, move Kidney to `enforce` first while keeping Safety Envelope in `observe`.
-3. Re-audit and then decide on Safety Envelope `enforce` transition.
-4. Keep the source-bootstrap zip as the current release artifact and rerun its validation for each candidate.
-5. Once governance is stable, run a package-readiness pass and prepare a release candidate checklist.
+1. Monitor `safety_envelope.mode=enforce` and `kidney.mode=enforce` for uncontrolled destructive behavior or promotion drift.
+2. Keep the source-bootstrap zip as the current release artifact and rerun its validation for each candidate.
+3. Use `nova package-readiness` as the release-candidate truth gate.
+4. Complete independent fresh-machine or VM validation before final release language.
+5. Keep product-facing docs consistent with shipped behavior, not aspirational behavior.
 
 ## Definition of "Close To Package Product"
 Nova is considered near package-ready when:

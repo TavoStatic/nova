@@ -1,5 +1,9 @@
 # Kidney System
 
+Last verified: 2026-05-06
+
+Current policy posture: `kidney.mode` is `enforce` in `policy.json`.
+
 ## Purpose
 The Kidney is the cleanup partner to the Phase 2 safety envelope.
 

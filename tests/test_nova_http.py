@@ -849,9 +849,9 @@ class TestNovaHttpProfile(unittest.TestCase):
             nova_http.nova_core.mem_add = orig_mem_add
 
     def test_location_self_diagnostic_when_missing(self):
-        self.orig_mem_audit = nova_http.nova_core.mem_audit
-        self.orig_get_saved_location_text = nova_http.nova_core.get_saved_location_text
-        self.orig_runtime_device_location_payload = nova_http.nova_core.runtime_device_location_payload
+        orig_mem_audit = nova_http.nova_core.mem_audit
+        orig_get_saved_location_text = nova_http.nova_core.get_saved_location_text
+        orig_runtime_device_location_payload = nova_http.nova_core.runtime_device_location_payload
         try:
             nova_http.nova_core.mem_audit = lambda q: "{\"results\": []}"
             nova_http.nova_core.get_saved_location_text = lambda: ""
@@ -859,9 +859,9 @@ class TestNovaHttpProfile(unittest.TestCase):
             reply = nova_http.process_chat("s7", "where is nova?")
             self.assertIn("I don't have a stored location yet.", reply)
         finally:
-            nova_http.nova_core.mem_audit = self.orig_mem_audit
-            nova_http.nova_core.get_saved_location_text = self.orig_get_saved_location_text
-            nova_http.nova_core.runtime_device_location_payload = self.orig_runtime_device_location_payload
+            nova_http.nova_core.mem_audit = orig_mem_audit
+            nova_http.nova_core.get_saved_location_text = orig_get_saved_location_text
+            nova_http.nova_core.runtime_device_location_payload = orig_runtime_device_location_payload
 
     def test_read_text_safely_handles_utf16_without_null_padded_output(self):
         with tempfile.TemporaryDirectory() as td:

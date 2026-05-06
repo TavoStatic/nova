@@ -11,7 +11,7 @@ SPEC.loader.exec_module(HEALTH_CHECK)
 
 
 class TestHealthCheckScript(unittest.TestCase):
-    def test_suite_command_targets_preflight_lane_runner(self):
+    def test_suite_command_targets_unit_lane_runner(self):
         command = HEALTH_CHECK._suite_command()
 
         self.assertEqual(
@@ -19,7 +19,7 @@ class TestHealthCheckScript(unittest.TestCase):
             [
                 HEALTH_CHECK.sys.executable,
                 str(HEALTH_CHECK.WORKSPACE_ROOT / "run_regression.py"),
-                "preflight",
+                "unit",
             ],
         )
 

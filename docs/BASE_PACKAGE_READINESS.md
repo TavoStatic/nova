@@ -1,6 +1,7 @@
 # NYO System Base Package Readiness
 
 Date: 2026-03-30
+Last verified: 2026-05-06
 
 ## Purpose
 
@@ -10,9 +11,9 @@ It is intentionally stricter than "the repo runs on my machine" and narrower tha
 
 ## Current Read
 
-- close to a base runtime package
-- moderately close to a base model package
-- not yet a clean drop-in distributable package
+- release-clean candidate exists and is promoted `ready-with-notes`
+- base runtime package validation passed from a same-machine short-path extract
+- not yet a final broadly deployable package until independent fresh-machine or VM validation is complete
 
 ## Current Gate Status
 
@@ -28,13 +29,13 @@ Required:
 
 ### Gate 2: Governance Stability
 
-Status: in progress
+Status: enforced, still must be monitored before final release language
 
-Current posture from status docs:
+Current posture from `policy.json` and status docs:
 
-- Safety Envelope still in `observe`
-- Kidney still in `observe`
-- packaging should not claim full governance maturity until the monitored cycle is complete
+- Safety Envelope is in `enforce`
+- Kidney is in `enforce`
+- packaging should not claim full governance maturity until enforced-mode behavior is monitored and the release posture is re-verified
 
 ### Gate 3: Packaging Boundary
 
@@ -98,17 +99,19 @@ The package is a release candidate only when all items below are true.
 - package validation has been run on a clean or near-clean environment
 - the latest candidate reports `ready` or `ready-with-notes` from `nova package-readiness`
 
-Latest packaging validation on `2026-03-30`:
+Latest packaging validation on `2026-05-06`:
 
-- near-clean staged copy bootstrap succeeded outside the live workspace tree
-- staged `nova doctor`, `nova runtime-status`, and `nova test` all passed
+- release-clean candidate `2026.05.06.2` reports `ready-with-notes`
+- zip verification and extracted-package verification passed
+- extracted package bootstrap succeeded from short path `C:\N\r62_082924`
+- extracted `nova doctor`, `nova runtime-status`, `nova smoke-base --fix`, and `nova test` passed
 
 ## Main Remaining Gaps
 
 - packaging-boundary maintenance as the repo evolves
-- fresh-machine execution of the built zip artifact is still outstanding
+- independent fresh-machine or VM execution of the built zip artifact is still outstanding
 - cleaner runtime dependency isolation for broad validation
-- release-candidate rerun discipline for the built zip artifact
+- keep both compact and full-discovery validation rerun discipline before promoting beyond release-candidate language
 
 ## Non-Goals For This Gate
 

@@ -1,5 +1,5 @@
 param(
-  # Subcommand: look | lookfull | chat | camera | ls | read | find | run | webui | webui-start | webui-stop | webui-status | operator | hub | smoke | test | health | guard | install | update | diag | logs | mem | config
+  # Subcommand: look | lookfull | chat | camera | ls | read | find | run | webui | webui-start | webui-stop | webui-status | operator | hub | smoke | test | health | guard | install | update | diag | logs | mem | memory | config | stop
   [Parameter(Position=0)]
   [string]$cmd = "help",
 
@@ -29,7 +29,7 @@ $CORE      = Join-Path $ROOT "nova_core.py"
 $SMOKEPY   = Join-Path $ROOT "smoke_test.py"
 $REGRESSION = Join-Path $ROOT "run_regression.py"
 $RUN_TOOLS = Join-Path $ROOT "run_tools.py"   # optional
-$CHATPY    = Join-Path $ROOT "chat_client.py" # unified text chat client
+$CHATPY    = Join-Path $ROOT "run.py"         # voice chat front door
 $WEBUIPY   = Join-Path $ROOT "nova_http.py"   # network UI/API
 $HEALTHPY  = Join-Path $ROOT "health.py"      # optional
 $MEMORYPY  = Join-Path $ROOT "memory.py"      # optional
@@ -805,7 +805,7 @@ function Show-Help {
   Write-Host "  nova help"
   Write-Host "  nova look                      # center-crop screenshot -> vision"
   Write-Host "  nova lookfull                  # full screenshot -> vision"
-  Write-Host "  nova chat                      # unified API chat (/api/chat)"
+  Write-Host "  nova chat                      # voice chat front door via run.py"
   Write-Host "  nova camera                    # webcam snapshot -> vision"
   Write-Host "  nova camera ""your prompt""      # webcam with custom prompt"
   Write-Host "  nova hub                       # menu: chat / look / camera"
@@ -836,6 +836,7 @@ function Show-Help {
   Write-Host "  nova webui-stop                # stop all nova_http processes"
   Write-Host "  nova webui-status [--port 8080] # show webui pids + endpoint check"
   Write-Host "  nova runtime-status            # logical guard/core/webui summary"
+  Write-Host "  nova stop                      # stop guard/core"
   Write-Host "  nova operator [--session <id>] [--macro <id>] [message]  # local operator CLI via /api/control/action"
   Write-Host "  nova operator --list-macros      # list saved operator macros"
   Write-Host "  nova smoke-base [--fix]        # base package smoke without Ollama requirement"
@@ -845,12 +846,14 @@ function Show-Help {
   Write-Host "  nova subconscious [--family <id>] [--label overnight]  # unattended subconscious batch report"
   Write-Host "  nova runtools                  # (optional) run_tools.py if you use it"
   Write-Host "  nova tools                     # list registered Nova tools"
+  Write-Host "  nova update                    # reserved update helper"
   Write-Host ""
   Write-Host "Ops (optional / future):"
   Write-Host "  nova health                    # health.py (if present)"
   Write-Host "  nova logs                      # open log folder"
   Write-Host "  nova policy                    # open policy.json"
   Write-Host "  nova mem                       # open memory folder"
+  Write-Host "  nova memory                    # run memory.py helper when present"
   Write-Host "  nova config                    # open config file (future)"
   Write-Host "  nova guard [--fix]             # supervisor (future)"
   Write-Host "  nova diag                      # full diagnostics (future)"

@@ -196,6 +196,6 @@ C:\Nova\.venv\Scripts\python.exe -m unittest \
 - `nova_core.py`: core orchestration, policy, memory, tools, teach flow
 - `nova_http.py`: runtime console, operator console, auth, session APIs
 - `memory.py`: SQLite-backed memory storage and recall
-- `run_tools.py`: tool-assisted API chat runner
-- `chat_client.py`: CLI chat client for `/api/chat`
+- `run.py`: voice chat front door using the shared voice interaction service
+- `run_tools.py`: voice/tool runner and registered-tool listing helper
 - `nova_guard.py`: supervisor/heartbeat management

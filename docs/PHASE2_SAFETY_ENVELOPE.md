@@ -1,5 +1,9 @@
 # Phase 2 Safety Envelope
 
+Last verified: 2026-05-06
+
+Current policy posture: `safety_envelope.mode` is `enforce` in `policy.json`.
+
 ## Purpose
 Prevent live-chat ingestion from creating overfit, unstable, or low-value training definitions.
 
@@ -44,6 +48,8 @@ Every live-chat-derived or subconscious-generated definition is evaluated agains
 1. Start in `observe` mode.
 2. Review audit output for several cycles.
 3. Flip to `enforce` once replay stability and audit decisions match operator expectations.
+
+Current status: the rollout has reached enforce mode. Keep monitoring audit output before using final governance-maturity language in release docs.
 
 ## Operator Status Check
 - `phase 2 status`

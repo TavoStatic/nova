@@ -17,6 +17,7 @@ class TestKidney(unittest.TestCase):
         self.orig_runtime_dir = kidney.RUNTIME_DIR
         self.orig_updates_dir = kidney.UPDATES_DIR
         self.orig_generated_dir = kidney.GENERATED_DEFINITIONS_DIR
+        self.orig_promoted_dir = kidney.PROMOTED_DEFINITIONS_DIR
         self.orig_pending_dir = kidney.PENDING_REVIEW_DIR
         self.orig_quarantine_dir = kidney.QUARANTINE_DIR
         self.orig_test_sessions_dir = kidney.TEST_SESSIONS_DIR
@@ -41,6 +42,7 @@ class TestKidney(unittest.TestCase):
         kidney.RUNTIME_DIR = runtime_dir
         kidney.UPDATES_DIR = updates_dir
         kidney.GENERATED_DEFINITIONS_DIR = test_sessions_dir / "generated_definitions"
+        kidney.PROMOTED_DEFINITIONS_DIR = test_sessions_dir / "promoted"
         kidney.PENDING_REVIEW_DIR = test_sessions_dir / "pending_review"
         kidney.QUARANTINE_DIR = test_sessions_dir / "quarantine"
         kidney.TEST_SESSIONS_DIR = test_sessions_dir
@@ -62,6 +64,7 @@ class TestKidney(unittest.TestCase):
         kidney.RUNTIME_DIR = self.orig_runtime_dir
         kidney.UPDATES_DIR = self.orig_updates_dir
         kidney.GENERATED_DEFINITIONS_DIR = self.orig_generated_dir
+        kidney.PROMOTED_DEFINITIONS_DIR = self.orig_promoted_dir
         kidney.PENDING_REVIEW_DIR = self.orig_pending_dir
         kidney.QUARANTINE_DIR = self.orig_quarantine_dir
         kidney.TEST_SESSIONS_DIR = self.orig_test_sessions_dir

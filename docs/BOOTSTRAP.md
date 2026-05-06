@@ -1,6 +1,9 @@
 # NYO System Bootstrap
 
 Date: 2026-03-30
+Last verified: 2026-05-06
+
+Verification note: the source-bootstrap flow was revalidated from the `2026.05.06.2` release-clean package on the same machine from a short extracted path. Independent fresh-machine or VM validation is still pending.
 
 ## Purpose
 

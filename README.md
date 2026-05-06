@@ -74,8 +74,10 @@ Domain-specific behavior should live in explicit packs, policies, tools, or high
 - [docs/README.md](docs/README.md)
 - [docs/OPERATIONS.md](docs/OPERATIONS.md)
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
+- [docs/SERVICES_INDEX.md](docs/SERVICES_INDEX.md)
 - [docs/SUPERVISOR_CONTRACT.md](docs/SUPERVISOR_CONTRACT.md)
 - [docs/STATUS.md](docs/STATUS.md)
+- [docs/DOC_OWNERSHIP.md](docs/DOC_OWNERSHIP.md)
 - [docs/PATCHING.md](docs/PATCHING.md)
 - [docs/PACKAGE_PRODUCT_ROADMAP.md](docs/PACKAGE_PRODUCT_ROADMAP.md)
 

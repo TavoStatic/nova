@@ -67,7 +67,7 @@ class TestNovaHttpTransportService(unittest.TestCase):
             parse_request_path_fn=lambda _path: ("/api/control/status", {}),
             basic_route_request_fn=lambda *_args: None,
             chat_history_request_fn=lambda *_args: (200, {"ok": True}),
-            control_api_request_fn=lambda path, _qs: (200, {"ok": True, "path": path}),
+            control_api_request_fn=lambda path, _handler, _qs: (200, {"ok": True, "path": path}),
             json_response_fn=lambda _handler, code, payload: responses.append((code, payload)),
             response_service=_ResponseService(),
             record_http_response_fn=lambda _code: None,

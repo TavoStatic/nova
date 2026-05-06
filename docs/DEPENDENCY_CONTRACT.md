@@ -1,6 +1,9 @@
 # NYO System Dependency Contract
 
 Date: 2026-03-30
+Last verified: 2026-05-06
+
+Verification note: dependencies were installed successfully by `nova install` from the `2026.05.06.2` extracted package. Package bootstrap remains source-first and does not lock every transitive dependency version.
 
 ## Purpose
 

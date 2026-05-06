@@ -396,7 +396,9 @@ class TestHttpSessionManager(unittest.TestCase):
         self.assertTrue(any(item.get("source") == "operator" and item.get("title") == "Guard Start" for item in events))
         self.assertTrue(any(item.get("title") == "Operator Prompt [MACRO]" and item.get("operator_source") == "cli" and item.get("operator_macro") == "inspect-runtime" for item in events))
         self.assertTrue(any(item.get("service") == "patch" and item.get("level") == "danger" for item in events))
-        self.assertTrue(any(item.get("title") == "Boot observation failed" for item in events))
+        self.assertFalse(any(item.get("title") == "Boot observation failed" for item in events))
+        self.assertFalse(any(item.get("title") == "Core attempt failed" for item in events))
+        self.assertFalse(any(item.get("title") == "Restart backoff armed" for item in events))
 
     def test_runtime_artifacts_payload_summarizes_runtime_files(self):
         with tempfile.TemporaryDirectory() as td:
@@ -927,7 +929,7 @@ class TestHttpSessionManager(unittest.TestCase):
         self.assertIn("real_world_task_create", script)
         self.assertIn("renderRealWorldTasks", script)
         self.assertIn("taskManagerSelect", script)
-        self.assertIn("NYO System Control", html)
+        self.assertIn("NYO AI Systems Control", html)
         self.assertIn("NOT YOUR ORDINARY AI SYSTEM", html)
         self.assertIn("Overview", html)
         self.assertIn("Operations", html)

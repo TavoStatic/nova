@@ -1,6 +1,7 @@
 # Nova Packaging Matrix
 
 Date: 2026-03-25
+Last verified: 2026-05-06
 
 ## Purpose
 
@@ -39,7 +40,7 @@ Inputs intentionally supplied by the operator or deployment environment, rather 
 | `*.py`, `nova.cmd`, `nova.ps1`, `run.py`, `health.py`, `doctor.py` | Shipped source | Yes | Core runtime, launchers, operator entrypoints |
 | `docs/` | Shipped source | Yes | Canonical contracts, architecture, operations, package guidance |
 | `tests/` | Shipped source | Yes | Validation surface for package integrity |
-| `tools/`, `TOOL_MANIFEST.json` | Shipped source | Yes | Tool contract and registry surface |
+| `tools/` | Shipped source | Yes | Tool contract and registry surface; current inventory is code-backed rather than a separate `TOOL_MANIFEST.json` file |
 | `templates/`, `static/` | Shipped source | Yes | Browser runtime console and operator-console UI assets |
 | `policy.example.json` | Shipped source | Yes | Example/default policy template |
 | `policy.json` | Shipped source | Yes, with care | Current repo treats it as part of the runnable package; environment-specific deployments may override it later |
@@ -74,6 +75,15 @@ Base-package intent today is:
 - treat domain specialization as explicit operator input rather than hidden bundled knowledge
 - keep safety-envelope and kidney governance logs as local runtime artifacts, not package payload
 - build the distributable candidate as a source-bootstrap zip via `nova package-build`
+
+## Root Artifact Policy
+
+Generated and scratch artifacts should not become root-level source truth.
+
+- Runtime truth belongs under `runtime/`, `logs/`, `memory/`, or the relevant generated-artifact directory.
+- Local probe folders such as `codex_pulse_test_*`, `codex_reflect_*`, and similar scratch outputs are disposable and excluded from package payloads.
+- `This_is_nova` is an append-only historical build log and cross-system context guide, not package authority.
+- If a new generated artifact appears at the repo root, either move the producing code to a runtime-owned path or document and ignore the artifact class explicitly.
 
 ## Important Exceptions
 
