@@ -173,6 +173,10 @@ def build_pulse_payload(
     ollama_up = bool(ollama_api_up_fn())
     routing_stable = bool(behavior.get("routing_stable", False))
     fallback_score = float(autonomy.get("last_fallback_overuse_score") or 0.0)
+    last_generated_queue_run = autonomy.get("last_generated_queue_run") if isinstance(autonomy.get("last_generated_queue_run"), dict) else {}
+    latest_queue_status = str(last_generated_queue_run.get("status") or "").strip().lower()
+    latest_queue_report_status = str(last_generated_queue_run.get("latest_report_status") or "").strip().lower()
+    fallback_pressure_active = fallback_score >= 0.75 and latest_queue_report_status in {"drift", "failed", "error", "blocked"}
     promoted_total = int(audit.get("promoted_total", 0) or 0)
     prior_promoted_total = int(prior.get("promoted_total", 0) or 0)
     promoted_delta = promoted_total - prior_promoted_total if prior_promoted_total else 0
@@ -197,6 +201,9 @@ def build_pulse_payload(
         "llm_fallback_count": int(behavior.get("llm_fallback", 0) or 0),
         "last_reflection_at": str(behavior.get("last_reflection_at") or "unknown"),
         "last_fallback_overuse_score": fallback_score,
+        "fallback_pressure_active": fallback_pressure_active,
+        "last_generated_queue_status": latest_queue_status,
+        "last_generated_queue_report_status": latest_queue_report_status,
         "last_regression_status": str(autonomy.get("last_regression_status") or "unknown"),
         "last_regression_stale": bool(autonomy.get("last_regression_stale", False)),
         "patch_revision": int(patch.get("current_revision", 0) or 0),

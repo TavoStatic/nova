@@ -40,7 +40,16 @@ def test_build_pulse_payload_and_render_roundtrip() -> None:
         )
         autonomy_file = root / "autonomy.json"
         autonomy_file.write_text(
-            json.dumps({"last_fallback_overuse_score": 0.2, "last_regression_status": "ok"}),
+            json.dumps(
+                {
+                    "last_fallback_overuse_score": 0.2,
+                    "last_regression_status": "ok",
+                    "last_generated_queue_run": {
+                        "status": "actionable",
+                        "latest_report_status": "green",
+                    },
+                }
+            ),
             encoding="utf-8",
         )
         pulse_snapshot_file = root / "pulse_snapshot.json"
@@ -86,6 +95,8 @@ def test_build_pulse_payload_and_render_roundtrip() -> None:
         assert payload["generated_total"] == 1
         assert payload["patch_revision"] == 7
         assert payload["last_regression_stale"] is False
+        assert payload["last_generated_queue_report_status"] == "green"
+        assert payload["fallback_pressure_active"] is False
         assert payload["autonomy_level"] == "operational"
 
         rendered = render_nova_pulse(payload)

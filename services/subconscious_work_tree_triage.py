@@ -18,6 +18,71 @@ _FULFILLMENT_SEAM_HINTS = {
 }
 
 
+def _fallback_review_context_for_source(source_key: str) -> dict[str, Any]:
+    key = str(source_key or "").strip().lower()
+    if "fulfillment" in key:
+        return {
+            "review_text": "Show me workable options without collapsing too early.",
+            "pending_action": None,
+            "conversation_state": None,
+            "turns": [],
+        }
+    if "weather" in key:
+        return {
+            "review_text": "yes get the weather for our location",
+            "pending_action": None,
+            "conversation_state": None,
+            "turns": [],
+        }
+    if "memory" in key:
+        return {
+            "review_text": "Remember this: my favorite color is teal. Don't forget.",
+            "pending_action": None,
+            "conversation_state": None,
+            "turns": [],
+        }
+    if "retrieval" in key:
+        return {
+            "review_text": "tell me about the first one",
+            "pending_action": None,
+            "conversation_state": {
+                "kind": "retrieval",
+                "active_subject": "retrieval_followup",
+                "selected_result_index": 0,
+            },
+            "turns": [
+                ("user", "find current PEIMS reporting guidance"),
+                ("assistant", "I found a few relevant results."),
+            ],
+        }
+    if "patch" in key:
+        review_text = "patch preview teach.zip" if "preview" in key else "please patch apply updates.zip"
+        return {
+            "review_text": review_text,
+            "pending_action": None,
+            "conversation_state": None,
+            "turns": [],
+        }
+    if "session_fact" in key or "fact_recall" in key:
+        return {
+            "review_text": "What codeword did I just ask you to remember?",
+            "pending_action": None,
+            "conversation_state": None,
+            "turns": [
+                ("user", "For this session, remember the codeword cobalt sparrow and the topic packaging drift."),
+                ("assistant", "Got it."),
+            ],
+        }
+    if "weak" in key or "unclear" in key:
+        return {
+            "review_text": "what now",
+            "pending_action": None,
+            "conversation_state": None,
+            "turns": [],
+        }
+    return {}
+
+
 class SubconsciousWorkTreeTriageService:
     """Translate subconscious pressure into governed Work Tree review candidates."""
 
@@ -110,13 +175,27 @@ class SubconsciousWorkTreeTriageService:
                 "conversation_state": None,
                 "turns": [],
             }
-        if signal_key in {"fulfillment_missed", "fallback_overuse"}:
+        if signal_key == "fulfillment_missed":
             return {
                 "review_text": "show me workable options without collapsing too early",
                 "pending_action": None,
                 "conversation_state": None,
                 "turns": [],
             }
+        if signal_key == "fallback_overuse":
+            review_context = _fallback_review_context_for_source(
+                " ".join(
+                    value
+                    for value in (
+                        family_id,
+                        target_seam,
+                        suggested_test_name,
+                    )
+                    if value
+                )
+            )
+            if review_context:
+                return review_context
         if signal_key == "route_conflict":
             return {
                 "review_text": "compare options and also use the saved route",

@@ -98,7 +98,7 @@ def load_session(session_name: str) -> dict[str, Any]:
     if not candidate.exists():
         raise FileNotFoundError(f"Session file not found: {candidate}")
 
-    payload = json.loads(candidate.read_text(encoding="utf-8"))
+    payload = json.loads(candidate.read_text(encoding="utf-8-sig"))
     if not isinstance(payload, dict):
         raise ValueError("Session JSON must be an object")
 

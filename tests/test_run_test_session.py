@@ -75,6 +75,24 @@ class TestRunTestSessionIsolation(unittest.TestCase):
 
         self.assertEqual(payload.get("compare_modes"), ["run_tools", "http"])
 
+    def test_load_session_reads_utf8_sig_json(self):
+        with tempfile.TemporaryDirectory() as td:
+            session_path = Path(td) / "bom_session.json"
+            session_path.write_text(
+                json.dumps(
+                    {
+                        "name": "bom-session",
+                        "messages": ["hello"],
+                    }
+                ),
+                encoding="utf-8-sig",
+            )
+
+            payload = load_session(str(session_path))
+
+        self.assertEqual(payload.get("name"), "bom-session")
+        self.assertEqual(payload.get("messages"), ["hello"])
+
     def test_generated_canary_has_no_cli_http_drift(self):
         with tempfile.TemporaryDirectory() as td:
             canary_path = Path(td) / "generated_canary.json"

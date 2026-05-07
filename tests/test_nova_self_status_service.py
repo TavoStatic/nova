@@ -96,6 +96,27 @@ def test_self_status_ignores_stale_regression_failure() -> None:
     assert "Latest regression is not green" not in render_self_status(payload)
 
 
+def test_self_status_treats_green_fallback_training_pressure_as_update() -> None:
+    payload = build_self_status_payload(
+        pulse_payload={
+            "ollama_up": True,
+            "memory_ok": True,
+            "routing_stable": True,
+            "last_fallback_overuse_score": 0.97,
+            "fallback_pressure_active": False,
+            "last_generated_queue_report_status": "green",
+            "last_regression_status": "ok",
+            "patch_activity": {},
+        },
+        recent_ops_events=[],
+    )
+
+    assert payload["level"] == "updating"
+    rendered = render_self_status(payload)
+    assert "Fallback training pressure is being worked" in rendered
+    assert "Level: hurting" not in rendered
+
+
 class TestNovaSelfStatusService(unittest.TestCase):
     def test_self_status_reports_local_code_change_with_validation(self) -> None:
         payload = build_self_status_payload(

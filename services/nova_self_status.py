@@ -172,6 +172,8 @@ def build_self_status_payload(
     behavior_fail_count = int(patch_activity.get("behavior_fail_count", 0) or 0)
     approved_updates = int(pulse.get("approved_eligible_previews", 0) or 0)
     fallback_score = float(pulse.get("last_fallback_overuse_score", 0.0) or 0.0)
+    fallback_pressure_active = bool(pulse.get("fallback_pressure_active", fallback_score >= 0.90))
+    latest_queue_report_status = _compact_text(pulse.get("last_generated_queue_report_status"), 80).lower()
     last_regression = _compact_text(pulse.get("last_regression_status"), 120).lower()
     last_regression_stale = bool(pulse.get("last_regression_stale", False))
 
@@ -183,8 +185,11 @@ def build_self_status_payload(
         events.append(_event("failure", "failure", "Patch rollback pressure is present", f"{rollback_count} rollback(s) were seen in the last 24 hours.", source="patch_log", command="patch list-previews"))
     if behavior_fail_count > 0:
         events.append(_event("failure", "failure", "Behavior checks failed during patch activity", f"{behavior_fail_count} behavior failure(s) were seen in the last 24 hours.", source="patch_log", command="pulse"))
-    if fallback_score >= 0.90:
+    if fallback_score >= 0.90 and fallback_pressure_active:
         events.append(_event("hurting", "warning", "Fallback pressure is high", f"Fallback overuse score is {fallback_score:.2f}.", source="pulse", command="learning status"))
+    elif fallback_score >= 0.90:
+        context = f"Latest generated queue report is {latest_queue_report_status or 'informational'}."
+        events.append(_event("updating", "info", "Fallback training pressure is being worked", f"Fallback overuse score is {fallback_score:.2f}. {context}", source="pulse", command="learning status"))
     elif not bool(pulse.get("routing_stable", True)):
         events.append(_event("hurting", "warning", "Routing is unsettled", "Nova is staying conservative until routing stabilizes.", source="pulse", command="learning status"))
     if not last_regression_stale and last_regression and any(token in last_regression for token in ("fail", "error", "drift", "blocked")):

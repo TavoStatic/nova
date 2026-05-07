@@ -139,6 +139,56 @@ class TestSubconsciousWorkTreeTriageService(unittest.TestCase):
         self.assertIn("patch_apply or patch_rollback", str(signal.get("next_task") or ""))
         self.assertIn("Patch-routing review", str(payload.get("branch_note") or ""))
 
+    def test_fallback_overuse_without_scenario_uses_family_review_context(self):
+        cases = [
+            (
+                "weather-continuation-fallthrough-family",
+                "weather_continuation_route_fallthrough",
+                "test_weather_continuation_route",
+                "yes get the weather for our location",
+            ),
+            (
+                "memory-capture-fallthrough-family",
+                "memory_capture_route_fallthrough",
+                "test_memory_capture_route",
+                "Remember this: my favorite color is teal. Don't forget.",
+            ),
+            (
+                "retrieval-followup-fallthrough-family",
+                "retrieval_followup_route_fallthrough",
+                "test_retrieval_followup_route",
+                "tell me about the first one",
+            ),
+            (
+                "patch-routing-fallthrough-family",
+                "patch_routing_fallthrough",
+                "test_patch_routing_route",
+                "please patch apply updates.zip",
+            ),
+            (
+                "session-fact-recall-fallthrough-family",
+                "session_fact_recall_route_fallthrough",
+                "test_session_fact_recall_route",
+                "What codeword did I just ask you to remember?",
+            ),
+        ]
+
+        for family_id, target_seam, test_name, expected_text in cases:
+            with self.subTest(family_id=family_id):
+                signal = SUBCONSCIOUS_WORK_TREE_TRIAGE_SERVICE.build_signal(
+                    family_id=family_id,
+                    target_seam=target_seam,
+                    signal_name="fallback_overuse",
+                    suggested_test_name=test_name,
+                    rationale="Specific route slipped to fallback.",
+                    urgency="high",
+                    robustness=0.95,
+                    variation_results=[],
+                )
+
+                review_context = dict((signal.get("payload") or {}).get("review_context") or {})
+                self.assertEqual(review_context.get("review_text"), expected_text)
+
     def test_build_signal_uses_memory_capture_family_context_when_available(self):
         signal = SUBCONSCIOUS_WORK_TREE_TRIAGE_SERVICE.build_signal(
             family_id="memory-capture-fallthrough-family",
