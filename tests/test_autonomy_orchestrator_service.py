@@ -187,6 +187,52 @@ class TestAutonomyOrchestratorService(unittest.TestCase):
         self.assertEqual(packet["decision_type"], SPEC_DECISION_RECOMMEND_ACTION)
         self.assertIn(packet["recommended_action"]["action_type"], autonomy_advisory_action_types())
 
+    def test_evaluate_next_action_recommends_patch_queue_conduit_when_patch_ready(self):
+        service = AutonomyOrchestratorService()
+
+        packet = service.evaluate_next_action(
+            _spec_envelope(
+                queue={
+                    "pending_count": 1,
+                    "high_priority_count": 1,
+                    "pressure_band": "high",
+                    "generated_pending_count": 0,
+                    "generated_actionable_count": 0,
+                    "patch_apply_ready_count": 1,
+                    "patch_approve_ready_count": 0,
+                    "patch_ready_count": 1,
+                }
+            )
+        )
+
+        self.assertEqual(packet["decision_type"], SPEC_DECISION_RECOMMEND_ACTION)
+        self.assertEqual(packet["recommended_action"]["action_type"], "patch_queue_run_next")
+        self.assertEqual(packet["recommended_action"]["execution_group"], "patch_queue")
+
+    def test_evaluate_next_action_recommends_active_work_tree_conduit(self):
+        service = AutonomyOrchestratorService()
+
+        packet = service.evaluate_next_action(
+            _spec_envelope(
+                work_tree={
+                    "open_count": 1,
+                    "branches": [
+                        {
+                            "branch_id": "branch-active",
+                            "title": "Core thinning follow-up",
+                            "status": "active",
+                            "owner": "core_thinning",
+                            "age_min": 4,
+                        }
+                    ],
+                }
+            )
+        )
+
+        self.assertEqual(packet["decision_type"], SPEC_DECISION_RECOMMEND_ACTION)
+        self.assertEqual(packet["recommended_action"]["action_type"], "active_work_tree_run_next")
+        self.assertEqual(packet["recommended_action"]["execution_group"], "active_work_tree")
+
     def test_evaluate_next_action_blocks_when_policy_disables_autonomy(self):
         service = AutonomyOrchestratorService()
 

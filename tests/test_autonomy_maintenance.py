@@ -387,6 +387,86 @@ class TestAutonomyMaintenance(unittest.TestCase):
         self.assertEqual(events[0].get("act"), "generated_queue_run_next")
         self.assertEqual(events[0].get("status"), "ok")
 
+    def test_execute_autonomy_recommendation_dispatches_patch_queue_conduit_action(self):
+        state: dict = {}
+        packet = {
+            "cycle_id": "cycle-test",
+            "decision_type": "RecommendAction",
+            "recommended_action": {
+                "action_type": "patch_queue_run_next",
+                "target_kind": "lane",
+                "target_id": "patch_queue",
+                "reason_code": "patch_queue_ready",
+                "requires_ack": False,
+                "cooldown_sec": 240,
+            },
+            "confidence": 0.72,
+            "refusal_reasons": [],
+        }
+        policy = {
+            "enabled": True,
+            "mode": "canary",
+            "execute_enabled": True,
+            "execute_allowed_actions": [],
+            "execute_allowed_action_groups": ["patch_queue"],
+            "execute_blocked_actions": [],
+            "requires_operator_ack_for": [],
+            "execute_min_confidence": 0.55,
+        }
+
+        with mock.patch.object(
+            autonomy_maintenance,
+            "_run_patch_queue_work_tree_cycle",
+            return_value={"status": "ok", "executed_count": 1, "tree_count": 1},
+        ) as cycle_mock:
+            result = autonomy_maintenance._execute_autonomy_recommendation(state, packet, policy)
+
+        cycle_mock.assert_called_once_with(state, max_steps=1)
+        self.assertEqual(result.get("result"), "success")
+        self.assertEqual(result.get("action_type"), "patch_queue_run_next")
+        self.assertEqual(((result.get("extra") or {}).get("cycle") or {}).get("executed_count"), 1)
+        self.assertEqual((result.get("events") or [])[0].get("act"), "patch_queue_run_next")
+
+    def test_execute_autonomy_recommendation_dispatches_active_work_tree_conduit_action(self):
+        state: dict = {}
+        packet = {
+            "cycle_id": "cycle-test",
+            "decision_type": "RecommendAction",
+            "recommended_action": {
+                "action_type": "active_work_tree_run_next",
+                "target_kind": "lane",
+                "target_id": "active_work_tree",
+                "reason_code": "active_work_tree_ready",
+                "requires_ack": False,
+                "cooldown_sec": 120,
+            },
+            "confidence": 0.72,
+            "refusal_reasons": [],
+        }
+        policy = {
+            "enabled": True,
+            "mode": "canary",
+            "execute_enabled": True,
+            "execute_allowed_actions": [],
+            "execute_allowed_action_groups": ["active_work_tree"],
+            "execute_blocked_actions": [],
+            "requires_operator_ack_for": [],
+            "execute_min_confidence": 0.55,
+        }
+
+        with mock.patch.object(
+            autonomy_maintenance,
+            "_run_active_work_tree_cycle",
+            return_value={"status": "ok", "executed_count": 1, "tree_count": 1},
+        ) as cycle_mock:
+            result = autonomy_maintenance._execute_autonomy_recommendation(state, packet, policy)
+
+        cycle_mock.assert_called_once_with(state, max_steps=1)
+        self.assertEqual(result.get("result"), "success")
+        self.assertEqual(result.get("action_type"), "active_work_tree_run_next")
+        self.assertEqual(((result.get("extra") or {}).get("cycle") or {}).get("executed_count"), 1)
+        self.assertEqual((result.get("events") or [])[0].get("act"), "active_work_tree_run_next")
+
     def test_run_worker_loops_for_bounded_cycles_and_records_status(self):
         with tempfile.TemporaryDirectory() as td:
             runtime_dir = Path(td) / "runtime"

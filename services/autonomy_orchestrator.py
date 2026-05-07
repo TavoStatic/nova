@@ -370,6 +370,21 @@ class AutonomyOrchestratorService:
                 "pressure_band": queue_band,
                 "source_freshness_sec": freshness["queue_pressure"],
                 "approved_eligible_previews": _as_int(queue_raw.get("approved_eligible_previews")),
+                "generated_pending_count": _as_int(
+                    queue_raw.get("generated_pending_count"),
+                    _as_int(queue_raw.get("pending_count")),
+                ),
+                "generated_actionable_count": _as_int(
+                    queue_raw.get("generated_actionable_count"),
+                    _as_int(queue_raw.get("high_priority_count")),
+                ),
+                "generated_blocked_count": _as_int(
+                    queue_raw.get("generated_blocked_count"),
+                    _as_int(queue_raw.get("blocked_count")),
+                ),
+                "patch_apply_ready_count": _as_int(queue_raw.get("patch_apply_ready_count")),
+                "patch_approve_ready_count": _as_int(queue_raw.get("patch_approve_ready_count")),
+                "patch_ready_count": _as_int(queue_raw.get("patch_ready_count")),
             },
             "runtime_guard_status": {
                 **runtime_summary,
@@ -385,6 +400,11 @@ class AutonomyOrchestratorService:
                 "blocked_actions": [
                     _safe_text(item, 120)
                     for item in _as_list(policy_raw.get("blocked_actions"))
+                    if _safe_text(item, 120)
+                ],
+                "execute_allowed_action_groups": [
+                    _safe_text(item, 120)
+                    for item in _as_list(policy_raw.get("execute_allowed_action_groups"))
                     if _safe_text(item, 120)
                 ],
                 "quiet_hours_active": bool(policy_raw.get("quiet_hours_active", False)),
@@ -455,7 +475,31 @@ class AutonomyOrchestratorService:
             "requires_ack": bool(catalog.get("requires_ack", False)),
             "cooldown_sec": _as_int(catalog.get("cooldown_sec")),
             "ttl_sec": _as_int(catalog.get("ttl_sec")),
+            "execution_group": _safe_text(catalog.get("execution_group"), 120),
         }
+
+    @staticmethod
+    def _contract_active_work_tree_count(work_tree: dict[str, Any]) -> int:
+        managed_owners = {"patch_queue", "generated_queue", "signal_ingestion"}
+        branches = [_as_dict(branch) for branch in _as_list(work_tree.get("branches")) if isinstance(branch, dict)]
+        active_count = 0
+        for payload in branches:
+            if not payload:
+                continue
+            status = _safe_text(payload.get("status"), 80).lower()
+            if status and status not in {"active", "working", "open", "pending"}:
+                continue
+            owner = _safe_text(payload.get("owner"), 120).lower()
+            if owner in managed_owners:
+                continue
+            active_count += 1
+        if branches:
+            return active_count
+        if active_count:
+            return active_count
+        open_count = _as_int(work_tree.get("open_count"))
+        working_count = _as_int(work_tree.get("working_count"))
+        return max(open_count, working_count)
 
     def _contract_candidate_actions(self, evidence: dict[str, Any]) -> list[dict[str, Any]]:
         candidates: list[dict[str, Any]] = []
@@ -472,11 +516,30 @@ class AutonomyOrchestratorService:
                 }
             )
 
-        pending_count = _as_int(queue.get("pending_count"))
+        pending_count = _as_int(queue.get("generated_pending_count"), _as_int(queue.get("pending_count")))
         aging_count = _as_int(queue.get("aging_items_count"))
-        high_priority_count = _as_int(queue.get("high_priority_count"))
+        high_priority_count = _as_int(queue.get("generated_actionable_count"), _as_int(queue.get("high_priority_count")))
+        generated_blocked_count = _as_int(queue.get("generated_blocked_count"))
+        patch_ready_count = _as_int(queue.get("patch_ready_count"))
+        patch_apply_ready = _as_int(queue.get("patch_apply_ready_count"))
+        patch_approve_ready = _as_int(queue.get("patch_approve_ready_count"))
         blocked_count = _as_int(work_tree.get("blocked_count"))
         stale_count = _as_int(work_tree.get("stale_count"))
+        active_work_count = self._contract_active_work_tree_count(work_tree)
+        if patch_ready_count > 0:
+            candidates.append(
+                {
+                    "action": self._contract_action(
+                        "patch_queue_run_next",
+                        reason_code="patch_queue_ready",
+                        expected_effect=(
+                            "Advance one governed patch queue step "
+                            f"({patch_apply_ready} apply-ready, {patch_approve_ready} approve-ready)."
+                        ),
+                    ),
+                    "source": "queue_pressure",
+                }
+            )
         if pending_count > 0 or high_priority_count > 0:
             candidates.append(
                 {
@@ -488,13 +551,25 @@ class AutonomyOrchestratorService:
                     "source": "queue_pressure",
                 }
             )
-        if blocked_count > 0 or stale_count > 0 or (aging_count > 0 and pending_count <= 0):
+        if generated_blocked_count > 0 or blocked_count > 0 or stale_count > 0 or (aging_count > 0 and pending_count <= 0):
             candidates.append(
                 {
                     "action": self._contract_action(
                         "generated_queue_investigate",
                         reason_code="work_tree_or_queue_blocked",
                         expected_effect="Investigate blocked, stale, or aging work before selecting execution.",
+                    ),
+                    "source": "work_tree_snapshot",
+                }
+            )
+
+        if active_work_count > 0:
+            candidates.append(
+                {
+                    "action": self._contract_action(
+                        "active_work_tree_run_next",
+                        reason_code="active_work_tree_ready",
+                        expected_effect=f"Advance one safe step from {active_work_count} active Work Tree signal(s).",
                     ),
                     "source": "work_tree_snapshot",
                 }

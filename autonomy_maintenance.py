@@ -237,11 +237,23 @@ def _steward_posture_for_orchestrator(core_steward: dict) -> dict:
     }
 
 
-def _queue_pressure_for_orchestrator(generated_queue: dict) -> dict:
+def _queue_pressure_for_orchestrator(generated_queue: dict, state: dict | None = None) -> dict:
     queue = dict(generated_queue or {}) if isinstance(generated_queue, dict) else {}
-    pending = _safe_int(queue.get("open_count") or queue.get("count"), 0)
-    actionable = _safe_int(queue.get("actionable_count"), 0)
-    blocked = _safe_int(queue.get("blocked_count"), 0)
+    current_state = dict(state or {}) if isinstance(state, dict) else {}
+    patch_sync = (
+        dict(current_state.get("last_patch_queue_sync") or {})
+        if isinstance(current_state.get("last_patch_queue_sync"), dict)
+        else {}
+    )
+    generated_pending = _safe_int(queue.get("open_count") or queue.get("count"), 0)
+    generated_actionable = _safe_int(queue.get("actionable_count"), 0)
+    generated_blocked = _safe_int(queue.get("blocked_count"), 0)
+    patch_apply_ready = _safe_int(patch_sync.get("apply_ready_count"), 0)
+    patch_approve_ready = _safe_int(patch_sync.get("approve_ready_count"), 0)
+    patch_ready = patch_apply_ready + patch_approve_ready
+    pending = generated_pending + patch_ready
+    actionable = generated_actionable + patch_ready
+    blocked = generated_blocked
     aging = _safe_int(queue.get("drift_count"), 0) + _safe_int(queue.get("warning_count"), 0)
     if actionable > 0 or aging > 0:
         pressure_band = "high"
@@ -255,6 +267,12 @@ def _queue_pressure_for_orchestrator(generated_queue: dict) -> dict:
         "high_priority_count": actionable,
         "pressure_band": pressure_band,
         "approved_eligible_previews": 0,
+        "generated_pending_count": generated_pending,
+        "generated_actionable_count": generated_actionable,
+        "generated_blocked_count": generated_blocked,
+        "patch_apply_ready_count": patch_apply_ready,
+        "patch_approve_ready_count": patch_approve_ready,
+        "patch_ready_count": patch_ready,
         "source_freshness_sec": 0,
     }
 
@@ -344,8 +362,10 @@ def _policy_snapshot_for_orchestrator() -> dict:
         "allowed_actions": _autonomy_policy_list(settings, "allowed_actions", advisory_actions),
         "blocked_actions": _autonomy_policy_list(settings, "blocked_actions", []),
         "execute_allowed_actions": _autonomy_policy_list(settings, "execute_allowed_actions", []),
+        "execute_allowed_action_groups": _autonomy_policy_list(settings, "execute_allowed_action_groups", []),
         "execute_blocked_actions": _autonomy_policy_list(settings, "execute_blocked_actions", []),
         "canary_allowed_actions": _autonomy_policy_list(settings, "canary_allowed_actions", []),
+        "canary_allowed_action_groups": _autonomy_policy_list(settings, "canary_allowed_action_groups", []),
         "quiet_hours_active": False,
         "requires_operator_ack_for": _autonomy_policy_list(settings, "requires_operator_ack_for", requires_ack_default),
         "operator_ack_present": bool(settings.get("operator_ack_present", False)),
@@ -415,7 +435,7 @@ def _autonomy_orchestrator_input_envelope(
         "timestamp_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "work_tree_snapshot": _work_tree_snapshot_for_orchestrator(work_tree_state),
         "steward_posture": _steward_posture_for_orchestrator(core_steward),
-        "queue_pressure": _queue_pressure_for_orchestrator(generated_queue),
+        "queue_pressure": _queue_pressure_for_orchestrator(generated_queue, state),
         "runtime_guard_status": _runtime_guard_status_for_orchestrator(core_steward, guard_health),
         "policy_snapshot": dict(policy_snapshot or _policy_snapshot_for_orchestrator()),
         "triage_hints": _triage_hints_for_orchestrator(core_steward, generated_queue),
@@ -611,7 +631,31 @@ def _maintenance_generated_queue_investigate_action(_payload: dict) -> tuple[boo
     return False, "generated_queue_investigate_requires_http_session_scope", {}, "generated_queue_investigate_requires_http_session_scope"
 
 
-def _dispatch_autonomy_control_action(action_type: str, payload: dict, events: list[dict]) -> tuple[bool, str, dict]:
+def _maintenance_patch_queue_run_next_action(_payload: dict, state: dict) -> tuple[bool, str, dict, str]:
+    try:
+        cycle = _run_patch_queue_work_tree_cycle(state, max_steps=1)
+    except Exception as exc:
+        msg = f"patch_queue_run_next_failed:{exc}"
+        return False, msg, {}, msg
+    status = str((cycle or {}).get("status") or "unknown").strip() or "unknown"
+    msg = f"patch_queue_run_next_{status}"
+    return status not in {"failed", "error"}, msg, {"cycle": cycle if isinstance(cycle, dict) else {}}, msg
+
+
+def _maintenance_active_work_tree_run_next_action(_payload: dict, state: dict) -> tuple[bool, str, dict, str]:
+    try:
+        cycle = _run_active_work_tree_cycle(state, max_steps=1)
+    except Exception as exc:
+        msg = f"active_work_tree_run_next_failed:{exc}"
+        return False, msg, {}, msg
+    status = str((cycle or {}).get("status") or "unknown").strip() or "unknown"
+    msg = f"active_work_tree_run_next_{status}"
+    return status not in {"failed", "error"}, msg, {"cycle": cycle if isinstance(cycle, dict) else {}}, msg
+
+
+def _dispatch_autonomy_control_action(action_type: str, payload: dict, events: list[dict], state: dict | None = None) -> tuple[bool, str, dict]:
+    runtime_state = state if isinstance(state, dict) else {}
+
     def _record_event(act: str, status: str, detail: str, event_payload: dict) -> None:
         events.append(
             {
@@ -651,6 +695,8 @@ def _dispatch_autonomy_control_action(action_type: str, payload: dict, events: l
         generated_pack_run_action_fn=_unsupported_control_action,
         generated_queue_run_next_action_fn=_maintenance_generated_queue_run_next_action,
         generated_queue_investigate_action_fn=_maintenance_generated_queue_investigate_action,
+        patch_queue_run_next_action_fn=lambda event_payload: _maintenance_patch_queue_run_next_action(event_payload, runtime_state),
+        active_work_tree_run_next_action_fn=lambda event_payload: _maintenance_active_work_tree_run_next_action(event_payload, runtime_state),
         real_world_task_create_action_fn=_unsupported_control_action,
         backend_command_list_action_fn=_unsupported_control_action,
         backend_command_run_action_fn=_unsupported_control_action,
@@ -716,7 +762,7 @@ def _execute_autonomy_recommendation(state: dict, packet: dict, policy_snapshot:
 
     events: list[dict] = []
     action_type = str(gate.get("action_type") or "").strip()
-    ok, msg, extra = _dispatch_autonomy_control_action(action_type, dict(gate.get("dispatch_payload") or {}), events)
+    ok, msg, extra = _dispatch_autonomy_control_action(action_type, dict(gate.get("dispatch_payload") or {}), events, state)
     if action_type == "generated_queue_run_next":
         _record_generated_queue_run(state, ok, msg, extra)
     cooldown_sec = max(0, _safe_int(gate.get("cooldown_sec"), 0))
@@ -1582,7 +1628,7 @@ def _sync_patch_queue_work_tree(state: dict) -> dict:
     return payload
 
 
-def _run_patch_queue_work_tree_cycle(state: dict) -> dict:
+def _run_patch_queue_work_tree_cycle(state: dict, *, max_steps: int | None = None) -> dict:
     sync_state = dict(state.get("last_patch_queue_sync") or {})
     tree_id = str(sync_state.get("tree_id") or "").strip()
     if not tree_id:
@@ -1599,8 +1645,9 @@ def _run_patch_queue_work_tree_cycle(state: dict) -> dict:
     executed_total = 0
     full_history: list[dict] = []
     last_action = ""
+    step_limit = max(1, _safe_int(max_steps, PATCH_QUEUE_MAX_STEPS)) if max_steps is not None else PATCH_QUEUE_MAX_STEPS
 
-    while executed_total < PATCH_QUEUE_MAX_STEPS:
+    while executed_total < step_limit:
         apply_ready_count = int(sync_state.get("apply_ready_count", 0) or 0)
         approve_ready_count = int(sync_state.get("approve_ready_count", 0) or 0)
         if apply_ready_count + approve_ready_count <= 0:
@@ -2105,8 +2152,10 @@ def _active_work_tree_candidates(limit: int = ACTIVE_WORK_TREE_MAX_TREES) -> lis
     return candidates
 
 
-def _run_active_work_tree_cycle(state: dict) -> dict:
-    candidates = _active_work_tree_candidates(ACTIVE_WORK_TREE_MAX_TREES)
+def _run_active_work_tree_cycle(state: dict, *, max_steps: int | None = None, max_trees: int | None = None) -> dict:
+    tree_limit = max(1, _safe_int(max_trees, ACTIVE_WORK_TREE_MAX_TREES)) if max_trees is not None else ACTIVE_WORK_TREE_MAX_TREES
+    step_limit = max(1, _safe_int(max_steps, ACTIVE_WORK_TREE_MAX_STEPS)) if max_steps is not None else ACTIVE_WORK_TREE_MAX_STEPS
+    candidates = _active_work_tree_candidates(tree_limit)
     executed_total = 0
     full_history: list[dict] = []
     processed: list[dict] = []
@@ -2114,7 +2163,7 @@ def _run_active_work_tree_cycle(state: dict) -> dict:
     last_action = ""
 
     for candidate in candidates:
-        if executed_total >= ACTIVE_WORK_TREE_MAX_STEPS:
+        if executed_total >= step_limit:
             break
         tree_id = str(candidate.get("tree_id") or "").strip()
         tree_title = str(candidate.get("title") or "").strip()

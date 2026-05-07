@@ -7,6 +7,7 @@ AUTONOMY_ADVISORY_ACTION_CATALOG: dict[str, dict[str, object]] = {
     "guard_start": {
         "target_kind": "runtime",
         "target_id": "guard",
+        "execution_group": "runtime_control",
         "expected_effect": "Restore the runtime guard before higher autonomy work continues.",
         "preconditions": ["guard_running_false", "policy_allows_guard_start"],
         "requires_ack": False,
@@ -18,6 +19,7 @@ AUTONOMY_ADVISORY_ACTION_CATALOG: dict[str, dict[str, object]] = {
     "autonomy_maintenance_start": {
         "target_kind": "runtime",
         "target_id": "autonomy_maintenance",
+        "execution_group": "runtime_control",
         "expected_effect": "Restart the maintenance worker so advisory posture stays fresh.",
         "preconditions": ["maintenance_worker_not_running", "policy_allows_autonomy_maintenance_start"],
         "requires_ack": False,
@@ -29,6 +31,7 @@ AUTONOMY_ADVISORY_ACTION_CATALOG: dict[str, dict[str, object]] = {
     "generated_queue_run_next": {
         "target_kind": "queue",
         "target_id": "generated_work_queue",
+        "execution_group": "generated_queue",
         "expected_effect": "Advance the next governed generated work item.",
         "preconditions": ["queue_has_actionable_items", "policy_allows_generated_queue_run_next"],
         "requires_ack": False,
@@ -40,6 +43,7 @@ AUTONOMY_ADVISORY_ACTION_CATALOG: dict[str, dict[str, object]] = {
     "generated_queue_investigate": {
         "target_kind": "queue",
         "target_id": "generated_work_queue",
+        "execution_group": "generated_queue",
         "expected_effect": "Inspect blocked or stale queue pressure without mutating runtime state.",
         "preconditions": ["queue_or_work_tree_has_blocked_signal", "policy_allows_generated_queue_investigate"],
         "requires_ack": False,
@@ -51,6 +55,7 @@ AUTONOMY_ADVISORY_ACTION_CATALOG: dict[str, dict[str, object]] = {
     "update_now_dry_run": {
         "target_kind": "runtime",
         "target_id": "patch_preview",
+        "execution_group": "patch_queue",
         "expected_effect": "Dry-run approved update work through the governed dispatcher.",
         "preconditions": ["approved_preview_exists", "policy_allows_update_now_dry_run"],
         "requires_ack": True,
@@ -62,6 +67,7 @@ AUTONOMY_ADVISORY_ACTION_CATALOG: dict[str, dict[str, object]] = {
     "pulse_status": {
         "target_kind": "runtime",
         "target_id": "pulse",
+        "execution_group": "runtime_health",
         "expected_effect": "Refresh operator posture around elevated pressure signals.",
         "preconditions": ["pulse_pressure_detected", "policy_allows_pulse_status"],
         "requires_ack": False,
@@ -69,6 +75,30 @@ AUTONOMY_ADVISORY_ACTION_CATALOG: dict[str, dict[str, object]] = {
         "ttl_sec": 120,
         "impact": 0.5,
         "safety_risk": 0.03,
+    },
+    "patch_queue_run_next": {
+        "target_kind": "lane",
+        "target_id": "patch_queue",
+        "execution_group": "patch_queue",
+        "expected_effect": "Advance one governed patch queue work-tree step.",
+        "preconditions": ["patch_queue_has_ready_item", "policy_allows_patch_queue_run_next"],
+        "requires_ack": False,
+        "cooldown_sec": 240,
+        "ttl_sec": 120,
+        "impact": 0.74,
+        "safety_risk": 0.16,
+    },
+    "active_work_tree_run_next": {
+        "target_kind": "lane",
+        "target_id": "active_work_tree",
+        "execution_group": "active_work_tree",
+        "expected_effect": "Advance one safe active Work Tree step.",
+        "preconditions": ["active_work_tree_has_safe_step", "policy_allows_active_work_tree_run_next"],
+        "requires_ack": False,
+        "cooldown_sec": 120,
+        "ttl_sec": 120,
+        "impact": 0.58,
+        "safety_risk": 0.08,
     },
 }
 
@@ -116,6 +146,8 @@ _CONTROL_ACTION_RUNTIME_HOOKS = {
     "generated_pack_run_action_fn": "_generated_pack_run_action",
     "generated_queue_run_next_action_fn": "_generated_queue_run_next_action",
     "generated_queue_investigate_action_fn": "_generated_queue_investigate_action",
+    "patch_queue_run_next_action_fn": "_patch_queue_run_next_action",
+    "active_work_tree_run_next_action_fn": "_active_work_tree_run_next_action",
     "real_world_task_create_action_fn": "_real_world_task_create_action",
     "backend_command_list_action_fn": "_backend_command_list_action",
     "backend_command_run_action_fn": "_backend_command_run_action",
@@ -236,6 +268,8 @@ class NovaControlActionDispatcher:
         generated_pack_run_action_fn,
         generated_queue_run_next_action_fn,
         generated_queue_investigate_action_fn,
+        patch_queue_run_next_action_fn,
+        active_work_tree_run_next_action_fn,
         real_world_task_create_action_fn,
         backend_command_list_action_fn,
         backend_command_run_action_fn,
@@ -416,6 +450,16 @@ class NovaControlActionDispatcher:
 
         if act == "generated_queue_investigate":
             ok, msg, extra, detail = generated_queue_investigate_action_fn(payload)
+            record_control_action_event_fn(act, "ok" if ok else "fail", detail, payload)
+            return ok, msg, extra
+
+        if act == "patch_queue_run_next":
+            ok, msg, extra, detail = patch_queue_run_next_action_fn(payload)
+            record_control_action_event_fn(act, "ok" if ok else "fail", detail, payload)
+            return ok, msg, extra
+
+        if act == "active_work_tree_run_next":
+            ok, msg, extra, detail = active_work_tree_run_next_action_fn(payload)
             record_control_action_event_fn(act, "ok" if ok else "fail", detail, payload)
             return ok, msg, extra
 

@@ -116,11 +116,19 @@
       "generated_queue_run_next",
       "generated_queue_investigate",
       "update_now_dry_run",
-      "pulse_status"
+      "pulse_status",
+      "patch_queue_run_next",
+      "active_work_tree_run_next"
     ],
     "execute_allowed_actions": [
       "generated_queue_run_next",
       "pulse_status"
+    ],
+    "execute_allowed_action_groups": [
+      "runtime_health",
+      "generated_queue",
+      "patch_queue",
+      "active_work_tree"
     ],
     "execute_blocked_actions": [
       "guard_start",

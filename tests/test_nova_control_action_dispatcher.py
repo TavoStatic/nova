@@ -77,6 +77,8 @@ def _runtime_scope(events):
         "_generated_pack_run_action": _ok_action,
         "_generated_queue_run_next_action": _ok_action,
         "_generated_queue_investigate_action": _ok_action,
+        "_patch_queue_run_next_action": _ok_action,
+        "_active_work_tree_run_next_action": _ok_action,
         "_real_world_task_create_action": _ok_action,
         "_backend_command_list_action": _ok_action,
         "_backend_command_run_action": _ok_action,

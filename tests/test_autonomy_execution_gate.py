@@ -54,6 +54,30 @@ class TestAutonomyExecutionGateService(unittest.TestCase):
         self.assertEqual(result["status"], "blocked")
         self.assertIn("action_not_execute_allowed", result["refusal_reasons"])
 
+    def test_allows_action_when_execution_group_is_allowed(self):
+        result = AUTONOMY_EXECUTION_GATE_SERVICE.evaluate(
+            _decision("patch_queue_run_next"),
+            _policy(execute_allowed_actions=[], execute_allowed_action_groups=["patch_queue"]),
+        )
+
+        self.assertTrue(result["allow_execute"])
+        self.assertEqual(result["action_type"], "patch_queue_run_next")
+        self.assertEqual(result["dispatch_payload"]["execution_group"], "patch_queue")
+
+    def test_explicit_block_wins_over_execution_group_allow(self):
+        result = AUTONOMY_EXECUTION_GATE_SERVICE.evaluate(
+            _decision("pulse_status"),
+            _policy(
+                execute_allowed_actions=[],
+                execute_allowed_action_groups=["runtime_health"],
+                execute_blocked_actions=["pulse_status"],
+            ),
+        )
+
+        self.assertFalse(result["allow_execute"])
+        self.assertEqual(result["status"], "blocked")
+        self.assertIn("action_execute_blocked", result["refusal_reasons"])
+
     def test_defers_when_decision_is_not_recommend_action(self):
         result = AUTONOMY_EXECUTION_GATE_SERVICE.evaluate(
             _decision(decision_type=SPEC_DECISION_DEFER),

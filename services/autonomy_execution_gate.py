@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from services.autonomy_orchestrator import SPEC_DECISION_RECOMMEND_ACTION
-from services.nova_control_action_dispatcher import is_autonomy_advisory_action
+from services.nova_control_action_dispatcher import autonomy_advisory_action_catalog, is_autonomy_advisory_action
 
 
 EXECUTION_MODE_ADVISORY = "advisory"
@@ -62,6 +62,34 @@ class AutonomyExecutionGateService:
             return {"*"}
         return configured
 
+    @staticmethod
+    def _execute_allowed_action_groups(policy_snapshot: dict[str, Any], mode: str) -> set[str]:
+        configured = _action_set(policy_snapshot.get("execute_allowed_action_groups"))
+        if not configured and mode == EXECUTION_MODE_CANARY:
+            configured = _action_set(policy_snapshot.get("canary_allowed_action_groups"))
+        if "*" in configured:
+            return {"*"}
+        return configured
+
+    @staticmethod
+    def _action_groups(action_type: str, action: dict[str, Any]) -> set[str]:
+        catalog = _as_dict(autonomy_advisory_action_catalog().get(action_type))
+        groups: set[str] = set()
+        for key in ("execution_group", "lane"):
+            value = _safe_text(catalog.get(key) or action.get(key), 120)
+            if value:
+                groups.add(value)
+        return groups
+
+    @staticmethod
+    def _primary_action_group(action_type: str, action: dict[str, Any]) -> str:
+        catalog = _as_dict(autonomy_advisory_action_catalog().get(action_type))
+        for key in ("execution_group", "lane"):
+            value = _safe_text(catalog.get(key) or action.get(key), 120)
+            if value:
+                return value
+        return ""
+
     def evaluate(
         self,
         decision_packet: dict[str, Any],
@@ -110,16 +138,25 @@ class AutonomyExecutionGateService:
             return self._result(False, "blocked", mode, checks, refusal_reasons, "Recommended action is not dispatcher-owned.")
         checks["dispatcher_catalog_action"] = "pass"
 
-        allowed_actions = self._execute_allowed_actions(policy, mode)
-        if "*" not in allowed_actions and action_type not in allowed_actions:
-            checks["execute_action_allowed"] = "fail"
-            refusal_reasons.append("action_not_execute_allowed")
-            return self._result(False, "blocked", mode, checks, refusal_reasons, "Recommended action is not enabled for execution.")
         blocked_actions = _action_set(policy.get("execute_blocked_actions")) | _action_set(policy.get("blocked_actions"))
         if action_type in blocked_actions or "*" in blocked_actions:
             checks["execute_action_allowed"] = "fail"
             refusal_reasons.append("action_execute_blocked")
             return self._result(False, "blocked", mode, checks, refusal_reasons, "Recommended action is blocked by policy.")
+
+        allowed_actions = self._execute_allowed_actions(policy, mode)
+        allowed_groups = self._execute_allowed_action_groups(policy, mode)
+        action_groups = self._action_groups(action_type, action)
+        action_allowed = (
+            "*" in allowed_actions
+            or action_type in allowed_actions
+            or "*" in allowed_groups
+            or bool(action_groups & allowed_groups)
+        )
+        if not action_allowed:
+            checks["execute_action_allowed"] = "fail"
+            refusal_reasons.append("action_not_execute_allowed")
+            return self._result(False, "blocked", mode, checks, refusal_reasons, "Recommended action is not enabled for execution.")
         checks["execute_action_allowed"] = "pass"
 
         confidence = _as_float(packet.get("confidence"), 0.0)
@@ -157,6 +194,7 @@ class AutonomyExecutionGateService:
             "target_kind": _safe_text(action.get("target_kind"), 80),
             "target_id": target_id,
             "reason_code": _safe_text(action.get("reason_code"), 120),
+            "execution_group": self._primary_action_group(action_type, action),
         }
         return {
             "allow_execute": True,
