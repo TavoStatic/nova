@@ -1572,8 +1572,6 @@ def _is_assistant_name_query(text: str) -> bool:
     return service_is_assistant_name_query(text)
 
 
-def _is_self_identity_web_challenge(text: str) -> bool:
-    return service_is_self_identity_web_challenge(text)
 
 
 def _self_identity_web_challenge_reply() -> str:
