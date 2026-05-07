@@ -1,6 +1,8 @@
 from pathlib import Path
+import subprocess
+import unittest
 
-from services.nova_self_status import build_self_status_payload, read_recent_ops_events, render_self_status
+from services.nova_self_status import build_repo_change_snapshot, build_self_status_payload, read_recent_ops_events, render_self_status
 
 
 def test_self_status_reports_hurt_failure_and_update_signals(tmp_path: Path) -> None:
@@ -92,3 +94,49 @@ def test_self_status_ignores_stale_regression_failure() -> None:
 
     assert payload["level"] == "steady"
     assert "Latest regression is not green" not in render_self_status(payload)
+
+
+class TestNovaSelfStatusService(unittest.TestCase):
+    def test_self_status_reports_local_code_change_with_validation(self) -> None:
+        payload = build_self_status_payload(
+            pulse_payload={
+                "ollama_up": True,
+                "memory_ok": True,
+                "routing_stable": True,
+                "last_fallback_overuse_score": 0.1,
+                "last_regression_status": "OK",
+                "patch_activity": {},
+            },
+            recent_ops_events=[],
+            repo_change_snapshot={
+                "ok": True,
+                "status": "dirty",
+                "changed_count": 1,
+                "insertions": 0,
+                "deletions": 2,
+                "files": [{"path": "nova_core.py", "status": "M", "insertions": 0, "deletions": 2}],
+            },
+        )
+
+        self.assertEqual(payload["level"], "updating")
+        rendered = render_self_status(payload)
+        self.assertIn("Local code changed since last accepted state", rendered)
+        self.assertIn("nova_core.py", rendered)
+        self.assertIn("latest regression is OK", rendered)
+
+    def test_repo_change_snapshot_parses_git_status_and_numstat(self) -> None:
+        def fake_run(cmd, **_kwargs):
+            if cmd[1:] == ["status", "--short"]:
+                return subprocess.CompletedProcess(cmd, 0, stdout=" M nova_core.py\n?? scratch.txt\n", stderr="")
+            if cmd[1:] == ["diff", "--numstat", "HEAD", "--"]:
+                return subprocess.CompletedProcess(cmd, 0, stdout="3\t2\tnova_core.py\n", stderr="")
+            return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="unexpected")
+
+        snapshot = build_repo_change_snapshot(Path("C:/Nova"), subprocess_run=fake_run)
+
+        self.assertTrue(snapshot.get("ok"))
+        self.assertEqual(snapshot.get("status"), "dirty")
+        self.assertEqual(snapshot.get("changed_count"), 2)
+        self.assertEqual(snapshot.get("insertions"), 3)
+        self.assertEqual(snapshot.get("deletions"), 2)
+        self.assertEqual([item.get("path") for item in snapshot.get("files")], ["nova_core.py", "scratch.txt"])

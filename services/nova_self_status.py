@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 import time
 from pathlib import Path
 from typing import Any
@@ -46,6 +47,77 @@ def read_recent_ops_events(path: Path, *, limit: int = 40) -> list[dict]:
     return events
 
 
+def _run_git(repo_root: Path, args: list[str], *, subprocess_run=subprocess.run) -> tuple[int, str]:
+    try:
+        proc = subprocess_run(
+            ["git", *args],
+            cwd=str(repo_root),
+            capture_output=True,
+            text=True,
+            timeout=8,
+        )
+    except Exception as exc:
+        return 1, str(exc)
+    return int(getattr(proc, "returncode", 1) or 0), str(getattr(proc, "stdout", "") or getattr(proc, "stderr", "") or "")
+
+
+def build_repo_change_snapshot(repo_root: Path, *, subprocess_run=subprocess.run, max_files: int = 20) -> dict:
+    root = Path(repo_root)
+    code, status_text = _run_git(root, ["status", "--short"], subprocess_run=subprocess_run)
+    if code != 0:
+        return {"ok": False, "status": "unknown", "error": _compact_text(status_text, 240), "changed_count": 0, "files": []}
+
+    status_lines = [line for line in status_text.splitlines() if line.strip()]
+    if not status_lines:
+        return {"ok": True, "status": "clean", "changed_count": 0, "files": [], "insertions": 0, "deletions": 0}
+
+    file_status: dict[str, dict] = {}
+    for line in status_lines:
+        code_text = line[:2].strip() or line[:2]
+        path_text = line[3:].strip() if len(line) > 3 else line.strip()
+        if " -> " in path_text:
+            path_text = path_text.split(" -> ", 1)[1].strip()
+        if not path_text:
+            continue
+        file_status[path_text] = {"path": path_text, "status": code_text, "insertions": 0, "deletions": 0}
+
+    code, numstat_text = _run_git(root, ["diff", "--numstat", "HEAD", "--"], subprocess_run=subprocess_run)
+    insertions = 0
+    deletions = 0
+    if code == 0:
+        for line in numstat_text.splitlines():
+            parts = line.split("\t")
+            if len(parts) < 3:
+                continue
+            added, removed, path_text = parts[0], parts[1], parts[2]
+            if " -> " in path_text:
+                path_text = path_text.split(" -> ", 1)[1].strip()
+            try:
+                added_count = int(added)
+            except Exception:
+                added_count = 0
+            try:
+                removed_count = int(removed)
+            except Exception:
+                removed_count = 0
+            insertions += added_count
+            deletions += removed_count
+            row = file_status.setdefault(path_text, {"path": path_text, "status": "M", "insertions": 0, "deletions": 0})
+            row["insertions"] = added_count
+            row["deletions"] = removed_count
+
+    files = list(file_status.values())
+    files.sort(key=lambda item: str(item.get("path") or ""))
+    return {
+        "ok": True,
+        "status": "dirty",
+        "changed_count": len(files),
+        "files": files[: max(1, int(max_files or 20))],
+        "insertions": insertions,
+        "deletions": deletions,
+    }
+
+
 def _ops_status_event(row: dict) -> dict | None:
     category = _compact_text(row.get("category"), 40).lower()
     action = _compact_text(row.get("action"), 80).lower()
@@ -64,7 +136,34 @@ def _ops_status_event(row: dict) -> dict | None:
     return None
 
 
-def build_self_status_payload(*, pulse_payload: dict | None = None, recent_ops_events: list[dict] | None = None) -> dict:
+def _repo_change_event(change_snapshot: dict, *, last_regression: str, last_regression_stale: bool) -> dict | None:
+    snapshot = dict(change_snapshot or {})
+    if str(snapshot.get("status") or "").strip().lower() != "dirty":
+        return None
+    files = [str((item or {}).get("path") or "").strip() for item in list(snapshot.get("files") or []) if isinstance(item, dict)]
+    files = [item for item in files if item]
+    changed_count = int(snapshot.get("changed_count", len(files)) or 0)
+    insertions = int(snapshot.get("insertions", 0) or 0)
+    deletions = int(snapshot.get("deletions", 0) or 0)
+    shown = ", ".join(files[:5]) or "tracked files"
+    if changed_count > 5:
+        shown = f"{shown}, +{changed_count - 5} more"
+    validation = "latest regression status is unknown"
+    if last_regression:
+        validation = f"latest regression is {last_regression.upper()}"
+        if last_regression_stale:
+            validation = f"{validation} but marked stale"
+    severity = "info" if last_regression in {"ok", "pass", "passed"} and not last_regression_stale else "warning"
+    detail = f"{changed_count} changed file(s): {shown}. Diff +{insertions}/-{deletions}; {validation}."
+    return _event("updating", severity, "Local code changed since last accepted state", detail, source="git_worktree", command="git diff --stat")
+
+
+def build_self_status_payload(
+    *,
+    pulse_payload: dict | None = None,
+    recent_ops_events: list[dict] | None = None,
+    repo_change_snapshot: dict | None = None,
+) -> dict:
     pulse = dict(pulse_payload or {})
     events: list[dict] = []
 
@@ -96,6 +195,14 @@ def build_self_status_payload(*, pulse_payload: dict | None = None, recent_ops_e
         if update_zip:
             detail = f"{detail} Latest package: {update_zip}"
         events.append(_event("updating", "info", "Validated update is waiting", detail, source="patch_pipeline", command="update now"))
+
+    repo_event = _repo_change_event(
+        dict(repo_change_snapshot or {}),
+        last_regression=last_regression,
+        last_regression_stale=last_regression_stale,
+    )
+    if repo_event:
+        events.append(repo_event)
 
     for row in list(recent_ops_events or [])[-20:]:
         if not isinstance(row, dict):
@@ -132,6 +239,7 @@ def build_self_status_payload(*, pulse_payload: dict | None = None, recent_ops_e
         "level": level,
         "summary": summary,
         "events": deduped[:12],
+        "repo_change": dict(repo_change_snapshot or {}),
     }
 
 

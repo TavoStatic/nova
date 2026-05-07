@@ -63,6 +63,7 @@ TEST_LANES: dict[str, list[str]] = {
         "tests.test_nova_reply_sequence",
         "tests.test_nova_route_probing",
         "tests.test_nova_runtime_context",
+        "tests.test_nova_self_status_service",
         "tests.test_nova_turn_direction",
         "tests.test_ollama_test_guard",
         "tests.test_patch_control_service",

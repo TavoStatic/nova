@@ -85,6 +85,7 @@ from services.nova_pulse import render_nova_pulse as service_render_nova_pulse
 from services.nova_pulse import tool_nova_pulse as service_tool_nova_pulse
 from services.nova_pulse import write_pulse_snapshot as service_write_pulse_snapshot
 from services.nova_self_status import build_self_status_payload as service_build_self_status_payload
+from services.nova_self_status import build_repo_change_snapshot as service_build_repo_change_snapshot
 from services.nova_self_status import read_recent_ops_events as service_read_recent_ops_events
 from services.nova_self_status import render_self_status as service_render_self_status
 from services.core_health_brief import build_core_health_brief as service_build_core_health_brief
@@ -5423,9 +5424,11 @@ def tool_nova_pulse():
 
 
 def tool_nova_self_status():
+    pulse_payload = _apply_latest_regression_validation(build_pulse_payload())
     payload = service_build_self_status_payload(
-        pulse_payload=build_pulse_payload(),
+        pulse_payload=pulse_payload,
         recent_ops_events=service_read_recent_ops_events(RUNTIME_DIR / "ops_journal.jsonl", limit=60),
+        repo_change_snapshot=service_build_repo_change_snapshot(BASE_DIR),
     )
     return service_render_self_status(payload)
 
@@ -5492,6 +5495,7 @@ def build_core_health_brief_payload() -> dict:
     self_status = service_build_self_status_payload(
         pulse_payload=pulse_payload,
         recent_ops_events=service_read_recent_ops_events(RUNTIME_DIR / "ops_journal.jsonl", limit=60),
+        repo_change_snapshot=service_build_repo_change_snapshot(BASE_DIR),
     )
     autonomy_maintenance = _load_json_file(AUTONOMY_MAINTENANCE_FILE, {}) or {}
     core_steward = service_build_core_steward_payload(
