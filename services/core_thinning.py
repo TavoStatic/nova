@@ -79,6 +79,23 @@ def _is_service_wrapper(node: ast.FunctionDef | ast.AsyncFunctionDef) -> str:
     return ""
 
 
+def _function_bounds(node: ast.FunctionDef | ast.AsyncFunctionDef) -> tuple[int, int]:
+    start = int(getattr(node, "lineno", 0) or 0)
+    end = int(getattr(node, "end_lineno", start) or start)
+    return start, end
+
+
+def _functions_named(tree: ast.AST, name: str) -> list[ast.FunctionDef | ast.AsyncFunctionDef]:
+    clean_name = str(name or "").strip()
+    if not clean_name:
+        return []
+    return [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == clean_name
+    ]
+
+
 def _http_surface_theme(name: str) -> str:
     clean = str(name or "").strip().lstrip("_")
     if not clean:
@@ -485,23 +502,38 @@ def execute_core_thinning_order(payload: str | dict[str, object], *, python_exec
     if not wrapped_call:
         return {"ok": False, "scope_ok": False, "verified": False, "reason": "missing_wrapper_target"}
 
-    matched = None
-    for node in ast.walk(tree):
-        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            continue
-        if node.name != name:
-            continue
-        if int(getattr(node, "lineno", 0) or 0) != start_line or int(getattr(node, "end_lineno", 0) or 0) != end_line:
-            return {"ok": False, "scope_ok": False, "verified": False, "reason": "target_line_drift"}
-        if _is_service_wrapper(node) != wrapped_call:
-            return {"ok": False, "scope_ok": False, "verified": False, "reason": "wrapper_shape_drift"}
-        matched = node
-        break
-    if matched is None:
+    matches = _functions_named(tree, name)
+    if not matches:
         return {"ok": False, "scope_ok": False, "verified": False, "reason": "wrapper_missing"}
+    if len(matches) > 1:
+        return {"ok": False, "scope_ok": False, "verified": False, "reason": "ambiguous_wrapper_target"}
+
+    matched = matches[0]
+    actual_start, actual_end = _function_bounds(matched)
+    line_drift_resolved = actual_start != start_line or actual_end != end_line
+    if _is_service_wrapper(matched) != wrapped_call:
+        return {"ok": False, "scope_ok": False, "verified": False, "reason": "wrapper_shape_drift"}
+    start_line, end_line = actual_start, actual_end
+
+    if name in _runtime_hook_reference_names([path]):
+        return {
+            "ok": False,
+            "scope_ok": True,
+            "verified": False,
+            "reason": "runtime_hook_still_present",
+            "line_drift_resolved": line_drift_resolved,
+            "target": {"file": str(path), "name": name, "start_line": start_line, "end_line": end_line},
+        }
 
     if _name_reference_count(tree, name) > 0:
-        return {"ok": False, "scope_ok": True, "verified": False, "reason": "callers_still_present"}
+        return {
+            "ok": False,
+            "scope_ok": True,
+            "verified": False,
+            "reason": "callers_still_present",
+            "line_drift_resolved": line_drift_resolved,
+            "target": {"file": str(path), "name": name, "start_line": start_line, "end_line": end_line},
+        }
 
     lines = source.splitlines()
     next_lines = lines[: start_line - 1] + lines[end_line:]
@@ -527,6 +559,7 @@ def execute_core_thinning_order(payload: str | dict[str, object], *, python_exec
         "scope_ok": True,
         "verified": True,
         "action": "removed_unused_wrapper",
+        "line_drift_resolved": line_drift_resolved,
         "target": {"file": str(path), "name": name, "start_line": start_line, "end_line": end_line},
     }
 

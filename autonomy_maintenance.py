@@ -21,6 +21,8 @@ from services.nova_patching import patch_preview_summaries as service_patch_prev
 from services.autonomy_orchestrator import AUTONOMY_ORCHESTRATOR_SERVICE
 from services.autonomy_execution_gate import AUTONOMY_EXECUTION_GATE_SERVICE
 from services.control_work_trees import CONTROL_WORK_TREES_SERVICE
+from services.core_thinning import build_core_thinning_brief as service_build_core_thinning_brief
+from services.core_thinning import feed_core_thinning_brief_to_work_tree as service_feed_core_thinning_brief_to_work_tree
 from services.core_steward import build_core_steward_payload as service_build_core_steward_payload
 from services.nova_control_action_dispatcher import NOVA_CONTROL_ACTION_DISPATCHER, autonomy_advisory_action_types
 from services.nova_runtime_context import AUTONOMY_ORCHESTRATOR_LEDGER_FILE
@@ -2434,10 +2436,52 @@ def _active_work_tree_candidates(limit: int = ACTIVE_WORK_TREE_MAX_TREES) -> lis
     return candidates
 
 
-def _run_active_work_tree_cycle(state: dict, *, max_steps: int | None = None, max_trees: int | None = None) -> dict:
+def _candidate_uses_tool(candidate: dict, tool_name: str) -> bool:
+    next_step = candidate.get("next_step") if isinstance(candidate.get("next_step"), dict) else {}
+    return str(next_step.get("recommended_tool") or "").strip() == tool_name
+
+
+def _sync_core_thinning_work_tree(state: dict) -> dict:
+    try:
+        brief = service_build_core_thinning_brief([ROOT / "nova_core.py", ROOT / "nova_http.py"])
+        feed = service_feed_core_thinning_brief_to_work_tree(brief, work_tree_module=work_tree)
+        payload = {
+            "ts": _patch_queue_timestamp(),
+            "status": "ok" if bool(feed.get("ok", False)) and bool(brief.get("ok", False)) else "failed",
+            "tree_id": str(feed.get("tree_id") or ""),
+            "tree_title": str(feed.get("tree_title") or "Core Thinning"),
+            "order_count": int(brief.get("order_count", 0) or 0),
+            "added_count": int(feed.get("added_count", 0) or 0),
+            "deduped_count": int(feed.get("deduped_count", 0) or 0),
+            "updated_count": int(feed.get("updated_count", 0) or 0),
+            "resolved_count": int(feed.get("resolved_count", 0) or 0),
+            "error": str(brief.get("error") or feed.get("error") or ""),
+        }
+    except Exception as exc:
+        payload = {
+            "ts": _patch_queue_timestamp(),
+            "status": "failed",
+            "reason": "core_thinning_sync_failed",
+            "error": str(exc),
+        }
+    state["last_core_thinning_sync"] = payload
+    return payload
+
+
+def _run_active_work_tree_cycle(
+    state: dict,
+    *,
+    max_steps: int | None = None,
+    max_trees: int | None = None,
+    sync_core_thinning: bool = True,
+) -> dict:
     tree_limit = max(1, _safe_int(max_trees, ACTIVE_WORK_TREE_MAX_TREES)) if max_trees is not None else ACTIVE_WORK_TREE_MAX_TREES
     step_limit = max(1, _safe_int(max_steps, ACTIVE_WORK_TREE_MAX_STEPS)) if max_steps is not None else ACTIVE_WORK_TREE_MAX_STEPS
     candidates = _active_work_tree_candidates(tree_limit)
+    core_thinning_sync: dict = {}
+    if sync_core_thinning and any(_candidate_uses_tool(candidate, "core_thinning") for candidate in candidates):
+        core_thinning_sync = _sync_core_thinning_work_tree(state)
+        candidates = _active_work_tree_candidates(tree_limit)
     executed_total = 0
     attempted_total = 0
     full_history: list[dict] = []
@@ -2503,6 +2547,8 @@ def _run_active_work_tree_cycle(state: dict, *, max_steps: int | None = None, ma
         "processed": processed,
         "skipped": skipped,
     }
+    if core_thinning_sync:
+        payload["core_thinning_sync"] = core_thinning_sync
     if full_history:
         payload["history"] = full_history
     state["last_active_work_tree_cycle"] = payload

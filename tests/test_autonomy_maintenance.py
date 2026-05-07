@@ -1289,7 +1289,7 @@ class TestAutonomyMaintenance(unittest.TestCase):
         work_tree.set_branch_tools(unsafe_root.branch_id, allowed_tools=["update_now"], preferred_tool="update_now")
 
         with mock.patch.object(autonomy_maintenance.nova_core, "execute_planned_action", return_value="Queue is empty."):
-            payload = autonomy_maintenance._run_active_work_tree_cycle(state)
+            payload = autonomy_maintenance._run_active_work_tree_cycle(state, sync_core_thinning=False)
 
         self.assertEqual(payload.get("status"), "ok")
         self.assertEqual(payload.get("executed_count"), 1)
@@ -1335,7 +1335,7 @@ class TestAutonomyMaintenance(unittest.TestCase):
             return {"ok": True, "scope_ok": True, "verified": True, "message": "core_thinning_checked"}
 
         with mock.patch.object(autonomy_maintenance.nova_core, "execute_planned_action", side_effect=_execute):
-            payload = autonomy_maintenance._run_active_work_tree_cycle(state, max_steps=1, max_trees=1)
+            payload = autonomy_maintenance._run_active_work_tree_cycle(state, max_steps=1, max_trees=1, sync_core_thinning=False)
 
         self.assertEqual(payload.get("status"), "ok")
         self.assertEqual(payload.get("executed_count"), 1)
@@ -1449,7 +1449,7 @@ class TestAutonomyMaintenance(unittest.TestCase):
                      }
                  ],
              ) as loop_mock:
-            payload = autonomy_maintenance._run_active_work_tree_cycle(state, max_steps=1, max_trees=2)
+            payload = autonomy_maintenance._run_active_work_tree_cycle(state, max_steps=1, max_trees=2, sync_core_thinning=False)
 
         loop_mock.assert_called_once()
         self.assertEqual(payload.get("status"), "scope_blocked")
@@ -1487,13 +1487,65 @@ class TestAutonomyMaintenance(unittest.TestCase):
 
         with mock.patch.object(autonomy_maintenance, "_active_work_tree_candidates", return_value=candidates), \
              mock.patch.object(autonomy_maintenance.work_tree, "run_autonomous_loop", return_value=[]) as loop_mock:
-            payload = autonomy_maintenance._run_active_work_tree_cycle(state, max_steps=1, max_trees=2)
+            payload = autonomy_maintenance._run_active_work_tree_cycle(state, max_steps=1, max_trees=2, sync_core_thinning=False)
 
         loop_mock.assert_called_once()
         self.assertEqual(payload.get("status"), "idle")
         self.assertEqual(payload.get("attempted_count"), 1)
         self.assertEqual(payload.get("executed_count"), 0)
         self.assertEqual(payload.get("processed_tree_count"), 1)
+
+    def test_run_active_work_tree_cycle_resyncs_core_thinning_before_execution(self):
+        state = {}
+        stale_candidate = {
+            "tree_id": "tree-core",
+            "title": "Core Thinning",
+            "status": "active",
+            "kind": "core_thinning",
+            "next_step": {
+                "branch_id": "branch-stale",
+                "branch_title": "Review stale wrapper shim",
+                "recommended_tool": "core_thinning",
+            },
+        }
+        refreshed_candidate = {
+            "tree_id": "tree-core",
+            "title": "Core Thinning",
+            "status": "active",
+            "kind": "core_thinning",
+            "next_step": {
+                "branch_id": "branch-refreshed",
+                "branch_title": "Review refreshed wrapper shim",
+                "recommended_tool": "core_thinning",
+            },
+        }
+        sync_payload = {
+            "status": "ok",
+            "tree_id": "tree-core",
+            "added_count": 0,
+            "deduped_count": 7,
+            "resolved_count": 1,
+        }
+
+        with mock.patch.object(
+            autonomy_maintenance,
+            "_active_work_tree_candidates",
+            side_effect=[[stale_candidate], [refreshed_candidate]],
+        ) as candidates_mock, \
+             mock.patch.object(autonomy_maintenance, "_sync_core_thinning_work_tree", return_value=sync_payload) as sync_mock, \
+             mock.patch.object(autonomy_maintenance.work_tree, "run_autonomous_loop", return_value=[]) as loop_mock:
+            payload = autonomy_maintenance._run_active_work_tree_cycle(state, max_steps=1, max_trees=2)
+
+        self.assertEqual(candidates_mock.call_count, 2)
+        sync_mock.assert_called_once_with(state)
+        loop_mock.assert_called_once_with(
+            "tree-core",
+            max_steps=1,
+            execute_planned_action_fn=autonomy_maintenance.nova_core.execute_planned_action,
+        )
+        self.assertEqual((payload.get("core_thinning_sync") or {}).get("resolved_count"), 1)
+        self.assertEqual(payload.get("attempted_count"), 1)
+        self.assertEqual(payload.get("processed")[0].get("last_action"), "")
 
     def test_retire_legacy_patch_update_trees_drops_open_tasks_and_completes_tree(self):
         self._isolated_work_tree_db()

@@ -155,6 +155,116 @@ class TestCoreThinningService(unittest.TestCase):
         self.assertIn("def keep", text)
         sample.unlink(missing_ok=True)
 
+    def test_execute_core_thinning_order_resolves_wrapper_line_drift(self):
+        sample = Path("C:/Nova/runtime/_test_tmp") / f"core_thinning_drift_{uuid.uuid4().hex}.py"
+        sample.write_text(
+            "\n".join(
+                [
+                    "HEADER = True",
+                    "",
+                    "def wrapper():",
+                    "    return service_demo()",
+                    "",
+                    "def keep():",
+                    "    return 1",
+                    "",
+                ]
+            ),
+            encoding="utf-8",
+        )
+        target = {
+            "file": str(sample),
+            "name": "wrapper",
+            "start_line": 1,
+            "end_line": 2,
+            "wrapped_call": "service_demo",
+        }
+
+        result = execute_core_thinning_order({"target": target})
+
+        self.assertTrue(result.get("ok"))
+        self.assertTrue(result.get("line_drift_resolved"))
+        self.assertEqual((result.get("target") or {}).get("start_line"), 3)
+        text = sample.read_text(encoding="utf-8")
+        self.assertNotIn("def wrapper", text)
+        self.assertIn("def keep", text)
+        sample.unlink(missing_ok=True)
+
+    def test_execute_core_thinning_order_resolves_line_drift_before_caller_block(self):
+        sample = Path("C:/Nova/runtime/_test_tmp") / f"core_thinning_drift_block_{uuid.uuid4().hex}.py"
+        sample.write_text(
+            "\n".join(
+                [
+                    "HEADER = True",
+                    "",
+                    "def wrapper():",
+                    "    return service_demo()",
+                    "",
+                    "def caller():",
+                    "    return wrapper()",
+                    "",
+                ]
+            ),
+            encoding="utf-8",
+        )
+        target = {
+            "file": str(sample),
+            "name": "wrapper",
+            "start_line": 1,
+            "end_line": 2,
+            "wrapped_call": "service_demo",
+        }
+
+        result = execute_core_thinning_order({"target": target})
+
+        self.assertFalse(result.get("ok"))
+        self.assertTrue(result.get("scope_ok"))
+        self.assertTrue(result.get("line_drift_resolved"))
+        self.assertEqual(result.get("reason"), "callers_still_present")
+        self.assertIn("def wrapper", sample.read_text(encoding="utf-8"))
+        sample.unlink(missing_ok=True)
+
+    def test_execute_core_thinning_order_blocks_runtime_hook_reference(self):
+        sample_dir = Path("C:/Nova/runtime/_test_tmp") / f"core_thinning_exec_hook_{uuid.uuid4().hex}"
+        services_dir = sample_dir / "services"
+        services_dir.mkdir(parents=True, exist_ok=True)
+        sample = sample_dir / "nova_core.py"
+        sample.write_text(
+            "\n".join(
+                [
+                    "HEADER = True",
+                    "",
+                    "def _wrapper():",
+                    "    return service_demo()",
+                    "",
+                ]
+            ),
+            encoding="utf-8",
+        )
+        (services_dir / "demo_hook.py").write_text(
+            "def run(runtime_scope):\n    return _runtime_hook(runtime_scope, \"_wrapper\", None)\n",
+            encoding="utf-8",
+        )
+        target = {
+            "file": str(sample),
+            "name": "_wrapper",
+            "start_line": 1,
+            "end_line": 2,
+            "wrapped_call": "service_demo",
+        }
+
+        result = execute_core_thinning_order({"target": target})
+
+        self.assertFalse(result.get("ok"))
+        self.assertTrue(result.get("scope_ok"))
+        self.assertTrue(result.get("line_drift_resolved"))
+        self.assertEqual(result.get("reason"), "runtime_hook_still_present")
+        self.assertIn("def _wrapper", sample.read_text(encoding="utf-8"))
+        (services_dir / "demo_hook.py").unlink(missing_ok=True)
+        sample.unlink(missing_ok=True)
+        services_dir.rmdir()
+        sample_dir.rmdir()
+
     def test_execute_core_thinning_order_blocks_wrapper_with_callers(self):
         sample = Path("C:/Nova/runtime/_test_tmp") / f"core_thinning_block_{uuid.uuid4().hex}.py"
         sample.write_text(
