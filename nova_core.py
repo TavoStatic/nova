@@ -5718,8 +5718,6 @@ def _provider_request_headers(token: str = "") -> dict[str, str]:
     return service_provider_request_headers(token)
 
 
-def _clean_html_text(value: str) -> str:
-    return service_clean_html_text(value)
 
 
 def _looks_like_code_discovery_query(text: str) -> bool:
