@@ -18,9 +18,10 @@ from services.nova_patching import bulk_archive_superseded_previews as service_b
 from services.nova_patching import bulk_reject_orphaned_previews as service_bulk_reject_orphaned_previews
 from services.nova_patching import patch_preview_summaries as service_patch_preview_summaries
 from services.autonomy_orchestrator import AUTONOMY_ORCHESTRATOR_SERVICE
+from services.autonomy_execution_gate import AUTONOMY_EXECUTION_GATE_SERVICE
 from services.control_work_trees import CONTROL_WORK_TREES_SERVICE
 from services.core_steward import build_core_steward_payload as service_build_core_steward_payload
-from services.nova_control_action_dispatcher import autonomy_advisory_action_types
+from services.nova_control_action_dispatcher import NOVA_CONTROL_ACTION_DISPATCHER, autonomy_advisory_action_types
 from services.nova_runtime_context import AUTONOMY_ORCHESTRATOR_LEDGER_FILE
 from services.test_session_control import TEST_SESSION_CONTROL_SERVICE
 from services.work_tree_signal_ingestion import WORK_TREE_SIGNAL_INGESTION_SERVICE
@@ -283,13 +284,76 @@ def _runtime_guard_status_for_orchestrator(core_steward: dict, guard_health: dic
     }
 
 
+def _autonomy_policy_settings() -> dict:
+    try:
+        policy = nova_core.load_policy()
+    except Exception:
+        policy = {}
+    settings = dict((policy or {}).get("autonomy") or {}) if isinstance((policy or {}).get("autonomy"), dict) else {}
+    return settings
+
+
+def _autonomy_policy_bool(settings: dict, *names: str, default: bool = False) -> bool:
+    for name in names:
+        if name in settings:
+            return bool(settings.get(name))
+    return bool(default)
+
+
+def _autonomy_policy_list(settings: dict, name: str, default: list[str]) -> list[str]:
+    value = settings.get(name)
+    if isinstance(value, list):
+        return [str(item or "").strip() for item in value if str(item or "").strip()]
+    return list(default)
+
+
+def _autonomy_execution_mode(settings: dict | None = None) -> str:
+    settings = dict(settings or _autonomy_policy_settings())
+    mode = str(settings.get("mode") or settings.get("execution_mode") or "advisory").strip().lower()
+    if mode in {"canary", "execute"}:
+        return mode
+    return "advisory"
+
+
+def _autonomy_execution_enabled(settings: dict | None = None) -> bool:
+    settings = dict(settings or _autonomy_policy_settings())
+    if _autonomy_execution_mode(settings) not in {"canary", "execute"}:
+        return False
+    return _autonomy_policy_bool(settings, "execute_enabled", "execution_enabled", "autonomy_execute_enabled", default=False)
+
+
+def _legacy_maintenance_execution_enabled(settings: dict | None = None) -> bool:
+    settings = dict(settings or _autonomy_policy_settings())
+    mode = _autonomy_execution_mode(settings)
+    if mode in {"canary", "execute"} and _autonomy_policy_bool(settings, "orchestrator_owns_execution", default=True):
+        return _autonomy_policy_bool(settings, "legacy_maintenance_execution_enabled", default=False)
+    return _autonomy_policy_bool(settings, "legacy_maintenance_execution_enabled", default=True)
+
+
 def _policy_snapshot_for_orchestrator() -> dict:
+    settings = _autonomy_policy_settings()
+    advisory_actions = list(autonomy_advisory_action_types())
+    requires_ack_default = ["update_now_dry_run"]
+    mode = _autonomy_execution_mode(settings)
+    execute_enabled = _autonomy_execution_enabled(settings)
     return {
-        "autonomy_enabled": True,
-        "allowed_actions": list(autonomy_advisory_action_types()),
-        "blocked_actions": [],
+        "autonomy_enabled": _autonomy_policy_bool(settings, "enabled", "autonomy_enabled", default=True),
+        "mode": mode,
+        "allow_execute_mode": bool(execute_enabled),
+        "execute_enabled": bool(execute_enabled),
+        "allowed_actions": _autonomy_policy_list(settings, "allowed_actions", advisory_actions),
+        "blocked_actions": _autonomy_policy_list(settings, "blocked_actions", []),
+        "execute_allowed_actions": _autonomy_policy_list(settings, "execute_allowed_actions", []),
+        "execute_blocked_actions": _autonomy_policy_list(settings, "execute_blocked_actions", []),
+        "canary_allowed_actions": _autonomy_policy_list(settings, "canary_allowed_actions", []),
         "quiet_hours_active": False,
-        "requires_operator_ack_for": ["update_now_dry_run"],
+        "requires_operator_ack_for": _autonomy_policy_list(settings, "requires_operator_ack_for", requires_ack_default),
+        "operator_ack_present": bool(settings.get("operator_ack_present", False)),
+        "confidence_threshold": _safe_float(settings.get("confidence_threshold"), 0.55),
+        "execute_min_confidence": _safe_float(settings.get("execute_min_confidence", settings.get("confidence_threshold")), 0.55),
+        "cooldown_sec": _safe_int(settings.get("cooldown_sec"), 180),
+        "orchestrator_owns_execution": _autonomy_policy_bool(settings, "orchestrator_owns_execution", default=False),
+        "legacy_maintenance_execution_enabled": _legacy_maintenance_execution_enabled(settings),
         "source_freshness_sec": 0,
     }
 
@@ -311,14 +375,28 @@ def _triage_hints_for_orchestrator(core_steward: dict, generated_queue: dict) ->
 
 
 def _last_action_context_for_orchestrator(state: dict) -> dict:
-    last = dict((state or {}).get("last_autonomy_orchestrator") or {}) if isinstance((state or {}).get("last_autonomy_orchestrator"), dict) else {}
-    action = dict(last.get("action") or {}) if isinstance(last.get("action"), dict) else {}
+    last_execution = (
+        dict((state or {}).get("last_autonomy_execution") or {})
+        if isinstance((state or {}).get("last_autonomy_execution"), dict)
+        else {}
+    )
+    last_orchestrator = (
+        dict((state or {}).get("last_autonomy_orchestrator") or {})
+        if isinstance((state or {}).get("last_autonomy_orchestrator"), dict)
+        else {}
+    )
+    action = dict(last_orchestrator.get("action") or {}) if isinstance(last_orchestrator.get("action"), dict) else {}
+    now_epoch = time.time()
+    cooldown_until = _safe_float(last_execution.get("cooldown_until_epoch"), 0.0)
+    cooldown_remaining = max(0, int(cooldown_until - now_epoch)) if cooldown_until else 0
+    execution_action_type = str(last_execution.get("action_type") or "").strip()
     return {
-        "last_action_type": str(action.get("act") or ""),
-        "last_action_at_utc": str(last.get("created_at_utc") or last.get("ts") or ""),
-        "cooldown_active": False,
-        "cooldown_remaining_sec": 0,
-        "last_result": "unknown",
+        "last_action_type": execution_action_type or str(action.get("act") or ""),
+        "last_target_id": str(last_execution.get("target_id") or ""),
+        "last_action_at_utc": str(last_execution.get("created_at_utc") or last_orchestrator.get("created_at_utc") or last_orchestrator.get("ts") or ""),
+        "cooldown_active": bool(cooldown_remaining > 0),
+        "cooldown_remaining_sec": cooldown_remaining,
+        "last_result": str(last_execution.get("result") or "unknown"),
         "source_freshness_sec": 0,
     }
 
@@ -330,6 +408,7 @@ def _autonomy_orchestrator_input_envelope(
     work_tree_state: dict,
     generated_queue: dict,
     guard_health: dict,
+    policy_snapshot: dict | None = None,
 ) -> dict:
     return {
         "cycle_id": f"autonomy-maintenance-{time.strftime('%Y%m%d%H%M%S')}",
@@ -338,7 +417,7 @@ def _autonomy_orchestrator_input_envelope(
         "steward_posture": _steward_posture_for_orchestrator(core_steward),
         "queue_pressure": _queue_pressure_for_orchestrator(generated_queue),
         "runtime_guard_status": _runtime_guard_status_for_orchestrator(core_steward, guard_health),
-        "policy_snapshot": _policy_snapshot_for_orchestrator(),
+        "policy_snapshot": dict(policy_snapshot or _policy_snapshot_for_orchestrator()),
         "triage_hints": _triage_hints_for_orchestrator(core_steward, generated_queue),
         "last_action_context": _last_action_context_for_orchestrator(state),
     }
@@ -352,6 +431,9 @@ def _run_autonomy_orchestrator_advisory(state: dict, kidney_summary: dict) -> di
     )
     generated_queue = _generated_work_queue(limit=200)
     guard_health = _guard_health_for_orchestrator()
+    policy_snapshot = _policy_snapshot_for_orchestrator()
+    requested_mode = "execute" if bool(policy_snapshot.get("execute_enabled")) else "advisory"
+    AUTONOMY_ORCHESTRATOR_SERVICE.set_mode(requested_mode, policy_snapshot)
     packet = AUTONOMY_ORCHESTRATOR_SERVICE.evaluate_next_action(
         _autonomy_orchestrator_input_envelope(
             state=state,
@@ -359,9 +441,11 @@ def _run_autonomy_orchestrator_advisory(state: dict, kidney_summary: dict) -> di
             work_tree_state=work_tree_state,
             generated_queue=generated_queue,
             guard_health=guard_health,
+            policy_snapshot=policy_snapshot,
         ),
         record_ledger_fn=_append_autonomy_orchestrator_ledger,
     )
+    execution = _execute_autonomy_recommendation(state, packet, policy_snapshot)
     recommended_action = dict(packet.get("recommended_action") or {}) if isinstance(packet.get("recommended_action"), dict) else {}
     state["last_autonomy_orchestrator"] = {
         "ts": str(((packet.get("ledger") or {}).get("row") or {}).get("ts") or ""),
@@ -376,7 +460,9 @@ def _run_autonomy_orchestrator_advisory(state: dict, kidney_summary: dict) -> di
         "explain_text": str(packet.get("explain_text") or ""),
         "rejection_reasons": list(packet.get("rejection_reasons") or []),
         "ledger_status": str((packet.get("ledger") or {}).get("status") or ""),
+        "execution": execution,
     }
+    packet["execution"] = execution
     return packet
 
 
@@ -475,6 +561,190 @@ def _record_generated_queue_run(state: dict, ok: bool, msg: str, extra: dict | N
         "queue_count": int(work_queue.get("count", 0) or 0),
     }
     state["last_generated_queue_run"] = payload
+    return payload
+
+
+class _MaintenancePatchControlService:
+    @staticmethod
+    def patch_control_state(*_args, **_kwargs) -> dict:
+        return {"ok": False, "status": "unavailable", "source": "autonomy_maintenance"}
+
+    @staticmethod
+    def patch_preview_show(*_args, **_kwargs) -> tuple[bool, str, dict, str]:
+        return False, "patch_preview_show_unavailable_in_maintenance", {}, "patch_preview_show_unavailable_in_maintenance"
+
+    @staticmethod
+    def patch_preview_decision(*_args, **_kwargs) -> tuple[bool, str, dict, str]:
+        return False, "patch_preview_decision_unavailable_in_maintenance", {}, "patch_preview_decision_unavailable_in_maintenance"
+
+    @staticmethod
+    def patch_preview_apply(*_args, **_kwargs) -> tuple[bool, str, dict, str]:
+        return False, "patch_preview_apply_unavailable_in_maintenance", {}, "patch_preview_apply_unavailable_in_maintenance"
+
+    @staticmethod
+    def patch_preview_entry(*_args, **_kwargs) -> dict:
+        return {}
+
+
+def _unsupported_control_action(payload: dict) -> tuple[bool, str, dict, str]:
+    action = str((payload or {}).get("_action") or (payload or {}).get("action") or "control_action").strip()
+    msg = f"{action}_unavailable_in_autonomy_maintenance"
+    return False, msg, {}, msg
+
+
+def _maintenance_pulse_status_action(_payload: dict) -> tuple[bool, str, dict, str]:
+    try:
+        pulse = nova_core.build_pulse_payload()
+    except Exception as exc:
+        msg = f"pulse_status_failed:{exc}"
+        return False, msg, {}, msg
+    return True, "pulse_status_ok", {"pulse": pulse if isinstance(pulse, dict) else {}}, "pulse_status_ok"
+
+
+def _maintenance_generated_queue_run_next_action(_payload: dict) -> tuple[bool, str, dict, str]:
+    return TEST_SESSION_CONTROL_SERVICE.generated_queue_run_next_action(
+        run_next_generated_work_queue_item_fn=_run_next_generated_work_queue_item,
+    )
+
+
+def _maintenance_generated_queue_investigate_action(_payload: dict) -> tuple[bool, str, dict, str]:
+    return False, "generated_queue_investigate_requires_http_session_scope", {}, "generated_queue_investigate_requires_http_session_scope"
+
+
+def _dispatch_autonomy_control_action(action_type: str, payload: dict, events: list[dict]) -> tuple[bool, str, dict]:
+    def _record_event(act: str, status: str, detail: str, event_payload: dict) -> None:
+        events.append(
+            {
+                "act": str(act or ""),
+                "status": str(status or ""),
+                "detail": str(detail or ""),
+                "payload": dict(event_payload or {}) if isinstance(event_payload, dict) else {},
+            }
+        )
+
+    return NOVA_CONTROL_ACTION_DISPATCHER.dispatch_control_action(
+        str(action_type or ""),
+        dict(payload or {}),
+        patch_control_service=_MaintenancePatchControlService(),
+        patch_status_payload_fn=lambda: {"ok": False, "status": "unavailable"},
+        patch_preview_summaries_fn=lambda _limit=40: [],
+        patch_action_readiness_payload_fn=lambda _patch: {"ready": False},
+        patch_preview_target_fn=lambda _payload, _previews=None: {},
+        show_preview_fn=lambda _target: {},
+        approve_preview_fn=lambda _target, note="": False,
+        reject_preview_fn=lambda _target, note="": False,
+        patch_apply_fn=lambda *_args, **_kwargs: {"ok": False, "error": "patch_apply_unavailable_in_maintenance"},
+        updates_dir=UPDATES_DIR,
+        refresh_status_action_fn=_unsupported_control_action,
+        device_location_update_action_fn=_unsupported_control_action,
+        device_location_clear_action_fn=_unsupported_control_action,
+        patch_preview_list_action_fn=_unsupported_control_action,
+        pulse_status_action_fn=_maintenance_pulse_status_action,
+        update_now_dry_run_action_fn=_unsupported_control_action,
+        update_now_confirm_action_fn=_unsupported_control_action,
+        update_now_cancel_action_fn=_unsupported_control_action,
+        runtime_artifact_show_action_fn=_unsupported_control_action,
+        guard_control_action_fn=_unsupported_control_action,
+        core_runtime_action_fn=_unsupported_control_action,
+        autonomy_runtime_action_fn=_unsupported_control_action,
+        test_session_run_action_fn=_unsupported_control_action,
+        generated_pack_run_action_fn=_unsupported_control_action,
+        generated_queue_run_next_action_fn=_maintenance_generated_queue_run_next_action,
+        generated_queue_investigate_action_fn=_maintenance_generated_queue_investigate_action,
+        real_world_task_create_action_fn=_unsupported_control_action,
+        backend_command_list_action_fn=_unsupported_control_action,
+        backend_command_run_action_fn=_unsupported_control_action,
+        operator_prompt_action_fn=lambda event_payload: (False, "operator_prompt_unavailable_in_maintenance", {}, "operator_prompt_unavailable_in_maintenance", event_payload),
+        session_delete_action_fn=_unsupported_control_action,
+        policy_allow_action_fn=_unsupported_control_action,
+        policy_remove_action_fn=_unsupported_control_action,
+        web_mode_action_fn=_unsupported_control_action,
+        memory_scope_set_action_fn=_unsupported_control_action,
+        search_provider_action_fn=_unsupported_control_action,
+        search_provider_toggle_action_fn=_unsupported_control_action,
+        search_endpoint_set_action_fn=_unsupported_control_action,
+        search_provider_priority_set_action_fn=_unsupported_control_action,
+        search_endpoint_probe_action_fn=_unsupported_control_action,
+        chat_user_list_action_fn=_unsupported_control_action,
+        chat_user_upsert_action_fn=_unsupported_control_action,
+        chat_user_delete_action_fn=_unsupported_control_action,
+        pipeline_note_append_action_fn=_unsupported_control_action,
+        pipeline_create_action_fn=_unsupported_control_action,
+        pipeline_start_action_fn=_unsupported_control_action,
+        pipeline_pause_action_fn=_unsupported_control_action,
+        pipeline_update_action_fn=_unsupported_control_action,
+        pipeline_population_upsert_action_fn=_unsupported_control_action,
+        pipeline_archive_action_fn=_unsupported_control_action,
+        self_check_action_fn=_unsupported_control_action,
+        export_capabilities_snapshot_fn=lambda: (False, "export_capabilities_unavailable_in_maintenance", {}),
+        export_ledger_summary_action_fn=lambda _payload: (False, "export_ledger_summary_unavailable_in_maintenance", {}),
+        export_diagnostics_bundle_action_fn=lambda _payload: (False, "export_diagnostics_bundle_unavailable_in_maintenance", {}),
+        tail_log_action_fn=lambda _payload: (False, "tail_log_unavailable_in_maintenance", {}),
+        metrics_action_fn=lambda _payload: (False, "metrics_unavailable_in_maintenance", {}),
+        inspect_environment_fn=lambda: {},
+        format_report_fn=lambda _data: "",
+        policy_audit_fn=lambda _limit=30: "",
+        record_control_action_event_fn=_record_event,
+        invalidate_control_status_cache_fn=lambda: None,
+    )
+
+
+def _execute_autonomy_recommendation(state: dict, packet: dict, policy_snapshot: dict) -> dict:
+    last_context = _last_action_context_for_orchestrator(state)
+    gate = AUTONOMY_EXECUTION_GATE_SERVICE.evaluate(
+        packet,
+        policy_snapshot,
+        last_execution_context=last_context,
+    )
+    created_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    payload = {
+        "ts": _patch_queue_timestamp(),
+        "created_at_utc": created_at,
+        "mode": str(gate.get("mode") or ""),
+        "gate_status": str(gate.get("status") or ""),
+        "gate_reason": str(gate.get("reason") or ""),
+        "action_type": str(gate.get("action_type") or ""),
+        "target_id": str(gate.get("target_id") or ""),
+        "allowed": bool(gate.get("allow_execute")),
+        "result": "blocked",
+        "refusal_reasons": list(gate.get("refusal_reasons") or []),
+        "policy_checks": dict(gate.get("policy_checks") or {}),
+    }
+    if not bool(gate.get("allow_execute")):
+        state["last_autonomy_execution_gate"] = payload
+        return payload
+
+    events: list[dict] = []
+    action_type = str(gate.get("action_type") or "").strip()
+    ok, msg, extra = _dispatch_autonomy_control_action(action_type, dict(gate.get("dispatch_payload") or {}), events)
+    if action_type == "generated_queue_run_next":
+        _record_generated_queue_run(state, ok, msg, extra)
+    cooldown_sec = max(0, _safe_int(gate.get("cooldown_sec"), 0))
+    payload.update(
+        {
+            "result": "success" if ok else "failed",
+            "ok": bool(ok),
+            "message": str(msg or ""),
+            "extra": extra if isinstance(extra, dict) else {},
+            "events": events,
+            "cooldown_sec": cooldown_sec,
+            "cooldown_until_epoch": time.time() + cooldown_sec if cooldown_sec else 0.0,
+        }
+    )
+    state["last_autonomy_execution_gate"] = dict(payload)
+    state["last_autonomy_execution"] = payload
+    return payload
+
+
+def _skipped_maintenance_execution_payload(state: dict, state_key: str, reason: str, *, tree_count: int = 0) -> dict:
+    payload = {
+        "ts": _patch_queue_timestamp(),
+        "status": "skipped",
+        "tree_count": int(tree_count or 0),
+        "executed_count": 0,
+        "reason": str(reason or "orchestrator_owns_execution"),
+    }
+    state[state_key] = payload
     return payload
 
 
@@ -2089,6 +2359,8 @@ def _archive_stale_cli_active_trees(state: dict) -> dict:
 
 def run_once() -> int:
     state = _load_state()
+    autonomy_settings = _autonomy_policy_settings()
+    legacy_execution_enabled = _legacy_maintenance_execution_enabled(autonomy_settings)
 
     ok, pack_out = _run_subconscious_pack()
     _append_log(f"subconscious_pack={'ok' if ok else 'fail'}")
@@ -2111,7 +2383,10 @@ def run_once() -> int:
     state["last_generated_at"] = generated_at
     state["last_fallback_overuse_score"] = fallback_score
 
-    if fallback_score >= threshold:
+    if not legacy_execution_enabled:
+        state["last_auto_apply"] = "skipped_orchestrator_owns_execution"
+        _append_log("auto_apply_skipped_orchestrator_owns_execution")
+    elif fallback_score >= threshold:
         patch_candidates = list(select_patch_candidate_definition_paths(GENERATED_DEFS) or [])
         if not patch_candidates:
             state["last_auto_apply"] = "skipped_no_generated_defs"
@@ -2199,7 +2474,15 @@ def run_once() -> int:
         _append_log(f"patch_queue_sync_failed {exc}")
 
     try:
-        work_tree_cycle = _run_patch_queue_work_tree_cycle(state)
+        if legacy_execution_enabled:
+            work_tree_cycle = _run_patch_queue_work_tree_cycle(state)
+        else:
+            work_tree_cycle = _skipped_maintenance_execution_payload(
+                state,
+                "last_work_tree_cycle",
+                "orchestrator_owns_execution",
+                tree_count=1,
+            )
         _append_log(
             "work_tree_cycle"
             f" status={work_tree_cycle.get('status')}"
@@ -2236,7 +2519,36 @@ def run_once() -> int:
         _append_log(f"generated_queue_sync_failed {exc}")
 
     try:
-        generated_queue_cycle = _run_generated_queue_work_tree_cycle(state)
+        autonomy_orchestrator = _run_autonomy_orchestrator_advisory(state, kidney_summary)
+        _append_log(
+            "autonomy_orchestrator"
+            f" decision={autonomy_orchestrator.get('decision')}"
+            f" action={str((autonomy_orchestrator.get('action') or {}).get('act') or 'none')}"
+            f" ledger={str((autonomy_orchestrator.get('ledger') or {}).get('status') or '')}"
+            f" execution={str((autonomy_orchestrator.get('execution') or {}).get('result') or '')}"
+        )
+    except Exception as exc:
+        state["last_autonomy_orchestrator"] = {
+            "ts": _patch_queue_timestamp(),
+            "mode": "advisory",
+            "decision": "block_with_reason",
+            "action": {},
+            "reason": f"autonomy_orchestrator_failed:{exc}",
+            "rejection_reasons": ["orchestrator_cycle_failed"],
+            "ledger_status": "record_failed",
+        }
+        _append_log(f"autonomy_orchestrator_failed {exc}")
+
+    try:
+        if legacy_execution_enabled:
+            generated_queue_cycle = _run_generated_queue_work_tree_cycle(state)
+        else:
+            generated_queue_cycle = _skipped_maintenance_execution_payload(
+                state,
+                "last_generated_queue_tree_cycle",
+                "orchestrator_owns_execution",
+                tree_count=1,
+            )
         _append_log(
             "generated_queue_cycle"
             f" status={generated_queue_cycle.get('status')}"
@@ -2255,7 +2567,15 @@ def run_once() -> int:
         _append_log(f"generated_queue_cycle_failed {exc}")
 
     try:
-        active_work_tree_cycle = _run_active_work_tree_cycle(state)
+        if legacy_execution_enabled:
+            active_work_tree_cycle = _run_active_work_tree_cycle(state)
+        else:
+            active_work_tree_cycle = _skipped_maintenance_execution_payload(
+                state,
+                "last_active_work_tree_cycle",
+                "orchestrator_owns_execution",
+                tree_count=0,
+            )
         _append_log(
             "active_work_tree_cycle"
             f" status={active_work_tree_cycle.get('status')}"
@@ -2372,26 +2692,6 @@ def run_once() -> int:
         }
         state["last_signal_ingestion"] = signal_ingestion
         _append_log(f"signal_ingestion_failed {exc}")
-
-    try:
-        autonomy_orchestrator = _run_autonomy_orchestrator_advisory(state, kidney_summary)
-        _append_log(
-            "autonomy_orchestrator"
-            f" decision={autonomy_orchestrator.get('decision')}"
-            f" action={str((autonomy_orchestrator.get('action') or {}).get('act') or 'none')}"
-            f" ledger={str((autonomy_orchestrator.get('ledger') or {}).get('status') or '')}"
-        )
-    except Exception as exc:
-        state["last_autonomy_orchestrator"] = {
-            "ts": _patch_queue_timestamp(),
-            "mode": "advisory",
-            "decision": "block_with_reason",
-            "action": {},
-            "reason": f"autonomy_orchestrator_failed:{exc}",
-            "rejection_reasons": ["orchestrator_cycle_failed"],
-            "ledger_status": "record_failed",
-        }
-        _append_log(f"autonomy_orchestrator_failed {exc}")
 
     _save_state(state)
     return 0

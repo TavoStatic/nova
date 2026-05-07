@@ -296,6 +296,7 @@ class TestAutonomyMaintenance(unittest.TestCase):
                          "executed_count": 0,
                      },
                  ), \
+                 mock.patch.object(autonomy_maintenance, "_legacy_maintenance_execution_enabled", return_value=True), \
                  mock.patch.object(
                      autonomy_maintenance,
                      "_retire_legacy_patch_update_trees",
@@ -336,6 +337,55 @@ class TestAutonomyMaintenance(unittest.TestCase):
             self.assertEqual(queue_run.get("queue_blocked_files"), ["stuck.json"])
             self.assertEqual(queue_run.get("queue_count"), 5)
             self.assertEqual((state.get("last_generated_queue_tree_cycle") or {}).get("executed_count"), 1)
+
+    def test_execute_autonomy_recommendation_uses_dispatcher_for_canary_action(self):
+        state: dict = {}
+        packet = {
+            "cycle_id": "cycle-test",
+            "decision_type": "RecommendAction",
+            "recommended_action": {
+                "action_type": "generated_queue_run_next",
+                "target_kind": "queue",
+                "target_id": "generated_work_queue",
+                "reason_code": "queue_pressure_actionable",
+                "requires_ack": False,
+                "cooldown_sec": 180,
+            },
+            "confidence": 0.72,
+            "refusal_reasons": [],
+        }
+        policy = {
+            "enabled": True,
+            "mode": "canary",
+            "execute_enabled": True,
+            "execute_allowed_actions": ["generated_queue_run_next"],
+            "execute_blocked_actions": [],
+            "requires_operator_ack_for": [],
+            "execute_min_confidence": 0.55,
+        }
+
+        with mock.patch.object(
+            autonomy_maintenance,
+            "_run_next_generated_work_queue_item",
+            return_value=(
+                True,
+                "generated_work_queue_run_ok",
+                {
+                    "selected": {"file": "demo.json", "latest_status": "pass"},
+                    "latest_report": {"status": "pass", "run_id": "run-demo"},
+                    "work_queue": {"status": "actionable", "open_count": 1, "actionable_count": 1, "count": 1},
+                },
+            ),
+        ):
+            result = autonomy_maintenance._execute_autonomy_recommendation(state, packet, policy)
+
+        self.assertEqual(result.get("result"), "success")
+        self.assertTrue(result.get("ok"))
+        self.assertEqual(result.get("action_type"), "generated_queue_run_next")
+        self.assertEqual((state.get("last_generated_queue_run") or {}).get("selected_file"), "demo.json")
+        events = list(result.get("events") or [])
+        self.assertEqual(events[0].get("act"), "generated_queue_run_next")
+        self.assertEqual(events[0].get("status"), "ok")
 
     def test_run_worker_loops_for_bounded_cycles_and_records_status(self):
         with tempfile.TemporaryDirectory() as td:
@@ -410,7 +460,8 @@ class TestAutonomyMaintenance(unittest.TestCase):
                      autonomy_maintenance,
                      "_guard_health_for_orchestrator",
                      return_value={"running": True, "status": "running"},
-                 ):
+                 ), \
+                 mock.patch.object(autonomy_maintenance, "_autonomy_policy_settings", return_value={"enabled": True, "mode": "advisory"}):
                 packet = autonomy_maintenance._run_autonomy_orchestrator_advisory(state, {"mode": "enforce"})
 
             self.assertEqual(packet.get("decision"), "recommend_action")
@@ -483,6 +534,7 @@ class TestAutonomyMaintenance(unittest.TestCase):
                  mock.patch.object(autonomy_maintenance, "_sync_patch_queue_work_tree", return_value={"ts": "2026-04-23 08:00:01", "status": "ok", "tree_id": "tree_demo", "tree_title": "Patch Queue", "apply_ready_count": 0, "created_count": 0, "updated_count": 0}), \
                  mock.patch.object(autonomy_maintenance, "_run_patch_queue_work_tree_cycle", return_value={"ts": "2026-04-23 08:00:01", "status": "idle", "tree_count": 1, "executed_count": 0}), \
                  mock.patch.object(autonomy_maintenance, "_run_active_work_tree_cycle", return_value={"ts": "2026-04-23 08:00:01", "status": "idle", "tree_count": 0, "executed_count": 0}), \
+                 mock.patch.object(autonomy_maintenance, "_legacy_maintenance_execution_enabled", return_value=True), \
                  mock.patch.object(autonomy_maintenance, "_retire_legacy_patch_update_trees", return_value={"ts": "2026-04-23 08:00:01", "status": "idle", "retired_count": 0}), \
                  mock.patch.object(autonomy_maintenance, "_run_daily_regression_if_due", return_value="daily_regression_skipped_already_ran"), \
                  mock.patch.object(

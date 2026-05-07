@@ -59,6 +59,7 @@ def execute_identity_history_outcome(
     developer_identity_followup_reply_fn: Callable[..., str],
     identity_name_followup_reply_fn: Callable[[str], str],
     identity_profile_followup_reply_fn: Callable[..., str],
+    identity_profile_source_boundary_reply_fn: Callable[[str], str],
     classify_name_origin_outcome_fn: Callable[[dict], dict[str, object]],
     render_reply_fn: Callable[[Optional[dict]], str],
 ) -> tuple[str, Optional[dict], dict[str, object]]:
@@ -79,6 +80,9 @@ def execute_identity_history_outcome(
         reply_text = hard_answer_fn(text) or developer_profile_reply_fn(turns=turns, user_text=text)
         next_state = make_conversation_state_fn("identity_profile", subject="developer")
         subject = "developer"
+    elif outcome_kind == "source_boundary":
+        reply_text = identity_profile_source_boundary_reply_fn(subject)
+        next_state = make_conversation_state_fn("identity_profile", subject=subject)
     elif outcome_kind == "name_origin":
         if state_kind == "developer_identity" or (subject == "developer" and speaker_matches_developer_fn()):
             reply_text = developer_identity_followup_reply_fn(turns=turns, name_focus=True)

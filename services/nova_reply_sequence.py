@@ -249,6 +249,17 @@ def execute_reply_sequence(
             return build_fn(user_text, session_turns)
 
     low = text.lower()
+    if is_developer_profile_request(text):
+        trace("developer_profile", "matched")
+        reply = developer_profile_reply(turns, text)
+        return _timed_return(normalize_reply(reply), {
+            "planner_decision": "deterministic",
+            "tool": "developer_profile",
+            "tool_args": {"query": text},
+            "tool_result": reply,
+            "grounded": True,
+        })
+
     handled_truth, truth_reply, truth_source, truth_grounded = core.truth_hierarchy_answer(text)
     if handled_truth:
         trace("truth_hierarchy", "matched", tool=str(truth_source or ""), grounded=bool(truth_grounded))

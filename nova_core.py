@@ -71,6 +71,7 @@ from services.nova_pipeline_tools import handle_pipeline_command as service_hand
 from services.nova_profile_followups import developer_identity_followup_reply as service_developer_identity_followup_reply
 from services.nova_profile_followups import developer_profile_reply as service_developer_profile_reply
 from services.nova_profile_followups import infer_profile_conversation_state as service_infer_profile_conversation_state
+from services.nova_profile_followups import identity_profile_source_boundary_reply as service_identity_profile_source_boundary_reply
 from services.nova_query_classifiers import is_action_history_query as service_is_action_history_query
 from services.nova_query_classifiers import is_assistant_name_query as service_is_assistant_name_query
 from services.nova_query_classifiers import is_capability_query as service_is_capability_query
@@ -1339,6 +1340,7 @@ def _execute_identity_history_outcome(
         developer_identity_followup_reply_fn=_developer_identity_followup_reply,
         identity_name_followup_reply_fn=_identity_name_followup_reply,
         identity_profile_followup_reply_fn=_identity_profile_followup_reply,
+        identity_profile_source_boundary_reply_fn=_identity_profile_source_boundary_reply,
         classify_name_origin_outcome_fn=_classify_name_origin_outcome,
         render_reply_fn=render_reply,
     )
@@ -3980,6 +3982,15 @@ def _identity_profile_followup_reply(subject: str, turns: Optional[list[tuple[st
         extract_animal_preferences_fn=_extract_animal_preferences,
         extract_animal_preferences_from_memory_fn=_extract_animal_preferences_from_memory,
         format_fact_series_fn=_format_fact_series,
+    )
+
+
+def _identity_profile_source_boundary_reply(subject: str) -> str:
+    return service_identity_profile_source_boundary_reply(
+        subject,
+        get_active_user_fn=get_active_user,
+        get_learned_fact_fn=get_learned_fact,
+        speaker_matches_developer_fn=_speaker_matches_developer,
     )
 
 

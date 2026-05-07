@@ -56,6 +56,14 @@ class TestSupervisorPatterns(unittest.TestCase):
             ),
             "history_recall",
         )
+        self.assertEqual(
+            supervisor_patterns.identity_history_kind(
+                "Now tell me which parts could be stale or memory-only.",
+                "now tell me which parts could be stale or memory-only.",
+                active_subject="identity_profile:developer",
+            ),
+            "source_boundary",
+        )
 
 
 if __name__ == "__main__":

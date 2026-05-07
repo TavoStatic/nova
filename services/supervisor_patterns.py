@@ -247,6 +247,27 @@ def looks_like_identity_history_prompt(low: str) -> bool:
     return any(cue in low for cue in cues)
 
 
+def looks_like_profile_source_boundary_prompt(low: str) -> bool:
+    if not low:
+        return False
+    source_cues = (
+        "stale",
+        "memory-only",
+        "memory only",
+        "saved memory",
+        "live runtime",
+        "runtime state",
+    )
+    boundary_cues = (
+        "which parts",
+        "what parts",
+        "separate",
+        "tell me which",
+        "tell me what",
+    )
+    return any(cue in low for cue in source_cues) and any(cue in low for cue in boundary_cues)
+
+
 def open_probe_kind(low: str) -> str:
     if not low:
         return ""
@@ -393,6 +414,8 @@ def identity_history_kind(user_text: str, low: str, *, active_subject: str = "")
     self_thread = active_subject.startswith("identity_profile:self")
     if looks_like_identity_history_prompt(low):
         return "history_recall"
+    if (developer_thread or self_thread) and looks_like_profile_source_boundary_prompt(low):
+        return "source_boundary"
     if developer_thread and move == "continuation":
         return "history_recall"
     if self_thread and (

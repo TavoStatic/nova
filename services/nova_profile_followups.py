@@ -317,6 +317,41 @@ def identity_profile_followup_reply(
     return "I do not have more verified personal facts for this thread yet."
 
 
+def identity_profile_source_boundary_reply(
+    subject: str,
+    *,
+    get_active_user_fn: Callable[[], str],
+    get_learned_fact_fn: Callable[[str, str], str],
+    speaker_matches_developer_fn: Callable[[], bool],
+) -> str:
+    active_user_raw = str(get_active_user_fn() or "").strip()
+    developer_name = get_learned_fact_fn("developer_name", "Gustavo Uribe").strip()
+    developer_nickname = get_learned_fact_fn("developer_nickname", "Gus").strip()
+    developer_subject = subject == "developer" or (subject == "self" and speaker_matches_developer_fn())
+
+    if developer_subject:
+        facts = []
+        if developer_name:
+            facts.append(f"full name `{developer_name}`")
+        if developer_nickname and developer_nickname.lower() != developer_name.lower():
+            facts.append(f"nickname `{developer_nickname}`")
+        memory_text = ", ".join(facts) if facts else "the developer facts I have already named"
+        return (
+            f"Memory-backed facts: {memory_text}. Those come from saved profile memory, so they can become stale until you confirm or update them. "
+            "Live runtime state: I can speak to this chat/session and Nova runtime signals, but I do not have fresh live facts about Gus beyond a current tool result or a fact you give me now."
+        )
+
+    if active_user_raw:
+        return (
+            f"Memory-backed facts: your active session name is `{active_user_raw}` if that was set or remembered. "
+            "Those personal facts can be stale until you confirm them. Live runtime state is limited to the current chat/session and Nova runtime signals."
+        )
+    return (
+        "Memory-backed facts are any saved personal/profile facts I recall. They can be stale until you confirm them. "
+        "Live runtime state is limited to the current chat/session and Nova runtime signals."
+    )
+
+
 def identity_name_followup_reply(
     subject: str,
     *,
