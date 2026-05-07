@@ -1052,6 +1052,19 @@ def _skipped_maintenance_execution_payload(state: dict, state_key: str, reason: 
     return payload
 
 
+def _orchestrator_executed_lane_cycle(packet: dict, action_type: str) -> dict:
+    execution = dict((packet or {}).get("execution") or {}) if isinstance((packet or {}).get("execution"), dict) else {}
+    if str(execution.get("action_type") or "").strip() != str(action_type or "").strip():
+        return {}
+    extra = dict(execution.get("extra") or {}) if isinstance(execution.get("extra"), dict) else {}
+    cycle = dict(extra.get("cycle") or {}) if isinstance(extra.get("cycle"), dict) else {}
+    if not cycle:
+        return {}
+    cycle.setdefault("orchestrator_owned", True)
+    cycle.setdefault("orchestrator_action_type", str(action_type or "").strip())
+    return cycle
+
+
 def _record_worker_cycle(*, cycle: int, interval_sec: int, status: str, code: int | None = None) -> None:
     state = _load_state()
     worker_state = dict(state.get("runtime_worker") or {})
@@ -2888,12 +2901,19 @@ def run_once() -> int:
         if legacy_execution_enabled:
             active_work_tree_cycle = _run_active_work_tree_cycle(state)
         else:
-            active_work_tree_cycle = _skipped_maintenance_execution_payload(
-                state,
-                "last_active_work_tree_cycle",
-                "orchestrator_owns_execution",
-                tree_count=0,
+            active_work_tree_cycle = _orchestrator_executed_lane_cycle(
+                autonomy_orchestrator if isinstance(autonomy_orchestrator, dict) else {},
+                "active_work_tree_run_next",
             )
+            if active_work_tree_cycle:
+                state["last_active_work_tree_cycle"] = active_work_tree_cycle
+            else:
+                active_work_tree_cycle = _skipped_maintenance_execution_payload(
+                    state,
+                    "last_active_work_tree_cycle",
+                    "orchestrator_owns_execution",
+                    tree_count=0,
+                )
         _append_log(
             "active_work_tree_cycle"
             f" status={active_work_tree_cycle.get('status')}"

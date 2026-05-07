@@ -1380,6 +1380,36 @@ class TestAutonomyMaintenance(unittest.TestCase):
         self.assertTrue((snapshot.get("branches") or [])[0].get("executable"))
         self.assertFalse((snapshot.get("branches") or [])[1].get("executable"))
 
+    def test_orchestrator_executed_lane_cycle_preserves_active_cycle_truth(self):
+        cycle = autonomy_maintenance._orchestrator_executed_lane_cycle(
+            {
+                "execution": {
+                    "action_type": "active_work_tree_run_next",
+                    "result": "success",
+                    "extra": {
+                        "cycle": {
+                            "status": "ok",
+                            "tree_count": 8,
+                            "executed_count": 1,
+                        }
+                    },
+                }
+            },
+            "active_work_tree_run_next",
+        )
+
+        self.assertEqual(cycle.get("status"), "ok")
+        self.assertEqual(cycle.get("executed_count"), 1)
+        self.assertTrue(cycle.get("orchestrator_owned"))
+        self.assertEqual(cycle.get("orchestrator_action_type"), "active_work_tree_run_next")
+        self.assertEqual(
+            autonomy_maintenance._orchestrator_executed_lane_cycle(
+                {"execution": {"action_type": "generated_queue_run_next"}},
+                "active_work_tree_run_next",
+            ),
+            {},
+        )
+
     def test_retire_legacy_patch_update_trees_drops_open_tasks_and_completes_tree(self):
         self._isolated_work_tree_db()
         state = {}
