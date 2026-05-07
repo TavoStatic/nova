@@ -720,6 +720,47 @@ def _primary_heartbeat_artifact(snapshot: dict) -> Path:
     return Path("runtime")
 
 
+def _unique_artifact_paths(snapshot: dict, keys: list[str]) -> list[Path]:
+    artifacts = dict(snapshot.get("artifacts") or {})
+    paths: list[Path] = []
+    seen: set[str] = set()
+    for key in keys:
+        path = artifacts.get(key)
+        if not isinstance(path, Path):
+            continue
+        path_text = str(path)
+        if path_text in seen:
+            continue
+        seen.add(path_text)
+        paths.append(path)
+    return paths
+
+
+def _dedupe_paths(paths: list[Path]) -> list[Path]:
+    deduped: list[Path] = []
+    seen: set[str] = set()
+    for path in list(paths or []):
+        if not isinstance(path, Path):
+            continue
+        path_text = str(path)
+        if path_text in seen:
+            continue
+        seen.add(path_text)
+        deduped.append(path)
+    return deduped
+
+
+def _format_artifact_paths(paths: list[Path]) -> str:
+    rendered = [f"`{str(path)}`" for path in list(paths or []) if isinstance(path, Path)]
+    if not rendered:
+        return "`runtime`"
+    if len(rendered) == 1:
+        return rendered[0]
+    if len(rendered) == 2:
+        return f"{rendered[0]} and {rendered[1]}"
+    return f"{', '.join(rendered[:-1])}, and {rendered[-1]}"
+
+
 def _heartbeat_forensics_reply(core) -> str:
     runtime_snapshot = _runtime_audit_snapshot(core)
     artifact_snapshot = _runtime_artifact_snapshot(core)
@@ -730,12 +771,19 @@ def _heartbeat_forensics_reply(core) -> str:
     heartbeat_fresh = isinstance(heartbeat_age, (int, float)) and float(heartbeat_age) <= 5.0
     status = "healthy" if heartbeat_fresh else "not fully healthy"
     primary_artifact = _primary_heartbeat_artifact(artifact_snapshot)
-    heartbeat_file = artifact_snapshot["artifacts"].get("heartbeat_file")
+    evidence_artifacts = [primary_artifact]
+    evidence_artifacts.extend(
+        _unique_artifact_paths(
+            artifact_snapshot,
+            ["heartbeat_status_file", "heartbeat_file", "heartbeat_log_file", "core_state_file"],
+        )
+    )
+    evidence_artifacts = _dedupe_paths(evidence_artifacts)[:3]
     return (
         f"Right now Nova's heartbeat looks {status}. "
         f"The live proof I am using is core status `{str(runtime_snapshot.get('core_status') or 'unknown')}`, "
         f"heartbeat age `{heartbeat_text}`, and the runtime heartbeat artifacts "
-        f"`{str(primary_artifact)}` and `{str(heartbeat_file)}`."
+        f"{_format_artifact_paths(evidence_artifacts)}."
     )
 
 

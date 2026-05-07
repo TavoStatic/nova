@@ -461,6 +461,31 @@ class TestNovaReplyDeterministic(unittest.TestCase):
         self.assertEqual(return_mode, "logged")
         self.assertEqual(tool_time_ms, 0)
 
+    def test_heartbeat_forensics_reply_does_not_duplicate_artifact_paths(self):
+        with TemporaryDirectory() as td:
+            base_dir = Path(td)
+            runtime_dir = base_dir / "runtime"
+            runtime_dir.mkdir(parents=True, exist_ok=True)
+            (runtime_dir / "core.heartbeat").write_text("ok", encoding="utf-8")
+            core = SimpleNamespace(
+                BASE_DIR=str(base_dir),
+                RUNTIME_DIR=str(runtime_dir),
+                runtime_audit_snapshot=lambda: {
+                    "core_status": "running",
+                    "core_heartbeat_age_sec": 0,
+                },
+                get_name_origin_story=lambda: "",
+                _is_developer_color_lookup_request=lambda _text: False,
+                _is_developer_bilingual_request=lambda _text: False,
+                _is_color_lookup_request=lambda _text: False,
+            )
+            reply, _meta, _return_mode, _tool_time_ms = self._call(
+                "Check whether Nova's heartbeat is healthy right now and tell me exactly what proves it.",
+                core=core,
+            )
+
+        self.assertEqual(reply.count(f"`{str(runtime_dir / 'core.heartbeat')}`"), 1)
+
     def test_runtime_artifact_grounding_reply_is_deterministic(self):
         with TemporaryDirectory() as td:
             base_dir = Path(td)
