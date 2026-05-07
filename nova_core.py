@@ -60,7 +60,9 @@ from services.nova_turn_direction import analyze_routing_text
 from services.nova_turn_direction import determine_turn_direction
 from services.nova_turn_direction import is_explicit_command_like
 from services.nova_memory_learning import mem_get_recent_learned as service_mem_get_recent_learned
+from services.nova_memory_learning import load_json_dict_with_tmp_fallback as service_load_json_dict_with_tmp_fallback
 from services.nova_memory_learning import mem_stats_payload as service_mem_stats_payload
+from services.memory_health import build_memory_health_payload as service_build_memory_health_payload
 from services.nova_prompt_replies import attach_learning_invitation as service_attach_learning_invitation
 from services.nova_prompt_replies import last_question_recall_reply as service_last_question_recall_reply
 from services.nova_prompt_replies import open_probe_reply as service_open_probe_reply
@@ -2326,8 +2328,6 @@ def _looks_like_retrieval_followup(text: str) -> bool:
     )
 
 
-def _is_retrieval_tool(tool_name: str) -> bool:
-    return service_conversation_followups.is_retrieval_tool(tool_name)
 
 
 def _retrieval_query_from_text(tool_name: str, text: str) -> str:
@@ -2714,6 +2714,17 @@ def mem_stats_payload(emit_event: bool = True) -> dict:
     )
 
 
+def memory_health_payload(update_snapshot: bool = True) -> dict:
+    db_path = Path(getattr(memory_mod, "DB_PATH", BASE_DIR / "nova_memory.sqlite")) if memory_mod is not None else BASE_DIR / "nova_memory.sqlite"
+    return service_build_memory_health_payload(
+        memory_db_path=db_path,
+        learned_facts_file=LEARNED_FACTS_FILE,
+        identity_file=IDENTITY_FILE,
+        snapshot_file=RUNTIME_DIR / "memory_health_snapshot.json",
+        update_snapshot=update_snapshot,
+    )
+
+
 
 def mem_add(kind: str, source: str, text: str):
     return service_mem_add(
@@ -2847,9 +2858,9 @@ def mem_remember_fact(text: str) -> str:
 
 def load_identity_profile() -> dict:
     try:
-        if not IDENTITY_FILE.exists():
-            return {}
-        data = json.loads(IDENTITY_FILE.read_text(encoding="utf-8"))
+        data, source = service_load_json_dict_with_tmp_fallback(IDENTITY_FILE)
+        if source == "tmp" and data:
+            save_identity_profile(data)
         return data if isinstance(data, dict) else {}
     except Exception:
         return {}
@@ -2904,13 +2915,11 @@ def _sanitize_learned_facts(data: dict) -> dict:
 
 def load_learned_facts() -> dict:
     try:
-        if not LEARNED_FACTS_FILE.exists():
-            return {}
-        data = json.loads(LEARNED_FACTS_FILE.read_text(encoding="utf-8"))
+        data, source = service_load_json_dict_with_tmp_fallback(LEARNED_FACTS_FILE)
         if not isinstance(data, dict):
             return {}
         sanitized = _sanitize_learned_facts(data)
-        if sanitized != data:
+        if sanitized != data or source == "tmp":
             save_learned_facts(sanitized)
         return sanitized
     except Exception:
@@ -5404,6 +5413,7 @@ def build_pulse_payload() -> dict:
         safety_policy_fn=lambda: __import__('nova_safety_envelope').policy_safety_envelope(),
         latest_approved_update_zip_fn=_latest_approved_update_zip,
         generated_work_queue_fn=_load_generated_queue_payload,
+        memory_health_payload_fn=memory_health_payload,
     )
 
 def render_nova_pulse(payload: Optional[dict] = None) -> str:

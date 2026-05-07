@@ -415,6 +415,21 @@ class ControlStatusService:
         payload["memory_stats_ok"] = bool(memory_stats.get("ok", False))
         payload["memory_entries_total"] = int(memory_stats.get("total", 0) or 0)
         payload["memory_by_user_count"] = len(memory_stats.get("by_user") or {}) if isinstance(memory_stats.get("by_user"), dict) else 0
+        pulse_memory_health = pulse_payload.get("memory_health") if isinstance(pulse_payload.get("memory_health"), dict) else {}
+        if isinstance(pulse_payload.get("memory_health_issues"), list):
+            pulse_memory_issues = list(pulse_payload.get("memory_health_issues") or [])
+        elif isinstance(pulse_memory_health.get("issues"), list):
+            pulse_memory_issues = list(pulse_memory_health.get("issues") or [])
+        else:
+            pulse_memory_issues = []
+        memory_health_status = str(pulse_payload.get("memory_health_status") or pulse_memory_health.get("status") or "unknown").strip().lower()
+        payload["memory_scoped_total"] = int(pulse_payload.get("memory_scoped_total", payload["memory_entries_total"]) or 0)
+        payload["memory_db_total"] = int(pulse_payload.get("memory_db_total", payload["memory_entries_total"]) or 0)
+        payload["memory_health"] = pulse_memory_health
+        payload["memory_health_ok"] = bool(pulse_payload.get("memory_ok", payload["memory_stats_ok"])) and memory_health_status in {"ok", "unknown"}
+        payload["memory_health_status"] = memory_health_status
+        payload["memory_health_issue_count"] = int(pulse_payload.get("memory_health_issue_count", pulse_memory_health.get("issue_count", 0)) or 0)
+        payload["memory_health_issues"] = pulse_memory_issues[:6]
         payload["memory_events_ok"] = bool(memory_summary.get("ok", False))
         payload["memory_events_total"] = int(memory_summary.get("count", 0))
         payload["memory_write_count"] = int(memory_summary.get("write_count", 0))

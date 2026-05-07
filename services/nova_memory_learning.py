@@ -618,9 +618,7 @@ def mem_remember_fact(text: str, *, mem_enabled_fn: Callable[[], bool], mem_add_
 
 def load_identity_profile(identity_file: Path) -> dict:
     try:
-        if not identity_file.exists():
-            return {}
-        data = json.loads(identity_file.read_text(encoding="utf-8"))
+        data, _source = load_json_dict_with_tmp_fallback(identity_file)
         return data if isinstance(data, dict) else {}
     except Exception:
         return {}
@@ -672,15 +670,37 @@ def sanitize_learned_facts(data: dict) -> dict:
     return facts
 
 
+def _tmp_json_path(path: Path) -> Path:
+    suffix = path.suffix
+    if suffix:
+        return path.with_suffix(f"{suffix}.tmp")
+    return path.with_name(f"{path.name}.tmp")
+
+
+def load_json_dict_with_tmp_fallback(path: Path) -> tuple[dict, str]:
+    """Load a JSON object, falling back to a valid atomic-write tmp file."""
+
+    primary = Path(path)
+    candidates = ((primary, "primary"), (_tmp_json_path(primary), "tmp"))
+    for candidate, source in candidates:
+        try:
+            if not candidate.exists():
+                continue
+            data = json.loads(candidate.read_text(encoding="utf-8"))
+            if isinstance(data, dict):
+                return data, source
+        except Exception:
+            continue
+    return {}, ""
+
+
 def load_learned_facts(*, learned_facts_file: Path, save_learned_facts_fn: Callable[[dict], None]) -> dict:
     try:
-        if not learned_facts_file.exists():
-            return {}
-        data = json.loads(learned_facts_file.read_text(encoding="utf-8"))
+        data, source = load_json_dict_with_tmp_fallback(learned_facts_file)
         if not isinstance(data, dict):
             return {}
         sanitized = sanitize_learned_facts(data)
-        if sanitized != data:
+        if sanitized != data or source == "tmp":
             save_learned_facts_fn(sanitized)
         return sanitized
     except Exception:

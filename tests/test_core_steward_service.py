@@ -106,6 +106,31 @@ class TestCoreStewardService(unittest.TestCase):
         self.assertNotIn("Review fallback training pressure", queue_titles)
         self.assertIn("Review cleanup pressure", queue_titles)
 
+    def test_build_payload_watches_memory_health(self):
+        payload = core_steward.build_core_steward_payload(
+            preflight_checks=[
+                {"name": "file:policy.json", "ok": True, "required": True, "info": "ok"},
+            ],
+            runtime_health={
+                "heartbeat": {"ok": True, "info": "age=1s"},
+                "core_state": {"ok": True, "info": "pid=123"},
+                "ollama": {"ok": True, "info": "status=200"},
+            },
+            pulse_payload={
+                "memory_ok": False,
+                "memory_health": {"ok": False, "status": "watch", "issue_count": 1},
+                "last_fallback_overuse_score": 0.0,
+                "approved_eligible_previews": 0,
+            },
+            autonomy_maintenance={"runtime_worker": {"last_cycle_status": "ok", "interval_sec": 300}},
+            kidney_summary={"mode": "enforce", "candidate_count": 0},
+        )
+
+        self.assertEqual(payload.get("level"), "watch")
+        self.assertIn("memory_health:watch", payload.get("summary"))
+        queue_titles = [item.get("title") for item in (payload.get("maintenance_queue") or [])]
+        self.assertIn("Review memory health", queue_titles)
+
 
 if __name__ == "__main__":
     unittest.main()

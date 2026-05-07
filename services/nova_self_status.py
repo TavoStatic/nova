@@ -179,8 +179,27 @@ def build_self_status_payload(
 
     if not bool(pulse.get("ollama_up", True)):
         events.append(_event("hurting", "failure", "Model runtime is offline", "Ollama is down, so Nova is holding to deterministic paths.", source="pulse", command="health"))
+    memory_health = pulse.get("memory_health") if isinstance(pulse.get("memory_health"), dict) else {}
+    memory_health_issues = list(memory_health.get("issues") or []) if isinstance(memory_health.get("issues"), list) else []
     if not bool(pulse.get("memory_ok", True)):
-        events.append(_event("hurting", "warning", "Memory is unavailable", "Memory stats did not come back cleanly.", source="pulse", command="mem stats"))
+        if memory_health and not bool(memory_health.get("ok", True)):
+            issue_text = "; ".join(
+                _compact_text(f"{item.get('code')}: {item.get('detail')}", 180)
+                for item in memory_health_issues[:3]
+                if isinstance(item, dict)
+            )
+            events.append(
+                _event(
+                    "hurting",
+                    "warning",
+                    "Memory health needs attention",
+                    issue_text or "Memory database or JSON fact files reported health issues.",
+                    source="memory_health",
+                    command="pulse",
+                )
+            )
+        else:
+            events.append(_event("hurting", "warning", "Memory is unavailable", "Memory stats did not come back cleanly.", source="pulse", command="mem stats"))
     if rollback_count > 0:
         events.append(_event("failure", "failure", "Patch rollback pressure is present", f"{rollback_count} rollback(s) were seen in the last 24 hours.", source="patch_log", command="patch list-previews"))
     if behavior_fail_count > 0:

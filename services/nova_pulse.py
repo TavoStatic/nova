@@ -154,6 +154,7 @@ def build_pulse_payload(
     safety_policy_fn: Callable[[], dict],
     latest_approved_update_zip_fn: Callable[[Optional[dict]], Optional[Path]],
     generated_work_queue_fn: Optional[Callable[[int], dict]] = None,
+    memory_health_payload_fn: Optional[Callable[[], dict]] = None,
 ) -> dict:
     audit = _promotion_audit_summary(
         promotion_audit_log=promotion_audit_log,
@@ -202,8 +203,30 @@ def build_pulse_payload(
     approved_update_zip = latest_approved_update_zip_fn(patch)
 
     memory_payload = mem_stats_payload_fn(emit_event=False)
+    memory_health = {}
+    if memory_health_payload_fn is not None:
+        try:
+            maybe_health = memory_health_payload_fn()
+            memory_health = maybe_health if isinstance(maybe_health, dict) else {}
+        except Exception as exc:
+            memory_health = {
+                "ok": False,
+                "status": "failure",
+                "issue_count": 1,
+                "issues": [
+                    {
+                        "severity": "failure",
+                        "code": "memory_health_failed",
+                        "detail": str(exc)[:260],
+                    }
+                ],
+            }
     kidney_summary = kidney_summary_fn()
     safety_cfg = safety_policy_fn()
+    memory_stats_ok = bool(memory_payload.get("ok", False))
+    memory_health_ok = bool(memory_health.get("ok", True)) if memory_health else True
+    memory_db = memory_health.get("memory_db") if isinstance(memory_health.get("memory_db"), dict) else {}
+    memory_scoped_total = int(memory_payload.get("total", 0) or 0) if memory_payload.get("ok") else 0
 
     payload = {
         "generated_at": time.strftime("%Y-%m-%d %H:%M:%S"),
@@ -233,8 +256,15 @@ def build_pulse_payload(
         "patch_activity": patch_activity,
         "patch_last_line": str(patch.get("last_patch_log_line") or patch_activity.get("last_line") or "none"),
         "ollama_up": ollama_up,
-        "memory_ok": bool(memory_payload.get("ok", False)),
-        "memory_total": int(memory_payload.get("total", 0) or 0) if memory_payload.get("ok") else 0,
+        "memory_ok": memory_stats_ok and memory_health_ok,
+        "memory_stats_ok": memory_stats_ok,
+        "memory_total": memory_scoped_total,
+        "memory_scoped_total": memory_scoped_total,
+        "memory_db_total": int(memory_db.get("total", memory_scoped_total) or 0),
+        "memory_health": memory_health,
+        "memory_health_status": str(memory_health.get("status") or ("ok" if memory_health_ok else "failure")) if memory_health else "unknown",
+        "memory_health_issue_count": int(memory_health.get("issue_count", 0) or 0) if memory_health else 0,
+        "memory_health_issues": list(memory_health.get("issues") or [])[:6] if isinstance(memory_health.get("issues"), list) else [],
         "kidney_mode": str(kidney_summary.get("mode") or "unknown"),
         "kidney_candidates": int(kidney_summary.get("candidate_count", 0) or 0),
         "kidney_archive_count": int(kidney_summary.get("archive_count", 0) or 0),
@@ -297,7 +327,7 @@ def render_nova_pulse(payload: Optional[dict] = None, *, build_pulse_payload_fn:
         f"- patch log tail: {data.get('patch_last_line')}",
         "Support systems:",
         f"- Ollama API: {'online' if data.get('ollama_up') else 'offline'}",
-        f"- memory: {'ok' if data.get('memory_ok') else 'unavailable'} (total={int(data.get('memory_total', 0) or 0)})",
+        f"- memory: {'ok' if data.get('memory_ok') else 'watch'} (scope_total={int(data.get('memory_scoped_total', data.get('memory_total', 0)) or 0)}, db_total={int(data.get('memory_db_total', data.get('memory_total', 0)) or 0)}, health={data.get('memory_health_status') or 'unknown'})",
         f"- kidney: mode={data.get('kidney_mode')} candidates={int(data.get('kidney_candidates', 0) or 0)} archive={int(data.get('kidney_archive_count', 0) or 0)} delete={int(data.get('kidney_delete_count', 0) or 0)}",
         f"- safety envelope: enabled={bool(data.get('safety_enabled'))} mode={data.get('safety_mode')}",
         "Autonomy:",
@@ -315,6 +345,16 @@ def render_nova_pulse(payload: Optional[dict] = None, *, build_pulse_payload_fn:
     if raw_fallback_score >= 0.75 and raw_fallback_score > active_fallback_score:
         queue_status = str(data.get("last_generated_queue_report_status") or data.get("last_generated_queue_status") or "informational")
         lines.append(f"- fallback robustness history: {raw_fallback_score:.2f} (not active; queue report is {queue_status})")
+    memory_issues = list(data.get("memory_health_issues") or [])
+    if memory_issues:
+        rendered_issues = []
+        for item in memory_issues[:3]:
+            if isinstance(item, dict):
+                code = str(item.get("code") or "memory_health_issue")
+                detail = str(item.get("detail") or "").strip()
+                rendered_issues.append(f"{code}: {detail}" if detail else code)
+        if rendered_issues:
+            lines.append(f"- memory watch: {'; '.join(rendered_issues)}")
     update_zip_path = str(data.get("update_zip_path") or "").strip()
     if update_zip_path:
         lines.append('Type "update now" if you want me to apply the latest approved validated update.')

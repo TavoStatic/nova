@@ -54,6 +54,12 @@ def build_core_steward_payload(
         pulse_payload.get("active_fallback_overuse_score", pulse_payload.get("last_fallback_overuse_score", 0.0)) or 0.0
     ) if isinstance(pulse_payload, dict) else 0.0
     raw_fallback_score = float(pulse_payload.get("raw_fallback_overuse_score", fallback_score) or 0.0) if isinstance(pulse_payload, dict) else 0.0
+    memory_health = dict(pulse_payload.get("memory_health") or {}) if isinstance(pulse_payload, dict) and isinstance(pulse_payload.get("memory_health"), dict) else {}
+    memory_health_status = str(memory_health.get("status") or "").strip().lower()
+    memory_health_issue_count = int(memory_health.get("issue_count", 0) or 0) if memory_health else 0
+    memory_health_ok = bool(pulse_payload.get("memory_ok", True)) if isinstance(pulse_payload, dict) else True
+    if memory_health:
+        memory_health_ok = memory_health_ok and bool(memory_health.get("ok", True))
     approved_updates = int(pulse_payload.get("approved_eligible_previews", 0) or 0) if isinstance(pulse_payload, dict) else 0
     kidney_candidates = int(kidney_summary.get("candidate_count", 0) or 0) if isinstance(kidney_summary, dict) else 0
     kidney_mode = str(kidney_summary.get("mode") or "unknown").strip() if isinstance(kidney_summary, dict) else "unknown"
@@ -71,6 +77,8 @@ def build_core_steward_payload(
         score -= 20
     if not bool(ollama.get("ok")):
         score -= 10
+    if not memory_health_ok:
+        score -= 12 if memory_health_status == "failure" else 6
     if fallback_penalty_active:
         if fallback_score >= 0.90:
             score -= 15
@@ -90,7 +98,7 @@ def build_core_steward_payload(
     level = "strong"
     if required_failed or not bool(heartbeat.get("ok")) or not bool(core_state.get("ok")):
         level = "repair"
-    elif score < 85 or fallback_penalty_active or kidney_penalty_active or worker_status not in {"running", "ok"}:
+    elif score < 85 or not memory_health_ok or fallback_penalty_active or kidney_penalty_active or worker_status not in {"running", "ok"}:
         level = "watch"
 
     queue: list[dict[str, str]] = []
@@ -119,6 +127,15 @@ def build_core_steward_payload(
                 "Repair model runtime",
                 "Ollama is not currently healthy.",
                 "c:/Nova/.venv/Scripts/python.exe health.py repair",
+            )
+        )
+    if not memory_health_ok:
+        queue.append(
+            _queue_item(
+                "medium" if memory_health_status != "failure" else "high",
+                "Review memory health",
+                f"Memory health is {memory_health_status or 'not ok'} with {memory_health_issue_count} issue(s).",
+                "pulse",
             )
         )
     if worker_status not in {"running", "ok"}:
@@ -175,6 +192,8 @@ def build_core_steward_payload(
         summary_lines.append(f"core_state:{core_state.get('info') or 'degraded'}")
     if not bool(ollama.get("ok")):
         summary_lines.append(f"ollama:{ollama.get('info') or 'degraded'}")
+    if not memory_health_ok:
+        summary_lines.append(f"memory_health:{memory_health_status or 'watch'}")
     if fallback_penalty_active:
         summary_lines.append(f"fallback_pressure:{fallback_score:.2f}")
     if kidney_penalty_active:
@@ -205,6 +224,8 @@ def build_core_steward_payload(
             "fallback_overuse_score": fallback_score,
             "raw_fallback_overuse_score": raw_fallback_score,
             "approved_eligible_previews": approved_updates,
+            "memory_health_status": memory_health_status or "unknown",
+            "memory_health_issue_count": memory_health_issue_count,
         },
         "kidney": {
             "mode": kidney_mode,

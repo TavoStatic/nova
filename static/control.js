@@ -1382,14 +1382,20 @@ async function stopAutonomyMaintenanceWorker() {
 
 function renderMetricGrid(status) {
     if (!statusKv) return;
-    const keys = [
+    const standardKeys = [
         'server_time', 'ollama_api_up', 'chat_model', 'memory_enabled', 'memory_scope', 'web_enabled',
         'search_provider', 'allow_domains_count', 'active_http_sessions', 'health_score',
-        'self_check_pass_ratio', 'tool_events_total', 'memory_events_total', 'action_ledger_total',
+        'self_check_pass_ratio', 'tool_events_total', 'memory_health_status', 'memory_db_total', 'memory_scoped_total',
+        'memory_events_total', 'action_ledger_total',
         'last_planner_decision', 'last_route_summary', 'process_counting_mode', 'heartbeat_age_sec',
+    ];
+    const subconsciousRow = [
         'subconscious_family_count', 'subconscious_training_priority_count', 'subconscious_generated_definition_count'
     ];
     const displayLabels = {
+        memory_health_status: 'Memory Health',
+        memory_db_total: 'Memory DB Rows',
+        memory_scoped_total: 'Memory Scope Rows',
         subconscious_family_count: 'Families',
         subconscious_training_priority_count: 'Priorities',
         subconscious_generated_definition_count: 'Definitions',
@@ -1397,16 +1403,13 @@ function renderMetricGrid(status) {
     const columnCount = 3;
     const rows = [];
 
-    for (let index = 0; index < keys.length; index += columnCount) {
-        rows.push(keys.slice(index, index + columnCount));
+    for (let index = 0; index < standardKeys.length; index += columnCount) {
+        rows.push(standardKeys.slice(index, index + columnCount));
     }
-
-    const standardRows = rows.slice(0, -1);
-    const subconsciousRow = rows[rows.length - 1] || [];
 
     statusKv.innerHTML = [
         '<tbody>',
-        standardRows.map((row) => [
+        rows.map((row) => [
             '<tr class="system-matrix-row">',
             row.map((key) => [
                 '<td class="system-matrix-cell">',
@@ -2504,11 +2507,56 @@ function renderOverrideBadges(session) {
     ].join('');
 }
 
+function memoryHealthDetails(status) {
+    const pulse = status && status.pulse && typeof status.pulse === 'object' ? status.pulse : {};
+    const statusText = String(
+        (status && status.memory_health_status)
+        || pulse.memory_health_status
+        || 'unknown'
+    ).trim() || 'unknown';
+    const scopedTotal = Number(
+        status && status.memory_scoped_total != null
+            ? status.memory_scoped_total
+            : (pulse.memory_scoped_total != null ? pulse.memory_scoped_total : (status && status.memory_entries_total != null ? status.memory_entries_total : 0))
+    );
+    const dbTotal = Number(
+        status && status.memory_db_total != null
+            ? status.memory_db_total
+            : (pulse.memory_db_total != null ? pulse.memory_db_total : scopedTotal)
+    );
+    const issueCount = Number(
+        status && status.memory_health_issue_count != null
+            ? status.memory_health_issue_count
+            : (pulse.memory_health_issue_count != null ? pulse.memory_health_issue_count : 0)
+    );
+    const issues = Array.isArray(status && status.memory_health_issues)
+        ? status.memory_health_issues
+        : (Array.isArray(pulse.memory_health_issues) ? pulse.memory_health_issues : []);
+    const issueText = issues.length
+        ? issues.slice(0, 3).map((item) => {
+            const code = item && item.code ? item.code : 'memory_health_issue';
+            const detail = item && item.detail ? item.detail : '';
+            return detail ? `${code}: ${detail}` : code;
+        }).join('\n')
+        : '';
+    return {
+        status: statusText,
+        scopedTotal: Number.isFinite(scopedTotal) ? scopedTotal : 0,
+        dbTotal: Number.isFinite(dbTotal) ? dbTotal : 0,
+        issueCount: Number.isFinite(issueCount) ? issueCount : 0,
+        issueText,
+    };
+}
+
 function renderHealthSummary(status) {
     const alerts = status && Array.isArray(status.alerts) ? status.alerts : [];
+    const memory = memoryHealthDetails(status);
     renderInspectorList(healthSummary, [
         {label: 'Health Score', value: status && status.health_score != null ? status.health_score : 'n/a'},
         {label: 'Pass Ratio', value: status && status.self_check_pass_ratio != null ? status.self_check_pass_ratio : 'n/a'},
+        {label: 'Memory Health', value: `${memory.status}${memory.issueCount ? ` (${memory.issueCount} issue${memory.issueCount === 1 ? '' : 's'})` : ''}`},
+        {label: 'Memory Rows', value: `db ${memory.dbTotal} | scope ${memory.scopedTotal}`},
+        {label: 'Memory Watch', value: memory.issueText || 'No amnesia signals'},
         {label: 'Alerts', value: alerts.length ? alerts.join('\n') : 'Alert board clear'},
     ]);
 }
@@ -2576,6 +2624,7 @@ function renderOverviewFocus(status) {
     const inspectorTarget = recommendedInspectorTab(status, selected);
     const queueOpen = Number(status.generated_work_queue_open_count != null ? status.generated_work_queue_open_count : 0);
     const queueNext = shortArtifactName(status.generated_work_queue_next_file || '');
+    const memory = memoryHealthDetails(status);
     const heartbeatAge = Number((status.runtime_summary && status.runtime_summary.core && status.runtime_summary.core.heartbeat_age_sec != null)
         ? status.runtime_summary.core.heartbeat_age_sec
         : (status.heartbeat_age_sec != null ? status.heartbeat_age_sec : 0));
@@ -2587,8 +2636,8 @@ function renderOverviewFocus(status) {
         {
             key: 'Runtime Posture',
             value: alerts.length
-                ? `${status.health_score}/100\n${alerts.length} alert${alerts.length === 1 ? '' : 's'} active`
-                : `${status.health_score}/100\nhb ${heartbeatAge.toFixed(1)}s`,
+                ? `${status.health_score}/100\n${alerts.length} alert${alerts.length === 1 ? '' : 's'} | mem ${memory.status}`
+                : `${status.health_score}/100\nhb ${heartbeatAge.toFixed(1)}s | mem ${memory.status}`,
         },
         {
             key: 'Standing Queue',
@@ -2632,12 +2681,13 @@ function renderCenterMissionBrief(status) {
     const route = String(status.last_planner_decision || 'n/a');
     const tool = String(status.last_action_tool || 'no tool');
     const routeSummary = compactRouteSummary(status.last_route_summary || 'route lane not available', 5);
+    const memory = memoryHealthDetails(status);
     const briefCards = [
         {
             key: 'Risk Posture',
             value: alerts.length
-                ? `${status.health_score}/100\n${alerts.join('\n')}`
-                : `${status.health_score}/100\nno active alerts`,
+                ? `${status.health_score}/100\n${alerts.join('\n')}\nmem ${memory.status}`
+                : `${status.health_score}/100\nno active alerts\nmem ${memory.status}`,
         },
         {
             key: 'Operator Load',
@@ -3558,11 +3608,15 @@ function renderGovernance(policy, status) {
     if (searchEndpointInput) searchEndpointInput.value = endpoint;
     if (searchProviderPriorityInput) searchProviderPriorityInput.value = priority.join(', ');
     if (memoryScopeBox) {
+        const memoryHealth = memoryHealthDetails(status);
         memoryScopeBox.textContent = [
             `Current scope: ${scope}`,
             `Memory enabled: ${Boolean(memory.enabled)}`,
             `Mode: ${String(memory.mode || '')}`,
             `Top K: ${String(memory.top_k || '')}`,
+            `Health: ${memoryHealth.status}`,
+            `Rows: db ${memoryHealth.dbTotal} | scope ${memoryHealth.scopedTotal}`,
+            `Watch: ${memoryHealth.issueText || 'No amnesia signals'}`,
         ].join('\n');
     }
     if (searchEndpointBox) {

@@ -88,7 +88,14 @@ class TestControlStatusService(unittest.TestCase):
 
             @staticmethod
             def build_pulse_payload():
-                return {"generated_at": "now", "autonomy_level": "guarded"}
+                return {
+                    "generated_at": "now",
+                    "autonomy_level": "guarded",
+                    "memory_health_status": "ok",
+                    "memory_db_total": 756,
+                    "memory_scoped_total": 1,
+                    "memory_health_issue_count": 0,
+                }
 
             @staticmethod
             def update_now_pending_payload():
@@ -146,6 +153,9 @@ class TestControlStatusService(unittest.TestCase):
         self.assertEqual(payload.get("alerts"), ["warn"])
         self.assertTrue(payload.get("metrics_snapshot_test"))
         self.assertEqual(payload.get("searxng_note"), "ok:http://127.0.0.1:8081/search")
+        self.assertEqual(payload.get("memory_health_status"), "ok")
+        self.assertEqual(payload.get("memory_db_total"), 756)
+        self.assertEqual(payload.get("memory_scoped_total"), 1)
 
     def test_status_payload_includes_runtime_timeline_and_patch_fields(self):
         payload = CONTROL_STATUS_SERVICE.status_payload(
@@ -246,7 +256,17 @@ class TestControlStatusService(unittest.TestCase):
                 "previews": [],
             },
             patch_action_readiness={"default_preview": "preview.txt"},
-            pulse_payload={"generated_at": "now", "autonomy_level": "guarded", "promoted_total": 2, "promoted_delta": 1},
+            pulse_payload={
+                "generated_at": "now",
+                "autonomy_level": "guarded",
+                "promoted_total": 2,
+                "promoted_delta": 1,
+                "memory_health_status": "watch",
+                "memory_health_issue_count": 1,
+                "memory_db_total": 756,
+                "memory_scoped_total": 0,
+                "memory_health_issues": [{"code": "learned_facts_orphan_tmp", "detail": "valid tmp without final"}],
+            },
             update_now_pending={"pending": False},
             requests_total=7,
             errors_total=1,
@@ -256,6 +276,11 @@ class TestControlStatusService(unittest.TestCase):
         self.assertEqual((payload.get("runtime_artifacts") or {}).get("count"), 1)
         self.assertEqual(payload.get("patch_current_revision"), 4)
         self.assertEqual((payload.get("patch_action_readiness") or {}).get("default_preview"), "preview.txt")
+        self.assertEqual(payload.get("memory_health_status"), "watch")
+        self.assertEqual(payload.get("memory_health_issue_count"), 1)
+        self.assertEqual(payload.get("memory_db_total"), 756)
+        self.assertEqual(payload.get("memory_scoped_total"), 0)
+        self.assertEqual((payload.get("memory_health_issues") or [{}])[0].get("code"), "learned_facts_orphan_tmp")
         self.assertEqual(payload.get("patch_previews_total"), 12)
         self.assertEqual(payload.get("patch_previews_orphaned"), 2)
         self.assertEqual(payload.get("patch_review_previews_total"), 5)

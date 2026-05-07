@@ -120,6 +120,34 @@ def test_self_status_keeps_green_fallback_history_out_of_active_status() -> None
 
 
 class TestNovaSelfStatusService(unittest.TestCase):
+    def test_self_status_reports_memory_health_watch(self) -> None:
+        payload = build_self_status_payload(
+            pulse_payload={
+                "ollama_up": True,
+                "memory_ok": False,
+                "memory_health": {
+                    "ok": False,
+                    "status": "watch",
+                    "issues": [
+                        {
+                            "code": "learned_facts_orphan_tmp",
+                            "detail": "learned_facts has a valid tmp file but no final JSON file.",
+                        }
+                    ],
+                },
+                "routing_stable": True,
+                "last_fallback_overuse_score": 0.1,
+                "last_regression_status": "ok",
+                "patch_activity": {},
+            },
+            recent_ops_events=[],
+        )
+
+        self.assertEqual(payload["level"], "hurting")
+        rendered = render_self_status(payload)
+        self.assertIn("Memory health needs attention", rendered)
+        self.assertIn("learned_facts_orphan_tmp", rendered)
+
     def test_self_status_reports_local_code_change_with_validation(self) -> None:
         payload = build_self_status_payload(
             pulse_payload={
