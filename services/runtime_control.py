@@ -55,7 +55,7 @@ class RuntimeControlService:
             runtime_worker["pid"] = None
             runtime_worker["create_time"] = None
             runtime_worker["script_path"] = str(runtime_worker.get("script_path") or maintenance_py)
-            if str(runtime_worker.get("last_cycle_status") or "").strip().lower() == "running":
+            if runtime_worker["stale_identity"] and str(runtime_worker.get("last_cycle_status") or "").strip().lower() in {"running", "ok", "success"}:
                 runtime_worker["last_cycle_status"] = "stopped"
         last_regression_status = str(payload.get("last_regression_status") or "").strip()
         stale_value = payload.get("last_regression_stale")

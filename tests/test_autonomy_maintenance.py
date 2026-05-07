@@ -495,6 +495,10 @@ class TestAutonomyMaintenance(unittest.TestCase):
             self.assertEqual(worker.get("cycle_count"), 2)
             self.assertEqual(worker.get("last_cycle_status"), "ok")
             self.assertEqual(worker.get("last_cycle_code"), 0)
+            self.assertGreater(int(worker.get("pid") or 0), 0)
+            self.assertEqual(worker.get("script_path"), str(Path(autonomy_maintenance.__file__).resolve()))
+            self.assertTrue(worker.get("active"))
+            self.assertFalse(worker.get("stale_identity"))
 
     def test_autonomy_orchestrator_advisory_records_state_and_ledger(self):
         with tempfile.TemporaryDirectory() as td:

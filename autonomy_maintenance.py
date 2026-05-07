@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import time
 import zipfile
@@ -797,9 +798,20 @@ def _skipped_maintenance_execution_payload(state: dict, state_key: str, reason: 
 def _record_worker_cycle(*, cycle: int, interval_sec: int, status: str, code: int | None = None) -> None:
     state = _load_state()
     worker_state = dict(state.get("runtime_worker") or {})
+    worker_pid = os.getpid()
     worker_state["interval_sec"] = max(1, int(interval_sec or 300))
     worker_state["last_cycle"] = max(1, int(cycle or 1))
     worker_state["cycle_count"] = max(int(worker_state.get("cycle_count", 0) or 0), max(1, int(cycle or 1)))
+    worker_state["pid"] = int(worker_pid)
+    try:
+        import psutil
+
+        worker_state["create_time"] = float(psutil.Process(worker_pid).create_time())
+    except Exception:
+        worker_state["create_time"] = worker_state.get("create_time")
+    worker_state["script_path"] = str(Path(__file__).resolve())
+    worker_state["active"] = True
+    worker_state["stale_identity"] = False
     if status == "running":
         worker_state["last_started_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
         worker_state["last_cycle_status"] = "running"

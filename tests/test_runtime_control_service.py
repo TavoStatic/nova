@@ -117,6 +117,33 @@ class TestRuntimeControlService(unittest.TestCase):
         self.assertIsNone(worker.get("pid"))
         self.assertIsNone(worker.get("create_time"))
 
+    def test_autonomy_maintenance_summary_downgrades_stale_ok_worker_identity(self):
+        runtime_processes = SimpleNamespace(
+            logical_service_processes=lambda _script: [],
+            select_logical_process=lambda logical, pid=None, create_time=None: None,
+        )
+        state = {
+            "runtime_worker": {
+                "last_cycle_status": "ok",
+                "pid": 4321,
+                "create_time": 12.5,
+            }
+        }
+
+        payload = RUNTIME_CONTROL_SERVICE.autonomy_maintenance_summary(
+            state_payload=state,
+            maintenance_py=Path("c:/Nova/autonomy_maintenance.py"),
+            runtime_processes_module=runtime_processes,
+            strftime_fn=lambda _fmt: "2026-04-27",
+        )
+
+        worker = dict(payload.get("runtime_worker") or {})
+        self.assertEqual(worker.get("last_cycle_status"), "stopped")
+        self.assertFalse(worker.get("active"))
+        self.assertTrue(worker.get("stale_identity"))
+        self.assertIsNone(worker.get("pid"))
+        self.assertIsNone(worker.get("create_time"))
+
     def test_autonomy_maintenance_summary_preserves_patch_queue_fields(self):
         runtime_processes = SimpleNamespace(
             logical_service_processes=lambda _script: [],
