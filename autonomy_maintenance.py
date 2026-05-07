@@ -24,6 +24,7 @@ from services.control_work_trees import CONTROL_WORK_TREES_SERVICE
 from services.core_steward import build_core_steward_payload as service_build_core_steward_payload
 from services.nova_control_action_dispatcher import NOVA_CONTROL_ACTION_DISPATCHER, autonomy_advisory_action_types
 from services.nova_runtime_context import AUTONOMY_ORCHESTRATOR_LEDGER_FILE
+from services.subconscious_work_tree_triage import SUBCONSCIOUS_WORK_TREE_TRIAGE_SERVICE
 from services.test_session_control import TEST_SESSION_CONTROL_SERVICE
 from services.work_tree_signal_ingestion import WORK_TREE_SIGNAL_INGESTION_SERVICE
 from work_tree_contracts import BranchStatus, TaskStatus
@@ -379,19 +380,228 @@ def _policy_snapshot_for_orchestrator() -> dict:
     }
 
 
-def _triage_hints_for_orchestrator(core_steward: dict, generated_queue: dict) -> dict:
+def _latest_subconscious_report_for_triage() -> dict:
+    try:
+        if not LATEST_SUBCONSCIOUS.exists():
+            return {}
+        stat = LATEST_SUBCONSCIOUS.stat()
+        report = json.loads(LATEST_SUBCONSCIOUS.read_text(encoding="utf-8"))
+        if not isinstance(report, dict):
+            return {}
+        report["_source_freshness_sec"] = max(0, int(time.time() - stat.st_mtime))
+        return report
+    except Exception:
+        return {}
+
+
+def _triage_runtime_context_for_orchestrator(state: dict | None, generated_queue: dict, kidney_summary: dict | None) -> dict:
+    current_state = dict(state or {}) if isinstance(state, dict) else {}
+    queue = dict(generated_queue or {}) if isinstance(generated_queue, dict) else {}
+    work_tree_cycle = (
+        dict(current_state.get("last_work_tree_cycle") or {})
+        if isinstance(current_state.get("last_work_tree_cycle"), dict)
+        else {}
+    )
+    last_generated_run = (
+        dict(current_state.get("last_generated_queue_run") or {})
+        if isinstance(current_state.get("last_generated_queue_run"), dict)
+        else {}
+    )
+    kidney_state = dict(kidney_summary or {}) if isinstance(kidney_summary, dict) else {}
+    return {
+        "last_regression_status": str(current_state.get("last_regression_status") or "").strip(),
+        "generated_queue_status": str(queue.get("status") or last_generated_run.get("status") or "").strip(),
+        "queue_open_count": _safe_int(queue.get("open_count"), _safe_int(last_generated_run.get("queue_open_count"), 0)),
+        "work_tree_status": str(work_tree_cycle.get("status") or "").strip(),
+        "work_tree_executed_count": _safe_int(work_tree_cycle.get("executed_count"), 0),
+        "work_tree_tree_count": _safe_int(work_tree_cycle.get("tree_count"), 0),
+        "kidney_mode": str(kidney_state.get("mode") or current_state.get("kidney_mode") or "").strip(),
+        "kidney_candidate_count": _safe_int(kidney_state.get("candidate_count"), 0),
+    }
+
+
+def _max_score(scores: dict, key: str, score: float) -> None:
+    clean_key = str(key or "").strip()
+    if not clean_key:
+        return
+    scores[clean_key] = round(max(_safe_float(scores.get(clean_key), 0.0), max(0.0, min(1.0, float(score or 0.0)))), 4)
+
+
+def _triage_signal_from_priority(family: dict, priority: dict, runtime_context: dict) -> dict:
+    family_id = str(family.get("family_id") or priority.get("family_id") or "").strip()
+    target_seam = str(priority.get("seam") or priority.get("target_seam") or family.get("target_seam") or "").strip()
+    signal_name = str(priority.get("signal") or priority.get("signal_name") or "").strip()
+    suggested_test_name = str(priority.get("suggested_test_name") or priority.get("test_name") or "").strip()
+    rationale = str(priority.get("rationale") or "").strip()
+    urgency = str(priority.get("urgency") or "medium").strip() or "medium"
+    robustness = _safe_float(priority.get("robustness", priority.get("robustness_score")), 0.0)
+    if not target_seam or not signal_name:
+        return {}
+    return SUBCONSCIOUS_WORK_TREE_TRIAGE_SERVICE.build_signal(
+        family_id=family_id,
+        target_seam=target_seam,
+        signal_name=signal_name,
+        suggested_test_name=suggested_test_name,
+        rationale=rationale,
+        urgency=urgency,
+        robustness=robustness,
+        variation_results=list(family.get("variation_results") or []) if isinstance(family.get("variation_results"), list) else [],
+        runtime_context=runtime_context,
+    )
+
+
+def _triage_lane_key(payload: dict) -> str:
+    seam = str(payload.get("target_seam") or "").strip().lower()
+    family_id = str(payload.get("family_id") or "").strip().lower()
+    if "patch" in seam or "patch" in family_id:
+        return "patch_queue"
+    return "generated_queue"
+
+
+def _queue_owner_hints(generated_queue: dict) -> dict:
+    queue = dict(generated_queue or {}) if isinstance(generated_queue, dict) else {}
+    owner_by_branch: dict[str, dict] = {}
+    seen: set[str] = set()
+    queue_items = []
+    if isinstance(queue.get("next_item"), dict):
+        queue_items.append(dict(queue.get("next_item") or {}))
+    queue_items.extend([dict(item) for item in list(queue.get("items") or []) if isinstance(item, dict)][:20])
+    for item in queue_items:
+        file_name = str(item.get("file") or "").strip()
+        if not file_name or file_name in seen:
+            continue
+        seen.add(file_name)
+        highest_priority = item.get("highest_priority")
+        priority = dict(highest_priority) if isinstance(highest_priority, dict) else {}
+        if not priority and isinstance(item.get("training_priorities"), list) and item.get("training_priorities"):
+            first_priority = (item.get("training_priorities") or [{}])[0]
+            priority = dict(first_priority) if isinstance(first_priority, dict) else {}
+        seam = str(priority.get("seam") or priority.get("target_seam") or "").strip()
+        signal_name = str(priority.get("signal") or "").strip()
+        if not seam and not signal_name:
+            continue
+        owner = SUBCONSCIOUS_WORK_TREE_TRIAGE_SERVICE.classify_owner(signal_name, seam)
+        owner_by_branch[f"generated:{file_name}"] = {
+            "source": "generated_queue",
+            "file": file_name,
+            "preferred_owner": str(owner.get("preferred_owner") or "").strip(),
+            "route_hint": str(owner.get("route_hint") or "").strip(),
+            "target_seam": seam,
+            "signal": signal_name,
+            "robustness": _safe_float(priority.get("robustness", priority.get("robustness_score")), 0.0),
+        }
+    return owner_by_branch
+
+
+def _triage_hints_for_orchestrator(
+    core_steward: dict,
+    generated_queue: dict,
+    *,
+    latest_report: dict | None = None,
+    state: dict | None = None,
+    kidney_summary: dict | None = None,
+) -> dict:
     pulse = dict((core_steward or {}).get("pulse") or {}) if isinstance((core_steward or {}).get("pulse"), dict) else {}
     queue = dict(generated_queue or {}) if isinstance(generated_queue, dict) else {}
     fallback_score = _safe_float(pulse.get("fallback_overuse_score"), 0.0)
     drift_score = min(1.0, _safe_int(queue.get("drift_count"), 0) / 10.0)
+    report_source = latest_report if latest_report is not None else _latest_subconscious_report_for_triage()
+    report = dict(report_source or {}) if isinstance(report_source, dict) else {}
+    source_freshness_sec = _safe_int(report.get("_source_freshness_sec"), 0)
+    runtime_context = _triage_runtime_context_for_orchestrator(state, queue, kidney_summary)
+
+    likely_owner_by_branch = _queue_owner_hints(queue)
+    seam_pressure_scores = {
+        "fallback_overuse": fallback_score,
+        "generated_queue_drift": drift_score,
+    }
+    owner_pressure_scores: dict[str, float] = {}
+    lane_pressure_scores: dict[str, float] = {}
+    review_contract_pressure_scores: dict[str, float] = {}
+    top_candidates: list[dict] = []
+    approved_review_count = 0
+    rejected_review_count = 0
+
+    for family in [dict(item) for item in list(report.get("families") or []) if isinstance(item, dict)]:
+        priorities = list(family.get("training_priorities") or []) if isinstance(family.get("training_priorities"), list) else []
+        for priority in [dict(item) for item in priorities if isinstance(item, dict)]:
+            signal = _triage_signal_from_priority(family, priority, runtime_context)
+            payload = dict(signal.get("payload") or {}) if isinstance(signal.get("payload"), dict) else {}
+            if not payload:
+                continue
+            gate = SUBCONSCIOUS_WORK_TREE_TRIAGE_SERVICE.review_gate(signal)
+            robustness = _safe_float(payload.get("robustness"), 0.0)
+            seam = str(payload.get("target_seam") or "").strip()
+            signal_name = str(payload.get("signal") or "").strip()
+            owner = str(payload.get("preferred_owner") or "").strip()
+            review_contract = str(payload.get("review_contract") or "").strip()
+            lane_key = _triage_lane_key(payload)
+            approved = bool(gate.get("approved"))
+            if approved:
+                approved_review_count += 1
+                _max_score(lane_pressure_scores, lane_key, robustness)
+                _max_score(lane_pressure_scores, "generated_queue", robustness)
+                _max_score(owner_pressure_scores, owner, robustness)
+                _max_score(review_contract_pressure_scores, review_contract, robustness)
+            else:
+                rejected_review_count += 1
+            _max_score(seam_pressure_scores, seam or signal_name, robustness)
+            branch_key = f"subconscious:{str(payload.get('family_id') or '').strip()}:{seam}:{signal_name}"
+            likely_owner_by_branch[branch_key] = {
+                "source": "subconscious_work_tree_triage",
+                "preferred_owner": owner,
+                "route_hint": str(payload.get("route_hint") or "").strip(),
+                "review_contract": review_contract,
+                "target_seam": seam,
+                "signal": signal_name,
+                "robustness": round(robustness, 4),
+                "gate_status": str(gate.get("status") or "").strip(),
+                "approved": approved,
+            }
+            top_candidates.append(
+                {
+                    "family_id": str(payload.get("family_id") or "").strip(),
+                    "target_seam": seam,
+                    "signal": signal_name,
+                    "preferred_owner": owner,
+                    "route_hint": str(payload.get("route_hint") or "").strip(),
+                    "review_contract": review_contract,
+                    "lane": lane_key,
+                    "robustness": round(robustness, 4),
+                    "urgency": str(payload.get("urgency") or "").strip(),
+                    "gate_status": str(gate.get("status") or "").strip(),
+                    "approved": approved,
+                    "suggested_test_name": str(payload.get("suggested_test_name") or "").strip(),
+                    "next_task": str(signal.get("next_task") or "").strip(),
+                }
+            )
+
+    top_candidates.sort(
+        key=lambda item: (
+            0 if bool(item.get("approved")) else 1,
+            -_safe_float(item.get("robustness"), 0.0),
+            str(item.get("target_seam") or ""),
+            str(item.get("signal") or ""),
+        )
+    )
+    confidence_basis = [
+        _safe_float(item.get("robustness"), 0.0)
+        for item in top_candidates
+        if bool(item.get("approved"))
+    ]
+    confidence = round(max(0.6, min(1.0, sum(confidence_basis) / len(confidence_basis))) if confidence_basis else 0.6, 4)
     return {
-        "likely_owner_by_branch": {},
-        "seam_pressure_scores": {
-            "fallback_overuse": fallback_score,
-            "generated_queue_drift": drift_score,
-        },
-        "confidence": 0.6,
-        "source_freshness_sec": 0,
+        "likely_owner_by_branch": likely_owner_by_branch,
+        "seam_pressure_scores": seam_pressure_scores,
+        "owner_pressure_scores": owner_pressure_scores,
+        "lane_pressure_scores": lane_pressure_scores,
+        "review_contract_pressure_scores": review_contract_pressure_scores,
+        "top_triage_candidates": top_candidates[:8],
+        "approved_review_count": approved_review_count,
+        "rejected_review_count": rejected_review_count,
+        "confidence": confidence,
+        "source": "subconscious_work_tree_triage" if top_candidates else "core_steward_pulse",
+        "source_freshness_sec": source_freshness_sec,
     }
 
 
@@ -429,6 +639,8 @@ def _autonomy_orchestrator_input_envelope(
     work_tree_state: dict,
     generated_queue: dict,
     guard_health: dict,
+    latest_report: dict | None = None,
+    kidney_summary: dict | None = None,
     policy_snapshot: dict | None = None,
 ) -> dict:
     return {
@@ -439,7 +651,13 @@ def _autonomy_orchestrator_input_envelope(
         "queue_pressure": _queue_pressure_for_orchestrator(generated_queue, state),
         "runtime_guard_status": _runtime_guard_status_for_orchestrator(core_steward, guard_health),
         "policy_snapshot": dict(policy_snapshot or _policy_snapshot_for_orchestrator()),
-        "triage_hints": _triage_hints_for_orchestrator(core_steward, generated_queue),
+        "triage_hints": _triage_hints_for_orchestrator(
+            core_steward,
+            generated_queue,
+            latest_report=latest_report,
+            state=state,
+            kidney_summary=kidney_summary,
+        ),
         "last_action_context": _last_action_context_for_orchestrator(state),
     }
 
@@ -453,6 +671,7 @@ def _run_autonomy_orchestrator_advisory(state: dict, kidney_summary: dict) -> di
     generated_queue = _generated_work_queue(limit=200)
     guard_health = _guard_health_for_orchestrator()
     policy_snapshot = _policy_snapshot_for_orchestrator()
+    latest_report = _latest_subconscious_report_for_triage()
     requested_mode = "execute" if bool(policy_snapshot.get("execute_enabled")) else "advisory"
     AUTONOMY_ORCHESTRATOR_SERVICE.set_mode(requested_mode, policy_snapshot)
     packet = AUTONOMY_ORCHESTRATOR_SERVICE.evaluate_next_action(
@@ -462,6 +681,8 @@ def _run_autonomy_orchestrator_advisory(state: dict, kidney_summary: dict) -> di
             work_tree_state=work_tree_state,
             generated_queue=generated_queue,
             guard_health=guard_health,
+            latest_report=latest_report,
+            kidney_summary=kidney_summary,
             policy_snapshot=policy_snapshot,
         ),
         record_ledger_fn=_append_autonomy_orchestrator_ledger,

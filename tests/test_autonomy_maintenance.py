@@ -556,6 +556,59 @@ class TestAutonomyMaintenance(unittest.TestCase):
             self.assertEqual(rows[0].get("decision"), "recommend_action")
             self.assertIn("candidate_actions", rows[0])
 
+    def test_triage_hints_for_orchestrator_use_live_subconscious_triage(self):
+        report = {
+            "_source_freshness_sec": 9,
+            "families": [
+                {
+                    "family_id": "patch-routing-fallthrough-family",
+                    "target_seam": "patch_routing_fallthrough",
+                    "training_priorities": [
+                        {
+                            "seam": "patch_routing_fallthrough",
+                            "signal": "fallback_overuse",
+                            "robustness": 0.97,
+                            "suggested_test_name": "test_patch_routing_route",
+                            "rationale": "Patch routing slipped to fallback.",
+                            "urgency": "high",
+                        }
+                    ],
+                    "variation_results": [],
+                }
+            ],
+        }
+        generated_queue = {
+            "status": "actionable",
+            "drift_count": 2,
+            "next_item": {
+                "file": "subconscious_patch-routing-fallthrough-family_patch-apply-direct-tool.json",
+                "highest_priority": {
+                    "seam": "patch_routing_fallthrough",
+                    "signal": "fallback_overuse",
+                    "robustness": 0.97,
+                },
+            },
+        }
+
+        hints = autonomy_maintenance._triage_hints_for_orchestrator(
+            {"pulse": {"fallback_overuse_score": 0.1}},
+            generated_queue,
+            latest_report=report,
+            state={"last_regression_status": "OK"},
+            kidney_summary={"mode": "enforce", "candidate_count": 3},
+        )
+
+        self.assertEqual(hints.get("source"), "subconscious_work_tree_triage")
+        self.assertEqual(hints.get("source_freshness_sec"), 9)
+        self.assertEqual(hints.get("approved_review_count"), 1)
+        self.assertAlmostEqual((hints.get("lane_pressure_scores") or {}).get("patch_queue"), 0.97)
+        self.assertAlmostEqual((hints.get("lane_pressure_scores") or {}).get("generated_queue"), 0.97)
+        self.assertAlmostEqual((hints.get("owner_pressure_scores") or {}).get("supervisor"), 0.97)
+        self.assertIn("generated:subconscious_patch-routing-fallthrough-family_patch-apply-direct-tool.json", hints.get("likely_owner_by_branch") or {})
+        top = (hints.get("top_triage_candidates") or [])[0]
+        self.assertEqual(top.get("preferred_owner"), "supervisor")
+        self.assertEqual(top.get("review_contract"), "subconscious.review.supervisor")
+
     def test_run_once_marks_failed_regression_stale_when_regression_is_skipped(self):
         with tempfile.TemporaryDirectory() as td:
             runtime_dir = Path(td) / "runtime"

@@ -209,6 +209,57 @@ class TestAutonomyOrchestratorService(unittest.TestCase):
         self.assertEqual(packet["recommended_action"]["action_type"], "patch_queue_run_next")
         self.assertEqual(packet["recommended_action"]["execution_group"], "patch_queue")
 
+    def test_evaluate_next_action_scores_generated_queue_with_triage_lane_pressure(self):
+        service = AutonomyOrchestratorService()
+
+        packet = service.evaluate_next_action(
+            _spec_envelope(
+                queue={
+                    "pending_count": 1,
+                    "high_priority_count": 1,
+                    "pressure_band": "medium",
+                    "generated_pending_count": 1,
+                    "generated_actionable_count": 1,
+                },
+                triage={
+                    "lane_pressure_scores": {"generated_queue": 0.97},
+                    "owner_pressure_scores": {"supervisor": 0.97},
+                    "review_contract_pressure_scores": {"subconscious.review.supervisor": 0.97},
+                    "seam_pressure_scores": {"weather_continuation_route_fallthrough": 0.97},
+                    "top_triage_candidates": [
+                        {
+                            "family_id": "weather-continuation-fallthrough-family",
+                            "target_seam": "weather_continuation_route_fallthrough",
+                            "signal": "fallback_overuse",
+                            "preferred_owner": "supervisor",
+                            "route_hint": "supervisor_owned",
+                            "review_contract": "subconscious.review.supervisor",
+                            "lane": "generated_queue",
+                            "robustness": 0.97,
+                            "approved": True,
+                        }
+                    ],
+                    "approved_review_count": 1,
+                    "confidence": 0.97,
+                    "source": "subconscious_work_tree_triage",
+                },
+            )
+        )
+
+        self.assertEqual(packet["decision_type"], SPEC_DECISION_RECOMMEND_ACTION)
+        self.assertEqual(packet["recommended_action"]["action_type"], "generated_queue_run_next")
+        self.assertIn("weather_continuation_route_fallthrough", packet["recommended_action"]["expected_effect"])
+        evidence_triage = packet["evidence"]["triage_hints"]
+        self.assertEqual(evidence_triage["approved_review_count"], 1)
+        self.assertEqual(evidence_triage["source"], "subconscious_work_tree_triage")
+        selected = next(
+            item for item in packet["candidates_considered"]
+            if (item.get("action") or {}).get("action_type") == "generated_queue_run_next"
+        )
+        self.assertEqual(selected.get("source"), "queue_pressure+triage_hints")
+        self.assertEqual((selected.get("triage_focus") or {}).get("preferred_owner"), "supervisor")
+        self.assertGreater((selected.get("score_components") or {}).get("triage_lane_pressure_bonus"), 0.0)
+
     def test_evaluate_next_action_recommends_active_work_tree_conduit(self):
         service = AutonomyOrchestratorService()
 

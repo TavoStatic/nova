@@ -338,9 +338,15 @@ class AutonomyOrchestratorService:
             "last_action_context": self._freshness_sec(last_action_raw),
         }
         seam_scores = _as_dict(triage_raw.get("seam_pressure_scores"))
+        owner_scores = _as_dict(triage_raw.get("owner_pressure_scores"))
+        lane_scores = _as_dict(triage_raw.get("lane_pressure_scores"))
+        review_contract_scores = _as_dict(triage_raw.get("review_contract_pressure_scores"))
         max_seam_pressure = 0.0
         for value in seam_scores.values():
             max_seam_pressure = max(max_seam_pressure, _clamp_float(value))
+        max_lane_pressure = 0.0
+        for value in lane_scores.values():
+            max_lane_pressure = max(max_lane_pressure, _clamp_float(value))
 
         return {
             "generated_at_utc": created_at_utc,
@@ -419,8 +425,16 @@ class AutonomyOrchestratorService:
             "triage_hints": {
                 "likely_owner_by_branch": _compact_value(_as_dict(triage_raw.get("likely_owner_by_branch"))),
                 "seam_pressure_scores": _compact_value(seam_scores),
+                "owner_pressure_scores": _compact_value(owner_scores),
+                "lane_pressure_scores": _compact_value(lane_scores),
+                "review_contract_pressure_scores": _compact_value(review_contract_scores),
+                "top_triage_candidates": _compact_value(_as_list(triage_raw.get("top_triage_candidates"))),
+                "approved_review_count": _as_int(triage_raw.get("approved_review_count")),
+                "rejected_review_count": _as_int(triage_raw.get("rejected_review_count")),
                 "max_seam_pressure": round(max_seam_pressure, 4),
+                "max_lane_pressure": round(max_lane_pressure, 4),
                 "confidence": _clamp_float(triage_raw.get("confidence")),
+                "source": _safe_text(triage_raw.get("source"), 120),
                 "source_freshness_sec": freshness["triage_hints"],
             },
             "last_action_context": {
@@ -433,6 +447,60 @@ class AutonomyOrchestratorService:
             },
             "correlation_ids": self._correlation_ids(input_envelope),
         }
+
+    @staticmethod
+    def _top_triage_candidate(triage: dict[str, Any], *, lane: str | None = None) -> dict[str, Any]:
+        lane_key = _safe_text(lane, 80).lower()
+        for item in _as_list(triage.get("top_triage_candidates")):
+            candidate = _as_dict(item)
+            if not candidate:
+                continue
+            if lane_key and _safe_text(candidate.get("lane"), 80).lower() not in {lane_key, ""}:
+                continue
+            return candidate
+        return {}
+
+    @staticmethod
+    def _triage_focus_text(candidate: dict[str, Any]) -> str:
+        if not candidate:
+            return ""
+        seam = _safe_text(candidate.get("target_seam"), 120)
+        signal = _safe_text(candidate.get("signal"), 120)
+        owner = _safe_text(candidate.get("preferred_owner"), 120)
+        if seam and signal and owner:
+            return f" Triage focus: {seam}/{signal} owned by {owner}."
+        if seam and signal:
+            return f" Triage focus: {seam}/{signal}."
+        return ""
+
+    @staticmethod
+    def _triage_pressure_for_action(action_type: str, evidence: dict[str, Any]) -> float:
+        triage = _as_dict(evidence.get("triage_hints"))
+        lane_scores = _as_dict(triage.get("lane_pressure_scores"))
+        seam_scores = _as_dict(triage.get("seam_pressure_scores"))
+        max_seam_pressure = _clamp_float(triage.get("max_seam_pressure"))
+        action = _safe_text(action_type, 120)
+        if action == "generated_queue_run_next":
+            return max(
+                _clamp_float(lane_scores.get("generated_queue")),
+                _clamp_float(lane_scores.get("subconscious_review")),
+                max_seam_pressure * 0.5,
+            )
+        if action == "patch_queue_run_next":
+            patch_pressure = _clamp_float(lane_scores.get("patch_queue"))
+            for key, value in seam_scores.items():
+                if "patch" in str(key or "").strip().lower():
+                    patch_pressure = max(patch_pressure, _clamp_float(value))
+            return patch_pressure
+        if action == "active_work_tree_run_next":
+            return max(
+                _clamp_float(lane_scores.get("active_work_tree")),
+                _clamp_float(lane_scores.get("work_tree")),
+                max_seam_pressure * 0.35,
+            )
+        if action == "pulse_status":
+            return max_seam_pressure
+        return 0.0
 
     @staticmethod
     def _contract_conflicts(evidence: dict[str, Any]) -> list[str]:
@@ -526,6 +594,9 @@ class AutonomyOrchestratorService:
         blocked_count = _as_int(work_tree.get("blocked_count"))
         stale_count = _as_int(work_tree.get("stale_count"))
         active_work_count = self._contract_active_work_tree_count(work_tree)
+        top_generated_triage = self._top_triage_candidate(triage, lane="generated_queue")
+        top_patch_triage = self._top_triage_candidate(triage, lane="patch_queue")
+        top_any_triage = self._top_triage_candidate(triage)
         if patch_ready_count > 0:
             candidates.append(
                 {
@@ -535,9 +606,11 @@ class AutonomyOrchestratorService:
                         expected_effect=(
                             "Advance one governed patch queue step "
                             f"({patch_apply_ready} apply-ready, {patch_approve_ready} approve-ready)."
+                            + self._triage_focus_text(top_patch_triage)
                         ),
                     ),
-                    "source": "queue_pressure",
+                    "source": "queue_pressure+triage_hints" if top_patch_triage else "queue_pressure",
+                    "triage_focus": _compact_value(top_patch_triage),
                 }
             )
         if pending_count > 0 or high_priority_count > 0:
@@ -546,9 +619,13 @@ class AutonomyOrchestratorService:
                     "action": self._contract_action(
                         "generated_queue_run_next",
                         reason_code="queue_pressure_actionable",
-                        expected_effect=f"Advance one of {max(pending_count, high_priority_count)} pending governed queue item(s).",
+                        expected_effect=(
+                            f"Advance one of {max(pending_count, high_priority_count)} pending governed queue item(s)."
+                            + self._triage_focus_text(top_generated_triage or top_any_triage)
+                        ),
                     ),
-                    "source": "queue_pressure",
+                    "source": "queue_pressure+triage_hints" if (top_generated_triage or top_any_triage) else "queue_pressure",
+                    "triage_focus": _compact_value(top_generated_triage or top_any_triage),
                 }
             )
         if generated_blocked_count > 0 or blocked_count > 0 or stale_count > 0 or (aging_count > 0 and pending_count <= 0):
@@ -569,9 +646,13 @@ class AutonomyOrchestratorService:
                     "action": self._contract_action(
                         "active_work_tree_run_next",
                         reason_code="active_work_tree_ready",
-                        expected_effect=f"Advance one safe step from {active_work_count} active Work Tree signal(s).",
+                        expected_effect=(
+                            f"Advance one safe step from {active_work_count} active Work Tree signal(s)."
+                            + self._triage_focus_text(top_any_triage)
+                        ),
                     ),
-                    "source": "work_tree_snapshot",
+                    "source": "work_tree_snapshot+triage_hints" if top_any_triage else "work_tree_snapshot",
+                    "triage_focus": _compact_value(top_any_triage),
                 }
             )
 
@@ -599,6 +680,7 @@ class AutonomyOrchestratorService:
         queue = _as_dict(evidence.get("queue_pressure"))
         work_tree = _as_dict(evidence.get("work_tree_snapshot"))
         posture = _as_dict(evidence.get("steward_posture"))
+        triage = _as_dict(evidence.get("triage_hints"))
         pressure_band = _safe_text(queue.get("pressure_band"), 40).lower()
         posture_band = _safe_text(posture.get("posture_band"), 40).lower()
         urgency = 0.0
@@ -612,11 +694,16 @@ class AutonomyOrchestratorService:
         impact = _clamp_float(catalog.get("impact"), 0.5)
         safety_risk = _clamp_float(catalog.get("safety_risk"), 0.0)
         posture_multiplier = {"green": 1.0, "yellow": 0.75, "red": 0.0}.get(posture_band, 0.5)
-        score = (impact + urgency - (safety_risk * 0.35)) * posture_multiplier
+        triage_pressure = AutonomyOrchestratorService._triage_pressure_for_action(_safe_text(action.get("action_type"), 120), evidence)
+        triage_confidence = _clamp_float(triage.get("confidence"), 0.0)
+        triage_bonus = triage_pressure * max(0.5, triage_confidence) * 0.14
+        score = (impact + urgency + triage_bonus - (safety_risk * 0.35)) * posture_multiplier
         score = _clamp_float(score)
         return round(score, 4), {
             "urgency": round(urgency, 4),
             "expected_impact": round(impact, 4),
+            "triage_lane_pressure_bonus": round(triage_bonus, 4),
+            "triage_pressure": round(triage_pressure, 4),
             "safety_risk_penalty": round(safety_risk * 0.35, 4),
             "posture_confidence_multiplier": round(posture_multiplier, 4),
         }
@@ -676,6 +763,7 @@ class AutonomyOrchestratorService:
                 {
                     "action": _compact_value(action),
                     "source": _safe_text(candidate.get("source"), 120),
+                    "triage_focus": _compact_value(_as_dict(candidate.get("triage_focus"))),
                     "score": score,
                     "score_components": score_components,
                     "reject_reasons": reject_reasons,
