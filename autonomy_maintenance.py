@@ -844,6 +844,66 @@ def _record_generated_queue_run(state: dict, ok: bool, msg: str, extra: dict | N
     return payload
 
 
+def _compact_report_summary(report: dict) -> dict:
+    return {
+        "run_id": str((report or {}).get("run_id") or ""),
+        "status": str((report or {}).get("status") or ""),
+        "session_path": str((report or {}).get("session_path") or ""),
+        "report_path": str((report or {}).get("report_path") or ""),
+    }
+
+
+def _compact_work_queue_summary(work_queue: dict) -> dict:
+    items = []
+    for item in list((work_queue or {}).get("items") or [])[:8]:
+        if not isinstance(item, dict):
+            continue
+        items.append(
+            {
+                "file": str(item.get("file") or ""),
+                "latest_status": str(item.get("latest_status") or ""),
+                "actionable": bool(item.get("actionable", False)),
+                "blocked_reason": str(item.get("blocked_reason") or ""),
+            }
+        )
+    next_item = dict((work_queue or {}).get("next_item") or {})
+    return {
+        "status": str((work_queue or {}).get("status") or ""),
+        "count": int((work_queue or {}).get("count", 0) or 0),
+        "open_count": int((work_queue or {}).get("open_count", 0) or 0),
+        "actionable_count": int((work_queue or {}).get("actionable_count", 0) or 0),
+        "blocked_count": int((work_queue or {}).get("blocked_count", 0) or 0),
+        "next_file": str(next_item.get("file") or ""),
+        "blocked_reason_counts": dict((work_queue or {}).get("blocked_reason_counts") or {})
+        if isinstance((work_queue or {}).get("blocked_reason_counts"), dict)
+        else {},
+        "blocked_files": list((work_queue or {}).get("blocked_files") or [])
+        if isinstance((work_queue or {}).get("blocked_files"), list)
+        else [],
+        "items": items,
+    }
+
+
+def _compact_generated_queue_execution_extra(extra: dict | None) -> dict:
+    data = dict(extra or {}) if isinstance(extra, dict) else {}
+    definitions = [dict(item) for item in list(data.get("definitions") or []) if isinstance(item, dict)]
+    return {
+        "selected": dict(data.get("selected") or {}) if isinstance(data.get("selected"), dict) else {},
+        "runner_message": str(data.get("runner_message") or ""),
+        "latest_report": _compact_report_summary(dict(data.get("latest_report") or {})),
+        "reports": [_compact_report_summary(dict(item)) for item in list(data.get("reports") or [])[:3] if isinstance(item, dict)],
+        "work_queue": _compact_work_queue_summary(dict(data.get("work_queue") or {})),
+        "definition_count": len(definitions),
+        "definition_files": [str(item.get("file") or "") for item in definitions[:12]],
+    }
+
+
+def _compact_autonomy_execution_extra(action_type: str, extra: dict | None) -> dict:
+    if action_type == "generated_queue_run_next":
+        return _compact_generated_queue_execution_extra(extra)
+    return dict(extra or {}) if isinstance(extra, dict) else {}
+
+
 class _MaintenancePatchControlService:
     @staticmethod
     def patch_control_state(*_args, **_kwargs) -> dict:
@@ -1031,7 +1091,7 @@ def _execute_autonomy_recommendation(state: dict, packet: dict, policy_snapshot:
             "result": "success" if ok else "failed",
             "ok": bool(ok),
             "message": str(msg or ""),
-            "extra": extra if isinstance(extra, dict) else {},
+            "extra": _compact_autonomy_execution_extra(action_type, extra),
             "events": events,
             "cooldown_sec": cooldown_sec,
             "cooldown_until_epoch": time.time() + cooldown_sec if cooldown_sec else 0.0,

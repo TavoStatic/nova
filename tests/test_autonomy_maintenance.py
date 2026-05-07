@@ -372,8 +372,24 @@ class TestAutonomyMaintenance(unittest.TestCase):
                 "generated_work_queue_run_ok",
                 {
                     "selected": {"file": "demo.json", "latest_status": "pass"},
-                    "latest_report": {"status": "pass", "run_id": "run-demo"},
-                    "work_queue": {"status": "actionable", "open_count": 1, "actionable_count": 1, "count": 1},
+                    "latest_report": {"status": "pass", "run_id": "run-demo", "report_path": "runtime/report.json"},
+                    "reports": [
+                        {"status": "pass", "run_id": "run-demo", "report_path": "runtime/report.json"},
+                        {"status": "drift", "run_id": "run-old", "report_path": "runtime/old.json"},
+                    ],
+                    "definitions": [
+                        {"file": "demo.json", "path": "C:/Nova/runtime/test_sessions/generated_definitions/demo.json", "messages": ["one"]},
+                        {"file": "next.json", "path": "C:/Nova/runtime/test_sessions/generated_definitions/next.json", "messages": ["two"]},
+                    ],
+                    "work_queue": {
+                        "status": "actionable",
+                        "open_count": 1,
+                        "actionable_count": 1,
+                        "blocked_count": 0,
+                        "count": 1,
+                        "next_item": {"file": "next.json"},
+                        "items": [{"file": "next.json", "latest_status": "drift", "actionable": True}],
+                    },
                 },
             ),
         ):
@@ -386,6 +402,10 @@ class TestAutonomyMaintenance(unittest.TestCase):
         events = list(result.get("events") or [])
         self.assertEqual(events[0].get("act"), "generated_queue_run_next")
         self.assertEqual(events[0].get("status"), "ok")
+        self.assertNotIn("definitions", result.get("extra") or {})
+        self.assertEqual((result.get("extra") or {}).get("definition_count"), 2)
+        self.assertEqual((result.get("extra") or {}).get("definition_files"), ["demo.json", "next.json"])
+        self.assertEqual(((result.get("extra") or {}).get("work_queue") or {}).get("next_file"), "next.json")
 
     def test_execute_autonomy_recommendation_dispatches_patch_queue_conduit_action(self):
         state: dict = {}
