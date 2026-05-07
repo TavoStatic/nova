@@ -359,11 +359,13 @@ class ControlStatusService:
         payload["autonomy_orchestrator_decision_type"] = str(last_autonomy_orchestrator.get("decision_type") or "")
         payload["autonomy_orchestrator_confidence"] = float(last_autonomy_orchestrator.get("confidence", 0.0) or 0.0)
         payload["autonomy_orchestrator_recommended_action"] = autonomy_orchestrator_recommended_action
-        payload["autonomy_orchestrator_action"] = str(
+        autonomy_orchestrator_action_text = str(
             autonomy_orchestrator_action.get("act")
             or autonomy_orchestrator_recommended_action.get("action_type")
             or ""
         )
+        payload["autonomy_orchestrator_action"] = autonomy_orchestrator_action_text
+        payload["autonomy_orchestrator_action_type"] = autonomy_orchestrator_action_text
         payload["autonomy_orchestrator_reason"] = str(last_autonomy_orchestrator.get("reason") or "")
         payload["autonomy_orchestrator_ledger_status"] = str(last_autonomy_orchestrator.get("ledger_status") or "")
         payload["autonomy_orchestrator_rejection_reasons"] = (
@@ -371,6 +373,27 @@ class ControlStatusService:
             if isinstance(last_autonomy_orchestrator.get("rejection_reasons"), list)
             else []
         )
+        stale_recommendation_reasons: list[str] = []
+        recommends_action = payload["autonomy_orchestrator_decision"] == "recommend_action" or payload["autonomy_orchestrator_decision_type"] == "RecommendAction"
+        if recommends_action:
+            if autonomy_orchestrator_action_text == "generated_queue_run_next" and queue_actionable_count <= 0:
+                stale_recommendation_reasons.append("generated_queue_no_actionable_items")
+            elif autonomy_orchestrator_action_text == "generated_queue_investigate" and queue_blocked_count <= 0:
+                stale_recommendation_reasons.append("generated_queue_no_blocked_items")
+        stale_recommendation = bool(stale_recommendation_reasons)
+        payload["autonomy_orchestrator_recommendation_stale"] = stale_recommendation
+        payload["autonomy_orchestrator_stale_reasons"] = stale_recommendation_reasons
+        payload["autonomy_orchestrator_display_decision"] = "settled" if stale_recommendation else (payload["autonomy_orchestrator_decision_type"] or payload["autonomy_orchestrator_decision"] or "")
+        payload["autonomy_orchestrator_display_action"] = "none" if stale_recommendation else (autonomy_orchestrator_action_text or "none")
+        payload["autonomy_orchestrator_current_note"] = (
+            "Generated Work Queue is clear; the last queue recommendation has already settled."
+            if stale_recommendation and "generated_queue_no_actionable_items" in stale_recommendation_reasons
+            else ""
+        )
+        autonomy_payload["autonomy_orchestrator_recommendation_stale"] = stale_recommendation
+        autonomy_payload["autonomy_orchestrator_display_decision"] = payload["autonomy_orchestrator_display_decision"]
+        autonomy_payload["autonomy_orchestrator_display_action"] = payload["autonomy_orchestrator_display_action"]
+        autonomy_payload["autonomy_orchestrator_current_note"] = payload["autonomy_orchestrator_current_note"]
         payload["autonomy_orchestrator_count"] = int(autonomy_orchestrator_summary.get("count", 0) or 0)
         payload["autonomy_orchestrator_recommendation_changes"] = int(autonomy_orchestrator_summary.get("recommendation_changes", 0) or 0)
         payload["autonomy_orchestrator_change_rate"] = float(autonomy_orchestrator_summary.get("recommendation_change_rate", 0.0) or 0.0)

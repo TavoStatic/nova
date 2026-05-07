@@ -1481,8 +1481,15 @@ function renderSubconscious(status) {
         ? `${lastQueueRun.status || 'n/a'} | ${lastQueueRun.selected_file}`
         : (lastQueueRun && lastQueueRun.status ? `${lastQueueRun.status} | none selected` : 'n/a');
     const lastQueueReport = lastQueueRun && lastQueueRun.latest_report_status ? lastQueueRun.latest_report_status : 'n/a';
-    const advisorDecision = advisor && advisor.decision ? advisor.decision : 'n/a';
-    const advisorActionText = advisorAction && advisorAction.act ? advisorAction.act : 'none';
+    const advisorDecision = status && status.autonomy_orchestrator_display_decision
+        ? status.autonomy_orchestrator_display_decision
+        : (advisor && advisor.decision ? advisor.decision : 'n/a');
+    const advisorActionText = status && status.autonomy_orchestrator_display_action
+        ? status.autonomy_orchestrator_display_action
+        : (advisorAction && advisorAction.act ? advisorAction.act : 'none');
+    const advisorCurrentNote = status && status.autonomy_orchestrator_current_note
+        ? status.autonomy_orchestrator_current_note
+        : '';
     const advisorLedger = advisor && advisor.ledger_status ? advisor.ledger_status : 'n/a';
     const advisorChurn = advisorSummary && advisorSummary.count
         ? `${advisorSummary.recommendation_changes || 0}/${Math.max(0, Number(advisorSummary.count || 0) - 1)}`
@@ -1512,6 +1519,7 @@ function renderSubconscious(status) {
         {label: 'Last queue report', value: lastQueueReport},
         {label: 'Advisor decision', value: advisorDecision},
         {label: 'Advisor action', value: advisorActionText},
+        {label: 'Advisor current', value: advisorCurrentNote || 'current evidence matches last recommendation'},
         {label: 'Advisor ledger', value: advisorLedger},
         {label: 'Advisor churn', value: advisorChurn},
         {label: 'Advisor stability', value: advisorStable},
