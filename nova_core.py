@@ -2718,6 +2718,7 @@ def memory_health_payload(update_snapshot: bool = True) -> dict:
         memory_db_path=db_path,
         learned_facts_file=LEARNED_FACTS_FILE,
         identity_file=IDENTITY_FILE,
+        memory_events_log=MEMORY_EVENTS_LOG,
         snapshot_file=RUNTIME_DIR / "memory_health_snapshot.json",
         update_snapshot=update_snapshot,
     )

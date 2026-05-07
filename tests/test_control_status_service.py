@@ -95,6 +95,9 @@ class TestControlStatusService(unittest.TestCase):
                     "memory_db_total": 756,
                     "memory_scoped_total": 1,
                     "memory_health_issue_count": 0,
+                    "memory_events_log_status": "ok",
+                    "memory_events_log_bytes": 42,
+                    "memory_events_log_invalid_tail_count": 0,
                 }
 
             @staticmethod
@@ -156,6 +159,8 @@ class TestControlStatusService(unittest.TestCase):
         self.assertEqual(payload.get("memory_health_status"), "ok")
         self.assertEqual(payload.get("memory_db_total"), 756)
         self.assertEqual(payload.get("memory_scoped_total"), 1)
+        self.assertEqual(payload.get("memory_events_log_status"), "ok")
+        self.assertEqual(payload.get("memory_events_log_bytes"), 42)
 
     def test_status_payload_includes_runtime_timeline_and_patch_fields(self):
         payload = CONTROL_STATUS_SERVICE.status_payload(
@@ -265,6 +270,13 @@ class TestControlStatusService(unittest.TestCase):
                 "memory_health_issue_count": 1,
                 "memory_db_total": 756,
                 "memory_scoped_total": 0,
+                "memory_health": {
+                    "memory_events_log": {
+                        "status": "watch",
+                        "byte_count": 99,
+                        "invalid_tail_count": 1,
+                    },
+                },
                 "memory_health_issues": [{"code": "learned_facts_orphan_tmp", "detail": "valid tmp without final"}],
             },
             update_now_pending={"pending": False},
@@ -280,6 +292,9 @@ class TestControlStatusService(unittest.TestCase):
         self.assertEqual(payload.get("memory_health_issue_count"), 1)
         self.assertEqual(payload.get("memory_db_total"), 756)
         self.assertEqual(payload.get("memory_scoped_total"), 0)
+        self.assertEqual(payload.get("memory_events_log_status"), "watch")
+        self.assertEqual(payload.get("memory_events_log_bytes"), 99)
+        self.assertEqual(payload.get("memory_events_log_invalid_tail_count"), 1)
         self.assertEqual((payload.get("memory_health_issues") or [{}])[0].get("code"), "learned_facts_orphan_tmp")
         self.assertEqual(payload.get("patch_previews_total"), 12)
         self.assertEqual(payload.get("patch_previews_orphaned"), 2)

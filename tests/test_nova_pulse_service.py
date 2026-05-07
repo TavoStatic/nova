@@ -226,6 +226,7 @@ class TestNovaPulseService(unittest.TestCase):
                     "status": "watch",
                     "issue_count": 1,
                     "issues": [{"code": "learned_facts_orphan_tmp", "detail": "valid tmp without final"}],
+                    "memory_events_log": {"status": "watch", "byte_count": 128, "invalid_tail_count": 1},
                 },
             )
 
@@ -233,8 +234,11 @@ class TestNovaPulseService(unittest.TestCase):
             self.assertEqual(payload["memory_health_status"], "watch")
             self.assertEqual(payload["memory_scoped_total"], 12)
             self.assertEqual(payload["memory_db_total"], 12)
+            self.assertEqual(payload["memory_events_log_status"], "watch")
+            self.assertEqual(payload["memory_events_log_invalid_tail_count"], 1)
             rendered = render_nova_pulse(payload)
             self.assertIn("memory watch", rendered)
+            self.assertIn("events=watch", rendered)
             self.assertIn("db_total=12", rendered)
             self.assertIn("learned_facts_orphan_tmp", rendered)
         finally:

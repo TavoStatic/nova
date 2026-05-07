@@ -79,6 +79,102 @@ def _json_file_health(path: Path, *, label: str) -> dict[str, object]:
     }
 
 
+def _tail_jsonl_lines(path: Path, *, max_lines: int = 40, max_bytes: int = 65536) -> list[str]:
+    size = int(path.stat().st_size or 0)
+    if size <= 0:
+        return []
+    with path.open("rb") as handle:
+        start = max(0, size - max(1, int(max_bytes)))
+        handle.seek(start)
+        data = handle.read()
+    text = data.decode("utf-8", errors="ignore")
+    lines = text.splitlines()
+    if size > max_bytes and lines:
+        lines = lines[1:]
+    return [line.strip() for line in lines if line.strip()][-max(1, int(max_lines)):]
+
+
+def _jsonl_log_health(path: Path, *, label: str) -> dict[str, object]:
+    final = Path(path)
+    issues: list[dict[str, str]] = []
+    payload: dict[str, object] = {
+        "path": str(final),
+        "exists": final.exists(),
+        "valid": False,
+        "status": "unknown",
+        "byte_count": 0,
+        "tail_count": 0,
+        "invalid_tail_count": 0,
+        "newest_ts": None,
+        "last_event": {},
+        "issues": issues,
+    }
+    if not final.exists():
+        issues.append(_issue("warning", f"{label}_log_missing", f"{label} event log is missing.", path=final))
+        payload["status"] = "watch"
+        return payload
+
+    try:
+        payload["byte_count"] = int(final.stat().st_size or 0)
+        lines = _tail_jsonl_lines(final)
+    except Exception as exc:
+        issues.append(_issue("failure", f"{label}_log_read_failed", f"{label} event log could not be tailed: {exc}", path=final))
+        payload["status"] = "failure"
+        return payload
+
+    if not lines:
+        issues.append(_issue("warning", f"{label}_log_empty", f"{label} event log is empty.", path=final))
+        payload["status"] = "watch"
+        return payload
+
+    invalid_count = 0
+    newest_ts: int | None = None
+    last_event: dict[str, object] = {}
+    for line in lines:
+        try:
+            entry = json.loads(line)
+        except Exception:
+            invalid_count += 1
+            continue
+        if not isinstance(entry, dict):
+            invalid_count += 1
+            continue
+        ts = entry.get("ts")
+        ts_int = int(ts) if isinstance(ts, (int, float)) else 0
+        if ts_int:
+            newest_ts = max(newest_ts or ts_int, ts_int)
+        last_event = {
+            "action": _compact(entry.get("action") or entry.get("event") or "", 80),
+            "status": _compact(entry.get("status") or "", 40),
+            "ts": ts_int,
+            "user": _compact(entry.get("user") or "", 120),
+        }
+
+    payload["tail_count"] = len(lines)
+    payload["invalid_tail_count"] = invalid_count
+    payload["newest_ts"] = newest_ts
+    payload["last_event"] = last_event
+    if invalid_count:
+        severity = "failure" if invalid_count >= len(lines) else "warning"
+        issues.append(
+            _issue(
+                severity,
+                f"{label}_jsonl_tail_invalid",
+                f"{label} event log has {invalid_count} invalid recent JSONL entr{'y' if invalid_count == 1 else 'ies'}.",
+                path=final,
+            )
+        )
+
+    if any(str(item.get("severity") or "") == "failure" for item in issues):
+        payload["status"] = "failure"
+    elif issues:
+        payload["status"] = "watch"
+    else:
+        payload["status"] = "ok"
+    payload["valid"] = not invalid_count
+    return payload
+
+
 def _sqlite_memory_health(db_path: Path) -> dict[str, object]:
     path = Path(db_path)
     issues: list[dict[str, str]] = []
@@ -159,6 +255,7 @@ def build_memory_health_payload(
     memory_db_path: Path,
     learned_facts_file: Path,
     identity_file: Path,
+    memory_events_log: Path | None = None,
     snapshot_file: Path | None = None,
     update_snapshot: bool = False,
     now_fn: Callable[[], float] = time.time,
@@ -166,13 +263,17 @@ def build_memory_health_payload(
     db = _sqlite_memory_health(Path(memory_db_path))
     learned_facts = _json_file_health(Path(learned_facts_file), label="learned_facts")
     identity = _json_file_health(Path(identity_file), label="identity")
+    memory_events = _jsonl_log_health(Path(memory_events_log), label="memory_events") if memory_events_log is not None else {}
 
     issues: list[dict[str, str]] = []
-    for source_name, source_payload in (
+    source_payloads: list[tuple[str, dict[str, object]]] = [
         ("memory_db", db),
         ("learned_facts", learned_facts),
         ("identity", identity),
-    ):
+    ]
+    if memory_events:
+        source_payloads.append(("memory_events_log", memory_events))
+    for source_name, source_payload in source_payloads:
         for item in list(source_payload.get("issues") or []):
             if isinstance(item, dict):
                 row = dict(item)
@@ -222,6 +323,7 @@ def build_memory_health_payload(
         "memory_db": db,
         "learned_facts": learned_facts,
         "identity": identity,
+        "memory_events_log": memory_events,
         "snapshot": {
             "path": str(snapshot_file) if snapshot_file is not None else "",
             "last_good_total": prior_total,

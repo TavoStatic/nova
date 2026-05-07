@@ -430,6 +430,16 @@ class ControlStatusService:
         payload["memory_health_status"] = memory_health_status
         payload["memory_health_issue_count"] = int(pulse_payload.get("memory_health_issue_count", pulse_memory_health.get("issue_count", 0)) or 0)
         payload["memory_health_issues"] = pulse_memory_issues[:6]
+        memory_events_log = pulse_memory_health.get("memory_events_log") if isinstance(pulse_memory_health.get("memory_events_log"), dict) else {}
+        payload["memory_events_log_status"] = str(
+            pulse_payload.get("memory_events_log_status") or memory_events_log.get("status") or "unknown"
+        )
+        payload["memory_events_log_invalid_tail_count"] = int(
+            pulse_payload.get("memory_events_log_invalid_tail_count", memory_events_log.get("invalid_tail_count", 0)) or 0
+        )
+        payload["memory_events_log_bytes"] = int(
+            pulse_payload.get("memory_events_log_bytes", memory_events_log.get("byte_count", 0)) or 0
+        )
         payload["memory_events_ok"] = bool(memory_summary.get("ok", False))
         payload["memory_events_total"] = int(memory_summary.get("count", 0))
         payload["memory_write_count"] = int(memory_summary.get("write_count", 0))

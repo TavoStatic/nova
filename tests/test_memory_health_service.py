@@ -102,6 +102,33 @@ class TestMemoryHealthService(unittest.TestCase):
             self.assertEqual(facts["assistant_name"], "Novaprime")
             self.assertTrue(learned.exists())
 
+    def test_memory_health_flags_invalid_recent_memory_event_log(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            db_path = root / "nova_memory.sqlite"
+            _create_memory_db(db_path, 3)
+            events_log = root / "runtime" / "memory_events.jsonl"
+            events_log.parent.mkdir(parents=True)
+            events_log.write_text(
+                '{"action":"add","status":"ok","ts":1000}\nnot-json\n',
+                encoding="utf-8",
+            )
+
+            payload = build_memory_health_payload(
+                memory_db_path=db_path,
+                learned_facts_file=root / "memory" / "learned_facts.json",
+                identity_file=root / "memory" / "identity.json",
+                memory_events_log=events_log,
+                now_fn=lambda: 789.0,
+            )
+
+            self.assertEqual(payload["status"], "watch")
+            self.assertEqual(payload["memory_events_log"]["invalid_tail_count"], 1)
+            codes = {item["code"] for item in payload["issues"]}
+            sources = {item["source"] for item in payload["issues"]}
+            self.assertIn("memory_events_jsonl_tail_invalid", codes)
+            self.assertIn("memory_events_log", sources)
+
 
 if __name__ == "__main__":
     unittest.main()

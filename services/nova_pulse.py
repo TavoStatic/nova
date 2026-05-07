@@ -226,6 +226,7 @@ def build_pulse_payload(
     memory_stats_ok = bool(memory_payload.get("ok", False))
     memory_health_ok = bool(memory_health.get("ok", True)) if memory_health else True
     memory_db = memory_health.get("memory_db") if isinstance(memory_health.get("memory_db"), dict) else {}
+    memory_events_log = memory_health.get("memory_events_log") if isinstance(memory_health.get("memory_events_log"), dict) else {}
     memory_scoped_total = int(memory_payload.get("total", 0) or 0) if memory_payload.get("ok") else 0
 
     payload = {
@@ -265,6 +266,9 @@ def build_pulse_payload(
         "memory_health_status": str(memory_health.get("status") or ("ok" if memory_health_ok else "failure")) if memory_health else "unknown",
         "memory_health_issue_count": int(memory_health.get("issue_count", 0) or 0) if memory_health else 0,
         "memory_health_issues": list(memory_health.get("issues") or [])[:6] if isinstance(memory_health.get("issues"), list) else [],
+        "memory_events_log_status": str(memory_events_log.get("status") or "unknown"),
+        "memory_events_log_invalid_tail_count": int(memory_events_log.get("invalid_tail_count", 0) or 0),
+        "memory_events_log_bytes": int(memory_events_log.get("byte_count", 0) or 0),
         "kidney_mode": str(kidney_summary.get("mode") or "unknown"),
         "kidney_candidates": int(kidney_summary.get("candidate_count", 0) or 0),
         "kidney_archive_count": int(kidney_summary.get("archive_count", 0) or 0),
@@ -327,7 +331,7 @@ def render_nova_pulse(payload: Optional[dict] = None, *, build_pulse_payload_fn:
         f"- patch log tail: {data.get('patch_last_line')}",
         "Support systems:",
         f"- Ollama API: {'online' if data.get('ollama_up') else 'offline'}",
-        f"- memory: {'ok' if data.get('memory_ok') else 'watch'} (scope_total={int(data.get('memory_scoped_total', data.get('memory_total', 0)) or 0)}, db_total={int(data.get('memory_db_total', data.get('memory_total', 0)) or 0)}, health={data.get('memory_health_status') or 'unknown'})",
+        f"- memory: {'ok' if data.get('memory_ok') else 'watch'} (scope_total={int(data.get('memory_scoped_total', data.get('memory_total', 0)) or 0)}, db_total={int(data.get('memory_db_total', data.get('memory_total', 0)) or 0)}, health={data.get('memory_health_status') or 'unknown'}, events={data.get('memory_events_log_status') or 'unknown'})",
         f"- kidney: mode={data.get('kidney_mode')} candidates={int(data.get('kidney_candidates', 0) or 0)} archive={int(data.get('kidney_archive_count', 0) or 0)} delete={int(data.get('kidney_delete_count', 0) or 0)}",
         f"- safety envelope: enabled={bool(data.get('safety_enabled'))} mode={data.get('safety_mode')}",
         "Autonomy:",

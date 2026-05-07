@@ -1386,7 +1386,7 @@ function renderMetricGrid(status) {
         'server_time', 'ollama_api_up', 'chat_model', 'memory_enabled', 'memory_scope', 'web_enabled',
         'search_provider', 'allow_domains_count', 'active_http_sessions', 'health_score',
         'self_check_pass_ratio', 'tool_events_total', 'memory_health_status', 'memory_db_total', 'memory_scoped_total',
-        'memory_events_total', 'action_ledger_total',
+        'memory_events_total', 'memory_events_log_status', 'action_ledger_total',
         'last_planner_decision', 'last_route_summary', 'process_counting_mode', 'heartbeat_age_sec',
     ];
     const subconsciousRow = [
@@ -1396,6 +1396,7 @@ function renderMetricGrid(status) {
         memory_health_status: 'Memory Health',
         memory_db_total: 'Memory DB Rows',
         memory_scoped_total: 'Memory Scope Rows',
+        memory_events_log_status: 'Memory Event Log',
         subconscious_family_count: 'Families',
         subconscious_training_priority_count: 'Priorities',
         subconscious_generated_definition_count: 'Definitions',
@@ -2509,6 +2510,12 @@ function renderOverrideBadges(session) {
 
 function memoryHealthDetails(status) {
     const pulse = status && status.pulse && typeof status.pulse === 'object' ? status.pulse : {};
+    const healthPayload = status && status.memory_health && typeof status.memory_health === 'object'
+        ? status.memory_health
+        : (pulse.memory_health && typeof pulse.memory_health === 'object' ? pulse.memory_health : {});
+    const eventLog = healthPayload.memory_events_log && typeof healthPayload.memory_events_log === 'object'
+        ? healthPayload.memory_events_log
+        : {};
     const statusText = String(
         (status && status.memory_health_status)
         || pulse.memory_health_status
@@ -2539,11 +2546,35 @@ function memoryHealthDetails(status) {
             return detail ? `${code}: ${detail}` : code;
         }).join('\n')
         : '';
+    const eventLogStatus = String(
+        (status && status.memory_events_log_status)
+        || pulse.memory_events_log_status
+        || eventLog.status
+        || (status && status.memory_events_ok ? 'ok' : 'unknown')
+    ).trim() || 'unknown';
+    const eventLogBytes = Number(
+        status && status.memory_events_log_bytes != null
+            ? status.memory_events_log_bytes
+            : (pulse.memory_events_log_bytes != null ? pulse.memory_events_log_bytes : (eventLog.byte_count != null ? eventLog.byte_count : 0))
+    );
+    const invalidTailCount = Number(
+        status && status.memory_events_log_invalid_tail_count != null
+            ? status.memory_events_log_invalid_tail_count
+            : (pulse.memory_events_log_invalid_tail_count != null ? pulse.memory_events_log_invalid_tail_count : (eventLog.invalid_tail_count != null ? eventLog.invalid_tail_count : 0))
+    );
+    const byteText = Number.isFinite(eventLogBytes) && eventLogBytes > 0
+        ? `${(eventLogBytes / (1024 * 1024)).toFixed(eventLogBytes >= 10 * 1024 * 1024 ? 1 : 2)} MB`
+        : '0 MB';
+    const eventLogText = `${eventLogStatus} | ${byteText}${invalidTailCount ? ` | invalid tail ${invalidTailCount}` : ''}`;
     return {
         status: statusText,
         scopedTotal: Number.isFinite(scopedTotal) ? scopedTotal : 0,
         dbTotal: Number.isFinite(dbTotal) ? dbTotal : 0,
         issueCount: Number.isFinite(issueCount) ? issueCount : 0,
+        eventLogStatus,
+        eventLogBytes: Number.isFinite(eventLogBytes) ? eventLogBytes : 0,
+        invalidTailCount: Number.isFinite(invalidTailCount) ? invalidTailCount : 0,
+        eventLogText,
         issueText,
     };
 }
@@ -2556,6 +2587,7 @@ function renderHealthSummary(status) {
         {label: 'Pass Ratio', value: status && status.self_check_pass_ratio != null ? status.self_check_pass_ratio : 'n/a'},
         {label: 'Memory Health', value: `${memory.status}${memory.issueCount ? ` (${memory.issueCount} issue${memory.issueCount === 1 ? '' : 's'})` : ''}`},
         {label: 'Memory Rows', value: `db ${memory.dbTotal} | scope ${memory.scopedTotal}`},
+        {label: 'Memory Event Log', value: memory.eventLogText},
         {label: 'Memory Watch', value: memory.issueText || 'No amnesia signals'},
         {label: 'Alerts', value: alerts.length ? alerts.join('\n') : 'Alert board clear'},
     ]);
@@ -3616,6 +3648,7 @@ function renderGovernance(policy, status) {
             `Top K: ${String(memory.top_k || '')}`,
             `Health: ${memoryHealth.status}`,
             `Rows: db ${memoryHealth.dbTotal} | scope ${memoryHealth.scopedTotal}`,
+            `Events: ${memoryHealth.eventLogText}`,
             `Watch: ${memoryHealth.issueText || 'No amnesia signals'}`,
         ].join('\n');
     }
