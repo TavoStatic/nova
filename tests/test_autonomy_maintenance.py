@@ -1410,6 +1410,91 @@ class TestAutonomyMaintenance(unittest.TestCase):
             {},
         )
 
+    def test_run_active_work_tree_cycle_stops_after_one_attempt(self):
+        state = {}
+        candidates = [
+            {
+                "tree_id": "tree-blocked",
+                "title": "Core Thinning",
+                "status": "active",
+                "kind": "core_thinning",
+                "next_step": {
+                    "branch_id": "branch-blocked",
+                    "branch_title": "Review wrapper shim",
+                    "recommended_tool": "core_thinning",
+                },
+            },
+            {
+                "tree_id": "tree-pulse",
+                "title": "Cli: nova pulse",
+                "status": "active",
+                "kind": "system",
+                "next_step": {
+                    "branch_id": "branch-pulse",
+                    "branch_title": "Run pulse",
+                    "recommended_tool": "pulse",
+                },
+            },
+        ]
+
+        with mock.patch.object(autonomy_maintenance, "_active_work_tree_candidates", return_value=candidates), \
+             mock.patch.object(
+                 autonomy_maintenance.work_tree,
+                 "run_autonomous_loop",
+                 return_value=[
+                     {
+                         "action": "scope_blocked",
+                         "tree_id": "tree-blocked",
+                         "tool": "core_thinning",
+                     }
+                 ],
+             ) as loop_mock:
+            payload = autonomy_maintenance._run_active_work_tree_cycle(state, max_steps=1, max_trees=2)
+
+        loop_mock.assert_called_once()
+        self.assertEqual(payload.get("status"), "scope_blocked")
+        self.assertEqual(payload.get("attempted_count"), 1)
+        self.assertEqual(payload.get("executed_count"), 0)
+        self.assertEqual(payload.get("processed_tree_count"), 1)
+        self.assertEqual((state.get("last_active_work_tree_cycle") or {}).get("status"), "scope_blocked")
+
+    def test_run_active_work_tree_cycle_empty_history_still_consumes_attempt(self):
+        state = {}
+        candidates = [
+            {
+                "tree_id": "tree-empty",
+                "title": "Core Thinning",
+                "status": "active",
+                "kind": "core_thinning",
+                "next_step": {
+                    "branch_id": "branch-empty",
+                    "branch_title": "Review wrapper shim",
+                    "recommended_tool": "core_thinning",
+                },
+            },
+            {
+                "tree_id": "tree-pulse",
+                "title": "Cli: nova pulse",
+                "status": "active",
+                "kind": "system",
+                "next_step": {
+                    "branch_id": "branch-pulse",
+                    "branch_title": "Run pulse",
+                    "recommended_tool": "pulse",
+                },
+            },
+        ]
+
+        with mock.patch.object(autonomy_maintenance, "_active_work_tree_candidates", return_value=candidates), \
+             mock.patch.object(autonomy_maintenance.work_tree, "run_autonomous_loop", return_value=[]) as loop_mock:
+            payload = autonomy_maintenance._run_active_work_tree_cycle(state, max_steps=1, max_trees=2)
+
+        loop_mock.assert_called_once()
+        self.assertEqual(payload.get("status"), "idle")
+        self.assertEqual(payload.get("attempted_count"), 1)
+        self.assertEqual(payload.get("executed_count"), 0)
+        self.assertEqual(payload.get("processed_tree_count"), 1)
+
     def test_retire_legacy_patch_update_trees_drops_open_tasks_and_completes_tree(self):
         self._isolated_work_tree_db()
         state = {}

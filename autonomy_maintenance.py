@@ -2439,13 +2439,14 @@ def _run_active_work_tree_cycle(state: dict, *, max_steps: int | None = None, ma
     step_limit = max(1, _safe_int(max_steps, ACTIVE_WORK_TREE_MAX_STEPS)) if max_steps is not None else ACTIVE_WORK_TREE_MAX_STEPS
     candidates = _active_work_tree_candidates(tree_limit)
     executed_total = 0
+    attempted_total = 0
     full_history: list[dict] = []
     processed: list[dict] = []
     skipped: list[dict] = []
     last_action = ""
 
     for candidate in candidates:
-        if executed_total >= step_limit:
+        if attempted_total >= step_limit:
             break
         tree_id = str(candidate.get("tree_id") or "").strip()
         tree_title = str(candidate.get("title") or "").strip()
@@ -2468,6 +2469,7 @@ def _run_active_work_tree_cycle(state: dict, *, max_steps: int | None = None, ma
             max_steps=1,
             execute_planned_action_fn=nova_core.execute_planned_action,
         )
+        attempted_total += 1
         full_history.extend(history)
         last_action = str((history[-1] if history else {}).get("action") or "").strip()
         executed = [step for step in history if str(step.get("action") or "").strip() == "executed"]
@@ -2492,6 +2494,7 @@ def _run_active_work_tree_cycle(state: dict, *, max_steps: int | None = None, ma
         "ts": _patch_queue_timestamp(),
         "status": status,
         "tree_count": len(candidates),
+        "attempted_count": attempted_total,
         "executed_count": executed_total,
         "history_count": len(full_history),
         "processed_tree_count": len(processed),
