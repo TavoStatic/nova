@@ -3561,8 +3561,6 @@ def _search_endpoint_candidates(endpoint: str) -> list[str]:
     return service_search_endpoint_candidates(endpoint)
 
 
-def _is_local_search_endpoint(endpoint: str) -> bool:
-    return service_is_local_search_endpoint(endpoint)
 
 
 def probe_search_endpoint(endpoint: str = "", *, timeout: float = 2.5, persist_repair: bool = False) -> dict:
@@ -5405,6 +5403,7 @@ def build_pulse_payload() -> dict:
         kidney_summary_fn=lambda: __import__('kidney').run_kidney(dry_run=True),
         safety_policy_fn=lambda: __import__('nova_safety_envelope').policy_safety_envelope(),
         latest_approved_update_zip_fn=_latest_approved_update_zip,
+        generated_work_queue_fn=_load_generated_queue_payload,
     )
 
 def render_nova_pulse(payload: Optional[dict] = None) -> str:

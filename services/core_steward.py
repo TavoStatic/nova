@@ -50,7 +50,10 @@ def build_core_steward_payload(
     if isinstance(autonomy_maintenance, dict) and isinstance(autonomy_maintenance.get("runtime_worker"), dict):
         runtime_worker = dict(autonomy_maintenance.get("runtime_worker") or {})
 
-    fallback_score = float(pulse_payload.get("last_fallback_overuse_score", 0.0) or 0.0) if isinstance(pulse_payload, dict) else 0.0
+    fallback_score = float(
+        pulse_payload.get("active_fallback_overuse_score", pulse_payload.get("last_fallback_overuse_score", 0.0)) or 0.0
+    ) if isinstance(pulse_payload, dict) else 0.0
+    raw_fallback_score = float(pulse_payload.get("raw_fallback_overuse_score", fallback_score) or 0.0) if isinstance(pulse_payload, dict) else 0.0
     approved_updates = int(pulse_payload.get("approved_eligible_previews", 0) or 0) if isinstance(pulse_payload, dict) else 0
     kidney_candidates = int(kidney_summary.get("candidate_count", 0) or 0) if isinstance(kidney_summary, dict) else 0
     kidney_mode = str(kidney_summary.get("mode") or "unknown").strip() if isinstance(kidney_summary, dict) else "unknown"
@@ -200,6 +203,7 @@ def build_core_steward_payload(
             "autonomy_level": str(pulse_payload.get("autonomy_level") or "unknown") if isinstance(pulse_payload, dict) else "unknown",
             "routing_stable": bool(pulse_payload.get("routing_stable", False)) if isinstance(pulse_payload, dict) else False,
             "fallback_overuse_score": fallback_score,
+            "raw_fallback_overuse_score": raw_fallback_score,
             "approved_eligible_previews": approved_updates,
         },
         "kidney": {

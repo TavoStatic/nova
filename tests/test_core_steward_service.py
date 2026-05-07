@@ -86,7 +86,12 @@ class TestCoreStewardService(unittest.TestCase):
                 "core_state": {"ok": True, "info": "pid=123"},
                 "ollama": {"ok": True, "info": "status=200"},
             },
-            pulse_payload={"last_fallback_overuse_score": 0.97, "approved_eligible_previews": 0},
+            pulse_payload={
+                "last_fallback_overuse_score": 0.0,
+                "active_fallback_overuse_score": 0.0,
+                "raw_fallback_overuse_score": 0.97,
+                "approved_eligible_previews": 0,
+            },
             autonomy_maintenance={
                 "runtime_worker": {"last_cycle_status": "ok", "interval_sec": 300},
                 "last_generated_queue_run": {"latest_report_status": "warning", "status": "ok"},
@@ -98,7 +103,7 @@ class TestCoreStewardService(unittest.TestCase):
         self.assertEqual(payload.get("level"), "strong")
         self.assertEqual(payload.get("summary"), "core surfaces look stable")
         queue_titles = [item.get("title") for item in (payload.get("maintenance_queue") or [])]
-        self.assertIn("Review fallback training pressure", queue_titles)
+        self.assertNotIn("Review fallback training pressure", queue_titles)
         self.assertIn("Review cleanup pressure", queue_titles)
 
 

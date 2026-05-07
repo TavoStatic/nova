@@ -171,7 +171,7 @@ def build_self_status_payload(
     rollback_count = int(patch_activity.get("rollback_count", 0) or 0)
     behavior_fail_count = int(patch_activity.get("behavior_fail_count", 0) or 0)
     approved_updates = int(pulse.get("approved_eligible_previews", 0) or 0)
-    fallback_score = float(pulse.get("last_fallback_overuse_score", 0.0) or 0.0)
+    fallback_score = float(pulse.get("active_fallback_overuse_score", pulse.get("last_fallback_overuse_score", 0.0)) or 0.0)
     fallback_pressure_active = bool(pulse.get("fallback_pressure_active", fallback_score >= 0.90))
     latest_queue_report_status = _compact_text(pulse.get("last_generated_queue_report_status"), 80).lower()
     last_regression = _compact_text(pulse.get("last_regression_status"), 120).lower()

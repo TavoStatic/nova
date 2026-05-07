@@ -153,6 +153,7 @@ def build_pulse_payload(
     kidney_summary_fn: Callable[[], dict],
     safety_policy_fn: Callable[[], dict],
     latest_approved_update_zip_fn: Callable[[Optional[dict]], Optional[Path]],
+    generated_work_queue_fn: Optional[Callable[[int], dict]] = None,
 ) -> dict:
     audit = _promotion_audit_summary(
         promotion_audit_log=promotion_audit_log,
@@ -172,11 +173,29 @@ def build_pulse_payload(
     )
     ollama_up = bool(ollama_api_up_fn())
     routing_stable = bool(behavior.get("routing_stable", False))
-    fallback_score = float(autonomy.get("last_fallback_overuse_score") or 0.0)
+    raw_fallback_score = float(autonomy.get("last_fallback_overuse_score") or 0.0)
     last_generated_queue_run = autonomy.get("last_generated_queue_run") if isinstance(autonomy.get("last_generated_queue_run"), dict) else {}
     latest_queue_status = str(last_generated_queue_run.get("status") or "").strip().lower()
     latest_queue_report_status = str(last_generated_queue_run.get("latest_report_status") or "").strip().lower()
-    fallback_pressure_active = fallback_score >= 0.75 and latest_queue_report_status in {"drift", "failed", "error", "blocked"}
+    live_queue = {}
+    if generated_work_queue_fn is not None:
+        try:
+            maybe_queue = generated_work_queue_fn(24)
+            live_queue = maybe_queue if isinstance(maybe_queue, dict) else {}
+        except Exception:
+            live_queue = {}
+    if live_queue:
+        latest_queue_status = str(live_queue.get("status") or latest_queue_status).strip().lower()
+        if int(live_queue.get("drift_count", 0) or 0) > 0:
+            latest_queue_report_status = "drift"
+        elif int(live_queue.get("warning_count", 0) or 0) > 0:
+            latest_queue_report_status = "warning"
+        elif int(live_queue.get("never_run_count", 0) or 0) > 0:
+            latest_queue_report_status = "never_run"
+        elif int(live_queue.get("green_count", 0) or 0) >= int(live_queue.get("count", 0) or 0) and int(live_queue.get("count", 0) or 0) > 0:
+            latest_queue_report_status = "green"
+    fallback_pressure_active = raw_fallback_score >= 0.75 and latest_queue_report_status in {"drift", "failed", "error", "blocked"}
+    active_fallback_score = raw_fallback_score if fallback_pressure_active else 0.0
     promoted_total = int(audit.get("promoted_total", 0) or 0)
     prior_promoted_total = int(prior.get("promoted_total", 0) or 0)
     promoted_delta = promoted_total - prior_promoted_total if prior_promoted_total else 0
@@ -200,7 +219,9 @@ def build_pulse_payload(
         "tool_route_count": int(behavior.get("tool_route", 0) or 0),
         "llm_fallback_count": int(behavior.get("llm_fallback", 0) or 0),
         "last_reflection_at": str(behavior.get("last_reflection_at") or "unknown"),
-        "last_fallback_overuse_score": fallback_score,
+        "last_fallback_overuse_score": active_fallback_score,
+        "raw_fallback_overuse_score": raw_fallback_score,
+        "active_fallback_overuse_score": active_fallback_score,
         "fallback_pressure_active": fallback_pressure_active,
         "last_generated_queue_status": latest_queue_status,
         "last_generated_queue_report_status": latest_queue_report_status,
@@ -225,14 +246,14 @@ def build_pulse_payload(
     payload["autonomy_level"] = _pulse_level(
         payload["ollama_up"],
         payload["routing_stable"],
-        payload["last_fallback_overuse_score"],
+        payload["active_fallback_overuse_score"],
         int((payload.get("patch_activity") or {}).get("rollback_count", 0) or 0),
     )
     payload["mood"] = _pulse_mood(
         payload["ollama_up"],
         payload["routing_stable"],
         payload["promoted_delta"],
-        payload["last_fallback_overuse_score"],
+        payload["active_fallback_overuse_score"],
         int((payload.get("patch_activity") or {}).get("rollback_count", 0) or 0),
     )
     return payload
@@ -283,12 +304,17 @@ def render_nova_pulse(payload: Optional[dict] = None, *, build_pulse_payload_fn:
         f"- level: {data.get('autonomy_level')}",
         f"- routing stable: {'yes' if data.get('routing_stable') else 'no'}",
         f"- tool routes vs llm fallbacks: {int(data.get('tool_route_count', 0) or 0)} / {int(data.get('llm_fallback_count', 0) or 0)}",
-        f"- last fallback overuse score: {float(data.get('last_fallback_overuse_score', 0.0) or 0.0):.2f}",
+        f"- active fallback pressure score: {float(data.get('active_fallback_overuse_score', data.get('last_fallback_overuse_score', 0.0)) or 0.0):.2f}",
         f"- last regression status: {data.get('last_regression_status')}",
         f"- last reflection: {data.get('last_reflection_at')}",
         "Assessment:",
         f"- {data.get('mood')}",
     ]
+    raw_fallback_score = float(data.get("raw_fallback_overuse_score", data.get("last_fallback_overuse_score", 0.0)) or 0.0)
+    active_fallback_score = float(data.get("active_fallback_overuse_score", data.get("last_fallback_overuse_score", 0.0)) or 0.0)
+    if raw_fallback_score >= 0.75 and raw_fallback_score > active_fallback_score:
+        queue_status = str(data.get("last_generated_queue_report_status") or data.get("last_generated_queue_status") or "informational")
+        lines.append(f"- fallback robustness history: {raw_fallback_score:.2f} (not active; queue report is {queue_status})")
     update_zip_path = str(data.get("update_zip_path") or "").strip()
     if update_zip_path:
         lines.append('Type "update now" if you want me to apply the latest approved validated update.')
