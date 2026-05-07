@@ -3,7 +3,9 @@ import shutil
 import unittest
 import uuid
 from pathlib import Path
+from unittest.mock import patch
 
+from services import nova_action_ledger
 from services.nova_action_ledger import finalize_action_ledger_record_from_runtime
 from services.nova_action_ledger import write_action_ledger_record
 
@@ -80,6 +82,21 @@ class TestNovaActionLedgerService(unittest.TestCase):
             self.assertEqual(last.get("category"), "action_ledger")
             self.assertEqual(last.get("action"), "write_record")
             self.assertEqual(last.get("result"), "ok")
+        finally:
+            shutil.rmtree(case_dir, ignore_errors=True)
+
+    def test_write_record_filename_uses_single_clock_sample_for_sorting(self):
+        case_dir = _workspace_case_dir("action_ledger_clock")
+        try:
+            with patch.object(nova_action_ledger.time, "time", side_effect=[1000.987, 1000.988, 1001.003, 1001.004]), \
+                 patch.object(nova_action_ledger.time, "time_ns", side_effect=[1000987000000, 1001003000000]):
+                first = write_action_ledger_record({"user_input": "first"}, action_ledger_dir=case_dir)
+                second = write_action_ledger_record({"user_input": "second"}, action_ledger_dir=case_dir)
+
+            self.assertIsNotNone(first)
+            self.assertIsNotNone(second)
+            paths = sorted(case_dir.glob("*.json"))
+            self.assertEqual([path.name for path in paths], [first.name, second.name])
         finally:
             shutil.rmtree(case_dir, ignore_errors=True)
 

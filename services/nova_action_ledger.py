@@ -65,8 +65,9 @@ def start_action_ledger_record(
 def write_action_ledger_record(record: dict, *, action_ledger_dir: Path) -> Optional[Path]:
     try:
         action_ledger_dir.mkdir(parents=True, exist_ok=True)
-        ts = time.strftime("%Y-%m-%d_%H-%M-%S")
-        ms = int((time.time() % 1) * 1000)
+        now = time.time()
+        ts = time.strftime("%Y-%m-%d_%H-%M-%S", time.localtime(now))
+        ms = int((now % 1) * 1000)
         digest = hashlib.sha1(
             str(record.get("user_input", "")).encode("utf-8", errors="ignore")
             + str(time.time_ns()).encode("ascii", errors="ignore")
