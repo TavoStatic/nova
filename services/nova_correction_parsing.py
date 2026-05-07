@@ -45,6 +45,10 @@ def looks_like_correction_cancel(text: str, *, normalize_turn_text: Callable[[st
     return any(cue in normalized for cue in cues)
 
 
+def _normalize_correction_probe(text: str) -> str:
+    return re.sub(r"\s+", " ", str(text or "").strip().lower())
+
+
 def looks_like_pending_replacement_text(text: str, *, normalize_turn_text: Callable[[str], str]) -> bool:
     raw = str(text or "").strip()
     if not raw or "?" in raw:
@@ -161,6 +165,8 @@ def normalize_correction_for_storage(correction: str) -> str:
 def looks_like_correction_turn(text: str) -> bool:
     raw = str(text or "").strip()
     if not raw:
+        return False
+    if "?" in raw and looks_like_correction_cancel(raw, normalize_turn_text=_normalize_correction_probe):
         return False
     normalized = raw.lower()
     identity_correction_patterns = (

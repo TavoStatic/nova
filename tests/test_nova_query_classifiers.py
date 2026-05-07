@@ -20,6 +20,9 @@ class TestNovaQueryClassifiers(unittest.TestCase):
     def test_assistant_name_query_detects_confidence_challenge(self):
         self.assertTrue(is_assistant_name_query("are you sure that is your name?"))
 
+    def test_assistant_name_query_detects_real_name_question(self):
+        self.assertTrue(is_assistant_name_query("Actually never mind. What is your real name?"))
+
     def test_self_identity_web_challenge_requires_web_and_identity_cues(self):
         self.assertTrue(is_self_identity_web_challenge("why should i use the web for your name"))
         self.assertFalse(is_self_identity_web_challenge("why should i use the web for weather"))

@@ -2152,6 +2152,13 @@ class TestCoreIdentityLearning(unittest.TestCase):
         acts = nova_core._classify_turn_acts("no, that's wrong")
         self.assertIn("correct", acts)
 
+    def test_classify_turn_acts_does_not_mark_cancel_question_as_correction(self):
+        acts = nova_core._classify_turn_acts(
+            "Actually never mind, that was just small talk. What is your real name?"
+        )
+        self.assertIn("ask", acts)
+        self.assertNotIn("correct", acts)
+
     def test_location_fact_extraction_and_normalization(self):
         out = nova_core._extract_location_fact("Your physical location is United states Brownsville TX 78521  .")
         self.assertEqual(out, "United states Brownsville TX 78521")

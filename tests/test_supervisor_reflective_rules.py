@@ -34,6 +34,19 @@ class TestSupervisorReflectiveRules(unittest.TestCase):
         self.assertTrue(result.get("handled"))
         self.assertEqual(result.get("action"), "apply_correction")
 
+    def test_apply_correction_ignores_cancel_then_question(self):
+        text = "Actually never mind, that was just small talk. What is your real name?"
+
+        result = supervisor_reflective_rules.apply_correction_rule(
+            text,
+            text.lower(),
+            ConversationSession(),
+            2,
+            phase="handle",
+        )
+
+        self.assertFalse(result.get("handled"))
+
     def test_reflective_retry_handles_developer_location_followup(self):
         session = ConversationSession()
         session.set_conversation_state({"kind": "identity_profile", "subject": "developer"})

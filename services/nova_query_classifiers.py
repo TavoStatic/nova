@@ -171,7 +171,9 @@ def is_assistant_name_query(text: str) -> bool:
     candidate = re.sub(r"\byor\b", "your", candidate)
     cues = [
         "what is your name",
+        "what is your real name",
         "what's your name",
+        "what's your real name",
         "are you sure that is your name",
         "your name is not",
         "is your name",

@@ -9,6 +9,22 @@ from services.supervisor_patterns import extract_last_user_question
 from services.supervisor_patterns import looks_like_reflective_retry
 
 
+def _looks_like_correction_cancel_query(raw: str, low: str) -> bool:
+    if "?" not in str(raw or ""):
+        return False
+    return any(
+        cue in str(low or "")
+        for cue in (
+            "never mind",
+            "nevermind",
+            "just small talk",
+            "no need to replace",
+            "dont have to replace",
+            "don't have to replace",
+        )
+    )
+
+
 def reflective_retry_rule(
     user_text: str,
     low: str,
@@ -89,6 +105,8 @@ def apply_correction_rule(
             "intent": "apply_correction",
             "grounded": True,
         }
+    if _looks_like_correction_cancel_query(raw, low):
+        return {"handled": False}
     triggers = [
         "wrong", "no,", "actually", "that's not", "not true", "incorrect",
         "mistake", "you lied", "that's wrong", "no it's not", "correction:",
