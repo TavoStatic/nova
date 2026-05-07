@@ -284,6 +284,61 @@ class TestAutonomyOrchestratorService(unittest.TestCase):
         self.assertEqual(packet["recommended_action"]["action_type"], "active_work_tree_run_next")
         self.assertEqual(packet["recommended_action"]["execution_group"], "active_work_tree")
 
+    def test_evaluate_next_action_prefers_concrete_active_lane_over_pulse(self):
+        service = AutonomyOrchestratorService()
+
+        packet = service.evaluate_next_action(
+            _spec_envelope(
+                work_tree={
+                    "open_count": 36,
+                    "blocked_count": 37,
+                    "active_candidate_count": 2,
+                    "active_executable_count": 1,
+                    "active_unsafe_count": 1,
+                    "branches": [
+                        {
+                            "branch_id": "branch-core",
+                            "title": "Review wrapper shim",
+                            "status": "active",
+                            "owner": "core_thinning",
+                            "recommended_tool": "core_thinning",
+                            "executable": True,
+                        }
+                    ],
+                },
+                triage={
+                    "seam_pressure_scores": {"fallback_overuse": 0.97},
+                    "lane_pressure_scores": {"generated_queue": 0.97},
+                    "top_triage_candidates": [
+                        {
+                            "target_seam": "fulfillment_bridge_entry_fallthrough",
+                            "signal": "fallback_overuse",
+                            "preferred_owner": "fulfillment",
+                            "lane": "generated_queue",
+                            "robustness": 0.97,
+                            "approved": True,
+                        }
+                    ],
+                    "confidence": 0.97,
+                    "source": "subconscious_work_tree_triage",
+                },
+                last_action={
+                    "last_action_type": "generated_queue_run_next",
+                    "cooldown_active": True,
+                    "cooldown_remaining_sec": 90,
+                },
+            )
+        )
+
+        self.assertEqual(packet["decision_type"], SPEC_DECISION_RECOMMEND_ACTION)
+        self.assertEqual(packet["recommended_action"]["action_type"], "active_work_tree_run_next")
+        action_types = [
+            (item.get("action") or {}).get("action_type")
+            for item in packet["candidates_considered"]
+        ]
+        self.assertNotIn("pulse_status", action_types)
+        self.assertEqual(packet["evidence"]["work_tree_snapshot"]["active_executable_count"], 1)
+
     def test_evaluate_next_action_blocks_when_policy_disables_autonomy(self):
         service = AutonomyOrchestratorService()
 

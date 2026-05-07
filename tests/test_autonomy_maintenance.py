@@ -1303,6 +1303,83 @@ class TestAutonomyMaintenance(unittest.TestCase):
         self.assertEqual(unsafe_inspect.get("status"), "active")
         self.assertEqual((state.get("last_active_work_tree_cycle") or {}).get("executed_count"), 1)
 
+    def test_run_active_work_tree_cycle_executes_core_thinning_lane(self):
+        self._isolated_work_tree_db()
+        state = {}
+        thinning_tree = work_tree.initialize_tree(
+            "Core Thinning",
+            meta={"kind": "core_thinning", "source": "core_thinning", "work_identity_key": "system:core-thinning"},
+        )
+        root = work_tree._BRANCHES[thinning_tree.root_branch_id]
+        work_tree.add_task_to_branch(
+            root.branch_id,
+            "thin wrapper shim",
+            meta={
+                "scope": "single_block_only",
+                "target": {
+                    "file": "C:/Nova/nova_core.py",
+                    "function": "_wrapper_shim",
+                    "block": "wrapper_candidate",
+                    "name": "_wrapper_shim",
+                    "start_line": 10,
+                    "end_line": 12,
+                },
+            },
+        )
+        work_tree.set_branch_tools(root.branch_id, allowed_tools=["core_thinning"], preferred_tool="core_thinning")
+
+        calls = []
+
+        def _execute(tool_name, tool_args=None):
+            calls.append((tool_name, list(tool_args or [])))
+            return {"ok": True, "scope_ok": True, "verified": True, "message": "core_thinning_checked"}
+
+        with mock.patch.object(autonomy_maintenance.nova_core, "execute_planned_action", side_effect=_execute):
+            payload = autonomy_maintenance._run_active_work_tree_cycle(state, max_steps=1, max_trees=1)
+
+        self.assertEqual(payload.get("status"), "ok")
+        self.assertEqual(payload.get("executed_count"), 1)
+        self.assertEqual(payload.get("skipped_tree_count"), 0)
+        self.assertEqual(calls[0][0], "core_thinning")
+        self.assertIn("_wrapper_shim", calls[0][1][0])
+        self.assertEqual((state.get("last_active_work_tree_cycle") or {}).get("executed_count"), 1)
+
+    def test_work_tree_snapshot_uses_active_candidate_execution_truth(self):
+        snapshot = autonomy_maintenance._work_tree_snapshot_for_orchestrator(
+            {"counts": {"active": 30, "open_tasks": 95, "blocked": 37}},
+            [
+                {
+                    "tree_id": "tree-core",
+                    "title": "Core Thinning",
+                    "status": "active",
+                    "kind": "core_thinning",
+                    "next_step": {
+                        "branch_id": "branch-core",
+                        "branch_title": "Review wrapper shim",
+                        "recommended_tool": "core_thinning",
+                    },
+                },
+                {
+                    "tree_id": "tree-update",
+                    "title": "Cli: update runtime",
+                    "status": "active",
+                    "kind": "system",
+                    "next_step": {
+                        "branch_id": "branch-update",
+                        "branch_title": "Update now",
+                        "recommended_tool": "update_now",
+                    },
+                },
+            ],
+        )
+
+        self.assertEqual(snapshot.get("active_candidate_count"), 2)
+        self.assertEqual(snapshot.get("active_executable_count"), 1)
+        self.assertEqual(snapshot.get("active_unsafe_count"), 1)
+        self.assertEqual((snapshot.get("branches") or [])[0].get("recommended_tool"), "core_thinning")
+        self.assertTrue((snapshot.get("branches") or [])[0].get("executable"))
+        self.assertFalse((snapshot.get("branches") or [])[1].get("executable"))
+
     def test_retire_legacy_patch_update_trees_drops_open_tasks_and_completes_tree(self):
         self._isolated_work_tree_db()
         state = {}

@@ -308,6 +308,10 @@ class AutonomyOrchestratorService:
                     "status": _safe_text(branch.get("status"), 80).lower(),
                     "owner": _safe_text(branch.get("owner") or branch.get("likely_owner"), 120),
                     "age_min": _as_int(branch.get("age_min") or branch.get("open_age_min")),
+                    "recommended_tool": _safe_text(branch.get("recommended_tool"), 120),
+                    "tree_id": _safe_text(branch.get("tree_id"), 120),
+                    "tree_title": _safe_text(branch.get("tree_title"), 180),
+                    "executable": bool(branch.get("executable", False)),
                 }
             )
 
@@ -358,6 +362,9 @@ class AutonomyOrchestratorService:
                 "blocked_count": _as_int(work_tree_raw.get("blocked_count")),
                 "stale_count": _as_int(work_tree_raw.get("stale_count")),
                 "oldest_open_age_min": _as_int(work_tree_raw.get("oldest_open_age_min")),
+                "active_candidate_count": _as_int(work_tree_raw.get("active_candidate_count"), -1),
+                "active_executable_count": _as_int(work_tree_raw.get("active_executable_count"), -1),
+                "active_unsafe_count": _as_int(work_tree_raw.get("active_unsafe_count"), -1),
                 "branches": branches,
                 "source_freshness_sec": freshness["work_tree_snapshot"],
             },
@@ -548,6 +555,9 @@ class AutonomyOrchestratorService:
 
     @staticmethod
     def _contract_active_work_tree_count(work_tree: dict[str, Any]) -> int:
+        executable_count = _as_int(work_tree.get("active_executable_count"), -1)
+        if executable_count >= 0:
+            return executable_count
         managed_owners = {"patch_queue", "generated_queue", "signal_ingestion"}
         branches = [_as_dict(branch) for branch in _as_list(work_tree.get("branches")) if isinstance(branch, dict)]
         active_count = 0
@@ -597,7 +607,9 @@ class AutonomyOrchestratorService:
         top_generated_triage = self._top_triage_candidate(triage, lane="generated_queue")
         top_patch_triage = self._top_triage_candidate(triage, lane="patch_queue")
         top_any_triage = self._top_triage_candidate(triage)
+        concrete_lane_candidate_present = False
         if patch_ready_count > 0:
+            concrete_lane_candidate_present = True
             candidates.append(
                 {
                     "action": self._contract_action(
@@ -614,6 +626,7 @@ class AutonomyOrchestratorService:
                 }
             )
         if pending_count > 0 or high_priority_count > 0:
+            concrete_lane_candidate_present = True
             candidates.append(
                 {
                     "action": self._contract_action(
@@ -628,7 +641,12 @@ class AutonomyOrchestratorService:
                     "triage_focus": _compact_value(top_generated_triage or top_any_triage),
                 }
             )
-        if generated_blocked_count > 0 or blocked_count > 0 or stale_count > 0 or (aging_count > 0 and pending_count <= 0):
+        if (
+            generated_blocked_count > 0
+            or stale_count > 0
+            or (blocked_count > 0 and active_work_count <= 0)
+            or (aging_count > 0 and pending_count <= 0 and active_work_count <= 0)
+        ):
             candidates.append(
                 {
                     "action": self._contract_action(
@@ -641,6 +659,7 @@ class AutonomyOrchestratorService:
             )
 
         if active_work_count > 0:
+            concrete_lane_candidate_present = True
             candidates.append(
                 {
                     "action": self._contract_action(
@@ -664,7 +683,7 @@ class AutonomyOrchestratorService:
                 }
             )
 
-        if _as_float(triage.get("max_seam_pressure")) >= 0.75:
+        if _as_float(triage.get("max_seam_pressure")) >= 0.75 and not concrete_lane_candidate_present:
             candidates.append(
                 {
                     "action": self._contract_action("pulse_status", reason_code="seam_pressure_elevated"),

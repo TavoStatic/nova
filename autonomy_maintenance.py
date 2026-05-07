@@ -61,7 +61,7 @@ GENERATED_QUEUE_ALLOWED_TOOLS = ["generated_queue_run", "read", "find", "queue_s
 GENERATED_QUEUE_EXECUTE_TOOLS = ["generated_queue_run"]
 GENERATED_QUEUE_REVIEW_TOOLS = ["read", "find", "queue_status"]
 GENERATED_QUEUE_MAX_STEPS = 4
-ACTIVE_WORK_TREE_EXECUTE_TOOLS = ["health", "system_check", "queue_status", "pulse", "read", "ls", "find"]
+ACTIVE_WORK_TREE_EXECUTE_TOOLS = ["health", "system_check", "queue_status", "pulse", "read", "ls", "find", "core_thinning"]
 ACTIVE_WORK_TREE_MAX_TREES = 8
 ACTIVE_WORK_TREE_MAX_STEPS = 8
 LEGACY_PATCH_UPDATE_TOOLS = {"patch_apply", "patch_rollback", "update_now"}
@@ -186,29 +186,62 @@ def _orchestrator_posture_band(core_steward: dict) -> str:
     return "green"
 
 
-def _work_tree_snapshot_for_orchestrator(work_tree_state: dict) -> dict:
+def _active_work_candidate_tool(candidate: dict) -> str:
+    next_step = candidate.get("next_step") if isinstance(candidate.get("next_step"), dict) else {}
+    return str(next_step.get("recommended_tool") or "").strip()
+
+
+def _active_work_candidate_branch(candidate: dict) -> dict:
+    next_step = candidate.get("next_step") if isinstance(candidate.get("next_step"), dict) else {}
+    return {
+        "branch_id": str(next_step.get("branch_id") or candidate.get("active_branch_id") or candidate.get("tree_id") or ""),
+        "title": str(next_step.get("branch_title") or candidate.get("active_branch_title") or candidate.get("title") or ""),
+        "status": str(candidate.get("status") or ""),
+        "owner": str(candidate.get("kind") or ""),
+        "age_min": _safe_int(candidate.get("age_min") or 0, 0),
+        "recommended_tool": str(next_step.get("recommended_tool") or ""),
+        "tree_id": str(candidate.get("tree_id") or ""),
+        "tree_title": str(candidate.get("title") or ""),
+        "executable": _active_work_candidate_tool(candidate) in ACTIVE_WORK_TREE_EXECUTE_TOOLS,
+    }
+
+
+def _work_tree_snapshot_for_orchestrator(work_tree_state: dict, active_work_candidates: list[dict] | None = None) -> dict:
     payload = dict(work_tree_state or {}) if isinstance(work_tree_state, dict) else {}
     counts = dict(payload.get("counts") or {}) if isinstance(payload.get("counts"), dict) else {}
     branches: list[dict] = []
-    for tree in list(payload.get("trees") or [])[:64]:
-        if not isinstance(tree, dict):
-            continue
-        tree_counts = dict(tree.get("counts") or {}) if isinstance(tree.get("counts"), dict) else {}
-        branches.append(
-            {
-                "branch_id": str(tree.get("active_branch_id") or tree.get("tree_id") or ""),
-                "title": str(tree.get("title") or ""),
-                "status": str(tree.get("status") or ""),
-                "owner": str(tree.get("kind") or ""),
-                "age_min": _safe_int(tree.get("age_min") or tree_counts.get("oldest_open_age_min"), 0),
-            }
-        )
+    active_candidates_provided = active_work_candidates is not None
+    active_candidates = [dict(item) for item in list(active_work_candidates or []) if isinstance(item, dict)]
+    if active_candidates:
+        branches = [_active_work_candidate_branch(candidate) for candidate in active_candidates[:64]]
+    else:
+        for tree in list(payload.get("trees") or [])[:64]:
+            if not isinstance(tree, dict):
+                continue
+            tree_counts = dict(tree.get("counts") or {}) if isinstance(tree.get("counts"), dict) else {}
+            branches.append(
+                {
+                    "branch_id": str(tree.get("active_branch_id") or tree.get("tree_id") or ""),
+                    "title": str(tree.get("title") or ""),
+                    "status": str(tree.get("status") or ""),
+                    "owner": str(tree.get("kind") or ""),
+                    "age_min": _safe_int(tree.get("age_min") or tree_counts.get("oldest_open_age_min"), 0),
+                    "recommended_tool": "",
+                    "tree_id": str(tree.get("tree_id") or ""),
+                    "tree_title": str(tree.get("title") or ""),
+                    "executable": False,
+                }
+            )
+    active_executable_count = sum(1 for branch in branches if bool(branch.get("executable")))
     return {
         "open_count": _safe_int(counts.get("open_tasks") or counts.get("pending") or counts.get("active"), 0),
         "working_count": _safe_int(counts.get("working"), 0),
         "blocked_count": _safe_int(counts.get("blocked"), 0),
         "stale_count": _safe_int(counts.get("stale"), 0),
         "oldest_open_age_min": _safe_int(counts.get("oldest_open_age_min"), 0),
+        "active_candidate_count": len(active_candidates) if active_candidates_provided else -1,
+        "active_executable_count": active_executable_count if active_candidates_provided else -1,
+        "active_unsafe_count": max(0, len(active_candidates) - active_executable_count) if active_candidates_provided else -1,
         "branches": branches,
         "source_freshness_sec": 0,
     }
@@ -639,6 +672,7 @@ def _autonomy_orchestrator_input_envelope(
     work_tree_state: dict,
     generated_queue: dict,
     guard_health: dict,
+    active_work_candidates: list[dict] | None = None,
     latest_report: dict | None = None,
     kidney_summary: dict | None = None,
     policy_snapshot: dict | None = None,
@@ -646,7 +680,7 @@ def _autonomy_orchestrator_input_envelope(
     return {
         "cycle_id": f"autonomy-maintenance-{time.strftime('%Y%m%d%H%M%S')}",
         "timestamp_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-        "work_tree_snapshot": _work_tree_snapshot_for_orchestrator(work_tree_state),
+        "work_tree_snapshot": _work_tree_snapshot_for_orchestrator(work_tree_state, active_work_candidates),
         "steward_posture": _steward_posture_for_orchestrator(core_steward),
         "queue_pressure": _queue_pressure_for_orchestrator(generated_queue, state),
         "runtime_guard_status": _runtime_guard_status_for_orchestrator(core_steward, guard_health),
@@ -672,6 +706,7 @@ def _run_autonomy_orchestrator_advisory(state: dict, kidney_summary: dict) -> di
     guard_health = _guard_health_for_orchestrator()
     policy_snapshot = _policy_snapshot_for_orchestrator()
     latest_report = _latest_subconscious_report_for_triage()
+    active_work_candidates = _active_work_tree_candidates(ACTIVE_WORK_TREE_MAX_TREES)
     requested_mode = "execute" if bool(policy_snapshot.get("execute_enabled")) else "advisory"
     AUTONOMY_ORCHESTRATOR_SERVICE.set_mode(requested_mode, policy_snapshot)
     packet = AUTONOMY_ORCHESTRATOR_SERVICE.evaluate_next_action(
@@ -681,6 +716,7 @@ def _run_autonomy_orchestrator_advisory(state: dict, kidney_summary: dict) -> di
             work_tree_state=work_tree_state,
             generated_queue=generated_queue,
             guard_health=guard_health,
+            active_work_candidates=active_work_candidates,
             latest_report=latest_report,
             kidney_summary=kidney_summary,
             policy_snapshot=policy_snapshot,
