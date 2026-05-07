@@ -134,7 +134,8 @@ class FulfillmentFlowService:
             and str(probe.get("comparison_strength") or "weak").strip().lower() == "clear"
         )
         if not should_attempt:
-            self._update_subconscious_state(session, probe, chosen_route="generic_fallback")
+            chosen_route = "supervisor_owned" if bool(supervisor_route.get("viable")) else "generic_fallback"
+            self._update_subconscious_state(session, probe, chosen_route=chosen_route)
             return None
 
         deps = _load_fulfillment_dependencies()

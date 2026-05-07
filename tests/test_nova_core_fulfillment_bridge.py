@@ -149,6 +149,20 @@ class TestNovaCoreFulfillmentBridge(unittest.TestCase):
         self.assertEqual(snapshot.get("weak_signal_window_counts", {}).get("route_unclear"), 1)
         self.assertEqual(snapshot.get("recent_pressure_records")[0].get("chosen_route"), "generic_fallback")
 
+    def test_patch_command_pressure_records_deterministic_owner_not_fallback(self):
+        session = ConversationSession()
+
+        result = nova_core._fulfillment_flow_service().maybe_run_fulfillment_flow("patch preview teach.zip", session, [])
+
+        self.assertIsNone(result)
+        snapshot = SUBCONSCIOUS_SERVICE.get_snapshot(session)
+        self.assertFalse(snapshot.get("replan_requested"))
+        self.assertEqual(snapshot.get("active_recent_signals"), [])
+        self.assertEqual(snapshot.get("crack_counts"), {})
+        record = (snapshot.get("recent_pressure_records") or [{}])[0]
+        self.assertEqual(record.get("chosen_route"), "supervisor_owned")
+        self.assertNotIn("fallback_overuse", record.get("signals") or [])
+
     def test_update_subconscious_state_accumulates_repeated_weak_cracks(self):
         session = ConversationSession()
         probe = nova_core._probe_turn_routes("how are you doing today ?", session, [])

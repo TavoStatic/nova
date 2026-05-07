@@ -135,7 +135,7 @@ class IdentityDecisionScores:
 class WorkTreeDecisionAdapter:
     """Adaptive judgment system that learns from decision outcomes."""
 
-    def __init__(self, *, state_path: Optional[Path] = None) -> None:
+    def __init__(self, *, state_path: Optional[Path] = None, stale_success_seconds: float = 5 * 60) -> None:
         root = Path(__file__).resolve().parents[1]
         self._state_path = state_path or (root / "runtime" / "work_decision_learning.json")
         self._state_path.parent.mkdir(parents=True, exist_ok=True)
@@ -143,6 +143,7 @@ class WorkTreeDecisionAdapter:
         self._identity_scores: dict[str, IdentityDecisionScores] = {}
         self._decision_history: list[WorkTreeDecisionOutcome] = []
         self._max_history: int = 500
+        self._stale_success_seconds = max(0.0, float(stale_success_seconds or 0.0))
         self._load_state()
 
     @staticmethod
@@ -225,13 +226,15 @@ class WorkTreeDecisionAdapter:
         decision = self._canonical_decision_type(decision_type)
         if not key or not decision:
             return
+        now_ts = float(timestamp or time.time())
         with self._lock:
+            self._close_stale_successes_locked(now_ts=now_ts)
             if key not in self._identity_scores:
                 self._identity_scores[key] = IdentityDecisionScores(work_identity_key=key)
             entry = WorkTreeDecisionOutcome(
                 decision_type=decision,
                 work_identity_key=key,
-                timestamp=float(timestamp or time.time()),
+                timestamp=now_ts,
                 branch_id=str(branch_id or "").strip(),
             )
             self._decision_history.append(entry)
@@ -272,6 +275,51 @@ class WorkTreeDecisionAdapter:
                     row.outcome_timestamp = time.time()
                     break
             self._save_state()
+
+    def _close_stale_successes_locked(self, *, now_ts: float) -> int:
+        """Mark old undecided work decisions as successful.
+
+        Work-tree seeding also keeps an in-memory pending-decision map, but
+        replay subprocesses and restarts can exit before that map has a chance
+        to flush. The persisted adapter owns the durable fallback so learning
+        does not stay blank forever.
+        """
+        closed = 0
+        threshold = self._stale_success_seconds
+        if threshold <= 0.0:
+            return 0
+
+        for row in self._decision_history:
+            if row.outcome:
+                continue
+            key = str(row.work_identity_key or "").strip()
+            decision = self._canonical_decision_type(row.decision_type)
+            if not key or not decision:
+                continue
+            try:
+                age = float(now_ts) - float(row.timestamp or 0.0)
+            except Exception:
+                continue
+            if age < threshold:
+                continue
+            if key not in self._identity_scores:
+                self._identity_scores[key] = IdentityDecisionScores(work_identity_key=key)
+            self._identity_scores[key].record_outcome(
+                decision_type=decision,
+                outcome="success",
+            )
+            row.outcome = "success"
+            row.outcome_timestamp = float(now_ts)
+            closed += 1
+        return closed
+
+    def flush_stale_pending_successes(self, *, now_ts: float = 0.0) -> int:
+        """Close persisted undecided decisions that aged past the success window."""
+        with self._lock:
+            closed = self._close_stale_successes_locked(now_ts=float(now_ts or time.time()))
+            if closed:
+                self._save_state()
+            return closed
 
     def get_bias_for_identity(self, *, work_identity_key: str) -> str:
         """Get the decision bias for a work identity.

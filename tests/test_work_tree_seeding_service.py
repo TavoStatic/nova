@@ -1,24 +1,31 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
+import tempfile
 import unittest
 from unittest.mock import MagicMock, patch
 
 import work_tree
-from services.work_tree_decision_adapter import WORK_TREE_DECISION_ADAPTER
+from services.work_tree_decision_adapter import WorkTreeDecisionAdapter
 from services.work_tree_seeding import WORK_TREE_SEEDING_SERVICE, WorkTreeSeedingService
 
 
 class TestWorkTreeSeedingService(unittest.TestCase):
     def setUp(self) -> None:
         work_tree._clear_in_memory()
+        self._tmp = tempfile.TemporaryDirectory()
+        self.adapter = WorkTreeDecisionAdapter(state_path=Path(self._tmp.name) / "decision_state.json")
         self._persist_patcher = patch.object(work_tree, "_persist_tree_state", return_value=None)
         self._persist_patcher.start()
-        WORK_TREE_DECISION_ADAPTER.reset_state(clear_persistence=False)
+        self._decision_patcher = patch("services.work_tree_seeding.WORK_TREE_DECISION_ADAPTER", self.adapter)
+        self._decision_patcher.start()
 
     def tearDown(self) -> None:
+        self._decision_patcher.stop()
         self._persist_patcher.stop()
         work_tree._clear_in_memory()
+        self._tmp.cleanup()
 
     def test_create_seeded_tree_builds_child_branches_with_tools(self) -> None:
         tree_id = WORK_TREE_SEEDING_SERVICE.create_seeded_tree(
@@ -469,7 +476,7 @@ class TestWorkTreeSeedingService(unittest.TestCase):
         self.assertTrue(work_identity_key)
         self.assertIn(str(result.get("decision_type") or ""), {"continue", "branch", "new", "complete"})
 
-        recent = WORK_TREE_DECISION_ADAPTER.get_recent_decisions(limit=1, work_identity_key=work_identity_key)
+        recent = self.adapter.get_recent_decisions(limit=1, work_identity_key=work_identity_key)
         self.assertEqual(len(recent), 1)
         row = recent[0]
         self.assertIn(str(row.get("decision_type") or ""), {"continue", "branch", "new", "complete"})
@@ -507,34 +514,34 @@ class TestWorkTreeSeedingService(unittest.TestCase):
             active_work_identity=identity,
         )
 
-        scores = WORK_TREE_DECISION_ADAPTER.get_scores_for_identity(work_identity_key=identity)
+        scores = self.adapter.get_scores_for_identity(work_identity_key=identity)
         self.assertIsNotNone(scores)
         self.assertLess(float((scores or {}).get("continue_score") or 0.0), 0.0)
 
     def test_phase5_bias_reflects_high_scoring_decision(self) -> None:
         identity = "work:phase5-bias|terms:phase5|bias"
-        WORK_TREE_DECISION_ADAPTER.record_decision(
+        self.adapter.record_decision(
             decision_type="branch",
             work_identity_key=identity,
             branch_id="branch_test",
         )
-        WORK_TREE_DECISION_ADAPTER.record_outcome(
+        self.adapter.record_outcome(
             work_identity_key=identity,
             decision_type="branch",
             outcome="success",
         )
-        WORK_TREE_DECISION_ADAPTER.record_decision(
+        self.adapter.record_decision(
             decision_type="branch",
             work_identity_key=identity,
             branch_id="branch_test_2",
         )
-        WORK_TREE_DECISION_ADAPTER.record_outcome(
+        self.adapter.record_outcome(
             work_identity_key=identity,
             decision_type="branch",
             outcome="success",
         )
 
-        bias = WORK_TREE_DECISION_ADAPTER.get_bias_for_identity(work_identity_key=identity)
+        bias = self.adapter.get_bias_for_identity(work_identity_key=identity)
         self.assertEqual(bias, "branch")
 
 if __name__ == "__main__":

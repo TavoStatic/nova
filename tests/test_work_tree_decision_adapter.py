@@ -57,6 +57,52 @@ class TestWorkTreeDecisionAdapter(unittest.TestCase):
         self.assertIsNotNone(scores)
         self.assertEqual(float((scores or {}).get("new_tree_score") or 0.0), 1.0)
 
+    def test_stale_blank_decision_closes_success_across_instances(self) -> None:
+        key = "work:cross-process|terms:cross|process"
+        first = WorkTreeDecisionAdapter(state_path=self.state_path, stale_success_seconds=300)
+        first.record_decision(
+            decision_type="continue",
+            work_identity_key=key,
+            branch_id="branch_a",
+            timestamp=1_000.0,
+        )
+
+        second = WorkTreeDecisionAdapter(state_path=self.state_path, stale_success_seconds=300)
+        second.record_decision(
+            decision_type="continue",
+            work_identity_key=key,
+            branch_id="branch_a",
+            timestamp=1_301.0,
+        )
+
+        rows = second.get_recent_decisions(limit=2, work_identity_key=key)
+        self.assertEqual(len(rows), 2)
+        self.assertEqual(rows[0].get("outcome"), "success")
+        self.assertGreater(float(rows[0].get("outcome_timestamp") or 0.0), 0.0)
+        self.assertEqual(rows[1].get("outcome"), "")
+
+        scores = second.get_scores_for_identity(work_identity_key=key)
+        self.assertIsNotNone(scores)
+        self.assertEqual(float((scores or {}).get("continue_score") or 0.0), 1.0)
+        self.assertEqual(int((scores or {}).get("decision_count") or 0), 1)
+
+    def test_explicit_flush_closes_stale_pending_successes(self) -> None:
+        key = "work:flush|terms:flush"
+        self.adapter = WorkTreeDecisionAdapter(state_path=self.state_path, stale_success_seconds=300)
+        self.adapter.record_decision(
+            decision_type="new",
+            work_identity_key=key,
+            branch_id="branch_a",
+            timestamp=2_000.0,
+        )
+
+        self.assertEqual(self.adapter.flush_stale_pending_successes(now_ts=2_299.0), 0)
+        self.assertEqual(self.adapter.flush_stale_pending_successes(now_ts=2_300.0), 1)
+
+        scores = self.adapter.get_scores_for_identity(work_identity_key=key)
+        self.assertIsNotNone(scores)
+        self.assertEqual(float((scores or {}).get("new_tree_score") or 0.0), 1.0)
+
 
 if __name__ == "__main__":
     unittest.main()
