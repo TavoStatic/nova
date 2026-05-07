@@ -1,3 +1,4 @@
+import json
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -399,6 +400,41 @@ class TestNovaReplyDeterministic(unittest.TestCase):
             core=core,
         )
         self.assertIn("guard tick", reply.lower())
+        self.assertEqual(meta.get("tool"), "maintenance_mode_truth")
+        self.assertEqual(return_mode, "logged")
+        self.assertEqual(tool_time_ms, 0)
+
+    def test_maintenance_mode_truth_uses_active_runtime_worker(self):
+        with TemporaryDirectory() as td:
+            runtime_dir = Path(td)
+            (runtime_dir / "autonomy_maintenance_state.json").write_text(
+                json.dumps(
+                    {
+                        "runtime_worker": {
+                            "active": True,
+                            "last_cycle_status": "ok",
+                            "pid": 123,
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+            core = SimpleNamespace(
+                RUNTIME_DIR=str(runtime_dir),
+                CONTROL_STATUS_URL="",
+                psutil=SimpleNamespace(pid_exists=lambda _pid: True),
+                get_name_origin_story=lambda: "",
+                _is_developer_color_lookup_request=lambda _text: False,
+                _is_developer_bilingual_request=lambda _text: False,
+                _is_color_lookup_request=lambda _text: False,
+            )
+            reply, meta, return_mode, tool_time_ms = self._call(
+                "Is Nova maintenance running through a separate worker or through the guard tick right now? Use only the live state.",
+                core=core,
+            )
+
+        self.assertIn("separate worker loop", reply.lower())
+        self.assertIn("worker_loop", reply)
         self.assertEqual(meta.get("tool"), "maintenance_mode_truth")
         self.assertEqual(return_mode, "logged")
         self.assertEqual(tool_time_ms, 0)

@@ -401,6 +401,11 @@ def _control_status_snapshot(core, *, timeout: float = 2.0) -> dict | None:
         return None
     guard_payload = dict(payload.get("guard") or {})
     core_payload = dict(payload.get("core") or {})
+    scheduler_active = bool(payload.get("maintenance_scheduler_active"))
+    runtime_worker_active = bool(payload.get("runtime_worker_active"))
+    runtime_worker_status = str(payload.get("runtime_worker_status") or "").strip()
+    scheduler_status = str(payload.get("maintenance_scheduler_status") or "").strip()
+    scheduler_mode = str(payload.get("maintenance_scheduler_mode") or "").strip()
     return {
         "source": "control_status_api",
         "control_status_url": endpoint,
@@ -414,9 +419,9 @@ def _control_status_snapshot(core, *, timeout: float = 2.0) -> dict | None:
         "search_ok": bool(payload.get("searxng_ok")),
         "search_note": str(payload.get("searxng_note") or ""),
         "search_endpoint": str(payload.get("search_api_endpoint") or ""),
-        "maintenance_active": bool(payload.get("maintenance_scheduler_active")),
-        "maintenance_status": str(payload.get("maintenance_scheduler_status") or ""),
-        "maintenance_mode": str(payload.get("maintenance_scheduler_mode") or ""),
+        "maintenance_active": scheduler_active or runtime_worker_active,
+        "maintenance_status": scheduler_status or runtime_worker_status,
+        "maintenance_mode": scheduler_mode or ("worker_loop" if runtime_worker_active else ""),
         "queue_status": str(payload.get("generated_queue_status") or ""),
         "queue_open_count": int(payload.get("queue_open_count", 0) or 0),
         "queue_actionable_count": int(payload.get("queue_actionable_count", 0) or 0),
@@ -456,6 +461,7 @@ def _direct_runtime_audit_snapshot(core) -> dict:
     runtime_worker = dict(maintenance_payload.get("runtime_worker") or {}) if isinstance(maintenance_payload, dict) else {}
     last_generated = dict(maintenance_payload.get("last_generated_queue_run") or {}) if isinstance(maintenance_payload, dict) else {}
     last_work_tree = dict(maintenance_payload.get("last_work_tree_cycle") or {}) if isinstance(maintenance_payload, dict) else {}
+    worker_active = bool(runtime_worker.get("active"))
     maintenance_status = str(
         runtime_worker.get("last_cycle_status")
         or maintenance_payload.get("maintenance_scheduler_status")
@@ -464,6 +470,8 @@ def _direct_runtime_audit_snapshot(core) -> dict:
         or ""
     ).strip()
     maintenance_mode = str(maintenance_payload.get("maintenance_scheduler_mode") or "").strip()
+    if not maintenance_mode and worker_active:
+        maintenance_mode = "worker_loop"
     queue_status = str(
         maintenance_payload.get("generated_queue_status")
         or last_generated.get("status")
@@ -483,7 +491,7 @@ def _direct_runtime_audit_snapshot(core) -> dict:
         "search_ok": bool(search_probe.get("ok")),
         "search_note": str(search_probe.get("note") or ""),
         "search_endpoint": str(search_probe.get("endpoint") or search_endpoint or ""),
-        "maintenance_active": bool(runtime_worker.get("active") or restart_snapshot.get("guard_running")),
+        "maintenance_active": bool(worker_active or str(maintenance_payload.get("maintenance_scheduler_mode") or "").strip()),
         "maintenance_status": maintenance_status,
         "maintenance_mode": maintenance_mode,
         "queue_status": queue_status,
