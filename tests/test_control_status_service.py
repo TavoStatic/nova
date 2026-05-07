@@ -311,6 +311,8 @@ class TestControlStatusService(unittest.TestCase):
         self.assertEqual(payload.get("complete_tree_retained_count"), 8)
         self.assertEqual(payload.get("requests_total"), 7)
         self.assertEqual(payload.get("last_provider_hit"), "wikipedia")
+        self.assertTrue(payload.get("last_provider_available"))
+        self.assertEqual(payload.get("last_provider_note"), "provider_hit_recorded")
         self.assertEqual(payload.get("runtime_worker_status"), "ok")
         self.assertFalse(payload.get("runtime_worker_active"))
         self.assertFalse(payload.get("runtime_worker_stale_identity"))
@@ -483,6 +485,64 @@ class TestControlStatusService(unittest.TestCase):
 
         self.assertEqual(payload.get("last_provider_hit"), "")
         self.assertEqual(payload.get("last_provider_family"), "")
+        self.assertFalse(payload.get("last_provider_available"))
+        self.assertEqual(payload.get("last_provider_note"), "no_provider_hit_recorded")
+
+    def test_status_payload_treats_nullish_provider_values_as_no_provider_hit(self):
+        payload = CONTROL_STATUS_SERVICE.status_payload(
+            policy={"memory": {"scope": "private"}},
+            provider="searxng",
+            endpoint="http://127.0.0.1:8081/search",
+            searx_ok=True,
+            searx_note="status=200",
+            search_provider_priority=["wikipedia", "stackexchange", "general_web"],
+            provider_telemetry={"last_provider_used": "null", "last_provider_family": "undefined"},
+            ollama_api_up=False,
+            chat_model="test-model",
+            memory_enabled=False,
+            subconscious_summary={"ok": True},
+            subconscious_live_summary={},
+            generated_work_queue={"open_count": 0, "next_item": {}},
+            autonomy_maintenance={},
+            operator_macros=[],
+            backend_commands=[],
+            memory_scope="private",
+            web_enabled=False,
+            allow_domains_count=0,
+            process_counting_mode="logical_leaf_processes",
+            runtime_process_note="note",
+            heartbeat_age_sec=1,
+            active_http_sessions=0,
+            chat_login_enabled=False,
+            chat_auth_source="disabled",
+            chat_users_count=0,
+            guard_status={},
+            core_status={},
+            webui_status={},
+            runtime_summary={},
+            timeline_payload={"count": 0, "events": []},
+            runtime_artifacts={"count": 0, "items": []},
+            runtime_restart_analytics={},
+            runtime_failures={},
+            live_tracking={},
+            action_readiness={},
+            release_status={},
+            memory_stats={"ok": True, "total": 0, "by_user": {}},
+            memory_summary={"ok": True, "count": 0},
+            tool_summary={"ok": True, "count": 0, "status_counts": {}},
+            ledger_summary={"ok": True, "count": 1, "last_record": {"provider_used": None, "provider_family": "none"}},
+            patch_summary={"ok": True},
+            patch_action_readiness={},
+            pulse_payload={},
+            update_now_pending={},
+            requests_total=0,
+            errors_total=0,
+        )
+
+        self.assertEqual(payload.get("last_provider_hit"), "")
+        self.assertEqual(payload.get("last_provider_family"), "")
+        self.assertFalse(payload.get("last_provider_available"))
+        self.assertEqual(payload.get("last_provider_note"), "no_provider_hit_recorded")
 
     def test_status_payload_marks_guard_scheduled_maintenance_when_worker_is_not_persistent(self):
         payload = CONTROL_STATUS_SERVICE.status_payload(

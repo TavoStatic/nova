@@ -12,6 +12,13 @@ class ControlTelemetryService:
     def __init__(self, *, list_capabilities_fn: Callable[[], dict]) -> None:
         self._list_capabilities = list_capabilities_fn
 
+    @staticmethod
+    def _clean_provider_value(value: Any) -> str:
+        text = str(value or "").strip().lower()
+        if text in {"none", "null", "undefined", "n/a", "na"}:
+            return ""
+        return text
+
     def action_ledger_summary(
         self,
         action_ledger_dir: Path,
@@ -260,7 +267,9 @@ class ControlTelemetryService:
         active_provider_set = {item for item in active_priority if item}
         last_record = ledger_summary.get("last_record") if isinstance(ledger_summary.get("last_record"), dict) else {}
         last_tool = str(last_record.get("tool") or "").strip()
-        last_provider_used = str(last_record.get("provider_used") or provider_name_from_tool_fn(last_tool)).strip().lower()
+        last_provider_used = ControlTelemetryService._clean_provider_value(last_record.get("provider_used"))
+        if not last_provider_used:
+            last_provider_used = ControlTelemetryService._clean_provider_value(provider_name_from_tool_fn(last_tool))
         if last_provider_used and last_provider_used not in active_provider_set:
             last_provider_used = ""
         last_query = str(((last_record.get("reply_outcome") or {}).get("query") or "")).strip() if isinstance(last_record.get("reply_outcome"), dict) else ""
@@ -268,23 +277,28 @@ class ControlTelemetryService:
         for rec in recent_action_ledger_records_fn(limit=80):
             if not isinstance(rec, dict):
                 continue
-            provider = str(rec.get("provider_used") or provider_name_from_tool_fn(rec.get("tool") or "")).strip().lower()
+            provider = ControlTelemetryService._clean_provider_value(rec.get("provider_used"))
+            if not provider:
+                provider = ControlTelemetryService._clean_provider_value(provider_name_from_tool_fn(rec.get("tool") or ""))
             if not provider or provider not in active_provider_set:
                 continue
             hits[provider] = int(hits.get(provider, 0) or 0) + 1
         web_cfg = policy_web_fn()
-        last_provider_family = str(last_record.get("provider_family") or last_provider_used or "").strip().lower()
+        last_provider_family = ControlTelemetryService._clean_provider_value(last_record.get("provider_family"))
+        if not last_provider_family:
+            last_provider_family = last_provider_used
         if last_provider_family and last_provider_family not in active_provider_set:
             last_provider_family = ""
         candidates = [
-            str(item or "").strip().lower()
+            ControlTelemetryService._clean_provider_value(item)
             for item in list(last_record.get("provider_candidates") or [])
-            if str(item or "").strip().lower() in active_provider_set
+            if ControlTelemetryService._clean_provider_value(item) in active_provider_set
         ] if isinstance(last_record.get("provider_candidates"), list) else []
         return {
             "priority": active_priority,
             "last_provider_used": last_provider_used,
             "last_provider_family": last_provider_family,
+            "last_provider_available": bool(last_provider_used),
             "last_provider_query": last_query,
             "last_provider_candidates": candidates,
             "hits_last_window": hits,

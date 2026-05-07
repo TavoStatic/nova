@@ -8,6 +8,13 @@ class ControlStatusService:
     """Own HTTP control-status payload assembly outside the transport layer."""
 
     @staticmethod
+    def _clean_provider_value(value) -> str:
+        text = str(value or "").strip().lower()
+        if text in {"none", "null", "undefined", "n/a", "na"}:
+            return ""
+        return text
+
+    @staticmethod
     def runtime_supplier_fns_from_scope(runtime_scope: dict[str, object]) -> dict[str, object]:
         names = (
             "probe_searxng",
@@ -505,14 +512,18 @@ class ControlStatusService:
             for item in list(payload.get("search_provider_priority") or [])
             if str(item or "").strip()
         }
-        last_provider_hit = str(last_record.get("provider_used") or provider_telemetry.get("last_provider_used") or "").strip().lower()
-        if last_provider_hit and last_provider_hit not in active_priority:
-            last_provider_hit = str(provider_telemetry.get("last_provider_used") or "").strip().lower()
-        last_provider_family = str(last_record.get("provider_family") or provider_telemetry.get("last_provider_family") or "").strip().lower()
-        if last_provider_family and last_provider_family not in active_priority:
-            last_provider_family = str(provider_telemetry.get("last_provider_family") or "").strip().lower()
+        telemetry_provider = ControlStatusService._clean_provider_value(provider_telemetry.get("last_provider_used"))
+        telemetry_family = ControlStatusService._clean_provider_value(provider_telemetry.get("last_provider_family"))
+        last_provider_hit = ControlStatusService._clean_provider_value(last_record.get("provider_used")) or telemetry_provider
+        if active_priority and last_provider_hit and last_provider_hit not in active_priority:
+            last_provider_hit = telemetry_provider if telemetry_provider in active_priority else ""
+        last_provider_family = ControlStatusService._clean_provider_value(last_record.get("provider_family")) or telemetry_family
+        if active_priority and last_provider_family and last_provider_family not in active_priority:
+            last_provider_family = telemetry_family if telemetry_family in active_priority else ""
         payload["last_provider_hit"] = last_provider_hit
         payload["last_provider_family"] = last_provider_family
+        payload["last_provider_available"] = bool(last_provider_hit)
+        payload["last_provider_note"] = "provider_hit_recorded" if last_provider_hit else "no_provider_hit_recorded"
 
         payload["patch_status_ok"] = bool(patch_summary.get("ok", False))
         payload["patch_enabled"] = bool(patch_summary.get("enabled", False))

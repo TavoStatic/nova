@@ -138,6 +138,23 @@ class TestPolicyCommands(unittest.TestCase):
         self.assertIn("http://127.0.0.1:8080/search => error:configured refused", str(probe.get("note") or ""))
         self.assertEqual(len(probe.get("candidate_errors") or []), 4)
 
+    def test_probe_search_endpoint_failure_sanitizes_volatile_object_addresses(self):
+        with mock.patch(
+            "nova_core.requests.get",
+            side_effect=[
+                RuntimeError("HTTPConnection(host='127.0.0.1') at 0xABC123 timed out"),
+                RuntimeError("HTTPConnection(host='127.0.0.1') at 0xDEF456 timed out"),
+                RuntimeError("HTTPConnection(host='localhost') at 0x111222 timed out"),
+                RuntimeError("HTTPConnection(host='localhost') at 0x333444 timed out"),
+            ],
+        ):
+            probe = nova_core.probe_search_endpoint("http://127.0.0.1:8080/search", timeout=0.1, persist_repair=True)
+
+        note = str(probe.get("note") or "")
+        self.assertIn("at 0xADDR timed out", note)
+        self.assertNotIn("0xABC123", note)
+        self.assertNotIn("0xDEF456", note)
+
     def test_wikipedia_lookup_returns_summary_and_related_pages(self):
         class _Response:
             def __init__(self, payload):

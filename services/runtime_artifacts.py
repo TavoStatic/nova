@@ -6,6 +6,31 @@ from pathlib import Path
 class RuntimeArtifactsService:
     """Own runtime artifact inventory and detail payload construction."""
 
+    ARTIFACT_ALIASES = {
+        "runtime_state": "core_state.json",
+        "runtime_heartbeat": "core.heartbeat",
+    }
+    ARTIFACT_IDS = {
+        "core_state.json": "runtime_state",
+        "core.heartbeat": "runtime_heartbeat",
+        "guard.lock": "guard_lock",
+        "guard.stop": "guard_stop",
+        "guard_boot_history.json": "guard_boot_history",
+        "control_action_audit.jsonl": "control_action_audit",
+        "guard.log": "guard_log",
+    }
+
+    @classmethod
+    def canonical_artifact_name(cls, name: str) -> str:
+        artifact_name = str(name or "").strip()
+        lookup = artifact_name.lower()
+        return cls.ARTIFACT_ALIASES.get(lookup, artifact_name)
+
+    @classmethod
+    def artifact_id(cls, name: str) -> str:
+        canonical = cls.canonical_artifact_name(name)
+        return cls.ARTIFACT_IDS.get(canonical, canonical.lower().replace(".", "_").replace("-", "_"))
+
     @staticmethod
     def artifact_definitions(*, runtime_dir: Path, guard_boot_history_path: Path, control_audit_log: Path, guard_log_path: Path) -> list[tuple[str, Path, str]]:
         return [
@@ -20,7 +45,7 @@ class RuntimeArtifactsService:
 
     @staticmethod
     def artifact_service(name: str) -> str:
-        artifact_name = str(name or "").strip().lower()
+        artifact_name = RuntimeArtifactsService.canonical_artifact_name(name).lower()
         if artifact_name in {"core_state.json", "core.heartbeat"}:
             return "core"
         if artifact_name in {"guard.lock", "guard.stop", "guard_boot_history.json", "guard.log"}:
@@ -31,6 +56,7 @@ class RuntimeArtifactsService:
 
     @staticmethod
     def artifact_status(name: str, path: Path, *, file_age_seconds_fn) -> str:
+        name = RuntimeArtifactsService.canonical_artifact_name(name)
         if not Path(path).exists():
             return "missing"
         if name == "core.heartbeat":
@@ -43,6 +69,7 @@ class RuntimeArtifactsService:
         return "present"
 
     def artifact_summary(self, name: str, path: Path, *, safe_json_file_fn, tail_file_fn, safe_tail_lines_fn, file_age_seconds_fn, json_module) -> tuple[str, str]:
+        name = self.canonical_artifact_name(name)
         path = Path(path)
         if not path.exists():
             return "artifact missing", ""
@@ -110,6 +137,7 @@ class RuntimeArtifactsService:
         return "artifact present", tail_file_fn(path, max_lines=8)
 
     def artifact_content(self, name: str, path: Path, *, max_lines: int, max_chars: int, safe_tail_lines_fn, tail_file_fn, file_age_seconds_fn, json_module) -> str:
+        name = self.canonical_artifact_name(name)
         path = Path(path)
         if not path.exists():
             return f"Artifact is not present: {path}"
@@ -148,11 +176,12 @@ class RuntimeArtifactsService:
         file_age_seconds_fn,
         max_lines: int = 120,
     ) -> dict:
-        artifact_name = str(name or "").strip()
+        requested_name = str(name or "").strip()
+        artifact_name = self.canonical_artifact_name(requested_name)
         artifact_map = {item_name: (path, kind) for item_name, path, kind in definitions}
         resolved = artifact_map.get(artifact_name)
         if not resolved:
-            return {"ok": False, "error": "runtime_artifact_unknown", "name": artifact_name}
+            return {"ok": False, "error": "runtime_artifact_unknown", "name": requested_name}
 
         path, kind = resolved
         summary, excerpt = artifact_summary_fn(artifact_name, path)
@@ -174,6 +203,8 @@ class RuntimeArtifactsService:
         return {
             "ok": True,
             "name": artifact_name,
+            "requested_name": requested_name,
+            "artifact_id": self.artifact_id(artifact_name),
             "kind": kind,
             "service": service,
             "path": str(path),
@@ -192,6 +223,7 @@ class RuntimeArtifactsService:
             summary, excerpt = artifact_summary_fn(name, path)
             items.append({
                 "name": name,
+                "artifact_id": self.artifact_id(name),
                 "kind": kind,
                 "service": self.artifact_service(name),
                 "path": str(path),
@@ -201,7 +233,18 @@ class RuntimeArtifactsService:
                 "summary": summary,
                 "excerpt": excerpt,
             })
-        return {"count": len(items), "items": items}
+        by_artifact_id = {
+            str(item.get("artifact_id") or ""): item
+            for item in items
+            if str(item.get("artifact_id") or "").strip()
+        }
+        return {
+            "count": len(items),
+            "items": items,
+            "by_artifact_id": by_artifact_id,
+            "runtime_state": by_artifact_id.get("runtime_state", {}),
+            "runtime_heartbeat": by_artifact_id.get("runtime_heartbeat", {}),
+        }
 
 
 RUNTIME_ARTIFACTS_SERVICE = RuntimeArtifactsService()

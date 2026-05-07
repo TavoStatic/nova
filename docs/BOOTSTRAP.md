@@ -1,9 +1,9 @@
 # NYO System Bootstrap
 
-Date: 2026-03-30
-Last verified: 2026-05-06
+Date: 2026-05-07
+Last verified: 2026-05-07
 
-Verification note: the source-bootstrap flow was revalidated from the `2026.05.06.2` release-clean package on the same machine from a short extracted path. Independent fresh-machine or VM validation is still pending.
+Verification note: the source-bootstrap flow was previously revalidated from the `2026.05.06.2` release-clean package on the same machine from a short extracted path. On 2026-05-07, the live code posture was refreshed for runtime truth artifacts, provider telemetry null handling, and SIS data-lane readiness reporting. Independent fresh-machine or VM validation is still pending.
 
 ## Purpose
 

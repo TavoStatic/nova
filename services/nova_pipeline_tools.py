@@ -120,18 +120,30 @@ def render_pipeline_status(status: Mapping[str, Any]) -> str:
     configured = bool(status.get("configured"))
     network = status.get("network_probe") if isinstance(status.get("network_probe"), Mapping) else {}
     auth = status.get("auth_probe") if isinstance(status.get("auth_probe"), Mapping) else {}
+    readiness = status.get("readiness") if isinstance(status.get("readiness"), Mapping) else {}
+    readiness_blockers = list(status.get("readiness_blockers") or readiness.get("blockers") or [])
+    next_step = str(status.get("next_step") or readiness.get("next_step") or "").strip()
     lines = [
         f"Pipeline status for {pipeline_id} ({display}):",
         f"- read_only: {bool(status.get('read_only'))}",
         f"- network_scope: {status.get('network_scope') or 'unknown'}",
         f"- configured: {configured}",
+        f"- auth_mode: {status.get('auth_mode') or 'unknown'}",
         f"- driver_selected: {status.get('driver_selected') or 'none'}",
         f"- network: {network.get('reason') or 'unknown'}",
         f"- auth: {auth.get('reason') or 'unknown'}",
         f"- live_query_ready: {ready}",
+        f"- readiness: {readiness.get('state') or ('ready' if ready else 'blocked')}",
     ]
+    if status.get("current_windows_identity") or status.get("intended_windows_identity"):
+        lines.append(f"- current_windows_identity: {status.get('current_windows_identity') or 'unknown'}")
+        lines.append(f"- intended_windows_identity: {status.get('intended_windows_identity') or 'not set'}")
+    if readiness_blockers:
+        lines.append(f"- readiness_blockers: {', '.join(str(item) for item in readiness_blockers)}")
     if not ready:
-        if not configured:
+        if next_step:
+            pass
+        elif not configured:
             next_step = "add or complete local_config.json before live reads."
         elif not bool(network.get("reachable")):
             next_step = f"fix SIS network reachability: {network.get('reason') or 'network_unreachable'}"

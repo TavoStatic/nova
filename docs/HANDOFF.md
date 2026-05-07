@@ -1,7 +1,9 @@
 # NYO System Handoff
 
-Date: 2026-03-30
-Last verified: 2026-05-06
+Date: 2026-05-07
+Last verified: 2026-05-07
+
+Verification note: handoff commands remain source-first. The 2026-05-07 refresh aligned operator truth surfaces for runtime artifacts, provider telemetry, and SIS data-lane readiness. Independent fresh-machine or VM validation is still pending.
 
 ## Purpose
 

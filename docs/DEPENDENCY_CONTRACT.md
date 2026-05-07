@@ -1,9 +1,9 @@
 # NYO System Dependency Contract
 
-Date: 2026-03-30
-Last verified: 2026-05-06
+Date: 2026-05-07
+Last verified: 2026-05-07
 
-Verification note: dependencies were installed successfully by `nova install` from the `2026.05.06.2` extracted package. Package bootstrap remains source-first and does not lock every transitive dependency version.
+Verification note: dependencies were installed successfully by `nova install` from the `2026.05.06.2` extracted package. The 2026-05-07 refresh did not change base bootstrap dependencies; SIS live data-lane execution still depends on operator-provided SQL Server client/ODBC readiness and district-network access. Package bootstrap remains source-first and does not lock every transitive dependency version.
 
 ## Purpose
 

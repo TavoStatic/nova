@@ -1135,9 +1135,10 @@ function setFeedback(text, level = 'muted') {
 }
 
 function setAction(text) {
-    if (actionBox) actionBox.textContent = text;
-    if (actionBoxClone) actionBoxClone.textContent = text;
-    const firstLine = String(text || '').split('\n')[0].trim() || 'Action complete.';
+    const safeText = String(text == null ? '' : text).trim() || 'Action complete.';
+    if (actionBox) actionBox.textContent = safeText;
+    if (actionBoxClone) actionBoxClone.textContent = safeText;
+    const firstLine = safeText.split('\n')[0].trim() || 'Action complete.';
     setFeedback(firstLine, /failed|error|denied|forbidden/i.test(firstLine) ? 'danger' : 'good');
 }
 
@@ -1697,6 +1698,10 @@ function renderPipelineDetail(payload) {
     const laneState = detail.lane_state && typeof detail.lane_state === 'object' ? detail.lane_state : {};
     const auth = status.auth_probe && typeof status.auth_probe === 'object' ? status.auth_probe : {};
     const network = status.network_probe && typeof status.network_probe === 'object' ? status.network_probe : {};
+    const readiness = status.readiness && typeof status.readiness === 'object' ? status.readiness : {};
+    const readinessBlockers = Array.isArray(status.readiness_blockers)
+        ? status.readiness_blockers
+        : (Array.isArray(readiness.blockers) ? readiness.blockers : []);
     const selectedSummary = selectedPipeline() || {};
 
     if (pipelineEditName) pipelineEditName.value = String(status.display_name || selectedPipelineId || '');
@@ -1711,7 +1716,10 @@ function renderPipelineDetail(payload) {
         {label: 'Network', value: String(network.reason || 'unknown')},
         {label: 'Auth', value: String(auth.reason || 'unknown')},
         {label: 'Live ready', value: String(Boolean(status.live_query_ready))},
+        {label: 'Readiness', value: `${String(readiness.state || (status.live_query_ready ? 'ready' : 'blocked'))}${readinessBlockers.length ? ' | ' + readinessBlockers.join(', ') : ''}`},
+        {label: 'Identity', value: status.current_windows_identity || status.intended_windows_identity ? `${String(status.current_windows_identity || 'unknown')} -> ${String(status.intended_windows_identity || 'not set')}` : 'n/a'},
         {label: 'Driver', value: String(status.driver_selected || 'none')},
+        {label: 'Next step', value: String(status.next_step || readiness.next_step || 'n/a')},
     ]);
     renderInspectorList(pipelineSchemaSummary, [
         {label: 'Schema status', value: String(schemaSource.verification_status || 'unknown')},
@@ -3662,6 +3670,8 @@ function renderGovernance(policy, status) {
     }
     if (searchEndpointBox) {
         const hitLines = Object.entries(providerTelemetry.hits_last_window || {}).map(([name, count]) => `${name}=${count}`);
+        const providerHit = String(providerTelemetry.last_provider_used || status.last_provider_hit || '').trim();
+        const providerNote = String(status && status.last_provider_note || '').trim();
         searchEndpointBox.textContent = [
             `Provider: ${provider}`,
             `Endpoint: ${endpoint || '(not set)'}`,
@@ -3669,7 +3679,8 @@ function renderGovernance(policy, status) {
             `Priority: ${priority.length ? priority.join(', ') : '(default)'}`,
             `Probe ok: ${status && status.searxng_ok != null ? Boolean(status.searxng_ok) : 'n/a'}`,
             `Probe note: ${String((status && status.searxng_note) || 'n/a')}`,
-            `Last provider hit: ${String(providerTelemetry.last_provider_used || status.last_provider_hit || 'n/a')}`,
+            `Last provider hit: ${providerHit || 'no provider hit recorded'}`,
+            `Last provider note: ${providerNote || 'n/a'}`,
             `Last provider query: ${String(providerTelemetry.last_provider_query || 'n/a')}`,
             `StackExchange site: ${String(providerTelemetry.stackexchange_site || 'stackoverflow')}`,
             `Hits last window: ${hitLines.length ? hitLines.join(', ') : 'n/a'}`,

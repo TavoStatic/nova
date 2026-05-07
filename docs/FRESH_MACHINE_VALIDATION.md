@@ -1,9 +1,9 @@
 # NYO System Fresh Machine Validation
 
-Date: 2026-03-30
-Last reviewed: 2026-05-06
+Date: 2026-05-07
+Last reviewed: 2026-05-07
 
-Status note: same-machine extracted-package validation passed for `2026.05.06.2`; this checklist still needs an independent fresh-machine or VM pass before final release language is appropriate.
+Status note: same-machine extracted-package validation passed for `2026.05.06.2`. The 2026-05-07 live-code refresh hardened runtime truth artifacts, provider telemetry null handling, and SIS data-lane readiness reporting. This checklist still needs an independent fresh-machine or VM pass before final release language is appropriate.
 
 ## Purpose
 
@@ -98,6 +98,6 @@ The candidate is acceptable only when:
 After the record is complete, append the outcome to the release ledger from the packaging workspace:
 
 ```powershell
-.\nova.cmd package-promote --result pass-with-notes --version 2026.03.30.2 --note "recorded from fresh machine checklist"
-.\nova.cmd package-promote --record runtime\exports\release_packages\validation_records\nyo-system-base-rc-2026.03.30.2-validation-seed-fix-20260330_161051.md --result pass-with-notes
+.\nova.cmd package-promote --result pass-with-notes --version <candidate-version> --note "recorded from fresh machine checklist"
+.\nova.cmd package-promote --record runtime\exports\release_packages\validation_records\<candidate-validation-record>.md --result pass-with-notes
 ```

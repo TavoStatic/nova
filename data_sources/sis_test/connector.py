@@ -174,6 +174,29 @@ class SisTestPipeline(BaseDataPipeline):
         except Exception as exc:
             return {"authenticated": False, "reason": self._sanitize_error_text(exc, config)}
 
+    def _readiness_blockers(self, status: Mapping[str, Any]) -> list[str]:
+        blockers: list[str] = []
+        if not bool(status.get("configured")):
+            blockers.append("local_config_incomplete")
+        if not bool(status.get("client_module_available")):
+            blockers.append("missing_client_module")
+        if not bool(status.get("driver_available")):
+            blockers.append("missing_odbc_driver")
+        network = status.get("network_probe") if isinstance(status.get("network_probe"), Mapping) else {}
+        if bool(status.get("configured")) and not bool(network.get("reachable")):
+            blockers.append("network_unreachable")
+        if bool(status.get("windows_identity_mismatch")):
+            blockers.append("windows_identity_mismatch")
+        auth = status.get("auth_probe") if isinstance(status.get("auth_probe"), Mapping) else {}
+        if (
+            bool(status.get("configured"))
+            and bool(network.get("reachable"))
+            and not bool(status.get("windows_identity_mismatch"))
+            and not bool(auth.get("authenticated"))
+        ):
+            blockers.append("auth_not_ready")
+        return blockers
+
     def _build_live_query(
         self,
         operation: str,
@@ -348,19 +371,21 @@ class SisTestPipeline(BaseDataPipeline):
             if configured
             else {"reachable": False, "reason": "local_config_incomplete"}
         )
-        auth_probe = (
-            self._auth_probe(config, driver_selected)
-            if configured and network_probe.get("reachable")
-            else {"authenticated": False, "reason": "network_unreachable"}
-        )
+        if configured and network_probe.get("reachable") and identity_mismatch:
+            auth_probe = {"authenticated": False, "reason": "windows_identity_mismatch"}
+        elif configured and network_probe.get("reachable"):
+            auth_probe = self._auth_probe(config, driver_selected)
+        else:
+            auth_probe = {"authenticated": False, "reason": "network_unreachable"}
         live_query_ready = bool(
             configured
             and self._client_module_available()
             and driver_selected
             and network_probe.get("reachable")
+            and not identity_mismatch
             and auth_probe.get("authenticated")
         )
-        return {
+        payload = {
             "pipeline_id": self.manifest.pipeline_id,
             "display_name": self.manifest.display_name,
             "kind": self.manifest.kind,
@@ -389,6 +414,16 @@ class SisTestPipeline(BaseDataPipeline):
             "live_query_ready": live_query_ready,
             "execution_supported": True,
         }
+        blockers = self._readiness_blockers(payload)
+        next_step = self._safe_query_next_step(payload, live_query_ready)
+        payload["readiness"] = {
+            "state": "ready" if live_query_ready else "blocked",
+            "blockers": blockers,
+            "next_step": next_step,
+        }
+        payload["readiness_blockers"] = blockers
+        payload["next_step"] = next_step
+        return payload
 
     def schema_probe(self) -> dict[str, Any]:
         payload = super().schema_probe()
@@ -483,6 +518,7 @@ class SisTestPipeline(BaseDataPipeline):
 
         if not dry_run and not ready:
             reason = ((status.get("auth_probe") or {}).get("reason") or "pipeline_not_ready")
+            next_step = str(status.get("next_step") or self._safe_query_next_step(status, ready))
             self.audit.append(
                 pipeline_id=self.manifest.pipeline_id,
                 action=validated["operation"],
@@ -495,7 +531,7 @@ class SisTestPipeline(BaseDataPipeline):
                 **base_payload,
                 "execution_mode": "blocked",
                 "error": reason,
-                "next_step": "Fix driver/auth readiness before requesting live execution.",
+                "next_step": next_step,
             }
 
         payload = {
@@ -526,19 +562,20 @@ class SisTestPipeline(BaseDataPipeline):
         if not bool(network.get("reachable")):
             reason = str(network.get("reason") or "network_unreachable")
             return f"Fix SIS network reachability before live execution: {reason}"
-        auth = status.get("auth_probe") if isinstance(status.get("auth_probe"), Mapping) else {}
-        if not bool(auth.get("authenticated")):
-            reason = str(auth.get("reason") or "auth_not_ready")
-            if bool(status.get("windows_identity_mismatch")):
-                return (
-                    "Run the SIS pipeline under the intended Windows identity "
-                    f"{status.get('intended_windows_identity')} instead of "
-                    f"{status.get('current_windows_identity')}; trusted auth uses the process identity. "
-                    f"Current auth result: {reason}"
-                )
-            return f"Fix SIS read-only authentication before live execution: {reason}"
+        if bool(status.get("windows_identity_mismatch")):
+            reason = str(((status.get("auth_probe") or {}).get("reason") or "windows_identity_mismatch"))
+            return (
+                "Run the SIS pipeline under the intended Windows identity "
+                f"{status.get('intended_windows_identity')} instead of "
+                f"{status.get('current_windows_identity')}; trusted auth uses the process identity. "
+                f"Current auth result: {reason}"
+            )
         if not bool(status.get("driver_available")):
             return "Install or configure an available SIS ODBC driver before live execution."
         if not bool(status.get("client_module_available")):
             return "Install the SIS database client module before live execution."
+        auth = status.get("auth_probe") if isinstance(status.get("auth_probe"), Mapping) else {}
+        if not bool(auth.get("authenticated")):
+            reason = str(auth.get("reason") or "auth_not_ready")
+            return f"Fix SIS read-only authentication before live execution: {reason}"
         return "Fix pipeline readiness before live execution."

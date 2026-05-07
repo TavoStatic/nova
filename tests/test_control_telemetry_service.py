@@ -165,11 +165,39 @@ class TestControlTelemetryService(unittest.TestCase):
         self.assertEqual(payload["priority"], ["general_web", "stackexchange"])
         self.assertEqual(payload["last_provider_used"], "general_web")
         self.assertEqual(payload["last_provider_family"], "")
+        self.assertTrue(payload["last_provider_available"])
         self.assertEqual(payload["last_provider_query"], "attendance rules")
         self.assertEqual(payload["last_provider_candidates"], ["general_web", "stackexchange"])
         self.assertEqual(payload["hits_last_window"], {"general_web": 1, "stackexchange": 1})
         self.assertEqual(payload["tool_latency_ms_by_tool"], {"tool_web_search": 42})
         self.assertEqual(payload["stackexchange_site"], "superuser")
+
+    def test_provider_telemetry_payload_ignores_nullish_provider_values(self):
+        payload = ControlTelemetryService.provider_telemetry_payload(
+            ledger_summary={
+                "last_record": {
+                    "tool": "",
+                    "provider_used": "null",
+                    "provider_family": "undefined",
+                    "provider_candidates": ["none", "general_web"],
+                    "reply_outcome": {"query": "status"},
+                }
+            },
+            tool_summary={"avg_latency_ms_by_tool": {}},
+            search_provider_priority_fn=lambda: ["general_web"],
+            provider_name_from_tool_fn=lambda tool: "",
+            recent_action_ledger_records_fn=lambda limit=80: [
+                {"provider_used": "null", "tool": ""},
+                {"provider_used": "general_web"},
+            ],
+            policy_web_fn=lambda: {},
+        )
+
+        self.assertEqual(payload["last_provider_used"], "")
+        self.assertEqual(payload["last_provider_family"], "")
+        self.assertFalse(payload["last_provider_available"])
+        self.assertEqual(payload["last_provider_candidates"], ["general_web"])
+        self.assertEqual(payload["hits_last_window"], {"general_web": 1})
 
     def test_tail_log_action_rejects_unknown_names(self):
         events = []

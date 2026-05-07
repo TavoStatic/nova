@@ -59,6 +59,34 @@ class TestNovaPipelineTools(unittest.TestCase):
         self.assertIn("Vendor dictionary: vendor_dictionary_grounded; tables=1222", out)
         self.assertIn("Predefined reports: modules=21; files=84; tables=25", out)
 
+    def test_status_renderer_shows_readiness_and_trusted_identity(self):
+        out = nova_pipeline_tools.render_pipeline_status({
+            "pipeline_id": "sis_test",
+            "display_name": "District SIS Test",
+            "read_only": True,
+            "network_scope": "district_only",
+            "configured": True,
+            "auth_mode": "trusted",
+            "driver_selected": "ODBC Driver 17 for SQL Server",
+            "network_probe": {"reachable": True, "reason": "connected"},
+            "auth_probe": {"authenticated": False, "reason": "windows_identity_mismatch"},
+            "live_query_ready": False,
+            "current_windows_identity": "K12AD\\guribe",
+            "intended_windows_identity": "K12AD\\guribe.tst",
+            "readiness": {
+                "state": "blocked",
+                "blockers": ["windows_identity_mismatch"],
+                "next_step": "Run the SIS pipeline under the intended Windows identity K12AD\\guribe.tst.",
+            },
+        })
+
+        self.assertIn("auth_mode: trusted", out)
+        self.assertIn("readiness: blocked", out)
+        self.assertIn("readiness_blockers: windows_identity_mismatch", out)
+        self.assertIn("current_windows_identity: K12AD\\guribe", out)
+        self.assertIn("intended_windows_identity: K12AD\\guribe.tst", out)
+        self.assertIn("next_step: Run the SIS pipeline", out)
+
     def test_preview_uses_dry_run_registry_path(self):
         calls = []
 

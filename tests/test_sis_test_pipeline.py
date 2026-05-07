@@ -74,14 +74,19 @@ class TestSisTestPipeline(unittest.TestCase):
 
     def test_status_exposes_local_config_path(self):
         with mock.patch.object(self.pipeline, "_installed_odbc_drivers", return_value=["ODBC Driver 17 for SQL Server"]):
-            with mock.patch.object(self.pipeline, "_network_probe", return_value={"reachable": True, "reason": "connected"}):
-                with mock.patch.object(self.pipeline, "_auth_probe", return_value={"authenticated": False, "reason": "login failed"}):
-                    status = self.pipeline.status()
+            with mock.patch.object(self.pipeline, "_client_module_available", return_value=True):
+                with mock.patch("data_sources.sis_test.connector._current_windows_identity", return_value="K12AD\\guribe.tst"):
+                    with mock.patch.object(self.pipeline, "_network_probe", return_value={"reachable": True, "reason": "connected"}):
+                        with mock.patch.object(self.pipeline, "_auth_probe", return_value={"authenticated": False, "reason": "login failed"}):
+                            status = self.pipeline.status()
         self.assertEqual(status["pipeline_id"], "sis_test")
         self.assertTrue(status["local_config_path"].endswith("local_config.json"))
         self.assertEqual(status["query_template_count"], 4)
         self.assertEqual(status["driver_selected"], "ODBC Driver 17 for SQL Server")
         self.assertFalse(status["live_query_ready"])
+        self.assertEqual((status["readiness"] or {}).get("state"), "blocked")
+        self.assertIn("auth_not_ready", status["readiness_blockers"])
+        self.assertIn("login failed", status["next_step"])
 
     def test_schema_inventory_builds_metadata_query(self):
         sql, args = self.pipeline._build_live_query(
@@ -196,6 +201,35 @@ class TestSisTestPipeline(unittest.TestCase):
         self.assertEqual(status["current_windows_identity"], "K12AD\\guribe")
         self.assertEqual(status["intended_windows_identity"], "K12AD\\guribe.tst")
         self.assertTrue(status["windows_identity_mismatch"])
+        self.assertEqual(status["auth_probe"]["reason"], "windows_identity_mismatch")
+        self.assertIn("windows_identity_mismatch", status["readiness_blockers"])
+        self.assertIn("K12AD\\guribe.tst", status["next_step"])
+
+    def test_status_reports_trusted_auth_failure_when_identity_matches(self):
+        config = {
+            "host": "10.80.42.50",
+            "database": "BNV_eSpTrain",
+            "driver": "ODBC Driver 17 for SQL Server",
+            "auth_mode": "trusted",
+            "intended_windows_identity": "K12AD\\guribe.tst",
+        }
+        with mock.patch("data_sources.sis_test.connector._load_local_config", return_value=config):
+            with mock.patch("data_sources.sis_test.connector._current_windows_identity", return_value="K12AD\\guribe.tst"):
+                with mock.patch.object(self.pipeline, "_installed_odbc_drivers", return_value=["ODBC Driver 17 for SQL Server"]):
+                    with mock.patch.object(self.pipeline, "_client_module_available", return_value=True):
+                        with mock.patch.object(self.pipeline, "_network_probe", return_value={"reachable": True, "reason": "connected"}):
+                            with mock.patch.object(
+                                self.pipeline,
+                                "_auth_probe",
+                                return_value={"authenticated": False, "reason": "Login failed for Windows integrated SIS identity (K12AD\\guribe.tst)."},
+                            ):
+                                status = self.pipeline.status()
+
+        self.assertFalse(status["windows_identity_mismatch"])
+        self.assertEqual(status["current_windows_identity"], "K12AD\\guribe.tst")
+        self.assertEqual(status["auth_probe"]["reason"], "Login failed for Windows integrated SIS identity (K12AD\\guribe.tst).")
+        self.assertIn("auth_not_ready", status["readiness_blockers"])
+        self.assertIn("Fix SIS read-only authentication", status["next_step"])
 
     def test_safe_query_next_step_explains_trusted_identity_mismatch(self):
         message = self.pipeline._safe_query_next_step(

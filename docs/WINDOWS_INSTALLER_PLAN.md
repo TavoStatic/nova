@@ -1,9 +1,9 @@
 # NYO System Windows Installer Plan
 
-Date: 2026-03-30
-Last reviewed: 2026-05-06
+Date: 2026-05-07
+Last reviewed: 2026-05-07
 
-Status note: package zip validation is current; independent installer build/validation remains a separate release task.
+Status note: package zip validation is current through same-machine checks, and 2026-05-07 live-code readiness surfaces were refreshed. Independent installer build/validation remains a separate release task.
 
 ## Purpose
 

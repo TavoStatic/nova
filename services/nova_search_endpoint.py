@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from typing import Callable
 from urllib.parse import urlparse
 
@@ -57,6 +58,12 @@ def is_local_search_endpoint(endpoint: str) -> bool:
     return str(parsed.hostname or "").strip().lower() in {"127.0.0.1", "localhost"}
 
 
+def stable_probe_error(exc: Exception | str) -> str:
+    text = str(exc)
+    text = re.sub(r" at 0x[0-9a-fA-F]+", " at 0xADDR", text)
+    return text
+
+
 def probe_search_endpoint(
     endpoint: str = "",
     *,
@@ -105,7 +112,7 @@ def probe_search_endpoint(
                 "message": f"SearXNG probe passed for {candidate} ({note}).",
             }
         except Exception as exc:
-            last_note = f"error:{exc}"
+            last_note = f"error:{stable_probe_error(exc)}"
             candidate_errors.append({"endpoint": candidate, "note": last_note})
 
     configured_error = next((item for item in candidate_errors if str(item.get("endpoint") or "") == configured), None)
