@@ -8,16 +8,18 @@ import zipfile
 from pathlib import Path
 from typing import Any, Callable
 
+from services.nova_runtime_context import GENERATED_DEFINITIONS_DIR
+from services.nova_runtime_context import PENDING_REVIEW_DIR
+from services.nova_runtime_context import PROMOTED_DEFINITIONS_DIR
+from services.nova_runtime_context import PROMOTION_AUDIT_LOG
+from services.nova_runtime_context import QUARANTINE_DIR
+from services.nova_runtime_context import RUNTIME_DIR
+from services.nova_runtime_context import TEST_SESSIONS_DIR
+
 
 ROOT = Path(__file__).resolve().parent
 POLICY_PATH = ROOT / "policy.json"
-RUNTIME_DIR = ROOT / "runtime"
 UPDATES_DIR = ROOT / "updates"
-GENERATED_DEFINITIONS_DIR = RUNTIME_DIR / "test_sessions" / "generated_definitions"
-PROMOTED_DEFINITIONS_DIR = RUNTIME_DIR / "test_sessions" / "promoted"
-PENDING_REVIEW_DIR = RUNTIME_DIR / "test_sessions" / "pending_review"
-QUARANTINE_DIR = RUNTIME_DIR / "test_sessions" / "quarantine"
-TEST_SESSIONS_DIR = RUNTIME_DIR / "test_sessions"
 PREVIEWS_DIR = UPDATES_DIR / "previews"
 SNAPSHOTS_DIR = UPDATES_DIR / "snapshots"
 KIDNEY_ROOT = RUNTIME_DIR / "kidney"
@@ -26,7 +28,7 @@ KIDNEY_SNAPSHOTS_DIR = KIDNEY_ROOT / "snapshots"
 KIDNEY_STATUS_PATH = KIDNEY_ROOT / "status.json"
 KIDNEY_PROTECT_PATH = KIDNEY_ROOT / "protect_patterns.json"
 KIDNEY_RETIRED_DEFINITIONS_PATH = KIDNEY_ROOT / "retired_generated_definitions.json"
-PROMOTION_AUDIT_PATH = TEST_SESSIONS_DIR / "promotion_audit.jsonl"
+PROMOTION_AUDIT_PATH = PROMOTION_AUDIT_LOG
 DEFAULT_TEMP_MAX_BYTES = 500 * 1024 * 1024
 _MANIFEST_NAMES = {"generated_manifest.json", "latest_manifest.json"}
 _PROTECTED_TEST_SESSION_DIRS = {

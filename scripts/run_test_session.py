@@ -17,12 +17,15 @@ BASE_DIR = Path(__file__).resolve().parents[1]
 if str(BASE_DIR) not in sys.path:
     sys.path.insert(0, str(BASE_DIR))
 
+from services.nova_runtime_context import resolve_runtime_dir
+
 import nova_core
 import nova_http
 import run_tools
 
 
-RUNNER_ROOT = BASE_DIR / "runtime" / "test_sessions"
+RUNTIME_DIR = resolve_runtime_dir(BASE_DIR)
+RUNNER_ROOT = RUNTIME_DIR / "test_sessions"
 DEFAULT_SESSIONS_DIR = BASE_DIR / "tests" / "sessions"
 DEFAULT_COMPARE_MODES = ("cli", "http")
 VALID_COMPARE_MODES = {"cli", "http", "run_tools"}
@@ -91,7 +94,7 @@ def load_session(session_name: str) -> dict[str, Any]:
         candidate = DEFAULT_SESSIONS_DIR / raw
 
     if not candidate.exists() and windows_abs:
-        alt = BASE_DIR / "runtime" / "test_sessions" / "generated_definitions" / Path(raw).name
+        alt = RUNTIME_DIR / "test_sessions" / "generated_definitions" / Path(raw).name
         if alt.exists():
             candidate = alt
 

@@ -56,7 +56,8 @@ class TestRunRegressionScript(unittest.TestCase):
         self.assertIn("- integration:", output)
 
     def test_run_unittest_suite_marks_regression_test_mode(self):
-        observed = []
+        observed_load = []
+        observed_run = []
 
         class _Result:
             failures = []
@@ -66,23 +67,46 @@ class TestRunRegressionScript(unittest.TestCase):
             def wasSuccessful():
                 return True
 
+        class _Loader:
+            def loadTestsFromNames(self, test_names):
+                observed_load.append(
+                    {
+                        "test_runner": os.environ.get("NOVA_TEST_RUNNER"),
+                        "validation_runtime": os.environ.get("NOVA_VALIDATION_RUNTIME_DIR"),
+                        "test_names": list(test_names),
+                    }
+                )
+                return object()
+
         class _Runner:
             def __init__(self, verbosity=1):
                 self.verbosity = verbosity
 
             def run(self, suite):
-                observed.append(os.environ.get("NOVA_TEST_RUNNER"))
+                observed_run.append(
+                    {
+                        "test_runner": os.environ.get("NOVA_TEST_RUNNER"),
+                        "validation_runtime": os.environ.get("NOVA_VALIDATION_RUNTIME_DIR"),
+                    }
+                )
                 return _Result()
 
         with patch.object(RUN_REGRESSION.unittest, "TextTestRunner", _Runner), \
+             patch.object(RUN_REGRESSION.unittest, "defaultTestLoader", _Loader()), \
              patch.dict(os.environ, {}, clear=True):
             ok, failed = RUN_REGRESSION.run_unittest_suite(["tests.test_smoke_placeholder"], verbosity=1)
             restored = os.environ.get("NOVA_TEST_RUNNER")
+            restored_validation = os.environ.get("NOVA_VALIDATION_RUNTIME_DIR")
 
         self.assertTrue(ok)
         self.assertEqual(failed, [])
-        self.assertEqual(observed, ["1"])
+        self.assertEqual(observed_load[0].get("test_runner"), "1")
+        self.assertEqual(observed_load[0].get("test_names"), ["tests.test_smoke_placeholder"])
+        self.assertEqual(observed_load[0].get("validation_runtime"), str(RUN_REGRESSION.BASE / "runtime" / "validation"))
+        self.assertEqual(observed_run[0].get("test_runner"), "1")
+        self.assertEqual(observed_run[0].get("validation_runtime"), str(RUN_REGRESSION.BASE / "runtime" / "validation"))
         self.assertIsNone(restored)
+        self.assertIsNone(restored_validation)
 
     def test_write_regression_status_records_validation_marker(self):
         marker = Path("C:/Nova/runtime/_test_tmp") / "regression_status_test.json"

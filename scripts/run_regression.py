@@ -181,18 +181,24 @@ def print_available_lanes() -> None:
 
 
 def run_unittest_suite(test_names: list[str], *, verbosity: int = 1) -> tuple[bool, list[str]]:
-    loader = unittest.defaultTestLoader
-    suite = loader.loadTestsFromNames(test_names)
-    runner = unittest.TextTestRunner(verbosity=verbosity)
     previous_test_runner = os.environ.get("NOVA_TEST_RUNNER")
+    previous_validation_runtime = os.environ.get("NOVA_VALIDATION_RUNTIME_DIR")
     os.environ["NOVA_TEST_RUNNER"] = "1"
+    os.environ.setdefault("NOVA_VALIDATION_RUNTIME_DIR", str(BASE / "runtime" / "validation"))
+    loader = unittest.defaultTestLoader
     try:
+        suite = loader.loadTestsFromNames(test_names)
+        runner = unittest.TextTestRunner(verbosity=verbosity)
         result = runner.run(suite)
     finally:
         if previous_test_runner is None:
             os.environ.pop("NOVA_TEST_RUNNER", None)
         else:
             os.environ["NOVA_TEST_RUNNER"] = previous_test_runner
+        if previous_validation_runtime is None:
+            os.environ.pop("NOVA_VALIDATION_RUNTIME_DIR", None)
+        else:
+            os.environ["NOVA_VALIDATION_RUNTIME_DIR"] = previous_validation_runtime
     failed_ids: list[str] = []
     for case, _ in list(result.failures) + list(result.errors):
         try:

@@ -3,6 +3,7 @@ import shutil
 import unittest
 import uuid
 from pathlib import Path
+from unittest import mock
 
 from services.ops_journal import append_ops_event
 
@@ -41,29 +42,29 @@ class TestOpsJournal(unittest.TestCase):
             self.assertEqual(entry.get("result"), "ok")
             self.assertEqual((entry.get("payload") or {}).get("session_id"), "abc")
 
-            this_is_nova = root.parent / "This_is_nova" if root.name == "runtime" else root / "This_is_nova"
-            self.assertTrue(this_is_nova.exists())
-            text = this_is_nova.read_text(encoding="utf-8")
-            self.assertIn("ACTIVITY LOG", text)
-            self.assertIn("control_action", text)
-            self.assertIn("refresh_status", text)
+            self.assertFalse((root / "This_is_nova").exists())
         finally:
             shutil.rmtree(case_dir, ignore_errors=True)
 
-    def test_append_ops_event_preserves_existing_this_is_nova_content(self):
+    def test_append_ops_event_preserves_live_root_this_is_nova_content(self):
         case_dir = _workspace_case_dir("ops_journal")
         try:
-            root = case_dir
+            root = case_dir / "workspace"
+            runtime_dir = root / "runtime"
+            runtime_dir.mkdir(parents=True, exist_ok=True)
             existing = root / "This_is_nova"
             existing.write_text("Nova summary\n", encoding="utf-8")
 
-            append_ops_event(
-                root,
-                category="runtime",
-                action="tick",
-                result="ok",
-                detail="heartbeat",
-            )
+            with mock.patch("services.ops_journal.BASE_DIR", root), \
+                 mock.patch("services.ops_journal.RUNTIME_DIR", runtime_dir), \
+                 mock.patch("services.ops_journal.runtime_scope_name", return_value="live"):
+                append_ops_event(
+                    runtime_dir,
+                    category="runtime",
+                    action="tick",
+                    result="ok",
+                    detail="heartbeat",
+                )
 
             text = existing.read_text(encoding="utf-8")
             self.assertTrue(text.startswith("Nova summary"))

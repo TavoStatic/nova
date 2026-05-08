@@ -63,6 +63,7 @@ from services.runtime_status import RUNTIME_STATUS_SERVICE
 from services.runtime_timeline import RUNTIME_TIMELINE_SERVICE
 from services.autonomy_orchestrator_ledger import AUTONOMY_ORCHESTRATOR_LEDGER_SERVICE
 from services.nova_runtime_context import AUTONOMY_ORCHESTRATOR_LEDGER_FILE
+from services.nova_runtime_context import resolve_runtime_dir
 from services.session_admin import SESSION_ADMIN_SERVICE
 from services.data_pipeline_registry import get_pipeline_schema_probe as pipeline_get_schema_probe
 from services.data_pipeline_registry import get_pipeline_status as pipeline_get_status
@@ -90,7 +91,7 @@ LEAH_JS_PATH = STATIC_DIR / "leah.js"
 LEAH_FX_JS_PATH = STATIC_DIR / "leah_fx.js"
 SCRIPTS_DIR = BASE_DIR / "scripts"
 LOG_DIR = BASE_DIR / "logs"
-RUNTIME_DIR = BASE_DIR / "runtime"
+RUNTIME_DIR = resolve_runtime_dir(BASE_DIR)
 LEAH_UPLOADS_DIR = RUNTIME_DIR / "leah_uploads"
 SESSION_STORE_PATH = RUNTIME_DIR / "http_chat_sessions.json"
 MAX_STORED_SESSIONS = 120

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import sys
 import threading
 from pathlib import Path
@@ -27,6 +28,49 @@ def resolve_base_dir() -> Path:
     return Path(__file__).resolve().parents[1]
 
 
+def _truthy(value: object) -> bool:
+    return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _path_from_env(value: str, *, base_dir: Path) -> Path:
+    path = Path(str(value or "").strip()).expanduser()
+    return path if path.is_absolute() else Path(base_dir) / path
+
+
+def _looks_like_test_process(argv=None) -> bool:
+    text = " ".join(str(arg or "") for arg in list(sys.argv if argv is None else argv))
+    lowered = text.lower()
+    return "unittest" in lowered or "pytest" in lowered
+
+
+def runtime_scope_name(environ=None, argv=None) -> str:
+    env = os.environ if environ is None else environ
+    return "validation" if _truthy(env.get("NOVA_TEST_RUNNER")) or _looks_like_test_process(argv) else "live"
+
+
+def resolve_runtime_dir(base_dir: Path | None = None, environ=None, argv=None) -> Path:
+    """Return the runtime root for the current execution scope.
+
+    Live Nova keeps using ``runtime``. Regression and validation runs get a
+    separate runtime root before test modules import live path constants.
+    """
+    env = os.environ if environ is None else environ
+    base = Path(base_dir) if base_dir is not None else resolve_base_dir()
+    runtime_override = str(env.get("NOVA_RUNTIME_DIR") or "").strip()
+    validation_override = str(env.get("NOVA_VALIDATION_RUNTIME_DIR") or "").strip()
+
+    if runtime_scope_name(env, argv) == "validation":
+        if validation_override:
+            return _path_from_env(validation_override, base_dir=base)
+        if runtime_override:
+            return _path_from_env(runtime_override, base_dir=base)
+        return base / "runtime" / "validation"
+
+    if runtime_override:
+        return _path_from_env(runtime_override, base_dir=base)
+    return base / "runtime"
+
+
 def resolve_python_executable(base_dir: Path) -> str:
     candidates = [
         base_dir / ".venv" / "Scripts" / "python.exe",
@@ -39,7 +83,7 @@ def resolve_python_executable(base_dir: Path) -> str:
 
 
 BASE_DIR = resolve_base_dir()
-RUNTIME_DIR = BASE_DIR / "runtime"
+RUNTIME_DIR = resolve_runtime_dir(BASE_DIR)
 LOG_DIR = BASE_DIR / "logs"
 MEMORY_DIR = BASE_DIR / "memory"
 ACTION_LEDGER_DIR = RUNTIME_DIR / "actions"

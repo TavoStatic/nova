@@ -26,6 +26,7 @@ from services.core_thinning import feed_core_thinning_brief_to_work_tree as serv
 from services.core_steward import build_core_steward_payload as service_build_core_steward_payload
 from services.nova_control_action_dispatcher import NOVA_CONTROL_ACTION_DISPATCHER, autonomy_advisory_action_types
 from services.nova_runtime_context import AUTONOMY_ORCHESTRATOR_LEDGER_FILE
+from services.nova_runtime_context import RUNTIME_DIR as CONTEXT_RUNTIME_DIR
 from services.subconscious_work_tree_triage import SUBCONSCIOUS_WORK_TREE_TRIAGE_SERVICE
 from services.test_session_control import TEST_SESSION_CONTROL_SERVICE
 from services.work_tree_signal_ingestion import WORK_TREE_SIGNAL_INGESTION_SERVICE
@@ -33,7 +34,7 @@ from work_tree_contracts import BranchStatus, TaskStatus
 
 
 ROOT = Path(__file__).resolve().parent
-RUNTIME_DIR = ROOT / "runtime"
+RUNTIME_DIR = CONTEXT_RUNTIME_DIR
 VENV_PY = ROOT / ".venv" / "Scripts" / "python.exe"
 TEST_SESSIONS_ROOT = RUNTIME_DIR / "test_sessions"
 TEST_SESSION_RUNNER_PY = ROOT / "scripts" / "run_test_session.py"

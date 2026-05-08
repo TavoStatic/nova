@@ -12,17 +12,23 @@ from pathlib import Path
 from typing import Any
 
 import nova_core
+from services.nova_runtime_context import GENERATED_DEFINITIONS_DIR
+from services.nova_runtime_context import PENDING_REVIEW_DIR
+from services.nova_runtime_context import PROMOTED_DEFINITIONS_DIR
+from services.nova_runtime_context import PROMOTION_AUDIT_LOG
+from services.nova_runtime_context import QUARANTINE_DIR
+from services.nova_runtime_context import RUNTIME_DIR
 
 
 ROOT = Path(__file__).resolve().parent
 VENV_PY = ROOT / ".venv" / "Scripts" / "python.exe"
 TEST_SESSION_RUNNER = ROOT / "scripts" / "run_test_session.py"
-GENERATED_DEFINITIONS_ROOT = ROOT / "runtime" / "test_sessions" / "generated_definitions"
-PROMOTED_DEFINITIONS_ROOT = ROOT / "runtime" / "test_sessions" / "promoted"
-PENDING_REVIEW_ROOT = ROOT / "runtime" / "test_sessions" / "pending_review"
-QUARANTINE_ROOT = ROOT / "runtime" / "test_sessions" / "quarantine"
-AUDIT_LOG = ROOT / "runtime" / "test_sessions" / "promotion_audit.jsonl"
-LATEST_SUBCONSCIOUS = ROOT / "runtime" / "subconscious_runs" / "latest.json"
+GENERATED_DEFINITIONS_ROOT = GENERATED_DEFINITIONS_DIR
+PROMOTED_DEFINITIONS_ROOT = PROMOTED_DEFINITIONS_DIR
+PENDING_REVIEW_ROOT = PENDING_REVIEW_DIR
+QUARANTINE_ROOT = QUARANTINE_DIR
+AUDIT_LOG = PROMOTION_AUDIT_LOG
+LATEST_SUBCONSCIOUS = RUNTIME_DIR / "subconscious_runs" / "latest.json"
 _MANIFEST_NAMES = {"generated_manifest.json", "latest_manifest.json"}
 _TOKEN_RE = re.compile(r"[a-z0-9']+")
 _REPORT_RE = re.compile(r"Saved full report to\s+(.+)$", re.MULTILINE)

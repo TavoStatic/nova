@@ -4,6 +4,10 @@ import json
 import time
 from pathlib import Path
 
+from services.nova_runtime_context import BASE_DIR
+from services.nova_runtime_context import RUNTIME_DIR
+from services.nova_runtime_context import runtime_scope_name
+
 
 THIS_IS_NOVA_FILE = "This_is_nova"
 THIS_IS_NOVA_SECTION = "ACTIVITY LOG"
@@ -54,6 +58,18 @@ def _append_this_is_nova_entry(workspace_root: Path, entry: dict) -> None:
         handle.write(f"{line}\n")
 
 
+def _this_is_nova_workspace_root(runtime_dir: Path) -> Path | None:
+    if runtime_scope_name() == "validation":
+        return None
+    try:
+        if Path(runtime_dir).resolve() != Path(RUNTIME_DIR).resolve():
+            return None
+    except Exception:
+        if str(runtime_dir).strip().lower() != str(RUNTIME_DIR).strip().lower():
+            return None
+    return BASE_DIR
+
+
 def append_ops_event(
     runtime_dir: Path,
     *,
@@ -99,8 +115,9 @@ def append_ops_event(
         path = runtime_dir / str(journal_name or "ops_journal.jsonl")
         with open(path, "a", encoding="utf-8") as handle:
             handle.write(json.dumps(entry, ensure_ascii=True) + "\n")
-        workspace_root = runtime_dir.parent if runtime_dir.name.lower() == "runtime" else runtime_dir
-        _append_this_is_nova_entry(workspace_root, entry)
+        workspace_root = _this_is_nova_workspace_root(runtime_dir)
+        if workspace_root is not None:
+            _append_this_is_nova_entry(workspace_root, entry)
     except Exception:
         # Never break runtime flow because journaling failed.
         pass

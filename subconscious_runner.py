@@ -9,6 +9,8 @@ from pathlib import Path
 
 from kidney import load_retired_generated_definition_index
 from nova_safety_envelope import evaluate_generated_definitions
+from services.nova_runtime_context import GENERATED_DEFINITIONS_DIR
+from services.nova_runtime_context import RUNTIME_DIR
 from subconscious_live_simulator import (
     TrainingPriorityItem,
     build_default_live_scenario_families,
@@ -18,8 +20,8 @@ from subconscious_live_simulator import (
 
 
 ROOT = Path(__file__).resolve().parent
-RUNTIME_ROOT = ROOT / "runtime" / "subconscious_runs"
-GENERATED_DEFINITIONS_ROOT = ROOT / "runtime" / "test_sessions" / "generated_definitions"
+RUNTIME_ROOT = RUNTIME_DIR / "subconscious_runs"
+GENERATED_DEFINITIONS_ROOT = GENERATED_DEFINITIONS_DIR
 
 
 def select_live_scenario_families(family_ids: list[str] | None = None) -> list[object]:
