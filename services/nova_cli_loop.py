@@ -1,6 +1,5 @@
 ﻿from __future__ import annotations
 
-import json
 import re
 import sys
 from typing import Optional
@@ -13,7 +12,6 @@ from services.nova_cli_sequence import execute_cli_sequence as service_execute_c
 from services.nova_cli_sequence import apply_sequence_result as service_apply_sequence_result
 from services.nova_cli_sequence import normalize_sequence_reply as service_normalize_sequence_reply
 from services.nova_fallback_flow import apply_low_confidence_block
-from services.nova_fallback_flow import apply_pending_weather_followup_fallback
 from services.nova_fallback_flow import prepare_fallback_flow
 from services.nova_fallback_flow import finalize_llm_fallback_reply
 from services.nova_profile_followups import animal_reply as service_animal_reply
@@ -29,10 +27,13 @@ from services.nova_turn_outcomes import apply_developer_location_outcome
 from services.nova_turn_outcomes import apply_developer_profile_learning
 from services.nova_turn_outcomes import apply_fast_smalltalk
 from services.nova_turn_outcomes import apply_identity_binding_learning
-from services.nova_turn_outcomes import apply_location_conversation_outcome
 from services.nova_turn_outcomes import apply_location_store_outcome
+from services.nova_turn_outcomes import apply_mixed_turn_clarify
+from services.nova_turn_outcomes import apply_numeric_clarify_outcome
 from services.nova_turn_outcomes import apply_saved_location_weather_outcome
 from services.nova_turn_outcomes import apply_self_profile_learning
+from services.nova_turn_outcomes import apply_supervisor_bypass_safe_fallback
+from services.nova_turn_outcomes import apply_web_research_override
 from services.nova_reply_sequence import execute_reply_sequence
 from services.nova_reply_runtime import apply_reply_runtime_effects
 from services.nova_session_state import apply_reply_session_updates
@@ -379,37 +380,53 @@ def run_loop(tts, *, core: object) -> None:
             if isinstance(llm_intent, dict) and core._supervisor_result_has_route(llm_intent):
                 intent_rule = llm_intent
                 _trace("llm_routing", "matched", intent=str(intent_rule.get("intent") or ""))
-        if not core._supervisor_result_has_route(intent_rule) and core._should_clarify_unlabeled_numeric_turn(
-            routed_user_text,
+        numeric_clarify_outcome = apply_numeric_clarify_outcome(
+            has_intent_route=core._supervisor_result_has_route(intent_rule),
+            routed_text=routed_user_text,
             pending_action=pending_action,
             current_state=conversation_state,
-        ):
-            final = core._ensure_reply(core._unlabeled_numeric_turn_reply(routed_user_text))
-            _set_conversation_state(core._make_conversation_state("numeric_reference_clarify", value=str(routed_user_text or "").strip()))
+            session=session_state,
+            ledger=pending_action_ledger.get("record") if isinstance(pending_action_ledger, dict) else {},
+            should_clarify_unlabeled_numeric_turn=core._should_clarify_unlabeled_numeric_turn,
+            unlabeled_numeric_turn_reply=core._unlabeled_numeric_turn_reply,
+            make_conversation_state=core._make_conversation_state,
+            action_ledger_add_step=lambda _ledger, stage, outcome, detail="", **data: _trace(stage, outcome, detail, **data),
+        )
+        if numeric_clarify_outcome.get("handled"):
+            _set_conversation_state(session_state.conversation_state)
             _sync_pending_conversation_tracking()
-            if pending_action_ledger is not None:
-                pending_action_ledger["planner_decision"] = "ask_clarify"
-                pending_action_ledger["grounded"] = False
-            _trace("numeric_clarify", "blocked")
-            print(f"Nova: {final}\n", flush=True)
-            session_turns.append(("assistant", final))
-            core.speak_chunked(tts, final)
+            apply_cli_handled_outcome(
+                pending_action_ledger=pending_action_ledger,
+                outcome=numeric_clarify_outcome,
+                default_planner_decision="ask_clarify",
+                session_turns=session_turns,
+                print_fn=print,
+                speak_chunked_fn=lambda reply: core.speak_chunked(tts, reply),
+                say_done_fn=lambda _msg: None,
+                coerce_grounded=True,
+            )
             continue
-        if "mixed" in turn_acts and not _should_skip_mixed_turn_clarify(routed_user_text):
-            final = core._ensure_reply(core._mixed_info_request_clarify_reply(routed_user_text))
-            if pending_action_ledger is not None:
-                pending_action_ledger["planner_decision"] = "ask_clarify"
-                pending_action_ledger["grounded"] = False
-                pending_action_ledger["reply_contract"] = "turn.clarify_mixed_intent"
-                pending_action_ledger["reply_outcome"] = {
-                    "intent": "clarify_mixed_turn",
-                    "kind": "mixed_info_request",
-                    "reply_contract": "turn.clarify_mixed_intent",
-                }
-            _trace("mixed_turn_clarify", "blocked")
-            print(f"Nova: {final}\n", flush=True)
-            session_turns.append(("assistant", final))
-            core.speak_chunked(tts, final)
+        mixed_clarify_outcome = apply_mixed_turn_clarify(
+            turn_acts=turn_acts,
+            correction_pending=False,
+            skip_mixed_turn_clarify=_should_skip_mixed_turn_clarify(routed_user_text),
+            routed_text=routed_user_text,
+            ledger=pending_action_ledger.get("record") if isinstance(pending_action_ledger, dict) else {},
+            mixed_info_request_clarify_reply=core._mixed_info_request_clarify_reply,
+            action_ledger_add_step=lambda _ledger, stage, outcome, detail="", **data: _trace(stage, outcome, detail, **data),
+        )
+        if mixed_clarify_outcome.get("handled"):
+            apply_cli_handled_outcome(
+                pending_action_ledger=pending_action_ledger,
+                outcome=mixed_clarify_outcome,
+                default_planner_decision="ask_clarify",
+                session_turns=session_turns,
+                print_fn=print,
+                speak_chunked_fn=lambda reply: core.speak_chunked(tts, reply),
+                say_done_fn=lambda _msg: None,
+                update_reply_fields=True,
+                coerce_grounded=True,
+            )
             continue
         handled_intent, intent_msg, intent_state, intent_effects = core._handle_supervisor_intent(
             intent_rule,
@@ -450,20 +467,25 @@ def run_loop(tts, *, core: object) -> None:
             continue
         warn_supervisor_bypass = not core._supervisor_result_has_route(intent_rule) and core._should_warn_supervisor_bypass(routed_user_text)
 
-        try:
-            if core._is_web_research_override_request(routed_user_text):
-                _set_prefer_web_for_data_queries(True)
-                _trace("session_override", "enabled", "prefer_web_for_data_queries")
-                if pending_action_ledger is not None:
-                    pending_action_ledger["planner_decision"] = "deterministic"
-                    pending_action_ledger["grounded"] = True
-                final = core._ensure_reply("Understood. I'll prefer web research for broad data queries in this session.")
-                print(f"Nova: {final}\n", flush=True)
-                session_turns.append(("assistant", final))
-                core.speak_chunked(tts, final)
-                continue
-        except Exception:
-            pass
+        web_override_outcome = apply_web_research_override(
+            text=routed_user_text,
+            ledger=pending_action_ledger.get("record") if isinstance(pending_action_ledger, dict) else {},
+            is_web_research_override_request=core._is_web_research_override_request,
+            set_prefer_web_for_data_queries=_set_prefer_web_for_data_queries,
+            action_ledger_add_step=lambda _ledger, stage, outcome, detail="", **data: _trace(stage, outcome, detail, **data),
+        )
+        if web_override_outcome.get("handled"):
+            apply_cli_handled_outcome(
+                pending_action_ledger=pending_action_ledger,
+                outcome=web_override_outcome,
+                default_planner_decision="deterministic",
+                session_turns=session_turns,
+                print_fn=print,
+                speak_chunked_fn=lambda reply: core.speak_chunked(tts, reply),
+                say_done_fn=lambda _msg: None,
+                coerce_grounded=True,
+            )
+            continue
 
         try:
             identity_learned, identity_msg = core._learn_self_identity_binding(user_text)
@@ -569,7 +591,7 @@ def run_loop(tts, *, core: object) -> None:
             conversation_state,
             turns=session_turns,
             input_source=input_source,
-            allowed_actions={"name_origin_store", "self_location", "location_recall", "location_name", "weather_current_location", "apply_correction", "retrieval_followup", "identity_history_family", "open_probe_family", "session_fact_recall", "last_question_recall", "rules_list", "developer_identity_followup", "identity_profile_followup", "developer_location"},
+            allowed_actions={"name_origin_store", "self_location", "location_recall", "location_name", "location_clarify", "weather_current_location", "apply_correction", "retrieval_followup", "identity_history_family", "open_probe_family", "session_fact_recall", "last_question_recall", "rules_list", "developer_identity_followup", "identity_profile_followup", "developer_location"},
         )
         if pending_action_ledger is not None:
             pending_action_ledger["routing_decision"] = core._build_routing_decision(
@@ -758,90 +780,6 @@ def run_loop(tts, *, core: object) -> None:
             pass
 
         try:
-            low_q = (routed_user_text or "").strip().lower()
-
-            handled_location, msg, next_location_state, _location_intent = core._handle_location_conversation_turn(
-                conversation_state,
-                routed_user_text,
-                turns=session_turns,
-            )
-            if handled_location:
-                try:
-                    final = core._apply_reply_overrides(msg)
-                except Exception:
-                    final = msg
-                final = core._ensure_reply(final)
-                if isinstance(next_location_state, dict):
-                    _set_conversation_state(next_location_state)
-                    _sync_pending_conversation_tracking()
-                print(f"Nova: {final}\n", flush=True)
-                session_turns.append(("assistant", final))
-                core.speak_chunked(tts, final)
-                continue
-
-            expand_triggers = ["what else", "other information", "anything else", "more about", "what other", "anything more"]
-            if "location" in low_q and any(t in low_q for t in expand_triggers):
-                try:
-                    audit_out = core.mem_audit("location")
-                    j = json.loads(audit_out) if audit_out else {}
-                    results = j.get("results") if isinstance(j, dict) else []
-                    previews = []
-                    seen = set()
-                    for r in results:
-                        p = (r.get("preview") or "").strip()
-                        n = re.sub(r"\W+", " ", p.lower()).strip()
-                        if not p or n in seen:
-                            continue
-                        seen.add(n)
-                        previews.append(p)
-
-                    if not previews:
-                        msg = "I don't have a stored location yet. You can tell me: 'My location is ...'"
-                    elif len(previews) == 1:
-                        msg = f"I only have one stored location fact right now: {core._normalize_location_preview(previews[0])}"
-                    else:
-                        summary = "; ".join(core._normalize_location_preview(p) for p in previews[:3])
-                        msg = f"I have multiple stored location facts: {summary}"
-                except Exception:
-                    msg = "I don't have a stored location yet. You can tell me: 'My location is ...'"
-
-                try:
-                    final = core._apply_reply_overrides(msg)
-                except Exception:
-                    final = msg
-                final = core._ensure_reply(final)
-                _set_conversation_state(core._make_conversation_state("location_recall"))
-                _sync_pending_conversation_tracking()
-                print(f"Nova: {final}\n", flush=True)
-                session_turns.append(("assistant", final))
-                core.speak_chunked(tts, final)
-                continue
-
-            loc_triggers = [
-                "what is your location",
-                "where are you located",
-                "where are you",
-                "what is your location nova",
-            ]
-            if any(low_q.startswith(t) for t in loc_triggers):
-                try:
-                    msg = core._location_reply()
-                except Exception:
-                    msg = "I don't have a stored location yet. You can tell me: 'My location is ...'"
-
-                try:
-                    final = core._apply_reply_overrides(msg)
-                except Exception:
-                    final = msg
-                final = core._ensure_reply(final)
-                print(f"Nova: {final}\n", flush=True)
-                session_turns.append(("assistant", final))
-                core.speak_chunked(tts, final)
-                continue
-        except Exception:
-            pass
-
-        try:
             developer_guess, next_state = core._developer_work_guess_turn(routed_user_text)
             if developer_guess:
                 final = core._ensure_reply(developer_guess)
@@ -969,28 +907,28 @@ def run_loop(tts, *, core: object) -> None:
         except Exception:
             pass
 
-        if warn_supervisor_bypass:
-            safe_reply, safe_kind = core._open_probe_reply(routed_user_text, turns=session_turns)
-            safe_outcome = {
-                "intent": "open_probe_family",
-                "kind": safe_kind,
-                "reply_contract": f"open_probe.{safe_kind}",
-                "reply_text": safe_reply,
-                "state_delta": {},
-            }
-            if pending_action_ledger is not None:
-                pending_action_ledger["planner_decision"] = "deterministic"
-                pending_action_ledger["grounded"] = False
-                pending_action_ledger["reply_contract"] = str(safe_outcome.get("reply_contract") or "")
-                pending_action_ledger["reply_outcome"] = dict(safe_outcome)
-                routing_decision = pending_action_ledger.get("routing_decision")
-                if isinstance(routing_decision, dict):
-                    routing_decision["final_owner"] = "supervisor_handle"
-            _trace("open_probe", "matched", safe_kind)
-            final = core._ensure_reply(safe_reply)
-            print(f"Nova: {final}\n", flush=True)
-            session_turns.append(("assistant", final))
-            core.speak_chunked(tts, final)
+        supervisor_bypass_outcome = apply_supervisor_bypass_safe_fallback(
+            warn_supervisor_bypass=warn_supervisor_bypass,
+            reply_contract=str(pending_action_ledger.get("reply_contract") or "") if isinstance(pending_action_ledger, dict) else "",
+            routed_text=routed_user_text,
+            turns=session_turns,
+            routing_decision=pending_action_ledger.get("routing_decision") if isinstance(pending_action_ledger, dict) else None,
+            ledger=pending_action_ledger.get("record") if isinstance(pending_action_ledger, dict) else {},
+            open_probe_reply=core._open_probe_reply,
+            action_ledger_add_step=lambda _ledger, stage, outcome, detail="", **data: _trace(stage, outcome, detail, **data),
+        )
+        if supervisor_bypass_outcome.get("handled"):
+            apply_cli_handled_outcome(
+                pending_action_ledger=pending_action_ledger,
+                outcome=supervisor_bypass_outcome,
+                default_planner_decision="deterministic",
+                session_turns=session_turns,
+                print_fn=print,
+                speak_chunked_fn=lambda reply: core.speak_chunked(tts, core._ensure_reply(reply)),
+                say_done_fn=lambda _msg: None,
+                update_reply_fields=True,
+                coerce_grounded=True,
+            )
             continue
 
         def _normalize_sequence_reply(reply: str) -> str:
@@ -1080,32 +1018,6 @@ def run_loop(tts, *, core: object) -> None:
             print(f"Nova: {msg}\n", flush=True)
             session_turns.append(("assistant", msg))
             core.speak_chunked(tts, msg)
-            continue
-
-        last_assistant_text = core._last_assistant_turn_text(session_turns[:-1])
-        weather_followup_fallback = apply_pending_weather_followup_fallback(
-            text=routed_user_text,
-            pending_action=pending_action,
-            last_assistant_text=last_assistant_text,
-            looks_like_affirmative_followup_fn=core._looks_like_affirmative_followup,
-            looks_like_shared_location_reference_fn=core._looks_like_shared_location_reference,
-            assistant_offered_weather_lookup_fn=core._assistant_offered_weather_lookup,
-            ensure_reply=core._ensure_reply,
-            weather_for_saved_location_fn=core._weather_for_saved_location,
-        )
-        if weather_followup_fallback.get("handled"):
-            apply_cli_handled_outcome(
-                pending_action_ledger=pending_action_ledger,
-                outcome=weather_followup_fallback,
-                default_planner_decision="llm_fallback",
-                session_turns=session_turns,
-                print_fn=print,
-                speak_chunked_fn=lambda reply: core.speak_chunked(tts, reply),
-                say_done_fn=tts.say,
-                coerce_grounded=True,
-                clear_pending_action_fn=lambda: _set_pending_action(None),
-                sync_pending_conversation_tracking_fn=_sync_pending_conversation_tracking,
-            )
             continue
 
         fallback_entry = prepare_fallback_flow(

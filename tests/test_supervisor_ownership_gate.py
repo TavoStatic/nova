@@ -1,4 +1,5 @@
 import unittest
+from pathlib import Path
 
 from conversation_manager import ConversationSession
 from supervisor import Supervisor
@@ -67,6 +68,65 @@ class TestSupervisorOwnershipGate(unittest.TestCase):
 
         self.assertTrue(result.get("handled"))
         self.assertEqual(result.get("rule_name"), "retrieval_followup")
+
+    def test_cli_loop_does_not_own_location_trigger_lists(self):
+        source = (Path(__file__).resolve().parents[1] / "services" / "nova_cli_loop.py").read_text(encoding="utf-8")
+
+        self.assertNotIn("loc_triggers", source)
+        self.assertNotIn("expand_triggers", source)
+
+    def test_followup_dispatch_does_not_own_location_conversation_fallback(self):
+        source = (Path(__file__).resolve().parents[1] / "services" / "nova_followup_dispatch.py").read_text(encoding="utf-8")
+
+        self.assertNotIn("handle_location_conversation_turn", source)
+
+    def test_cli_loop_does_not_own_pending_weather_followup_fallback(self):
+        source = (Path(__file__).resolve().parents[1] / "services" / "nova_cli_loop.py").read_text(encoding="utf-8")
+
+        self.assertNotIn("apply_pending_weather_followup_fallback", source)
+
+    def test_http_chat_flow_does_not_reown_shared_turn_outcomes(self):
+        source = (Path(__file__).resolve().parents[1] / "http_chat_flow.py").read_text(encoding="utf-8")
+
+        self.assertIn("from services.nova_turn_outcomes import apply_fast_smalltalk", source)
+        shared_outcomes = [
+            "apply_fast_smalltalk",
+            "apply_identity_binding_learning",
+            "apply_numeric_clarify_outcome",
+            "apply_mixed_turn_clarify",
+            "apply_web_research_override",
+            "apply_supervisor_bypass_safe_fallback",
+            "apply_developer_profile_learning",
+            "apply_self_profile_learning",
+            "apply_location_store_outcome",
+            "apply_saved_location_weather_outcome",
+            "apply_declarative_store_outcome",
+            "apply_developer_guess_outcome",
+            "apply_developer_location_outcome",
+        ]
+        for outcome_name in shared_outcomes:
+            self.assertNotIn(f"def {outcome_name}(", source)
+
+    def test_cli_loop_uses_shared_numeric_and_mixed_clarify_outcomes(self):
+        source = (Path(__file__).resolve().parents[1] / "services" / "nova_cli_loop.py").read_text(encoding="utf-8")
+
+        self.assertIn("from services.nova_turn_outcomes import apply_numeric_clarify_outcome", source)
+        self.assertIn("from services.nova_turn_outcomes import apply_mixed_turn_clarify", source)
+        self.assertNotIn("if \"mixed\" in turn_acts", source)
+        self.assertNotIn("core._should_clarify_unlabeled_numeric_turn(", source)
+
+    def test_cli_loop_uses_shared_web_override_outcome(self):
+        source = (Path(__file__).resolve().parents[1] / "services" / "nova_cli_loop.py").read_text(encoding="utf-8")
+
+        self.assertIn("from services.nova_turn_outcomes import apply_web_research_override", source)
+        self.assertNotIn("core._is_web_research_override_request(", source)
+
+    def test_cli_loop_uses_shared_supervisor_bypass_outcome(self):
+        source = (Path(__file__).resolve().parents[1] / "services" / "nova_cli_loop.py").read_text(encoding="utf-8")
+
+        self.assertIn("from services.nova_turn_outcomes import apply_supervisor_bypass_safe_fallback", source)
+        self.assertNotIn("safe_reply, safe_kind", source)
+        self.assertNotIn("core._open_probe_reply(", source)
 
 
 if __name__ == "__main__":

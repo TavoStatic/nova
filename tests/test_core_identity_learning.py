@@ -2195,8 +2195,8 @@ class TestCoreIdentityLearning(unittest.TestCase):
         finally:
             nova_core.set_location_text = orig_set_location_text
 
-    def test_handle_location_conversation_turn_does_not_claim_affirmation_without_location_context(self):
-        handled, reply, next_state, intent = nova_core._handle_location_conversation_turn(
+    def test_location_followup_dispatch_does_not_claim_affirmation_without_location_context(self):
+        handled, reply, next_state = nova_core._consume_conversation_followup(
             None,
             "yea please do that ..",
             turns=[("user", "check the weather if you can please.."), ("assistant", "I can try to check the weather for you.")],
@@ -2204,8 +2204,7 @@ class TestCoreIdentityLearning(unittest.TestCase):
 
         self.assertFalse(handled)
         self.assertEqual(reply, "")
-        self.assertEqual(intent, "")
-        self.assertEqual(next_state, {"kind": "location_recall"})
+        self.assertIsNone(next_state)
 
     def test_store_declarative_fact_reply_ignores_request_like_text(self):
         out = nova_core._store_declarative_fact_reply("I am curious to know if you know what your capable of doing ?")

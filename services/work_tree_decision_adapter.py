@@ -13,6 +13,8 @@ import threading
 import time
 from typing import Optional
 
+from services.nova_runtime_context import WORK_DECISION_LEARNING_FILE
+
 
 class WorkTreeDecisionOutcome:
     """Record of a single work decision and its measured outcome."""
@@ -136,8 +138,7 @@ class WorkTreeDecisionAdapter:
     """Adaptive judgment system that learns from decision outcomes."""
 
     def __init__(self, *, state_path: Optional[Path] = None, stale_success_seconds: float = 5 * 60) -> None:
-        root = Path(__file__).resolve().parents[1]
-        self._state_path = state_path or (root / "runtime" / "work_decision_learning.json")
+        self._state_path = state_path or WORK_DECISION_LEARNING_FILE
         self._state_path.parent.mkdir(parents=True, exist_ok=True)
         self._lock = threading.Lock()
         self._identity_scores: dict[str, IdentityDecisionScores] = {}

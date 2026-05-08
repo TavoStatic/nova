@@ -7,6 +7,7 @@ import unittest
 from services.pipeline_privileged_bridge import queue_privileged_pipeline_query
 from services.pipeline_privileged_bridge import run_privileged_pipeline_query
 from services.pipeline_privileged_bridge import wait_for_privileged_pipeline_query
+from services.nova_runtime_context import RUNTIME_DIR
 from pipelines.privileged_protocol import build_protocol_paths
 from pipelines.privileged_protocol import load_request
 from pipelines.privileged_protocol import write_response
@@ -19,6 +20,11 @@ class TestPipelinePrivilegedBridge(unittest.TestCase):
 
     def tearDown(self):
         self.temp_dir.cleanup()
+
+    def test_default_runtime_root_uses_runtime_context(self):
+        from services import pipeline_privileged_bridge as bridge
+
+        self.assertEqual(bridge.RUNTIME_ROOT, RUNTIME_DIR)
 
     def test_queue_and_wait_for_privileged_pipeline_query(self):
         request = queue_privileged_pipeline_query(

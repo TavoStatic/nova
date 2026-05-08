@@ -351,7 +351,6 @@ Primary current-state order:
 2. `.\nova.cmd package-readiness`
 3. `C:\Nova\docs\PHASE_CLOSEOUT_CHECKLIST.md`
 4. `C:\Nova\docs\HANDOFF.md`
-5. `C:\Nova\This_is_nova`
 
 `This_is_nova` is append-only build history and a cross-system context guide. It is not the authority for current governance, release readiness, policy, runtime truth, or test results.
 

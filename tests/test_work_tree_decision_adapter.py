@@ -5,6 +5,7 @@ import unittest
 import uuid
 from pathlib import Path
 
+from services.nova_runtime_context import WORK_DECISION_LEARNING_FILE
 from services.work_tree_decision_adapter import WorkTreeDecisionAdapter
 
 
@@ -26,6 +27,11 @@ class TestWorkTreeDecisionAdapter(unittest.TestCase):
 
     def tearDown(self) -> None:
         shutil.rmtree(self._tmp, ignore_errors=True)
+
+    def test_default_state_path_uses_runtime_context(self) -> None:
+        adapter = WorkTreeDecisionAdapter()
+
+        self.assertEqual(adapter._state_path, WORK_DECISION_LEARNING_FILE)
 
     def test_score_update_success_and_failure(self) -> None:
         key = "work:test|terms:test"

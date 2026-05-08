@@ -5,15 +5,11 @@ import time
 from pathlib import Path
 from typing import Any, Callable, Optional
 
+from services.test_session_definitions import count_definition_files
+
 
 def _count_definition_files(root: Path) -> int:
-    manifest_names = {"generated_manifest.json", "latest_manifest.json"}
-    try:
-        if not root.exists():
-            return 0
-        return sum(1 for path in root.glob("*.json") if path.is_file() and path.name not in manifest_names)
-    except Exception:
-        return 0
+    return count_definition_files(root)
 
 
 def _promotion_audit_summary(

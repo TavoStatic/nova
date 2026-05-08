@@ -6,12 +6,17 @@ from unittest.mock import patch
 
 import nova_core
 import nova_http
+import tools.registry as registry_module
 
+from services.nova_runtime_context import TOOL_EVENTS_FILE
 from tools import ToolContext, build_default_registry
 from tools.base_tool import ToolInvocationError
 
 
 class TestToolRegistry(unittest.TestCase):
+    def test_default_tool_events_path_uses_runtime_context(self):
+        self.assertEqual(registry_module.TOOL_EVENTS_PATH, TOOL_EVENTS_FILE)
+
     def test_manifest_lists_expected_tools(self):
         registry = build_default_registry()
         metadata = registry.list_metadata()

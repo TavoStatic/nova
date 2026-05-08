@@ -18,6 +18,7 @@ from services.nova_runtime_context import PROMOTED_DEFINITIONS_DIR
 from services.nova_runtime_context import PROMOTION_AUDIT_LOG
 from services.nova_runtime_context import QUARANTINE_DIR
 from services.nova_runtime_context import RUNTIME_DIR
+from services.test_session_definitions import iter_definition_files
 
 
 ROOT = Path(__file__).resolve().parent
@@ -54,9 +55,7 @@ def policy_safety_envelope() -> dict[str, Any]:
 
 
 def _definition_files(root: Path) -> list[Path]:
-    if not root.exists():
-        return []
-    return [path for path in sorted(root.glob("*.json")) if path.is_file() and path.name not in _MANIFEST_NAMES]
+    return iter_definition_files(root)
 
 
 def _load_definition(path: Path) -> dict[str, Any]:

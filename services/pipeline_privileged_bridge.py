@@ -6,10 +6,10 @@ from typing import Any, Mapping, Optional
 from pipelines.privileged_protocol import build_protocol_paths
 from pipelines.privileged_protocol import submit_request
 from pipelines.privileged_protocol import wait_for_response
+from services.nova_runtime_context import RUNTIME_DIR
 
 
-BASE_DIR = Path(__file__).resolve().parent.parent
-RUNTIME_ROOT = BASE_DIR / "runtime"
+RUNTIME_ROOT = RUNTIME_DIR
 
 
 def queue_privileged_pipeline_query(

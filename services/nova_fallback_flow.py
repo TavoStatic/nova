@@ -5,55 +5,6 @@ import time
 from typing import Callable, Optional
 
 
-def apply_pending_weather_followup_fallback(
-    *,
-    text: str,
-    pending_action,
-    last_assistant_text: str,
-    looks_like_affirmative_followup_fn: Callable[[str], bool],
-    looks_like_shared_location_reference_fn: Callable[[str], bool],
-    assistant_offered_weather_lookup_fn: Callable[[str], bool],
-    ensure_reply: Callable[[str], str],
-    weather_for_saved_location_fn: Optional[Callable[[], str]] = None,
-) -> dict:
-    pending_weather_followup = (
-        isinstance(pending_action, dict)
-        and str(pending_action.get("kind") or "") == "weather_lookup"
-        and str(pending_action.get("status") or "") == "awaiting_location"
-        and bool(pending_action.get("saved_location_available"))
-    )
-    pending_weather_cli_fallback = pending_weather_followup and (
-        looks_like_affirmative_followup_fn(text)
-        or looks_like_shared_location_reference_fn(text)
-    )
-    assistant_offer_fallback = looks_like_affirmative_followup_fn((text or "").lower()) and assistant_offered_weather_lookup_fn(
-        last_assistant_text
-    )
-    if not pending_weather_cli_fallback and not assistant_offer_fallback:
-        return {"handled": False}
-
-    if weather_for_saved_location_fn is not None:
-        weather_reply = str(weather_for_saved_location_fn() or "").strip()
-        if weather_reply:
-            return {
-                "handled": True,
-                "reply": ensure_reply(weather_reply),
-                "planner_decision": "deterministic",
-                "grounded": True,
-                "clear_pending_action": bool(pending_weather_followup),
-            }
-
-    return {
-        "handled": True,
-        "reply": ensure_reply(
-            "I can try to check the weather for you, but I need a specific weather source or tool available here first."
-        ),
-        "planner_decision": "llm_fallback",
-        "grounded": False,
-        "clear_pending_action": bool(pending_weather_followup),
-    }
-
-
 def looks_like_open_fallback_turn(
     text: str,
     *,

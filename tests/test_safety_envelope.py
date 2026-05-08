@@ -117,6 +117,29 @@ class TestSafetyEnvelope(unittest.TestCase):
 
         self.assertEqual(selected, [self.definition_path])
 
+    def test_patch_filter_reads_nested_generated_definitions(self):
+        self._write_policy({"enabled": True, "mode": "enforce", "human_veto_first_n": 0})
+        nested_path = nova_safety_envelope.GENERATED_DEFINITIONS_ROOT / "real_world" / "nested_candidate.json"
+        nested_path.parent.mkdir(parents=True, exist_ok=True)
+        nested_path.write_text(self.definition_path.read_text(encoding="utf-8"), encoding="utf-8")
+        fingerprint = nova_safety_envelope._fingerprint(nested_path)
+        nova_safety_envelope.AUDIT_LOG.parent.mkdir(parents=True, exist_ok=True)
+        nova_safety_envelope.AUDIT_LOG.write_text(
+            json.dumps(
+                {
+                    "file": nested_path.name,
+                    "fingerprint": fingerprint,
+                    "status": "promoted",
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+        selected = nova_safety_envelope.select_patch_candidate_definition_paths(nova_safety_envelope.GENERATED_DEFINITIONS_ROOT)
+
+        self.assertEqual(selected, [nested_path])
+
     def test_short_single_turn_candidate_skips_diversity_gate(self):
         self.definition_path.write_text(
             json.dumps(

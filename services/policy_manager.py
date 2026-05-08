@@ -6,6 +6,8 @@ import time
 from pathlib import Path
 from urllib.parse import urlparse
 
+from services.nova_runtime_context import resolve_runtime_dir
+
 
 WEB_RESEARCH_PRESETS = {
     "normal": {
@@ -120,8 +122,9 @@ class PolicyManager:
         safety_envelope.setdefault("auto_demote_threshold", 0.90)
         safety_envelope.setdefault("max_candidates_per_cycle", 3)
         safety_envelope.setdefault("full_regression_required", False)
-        safety_envelope.setdefault("quarantine_root", str(self.base_dir / "runtime" / "test_sessions" / "quarantine"))
-        safety_envelope.setdefault("pending_review_root", str(self.base_dir / "runtime" / "test_sessions" / "pending_review"))
+        runtime_dir = resolve_runtime_dir(self.base_dir)
+        safety_envelope.setdefault("quarantine_root", str(runtime_dir / "test_sessions" / "quarantine"))
+        safety_envelope.setdefault("pending_review_root", str(runtime_dir / "test_sessions" / "pending_review"))
         data["safety_envelope"] = safety_envelope
 
         kidney = data.get("kidney") if isinstance(data.get("kidney"), dict) else {}

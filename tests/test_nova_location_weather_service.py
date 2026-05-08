@@ -110,55 +110,6 @@ class TestNovaLocationWeatherService(unittest.TestCase):
 
         self.assertEqual(fact, "25.90974,-97.50606")
 
-    def test_handle_location_conversation_turn_returns_location_recall(self):
-        handled, reply, next_state, action = nova_location_weather.handle_location_conversation_turn(
-            None,
-            "where am i",
-            turns=[],
-            make_conversation_state_fn=lambda kind, **data: {"kind": kind, **data},
-            is_location_name_query_fn=lambda text: False,
-            location_name_reply_fn=lambda: "name",
-            is_location_recall_query_fn=lambda text: True,
-            location_recall_reply_fn=lambda: "Your saved location is Brownsville.",
-            looks_like_contextual_followup_fn=lambda text: False,
-            is_location_recall_state_fn=lambda state: False,
-            looks_like_location_recall_followup_fn=lambda turns, text: False,
-        )
-        self.assertTrue(handled)
-        self.assertEqual(action, "location_recall")
-        self.assertEqual(reply, "Your saved location is Brownsville.")
-        self.assertEqual(next_state, {"kind": "location_recall"})
-
-    def test_infer_location_turn_intent_uses_active_location_context_for_city_name(self):
-        intent = nova_location_weather.infer_location_turn_intent(
-            {"kind": "location_recall"},
-            "what is the name of the city",
-            turns=[],
-            normalize_turn_text_fn=lambda value: value.lower().strip(),
-            is_location_name_query_fn=lambda _text: False,
-            is_location_recall_query_fn=lambda _text: False,
-            is_location_recall_state_fn=lambda state: isinstance(state, dict) and state.get("kind") == "location_recall",
-            looks_like_location_recall_followup_fn=lambda _turns, _text: False,
-        )
-
-        self.assertEqual(intent.get("intent"), "location_name")
-        self.assertGreaterEqual(intent.get("confidence"), 0.8)
-
-    def test_infer_location_turn_intent_clarifies_city_name_without_context(self):
-        intent = nova_location_weather.infer_location_turn_intent(
-            None,
-            "what is the name of the city",
-            turns=[],
-            normalize_turn_text_fn=lambda value: value.lower().strip(),
-            is_location_name_query_fn=lambda _text: False,
-            is_location_recall_query_fn=lambda _text: False,
-            is_location_recall_state_fn=lambda _state: False,
-            looks_like_location_recall_followup_fn=lambda _turns, _text: False,
-        )
-
-        self.assertEqual(intent.get("intent"), "clarify_location_reference")
-        self.assertIn("Which location", intent.get("clarifying_question", ""))
-
     def test_location_name_reply_prefers_live_device_location_label(self):
         reply = nova_location_weather.location_name_reply(
             get_saved_location_text_fn=lambda: "",

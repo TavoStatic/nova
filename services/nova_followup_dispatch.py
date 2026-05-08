@@ -18,7 +18,6 @@ _CONVERSATION_FOLLOWUP_HOOKS = {
     "queue_status_report_reply_fn": "_queue_status_report_reply",
     "is_queue_status_seam_followup_fn": "_is_queue_status_seam_followup",
     "queue_status_seam_reply_fn": "_queue_status_seam_reply",
-    "handle_location_conversation_turn_fn": "_handle_location_conversation_turn",
     "is_weather_meta_followup_fn": "_is_weather_meta_followup",
     "weather_meta_reply_fn": "_weather_meta_reply",
     "is_weather_status_followup_fn": "_is_weather_status_followup",
@@ -73,7 +72,6 @@ def consume_conversation_followup(
     queue_status_report_reply_fn: Callable[[dict], str],
     is_queue_status_seam_followup_fn: Callable[[str], bool],
     queue_status_seam_reply_fn: Callable[[dict], str],
-    handle_location_conversation_turn_fn: Callable[..., tuple[bool, str, Optional[dict], str]],
     is_weather_meta_followup_fn: Callable[[str], bool],
     weather_meta_reply_fn: Callable[[dict], str],
     is_weather_status_followup_fn: Callable[[str], bool],
@@ -142,16 +140,6 @@ def consume_conversation_followup(
             return True, queue_status_report_reply_fn(state), state
         if is_queue_status_seam_followup_fn(text):
             return True, queue_status_seam_reply_fn(state), state
-        return False, "", state
-
-    if kind == "location_recall":
-        handled_location, location_reply, location_state, _location_intent = handle_location_conversation_turn_fn(
-            state,
-            text,
-            turns=turns,
-        )
-        if handled_location:
-            return True, location_reply, location_state
         return False, "", state
 
     if kind == "weather_result":

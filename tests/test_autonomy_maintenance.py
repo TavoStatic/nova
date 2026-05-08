@@ -37,6 +37,53 @@ class TestAutonomyMaintenance(unittest.TestCase):
         self.addCleanup(_cleanup)
         return db_path
 
+    def test_queue_pressure_uses_open_count_zero_as_clear_truth(self):
+        payload = autonomy_maintenance._queue_pressure_for_orchestrator(
+            {
+                "status": "clear",
+                "count": 2,
+                "open_count": 0,
+                "actionable_count": 0,
+                "blocked_count": 0,
+            },
+            {},
+        )
+
+        self.assertEqual(payload.get("generated_pending_count"), 0)
+        self.assertEqual(payload.get("pending_count"), 0)
+        self.assertEqual(payload.get("high_priority_count"), 0)
+        self.assertEqual(payload.get("pressure_band"), "low")
+
+    def test_queue_pressure_falls_back_to_count_only_when_open_count_missing(self):
+        payload = autonomy_maintenance._queue_pressure_for_orchestrator(
+            {
+                "status": "ready",
+                "count": 2,
+                "actionable_count": 0,
+                "blocked_count": 0,
+            },
+            {},
+        )
+
+        self.assertEqual(payload.get("generated_pending_count"), 2)
+        self.assertEqual(payload.get("pending_count"), 2)
+        self.assertEqual(payload.get("pressure_band"), "medium")
+
+    def test_queue_pressure_clear_status_without_open_count_does_not_invent_pending_work(self):
+        payload = autonomy_maintenance._queue_pressure_for_orchestrator(
+            {
+                "status": "clear",
+                "count": 2,
+                "actionable_count": 0,
+                "blocked_count": 0,
+            },
+            {},
+        )
+
+        self.assertEqual(payload.get("generated_pending_count"), 0)
+        self.assertEqual(payload.get("pending_count"), 0)
+        self.assertEqual(payload.get("pressure_band"), "low")
+
     def test_archive_stale_complete_trees_keeps_recent_history_visible(self):
         self._isolated_work_tree_db()
         now = work_tree._now()
@@ -477,15 +524,57 @@ class TestAutonomyMaintenance(unittest.TestCase):
         with mock.patch.object(
             autonomy_maintenance,
             "_run_active_work_tree_cycle",
-            return_value={"status": "ok", "executed_count": 1, "tree_count": 1},
+            return_value={"status": "ok", "executed_count": 3, "tree_count": 3},
         ) as cycle_mock:
             result = autonomy_maintenance._execute_autonomy_recommendation(state, packet, policy)
 
-        cycle_mock.assert_called_once_with(state, max_steps=1)
+        cycle_mock.assert_called_once_with(state, max_steps=3, max_trees=8)
         self.assertEqual(result.get("result"), "success")
         self.assertEqual(result.get("action_type"), "active_work_tree_run_next")
-        self.assertEqual(((result.get("extra") or {}).get("cycle") or {}).get("executed_count"), 1)
+        self.assertEqual(((result.get("extra") or {}).get("cycle") or {}).get("executed_count"), 3)
         self.assertEqual((result.get("events") or [])[0].get("act"), "active_work_tree_run_next")
+
+    def test_execute_autonomy_recommendation_honors_active_work_tree_step_budget(self):
+        state: dict = {}
+        packet = {
+            "cycle_id": "cycle-test",
+            "decision_type": "RecommendAction",
+            "recommended_action": {
+                "action_type": "active_work_tree_run_next",
+                "target_kind": "lane",
+                "target_id": "active_work_tree",
+                "reason_code": "active_work_tree_ready",
+                "requires_ack": False,
+                "cooldown_sec": 120,
+                "max_steps": 5,
+                "max_trees": 6,
+            },
+            "confidence": 0.72,
+            "refusal_reasons": [],
+        }
+        policy = {
+            "enabled": True,
+            "mode": "canary",
+            "execute_enabled": True,
+            "execute_allowed_actions": [],
+            "execute_allowed_action_groups": ["active_work_tree"],
+            "execute_blocked_actions": [],
+            "requires_operator_ack_for": [],
+            "execute_min_confidence": 0.55,
+        }
+
+        with mock.patch.object(
+            autonomy_maintenance,
+            "_run_active_work_tree_cycle",
+            return_value={"status": "ok", "executed_count": 5, "tree_count": 6},
+        ) as cycle_mock:
+            result = autonomy_maintenance._execute_autonomy_recommendation(state, packet, policy)
+
+        cycle_mock.assert_called_once_with(state, max_steps=5, max_trees=6)
+        self.assertEqual(result.get("result"), "success")
+        event_payload = (result.get("events") or [{}])[0].get("payload") or {}
+        self.assertEqual(event_payload.get("max_steps"), 5)
+        self.assertEqual(event_payload.get("max_trees"), 6)
 
     def test_run_worker_loops_for_bounded_cycles_and_records_status(self):
         with tempfile.TemporaryDirectory() as td:

@@ -85,6 +85,7 @@ _EXPLICIT_HANDLE_OWNERSHIP_RULES = frozenset({
     "session_fact_recall",
     "self_location",
     "location_recall",
+    "location_name",
     "retrieval_followup",
     "name_origin_store",
     "apply_correction",

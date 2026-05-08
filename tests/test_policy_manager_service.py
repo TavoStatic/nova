@@ -3,6 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from services.nova_runtime_context import resolve_runtime_dir
 from services.policy_manager import PolicyManager
 
 
@@ -24,6 +25,23 @@ class TestPolicyManager(unittest.TestCase):
             self.assertIn("web", policy)
             self.assertIn("patch", policy)
             self.assertEqual(policy["memory"].get("scope"), "private")
+
+    def test_safety_envelope_defaults_use_runtime_context(self):
+        with tempfile.TemporaryDirectory() as td:
+            base = Path(td)
+            manager = self._make_manager(base)
+
+            policy = manager.load_policy()
+
+            runtime_dir = resolve_runtime_dir(base)
+            self.assertEqual(
+                policy["safety_envelope"].get("quarantine_root"),
+                str(runtime_dir / "test_sessions" / "quarantine"),
+            )
+            self.assertEqual(
+                policy["safety_envelope"].get("pending_review_root"),
+                str(runtime_dir / "test_sessions" / "pending_review"),
+            )
 
     def test_allow_and_remove_domain_mutates_policy(self):
         with tempfile.TemporaryDirectory() as td:

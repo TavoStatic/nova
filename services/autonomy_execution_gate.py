@@ -196,6 +196,10 @@ class AutonomyExecutionGateService:
             "reason_code": _safe_text(action.get("reason_code"), 120),
             "execution_group": self._primary_action_group(action_type, action),
         }
+        for key in ("max_steps", "max_trees"):
+            value = int(_as_float(action.get(key), 0))
+            if value > 0:
+                payload[key] = value
         return {
             "allow_execute": True,
             "status": "allowed",

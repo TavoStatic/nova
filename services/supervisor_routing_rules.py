@@ -583,8 +583,34 @@ def location_name_rule(
     phase: str = "handle",
     entry_point: str = "",
 ) -> dict[str, Any]:
-    del user_text, low, manager, turn, turns, phase, entry_point
-    return {"handled": False}
+    del turn, turns, entry_point
+    if phase != "handle":
+        return {"handled": False}
+
+    if not looks_like_location_name_query(low):
+        return {"handled": False}
+
+    context = active_tasks.resolve_active_task_context(manager)
+    move = _classify_followup_move(user_text, low)
+    if context.is_location_recall() or move == "reference_answer" or followup_moves.uses_prior_reference(low):
+        return {
+            "handled": True,
+            "action": "location_name",
+            "continuation": False,
+            "next_state": {"kind": "location_recall"},
+            "ledger_stage": "location_recall",
+            "grounded": True,
+        }
+
+    return {
+        "handled": True,
+        "action": "location_clarify",
+        "continuation": False,
+        "next_state": {"kind": "location_recall"},
+        "ledger_stage": "location_clarify",
+        "grounded": False,
+        "clarifying_question": "Which location do you mean: your current device location, your saved location, or another place?",
+    }
 
 
 def location_weather_rule(

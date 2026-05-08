@@ -6,7 +6,7 @@ import unittest
 import uuid
 from pathlib import Path
 
-from services.nova_pulse import build_pulse_payload, render_nova_pulse, write_pulse_snapshot
+from services.nova_pulse import _count_definition_files, build_pulse_payload, render_nova_pulse, write_pulse_snapshot
 
 
 def _workspace_dir() -> Path:
@@ -136,6 +136,19 @@ def test_write_pulse_snapshot_writes_expected_fields() -> None:
 
 
 class TestNovaPulseService(unittest.TestCase):
+    def test_pulse_counts_nested_generated_definition_files(self) -> None:
+        root = _workspace_dir()
+        try:
+            generated = root / "generated"
+            nested = generated / "real_world"
+            nested.mkdir(parents=True, exist_ok=True)
+            (nested / "stress_location_recall.json").write_text("{}", encoding="utf-8")
+            (generated / "latest_manifest.json").write_text("{}", encoding="utf-8")
+
+            self.assertEqual(_count_definition_files(generated), 1)
+        finally:
+            shutil.rmtree(root, ignore_errors=True)
+
     def test_live_generated_queue_drift_overrides_stale_maintenance_clear(self) -> None:
         root = _workspace_dir()
         try:

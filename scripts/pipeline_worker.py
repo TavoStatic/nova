@@ -10,12 +10,13 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from pipelines.privileged_worker import process_next_privileged_request
+from services.nova_runtime_context import RUNTIME_DIR
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Run a privileged Nova data-pipeline worker.")
     parser.add_argument("--pipeline", required=True, help="Pipeline id to service, e.g. sis_test")
-    parser.add_argument("--runtime-root", default=str(ROOT / "runtime"))
+    parser.add_argument("--runtime-root", default=str(RUNTIME_DIR))
     parser.add_argument("--data-sources-root", default=str(ROOT / "data_sources"))
     parser.add_argument("--once", action="store_true", help="Process at most one request and exit.")
     parser.add_argument("--poll-interval", type=float, default=1.0, help="Seconds between polls when idle.")

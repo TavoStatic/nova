@@ -86,6 +86,33 @@ class TestSupervisorRoutingRules(unittest.TestCase):
         self.assertTrue(result.get("handled"))
         self.assertFalse(result.get("continuation", False))
 
+    def test_location_name_rule_clarifies_without_location_context(self):
+        supervisor = Supervisor()
+
+        result = supervisor.evaluate_rules(
+            "what is the name of the city",
+            manager=ConversationSession(),
+            phase="handle",
+        )
+
+        self.assertEqual(result.get("rule_name"), "location_name")
+        self.assertEqual(result.get("action"), "location_clarify")
+        self.assertTrue(result.get("handled"))
+        self.assertIn("Which location", result.get("clarifying_question", ""))
+
+    def test_location_name_rule_claims_prior_reference(self):
+        supervisor = Supervisor()
+
+        result = supervisor.evaluate_rules(
+            "what is the name of that location",
+            manager=ConversationSession(),
+            phase="handle",
+        )
+
+        self.assertEqual(result.get("rule_name"), "location_name")
+        self.assertEqual(result.get("action"), "location_name")
+        self.assertTrue(result.get("handled"))
+
 
 if __name__ == "__main__":
     unittest.main()

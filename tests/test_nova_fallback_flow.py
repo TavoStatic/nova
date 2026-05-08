@@ -2,7 +2,6 @@
 from types import SimpleNamespace
 
 from services.nova_fallback_flow import apply_low_confidence_block
-from services.nova_fallback_flow import apply_pending_weather_followup_fallback
 from services.nova_fallback_flow import apply_policy_gate_block
 from services.nova_fallback_flow import build_fallback_context
 from services.nova_fallback_flow import finalize_llm_fallback_reply
@@ -12,23 +11,6 @@ from services.nova_fallback_flow import prepare_fallback_flow
 
 
 class TestNovaFallbackFlow(unittest.TestCase):
-    def test_apply_pending_weather_followup_fallback_handles_saved_location_followup(self):
-        out = apply_pending_weather_followup_fallback(
-            text="yea please do that ..",
-            pending_action={"kind": "weather_lookup", "status": "awaiting_location", "saved_location_available": True},
-            last_assistant_text="What location should I use?",
-            looks_like_affirmative_followup_fn=lambda text: "yea" in text,
-            looks_like_shared_location_reference_fn=lambda text: False,
-            assistant_offered_weather_lookup_fn=lambda text: False,
-            ensure_reply=lambda text: text,
-            weather_for_saved_location_fn=lambda: "Brownsville, TX: clear skies.",
-        )
-        self.assertTrue(out.get("handled"))
-        self.assertEqual(out.get("planner_decision"), "deterministic")
-        self.assertTrue(out.get("grounded"))
-        self.assertTrue(out.get("clear_pending_action"))
-        self.assertIn("Brownsville, TX", out.get("reply"))
-
     def test_build_fallback_context_appends_recent_tool_context_for_prior_reference(self):
         calls = []
         out = build_fallback_context(

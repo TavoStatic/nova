@@ -1,6 +1,6 @@
 # Services Index
 
-Last verified: 2026-05-06
+Last verified: 2026-05-08
 
 This page maps the major service clusters under `services/`. It is a practical orientation guide, not an exhaustive API reference.
 
@@ -13,14 +13,14 @@ This page maps the major service clusters under `services/`. It is a practical o
 ## HTTP Runtime
 
 - `nova_http_frontdoor.py`, `nova_http_transport.py`, `nova_http_get_routes.py`, `nova_http_post_routes.py`, `nova_http_post_dispatch.py`
-- `nova_http_chat_orchestration.py`, `nova_http_chat_runtime.py`, `nova_http_turn_entry.py`, `nova_http_turn_finalization.py`
+- `nova_http_chat_runtime.py`, `nova_http_turn_finalization.py`
 - `nova_http_request_binding.py`, `nova_http_responses.py`, `nova_http_routing.py`
-- owns HTTP request binding, route dispatch, response emission, and chat-turn orchestration while `nova_http.py` remains the stable transport wrapper
+- owns HTTP request binding, route dispatch, response emission, and chat-turn runtime/finalization while `nova_http.py` remains the stable transport wrapper
 
 ## Decision And Reply Behavior
 
 - `decision_pipeline.py`, `fulfillment_flow.py`, `nova_fulfillment_routing.py`, `nova_query_classifiers.py`
-- `nova_reply_contracts.py`, `nova_reply_deterministic.py`, `nova_reply_guards.py`, `nova_reply_runtime.py`, `nova_reply_sanitizer.py`, `nova_reply_sequence.py`
+- `nova_reply_contracts.py`, `nova_reply_deterministic.py`, `nova_reply_guards.py`, `nova_reply_runtime.py`, `nova_reply_sanitizer.py`, `nova_reply_sequence.py`, `nova_turn_outcomes.py`
 - owns structured outcomes, deterministic reply contracts, fallback control, and reply safety shaping
 
 ## Supervisor And Routing Rules

@@ -80,6 +80,22 @@ class TestNovaSupervisorFlow(unittest.TestCase):
         self.assertEqual(reply, "Rules go here.")
         self.assertIsNone(next_state)
 
+    def test_execute_registered_supervisor_rule_from_runtime_dispatches_location_clarify(self):
+        handled, reply, next_state = nova_supervisor_flow.execute_registered_supervisor_rule_from_runtime(
+            {
+                "action": "location_clarify",
+                "clarifying_question": "Which location do you mean?",
+                "next_state": {"kind": "location_recall"},
+            },
+            "what is the name of the city",
+            None,
+            runtime_scope=_runtime_scope(),
+        )
+
+        self.assertTrue(handled)
+        self.assertEqual(reply, "Which location do you mean?")
+        self.assertEqual(next_state, {"kind": "location_recall"})
+
     def test_handle_supervisor_intent_from_runtime_dispatches_capability_query(self):
         handled, reply, next_state, effects = nova_supervisor_flow.handle_supervisor_intent_from_runtime(
             {"intent": "capability_query"},

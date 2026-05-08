@@ -138,6 +138,13 @@ def execute_registered_supervisor_rule(
         next_state = current_state if isinstance(current_state, dict) else make_conversation_state_fn("location_recall")
         return True, location_name_reply_fn(), next_state
 
+    if action == "location_clarify":
+        question = str((rule_result or {}).get("clarifying_question") or "").strip()
+        if not question:
+            question = "Which location do you mean?"
+        next_state = (rule_result or {}).get("next_state") if isinstance((rule_result or {}).get("next_state"), dict) else current_state
+        return True, question, next_state
+
     if action == "weather_current_location":
         next_state = (rule_result or {}).get("next_state")
         if not isinstance(next_state, dict):

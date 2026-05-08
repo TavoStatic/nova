@@ -26,7 +26,7 @@ HEARTBEAT_INTERVAL_SEC: int = 1
 GUARD_POLL_INTERVAL_SEC: int = 2
 
 # nova_guard.py → MAINTENANCE_INTERVAL_SECONDS = 3600
-MAINTENANCE_LAUNCH_INTERVAL_SEC: int = 3600
+MAINTENANCE_LAUNCH_INTERVAL_SEC: int = 300
 
 # autonomy_maintenance.py → run_worker(interval_sec=300)
 MAINTENANCE_CYCLE_INTERVAL_SEC: int = 300
@@ -98,7 +98,7 @@ SCHEDULED_TASKS: list[ScheduledTask] = [
         owner="nova_guard.py",
         trigger="interval",
         interval_sec=MAINTENANCE_LAUNCH_INTERVAL_SEC,
-        description="Guard launches autonomy_maintenance.py as a subprocess once per hour to run all maintenance cycles.",
+        description="Guard launches autonomy_maintenance.py as a subprocess every five minutes to run all maintenance cycles.",
         state_key="runtime_worker",
     ),
     ScheduledTask(
@@ -134,7 +134,7 @@ SCHEDULED_TASKS: list[ScheduledTask] = [
         owner="autonomy_maintenance.py",
         trigger="per_maintenance_cycle",
         interval_sec=MAINTENANCE_CYCLE_INTERVAL_SEC,
-        description="Advances active system work trees up to 3 steps per cycle; seeds a new tree if none are active.",
+        description="Advances active system work trees through the configured step budget; seeds a new tree if none are active.",
         state_key="last_work_tree_cycle",
     ),
     ScheduledTask(

@@ -7,6 +7,8 @@ import subprocess
 from pathlib import Path
 
 import http_test_session_helpers
+from services.test_session_definitions import iter_definition_files
+from services.test_session_definitions import relative_definition_name
 
 
 class TestSessionControlService:
@@ -25,18 +27,11 @@ class TestSessionControlService:
 
     @staticmethod
     def _iter_definition_files(root: Path) -> list[Path]:
-        try:
-            files = [path for path in root.rglob("*.json") if path.is_file()]
-        except Exception:
-            return []
-        return sorted(files, key=lambda path: path.as_posix().lower())
+        return iter_definition_files(root)
 
     @staticmethod
     def _relative_definition_name(path: Path, root: Path) -> str:
-        try:
-            return path.relative_to(root).as_posix()
-        except Exception:
-            return path.name
+        return relative_definition_name(path, root)
 
     @staticmethod
     def _normalize_session_lookup(value: str) -> str:

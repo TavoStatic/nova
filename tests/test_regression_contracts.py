@@ -6,6 +6,8 @@ import memory
 import nova_core
 from conversation_manager import ConversationSession
 from planner_decision import decide_turn
+from services.nova_action_ledger import _FINALIZE_ACTION_LEDGER_RECORD_HOOKS
+from services.nova_tool_dispatch import _PLANNED_TOOL_NAMES
 
 
 class TestRegressionContracts(unittest.TestCase):
@@ -69,6 +71,27 @@ class TestRegressionContracts(unittest.TestCase):
     def test_creator_hard_answer_contains_canonical_name(self):
         reply = nova_core.hard_answer("who made you?") or ""
         self.assertIn("my creator is gustavo uribe", reply.lower())
+
+    def test_core_thinning_keeps_runtime_public_adapters(self):
+        required_public_adapters = [
+            "_store_declarative_fact_reply",
+            "clear_runtime_device_location",
+            "handle_commands",
+            "handle_keywords",
+            "learn_from_user_correction",
+            "sanitize_llm_reply",
+            "speak_chunked",
+            "update_now_pending_payload",
+            "write_action_ledger_record",
+        ]
+        for adapter_name in required_public_adapters:
+            self.assertTrue(callable(getattr(nova_core, adapter_name, None)), adapter_name)
+
+        for tool_name in _PLANNED_TOOL_NAMES:
+            self.assertTrue(callable(getattr(nova_core, tool_name, None)), tool_name)
+
+        for runtime_name in _FINALIZE_ACTION_LEDGER_RECORD_HOOKS.values():
+            self.assertTrue(callable(getattr(nova_core, runtime_name, None)), runtime_name)
 
     def test_control_template_uses_current_branding(self):
         template = (Path(__file__).resolve().parents[1] / "templates" / "control.html").read_text(encoding="utf-8").lower()

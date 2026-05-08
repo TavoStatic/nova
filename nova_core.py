@@ -123,10 +123,8 @@ from services.nova_location_weather import coords_from_saved_location as service
 from services.nova_location_weather import extract_location_fact as service_extract_location_fact
 from services.nova_location_weather import extract_weather_source_host as service_extract_weather_source_host
 from services.nova_location_weather import get_saved_location_text as service_get_saved_location_text
-from services.nova_location_weather import handle_location_conversation_turn as service_handle_location_conversation_turn
 from services.nova_location_weather import is_location_name_query as service_is_location_name_query
 from services.nova_location_weather import is_location_recall_query as service_is_location_recall_query
-from services.nova_location_weather import infer_location_turn_intent as service_infer_location_turn_intent
 from services.nova_location_weather import is_saved_location_weather_query as service_is_saved_location_weather_query
 from services.nova_location_weather import is_weather_meta_followup as service_is_weather_meta_followup
 from services.nova_location_weather import is_weather_status_followup as service_is_weather_status_followup
@@ -591,12 +589,8 @@ def _recent_action_ledger_records(limit: int = 20) -> list[dict]:
     return service_recent_action_ledger_records(ACTION_LEDGER_DIR, limit=limit)
 
 
-def _record_completed_tool_execution(record: dict) -> bool:
-    return service_record_completed_tool_execution(record)
 
 
-def _record_requested_tool_clarification(record: dict) -> bool:
-    return service_record_requested_tool_clarification(record)
 
 
 def _detect_repeated_tool_intent_without_execution(records: Optional[list[dict]] = None, limit: int = 20) -> dict:
@@ -620,8 +614,6 @@ def _count_routing_overrides_recently(records: Optional[list[dict]] = None, limi
     return service_count_routing_overrides_recently(ACTION_LEDGER_DIR, records=records, limit=limit)
 
 
-def _unsupported_claims_blocked_recently(records: Optional[list[dict]] = None, limit: int = 20) -> bool:
-    return service_unsupported_claims_blocked_recently(ACTION_LEDGER_DIR, records=records, limit=limit)
 
 
 
@@ -1465,6 +1457,8 @@ def write_action_ledger_record(record: dict) -> Optional[Path]:
     return service_write_action_ledger_record(record, action_ledger_dir=ACTION_LEDGER_DIR)
 
 
+
+
 def _append_memory_event(payload: dict) -> None:
     return service_append_memory_event(payload, memory_events_log=MEMORY_EVENTS_LOG)
 
@@ -1910,6 +1904,15 @@ def _weather_unavailable_message() -> str:
     )
 
 
+def sanitize_llm_reply(reply: str, tool_context: str = "") -> str:
+    return service_sanitize_llm_reply(
+        reply,
+        tool_context,
+        weather_unavailable_message_fn=_weather_unavailable_message,
+        describe_capabilities_fn=describe_capabilities,
+    )
+
+
 def weather_response_style() -> str:
     try:
         s = str((policy_web().get("weather_response_style") or "concise")).strip().lower()
@@ -2022,6 +2025,10 @@ def clear_runtime_device_location() -> dict:
     )
 
 
+
+
+
+
 def _resolve_windows_device_coords(timeout_sec: float = 8.0) -> Optional[dict]:
     return service_resolve_windows_device_coords(
         timeout_sec,
@@ -2109,13 +2116,6 @@ def _store_location_fact_reply(
     )
 
 
-def _store_declarative_fact_reply(text: str, *, input_source: str = "typed") -> str:
-    return service_store_declarative_fact_reply(
-        text,
-        input_source=input_source,
-        store_declarative_fact_outcome_fn=_store_declarative_fact_outcome,
-        render_reply_fn=render_reply,
-    )
 
 
 def _store_declarative_fact_outcome(text: str, *, input_source: str = "typed") -> Optional[dict[str, object]]:
@@ -2126,6 +2126,15 @@ def _store_declarative_fact_outcome(text: str, *, input_source: str = "typed") -
         mem_should_store_fn=mem_should_store,
         mem_add_fn=mem_add,
         classify_store_fact_outcome_fn=_classify_store_fact_outcome,
+    )
+
+
+def _store_declarative_fact_reply(text: str, *, input_source: str = "typed") -> str:
+    return service_store_declarative_fact_reply(
+        text,
+        input_source=input_source,
+        store_declarative_fact_outcome_fn=_store_declarative_fact_outcome,
+        render_reply_fn=render_reply,
     )
 
 
@@ -2209,44 +2218,6 @@ def _location_name_reply() -> str:
     )
 
 
-def _infer_location_turn_intent(
-    state: Optional[dict],
-    text: str,
-    turns: Optional[list[tuple[str, str]]] = None,
-) -> dict:
-    return service_infer_location_turn_intent(
-        state,
-        text,
-        turns=turns,
-        normalize_turn_text_fn=_normalize_turn_text,
-        is_location_name_query_fn=_is_location_name_query,
-        is_location_recall_query_fn=_is_location_recall_query,
-        is_location_recall_state_fn=_is_location_recall_state,
-        looks_like_location_recall_followup_fn=_looks_like_location_recall_followup,
-    )
-
-
-def _handle_location_conversation_turn(
-    state: Optional[dict],
-    text: str,
-    turns: Optional[list[tuple[str, str]]] = None,
-) -> tuple[bool, str, Optional[dict], str]:
-    return service_handle_location_conversation_turn(
-        state,
-        text,
-        turns=turns,
-        make_conversation_state_fn=_make_conversation_state,
-        is_location_name_query_fn=_is_location_name_query,
-        location_name_reply_fn=_location_name_reply,
-        is_location_recall_query_fn=_is_location_recall_query,
-        location_recall_reply_fn=_location_recall_reply,
-        looks_like_contextual_followup_fn=_looks_like_contextual_followup,
-        is_location_recall_state_fn=_is_location_recall_state,
-        looks_like_location_recall_followup_fn=_looks_like_location_recall_followup,
-        infer_location_turn_intent_fn=_infer_location_turn_intent,
-    )
-
-
 def _make_conversation_state(kind: str, **data) -> dict:
     state = {"kind": str(kind or "").strip()}
     for key, value in data.items():
@@ -2324,12 +2295,6 @@ def _looks_like_retrieval_followup(text: str) -> bool:
 
 
 
-def _retrieval_query_from_text(tool_name: str, text: str) -> str:
-    return service_conversation_followups.retrieval_query_from_text(
-        tool_name,
-        text,
-        web_research_query_fn=lambda: WEB_RESEARCH_SESSION.query,
-    )
 
 
 def _provider_name_from_tool(tool_name: str) -> str:
@@ -2449,8 +2414,6 @@ def _queue_status_seam_reply(state: dict) -> str:
     return service_conversation_followups.queue_status_seam_reply(state)
 
 
-def _is_location_recall_state(state: Optional[dict]) -> bool:
-    return service_conversation_followups.is_location_recall_state(state)
 
 
 def _looks_like_location_recall_followup(session_turns: list[tuple[str, str]], text: str) -> bool:
@@ -2616,8 +2579,8 @@ class SubprocessTTS(ServiceSubprocessTTS):
         super().__init__(python_exe, oneshot_script, timeout_sec, warn_fn=warn)
 
 
-def speak_chunked(tts: SubprocessTTS, text: str, max_len: int = 220):
-    return service_speak_chunked(tts, text, max_len=max_len)
+
+
 
 
 # =========================
@@ -2948,6 +2911,15 @@ def _title_name(s: str) -> str:
     return " ".join(w[:1].upper() + w[1:] for w in out.split())
 
 
+
+
+
+def get_learned_fact(key: str, default: str = "") -> str:
+    data = load_learned_facts()
+    v = str(data.get(key) or "").strip()
+    return v or default
+
+
 def learn_from_user_correction(text: str) -> tuple[bool, str]:
     return service_learn_from_user_correction(
         text,
@@ -2958,13 +2930,6 @@ def learn_from_user_correction(text: str) -> tuple[bool, str]:
         mem_enabled_fn=mem_enabled,
         mem_add_fn=mem_add,
     )
-
-
-
-def get_learned_fact(key: str, default: str = "") -> str:
-    data = load_learned_facts()
-    v = str(data.get(key) or "").strip()
-    return v or default
 
 
 def _speaker_matches_developer() -> bool:
@@ -3559,8 +3524,6 @@ def _resolve_research_provider(candidates: list[str], *, default_tool: str = "we
 
 
 
-def _search_endpoint_candidates(endpoint: str) -> list[str]:
-    return service_search_endpoint_candidates(endpoint)
 
 
 
@@ -4970,13 +4933,6 @@ def hard_answer(user_text: str) -> Optional[str]:
 
 
 
-def sanitize_llm_reply(reply: str, tool_context: str = "") -> str:
-    return service_sanitize_llm_reply(
-        reply,
-        tool_context,
-        weather_unavailable_message_fn=_weather_unavailable_message,
-        describe_capabilities_fn=describe_capabilities,
-    )
 
 
 def _strip_mem_leak(reply: str, mem_block: str) -> str:
@@ -5244,24 +5200,12 @@ def _teach_autoapply_proposal(zip_path: str, apply_live: bool = False) -> str:
 # =========================
 # Voice (STT)
 # =========================
-def record_seconds(seconds=3):
-    return service_record_seconds(
-        seconds,
-        ensure_voice_deps_fn=_ensure_voice_deps,
-        runtime_scope=globals(),
-        sample_rate=SAMPLE_RATE,
-        channels=CHANNELS,
-    )
 
 
-def transcribe(model, audio_int16):
-    return service_transcribe(
-        model,
-        audio_int16,
-        ensure_voice_deps_fn=_ensure_voice_deps,
-        runtime_scope=globals(),
-        sample_rate=SAMPLE_RATE,
-    )
+
+
+def speak_chunked(tts, text: str, max_len: int = 220):
+    return service_speak_chunked(tts, text, max_len=max_len)
 
 
 # =========================
@@ -5416,13 +5360,22 @@ def render_nova_pulse(payload: Optional[dict] = None) -> str:
     )
 
 
+def write_pulse_snapshot(payload: dict) -> None:
+    return service_write_pulse_snapshot(
+        payload,
+        pulse_snapshot_file=PULSE_SNAPSHOT_FILE,
+    )
+
 
 def tool_nova_pulse():
     return service_tool_nova_pulse(
         build_pulse_payload_fn=build_pulse_payload,
-        write_pulse_snapshot_fn=lambda payload: service_write_pulse_snapshot(payload, pulse_snapshot_file=PULSE_SNAPSHOT_FILE),
+        write_pulse_snapshot_fn=write_pulse_snapshot,
         render_nova_pulse_fn=render_nova_pulse,
     )
+
+
+
 
 
 def tool_nova_self_status():
@@ -5546,6 +5499,13 @@ def _read_update_now_pending() -> dict:
     return service_read_update_now_pending(UPDATE_NOW_PENDING_FILE, load_json_file_fn=_load_json_file)
 
 
+def update_now_pending_payload() -> dict:
+    return service_update_now_pending_payload(
+        UPDATE_NOW_PENDING_FILE,
+        read_pending_fn=_read_update_now_pending,
+    )
+
+
 def _write_update_now_pending(payload: dict) -> None:
     return service_write_update_now_pending(UPDATE_NOW_PENDING_FILE, payload)
 
@@ -5554,8 +5514,8 @@ def _clear_update_now_pending() -> None:
     return service_clear_update_now_pending(UPDATE_NOW_PENDING_FILE)
 
 
-def update_now_pending_payload() -> dict:
-    return service_update_now_pending_payload(UPDATE_NOW_PENDING_FILE, read_pending_fn=_read_update_now_pending)
+
+
 
 
 def _build_update_now_token(zip_path: Path) -> str:
@@ -5584,6 +5544,10 @@ def tool_update_now_confirm(token: str = ""):
     )
 
 
+
+
+
+
 def tool_update_now_cancel():
     return service_tool_update_now_cancel(
         read_pending_fn=_read_update_now_pending,
@@ -5596,6 +5560,15 @@ def execute_planned_action(tool: str, args=None):
         tool,
         args,
         runtime_scope=globals(),
+    )
+
+
+def handle_commands(user_text: str, session_turns=None, session=None):
+    return service_handle_commands(
+        user_text,
+        session_turns=session_turns,
+        session=session,
+        core=sys.modules[__name__],
     )
 
 
@@ -5618,23 +5591,8 @@ def _weather_current_location_available() -> bool:
     return bool(_coords_from_saved_location())
 
 
-def web_search(query: str, save_dir: Path, max_results: int = 5) -> dict:
-    return service_web_search(
-        query,
-        save_dir,
-        requests_post_fn=requests.post,
-        max_results=max_results,
-    )
 
 
-def tool_search(query: str):
-    return service_tool_search(
-        query,
-        explain_missing_fn=explain_missing,
-        policy_tools_enabled_fn=policy_tools_enabled,
-        web_search_fn=web_search,
-        web_cache_dir=WEB_CACHE_DIR,
-    )
 
 
 def _decode_search_href(href: str) -> str:
@@ -5720,8 +5678,6 @@ def tool_web_fetch(url: str):
     )
 
 
-def _provider_request_headers(token: str = "") -> dict[str, str]:
-    return service_provider_request_headers(token)
 
 
 
@@ -5817,17 +5773,6 @@ def _is_brief_command_form(text: str, command: str, max_tokens: int) -> bool:
 # =========================
 # Commands (typed) for kb / patch
 # =========================
-def handle_commands(
-    user_text: str,
-    session_turns: Optional[list[tuple[str, str]]] = None,
-    session: Optional[ConversationSession] = None,
-) -> Optional[str]:
-    return service_handle_commands(
-        user_text,
-        session_turns=session_turns,
-        session=session,
-        core=sys.modules[__name__],
-    )
 
 
 

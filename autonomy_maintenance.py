@@ -67,6 +67,7 @@ GENERATED_QUEUE_MAX_STEPS = 4
 ACTIVE_WORK_TREE_EXECUTE_TOOLS = ["health", "system_check", "queue_status", "pulse", "read", "ls", "find", "core_thinning"]
 ACTIVE_WORK_TREE_MAX_TREES = 8
 ACTIVE_WORK_TREE_MAX_STEPS = 8
+ACTIVE_WORK_TREE_DEFAULT_DISPATCH_STEPS = 3
 LEGACY_PATCH_UPDATE_TOOLS = {"patch_apply", "patch_rollback", "update_now"}
 COMPLETE_TREE_VISIBLE_KEEP = 12
 COMPLETE_TREE_ARCHIVE_MIN_AGE_SEC = 0
@@ -283,7 +284,13 @@ def _queue_pressure_for_orchestrator(generated_queue: dict, state: dict | None =
         if isinstance(current_state.get("last_patch_queue_sync"), dict)
         else {}
     )
-    generated_pending = _safe_int(queue.get("open_count") or queue.get("count"), 0)
+    queue_status = str(queue.get("status") or "").strip().lower()
+    if "open_count" in queue:
+        generated_pending = _safe_int(queue.get("open_count"), 0)
+    elif queue_status in {"clear", "empty", "ok"}:
+        generated_pending = 0
+    else:
+        generated_pending = _safe_int(queue.get("count"), 0)
     generated_actionable = _safe_int(queue.get("actionable_count"), 0)
     generated_blocked = _safe_int(queue.get("blocked_count"), 0)
     patch_apply_ready = _safe_int(patch_sync.get("apply_ready_count"), 0)
@@ -410,6 +417,14 @@ def _policy_snapshot_for_orchestrator() -> dict:
         "confidence_threshold": _safe_float(settings.get("confidence_threshold"), 0.55),
         "execute_min_confidence": _safe_float(settings.get("execute_min_confidence", settings.get("confidence_threshold")), 0.55),
         "cooldown_sec": _safe_int(settings.get("cooldown_sec"), 180),
+        "active_work_tree_max_steps_per_cycle": _safe_int(
+            settings.get("active_work_tree_max_steps_per_cycle"),
+            ACTIVE_WORK_TREE_DEFAULT_DISPATCH_STEPS,
+        ),
+        "active_work_tree_max_trees_per_cycle": _safe_int(
+            settings.get("active_work_tree_max_trees_per_cycle"),
+            ACTIVE_WORK_TREE_MAX_TREES,
+        ),
         "orchestrator_owns_execution": _autonomy_policy_bool(settings, "orchestrator_owns_execution", default=False),
         "legacy_maintenance_execution_enabled": _legacy_maintenance_execution_enabled(settings),
         "source_freshness_sec": 0,
@@ -964,8 +979,14 @@ def _maintenance_patch_queue_run_next_action(_payload: dict, state: dict) -> tup
 
 
 def _maintenance_active_work_tree_run_next_action(_payload: dict, state: dict) -> tuple[bool, str, dict, str]:
+    max_steps = _safe_int((_payload or {}).get("max_steps"), ACTIVE_WORK_TREE_DEFAULT_DISPATCH_STEPS)
+    max_trees = _safe_int((_payload or {}).get("max_trees"), ACTIVE_WORK_TREE_MAX_TREES)
     try:
-        cycle = _run_active_work_tree_cycle(state, max_steps=1)
+        cycle = _run_active_work_tree_cycle(
+            state,
+            max_steps=max(1, min(max_steps, ACTIVE_WORK_TREE_MAX_STEPS)),
+            max_trees=max(1, min(max_trees, ACTIVE_WORK_TREE_MAX_TREES)),
+        )
     except Exception as exc:
         msg = f"active_work_tree_run_next_failed:{exc}"
         return False, msg, {}, msg

@@ -1,5 +1,5 @@
 param(
-  # Subcommand: look | lookfull | chat | camera | ls | read | find | run | webui | webui-start | webui-stop | webui-status | operator | hub | smoke | test | health | guard | install | update | diag | logs | mem | memory | config | stop
+  # Subcommand: look | lookfull | chat | camera | ls | read | find | run | webui | webui-start | webui-stop | webui-status | operator | hub | smoke | test | health | guard | install | update | diag | logs | mem | memory | config | release-clean | stop
   [Parameter(Position=0)]
   [string]$cmd = "help",
 
@@ -44,6 +44,7 @@ $PACKAGELEDGERPS1 = Join-Path $ROOT "scripts\show_release_ledger.ps1"
 $PACKAGEPROMOTEPS1 = Join-Path $ROOT "scripts\promote_release_package.ps1"
 $PACKAGESTATUSPS1 = Join-Path $ROOT "scripts\show_release_status.ps1"
 $PACKAGEREADINESSPS1 = Join-Path $ROOT "scripts\show_release_readiness.ps1"
+$RELEASECLEANPY = Join-Path $ROOT "scripts\release_clean_check.py"
 $POLICY    = Join-Path $ROOT "policy.json"    # optional
 $LOG_DIR   = Join-Path $ROOT "logs"
 
@@ -123,7 +124,13 @@ function Invoke-NovaNative([string]$executablePath, [string[]]$argumentList=@())
 
 function Invoke-BootstrapPython([string[]]$pythonTokens=@()) {
   if (Test-Path $venvPython) {
-    return (Invoke-NovaNative $venvPython $pythonTokens)
+    & $venvPython --version *> $null
+    if ($null -eq $LASTEXITCODE -or [int]$LASTEXITCODE -eq 0) {
+      return (Invoke-NovaNative $venvPython $pythonTokens)
+    }
+
+    Write-Host ("[WARN] venv python exists but is not runnable: " + $venvPython)
+    Write-Host "       Falling back to a bootstrap Python for this command."
   }
 
   $pyCmd = Get-Command py -ErrorAction SilentlyContinue
@@ -335,6 +342,16 @@ function Invoke-NovaPackageReadiness([string[]]$readinessTokens=@()) {
 
   $args = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $PACKAGEREADINESSPS1) + $readinessTokens
   return (Invoke-NovaNative "powershell.exe" $args)
+}
+
+function Invoke-NovaReleaseClean([string[]]$releaseCleanTokens=@()) {
+  if (-not (Test-Path $RELEASECLEANPY)) {
+    Write-Host ("[FAIL] Missing release-clean lane: " + $RELEASECLEANPY)
+    return 1
+  }
+
+  $pythonArgs = @($RELEASECLEANPY) + $releaseCleanTokens
+  return (Invoke-BootstrapPython $pythonArgs)
 }
 
 function Invoke-NovaInstallerReadiness([string[]]$readinessTokens=@()) {
@@ -826,6 +843,7 @@ function Show-Help {
   Write-Host "  nova package-status            # latest release artifact and promotion state"
   Write-Host "  nova installer-status          # latest Windows installer and promotion state"
   Write-Host "  nova package-readiness         # ship-gate summary from latest build, verify, and promotion records"
+  Write-Host "  nova release-clean [--label push-prep]  # hygiene -> regression -> smoke -> package build/verify -> readiness report"
   Write-Host "  nova installer-readiness       # ship-gate summary for latest Windows installer"
   Write-Host "  nova package-promote --result pass [--version 2026.03.30.2] [--note text]  # record RC validation outcome"
   Write-Host "  nova installer-promote --result pass [--version 2026.03.30.2] [--note text]  # record installer validation outcome"
@@ -1332,6 +1350,11 @@ switch ($cmd.ToLower()) {
   "package-readiness" {
     $readinessCode = Invoke-NovaPackageReadiness $remainingTokens
     exit $readinessCode
+  }
+
+  "release-clean" {
+    $releaseCleanCode = Invoke-NovaReleaseClean $remainingTokens
+    exit $releaseCleanCode
   }
 
   "installer-readiness" {

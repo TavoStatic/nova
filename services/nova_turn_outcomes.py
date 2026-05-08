@@ -43,6 +43,149 @@ def apply_identity_binding_learning(
     }
 
 
+def apply_numeric_clarify_outcome(
+    *,
+    has_intent_route: bool,
+    routed_text: str,
+    pending_action,
+    current_state,
+    session,
+    ledger: dict,
+    should_clarify_unlabeled_numeric_turn: Callable[..., bool],
+    unlabeled_numeric_turn_reply: Callable[[str], str],
+    make_conversation_state: Callable[..., dict],
+    action_ledger_add_step: Callable[..., None],
+) -> dict:
+    if has_intent_route or not should_clarify_unlabeled_numeric_turn(
+        routed_text,
+        pending_action=pending_action,
+        current_state=current_state,
+    ):
+        return {"handled": False}
+
+    session.apply_state_update(
+        make_conversation_state(
+            "numeric_reference_clarify",
+            value=str(routed_text or "").strip(),
+        )
+    )
+    action_ledger_add_step(ledger, "numeric_clarify", "blocked")
+    return {
+        "handled": True,
+        "reply": unlabeled_numeric_turn_reply(routed_text),
+        "planner_decision": "ask_clarify",
+        "grounded": False,
+        "intent": "numeric_clarify",
+    }
+
+
+def apply_mixed_turn_clarify(
+    *,
+    turn_acts: list[str],
+    correction_pending: bool,
+    skip_mixed_turn_clarify: bool = False,
+    routed_text: str,
+    ledger: dict,
+    mixed_info_request_clarify_reply: Callable[[str], str],
+    action_ledger_add_step: Callable[..., None],
+) -> dict:
+    if "mixed" not in turn_acts or correction_pending or skip_mixed_turn_clarify:
+        return {"handled": False}
+
+    action_ledger_add_step(ledger, "mixed_turn_clarify", "blocked")
+    return {
+        "handled": True,
+        "reply": mixed_info_request_clarify_reply(routed_text),
+        "planner_decision": "ask_clarify",
+        "grounded": False,
+        "intent": "clarify_mixed_turn",
+        "reply_contract": "turn.clarify_mixed_intent",
+        "reply_outcome": {
+            "intent": "clarify_mixed_turn",
+            "kind": "mixed_info_request",
+            "reply_contract": "turn.clarify_mixed_intent",
+        },
+    }
+
+
+def apply_web_research_override(
+    *,
+    text: str,
+    ledger: dict,
+    is_web_research_override_request: Callable[[str], bool],
+    action_ledger_add_step: Callable[..., None],
+    session=None,
+    set_prefer_web_for_data_queries: Callable[[bool], None] | None = None,
+) -> dict:
+    if not bool(is_web_research_override_request(text)):
+        return {"handled": False}
+
+    try:
+        if callable(set_prefer_web_for_data_queries):
+            set_prefer_web_for_data_queries(True)
+        elif session is not None:
+            session.set_prefer_web_for_data_queries(True)
+        else:
+            return {"handled": False}
+    except Exception:
+        return {"handled": False}
+
+    action_ledger_add_step(ledger, "session_override", "enabled", "prefer_web_for_data_queries")
+    return {
+        "handled": True,
+        "reply": "Understood. I'll prefer web research for broad data queries in this session.",
+        "planner_decision": "deterministic",
+        "grounded": True,
+        "intent": "session_override",
+    }
+
+
+def apply_supervisor_bypass_safe_fallback(
+    *,
+    warn_supervisor_bypass: bool,
+    reply_contract: str,
+    routed_text: str,
+    turns,
+    routing_decision,
+    ledger: dict,
+    open_probe_reply: Callable[..., tuple[str, str]],
+    action_ledger_add_step: Callable[..., None],
+) -> dict:
+    if not warn_supervisor_bypass or reply_contract == "turn.truthful_limit":
+        return {"handled": False, "routing_decision": routing_decision}
+
+    reply, safe_kind = open_probe_reply(routed_text, turns=turns)
+    safe_outcome = {
+        "intent": "open_probe_family",
+        "kind": safe_kind,
+        "reply_contract": f"open_probe.{safe_kind}",
+        "reply_text": reply,
+        "state_delta": {},
+    }
+    if isinstance(routing_decision, dict):
+        routing_decision["final_owner"] = "supervisor_handle"
+    action_ledger_add_step(ledger, "open_probe", "matched", safe_kind)
+    return {
+        "handled": True,
+        "reply": reply,
+        "reply_contract": str(safe_outcome.get("reply_contract") or ""),
+        "reply_outcome": safe_outcome,
+        "planner_decision": "deterministic",
+        "grounded": False,
+        "intent": "open_probe_family",
+        "meta": {
+            "planner_decision": "deterministic",
+            "tool": "",
+            "tool_args": {},
+            "tool_result": "",
+            "grounded": False,
+            "reply_contract": str(safe_outcome.get("reply_contract") or ""),
+            "reply_outcome": safe_outcome,
+        },
+        "routing_decision": routing_decision,
+    }
+
+
 def apply_developer_profile_learning(
     *,
     learned_profile: bool,
@@ -139,6 +282,14 @@ def apply_saved_location_weather_outcome(
     normalized = str(routed_text or "").strip().lower()
     explicit_saved_location = "saved location" in normalized
     if not is_saved_location_weather_query(routed_text):
+        return {"handled": False}
+    if not (
+        (
+            isinstance(conversation_state, dict)
+            and str(conversation_state.get("kind") or "") == "location_recall"
+        )
+        or explicit_saved_location
+    ):
         return {"handled": False}
 
     weather_reply = str(weather_for_saved_location() or "")
@@ -244,31 +395,5 @@ def apply_developer_location_outcome(
         "planner_decision": "deterministic",
         "grounded": True,
         "intent": "developer_location",
-        "conversation_state": session.conversation_state,
-    }
-
-
-def apply_location_conversation_outcome(
-    *,
-    handled_location: bool,
-    location_reply: str,
-    next_location_state,
-    location_intent: str,
-    conversation_state,
-    session,
-    ensure_reply: Callable[[str], str],
-) -> dict:
-    if not handled_location:
-        return {"handled": False}
-
-    if isinstance(next_location_state, dict):
-        session.apply_state_update(next_location_state, fallback_state=conversation_state)
-    reply = ensure_reply(str(location_reply or ""))
-    return {
-        "handled": True,
-        "reply": reply,
-        "planner_decision": "deterministic",
-        "grounded": True,
-        "intent": str(location_intent or "location_recall"),
         "conversation_state": session.conversation_state,
     }

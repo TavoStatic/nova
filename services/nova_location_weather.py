@@ -914,45 +914,6 @@ def is_location_name_query(
     return "location" in normalized and "name" in normalized and uses_prior_reference_fn(normalized)
 
 
-def infer_location_turn_intent(
-    state: Optional[dict],
-    text: str,
-    *,
-    turns: Optional[list[tuple[str, str]]] = None,
-    normalize_turn_text_fn: Callable[[str], str],
-    is_location_name_query_fn: Callable[[str], bool],
-    is_location_recall_query_fn: Callable[[str], bool],
-    is_location_recall_state_fn: Callable[[Optional[dict]], bool],
-    looks_like_location_recall_followup_fn: Callable[[list[tuple[str, str]], str], bool],
-) -> dict:
-    normalized = normalize_turn_text_fn(text).strip(" .,!?")
-    if not normalized:
-        return {"intent": "none", "confidence": 0.0}
-
-    active_location_context = is_location_recall_state_fn(state) or looks_like_location_recall_followup_fn(list(turns or []), text)
-    if is_location_name_query_fn(text):
-        return {"intent": "location_name", "confidence": 0.92, "context_fit": active_location_context}
-    if is_location_recall_query_fn(text):
-        return {"intent": "location_recall", "confidence": 0.92, "context_fit": True}
-
-    tokens = set(re.findall(r"[a-z0-9']+", normalized.lower()))
-    asks_identity = bool(tokens & {"name", "called", "which", "what"})
-    asks_location_label = bool(tokens & {"city", "place", "town", "area", "county", "zip", "zipcode"})
-    has_external_topic = bool(tokens & {"song", "book", "movie", "album", "person", "company", "band", "definition", "history"})
-
-    if asks_identity and asks_location_label and active_location_context:
-        return {"intent": "location_name", "confidence": 0.86, "context_fit": True}
-    if asks_identity and asks_location_label and not has_external_topic:
-        return {
-            "intent": "clarify_location_reference",
-            "confidence": 0.62,
-            "context_fit": False,
-            "clarifying_question": "Which location do you mean: your current device location, your saved location, or another place?",
-        }
-
-    return {"intent": "none", "confidence": 0.0, "context_fit": active_location_context}
-
-
 def location_name_reply(
     *,
     get_saved_location_text_fn: Callable[[], str],
@@ -979,52 +940,6 @@ def location_name_reply(
     if expanded:
         return f"That location is {expanded}."
     return f"The location I have saved is {preview}."
-
-
-def handle_location_conversation_turn(
-    state: Optional[dict],
-    text: str,
-    *,
-    turns: Optional[list[tuple[str, str]]] = None,
-    make_conversation_state_fn: Callable[..., dict],
-    is_location_name_query_fn: Callable[[str], bool],
-    location_name_reply_fn: Callable[[], str],
-    is_location_recall_query_fn: Callable[[str], bool],
-    location_recall_reply_fn: Callable[[], str],
-    looks_like_contextual_followup_fn: Callable[[str], bool],
-    is_location_recall_state_fn: Callable[[Optional[dict]], bool],
-    looks_like_location_recall_followup_fn: Callable[[list[tuple[str, str]], str], bool],
-    infer_location_turn_intent_fn: Optional[Callable[..., dict]] = None,
-) -> tuple[bool, str, Optional[dict], str]:
-    next_state = state if isinstance(state, dict) else make_conversation_state_fn("location_recall")
-    intent = (
-        infer_location_turn_intent_fn(
-            state,
-            text,
-            turns=turns,
-        )
-        if callable(infer_location_turn_intent_fn)
-        else {}
-    )
-    intent_name = str((intent or {}).get("intent") or "").strip()
-    if intent_name == "location_name":
-        return True, location_name_reply_fn(), next_state, "location_name"
-    if intent_name == "location_recall":
-        return True, location_recall_reply_fn(), make_conversation_state_fn("location_recall"), "location_recall"
-    if intent_name == "clarify_location_reference":
-        question = str((intent or {}).get("clarifying_question") or "").strip()
-        if not question:
-            question = "Which location do you mean?"
-        return True, question, state if isinstance(state, dict) else None, "location_clarify"
-    if is_location_name_query_fn(text):
-        return True, location_name_reply_fn(), next_state, "location_name"
-    if is_location_recall_query_fn(text):
-        return True, location_recall_reply_fn(), make_conversation_state_fn("location_recall"), "location_recall"
-    if looks_like_contextual_followup_fn(text) and (
-        is_location_recall_state_fn(state) or looks_like_location_recall_followup_fn(list(turns or []), text)
-    ):
-        return True, location_recall_reply_fn(), make_conversation_state_fn("location_recall"), "location_recall"
-    return False, "", next_state, ""
 
 
 def set_location_coords(

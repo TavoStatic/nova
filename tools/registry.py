@@ -2,7 +2,6 @@
 
 import json
 import time
-from pathlib import Path
 from typing import Any
 
 from .base_tool import NovaTool, ToolContext, ToolInvocationError
@@ -11,11 +10,12 @@ from .patch_tool import PatchTool
 from .research_tool import ResearchTool
 from .system_tool import SystemTool
 from .vision_tool import VisionTool
+from services.nova_runtime_context import BASE_DIR
+from services.nova_runtime_context import TOOL_EVENTS_FILE
 
 
-BASE_DIR = Path(__file__).resolve().parent.parent
 TOOL_MANIFEST_PATH = BASE_DIR / "TOOL_MANIFEST.json"
-TOOL_EVENTS_PATH = BASE_DIR / "runtime" / "tool_events.jsonl"
+TOOL_EVENTS_PATH = TOOL_EVENTS_FILE
 
 
 def _load_manifest() -> dict[str, Any]:

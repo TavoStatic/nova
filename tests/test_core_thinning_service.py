@@ -346,9 +346,21 @@ class TestCoreThinningService(unittest.TestCase):
         services_dir = sample_dir / "services"
         services_dir.mkdir(parents=True, exist_ok=True)
         sample = sample_dir / "nova_core.py"
-        sample.write_text("def _runtime_wrapper():\n    return service_demo()\n", encoding="utf-8")
+        sample.write_text(
+            "\n".join(
+                [
+                    "def _runtime_wrapper():",
+                    "    return service_demo()",
+                    "",
+                    "def handle_keywords(text):",
+                    "    return service_handle_keywords(text)",
+                    "",
+                ]
+            ),
+            encoding="utf-8",
+        )
         (services_dir / "demo_attrs.py").write_text(
-            "def run(core):\n    return core._runtime_wrapper()\n",
+            "def run(core):\n    core._runtime_wrapper()\n    return core.handle_keywords('status')\n",
             encoding="utf-8",
         )
         try:
@@ -360,8 +372,83 @@ class TestCoreThinningService(unittest.TestCase):
             sample_dir.rmdir()
 
         self.assertEqual(brief.get("wrapper_candidate_count"), 0)
-        self.assertEqual(brief.get("referenced_wrapper_count"), 1)
+        self.assertEqual(brief.get("referenced_wrapper_count"), 2)
         self.assertFalse(any(item.get("kind") == "wrapper_candidate" for item in list(brief.get("orders") or [])))
+
+    def test_build_brief_protects_public_runtime_adapters(self):
+        sample = Path("C:/Nova/runtime/_test_tmp") / f"core_thinning_public_{uuid.uuid4().hex}.py"
+        sample.write_text(
+            "\n".join(
+                [
+                    "def tool_update_now_cancel():",
+                    "    return service_tool_update_now_cancel()",
+                    "",
+                    "def update_now_pending_payload():",
+                    "    return service_update_now_pending_payload()",
+                    "",
+                    "def speak_chunked(tts, text):",
+                    "    return service_speak_chunked(tts, text)",
+                    "",
+                    "def sanitize_llm_reply(reply, tool_context=''):",
+                    "    return service_sanitize_llm_reply(reply, tool_context)",
+                    "",
+                    "def clear_runtime_device_location():",
+                    "    return service_clear_runtime_device_location()",
+                    "",
+                    "def _store_declarative_fact_reply(text):",
+                    "    return service_store_declarative_fact_reply(text)",
+                    "",
+                    "def learn_from_user_correction(text):",
+                    "    return service_learn_from_user_correction(text)",
+                    "",
+                    "def handle_commands(user_text):",
+                    "    return service_handle_commands(user_text)",
+                    "",
+                    "def handle_keywords(text):",
+                    "    return service_handle_keywords(text)",
+                    "",
+                ]
+            ),
+            encoding="utf-8",
+        )
+        try:
+            brief = build_core_thinning_brief(sample)
+        finally:
+            sample.unlink(missing_ok=True)
+
+        self.assertEqual(brief.get("wrapper_candidate_count"), 0)
+        self.assertEqual(brief.get("referenced_wrapper_count"), 9)
+        self.assertFalse(any(item.get("kind") == "wrapper_candidate" for item in list(brief.get("orders") or [])))
+
+    def test_execute_core_thinning_order_blocks_public_runtime_adapter(self):
+        sample = Path("C:/Nova/runtime/_test_tmp") / f"core_thinning_public_exec_{uuid.uuid4().hex}.py"
+        sample.write_text(
+            "\n".join(
+                [
+                    "def tool_update_now_cancel():",
+                    "    return service_tool_update_now_cancel()",
+                    "",
+                ]
+            ),
+            encoding="utf-8",
+        )
+        target = {
+            "file": str(sample),
+            "name": "tool_update_now_cancel",
+            "start_line": 1,
+            "end_line": 2,
+            "wrapped_call": "service_tool_update_now_cancel",
+        }
+
+        try:
+            result = execute_core_thinning_order({"target": target})
+
+            self.assertFalse(result.get("ok"))
+            self.assertTrue(result.get("scope_ok"))
+            self.assertEqual(result.get("reason"), "public_adapter_protected")
+            self.assertIn("def tool_update_now_cancel", sample.read_text(encoding="utf-8"))
+        finally:
+            sample.unlink(missing_ok=True)
 
     def test_execute_core_thinning_order_blocks_wrapper_used_as_callable_hook(self):
         sample = Path("C:/Nova/runtime/_test_tmp") / f"core_thinning_hook_{uuid.uuid4().hex}.py"

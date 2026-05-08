@@ -954,40 +954,5 @@ class TestHttpChatFlow(unittest.TestCase):
         )
         self.assertFalse(out.get("handled"))
 
-    def test_apply_location_conversation_outcome_handled(self):
-        class _Session:
-            def __init__(self):
-                self.conversation_state = {"kind": "before"}
-
-            def apply_state_update(self, state, fallback_state=None):
-                self.conversation_state = state or fallback_state
-
-        session = _Session()
-        out = http_chat_flow.apply_location_conversation_outcome(
-            handled_location=True,
-            location_reply="I can use your saved location.",
-            next_location_state={"kind": "location_recall"},
-            location_intent="location_recall",
-            conversation_state={"kind": "before"},
-            session=session,
-            ensure_reply=lambda text: text,
-        )
-        self.assertTrue(out.get("handled"))
-        self.assertEqual(out.get("intent"), "location_recall")
-        self.assertEqual(out.get("reply"), "I can use your saved location.")
-        self.assertEqual(session.conversation_state, {"kind": "location_recall"})
-
-    def test_apply_location_conversation_outcome_not_handled(self):
-        out = http_chat_flow.apply_location_conversation_outcome(
-            handled_location=False,
-            location_reply="",
-            next_location_state=None,
-            location_intent="",
-            conversation_state={"kind": "before"},
-            session=object(),
-            ensure_reply=lambda text: text,
-        )
-        self.assertFalse(out.get("handled"))
-
 if __name__ == "__main__":
     unittest.main()

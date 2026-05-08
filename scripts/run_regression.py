@@ -76,6 +76,7 @@ TEST_LANES: dict[str, list[str]] = {
         "tests.test_policy_manager_service",
         "tests.test_regression_contracts",
         "tests.test_release_status_service",
+        "tests.test_release_clean_service",
         "tests.test_run_regression",
         "tests.test_run_tools",
         "tests.test_runtime_artifacts_service",

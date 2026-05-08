@@ -15,6 +15,7 @@ from services.nova_runtime_context import PROMOTION_AUDIT_LOG
 from services.nova_runtime_context import QUARANTINE_DIR
 from services.nova_runtime_context import RUNTIME_DIR
 from services.nova_runtime_context import TEST_SESSIONS_DIR
+from services.test_session_definitions import iter_definition_files
 
 
 ROOT = Path(__file__).resolve().parent
@@ -260,7 +261,7 @@ def scan_candidates() -> list[dict[str, Any]]:
 
     definition_max_age = float(cfg.get("definition_max_age_days", 7) or 7) * 86400.0
     novelty_min = float(cfg.get("definition_novelty_min", 0.4) or 0.4)
-    for path in sorted(GENERATED_DEFINITIONS_DIR.glob("*.json")) if GENERATED_DEFINITIONS_DIR.exists() else []:
+    for path in iter_definition_files(GENERATED_DEFINITIONS_DIR):
         if path.name in _MANIFEST_NAMES or _is_protected(path, protect_patterns):
             continue
         age = _age_seconds(path, now)
@@ -275,7 +276,7 @@ def scan_candidates() -> list[dict[str, Any]]:
         if reason:
             out.append(_build_candidate(path, "old_definition", "archive", reason, extra={"novelty": novelty}))
 
-    for path in sorted(PROMOTED_DEFINITIONS_DIR.glob("*.json")) if PROMOTED_DEFINITIONS_DIR.exists() else []:
+    for path in iter_definition_files(PROMOTED_DEFINITIONS_DIR):
         if path.name in _MANIFEST_NAMES or _is_protected(path, protect_patterns):
             continue
         age = _age_seconds(path, now)
@@ -285,7 +286,7 @@ def scan_candidates() -> list[dict[str, Any]]:
     quarantine_max_age = float(cfg.get("quarantine_max_age_hours", 48) or 48) * 3600.0
     demote_threshold = 0.90
     for root_name, root in (("pending_review", PENDING_REVIEW_DIR), ("quarantine", QUARANTINE_DIR)):
-        for path in sorted(root.glob("*.json")) if root.exists() else []:
+        for path in iter_definition_files(root):
             if _is_protected(path, protect_patterns):
                 continue
             age = _age_seconds(path, now)

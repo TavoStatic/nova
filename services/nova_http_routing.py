@@ -5,6 +5,7 @@ from typing import Any, Callable
 import http_chat_flow
 from services.decision_pipeline import StageRegistry
 from services.decision_pipeline import run_registered_stages
+from services.nova_reply_deterministic import _should_skip_mixed_turn_clarify
 
 
 HTTP_REGISTERED_SUPERVISOR_ACTIONS = {
@@ -12,6 +13,7 @@ HTTP_REGISTERED_SUPERVISOR_ACTIONS = {
     "self_location",
     "location_recall",
     "location_name",
+    "location_clarify",
     "weather_current_location",
     "apply_correction",
     "retrieval_followup",
@@ -61,13 +63,13 @@ def execute_http_routing_sequence(
     store_location_fact_reply: Callable[..., str],
     weather_for_saved_location: Callable[..., str],
     is_saved_location_weather_query: Callable[[str], bool],
+    get_saved_location_text: Callable[[], str] | None = None,
     store_declarative_fact_outcome: Callable[..., dict],
     render_reply: Callable[[Any], str],
     consume_conversation_followup: Callable[..., tuple[bool, str, Any]],
     conversation_active_subject: Callable[[dict], str],
     developer_work_guess_turn: Callable[[str], tuple[bool, Any]],
     developer_location_turn: Callable[..., tuple[str, Any]],
-    handle_location_conversation_turn: Callable[..., tuple[bool, str, Any, str]],
     action_ledger_add_step: Callable[..., None],
     ensure_reply: Callable[[str], str],
 ) -> dict[str, Any]:
@@ -135,6 +137,7 @@ def execute_http_routing_sequence(
         flow_result = http_chat_flow.apply_mixed_turn_clarify(
             turn_acts=turn_acts,
             correction_pending=correction_pending,
+            skip_mixed_turn_clarify=_should_skip_mixed_turn_clarify(routed_text),
             routed_text=routed_text,
             ledger=ledger,
             mixed_info_request_clarify_reply=mixed_info_request_clarify_reply,
@@ -434,30 +437,6 @@ def execute_http_routing_sequence(
         context["conversation_state"] = next_state
         return _handled_result(flow_result, state=next_state, detail="developer_location", owner="developer_location")
 
-    def _location_conversation_stage(_context: dict[str, Any]) -> dict[str, Any]:
-        try:
-            handled_location, location_reply, next_location_state, location_intent = handle_location_conversation_turn(
-                context.get("conversation_state"),
-                routed_text,
-                turns=turns,
-            )
-        except Exception:
-            return {"handled": False, "result": "pass"}
-        flow_result = http_chat_flow.apply_location_conversation_outcome(
-            handled_location=handled_location,
-            location_reply=location_reply,
-            next_location_state=next_location_state,
-            location_intent=location_intent,
-            conversation_state=context.get("conversation_state"),
-            session=session,
-            ensure_reply=ensure_reply,
-        )
-        if not flow_result.get("handled"):
-            return {"handled": False, "result": "pass"}
-        next_state = flow_result.get("conversation_state") if isinstance(flow_result.get("conversation_state"), dict) else session.conversation_state
-        context["conversation_state"] = next_state
-        return _handled_result(flow_result, state=next_state, detail="location_conversation", owner="location_conversation")
-
     registry = StageRegistry()
     registry.register("identity_only_mode", priority=10, handler=_identity_only_mode_stage)
     registry.register("numeric_clarify", priority=20, handler=_numeric_clarify_stage)
@@ -476,7 +455,6 @@ def execute_http_routing_sequence(
     registry.register("conversation_followup", priority=150, handler=_conversation_followup_stage)
     registry.register("developer_guess", priority=160, handler=_developer_guess_stage)
     registry.register("developer_location", priority=170, handler=_developer_location_stage)
-    registry.register("location_conversation", priority=180, handler=_location_conversation_stage)
 
     outcome = run_registered_stages(registry, context=context)
     if outcome.get("handled"):

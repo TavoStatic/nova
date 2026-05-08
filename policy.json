@@ -144,6 +144,8 @@
     ],
     "confidence_threshold": 0.55,
     "execute_min_confidence": 0.55,
-    "cooldown_sec": 180
+    "cooldown_sec": 180,
+    "active_work_tree_max_steps_per_cycle": 3,
+    "active_work_tree_max_trees_per_cycle": 8
   }
 }

@@ -12,6 +12,34 @@ from typing import Any
 
 CORE_THINNING_WORK_IDENTITY = "system:core-thinning"
 CORE_THINNING_ALLOWED_TOOLS = ["core_thinning", "read", "find", "patch_apply", "system_check", "health"]
+CORE_THINNING_PUBLIC_ADAPTER_NAMES = {
+    "_store_declarative_fact_reply",
+    "clear_runtime_device_location",
+    "handle_commands",
+    "handle_keywords",
+    "learn_from_user_correction",
+    "sanitize_llm_reply",
+    "speak_chunked",
+    "update_now_pending_payload",
+    "write_action_ledger_record",
+}
+
+
+def _protected_public_wrapper_names() -> set[str]:
+    names = set(CORE_THINNING_PUBLIC_ADAPTER_NAMES)
+    try:
+        from services.nova_tool_dispatch import _PLANNED_TOOL_NAMES
+
+        names.update(str(item or "").strip() for item in _PLANNED_TOOL_NAMES)
+    except Exception:
+        pass
+    try:
+        from services.nova_action_ledger import _FINALIZE_ACTION_LEDGER_RECORD_HOOKS
+
+        names.update(str(item or "").strip() for item in _FINALIZE_ACTION_LEDGER_RECORD_HOOKS.values())
+    except Exception:
+        pass
+    return {str(name or "").strip() for name in names if str(name or "").strip()}
 
 
 def _slug(value: Any) -> str:
@@ -188,16 +216,28 @@ def _runtime_hook_reference_names(paths: list[Path]) -> set[str]:
             for node in ast.walk(tree):
                 if isinstance(node, ast.Dict):
                     for value in list(node.values or []):
-                        if isinstance(value, ast.Constant) and isinstance(value.value, str) and value.value.startswith("_"):
-                            names.add(value.value)
+                        if isinstance(value, ast.Constant) and isinstance(value.value, str):
+                            hook_name = str(value.value or "").strip()
+                            if hook_name.isidentifier():
+                                names.add(hook_name)
                 elif isinstance(node, ast.Call):
                     if _called_name(node) != "_runtime_hook" or len(node.args) < 2:
                         continue
                     hook_name = node.args[1]
-                    if isinstance(hook_name, ast.Constant) and isinstance(hook_name.value, str) and hook_name.value.startswith("_"):
-                        names.add(hook_name.value)
-                elif isinstance(node, ast.Attribute) and str(node.attr or "").startswith("_"):
-                    names.add(str(node.attr or ""))
+                    if isinstance(hook_name, ast.Constant) and isinstance(hook_name.value, str):
+                        hook_text = str(hook_name.value or "").strip()
+                        if hook_text.isidentifier():
+                            names.add(hook_text)
+                elif isinstance(node, ast.Attribute):
+                    attr = str(node.attr or "").strip()
+                    if not attr.isidentifier():
+                        continue
+                    base = node.value
+                    while isinstance(base, ast.Attribute):
+                        base = base.value
+                    base_name = base.id if isinstance(base, ast.Name) else ""
+                    if attr.startswith("_") or base_name in {"core", "core_module", "nova_core"}:
+                        names.add(attr)
     return names
 
 
@@ -270,7 +310,7 @@ def _analyze_core_file(
         if span >= large_function_threshold:
             large.append(row)
 
-    protected_names = set(protected_wrapper_names or set())
+    protected_names = set(protected_wrapper_names or set()) | _protected_public_wrapper_names()
     wrapper_reference_counts = _name_reference_counts(tree, {str(item.get("name") or "") for item in wrappers})
     actionable_wrappers: list[dict[str, object]] = []
     referenced_wrappers: list[dict[str, object]] = []
@@ -514,6 +554,16 @@ def execute_core_thinning_order(payload: str | dict[str, object], *, python_exec
     if _is_service_wrapper(matched) != wrapped_call:
         return {"ok": False, "scope_ok": False, "verified": False, "reason": "wrapper_shape_drift"}
     start_line, end_line = actual_start, actual_end
+
+    if name in _protected_public_wrapper_names():
+        return {
+            "ok": False,
+            "scope_ok": True,
+            "verified": False,
+            "reason": "public_adapter_protected",
+            "line_drift_resolved": line_drift_resolved,
+            "target": {"file": str(path), "name": name, "start_line": start_line, "end_line": end_line},
+        }
 
     if name in _runtime_hook_reference_names([path]):
         return {

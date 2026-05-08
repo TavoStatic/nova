@@ -160,6 +160,8 @@ class AutonomyOrchestratorService:
                 "requires_ack": bool(payload.get("requires_ack", False)),
                 "cooldown_sec": _as_int(payload.get("cooldown_sec")),
                 "ttl_sec": _as_int(payload.get("ttl_sec")),
+                "max_steps": _as_int(payload.get("max_steps")),
+                "max_trees": _as_int(payload.get("max_trees")),
             },
             "source": "services.autonomy_orchestrator",
             "reason": _safe_text(payload.get("expected_effect"), 360),
@@ -427,6 +429,8 @@ class AutonomyOrchestratorService:
                     if _safe_text(item, 120)
                 ],
                 "operator_ack_present": bool(policy_raw.get("operator_ack_present", False)),
+                "active_work_tree_max_steps_per_cycle": _as_int(policy_raw.get("active_work_tree_max_steps_per_cycle")),
+                "active_work_tree_max_trees_per_cycle": _as_int(policy_raw.get("active_work_tree_max_trees_per_cycle")),
                 "source_freshness_sec": freshness["policy_snapshot"],
             },
             "triage_hints": {
@@ -550,6 +554,8 @@ class AutonomyOrchestratorService:
             "requires_ack": bool(catalog.get("requires_ack", False)),
             "cooldown_sec": _as_int(catalog.get("cooldown_sec")),
             "ttl_sec": _as_int(catalog.get("ttl_sec")),
+            "max_steps": _as_int(catalog.get("max_steps")),
+            "max_trees": _as_int(catalog.get("max_trees")),
             "execution_group": _safe_text(catalog.get("execution_group"), 120),
         }
 
@@ -607,6 +613,7 @@ class AutonomyOrchestratorService:
         top_generated_triage = self._top_triage_candidate(triage, lane="generated_queue")
         top_patch_triage = self._top_triage_candidate(triage, lane="patch_queue")
         top_any_triage = self._top_triage_candidate(triage)
+        policy = _as_dict(evidence.get("policy_snapshot"))
         concrete_lane_candidate_present = False
         if patch_ready_count > 0:
             concrete_lane_candidate_present = True
@@ -660,16 +667,24 @@ class AutonomyOrchestratorService:
 
         if active_work_count > 0:
             concrete_lane_candidate_present = True
+            catalog = _as_dict(autonomy_advisory_action_catalog().get("active_work_tree_run_next"))
+            configured_steps = _as_int(policy.get("active_work_tree_max_steps_per_cycle"), _as_int(catalog.get("max_steps"), 3))
+            configured_trees = _as_int(policy.get("active_work_tree_max_trees_per_cycle"), _as_int(catalog.get("max_trees"), 8))
+            step_budget = max(1, min(max(1, active_work_count), max(1, configured_steps)))
+            tree_budget = max(1, min(max(1, active_work_count), max(1, configured_trees)))
+            action = self._contract_action(
+                "active_work_tree_run_next",
+                reason_code="active_work_tree_ready",
+                expected_effect=(
+                    f"Advance up to {step_budget} governed step(s) from {active_work_count} active Work Tree signal(s)."
+                    + self._triage_focus_text(top_any_triage)
+                ),
+            )
+            action["max_steps"] = step_budget
+            action["max_trees"] = tree_budget
             candidates.append(
                 {
-                    "action": self._contract_action(
-                        "active_work_tree_run_next",
-                        reason_code="active_work_tree_ready",
-                        expected_effect=(
-                            f"Advance one safe step from {active_work_count} active Work Tree signal(s)."
-                            + self._triage_focus_text(top_any_triage)
-                        ),
-                    ),
+                    "action": action,
                     "source": "work_tree_snapshot+triage_hints" if top_any_triage else "work_tree_snapshot",
                     "triage_focus": _compact_value(top_any_triage),
                 }

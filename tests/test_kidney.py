@@ -125,6 +125,23 @@ class TestKidney(unittest.TestCase):
         self.assertEqual(len(candidates), 1)
         self.assertEqual(candidates[0].get("action"), "archive")
 
+    def test_scan_candidates_flags_nested_generated_definition(self):
+        target = kidney.GENERATED_DEFINITIONS_DIR / "real_world" / "candidate.json"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(json.dumps({"messages": ["run patch now"]}), encoding="utf-8")
+        self._touch_old(target, 8 * 86400)
+        kidney.PROMOTION_AUDIT_PATH.parent.mkdir(parents=True, exist_ok=True)
+        kidney.PROMOTION_AUDIT_PATH.write_text(
+            json.dumps({"file": "candidate.json", "metrics": {"novelty": 0.2}}) + "\n",
+            encoding="utf-8",
+        )
+
+        candidates = kidney.scan_candidates()
+
+        self.assertEqual(len(candidates), 1)
+        self.assertEqual(candidates[0].get("path"), str(target))
+        self.assertEqual(candidates[0].get("action"), "archive")
+
     def test_run_kidney_enforce_archives_and_deletes(self):
         self._write_policy({"enabled": True, "mode": "enforce", "definition_max_age_days": 7, "quarantine_max_age_hours": 48})
 
