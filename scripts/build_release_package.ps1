@@ -248,6 +248,7 @@ $manifest = [ordered]@{
   validation_commands = @(
     ".\\nova.cmd doctor",
     ".\\nova.cmd runtime-status",
+    ".\\nova.cmd wiring-check --offline",
     ".\\nova.cmd smoke-base --fix",
     ".\\nova.cmd smoke --fix",
     ".\\nova.cmd test"

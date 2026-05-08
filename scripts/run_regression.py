@@ -50,6 +50,7 @@ TEST_LANES: dict[str, list[str]] = {
         "tests.test_control_status_service",
         "tests.test_control_telemetry_service",
         "tests.test_core_steward_service",
+        "tests.test_end_to_end_wiring_service",
         "tests.test_fulfillment_flow_service",
         "tests.test_http_session_store",
         "tests.test_http_test_session_helpers",

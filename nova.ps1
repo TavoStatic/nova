@@ -1,5 +1,5 @@
 param(
-  # Subcommand: look | lookfull | chat | camera | ls | read | find | run | webui | webui-start | webui-stop | webui-status | operator | hub | smoke | test | health | guard | install | update | diag | logs | mem | memory | config | release-clean | stop
+  # Subcommand: look | lookfull | chat | camera | ls | read | find | run | webui | webui-start | webui-stop | webui-status | operator | hub | smoke | test | health | guard | install | update | diag | logs | mem | memory | config | wiring-check | release-clean | stop
   [Parameter(Position=0)]
   [string]$cmd = "help",
 
@@ -45,6 +45,7 @@ $PACKAGEPROMOTEPS1 = Join-Path $ROOT "scripts\promote_release_package.ps1"
 $PACKAGESTATUSPS1 = Join-Path $ROOT "scripts\show_release_status.ps1"
 $PACKAGEREADINESSPS1 = Join-Path $ROOT "scripts\show_release_readiness.ps1"
 $RELEASECLEANPY = Join-Path $ROOT "scripts\release_clean_check.py"
+$WIRINGCHECKPY = Join-Path $ROOT "scripts\end_to_end_wiring_check.py"
 $POLICY    = Join-Path $ROOT "policy.json"    # optional
 $LOG_DIR   = Join-Path $ROOT "logs"
 
@@ -351,6 +352,16 @@ function Invoke-NovaReleaseClean([string[]]$releaseCleanTokens=@()) {
   }
 
   $pythonArgs = @($RELEASECLEANPY) + $releaseCleanTokens
+  return (Invoke-BootstrapPython $pythonArgs)
+}
+
+function Invoke-NovaWiringCheck([string[]]$wiringCheckTokens=@()) {
+  if (-not (Test-Path $WIRINGCHECKPY)) {
+    Write-Host ("[FAIL] Missing wiring check: " + $WIRINGCHECKPY)
+    return 1
+  }
+
+  $pythonArgs = @($WIRINGCHECKPY) + $wiringCheckTokens
   return (Invoke-BootstrapPython $pythonArgs)
 }
 
@@ -843,6 +854,7 @@ function Show-Help {
   Write-Host "  nova package-status            # latest release artifact and promotion state"
   Write-Host "  nova installer-status          # latest Windows installer and promotion state"
   Write-Host "  nova package-readiness         # ship-gate summary from latest build, verify, and promotion records"
+  Write-Host "  nova wiring-check [--offline]  # verify front door, services, data lanes, runtime truth, and release-clean wiring"
   Write-Host "  nova release-clean [--label push-prep]  # hygiene -> regression -> smoke -> package build/verify -> readiness report"
   Write-Host "  nova installer-readiness       # ship-gate summary for latest Windows installer"
   Write-Host "  nova package-promote --result pass [--version 2026.03.30.2] [--note text]  # record RC validation outcome"
@@ -1350,6 +1362,11 @@ switch ($cmd.ToLower()) {
   "package-readiness" {
     $readinessCode = Invoke-NovaPackageReadiness $remainingTokens
     exit $readinessCode
+  }
+
+  "wiring-check" {
+    $wiringCode = Invoke-NovaWiringCheck $remainingTokens
+    exit $wiringCode
   }
 
   "release-clean" {
