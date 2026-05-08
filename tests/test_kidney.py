@@ -160,6 +160,36 @@ class TestKidney(unittest.TestCase):
         self.assertIn("candidate.json", retired)
         self.assertEqual((retired.get("candidate.json") or {}).get("reason"), "definition_age_days>7")
 
+    def test_dry_run_does_not_overwrite_live_status(self):
+        self._write_policy({"enabled": True, "mode": "enforce", "definition_max_age_days": 7})
+        kidney.KIDNEY_STATUS_PATH.parent.mkdir(parents=True, exist_ok=True)
+        kidney.KIDNEY_STATUS_PATH.write_text(
+            json.dumps({"mode": "enforce", "dry_run": False, "sentinel": "live"}),
+            encoding="utf-8",
+        )
+        old_definition = kidney.GENERATED_DEFINITIONS_DIR / "candidate.json"
+        old_definition.parent.mkdir(parents=True, exist_ok=True)
+        old_definition.write_text(json.dumps({"messages": ["run patch now"]}), encoding="utf-8")
+        self._touch_old(old_definition, 8 * 86400)
+
+        summary = kidney.run_kidney(dry_run=True)
+
+        self.assertTrue(summary.get("dry_run"))
+        self.assertEqual(summary.get("status_write"), "suppressed")
+        stored = json.loads(kidney.KIDNEY_STATUS_PATH.read_text(encoding="utf-8"))
+        self.assertEqual(stored.get("sentinel"), "live")
+        self.assertFalse(stored.get("dry_run"))
+
+    def test_dry_run_can_explicitly_write_status_to_isolated_path(self):
+        self._write_policy({"enabled": True, "mode": "observe"})
+
+        summary = kidney.run_kidney(dry_run=True, write_status=True)
+
+        stored = json.loads(kidney.KIDNEY_STATUS_PATH.read_text(encoding="utf-8"))
+        self.assertTrue(summary.get("dry_run"))
+        self.assertTrue(stored.get("dry_run"))
+        self.assertEqual(stored.get("status_write"), "live")
+
     def test_protected_pattern_skips_candidate(self):
         self._write_policy({"enabled": True, "mode": "observe", "protect_patterns": ["builder_mode"]})
         protected = kidney.GENERATED_DEFINITIONS_DIR / "builder_mode_chat.json"

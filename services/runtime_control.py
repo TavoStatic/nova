@@ -588,6 +588,8 @@ class RuntimeControlService:
         if not scheduled:
             return False, scheduled_msg
         stopped, stopped_msg = shutdown_http_server_later_fn(0.25)
+        if not stopped and str(stopped_msg or "") == "http_server_unavailable":
+            return True, "webui_start_requested"
         if not stopped:
             return False, stopped_msg
         return True, "webui_restart_requested"

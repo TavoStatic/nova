@@ -14,6 +14,9 @@ SPEC.loader.exec_module(SMOKE_TEST)
 
 
 class TestSmokeTestScript(unittest.TestCase):
+    def test_repo_root_is_importable_when_script_runs_directly(self):
+        self.assertIn(str(SMOKE_TEST.BASE_DIR), SMOKE_TEST.sys.path)
+
     def test_run_health_check_base_uses_skip_ollama(self):
         result = SimpleNamespace(returncode=0, stdout="{}", stderr="")
         with patch.dict(os.environ, {}, clear=True), \

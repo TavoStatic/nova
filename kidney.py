@@ -520,16 +520,28 @@ def _apply_candidate(item: dict[str, Any]) -> dict[str, Any]:
     return result
 
 
-def run_kidney(*, dry_run: bool = False, logger: Callable[[str], None] | None = None) -> dict[str, Any]:
+def _write_status_payload(path: Path, payload: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, ensure_ascii=True, indent=2), encoding="utf-8")
+
+
+def run_kidney(
+    *,
+    dry_run: bool = False,
+    logger: Callable[[str], None] | None = None,
+    write_status: bool | None = None,
+) -> dict[str, Any]:
     cfg = policy_kidney()
     mode = str(cfg.get("mode") or "observe").strip().lower() or "observe"
     enabled = bool(cfg.get("enabled", True))
     candidates = scan_candidates()
+    should_write_status = (not bool(dry_run)) if write_status is None else bool(write_status)
     summary = {
         "ts": time.strftime("%Y-%m-%d %H:%M:%S"),
         "enabled": enabled,
         "mode": mode,
         "dry_run": bool(dry_run),
+        "status_write": "live" if should_write_status else "suppressed",
         "protect_patterns": _load_protect_patterns(),
         "candidate_count": len(candidates),
         "archive_count": sum(1 for item in candidates if str(item.get("action") or "") == "archive"),
@@ -544,8 +556,8 @@ def run_kidney(*, dry_run: bool = False, logger: Callable[[str], None] | None = 
     if logger is not None:
         logger(f"mode={mode} dry_run={bool(dry_run)} candidates={len(candidates)}")
     if not enabled or dry_run or mode != "enforce":
-        KIDNEY_STATUS_PATH.parent.mkdir(parents=True, exist_ok=True)
-        KIDNEY_STATUS_PATH.write_text(json.dumps(summary, ensure_ascii=True, indent=2), encoding="utf-8")
+        if should_write_status:
+            _write_status_payload(KIDNEY_STATUS_PATH, summary)
         return summary
     if candidates:
         snapshot_skip_reason = _skip_cleanup_snapshot(candidates, cfg=cfg)
@@ -570,8 +582,8 @@ def run_kidney(*, dry_run: bool = False, logger: Callable[[str], None] | None = 
             "cleanup_snapshot_prune "
             f"removed={summary['cleanup_snapshot_pruned_count']} retained={summary['cleanup_snapshot_retained_count']}"
         )
-    KIDNEY_STATUS_PATH.parent.mkdir(parents=True, exist_ok=True)
-    KIDNEY_STATUS_PATH.write_text(json.dumps(summary, ensure_ascii=True, indent=2), encoding="utf-8")
+    if should_write_status:
+        _write_status_payload(KIDNEY_STATUS_PATH, summary)
     return summary
 
 

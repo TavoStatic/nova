@@ -279,6 +279,23 @@ class TestRuntimeControlService(unittest.TestCase):
         self.assertEqual(msg, "webui_restart_requested")
         self.assertEqual(calls[0][1], 1.5)
 
+    def test_restart_webui_reports_start_when_no_server_is_available(self):
+        calls = []
+
+        ok, msg = RUNTIME_CONTROL_SERVICE.restart_webui(
+            venv_python=Path("c:/Nova/.venv/Scripts/python.exe"),
+            http_py=Path("c:/Nova/nova_http.py"),
+            bind_host="127.0.0.1",
+            bind_port=8080,
+            base_dir=Path("c:/Nova"),
+            schedule_detached_start_fn=lambda command, delay_seconds=0.0, cwd=None: calls.append((command, delay_seconds, cwd)) or (True, "delayed_start_scheduled"),
+            shutdown_http_server_later_fn=lambda delay_seconds=0.0: (False, "http_server_unavailable"),
+        )
+
+        self.assertTrue(ok)
+        self.assertEqual(msg, "webui_start_requested")
+        self.assertEqual(calls[0][1], 1.5)
+
     def test_start_autonomy_maintenance_worker_starts_detached_loop(self):
         calls = []
 
