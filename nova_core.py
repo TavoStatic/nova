@@ -2038,8 +2038,6 @@ def resolve_current_device_coords(*, max_age_sec: float = DEVICE_LOCATION_MAX_AG
     )
 
 
-def _mentions_location_phrase(text: str) -> bool:
-    return service_mentions_location_phrase(text)
 
 
 BROWNSVILLE_LAT = 25.9017
@@ -2266,8 +2264,6 @@ def _conversation_active_subject(state: Optional[dict]) -> str:
     return kind
 
 
-def _normalize_turn_token(token: str) -> str:
-    return service_conversation_followups.normalize_turn_token(token)
 
 
 def _normalize_turn_text(text: str) -> str:
@@ -3561,8 +3557,6 @@ def _resolve_research_provider(candidates: list[str], *, default_tool: str = "we
     return {"provider": chosen, "tool_name": tool_map.get(chosen, default_tool)}
 
 
-def _normalize_search_endpoint(endpoint: str) -> str:
-    return service_normalize_search_endpoint(endpoint)
 
 
 def _search_endpoint_candidates(endpoint: str) -> list[str]:
@@ -5732,8 +5726,6 @@ def _provider_request_headers(token: str = "") -> dict[str, str]:
 
 
 
-def _looks_like_code_discovery_query(text: str) -> bool:
-    return service_looks_like_code_discovery_query(text)
 
 
 def tool_wikipedia_lookup(query: str):
