@@ -197,6 +197,70 @@ function Test-PayloadContainsPathSegmentPattern([hashtable]$payload, [string]$pa
   return $false
 }
 
+function Test-NovaTextPayloadExtension([string]$pathValue) {
+  $extension = [System.IO.Path]::GetExtension($pathValue).ToLowerInvariant()
+  return @(
+    ".cmd",
+    ".css",
+    ".html",
+    ".js",
+    ".json",
+    ".md",
+    ".ps1",
+    ".py",
+    ".txt",
+    ".yml",
+    ".yaml"
+  ) -contains $extension
+}
+
+function Test-PayloadContainsForbiddenContent([hashtable]$payload, [string[]]$markers) {
+  $usableMarkers = @($markers | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+  if ($usableMarkers.Count -le 0) { return $false }
+  $maxTextBytes = 2MB
+
+  if ([string]$payload.root_type -eq "directory") {
+    foreach ($file in Get-ChildItem -Path ([string]$payload.root_path) -Recurse -File -Force -ErrorAction SilentlyContinue) {
+      if ($file.Length -gt $maxTextBytes) { continue }
+      if (-not (Test-NovaTextPayloadExtension $file.FullName)) { continue }
+      foreach ($marker in $usableMarkers) {
+        if (Select-String -LiteralPath $file.FullName -Pattern $marker -SimpleMatch -Quiet -ErrorAction SilentlyContinue) {
+          return $true
+        }
+      }
+    }
+    return $false
+  }
+
+  if ([string]$payload.root_type -eq "zip") {
+    Add-Type -AssemblyName System.IO.Compression
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    $archive = [System.IO.Compression.ZipFile]::OpenRead([string]$payload.root_path)
+    try {
+      foreach ($entry in $archive.Entries) {
+        if ([string]::IsNullOrWhiteSpace($entry.Name)) { continue }
+        if ($entry.Length -gt $maxTextBytes) { continue }
+        if (-not (Test-NovaTextPayloadExtension $entry.FullName)) { continue }
+        $reader = New-Object System.IO.StreamReader($entry.Open())
+        try {
+          $text = $reader.ReadToEnd()
+        } finally {
+          $reader.Dispose()
+        }
+        foreach ($marker in $usableMarkers) {
+          if ($text.Contains($marker)) {
+            return $true
+          }
+        }
+      }
+    } finally {
+      $archive.Dispose()
+    }
+  }
+
+  return $false
+}
+
 $targetPath = Resolve-VerificationTarget $Path
 $targetItem = Get-Item $targetPath
 $payload = if ($targetItem.PSIsContainer) {
@@ -274,6 +338,12 @@ $forbiddenLeafPatterns = @(
   "codex_health_*.jsonl",
   "codex_reflection_*.jsonl"
 )
+$forbiddenContentMarkers = @(
+  ("K12" + "AD"),
+  ("guri" + "be.tst"),
+  ("10.80" + ".42.50"),
+  ("BNV_" + "eSp" + "Train")
+)
 
 Write-Host ""
 Write-Host "NYO System Package Verification"
@@ -330,6 +400,8 @@ foreach ($forbiddenPattern in $forbiddenSegmentPatterns) {
 foreach ($forbiddenPattern in $forbiddenLeafPatterns) {
   Add-CheckResult $failures (-not (Test-PayloadContainsLeafPattern $payload $forbiddenPattern)) ("forbidden file pattern absent: " + $forbiddenPattern) ("forbidden file pattern present: " + $forbiddenPattern)
 }
+
+Add-CheckResult $failures (-not (Test-PayloadContainsForbiddenContent $payload $forbiddenContentMarkers)) "forbidden incident content markers absent" "forbidden incident marker present in package content"
 
 Write-Host ("[INFO] Version        : " + [string]$manifest.artifact_version)
 Write-Host ("[INFO] Channel        : " + [string]$manifest.release_channel)

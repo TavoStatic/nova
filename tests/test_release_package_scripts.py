@@ -187,6 +187,7 @@ class TestReleasePackageScripts(unittest.TestCase):
             _write(candidate_dir / ".pytest_cache" / "v" / "cache" / "nodeids", "[]\n")
             _write(candidate_dir / "knowledge" / "peims" / "rules.txt", "peims\n")
             _write(candidate_dir / "data_sources" / "sis_test" / "local_config.json", "{\"host\":\"10.1.2.3\"}\n")
+            _write(candidate_dir / "docs" / "incident_marker.md", ("K12" + "AD") + "\n")
             _write(candidate_dir / "LAST_SESSION.json", "{}\n")
             _write(candidate_dir / "RESUME_HERE.txt", "resume\n")
             _write(candidate_dir / "This_is_nova", "internal note\n")
@@ -213,6 +214,7 @@ class TestReleasePackageScripts(unittest.TestCase):
             self.assertIn("forbidden segment pattern present: codex_pulse_test_*", combined)
             self.assertIn("forbidden file pattern present: codex_health_*.jsonl", combined)
             self.assertIn("forbidden file pattern present: codex_reflection_*.jsonl", combined)
+            self.assertIn("forbidden incident marker present in package content", combined)
 
 
 if __name__ == "__main__":
