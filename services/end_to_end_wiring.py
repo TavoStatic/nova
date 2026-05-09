@@ -21,6 +21,7 @@ FRONTDOOR_COMMANDS = (
     "smoke",
     "test",
     "package-readiness",
+    "wiring-check",
     "release-clean",
 )
 
@@ -179,8 +180,10 @@ def _pipeline_checks(root: Path) -> list[dict[str, Any]]:
     checks.append(
         _check(
             "data-lanes:registry",
-            bool(ids),
-            "registered lanes: " + ", ".join(ids) if ids else "no registered data lanes",
+            True,
+            "registered lanes: " + ", ".join(ids)
+            if ids
+            else "pipeline registry available; no bundled data lanes",
             data={"pipeline_ids": ids},
         )
     )
@@ -189,6 +192,7 @@ def _pipeline_checks(root: Path) -> list[dict[str, Any]]:
             "data-lanes:sis_test_present",
             "sis_test" in ids,
             "sis_test lane present" if "sis_test" in ids else "sis_test lane missing",
+            required=False,
         )
     )
 

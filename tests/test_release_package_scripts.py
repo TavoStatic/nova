@@ -94,6 +94,11 @@ class TestReleasePackageScripts(unittest.TestCase):
             _write(repo / "codex_reflection_demo.jsonl", "{}\n")
             _write(repo / "codex_pulse_test_demo" / "runtime" / "pulse_snapshot.json", "{}\n")
             _write(repo / "nova_memory.sqlite", "sqlite")
+            _write(repo / "data_sources" / "__init__.py", "")
+            _write(repo / "data_sources" / "sis_test" / "pipeline.json", "{}\n")
+            _write(repo / "data_sources" / "sis_test" / "local_config.json", "{\"host\":\"10.1.2.3\"}\n")
+            _write(repo / "data_sources" / "sis_test" / "schema_manifest.json", "{}\n")
+            _write(repo / "data_sources" / "sis_test" / "population_definitions.json", "{}\n")
 
             build_result = _run_powershell(build_script, repo)
             self.assertEqual(build_result.returncode, 0, msg=build_result.stdout + build_result.stderr)
@@ -120,6 +125,7 @@ class TestReleasePackageScripts(unittest.TestCase):
             self.assertNotIn("This_is_nova", entries)
             self.assertNotIn("tests_to_review.txt", entries)
             self.assertNotIn("nova_memory.sqlite", entries)
+            self.assertTrue(all(not entry.startswith("data_sources/") for entry in entries))
             self.assertTrue(all(".pytest_cache" not in entry for entry in entries))
             self.assertTrue(all("codex_pulse_test_" not in entry for entry in entries))
             self.assertTrue(all(not Path(entry).name.startswith("codex_health_") for entry in entries))
@@ -157,6 +163,7 @@ class TestReleasePackageScripts(unittest.TestCase):
   \"validation_commands\": [
     \".\\\\nova.cmd doctor\",
     \".\\\\nova.cmd runtime-status\",
+    \".\\\\nova.cmd wiring-check --offline\",
     \".\\\\nova.cmd smoke-base --fix\",
     \".\\\\nova.cmd smoke --fix\",
     \".\\\\nova.cmd test\"
@@ -179,6 +186,7 @@ class TestReleasePackageScripts(unittest.TestCase):
             _write(candidate_dir / ".ci_venv" / "pyvenv.cfg", "home = C:/Python\n")
             _write(candidate_dir / ".pytest_cache" / "v" / "cache" / "nodeids", "[]\n")
             _write(candidate_dir / "knowledge" / "peims" / "rules.txt", "peims\n")
+            _write(candidate_dir / "data_sources" / "sis_test" / "local_config.json", "{\"host\":\"10.1.2.3\"}\n")
             _write(candidate_dir / "LAST_SESSION.json", "{}\n")
             _write(candidate_dir / "RESUME_HERE.txt", "resume\n")
             _write(candidate_dir / "This_is_nova", "internal note\n")
@@ -196,6 +204,7 @@ class TestReleasePackageScripts(unittest.TestCase):
             self.assertIn("forbidden path present: .ci_venv", combined)
             self.assertIn("forbidden path present: .pytest_cache", combined)
             self.assertIn("forbidden path present: knowledge/peims", combined)
+            self.assertIn("forbidden path present: data_sources", combined)
             self.assertIn("forbidden path present: This_is_nova", combined)
             self.assertIn("forbidden path present: LAST_SESSION.json", combined)
             self.assertIn("forbidden path present: RESUME_HERE.txt", combined)

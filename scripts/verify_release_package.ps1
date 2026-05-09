@@ -247,6 +247,7 @@ $forbiddenPathPrefixes = @(
   ".ci_venv",
   ".venv",
   ".pytest_cache",
+  "data_sources",
   "knowledge/packs",
   "knowledge/peims",
   "knowledge/web",
