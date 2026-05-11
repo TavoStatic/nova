@@ -1249,7 +1249,8 @@ class WorkTreeSeedingService:
         1) explicit work-tree request always seeds
         2) clear content prompts do not seed
         3) internal maintenance cues seed
-        4) operator macro / CLI flows default to seed unless content-oriented
+        4) operator macro flows default to seed unless content-oriented
+        5) CLI source alone is only transport; it must still show work intent
         """
         if WorkTreeSeedingService.looks_like_explicit_work_tree_request(message):
             return True
@@ -1257,9 +1258,8 @@ class WorkTreeSeedingService:
             return False
         if WorkTreeSeedingService._looks_like_system_nervous_system_prompt(message):
             return True
-        normalized_source = str(source or "").strip().lower()
         normalized_mode = str(operator_mode or "").strip().lower()
-        if normalized_mode == "macro" or normalized_source == "cli":
+        if normalized_mode == "macro":
             return True
         return False
 

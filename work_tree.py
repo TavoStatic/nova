@@ -715,10 +715,10 @@ def _branch_candidate_tool(branch: Branch) -> str:
     for tool_name in declared:
         if branch.tool_state.get(tool_name, ToolStatus.READY) == ToolStatus.READY:
             return tool_name
-    if preferred:
+    if preferred and branch.tool_state.get(preferred, ToolStatus.READY) != ToolStatus.BLOCKED:
         return preferred
     for tool_name in declared:
-        if tool_name:
+        if tool_name and branch.tool_state.get(tool_name, ToolStatus.READY) != ToolStatus.BLOCKED:
             return tool_name
     return ""
 
@@ -765,6 +765,50 @@ def _blocked_dependencies(branch: Branch) -> list[str]:
     return blocked
 
 
+def _terminal_dependency_resolution(branch: Branch) -> tuple[str, str]:
+    for dependency_id in branch.depends_on:
+        dependency = _BRANCHES.get(dependency_id)
+        if dependency is None or dependency.status != BranchStatus.BLOCKED:
+            continue
+        resolution = str(dependency.resolution_state or "").strip().lower()
+        if resolution in {"missing_target", "blocked_by_missing_target"}:
+            return dependency_id, "missing_target"
+    return "", ""
+
+
+def _propagate_terminal_blocked_dependencies(tree_id: str) -> bool:
+    now = _now()
+    dirty = False
+    changed = True
+    while changed:
+        changed = False
+        for branch in _tree_branches(tree_id):
+            if branch.status in {BranchStatus.COMPLETE, BranchStatus.ARCHIVED}:
+                continue
+            dependency_id, resolution = _terminal_dependency_resolution(branch)
+            if not dependency_id or not resolution:
+                continue
+            next_resolution = f"blocked_by_{resolution}"
+            branch_dirty = False
+            for task in _branch_tasks(branch.branch_id):
+                if task.status in {TaskStatus.COMPLETE, TaskStatus.DROPPED, TaskStatus.BLOCKED}:
+                    continue
+                task.status = TaskStatus.BLOCKED
+                task.updated_at = now
+                branch_dirty = True
+            if branch.status != BranchStatus.BLOCKED:
+                branch.status = BranchStatus.BLOCKED
+                branch_dirty = True
+            if str(branch.resolution_state or "").strip().lower() != next_resolution:
+                branch.resolution_state = next_resolution
+                branch_dirty = True
+            if branch_dirty:
+                branch.updated_at = now
+                dirty = True
+                changed = True
+    return dirty
+
+
 def _branch_ancestor_ids(branch_id: str) -> list[str]:
     ancestors: list[str] = []
     current = _BRANCHES.get(branch_id)
@@ -783,6 +827,7 @@ def _refresh_branch_state(branch: Branch) -> bool:
     tasks = _branch_tasks(branch.branch_id)
     open_tasks = [task for task in tasks if task.status not in (TaskStatus.COMPLETE, TaskStatus.DROPPED)]
     active_tasks = [task for task in open_tasks if task.status == TaskStatus.ACTIVE]
+    blocked_tasks = [task for task in open_tasks if task.status == TaskStatus.BLOCKED]
     was_active = branch.status == BranchStatus.ACTIVE
     can_preserve_active = was_active and all(state == ToolStatus.READY for state in branch.tool_state.values())
     previous_open_stem_count = int(branch.open_stem_count)
@@ -800,7 +845,7 @@ def _refresh_branch_state(branch: Branch) -> bool:
             or previous_status != branch.status
             or abs(previous_score - float(branch.score)) > 1e-9
         )
-    if branch.blocked_by:
+    if branch.blocked_by or blocked_tasks:
         branch.status = BranchStatus.BLOCKED
     elif branch.open_stem_count == 0:
         branch.status = BranchStatus.COMPLETE
@@ -827,6 +872,11 @@ def _refresh_tree_state(tree_id: str, persist: bool = False) -> bool:
     branches = _tree_branches(tree_id)
     for branch in branches:
         branch_dirty = _refresh_branch_state(branch) or branch_dirty
+    if _propagate_terminal_blocked_dependencies(tree_id):
+        branch_dirty = True
+        branches = _tree_branches(tree_id)
+        for branch in branches:
+            branch_dirty = _refresh_branch_state(branch) or branch_dirty
     if tree.status != TreeStatus.ARCHIVED:
         tree.status = TreeStatus.COMPLETE if is_tree_complete(tree_id) else TreeStatus.ACTIVE
     dirty = branch_dirty or tree.status != previous_status
@@ -1222,7 +1272,7 @@ def is_branch_ready(branch_id: str) -> bool:
     branch = _BRANCHES.get(branch_id)
     if branch is None:
         return False
-    if branch.status in (BranchStatus.COMPLETE, BranchStatus.ARCHIVED):
+    if branch.status in (BranchStatus.COMPLETE, BranchStatus.ARCHIVED, BranchStatus.BLOCKED, BranchStatus.STALLED):
         return False
     return not _blocked_dependencies(branch)
 
@@ -1465,6 +1515,7 @@ def _tool_args_for_task(tool_name: str, task: Task) -> list[str]:
         resolved_dir = _extract_ls_path_from_task_title(title)
         if resolved_dir:
             return [resolved_dir]
+        return []
     if tool_name == "find":
         find_keyword = _extract_find_keyword_from_task_title(title)
         if find_keyword:
@@ -1473,7 +1524,72 @@ def _tool_args_for_task(tool_name: str, task: Task) -> list[str]:
         resolved_path = _extract_read_path_from_task_title(title)
         if resolved_path:
             return [resolved_path]
+        return []
+    if tool_name == "patch_apply":
+        resolved_path = _extract_read_path_from_task_title(title)
+        if resolved_path:
+            return [resolved_path]
+        return []
     return [title] if title else []
+
+
+def _tool_target_required(tool_name: str) -> bool:
+    return str(tool_name or "").strip() in {"ls", "read", "patch_apply"}
+
+
+def _tool_target_kind(tool_name: str) -> str:
+    tool = str(tool_name or "").strip()
+    if tool == "ls":
+        return "folder"
+    if tool in {"read", "patch_apply"}:
+        return "file"
+    return ""
+
+
+def _missing_tool_target_reason(tool_name: str) -> str:
+    tool = str(tool_name or "").strip()
+    if tool == "ls":
+        return "missing_folder_target"
+    if tool in {"read", "patch_apply"}:
+        return "missing_file_target"
+    return "missing_target"
+
+
+def _tool_target_validation(tool_name: str, task: Task | None) -> dict[str, object]:
+    tool = str(tool_name or "").strip()
+    if task is None:
+        return {
+            "required": _tool_target_required(tool),
+            "valid": not _tool_target_required(tool),
+            "target_kind": _tool_target_kind(tool),
+            "args": [],
+            "reason": "missing_task" if _tool_target_required(tool) else "",
+        }
+    args = _tool_args_for_task(tool, task)
+    required = _tool_target_required(tool)
+    valid = bool(args) if required else True
+    return {
+        "required": required,
+        "valid": valid,
+        "target_kind": _tool_target_kind(tool),
+        "args": args,
+        "reason": "" if valid else _missing_tool_target_reason(tool),
+    }
+
+
+def _missing_target_payload(branch: Branch, task: Task | None, tool_name: str, target_validation: dict[str, object]) -> dict:
+    return {
+        "action": "missing_target",
+        "branch_id": branch.branch_id,
+        "branch_title": branch.title,
+        "task_id": str(task.task_id) if task is not None else "",
+        "task_title": str(task.title) if task is not None else "",
+        "tool": str(tool_name or "").strip(),
+        "recommended_tool": str(tool_name or "").strip(),
+        "tool_args": list(target_validation.get("args") or []),
+        "reason": str(target_validation.get("reason") or _missing_tool_target_reason(tool_name)),
+        "target_validation": dict(target_validation),
+    }
 
 
 def _scoped_task_target(task: Task) -> dict[str, object]:
@@ -1535,6 +1651,48 @@ def _restore_task_after_failed_execution(task: Task, branch: Branch) -> None:
     task.status = TaskStatus.OPEN
     task.updated_at = now
     branch.updated_at = now
+
+
+def _block_task_after_missing_target(task: Task, branch: Branch, tool_name: str) -> None:
+    now = _now()
+    task.status = TaskStatus.BLOCKED
+    task.updated_at = now
+    selected_tool = str(tool_name or "").strip()
+    if selected_tool:
+        branch.tool_state[selected_tool] = ToolStatus.BLOCKED
+    branch.status = BranchStatus.BLOCKED
+    branch.resolution_state = "missing_target"
+    branch.updated_at = now
+
+
+def resolve_next_nonexecutable_step(tree_id: str, *, persist: bool = True) -> dict:
+    """Persist terminal planning blockers that do not require a tool call."""
+    step = _preview_next_autonomous_step(tree_id)
+    if not isinstance(step, dict) or str(step.get("action") or "").strip() != "missing_target":
+        return {
+            "resolved": False,
+            "step": dict(step) if isinstance(step, dict) else None,
+        }
+
+    branch = _BRANCHES.get(str(step.get("branch_id") or "").strip())
+    task = _TASKS.get(str(step.get("task_id") or "").strip())
+    tool_name = str(step.get("recommended_tool") or step.get("tool") or "").strip()
+    if branch is None or task is None or not tool_name:
+        return {
+            "resolved": False,
+            "reason": "missing_resolution_target",
+            "step": dict(step),
+        }
+
+    _block_task_after_missing_target(task, branch, tool_name)
+    _refresh_tree_state(tree_id, persist=False)
+    if persist:
+        _persist_tree_state(tree_id)
+
+    resolved = dict(step)
+    resolved["resolved"] = True
+    resolved["resolution"] = "blocked_missing_target"
+    return resolved
 
 
 def _ordered_tool_suggestions_from_text(text: str) -> list[str]:
@@ -1669,6 +1827,10 @@ def list_autonomous_options(tree_id: str) -> list[dict]:
         allowed, _ = _tool_governance_status(tree, branch, recommended_tool)
         if not allowed:
             continue
+        task = _next_open_task(branch.branch_id)
+        target_validation = _tool_target_validation(recommended_tool, task)
+        if not bool(target_validation.get("valid", True)):
+            continue
         options.append(
             {
                 "branch_id": branch.branch_id,
@@ -1676,6 +1838,7 @@ def list_autonomous_options(tree_id: str) -> list[dict]:
                 "recommended_tool": recommended_tool,
                 "required_tools": list(branch.required_tools),
                 "allowed_tools": list(branch.allowed_tools),
+                "target_validation": target_validation,
             }
         )
     return options
@@ -1762,6 +1925,10 @@ def _preview_next_autonomous_step(tree_id: str) -> dict | None:
             "tree_allowed_tools": _tree_allowed_tools(tree),
         }
 
+    target_validation = _tool_target_validation(recommended_tool, current_task)
+    if not bool(target_validation.get("valid", True)):
+        return _missing_target_payload(branch, current_task, recommended_tool, target_validation)
+
     return {
         "action": "execute",
         "branch_id": branch.branch_id,
@@ -1770,6 +1937,7 @@ def _preview_next_autonomous_step(tree_id: str) -> dict | None:
         "required_tools": branch.required_tools,
         "allowed_tools": allowed_tools,
         "task_target": _scoped_task_target(current_task) if current_task is not None else {},
+        "target_validation": target_validation,
     }
 
 
@@ -1808,6 +1976,7 @@ def next_autonomous_step(tree_id: str, decide_next_step_fn: DecisionCallback | N
                     "recommended_tool": str(selected.get("recommended_tool") or ""),
                     "required_tools": list(selected.get("required_tools") or []),
                     "allowed_tools": list(selected.get("allowed_tools") or []),
+                    "target_validation": dict(selected.get("target_validation") or {}),
                 }
     branch = next_open_branch(tree_id)
     if branch is None:
@@ -1827,6 +1996,9 @@ def next_autonomous_step(tree_id: str, decide_next_step_fn: DecisionCallback | N
             allowed, reason = _tool_governance_status(tree, branch, recommended_tool)
             if not allowed:
                 return _governance_payload(tree, branch, recommended_tool, reason)
+            target_validation = _tool_target_validation(recommended_tool, current_task)
+            if not bool(target_validation.get("valid", True)):
+                return _missing_target_payload(branch, current_task, recommended_tool, target_validation)
             return {
                 "action": "execute",
                 "branch_id": branch.branch_id,
@@ -1835,6 +2007,7 @@ def next_autonomous_step(tree_id: str, decide_next_step_fn: DecisionCallback | N
                 "required_tools": branch.required_tools,
                 "allowed_tools": branch.allowed_tools,
                 "task_target": _scoped_task_target(current_task) if current_task is not None else {},
+                "target_validation": target_validation,
             }
         return {
             "action": "missing_tool_assignment",
@@ -1847,6 +2020,9 @@ def next_autonomous_step(tree_id: str, decide_next_step_fn: DecisionCallback | N
     allowed, reason = _tool_governance_status(tree, branch, recommended_tool)
     if not allowed:
         return _governance_payload(tree, branch, recommended_tool, reason)
+    target_validation = _tool_target_validation(recommended_tool, current_task)
+    if not bool(target_validation.get("valid", True)):
+        return _missing_target_payload(branch, current_task, recommended_tool, target_validation)
     return {
         "action": "execute",
         "branch_id": branch.branch_id,
@@ -1855,6 +2031,7 @@ def next_autonomous_step(tree_id: str, decide_next_step_fn: DecisionCallback | N
         "required_tools": branch.required_tools,
         "allowed_tools": branch.allowed_tools,
         "task_target": _scoped_task_target(current_task) if current_task is not None else {},
+        "target_validation": target_validation,
     }
 
 
@@ -1867,6 +2044,13 @@ def execute_autonomous_step(
     if step is None:
         return None
     if str(step.get("action") or "") != "execute":
+        if str(step.get("action") or "") == "missing_target":
+            branch = _BRANCHES.get(str(step.get("branch_id") or "").strip())
+            task = _TASKS.get(str(step.get("task_id") or "").strip())
+            tool_name = str(step.get("recommended_tool") or step.get("tool") or "").strip()
+            if branch is not None and task is not None and tool_name:
+                _block_task_after_missing_target(task, branch, tool_name)
+                _persist_tree_state(tree_id)
         return step
 
     branch_id = str(step.get("branch_id") or "").strip()
@@ -1902,6 +2086,13 @@ def execute_autonomous_step(
                 "task_target": _scoped_task_target(task),
             }
 
+    target_validation = _tool_target_validation(tool_name, task)
+    tool_args = list(target_validation.get("args") or [])
+    if not bool(target_validation.get("valid", True)):
+        _block_task_after_missing_target(task, branch, tool_name)
+        _persist_tree_state(tree_id)
+        return _missing_target_payload(branch, task, tool_name, target_validation)
+
     now = _now()
     task.status = TaskStatus.ACTIVE
     task.updated_at = now
@@ -1909,7 +2100,6 @@ def execute_autonomous_step(
     branch.tool_state[tool_name] = ToolStatus.RUNNING
     _persist_tree_state(tree_id)
 
-    tool_args = _tool_args_for_task(tool_name, task)
     result = execute_planned_action_fn(tool_name, tool_args)
 
     if _is_scoped_stabilization_task(task):

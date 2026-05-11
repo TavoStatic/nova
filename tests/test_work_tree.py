@@ -421,20 +421,88 @@ class TestWorkTree(unittest.TestCase):
         self.assertEqual(calls, [("patch_preview_approve", ["preview_queue_item.txt"])])
         self.assertEqual(work_tree._TASKS[task.task_id].status, work_tree.TaskStatus.COMPLETE)
 
-    def test_execute_autonomous_step_read_not_a_file_marks_failed(self) -> None:
+    def test_execute_autonomous_step_read_missing_target_blocks_before_tool_call(self) -> None:
         tree = work_tree.initialize_tree("Read failure tree")
         root_branch = work_tree._BRANCHES[tree.root_branch_id]
         task = work_tree.add_task_to_branch(root_branch.branch_id, "Map run_loop, hard_answer, patch_apply seams")
         work_tree.set_branch_tools(root_branch.branch_id, allowed_tools=["read"], preferred_tool="read")
 
+        calls = []
         step = work_tree.execute_autonomous_step(
             tree.tree_id,
-            execute_planned_action_fn=lambda tool, args=None: "Not a file: C:\\Nova\\Map run_loop, hard_answer, patch_apply seams",
+            execute_planned_action_fn=lambda tool, args=None: calls.append((tool, list(args or []))) or "should not run",
         )
 
-        self.assertEqual(step["action"], "tool_failed")
+        self.assertEqual(step["action"], "missing_target")
         self.assertEqual(step["tool"], "read")
-        self.assertEqual(work_tree._TASKS[task.task_id].status, work_tree.TaskStatus.OPEN)
+        self.assertEqual(step["reason"], "missing_file_target")
+        self.assertEqual(calls, [])
+        self.assertEqual(work_tree._TASKS[task.task_id].status, work_tree.TaskStatus.BLOCKED)
+
+    def test_execute_autonomous_step_ls_missing_target_blocks_before_tool_call(self) -> None:
+        tree = work_tree.initialize_tree("Ls missing target tree")
+        root_branch = work_tree._BRANCHES[tree.root_branch_id]
+        task = work_tree.add_task_to_branch(root_branch.branch_id, "download updates.zip to local storage")
+        work_tree.set_branch_tools(root_branch.branch_id, allowed_tools=["ls"], preferred_tool="ls")
+
+        calls = []
+        step = work_tree.execute_autonomous_step(
+            tree.tree_id,
+            execute_planned_action_fn=lambda tool, args=None: calls.append((tool, list(args or []))) or "should not run",
+        )
+
+        self.assertEqual(step["action"], "missing_target")
+        self.assertEqual(step["tool"], "ls")
+        self.assertEqual(step["reason"], "missing_folder_target")
+        self.assertEqual(calls, [])
+        self.assertEqual(work_tree._TASKS[task.task_id].status, work_tree.TaskStatus.BLOCKED)
+
+    def test_next_step_surfaces_missing_target_before_execution(self) -> None:
+        tree = work_tree.initialize_tree("Preview missing target tree")
+        root_branch = work_tree._BRANCHES[tree.root_branch_id]
+        work_tree.add_task_to_branch(root_branch.branch_id, "download updates.zip to local storage")
+        work_tree.set_branch_tools(root_branch.branch_id, allowed_tools=["ls"], preferred_tool="ls")
+
+        step = work_tree.next_autonomous_step(tree.tree_id)
+        payload = work_tree.get_visual_tree_data(tree.tree_id)
+
+        self.assertEqual(step["action"], "missing_target")
+        self.assertEqual(step["reason"], "missing_folder_target")
+        self.assertEqual((payload.get("next_step") or {}).get("action"), "missing_target")
+        self.assertEqual(work_tree.list_autonomous_options(tree.tree_id), [])
+
+    def test_resolve_next_nonexecutable_step_blocks_missing_target(self) -> None:
+        tree = work_tree.initialize_tree("Resolve missing target tree")
+        root_branch = work_tree._BRANCHES[tree.root_branch_id]
+        task = work_tree.add_task_to_branch(root_branch.branch_id, "download updates.zip to local storage")
+        work_tree.set_branch_tools(root_branch.branch_id, allowed_tools=["ls"], preferred_tool="ls")
+
+        result = work_tree.resolve_next_nonexecutable_step(tree.tree_id)
+
+        self.assertTrue(result["resolved"])
+        self.assertEqual(result["action"], "missing_target")
+        self.assertEqual(result["resolution"], "blocked_missing_target")
+        self.assertEqual(work_tree._TASKS[task.task_id].status, work_tree.TaskStatus.BLOCKED)
+        self.assertEqual(work_tree._BRANCHES[root_branch.branch_id].status, work_tree.BranchStatus.BLOCKED)
+        self.assertIsNone(work_tree.next_autonomous_step(tree.tree_id))
+
+    def test_missing_target_propagates_to_dependent_branches(self) -> None:
+        tree = work_tree.initialize_tree("Resolve dependency fallout")
+        first = work_tree.add_branch_to_tree(tree.tree_id, "download patch file", "planned", tree.root_branch_id)
+        second = work_tree.add_branch_to_tree(tree.tree_id, "apply patch file", "planned", tree.root_branch_id)
+        first_task = work_tree.add_task_to_branch(first.branch_id, "download updates.zip to local storage")
+        second_task = work_tree.add_task_to_branch(second.branch_id, "apply patches from updates.zip")
+        work_tree.set_branch_tools(first.branch_id, allowed_tools=["ls"], preferred_tool="ls")
+        work_tree.set_branch_tools(second.branch_id, allowed_tools=["patch_apply"], preferred_tool="patch_apply")
+        work_tree.add_dependency(second.branch_id, first.branch_id)
+
+        result = work_tree.resolve_next_nonexecutable_step(tree.tree_id)
+
+        self.assertTrue(result["resolved"])
+        self.assertEqual(work_tree._TASKS[first_task.task_id].status, work_tree.TaskStatus.BLOCKED)
+        self.assertEqual(work_tree._TASKS[second_task.task_id].status, work_tree.TaskStatus.BLOCKED)
+        self.assertEqual(work_tree._BRANCHES[second.branch_id].resolution_state, "blocked_by_missing_target")
+        self.assertIsNone(work_tree.next_autonomous_step(tree.tree_id))
 
     def test_execute_autonomous_step_ls_not_a_folder_marks_failed(self) -> None:
         tree = work_tree.initialize_tree("Ls failure tree")
@@ -467,21 +535,24 @@ class TestWorkTree(unittest.TestCase):
         self.assertEqual(step["tool_result"], {"tool": "ls", "args": ["runtime"]})
         self.assertEqual(work_tree._TASKS[task.task_id].status, work_tree.TaskStatus.COMPLETE)
 
-    def test_execute_autonomous_step_patch_apply_not_a_file_marks_failed(self) -> None:
+    def test_execute_autonomous_step_patch_apply_missing_target_blocks_before_tool_call(self) -> None:
         tree = work_tree.initialize_tree("Patch apply failure tree")
         root_branch = work_tree._BRANCHES[tree.root_branch_id]
         task = work_tree.add_task_to_branch(root_branch.branch_id, "patch preview teach.zip")
         work_tree.set_tree_execution_policy(tree.tree_id, allowed_tools=["patch_apply"], require_explicit_allow=True)
         work_tree.set_branch_tools(root_branch.branch_id, allowed_tools=["patch_apply"], preferred_tool="patch_apply")
 
+        calls = []
         step = work_tree.execute_autonomous_step(
             tree.tree_id,
-            execute_planned_action_fn=lambda tool, args=None: "Not a file: C:\\Nova\\patch preview teach.zip",
+            execute_planned_action_fn=lambda tool, args=None: calls.append((tool, list(args or []))) or "should not run",
         )
 
-        self.assertEqual(step["action"], "tool_failed")
+        self.assertEqual(step["action"], "missing_target")
         self.assertEqual(step["tool"], "patch_apply")
-        self.assertEqual(work_tree._TASKS[task.task_id].status, work_tree.TaskStatus.OPEN)
+        self.assertEqual(step["reason"], "missing_file_target")
+        self.assertEqual(calls, [])
+        self.assertEqual(work_tree._TASKS[task.task_id].status, work_tree.TaskStatus.BLOCKED)
 
     def test_execute_autonomous_step_test_review_prefers_find_and_uses_test_symbol(self) -> None:
         tree = work_tree.initialize_tree("Test review tree")
@@ -594,12 +665,12 @@ class TestWorkTree(unittest.TestCase):
             tree.tree_id,
             execute_planned_action_fn=lambda tool, args=None: "Not a file: C:\\Nova\\inspect missing file",
         )
-        self.assertEqual(result["action"], "tool_failed")
+        self.assertEqual(result["action"], "missing_target")
 
         payload = work_tree.get_visual_tree_data(tree.tree_id)
         self.assertIsNotNone(payload)
         nodes = {node["id"]: node for node in payload["nodes"]}
-        self.assertEqual(nodes[child_branch.branch_id]["status"], "ready")
+        self.assertEqual(nodes[child_branch.branch_id]["status"], "blocked")
 
     def test_next_autonomous_step_uses_decision_callback_selection(self) -> None:
         tree = work_tree.initialize_tree("Decision callback")

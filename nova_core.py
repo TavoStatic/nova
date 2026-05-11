@@ -256,11 +256,9 @@ from services.nova_web_tools import seed_urls_for_domain as service_seed_urls_fo
 from services.nova_web_tools import tool_stackexchange_search as service_tool_stackexchange_search
 from services.nova_web_tools import tool_web_fetch as service_tool_web_fetch
 from services.nova_web_tools import tool_web_gather as service_tool_web_gather
-from services.nova_web_tools import tool_search as service_tool_search
 from services.nova_web_tools import tool_web_research as service_tool_web_research
 from services.nova_web_tools import tool_web_search as service_tool_web_search
 from services.nova_web_tools import tool_wikipedia_lookup as service_tool_wikipedia_lookup
-from services.nova_web_tools import web_search as service_web_search
 from services.nova_cli_loop import run_loop as service_run_loop
 from services.nova_followup_dispatch import consume_conversation_followup_from_runtime as service_consume_conversation_followup_from_runtime
 from services.nova_memory_events import append_memory_event as service_append_memory_event
@@ -342,6 +340,15 @@ CHANNELS = 1
 RECORD_SECONDS = 3
 OLLAMA_BOOT_RETRIES = 15
 OLLAMA_REQ_TIMEOUT = 1800
+
+
+def record_seconds(seconds: int = RECORD_SECONDS):
+    return service_record_seconds(seconds, ensure_voice_deps_fn=_ensure_voice_deps, runtime_scope=globals(), sample_rate=SAMPLE_RATE, channels=CHANNELS)
+
+
+def transcribe(model, audio_int16):
+    return service_transcribe(model, audio_int16, ensure_voice_deps_fn=_ensure_voice_deps, runtime_scope=globals(), sample_rate=SAMPLE_RATE)
+
 
 # Knowledge packs (B-mode)
 KNOWLEDGE_ROOT = BASE_DIR / "knowledge"

@@ -68,6 +68,7 @@ ACTIVE_WORK_TREE_EXECUTE_TOOLS = ["health", "system_check", "queue_status", "pul
 ACTIVE_WORK_TREE_MAX_TREES = 8
 ACTIVE_WORK_TREE_MAX_STEPS = 8
 ACTIVE_WORK_TREE_DEFAULT_DISPATCH_STEPS = 3
+ACTIVE_WORK_TREE_MAX_BLOCKER_RESOLUTIONS = 8
 LEGACY_PATCH_UPDATE_TOOLS = {"patch_apply", "patch_rollback", "update_now"}
 COMPLETE_TREE_VISIBLE_KEEP = 12
 COMPLETE_TREE_ARCHIVE_MIN_AGE_SEC = 0
@@ -992,7 +993,7 @@ def _maintenance_active_work_tree_run_next_action(_payload: dict, state: dict) -
         return False, msg, {}, msg
     status = str((cycle or {}).get("status") or "unknown").strip() or "unknown"
     msg = f"active_work_tree_run_next_{status}"
-    return status not in {"failed", "error"}, msg, {"cycle": cycle if isinstance(cycle, dict) else {}}, msg
+    return not _cycle_status_is_failure(status), msg, {"cycle": cycle if isinstance(cycle, dict) else {}}, msg
 
 
 def _dispatch_autonomy_control_action(action_type: str, payload: dict, events: list[dict], state: dict | None = None) -> tuple[bool, str, dict]:
@@ -1147,6 +1148,20 @@ def _orchestrator_executed_lane_cycle(packet: dict, action_type: str) -> dict:
     cycle.setdefault("orchestrator_owned", True)
     cycle.setdefault("orchestrator_action_type", str(action_type or "").strip())
     return cycle
+
+
+def _cycle_status_is_failure(status: str) -> bool:
+    return str(status or "").strip().lower() in {
+        "failed",
+        "error",
+        "tool_failed",
+        "execution_failed",
+        "verification_failed",
+        "scope_blocked",
+        "governance_blocked",
+        "missing_target",
+        "no_tool_selected",
+    }
 
 
 def _record_worker_cycle(*, cycle: int, interval_sec: int, status: str, code: int | None = None) -> None:
@@ -2500,7 +2515,62 @@ def _run_generated_queue_work_tree_cycle(state: dict) -> dict:
     return payload
 
 
-def _active_work_tree_candidates(limit: int = ACTIVE_WORK_TREE_MAX_TREES) -> list[dict]:
+def _resolve_nonexecutable_active_work_tree_steps(
+    state: dict,
+    *,
+    limit: int = ACTIVE_WORK_TREE_MAX_TREES,
+    max_resolutions: int = ACTIVE_WORK_TREE_MAX_BLOCKER_RESOLUTIONS,
+) -> dict:
+    resolved: list[dict] = []
+    inspected = 0
+    tree_limit = max(int(limit or ACTIVE_WORK_TREE_MAX_TREES) * 4, 16)
+    resolution_limit = max(1, int(max_resolutions or ACTIVE_WORK_TREE_MAX_BLOCKER_RESOLUTIONS))
+    for payload in work_tree.list_visual_trees(limit=tree_limit):
+        if len(resolved) >= resolution_limit:
+            break
+        if not isinstance(payload, dict):
+            continue
+        if str(payload.get("status") or "").strip().lower() != "active":
+            continue
+        if str(payload.get("kind") or "").strip().lower() in {PATCH_QUEUE_TREE_KIND, GENERATED_QUEUE_TREE_KIND}:
+            continue
+        tree_id = str(payload.get("tree_id") or "").strip()
+        if not tree_id:
+            continue
+        inspected += 1
+        while len(resolved) < resolution_limit:
+            current_payload = work_tree.get_visual_tree_data(tree_id) or {}
+            next_step = current_payload.get("next_step") if isinstance(current_payload.get("next_step"), dict) else {}
+            if str(next_step.get("action") or "").strip().lower() != "missing_target":
+                break
+            result = work_tree.resolve_next_nonexecutable_step(tree_id, persist=True)
+            if not bool((result or {}).get("resolved", False)):
+                break
+            resolved.append(
+                {
+                    "tree_id": tree_id,
+                    "tree_title": str(current_payload.get("title") or payload.get("title") or ""),
+                    "branch_id": str(result.get("branch_id") or ""),
+                    "task_id": str(result.get("task_id") or ""),
+                    "tool": str(result.get("recommended_tool") or result.get("tool") or ""),
+                    "reason": str(result.get("reason") or ""),
+                    "resolution": str(result.get("resolution") or ""),
+                }
+            )
+    result_payload = {
+        "ts": _patch_queue_timestamp(),
+        "status": "ok" if resolved else "idle",
+        "inspected_count": inspected,
+        "resolved_count": len(resolved),
+        "resolved": resolved,
+    }
+    state["last_active_work_tree_blocker_resolution"] = result_payload
+    return result_payload
+
+
+def _active_work_tree_candidates(
+    limit: int = ACTIVE_WORK_TREE_MAX_TREES,
+) -> list[dict]:
     candidates: list[dict] = []
     for payload in work_tree.list_visual_trees(limit=max(int(limit or ACTIVE_WORK_TREE_MAX_TREES) * 4, 16)):
         if not isinstance(payload, dict):
@@ -2512,6 +2582,8 @@ def _active_work_tree_candidates(limit: int = ACTIVE_WORK_TREE_MAX_TREES) -> lis
         next_step = payload.get("next_step") if isinstance(payload.get("next_step"), dict) else {}
         if not next_step:
             continue
+        if str(next_step.get("action") or "").strip().lower() != "execute":
+            continue
         candidates.append(payload)
         if len(candidates) >= max(1, int(limit or ACTIVE_WORK_TREE_MAX_TREES)):
             break
@@ -2521,6 +2593,41 @@ def _active_work_tree_candidates(limit: int = ACTIVE_WORK_TREE_MAX_TREES) -> lis
 def _candidate_uses_tool(candidate: dict, tool_name: str) -> bool:
     next_step = candidate.get("next_step") if isinstance(candidate.get("next_step"), dict) else {}
     return str(next_step.get("recommended_tool") or "").strip() == tool_name
+
+
+def _is_structured_cli_system_tree(payload: dict) -> bool:
+    return (
+        str((payload or {}).get("kind") or "").strip().lower() == "system"
+        and str((payload or {}).get("source") or "").strip().lower() == "cli"
+    )
+
+
+def _next_step_action(payload: dict) -> str:
+    next_step = (payload or {}).get("next_step") if isinstance((payload or {}).get("next_step"), dict) else {}
+    return str(next_step.get("action") or "").strip().lower()
+
+
+def _is_structurally_nonexecutable_cli_payload(payload: dict) -> bool:
+    if not _is_structured_cli_system_tree(payload):
+        return False
+    return _next_step_action(payload) in {
+        "missing_target",
+        "missing_tool_assignment",
+        "governance_blocked",
+        "wait_for_tools",
+        "no_tool_selected",
+    }
+
+
+def _is_resolved_missing_target_cli_tree(branches: list, open_tasks: list) -> bool:
+    if not open_tasks:
+        return False
+    if any(getattr(task, "status", None) != TaskStatus.BLOCKED for task in open_tasks):
+        return False
+    return any(
+        str(getattr(branch, "resolution_state", "") or "").strip().lower() == "missing_target"
+        for branch in branches
+    )
 
 
 def _sync_core_thinning_work_tree(state: dict) -> dict:
@@ -2559,10 +2666,12 @@ def _run_active_work_tree_cycle(
 ) -> dict:
     tree_limit = max(1, _safe_int(max_trees, ACTIVE_WORK_TREE_MAX_TREES)) if max_trees is not None else ACTIVE_WORK_TREE_MAX_TREES
     step_limit = max(1, _safe_int(max_steps, ACTIVE_WORK_TREE_MAX_STEPS)) if max_steps is not None else ACTIVE_WORK_TREE_MAX_STEPS
+    blocker_resolution = _resolve_nonexecutable_active_work_tree_steps(state, limit=tree_limit)
     candidates = _active_work_tree_candidates(tree_limit)
     core_thinning_sync: dict = {}
     if sync_core_thinning and any(_candidate_uses_tool(candidate, "core_thinning") for candidate in candidates):
         core_thinning_sync = _sync_core_thinning_work_tree(state)
+        blocker_resolution = _resolve_nonexecutable_active_work_tree_steps(state, limit=tree_limit)
         candidates = _active_work_tree_candidates(tree_limit)
     executed_total = 0
     attempted_total = 0
@@ -2631,6 +2740,8 @@ def _run_active_work_tree_cycle(
     }
     if core_thinning_sync:
         payload["core_thinning_sync"] = core_thinning_sync
+    if blocker_resolution:
+        payload["blocker_resolution"] = blocker_resolution
     if full_history:
         payload["history"] = full_history
     state["last_active_work_tree_cycle"] = payload
@@ -2641,12 +2752,16 @@ def _retire_legacy_patch_update_trees(state: dict) -> dict:
     retired: list[dict] = []
     now = work_tree._now()
     reason = "Retired legacy patch/update shell after governed patch queue adoption."
-    for candidate in _active_work_tree_candidates(limit=64):
+    for candidate in work_tree.list_visual_trees(limit=256):
+        if not isinstance(candidate, dict):
+            continue
+        if str(candidate.get("status") or "").strip().lower() != "active":
+            continue
         tree_id = str(candidate.get("tree_id") or "").strip()
         tree_kind = str(candidate.get("kind") or "").strip().lower()
         tree_source = str(candidate.get("source") or "").strip().lower()
         next_step = candidate.get("next_step") if isinstance(candidate.get("next_step"), dict) else {}
-        tool_name = str(next_step.get("recommended_tool") or "").strip()
+        tool_name = str(next_step.get("recommended_tool") or next_step.get("tool") or "").strip()
         if not tree_id or tree_kind != "system" or tree_source != "cli":
             continue
         if tool_name not in LEGACY_PATCH_UPDATE_TOOLS:
@@ -2779,23 +2894,31 @@ def _archive_stale_cli_active_trees(state: dict) -> dict:
         if tree.status != work_tree.TreeStatus.ACTIVE:
             continue
         meta = dict(tree.meta or {}) if isinstance(tree.meta, dict) else {}
-        kind = str(meta.get("kind") or "").strip().lower()
-        source = str(meta.get("source") or "").strip().lower()
+        payload = work_tree.get_visual_tree_data(tree.tree_id) or {}
+        kind = str(payload.get("kind") or meta.get("kind") or "").strip().lower()
+        source = str(payload.get("source") or meta.get("source") or "").strip().lower()
         title = str(tree.title or "").strip()
-        if kind != "system" or source != "cli" or not title.lower().startswith("cli:"):
-            continue
-        age_sec = max(0.0, (now - tree.created_at).total_seconds())
-        if age_sec < float(STALE_CLI_ACTIVE_TREE_ARCHIVE_MIN_AGE_SEC):
-            skipped_recent += 1
+        if kind != "system" or source != "cli":
             continue
         branches = work_tree.list_tree_branches(tree.tree_id)
         open_tasks = [
             task for task in work_tree.list_tree_tasks(tree.tree_id)
             if task.status not in {TaskStatus.COMPLETE, TaskStatus.DROPPED}
         ]
-        if len(branches) > int(STALE_CLI_ACTIVE_TREE_MAX_BRANCHES) or len(open_tasks) > int(STALE_CLI_ACTIVE_TREE_MAX_OPEN_TASKS):
-            skipped_complex += 1
+        structurally_nonexecutable = _is_structurally_nonexecutable_cli_payload(payload)
+        resolved_missing_target = _is_resolved_missing_target_cli_tree(branches, open_tasks)
+        immediate_nonexecutable = _next_step_action(payload) == "missing_target" or resolved_missing_target
+        age_sec = max(0.0, (now - tree.created_at).total_seconds())
+        if (
+            age_sec < float(STALE_CLI_ACTIVE_TREE_ARCHIVE_MIN_AGE_SEC)
+            and not immediate_nonexecutable
+        ):
+            skipped_recent += 1
             continue
+        if len(branches) > int(STALE_CLI_ACTIVE_TREE_MAX_BRANCHES) or len(open_tasks) > int(STALE_CLI_ACTIVE_TREE_MAX_OPEN_TASKS):
+            if not structurally_nonexecutable and not resolved_missing_target:
+                skipped_complex += 1
+                continue
         work_tree.archive_tree(tree.tree_id, reason=reason)
         archived.append(
             {
@@ -2805,6 +2928,7 @@ def _archive_stale_cli_active_trees(state: dict) -> dict:
                 "branch_count": len(branches),
                 "open_tasks": len(open_tasks),
                 "work_identity_key": str(meta.get("work_identity_key") or ""),
+                "nonexecutable": bool(structurally_nonexecutable or resolved_missing_target),
             }
         )
     payload = {

@@ -168,6 +168,19 @@ class TestAutonomyMaintenance(unittest.TestCase):
         work_tree.save_tree(recent_cli)
         work_tree._persist_tree_state(recent_cli.tree_id)
 
+        recent_resolved_invalid = work_tree.initialize_tree(
+            "Cli: recent resolved missing target",
+            meta={"kind": "system", "source": "cli", "work_identity_key": "work:recent-invalid"},
+        )
+        recent_invalid_root = work_tree._BRANCHES[recent_resolved_invalid.root_branch_id]
+        work_tree.add_task_to_branch(recent_invalid_root.branch_id, "copy artifact to local storage")
+        work_tree.set_branch_tools(recent_invalid_root.branch_id, allowed_tools=["ls"], preferred_tool="ls")
+        work_tree.resolve_next_nonexecutable_step(recent_resolved_invalid.tree_id)
+        recent_resolved_invalid.created_at = now - timedelta(minutes=10)
+        recent_resolved_invalid.updated_at = now - timedelta(minutes=10)
+        work_tree.save_tree(recent_resolved_invalid)
+        work_tree._persist_tree_state(recent_resolved_invalid.tree_id)
+
         core_thinning = work_tree.initialize_tree(
             "Core Thinning",
             meta={"source": "core_thinning", "work_identity_key": "system:core-thinning"},
@@ -183,11 +196,28 @@ class TestAutonomyMaintenance(unittest.TestCase):
             meta={"kind": "system", "source": "cli", "work_identity_key": "work:complex-prompt"},
         )
         for idx in range(5):
-            work_tree.add_branch_to_tree(complex_cli.tree_id, f"complex branch {idx}", "work", complex_cli.root_branch_id)
+            branch = work_tree.add_branch_to_tree(complex_cli.tree_id, f"complex branch {idx}", "work", complex_cli.root_branch_id)
+            if idx == 0:
+                work_tree.add_task_to_branch(branch.branch_id, "keep complex prompt open")
+                work_tree.set_branch_tools(branch.branch_id, allowed_tools=["health"], preferred_tool="health")
         complex_cli.created_at = now - timedelta(hours=13)
         complex_cli.updated_at = now - timedelta(hours=13)
         work_tree.save_tree(complex_cli)
         work_tree._persist_tree_state(complex_cli.tree_id)
+
+        complex_invalid_cli = work_tree.initialize_tree(
+            "Cli: stale file operation",
+            meta={"kind": "system", "source": "cli", "work_identity_key": "work:invalid-file-prompt"},
+        )
+        invalid_root = work_tree._BRANCHES[complex_invalid_cli.root_branch_id]
+        work_tree.add_task_to_branch(invalid_root.branch_id, "copy artifact to local storage")
+        work_tree.set_branch_tools(invalid_root.branch_id, allowed_tools=["ls"], preferred_tool="ls")
+        for idx in range(5):
+            work_tree.add_branch_to_tree(complex_invalid_cli.tree_id, f"invalid branch {idx}", "work", complex_invalid_cli.root_branch_id)
+        complex_invalid_cli.created_at = now - timedelta(hours=13)
+        complex_invalid_cli.updated_at = now - timedelta(hours=13)
+        work_tree.save_tree(complex_invalid_cli)
+        work_tree._persist_tree_state(complex_invalid_cli.tree_id)
 
         state: dict = {}
         with mock.patch.object(autonomy_maintenance, "STALE_CLI_ACTIVE_TREE_ARCHIVE_MIN_AGE_SEC", 3600), \
@@ -195,17 +225,19 @@ class TestAutonomyMaintenance(unittest.TestCase):
              mock.patch.object(autonomy_maintenance, "STALE_CLI_ACTIVE_TREE_MAX_OPEN_TASKS", 2):
             payload = autonomy_maintenance._archive_stale_cli_active_trees(state)
 
-        self.assertEqual(payload.get("archived_count"), 1)
+        self.assertEqual(payload.get("archived_count"), 3)
         self.assertEqual(payload.get("skipped_recent_count"), 1)
         self.assertEqual(payload.get("skipped_complex_count"), 1)
         self.assertEqual(work_tree.get_tree(stale_cli.tree_id).status, work_tree.TreeStatus.ARCHIVED)
         self.assertEqual(work_tree.get_tree(recent_cli.tree_id).status, work_tree.TreeStatus.ACTIVE)
+        self.assertEqual(work_tree.get_tree(recent_resolved_invalid.tree_id).status, work_tree.TreeStatus.ARCHIVED)
         self.assertEqual(work_tree.get_tree(core_thinning.tree_id).status, work_tree.TreeStatus.ACTIVE)
         self.assertEqual(work_tree.get_tree(complex_cli.tree_id).status, work_tree.TreeStatus.ACTIVE)
+        self.assertEqual(work_tree.get_tree(complex_invalid_cli.tree_id).status, work_tree.TreeStatus.ARCHIVED)
         self.assertTrue(
             all(task.status == work_tree.TaskStatus.DROPPED for task in work_tree.list_tree_tasks(stale_cli.tree_id))
         )
-        self.assertEqual((state.get("last_stale_cli_tree_archive") or {}).get("archived_count"), 1)
+        self.assertEqual((state.get("last_stale_cli_tree_archive") or {}).get("archived_count"), 3)
 
     def test_run_once_records_generated_queue_outcome(self):
         with tempfile.TemporaryDirectory() as td:
@@ -533,6 +565,44 @@ class TestAutonomyMaintenance(unittest.TestCase):
         self.assertEqual(result.get("action_type"), "active_work_tree_run_next")
         self.assertEqual(((result.get("extra") or {}).get("cycle") or {}).get("executed_count"), 3)
         self.assertEqual((result.get("events") or [])[0].get("act"), "active_work_tree_run_next")
+
+    def test_execute_autonomy_recommendation_reports_inner_active_work_tree_failure(self):
+        state: dict = {}
+        packet = {
+            "cycle_id": "cycle-test",
+            "decision_type": "RecommendAction",
+            "recommended_action": {
+                "action_type": "active_work_tree_run_next",
+                "target_kind": "lane",
+                "target_id": "active_work_tree",
+                "reason_code": "active_work_tree_ready",
+                "requires_ack": False,
+                "cooldown_sec": 120,
+            },
+            "confidence": 0.72,
+            "refusal_reasons": [],
+        }
+        policy = {
+            "enabled": True,
+            "mode": "canary",
+            "execute_enabled": True,
+            "execute_allowed_actions": [],
+            "execute_allowed_action_groups": ["active_work_tree"],
+            "execute_blocked_actions": [],
+            "requires_operator_ack_for": [],
+            "execute_min_confidence": 0.55,
+        }
+
+        with mock.patch.object(
+            autonomy_maintenance,
+            "_run_active_work_tree_cycle",
+            return_value={"status": "tool_failed", "executed_count": 0, "tree_count": 1},
+        ):
+            result = autonomy_maintenance._execute_autonomy_recommendation(state, packet, policy)
+
+        self.assertEqual(result.get("result"), "failed")
+        self.assertFalse(result.get("ok"))
+        self.assertEqual(result.get("message"), "active_work_tree_run_next_tool_failed")
 
     def test_execute_autonomy_recommendation_honors_active_work_tree_step_budget(self):
         state: dict = {}
@@ -1402,15 +1472,65 @@ class TestAutonomyMaintenance(unittest.TestCase):
 
         self.assertEqual(payload.get("status"), "ok")
         self.assertEqual(payload.get("executed_count"), 1)
-        self.assertEqual(payload.get("tree_count"), 2)
-        self.assertEqual(payload.get("skipped_tree_count"), 1)
-        skipped = payload.get("skipped") or []
-        self.assertEqual(skipped[0].get("tool"), "update_now")
+        self.assertEqual(payload.get("tree_count"), 1)
+        self.assertEqual(payload.get("skipped_tree_count"), 0)
         safe_inspect = work_tree.inspect_tree(safe_tree.tree_id)
         unsafe_inspect = work_tree.inspect_tree(unsafe_tree.tree_id)
         self.assertEqual(safe_inspect.get("status"), "complete")
         self.assertEqual(unsafe_inspect.get("status"), "active")
         self.assertEqual((state.get("last_active_work_tree_cycle") or {}).get("executed_count"), 1)
+
+    def test_active_work_tree_candidates_require_executable_next_step(self):
+        self._isolated_work_tree_db()
+        safe_tree = work_tree.initialize_tree(
+            "Cli: check queue status",
+            meta={"kind": "system", "source": "cli"},
+        )
+        safe_root = work_tree._BRANCHES[safe_tree.root_branch_id]
+        work_tree.add_task_to_branch(safe_root.branch_id, "check queue status")
+        work_tree.set_branch_tools(safe_root.branch_id, allowed_tools=["queue_status"], preferred_tool="queue_status")
+
+        legacy_tree = work_tree.initialize_tree(
+            "Cli: please patch apply updates.zip",
+            meta={"kind": "system", "source": "cli"},
+        )
+        legacy_root = work_tree._BRANCHES[legacy_tree.root_branch_id]
+        work_tree.add_task_to_branch(legacy_root.branch_id, "download updates.zip to local storage")
+        work_tree.set_branch_tools(legacy_root.branch_id, allowed_tools=["ls"], preferred_tool="ls")
+
+        legacy_payload = work_tree.get_visual_tree_data(legacy_tree.tree_id)
+        candidates = autonomy_maintenance._active_work_tree_candidates(limit=4)
+
+        self.assertEqual((legacy_payload.get("next_step") or {}).get("action"), "missing_target")
+        self.assertIn(safe_tree.tree_id, {str(candidate.get("tree_id") or "") for candidate in candidates})
+        self.assertNotIn(legacy_tree.tree_id, {str(candidate.get("tree_id") or "") for candidate in candidates})
+
+    def test_run_active_work_tree_cycle_resolves_missing_target_before_candidate_selection(self):
+        self._isolated_work_tree_db()
+        state = {}
+        mixed_tree = work_tree.initialize_tree(
+            "Cli: mixed prompt",
+            meta={"kind": "system", "source": "cli"},
+        )
+        root = work_tree._BRANCHES[mixed_tree.root_branch_id]
+        root_task = work_tree.add_task_to_branch(root.branch_id, "download updates.zip to local storage")
+        work_tree.set_branch_tools(root.branch_id, allowed_tools=["ls"], preferred_tool="ls")
+        child = work_tree.add_branch_to_tree(mixed_tree.tree_id, "check queue status", "planned", root.branch_id)
+        child_task = work_tree.add_task_to_branch(child.branch_id, "check queue status")
+        work_tree.set_branch_tools(child.branch_id, allowed_tools=["queue_status"], preferred_tool="queue_status")
+
+        with mock.patch.object(autonomy_maintenance.nova_core, "execute_planned_action", return_value="Queue is empty."):
+            payload = autonomy_maintenance._run_active_work_tree_cycle(
+                state,
+                max_steps=1,
+                max_trees=1,
+                sync_core_thinning=False,
+            )
+
+        self.assertEqual((payload.get("blocker_resolution") or {}).get("resolved_count"), 1)
+        self.assertEqual(payload.get("executed_count"), 1)
+        self.assertEqual(work_tree._TASKS[root_task.task_id].status, work_tree.TaskStatus.BLOCKED)
+        self.assertEqual(work_tree._TASKS[child_task.task_id].status, work_tree.TaskStatus.COMPLETE)
 
     def test_run_active_work_tree_cycle_executes_core_thinning_lane(self):
         self._isolated_work_tree_db()
