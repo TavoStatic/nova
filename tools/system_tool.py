@@ -14,16 +14,26 @@ def _format_generated_queue_status(queue: dict) -> str:
     drift_count = int(payload.get("drift_count", 0) or 0)
     warning_count = int(payload.get("warning_count", 0) or 0)
     never_run_count = int(payload.get("never_run_count", 0) or 0)
+    ecology_status = str(payload.get("ecology_status") or "unknown").strip() or "unknown"
+    growth_candidate_count = int(payload.get("growth_candidate_count", 0) or 0)
+    contract_count = int(payload.get("contract_count", 0) or 0)
+    historical_count = int(payload.get("historical_count", 0) or 0)
     next_item = payload.get("next_item") if isinstance(payload.get("next_item"), dict) else {}
     next_file = str(next_item.get("file") or "").strip()
     next_family = str(next_item.get("family_id") or "").strip()
     next_status = str(next_item.get("latest_status") or "unknown").strip() or "unknown"
     next_reason = str(next_item.get("opportunity_reason") or "unknown").strip() or "unknown"
+    next_lifecycle = str(next_item.get("lifecycle_state") or "unknown").strip() or "unknown"
+    next_growth_action = str(next_item.get("growth_action") or "unknown").strip() or "unknown"
     report_path = str(next_item.get("latest_report_path") or "").strip()
 
     lines = [
         "Standing work queue:",
+        f"- ecology: {ecology_status}",
         f"- open: {open_count} of {count}",
+        f"- growth candidates: {growth_candidate_count}",
+        f"- contracts: {contract_count}",
+        f"- historical: {historical_count}",
         f"- green: {green_count}",
         f"- drift: {drift_count}",
         f"- warning: {warning_count}",
@@ -34,6 +44,7 @@ def _format_generated_queue_status(queue: dict) -> str:
         if next_family:
             lines.append(f"Family: {next_family}")
         lines.append(f"Status: {next_status} ({next_reason})")
+        lines.append(f"Lifecycle: {next_lifecycle} ({next_growth_action})")
         if report_path:
             lines.append(f"Latest report: {report_path}")
     items = payload.get("items") if isinstance(payload.get("items"), list) else []
@@ -44,11 +55,13 @@ def _format_generated_queue_status(queue: dict) -> str:
             file_name = str(item.get("file") or "unknown").strip() or "unknown"
             status = str(item.get("latest_status") or "unknown").strip() or "unknown"
             reason = str(item.get("opportunity_reason") or "unknown").strip() or "unknown"
+            lifecycle = str(item.get("lifecycle_state") or "unknown").strip() or "unknown"
+            growth_action = str(item.get("growth_action") or "unknown").strip() or "unknown"
             highest = item.get("highest_priority") if isinstance(item.get("highest_priority"), dict) else {}
             signal = str(highest.get("signal") or "").strip()
             urgency = str(highest.get("urgency") or "").strip()
             seam = str(highest.get("seam") or "").strip()
-            detail = f"status={status}; reason={reason}"
+            detail = f"status={status}; lifecycle={lifecycle}; action={growth_action}; reason={reason}"
             if signal or urgency or seam:
                 detail += f"; signal={signal or 'n/a'}; urgency={urgency or 'n/a'}; seam={seam or 'n/a'}"
             lines.append(f"{index}. {file_name} - {detail}")

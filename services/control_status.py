@@ -257,6 +257,10 @@ class ControlStatusService:
             "subconscious_live_summary": subconscious_live_summary,
             "generated_work_queue_open_count": int(generated_work_queue.get("open_count", 0) or 0),
             "generated_work_queue_next_file": str((generated_work_queue.get("next_item") or {}).get("file") or ""),
+            "generated_work_queue_ecology_status": str(generated_work_queue.get("ecology_status") or ""),
+            "generated_work_queue_growth_candidate_count": int(generated_work_queue.get("growth_candidate_count", 0) or 0),
+            "generated_work_queue_contract_count": int(generated_work_queue.get("contract_count", 0) or 0),
+            "generated_work_queue_historical_count": int(generated_work_queue.get("historical_count", 0) or 0),
             "autonomy_maintenance": autonomy_payload,
             "operator_macros": operator_macros,
             "backend_commands": backend_commands,
@@ -302,6 +306,12 @@ class ControlStatusService:
         queue_open_count = int(generated_work_queue.get("open_count", 0) or 0)
         queue_actionable_count = int(generated_work_queue.get("actionable_count", 0) or 0)
         queue_blocked_count = int(generated_work_queue.get("blocked_count", 0) or 0)
+        queue_ecology_status = str(generated_work_queue.get("ecology_status") or "").strip()
+        queue_growth_candidate_count = int(generated_work_queue.get("growth_candidate_count", 0) or 0)
+        queue_contract_count = int(generated_work_queue.get("contract_count", 0) or 0)
+        queue_historical_count = int(generated_work_queue.get("historical_count", 0) or 0)
+        queue_lifecycle_counts = dict(generated_work_queue.get("lifecycle_counts") or {}) if isinstance(generated_work_queue.get("lifecycle_counts"), dict) else {}
+        queue_ecology_role_counts = dict(generated_work_queue.get("ecology_role_counts") or {}) if isinstance(generated_work_queue.get("ecology_role_counts"), dict) else {}
         queue_blocked_reason_counts = dict(generated_work_queue.get("blocked_reason_counts") or {}) if isinstance(generated_work_queue.get("blocked_reason_counts"), dict) else {}
         queue_blocked_files = list(generated_work_queue.get("blocked_files") or []) if isinstance(generated_work_queue.get("blocked_files"), list) else []
         if queue_open_count > 0 and queue_blocked_count <= 0 and queue_actionable_count <= 0:
@@ -321,6 +331,12 @@ class ControlStatusService:
         autonomy_payload["queue_open_count"] = queue_open_count
         autonomy_payload["queue_actionable_count"] = queue_actionable_count
         autonomy_payload["queue_blocked_count"] = queue_blocked_count
+        autonomy_payload["queue_ecology_status"] = queue_ecology_status
+        autonomy_payload["queue_growth_candidate_count"] = queue_growth_candidate_count
+        autonomy_payload["queue_contract_count"] = queue_contract_count
+        autonomy_payload["queue_historical_count"] = queue_historical_count
+        autonomy_payload["queue_lifecycle_counts"] = queue_lifecycle_counts
+        autonomy_payload["queue_ecology_role_counts"] = queue_ecology_role_counts
         autonomy_payload["queue_blocked_reason_counts"] = queue_blocked_reason_counts
         autonomy_payload["queue_blocked_files"] = queue_blocked_files
         autonomy_payload["last_generated_queue_run_stale"] = last_generated_queue_run_stale
@@ -414,6 +430,12 @@ class ControlStatusService:
         payload["last_generated_queue_report_status"] = str(last_generated_queue_run.get("latest_report_status") or "")
         payload["last_generated_queue_run_stale"] = last_generated_queue_run_stale
         payload["generated_queue_status"] = queue_status
+        payload["generated_queue_ecology_status"] = queue_ecology_status
+        payload["queue_growth_candidate_count"] = queue_growth_candidate_count
+        payload["queue_contract_count"] = queue_contract_count
+        payload["queue_historical_count"] = queue_historical_count
+        payload["queue_lifecycle_counts"] = queue_lifecycle_counts
+        payload["queue_ecology_role_counts"] = queue_ecology_role_counts
         payload["queue_open_count"] = queue_open_count
         payload["queue_actionable_count"] = queue_actionable_count
         payload["queue_blocked_count"] = queue_blocked_count
