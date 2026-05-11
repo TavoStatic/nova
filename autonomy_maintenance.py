@@ -519,6 +519,8 @@ def _queue_owner_hints(generated_queue: dict) -> dict:
         queue_items.append(dict(queue.get("next_item") or {}))
     queue_items.extend([dict(item) for item in list(queue.get("items") or []) if isinstance(item, dict)][:20])
     for item in queue_items:
+        if ("open" in item or "actionable" in item) and not (bool(item.get("open")) or bool(item.get("actionable"))):
+            continue
         file_name = str(item.get("file") or "").strip()
         if not file_name or file_name in seen:
             continue
@@ -541,6 +543,7 @@ def _queue_owner_hints(generated_queue: dict) -> dict:
             "target_seam": seam,
             "signal": signal_name,
             "robustness": _safe_float(priority.get("robustness", priority.get("robustness_score")), 0.0),
+            "pressure_state": "active" if (bool(item.get("open")) or bool(item.get("actionable"))) else "unknown",
         }
     return owner_by_branch
 
@@ -561,6 +564,7 @@ def _triage_hints_for_orchestrator(
     report = dict(report_source or {}) if isinstance(report_source, dict) else {}
     source_freshness_sec = _safe_int(report.get("_source_freshness_sec"), 0)
     runtime_context = _triage_runtime_context_for_orchestrator(state, queue, kidney_summary)
+    active_report_pressure = _queue_has_active_probe_pressure(queue)
 
     likely_owner_by_branch = _queue_owner_hints(queue)
     seam_pressure_scores = {
@@ -571,8 +575,10 @@ def _triage_hints_for_orchestrator(
     lane_pressure_scores: dict[str, float] = {}
     review_contract_pressure_scores: dict[str, float] = {}
     top_candidates: list[dict] = []
+    historical_candidates: list[dict] = []
     approved_review_count = 0
     rejected_review_count = 0
+    historical_review_count = 0
 
     for family in [dict(item) for item in list(report.get("families") or []) if isinstance(item, dict)]:
         priorities = list(family.get("training_priorities") or []) if isinstance(family.get("training_priorities"), list) else []
@@ -589,15 +595,19 @@ def _triage_hints_for_orchestrator(
             review_contract = str(payload.get("review_contract") or "").strip()
             lane_key = _triage_lane_key(payload)
             approved = bool(gate.get("approved"))
-            if approved:
+            active_candidate = approved and active_report_pressure
+            if active_candidate:
                 approved_review_count += 1
                 _max_score(lane_pressure_scores, lane_key, robustness)
                 _max_score(lane_pressure_scores, "generated_queue", robustness)
                 _max_score(owner_pressure_scores, owner, robustness)
                 _max_score(review_contract_pressure_scores, review_contract, robustness)
+            elif approved:
+                historical_review_count += 1
             else:
                 rejected_review_count += 1
-            _max_score(seam_pressure_scores, seam or signal_name, robustness)
+            if active_candidate:
+                _max_score(seam_pressure_scores, seam or signal_name, robustness)
             branch_key = f"subconscious:{str(payload.get('family_id') or '').strip()}:{seam}:{signal_name}"
             likely_owner_by_branch[branch_key] = {
                 "source": "subconscious_work_tree_triage",
@@ -609,24 +619,28 @@ def _triage_hints_for_orchestrator(
                 "robustness": round(robustness, 4),
                 "gate_status": str(gate.get("status") or "").strip(),
                 "approved": approved,
+                "pressure_state": "active" if active_candidate else ("historical" if approved else "rejected"),
             }
-            top_candidates.append(
-                {
-                    "family_id": str(payload.get("family_id") or "").strip(),
-                    "target_seam": seam,
-                    "signal": signal_name,
-                    "preferred_owner": owner,
-                    "route_hint": str(payload.get("route_hint") or "").strip(),
-                    "review_contract": review_contract,
-                    "lane": lane_key,
-                    "robustness": round(robustness, 4),
-                    "urgency": str(payload.get("urgency") or "").strip(),
-                    "gate_status": str(gate.get("status") or "").strip(),
-                    "approved": approved,
-                    "suggested_test_name": str(payload.get("suggested_test_name") or "").strip(),
-                    "next_task": str(signal.get("next_task") or "").strip(),
-                }
-            )
+            candidate = {
+                "family_id": str(payload.get("family_id") or "").strip(),
+                "target_seam": seam,
+                "signal": signal_name,
+                "preferred_owner": owner,
+                "route_hint": str(payload.get("route_hint") or "").strip(),
+                "review_contract": review_contract,
+                "lane": lane_key,
+                "robustness": round(robustness, 4),
+                "urgency": str(payload.get("urgency") or "").strip(),
+                "gate_status": str(gate.get("status") or "").strip(),
+                "approved": approved,
+                "pressure_state": "active" if active_candidate else ("historical" if approved else "rejected"),
+                "suggested_test_name": str(payload.get("suggested_test_name") or "").strip(),
+                "next_task": str(signal.get("next_task") or "").strip(),
+            }
+            if active_candidate or (active_report_pressure and not approved):
+                top_candidates.append(candidate)
+            else:
+                historical_candidates.append(candidate)
 
     top_candidates.sort(
         key=lambda item: (
@@ -649,8 +663,11 @@ def _triage_hints_for_orchestrator(
         "lane_pressure_scores": lane_pressure_scores,
         "review_contract_pressure_scores": review_contract_pressure_scores,
         "top_triage_candidates": top_candidates[:8],
+        "historical_triage_candidates": historical_candidates[:8],
+        "active_report_pressure": active_report_pressure,
         "approved_review_count": approved_review_count,
         "rejected_review_count": rejected_review_count,
+        "historical_review_count": historical_review_count,
         "confidence": confidence,
         "source": "subconscious_work_tree_triage" if top_candidates else "core_steward_pulse",
         "source_freshness_sec": source_freshness_sec,
@@ -1205,6 +1222,51 @@ def _max_fallback_robustness(report: dict) -> float:
             if score > best:
                 best = score
     return best
+
+
+def _queue_has_active_probe_pressure(generated_queue: dict | None) -> bool:
+    queue = dict(generated_queue or {}) if isinstance(generated_queue, dict) else {}
+    status = str(queue.get("queue_status") or queue.get("status") or "").strip().lower()
+    if status in {"actionable", "blocked", "failed", "error"}:
+        return True
+    return any(
+        _safe_int(queue.get(key), 0) > 0
+        for key in (
+            "open_count",
+            "actionable_count",
+            "blocked_count",
+            "drift_count",
+            "warning_count",
+            "never_run_count",
+        )
+    )
+
+
+def _active_fallback_robustness(report: dict, generated_queue: dict | None) -> float:
+    raw_score = _max_fallback_robustness(report)
+    if raw_score <= 0.0:
+        return 0.0
+    if not _queue_has_active_probe_pressure(generated_queue):
+        return 0.0
+    return raw_score
+
+
+def _record_fallback_pressure_state(
+    state: dict,
+    *,
+    raw_score: float,
+    active_score: float,
+    generated_queue: dict | None,
+) -> None:
+    active_score = max(0.0, min(1.0, float(active_score or 0.0)))
+    raw_score = max(0.0, min(1.0, float(raw_score or 0.0)))
+    state["last_raw_fallback_overuse_score"] = raw_score
+    state["last_active_fallback_overuse_score"] = active_score
+    state["last_fallback_overuse_score"] = active_score
+    state["last_fallback_pressure_active"] = bool(active_score > 0.0 and _queue_has_active_probe_pressure(generated_queue))
+    state["last_fallback_pressure_queue_status"] = str(
+        (generated_queue or {}).get("queue_status") or (generated_queue or {}).get("status") or ""
+    ).strip()
 
 
 def _build_micro_patch_zip(state: dict) -> Path | None:
@@ -2963,16 +3025,23 @@ def run_once() -> int:
     report = json.loads(LATEST_SUBCONSCIOUS.read_text(encoding="utf-8"))
     generated_at = str(report.get("generated_at") or "")
     threshold = float(state.get("auto_apply_threshold", AUTO_APPLY_THRESHOLD) or AUTO_APPLY_THRESHOLD)
-    fallback_score = _max_fallback_robustness(report)
+    raw_fallback_score = _max_fallback_robustness(report)
+    preliminary_generated_queue = _generated_work_queue(limit=200)
+    active_fallback_score = _active_fallback_robustness(report, preliminary_generated_queue)
 
     state["auto_apply_threshold"] = threshold
     state["last_generated_at"] = generated_at
-    state["last_fallback_overuse_score"] = fallback_score
+    _record_fallback_pressure_state(
+        state,
+        raw_score=raw_fallback_score,
+        active_score=active_fallback_score,
+        generated_queue=preliminary_generated_queue,
+    )
 
     if not legacy_execution_enabled:
         state["last_auto_apply"] = "skipped_orchestrator_owns_execution"
         _append_log("auto_apply_skipped_orchestrator_owns_execution")
-    elif fallback_score >= threshold:
+    elif active_fallback_score >= threshold:
         patch_candidates = list(select_patch_candidate_definition_paths(GENERATED_DEFS) or [])
         if not patch_candidates:
             state["last_auto_apply"] = "skipped_no_generated_defs"
@@ -2992,7 +3061,7 @@ def run_once() -> int:
                 _append_log(f"auto_apply_result={apply_result[:200]}")
     else:
         state["last_auto_apply"] = "skipped_threshold"
-        _append_log(f"auto_apply_skipped_threshold score={fallback_score:.2f} threshold={threshold:.2f}")
+        _append_log(f"auto_apply_skipped_threshold score={active_fallback_score:.2f} threshold={threshold:.2f}")
 
     try:
         pending_review_recheck = _reevaluate_pending_review_queue(state)
@@ -3088,6 +3157,13 @@ def run_once() -> int:
 
     try:
         generated_queue_sync = _sync_generated_queue_work_tree(state)
+        active_fallback_score = _active_fallback_robustness(report, generated_queue_sync)
+        _record_fallback_pressure_state(
+            state,
+            raw_score=raw_fallback_score,
+            active_score=active_fallback_score,
+            generated_queue=generated_queue_sync,
+        )
         _append_log(
             "generated_queue_sync"
             f" status={generated_queue_sync.get('status')}"

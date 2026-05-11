@@ -84,6 +84,36 @@ class TestAutonomyMaintenance(unittest.TestCase):
         self.assertEqual(payload.get("pending_count"), 0)
         self.assertEqual(payload.get("pressure_band"), "low")
 
+    def test_active_fallback_pressure_requires_live_generated_queue(self):
+        report = {
+            "families": [
+                {
+                    "robust_signals": [
+                        {"signal": "fallback_overuse", "robustness_score": 0.97},
+                    ]
+                }
+            ]
+        }
+
+        clear_queue = {
+            "status": "clear",
+            "count": 0,
+            "open_count": 0,
+            "actionable_count": 0,
+            "blocked_count": 0,
+        }
+        active_queue = {
+            "status": "actionable",
+            "count": 1,
+            "open_count": 1,
+            "actionable_count": 1,
+            "blocked_count": 0,
+        }
+
+        self.assertEqual(autonomy_maintenance._max_fallback_robustness(report), 0.97)
+        self.assertEqual(autonomy_maintenance._active_fallback_robustness(report, clear_queue), 0.0)
+        self.assertEqual(autonomy_maintenance._active_fallback_robustness(report, active_queue), 0.97)
+
     def test_archive_stale_complete_trees_keeps_recent_history_visible(self):
         self._isolated_work_tree_db()
         now = work_tree._now()
@@ -787,6 +817,54 @@ class TestAutonomyMaintenance(unittest.TestCase):
         top = (hints.get("top_triage_candidates") or [])[0]
         self.assertEqual(top.get("preferred_owner"), "supervisor")
         self.assertEqual(top.get("review_contract"), "subconscious.review.supervisor")
+
+    def test_triage_hints_keep_cleared_probe_priorities_historical(self):
+        report = {
+            "_source_freshness_sec": 4,
+            "families": [
+                {
+                    "family_id": "memory-capture-fallthrough-family",
+                    "target_seam": "memory_capture_route_fallthrough",
+                    "training_priorities": [
+                        {
+                            "seam": "memory_capture_route_fallthrough",
+                            "signal": "fallback_overuse",
+                            "robustness": 0.97,
+                            "suggested_test_name": "test_memory_capture_route",
+                            "rationale": "Memory capture slipped to fallback.",
+                            "urgency": "high",
+                        }
+                    ],
+                    "variation_results": [],
+                }
+            ],
+        }
+        generated_queue = {
+            "status": "clear",
+            "count": 0,
+            "open_count": 0,
+            "actionable_count": 0,
+            "blocked_count": 0,
+            "items": [],
+        }
+
+        hints = autonomy_maintenance._triage_hints_for_orchestrator(
+            {"pulse": {"fallback_overuse_score": 0.0}},
+            generated_queue,
+            latest_report=report,
+            state={"last_regression_status": "OK"},
+            kidney_summary={"mode": "enforce", "candidate_count": 0},
+        )
+
+        self.assertFalse(hints.get("active_report_pressure"))
+        self.assertEqual(hints.get("source"), "core_steward_pulse")
+        self.assertEqual(hints.get("approved_review_count"), 0)
+        self.assertEqual(hints.get("historical_review_count"), 1)
+        self.assertEqual(hints.get("top_triage_candidates"), [])
+        self.assertEqual((hints.get("lane_pressure_scores") or {}), {})
+        self.assertNotIn("memory_capture_route_fallthrough", hints.get("seam_pressure_scores") or {})
+        historical = (hints.get("historical_triage_candidates") or [])[0]
+        self.assertEqual(historical.get("pressure_state"), "historical")
 
     def test_run_once_marks_failed_regression_stale_when_regression_is_skipped(self):
         with tempfile.TemporaryDirectory() as td:
