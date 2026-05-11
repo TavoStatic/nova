@@ -118,6 +118,8 @@ const subconsciousLiveList = document.getElementById('subconsciousLiveList');
 const subconsciousPriorityList = document.getElementById('subconsciousPriorityList');
 const generatedQueueBox = document.getElementById('generatedQueueBox');
 const generatedQueueCount = document.getElementById('generatedQueueCount');
+const testingEcologyBox = document.getElementById('testingEcologyBox');
+const testingEcologyCount = document.getElementById('testingEcologyCount');
 const overviewFocusStrip = document.getElementById('overviewFocusStrip');
 const centerMissionBrief = document.getElementById('centerMissionBrief');
 const liveTrackingSummary = document.getElementById('liveTrackingSummary');
@@ -1457,6 +1459,7 @@ function renderSubconscious(status) {
     const liveSummary = status && status.subconscious_live_summary ? status.subconscious_live_summary : {};
     const topPriorities = Array.isArray(status && status.subconscious_top_priorities) ? status.subconscious_top_priorities : [];
     const workQueue = status && status.generated_work_queue ? status.generated_work_queue : {};
+    const testingEcology = status && status.testing_ecology ? status.testing_ecology : {};
     const maintenance = status && status.autonomy_maintenance ? status.autonomy_maintenance : {};
     const runtimeWorker = maintenance && maintenance.runtime_worker ? maintenance.runtime_worker : {};
     const maintenanceSchedulerStatus = status && status.maintenance_scheduler_status ? status.maintenance_scheduler_status : '';
@@ -1470,6 +1473,7 @@ function renderSubconscious(status) {
         : (maintenance && maintenance.autonomy_orchestrator_summary ? maintenance.autonomy_orchestrator_summary : {});
     const advisorAction = advisor && advisor.action ? advisor.action : {};
     const queueItems = Array.isArray(workQueue && workQueue.items) ? workQueue.items : [];
+    const ecologyItems = Array.isArray(testingEcology && testingEcology.items) ? testingEcology.items : [];
     const liveSessions = Array.isArray(liveSummary && liveSummary.sessions) ? liveSummary.sessions : [];
     const pressureConfig = liveSummary && liveSummary.pressure_config ? liveSummary.pressure_config : {};
     const weakSignalThresholds = pressureConfig && pressureConfig.weak_signal_thresholds ? pressureConfig.weak_signal_thresholds : {};
@@ -1516,6 +1520,10 @@ function renderSubconscious(status) {
         {label: 'Weak thresholds', value: thresholdText || 'n/a'},
         {label: 'Open queue', value: workQueue.open_count != null ? workQueue.open_count : 0},
         {label: 'Next item', value: workQueue.next_item && workQueue.next_item.file ? workQueue.next_item.file : 'none'},
+        {label: 'Test ecology', value: testingEcology.ecology_status || 'n/a'},
+        {label: 'Growth pressure', value: testingEcology.growth_pressure_count != null ? testingEcology.growth_pressure_count : 0},
+        {label: 'Mutation due', value: testingEcology.mutation_due_count != null ? testingEcology.mutation_due_count : 0},
+        {label: 'Stale evidence', value: testingEcology.stale_evidence_count != null ? testingEcology.stale_evidence_count : 0},
         {label: 'Last queue run', value: lastQueueRunText},
         {label: 'Last queue report', value: lastQueueReport},
         {label: 'Advisor decision', value: advisorDecision},
@@ -1573,6 +1581,26 @@ function renderSubconscious(status) {
         const total = queueItems.length;
         const open = workQueue.open_count != null ? workQueue.open_count : total;
         generatedQueueCount.textContent = `${total} queued | ${open} open`;
+    }
+
+    renderInspectorList(testingEcologyBox, ecologyItems.map((item) => {
+        const badge = subconsciousSeamBadgeMeta(item.top_seam || item.family_id || '');
+        const state = item.mutation_due ? 'mutation_due' : (item.lifecycle_state || item.latest_status || 'unknown');
+        const owner = item.owner_hint ? ` | ${item.owner_hint}` : '';
+        const age = item.evidence_age_hours != null ? ` | ${Number(item.evidence_age_hours).toFixed(1)}h` : '';
+        return {
+            label: `${item.file || 'test item'} [${state}]`,
+            badgeText: badge ? badge.text : '',
+            badgeClass: badge ? badge.className : '',
+            value: `${item.growth_action || 'watch'}${owner}${age}`,
+        };
+    }));
+
+    if (testingEcologyCount) {
+        const count = testingEcology.count != null ? testingEcology.count : ecologyItems.length;
+        const growth = testingEcology.growth_pressure_count != null ? testingEcology.growth_pressure_count : 0;
+        const mutation = testingEcology.mutation_due_count != null ? testingEcology.mutation_due_count : 0;
+        testingEcologyCount.textContent = `${count} watched | ${growth} growth | ${mutation} mutation`;
     }
 }
 
@@ -2637,9 +2665,13 @@ function renderHeroMeta(container, items) {
 function recommendedCenterTab(status) {
     const alerts = status && Array.isArray(status.alerts) ? status.alerts : [];
     const queueOpen = Number(status && status.generated_work_queue_open_count != null ? status.generated_work_queue_open_count : 0);
+    const ecologyGrowth = Number(status && status.testing_ecology_growth_pressure_count != null ? status.testing_ecology_growth_pressure_count : 0);
+    const ecologyMutation = Number(status && status.testing_ecology_mutation_due_count != null ? status.testing_ecology_mutation_due_count : 0);
     const patchStatus = String(status && status.patch_status ? status.patch_status : '').trim().toLowerCase();
     const releaseReadiness = String(status && status.release_status && status.release_status.latest_readiness_state ? status.release_status.latest_readiness_state : '').trim().toLowerCase();
     if (alerts.length) return {tab: 'failure-reasons', label: 'Failure Reasons', why: `${alerts.length} live alert${alerts.length === 1 ? '' : 's'} need attention`};
+    if (ecologyMutation > 0) return {tab: 'subconscious-watch', label: 'Subconscious Watch', why: `${ecologyMutation} test contract${ecologyMutation === 1 ? '' : 's'} need mutation or revalidation`};
+    if (ecologyGrowth > 0) return {tab: 'subconscious-watch', label: 'Subconscious Watch', why: `${ecologyGrowth} testing growth item${ecologyGrowth === 1 ? '' : 's'} need attention`};
     if (queueOpen > 0) return {tab: 'subconscious-watch', label: 'Subconscious Watch', why: `${queueOpen} queue item${queueOpen === 1 ? '' : 's'} are still open`};
     if (patchStatus && !patchStatus.includes('eligible') && !patchStatus.includes('ready')) {
         return {tab: 'patch-readiness', label: 'Patch Readiness', why: 'patch governance needs review'};

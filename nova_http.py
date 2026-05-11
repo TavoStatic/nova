@@ -68,6 +68,7 @@ from services.data_pipeline_registry import get_pipeline_status as pipeline_get_
 from services.data_pipeline_registry import list_pipeline_summaries as pipeline_list_summaries
 from services.subconscious_control import SUBCONSCIOUS_CONTROL_SERVICE
 from services.test_session_control import TEST_SESSION_CONTROL_SERVICE
+from services.testing_ecology import TESTING_ECOLOGY_SERVICE
 from services.subconscious_runtime import SUBCONSCIOUS_SERVICE
 from services.runtime_console_frontdoor import RUNTIME_CONSOLE_FRONTDOOR_SERVICE
 import tools.runtime_processes as runtime_processes
@@ -437,11 +438,22 @@ def _subconscious_live_summary(limit: int = 6) -> dict:
 
 
 def _generated_work_queue(limit: int = 24) -> dict:
+    definitions = _available_test_session_definitions(500)
     return TEST_SESSION_CONTROL_SERVICE.generated_work_queue(
-        _available_test_session_definitions(500),
-        _test_session_report_summaries(max(200, len(_available_test_session_definitions(500)) * 2)),
+        definitions,
+        _test_session_report_summaries(max(200, len(definitions) * 2)),
         limit=limit,
         runtime_dir=RUNTIME_DIR,
+    )
+
+
+def _testing_ecology_report(limit: int = 200) -> dict:
+    definitions = _available_test_session_definitions(500)
+    return TESTING_ECOLOGY_SERVICE.build_report(
+        definitions,
+        _test_session_report_summaries(max(200, len(definitions) * 2)),
+        runtime_dir=RUNTIME_DIR,
+        limit=limit,
     )
 
 

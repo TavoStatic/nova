@@ -25,6 +25,7 @@ class ControlStatusService:
             "subconscious_status_summary",
             "subconscious_live_summary",
             "generated_work_queue",
+            "testing_ecology_report",
             "autonomy_maintenance_summary",
             "load_operator_macros",
             "load_backend_commands",
@@ -72,6 +73,7 @@ class ControlStatusService:
         subconscious_status_summary_fn = supplier_fns["subconscious_status_summary"]
         subconscious_live_summary_fn = supplier_fns["subconscious_live_summary"]
         generated_work_queue_fn = supplier_fns["generated_work_queue"]
+        testing_ecology_report_fn = supplier_fns["testing_ecology_report"]
         autonomy_maintenance_summary_fn = supplier_fns["autonomy_maintenance_summary"]
         load_operator_macros_fn = supplier_fns["load_operator_macros"]
         load_backend_commands_fn = supplier_fns["load_backend_commands"]
@@ -117,6 +119,7 @@ class ControlStatusService:
         subconscious_summary = subconscious_status_summary_fn()
         subconscious_live_summary = subconscious_live_summary_fn()
         generated_work_queue = generated_work_queue_fn(24)
+        testing_ecology = testing_ecology_report_fn(200)
         autonomy_maintenance = autonomy_maintenance_summary_fn()
         operator_macros = load_operator_macros_fn(24)
         backend_commands = load_backend_commands_fn(40)
@@ -143,6 +146,7 @@ class ControlStatusService:
             subconscious_summary=subconscious_summary,
             subconscious_live_summary=subconscious_live_summary,
             generated_work_queue=generated_work_queue,
+            testing_ecology=testing_ecology,
             autonomy_maintenance=autonomy_maintenance,
             operator_macros=operator_macros,
             backend_commands=backend_commands,
@@ -237,8 +241,10 @@ class ControlStatusService:
         requests_total: int,
         errors_total: int,
         storage_watch_summary: dict | None = None,
+        testing_ecology: dict | None = None,
     ) -> dict:
         autonomy_payload = autonomy_maintenance.copy() if isinstance(autonomy_maintenance, dict) else {}
+        testing_ecology_payload = dict(testing_ecology or {}) if isinstance(testing_ecology, dict) else {}
         payload = {
             "ok": True,
             "server_time": time.strftime("%Y-%m-%d %H:%M:%S"),
@@ -261,6 +267,16 @@ class ControlStatusService:
             "generated_work_queue_growth_candidate_count": int(generated_work_queue.get("growth_candidate_count", 0) or 0),
             "generated_work_queue_contract_count": int(generated_work_queue.get("contract_count", 0) or 0),
             "generated_work_queue_historical_count": int(generated_work_queue.get("historical_count", 0) or 0),
+            "testing_ecology": testing_ecology_payload,
+            "testing_ecology_status": str(testing_ecology_payload.get("ecology_status") or ""),
+            "testing_ecology_growth_pressure_count": int(testing_ecology_payload.get("growth_pressure_count", 0) or 0),
+            "testing_ecology_mutation_due_count": int(testing_ecology_payload.get("mutation_due_count", 0) or 0),
+            "testing_ecology_stale_evidence_count": int(testing_ecology_payload.get("stale_evidence_count", 0) or 0),
+            "testing_ecology_lifecycle_counts": dict(testing_ecology_payload.get("lifecycle_counts") or {}) if isinstance(testing_ecology_payload.get("lifecycle_counts"), dict) else {},
+            "testing_ecology_role_counts": dict(testing_ecology_payload.get("ecology_role_counts") or {}) if isinstance(testing_ecology_payload.get("ecology_role_counts"), dict) else {},
+            "testing_ecology_owner_counts": dict(testing_ecology_payload.get("owner_counts") or {}) if isinstance(testing_ecology_payload.get("owner_counts"), dict) else {},
+            "testing_ecology_origin_counts": dict(testing_ecology_payload.get("origin_counts") or {}) if isinstance(testing_ecology_payload.get("origin_counts"), dict) else {},
+            "testing_ecology_next_growth_file": str((testing_ecology_payload.get("next_growth_item") or {}).get("file") or "") if isinstance(testing_ecology_payload.get("next_growth_item"), dict) else "",
             "autonomy_maintenance": autonomy_payload,
             "operator_macros": operator_macros,
             "backend_commands": backend_commands,

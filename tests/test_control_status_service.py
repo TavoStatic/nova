@@ -14,6 +14,7 @@ class TestControlStatusService(unittest.TestCase):
             "_subconscious_status_summary": object(),
             "_subconscious_live_summary": object(),
             "_generated_work_queue": object(),
+            "_testing_ecology_report": object(),
             "_autonomy_maintenance_summary": object(),
             "_load_operator_macros": object(),
             "_load_backend_commands": object(),
@@ -44,8 +45,9 @@ class TestControlStatusService(unittest.TestCase):
 
         self.assertIs(payload["probe_searxng"], scope["_probe_searxng"])
         self.assertIs(payload["provider_telemetry_payload"], scope["_provider_telemetry_payload"])
+        self.assertIs(payload["testing_ecology_report"], scope["_testing_ecology_report"])
         self.assertIs(payload["metrics_payload"], scope["_metrics_payload"])
-        self.assertEqual(len(payload), 32)
+        self.assertEqual(len(payload), 33)
 
     def test_runtime_status_payload_collects_supplier_outputs(self):
         class _Core:
@@ -121,6 +123,13 @@ class TestControlStatusService(unittest.TestCase):
                 "subconscious_status_summary": lambda: {"ok": True},
                 "subconscious_live_summary": lambda: {},
                 "generated_work_queue": lambda limit: {"status": "clear", "open_count": 0, "actionable_count": 0, "next_item": {}},
+                "testing_ecology_report": lambda limit: {
+                    "ecology_status": "stable_watch",
+                    "growth_pressure_count": 0,
+                    "lifecycle_counts": {"stable_contract": 2},
+                    "owner_counts": {"fulfillment": 1},
+                    "origin_counts": {"saved": 2},
+                },
                 "autonomy_maintenance_summary": lambda: {},
                 "load_operator_macros": lambda limit: [],
                 "load_backend_commands": lambda limit: [],
@@ -161,6 +170,10 @@ class TestControlStatusService(unittest.TestCase):
         self.assertEqual(payload.get("memory_scoped_total"), 1)
         self.assertEqual(payload.get("memory_events_log_status"), "ok")
         self.assertEqual(payload.get("memory_events_log_bytes"), 42)
+        self.assertEqual(payload.get("testing_ecology_status"), "stable_watch")
+        self.assertEqual(payload.get("testing_ecology_lifecycle_counts"), {"stable_contract": 2})
+        self.assertEqual(payload.get("testing_ecology_owner_counts"), {"fulfillment": 1})
+        self.assertEqual(payload.get("testing_ecology_origin_counts"), {"saved": 2})
 
     def test_status_payload_includes_runtime_timeline_and_patch_fields(self):
         payload = CONTROL_STATUS_SERVICE.status_payload(
@@ -177,6 +190,17 @@ class TestControlStatusService(unittest.TestCase):
             subconscious_summary={"ok": True},
             subconscious_live_summary={"tracked_session_count": 0},
             generated_work_queue={"open_count": 0, "next_item": {}},
+            testing_ecology={
+                "ecology_status": "mutation_due",
+                "growth_pressure_count": 2,
+                "mutation_due_count": 1,
+                "stale_evidence_count": 1,
+                "lifecycle_counts": {"stable_contract": 3, "seed": 1},
+                "ecology_role_counts": {"contract": 3, "growth_candidate": 1},
+                "owner_counts": {"route_comparison": 1},
+                "origin_counts": {"generated": 1, "saved": 3},
+                "next_growth_item": {"file": "old_contract.json"},
+            },
             autonomy_maintenance={
                 "runtime_worker": {"last_cycle_status": "ok", "interval_sec": 300, "cycle_count": 4, "last_completed_at": "2026-04-04 02:10:00"},
                 "last_generated_queue_run": {"status": "ok", "selected_file": "demo.json", "ts": "2026-04-04 02:09:00", "latest_report_status": "green"},
@@ -332,6 +356,12 @@ class TestControlStatusService(unittest.TestCase):
         self.assertEqual(payload.get("autonomy_orchestrator_change_rate"), 0.3333)
         self.assertFalse(payload.get("autonomy_orchestrator_stable"))
         self.assertEqual(payload.get("autonomy_orchestrator_weak_refusal_rate"), 1.0)
+        self.assertEqual(payload.get("testing_ecology_status"), "mutation_due")
+        self.assertEqual(payload.get("testing_ecology_growth_pressure_count"), 2)
+        self.assertEqual(payload.get("testing_ecology_mutation_due_count"), 1)
+        self.assertEqual(payload.get("testing_ecology_stale_evidence_count"), 1)
+        self.assertEqual(payload.get("testing_ecology_next_growth_file"), "old_contract.json")
+        self.assertEqual(payload.get("testing_ecology_origin_counts"), {"generated": 1, "saved": 3})
 
     def test_status_payload_includes_subconscious_and_queue_fields(self):
         payload = CONTROL_STATUS_SERVICE.status_payload(
