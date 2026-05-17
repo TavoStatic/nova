@@ -11,6 +11,7 @@ def sanitize_llm_reply(
     weather_unavailable_message_fn: Callable[[], str],
     describe_capabilities_fn: Callable[[], str],
 ) -> str:
+    del describe_capabilities_fn
     rendered = (reply or "").strip()
     lowered = rendered.lower()
 
@@ -139,14 +140,6 @@ def sanitize_llm_reply(
 
     if re.search(r"https?://", filtered) and not (tool_context or ""):
         filtered = re.sub(r"https?://\S+", "[link removed]", filtered)
-
-    cap_match = re.search(
-        r"\bi can (fetch|browse|search|lookup|open|download|run|apply|patch|install|scan)\b",
-        filtered or "",
-        flags=re.I,
-    )
-    if cap_match:
-        return describe_capabilities_fn()
 
     filtered = filtered.strip()
     if not filtered:

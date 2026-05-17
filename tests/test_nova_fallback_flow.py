@@ -180,8 +180,8 @@ class TestNovaFallbackFlow(unittest.TestCase):
         )
         self.assertEqual(out.get("reply"), "post:pre:raw reply")
 
-    def test_looks_like_open_fallback_turn_filters_weather_and_location_requests(self):
-        self.assertFalse(
+    def test_looks_like_open_fallback_turn_keeps_weather_chat_model_owned(self):
+        self.assertTrue(
             looks_like_open_fallback_turn(
                 "what's the weather now",
                 is_explicit_command_like_fn=lambda text: False,
@@ -191,6 +191,8 @@ class TestNovaFallbackFlow(unittest.TestCase):
                 is_local_knowledge_topic_query_fn=lambda text: False,
             )
         )
+
+    def test_looks_like_open_fallback_turn_filters_location_requests(self):
         self.assertFalse(
             looks_like_open_fallback_turn(
                 "where am I",

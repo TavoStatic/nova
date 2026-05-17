@@ -56,6 +56,8 @@ def _runtime_scope() -> dict[str, object]:
         "set_location_text": lambda *args, **kwargs: None,
         "_quick_smalltalk_reply": lambda user_text, active_user=None: "",
         "describe_capabilities": lambda: "capabilities",
+        "grounded_self_report_reply": lambda text: "self-report",
+        "runtime_identity_reply": lambda text: "runtime-identity",
         "policy_web": lambda: {"enabled": True, "allow_domains": ["example.com"]},
         "_assistant_name_reply": lambda user_text: "Nova",
         "_self_identity_web_challenge_reply": lambda: "identity",
@@ -76,8 +78,8 @@ class TestNovaSupervisorFlow(unittest.TestCase):
             runtime_scope=_runtime_scope(),
         )
 
-        self.assertTrue(handled)
-        self.assertEqual(reply, "Rules go here.")
+        self.assertFalse(handled)
+        self.assertEqual(reply, "")
         self.assertIsNone(next_state)
 
     def test_execute_registered_supervisor_rule_from_runtime_dispatches_location_clarify(self):
@@ -96,17 +98,30 @@ class TestNovaSupervisorFlow(unittest.TestCase):
         self.assertEqual(reply, "Which location do you mean?")
         self.assertEqual(next_state, {"kind": "location_recall"})
 
-    def test_handle_supervisor_intent_from_runtime_dispatches_capability_query(self):
+    def test_handle_supervisor_intent_from_runtime_does_not_dispatch_content_intent(self):
         handled, reply, next_state, effects = nova_supervisor_flow.handle_supervisor_intent_from_runtime(
-            {"intent": "capability_query"},
+            {"intent": "capability_inventory"},
             "what can you do?",
             runtime_scope=_runtime_scope(),
         )
 
-        self.assertTrue(handled)
-        self.assertEqual(reply, "capabilities")
+        self.assertFalse(handled)
+        self.assertEqual(reply, "")
         self.assertIsNone(next_state)
         self.assertIsNone(effects)
+
+    def test_handle_supervisor_intent_from_runtime_does_not_dispatch_chat_tool_intents(self):
+        for intent in ("weather_lookup", "web_research_family", "retrieval_followup"):
+            handled, reply, next_state, effects = nova_supervisor_flow.handle_supervisor_intent_from_runtime(
+                {"intent": intent, "weather_mode": "current_location"},
+                "weather current location",
+                runtime_scope=_runtime_scope(),
+            )
+
+            self.assertFalse(handled)
+            self.assertEqual(reply, "")
+            self.assertIsNone(next_state)
+            self.assertIsNone(effects)
 
 
 if __name__ == "__main__":

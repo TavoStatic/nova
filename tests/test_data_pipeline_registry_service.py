@@ -11,9 +11,16 @@ from services.data_pipeline_registry import run_pipeline_query
 from services.data_pipeline_registry import search_pipeline_vendor_dictionary
 
 
+DATA_SOURCES_ROOT = Path(__file__).resolve().parents[1] / "data_sources"
+SIS_TEST_ACTIVE = (DATA_SOURCES_ROOT / "sis_test" / "pipeline.json").exists()
+INSTALL_PROFILE_LANES = ("sis_test",)
+INSTALL_PROFILE_INACTIVE_BEHAVIOR = "skip_when_absent"
+
+
+@unittest.skipUnless(SIS_TEST_ACTIVE, "sis_test pipeline is not active in this install")
 class TestDataPipelineRegistryService(unittest.TestCase):
     def setUp(self):
-        self.data_sources_root = Path(__file__).resolve().parents[1] / "data_sources"
+        self.data_sources_root = DATA_SOURCES_ROOT
 
     def test_list_pipeline_summaries_includes_sis_test(self):
         summaries = list_pipeline_summaries(self.data_sources_root)

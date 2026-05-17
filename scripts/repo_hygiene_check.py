@@ -50,6 +50,13 @@ def tracked_files() -> list[str]:
     return [item for item in raw.split("\x00") if item]
 
 
+def is_git_work_tree() -> bool:
+    try:
+        return _run(["git", "rev-parse", "--is-inside-work-tree"]).strip().lower() == "true"
+    except Exception:
+        return False
+
+
 def is_lfs_pointer(path: Path) -> bool:
     try:
         with path.open("rb") as handle:
@@ -69,6 +76,10 @@ def is_lfs_tracked(rel_path: str) -> bool:
 
 def main() -> int:
     repo_root = Path(__file__).resolve().parents[1]
+    if not is_git_work_tree():
+        print("repo_hygiene_check: SKIP (not a git work tree)")
+        return 0
+
     violations: list[str] = []
     size_violations: list[str] = []
 

@@ -4,10 +4,16 @@ import unittest
 from pipelines.registry import PipelineRegistry
 
 
+DATA_SOURCES_ROOT = Path(__file__).resolve().parents[1] / "data_sources"
+SIS_TEST_ACTIVE = (DATA_SOURCES_ROOT / "sis_test" / "pipeline.json").exists()
+INSTALL_PROFILE_LANES = ("sis_test",)
+INSTALL_PROFILE_INACTIVE_BEHAVIOR = "skip_when_absent"
+
+
+@unittest.skipUnless(SIS_TEST_ACTIVE, "sis_test pipeline is not active in this install")
 class TestPipelineRegistry(unittest.TestCase):
     def setUp(self):
-        self.repo_root = Path(__file__).resolve().parents[1]
-        self.registry = PipelineRegistry(self.repo_root / "data_sources")
+        self.registry = PipelineRegistry(DATA_SOURCES_ROOT)
 
     def test_discovers_sis_test_pipeline(self):
         summaries = self.registry.list_summaries()

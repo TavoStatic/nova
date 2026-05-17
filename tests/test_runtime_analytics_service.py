@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import os
+
 import json
 import shutil
+import time
 import unittest
 import uuid
 from pathlib import Path
@@ -10,7 +13,7 @@ from unittest import mock
 from services.runtime_analytics import RuntimeAnalyticsService, RUNTIME_ANALYTICS_SERVICE
 
 
-WORK_TMP_ROOT = Path(__file__).resolve().parents[1] / "runtime" / "pytest_temp"
+WORK_TMP_ROOT = Path(os.environ.get("NOVA_VALIDATION_RUNTIME_DIR") or Path(__file__).resolve().parents[1] / "runtime" / "validation") / "pytest_temp"
 
 
 def _workspace_case_dir(prefix: str) -> Path:
@@ -120,6 +123,159 @@ class TestRuntimeAnalyticsService(unittest.TestCase):
             shutil.rmtree(case_dir, ignore_errors=True)
         self.assertEqual(payload["flap_level"], "warn")
         self.assertEqual(payload["consecutive_failures"], 1)
+
+    def test_planned_operator_restarts_do_not_become_pressure(self):
+        entries = [
+            {
+                "ts": 1710000000 + i * 60,
+                "success": True,
+                "reason": "running",
+                "start_reason": "initial_start",
+                "restart_origin": "operator",
+                "restart_action": "guard_restart",
+                "planned_restart": True,
+                "provenance_complete": True,
+                "total_observed_s": 5.0,
+            }
+            for i in range(4)
+        ]
+        case_dir = _workspace_case_dir("runtime_analytics")
+        try:
+            p = self._write_history(entries, str(case_dir))
+            payload = self.svc.restart_analytics_payload(boot_history_path=p, now=1710000400)
+        finally:
+            shutil.rmtree(case_dir, ignore_errors=True)
+
+        self.assertEqual(payload["recent_restart_count_1h"], 4)
+        self.assertEqual(payload["pressure_restart_count_1h"], 0)
+        self.assertEqual(payload["planned_restart_count_1h"], 4)
+        self.assertFalse(payload["restart_pressure_active"])
+        self.assertEqual(payload["flap_level"], "good")
+
+    def test_unattributed_successful_boots_report_provenance_gap_not_pressure(self):
+        entries = [
+            {"ts": 1710000000 + i * 60, "success": True, "reason": "running", "total_observed_s": 5.0}
+            for i in range(3)
+        ]
+        case_dir = _workspace_case_dir("runtime_analytics")
+        try:
+            p = self._write_history(entries, str(case_dir))
+            payload = self.svc.restart_analytics_payload(boot_history_path=p, now=1710000300)
+        finally:
+            shutil.rmtree(case_dir, ignore_errors=True)
+
+        self.assertEqual(payload["pressure_restart_count_1h"], 0)
+        self.assertEqual(payload["restart_origin_gap_count_1h"], 3)
+        self.assertEqual(payload["restart_origin_active_gap_count_1h"], 3)
+        self.assertEqual(payload["restart_provenance_status"], "incomplete")
+        self.assertEqual(payload["flap_level"], "good")
+
+    def test_older_unattributed_boots_become_legacy_gap_after_current_provenance(self):
+        entries = [
+            {"ts": 1710000000, "success": True, "reason": "running", "total_observed_s": 5.0},
+            {"ts": 1710000060, "success": True, "reason": "running", "total_observed_s": 5.0},
+            {
+                "ts": 1710000120,
+                "success": True,
+                "reason": "running",
+                "start_reason": "initial_start",
+                "restart_origin": "operator",
+                "restart_action": "guard_restart_after_stop",
+                "planned_restart": True,
+                "provenance_complete": True,
+                "total_observed_s": 5.0,
+            },
+        ]
+        case_dir = _workspace_case_dir("runtime_analytics")
+        try:
+            p = self._write_history(entries, str(case_dir))
+            payload = self.svc.restart_analytics_payload(boot_history_path=p, now=1710000300)
+        finally:
+            shutil.rmtree(case_dir, ignore_errors=True)
+
+        self.assertEqual(payload["restart_origin_gap_count_1h"], 2)
+        self.assertEqual(payload["restart_origin_active_gap_count_1h"], 0)
+        self.assertEqual(payload["restart_origin_legacy_gap_count_1h"], 2)
+        self.assertEqual(payload["restart_provenance_status"], "legacy_incomplete")
+        self.assertFalse(payload["restart_pressure_active"])
+
+    def test_supervised_recovery_restarts_are_pressure(self):
+        entries = [
+            {
+                "ts": 1710000000 + i * 60,
+                "success": True,
+                "reason": "running",
+                "start_reason": "restart",
+                "restart_origin": "guard_supervisor",
+                "restart_action": "supervised_restart",
+                "planned_restart": False,
+                "provenance_complete": True,
+                "total_observed_s": 5.0,
+            }
+            for i in range(3)
+        ]
+        case_dir = _workspace_case_dir("runtime_analytics")
+        try:
+            p = self._write_history(entries, str(case_dir))
+            payload = self.svc.restart_analytics_payload(boot_history_path=p, now=1710000300)
+        finally:
+            shutil.rmtree(case_dir, ignore_errors=True)
+
+        self.assertEqual(payload["pressure_restart_count_1h"], 3)
+        self.assertTrue(payload["restart_pressure_active"])
+        self.assertEqual(payload["flap_level"], "warn")
+
+    def test_repeated_heartbeat_stale_restarts_warn_even_below_generic_pressure_threshold(self):
+        base = int(time.mktime(time.strptime("2024-03-09 16:00:00", "%Y-%m-%d %H:%M:%S")))
+        entries = [
+            {
+                "ts": base + 64,
+                "success": True,
+                "reason": "running",
+                "start_reason": "restart",
+                "restart_origin": "guard_supervisor",
+                "restart_action": "supervised_restart",
+                "planned_restart": False,
+                "provenance_complete": True,
+                "total_observed_s": 4.0,
+            },
+            {
+                "ts": base + 364,
+                "success": True,
+                "reason": "running",
+                "start_reason": "restart",
+                "restart_origin": "guard_supervisor",
+                "restart_action": "supervised_restart",
+                "planned_restart": False,
+                "provenance_complete": True,
+                "total_observed_s": 4.0,
+            },
+        ]
+        case_dir = _workspace_case_dir("runtime_analytics")
+        try:
+            p = self._write_history(entries, str(case_dir))
+            guard_log = case_dir / "guard.log"
+            guard_log.write_text(
+                "\n".join([
+                    "2024-03-09 16:00:59 | [GUARD] Core attempt failed: heartbeat_stale",
+                    "2024-03-09 16:05:59 | [GUARD] Core attempt failed: heartbeat_stale",
+                ]),
+                encoding="utf-8",
+            )
+            payload = self.svc.restart_analytics_payload(
+                boot_history_path=p,
+                guard_log_path=guard_log,
+                now=base + 400,
+            )
+        finally:
+            shutil.rmtree(case_dir, ignore_errors=True)
+
+        self.assertEqual(payload["pressure_restart_count_1h"], 2)
+        self.assertEqual(payload["heartbeat_stale_restart_count_1h"], 2)
+        self.assertTrue(payload["restart_pressure_active"])
+        self.assertEqual(payload["flap_level"], "warn")
+        self.assertEqual(payload["latest_restart_cause_reason"], "heartbeat_stale")
+        self.assertEqual(payload["recent_outcomes"][0]["restart_cause_reason"], "heartbeat_stale")
 
     def test_avg_success_boot_sec_computed(self):
         entries = [

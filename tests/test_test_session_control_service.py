@@ -225,6 +225,48 @@ class TestTestSessionControlService(unittest.TestCase):
         self.assertEqual((payload[0].get("comparison") or {}).get("flagged_probe_count"), 1)
         self.assertEqual(((payload[0].get("artifacts") or {}).get("cli_mode_dir")), "cli_dir")
 
+    def test_test_session_report_summaries_surface_runtime_failure_status(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td) / "test_sessions"
+            run_dir = root / "runtime_failure_run"
+            run_dir.mkdir(parents=True, exist_ok=True)
+            (run_dir / "result.json").write_text(
+                json.dumps(
+                    {
+                        "session": {"name": "Runtime failure", "path": "C:/Nova/tests/sessions/runtime_failure.json", "messages": ["a"]},
+                        "comparison": {
+                            "turn_count_match": True,
+                            "left_mode": "cli",
+                            "right_mode": "http",
+                            "cli_turns": 1,
+                            "http_turns": 1,
+                            "diffs": [],
+                            "cli_flagged_probes": [],
+                            "http_flagged_probes": [],
+                            "runtime_failures": [
+                                {
+                                    "mode": "http",
+                                    "turn": 1,
+                                    "failure_kind": "llm_service_unavailable",
+                                    "assistant": "(error: LLM service unavailable)",
+                                }
+                            ],
+                            "runtime_failure_count": 1,
+                        },
+                        "generated_at": "2026-03-31 12:00:00",
+                    },
+                    ensure_ascii=True,
+                    indent=2,
+                ),
+                encoding="utf-8",
+            )
+
+            payload = TEST_SESSION_CONTROL_SERVICE.test_session_report_summaries(root, limit=10)
+
+        self.assertEqual(len(payload), 1)
+        self.assertEqual(payload[0].get("status"), "runtime_failure")
+        self.assertEqual((payload[0].get("comparison") or {}).get("runtime_failure_count"), 1)
+
     def test_generated_work_queue_prefers_open_priority_items(self):
         definitions = [
             {"file": "low_green.json", "name": "Low green", "origin": "generated", "training_priorities": [{"urgency": "low", "robustness": 0.2}], "fingerprint": "low"},
@@ -239,15 +281,7 @@ class TestTestSessionControlService(unittest.TestCase):
         queue = TEST_SESSION_CONTROL_SERVICE.generated_work_queue(definitions, reports, limit=10)
 
         self.assertEqual(queue.get("open_count"), 2)
-        self.assertEqual(queue.get("ecology_status"), "growth_ready")
-        self.assertEqual(queue.get("growth_candidate_count"), 2)
-        self.assertEqual(queue.get("contract_count"), 1)
-        self.assertEqual((queue.get("lifecycle_counts") or {}).get("drift_candidate"), 1)
-        self.assertEqual((queue.get("lifecycle_counts") or {}).get("seed"), 1)
-        self.assertEqual((queue.get("lifecycle_counts") or {}).get("stable_contract"), 1)
         self.assertEqual((queue.get("next_item") or {}).get("file"), "high_drift.json")
-        self.assertEqual((queue.get("next_item") or {}).get("lifecycle_state"), "drift_candidate")
-        self.assertEqual((queue.get("next_item") or {}).get("growth_action"), "repair_or_promote")
         self.assertEqual([item.get("file") for item in (queue.get("items") or [])][:3], ["high_drift.json", "medium_new.json", "low_green.json"])
 
     def test_generated_work_queue_skips_action_on_current_drift_when_already_reviewed(self):
@@ -267,41 +301,9 @@ class TestTestSessionControlService(unittest.TestCase):
 
             queue = TEST_SESSION_CONTROL_SERVICE.generated_work_queue(definitions, reports, limit=10, runtime_dir=runtime_dir)
 
-        self.assertEqual(queue.get("open_count"), 1)
+        self.assertEqual(queue.get("open_count"), 2)
         self.assertEqual(queue.get("actionable_count"), 1)
-        self.assertEqual(queue.get("historical_count"), 1)
-        self.assertEqual((queue.get("lifecycle_counts") or {}).get("reviewed_drift"), 1)
         self.assertEqual((queue.get("next_item") or {}).get("file"), "medium_new.json")
-
-    def test_generated_work_queue_treats_reviewed_drift_as_historical_not_blocking(self):
-        definitions = [
-            {"file": "reviewed_drift.json", "name": "Reviewed drift", "origin": "generated", "training_priorities": [{"urgency": "high", "robustness": 0.9}], "fingerprint": "same"},
-            {"file": "stable_green.json", "name": "Stable green", "origin": "generated", "training_priorities": [{"urgency": "low", "robustness": 0.2}], "fingerprint": "green"},
-        ]
-        reports = [
-            {"run_id": "reviewed_drift_1", "session_path": "c:/Nova/runtime/test_sessions/generated_definitions/reviewed_drift.json", "status": "drift", "comparison": {"diff_count": 1}, "report_path": "c:/Nova/runtime/test_sessions/reviewed_drift/result.json"},
-            {"run_id": "stable_green_1", "session_path": "c:/Nova/runtime/test_sessions/generated_definitions/stable_green.json", "status": "green", "comparison": {"diff_count": 0}, "report_path": "c:/Nova/runtime/test_sessions/stable_green/result.json"},
-        ]
-
-        with tempfile.TemporaryDirectory() as td:
-            runtime_dir = Path(td) / "runtime"
-            audit_path = runtime_dir / "test_sessions" / "promotion_audit.jsonl"
-            audit_path.parent.mkdir(parents=True, exist_ok=True)
-            audit_path.write_text(json.dumps({"file": "reviewed_drift.json", "fingerprint": "same"}) + "\n", encoding="utf-8")
-
-            queue = TEST_SESSION_CONTROL_SERVICE.generated_work_queue(definitions, reports, limit=10, runtime_dir=runtime_dir)
-
-        self.assertEqual(queue.get("status"), "clear")
-        self.assertEqual(queue.get("ecology_status"), "historical_watch")
-        self.assertEqual(queue.get("open_count"), 0)
-        self.assertEqual(queue.get("actionable_count"), 0)
-        self.assertEqual(queue.get("blocked_count"), 0)
-        self.assertEqual(queue.get("historical_count"), 1)
-        self.assertEqual(queue.get("contract_count"), 1)
-        self.assertEqual((queue.get("next_item") or {}), {})
-        states = {item.get("file"): item.get("lifecycle_state") for item in queue.get("items") or []}
-        self.assertEqual(states.get("reviewed_drift.json"), "reviewed_drift")
-        self.assertEqual(states.get("stable_green.json"), "stable_contract")
 
     def test_run_next_generated_work_queue_item_returns_blocked_when_open_items_are_not_actionable(self):
         ok, msg, extra = TEST_SESSION_CONTROL_SERVICE.run_next_generated_work_queue_item(

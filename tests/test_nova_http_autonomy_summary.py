@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import json
 import unittest
 import uuid
@@ -9,9 +10,13 @@ from unittest import mock
 import nova_http
 
 
+def _validation_tmp_root() -> Path:
+    return Path(os.environ.get("NOVA_VALIDATION_RUNTIME_DIR") or Path(__file__).resolve().parents[1] / "runtime" / "validation") / "_test_tmp"
+
+
 class TestNovaHttpAutonomySummary(unittest.TestCase):
     def test_autonomy_maintenance_summary_preserves_patch_queue_fields(self):
-        base_tmp = Path("C:/Nova/runtime/_test_tmp")
+        base_tmp = _validation_tmp_root()
         base_tmp.mkdir(parents=True, exist_ok=True)
         state_path = base_tmp / f"autonomy_state_{uuid.uuid4().hex}.json"
         state_path.write_text(

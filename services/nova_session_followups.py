@@ -94,7 +94,7 @@ def build_session_fact_sheet(
 
     saved_location = get_saved_location_text_fn()
     if saved_location:
-        lines.append(f"Stored assistant location: {saved_location}")
+        lines.append(f"Stored runtime location label: {saved_location}")
 
     if get_learned_fact_fn("developer_location_relation", "").strip().lower() == "same_as_assistant":
         lines.append("Verified developer location relation: same as assistant")

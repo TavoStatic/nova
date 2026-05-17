@@ -10,7 +10,7 @@
     "health": true
   },
   "models": {
-    "chat": "llama3.1:8b",
+    "chat": "llama3.2:3b",
     "vision": "qwen2.5vl:7b",
     "stt_size": "small"
   },

@@ -9,6 +9,70 @@ $scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $repoRoot = (Resolve-Path (Join-Path $scriptRoot "..")).Path
 $ledgerPath = Join-Path $repoRoot "runtime\exports\release_packages\release_ledger.jsonl"
 
+function Write-ReadinessPayload($payload) {
+  Write-Host ""
+  Write-Host "NYO System Release Readiness"
+  Write-Host "----------------------------"
+  Write-Host ("[OK]   Artifact kind  : " + $payload.artifact_kind)
+  Write-Host ("[OK]   Readiness      : " + $payload.latest_readiness_state)
+  Write-Host ("[OK]   Ready to ship  : " + $(if ($payload.latest_ready_to_ship) { "yes" } else { "no" }))
+  Write-Host ("[OK]   Version        : " + $payload.latest_version)
+  Write-Host ("[OK]   Channel        : " + $payload.latest_channel)
+  if (-not [string]::IsNullOrWhiteSpace($payload.latest_label)) {
+    Write-Host ("[OK]   Label          : " + $payload.latest_label)
+  }
+  Write-Host ("[OK]   Artifact       : " + $payload.latest_artifact_path)
+  Write-Host ("[OK]   Built at       : " + $payload.latest_build_recorded_at)
+  if (-not [string]::IsNullOrWhiteSpace($payload.latest_verified_at)) {
+    Write-Host ("[OK]   Verified at    : " + $payload.latest_verified_at)
+  }
+  if (-not [string]::IsNullOrWhiteSpace($payload.latest_verification_target)) {
+    Write-Host ("[INFO] Verify target  : " + $payload.latest_verification_target)
+  }
+  if (-not [string]::IsNullOrWhiteSpace($payload.latest_promoted_at)) {
+    Write-Host ("[OK]   Promoted at    : " + $payload.latest_promoted_at)
+  }
+  if (-not [string]::IsNullOrWhiteSpace($payload.latest_validation_result)) {
+    Write-Host ("[OK]   Result         : " + $payload.latest_validation_result)
+  }
+  if ($payload.latest_source_changed_after_build) {
+    Write-Host ("[WARN] Source changed : " + $payload.latest_source_changed_after_build_count + " file(s) after build")
+    if (-not [string]::IsNullOrWhiteSpace($payload.latest_source_newest_path)) {
+      Write-Host ("[WARN] Newest source  : " + $payload.latest_source_newest_path)
+    }
+  }
+  Write-Host ("[INFO] Note           : " + $payload.latest_readiness_note)
+  if (-not [string]::IsNullOrWhiteSpace($payload.latest_validation_note)) {
+    Write-Host ("[INFO] Validation note: " + $payload.latest_validation_note)
+  }
+}
+
+function Get-ServiceReadinessPayload {
+  $pythonExe = Join-Path $repoRoot ".venv\Scripts\python.exe"
+  if (-not (Test-Path $pythonExe)) { return $null }
+  $code = @'
+import json
+import sys
+from pathlib import Path
+from services.release_status import RELEASE_STATUS_SERVICE
+
+payload = RELEASE_STATUS_SERVICE.status_payload(
+    Path(sys.argv[1]),
+    limit=8,
+    source_root=Path(sys.argv[2]),
+)
+payload['artifact_kind'] = sys.argv[3]
+print(json.dumps(payload))
+'@
+  $jsonText = & $pythonExe -c $code $ledgerPath $repoRoot $ArtifactKind
+  if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($jsonText)) { return $null }
+  try {
+    return ($jsonText | ConvertFrom-Json)
+  } catch {
+    return $null
+  }
+}
+
 function Get-EntryArtifactKind($entry) {
   $kind = [string]$entry.artifact_kind
   if ([string]::IsNullOrWhiteSpace($kind)) {
@@ -47,6 +111,16 @@ function Test-ReleaseEntryMatchesBuild($entry, $buildEntry) {
 if (-not (Test-Path $ledgerPath)) {
   Write-Host ("[FAIL] Release ledger not found: " + $ledgerPath)
   exit 1
+}
+
+$servicePayload = Get-ServiceReadinessPayload
+if ($null -ne $servicePayload) {
+  if ($Json) {
+    $servicePayload | ConvertTo-Json -Depth 8
+    exit 0
+  }
+  Write-ReadinessPayload $servicePayload
+  exit 0
 }
 
 $entries = @()
@@ -150,34 +224,6 @@ if ($Json) {
   exit 0
 }
 
-Write-Host ""
-Write-Host "NYO System Release Readiness"
-Write-Host "----------------------------"
-Write-Host ("[OK]   Artifact kind  : " + $payload.artifact_kind)
-Write-Host ("[OK]   Readiness      : " + $payload.latest_readiness_state)
-Write-Host ("[OK]   Ready to ship  : " + $(if ($payload.latest_ready_to_ship) { "yes" } else { "no" }))
-Write-Host ("[OK]   Version        : " + $payload.latest_version)
-Write-Host ("[OK]   Channel        : " + $payload.latest_channel)
-if (-not [string]::IsNullOrWhiteSpace($payload.latest_label)) {
-  Write-Host ("[OK]   Label          : " + $payload.latest_label)
-}
-Write-Host ("[OK]   Artifact       : " + $payload.latest_artifact_path)
-Write-Host ("[OK]   Built at       : " + $payload.latest_build_recorded_at)
-if (-not [string]::IsNullOrWhiteSpace($payload.latest_verified_at)) {
-  Write-Host ("[OK]   Verified at    : " + $payload.latest_verified_at)
-}
-if (-not [string]::IsNullOrWhiteSpace($payload.latest_verification_target)) {
-  Write-Host ("[INFO] Verify target  : " + $payload.latest_verification_target)
-}
-if (-not [string]::IsNullOrWhiteSpace($payload.latest_promoted_at)) {
-  Write-Host ("[OK]   Promoted at    : " + $payload.latest_promoted_at)
-}
-if (-not [string]::IsNullOrWhiteSpace($payload.latest_validation_result)) {
-  Write-Host ("[OK]   Result         : " + $payload.latest_validation_result)
-}
-Write-Host ("[INFO] Note           : " + $payload.latest_readiness_note)
-if (-not [string]::IsNullOrWhiteSpace($payload.latest_validation_note)) {
-  Write-Host ("[INFO] Validation note: " + $payload.latest_validation_note)
-}
+Write-ReadinessPayload $payload
 
 exit 0

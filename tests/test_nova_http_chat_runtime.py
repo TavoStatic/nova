@@ -1,4 +1,5 @@
 import unittest
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import nova_http
@@ -23,14 +24,23 @@ class _FakeSession:
     def reflection_summary(self):
         return {"overrides_active": []}
 
+    def set_language_mix_spanish_pct(self, value):
+        self.language_mix_spanish_pct = value
+
     def set_pending_action(self, payload):
         self.pending_action = payload
 
     def apply_state_update(self, payload, fallback_state=None):
         self.conversation_state = payload
 
+    def set_conversation_state(self, payload):
+        self.conversation_state = payload
+
     def set_retrieval_state(self, payload):
         self.conversation_state = payload
+
+    def mark_continuation_used(self):
+        self.continuation_used_last_turn = True
 
 
 class _SessionManager:
@@ -60,8 +70,6 @@ class TestNovaHttpChatRuntimeService(unittest.TestCase):
                     "_append_session_turn": nova_http._append_session_turn,
                     "_generate_chat_reply": nova_http._generate_chat_reply,
                     "_invalidate_control_status_cache": nova_http._invalidate_control_status_cache,
-                    "_fast_smalltalk_reply": nova_http._fast_smalltalk_reply,
-                    "_learn_contextual_developer_facts": nova_http._learn_contextual_developer_facts,
                 },
             )
 
@@ -70,7 +78,8 @@ class TestNovaHttpChatRuntimeService(unittest.TestCase):
         self.assertEqual(process_mock.call_args.kwargs.get("user_id"), "runner")
         self.assertIs(process_mock.call_args.kwargs.get("session_state_manager"), nova_http.SESSION_STATE_MANAGER)
         self.assertIs(process_mock.call_args.kwargs.get("generate_chat_reply_fn"), nova_http._generate_chat_reply)
-        self.assertIs(process_mock.call_args.kwargs.get("extract_memory_teach_text_fn"), nova_http.nova_core._extract_memory_teach_text)
+        self.assertNotIn("fast_smalltalk_reply_fn", process_mock.call_args.kwargs)
+        self.assertNotIn("extract_memory_teach_text_fn", process_mock.call_args.kwargs)
 
     def test_process_chat_returns_ok_for_empty_text_and_restores_active_user(self):
         invalidations = []
@@ -89,9 +98,6 @@ class TestNovaHttpChatRuntimeService(unittest.TestCase):
                 append_session_turn_fn=nova_http._append_session_turn,
                 generate_chat_reply_fn=nova_http._generate_chat_reply,
                 invalidate_control_status_cache_fn=lambda: invalidations.append(True),
-                fast_smalltalk_reply_fn=nova_http._fast_smalltalk_reply,
-                learn_contextual_developer_facts_fn=nova_http._learn_contextual_developer_facts,
-                extract_memory_teach_text_fn=nova_http.nova_core._extract_memory_teach_text,
             )
 
         self.assertEqual(reply, "Okay.")
@@ -114,7 +120,6 @@ class TestNovaHttpChatRuntimeService(unittest.TestCase):
                      "routed_text": "hello",
                      "turn_acts": [],
                      "intent_rule": {},
-                     "identity_only_block_kind": "",
                  },
              ), \
              patch(
@@ -142,12 +147,103 @@ class TestNovaHttpChatRuntimeService(unittest.TestCase):
                 append_session_turn_fn=nova_http._append_session_turn,
                 generate_chat_reply_fn=nova_http._generate_chat_reply,
                 invalidate_control_status_cache_fn=nova_http._invalidate_control_status_cache,
-                fast_smalltalk_reply_fn=nova_http._fast_smalltalk_reply,
-                learn_contextual_developer_facts_fn=nova_http._learn_contextual_developer_facts,
-                extract_memory_teach_text_fn=nova_http.nova_core._extract_memory_teach_text,
             )
 
         self.assertEqual(reply, "runtime delegated")
         routing_mock.assert_called_once()
         finalize_mock.assert_called_once()
         self.assertEqual(set_user_mock.call_args_list[-1].args, ("runner",))
+
+    def test_process_chat_url_fetch_reaches_runtime_web_fetch_tool(self):
+        session = _FakeSession()
+        turns = []
+        finalized = []
+
+        def append_turn(_session_id, role, text):
+            turns.append((role, text))
+            return list(turns)
+
+        def finalize_record(record, **kwargs):
+            finalized.append({"record": record, **kwargs})
+            return "captured.json"
+
+        with patch.object(nova_http.nova_core, "get_active_user", return_value="runner"), \
+             patch.object(nova_http.nova_core, "set_active_user"), \
+             patch.object(
+                 nova_http.nova_core,
+                 "_llm_classify_routing_intent",
+                 return_value={
+                     "tool": "web_fetch",
+                     "args": ["http://127.0.0.1:8080/control"],
+                     "confidence": 0.94,
+                     "reason": "semantic access request",
+                 },
+             ), \
+             patch.object(nova_http.nova_core, "tool_web_fetch", return_value="FETCHED_CONTROL"), \
+             patch.object(nova_http.nova_core, "build_turn_reflection", return_value={}), \
+             patch.object(nova_http.nova_core, "finalize_action_ledger_record", side_effect=finalize_record), \
+             patch.object(nova_http.nova_core, "behavior_record_event"):
+            reply = HTTP_CHAT_RUNTIME_SERVICE.process_chat(
+                "s-web-fetch",
+                "can you access the following website http://127.0.0.1:8080/control",
+                user_id="runner",
+                core_module=nova_http.nova_core,
+                session_state_manager=_SessionManager(session),
+                turn_finalization_service=nova_http.HTTP_TURN_FINALIZATION_SERVICE,
+                http_chat_flow_module=nova_http.http_chat_flow,
+                append_session_turn_fn=append_turn,
+                generate_chat_reply_fn=nova_http._generate_chat_reply,
+                invalidate_control_status_cache_fn=lambda: None,
+            )
+
+        self.assertEqual(reply, "FETCHED_CONTROL")
+        self.assertTrue(finalized)
+        self.assertEqual(finalized[-1].get("planner_decision"), "run_tool")
+        self.assertEqual(finalized[-1].get("tool"), "web_fetch")
+        self.assertEqual(finalized[-1].get("tool_result"), "FETCHED_CONTROL")
+
+    def test_process_chat_web_fetch_failure_question_stays_llm_owned(self):
+        session = _FakeSession()
+        turns = []
+        finalized = []
+
+        def append_turn(_session_id, role, text):
+            turns.append((role, text))
+            return list(turns)
+
+        def finalize_record(record, **kwargs):
+            finalized.append({"record": record, **kwargs})
+            return "captured.json"
+
+        web_research_mock = None
+        with patch.object(nova_http.nova_core, "get_active_user", return_value="runner"), \
+             patch.object(nova_http.nova_core, "set_active_user"), \
+             patch.object(nova_http.nova_core, "analyze_request", return_value=SimpleNamespace(allow_llm=True, message="")), \
+             patch.object(nova_http.nova_core, "build_fallback_context_details", return_value={}), \
+             patch.object(nova_http.nova_core, "should_block_low_confidence", return_value=False), \
+             patch.object(nova_http.nova_core, "ollama_chat", return_value="LLM_DIAGNOSTIC"), \
+             patch.object(nova_http.nova_core, "sanitize_llm_reply", side_effect=lambda reply, _tool_context="": reply), \
+             patch.object(nova_http.nova_core, "_apply_claim_gate", side_effect=lambda reply, evidence_text="", tool_context="": (reply, False, "")), \
+             patch.object(nova_http.nova_core, "_attach_learning_invitation", side_effect=lambda reply: reply), \
+             patch.object(nova_http.nova_core, "tool_web_research", return_value="WRONG_WEB_RESEARCH") as web_research_mock, \
+             patch.object(nova_http.nova_core, "build_turn_reflection", return_value={}), \
+             patch.object(nova_http.nova_core, "finalize_action_ledger_record", side_effect=finalize_record), \
+             patch.object(nova_http.nova_core, "behavior_record_event"):
+            reply = HTTP_CHAT_RUNTIME_SERVICE.process_chat(
+                "s-web-fetch-diagnostic",
+                "why did you web_fetch tool failed ?",
+                user_id="runner",
+                core_module=nova_http.nova_core,
+                session_state_manager=_SessionManager(session),
+                turn_finalization_service=nova_http.HTTP_TURN_FINALIZATION_SERVICE,
+                http_chat_flow_module=nova_http.http_chat_flow,
+                append_session_turn_fn=append_turn,
+                generate_chat_reply_fn=nova_http._generate_chat_reply,
+                invalidate_control_status_cache_fn=lambda: None,
+            )
+
+        self.assertEqual(reply, "LLM_DIAGNOSTIC")
+        web_research_mock.assert_not_called()
+        self.assertTrue(finalized)
+        self.assertEqual(finalized[-1].get("planner_decision"), "llm_fallback")
+        self.assertEqual(finalized[-1].get("tool"), "")

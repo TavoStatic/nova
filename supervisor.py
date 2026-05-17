@@ -1,97 +1,18 @@
 from __future__ import annotations
 
-import active_task_constraints as active_tasks
-import followup_move_classifier as followup_moves
-import re
 from typing import Any, Callable, Optional
 from services.supervisor_patterns import normalize_text as _normalize_text
 from services.supervisor_probes import build_suggestions
 from services.supervisor_probes import DEFAULT_SUPERVISOR_PROBES
 from services.supervisor_probes import normalize_decision
 from services.supervisor_probes import status_line
-from services.supervisor_identity_rules import developer_profile_state_rule
-from services.supervisor_identity_rules import identity_history_family_rule
-from services.supervisor_identity_rules import last_question_recall_rule
-from services.supervisor_identity_rules import name_origin_store_rule
-from services.supervisor_identity_rules import open_probe_family_rule
-from services.supervisor_identity_rules import profile_certainty_rule
-from services.supervisor_identity_rules import rules_list_rule
-from services.supervisor_identity_rules import session_fact_recall_rule
-from services.supervisor_intent_rules import assistant_name_rule
-from services.supervisor_intent_rules import capability_query_rule
-from services.supervisor_intent_rules import developer_full_name_rule
-from services.supervisor_intent_rules import developer_profile_rule
-from services.supervisor_intent_rules import name_origin_rule
-from services.supervisor_intent_rules import policy_domain_rule
-from services.supervisor_intent_rules import self_identity_web_challenge_rule
-from services.supervisor_intent_rules import session_summary_rule
-from services.supervisor_intent_rules import smalltalk_rule
-from services.supervisor_reflective_rules import apply_correction_rule
-from services.supervisor_reflective_rules import reflective_retry_rule
-from services.supervisor_routing_rules import location_name_rule
-from services.supervisor_routing_rules import location_recall_rule
-from services.supervisor_routing_rules import location_weather_rule
-from services.supervisor_routing_rules import retrieval_followup_rule
-from services.supervisor_routing_rules import self_location_rule
-from services.supervisor_routing_rules import set_location_rule
-from services.supervisor_routing_rules import store_fact_rule
-from services.supervisor_routing_rules import weather_lookup_rule
-from services.supervisor_routing_rules import web_research_family_rule
 from services.supervisor_registry import DEFAULT_SUPERVISOR_RULE_SPECS
-_manager_pending_action = active_tasks.manager_pending_action
-_manager_retrieval_state = active_tasks.manager_retrieval_state
 
 
-_uses_prior_reference = followup_moves.uses_prior_reference
-_compact_followup_text = followup_moves.compact_followup_text
-_looks_like_contextual_continuation = followup_moves.looks_like_contextual_continuation
-_looks_like_contextual_followup = followup_moves.looks_like_contextual_followup
-_extract_retrieval_result_index = followup_moves.extract_retrieval_result_index
-_looks_like_retrieval_followup = followup_moves.looks_like_retrieval_followup
-_looks_like_retrieval_continuation = followup_moves.looks_like_retrieval_continuation
-_looks_like_shared_location_reference = followup_moves.looks_like_shared_location_reference
-_classify_followup_move = followup_moves.classify_followup_move
-_looks_like_retrieval_meta_question = followup_moves.looks_like_retrieval_meta_question
+_EXPLICIT_INTENT_OWNERSHIP_RULES = frozenset()
 
 
-def _last_assistant_turn(turns: list[tuple[str, str]]) -> str:
-    for role, text in reversed(list(turns or [])):
-        if str(role or "").strip().lower() == "assistant":
-            return _normalize_text(text)
-    return ""
-
-
-_extract_weather_followup_location_candidate = followup_moves.extract_weather_followup_location_candidate
-_looks_like_explicit_location_declaration = followup_moves.looks_like_explicit_location_declaration
-
-
-_EXPLICIT_INTENT_OWNERSHIP_RULES = frozenset({
-    "store_fact",
-    "web_research_family",
-    "weather_lookup",
-    "set_location",
-    "capability_query",
-    "policy_domain_query",
-    "assistant_name",
-    "self_identity_web_challenge",
-})
-
-
-_EXPLICIT_HANDLE_OWNERSHIP_RULES = frozenset({
-    "reflective_retry",
-    "profile_certainty",
-    "identity_history_family",
-    "open_probe_family",
-    "session_fact_recall",
-    "self_location",
-    "location_recall",
-    "location_name",
-    "retrieval_followup",
-    "name_origin_store",
-    "apply_correction",
-    "rules_list",
-    "last_question_recall",
-})
+_EXPLICIT_HANDLE_OWNERSHIP_RULES = frozenset()
 
 
 def _result_is_explicitly_owned(rule_name: str, result: dict[str, Any], *, phase: str) -> bool:
@@ -126,36 +47,7 @@ class Supervisor:
 
     @staticmethod
     def _rule_handlers() -> dict[str, Callable[..., dict[str, Any]]]:
-        return {
-            "reflective_retry": reflective_retry_rule,
-            "profile_certainty": profile_certainty_rule,
-            "identity_history_family": identity_history_family_rule,
-            "open_probe_family": open_probe_family_rule,
-            "session_fact_recall": session_fact_recall_rule,
-            "developer_profile_state": developer_profile_state_rule,
-            "last_question_recall": last_question_recall_rule,
-            "self_location": self_location_rule,
-            "rules_list": rules_list_rule,
-            "location_recall": location_recall_rule,
-            "location_name": location_name_rule,
-            "location_weather": location_weather_rule,
-            "retrieval_followup": retrieval_followup_rule,
-            "name_origin_store": name_origin_store_rule,
-            "apply_correction": apply_correction_rule,
-            "smalltalk": smalltalk_rule,
-            "store_fact": store_fact_rule,
-            "web_research_family": web_research_family_rule,
-            "weather_lookup": weather_lookup_rule,
-            "set_location": set_location_rule,
-            "capability_query": capability_query_rule,
-            "policy_domain_query": policy_domain_rule,
-            "assistant_name": assistant_name_rule,
-            "self_identity_web_challenge": self_identity_web_challenge_rule,
-            "name_origin": name_origin_rule,
-            "developer_full_name": developer_full_name_rule,
-            "developer_profile": developer_profile_rule,
-            "session_summary": session_summary_rule,
-        }
+        return {}
 
     def register_rule(
         self,

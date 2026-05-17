@@ -1,5 +1,5 @@
 param(
-  # Subcommand: look | lookfull | chat | camera | ls | read | find | run | webui | webui-start | webui-stop | webui-status | operator | hub | smoke | test | health | guard | install | update | diag | logs | mem | memory | config | wiring-check | release-clean | stop
+  # Subcommand: look | lookfull | chat | camera | ls | read | find | run | webui | webui-start | webui-stop | webui-status | operator | hub | smoke | test | health | guard | install | update | diag | logs | mem | memory | config | wiring-check | release-clean | package-validate | stop
   [Parameter(Position=0)]
   [string]$cmd = "help",
 
@@ -44,6 +44,7 @@ $PACKAGELEDGERPS1 = Join-Path $ROOT "scripts\show_release_ledger.ps1"
 $PACKAGEPROMOTEPS1 = Join-Path $ROOT "scripts\promote_release_package.ps1"
 $PACKAGESTATUSPS1 = Join-Path $ROOT "scripts\show_release_status.ps1"
 $PACKAGEREADINESSPS1 = Join-Path $ROOT "scripts\show_release_readiness.ps1"
+$PACKAGEVALIDATEPY = Join-Path $ROOT "scripts\validate_release_package.py"
 $RELEASECLEANPY = Join-Path $ROOT "scripts\release_clean_check.py"
 $WIRINGCHECKPY = Join-Path $ROOT "scripts\end_to_end_wiring_check.py"
 $POLICY    = Join-Path $ROOT "policy.json"    # optional
@@ -345,6 +346,16 @@ function Invoke-NovaPackageReadiness([string[]]$readinessTokens=@()) {
   return (Invoke-NovaNative "powershell.exe" $args)
 }
 
+function Invoke-NovaPackageValidate([string[]]$validateTokens=@()) {
+  if (-not (Test-Path $PACKAGEVALIDATEPY)) {
+    Write-Host ("[FAIL] Missing package validation tool: " + $PACKAGEVALIDATEPY)
+    return 1
+  }
+
+  $pythonArgs = @($PACKAGEVALIDATEPY) + $validateTokens
+  return (Invoke-BootstrapPython $pythonArgs)
+}
+
 function Invoke-NovaReleaseClean([string[]]$releaseCleanTokens=@()) {
   if (-not (Test-Path $RELEASECLEANPY)) {
     Write-Host ("[FAIL] Missing release-clean lane: " + $RELEASECLEANPY)
@@ -394,12 +405,17 @@ function Invoke-NovaSmoke([string]$tier="runtime", [bool]$useFix=$false) {
   if (-not (Run-DoctorPreflight $useFix)) { exit 1 }
 
   Ensure-Python
-  if (-not (Test-Path $GUARDPY)) {
-    Write-Host "[FAIL] Missing guard script: $GUARDPY"
-    exit 1
-  }
   if (-not (Test-Path $SMOKEPY)) {
     Write-Host "[FAIL] Missing smoke script: $SMOKEPY"
+    exit 1
+  }
+  if ($tier -ieq "base") {
+    Write-Host "[INFO] Running base smoke without guard/core startup ..."
+    & $venvPython $SMOKEPY "--tier" "base"
+    exit $LASTEXITCODE
+  }
+  if (-not (Test-Path $GUARDPY)) {
+    Write-Host "[FAIL] Missing guard script: $GUARDPY"
     exit 1
   }
   if (-not (Test-Path $STOPPY)) {
@@ -854,6 +870,7 @@ function Show-Help {
   Write-Host "  nova package-status            # latest release artifact and promotion state"
   Write-Host "  nova installer-status          # latest Windows installer and promotion state"
   Write-Host "  nova package-readiness         # ship-gate summary from latest build, verify, and promotion records"
+  Write-Host "  nova package-validate [--artifact path --record path] [--include-runtime]  # run observed release validation and update its record"
   Write-Host "  nova wiring-check [--offline]  # verify front door, services, data lanes, runtime truth, and release-clean wiring"
   Write-Host "  nova release-clean [--label push-prep]  # hygiene -> regression -> smoke -> package build/verify -> readiness report"
   Write-Host "  nova installer-readiness       # ship-gate summary for latest Windows installer"
@@ -913,7 +930,7 @@ switch ($cmd.ToLower()) {
     Write-Host ""
     $choice = Read-Host "Choose 1-4"
     switch ($choice) {
-      "1" { Run-Ollama @("run","llama3.1:8b") }
+      "1" { Run-Ollama @("run","llama3.2:3b") }
       "2" { Run-Py $LOOK_CROP }
       "3" { Run-Py $CAMERA @("what do you see") }
       "4" { Run-Py $CORE }
@@ -950,7 +967,7 @@ switch ($cmd.ToLower()) {
     if (Test-Path $CHATPY) {
       Run-Py $CHATPY
     } else {
-      Run-Ollama @("run","llama3.1:8b")
+      Run-Ollama @("run","llama3.2:3b")
     }
     break
   }
@@ -1362,6 +1379,11 @@ switch ($cmd.ToLower()) {
   "package-readiness" {
     $readinessCode = Invoke-NovaPackageReadiness $remainingTokens
     exit $readinessCode
+  }
+
+  "package-validate" {
+    $validateCode = Invoke-NovaPackageValidate $remainingTokens
+    exit $validateCode
   }
 
   "wiring-check" {

@@ -132,6 +132,7 @@ class AutonomyExecutionGateService:
         action = _as_dict(packet.get("recommended_action"))
         action_type = _safe_text(action.get("action_type"), 120)
         target_id = _safe_text(action.get("target_id"), 160)
+        target_step_id = _safe_text(action.get("target_step_id"), 160)
         if not action_type or not is_autonomy_advisory_action(action_type):
             checks["dispatcher_catalog_action"] = "fail"
             refusal_reasons.append("action_not_dispatcher_owned")
@@ -161,11 +162,16 @@ class AutonomyExecutionGateService:
 
         confidence = _as_float(packet.get("confidence"), 0.0)
         threshold = _as_float(policy.get("execute_min_confidence") or policy.get("confidence_threshold"), 0.55)
-        if confidence < threshold:
+        decision_checks = _as_dict(packet.get("policy_checks"))
+        concrete_active_work_tree = (
+            action_type == "active_work_tree_run_next"
+            and _safe_text(decision_checks.get("recommendation_threshold"), 120) == "concrete_active_work_tree"
+        )
+        if confidence < threshold and not concrete_active_work_tree:
             checks["confidence_threshold"] = "fail"
             refusal_reasons.append("confidence_below_execute_threshold")
             return self._result(False, "deferred", mode, checks, refusal_reasons, "Recommendation confidence is below execution threshold.")
-        checks["confidence_threshold"] = "pass"
+        checks["confidence_threshold"] = "pass" if confidence >= threshold else "concrete_active_work_tree"
 
         ack_required = bool(action.get("requires_ack", False))
         ack_required_for = _action_set(policy.get("requires_operator_ack_for"))
@@ -181,7 +187,13 @@ class AutonomyExecutionGateService:
         cooldown_active = bool(last_execution.get("cooldown_active", False))
         last_action_type = _safe_text(last_execution.get("last_action_type"), 120)
         last_target_id = _safe_text(last_execution.get("last_target_id"), 160)
-        if cooldown_active and (not last_action_type or last_action_type == action_type) and (not last_target_id or last_target_id == target_id):
+        last_target_step_id = _safe_text(last_execution.get("last_target_step_id"), 160)
+        if (
+            cooldown_active
+            and (not last_action_type or last_action_type == action_type)
+            and (not last_target_id or last_target_id == target_id)
+            and (not last_target_step_id or not target_step_id or last_target_step_id == target_step_id)
+        ):
             checks["cooldown"] = "fail"
             refusal_reasons.append("cooldown_active")
             return self._result(False, "deferred", mode, checks, refusal_reasons, "Cooldown is still active for this action.")
@@ -193,6 +205,7 @@ class AutonomyExecutionGateService:
             "cycle_id": _safe_text(packet.get("cycle_id"), 120),
             "target_kind": _safe_text(action.get("target_kind"), 80),
             "target_id": target_id,
+            "target_step_id": target_step_id,
             "reason_code": _safe_text(action.get("reason_code"), 120),
             "execution_group": self._primary_action_group(action_type, action),
         }
@@ -209,6 +222,7 @@ class AutonomyExecutionGateService:
             "policy_checks": checks,
             "action_type": action_type,
             "target_id": target_id,
+            "target_step_id": target_step_id,
             "dispatch_payload": payload,
             "confidence": confidence,
             "cooldown_sec": int(_as_float(action.get("cooldown_sec"), _as_float(policy.get("cooldown_sec"), 180))),
@@ -233,6 +247,7 @@ class AutonomyExecutionGateService:
             "policy_checks": dict(checks),
             "action_type": "",
             "target_id": "",
+            "target_step_id": "",
             "dispatch_payload": {},
             "confidence": 0.0,
             "cooldown_sec": 0,

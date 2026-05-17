@@ -65,7 +65,7 @@ class PolicyManager:
         data["tools_enabled"] = tools
 
         models = data.get("models") if isinstance(data.get("models"), dict) else {}
-        models.setdefault("chat", "llama3.1:8b")
+        models.setdefault("chat", "llama3.2:3b")
         models.setdefault("vision", "qwen2.5vl:7b")
         models.setdefault("stt_size", "base")
         data["models"] = models

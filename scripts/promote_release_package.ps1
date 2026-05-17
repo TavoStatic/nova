@@ -17,10 +17,25 @@ $repoRoot = (Resolve-Path (Join-Path $scriptRoot "..")).Path
 $ledgerPath = Join-Path $repoRoot "runtime\exports\release_packages\release_ledger.jsonl"
 
 function Get-RecordField([string[]]$lines, [string]$label) {
-  foreach ($line in $lines) {
+  for ($i = 0; $i -lt $lines.Count; $i++) {
+    $line = $lines[$i]
     $trimmed = [string]$line
-    if ($trimmed -match ('^\s*-\s*' + [regex]::Escape($label) + '\s*:\s*(.*)$')) {
-      return [string]$Matches[1]
+    if ($trimmed -match ('^\s*-\s*`?' + [regex]::Escape($label) + '`?\s*:\s*(.*)$')) {
+      $value = [string]$Matches[1]
+      if (-not [string]::IsNullOrWhiteSpace($value)) {
+        return $value
+      }
+      $j = $i + 1
+      while ($j -lt $lines.Count -and [string]::IsNullOrWhiteSpace([string]$lines[$j])) {
+        $j += 1
+      }
+      if ($j -lt $lines.Count) {
+        $candidate = [string]$lines[$j]
+        if ($candidate -notmatch '^\s*-\s*`?[^`:]+`?\s*:' -and $candidate -notmatch '^\s*#') {
+          return $candidate
+        }
+      }
+      return ""
     }
   }
   return ""
@@ -59,6 +74,13 @@ if (-not [string]::IsNullOrWhiteSpace($Record)) {
   }
 }
 
+if ($ArtifactKind -eq "package-zip" -and [string]::IsNullOrWhiteSpace($Record)) {
+  Write-Host "[FAIL] package-zip validation outcomes must be recorded from a completed validation record."
+  Write-Host "       Run: nova package-validate --artifact <zip> --record <record>"
+  Write-Host "       Then: nova package-promote --record <record>"
+  exit 1
+}
+
 if (-not (Test-Path $ledgerPath)) {
   Write-Host ("[FAIL] Release ledger not found: " + $ledgerPath)
   exit 1
@@ -68,6 +90,40 @@ $validResults = @("pass", "pass-with-notes", "fail")
 if ([string]::IsNullOrWhiteSpace($Result) -or ($validResults -notcontains $Result)) {
   Write-Host "[FAIL] --result is required and must be one of: pass, pass-with-notes, fail"
   exit 1
+}
+
+if ($ArtifactKind -eq "package-zip" -and -not [string]::IsNullOrWhiteSpace($Record)) {
+  $requiredRecordFields = @(
+    "Artifact path",
+    "Artifact version",
+    "Release channel",
+    "Manifest reviewed",
+    "Machine or VM name",
+    "Windows version",
+    "Python source used during install",
+    "Ollama expected for this target",
+    "nova package-verify .",
+    "nova install",
+    "nova doctor",
+    "nova runtime-status",
+    "nova smoke-base --fix",
+    "nova test",
+    "nova run",
+    "nova webui-start --host 127.0.0.1 --port 8080",
+    "/control load result",
+    "Result"
+  )
+  $missingRecordFields = @()
+  foreach ($field in $requiredRecordFields) {
+    $fieldValue = Get-RecordField $recordLines $field
+    if ([string]::IsNullOrWhiteSpace($fieldValue) -or $fieldValue -eq "yes/no" -or $fieldValue -eq "pass / pass-with-notes / fail") {
+      $missingRecordFields += $field
+    }
+  }
+  if ($missingRecordFields.Count -gt 0) {
+    Write-Host ("[FAIL] Validation record is incomplete: " + ($missingRecordFields -join ", "))
+    exit 1
+  }
 }
 
 $entries = @()

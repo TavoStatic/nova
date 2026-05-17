@@ -12,11 +12,20 @@ class TestCoreSeamGuardService(unittest.TestCase):
             (root / "nova_http.py").write_text(
                 "from services.control_actions import CONTROL_ACTIONS_SERVICE\n"
                 "from services.control_status import CONTROL_STATUS_SERVICE\n"
+                "from services.nova_control_action_dispatcher import NOVA_CONTROL_ACTION_DISPATCHER\n"
                 "\n"
                 "def demo():\n"
-                "    CONTROL_ACTIONS_SERVICE.build_action_handlers()\n"
-                "    CONTROL_ACTIONS_SERVICE.handle_control_action('refresh_status', {}, action_handlers={}, record_control_action_event_fn=lambda *args: None)\n"
-                "    return CONTROL_STATUS_SERVICE.control_status_payload()\n",
+                "    CONTROL_ACTIONS_SERVICE.refresh_status_action(control_status_payload_fn=lambda: {})\n"
+                "    CONTROL_ACTIONS_SERVICE.self_check_action(control_self_check_payload_fn=lambda: {})\n"
+                "    CONTROL_STATUS_SERVICE.runtime_supplier_fns_from_scope({})\n"
+                "    CONTROL_STATUS_SERVICE.runtime_status_payload(core_module=None, session_turns={}, metrics_totals=(0, 0), supplier_fns={})\n"
+                "    return NOVA_CONTROL_ACTION_DISPATCHER.dispatch_control_action_from_runtime('refresh_status', {}, runtime_scope={})\n",
+                encoding="utf-8",
+            )
+            (root / "services").mkdir()
+            (root / "services" / "voice_interaction.py").write_text(
+                "class VoiceInteractionService:\n"
+                "    pass\n",
                 encoding="utf-8",
             )
             (root / "nova_core.py").write_text(
@@ -46,7 +55,13 @@ class TestCoreSeamGuardService(unittest.TestCase):
                 encoding="utf-8",
             )
             (root / "nova_core.py").write_text(
+                "import nova_http\n"
                 "_ALLOWED_SUPERVISOR_BYPASSES = ({'category': 'general_qa'},)\n",
+                encoding="utf-8",
+            )
+            (root / "services").mkdir()
+            (root / "services" / "voice_interaction.py").write_text(
+                "import nova_core\n",
                 encoding="utf-8",
             )
 
@@ -54,3 +69,5 @@ class TestCoreSeamGuardService(unittest.TestCase):
 
         self.assertFalse(bool((checks.get("seam:nova_http_transport_boundary") or {}).get("ok")))
         self.assertFalse(bool((checks.get("seam:nova_core_no_content_bypass_bucket") or {}).get("ok")))
+        self.assertFalse(bool((checks.get("seam:nova_core_no_http_import_cycle") or {}).get("ok")))
+        self.assertFalse(bool((checks.get("seam:voice_service_dependency_inversion") or {}).get("ok")))

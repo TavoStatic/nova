@@ -2,10 +2,11 @@
 
 import json
 import time
+from types import SimpleNamespace
 from typing import Callable
 
 from services import nova_planner_contract
-from services.nova_fallback_flow import apply_low_confidence_block, finalize_llm_fallback_reply, prepare_fallback_flow
+from services.nova_fallback_flow import finalize_llm_fallback_reply, prepare_fallback_flow
 from services.nova_reply_deterministic import (
     _is_queue_pressure_justify_followup,
     _is_queue_pressure_triage_query,
@@ -34,7 +35,15 @@ def execute_reply_sequence_from_runtime(
     post_planner_branch_group: str | None = None,
     planner_before_deterministic_content: bool = False,
     stop_before_llm_fallback: bool = False,
+    ensure_active_work_tree_fn: Callable[[str], str] | None = None,
+    work_tree_seed_source: str = "",
+    work_tree_seed_mode: str = "",
 ) -> tuple[str, dict]:
+    content_enabled = pre_planner_branch_group in {"all", "general"} or post_planner_branch_group in {"all", "general"}
+    false_text = lambda _text: False
+    empty_reply = lambda *args, **kwargs: ""
+    empty_from_turns = lambda _turns, *_args, **_kwargs: ""
+
     return execute_reply_sequence(
         turns=turns,
         text=text,
@@ -46,31 +55,42 @@ def execute_reply_sequence_from_runtime(
         normalize_reply=normalize_reply,
         ensure_reply=ensure_reply,
         core=core,
-        is_developer_profile_request=_runtime_fn(runtime_scope, "_is_developer_profile_request"),
-        developer_profile_reply=_runtime_fn(runtime_scope, "_developer_profile_reply"),
-        is_location_request=_runtime_fn(runtime_scope, "_is_location_request"),
-        location_reply=_runtime_fn(runtime_scope, "_location_reply"),
+        is_developer_profile_request=_runtime_fn(runtime_scope, "_is_developer_profile_request") if content_enabled else false_text,
+        developer_profile_reply=_runtime_fn(runtime_scope, "_developer_profile_reply") if content_enabled else empty_from_turns,
+        is_location_request=_runtime_fn(runtime_scope, "_is_location_request") if content_enabled else false_text,
+        location_reply=_runtime_fn(runtime_scope, "_location_reply") if content_enabled else empty_reply,
         is_web_preferred_data_query=_runtime_fn(runtime_scope, "nova_query_classifiers").is_web_preferred_data_query,
-        is_session_recap_request=_runtime_fn(runtime_scope, "_is_session_recap_request"),
-        session_recap_reply=_runtime_fn(runtime_scope, "_session_recap_reply"),
-        is_assistant_name_query=_runtime_fn(runtime_scope, "_is_assistant_name_query"),
-        assistant_name_reply=_runtime_fn(runtime_scope, "_assistant_name_reply"),
-        is_developer_full_name_query=_runtime_fn(runtime_scope, "_is_developer_full_name_query"),
-        developer_full_name_reply=_runtime_fn(runtime_scope, "_developer_full_name_reply"),
-        is_name_origin_question=_runtime_fn(runtime_scope, "_is_name_origin_question"),
-        is_student_data_attendance_rules_query=_runtime_fn(runtime_scope, "nova_query_classifiers").is_student_data_attendance_rules_query,
-        student_data_attendance_rules_reply=_runtime_fn(runtime_scope, "_peims_attendance_rules_reply"),
-        is_conversational_clarification=_runtime_fn(runtime_scope, "nova_query_classifiers").is_conversational_clarification,
-        clarification_reply=lambda turns: core._open_probe_reply("what are you talking about ?", turns=turns)[0],
-        is_deep_search_followup_request=_runtime_fn(runtime_scope, "_is_deep_search_followup_request"),
-        infer_research_query_from_turns=_runtime_fn(runtime_scope, "_infer_research_query_from_turns"),
-        build_grounded_answer=_runtime_fn(runtime_scope, "_build_grounded_answer"),
-        build_local_topic_digest_answer=_runtime_fn(runtime_scope, "_build_local_topic_digest_answer"),
+        is_session_recap_request=_runtime_fn(runtime_scope, "_is_session_recap_request") if content_enabled else false_text,
+        session_recap_reply=_runtime_fn(runtime_scope, "_session_recap_reply") if content_enabled else empty_from_turns,
+        is_assistant_name_query=_runtime_fn(runtime_scope, "_is_assistant_name_query") if content_enabled else false_text,
+        assistant_name_reply=_runtime_fn(runtime_scope, "_assistant_name_reply") if content_enabled else empty_reply,
+        is_developer_full_name_query=_runtime_fn(runtime_scope, "_is_developer_full_name_query") if content_enabled else false_text,
+        developer_full_name_reply=_runtime_fn(runtime_scope, "_developer_full_name_reply") if content_enabled else empty_reply,
+        is_name_origin_question=_runtime_fn(runtime_scope, "_is_name_origin_question") if content_enabled else false_text,
+        is_student_data_attendance_rules_query=(
+            _runtime_fn(runtime_scope, "nova_query_classifiers").is_student_data_attendance_rules_query
+            if content_enabled
+            else false_text
+        ),
+        student_data_attendance_rules_reply=_runtime_fn(runtime_scope, "_peims_attendance_rules_reply") if content_enabled else empty_reply,
+        is_conversational_clarification=(
+            _runtime_fn(runtime_scope, "nova_query_classifiers").is_conversational_clarification
+            if content_enabled
+            else false_text
+        ),
+        clarification_reply=(lambda turns: core._open_probe_reply("what are you talking about ?", turns=turns)[0]) if content_enabled else empty_from_turns,
+        is_deep_search_followup_request=_runtime_fn(runtime_scope, "_is_deep_search_followup_request") if content_enabled else false_text,
+        infer_research_query_from_turns=_runtime_fn(runtime_scope, "_infer_research_query_from_turns") if content_enabled else empty_from_turns,
+        build_grounded_answer=_runtime_fn(runtime_scope, "_build_grounded_answer") if content_enabled else (lambda _query, max_sources=2: ""),
+        build_local_topic_digest_answer=_runtime_fn(runtime_scope, "_build_local_topic_digest_answer") if content_enabled else (lambda _query: ""),
         is_groundable_factual_query=lambda _text: False,
-        developer_color_reply=_runtime_fn(runtime_scope, "_developer_color_reply"),
-        developer_bilingual_reply=_runtime_fn(runtime_scope, "_developer_bilingual_reply"),
-        color_reply=_runtime_fn(runtime_scope, "_color_reply"),
-        animal_reply=_runtime_fn(runtime_scope, "_animal_reply"),
+        developer_color_reply=_runtime_fn(runtime_scope, "_developer_color_reply") if content_enabled else empty_from_turns,
+        developer_bilingual_reply=_runtime_fn(runtime_scope, "_developer_bilingual_reply") if content_enabled else empty_from_turns,
+        color_reply=_runtime_fn(runtime_scope, "_color_reply") if content_enabled else empty_from_turns,
+        animal_reply=_runtime_fn(runtime_scope, "_animal_reply") if content_enabled else empty_from_turns,
+        ensure_active_work_tree_fn=ensure_active_work_tree_fn,
+        work_tree_seed_source=work_tree_seed_source,
+        work_tree_seed_mode=work_tree_seed_mode,
         pre_planner_branch_group=pre_planner_branch_group,
         post_planner_branch_group=post_planner_branch_group,
         planner_before_deterministic_content=planner_before_deterministic_content,
@@ -92,20 +112,13 @@ def execute_http_reply_sequence_from_runtime(
     runtime_scope: dict[str, object],
     pre_planner_branch_group: str = "all",
     post_planner_branch_group: str | None = None,
+    ensure_active_work_tree_fn: Callable[[str], str] | None = None,
 ) -> tuple[str, dict]:
     def _trace(stage: str, outcome: str, detail: str = "", **data) -> None:
         core.action_ledger_add_step(ledger_record, stage, outcome, detail, **data)
 
     def _normalize_reply(reply_text: str) -> str:
         reply_local = _runtime_fn(runtime_scope, "_strip_ui_tip_leak")(reply_text)
-        corrected_reply, was_corrected, _reason = core._self_correct_reply(text, reply_local)
-        if was_corrected:
-            core.behavior_record_event("correction_applied")
-            core.behavior_record_event("self_correction_applied")
-            _trace("llm_postprocess", "self_corrected")
-            reply_local = corrected_reply
-        if not core._is_identity_stable_reply(reply_local):
-            reply_local = core._apply_reply_overrides(reply_local)
         return ensure_reply(reply_local)
 
     return execute_reply_sequence_from_runtime(
@@ -120,6 +133,8 @@ def execute_http_reply_sequence_from_runtime(
         ensure_reply=ensure_reply,
         core=core,
         runtime_scope=runtime_scope,
+        ensure_active_work_tree_fn=ensure_active_work_tree_fn,
+        work_tree_seed_source="http",
         pre_planner_branch_group=pre_planner_branch_group,
         post_planner_branch_group=post_planner_branch_group,
     )
@@ -249,7 +264,9 @@ def execute_reply_sequence(
             return build_fn(user_text, session_turns)
 
     low = text.lower()
-    if is_developer_profile_request(text):
+    allow_general_content = pre_planner_branch_group in {"all", "general"}
+
+    if allow_general_content and is_developer_profile_request(text):
         trace("developer_profile", "matched")
         reply = developer_profile_reply(turns, text)
         return _timed_return(normalize_reply(reply), {
@@ -260,48 +277,54 @@ def execute_reply_sequence(
             "grounded": True,
         })
 
-    handled_truth, truth_reply, truth_source, truth_grounded = core.truth_hierarchy_answer(text)
-    if handled_truth:
-        trace("truth_hierarchy", "matched", tool=str(truth_source or ""), grounded=bool(truth_grounded))
-        reply = truth_reply
-        used_hard_answer = False
-        if is_developer_profile_request(text):
-            hard = core.hard_answer(text)
-            if hard:
-                reply = hard
-                used_hard_answer = True
-            elif reply.lower().startswith("uncertain. no structured identity fact"):
-                reply = developer_profile_reply(turns, text)
-        elif reply.lower().startswith("uncertain. no structured identity fact"):
-            if is_location_request(text):
-                reply = location_reply()
-            else:
+    if allow_general_content:
+        handled_truth, truth_reply, truth_source, truth_grounded = core.truth_hierarchy_answer(text)
+        if handled_truth:
+            trace("truth_hierarchy", "matched", tool=str(truth_source or ""), grounded=bool(truth_grounded))
+            reply = truth_reply
+            used_hard_answer = False
+            if is_developer_profile_request(text):
                 hard = core.hard_answer(text)
                 if hard:
                     reply = hard
                     used_hard_answer = True
-        final_reply = ensure_reply(reply) if used_hard_answer else normalize_reply(reply)
-        return _timed_return(final_reply, {
-            "planner_decision": "truth_hierarchy",
-            "tool": str(truth_source or ""),
-            "tool_args": {"query": text},
-            "tool_result": str(reply or ""),
-            "grounded": bool(truth_grounded),
-        })
-    trace("truth_hierarchy", "not_matched")
+                elif reply.lower().startswith("uncertain. no structured identity fact"):
+                    reply = developer_profile_reply(turns, text)
+            elif reply.lower().startswith("uncertain. no structured identity fact"):
+                if is_location_request(text):
+                    reply = location_reply()
+                else:
+                    hard = core.hard_answer(text)
+                    if hard:
+                        reply = hard
+                        used_hard_answer = True
+            final_reply = ensure_reply(reply) if used_hard_answer else normalize_reply(reply)
+            return _timed_return(final_reply, {
+                "planner_decision": "truth_hierarchy",
+                "tool": str(truth_source or ""),
+                "tool_args": {"query": text},
+                "tool_result": str(reply or ""),
+                "grounded": bool(truth_grounded),
+            })
+        trace("truth_hierarchy", "not_matched")
+    else:
+        trace("truth_hierarchy", "skipped", detail="content_owned_chat_disabled")
 
-    hard = core.hard_answer(text)
-    if hard:
-        trace("hard_answer", "matched", grounded=True)
-        reply = ensure_reply(hard)
-        return _timed_return(reply, {
-            "planner_decision": "deterministic",
-            "tool": "hard_answer",
-            "tool_args": {"query": text},
-            "tool_result": reply,
-            "grounded": True,
-        })
-    trace("hard_answer", "not_matched")
+    if allow_general_content:
+        hard = core.hard_answer(text)
+        if hard:
+            trace("hard_answer", "matched", grounded=True)
+            reply = ensure_reply(hard)
+            return _timed_return(reply, {
+                "planner_decision": "deterministic",
+                "tool": "hard_answer",
+                "tool_args": {"query": text},
+                "tool_result": reply,
+                "grounded": True,
+            })
+        trace("hard_answer", "not_matched")
+    else:
+        trace("hard_answer", "skipped", detail="content_owned_chat_disabled")
 
     force_pre_planner_deterministic = _is_queue_pressure_triage_query(text) or _is_queue_pressure_justify_followup(text)
 
@@ -437,7 +460,7 @@ def execute_reply_sequence(
         turns=turns,
         recent_tool_context="",
         prefer_web_for_data_queries=prefer_web_for_data_queries,
-        analyze_request_fn=core.analyze_request,
+        analyze_request_fn=lambda *_args, **_kwargs: SimpleNamespace(allow_llm=True, message=""),
         normalize_policy_reply_fn=normalize_reply,
         build_fallback_context_details_fn=_build_fallback_context_details,
         uses_prior_reference_fn=lambda _text: False,
@@ -454,30 +477,6 @@ def execute_reply_sequence(
         })
 
     retrieved = str(fallback_entry.get("retrieved_context") or "")
-    low_confidence_outcome = apply_low_confidence_block(
-        text=text,
-        retrieved_context=retrieved,
-        recent_tool_context="",
-        should_block_low_confidence_fn=lambda user_text, retrieved_context="", tool_context="": core.should_block_low_confidence(
-            user_text,
-            retrieved_context=retrieved_context,
-        ),
-        behavior_record_event_fn=getattr(core, "behavior_record_event", lambda *_args, **_kwargs: None),
-        truthful_limit_outcome_fn=core._truthful_limit_outcome,
-        truthful_limit_reply_fn=core._truthful_limit_reply,
-        action_ledger_add_step=lambda stage, outcome, detail="", **data: trace(stage, outcome, detail, **data),
-        ensure_reply=normalize_reply,
-    )
-    if low_confidence_outcome.get("handled"):
-        return _timed_return(str(low_confidence_outcome.get("reply") or ""), {
-            "planner_decision": str(low_confidence_outcome.get("planner_decision") or "blocked_low_confidence"),
-            "tool": "",
-            "tool_args": {},
-            "tool_result": "",
-            "grounded": False,
-            "reply_contract": str(low_confidence_outcome.get("reply_contract") or ""),
-            "reply_outcome": dict(low_confidence_outcome.get("reply_outcome") or {}),
-        })
     trace("llm_fallback", "invoked", retrieved_chars=len(retrieved))
     trace("llm_call", "started")
     llm_fallback_outcome = finalize_llm_fallback_reply(
@@ -489,7 +488,7 @@ def execute_reply_sequence(
         language_mix_spanish_pct=int(language_mix_spanish_pct or 0),
         active_user="",
         ollama_chat_fn=core.ollama_chat,
-        sanitize_llm_reply_fn=lambda reply, tool_context: core.sanitize_llm_reply(reply, tool_context),
+        sanitize_llm_reply_fn=lambda reply, _tool_context: str(reply or "").strip(),
         mem_enabled_fn=lambda: False,
         mem_should_store_fn=lambda _text: False,
         mem_add_fn=lambda *_args, **_kwargs: None,
@@ -499,12 +498,8 @@ def execute_reply_sequence(
         action_ledger_add_step=lambda *_args, **_kwargs: None,
         teach_store_example_fn=lambda *_args, **_kwargs: None,
         truthful_limit_outcome_fn=core._truthful_limit_outcome,
-        apply_claim_gate_fn=lambda reply, evidence_text="", tool_context="": core._apply_claim_gate(
-            reply,
-            evidence_text=evidence_text,
-            tool_context=tool_context,
-        ),
-        post_claim_reply_transform_fn=lambda reply, reply_contract: reply if reply_contract else core._attach_learning_invitation(reply),
+        apply_claim_gate_fn=lambda reply, evidence_text="", tool_context="": (reply, False, ""),
+        post_claim_reply_transform_fn=lambda reply, reply_contract: reply,
         is_explicit_request_fn=lambda _text: True,
         apply_reply_overrides_fn=lambda reply: reply,
         ensure_reply_fn=lambda reply: reply,

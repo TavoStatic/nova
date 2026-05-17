@@ -6,6 +6,8 @@ Does NOT inspect source code or depend on internal call patterns.
 """
 from __future__ import annotations
 
+import os
+
 import shutil
 import unittest
 import uuid
@@ -15,7 +17,7 @@ import work_tree
 from work_tree_contracts import BranchStatus, TaskStatus, ToolStatus
 
 
-WORK_TMP_ROOT = Path(__file__).resolve().parents[2] / "runtime" / "pytest_temp"
+WORK_TMP_ROOT = Path(os.environ.get("NOVA_VALIDATION_RUNTIME_DIR") or Path(__file__).resolve().parents[2] / "runtime" / "validation") / "pytest_temp"
 
 
 def _workspace_case_dir(prefix: str) -> Path:
@@ -97,7 +99,7 @@ class TestMissingToolAssignment(unittest.TestCase):
     def test_branch_with_no_tools_gets_deterministic_assignment(self):
         tree = work_tree.initialize_tree("No tools tree")
         root = work_tree._BRANCHES[tree.root_branch_id]
-        work_tree.add_task_to_branch(root.branch_id, "check runtime status")
+        work_tree.add_task_to_branch(root.branch_id, "Do task without tools")
 
         step = work_tree.next_autonomous_step(tree.tree_id)
 
@@ -108,7 +110,7 @@ class TestMissingToolAssignment(unittest.TestCase):
     def test_deterministic_assignment_is_explicit_on_branch(self):
         tree = work_tree.initialize_tree("Suggestions tree")
         root = work_tree._BRANCHES[tree.root_branch_id]
-        work_tree.add_task_to_branch(root.branch_id, "check runtime status")
+        work_tree.add_task_to_branch(root.branch_id, "research attendance web data")
 
         step = work_tree.next_autonomous_step(tree.tree_id)
 
@@ -121,7 +123,7 @@ class TestMissingToolAssignment(unittest.TestCase):
     def test_execute_calls_executor_after_deterministic_assignment(self):
         tree = work_tree.initialize_tree("No exec tree")
         root = work_tree._BRANCHES[tree.root_branch_id]
-        task = work_tree.add_task_to_branch(root.branch_id, "check runtime status")
+        task = work_tree.add_task_to_branch(root.branch_id, "task without tools")
 
         executor_calls = []
         step = work_tree.execute_autonomous_step(
@@ -136,7 +138,7 @@ class TestMissingToolAssignment(unittest.TestCase):
     def test_task_completes_after_deterministic_assignment(self):
         tree = work_tree.initialize_tree("Task open tree")
         root = work_tree._BRANCHES[tree.root_branch_id]
-        task = work_tree.add_task_to_branch(root.branch_id, "check runtime status")
+        task = work_tree.add_task_to_branch(root.branch_id, "undeclared task")
 
         work_tree.execute_autonomous_step(
             tree.tree_id,

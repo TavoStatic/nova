@@ -23,11 +23,14 @@ class TestRegressionContracts(unittest.TestCase):
         self.assertIn("scope", stats_params)
         self.assertIn("user", stats_params)
 
-    def test_queue_status_phrase_routes_to_direct_tool(self):
+    def test_queue_status_natural_phrase_stays_conversation_owned(self):
         actions = decide_turn("what should you work on next", config={})
-        self.assertTrue(actions)
-        self.assertEqual(actions[0].get("type"), "run_tool")
-        self.assertEqual(actions[0].get("tool"), "queue_status")
+        self.assertEqual(actions, [])
+
+        check_actions = decide_turn("check queue status", config={})
+        self.assertTrue(check_actions)
+        self.assertEqual(check_actions[0].get("type"), "run_tool")
+        self.assertEqual(check_actions[0].get("tool"), "queue_status")
 
     def test_system_check_phrase_routes_to_direct_tool(self):
         actions = decide_turn("run system checks", config={})

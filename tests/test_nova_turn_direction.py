@@ -19,7 +19,7 @@ class TestNovaTurnDirection(unittest.TestCase):
         self.assertEqual(effective, "do you remember me?")
         self.assertEqual(reason, "reflective_retry_prior_question")
 
-    def test_determine_turn_direction_marks_identity_query_and_bypasses_pattern_routes(self):
+    def test_determine_turn_direction_leaves_identity_content_model_owned(self):
         result = determine_turn_direction(
             [("user", "what else do you know about me?")],
             "what else do you know about me?",
@@ -34,9 +34,9 @@ class TestNovaTurnDirection(unittest.TestCase):
             is_explicit_command_like_fn=is_explicit_command_like,
         )
 
-        self.assertEqual(result.get("primary"), "identity_query")
-        self.assertTrue(result.get("identity_focused"))
-        self.assertTrue(result.get("bypass_pattern_routes"))
+        self.assertEqual(result.get("primary"), "general_chat")
+        self.assertFalse(result.get("identity_focused"))
+        self.assertFalse(result.get("bypass_pattern_routes"))
 
     def test_determine_turn_direction_keeps_explicit_commands_pattern_routable(self):
         result = determine_turn_direction(
@@ -55,6 +55,13 @@ class TestNovaTurnDirection(unittest.TestCase):
 
         self.assertEqual(result.get("primary"), "explicit_command")
         self.assertFalse(result.get("bypass_pattern_routes"))
+
+    def test_self_report_phrases_are_not_command_like_without_explicit_command(self):
+        self.assertFalse(is_explicit_command_like("what is troubling you today?"))
+        self.assertFalse(is_explicit_command_like("runtime status"))
+        self.assertTrue(is_explicit_command_like("nova status"))
+        self.assertFalse(is_explicit_command_like("I need help deciding."))
+        self.assertFalse(is_explicit_command_like("what hurts"))
 
 
 if __name__ == "__main__":

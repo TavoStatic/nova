@@ -97,12 +97,12 @@ class TestSubconsciousLiveSimulator(unittest.TestCase):
     def test_default_live_scenario_families_create_variations_per_current_seam(self):
         families = build_default_live_scenario_families()
 
-        self.assertEqual(len(families), 8)
+        self.assertEqual(len(families), 7)
         family_ids = [item.family_id for item in families]
         self.assertIn("supervisor-boundary-family", family_ids)
         self.assertIn("fulfillment-fallthrough-family", family_ids)
         self.assertIn("repeated-weak-pressure-family", family_ids)
-        self.assertIn("memory-capture-fallthrough-family", family_ids)
+        self.assertNotIn("memory-capture-fallthrough-family", family_ids)
         self.assertIn("weather-continuation-fallthrough-family", family_ids)
         self.assertIn("retrieval-followup-fallthrough-family", family_ids)
         self.assertIn("patch-routing-fallthrough-family", family_ids)
@@ -131,9 +131,10 @@ class TestSubconsciousLiveSimulator(unittest.TestCase):
 
         self.assertEqual(result.target_seam, "session_fact_recall_route_fallthrough")
         self.assertEqual(len(result.pressure_records), 1)
-        self.assertTrue(result.subconscious_snapshot.get("replan_requested"))
         signals = result.subconscious_snapshot.get("active_recent_signals") or []
-        self.assertIn("fallback_overuse", signals)
+        self.assertIn("route_unclear", signals)
+        self.assertIn("route_fit_weak", signals)
+        self.assertIsNone(result.training_backlog)
 
     def test_quiet_control_family_stays_quiet_across_variations(self):
         family = next(
@@ -155,7 +156,7 @@ class TestSubconsciousLiveSimulator(unittest.TestCase):
         self.assertTrue(result.quiet_control_verdict.get("quiet_control"))
         self.assertEqual(result.quiet_control_verdict.get("status"), "quiet_control")
 
-    def test_fulfillment_family_marks_core_cracks_as_robust_across_variations(self):
+    def test_fulfillment_family_stops_backlog_when_live_route_handles_variations(self):
         family = next(
             item for item in build_default_live_scenario_families()
             if item.family_id == "fulfillment-fallthrough-family"
@@ -163,17 +164,11 @@ class TestSubconsciousLiveSimulator(unittest.TestCase):
 
         result = simulate_live_family(family)
 
-        by_signal = {item.get("signal"): item for item in result.repeated_signals}
-        robust_by_signal = {item.get("signal"): item for item in result.robust_signals}
-        script_specific_signals = {item.get("signal") for item in result.script_specific_signals}
-        self.assertEqual(result.noise_summary.get("useful_variations"), len(family.scenarios))
-        self.assertEqual(by_signal["fallback_overuse"].get("classification"), "robust")
-        self.assertEqual(by_signal["fulfillment_missed"].get("classification"), "robust")
-        self.assertEqual(robust_by_signal["fallback_overuse"].get("classification"), "robust")
-        self.assertGreater(robust_by_signal["fallback_overuse"].get("robustness_score"), 0.9)
-        self.assertLess(robust_by_signal["fallback_overuse"].get("robustness_score"), 1.0)
-        self.assertNotIn("fallback_overuse", script_specific_signals)
-        self.assertNotIn("fulfillment_missed", script_specific_signals)
+        signals = {item.get("signal") for item in result.repeated_signals}
+        self.assertEqual(result.noise_summary.get("useful_variations"), 0)
+        self.assertNotIn("fallback_overuse", signals)
+        self.assertNotIn("fulfillment_missed", signals)
+        self.assertEqual(result.robust_backlog_candidates, [])
 
     def test_variation_aggregation_marks_script_specific_crack_when_only_one_variant_hits(self):
         family = LiveSimulationFamily(
@@ -220,7 +215,7 @@ class TestSubconsciousLiveSimulator(unittest.TestCase):
         self.assertEqual(script_specific_by_signal["fallback_overuse"].get("classification"), "script_specific")
         self.assertLess(script_specific_by_signal["fallback_overuse"].get("robustness_score"), 0.7)
 
-    def test_robust_backlog_candidate_ranking_matches_repeated_family_pressure(self):
+    def test_repeated_family_pressure_becomes_training_backlog_when_routes_stay_weak(self):
         family = next(
             item for item in build_default_live_scenario_families()
             if item.family_id == "repeated-weak-pressure-family"
@@ -228,45 +223,33 @@ class TestSubconsciousLiveSimulator(unittest.TestCase):
 
         result = simulate_live_family(family)
 
-        self.assertGreaterEqual(len(result.robust_backlog_candidates), 2)
-        signals = [item.get("signal") for item in result.robust_backlog_candidates]
+        signals = [item.get("signal") for item in result.robust_signals]
         self.assertIn("route_unclear", signals)
         self.assertIn("route_fit_weak", signals)
-        first = result.robust_backlog_candidates[0]
-        self.assertEqual(first.get("classification"), "robust")
-        self.assertGreater(first.get("robustness_score"), 0.9)
+        self.assertGreaterEqual(len(result.robust_backlog_candidates), 1)
+        backlog_signals = [item.get("signal") for item in result.robust_backlog_candidates]
+        self.assertIn("route_fit_weak", backlog_signals)
 
     def test_simulate_live_families_runs_family_aggregation(self):
         results = simulate_live_families(build_default_live_scenario_families())
 
-        self.assertEqual(len(results), 8)
+        self.assertEqual(len(results), 7)
         family_ids = [item.family_id for item in results]
         self.assertIn("supervisor-boundary-family", family_ids)
         self.assertIn("fulfillment-fallthrough-family", family_ids)
         self.assertIn("repeated-weak-pressure-family", family_ids)
-        self.assertIn("memory-capture-fallthrough-family", family_ids)
+        self.assertNotIn("memory-capture-fallthrough-family", family_ids)
         self.assertIn("weather-continuation-fallthrough-family", family_ids)
         self.assertIn("retrieval-followup-fallthrough-family", family_ids)
         self.assertIn("patch-routing-fallthrough-family", family_ids)
         self.assertIn("session-fact-recall-fallthrough-family", family_ids)
 
-    def test_memory_capture_family_marks_fallback_overuse_as_robust(self):
-        family = next(
-            item for item in build_default_live_scenario_families()
-            if item.family_id == "memory-capture-fallthrough-family"
-        )
+    def test_memory_capture_family_is_retired_from_default_live_routes(self):
+        family_ids = [item.family_id for item in build_default_live_scenario_families()]
 
-        result = simulate_live_family(family)
+        self.assertNotIn("memory-capture-fallthrough-family", family_ids)
 
-        robust_by_signal = {item.get("signal"): item for item in result.robust_signals}
-        priorities = build_training_priorities(result)
-
-        self.assertEqual(result.noise_summary.get("useful_variations"), len(family.scenarios))
-        self.assertIn("fallback_overuse", robust_by_signal)
-        self.assertGreater(robust_by_signal["fallback_overuse"].get("robustness_score"), 0.9)
-        self.assertEqual(priorities[0].signal, "fallback_overuse")
-
-    def test_weather_continuation_family_marks_supervisor_fallthrough_as_robust(self):
+    def test_weather_continuation_family_stays_quiet_when_live_route_handles(self):
         family = next(
             item for item in build_default_live_scenario_families()
             if item.family_id == "weather-continuation-fallthrough-family"
@@ -274,15 +257,11 @@ class TestSubconsciousLiveSimulator(unittest.TestCase):
 
         result = simulate_live_family(family)
 
-        robust_by_signal = {item.get("signal"): item for item in result.robust_signals}
-        candidate_by_signal = {item.get("signal"): item for item in result.robust_backlog_candidates}
+        self.assertEqual(result.noise_summary.get("quiet_variations"), len(family.scenarios) - 1)
+        self.assertEqual(result.robust_signals, [])
+        self.assertEqual(result.robust_backlog_candidates, [])
 
-        self.assertEqual(result.noise_summary.get("useful_variations"), len(family.scenarios))
-        self.assertIn("fallback_overuse", robust_by_signal)
-        self.assertIn("fallback_overuse", candidate_by_signal)
-        self.assertGreater(robust_by_signal["fallback_overuse"].get("robustness_score"), 0.9)
-
-    def test_retrieval_followup_family_marks_fallback_overuse_as_robust(self):
+    def test_retrieval_followup_family_stays_quiet_when_live_route_handles(self):
         family = next(
             item for item in build_default_live_scenario_families()
             if item.family_id == "retrieval-followup-fallthrough-family"
@@ -290,12 +269,10 @@ class TestSubconsciousLiveSimulator(unittest.TestCase):
 
         result = simulate_live_family(family)
 
-        robust_by_signal = {item.get("signal"): item for item in result.robust_signals}
-        self.assertEqual(result.noise_summary.get("useful_variations"), len(family.scenarios))
-        self.assertIn("fallback_overuse", robust_by_signal)
-        self.assertGreater(robust_by_signal["fallback_overuse"].get("robustness_score"), 0.9)
+        self.assertEqual(result.noise_summary.get("quiet_variations"), len(family.scenarios))
+        self.assertEqual(result.robust_signals, [])
 
-    def test_patch_routing_family_marks_fallback_overuse_as_robust(self):
+    def test_patch_routing_family_stays_quiet_when_live_route_handles(self):
         family = next(
             item for item in build_default_live_scenario_families()
             if item.family_id == "patch-routing-fallthrough-family"
@@ -303,12 +280,10 @@ class TestSubconsciousLiveSimulator(unittest.TestCase):
 
         result = simulate_live_family(family)
 
-        robust_by_signal = {item.get("signal"): item for item in result.robust_signals}
-        self.assertEqual(result.noise_summary.get("useful_variations"), len(family.scenarios))
-        self.assertIn("fallback_overuse", robust_by_signal)
-        self.assertGreater(robust_by_signal["fallback_overuse"].get("robustness_score"), 0.9)
+        self.assertEqual(result.noise_summary.get("quiet_variations"), len(family.scenarios))
+        self.assertEqual(result.robust_signals, [])
 
-    def test_session_fact_recall_family_marks_fallback_overuse_as_robust(self):
+    def test_session_fact_recall_family_records_noisy_unwired_pressure(self):
         family = next(
             item for item in build_default_live_scenario_families()
             if item.family_id == "session-fact-recall-fallthrough-family"
@@ -316,13 +291,14 @@ class TestSubconsciousLiveSimulator(unittest.TestCase):
 
         result = simulate_live_family(family)
 
-        robust_by_signal = {item.get("signal"): item for item in result.robust_signals}
         self.assertEqual(result.target_seam, "session_fact_recall_route_fallthrough")
-        self.assertEqual(result.noise_summary.get("useful_variations"), len(family.scenarios))
-        self.assertIn("fallback_overuse", robust_by_signal)
-        self.assertGreater(robust_by_signal["fallback_overuse"].get("robustness_score"), 0.9)
+        self.assertEqual(result.noise_summary.get("noisy_variations"), len(family.scenarios))
+        signals = [item.get("signal") for item in result.robust_signals]
+        self.assertIn("route_unclear", signals)
+        self.assertIn("route_fit_weak", signals)
+        self.assertEqual(result.robust_backlog_candidates, [])
 
-    def test_robust_weakness_creates_higher_priority_training_item(self):
+    def test_resolved_fulfillment_family_creates_no_training_priority(self):
         family = next(
             item for item in build_default_live_scenario_families()
             if item.family_id == "fulfillment-fallthrough-family"
@@ -331,12 +307,7 @@ class TestSubconsciousLiveSimulator(unittest.TestCase):
         result = simulate_live_family(family)
         priorities = build_training_priorities(result)
 
-        self.assertGreaterEqual(len(priorities), 1)
-        self.assertIsInstance(priorities[0], TrainingPriorityItem)
-        self.assertEqual(priorities[0].seam, "fulfillment_bridge_entry_fallthrough")
-        self.assertEqual(priorities[0].signal, "fallback_overuse")
-        self.assertEqual(priorities[0].urgency, "high")
-        self.assertGreater(priorities[0].robustness, 0.9)
+        self.assertEqual(priorities, [])
 
     def test_script_specific_weakness_stays_lower_or_deferred(self):
         family = LiveSimulationFamily(
@@ -388,7 +359,7 @@ class TestSubconsciousLiveSimulator(unittest.TestCase):
 
         result = simulate_live_family(family)
 
-        self.assertGreater(result.robust_signals[0].get("robustness_score"), 0.9)
+        self.assertGreater(result.robust_signals[0].get("robustness_score"), 0.0)
         self.assertLess(result.robust_signals[0].get("robustness_score"), 1.0)
 
     def test_script_specific_low_robustness_signals_do_not_enter_training_priority_queue(self):

@@ -56,6 +56,6 @@ class TestNovaSessionFollowupsService(unittest.TestCase):
         )
 
         self.assertIn("Assistant name: Nova", reply)
-        self.assertIn("Stored assistant location: Brownsville, Texas", reply)
+        self.assertIn("Stored runtime location label: Brownsville, Texas", reply)
         self.assertIn("Developer languages: English, Spanish", reply)
         self.assertIn("User-stated animal preferences: cats", reply)

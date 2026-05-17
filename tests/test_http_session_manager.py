@@ -1425,8 +1425,14 @@ class TestHttpSessionManager(unittest.TestCase):
             {"run_id": "low_green_1", "session_path": "c:/Nova/runtime/test_sessions/generated_definitions/low_green.json", "status": "green", "comparison": {"diff_count": 0}, "report_path": "c:/Nova/runtime/test_sessions/low_green/result.json"},
         ]
 
-        with mock.patch("nova_http._available_test_session_definitions", return_value=definitions), \
-            mock.patch("nova_http._test_session_report_summaries", return_value=reports):
+        queue_payload = nova_http.TEST_SESSION_CONTROL_SERVICE.generated_work_queue(
+            definitions,
+            reports,
+            limit=10,
+            runtime_dir=nova_http.RUNTIME_DIR,
+        )
+
+        with mock.patch("nova_http.service_generated_work_queue_payload", return_value=queue_payload):
             queue = nova_http._generated_work_queue(10)
 
         self.assertEqual(queue.get("open_count"), 2)

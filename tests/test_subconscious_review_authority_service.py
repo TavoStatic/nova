@@ -212,7 +212,7 @@ class TestSubconsciousReviewAuthorityService(unittest.TestCase):
         self.assertFalse(verdict.get("approved"))
         self.assertEqual(verdict.get("authority_status"), "rejected")
 
-    def test_probe_backed_weather_family_context_approves_supervisor_review(self):
+    def test_probe_backed_weather_family_context_rejects_retired_supervisor_review(self):
         signal = SUBCONSCIOUS_WORK_TREE_TRIAGE_SERVICE.build_signal(
             family_id="weather-continuation-fallthrough-family",
             target_seam="weather_continuation_route_fallthrough",
@@ -238,9 +238,10 @@ class TestSubconsciousReviewAuthorityService(unittest.TestCase):
             session_factory=ConversationSession,
         )
 
-        self.assertTrue(verdict.get("approved"))
+        self.assertFalse(verdict.get("approved"))
         self.assertEqual(verdict.get("authority_owner"), "supervisor")
-        self.assertIn("supervisor_viable=True", str(verdict.get("authority_reason") or ""))
+        self.assertEqual(verdict.get("authority_status"), "rejected")
+        self.assertIn("supervisor_viable=False", str(verdict.get("authority_reason") or ""))
 
     def test_probe_backed_patch_family_context_approves_supervisor_review(self):
         signal = SUBCONSCIOUS_WORK_TREE_TRIAGE_SERVICE.build_signal(
@@ -272,7 +273,7 @@ class TestSubconsciousReviewAuthorityService(unittest.TestCase):
         self.assertEqual(verdict.get("authority_owner"), "supervisor")
         self.assertIn("supervisor_viable=True", str(verdict.get("authority_reason") or ""))
 
-    def test_probe_backed_memory_capture_family_context_approves_supervisor_review(self):
+    def test_probe_backed_memory_capture_family_context_rejects_retired_supervisor_review(self):
         signal = SUBCONSCIOUS_WORK_TREE_TRIAGE_SERVICE.build_signal(
             family_id="memory-capture-fallthrough-family",
             target_seam="memory_capture_route_fallthrough",
@@ -298,9 +299,10 @@ class TestSubconsciousReviewAuthorityService(unittest.TestCase):
             session_factory=ConversationSession,
         )
 
-        self.assertTrue(verdict.get("approved"))
-        self.assertEqual(verdict.get("authority_owner"), "supervisor")
-        self.assertIn("supervisor_viable=True", str(verdict.get("authority_reason") or ""))
+        self.assertFalse(verdict.get("approved"))
+        self.assertEqual(verdict.get("authority_owner"), "maintenance_review")
+        self.assertEqual(verdict.get("authority_status"), "not_reviewed")
+        self.assertIn("did not clear triage gate", str(verdict.get("authority_reason") or ""))
 
     def test_probe_backed_low_priority_review_can_defer_under_runtime_pressure(self):
         signal = SUBCONSCIOUS_WORK_TREE_TRIAGE_SERVICE.build_signal(
@@ -339,8 +341,8 @@ class TestSubconsciousReviewAuthorityService(unittest.TestCase):
         )
 
         self.assertFalse(verdict.get("approved"))
-        self.assertEqual(verdict.get("authority_status"), "deferred_runtime_pressure")
-        self.assertIn("generated_queue_failed", str(verdict.get("authority_reason") or ""))
+        self.assertEqual(verdict.get("authority_status"), "rejected")
+        self.assertIn("supervisor_viable=False", str(verdict.get("authority_reason") or ""))
 
     def test_runtime_pressure_ignores_stale_regression_failure(self):
         signal = {
@@ -537,11 +539,12 @@ class TestSubconsciousReviewAuthorityService(unittest.TestCase):
             session_factory=ConversationSession,
         )
 
-        self.assertTrue(verdict.get("approved"))
+        self.assertFalse(verdict.get("approved"))
         self.assertEqual(verdict.get("authority_owner"), "supervisor")
-        self.assertIn("runtime_pressure=", str(verdict.get("authority_reason") or ""))
+        self.assertEqual(verdict.get("authority_status"), "rejected")
+        self.assertIn("supervisor_viable=False", str(verdict.get("authority_reason") or ""))
 
-    def test_probe_backed_session_fact_family_context_approves_supervisor_review(self):
+    def test_probe_backed_session_fact_family_context_rejects_removed_supervisor_route(self):
         signal = SUBCONSCIOUS_WORK_TREE_TRIAGE_SERVICE.build_signal(
             family_id="session-fact-recall-fallthrough-family",
             target_seam="session_fact_recall_route_fallthrough",
@@ -567,6 +570,6 @@ class TestSubconsciousReviewAuthorityService(unittest.TestCase):
             session_factory=ConversationSession,
         )
 
-        self.assertTrue(verdict.get("approved"))
+        self.assertFalse(verdict.get("approved"))
         self.assertEqual(verdict.get("authority_owner"), "supervisor")
-        self.assertIn("supervisor_viable=True", str(verdict.get("authority_reason") or ""))
+        self.assertIn("supervisor_viable=False", str(verdict.get("authority_reason") or ""))

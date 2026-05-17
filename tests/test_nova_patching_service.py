@@ -1,3 +1,4 @@
+import os
 import json
 import shutil
 import unittest
@@ -10,7 +11,7 @@ import nova_core
 from services import nova_patching
 
 
-WORK_TMP_ROOT = Path(__file__).resolve().parents[1] / "runtime" / "pytest_temp"
+WORK_TMP_ROOT = Path(os.environ.get("NOVA_VALIDATION_RUNTIME_DIR") or Path(__file__).resolve().parents[1] / "runtime" / "validation") / "pytest_temp"
 
 
 def _workspace_case_dir(prefix: str) -> Path:

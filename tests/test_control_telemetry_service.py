@@ -69,6 +69,28 @@ class TestControlTelemetryService(unittest.TestCase):
         self.assertEqual(payload["avg_latency_ms"], 75)
         self.assertEqual(payload["avg_latency_ms_by_tool"].get("filesystem"), 50)
         self.assertIn("vision", payload["last_error_summary"])
+        self.assertEqual(payload["last_error_ts"], 2)
+        self.assertFalse(payload["last_error_stale"])
+
+    def test_tool_events_summary_marks_error_stale_after_later_success(self):
+        service = ControlTelemetryService(list_capabilities_fn=lambda: {})
+        with tempfile.TemporaryDirectory() as td:
+            log_path = Path(td) / "tool_events.jsonl"
+            log_path.write_text(
+                "\n".join(
+                    [
+                        json.dumps({"tool": "filesystem", "status": "error", "error": "old miss", "ts": 10}),
+                        json.dumps({"tool": "filesystem", "status": "ok", "ts": 20}),
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            payload = service.tool_events_summary(log_path, limit=10)
+
+        self.assertEqual(payload["last_error_summary"], "filesystem: old miss")
+        self.assertEqual(payload["last_error_ts"], 10)
+        self.assertTrue(payload["last_error_stale"])
 
     def test_memory_events_summary_counts_actions(self):
         service = ControlTelemetryService(list_capabilities_fn=lambda: {})
@@ -114,6 +136,42 @@ class TestControlTelemetryService(unittest.TestCase):
         self.assertGreaterEqual(payload["health_score"], 0)
         self.assertIn("web_enabled_without_allow_domains", payload["alerts"])
         self.assertTrue(any(item.get("name") == "capability_registry" for item in payload.get("checks")))
+
+    def test_build_self_check_flags_validation_artifact_truth_gap(self):
+        service = ControlTelemetryService(list_capabilities_fn=lambda: {"a": 1})
+        status = {
+            "ok": True,
+            "ollama_api_up": True,
+            "ollama_chat_ready": True,
+            "guard": {},
+            "heartbeat_age_sec": 5,
+            "tool_events_ok": True,
+            "patch_status_ok": True,
+            "patch_enabled": False,
+            "patch_strict_manifest": True,
+            "patch_behavioral_check": True,
+            "patch_tests_available": True,
+            "validation_artifact_truth_ok": False,
+            "validation_artifact_truth_status": "llm_unavailable_in_green_regression",
+            "validation_artifact_failure_count": 2,
+            "validation_artifact_llm_unavailable_count": 2,
+            "validation_artifact_hidden_by_green_regression": True,
+        }
+        policy = {"ok": True, "tools_enabled": {"web": False}, "web": {"enabled": False, "allow_domains": []}}
+        metrics = {"ok": True, "points": []}
+
+        payload = service.build_self_check(status, policy, metrics)
+
+        self.assertIn(
+            "validation_artifact_truth:llm_unavailable_in_green_regression;failures=2;llm_unavailable=2;hidden_by_green_regression=True",
+            payload["alerts"],
+        )
+        self.assertTrue(
+            any(
+                item.get("name") == "validation_artifact_truth_clear" and item.get("ok") is False
+                for item in payload.get("checks")
+            )
+        )
 
     def test_metrics_helpers_append_and_read_payload(self):
         series = []

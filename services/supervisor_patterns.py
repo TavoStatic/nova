@@ -29,21 +29,8 @@ def looks_like_reflective_retry(low: str) -> bool:
 
 
 def looks_like_self_location(low: str) -> bool:
-    if not low:
-        return False
-    if low.startswith("use "):
-        return False
-    triggers = (
-        "where is nova",
-        "where are you",
-        "your location",
-        "what is your location",
-        "what is your current location",
-        "what is your current physical location",
-        "where are you located",
-        "where is nova located",
-    )
-    return any(trigger in low for trigger in triggers)
+    del low
+    return False
 
 
 def looks_like_profile_certainty_followup(low: str) -> bool:

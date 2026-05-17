@@ -113,61 +113,6 @@ def test_build_pulse_payload_and_render_roundtrip() -> None:
         shutil.rmtree(root, ignore_errors=True)
 
 
-def test_build_pulse_payload_preserves_raw_probe_history_without_active_pressure() -> None:
-    root = _workspace_dir()
-    try:
-        for folder_name in ("generated", "promoted", "pending", "quarantine"):
-            (root / folder_name).mkdir(parents=True, exist_ok=True)
-        behavior_file = root / "behavior.json"
-        behavior_file.write_text(json.dumps({"routing_stable": True}), encoding="utf-8")
-        autonomy_file = root / "autonomy.json"
-        autonomy_file.write_text(
-            json.dumps(
-                {
-                    "last_raw_fallback_overuse_score": 0.97,
-                    "last_active_fallback_overuse_score": 0.0,
-                    "last_fallback_overuse_score": 0.0,
-                    "last_fallback_pressure_active": False,
-                    "last_regression_status": "ok",
-                    "last_generated_queue_run": {"status": "clear", "latest_report_status": "green"},
-                }
-            ),
-            encoding="utf-8",
-        )
-        patch_log = root / "patch.log"
-        patch_log.write_text("", encoding="utf-8")
-
-        def load_json_file(path: Path, default):
-            return json.loads(path.read_text(encoding="utf-8")) if path.exists() else default
-
-        payload = build_pulse_payload(
-            promotion_audit_log=root / "promotion.jsonl",
-            generated_definitions_dir=root / "generated",
-            promoted_definitions_dir=root / "promoted",
-            pending_review_dir=root / "pending",
-            quarantine_dir=root / "quarantine",
-            behavior_metrics_file=behavior_file,
-            autonomy_maintenance_file=autonomy_file,
-            pulse_snapshot_file=root / "pulse.json",
-            patch_log=patch_log,
-            load_json_file_fn=load_json_file,
-            patch_status_payload_fn=lambda: {},
-            read_patch_log_tail_line_fn=lambda: "",
-            ollama_api_up_fn=lambda: True,
-            mem_stats_payload_fn=lambda emit_event=False: {"ok": True, "total": 0},
-            kidney_summary_fn=lambda: {"mode": "enforce", "candidate_count": 0},
-            safety_policy_fn=lambda: {"enabled": True, "mode": "enforce"},
-            latest_approved_update_zip_fn=lambda _patch: None,
-        )
-
-        assert payload["raw_fallback_overuse_score"] == 0.97
-        assert payload["active_fallback_overuse_score"] == 0.0
-        assert payload["last_fallback_overuse_score"] == 0.0
-        assert payload["fallback_pressure_active"] is False
-    finally:
-        shutil.rmtree(root, ignore_errors=True)
-
-
 def test_write_pulse_snapshot_writes_expected_fields() -> None:
     root = _workspace_dir()
     try:

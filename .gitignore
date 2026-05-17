@@ -7,6 +7,7 @@ knowledge/web/
 LAST_SESSION.json
 RESUME_HERE.txt
 nova_memory.sqlite
+work_tree.db
 *.sqlite-shm
 *.sqlite-wal
 *.pyc

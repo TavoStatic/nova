@@ -1,7 +1,45 @@
 from __future__ import annotations
 
 
-DEFAULT_SUPERVISOR_RULE_SPECS = [
+CHAT_SUPERVISOR_RETIRED_RULE_NAMES = frozenset({
+    "grounded_self_report",
+    "runtime_identity",
+    "capability_inventory",
+    "reflective_retry",
+    "profile_certainty",
+    "identity_history_family",
+    "open_probe_family",
+    "session_fact_recall",
+    "developer_profile_state",
+    "last_question_recall",
+    "self_location",
+    "rules_list",
+    "location_recall",
+    "location_name",
+    "name_origin_store",
+    "apply_correction",
+    "smalltalk",
+    "store_fact",
+    "capability_query",
+    "policy_domain_query",
+    "assistant_name",
+    "self_identity_web_challenge",
+    "name_origin",
+    "developer_full_name",
+    "developer_profile",
+    "session_summary",
+    "set_location",
+    "location_weather",
+    "retrieval_followup",
+    "web_research_family",
+    "weather_lookup",
+})
+
+
+_ALL_SUPERVISOR_RULE_SPECS = [
+    {"name": "grounded_self_report", "priority": 20, "phases": ("intent",)},
+    {"name": "runtime_identity", "priority": 21, "phases": ("intent",)},
+    {"name": "capability_inventory", "priority": 22, "phases": ("intent",)},
     {"name": "reflective_retry", "priority": 30, "phases": ("rewrite", "handle")},
     {"name": "profile_certainty", "priority": 35, "phases": ("handle",)},
     {"name": "identity_history_family", "priority": 36, "phases": ("handle",)},
@@ -30,4 +68,11 @@ DEFAULT_SUPERVISOR_RULE_SPECS = [
     {"name": "developer_full_name", "priority": 69, "phases": ("intent",)},
     {"name": "developer_profile", "priority": 70, "phases": ("intent",)},
     {"name": "session_summary", "priority": 71, "phases": ("intent",)},
+]
+
+
+DEFAULT_SUPERVISOR_RULE_SPECS = [
+    spec
+    for spec in _ALL_SUPERVISOR_RULE_SPECS
+    if str(spec.get("name") or "") not in CHAT_SUPERVISOR_RETIRED_RULE_NAMES
 ]

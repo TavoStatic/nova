@@ -17,10 +17,11 @@ REPLY_TEMPLATES: dict[str, str] = {
     "store_fact.explicit_store": "Learned: {fact_text}",
     "store_fact.prompted_store": "Learned: {fact_text}",
     "store_fact.correctional_store": "Learned correction: {fact_text}",
-    "store_fact.declarative_ack": "Noted.",
-    "weather_lookup.clarify": "What location should I use for the weather lookup?",
+    "store_fact.storage_unavailable": "Memory storage is not available for that fact.",
+    "store_fact.declarative_ack": "Memory storage requires an explicit store request.",
     "weather_lookup.current_location": "{tool_result}",
     "weather_lookup.explicit_location": "{tool_result}",
+    "weather_lookup.clarify": "What location should I use for the weather lookup?",
     "web_research_family.research_prompt": "{tool_result}",
     "web_research_family.deep_search": "{tool_result}",
     "name_origin.story_known": "{reply_text}",
@@ -73,15 +74,15 @@ def truthful_limit_reply(
     else:
         base = "I don't know that based on what I can verify right now, and I don't want to make it up."
 
-    learning_invitation = "If you know the answer or want to correct me, tell me and I'll store it so I do better next time."
+    missing_context_invitation = "Give me the missing context or a grounded result, and I can use it in this conversation."
 
     if not include_next_step:
-        return base + " " + learning_invitation
+        return base + " " + missing_context_invitation
     if looks_like_mixed_info_request_turn_fn(normalized):
-        return base + " Please split the request or tell me which part you want me to handle first. " + learning_invitation
+        return base + " " + missing_context_invitation
     if is_explicit_request_fn(normalized) or "?" in normalized:
-        return base + " If you want, I can ask a clarifying question or use a grounded source or tool if one is available. " + learning_invitation
-    return base + " If you want, I can stay on the current thread, ask a clarifying question, or use a grounded source or tool if one is available. " + learning_invitation
+        return base + " Use a grounded source, a tool result, or the missing context and I will stay with it."
+    return base + " Stay on the current thread by giving the missing context or a grounded result."
 
 
 def attach_learning_invitation(reply_text: str, *, truthful_limit: bool = False, normalize_turn_text_fn: Callable[[str], str]) -> str:
@@ -90,13 +91,13 @@ def attach_learning_invitation(reply_text: str, *, truthful_limit: bool = False,
         return reply
 
     normalized = normalize_turn_text_fn(reply)
-    if "correct me" in normalized and ("store it" in normalized or "do better next time" in normalized):
+    if "missing context" in normalized or "grounded result" in normalized:
         return reply
 
     if not truthful_limit:
         return reply
 
-    suffix = "If you know the answer or want to correct me, tell me and I'll store it so I do better next time."
+    suffix = "Give me the missing context or a grounded result, and I can use it in this conversation."
     return reply + " " + suffix
 
 
@@ -226,7 +227,7 @@ def classify_store_fact_outcome(
     payload = intent_result if isinstance(intent_result, dict) else {}
     fact_text = str(payload.get("fact_text") or user_text).strip()
     requested_kind = str(payload.get("store_fact_kind") or "").strip().lower()
-    if requested_kind not in {"explicit_store", "prompted_store", "correctional_store", "declarative_ack"}:
+    if requested_kind not in {"explicit_store", "prompted_store", "correctional_store", "declarative_ack", "storage_unavailable"}:
         requested_kind = "declarative_ack" if source == "declarative" else "explicit_store"
     user_commitment = str(payload.get("user_commitment") or "").strip().lower()
     if user_commitment not in {"explicit", "implied", "none"}:
@@ -246,8 +247,8 @@ def classify_store_fact_outcome(
     outcome_kind = requested_kind
     reply_contract = f"store_fact.{outcome_kind}"
     if outcome_kind != "declarative_ack" and not storage_performed:
-        outcome_kind = "declarative_ack"
-        reply_contract = "store_fact.declarative_ack"
+        outcome_kind = "storage_unavailable"
+        reply_contract = "store_fact.storage_unavailable"
 
     default_memory_kind = "fact" if source == "declarative" else "user_fact"
     return {
@@ -268,7 +269,7 @@ def classify_weather_lookup_outcome(
     make_pending_weather_action_fn: Callable[[], dict],
 ) -> dict[str, object]:
     payload = intent_result if isinstance(intent_result, dict) else {}
-    weather_mode = str(payload.get("weather_mode") or "clarify").strip().lower() or "clarify"
+    weather_mode = str(payload.get("weather_mode") or "").strip().lower()
     next_state = payload.get("next_state") if isinstance(payload.get("next_state"), dict) else None
     location_value = str(payload.get("location_value") or "").strip()
     if weather_mode == "current_location":
@@ -295,14 +296,26 @@ def classify_weather_lookup_outcome(
             "next_state": next_state,
             "state_delta": next_state or {},
         }
+    if weather_mode == "needs_location":
+        return {
+            "intent": "weather_lookup",
+            "kind": "needs_location",
+            "reply_contract": "weather_lookup.clarify",
+            "weather_mode": weather_mode,
+            "location_value": "",
+            "requires_tool": False,
+            "pending_action": make_pending_weather_action_fn(),
+            "next_state": next_state,
+            "state_delta": next_state or {},
+        }
     return {
         "intent": "weather_lookup",
-        "kind": "clarify",
-        "reply_contract": "weather_lookup.clarify",
-        "weather_mode": "clarify",
+        "kind": "unhandled",
+        "reply_contract": "",
+        "weather_mode": "",
         "location_value": "",
         "requires_tool": False,
-        "pending_action": make_pending_weather_action_fn(),
+        "pending_action": None,
         "next_state": next_state,
         "state_delta": next_state or {},
     }
@@ -317,10 +330,8 @@ def execute_weather_lookup_outcome(
     classify_weather_lookup_outcome_fn: Callable[[dict], dict[str, object]],
 ) -> tuple[str, Optional[dict], dict[str, object]]:
     outcome = dict(weather_outcome or {})
-    weather_mode = str(outcome.get("weather_mode") or "clarify").strip().lower() or "clarify"
+    weather_mode = str(outcome.get("weather_mode") or "").strip().lower()
     next_state = outcome.get("next_state") if isinstance(outcome.get("next_state"), dict) else None
-    if weather_mode == "clarify":
-        return render_reply_fn(outcome), next_state, outcome
 
     if weather_mode == "current_location":
         tool_result = execute_planned_action_fn("weather_current_location")
@@ -333,8 +344,8 @@ def execute_weather_lookup_outcome(
     if weather_mode == "explicit_location":
         location_value = str(outcome.get("location_value") or "").strip()
         if not location_value:
-            fallback = classify_weather_lookup_outcome_fn({"weather_mode": "clarify", "next_state": next_state})
-            return render_reply_fn(fallback), next_state, fallback
+            fallback = classify_weather_lookup_outcome_fn({"next_state": next_state})
+            return "", next_state, fallback
         tool_result = execute_planned_action_fn("weather_location", [location_value])
         next_state = make_weather_result_state_fn(
             weather_mode=weather_mode,
@@ -346,5 +357,9 @@ def execute_weather_lookup_outcome(
         outcome["tool_result"] = str(tool_result or "")
         return render_reply_fn(outcome), next_state, outcome
 
-    fallback = classify_weather_lookup_outcome_fn({"weather_mode": "clarify", "next_state": next_state})
-    return render_reply_fn(fallback), next_state, fallback
+    if weather_mode == "needs_location":
+        outcome["tool_result"] = ""
+        return render_reply_fn(outcome), next_state, outcome
+
+    fallback = classify_weather_lookup_outcome_fn({"next_state": next_state})
+    return "", next_state, fallback

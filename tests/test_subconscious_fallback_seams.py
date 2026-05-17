@@ -89,14 +89,14 @@ class TestWeatherContinuationFallthrough(unittest.TestCase):
         return s
 
     def test_generic_fallback_does_not_hide_viable_specific_route(self):
-        """Probe must report supervisor_viable=True for all affirmative continuations."""
+        """Probe must report supervisor_viable=False for all affirmative continuations."""
         for text in self.INPUTS:
             with self.subTest(text=text):
                 session = self._session()
                 result = _probe(text, session, pending_action=_weather_pending())
                 routes = result.get("routes", {})
                 supervisor_viable = bool((routes.get("supervisor_owned") or {}).get("viable"))
-                self.assertTrue(
+                self.assertFalse(
                     supervisor_viable,
                     f"Probe hid the supervisor route for '{text}' — "
                     f"comparison_strength={result.get('comparison_strength')}, "
@@ -104,23 +104,23 @@ class TestWeatherContinuationFallthrough(unittest.TestCase):
                 )
 
     def test_supervisor_claims_affirmative_weather_continuation(self):
-        """Supervisor must directly claim all affirmative weather continuations."""
+        """Supervisor must not directly claim affirmative weather continuations."""
         for text in self.INPUTS:
             with self.subTest(text=text):
                 session = self._session()
-                self.assertTrue(
+                self.assertFalse(
                     _supervisor_claims(text, session, pending_action=_weather_pending()),
-                    f"Supervisor did not claim '{text}' with weather pending action",
+                    f"Supervisor still claimed '{text}' with weather pending action",
                 )
 
     def test_fallback_pressure_is_raised_when_route_bypassed(self):
-        """analyze_route_pressure must flag fallback_overuse if we pretend fallback was chosen."""
+        """Fallback is not overuse when the content-owned weather route is retired."""
         for text in self.INPUTS[:2]:  # spot check 2 inputs
             with self.subTest(text=text):
                 session = self._session()
                 probe_result = _probe(text, session, pending_action=_weather_pending())
                 record = analyze_route_pressure(probe_result, chosen_route="generic_fallback")
-                self.assertIn(
+                self.assertNotIn(
                     "fallback_overuse",
                     record.signals,
                     f"No fallback_overuse signal for '{text}' — subconscious would miss the regression",
@@ -133,8 +133,8 @@ class TestWeatherContinuationFallthrough(unittest.TestCase):
 # ---------------------------------------------------------------------------
 
 class TestMemoryCaptureFallthrough(unittest.TestCase):
-    """'remember this X' and 'Remember this: X' are explicit store-fact/set-location
-    commands.  The supervisor must claim them — not fall through to generic chat."""
+    """Retired content-owned memory capture phrases must not look supervisor-owned.
+    """
 
     FACT_INPUTS = [
         "Remember this: my favorite color is teal. Don't forget.",
@@ -146,45 +146,37 @@ class TestMemoryCaptureFallthrough(unittest.TestCase):
         "remember this Brownsville is my location",
     ]
 
-    def test_generic_fallback_does_not_hide_viable_specific_route_for_facts(self):
+    def test_generic_fallback_has_no_supervisor_route_for_fact_phrases(self):
         for text in self.FACT_INPUTS:
             with self.subTest(text=text):
                 session = ConversationSession()
                 result = _probe(text, session)
                 routes = result.get("routes", {})
                 supervisor_viable = bool((routes.get("supervisor_owned") or {}).get("viable"))
-                self.assertTrue(
-                    supervisor_viable,
-                    f"Probe hid the supervisor route for fact input '{text}'",
-                )
+                self.assertFalse(supervisor_viable)
 
-    def test_generic_fallback_does_not_hide_viable_specific_route_for_location(self):
+    def test_generic_fallback_has_no_supervisor_route_for_location_phrase(self):
         for text in self.LOCATION_INPUTS:
             with self.subTest(text=text):
                 session = ConversationSession()
                 result = _probe(text, session)
                 routes = result.get("routes", {})
                 supervisor_viable = bool((routes.get("supervisor_owned") or {}).get("viable"))
-                self.assertTrue(
-                    supervisor_viable,
-                    f"Probe hid the supervisor route for location input '{text}'",
-                )
+                self.assertFalse(supervisor_viable)
 
-    def test_supervisor_claims_remember_this_turns(self):
+    def test_supervisor_does_not_claim_remember_this_turns(self):
         for text in self.FACT_INPUTS + self.LOCATION_INPUTS:
             with self.subTest(text=text):
                 session = ConversationSession()
-                self.assertTrue(
-                    _supervisor_claims(text, session),
-                    f"Supervisor did not claim memory capture turn '{text}'",
-                )
+                self.assertFalse(_supervisor_claims(text, session))
 
-    def test_fallback_pressure_raised_when_route_bypassed(self):
+    def test_fallback_pressure_does_not_raise_fallback_overuse_for_retired_memory_capture(self):
         for text in self.FACT_INPUTS[:1]:
             session = ConversationSession()
             probe_result = _probe(text, session)
             record = analyze_route_pressure(probe_result, chosen_route="generic_fallback")
-            self.assertIn("fallback_overuse", record.signals)
+            self.assertNotIn("fallback_overuse", record.signals)
+            self.assertIn("route_fit_weak", record.signals)
 
 
 # ---------------------------------------------------------------------------
@@ -193,13 +185,14 @@ class TestMemoryCaptureFallthrough(unittest.TestCase):
 # ---------------------------------------------------------------------------
 
 class TestRetrievalFollowupFallthrough(unittest.TestCase):
-    """After a web_research retrieval with active state, follow-up turns
-    ('tell me about the first one', 'what did you find', 'web continue')
-    must be routed to supervisor_owned via the retrieval_followup rule."""
+    """Retrieval follow-up content remains model-owned; explicit web continue
+    stays available through command/keyword routing."""
 
-    INPUTS = [
+    NATURAL_INPUTS = [
         "tell me about the first one",
         "what did you find",
+    ]
+    EXPLICIT_INPUTS = [
         "web continue",
     ]
 
@@ -208,40 +201,30 @@ class TestRetrievalFollowupFallthrough(unittest.TestCase):
         s.set_retrieval_state(_retrieval_state())
         return s
 
-    def test_generic_fallback_does_not_hide_viable_specific_route(self):
-        for text in self.INPUTS:
+    def test_natural_retrieval_followup_content_is_model_owned(self):
+        for text in self.NATURAL_INPUTS:
             with self.subTest(text=text):
                 session = self._session()
                 result = _probe(text, session)
                 routes = result.get("routes", {})
                 supervisor_viable = bool((routes.get("supervisor_owned") or {}).get("viable"))
-                self.assertTrue(
-                    supervisor_viable,
-                    f"Probe hid supervisor route for retrieval follow-up '{text}'",
-                )
+                self.assertFalse(supervisor_viable)
+                self.assertTrue(bool((routes.get("generic_fallback") or {}).get("viable")))
 
-    def test_supervisor_claims_retrieval_followup_turns(self):
-        for text in self.INPUTS:
+    def test_explicit_web_continue_still_has_specific_route(self):
+        for text in self.EXPLICIT_INPUTS:
             with self.subTest(text=text):
                 session = self._session()
-                # "web continue" is a command word routed via the planner, not a
-                # supervisor rule.  Accept either path claiming supervisor_viable.
-                claimed_by_supervisor = _supervisor_claims(text, session)
-                if not claimed_by_supervisor:
-                    result = _probe(text, session)
-                    routes = result.get("routes", {})
-                    supervisor_viable = bool((routes.get("supervisor_owned") or {}).get("viable"))
-                    self.assertTrue(
-                        supervisor_viable,
-                        f"Neither supervisor nor probe claimed retrieval follow-up '{text}'",
-                    )
+                result = _probe(text, session)
+                routes = result.get("routes", {})
+                self.assertTrue(bool((routes.get("supervisor_owned") or {}).get("viable")))
 
-    def test_fallback_pressure_raised_when_route_bypassed(self):
-        for text in self.INPUTS[:1]:
+    def test_fallback_pressure_not_raised_for_retired_retrieval_followup_content(self):
+        for text in self.NATURAL_INPUTS[:1]:
             session = self._session()
             probe_result = _probe(text, session)
             record = analyze_route_pressure(probe_result, chosen_route="generic_fallback")
-            self.assertIn("fallback_overuse", record.signals)
+            self.assertNotIn("fallback_overuse", record.signals)
 
 
 # ---------------------------------------------------------------------------

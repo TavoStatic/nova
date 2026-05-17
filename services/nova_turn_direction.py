@@ -3,7 +3,6 @@ from __future__ import annotations
 import re
 from typing import Callable, Optional
 
-
 def analyze_routing_text(
     turns: list[tuple[str, str]],
     text: str,
@@ -24,20 +23,26 @@ def is_explicit_command_like(text: str) -> bool:
     low = (text or "").strip().lower()
     if not low:
         return False
+    if low in {"weather current location", "weather current"}:
+        return True
+    if low.startswith((
+        "weather for ",
+        "weather in ",
+        "weather at ",
+        "check weather for ",
+        "check weather in ",
+        "check weather at ",
+    )):
+        return True
     command_prefixes = (
         "screen",
         "camera ",
         "web ",
-        "weather",
-        "check weather",
         "pulse",
         "nova pulse",
         "nova status",
         "self status",
         "status events",
-        "what hurts",
-        "what failed",
-        "what are you updating",
         "update now",
         "update now confirm",
         "update now cancel",
@@ -87,32 +92,15 @@ def determine_turn_direction(
     )
 
     primary = "general_chat"
-    if "correct" in turn_acts:
-        primary = "correction_feedback"
-    elif extract_memory_teach_text_fn(text):
-        primary = "memory_teach"
-    elif "command" in turn_acts:
+    if "command" in turn_acts:
         primary = "explicit_command"
-    elif is_identity_or_developer_query_fn(effective_query) or any(
-        query in low for query in ["what do you know about me", "what else do you know about me", "what do you know about gus"]
-    ):
-        primary = "identity_query"
-    elif is_developer_color_lookup_request_fn(effective_query) or is_developer_bilingual_request_fn(effective_query):
-        primary = "identity_query"
-    elif is_color_lookup_request_fn(effective_query):
-        primary = "identity_query"
-    elif bool(re.match(r"^i\s+am\s+([a-z][a-z '\-]{1,40})[.!?]*$", raw_low)):
-        primary = "identity_binding"
     elif "inform" in turn_acts and "mixed" not in turn_acts:
-        if any(keyword in raw_low for keyword in ["my favorite", "my favourite", "creator", "developer", "gus", "gustavo"]):
-            primary = "identity_teach"
-        else:
-            primary = "generic_declarative"
+        primary = "generic_declarative"
     elif build_greeting_reply_fn(effective_query, active_user=""):
         primary = "greeting"
 
-    identity_focused = primary in {"identity_query", "identity_binding", "identity_teach"}
-    bypass_pattern_routes = identity_focused and not is_explicit_command_like_fn(effective_query)
+    identity_focused = False
+    bypass_pattern_routes = False
     return {
         "primary": primary,
         "effective_query": effective_query,

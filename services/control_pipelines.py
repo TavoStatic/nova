@@ -34,7 +34,7 @@ class ControlPipelinesService:
     def lane_state(*, data_sources_root: Path, pipeline_id: str) -> dict[str, Any]:
         path = ControlPipelinesService.lane_control_path(data_sources_root=data_sources_root, pipeline_id=pipeline_id)
         if not path.exists():
-            return {"enabled": True, "state": "running", "path": str(path)}
+            return {"enabled": True, "state": "uncontrolled", "control_present": False, "path": str(path)}
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
         except Exception:
@@ -46,6 +46,7 @@ class ControlPipelinesService:
             **data,
             "enabled": enabled,
             "state": "running" if enabled else "paused",
+            "control_present": True,
             "path": str(path),
         }
 
@@ -63,6 +64,7 @@ class ControlPipelinesService:
         payload = {
             "enabled": bool(enabled),
             "state": "running" if enabled else "paused",
+            "control_present": True,
             "reason": str(reason or "").strip(),
             "updated_at": int(now_fn()),
         }

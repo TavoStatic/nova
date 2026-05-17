@@ -27,6 +27,13 @@ _SYSTEM_TOOL_NAMES = frozenset({
     "read",
     "ls",
     "find",
+    "pipeline",
+    "core_health",
+    "core_thinning",
+    "release_promotion_judgment",
+    "release_validation_run",
+    "release_record_validation_outcome",
+    "release_rebuild_verify",
     "patch_preview_apply",
     "patch_apply",
     "patch_rollback",
@@ -56,6 +63,14 @@ _SYSTEM_NERVOUS_SYSTEM_CUES = (
     "queue",
     "backlog",
     "generated work",
+    "data lane",
+    "pipeline",
+    "ollama",
+    "model",
+    "voice",
+    "vision",
+    "evidence",
+    "wiring",
     "subconscious",
     "pressure",
     "drift",
@@ -89,7 +104,7 @@ _DECOMPOSE_SYSTEM = (
     "Break the given system maintenance task into 2 to 4 sequential steps. "
     "Each step is a concise action phrase of at most 60 characters describing a system check or repair action. "
     "For each step choose the single best tool from: "
-    "health, system_check, pulse, queue_status, read, ls, patch_apply, patch_rollback, update_now. "
+    "health, system_check, pulse, queue_status, read, ls, find, pipeline, core_health, core_thinning, release_validation_run, release_record_validation_outcome, release_rebuild_verify, patch_apply, patch_rollback, update_now. "
     "Reply ONLY with a JSON array — no markdown, no prose, no code fences. "
     'Example: [{"title":"check runtime pulse","tool":"pulse"},{"title":"verify Ollama model availability","tool":"health"}]'
 )
@@ -1174,7 +1189,7 @@ class WorkTreeSeedingService:
         if _requests is None:
             return None
         try:
-            model: str = "llama3"
+            model: str = "llama3.2:3b"
             if nova_core_module is not None:
                 try:
                     model = nova_core_module.chat_model()
@@ -1249,8 +1264,7 @@ class WorkTreeSeedingService:
         1) explicit work-tree request always seeds
         2) clear content prompts do not seed
         3) internal maintenance cues seed
-        4) operator macro flows default to seed unless content-oriented
-        5) CLI source alone is only transport; it must still show work intent
+        4) operator macro / CLI flows default to seed unless content-oriented
         """
         if WorkTreeSeedingService.looks_like_explicit_work_tree_request(message):
             return True
@@ -1258,8 +1272,9 @@ class WorkTreeSeedingService:
             return False
         if WorkTreeSeedingService._looks_like_system_nervous_system_prompt(message):
             return True
+        normalized_source = str(source or "").strip().lower()
         normalized_mode = str(operator_mode or "").strip().lower()
-        if normalized_mode == "macro":
+        if normalized_mode == "macro" or normalized_source == "cli":
             return True
         return False
 
@@ -1303,12 +1318,24 @@ class WorkTreeSeedingService:
             return "update_now"
         if any(token in low for token in ("queue", "backlog", "pending", "generated", "work queue")):
             return "queue_status"
+        if any(token in low for token in ("pipeline", "data lane", "data source", "schema probe")):
+            return "pipeline"
         if any(token in low for token in ("list files", "directory", "folder", "list dir", "ls ")):
             return "ls"
         if any(token in low for token in ("read", "inspect file", "open file", "scan", "log", "snapshot", "report")):
             return "read"
         if any(token in low for token in ("phase2", "audit", "safety envelope")):
             return "phase2_audit"
+        if any(token in low for token in ("release validation", "validation outcome", "validation profile")):
+            return "release_validation_run"
+        if any(token in low for token in ("record validation", "ledger outcome")):
+            return "release_record_validation_outcome"
+        if any(token in low for token in ("release package", "release readiness", "rebuild release")):
+            return "release_rebuild_verify"
+        if any(token in low for token in ("core thinning", "thin core", "large core", "wrapper")):
+            return "core_thinning"
+        if any(token in low for token in ("core health", "health brief")):
+            return "core_health"
         if any(token in low for token in ("system", "runtime", "status", "check", "verify", "validate", "diagnose")):
             return "system_check"
         return "health"
@@ -1322,6 +1349,18 @@ class WorkTreeSeedingService:
             return ["pulse", "health", "system_check"]
         if tool in {"queue_status"}:
             return ["queue_status", "system_check", "health"]
+        if tool in {"pipeline"}:
+            return ["pipeline", "read", "find"]
+        if tool in {"core_health"}:
+            return ["core_health", "pulse", "system_check"]
+        if tool in {"core_thinning"}:
+            return ["core_thinning", "read", "find"]
+        if tool in {"release_rebuild_verify"}:
+            return ["release_rebuild_verify", "read", "find"]
+        if tool in {"release_validation_run"}:
+            return ["release_validation_run", "release_promotion_judgment", "read", "find"]
+        if tool in {"release_record_validation_outcome"}:
+            return ["release_record_validation_outcome", "release_promotion_judgment", "read", "find"]
         if tool in {"patch_preview_apply", "patch_apply", "patch_rollback"}:
             return ["patch_preview_apply", "patch_apply", "patch_rollback"]
         if tool in {"update_now"}:

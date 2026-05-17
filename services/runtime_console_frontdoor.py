@@ -35,6 +35,7 @@ RUNTIME_CONSOLE_HTML = """<!doctype html>
     .btn-mini { padding: 6px 10px; font-size: 12px; }
     .btn-mini.alt { background: linear-gradient(135deg, #846540, #a47d4f); }
     .btn-mini.muted { background: linear-gradient(135deg, #8d8a84, #6d6a65); }
+    .btn-link { color: var(--accent); font-size: 12px; font-weight: 600; text-decoration: none; }
     #chat { height: 58vh; overflow: auto; padding: 14px; display: grid; gap: 10px; }
     .msg { padding: 10px 12px; border-radius: 10px; max-width: 85%; white-space: pre-wrap; line-height: 1.35; }
     .u { margin-left: auto; background: #d7efe9; border: 1px solid #a9d9ce; }
@@ -42,7 +43,6 @@ RUNTIME_CONSOLE_HTML = """<!doctype html>
     form { display: grid; grid-template-columns: 1fr auto; gap: 10px; padding: 12px; border-top: 1px solid var(--line); }
     input { font-size: 15px; padding: 10px 12px; border-radius: 9px; border: 1px solid #cabfae; outline: none; }
     button { background: linear-gradient(135deg, var(--accent), #0f8f7d); color: #fff; border: 0; border-radius: 9px; padding: 10px 14px; cursor: pointer; font-weight: 600; }
-    .hint { padding: 0 14px 14px; color: var(--muted); font-size: 12px; }
   </style>
 </head>
 <body>
@@ -54,6 +54,7 @@ RUNTIME_CONSOLE_HTML = """<!doctype html>
                     <div id=\"status\" class=\"status\">Checking health...</div>
                     <button id="btnToggleAudio" type="button" class="btn-mini alt">Voice Off</button>
                     <button id="btnMic" type="button" class="btn-mini muted">Mic Unavailable</button>
+                    <a class="btn-link" href="/control">Open Operator Console</a>
                     <button id=\"btnNewSession\" type=\"button\" class=\"btn-mini\">New Session</button>
                 </div>
             </div>
@@ -62,7 +63,6 @@ RUNTIME_CONSOLE_HTML = """<!doctype html>
         <input id=\"m\" placeholder=\"Enter a request for the NYO runtime...\" autocomplete=\"off\" />
         <button type=\"submit\">Send</button>
       </form>
-            <div class=\"hint\">Tip: start server with <code>--host 0.0.0.0</code> to test from another device on your LAN. <a href=\"/control\">Open Operator Console</a>.</div>
     </div>
   </div>
 <script>
@@ -88,6 +88,7 @@ RUNTIME_CONSOLE_HTML = """<!doctype html>
     let chatLoginEnabled = false;
     let sessionId = sidParam || localStorage.getItem('nova_session_id') || '';
     let voiceOutputEnabled = localStorage.getItem('nova_voice_output') === 'on';
+    let lastOperatorOutboxId = localStorage.getItem('nova_operator_outbox_last_id') || '';
     let recognition = null;
     let recognitionActive = false;
     if (sidParam) {
@@ -141,6 +142,30 @@ RUNTIME_CONSOLE_HTML = """<!doctype html>
         speakAssistant(text);
     }
   }
+
+    function handleOperatorOutbox(payload) {
+        const events = Array.isArray(payload?.events) ? payload.events : [];
+        if (!events.length) return;
+        let newest = lastOperatorOutboxId || '';
+        events.forEach(event => {
+            if (!event || !event.id) return;
+            const id = String(event.id);
+            if (lastOperatorOutboxId && id <= lastOperatorOutboxId) return;
+            const title = String(event.title || '').trim();
+            const message = String(event.message || '').trim();
+            const rendered = title && message ? `${title}\n${message}` : (message || title);
+            if (rendered) {
+                add('a', rendered);
+            }
+            if (!newest || id > newest) {
+                newest = id;
+            }
+        });
+        if (newest && newest !== lastOperatorOutboxId) {
+            lastOperatorOutboxId = newest;
+            localStorage.setItem('nova_operator_outbox_last_id', newest);
+        }
+    }
 
     async function sendMessage(message) {
         if (!message) return;
@@ -285,7 +310,8 @@ RUNTIME_CONSOLE_HTML = """<!doctype html>
       const r = await fetch('/api/health');
       const j = await r.json();
             chatLoginEnabled = Boolean(j.chat_login_enabled);
-      statusEl.textContent = j.ollama_api_up ? `Healthy | model: ${j.chat_model}` : 'Ollama unavailable';
+      statusEl.textContent = j.ollama_api_up && j.ollama_model_available !== false ? `Healthy | model: ${j.chat_model}` : 'Ollama unavailable';
+            handleOperatorOutbox(j.operator_outbox || {});
     } catch (_) {
       statusEl.textContent = 'Health check failed';
     }
@@ -352,6 +378,7 @@ RUNTIME_CONSOLE_HTML = """<!doctype html>
             add('a', 'NYO runtime console ready. Enter a request when you are ready.');
         }
         health();
+        window.setInterval(health, 5000);
     })();
 </script>
 </body>

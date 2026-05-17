@@ -41,17 +41,23 @@ class TestHealthCheck(unittest.TestCase):
                 self.assertTrue(info.startswith("age="))
 
     def test_run_check_skip_ollama_allows_base_package_profile(self):
-        with patch.object(health, "check_heartbeat", return_value=(True, "age=1s")), \
-             patch.object(health, "check_state", return_value=(True, "pid=123")), \
+        with patch.object(health, "check_heartbeat") as heartbeat_mock, \
+             patch.object(health, "check_state") as state_mock, \
              patch.object(health, "check_ollama", return_value=(False, "status=503")):
             buf = io.StringIO()
             with redirect_stdout(buf):
                 code = health.run_check(include_ollama=False)
 
         self.assertEqual(code, 0)
+        heartbeat_mock.assert_not_called()
+        state_mock.assert_not_called()
         payload = json.loads(buf.getvalue())
         self.assertEqual(payload["profile"], "base-package")
         self.assertTrue(payload["ok"])
+        self.assertIsNone(payload["heartbeat"]["ok"])
+        self.assertFalse(payload["heartbeat"]["required"])
+        self.assertIsNone(payload["core_state"]["ok"])
+        self.assertFalse(payload["core_state"]["required"])
         self.assertEqual(payload["ollama"]["info"], "skipped")
         self.assertFalse(payload["ollama"]["required"])
 
@@ -68,6 +74,25 @@ class TestHealthCheck(unittest.TestCase):
         self.assertEqual(payload["profile"], "runtime")
         self.assertFalse(payload["ok"])
         self.assertTrue(payload["ollama"]["required"])
+
+    def test_required_models_follow_policy_models(self):
+        with tempfile.TemporaryDirectory() as td:
+            policy = Path(td) / "policy.json"
+            policy.write_text(
+                json.dumps({"models": {"chat": "local-chat:latest", "vision": "local-vision:latest"}}),
+                encoding="utf-8",
+            )
+            with patch.object(health, "BASE", Path(td)):
+                self.assertEqual(health.required_ollama_models(), ["local-chat:latest", "local-vision:latest"])
+
+    def test_repair_does_not_restart_when_server_endpoint_is_reachable(self):
+        with patch.object(health, "tcp_listening", return_value=True), \
+             patch.object(health, "ollama_api_up", return_value=True), \
+             patch.object(health, "kill_ollama") as kill_mock, \
+             patch.object(health, "start_ollama_serve_detached") as start_mock:
+            self.assertTrue(health.repair_ollama())
+            kill_mock.assert_not_called()
+            start_mock.assert_not_called()
 
 
 if __name__ == "__main__":

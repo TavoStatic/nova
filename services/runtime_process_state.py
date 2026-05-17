@@ -12,13 +12,16 @@ class RuntimeProcessStateService:
         return runtime_scope[name]
 
     @staticmethod
-    def matches_script_process(cmdline: list[str], script_path: Path) -> bool:
+    def matches_script_process(cmdline: list[str], script_path: Path, cwd: str | Path | None = None) -> bool:
         normalized_script = os.path.normcase(os.path.normpath(str(script_path)))
         for arg in list(cmdline or [])[1:]:
             text = str(arg or "").strip()
             if not text:
                 continue
-            if os.path.normcase(os.path.normpath(text)) == normalized_script:
+            candidates = [text]
+            if cwd is not None and not os.path.isabs(text):
+                candidates.append(str(Path(cwd) / text))
+            if any(os.path.normcase(os.path.normpath(candidate)) == normalized_script for candidate in candidates):
                 return True
         return False
 
@@ -26,7 +29,15 @@ class RuntimeProcessStateService:
         matcher = matches_script_process_fn or self.matches_script_process
         try:
             cmdline = process.cmdline() or []
-            if not matcher(cmdline, script_path):
+            try:
+                cwd = process.cwd()
+            except Exception:
+                cwd = None
+            try:
+                matched = matcher(cmdline, script_path, cwd=cwd)
+            except TypeError:
+                matched = matcher(cmdline, script_path)
+            if not matched:
                 return None
             return {
                 "pid": int(process.pid or 0),
@@ -85,7 +96,11 @@ class RuntimeProcessStateService:
         for process in psutil_module.process_iter(["pid", "ppid", "cmdline"]):
             try:
                 cmdline = process.info.get("cmdline") or []
-                if not self.matches_script_process(cmdline, script_path):
+                try:
+                    cwd = process.cwd()
+                except Exception:
+                    cwd = None
+                if not self.matches_script_process(cmdline, script_path, cwd=cwd):
                     continue
                 create_time_value = process.info.get("create_time")
                 if create_time_value is None:

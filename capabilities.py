@@ -91,3 +91,35 @@ def analyze_task(task: str) -> dict:  # ← change return type for clarity
 
     msg = "This task requires capabilities I don't have yet:\n" + "\n".join(f"• {m}" for m in missing)
     return {"allow_llm": False, "message": msg}
+
+
+def describe_runtime_identity(assistant_name="Nova"):
+    data = load_capabilities()
+    name = str(assistant_name or "Nova").strip() or "Nova"
+    if not data:
+        return f"I am {name}, a local AI runtime. My capability registry is currently empty."
+    organs = [
+        key
+        for key in (
+            "runtime_core",
+            "guard_system",
+            "work_tree",
+            "health_monitoring",
+            "memory_systems",
+            "task_routing",
+            "maintenance_loops",
+            "release_verification",
+            "subconscious_priority",
+            "autonomy_handling",
+            "operator_outbox",
+        )
+        if key in data
+    ]
+    if not organs:
+        organs = list(data.keys())[:8]
+    organ_text = ", ".join(organs)
+    return (
+        f"I am {name}, a local AI runtime. Conversation is one interface; "
+        f"my registered internal parts include {organ_text}. "
+        "Those parts monitor state, route work, maintain continuity, and move governed tasks through the system."
+    )

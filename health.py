@@ -20,13 +20,34 @@ from typing import Tuple
 
 import psutil
 import requests
+from services.ollama_health import build_ollama_health_payload
 
 BASE = Path(__file__).resolve().parent
 RUNTIME = BASE / "runtime"
 HEARTBEAT = RUNTIME / "core.heartbeat"
 STATE = RUNTIME / "core_state.json"
 OLLAMA_BASE = "http://127.0.0.1:11434"
-REQUIRED_MODELS = ["llama3.1:8b", "qwen2.5vl:7b"]
+DEFAULT_CHAT_MODEL = "llama3.2:3b"
+DEFAULT_VISION_MODEL = "qwen2.5vl:7b"
+
+
+def configured_models() -> dict[str, str]:
+    try:
+        policy = json.loads((BASE / "policy.json").read_text(encoding="utf-8"))
+    except Exception:
+        policy = {}
+    models = policy.get("models") if isinstance(policy.get("models"), dict) else {}
+    chat = str(models.get("chat") or DEFAULT_CHAT_MODEL).strip()
+    vision = str(models.get("vision") or DEFAULT_VISION_MODEL).strip()
+    return {"chat": chat, "vision": vision}
+
+
+def required_ollama_models() -> list[str]:
+    required = []
+    for model in configured_models().values():
+        if model and model not in required:
+            required.append(model)
+    return required
 
 
 def ok(msg: str):
@@ -63,11 +84,19 @@ def check_state() -> Tuple[bool, str]:
 
 
 def check_ollama(timeout: float = 1.0) -> Tuple[bool, str]:
-    try:
-        r = requests.get(f"{OLLAMA_BASE}/api/tags", timeout=timeout)
-        return r.status_code == 200, f"status={r.status_code}"
-    except Exception as e:
-        return False, f"error:{e}"
+    payload = ollama_health_payload(timeout=timeout)
+    return bool(payload.get("ok")), str(payload.get("info") or payload.get("status") or "")
+
+
+def ollama_health_payload(timeout: float = 2.0) -> dict:
+    return build_ollama_health_payload(
+        requests_get_fn=requests.get,
+        requests_post_fn=requests.post,
+        ollama_base=OLLAMA_BASE,
+        chat_model=configured_models().get("chat") or DEFAULT_CHAT_MODEL,
+        timeout=timeout,
+        live_calls_allowed=True,
+    )
 
 
 def tcp_listening(host: str = "127.0.0.1", port: int = 11434, timeout: float = 1.0) -> bool:
@@ -79,8 +108,7 @@ def tcp_listening(host: str = "127.0.0.1", port: int = 11434, timeout: float = 1
 
 
 def ollama_api_up(timeout: float = 2.0) -> bool:
-    ok_status, _ = check_ollama(timeout=timeout)
-    return ok_status
+    return bool(ollama_health_payload(timeout=timeout).get("server_ok"))
 
 
 def ollama_tags() -> Tuple[bool, list[str]]:
@@ -196,21 +224,25 @@ def repair_ollama() -> bool:
 
 
 def run_check(include_ollama: bool = True) -> int:
-    hb_ok, hb_msg = check_heartbeat()
-    st_ok, st_msg = check_state()
     profile = "runtime" if include_ollama else "base-package"
     if include_ollama:
+        hb_ok, hb_msg = check_heartbeat()
+        st_ok, st_msg = check_state()
         ol_ok, ol_msg = check_ollama()
         ollama_payload = {"ok": ol_ok, "info": ol_msg, "required": True}
+        runtime_ok = hb_ok and st_ok
     else:
+        hb_ok, hb_msg = None, "skipped"
+        st_ok, st_msg = None, "skipped"
         ol_ok, ol_msg = True, "skipped"
         ollama_payload = {"ok": None, "info": ol_msg, "required": False}
+        runtime_ok = True
 
-    all_ok = hb_ok and st_ok and ol_ok
+    all_ok = runtime_ok and ol_ok
     out = {
         "profile": profile,
-        "heartbeat": {"ok": hb_ok, "info": hb_msg},
-        "core_state": {"ok": st_ok, "info": st_msg},
+        "heartbeat": {"ok": hb_ok, "info": hb_msg, "required": include_ollama},
+        "core_state": {"ok": st_ok, "info": st_msg, "required": include_ollama},
         "ollama": ollama_payload,
         "ok": all_ok,
     }
@@ -230,12 +262,13 @@ def run_diag() -> int:
     else:
         bad("Port 11434 is NOT listening (Ollama not serving)")
 
-    if ollama_api_up():
-        ok("Ollama API responding (/api/tags)")
+    ollama_health = ollama_health_payload(timeout=2.0)
+    if bool(ollama_health.get("tags_ok")):
+        ok("Ollama tags endpoint responding (/api/tags)")
         tags_ok, models = ollama_tags()
         if tags_ok:
             ok(f"Ollama models found: {len(models)}")
-            missing = [m for m in REQUIRED_MODELS if m not in models]
+            missing = [m for m in required_ollama_models() if m not in models]
             if missing:
                 warn("Missing required models: " + ", ".join(missing))
                 warn("Fix: ollama pull " + " ; ".join(missing))
@@ -244,7 +277,12 @@ def run_diag() -> int:
         else:
             warn("Could not fetch model list")
     else:
-        bad("Ollama API NOT responding")
+        bad("Ollama tags endpoint NOT responding")
+
+    if bool(ollama_health.get("chat_route_ok")):
+        ok(f"Ollama chat route responding (/api/chat probe status={ollama_health.get('chat_route_status')})")
+    else:
+        bad(f"Ollama chat route NOT responding ({ollama_health.get('info') or ollama_health.get('status')})")
 
     print("\n=== Done ===\n")
     return 0

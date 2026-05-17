@@ -285,17 +285,18 @@ class TestWeatherBehavior(unittest.TestCase):
         self.assertTrue(provider.get("winsdk_installed"))
         self.assertEqual(provider.get("name"), "windows_geolocator")
 
-    def test_natural_weather_phrase_routes_deterministically(self):
+    def test_natural_weather_phrase_stays_conversation_owned(self):
         self._write_policy(["api.weather.gov"])
         out = nova_core.handle_commands("nova give me the weather")
-        self.assertIn("need a confirmed location or coordinates", out)
-        self.assertIn("My location is", out)
+        self.assertIsNone(out)
 
-    def test_natural_weather_phrase_uses_saved_location_text(self):
+    def test_natural_weather_phrase_with_your_location_does_not_auto_use_saved_location(self):
         self._write_policy(["api.weather.gov"])
         nova_core.set_location_text("Brownsville TX")
+        calls = {"n": 0}
 
         def fake_get(url, headers=None, timeout=0):
+            calls["n"] += 1
             if "api.weather.gov/points/" in url:
                 return _FakeResponse({"properties": {"forecast": "https://api.weather.gov/gridpoints/BRO/64,48/forecast"}})
             return _FakeResponse(
@@ -317,8 +318,8 @@ class TestWeatherBehavior(unittest.TestCase):
 
         nova_core.requests.get = fake_get
         out = nova_core.handle_commands("can you give me the current weather in your location ?")
-        self.assertIn("Brownsville, TX:", out)
-        self.assertIn("[source: api.weather.gov]", out)
+        self.assertIsNone(out)
+        self.assertEqual(calls["n"], 0)
 
     def test_use_physical_location_without_task_context_clarifies(self):
         self._write_policy(["api.weather.gov"])
@@ -348,7 +349,7 @@ class TestWeatherBehavior(unittest.TestCase):
             )
 
         out = nova_core.handle_commands("use your physical location")
-        self.assertEqual(out, "What do you want me to use my location for?")
+        self.assertIsNone(out)
         self.assertEqual(calls["n"], 0)
 
     def test_use_your_location_nova_without_task_context_clarifies(self):
@@ -376,9 +377,9 @@ class TestWeatherBehavior(unittest.TestCase):
             )
 
         out = nova_core.handle_commands("use your location nova")
-        self.assertEqual(out, "What do you want me to use my location for?")
+        self.assertIsNone(out)
 
-    def test_weather_for_current_physical_locaiton_typo_routes_to_brownsville(self):
+    def test_weather_for_current_physical_locaiton_typo_stays_conversation_owned(self):
         self._write_policy(["api.weather.gov"])
         nova_core.set_location_text("Brownsville TX")
 
@@ -404,8 +405,7 @@ class TestWeatherBehavior(unittest.TestCase):
 
         nova_core.requests.get = fake_get
         out = nova_core.handle_commands("Give me the weather for your current physical locaiton nova")
-        self.assertIn("Brownsville, TX:", out)
-        self.assertIn("[source: api.weather.gov]", out)
+        self.assertIsNone(out)
 
 
 class TestLlmRoutingIntentClassifier(unittest.TestCase):
@@ -440,20 +440,15 @@ class TestLlmRoutingIntentClassifier(unittest.TestCase):
         nova_core.get_saved_location_text = lambda: ""
         with mock.patch.dict("os.environ", {"NOVA_ALLOW_LIVE_OLLAMA_TESTS": "1"}, clear=False):
             result = nova_core._llm_classify_routing_intent("should I bring a jacket today?")
-        self.assertIsNotNone(result)
-        self.assertEqual(result.get("intent"), "weather_lookup")
-        self.assertEqual(result.get("weather_mode"), "clarify")
+        self.assertEqual((result or {}).get("tool"), "weather_current_location")
 
-    def test_umbrella_question_with_saved_location(self):
-        """'do I need an umbrella?' with saved location → current_location mode."""
+    def test_umbrella_question_with_saved_location_still_requires_location_choice(self):
+        """'do I need an umbrella?' with saved location still needs user location choice."""
         self._mock_llm_label("weather_lookup")
         nova_core.get_saved_location_text = lambda: "Brownsville TX"
         with mock.patch.dict("os.environ", {"NOVA_ALLOW_LIVE_OLLAMA_TESTS": "1"}, clear=False):
             result = nova_core._llm_classify_routing_intent("do I need an umbrella?")
-        self.assertIsNotNone(result)
-        self.assertEqual(result.get("intent"), "weather_lookup")
-        self.assertEqual(result.get("weather_mode"), "current_location")
-        self.assertEqual(result.get("location_value"), "Brownsville TX")
+        self.assertEqual((result or {}).get("tool"), "weather_current_location")
 
     def test_hot_outside_question_with_saved_location(self):
         """'how hot is it outside?' — implicit outdoor conditions, no keyword."""
@@ -461,12 +456,10 @@ class TestLlmRoutingIntentClassifier(unittest.TestCase):
         nova_core.get_saved_location_text = lambda: "McAllen TX"
         with mock.patch.dict("os.environ", {"NOVA_ALLOW_LIVE_OLLAMA_TESTS": "1"}, clear=False):
             result = nova_core._llm_classify_routing_intent("how hot is it outside right now?")
-        self.assertIsNotNone(result)
-        self.assertEqual(result.get("weather_mode"), "current_location")
-        self.assertEqual(result.get("location_value"), "McAllen TX")
+        self.assertEqual((result or {}).get("tool"), "weather_current_location")
 
     def test_general_chat_returns_none(self):
-        """LLM says general_chat → no route returned (falls through to LLM chat)."""
+        """LLM says general_chat -> no route returned (falls through to LLM chat)."""
         self._mock_llm_label("general_chat")
         nova_core.get_saved_location_text = lambda: ""
         with mock.patch.dict("os.environ", {"NOVA_ALLOW_LIVE_OLLAMA_TESTS": "1"}, clear=False):

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 import unittest
 import uuid
@@ -13,9 +14,13 @@ from services.core_thinning import (
 )
 
 
+def _validation_tmp_root() -> Path:
+    return Path(os.environ.get("NOVA_VALIDATION_RUNTIME_DIR") or Path(__file__).resolve().parents[1] / "runtime" / "validation") / "_test_tmp"
+
+
 class TestCoreThinningService(unittest.TestCase):
     def setUp(self) -> None:
-        base_tmp = Path("C:/Nova/runtime/_test_tmp")
+        base_tmp = _validation_tmp_root()
         base_tmp.mkdir(parents=True, exist_ok=True)
         self._db_path = base_tmp / f"core_thinning_{uuid.uuid4().hex}.sqlite3"
         work_tree._set_db_path(self._db_path)
@@ -29,7 +34,7 @@ class TestCoreThinningService(unittest.TestCase):
                 pass
 
     def test_build_brief_finds_wrapper_and_large_function_candidates(self):
-        sample = Path("C:/Nova/runtime/_test_tmp") / f"core_thinning_sample_{uuid.uuid4().hex}.py"
+        sample = _validation_tmp_root() / f"core_thinning_sample_{uuid.uuid4().hex}.py"
         sample.write_text(
             "\n".join(
                 [
@@ -53,8 +58,8 @@ class TestCoreThinningService(unittest.TestCase):
         self.assertGreaterEqual(brief.get("order_count"), 2)
 
     def test_build_brief_can_cover_core_and_http_surfaces(self):
-        sample_core = Path("C:/Nova/runtime/_test_tmp") / f"core_thinning_core_{uuid.uuid4().hex}.py"
-        sample_http = Path("C:/Nova/runtime/_test_tmp") / f"core_thinning_http_{uuid.uuid4().hex}.py"
+        sample_core = _validation_tmp_root() / f"core_thinning_core_{uuid.uuid4().hex}.py"
+        sample_http = _validation_tmp_root() / f"core_thinning_http_{uuid.uuid4().hex}.py"
         sample_core.write_text("def core_wrapper():\n    return service_core()\n", encoding="utf-8")
         sample_http.write_text("def http_wrapper():\n    return service_http()\n", encoding="utf-8")
         try:
@@ -70,7 +75,7 @@ class TestCoreThinningService(unittest.TestCase):
         self.assertEqual({Path(str(item.get("file") or "")).name for item in targets}, {sample_core.name, sample_http.name})
 
     def test_build_brief_finds_http_surface_candidates(self):
-        sample_http = Path("C:/Nova/runtime/_test_tmp") / f"nova_http_surface_{uuid.uuid4().hex}.py"
+        sample_http = _validation_tmp_root() / f"nova_http_surface_{uuid.uuid4().hex}.py"
         sample_http.write_text(
             "\n".join(
                 [
@@ -104,7 +109,7 @@ class TestCoreThinningService(unittest.TestCase):
         self.assertEqual((order.get("target") or {}).get("theme"), "pipeline_control")
 
     def test_feed_brief_creates_deduped_core_thinning_tree(self):
-        sample = Path("C:/Nova/runtime/_test_tmp") / f"core_thinning_feed_{uuid.uuid4().hex}.py"
+        sample = _validation_tmp_root() / f"core_thinning_feed_{uuid.uuid4().hex}.py"
         sample.write_text("def wrapper():\n    return service_demo()\n", encoding="utf-8")
         try:
             brief = build_core_thinning_brief(sample)
@@ -129,7 +134,7 @@ class TestCoreThinningService(unittest.TestCase):
         self.assertEqual((task.meta.get("target") or {}).get("block"), "wrapper_candidate")
 
     def test_execute_core_thinning_order_removes_unused_wrapper(self):
-        sample = Path("C:/Nova/runtime/_test_tmp") / f"core_thinning_exec_{uuid.uuid4().hex}.py"
+        sample = _validation_tmp_root() / f"core_thinning_exec_{uuid.uuid4().hex}.py"
         sample.write_text(
             "\n".join(
                 [
@@ -156,7 +161,7 @@ class TestCoreThinningService(unittest.TestCase):
         sample.unlink(missing_ok=True)
 
     def test_execute_core_thinning_order_resolves_wrapper_line_drift(self):
-        sample = Path("C:/Nova/runtime/_test_tmp") / f"core_thinning_drift_{uuid.uuid4().hex}.py"
+        sample = _validation_tmp_root() / f"core_thinning_drift_{uuid.uuid4().hex}.py"
         sample.write_text(
             "\n".join(
                 [
@@ -191,7 +196,7 @@ class TestCoreThinningService(unittest.TestCase):
         sample.unlink(missing_ok=True)
 
     def test_execute_core_thinning_order_resolves_line_drift_before_caller_block(self):
-        sample = Path("C:/Nova/runtime/_test_tmp") / f"core_thinning_drift_block_{uuid.uuid4().hex}.py"
+        sample = _validation_tmp_root() / f"core_thinning_drift_block_{uuid.uuid4().hex}.py"
         sample.write_text(
             "\n".join(
                 [
@@ -225,7 +230,7 @@ class TestCoreThinningService(unittest.TestCase):
         sample.unlink(missing_ok=True)
 
     def test_execute_core_thinning_order_blocks_runtime_hook_reference(self):
-        sample_dir = Path("C:/Nova/runtime/_test_tmp") / f"core_thinning_exec_hook_{uuid.uuid4().hex}"
+        sample_dir = _validation_tmp_root() / f"core_thinning_exec_hook_{uuid.uuid4().hex}"
         services_dir = sample_dir / "services"
         services_dir.mkdir(parents=True, exist_ok=True)
         sample = sample_dir / "nova_core.py"
@@ -266,7 +271,7 @@ class TestCoreThinningService(unittest.TestCase):
         sample_dir.rmdir()
 
     def test_execute_core_thinning_order_blocks_wrapper_with_callers(self):
-        sample = Path("C:/Nova/runtime/_test_tmp") / f"core_thinning_block_{uuid.uuid4().hex}.py"
+        sample = _validation_tmp_root() / f"core_thinning_block_{uuid.uuid4().hex}.py"
         sample.write_text(
             "\n".join(
                 [
@@ -296,7 +301,7 @@ class TestCoreThinningService(unittest.TestCase):
         sample.unlink(missing_ok=True)
 
     def test_build_brief_protects_referenced_wrapper_from_work_orders(self):
-        sample = Path("C:/Nova/runtime/_test_tmp") / f"core_thinning_protect_{uuid.uuid4().hex}.py"
+        sample = _validation_tmp_root() / f"core_thinning_protect_{uuid.uuid4().hex}.py"
         sample.write_text(
             "\n".join(
                 [
@@ -320,7 +325,7 @@ class TestCoreThinningService(unittest.TestCase):
         self.assertFalse(any(item.get("kind") == "wrapper_candidate" for item in list(brief.get("orders") or [])))
 
     def test_build_brief_protects_service_hook_map_wrappers(self):
-        sample_dir = Path("C:/Nova/runtime/_test_tmp") / f"core_thinning_hooks_{uuid.uuid4().hex}"
+        sample_dir = _validation_tmp_root() / f"core_thinning_hooks_{uuid.uuid4().hex}"
         services_dir = sample_dir / "services"
         services_dir.mkdir(parents=True, exist_ok=True)
         sample = sample_dir / "nova_core.py"
@@ -342,7 +347,7 @@ class TestCoreThinningService(unittest.TestCase):
         self.assertFalse(any(item.get("kind") == "wrapper_candidate" for item in list(brief.get("orders") or [])))
 
     def test_build_brief_protects_service_core_attribute_references(self):
-        sample_dir = Path("C:/Nova/runtime/_test_tmp") / f"core_thinning_attrs_{uuid.uuid4().hex}"
+        sample_dir = _validation_tmp_root() / f"core_thinning_attrs_{uuid.uuid4().hex}"
         services_dir = sample_dir / "services"
         services_dir.mkdir(parents=True, exist_ok=True)
         sample = sample_dir / "nova_core.py"
@@ -376,7 +381,7 @@ class TestCoreThinningService(unittest.TestCase):
         self.assertFalse(any(item.get("kind") == "wrapper_candidate" for item in list(brief.get("orders") or [])))
 
     def test_build_brief_protects_public_runtime_adapters(self):
-        sample = Path("C:/Nova/runtime/_test_tmp") / f"core_thinning_public_{uuid.uuid4().hex}.py"
+        sample = _validation_tmp_root() / f"core_thinning_public_{uuid.uuid4().hex}.py"
         sample.write_text(
             "\n".join(
                 [
@@ -421,7 +426,7 @@ class TestCoreThinningService(unittest.TestCase):
         self.assertFalse(any(item.get("kind") == "wrapper_candidate" for item in list(brief.get("orders") or [])))
 
     def test_execute_core_thinning_order_blocks_public_runtime_adapter(self):
-        sample = Path("C:/Nova/runtime/_test_tmp") / f"core_thinning_public_exec_{uuid.uuid4().hex}.py"
+        sample = _validation_tmp_root() / f"core_thinning_public_exec_{uuid.uuid4().hex}.py"
         sample.write_text(
             "\n".join(
                 [
@@ -451,7 +456,7 @@ class TestCoreThinningService(unittest.TestCase):
             sample.unlink(missing_ok=True)
 
     def test_execute_core_thinning_order_blocks_wrapper_used_as_callable_hook(self):
-        sample = Path("C:/Nova/runtime/_test_tmp") / f"core_thinning_hook_{uuid.uuid4().hex}.py"
+        sample = _validation_tmp_root() / f"core_thinning_hook_{uuid.uuid4().hex}.py"
         sample.write_text(
             "\n".join(
                 [
@@ -480,7 +485,7 @@ class TestCoreThinningService(unittest.TestCase):
         sample.unlink(missing_ok=True)
 
     def test_execute_core_thinning_order_maps_http_boundary_without_mutation(self):
-        sample_http = Path("C:/Nova/runtime/_test_tmp") / f"nova_http_map_{uuid.uuid4().hex}.py"
+        sample_http = _validation_tmp_root() / f"nova_http_map_{uuid.uuid4().hex}.py"
         source = "\n".join(
             [
                 "def _pipeline_create_action(payload):",

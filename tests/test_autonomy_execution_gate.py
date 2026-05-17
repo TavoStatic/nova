@@ -64,6 +64,19 @@ class TestAutonomyExecutionGateService(unittest.TestCase):
         self.assertEqual(result["action_type"], "patch_queue_run_next")
         self.assertEqual(result["dispatch_payload"]["execution_group"], "patch_queue")
 
+    def test_allows_concrete_active_work_tree_below_generic_confidence_threshold(self):
+        decision = _decision("active_work_tree_run_next", confidence=0.447)
+        decision["policy_checks"] = {"recommendation_threshold": "concrete_active_work_tree"}
+
+        result = AUTONOMY_EXECUTION_GATE_SERVICE.evaluate(
+            decision,
+            _policy(execute_allowed_actions=[], execute_allowed_action_groups=["active_work_tree"]),
+        )
+
+        self.assertTrue(result["allow_execute"])
+        self.assertEqual(result["action_type"], "active_work_tree_run_next")
+        self.assertEqual(result["policy_checks"]["confidence_threshold"], "concrete_active_work_tree")
+
     def test_explicit_block_wins_over_execution_group_allow(self):
         result = AUTONOMY_EXECUTION_GATE_SERVICE.evaluate(
             _decision("pulse_status"),
@@ -102,6 +115,31 @@ class TestAutonomyExecutionGateService(unittest.TestCase):
         self.assertFalse(result["allow_execute"])
         self.assertEqual(result["status"], "deferred")
         self.assertIn("cooldown_active", result["refusal_reasons"])
+
+    def test_allows_same_branch_when_cooldown_was_for_different_work_tree_task(self):
+        decision = _decision("active_work_tree_run_next")
+        decision["recommended_action"].update(
+            {
+                "target_kind": "lane",
+                "target_id": "branch-release",
+                "target_step_id": "task-promotion",
+            }
+        )
+
+        result = AUTONOMY_EXECUTION_GATE_SERVICE.evaluate(
+            decision,
+            _policy(execute_allowed_actions=[], execute_allowed_action_groups=["active_work_tree"]),
+            last_execution_context={
+                "last_action_type": "active_work_tree_run_next",
+                "last_target_id": "branch-release",
+                "last_target_step_id": "task-validation",
+                "cooldown_active": True,
+            },
+        )
+
+        self.assertTrue(result["allow_execute"])
+        self.assertEqual(result["target_step_id"], "task-promotion")
+        self.assertEqual(result["dispatch_payload"]["target_step_id"], "task-promotion")
 
 
 if __name__ == "__main__":

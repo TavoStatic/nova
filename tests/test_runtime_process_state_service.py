@@ -18,6 +18,20 @@ class TestRuntimeProcessStateService(unittest.TestCase):
 
         self.assertEqual(leaves, [{"pid": 11, "ppid": 10, "create_time": 2.0}])
 
+    def test_matches_relative_script_token_against_process_cwd(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            script = root / "nova_guard.py"
+            script.write_text("print('guard')\n", encoding="utf-8")
+
+            matched = RUNTIME_PROCESS_STATE_SERVICE.matches_script_process(
+                ["python", "nova_guard.py"],
+                script,
+                cwd=root,
+            )
+
+        self.assertTrue(matched)
+
     def test_prune_orphaned_guard_artifacts_removes_old_files(self):
         with tempfile.TemporaryDirectory() as td:
             runtime_dir = Path(td)

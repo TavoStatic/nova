@@ -5,9 +5,16 @@ from unittest import mock
 from pipelines.registry import PipelineRegistry
 
 
+DATA_SOURCES_ROOT = Path(__file__).resolve().parents[1] / "data_sources"
+SIS_TEST_ACTIVE = (DATA_SOURCES_ROOT / "sis_test" / "pipeline.json").exists()
+INSTALL_PROFILE_LANES = ("sis_test",)
+INSTALL_PROFILE_INACTIVE_BEHAVIOR = "skip_when_absent"
+
+
+@unittest.skipUnless(SIS_TEST_ACTIVE, "sis_test pipeline is not active in this install")
 class TestSisTestPipeline(unittest.TestCase):
     def setUp(self):
-        self.registry = PipelineRegistry(Path(__file__).resolve().parents[1] / "data_sources")
+        self.registry = PipelineRegistry(DATA_SOURCES_ROOT)
         self.pipeline = self.registry.instantiate("sis_test")
 
     def test_schema_probe_exposes_known_entities(self):
@@ -73,20 +80,12 @@ class TestSisTestPipeline(unittest.TestCase):
         self.assertIn(("146", "5"), filters)
 
     def test_status_exposes_local_config_path(self):
-        config = {
-            "host": "192.0.2.10",
-            "database": "EXAMPLE_SIS_DB",
-            "driver": "ODBC Driver 17 for SQL Server",
-            "auth_mode": "trusted",
-            "intended_windows_identity": "EXAMPLE-DOMAIN\\pipeline.user",
-        }
-        with mock.patch("data_sources.sis_test.connector._load_local_config", return_value=config):
-            with mock.patch.object(self.pipeline, "_installed_odbc_drivers", return_value=["ODBC Driver 17 for SQL Server"]):
-                with mock.patch.object(self.pipeline, "_client_module_available", return_value=True):
-                    with mock.patch("data_sources.sis_test.connector._current_windows_identity", return_value="EXAMPLE-DOMAIN\\pipeline.user"):
-                        with mock.patch.object(self.pipeline, "_network_probe", return_value={"reachable": True, "reason": "connected"}):
-                            with mock.patch.object(self.pipeline, "_auth_probe", return_value={"authenticated": False, "reason": "login failed"}):
-                                status = self.pipeline.status()
+        with mock.patch.object(self.pipeline, "_installed_odbc_drivers", return_value=["ODBC Driver 17 for SQL Server"]):
+            with mock.patch.object(self.pipeline, "_client_module_available", return_value=True):
+                with mock.patch("data_sources.sis_test.connector._current_windows_identity", return_value="K12AD\\guribe.tst"):
+                    with mock.patch.object(self.pipeline, "_network_probe", return_value={"reachable": True, "reason": "connected"}):
+                        with mock.patch.object(self.pipeline, "_auth_probe", return_value={"authenticated": False, "reason": "login failed"}):
+                            status = self.pipeline.status()
         self.assertEqual(status["pipeline_id"], "sis_test")
         self.assertTrue(status["local_config_path"].endswith("local_config.json"))
         self.assertEqual(status["query_template_count"], 4)
@@ -164,35 +163,35 @@ class TestSisTestPipeline(unittest.TestCase):
 
     def test_sanitize_error_text_redacts_password_and_normalizes_login_failure(self):
         message = self.pipeline._sanitize_error_text(
-            'Provider=MSDASQL;Uid=pipeline.user;Pwd=supersecret; Login failed for user "pipeline.user".',
-            {"username": "pipeline.user", "password": "supersecret"},
+            'Provider=MSDASQL;Uid=guribe.tst;Pwd=supersecret; Login failed for user "guribe.tst".',
+            {"username": "guribe.tst", "password": "supersecret"},
         )
         self.assertEqual(
             message,
-            "Login failed for configured SIS read-only user (pipeline.user).",
+            "Login failed for configured SIS read-only user (guribe.tst).",
         )
 
     def test_sanitize_error_text_reports_integrated_identity_login_failure(self):
         message = self.pipeline._sanitize_error_text(
-            "Login failed for user 'EXAMPLE-DOMAIN\\current.user'.",
+            "Login failed for user 'K12AD\\guribe'.",
             {"auth_mode": "trusted"},
         )
 
         self.assertEqual(
             message,
-            "Login failed for Windows integrated SIS identity (EXAMPLE-DOMAIN\\current.user).",
+            "Login failed for Windows integrated SIS identity (K12AD\\guribe).",
         )
 
     def test_status_reports_trusted_auth_identity_mismatch(self):
         config = {
-            "host": "192.0.2.10",
-            "database": "EXAMPLE_SIS_DB",
+            "host": "10.80.42.50",
+            "database": "BNV_eSpTrain",
             "driver": "ODBC Driver 17 for SQL Server",
             "auth_mode": "trusted",
-            "intended_windows_identity": "EXAMPLE-DOMAIN\\pipeline.user",
+            "intended_windows_identity": "K12AD\\guribe.tst",
         }
         with mock.patch("data_sources.sis_test.connector._load_local_config", return_value=config):
-            with mock.patch("data_sources.sis_test.connector._current_windows_identity", return_value="EXAMPLE-DOMAIN\\current.user"):
+            with mock.patch("data_sources.sis_test.connector._current_windows_identity", return_value="K12AD\\guribe"):
                 with mock.patch.object(self.pipeline, "_installed_odbc_drivers", return_value=["ODBC Driver 17 for SQL Server"]):
                     with mock.patch.object(self.pipeline, "_network_probe", return_value={"reachable": True, "reason": "connected"}):
                         with mock.patch.object(
@@ -200,42 +199,42 @@ class TestSisTestPipeline(unittest.TestCase):
                             "_auth_probe",
                             return_value={
                                 "authenticated": False,
-                                "reason": "Login failed for Windows integrated SIS identity (EXAMPLE-DOMAIN\\current.user).",
+                                "reason": "Login failed for Windows integrated SIS identity (K12AD\\guribe).",
                             },
                         ):
                             status = self.pipeline.status()
 
         self.assertEqual(status["auth_mode"], "trusted")
-        self.assertEqual(status["current_windows_identity"], "EXAMPLE-DOMAIN\\current.user")
-        self.assertEqual(status["intended_windows_identity"], "EXAMPLE-DOMAIN\\pipeline.user")
+        self.assertEqual(status["current_windows_identity"], "K12AD\\guribe")
+        self.assertEqual(status["intended_windows_identity"], "K12AD\\guribe.tst")
         self.assertTrue(status["windows_identity_mismatch"])
         self.assertEqual(status["auth_probe"]["reason"], "windows_identity_mismatch")
         self.assertIn("windows_identity_mismatch", status["readiness_blockers"])
-        self.assertIn("EXAMPLE-DOMAIN\\pipeline.user", status["next_step"])
+        self.assertIn("K12AD\\guribe.tst", status["next_step"])
 
     def test_status_reports_trusted_auth_failure_when_identity_matches(self):
         config = {
-            "host": "192.0.2.10",
-            "database": "EXAMPLE_SIS_DB",
+            "host": "10.80.42.50",
+            "database": "BNV_eSpTrain",
             "driver": "ODBC Driver 17 for SQL Server",
             "auth_mode": "trusted",
-            "intended_windows_identity": "EXAMPLE-DOMAIN\\pipeline.user",
+            "intended_windows_identity": "K12AD\\guribe.tst",
         }
         with mock.patch("data_sources.sis_test.connector._load_local_config", return_value=config):
-            with mock.patch("data_sources.sis_test.connector._current_windows_identity", return_value="EXAMPLE-DOMAIN\\pipeline.user"):
+            with mock.patch("data_sources.sis_test.connector._current_windows_identity", return_value="K12AD\\guribe.tst"):
                 with mock.patch.object(self.pipeline, "_installed_odbc_drivers", return_value=["ODBC Driver 17 for SQL Server"]):
                     with mock.patch.object(self.pipeline, "_client_module_available", return_value=True):
                         with mock.patch.object(self.pipeline, "_network_probe", return_value={"reachable": True, "reason": "connected"}):
                             with mock.patch.object(
                                 self.pipeline,
                                 "_auth_probe",
-                                return_value={"authenticated": False, "reason": "Login failed for Windows integrated SIS identity (EXAMPLE-DOMAIN\\pipeline.user)."},
+                                return_value={"authenticated": False, "reason": "Login failed for Windows integrated SIS identity (K12AD\\guribe.tst)."},
                             ):
                                 status = self.pipeline.status()
 
         self.assertFalse(status["windows_identity_mismatch"])
-        self.assertEqual(status["current_windows_identity"], "EXAMPLE-DOMAIN\\pipeline.user")
-        self.assertEqual(status["auth_probe"]["reason"], "Login failed for Windows integrated SIS identity (EXAMPLE-DOMAIN\\pipeline.user).")
+        self.assertEqual(status["current_windows_identity"], "K12AD\\guribe.tst")
+        self.assertEqual(status["auth_probe"]["reason"], "Login failed for Windows integrated SIS identity (K12AD\\guribe.tst).")
         self.assertIn("auth_not_ready", status["readiness_blockers"])
         self.assertIn("Fix SIS read-only authentication", status["next_step"])
 
@@ -246,14 +245,14 @@ class TestSisTestPipeline(unittest.TestCase):
                 "network_probe": {"reachable": True},
                 "auth_probe": {"authenticated": False, "reason": "login failed"},
                 "windows_identity_mismatch": True,
-                "current_windows_identity": "EXAMPLE-DOMAIN\\current.user",
-                "intended_windows_identity": "EXAMPLE-DOMAIN\\pipeline.user",
+                "current_windows_identity": "K12AD\\guribe",
+                "intended_windows_identity": "K12AD\\guribe.tst",
             },
             False,
         )
 
-        self.assertIn("EXAMPLE-DOMAIN\\pipeline.user", message)
-        self.assertIn("EXAMPLE-DOMAIN\\current.user", message)
+        self.assertIn("K12AD\\guribe.tst", message)
+        self.assertIn("K12AD\\guribe", message)
         self.assertIn("trusted auth uses the process identity", message)
 
 

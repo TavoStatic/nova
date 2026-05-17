@@ -66,6 +66,80 @@ class TestToolRegistry(unittest.TestCase):
             with self.assertRaises(ToolInvocationError):
                 registry.run_tool("filesystem", {"action": "read", "path": str(outside)}, ctx)
 
+    def test_filesystem_find_defaults_to_live_workspace_scope(self):
+        registry = build_default_registry()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            live = root / "nova_core.py"
+            archive = root / "runtime" / "exports" / "release" / "nova_core.py"
+            quarantine = root / "runtime" / "recovery_quarantine" / "copy" / "nova_core.py"
+            validation = root / "runtime" / "validation" / "case" / "nova_core.py"
+            dependency = root / ".venv" / "Lib" / "site-packages" / "copy.py"
+            for path in (live, archive, quarantine, validation, dependency):
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text("needle_symbol = True", encoding="utf-8")
+            ctx = ToolContext(
+                user_id="tester",
+                session_id="sess-find",
+                policy={"tools_enabled": {"files": True}},
+                allowed_root=str(root),
+            )
+
+            out = registry.run_tool("filesystem", {"action": "find", "keyword": "needle_symbol"}, ctx)
+
+            self.assertIn(str(live), out)
+            self.assertNotIn(str(archive), out)
+            self.assertNotIn(str(quarantine), out)
+            self.assertNotIn(str(validation), out)
+            self.assertNotIn(str(dependency), out)
+
+    def test_filesystem_find_can_explicitly_search_archived_runtime_path(self):
+        registry = build_default_registry()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            archive = root / "runtime" / "exports" / "release" / "nova_core.py"
+            archive.parent.mkdir(parents=True, exist_ok=True)
+            archive.write_text("needle_symbol = True", encoding="utf-8")
+            ctx = ToolContext(
+                user_id="tester",
+                session_id="sess-find-archive",
+                policy={"tools_enabled": {"files": True}},
+                allowed_root=str(root),
+            )
+
+            out = registry.run_tool(
+                "filesystem",
+                {"action": "find", "keyword": "needle_symbol", "path": "runtime/exports"},
+                ctx,
+            )
+
+            self.assertIn(str(archive), out)
+
+    def test_filesystem_find_can_target_specific_file(self):
+        registry = build_default_registry()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "subconscious_live_simulator.py"
+            source.write_text("target_seam='fulfillment_bridge_entry_fallthrough'", encoding="utf-8")
+            sibling = root / "runtime" / "subconscious_runs" / "latest.json"
+            sibling.parent.mkdir(parents=True, exist_ok=True)
+            sibling.write_text("fulfillment_bridge_entry_fallthrough", encoding="utf-8")
+            ctx = ToolContext(
+                user_id="tester",
+                session_id="sess-find-file",
+                policy={"tools_enabled": {"files": True}},
+                allowed_root=str(root),
+            )
+
+            out = registry.run_tool(
+                "filesystem",
+                {"action": "find", "keyword": "fulfillment_bridge_entry_fallthrough", "path": "subconscious_live_simulator.py"},
+                ctx,
+            )
+
+            self.assertIn(str(source), out)
+            self.assertNotIn(str(sibling), out)
+
     def test_disabled_tool_is_denied(self):
         registry = build_default_registry()
         ctx = ToolContext(
@@ -171,6 +245,52 @@ class TestToolRegistry(unittest.TestCase):
         self.assertGreaterEqual(len(called_cmd), 3)
         self.assertIn("health.py", str(called_cmd[1]).lower())
         self.assertEqual(called_cmd[2], "check")
+
+    def test_vision_tool_nonzero_helper_exit_is_recorded_as_error(self):
+        registry = build_default_registry()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            event_path = root / "tool_events.jsonl"
+            ctx = ToolContext(
+                user_id="tester",
+                session_id="sess-vision-error",
+                policy={"tools_enabled": {"screen": True}},
+                allowed_root=str(root),
+            )
+            fake_completed = type("P", (), {"returncode": 1, "stdout": "", "stderr": "camera failed"})()
+            with patch("tools.registry.TOOL_EVENTS_PATH", event_path), \
+                 patch("tools.vision_tool.subprocess.run", return_value=fake_completed):
+                with self.assertRaises(ToolInvocationError) as err:
+                    registry.run_tool("vision", {"action": "screen"}, ctx)
+
+            self.assertIn("vision_helper_failed:exit:1", str(err.exception))
+            payload = json.loads(event_path.read_text(encoding="utf-8").strip())
+            self.assertEqual(payload["tool"], "vision")
+            self.assertEqual(payload["status"], "error")
+            self.assertIn("vision_helper_failed", payload["error"])
+
+    def test_system_tool_nonzero_helper_exit_is_recorded_as_error(self):
+        registry = build_default_registry()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            event_path = root / "tool_events.jsonl"
+            ctx = ToolContext(
+                user_id="tester",
+                session_id="sess-system-error",
+                policy={"tools_enabled": {"health": True}},
+                allowed_root=str(root),
+            )
+            fake_completed = type("P", (), {"returncode": 2, "stdout": "bad", "stderr": ""})()
+            with patch("tools.registry.TOOL_EVENTS_PATH", event_path), \
+                 patch("tools.system_tool.subprocess.run", return_value=fake_completed):
+                with self.assertRaises(ToolInvocationError) as err:
+                    registry.run_tool("system", {"action": "health_check"}, ctx)
+
+            self.assertIn("system_helper_failed:exit:2", str(err.exception))
+            payload = json.loads(event_path.read_text(encoding="utf-8").strip())
+            self.assertEqual(payload["tool"], "system")
+            self.assertEqual(payload["status"], "error")
+            self.assertIn("system_helper_failed", payload["error"])
 
     def test_core_keyword_to_status_event_pipeline(self):
         with tempfile.TemporaryDirectory() as tmp:

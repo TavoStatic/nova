@@ -97,6 +97,32 @@ def resolve_active_task_context(manager: Any) -> ActiveTaskContext:
     )
 
 
+def looks_like_current_location_slot_fill(user_text: str) -> bool:
+    normalized = " ".join(str(user_text or "").strip().lower().split())
+    if not normalized.startswith("use "):
+        return False
+    tail = normalized[4:].strip(" .,!?")
+    if tail.endswith(" nova"):
+        tail = tail[:-5].strip()
+    pointer_words = {
+        "current",
+        "currrent",
+        "device",
+        "physical",
+        "runtime",
+        "saved",
+        "same",
+        "location",
+        "locaiton",
+        "coords",
+        "coordinates",
+        "your",
+        "our",
+        "my",
+    }
+    return bool(set(tail.split()) & pointer_words)
+
+
 def bind_pending_weather_followup(
     context: ActiveTaskContext,
     user_text: str,
@@ -104,38 +130,41 @@ def bind_pending_weather_followup(
     *,
     move: str = "",
 ) -> dict[str, Any]:
-    pending_action = context.pending_action if isinstance(context.pending_action, dict) else {}
-    if (
-        str(pending_action.get("kind") or "") != "weather_lookup"
-        or str(pending_action.get("status") or "") != "awaiting_location"
-    ):
+    pending = context.pending_action if isinstance(context.pending_action, dict) else {}
+    if str(pending.get("kind") or "").strip() != "weather_lookup":
+        return {}
+    if str(pending.get("status") or "").strip() != "awaiting_location":
         return {}
 
-    followup_move = str(move or followup_moves.classify_followup_move(user_text, low)).strip()
-    saved_location_available = bool(pending_action.get("saved_location_available"))
-
-    if followup_move in {"reference_answer", "affirmation"} and saved_location_available:
+    if looks_like_current_location_slot_fill(user_text) or followup_moves.looks_like_shared_location_reference(low):
         return {
             "intent": "weather_lookup",
             "weather_mode": "current_location",
             "ledger_stage": "weather_lookup",
             "grounded": True,
+            "ownership": "explicit",
         }
 
-    if followup_move != "value_answer":
-        return {}
-
     location_value = followup_moves.extract_weather_followup_location_candidate(user_text, low)
-    if not location_value:
-        return {}
+    if location_value:
+        return {
+            "intent": "weather_lookup",
+            "weather_mode": "explicit_location",
+            "location_value": location_value,
+            "ledger_stage": "weather_lookup",
+            "grounded": True,
+            "ownership": "explicit",
+        }
 
-    return {
-        "intent": "weather_lookup",
-        "weather_mode": "explicit_location",
-        "location_value": location_value,
-        "ledger_stage": "weather_lookup",
-        "grounded": True,
-    }
+    if move == "affirmation" and bool(pending.get("saved_location_available")):
+        return {
+            "intent": "weather_lookup",
+            "weather_mode": "current_location",
+            "ledger_stage": "weather_lookup",
+            "grounded": True,
+            "ownership": "explicit",
+        }
+    return {}
 
 
 def bind_retrieval_followup(context: ActiveTaskContext, *, move: str) -> dict[str, Any]:
@@ -156,6 +185,7 @@ __all__ = [
     "ActiveTaskContext",
     "bind_pending_weather_followup",
     "bind_retrieval_followup",
+    "looks_like_current_location_slot_fill",
     "manager_active_subject",
     "manager_pending_action",
     "manager_retrieval_state",

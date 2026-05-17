@@ -16,6 +16,7 @@ class _CoreStub:
     def __init__(self):
         self.actions = []
         self.patch_calls = []
+        self.grounded_calls = []
         self.DEFAULT_STATEFILE = "runtime/state.json"
         self.os = types.SimpleNamespace(environ={})
         self.re = __import__("re")
@@ -30,6 +31,10 @@ class _CoreStub:
     def execute_planned_action(self, tool, args=None):
         self.actions.append((tool, args))
         return f"action:{tool}:{args}"
+
+    def grounded_self_report_reply(self, text):
+        self.grounded_calls.append(text)
+        return f"grounded:{text}"
 
     def tool_pipeline(self, text):
         return f"pipeline:{text}"
@@ -152,6 +157,24 @@ class TestNovaCommandHandlersService(unittest.TestCase):
         self.assertEqual(out, "action:queue_status:None")
         self.assertEqual(core.actions, [("queue_status", None)])
 
+    def test_runtime_status_phrase_is_not_grounded_self_report_command(self):
+        core = _CoreStub()
+
+        out = nova_command_handlers.handle_commands("runtime status", core=core)
+
+        self.assertIsNone(out)
+        self.assertEqual(core.grounded_calls, [])
+        self.assertEqual(core.actions, [])
+
+    def test_user_help_request_is_not_hijacked_as_self_report(self):
+        core = _CoreStub()
+
+        out = nova_command_handlers.handle_commands("I need help deciding.", core=core)
+
+        self.assertIsNone(out)
+        self.assertEqual(core.grounded_calls, [])
+        self.assertEqual(core.actions, [])
+
     def test_patch_apply_parses_force_flag(self):
         core = _CoreStub()
 
@@ -176,12 +199,12 @@ class TestNovaCommandHandlersService(unittest.TestCase):
 
         self.assertEqual(out, "pipeline:pipeline status sis_test")
 
-    def test_plain_weather_command_clarifies_location(self):
+    def test_plain_weather_command_stays_model_owned(self):
         core = _CoreStub()
 
         out = nova_command_handlers.handle_commands("weather", core=core)
 
-        self.assertEqual(out, "What location should I use for the weather lookup?")
+        self.assertIsNone(out)
         self.assertEqual(core.actions, [])
 
     def test_weather_current_command_uses_current_location(self):

@@ -3,7 +3,8 @@ param(
   [string]$Label = "",
   [string]$Version = "",
   [string]$Channel = "rc",
-  [switch]$KeepStage
+  [switch]$KeepStage,
+  [int]$RetainZipCount = 12
 )
 
 $ErrorActionPreference = "Stop"
@@ -120,7 +121,6 @@ $excludeDirs = @(
   ".venv",
   ".pytest_cache",
   "__pycache__",
-  "data_sources",
   "knowledge\packs",
   "knowledge\peims",
   "knowledge\web",
@@ -149,7 +149,6 @@ $forbiddenStagePaths = @(
   ".ci_venv",
   ".venv",
   ".pytest_cache",
-  "data_sources",
   "knowledge\packs",
   "knowledge\peims",
   "knowledge\web",
@@ -209,6 +208,15 @@ if ($robocopyCode -ge 8) {
 foreach ($relativePath in $forbiddenStagePaths) {
   Remove-StageRelativePath $stageDir $relativePath
 }
+
+# Remove pipeline-local lane artifacts that can contain credentials or sensitive operator data.
+Get-ChildItem -Path (Join-Path $stageDir "data_sources") -Recurse -File -Force -ErrorAction SilentlyContinue |
+  Where-Object {
+    $_.Name -eq "local_config.json" -or
+    $_.Name -eq "operator_intake.jsonl" -or
+    $_.Name -eq "lane_control.json"
+  } |
+  ForEach-Object { Remove-Item -Force $_.FullName }
 
 Get-ChildItem -Path $stageDir -Recurse -Directory -Force -ErrorAction SilentlyContinue |
   Where-Object { $_.Name -eq "__pycache__" } |
@@ -275,10 +283,12 @@ $manifest = [ordered]@{
     ".ci_venv",
     ".venv",
     ".pytest_cache",
-    "data_sources",
     "knowledge/packs",
     "knowledge/peims",
     "knowledge/web",
+    "data_sources/*/local_config.json",
+    "data_sources/*/operator_intake.jsonl",
+    "data_sources/*/lane_control.json",
     "nova_memory.sqlite",
     "runtime",
     "logs",
@@ -297,19 +307,19 @@ Compress-Archive -Path $stageDir -DestinationPath $zipPath -CompressionLevel Opt
 $validationRecord = @(
   "# NYO System RC Validation Record",
   "",
-  "Date: " + (Get-Date -Format "yyyy-MM-dd"),
+  ("Date: {0}" -f (Get-Date -Format "yyyy-MM-dd")),
   "",
   "Use this prefilled record for the fresh-machine or VM validation pass.",
   "",
   "## Candidate",
   "",
-  "- Artifact path: " + $zipPath,
-  "- Artifact version: " + $versionToken,
-  "- Version source: " + $versionInfo.source,
-  "- Release channel: " + $channelToken,
-  "- Release label: " + $(if ([string]::IsNullOrWhiteSpace($labelToken)) { "" } else { $labelToken }),
+  ("- Artifact path: {0}" -f $zipPath),
+  ("- Artifact version: {0}" -f $versionToken),
+  ("- Version source: {0}" -f $versionInfo.source),
+  ("- Release channel: {0}" -f $channelToken),
+  ("- Release label: {0}" -f $(if ([string]::IsNullOrWhiteSpace($labelToken)) { "" } else { $labelToken })),
   "- Manifest reviewed: yes/no",
-  "- Release ledger path: " + $ledgerPath,
+  ("- Release ledger path: {0}" -f $ledgerPath),
   "",
   "## Environment",
   "",
@@ -355,6 +365,17 @@ $validationRecord = @(
 )
 $validationRecord | Set-Content -Encoding UTF8 $validationRecordPath
 
+$removedZipCount = 0
+if ($RetainZipCount -gt 0) {
+  $oldZipArtifacts = Get-ChildItem -Path $outputRoot -File -Filter "*.zip" -ErrorAction SilentlyContinue |
+    Sort-Object LastWriteTimeUtc -Descending |
+    Select-Object -Skip $RetainZipCount
+  foreach ($oldZip in @($oldZipArtifacts)) {
+    Remove-Item -LiteralPath $oldZip.FullName -Force
+    $removedZipCount += 1
+  }
+}
+
 $ledgerEntry = [ordered]@{
   recorded_at = (Get-Date).ToString("o")
   event = "build"
@@ -370,6 +391,9 @@ $ledgerEntry = [ordered]@{
   release_label = $labelToken
   built_on_host = $env:COMPUTERNAME
   validation_record_seed_path = $validationRecordPath
+  stage_retained = [bool]$KeepStage
+  retained_zip_count = $RetainZipCount
+  removed_old_zip_count = $removedZipCount
 }
 Add-Content -Path $ledgerPath -Value (($ledgerEntry | ConvertTo-Json -Compress))
 
@@ -386,8 +410,12 @@ Write-Host ("[OK]   Stage directory: " + $stageDir)
 Write-Host ("[OK]   Zip artifact   : " + $zipPath)
 Write-Host ("[OK]   Release ledger : " + $ledgerPath)
 Write-Host ("[OK]   Validation seed: " + $validationRecordPath)
+Write-Host ("[OK]   Zip retention  : kept latest " + $RetainZipCount + ", removed " + $removedZipCount)
 Write-Host "[INFO] Bootstrap after extract: .\\nova.cmd install"
 
-if (-not $KeepStage) {
-  Write-Host "[INFO] Stage directory retained for inspection. Remove it manually when no longer needed."
+if ($KeepStage) {
+  Write-Host "[INFO] Stage directory retained for inspection because -KeepStage was provided."
+} else {
+  Remove-Item -Recurse -Force $stageDir
+  Write-Host "[INFO] Stage directory removed after zip creation. Use -KeepStage to retain it."
 }

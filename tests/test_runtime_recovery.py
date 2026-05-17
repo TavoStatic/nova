@@ -14,6 +14,14 @@ class TestRuntimeRecovery(unittest.TestCase):
     def _fake_process_iter(*rows):
         return [SimpleNamespace(info=row) for row in rows]
 
+    @staticmethod
+    def _fake_process(row, cwd: Path):
+        process = mock.Mock()
+        process.info = row
+        process.cwd.return_value = str(cwd)
+        process.create_time.return_value = float(row.get("create_time") or 0.0)
+        return process
+
     def test_guard_status_payload_uses_pid_exists_and_runtime_flags(self):
         with tempfile.TemporaryDirectory() as td:
             runtime_dir = Path(td)
@@ -54,6 +62,33 @@ class TestRuntimeRecovery(unittest.TestCase):
 
             self.assertTrue(payload["running"])
             self.assertEqual(payload["pid"], 8000)
+            self.assertEqual(payload["process_count"], 1)
+
+    def test_guard_status_payload_matches_relative_guard_script_against_process_cwd(self):
+        with tempfile.TemporaryDirectory() as td:
+            runtime_dir = Path(td)
+            (runtime_dir / "guard.lock").write_text("{}", encoding="utf-8")
+            (runtime_dir / "guard_pid.json").write_text(
+                json.dumps({"pid": 7000, "create_time": 70.0}, ensure_ascii=True),
+                encoding="utf-8",
+            )
+            root = nova_http.GUARD_PY.parent
+            processes = [
+                self._fake_process(
+                    {"pid": 7000, "ppid": 1, "cmdline": [str(nova_http.VENV_PY), "nova_guard.py"], "create_time": 70.0},
+                    root,
+                )
+            ]
+
+            with mock.patch.object(nova_http, "RUNTIME_DIR", runtime_dir), \
+                mock.patch("nova_http.psutil.pid_exists", return_value=True), \
+                mock.patch("nova_http.psutil.Process", side_effect=Exception("force process_iter fallback")), \
+                mock.patch("nova_http.psutil.process_iter", return_value=processes):
+                payload = nova_http._guard_status_payload()
+
+            self.assertTrue(payload["running"])
+            self.assertEqual(payload["status"], "running")
+            self.assertEqual(payload["pid"], 7000)
             self.assertEqual(payload["process_count"], 1)
 
     def test_core_status_payload_treats_fresh_heartbeat_as_running(self):
@@ -387,12 +422,61 @@ class TestRuntimeRecovery(unittest.TestCase):
         )
 
         with mock.patch("nova_guard._runtime_failed", return_value=(True, "heartbeat_stale")), \
+            mock.patch.object(nova_guard, "log", lambda _msg: None), \
             mock.patch("nova_guard.start_new_attempt") as start_new_attempt:
             nova_guard.supervisor_tick(attempt)
 
         self.assertEqual(attempt.state, nova_guard.STATE_FAILED)
         self.assertEqual(attempt.failure_reason, "heartbeat_stale")
         start_new_attempt.assert_not_called()
+
+    def test_runtime_failed_requires_sustained_heartbeat_staleness(self):
+        attempt = nova_guard.GuardAttempt(
+            pid=2222,
+            create_time=22.0,
+            started_at=90.0,
+            state=nova_guard.STATE_RUNNING,
+        )
+
+        with mock.patch("nova_guard._attempt_is_alive", return_value=True), \
+            mock.patch("nova_guard.read_core_state", return_value={"pid": 2222, "create_time": 22.0}), \
+            mock.patch("nova_guard._runtime_state_matches_attempt", return_value=True), \
+            mock.patch("nova_guard.heartbeat_age_seconds", return_value=10.0), \
+            mock.patch.object(nova_guard, "log", lambda _msg: None):
+            with mock.patch("nova_guard.time.time", return_value=100.0):
+                failed, reason = nova_guard._runtime_failed(attempt)
+            self.assertFalse(failed)
+            self.assertEqual(reason, "")
+            self.assertEqual(attempt.heartbeat_stale_since, 100.0)
+
+            with mock.patch("nova_guard.time.time", return_value=110.0):
+                failed, reason = nova_guard._runtime_failed(attempt)
+            self.assertFalse(failed)
+            self.assertEqual(reason, "")
+
+            with mock.patch("nova_guard.time.time", return_value=116.0):
+                failed, reason = nova_guard._runtime_failed(attempt)
+            self.assertTrue(failed)
+            self.assertEqual(reason, "heartbeat_stale")
+
+    def test_runtime_failed_clears_stale_latch_when_heartbeat_recovers(self):
+        attempt = nova_guard.GuardAttempt(
+            pid=2222,
+            create_time=22.0,
+            started_at=90.0,
+            state=nova_guard.STATE_RUNNING,
+            heartbeat_stale_since=100.0,
+        )
+
+        with mock.patch("nova_guard._attempt_is_alive", return_value=True), \
+            mock.patch("nova_guard.read_core_state", return_value={"pid": 2222, "create_time": 22.0}), \
+            mock.patch("nova_guard._runtime_state_matches_attempt", return_value=True), \
+            mock.patch("nova_guard.heartbeat_age_seconds", return_value=0.5):
+            failed, reason = nova_guard._runtime_failed(attempt)
+
+        self.assertFalse(failed)
+        self.assertEqual(reason, "")
+        self.assertIsNone(attempt.heartbeat_stale_since)
 
     def test_supervisor_tick_resolves_failed_attempt_into_restart_wait(self):
         attempt = nova_guard.GuardAttempt(
@@ -404,6 +488,7 @@ class TestRuntimeRecovery(unittest.TestCase):
         )
 
         with mock.patch("nova_guard._resolve_attempt", return_value=True) as resolve_attempt, \
+            mock.patch.object(nova_guard, "log", lambda _msg: None), \
             mock.patch("nova_guard.time.time", return_value=200.0):
             nova_guard.supervisor_tick(attempt)
 
@@ -411,6 +496,24 @@ class TestRuntimeRecovery(unittest.TestCase):
         self.assertEqual(attempt.state, nova_guard.STATE_RESTART_WAIT)
         self.assertEqual(attempt.next_restart_at, 202.0)
         self.assertEqual(attempt.restart_count, 1)
+        self.assertEqual(attempt.restart_cause_reason, "boot_timeout")
+
+    def test_boot_observation_records_supervised_restart_cause(self):
+        attempt = nova_guard.GuardAttempt(
+            started_at=100.0,
+            state_seen_at=102.0,
+            heartbeat_seen_at=102.0,
+            start_reason="restart",
+            restart_cause_reason="heartbeat_stale",
+            boot_timeout_seconds=20.0,
+        )
+
+        with mock.patch("nova_guard.time.time", return_value=104.0):
+            entry = nova_guard._boot_observation_entry(attempt, success=True, reason="running")
+
+        self.assertEqual(entry["restart_origin"], "guard_supervisor")
+        self.assertEqual(entry["restart_action"], "supervised_restart")
+        self.assertEqual(entry["restart_cause_reason"], "heartbeat_stale")
 
     def test_supervisor_tick_waits_for_resolution_before_restart_wait(self):
         attempt = nova_guard.GuardAttempt(

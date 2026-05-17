@@ -1,4 +1,5 @@
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -62,6 +63,47 @@ class TestReleaseStatusService(unittest.TestCase):
         self.assertEqual(payload.get("latest_follow_up_owner"), "release-ops")
         self.assertEqual(payload.get("latest_validation_machine"), "RC-VM-01")
         self.assertEqual(len(payload.get("recent_entries") or []), 3)
+
+    def test_status_payload_marks_release_stale_when_source_changed_after_build(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            ledger_path = root / "runtime" / "exports" / "release_packages" / "release_ledger.jsonl"
+            ledger_path.parent.mkdir(parents=True)
+            ledger_path.write_text(
+                "\n".join([
+                    json.dumps({
+                        "recorded_at": "2026-03-30T16:09:45.0928881-05:00",
+                        "event": "build",
+                        "artifact_name": "artifact-a.zip",
+                        "artifact_path": str(ledger_path.parent / "artifact-a.zip"),
+                        "artifact_version": "2026.03.30.1",
+                        "release_channel": "rc",
+                        "release_label": "auto-version-check",
+                    }),
+                    json.dumps({
+                        "recorded_at": "2026-03-30T16:12:10.0000000-05:00",
+                        "event": "verify",
+                        "artifact_name": "artifact-a.zip",
+                        "artifact_path": str(ledger_path.parent / "artifact-a.zip"),
+                        "artifact_version": "2026.03.30.1",
+                        "release_channel": "rc",
+                        "release_label": "auto-version-check",
+                        "verification_result": "pass",
+                    }),
+                ]),
+                encoding="utf-8",
+            )
+            source_file = root / "nova_core.py"
+            source_file.write_text("print('changed')\n", encoding="utf-8")
+            os.utime(source_file, (1900000000, 1900000000))
+
+            payload = RELEASE_STATUS_SERVICE.status_payload(ledger_path, limit=5, source_root=root)
+
+        self.assertEqual(payload.get("latest_readiness_state"), "source-changed-after-build")
+        self.assertFalse(payload.get("latest_ready_to_ship"))
+        self.assertTrue(payload.get("latest_artifact_stale"))
+        self.assertTrue(payload.get("latest_source_changed_after_build"))
+        self.assertIn("nova_core.py", payload.get("latest_source_changed_after_build_sample") or [])
 
 
 if __name__ == "__main__":

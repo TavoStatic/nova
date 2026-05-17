@@ -19,15 +19,15 @@ def truthful_limit_reply(
     else:
         base = "I don't know that based on what I can verify right now, and I don't want to make it up."
 
-    learning_invitation = "If you know the answer or want to correct me, tell me and I'll store it so I do better next time."
+    missing_context_invitation = "Give me the missing context or a grounded result, and I can use it in this conversation."
 
     if not include_next_step:
-        return base + " " + learning_invitation
+        return base + " " + missing_context_invitation
     if looks_like_mixed_info_request_turn_fn(normalized):
-        return base + " Please split the request or tell me which part you want me to handle first. " + learning_invitation
+        return base + " " + missing_context_invitation
     if is_explicit_request_fn(normalized) or "?" in normalized:
-        return base + " If you want, I can ask a clarifying question or use a grounded source or tool if one is available. " + learning_invitation
-    return base + " If you want, I can stay on the current thread, ask a clarifying question, or use a grounded source or tool if one is available. " + learning_invitation
+        return base + " Use a grounded source, a tool result, or the missing context and I will stay with it."
+    return base + " Stay on the current thread by giving the missing context or a grounded result."
 
 
 def attach_learning_invitation(
@@ -41,13 +41,13 @@ def attach_learning_invitation(
         return reply
 
     normalized = normalize_turn_text_fn(reply)
-    if "correct me" in normalized and ("store it" in normalized or "do better next time" in normalized):
+    if "missing context" in normalized or "grounded result" in normalized:
         return reply
 
     if not truthful_limit:
         return reply
 
-    suffix = "If you know the answer or want to correct me, tell me and I'll store it so I do better next time."
+    suffix = "Give me the missing context or a grounded result, and I can use it in this conversation."
     return reply + " " + suffix
 
 

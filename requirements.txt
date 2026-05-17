@@ -5,3 +5,6 @@ sounddevice
 scipy
 pyttsx3
 winsdk
+mss
+Pillow
+opencv-python

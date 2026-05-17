@@ -3,6 +3,15 @@ from __future__ import annotations
 import os
 import time
 
+from services.data_pipeline_registry import list_pipeline_summaries
+from services.nova_grounded_self_report import GROUNDED_SELF_REPORT_SERVICE
+from services.regression_lanes import SOURCE_PROFILE_LANES
+from services.regression_profile_inventory import build_regression_profile_inventory_payload
+from services.nova_root_inventory import build_source_root_inventory_payload
+from services.nova_wiring_inventory import build_root_closure_inventory_payload
+from services.nova_wiring_inventory import build_wiring_inventory_payload
+from services.nova_wiring_inventory import wiring_surface_ids
+
 
 class ControlStatusService:
     """Own HTTP control-status payload assembly outside the transport layer."""
@@ -25,8 +34,8 @@ class ControlStatusService:
             "subconscious_status_summary",
             "subconscious_live_summary",
             "generated_work_queue",
-            "testing_ecology_report",
             "autonomy_maintenance_summary",
+            "work_trees_payload",
             "load_operator_macros",
             "load_backend_commands",
             "memory_events_summary",
@@ -35,8 +44,10 @@ class ControlStatusService:
             "provider_telemetry_payload",
             "runtime_summary_payload",
             "runtime_artifacts_payload",
+            "validation_artifact_truth_payload",
             "runtime_restart_analytics_payload",
             "runtime_failure_reasons_payload",
+            "port_ownership_payload",
             "action_readiness_payload",
             "release_status_payload",
             "patch_action_readiness_payload",
@@ -73,8 +84,8 @@ class ControlStatusService:
         subconscious_status_summary_fn = supplier_fns["subconscious_status_summary"]
         subconscious_live_summary_fn = supplier_fns["subconscious_live_summary"]
         generated_work_queue_fn = supplier_fns["generated_work_queue"]
-        testing_ecology_report_fn = supplier_fns["testing_ecology_report"]
         autonomy_maintenance_summary_fn = supplier_fns["autonomy_maintenance_summary"]
+        work_trees_payload_fn = supplier_fns["work_trees_payload"]
         load_operator_macros_fn = supplier_fns["load_operator_macros"]
         load_backend_commands_fn = supplier_fns["load_backend_commands"]
         memory_events_summary_fn = supplier_fns["memory_events_summary"]
@@ -83,8 +94,10 @@ class ControlStatusService:
         provider_telemetry_payload_fn = supplier_fns["provider_telemetry_payload"]
         runtime_summary_payload_fn = supplier_fns["runtime_summary_payload"]
         runtime_artifacts_payload_fn = supplier_fns["runtime_artifacts_payload"]
+        validation_artifact_truth_payload_fn = supplier_fns["validation_artifact_truth_payload"]
         runtime_restart_analytics_payload_fn = supplier_fns["runtime_restart_analytics_payload"]
         runtime_failure_reasons_payload_fn = supplier_fns["runtime_failure_reasons_payload"]
+        port_ownership_payload_fn = supplier_fns["port_ownership_payload"]
         action_readiness_payload_fn = supplier_fns["action_readiness_payload"]
         release_status_payload_fn = supplier_fns["release_status_payload"]
         patch_action_readiness_payload_fn = supplier_fns["patch_action_readiness_payload"]
@@ -119,8 +132,8 @@ class ControlStatusService:
         subconscious_summary = subconscious_status_summary_fn()
         subconscious_live_summary = subconscious_live_summary_fn()
         generated_work_queue = generated_work_queue_fn(24)
-        testing_ecology = testing_ecology_report_fn(200)
         autonomy_maintenance = autonomy_maintenance_summary_fn()
+        work_trees_payload = work_trees_payload_fn(32)
         operator_macros = load_operator_macros_fn(24)
         backend_commands = load_backend_commands_fn(40)
         memory_stats = core_module.mem_stats_payload(emit_event=False)
@@ -130,7 +143,32 @@ class ControlStatusService:
         patch_summary = core_module.patch_status_payload()
         pulse_payload = core_module.build_pulse_payload()
         update_now_pending = core_module.update_now_pending_payload()
+        try:
+            data_pipelines = {
+                "ok": True,
+                "pipelines": list_pipeline_summaries(),
+                "error": "",
+            }
+        except Exception as exc:
+            data_pipelines = {
+                "ok": False,
+                "pipelines": [],
+                "error": str(exc),
+            }
         requests_total, errors_total = metrics_totals
+        if hasattr(core_module, "ollama_health_payload"):
+            ollama_health = core_module.ollama_health_payload()
+        else:
+            ollama_health = {"ok": bool(core_module.ollama_api_up()), "status": "legacy_probe", "info": ""}
+        voice_status_payload_fn = getattr(core_module, "voice_status_payload", None)
+        voice_status = voice_status_payload_fn() if callable(voice_status_payload_fn) else {}
+        vision_status_payload_fn = getattr(core_module, "vision_status_payload", None)
+        vision_status = {}
+        if callable(vision_status_payload_fn):
+            try:
+                vision_status = vision_status_payload_fn(policy=policy, ollama_health=ollama_health)
+            except TypeError:
+                vision_status = vision_status_payload_fn()
 
         payload = self.status_payload(
             policy=policy,
@@ -140,14 +178,17 @@ class ControlStatusService:
             searx_note=searx_note,
             search_provider_priority=list(core_module.get_search_provider_priority()),
             provider_telemetry=provider_telemetry_payload_fn(ledger_summary=ledger_summary, tool_summary=tool_summary),
-            ollama_api_up=bool(core_module.ollama_api_up()),
+            ollama_api_up=bool(ollama_health.get("server_ok", ollama_health.get("ok"))),
+            ollama_health=ollama_health,
+            voice_status=voice_status,
+            vision_status=vision_status,
             chat_model=core_module.chat_model(),
             memory_enabled=bool(core_module.mem_enabled()),
             subconscious_summary=subconscious_summary,
             subconscious_live_summary=subconscious_live_summary,
             generated_work_queue=generated_work_queue,
-            testing_ecology=testing_ecology,
             autonomy_maintenance=autonomy_maintenance,
+            work_trees_payload=work_trees_payload,
             operator_macros=operator_macros,
             backend_commands=backend_commands,
             memory_scope=str((policy.get("memory") or {}).get("scope") or "private"),
@@ -166,8 +207,10 @@ class ControlStatusService:
             runtime_summary=runtime_summary_payload_fn(guard=guard_status, core=core_status, webui=webui_status),
             timeline_payload=timeline_payload,
             runtime_artifacts=runtime_artifacts_payload_fn(),
+            validation_artifact_truth=validation_artifact_truth_payload_fn(),
             runtime_restart_analytics=runtime_restart_analytics_payload_fn(),
             runtime_failures=runtime_failure_reasons_payload_fn(guard_status, core_status, webui_status, timeline_payload),
+            port_ownership=port_ownership_payload_fn(),
             live_tracking=core_module.runtime_device_location_payload(),
             action_readiness=action_readiness_payload_fn(guard_status, core_status, webui_status),
             release_status=release_status_payload_fn(),
@@ -179,6 +222,7 @@ class ControlStatusService:
             patch_action_readiness=patch_action_readiness_payload_fn(patch_summary),
             pulse_payload=pulse_payload,
             update_now_pending=update_now_pending,
+            data_pipelines=data_pipelines,
             requests_total=requests_total,
             errors_total=errors_total,
             storage_watch_summary=storage_watch_summary_fn(),
@@ -188,6 +232,12 @@ class ControlStatusService:
         payload["health_score"] = int(self_check.get("health_score", 0))
         payload["self_check_pass_ratio"] = float(self_check.get("pass_ratio", 0.0))
         payload["alerts"] = list(self_check.get("alerts") or [])
+        report_payload = GROUNDED_SELF_REPORT_SERVICE.build_payload(payload, work_trees_payload)
+        operator_attention = GROUNDED_SELF_REPORT_SERVICE.build_operator_attention(report_payload)
+        payload["operator_attention"] = operator_attention
+        payload["operator_attention_active"] = bool(operator_attention.get("active"))
+        payload["operator_attention_level"] = str(operator_attention.get("level") or "")
+        payload["operator_attention_message"] = str(operator_attention.get("message") or "")
         return payload
 
     @staticmethod
@@ -240,15 +290,80 @@ class ControlStatusService:
         update_now_pending: dict,
         requests_total: int,
         errors_total: int,
+        validation_artifact_truth: dict | None = None,
         storage_watch_summary: dict | None = None,
-        testing_ecology: dict | None = None,
+        work_trees_payload: dict | None = None,
+        ollama_health: dict | None = None,
+        voice_status: dict | None = None,
+        vision_status: dict | None = None,
+        port_ownership: dict | None = None,
+        data_pipelines: dict | None = None,
     ) -> dict:
         autonomy_payload = autonomy_maintenance.copy() if isinstance(autonomy_maintenance, dict) else {}
-        testing_ecology_payload = dict(testing_ecology or {}) if isinstance(testing_ecology, dict) else {}
+        ollama_health_payload = dict(ollama_health or {}) if isinstance(ollama_health, dict) else {}
+        port_ownership_payload = dict(port_ownership or {}) if isinstance(port_ownership, dict) else {}
+        validation_truth_payload = (
+            dict(validation_artifact_truth)
+            if isinstance(validation_artifact_truth, dict)
+            else {"ok": True, "status": "not_supplied"}
+        )
+        voice_status_payload = dict(voice_status or {}) if isinstance(voice_status, dict) else {}
+        vision_status_payload = dict(vision_status or {}) if isinstance(vision_status, dict) else {}
+        data_pipeline_payload = dict(data_pipelines or {}) if isinstance(data_pipelines, dict) else {"ok": True, "pipelines": []}
+        data_pipeline_rows = [
+            dict(item)
+            for item in list(data_pipeline_payload.get("pipelines") or [])
+            if isinstance(item, dict)
+        ]
+        voice_runtime_requested = bool(
+            voice_status_payload.get("requested", voice_status_payload.get("voice_ready", False))
+        )
+        voice_runtime_ok = bool(voice_status_payload.get("ok", not voice_runtime_requested))
+        vision_runtime_requested = bool(vision_status_payload.get("requested", False))
+        vision_runtime_ok = bool(vision_status_payload.get("ok", not vision_runtime_requested))
         payload = {
             "ok": True,
             "server_time": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "health_score": 0,
+            "self_check_pass_ratio": 0.0,
             "ollama_api_up": bool(ollama_api_up),
+            "ollama_server_ok": bool(ollama_health_payload.get("server_ok", bool(ollama_api_up))),
+            "ollama_chat_ready": bool(ollama_health_payload.get("ok", bool(ollama_api_up))),
+            "ollama_health": ollama_health_payload,
+            "ollama_health_status": str(ollama_health_payload.get("status") or ""),
+            "ollama_health_info": str(ollama_health_payload.get("info") or ""),
+            "ollama_tags_ok": bool(ollama_health_payload.get("tags_ok", bool(ollama_api_up))),
+            "ollama_chat_route_ok": bool(ollama_health_payload.get("chat_route_ok", bool(ollama_api_up))),
+            "ollama_version": str(ollama_health_payload.get("version") or ""),
+            "ollama_version_ok": bool(ollama_health_payload.get("version_ok", False)),
+            "ollama_version_status": int(ollama_health_payload.get("version_status", 0) or 0),
+            "ollama_api_contract_status": str(ollama_health_payload.get("api_contract_status") or ""),
+            "ollama_configured_model": str(ollama_health_payload.get("chat_model") or chat_model or ""),
+            "ollama_model_available": bool(ollama_health_payload.get("model_available", bool(ollama_api_up))),
+            "ollama_model_status": str(ollama_health_payload.get("model_status") or ""),
+            "ollama_available_models": list(ollama_health_payload.get("available_models") or []),
+            "voice_status": voice_status_payload,
+            "voice_runtime_status": str(voice_status_payload.get("status") or ""),
+            "voice_runtime_requested": voice_runtime_requested,
+            "voice_runtime_ok": voice_runtime_ok,
+            "voice_import_error": str(voice_status_payload.get("import_error") or ""),
+            "voice_sounddevice_loaded": bool(
+                voice_status_payload.get("sounddevice_loaded", voice_status_payload.get("sounddevice_available", False))
+            ),
+            "voice_wav_loaded": bool(voice_status_payload.get("wav_loaded", voice_status_payload.get("wav_available", False))),
+            "voice_whisper_loaded": bool(
+                voice_status_payload.get("whisper_loaded", voice_status_payload.get("whisper_available", False))
+            ),
+            "vision_status": vision_status_payload,
+            "vision_runtime_status": str(vision_status_payload.get("status") or ""),
+            "vision_runtime_requested": vision_runtime_requested,
+            "vision_runtime_ok": vision_runtime_ok,
+            "vision_missing_modules": list(vision_status_payload.get("missing_modules") or []),
+            "vision_screen_requested": bool(vision_status_payload.get("screen_requested", False)),
+            "vision_camera_requested": bool(vision_status_payload.get("camera_requested", False)),
+            "vision_model": str(vision_status_payload.get("vision_model") or ""),
+            "vision_model_available": bool(vision_status_payload.get("vision_model_available", True)),
+            "vision_note": str(vision_status_payload.get("note") or ""),
             "chat_model": chat_model,
             "memory_enabled": bool(memory_enabled),
             "subconscious_ok": bool(subconscious_summary.get("ok")),
@@ -263,20 +378,6 @@ class ControlStatusService:
             "subconscious_live_summary": subconscious_live_summary,
             "generated_work_queue_open_count": int(generated_work_queue.get("open_count", 0) or 0),
             "generated_work_queue_next_file": str((generated_work_queue.get("next_item") or {}).get("file") or ""),
-            "generated_work_queue_ecology_status": str(generated_work_queue.get("ecology_status") or ""),
-            "generated_work_queue_growth_candidate_count": int(generated_work_queue.get("growth_candidate_count", 0) or 0),
-            "generated_work_queue_contract_count": int(generated_work_queue.get("contract_count", 0) or 0),
-            "generated_work_queue_historical_count": int(generated_work_queue.get("historical_count", 0) or 0),
-            "testing_ecology": testing_ecology_payload,
-            "testing_ecology_status": str(testing_ecology_payload.get("ecology_status") or ""),
-            "testing_ecology_growth_pressure_count": int(testing_ecology_payload.get("growth_pressure_count", 0) or 0),
-            "testing_ecology_mutation_due_count": int(testing_ecology_payload.get("mutation_due_count", 0) or 0),
-            "testing_ecology_stale_evidence_count": int(testing_ecology_payload.get("stale_evidence_count", 0) or 0),
-            "testing_ecology_lifecycle_counts": dict(testing_ecology_payload.get("lifecycle_counts") or {}) if isinstance(testing_ecology_payload.get("lifecycle_counts"), dict) else {},
-            "testing_ecology_role_counts": dict(testing_ecology_payload.get("ecology_role_counts") or {}) if isinstance(testing_ecology_payload.get("ecology_role_counts"), dict) else {},
-            "testing_ecology_owner_counts": dict(testing_ecology_payload.get("owner_counts") or {}) if isinstance(testing_ecology_payload.get("owner_counts"), dict) else {},
-            "testing_ecology_origin_counts": dict(testing_ecology_payload.get("origin_counts") or {}) if isinstance(testing_ecology_payload.get("origin_counts"), dict) else {},
-            "testing_ecology_next_growth_file": str((testing_ecology_payload.get("next_growth_item") or {}).get("file") or "") if isinstance(testing_ecology_payload.get("next_growth_item"), dict) else "",
             "autonomy_maintenance": autonomy_payload,
             "operator_macros": operator_macros,
             "backend_commands": backend_commands,
@@ -303,13 +404,52 @@ class ControlStatusService:
             "runtime_summary": runtime_summary,
             "runtime_timeline": timeline_payload,
             "runtime_artifacts": runtime_artifacts,
+            "validation_artifact_truth": validation_truth_payload,
+            "validation_artifact_truth_ok": bool(validation_truth_payload.get("ok", True)),
+            "validation_artifact_truth_status": str(validation_truth_payload.get("status") or ""),
+            "validation_artifact_action_count": int(validation_truth_payload.get("action_count", 0) or 0),
+            "validation_artifact_inspected_count": int(validation_truth_payload.get("inspected_count", 0) or 0),
+            "validation_artifact_failure_count": int(
+                validation_truth_payload.get(
+                    "current_window_failure_count",
+                    validation_truth_payload.get("failure_count", 0),
+                )
+                or 0
+            ),
+            "validation_artifact_llm_unavailable_count": int(
+                validation_truth_payload.get(
+                    "current_window_llm_unavailable_count",
+                    validation_truth_payload.get("llm_unavailable_count", 0),
+                )
+                or 0
+            ),
+            "validation_artifact_hidden_by_green_regression": bool(
+                validation_truth_payload.get("hidden_by_green_regression", False)
+            ),
+            "validation_artifact_latest_failure": (
+                dict(validation_truth_payload.get("latest_failure") or {})
+                if isinstance(validation_truth_payload.get("latest_failure"), dict)
+                else {}
+            ),
             "runtime_restart_analytics": runtime_restart_analytics,
             "runtime_failures": runtime_failures,
+            "port_ownership": port_ownership_payload,
+            "port_ownership_status": str(port_ownership_payload.get("status") or ""),
+            "port_ownership_issue_count": int(port_ownership_payload.get("issue_count", 0) or 0),
             "live_tracking": live_tracking,
             "action_readiness": action_readiness,
             "release_status": release_status,
             "subconscious_summary": subconscious_summary,
             "generated_work_queue": generated_work_queue,
+            "data_pipelines": data_pipeline_payload,
+            "data_pipeline_registry_ok": bool(data_pipeline_payload.get("ok", True)),
+            "data_pipeline_registry_error": str(data_pipeline_payload.get("error") or ""),
+            "data_pipeline_count": len(data_pipeline_rows),
+            "data_pipeline_ids": [
+                str(item.get("pipeline_id") or "").strip()
+                for item in data_pipeline_rows
+                if str(item.get("pipeline_id") or "").strip()
+            ],
         }
 
         runtime_worker = autonomy_payload.get("runtime_worker") if isinstance(autonomy_payload.get("runtime_worker"), dict) else {}
@@ -318,23 +458,78 @@ class ControlStatusService:
         last_patch_cleanup = autonomy_payload.get("last_patch_cleanup") if isinstance(autonomy_payload.get("last_patch_cleanup"), dict) else {}
         last_complete_tree_archive = autonomy_payload.get("last_complete_tree_archive") if isinstance(autonomy_payload.get("last_complete_tree_archive"), dict) else {}
         last_autonomy_orchestrator = autonomy_payload.get("last_autonomy_orchestrator") if isinstance(autonomy_payload.get("last_autonomy_orchestrator"), dict) else {}
-        queue_status = str(generated_work_queue.get("status") or last_generated_queue_run.get("status") or "").strip()
-        queue_open_count = int(generated_work_queue.get("open_count", 0) or 0)
-        queue_actionable_count = int(generated_work_queue.get("actionable_count", 0) or 0)
-        queue_blocked_count = int(generated_work_queue.get("blocked_count", 0) or 0)
-        queue_ecology_status = str(generated_work_queue.get("ecology_status") or "").strip()
-        queue_growth_candidate_count = int(generated_work_queue.get("growth_candidate_count", 0) or 0)
-        queue_contract_count = int(generated_work_queue.get("contract_count", 0) or 0)
-        queue_historical_count = int(generated_work_queue.get("historical_count", 0) or 0)
-        queue_lifecycle_counts = dict(generated_work_queue.get("lifecycle_counts") or {}) if isinstance(generated_work_queue.get("lifecycle_counts"), dict) else {}
-        queue_ecology_role_counts = dict(generated_work_queue.get("ecology_role_counts") or {}) if isinstance(generated_work_queue.get("ecology_role_counts"), dict) else {}
-        queue_blocked_reason_counts = dict(generated_work_queue.get("blocked_reason_counts") or {}) if isinstance(generated_work_queue.get("blocked_reason_counts"), dict) else {}
-        queue_blocked_files = list(generated_work_queue.get("blocked_files") or []) if isinstance(generated_work_queue.get("blocked_files"), list) else []
+        generated_queue_snapshot_has_truth = any(
+            key in generated_work_queue
+            for key in ("status", "open_count", "actionable_count", "blocked_count")
+        )
+        queue_status = str(
+            generated_work_queue.get("status")
+            or autonomy_payload.get("generated_queue_status")
+            or last_generated_queue_run.get("status")
+            or ""
+        ).strip()
+        queue_open_count = int(
+            (
+                generated_work_queue.get("open_count")
+                if generated_queue_snapshot_has_truth
+                else autonomy_payload.get("queue_open_count", last_generated_queue_run.get("queue_open_count", 0))
+            )
+            or 0
+        )
+        queue_actionable_count = int(
+            (
+                generated_work_queue.get("actionable_count")
+                if generated_queue_snapshot_has_truth
+                else autonomy_payload.get("queue_actionable_count", last_generated_queue_run.get("queue_actionable_count", 0))
+            )
+            or 0
+        )
+        queue_blocked_count = int(
+            (
+                generated_work_queue.get("blocked_count")
+                if generated_queue_snapshot_has_truth
+                else autonomy_payload.get("queue_blocked_count", last_generated_queue_run.get("queue_blocked_count", 0))
+            )
+            or 0
+        )
+        queue_blocked_reason_counts = (
+            dict(generated_work_queue.get("blocked_reason_counts") or {})
+            if generated_queue_snapshot_has_truth and isinstance(generated_work_queue.get("blocked_reason_counts"), dict)
+            else (
+                dict(autonomy_payload.get("queue_blocked_reason_counts") or {})
+                if isinstance(autonomy_payload.get("queue_blocked_reason_counts"), dict)
+                else {}
+            )
+        )
+        queue_blocked_files = (
+            list(generated_work_queue.get("blocked_files") or [])
+            if generated_queue_snapshot_has_truth and isinstance(generated_work_queue.get("blocked_files"), list)
+            else (
+                list(autonomy_payload.get("queue_blocked_files") or [])
+                if isinstance(autonomy_payload.get("queue_blocked_files"), list)
+                else []
+            )
+        )
         if queue_open_count > 0 and queue_blocked_count <= 0 and queue_actionable_count <= 0:
             queue_blocked_count = queue_open_count
+        if generated_queue_snapshot_has_truth and not str(generated_work_queue.get("status") or "").strip():
+            if queue_open_count <= 0:
+                queue_status = "clear"
+            elif queue_actionable_count > 0:
+                queue_status = "actionable"
+            elif queue_blocked_count > 0:
+                queue_status = "blocked"
+            else:
+                queue_status = "open"
+        last_queue_run_status = str(last_generated_queue_run.get("status") or "").strip().lower()
+        last_queue_run_status_mismatch = bool(
+            last_queue_run_status
+            and last_queue_run_status not in {"ok", "success"}
+            and last_queue_run_status != queue_status.strip().lower()
+        )
         last_generated_queue_run_stale = any(
             (
-                str(last_generated_queue_run.get("status") or "").strip() != queue_status,
+                last_queue_run_status_mismatch,
                 int(last_generated_queue_run.get("queue_open_count", 0) or 0) != queue_open_count,
                 int(last_generated_queue_run.get("queue_actionable_count", 0) or 0) != queue_actionable_count,
                 int(last_generated_queue_run.get("queue_blocked_count", 0) or 0) != queue_blocked_count,
@@ -347,12 +542,6 @@ class ControlStatusService:
         autonomy_payload["queue_open_count"] = queue_open_count
         autonomy_payload["queue_actionable_count"] = queue_actionable_count
         autonomy_payload["queue_blocked_count"] = queue_blocked_count
-        autonomy_payload["queue_ecology_status"] = queue_ecology_status
-        autonomy_payload["queue_growth_candidate_count"] = queue_growth_candidate_count
-        autonomy_payload["queue_contract_count"] = queue_contract_count
-        autonomy_payload["queue_historical_count"] = queue_historical_count
-        autonomy_payload["queue_lifecycle_counts"] = queue_lifecycle_counts
-        autonomy_payload["queue_ecology_role_counts"] = queue_ecology_role_counts
         autonomy_payload["queue_blocked_reason_counts"] = queue_blocked_reason_counts
         autonomy_payload["queue_blocked_files"] = queue_blocked_files
         autonomy_payload["last_generated_queue_run_stale"] = last_generated_queue_run_stale
@@ -362,6 +551,9 @@ class ControlStatusService:
         payload["runtime_worker_interval_sec"] = int(runtime_worker.get("interval_sec", 0) or 0)
         payload["runtime_worker_cycle_count"] = int(runtime_worker.get("cycle_count", 0) or 0)
         payload["runtime_worker_last_completed_at"] = str(runtime_worker.get("last_completed_at") or "")
+        payload["maintenance_cycle_process_active"] = bool(runtime_worker.get("cycle_process_active", False))
+        payload["maintenance_cycle_process_count"] = int(runtime_worker.get("cycle_process_count", 0) or 0)
+        payload["maintenance_cycle_process_pids"] = list(runtime_worker.get("cycle_process_pids") or [])
         guard_running = bool((guard_status or {}).get("running"))
         if payload["runtime_worker_active"]:
             maintenance_scheduler_mode = "worker_loop"
@@ -446,18 +638,111 @@ class ControlStatusService:
         payload["last_generated_queue_report_status"] = str(last_generated_queue_run.get("latest_report_status") or "")
         payload["last_generated_queue_run_stale"] = last_generated_queue_run_stale
         payload["generated_queue_status"] = queue_status
-        payload["generated_queue_ecology_status"] = queue_ecology_status
-        payload["queue_growth_candidate_count"] = queue_growth_candidate_count
-        payload["queue_contract_count"] = queue_contract_count
-        payload["queue_historical_count"] = queue_historical_count
-        payload["queue_lifecycle_counts"] = queue_lifecycle_counts
-        payload["queue_ecology_role_counts"] = queue_ecology_role_counts
         payload["queue_open_count"] = queue_open_count
         payload["queue_actionable_count"] = queue_actionable_count
         payload["queue_blocked_count"] = queue_blocked_count
         payload["queue_blocked_reason_counts"] = queue_blocked_reason_counts
         payload["queue_blocked_files"] = queue_blocked_files
         payload["work_tree_status"] = str(last_work_tree_cycle.get("status") or "")
+        work_trees = work_trees_payload if isinstance(work_trees_payload, dict) else {}
+        work_tree_counts = work_trees.get("counts") if isinstance(work_trees.get("counts"), dict) else {}
+        work_tree_branch_count = int(work_tree_counts.get("branches", 0) or 0)
+        work_tree_open_task_count = int(work_tree_counts.get("open_tasks", 0) or 0)
+        work_tree_blocked_count = int(work_tree_counts.get("blocked", 0) or 0)
+        work_tree_pending_count = int(work_tree_counts.get("pending", 0) or 0)
+        work_tree_working_count = int(work_tree_counts.get("working", 0) or 0)
+        work_tree_complete_count = int(work_tree_counts.get("complete", 0) or 0)
+        observing_count = 0
+        latent_root_signal_count = 0
+        operator_hold_count = 0
+        self_repair_blocked_count = 0
+        self_repair_observing_count = 0
+        for tree_payload in list(work_trees.get("trees") or []):
+            if not isinstance(tree_payload, dict):
+                continue
+            for node in list(tree_payload.get("nodes") or []):
+                if not isinstance(node, dict):
+                    continue
+                status_text = str(node.get("status") or "").strip().lower()
+                resolution_text = str(node.get("resolution_state") or "").strip().lower()
+                source_type = str(node.get("source_type") or "").strip().lower()
+                work_class = str(node.get("work_class") or "").strip().lower()
+                actionability = str(node.get("actionability") or "").strip().lower()
+                source_payload = node.get("source_payload") if isinstance(node.get("source_payload"), dict) else {}
+                memory_origin = (
+                    source_payload.get("memory_bootstrap_origin")
+                    if isinstance(source_payload.get("memory_bootstrap_origin"), dict)
+                    else {}
+                )
+                memory_bootstrap = (
+                    source_payload.get("memory_bootstrap")
+                    if isinstance(source_payload.get("memory_bootstrap"), dict)
+                    else {}
+                )
+                memory_operator_hold = bool(
+                    status_text == "blocked"
+                    and source_type == "memory_health"
+                    and work_class == "governance_pressure"
+                    and str(memory_origin.get("status") or memory_bootstrap.get("origin_status") or "").strip().lower()
+                    == "pending_operator_confirmation"
+                )
+                operator_hold = memory_operator_hold
+                if operator_hold:
+                    operator_hold_count += 1
+                elif status_text == "blocked":
+                    self_repair_blocked_count += 1
+                if resolution_text == "observing" and status_text not in {"complete", "archived"}:
+                    observing_count += 1
+                    if operator_hold:
+                        continue
+                    self_repair_observing_count += 1
+                    if (
+                        str(node.get("source_type") or "").strip().lower() == "subconscious"
+                        and str(node.get("work_class") or "").strip().lower() == "candidate_review"
+                    ):
+                        latent_root_signal_count += 1
+        if self_repair_blocked_count > 0 or self_repair_observing_count > 0:
+            work_tree_truth_status = "blocked_observing"
+        elif operator_hold_count > 0:
+            work_tree_truth_status = "operator_hold"
+        elif work_tree_open_task_count > 0 or work_tree_pending_count > 0 or work_tree_working_count > 0:
+            work_tree_truth_status = "open"
+        else:
+            work_tree_truth_status = "clear"
+        payload["work_tree_truth_status"] = work_tree_truth_status
+        payload["work_tree_tree_count"] = int(work_tree_counts.get("total", 0) or 0)
+        payload["work_tree_active_tree_count"] = int(work_tree_counts.get("active", 0) or 0)
+        payload["work_tree_branch_count"] = work_tree_branch_count
+        payload["work_tree_open_task_count"] = work_tree_open_task_count
+        payload["work_tree_blocked_branch_count"] = work_tree_blocked_count
+        payload["work_tree_operator_hold_branch_count"] = operator_hold_count
+        payload["work_tree_self_repair_blocked_branch_count"] = self_repair_blocked_count
+        payload["work_tree_self_repair_observing_branch_count"] = self_repair_observing_count
+        payload["work_tree_pending_branch_count"] = work_tree_pending_count
+        payload["work_tree_working_branch_count"] = work_tree_working_count
+        payload["work_tree_complete_branch_count"] = work_tree_complete_count
+        payload["work_tree_observing_branch_count"] = observing_count
+        payload["work_tree_latent_root_signal_count"] = latent_root_signal_count
+        payload["work_tree_truth"] = {
+            "status": work_tree_truth_status,
+            "tree_count": payload["work_tree_tree_count"],
+            "active_tree_count": payload["work_tree_active_tree_count"],
+            "branch_count": work_tree_branch_count,
+            "open_task_count": work_tree_open_task_count,
+            "blocked_branch_count": work_tree_blocked_count,
+            "operator_hold_branch_count": operator_hold_count,
+            "self_repair_blocked_branch_count": self_repair_blocked_count,
+            "self_repair_observing_branch_count": self_repair_observing_count,
+            "observing_branch_count": observing_count,
+            "latent_root_signal_count": latent_root_signal_count,
+        }
+        autonomy_payload["work_tree_truth_status"] = work_tree_truth_status
+        autonomy_payload["work_tree_blocked_branch_count"] = work_tree_blocked_count
+        autonomy_payload["work_tree_observing_branch_count"] = observing_count
+        autonomy_payload["work_tree_latent_root_signal_count"] = latent_root_signal_count
+        autonomy_payload["work_tree_operator_hold_branch_count"] = operator_hold_count
+        autonomy_payload["work_tree_self_repair_blocked_branch_count"] = self_repair_blocked_count
+        autonomy_payload["work_tree_self_repair_observing_branch_count"] = self_repair_observing_count
         payload["patch_cleanup_status"] = str(last_patch_cleanup.get("status") or "")
         payload["patch_cleanup_at"] = str(last_patch_cleanup.get("ts") or "")
         payload["patch_cleanup_orphan_rejected_count"] = int(last_patch_cleanup.get("orphan_rejected_count", 0) or 0)
@@ -477,8 +762,17 @@ class ControlStatusService:
         payload["storage_watch_status"] = str(storage_watch.get("status") or "")
         payload["storage_watch_note"] = str(storage_watch.get("note") or "")
         payload["storage_watch_total_bytes"] = int(storage_watch.get("total_bytes", 0) or 0)
+        payload["storage_watch_watched_total_bytes"] = int(storage_watch.get("watched_total_bytes", 0) or 0)
+        payload["runtime_storage_total_bytes"] = int(storage_watch.get("runtime_total_bytes", 0) or 0)
+        payload["runtime_storage_file_count"] = int(storage_watch.get("runtime_file_count", 0) or 0)
         payload["patch_snapshot_count"] = int(storage_watch.get("patch_snapshot_count", 0) or 0)
         payload["kidney_snapshot_count"] = int(storage_watch.get("kidney_snapshot_count", 0) or 0)
+        payload["release_validation_extract_count"] = int(storage_watch.get("release_validation_extract_count", 0) or 0)
+        payload["release_validation_extract_bytes"] = int(storage_watch.get("release_validation_extract_bytes", 0) or 0)
+        payload["release_stage_count"] = int(storage_watch.get("release_stage_count", 0) or 0)
+        payload["release_stage_bytes"] = int(storage_watch.get("release_stage_bytes", 0) or 0)
+        payload["release_zip_count"] = int(storage_watch.get("release_zip_count", 0) or 0)
+        payload["release_zip_bytes"] = int(storage_watch.get("release_zip_bytes", 0) or 0)
 
         payload["memory_stats_ok"] = bool(memory_stats.get("ok", False))
         payload["memory_entries_total"] = int(memory_stats.get("total", 0) or 0)
@@ -530,6 +824,10 @@ class ControlStatusService:
         payload["tool_events_avg_latency_ms"] = int(tool_summary.get("avg_latency_ms", 0))
         payload["tool_avg_latency_ms_by_tool"] = tool_summary.get("avg_latency_ms_by_tool") or {}
         payload["last_tool_error_summary"] = str(tool_summary.get("last_error_summary") or "")
+        payload["last_tool_error_ts"] = int(tool_summary.get("last_error_ts", 0) or 0)
+        last_tool_error_age = tool_summary.get("last_error_age_sec")
+        payload["last_tool_error_age_sec"] = int(last_tool_error_age) if isinstance(last_tool_error_age, (int, float)) else None
+        payload["last_tool_error_stale"] = bool(tool_summary.get("last_error_stale", False))
         payload["last_tool_name"] = str(last_tool.get("tool") or "")
         payload["last_tool_status"] = str(last_tool.get("status") or "")
         payload["last_tool_user"] = str(last_tool.get("user") or "")
@@ -608,6 +906,56 @@ class ControlStatusService:
         payload["core_heartbeat_age_sec"] = core_status.get("heartbeat_age_sec")
         payload["requests_total"] = int(requests_total)
         payload["errors_total"] = int(errors_total)
+        test_profile_inventory = build_regression_profile_inventory_payload(test_lanes=SOURCE_PROFILE_LANES)
+        payload["test_profile_inventory"] = test_profile_inventory
+        payload["test_profile_inventory_ok"] = bool(test_profile_inventory.get("ok", False))
+        payload["test_profile_profile_gap_count"] = int(test_profile_inventory.get("profile_gap_count", 0) or 0)
+        payload["test_profile_profile_drift_count"] = int(test_profile_inventory.get("profile_drift_count", 0) or 0)
+        payload["test_profile_profile_attention_count"] = int(test_profile_inventory.get("profile_attention_count", 0) or 0)
+        payload["test_profile_curated_target_count"] = int(test_profile_inventory.get("curated_target_count", 0) or 0)
+        payload["test_profile_curated_test_file_count"] = int(test_profile_inventory.get("curated_test_file_count", 0) or 0)
+        payload["test_profile_root_test_file_count"] = int(test_profile_inventory.get("root_test_file_count", 0) or 0)
+        payload["test_profile_all_test_file_count"] = int(test_profile_inventory.get("all_test_file_count", 0) or 0)
+        payload["test_profile_source_observed_count"] = int(
+            test_profile_inventory.get("source_observed_count", test_profile_inventory.get("outside_curated_count", 0)) or 0
+        )
+        payload["test_profile_outside_curated_count"] = int(test_profile_inventory.get("outside_curated_count", 0) or 0)
+        payload["test_profile_install_profile_inactive_count"] = int(test_profile_inventory.get("install_profile_inactive_count", 0) or 0)
+        payload["test_profile_install_profile_optional_inactive_count"] = int(
+            test_profile_inventory.get("install_profile_optional_inactive_count", 0) or 0
+        )
+        payload["test_profile_unclassified_count"] = int(test_profile_inventory.get("unclassified_count", 0) or 0)
+        source_root_inventory = build_source_root_inventory_payload(wiring_surface_ids=wiring_surface_ids())
+        payload["source_root_inventory"] = source_root_inventory
+        payload["source_root_inventory_ok"] = bool(source_root_inventory.get("ok", False))
+        payload["source_root_inventory_root_count"] = int(source_root_inventory.get("root_count", 0) or 0)
+        payload["source_root_inventory_gap_count"] = int(source_root_inventory.get("gap_count", 0) or 0)
+        payload["source_root_inventory_unwired_roots"] = list(source_root_inventory.get("unwired_roots") or [])
+        payload["source_root_inventory_missing_evidence_roots"] = list(
+            source_root_inventory.get("missing_evidence_roots") or []
+        )
+        payload["source_root_inventory_source_file_count"] = int(source_root_inventory.get("source_file_count", 0) or 0)
+        payload["source_root_inventory_unclassified_source_file_count"] = int(
+            source_root_inventory.get("unclassified_source_file_count", 0) or 0
+        )
+        payload["source_root_inventory_unclassified_source_files"] = list(
+            source_root_inventory.get("unclassified_source_files") or []
+        )
+        root_closure_seed = {
+            **payload,
+            "root_closure_inventory": {},
+            "root_closure_inventory_ok": True,
+            "root_closure_inventory_gap_count": 0,
+        }
+        root_closure_inventory = build_root_closure_inventory_payload(root_closure_seed)
+        payload["root_closure_inventory"] = root_closure_inventory
+        payload["root_closure_inventory_ok"] = bool(root_closure_inventory.get("ok", False))
+        payload["root_closure_inventory_gap_count"] = int(root_closure_inventory.get("gap_count", 0) or 0)
+        payload["root_closure_inventory_gap_roots"] = list(root_closure_inventory.get("gap_roots") or [])
+        wiring_inventory = build_wiring_inventory_payload(payload)
+        payload["wiring_inventory"] = wiring_inventory
+        payload["wiring_inventory_ok"] = bool(wiring_inventory.get("ok", False))
+        payload["wiring_inventory_gap_count"] = int(wiring_inventory.get("gap_count", 0) or 0)
         return payload
 
 

@@ -90,6 +90,45 @@ class TestRuntimeControlService(unittest.TestCase):
         self.assertEqual(((payload.get("last_autonomy_orchestrator") or {}).get("action") or {}).get("act"), "generated_queue_run_next")
         self.assertEqual((payload.get("last_autonomy_orchestrator") or {}).get("ledger_status"), "recorded")
 
+    def test_autonomy_maintenance_summary_prefers_latest_queue_sync_over_stale_run(self):
+        runtime_processes = SimpleNamespace(
+            logical_service_processes=lambda _script: [],
+            select_logical_process=lambda logical, pid=None, create_time=None: None,
+        )
+        state = {
+            "runtime_worker": {"last_cycle_status": "ok"},
+            "last_generated_queue_run": {
+                "status": "actionable",
+                "queue_open_count": 1,
+                "queue_actionable_count": 1,
+                "queue_blocked_count": 0,
+                "selected_file": "old.json",
+            },
+            "last_generated_queue_sync": {
+                "status": "ok",
+                "queue_status": "clear",
+                "open_count": 0,
+                "actionable_count": 0,
+                "blocked_count": 0,
+                "queue_count": 25,
+                "ts": "2026-05-15 22:19:12",
+            },
+        }
+
+        payload = RUNTIME_CONTROL_SERVICE.autonomy_maintenance_summary(
+            state_payload=state,
+            maintenance_py=Path("c:/Nova/autonomy_maintenance.py"),
+            runtime_processes_module=runtime_processes,
+            strftime_fn=lambda _fmt: "2026-05-15",
+        )
+
+        self.assertEqual(payload.get("generated_queue_status"), "clear")
+        self.assertEqual(payload.get("queue_open_count"), 0)
+        self.assertEqual(payload.get("queue_actionable_count"), 0)
+        self.assertEqual(payload.get("queue_blocked_count"), 0)
+        self.assertEqual((payload.get("last_generated_queue_sync") or {}).get("queue_count"), 25)
+        self.assertTrue(payload.get("last_generated_queue_run_stale"))
+
     def test_autonomy_maintenance_summary_marks_missing_runtime_worker_stale(self):
         runtime_processes = SimpleNamespace(
             logical_service_processes=lambda _script: [],
@@ -143,6 +182,66 @@ class TestRuntimeControlService(unittest.TestCase):
         self.assertTrue(worker.get("stale_identity"))
         self.assertIsNone(worker.get("pid"))
         self.assertIsNone(worker.get("create_time"))
+
+    def test_autonomy_maintenance_summary_does_not_treat_guard_cycle_as_worker_loop(self):
+        runtime_processes = SimpleNamespace(
+            logical_service_processes=lambda _script: [
+                {
+                    "pid": 9876,
+                    "create_time": 55.0,
+                    "cmdline": ["python.exe", "C:/Nova/autonomy_maintenance.py"],
+                }
+            ],
+            select_logical_process=lambda logical, pid=None, create_time=None: logical[0] if logical else None,
+        )
+        state = {
+            "runtime_worker": {
+                "last_cycle_status": "ok",
+                "pid": 4321,
+                "create_time": 12.5,
+            }
+        }
+
+        payload = RUNTIME_CONTROL_SERVICE.autonomy_maintenance_summary(
+            state_payload=state,
+            maintenance_py=Path("c:/Nova/autonomy_maintenance.py"),
+            runtime_processes_module=runtime_processes,
+            strftime_fn=lambda _fmt: "2026-04-27",
+        )
+
+        worker = dict(payload.get("runtime_worker") or {})
+        self.assertEqual(worker.get("last_cycle_status"), "stopped")
+        self.assertFalse(worker.get("active"))
+        self.assertTrue(worker.get("stale_identity"))
+        self.assertTrue(worker.get("cycle_process_active"))
+        self.assertEqual(worker.get("cycle_process_count"), 1)
+        self.assertEqual(worker.get("cycle_process_pids"), [9876])
+
+    def test_autonomy_maintenance_summary_recognizes_loop_worker_process(self):
+        runtime_processes = SimpleNamespace(
+            logical_service_processes=lambda _script: [
+                {
+                    "pid": 9876,
+                    "create_time": 55.0,
+                    "cmdline": ["python.exe", "C:/Nova/autonomy_maintenance.py", "--loop", "--interval-sec", "300"],
+                }
+            ],
+            select_logical_process=lambda logical, pid=None, create_time=None: logical[0] if logical else None,
+        )
+
+        payload = RUNTIME_CONTROL_SERVICE.autonomy_maintenance_summary(
+            state_payload={"runtime_worker": {"last_cycle_status": "stopped"}},
+            maintenance_py=Path("c:/Nova/autonomy_maintenance.py"),
+            runtime_processes_module=runtime_processes,
+            strftime_fn=lambda _fmt: "2026-04-27",
+        )
+
+        worker = dict(payload.get("runtime_worker") or {})
+        self.assertEqual(worker.get("last_cycle_status"), "running")
+        self.assertTrue(worker.get("active"))
+        self.assertFalse(worker.get("stale_identity"))
+        self.assertFalse(worker.get("cycle_process_active"))
+        self.assertEqual(worker.get("pid"), 9876)
 
     def test_autonomy_maintenance_summary_preserves_patch_queue_fields(self):
         runtime_processes = SimpleNamespace(

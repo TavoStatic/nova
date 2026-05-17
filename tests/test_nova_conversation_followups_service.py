@@ -120,6 +120,21 @@ class TestNovaConversationFollowupsService(unittest.TestCase):
             "web peims attendance rules",
         )
 
+    def test_llm_fallback_does_not_infer_hidden_state_from_chat_content(self):
+        state = nova_conversation_followups.infer_post_reply_conversation_state(
+            "what else do you know about me?",
+            planner_decision="llm_fallback",
+            turns=[("user", "what else do you know about me?")],
+            fallback_state={"kind": "retrieval", "subject": "web_search"},
+            make_tool_conversation_state_fn=lambda tool, query, output: {"kind": "tool"},
+            infer_profile_conversation_state_fn=lambda text: {"kind": "identity_profile", "subject": "developer"},
+            is_location_recall_query_fn=lambda text: True,
+            looks_like_location_recall_followup_fn=lambda turns, text: True,
+            make_conversation_state_fn=nova_conversation_followups.make_conversation_state,
+        )
+
+        self.assertEqual(state, {"kind": "retrieval", "subject": "web_search"})
+
 
 if __name__ == "__main__":
     unittest.main()

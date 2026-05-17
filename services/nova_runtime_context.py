@@ -83,18 +83,29 @@ def resolve_python_executable(base_dir: Path) -> str:
 
 
 BASE_DIR = resolve_base_dir()
+RUNTIME_SCOPE = runtime_scope_name()
 RUNTIME_DIR = resolve_runtime_dir(BASE_DIR)
-LOG_DIR = BASE_DIR / "logs"
-MEMORY_DIR = BASE_DIR / "memory"
+LOG_DIR = (
+    _path_from_env(os.environ["NOVA_LOG_DIR"], base_dir=BASE_DIR)
+    if str(os.environ.get("NOVA_LOG_DIR") or "").strip()
+    else (RUNTIME_DIR / "logs" if RUNTIME_SCOPE == "validation" else BASE_DIR / "logs")
+)
+MEMORY_DIR = (
+    _path_from_env(os.environ["NOVA_MEMORY_DIR"], base_dir=BASE_DIR)
+    if str(os.environ.get("NOVA_MEMORY_DIR") or "").strip()
+    else (RUNTIME_DIR / "memory" if RUNTIME_SCOPE == "validation" else BASE_DIR / "memory")
+)
 ACTION_LEDGER_DIR = RUNTIME_DIR / "actions"
 MEMORY_EVENTS_LOG = RUNTIME_DIR / "memory_events.jsonl"
 HEALTH_LOG = RUNTIME_DIR / "health.log"
 IDENTITY_FILE = MEMORY_DIR / "identity.json"
 LEARNED_FACTS_FILE = MEMORY_DIR / "learned_facts.json"
+MEMORY_BOOTSTRAP_ORIGIN_FILE = MEMORY_DIR / "bootstrap_origin.json"
 BEHAVIOR_METRICS_FILE = RUNTIME_DIR / "behavior_metrics.json"
 SELF_REFLECTION_LOG = RUNTIME_DIR / "self_reflection.jsonl"
 AUTONOMY_MAINTENANCE_FILE = RUNTIME_DIR / "autonomy_maintenance_state.json"
 AUTONOMY_ORCHESTRATOR_LEDGER_FILE = RUNTIME_DIR / "autonomy_orchestrator_ledger.jsonl"
+OPERATOR_OUTBOX_FILE = RUNTIME_DIR / "operator_outbox.jsonl"
 PULSE_SNAPSHOT_FILE = RUNTIME_DIR / "pulse_snapshot.json"
 UPDATE_NOW_PENDING_FILE = RUNTIME_DIR / "update_now_pending.json"
 DEVICE_LOCATION_FILE = RUNTIME_DIR / "device_location.json"

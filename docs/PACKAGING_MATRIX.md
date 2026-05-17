@@ -63,6 +63,7 @@ Inputs intentionally supplied by the operator or deployment environment, rather 
 | `codex_*` scratch files and directories | Disposable runtime artifacts | No | Local agent probes, reflection scratch space, pulse tests, and health traces |
 | `knowledge/packs/*` active pack content | Operator-provided inputs | No by default | Optional domain extension points loaded explicitly by operators |
 | `knowledge/peims/`, `knowledge/peims_knowledge_pack.zip` | Operator-provided inputs | No | Public repo no longer treats PEIMS content as bundled product knowledge |
+| `data_sources/*/local_config.json`, `data_sources/*/operator_intake.jsonl`, `data_sources/*/lane_control.json` | Operator-provided inputs | No | Lane-local credentials, intake notes, and control toggles remain machine-local and must not ship in release artifacts |
 | chat users, control credentials, env vars | Operator-provided inputs | No | Deployment-specific auth and secrets |
 | external model/runtime backends such as local Ollama availability | Operator-provided inputs | No | Runtime dependency supplied by the deployment environment |
 

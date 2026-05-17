@@ -660,11 +660,21 @@ def _storage_watch_truth_reply(core) -> str:
     total_mb = float(snapshot.get("total_bytes", 0) or 0) / (1024 * 1024)
     patch_count = int(snapshot.get("patch_snapshot_count", 0) or 0)
     kidney_count = int(snapshot.get("kidney_snapshot_count", 0) or 0)
+    release_extract_count = int(snapshot.get("release_validation_extract_count", 0) or 0)
+    release_extract_mb = float(snapshot.get("release_validation_extract_bytes", 0) or 0) / (1024 * 1024)
+    release_stage_count = int(snapshot.get("release_stage_count", 0) or 0)
+    release_stage_mb = float(snapshot.get("release_stage_bytes", 0) or 0) / (1024 * 1024)
+    release_zip_count = int(snapshot.get("release_zip_count", 0) or 0)
+    release_zip_mb = float(snapshot.get("release_zip_bytes", 0) or 0) / (1024 * 1024)
     health = "healthy" if status == "ok" else "not fully healthy"
     return (
-        f"Nova's snapshot storage is {health} right now. "
+        f"Nova's watched storage is {health} right now. "
         f"The storage watch is `{status}` with `{patch_count}` patch rollback snapshot(s), "
-        f"`{kidney_count}` kidney cleanup snapshot(s), and `{total_mb:.1f}` MB total snapshot storage. "
+        f"`{kidney_count}` kidney cleanup snapshot(s), "
+        f"`{release_extract_count}` release validation extract(s) at `{release_extract_mb:.1f}` MB, "
+        f"`{release_stage_count}` release stage dir(s) at `{release_stage_mb:.1f}` MB, "
+        f"`{release_zip_count}` release package zip(s) at `{release_zip_mb:.1f}` MB, "
+        f"and `{total_mb:.1f}` MB total watched storage. "
         f"{str(snapshot.get('note') or '').strip().capitalize()}."
     )
 
@@ -674,14 +684,27 @@ def _storage_watch_warning_reply(core) -> str:
     count_limit = int(snapshot.get("kidney_snapshot_warn_count", 24) or 24)
     total_limit_mb = float(snapshot.get("kidney_snapshot_warn_total_mb", 128) or 128)
     patch_limit = int(snapshot.get("patch_snapshot_warn_count", 3) or 3)
+    release_extract_limit_mb = float(snapshot.get("release_validation_extract_warn_total_mb", 1024) or 1024)
+    release_stage_limit_mb = float(snapshot.get("release_stage_warn_total_mb", 256) or 256)
+    release_zip_limit = int(snapshot.get("release_zip_warn_count", 12) or 12)
+    release_zip_limit_mb = float(snapshot.get("release_zip_warn_total_mb", 1024) or 1024)
     patch_count = int(snapshot.get("patch_snapshot_count", 0) or 0)
     kidney_count = int(snapshot.get("kidney_snapshot_count", 0) or 0)
+    release_extract_count = int(snapshot.get("release_validation_extract_count", 0) or 0)
+    release_stage_count = int(snapshot.get("release_stage_count", 0) or 0)
+    release_zip_count = int(snapshot.get("release_zip_count", 0) or 0)
     total_mb = float(snapshot.get("total_bytes", 0) or 0) / (1024 * 1024)
     status = str(snapshot.get("status") or "unknown")
     return (
         f"The storage watch warning boundary is crossed if kidney cleanup snapshots rise above `{count_limit}`, "
-        f"if total snapshot storage climbs past `{total_limit_mb:.0f}` MB, or if patch rollback snapshots build past `{patch_limit}` retained file(s). "
-        f"Right now it is `{status}` with `{patch_count}` patch snapshot(s), `{kidney_count}` kidney snapshot(s), and `{total_mb:.1f}` MB total."
+        f"if total legacy snapshot storage climbs past `{total_limit_mb:.0f}` MB, "
+        f"if patch rollback snapshots build past `{patch_limit}` retained file(s), "
+        f"if release validation extracts climb past `{release_extract_limit_mb:.0f}` MB, "
+        f"if release package stages climb past `{release_stage_limit_mb:.0f}` MB, "
+        f"or if release package zips rise past `{release_zip_limit}` file(s) or `{release_zip_limit_mb:.0f}` MB. "
+        f"Right now it is `{status}` with `{patch_count}` patch snapshot(s), `{kidney_count}` kidney snapshot(s), "
+        f"`{release_extract_count}` release extract(s), `{release_stage_count}` release stage dir(s), "
+        f"`{release_zip_count}` release zip(s), and `{total_mb:.1f}` MB total watched storage."
     )
 
 
@@ -911,8 +934,10 @@ def maybe_handle_deterministic_sequence(
     core,
     branch_group: str = "all",
 ) -> tuple[str, dict, str, int] | None:
-    if branch_group not in {"all", "operational", "general"}:
+    if branch_group not in {"all", "operational", "general", "none"}:
         raise ValueError(f"Unsupported branch_group: {branch_group}")
+    if branch_group == "none":
+        return None
 
     allow_general = branch_group in {"all", "general"}
     allow_operational = branch_group in {"all", "operational"}
@@ -971,7 +996,7 @@ def maybe_handle_deterministic_sequence(
             "tool_result": reply,
             "grounded": bool(story),
         }, "timed", 0
-    if allow_operational and is_student_data_attendance_rules_query(text):
+    if allow_general and is_student_data_attendance_rules_query(text):
         trace("grounded_lookup", "matched", tool="student_data_attendance")
         reply = student_data_attendance_rules_reply()
         return normalize_reply(reply), {
@@ -981,7 +1006,7 @@ def maybe_handle_deterministic_sequence(
             "tool_result": reply,
             "grounded": "[source:" in reply.lower(),
         }, "timed", 0
-    if allow_operational and is_developer_profile_request(text):
+    if allow_general and is_developer_profile_request(text):
         trace("deterministic_reply", "matched", detail="developer_profile")
         reply = developer_profile_reply(turns, text)
         return normalize_reply(reply), {

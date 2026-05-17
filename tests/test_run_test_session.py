@@ -7,8 +7,9 @@ from unittest import mock
 
 import nova_core
 import nova_http
-import supervisor
+from services.supervisor_identity_rules import session_fact_recall_rule
 from scripts.run_test_session import compare_sessions
+from scripts.run_test_session import _comparison_failed
 from scripts.run_test_session import _isolated_runner_state
 from scripts.run_test_session import load_session
 from scripts.run_test_session import run_cli_session
@@ -256,6 +257,81 @@ class TestRunTestSessionIsolation(unittest.TestCase):
 
         self.assertEqual(comparison.get("diffs"), [])
 
+    def test_compare_sessions_surfaces_runtime_error_answers_even_without_drift(self):
+        cli = {
+            "mode": "cli",
+            "turns": [
+                {
+                    "assistant": "(error: LLM service unavailable)",
+                    "planner_decision": "llm_fallback",
+                    "route_summary": "input:received -> llm_call:started -> finalize:llm_fallback",
+                    "active_subject": "",
+                    "continuation_used": False,
+                    "probe_summary": "All green",
+                    "probe_results": [],
+                }
+            ],
+        }
+        http = {
+            "mode": "http",
+            "turns": [
+                {
+                    "assistant": "(error: LLM service unavailable)",
+                    "planner_decision": "llm_fallback",
+                    "route_summary": "input:received -> llm_call:started -> finalize:llm_fallback",
+                    "active_subject": "",
+                    "continuation_used": False,
+                    "probe_summary": "All green",
+                    "probe_results": [],
+                }
+            ],
+        }
+
+        comparison = compare_sessions(cli, http)
+
+        self.assertEqual(comparison.get("diffs"), [])
+        self.assertEqual(comparison.get("runtime_failure_count"), 2)
+        self.assertEqual((comparison.get("cli_runtime_failures") or [])[0]["failure_kind"], "llm_service_unavailable")
+        self.assertEqual((comparison.get("http_runtime_failures") or [])[0]["failure_kind"], "llm_service_unavailable")
+        self.assertTrue(_comparison_failed(comparison))
+
+    def test_compare_sessions_surfaces_specific_ollama_chat_errors(self):
+        cli = {
+            "mode": "cli",
+            "turns": [
+                {
+                    "assistant": "(error: Ollama chat API unavailable: /api/chat returned 404)",
+                    "planner_decision": "llm_fallback",
+                    "route_summary": "input:received -> llm_call:started -> finalize:llm_fallback",
+                    "active_subject": "",
+                    "continuation_used": False,
+                    "probe_summary": "All green",
+                    "probe_results": [],
+                }
+            ],
+        }
+        http = {
+            "mode": "http",
+            "turns": [
+                {
+                    "assistant": "(error: Ollama chat failed: connection refused)",
+                    "planner_decision": "llm_fallback",
+                    "route_summary": "input:received -> llm_call:started -> finalize:llm_fallback",
+                    "active_subject": "",
+                    "continuation_used": False,
+                    "probe_summary": "All green",
+                    "probe_results": [],
+                }
+            ],
+        }
+
+        comparison = compare_sessions(cli, http)
+
+        self.assertEqual(comparison.get("runtime_failure_count"), 2)
+        self.assertEqual((comparison.get("cli_runtime_failures") or [])[0]["failure_kind"], "llm_service_unavailable")
+        self.assertEqual((comparison.get("http_runtime_failures") or [])[0]["failure_kind"], "llm_service_unavailable")
+        self.assertTrue(_comparison_failed(comparison))
+
     def test_compare_sessions_tolerates_reported_fact_restatement(self):
         run_tools_result = {
             "mode": "run_tools",
@@ -297,7 +373,7 @@ class TestRunTestSessionIsolation(unittest.TestCase):
             ("user", "What codeword did I just ask you to remember?"),
         ]
 
-        result = supervisor.session_fact_recall_rule(
+        result = session_fact_recall_rule(
             "What codeword did I just ask you to remember?",
             "what codeword did i just ask you to remember?",
             None,
@@ -311,7 +387,7 @@ class TestRunTestSessionIsolation(unittest.TestCase):
         self.assertEqual(result.get("fact_target"), "codeword")
         self.assertEqual(result.get("fact_value"), "cobalt sparrow")
 
-    def test_execute_registered_supervisor_rule_returns_concise_session_fact(self):
+    def test_execute_registered_supervisor_rule_does_not_answer_session_fact_content(self):
         turns = [
             ("user", "For this session, remember the codeword cobalt sparrow and the topic packaging drift."),
             ("assistant", "Got it."),
@@ -330,8 +406,8 @@ class TestRunTestSessionIsolation(unittest.TestCase):
             allowed_actions={"session_fact_recall"},
         )
 
-        self.assertTrue(handled)
-        self.assertEqual(reply, "cobalt sparrow")
+        self.assertFalse(handled)
+        self.assertEqual(reply, "")
         self.assertIsNone(next_state)
 
     def test_compare_sessions_surfaces_generic_mode_labels(self):

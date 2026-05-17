@@ -156,6 +156,7 @@ class AutonomyOrchestratorService:
             "payload": {
                 "target_kind": _safe_text(payload.get("target_kind"), 80),
                 "target_id": _safe_text(payload.get("target_id"), 160),
+                "target_step_id": _safe_text(payload.get("target_step_id"), 160),
                 "preconditions": list(payload.get("preconditions") or []),
                 "requires_ack": bool(payload.get("requires_ack", False)),
                 "cooldown_sec": _as_int(payload.get("cooldown_sec")),
@@ -310,6 +311,8 @@ class AutonomyOrchestratorService:
                     "status": _safe_text(branch.get("status"), 80).lower(),
                     "owner": _safe_text(branch.get("owner") or branch.get("likely_owner"), 120),
                     "age_min": _as_int(branch.get("age_min") or branch.get("open_age_min")),
+                    "task_id": _safe_text(branch.get("task_id"), 160),
+                    "task_title": _safe_text(branch.get("task_title"), 180),
                     "recommended_tool": _safe_text(branch.get("recommended_tool"), 120),
                     "tree_id": _safe_text(branch.get("tree_id"), 120),
                     "tree_title": _safe_text(branch.get("tree_title"), 180),
@@ -362,6 +365,9 @@ class AutonomyOrchestratorService:
                 "open_count": _as_int(work_tree_raw.get("open_count")),
                 "working_count": _as_int(work_tree_raw.get("working_count")),
                 "blocked_count": _as_int(work_tree_raw.get("blocked_count")),
+                "observing_count": _as_int(work_tree_raw.get("observing_count")),
+                "latent_root_signal_count": _as_int(work_tree_raw.get("latent_root_signal_count")),
+                "operator_hold_count": _as_int(work_tree_raw.get("operator_hold_count")),
                 "stale_count": _as_int(work_tree_raw.get("stale_count")),
                 "oldest_open_age_min": _as_int(work_tree_raw.get("oldest_open_age_min")),
                 "active_candidate_count": _as_int(work_tree_raw.get("active_candidate_count"), -1),
@@ -450,6 +456,8 @@ class AutonomyOrchestratorService:
             },
             "last_action_context": {
                 "last_action_type": _safe_text(last_action_raw.get("last_action_type"), 120),
+                "last_target_id": _safe_text(last_action_raw.get("last_target_id"), 160),
+                "last_target_step_id": _safe_text(last_action_raw.get("last_target_step_id"), 160),
                 "last_action_at_utc": _safe_text(last_action_raw.get("last_action_at_utc"), 80),
                 "cooldown_active": bool(last_action_raw.get("cooldown_active", False)),
                 "cooldown_remaining_sec": _as_int(last_action_raw.get("cooldown_remaining_sec")),
@@ -608,6 +616,8 @@ class AutonomyOrchestratorService:
         patch_apply_ready = _as_int(queue.get("patch_apply_ready_count"))
         patch_approve_ready = _as_int(queue.get("patch_approve_ready_count"))
         blocked_count = _as_int(work_tree.get("blocked_count"))
+        latent_root_signal_count = _as_int(work_tree.get("latent_root_signal_count"))
+        operator_hold_count = _as_int(work_tree.get("operator_hold_count"))
         stale_count = _as_int(work_tree.get("stale_count"))
         active_work_count = self._contract_active_work_tree_count(work_tree)
         top_generated_triage = self._top_triage_candidate(triage, lane="generated_queue")
@@ -651,7 +661,6 @@ class AutonomyOrchestratorService:
         if (
             generated_blocked_count > 0
             or stale_count > 0
-            or (blocked_count > 0 and active_work_count <= 0)
             or (aging_count > 0 and pending_count <= 0 and active_work_count <= 0)
         ):
             candidates.append(
@@ -672,21 +681,47 @@ class AutonomyOrchestratorService:
             configured_trees = _as_int(policy.get("active_work_tree_max_trees_per_cycle"), _as_int(catalog.get("max_trees"), 8))
             step_budget = max(1, min(max(1, active_work_count), max(1, configured_steps)))
             tree_budget = max(1, min(max(1, active_work_count), max(1, configured_trees)))
+            active_branches = [
+                _as_dict(branch)
+                for branch in _as_list(work_tree.get("branches"))
+                if bool(_as_dict(branch).get("executable", False))
+            ]
+            active_branch_title = _safe_text(
+                (_as_dict(active_branches[0]).get("title") if active_branches else ""),
+                180,
+            )
+            active_branch_id = _safe_text(
+                (_as_dict(active_branches[0]).get("branch_id") if active_branches else ""),
+                160,
+            )
+            active_branch_tool = _safe_text(
+                (_as_dict(active_branches[0]).get("recommended_tool") if active_branches else ""),
+                120,
+            )
+            active_task_id = _safe_text(
+                (_as_dict(active_branches[0]).get("task_id") if active_branches else ""),
+                160,
+            )
+            effect = f"Advance up to {step_budget} governed step(s) from {active_work_count} active Work Tree signal(s)."
+            if active_branch_title:
+                effect = f"{effect} First branch: {active_branch_title}."
             action = self._contract_action(
                 "active_work_tree_run_next",
                 reason_code="active_work_tree_ready",
-                expected_effect=(
-                    f"Advance up to {step_budget} governed step(s) from {active_work_count} active Work Tree signal(s)."
-                    + self._triage_focus_text(top_any_triage)
-                ),
+                target_id=active_branch_id or None,
+                expected_effect=effect,
             )
+            if active_task_id:
+                action["target_step_id"] = active_task_id
             action["max_steps"] = step_budget
             action["max_trees"] = tree_budget
+            if active_branch_tool in {"read", "find", "ls", "health", "system_check", "queue_status", "pulse"}:
+                action["cooldown_sec"] = 0
             candidates.append(
                 {
                     "action": action,
-                    "source": "work_tree_snapshot+triage_hints" if top_any_triage else "work_tree_snapshot",
-                    "triage_focus": _compact_value(top_any_triage),
+                    "source": "work_tree_snapshot",
+                    "triage_focus": {},
                 }
             )
 
@@ -771,11 +806,15 @@ class AutonomyOrchestratorService:
         quiet_hours_active = bool(policy.get("quiet_hours_active", False))
         cooldown_active = bool(last_action.get("cooldown_active", False))
         last_action_type = _safe_text(last_action.get("last_action_type"), 120)
+        last_target_id = _safe_text(last_action.get("last_target_id"), 160)
+        last_target_step_id = _safe_text(last_action.get("last_target_step_id"), 160)
 
         considered: list[dict[str, Any]] = []
         for candidate in candidates:
             action = _as_dict(candidate.get("action"))
             action_type = _safe_text(action.get("action_type"), 120)
+            target_id = _safe_text(action.get("target_id"), 160)
+            target_step_id = _safe_text(action.get("target_step_id"), 160)
             reject_reasons: list[str] = []
             if not is_autonomy_advisory_action(action_type):
                 reject_reasons.append("action_not_allowed")
@@ -789,7 +828,12 @@ class AutonomyOrchestratorService:
                 action["requires_ack"] = True
             if bool(action.get("requires_ack", False)) and not operator_ack_present:
                 reject_reasons.append("operator_ack_required")
-            if cooldown_active and (not last_action_type or last_action_type == action_type):
+            if (
+                cooldown_active
+                and (not last_action_type or last_action_type == action_type)
+                and (not last_target_id or last_target_id == target_id)
+                and (not last_target_step_id or not target_step_id or last_target_step_id == target_step_id)
+            ):
                 reject_reasons.append("cooldown_active")
 
             score, score_components = self._score_contract_candidate({"action": action}, evidence)
@@ -816,6 +860,7 @@ class AutonomyOrchestratorService:
         policy_checks: dict[str, str] = {}
         presence = _as_dict(evidence.get("source_presence"))
         freshness = _as_dict(evidence.get("source_freshness_sec"))
+        work_tree = _as_dict(evidence.get("work_tree_snapshot"))
         posture = _as_dict(evidence.get("steward_posture"))
         runtime = _as_dict(evidence.get("runtime_guard_status"))
         policy = _as_dict(evidence.get("policy_snapshot"))
@@ -884,6 +929,30 @@ class AutonomyOrchestratorService:
             return SPEC_DECISION_DEFER, {}, 0.0, refusal_reasons + conflicts, policy_checks, "Evidence conflicts require operator review."
 
         if not candidates_considered:
+            operator_hold_count = _as_int(work_tree.get("operator_hold_count"))
+            non_operator_observing = max(0, _as_int(work_tree.get("observing_count")) - operator_hold_count)
+            if _as_int(work_tree.get("latent_root_signal_count")) > 0 or non_operator_observing > 0:
+                refusal_reasons.append("work_tree_observing_root_truth")
+                policy_checks["candidate_available"] = "blocked"
+                return (
+                    SPEC_DECISION_DEFER,
+                    {},
+                    0.0,
+                    refusal_reasons,
+                    policy_checks,
+                    "Work Tree has blocked observing root signal(s); closure needs synthesized fix evidence, not a generic maintenance step.",
+                )
+            if operator_hold_count > 0:
+                refusal_reasons.append("operator_hold_pending")
+                policy_checks["candidate_available"] = "operator_hold"
+                return (
+                    SPEC_DECISION_DEFER,
+                    {},
+                    0.0,
+                    refusal_reasons,
+                    policy_checks,
+                    "Work Tree has operator-held branch(es); no autonomous repair action is available for that hold.",
+                )
             refusal_reasons.append("no_legal_action")
             policy_checks["candidate_available"] = "fail"
             return SPEC_DECISION_DEFER, {}, 0.0, refusal_reasons, policy_checks, "No governed candidate action was found."
@@ -927,12 +996,20 @@ class AutonomyOrchestratorService:
         if len(ordered) > 1 and abs(top_score - _as_float(ordered[1].get("score"))) <= 0.0001:
             refusal_reasons.append("candidate_tie")
             return SPEC_DECISION_DEFER, {}, 0.0, refusal_reasons, policy_checks, "Top candidate scores tied; advisory cycle deferred."
-        if top_score < DEFAULT_RECOMMENDATION_THRESHOLD:
-            refusal_reasons.append("no_legal_action")
+        action = _as_dict(selected.get("action"))
+        action_type = _safe_text(action.get("action_type"), 120)
+        work_tree_snapshot = _as_dict(evidence.get("work_tree_snapshot"))
+        concrete_active_work_tree_step = (
+            action_type == "active_work_tree_run_next"
+            and _as_int(work_tree_snapshot.get("active_executable_count"), 0) > 0
+        )
+        if top_score < DEFAULT_RECOMMENDATION_THRESHOLD and not concrete_active_work_tree_step:
+            refusal_reasons.append("below_recommendation_threshold")
+            policy_checks["recommendation_threshold"] = "fail"
             return SPEC_DECISION_DEFER, {}, top_score, refusal_reasons, policy_checks, "No candidate scored above the recommendation threshold."
+        policy_checks["recommendation_threshold"] = "pass" if top_score >= DEFAULT_RECOMMENDATION_THRESHOLD else "concrete_active_work_tree"
 
         selected["status"] = "selected"
-        action = _as_dict(selected.get("action"))
         return (
             SPEC_DECISION_RECOMMEND_ACTION,
             action,
@@ -960,6 +1037,7 @@ class AutonomyOrchestratorService:
                 "action_type": _safe_text(recommended_action.get("action_type"), 120),
                 "target_kind": _safe_text(recommended_action.get("target_kind"), 80),
                 "target_id": _safe_text(recommended_action.get("target_id"), 160),
+                "target_step_id": _safe_text(recommended_action.get("target_step_id"), 160),
                 "reason_code": _safe_text(recommended_action.get("reason_code"), 120),
             }
             if recommended_action

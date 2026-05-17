@@ -15,6 +15,28 @@ from subconscious_runner import (
 from subconscious_live_simulator import simulate_live_families
 
 
+def _report_with_training_priority() -> dict:
+    return {
+        "label": "overnight",
+        "families": [
+            {
+                "family_id": "fulfillment-fallthrough-family",
+                "target_seam": "fulfillment_bridge_entry_fallthrough",
+                "training_priorities": [
+                    {
+                        "seam": "fulfillment_bridge_entry_fallthrough",
+                        "signal": "fallback_overuse",
+                        "robustness": 0.97,
+                        "suggested_test_name": "test_generic_fallback_does_not_hide_viable_specific_route",
+                        "rationale": "Forced report fixture for generated-session writer coverage.",
+                        "urgency": "high",
+                    }
+                ],
+            }
+        ],
+    }
+
+
 class TestSubconsciousRunner(unittest.TestCase):
     def test_select_live_scenario_families_filters_requested_family(self):
         families = select_live_scenario_families(["fulfillment-fallthrough-family"])
@@ -26,7 +48,7 @@ class TestSubconsciousRunner(unittest.TestCase):
         with self.assertRaises(ValueError):
             select_live_scenario_families(["missing-family"])
 
-    def test_build_unattended_report_accumulates_priorities(self):
+    def test_build_unattended_report_creates_priorities_for_repeated_weak_routes(self):
         families = select_live_scenario_families(["fulfillment-fallthrough-family", "repeated-weak-pressure-family"])
         results = simulate_live_families(families)
 
@@ -34,10 +56,11 @@ class TestSubconsciousRunner(unittest.TestCase):
 
         self.assertEqual(report["label"], "overnight")
         self.assertEqual(report["totals"]["family_count"], 2)
-        self.assertGreater(report["totals"]["training_priority_count"], 0)
+        self.assertEqual(report["totals"]["training_priority_count"], 2)
         by_id = {item["family_id"]: item for item in report["families"]}
         self.assertIn("fulfillment-fallthrough-family", by_id)
-        self.assertTrue(by_id["fulfillment-fallthrough-family"]["training_priorities"])
+        self.assertEqual(by_id["fulfillment-fallthrough-family"]["training_priorities"], [])
+        self.assertEqual(len(by_id["repeated-weak-pressure-family"]["training_priorities"]), 2)
 
     def test_write_report_bundle_writes_json_markdown_and_latest(self):
         families = select_live_scenario_families(["repeated-weak-pressure-family"])
@@ -60,8 +83,7 @@ class TestSubconsciousRunner(unittest.TestCase):
             self.assertIn("repeated-weak-pressure-family", summary_markdown.read_text(encoding="utf-8"))
 
     def test_generated_session_definitions_cover_prioritized_family_scenarios(self):
-        families = select_live_scenario_families(["fulfillment-fallthrough-family"])
-        report = build_unattended_report(simulate_live_families(families), label="overnight")
+        report = _report_with_training_priority()
 
         with mock.patch("subconscious_runner.load_retired_generated_definition_index", return_value={}):
             generated = build_generated_session_definitions(report)
@@ -74,8 +96,7 @@ class TestSubconsciousRunner(unittest.TestCase):
         self.assertTrue(payload.get("training_priorities"))
 
     def test_write_generated_session_definitions_writes_manifest_and_payloads(self):
-        families = select_live_scenario_families(["fulfillment-fallthrough-family"])
-        report = build_unattended_report(simulate_live_families(families), label="overnight")
+        report = _report_with_training_priority()
 
         with tempfile.TemporaryDirectory() as tmp:
             with mock.patch("subconscious_runner.load_retired_generated_definition_index", return_value={}):
@@ -92,8 +113,7 @@ class TestSubconsciousRunner(unittest.TestCase):
             self.assertTrue(payload.get("messages"))
 
     def test_write_generated_session_definitions_skips_recently_retired_files(self):
-        families = select_live_scenario_families(["fulfillment-fallthrough-family"])
-        report = build_unattended_report(simulate_live_families(families), label="overnight")
+        report = _report_with_training_priority()
         with mock.patch("subconscious_runner.load_retired_generated_definition_index", return_value={}):
             generated = build_generated_session_definitions(report)
         self.assertTrue(generated)

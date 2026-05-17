@@ -29,11 +29,18 @@ class TestSupervisorRuntime(unittest.TestCase):
 
         self.assertFalse(result.get("handled"))
 
-    def test_result_is_explicitly_owned_respects_phase_gate(self):
-        self.assertTrue(
+    def test_result_is_explicitly_owned_requires_explicit_weather_ownership(self):
+        self.assertFalse(
             supervisor_runtime.result_is_explicitly_owned(
                 "weather_lookup",
                 {"handled": True},
+                phase="intent",
+            )
+        )
+        self.assertTrue(
+            supervisor_runtime.result_is_explicitly_owned(
+                "weather_lookup",
+                {"handled": True, "ownership": "explicit"},
                 phase="intent",
             )
         )

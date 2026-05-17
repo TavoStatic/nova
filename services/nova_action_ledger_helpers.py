@@ -290,8 +290,6 @@ def count_unsupported_claim_blocks_recently(
             detail = str(step.get("detail") or "").strip().lower()
             if stage == "claim_gate" and outcome == "adjusted":
                 count += 1
-            if stage == "llm_postprocess" and outcome == "self_corrected" and detail == "autonomy_guard":
-                count += 1
     return count
 
 

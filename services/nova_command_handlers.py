@@ -17,7 +17,7 @@ def handle_commands(
             return "No chat context is available yet in this session."
         return "Current chat context:\n" + rendered
 
-    if low in {"queue", "queue status", "work queue", "show queue", "standing work queue"}:
+    if low in {"queue", "queue status", "check queue status", "work queue", "show queue", "standing work queue"}:
         return str(core.execute_planned_action("queue_status") or "")
 
     if low in {"pulse", "nova pulse", "show pulse", "system pulse"}:
@@ -31,13 +31,6 @@ def handle_commands(
         "self status",
         "status events",
         "nova self status",
-        "what hurts",
-        "what is hurting",
-        "are you hurting",
-        "what failed",
-        "what has failed",
-        "what are you updating",
-        "are you updating",
     }:
         return str(core.execute_planned_action("self_status") or "")
 
@@ -87,45 +80,29 @@ def handle_commands(
         value = t.split(maxsplit=2)[2] if len(t.split(maxsplit=2)) >= 3 else ""
         return core.set_location_coords(value)
 
-    if low in {"weather", "check weather"}:
-        return "What location should I use for the weather lookup?"
-
     if low in {"weather current location", "weather current"}:
         return str(core.execute_planned_action("weather_current_location") or "")
 
-    if low.startswith("weather ") or low.startswith("check weather "):
-        parts = t.split(maxsplit=2)
-        location_value = parts[2] if len(parts) >= 3 else (parts[1] if len(parts) >= 2 else "")
-        return str(core.execute_planned_action("weather_location", [location_value]) or "")
+    weather_location_prefixes = (
+        ("weather for ", len("weather for ")),
+        ("weather in ", len("weather in ")),
+        ("weather at ", len("weather at ")),
+        ("check weather for ", len("check weather for ")),
+        ("check weather in ", len("check weather in ")),
+        ("check weather at ", len("check weather at ")),
+    )
+    for prefix, prefix_len in weather_location_prefixes:
+        if low.startswith(prefix):
+            location_value = t[prefix_len:].strip()
+            return str(core.execute_planned_action("weather_location", [location_value]) or "")
 
-    normalized = core._normalize_turn_text(t)
-    if normalized in {"use your physical location", "use your location nova", "use your location"}:
-        return "What do you want me to use my location for?"
-
-    if core._is_saved_location_weather_query(normalized) or (
-        "weather" in normalized and any(phrase in normalized for phrase in (
-            "give me",
-            "can you give me",
-            "what is",
-            "what's",
-            "forecast",
-            "current",
-            "today",
-            "now",
-        ))
-    ):
-        live = core.runtime_device_location_payload()
-        if (live.get("available") and not live.get("stale")) or core.get_saved_location_text() or core._coords_from_saved_location():
-            return str(core.execute_planned_action("weather_current_location") or "")
-        return core._need_confirmed_location_message() + " My location is unknown until live tracking is active, or you tell me or save coordinates."
-
-    if core._is_location_request(normalized):
-        return core._location_reply()
+    if low in {"weather", "check weather"} or low.startswith("weather ") or low.startswith("check weather "):
+        return None
 
     if low.startswith("remember:"):
         return core.mem_remember_fact(t.split(":", 1)[1])
 
-    if low in {"what can you do", "capabilities", "show capabilities"}:
+    if low in {"capabilities", "show capabilities"}:
         return core.describe_capabilities()
 
     if low in {"mem stats", "memory stats"}:
@@ -346,7 +323,7 @@ def handle_commands(
     if low in {"behavior stats", "behavior metrics", "behavior"}:
         return core.json.dumps(core.behavior_get_metrics(), ensure_ascii=True, indent=2)
 
-    if low in {"learning state", "learning status", "self correction status", "what are you learning"}:
+    if low in {"learning state", "learning status", "self correction status"}:
         m = core.behavior_get_metrics()
         return (
             "Learning state:\n"

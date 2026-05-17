@@ -36,7 +36,7 @@ runtime/
 
 ## Run the SIS Worker Under the Trusted Identity
 
-From the trusted district pipeline account session:
+From the trusted `guribe.tst` / district account session:
 
 ```powershell
 cd C:\Nova

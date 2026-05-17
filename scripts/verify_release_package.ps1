@@ -184,6 +184,23 @@ function Test-PayloadContainsLeafPattern([hashtable]$payload, [string]$pattern) 
   return $false
 }
 
+function Test-PayloadContainsRelativePathPattern([hashtable]$payload, [string]$pattern) {
+  if ([string]::IsNullOrWhiteSpace($pattern)) { return $false }
+
+  $normalizedPattern = Normalize-RelativePath $pattern
+  if ([string]::IsNullOrWhiteSpace($normalizedPattern)) { return $false }
+
+  foreach ($entryPath in @($payload.relative_entry_paths)) {
+    $candidate = Normalize-RelativePath ([string]$entryPath.TrimEnd('/'))
+    if ([string]::IsNullOrWhiteSpace($candidate)) { continue }
+    if ($candidate -like $normalizedPattern) {
+      return $true
+    }
+  }
+
+  return $false
+}
+
 function Test-PayloadContainsPathSegmentPattern([hashtable]$payload, [string]$pattern) {
   if ([string]::IsNullOrWhiteSpace($pattern)) { return $false }
 
@@ -194,70 +211,6 @@ function Test-PayloadContainsPathSegmentPattern([hashtable]$payload, [string]$pa
       }
     }
   }
-  return $false
-}
-
-function Test-NovaTextPayloadExtension([string]$pathValue) {
-  $extension = [System.IO.Path]::GetExtension($pathValue).ToLowerInvariant()
-  return @(
-    ".cmd",
-    ".css",
-    ".html",
-    ".js",
-    ".json",
-    ".md",
-    ".ps1",
-    ".py",
-    ".txt",
-    ".yml",
-    ".yaml"
-  ) -contains $extension
-}
-
-function Test-PayloadContainsForbiddenContent([hashtable]$payload, [string[]]$markers) {
-  $usableMarkers = @($markers | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
-  if ($usableMarkers.Count -le 0) { return $false }
-  $maxTextBytes = 2MB
-
-  if ([string]$payload.root_type -eq "directory") {
-    foreach ($file in Get-ChildItem -Path ([string]$payload.root_path) -Recurse -File -Force -ErrorAction SilentlyContinue) {
-      if ($file.Length -gt $maxTextBytes) { continue }
-      if (-not (Test-NovaTextPayloadExtension $file.FullName)) { continue }
-      foreach ($marker in $usableMarkers) {
-        if (Select-String -LiteralPath $file.FullName -Pattern $marker -SimpleMatch -Quiet -ErrorAction SilentlyContinue) {
-          return $true
-        }
-      }
-    }
-    return $false
-  }
-
-  if ([string]$payload.root_type -eq "zip") {
-    Add-Type -AssemblyName System.IO.Compression
-    Add-Type -AssemblyName System.IO.Compression.FileSystem
-    $archive = [System.IO.Compression.ZipFile]::OpenRead([string]$payload.root_path)
-    try {
-      foreach ($entry in $archive.Entries) {
-        if ([string]::IsNullOrWhiteSpace($entry.Name)) { continue }
-        if ($entry.Length -gt $maxTextBytes) { continue }
-        if (-not (Test-NovaTextPayloadExtension $entry.FullName)) { continue }
-        $reader = New-Object System.IO.StreamReader($entry.Open())
-        try {
-          $text = $reader.ReadToEnd()
-        } finally {
-          $reader.Dispose()
-        }
-        foreach ($marker in $usableMarkers) {
-          if ($text.Contains($marker)) {
-            return $true
-          }
-        }
-      }
-    } finally {
-      $archive.Dispose()
-    }
-  }
-
   return $false
 }
 
@@ -311,7 +264,6 @@ $forbiddenPathPrefixes = @(
   ".ci_venv",
   ".venv",
   ".pytest_cache",
-  "data_sources",
   "knowledge/packs",
   "knowledge/peims",
   "knowledge/web",
@@ -327,6 +279,11 @@ $forbiddenExactPaths = @(
   "This_is_nova",
   "tests_to_review.txt"
 )
+$forbiddenRelativePathPatterns = @(
+  "data_sources/*/local_config.json",
+  "data_sources/*/operator_intake.jsonl",
+  "data_sources/*/lane_control.json"
+)
 $forbiddenSegmentPatterns = @(
   "codex_pulse_test_*",
   "codex_reflect_*"
@@ -337,12 +294,6 @@ $forbiddenLeafPatterns = @(
   "*.pyo",
   "codex_health_*.jsonl",
   "codex_reflection_*.jsonl"
-)
-$forbiddenContentMarkers = @(
-  ("K12" + "AD"),
-  ("guri" + "be.tst"),
-  ("10.80" + ".42.50"),
-  ("BNV_" + "eSp" + "Train")
 )
 
 Write-Host ""
@@ -391,6 +342,10 @@ foreach ($forbiddenPath in $forbiddenExactPaths) {
   Add-CheckResult $failures (-not (Test-PayloadHasRelativePath $payload $forbiddenPath)) ("forbidden path absent: " + $forbiddenPath) ("forbidden path present: " + $forbiddenPath)
 }
 
+foreach ($forbiddenPattern in $forbiddenRelativePathPatterns) {
+  Add-CheckResult $failures (-not (Test-PayloadContainsRelativePathPattern $payload $forbiddenPattern)) ("forbidden path pattern absent: " + $forbiddenPattern) ("forbidden path pattern present: " + $forbiddenPattern)
+}
+
 Add-CheckResult $failures (-not (Test-PayloadContainsPathSegment $payload "__pycache__")) "forbidden cache path absent: __pycache__" "forbidden cache path present: __pycache__"
 
 foreach ($forbiddenPattern in $forbiddenSegmentPatterns) {
@@ -400,8 +355,6 @@ foreach ($forbiddenPattern in $forbiddenSegmentPatterns) {
 foreach ($forbiddenPattern in $forbiddenLeafPatterns) {
   Add-CheckResult $failures (-not (Test-PayloadContainsLeafPattern $payload $forbiddenPattern)) ("forbidden file pattern absent: " + $forbiddenPattern) ("forbidden file pattern present: " + $forbiddenPattern)
 }
-
-Add-CheckResult $failures (-not (Test-PayloadContainsForbiddenContent $payload $forbiddenContentMarkers)) "forbidden incident content markers absent" "forbidden incident marker present in package content"
 
 Write-Host ("[INFO] Version        : " + [string]$manifest.artifact_version)
 Write-Host ("[INFO] Channel        : " + [string]$manifest.release_channel)

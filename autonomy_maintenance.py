@@ -5,6 +5,8 @@ import json
 import os
 import subprocess
 import time
+import urllib.error
+import urllib.request
 import zipfile
 from pathlib import Path
 from typing import Callable
@@ -26,9 +28,15 @@ from services.core_thinning import feed_core_thinning_brief_to_work_tree as serv
 from services.core_steward import build_core_steward_payload as service_build_core_steward_payload
 from services.nova_control_action_dispatcher import NOVA_CONTROL_ACTION_DISPATCHER, autonomy_advisory_action_types
 from services.nova_runtime_context import AUTONOMY_ORCHESTRATOR_LEDGER_FILE
+from services.nova_runtime_context import OPERATOR_OUTBOX_FILE
 from services.nova_runtime_context import RUNTIME_DIR as CONTEXT_RUNTIME_DIR
+from services.nova_runtime_context import runtime_scope_name
+from services.operator_outbox import OPERATOR_OUTBOX_SERVICE
+from services.subconscious_review_judgment import is_no_owner_root_repair_judgment
+from services.subconscious_review_judgment import latest_subconscious_review_judgment_for_branch
 from services.subconscious_work_tree_triage import SUBCONSCIOUS_WORK_TREE_TRIAGE_SERVICE
 from services.test_session_control import TEST_SESSION_CONTROL_SERVICE
+from services.validation_artifact_truth import VALIDATION_ARTIFACT_TRUTH_SERVICE
 from services.work_tree_signal_ingestion import WORK_TREE_SIGNAL_INGESTION_SERVICE
 from work_tree_contracts import BranchStatus, TaskStatus
 
@@ -40,10 +48,18 @@ TEST_SESSIONS_ROOT = RUNTIME_DIR / "test_sessions"
 TEST_SESSION_RUNNER_PY = ROOT / "scripts" / "run_test_session.py"
 STATE_FILE = RUNTIME_DIR / "autonomy_maintenance_state.json"
 MAINT_LOG = RUNTIME_DIR / "autonomy_maintenance.log"
+REGRESSION_STATUS_FILE = RUNTIME_DIR / "regression_status.json"
+REGRESSION_RUNNER = ROOT / "scripts" / "run_regression.py"
 AUTONOMY_ORCHESTRATOR_LEDGER = AUTONOMY_ORCHESTRATOR_LEDGER_FILE
+OPERATOR_OUTBOX = OPERATOR_OUTBOX_FILE
 LATEST_SUBCONSCIOUS = RUNTIME_DIR / "subconscious_runs" / "latest.json"
 GENERATED_DEFS = TEST_SESSIONS_ROOT / "generated_definitions"
-UPDATES_DIR = ROOT / "updates"
+UPDATES_DIR = RUNTIME_DIR / "updates" if runtime_scope_name() == "validation" else ROOT / "updates"
+CONTROL_STATUS_URL = os.environ.get("NOVA_CONTROL_STATUS_URL", "http://127.0.0.1:8080/api/control/status")
+try:
+    CONTROL_STATUS_TIMEOUT_SEC = max(2.0, float(os.environ.get("NOVA_CONTROL_STATUS_TIMEOUT_SEC", "10")))
+except Exception:
+    CONTROL_STATUS_TIMEOUT_SEC = 10.0
 
 AUTO_APPLY_THRESHOLD = 0.90
 PATCH_QUEUE_TREE_TITLE = "Patch Queue: governed review and apply"
@@ -64,11 +80,41 @@ GENERATED_QUEUE_ALLOWED_TOOLS = ["generated_queue_run", "read", "find", "queue_s
 GENERATED_QUEUE_EXECUTE_TOOLS = ["generated_queue_run"]
 GENERATED_QUEUE_REVIEW_TOOLS = ["read", "find", "queue_status"]
 GENERATED_QUEUE_MAX_STEPS = 4
-ACTIVE_WORK_TREE_EXECUTE_TOOLS = ["health", "system_check", "queue_status", "pulse", "read", "ls", "find", "core_thinning"]
+ACTIVE_WORK_TREE_EXECUTE_TOOLS = [
+    "web_fetch",
+    "web_search",
+    "web_research",
+    "web_gather",
+    "wikipedia_lookup",
+    "stackexchange_search",
+    "health",
+    "system_check",
+    "queue_status",
+    "phase2_audit",
+    "pulse",
+    "read",
+    "ls",
+    "find",
+    "pipeline",
+    "core_health",
+    "core_thinning",
+    "release_promotion_judgment",
+    "release_validation_run",
+    "release_record_validation_outcome",
+    "release_rebuild_verify",
+    "memory_bootstrap_judgment",
+    "memory_bootstrap_confirm",
+    "memory_identity_bootstrap",
+    "subconscious_review_judgment",
+    "weather_current_location",
+    "weather_location",
+    "location_coords",
+    "screen",
+    "camera",
+]
 ACTIVE_WORK_TREE_MAX_TREES = 8
 ACTIVE_WORK_TREE_MAX_STEPS = 8
 ACTIVE_WORK_TREE_DEFAULT_DISPATCH_STEPS = 3
-ACTIVE_WORK_TREE_MAX_BLOCKER_RESOLUTIONS = 8
 LEGACY_PATCH_UPDATE_TOOLS = {"patch_apply", "patch_rollback", "update_now"}
 COMPLETE_TREE_VISIBLE_KEEP = 12
 COMPLETE_TREE_ARCHIVE_MIN_AGE_SEC = 0
@@ -79,6 +125,16 @@ STALE_CLI_ACTIVE_TREE_MAX_BRANCHES = 5
 STALE_CLI_ACTIVE_TREE_MAX_OPEN_TASKS = 2
 PROMOTED_PATCH_ENTRY_PREFIX = "runtime/test_sessions/promoted/"
 PATCH_MANIFEST_NAME = "nova_patch.json"
+
+
+def _validation_subprocess_env() -> dict[str, str]:
+    env = os.environ.copy()
+    validation_runtime = RUNTIME_DIR / "validation"
+    env["NOVA_TEST_RUNNER"] = "1"
+    env.setdefault("NOVA_VALIDATION_RUNTIME_DIR", str(validation_runtime))
+    env.setdefault("NOVA_WORK_TREE_DB", str(validation_runtime / "_internal" / "work_tree.db"))
+    env.setdefault("NOVA_MEMORY_DB", str(validation_runtime / "nova_memory.sqlite"))
+    return env
 
 
 def _append_log(message: str) -> None:
@@ -108,6 +164,65 @@ def _append_autonomy_orchestrator_ledger(row: dict) -> None:
     AUTONOMY_ORCHESTRATOR_LEDGER.parent.mkdir(parents=True, exist_ok=True)
     with open(AUTONOMY_ORCHESTRATOR_LEDGER, "a", encoding="utf-8") as fh:
         fh.write(json.dumps(dict(row or {}), ensure_ascii=True) + "\n")
+
+
+def _publish_operator_notice_from_autonomy(packet: dict, execution: dict) -> dict:
+    notice = OPERATOR_OUTBOX_SERVICE.notice_from_autonomy(packet, execution)
+    if not notice:
+        return {"ok": True, "published": False, "reason": "no_operator_notice_needed"}
+    try:
+        result = OPERATOR_OUTBOX_SERVICE.append_notice(OPERATOR_OUTBOX, **notice)
+    except Exception as exc:
+        return {"ok": False, "published": False, "reason": f"operator_outbox_failed:{exc}"}
+    return {
+        "ok": bool(result.get("ok", False)),
+        "published": bool(result.get("ok", False)) and not bool(result.get("deduped", False)),
+        "deduped": bool(result.get("deduped", False)),
+        "event_id": str((result.get("event") or {}).get("id") or ""),
+    }
+
+
+def _publish_operator_notices_from_work_tree(work_tree_state: dict) -> dict:
+    notices = OPERATOR_OUTBOX_SERVICE.notices_from_work_tree_state(
+        work_tree_state,
+        executable_tools=ACTIVE_WORK_TREE_EXECUTE_TOOLS,
+    )
+    if not notices:
+        return {
+            "ok": True,
+            "published_count": 0,
+            "deduped_count": 0,
+            "notice_count": 0,
+            "reason": "no_work_tree_operator_requests",
+        }
+
+    published = 0
+    deduped = 0
+    event_ids: list[str] = []
+    errors: list[str] = []
+    for notice in notices:
+        try:
+            result = OPERATOR_OUTBOX_SERVICE.append_notice(OPERATOR_OUTBOX, **notice)
+        except Exception as exc:
+            errors.append(str(exc))
+            continue
+        if bool(result.get("deduped", False)):
+            deduped += 1
+            continue
+        if bool(result.get("ok", False)):
+            published += 1
+            event_id = str((result.get("event") or {}).get("id") or "")
+            if event_id:
+                event_ids.append(event_id)
+
+    return {
+        "ok": not errors,
+        "published_count": published,
+        "deduped_count": deduped,
+        "notice_count": len(notices),
+        "event_ids": event_ids,
+        "errors": errors[:5],
+    }
 
 
 def _safe_int(value, default: int = 0) -> int:
@@ -169,14 +284,27 @@ def _preflight_checks_for_orchestrator() -> list:
         return []
 
 
-def _core_steward_for_orchestrator(state: dict, kidney_summary: dict) -> dict:
+def _core_steward_for_orchestrator(state: dict, kidney_summary: dict, guard_health: dict | None = None) -> dict:
     runtime_health = nova_core._core_health_runtime_health()
     pulse_payload = nova_core.build_pulse_payload()
+    autonomy_state = dict(state or {}) if isinstance(state, dict) else {}
+    guard = dict(guard_health or {}) if isinstance(guard_health, dict) else {}
+    guard_running = bool(guard.get("running", False))
+    runtime_worker = dict(autonomy_state.get("runtime_worker") or {}) if isinstance(autonomy_state.get("runtime_worker"), dict) else {}
+    worker_active = bool(runtime_worker.get("active", False))
+    if guard_running and not worker_active:
+        autonomy_state["maintenance_scheduler_active"] = True
+        autonomy_state["maintenance_scheduler_mode"] = "guard_tick"
+        autonomy_state["maintenance_scheduler_status"] = "guard_scheduled"
+    elif worker_active:
+        autonomy_state["maintenance_scheduler_active"] = True
+        autonomy_state["maintenance_scheduler_mode"] = "worker_loop"
+        autonomy_state["maintenance_scheduler_status"] = "running"
     return service_build_core_steward_payload(
         preflight_checks=_preflight_checks_for_orchestrator(),
         runtime_health=runtime_health,
         pulse_payload=pulse_payload if isinstance(pulse_payload, dict) else {},
-        autonomy_maintenance=state if isinstance(state, dict) else {},
+        autonomy_maintenance=autonomy_state,
         kidney_summary=kidney_summary if isinstance(kidney_summary, dict) else {},
     )
 
@@ -201,6 +329,8 @@ def _active_work_candidate_branch(candidate: dict) -> dict:
     return {
         "branch_id": str(next_step.get("branch_id") or candidate.get("active_branch_id") or candidate.get("tree_id") or ""),
         "title": str(next_step.get("branch_title") or candidate.get("active_branch_title") or candidate.get("title") or ""),
+        "task_id": str(next_step.get("task_id") or ""),
+        "task_title": str(next_step.get("task_title") or ""),
         "status": str(candidate.get("status") or ""),
         "owner": str(candidate.get("kind") or ""),
         "age_min": _safe_int(candidate.get("age_min") or 0, 0),
@@ -211,10 +341,28 @@ def _active_work_candidate_branch(candidate: dict) -> dict:
     }
 
 
+def _work_tree_node_is_operator_hold(node: dict) -> bool:
+    status_text = str(node.get("status") or "").strip().lower()
+    if status_text != "blocked":
+        return False
+    source_type = str(node.get("source_type") or "").strip().lower()
+    work_class = str(node.get("work_class") or "").strip().lower()
+    payload = node.get("source_payload") if isinstance(node.get("source_payload"), dict) else {}
+    if source_type == "memory_health" and work_class == "governance_pressure":
+        origin = payload.get("memory_bootstrap_origin") if isinstance(payload.get("memory_bootstrap_origin"), dict) else {}
+        bootstrap = payload.get("memory_bootstrap") if isinstance(payload.get("memory_bootstrap"), dict) else {}
+        origin_status = str(origin.get("status") or bootstrap.get("origin_status") or "").strip().lower()
+        return origin_status == "pending_operator_confirmation"
+    return False
+
+
 def _work_tree_snapshot_for_orchestrator(work_tree_state: dict, active_work_candidates: list[dict] | None = None) -> dict:
     payload = dict(work_tree_state or {}) if isinstance(work_tree_state, dict) else {}
     counts = dict(payload.get("counts") or {}) if isinstance(payload.get("counts"), dict) else {}
     branches: list[dict] = []
+    observing_count = 0
+    latent_root_signal_count = 0
+    operator_hold_count = 0
     active_candidates_provided = active_work_candidates is not None
     active_candidates = [dict(item) for item in list(active_work_candidates or []) if isinstance(item, dict)]
     if active_candidates:
@@ -237,11 +385,31 @@ def _work_tree_snapshot_for_orchestrator(work_tree_state: dict, active_work_cand
                     "executable": False,
                 }
             )
+            for node in list(tree.get("nodes") or []):
+                if not isinstance(node, dict):
+                    continue
+                status_text = str(node.get("status") or "").strip().lower()
+                resolution_text = str(node.get("resolution_state") or "").strip().lower()
+                operator_hold = _work_tree_node_is_operator_hold(node)
+                if operator_hold:
+                    operator_hold_count += 1
+                if status_text == "blocked" and resolution_text == "observing":
+                    observing_count += 1
+                    if (
+                        not operator_hold
+                        and
+                        str(node.get("source_type") or "").strip().lower() == "subconscious"
+                        and str(node.get("work_class") or "").strip().lower() == "candidate_review"
+                    ):
+                        latent_root_signal_count += 1
     active_executable_count = sum(1 for branch in branches if bool(branch.get("executable")))
     return {
         "open_count": _safe_int(counts.get("open_tasks") or counts.get("pending") or counts.get("active"), 0),
         "working_count": _safe_int(counts.get("working"), 0),
         "blocked_count": _safe_int(counts.get("blocked"), 0),
+        "observing_count": observing_count,
+        "latent_root_signal_count": latent_root_signal_count,
+        "operator_hold_count": operator_hold_count,
         "stale_count": _safe_int(counts.get("stale"), 0),
         "oldest_open_age_min": _safe_int(counts.get("oldest_open_age_min"), 0),
         "active_candidate_count": len(active_candidates) if active_candidates_provided else -1,
@@ -502,6 +670,26 @@ def _triage_signal_from_priority(family: dict, priority: dict, runtime_context: 
     )
 
 
+def _subconscious_terminal_no_repair_for_source_key(source_key: str) -> dict:
+    clean_key = str(source_key or "").strip()
+    if not clean_key:
+        return {}
+    for tree in work_tree.list_trees():
+        for branch in work_tree.list_tree_branches(tree.tree_id):
+            if str(getattr(branch, "source_key", "") or "").strip() != clean_key:
+                continue
+            if str(getattr(branch, "source_type", "") or "").strip().lower() != "subconscious":
+                continue
+            judgment = latest_subconscious_review_judgment_for_branch(work_tree, branch.branch_id)
+            if is_no_owner_root_repair_judgment(judgment):
+                return {
+                    "branch_id": str(getattr(branch, "branch_id", "") or ""),
+                    "classification": str(judgment.get("classification") or ""),
+                    "verdict": str(judgment.get("verdict") or ""),
+                }
+    return {}
+
+
 def _triage_lane_key(payload: dict) -> str:
     seam = str(payload.get("target_seam") or "").strip().lower()
     family_id = str(payload.get("family_id") or "").strip().lower()
@@ -519,8 +707,6 @@ def _queue_owner_hints(generated_queue: dict) -> dict:
         queue_items.append(dict(queue.get("next_item") or {}))
     queue_items.extend([dict(item) for item in list(queue.get("items") or []) if isinstance(item, dict)][:20])
     for item in queue_items:
-        if ("open" in item or "actionable" in item) and not (bool(item.get("open")) or bool(item.get("actionable"))):
-            continue
         file_name = str(item.get("file") or "").strip()
         if not file_name or file_name in seen:
             continue
@@ -543,7 +729,6 @@ def _queue_owner_hints(generated_queue: dict) -> dict:
             "target_seam": seam,
             "signal": signal_name,
             "robustness": _safe_float(priority.get("robustness", priority.get("robustness_score")), 0.0),
-            "pressure_state": "active" if (bool(item.get("open")) or bool(item.get("actionable"))) else "unknown",
         }
     return owner_by_branch
 
@@ -564,7 +749,6 @@ def _triage_hints_for_orchestrator(
     report = dict(report_source or {}) if isinstance(report_source, dict) else {}
     source_freshness_sec = _safe_int(report.get("_source_freshness_sec"), 0)
     runtime_context = _triage_runtime_context_for_orchestrator(state, queue, kidney_summary)
-    active_report_pressure = _queue_has_active_probe_pressure(queue)
 
     likely_owner_by_branch = _queue_owner_hints(queue)
     seam_pressure_scores = {
@@ -575,10 +759,8 @@ def _triage_hints_for_orchestrator(
     lane_pressure_scores: dict[str, float] = {}
     review_contract_pressure_scores: dict[str, float] = {}
     top_candidates: list[dict] = []
-    historical_candidates: list[dict] = []
     approved_review_count = 0
     rejected_review_count = 0
-    historical_review_count = 0
 
     for family in [dict(item) for item in list(report.get("families") or []) if isinstance(item, dict)]:
         priorities = list(family.get("training_priorities") or []) if isinstance(family.get("training_priorities"), list) else []
@@ -595,19 +777,15 @@ def _triage_hints_for_orchestrator(
             review_contract = str(payload.get("review_contract") or "").strip()
             lane_key = _triage_lane_key(payload)
             approved = bool(gate.get("approved"))
-            active_candidate = approved and active_report_pressure
-            if active_candidate:
+            if approved:
                 approved_review_count += 1
                 _max_score(lane_pressure_scores, lane_key, robustness)
                 _max_score(lane_pressure_scores, "generated_queue", robustness)
                 _max_score(owner_pressure_scores, owner, robustness)
                 _max_score(review_contract_pressure_scores, review_contract, robustness)
-            elif approved:
-                historical_review_count += 1
             else:
                 rejected_review_count += 1
-            if active_candidate:
-                _max_score(seam_pressure_scores, seam or signal_name, robustness)
+            _max_score(seam_pressure_scores, seam or signal_name, robustness)
             branch_key = f"subconscious:{str(payload.get('family_id') or '').strip()}:{seam}:{signal_name}"
             likely_owner_by_branch[branch_key] = {
                 "source": "subconscious_work_tree_triage",
@@ -619,28 +797,24 @@ def _triage_hints_for_orchestrator(
                 "robustness": round(robustness, 4),
                 "gate_status": str(gate.get("status") or "").strip(),
                 "approved": approved,
-                "pressure_state": "active" if active_candidate else ("historical" if approved else "rejected"),
             }
-            candidate = {
-                "family_id": str(payload.get("family_id") or "").strip(),
-                "target_seam": seam,
-                "signal": signal_name,
-                "preferred_owner": owner,
-                "route_hint": str(payload.get("route_hint") or "").strip(),
-                "review_contract": review_contract,
-                "lane": lane_key,
-                "robustness": round(robustness, 4),
-                "urgency": str(payload.get("urgency") or "").strip(),
-                "gate_status": str(gate.get("status") or "").strip(),
-                "approved": approved,
-                "pressure_state": "active" if active_candidate else ("historical" if approved else "rejected"),
-                "suggested_test_name": str(payload.get("suggested_test_name") or "").strip(),
-                "next_task": str(signal.get("next_task") or "").strip(),
-            }
-            if active_candidate or (active_report_pressure and not approved):
-                top_candidates.append(candidate)
-            else:
-                historical_candidates.append(candidate)
+            top_candidates.append(
+                {
+                    "family_id": str(payload.get("family_id") or "").strip(),
+                    "target_seam": seam,
+                    "signal": signal_name,
+                    "preferred_owner": owner,
+                    "route_hint": str(payload.get("route_hint") or "").strip(),
+                    "review_contract": review_contract,
+                    "lane": lane_key,
+                    "robustness": round(robustness, 4),
+                    "urgency": str(payload.get("urgency") or "").strip(),
+                    "gate_status": str(gate.get("status") or "").strip(),
+                    "approved": approved,
+                    "suggested_test_name": str(payload.get("suggested_test_name") or "").strip(),
+                    "next_task": str(signal.get("next_task") or "").strip(),
+                }
+            )
 
     top_candidates.sort(
         key=lambda item: (
@@ -663,14 +837,120 @@ def _triage_hints_for_orchestrator(
         "lane_pressure_scores": lane_pressure_scores,
         "review_contract_pressure_scores": review_contract_pressure_scores,
         "top_triage_candidates": top_candidates[:8],
-        "historical_triage_candidates": historical_candidates[:8],
-        "active_report_pressure": active_report_pressure,
         "approved_review_count": approved_review_count,
         "rejected_review_count": rejected_review_count,
-        "historical_review_count": historical_review_count,
         "confidence": confidence,
         "source": "subconscious_work_tree_triage" if top_candidates else "core_steward_pulse",
         "source_freshness_sec": source_freshness_sec,
+    }
+
+
+def _subconscious_triage_signals_for_work_tree(
+    *,
+    state: dict | None,
+    generated_queue: dict | None,
+    latest_report: dict | None,
+    kidney_summary: dict | None = None,
+    limit: int = 8,
+) -> list[dict]:
+    queue = dict(generated_queue or {}) if isinstance(generated_queue, dict) else {}
+    report = dict(latest_report or {}) if isinstance(latest_report, dict) else {}
+    if not report:
+        return []
+    runtime_context = _triage_runtime_context_for_orchestrator(state, queue, kidney_summary)
+    signals: list[tuple[tuple[object, ...], dict]] = []
+    for family in [dict(item) for item in list(report.get("families") or []) if isinstance(item, dict)]:
+        priorities = list(family.get("training_priorities") or []) if isinstance(family.get("training_priorities"), list) else []
+        for priority in [dict(item) for item in priorities if isinstance(item, dict)]:
+            signal = _triage_signal_from_priority(family, priority, runtime_context)
+            payload = dict(signal.get("payload") or {}) if isinstance(signal.get("payload"), dict) else {}
+            if not payload:
+                continue
+            gate = SUBCONSCIOUS_WORK_TREE_TRIAGE_SERVICE.review_gate(signal)
+            if not bool(gate.get("approved")):
+                continue
+            payload["review_gate"] = dict(gate)
+            payload["source_freshness_sec"] = _safe_int(report.get("_source_freshness_sec"), 0)
+            signal["payload"] = payload
+            source_key = WORK_TREE_SIGNAL_INGESTION_SERVICE.source_key_for_signal(signal)
+            if _subconscious_terminal_no_repair_for_source_key(source_key):
+                continue
+            signals.append(
+                (
+                    (
+                        -_safe_float(payload.get("robustness"), 0.0),
+                        str(payload.get("target_seam") or ""),
+                        str(payload.get("signal") or ""),
+                        str(payload.get("family_id") or ""),
+                    ),
+                    signal,
+                )
+            )
+    signals.sort(key=lambda item: item[0])
+    return [signal for _rank, signal in signals[: max(0, int(limit or 0))]]
+
+
+def _live_control_status_payload_for_signal_ingestion(fallback_payload: dict) -> dict:
+    fallback = dict(fallback_payload or {})
+    url = str(CONTROL_STATUS_URL or "").strip()
+    if not url:
+        return fallback
+    try:
+        request = urllib.request.Request(url, headers={"Accept": "application/json"})
+        with urllib.request.urlopen(request, timeout=CONTROL_STATUS_TIMEOUT_SEC) as response:
+            raw = response.read(2_000_000)
+        live = json.loads(raw.decode("utf-8", errors="replace"))
+    except Exception:
+        return fallback
+    if not isinstance(live, dict):
+        return fallback
+    merged = {**fallback, **live}
+    fallback_maintenance = fallback.get("autonomy_maintenance") if isinstance(fallback.get("autonomy_maintenance"), dict) else {}
+    live_maintenance = live.get("autonomy_maintenance") if isinstance(live.get("autonomy_maintenance"), dict) else {}
+    if fallback_maintenance:
+        merged["autonomy_maintenance"] = {**dict(live_maintenance or {}), **dict(fallback_maintenance or {})}
+    merged["signal_ingestion_status_source"] = "control_status_http"
+    return merged
+
+
+def _validation_artifact_truth_payload_for_signal_ingestion() -> dict:
+    try:
+        truth = VALIDATION_ARTIFACT_TRUTH_SERVICE.payload(
+            runtime_dir=RUNTIME_DIR,
+            regression_status_path=REGRESSION_STATUS_FILE,
+        )
+    except Exception as exc:
+        truth = {
+            "ok": False,
+            "status": "validation_artifact_truth_unavailable",
+            "current_window_failure_count": 0,
+            "current_window_llm_unavailable_count": 0,
+            "hidden_by_green_regression": False,
+            "latest_failure": {},
+            "failures": [],
+            "error": str(exc),
+            "rationale": "Maintenance could not read validation action artifacts directly.",
+        }
+    if not isinstance(truth, dict):
+        truth = {"ok": True, "status": "not_available"}
+    return {
+        "validation_artifact_truth": dict(truth),
+        "validation_artifact_truth_ok": bool(truth.get("ok", True)),
+        "validation_artifact_truth_status": str(truth.get("status") or ""),
+        "validation_artifact_failure_count": _safe_int(
+            truth.get("current_window_failure_count", truth.get("failure_count", 0)),
+            0,
+        ),
+        "validation_artifact_llm_unavailable_count": _safe_int(
+            truth.get("current_window_llm_unavailable_count", truth.get("llm_unavailable_count", 0)),
+            0,
+        ),
+        "validation_artifact_hidden_by_green_regression": bool(truth.get("hidden_by_green_regression", False)),
+        "validation_artifact_latest_failure": (
+            dict(truth.get("latest_failure") or {})
+            if isinstance(truth.get("latest_failure"), dict)
+            else {}
+        ),
     }
 
 
@@ -693,6 +973,7 @@ def _last_action_context_for_orchestrator(state: dict) -> dict:
     return {
         "last_action_type": execution_action_type or str(action.get("act") or ""),
         "last_target_id": str(last_execution.get("target_id") or ""),
+        "last_target_step_id": str(last_execution.get("target_step_id") or ""),
         "last_action_at_utc": str(last_execution.get("created_at_utc") or last_orchestrator.get("created_at_utc") or last_orchestrator.get("ts") or ""),
         "cooldown_active": bool(cooldown_remaining > 0),
         "cooldown_remaining_sec": cooldown_remaining,
@@ -733,13 +1014,13 @@ def _autonomy_orchestrator_input_envelope(
 
 
 def _run_autonomy_orchestrator_advisory(state: dict, kidney_summary: dict) -> dict:
-    core_steward = _core_steward_for_orchestrator(state, kidney_summary)
     work_tree_state = CONTROL_WORK_TREES_SERVICE.payload(
         list_visual_trees_fn=work_tree.list_visual_trees,
         limit=64,
     )
     generated_queue = _generated_work_queue(limit=200)
     guard_health = _guard_health_for_orchestrator()
+    core_steward = _core_steward_for_orchestrator(state, kidney_summary, guard_health=guard_health)
     policy_snapshot = _policy_snapshot_for_orchestrator()
     latest_report = _latest_subconscious_report_for_triage()
     active_work_candidates = _active_work_tree_candidates(ACTIVE_WORK_TREE_MAX_TREES)
@@ -757,9 +1038,24 @@ def _run_autonomy_orchestrator_advisory(state: dict, kidney_summary: dict) -> di
             kidney_summary=kidney_summary,
             policy_snapshot=policy_snapshot,
         ),
-        record_ledger_fn=_append_autonomy_orchestrator_ledger,
     )
     execution = _execute_autonomy_recommendation(state, packet, policy_snapshot)
+    ledger = dict(packet.get("ledger") or {}) if isinstance(packet.get("ledger"), dict) else {}
+    ledger_row = dict(ledger.get("row") or {}) if isinstance(ledger.get("row"), dict) else {}
+    ledger_status = "not_requested"
+    if ledger_row:
+        ledger_row["execution"] = _compact_autonomy_execution_for_ledger(execution)
+        ledger_row["execution_result"] = str(execution.get("result") or "")
+        ledger_row["execution_action_type"] = str(execution.get("action_type") or "")
+        try:
+            _append_autonomy_orchestrator_ledger(dict(ledger_row))
+            ledger_status = "recorded"
+        except Exception as exc:
+            ledger_status = f"record_failed:{exc}"
+    packet["ledger"] = {
+        "status": ledger_status,
+        "row": ledger_row,
+    }
     recommended_action = dict(packet.get("recommended_action") or {}) if isinstance(packet.get("recommended_action"), dict) else {}
     state["last_autonomy_orchestrator"] = {
         "ts": str(((packet.get("ledger") or {}).get("row") or {}).get("ts") or ""),
@@ -777,6 +1073,12 @@ def _run_autonomy_orchestrator_advisory(state: dict, kidney_summary: dict) -> di
         "execution": execution,
     }
     packet["execution"] = execution
+    operator_notice = _publish_operator_notice_from_autonomy(packet, execution)
+    state["last_operator_outbox_notice"] = operator_notice
+    packet["operator_notice"] = operator_notice
+    work_tree_operator_notices = _publish_operator_notices_from_work_tree(work_tree_state)
+    state["last_operator_outbox_work_tree_notices"] = work_tree_operator_notices
+    packet["operator_work_tree_notices"] = work_tree_operator_notices
     return packet
 
 
@@ -932,10 +1234,121 @@ def _compact_generated_queue_execution_extra(extra: dict | None) -> dict:
     }
 
 
+def _compact_tool_result_summary(result: object) -> dict:
+    if isinstance(result, dict):
+        summary = {}
+        for key in ("ok", "status", "result", "message", "artifact", "report_path", "failure_reason", "readiness_state", "ready_to_ship", "promoted"):
+            if key in result:
+                summary[key] = result.get(key)
+        return summary
+    text = str(result or "")
+    if not text:
+        return {}
+    return {
+        "text_preview": text[:500],
+        "text_length": len(text),
+    }
+
+
+def _compact_work_tree_history(history: list[dict] | None, *, limit: int = 8) -> list[dict]:
+    compact: list[dict] = []
+    for item in list(history or [])[: max(1, int(limit or 8))]:
+        if not isinstance(item, dict):
+            continue
+        row = {
+            "action": str(item.get("action") or ""),
+            "tree_id": str(item.get("tree_id") or ""),
+            "tree_title": str(item.get("tree_title") or ""),
+            "branch_id": str(item.get("branch_id") or ""),
+            "branch_title": str(item.get("branch_title") or ""),
+            "task_id": str(item.get("task_id") or ""),
+            "task_title": str(item.get("task_title") or ""),
+            "tool": str(item.get("tool") or item.get("recommended_tool") or ""),
+            "evidence_id": str(item.get("evidence_id") or ""),
+            "reason": str(item.get("reason") or ""),
+        }
+        if "tool_args" in item:
+            row["tool_args"] = list(item.get("tool_args") or [])[:8] if isinstance(item.get("tool_args"), list) else item.get("tool_args")
+        if "tool_result" in item:
+            row["tool_result_summary"] = _compact_tool_result_summary(item.get("tool_result"))
+        compact.append({key: value for key, value in row.items() if value not in ("", [], {})})
+    return compact
+
+
+def _compact_work_tree_cycle_payload(cycle: dict | None) -> dict:
+    data = dict(cycle or {}) if isinstance(cycle, dict) else {}
+    compact = {
+        "ts": str(data.get("ts") or ""),
+        "status": str(data.get("status") or ""),
+        "tree_count": _safe_int(data.get("tree_count"), 0),
+        "attempted_count": _safe_int(data.get("attempted_count"), 0),
+        "executed_count": _safe_int(data.get("executed_count"), 0),
+        "history_count": _safe_int(data.get("history_count"), len(list(data.get("history") or [])) if isinstance(data.get("history"), list) else 0),
+        "processed_tree_count": _safe_int(data.get("processed_tree_count"), 0),
+        "skipped_tree_count": _safe_int(data.get("skipped_tree_count"), 0),
+        "last_action": str(data.get("last_action") or ""),
+        "processed": list(data.get("processed") or [])[:8] if isinstance(data.get("processed"), list) else [],
+        "skipped": list(data.get("skipped") or [])[:8] if isinstance(data.get("skipped"), list) else [],
+    }
+    if isinstance(data.get("history"), list):
+        compact["history"] = _compact_work_tree_history(data.get("history"))
+    if isinstance(data.get("core_thinning_sync"), dict):
+        compact["core_thinning_sync"] = dict(data.get("core_thinning_sync") or {})
+    return {key: value for key, value in compact.items() if value not in ("", [], {})}
+
+
 def _compact_autonomy_execution_extra(action_type: str, extra: dict | None) -> dict:
     if action_type == "generated_queue_run_next":
         return _compact_generated_queue_execution_extra(extra)
+    if action_type in {"active_work_tree_run_next", "patch_queue_run_next"}:
+        data = dict(extra or {}) if isinstance(extra, dict) else {}
+        if isinstance(data.get("cycle"), dict):
+            data["cycle"] = _compact_work_tree_cycle_payload(data.get("cycle"))
+        return data
     return dict(extra or {}) if isinstance(extra, dict) else {}
+
+
+def _compact_autonomy_execution_for_ledger(execution: dict | None) -> dict:
+    data = dict(execution or {}) if isinstance(execution, dict) else {}
+    events = []
+    for event in list(data.get("events") or [])[:8]:
+        if not isinstance(event, dict):
+            continue
+        payload = dict(event.get("payload") or {}) if isinstance(event.get("payload"), dict) else {}
+        events.append(
+            {
+                "act": str(event.get("act") or ""),
+                "status": str(event.get("status") or ""),
+                "detail": str(event.get("detail") or ""),
+                "target_kind": str(payload.get("target_kind") or ""),
+                "target_id": str(payload.get("target_id") or ""),
+                "target_step_id": str(payload.get("target_step_id") or ""),
+                "reason_code": str(payload.get("reason_code") or ""),
+            }
+        )
+    compact = {
+        "ts": str(data.get("ts") or ""),
+        "created_at_utc": str(data.get("created_at_utc") or ""),
+        "mode": str(data.get("mode") or ""),
+        "gate_status": str(data.get("gate_status") or ""),
+        "gate_reason": str(data.get("gate_reason") or ""),
+        "action_type": str(data.get("action_type") or ""),
+        "target_id": str(data.get("target_id") or ""),
+        "target_step_id": str(data.get("target_step_id") or ""),
+        "allowed": bool(data.get("allowed", False)),
+        "result": str(data.get("result") or ""),
+        "ok": bool(data.get("ok", False)),
+        "message": str(data.get("message") or ""),
+        "refusal_reasons": list(data.get("refusal_reasons") or []),
+        "cooldown_sec": _safe_int(data.get("cooldown_sec"), 0),
+        "events": events,
+    }
+    extra = dict(data.get("extra") or {}) if isinstance(data.get("extra"), dict) else {}
+    if isinstance(extra.get("cycle"), dict):
+        compact["cycle"] = _compact_work_tree_cycle_payload(extra.get("cycle"))
+    elif extra:
+        compact["extra"] = extra
+    return {key: value for key, value in compact.items() if value not in ("", [], {})}
 
 
 class _MaintenancePatchControlService:
@@ -1010,7 +1423,7 @@ def _maintenance_active_work_tree_run_next_action(_payload: dict, state: dict) -
         return False, msg, {}, msg
     status = str((cycle or {}).get("status") or "unknown").strip() or "unknown"
     msg = f"active_work_tree_run_next_{status}"
-    return not _cycle_status_is_failure(status), msg, {"cycle": cycle if isinstance(cycle, dict) else {}}, msg
+    return status not in {"failed", "error"}, msg, {"cycle": cycle if isinstance(cycle, dict) else {}}, msg
 
 
 def _dispatch_autonomy_control_action(action_type: str, payload: dict, events: list[dict], state: dict | None = None) -> tuple[bool, str, dict]:
@@ -1111,6 +1524,7 @@ def _execute_autonomy_recommendation(state: dict, packet: dict, policy_snapshot:
         "gate_reason": str(gate.get("reason") or ""),
         "action_type": str(gate.get("action_type") or ""),
         "target_id": str(gate.get("target_id") or ""),
+        "target_step_id": str(gate.get("target_step_id") or ""),
         "allowed": bool(gate.get("allow_execute")),
         "result": "blocked",
         "refusal_reasons": list(gate.get("refusal_reasons") or []),
@@ -1167,18 +1581,57 @@ def _orchestrator_executed_lane_cycle(packet: dict, action_type: str) -> dict:
     return cycle
 
 
-def _cycle_status_is_failure(status: str) -> bool:
-    return str(status or "").strip().lower() in {
-        "failed",
-        "error",
-        "tool_failed",
-        "execution_failed",
-        "verification_failed",
-        "scope_blocked",
-        "governance_blocked",
-        "missing_target",
-        "no_tool_selected",
-    }
+def _runtime_worker_loop_identity_live(worker_state: dict) -> bool:
+    pid = _safe_int((worker_state or {}).get("pid"), 0)
+    if pid <= 0:
+        return False
+    try:
+        import psutil
+
+        process = psutil.Process(pid)
+        recorded_create_time = (worker_state or {}).get("create_time")
+        if recorded_create_time not in (None, ""):
+            try:
+                if abs(float(process.create_time()) - float(recorded_create_time)) > 1.0:
+                    return False
+            except Exception:
+                return False
+        cmdline = [str(part or "").strip().lower() for part in list(process.cmdline() or [])]
+    except Exception:
+        return False
+    joined_cmdline = " ".join(cmdline)
+    return "--loop" in cmdline and "autonomy_maintenance.py" in joined_cmdline
+
+
+def _clear_non_loop_runtime_worker_state(state: dict, *, timestamp_fn: Callable[[], str] | None = None) -> bool:
+    worker_state = dict((state or {}).get("runtime_worker") or {})
+    if not worker_state:
+        return False
+    if _runtime_worker_loop_identity_live(worker_state):
+        return False
+
+    had_identity = bool(
+        worker_state.get("pid")
+        or worker_state.get("create_time")
+        or worker_state.get("active")
+        or worker_state.get("stale_identity")
+    )
+    if not had_identity:
+        return False
+
+    prior_status = str(worker_state.get("last_cycle_status") or "").strip().lower()
+    worker_state["active"] = False
+    worker_state["stale_identity"] = False
+    worker_state["cleared_stale_identity"] = True
+    worker_state["pid"] = None
+    worker_state["create_time"] = None
+    if prior_status in {"", "running", "ok", "success"}:
+        worker_state["last_cycle_status"] = "stopped"
+    worker_state["stopped_at"] = (timestamp_fn or _patch_queue_timestamp)()
+    worker_state["stale_identity_cleared_at"] = worker_state["stopped_at"]
+    worker_state["stopped_reason"] = "one_shot_cycle_not_worker_loop"
+    state["runtime_worker"] = worker_state
+    return True
 
 
 def _record_worker_cycle(*, cycle: int, interval_sec: int, status: str, code: int | None = None) -> None:
@@ -1222,51 +1675,6 @@ def _max_fallback_robustness(report: dict) -> float:
             if score > best:
                 best = score
     return best
-
-
-def _queue_has_active_probe_pressure(generated_queue: dict | None) -> bool:
-    queue = dict(generated_queue or {}) if isinstance(generated_queue, dict) else {}
-    status = str(queue.get("queue_status") or queue.get("status") or "").strip().lower()
-    if status in {"actionable", "blocked", "failed", "error"}:
-        return True
-    return any(
-        _safe_int(queue.get(key), 0) > 0
-        for key in (
-            "open_count",
-            "actionable_count",
-            "blocked_count",
-            "drift_count",
-            "warning_count",
-            "never_run_count",
-        )
-    )
-
-
-def _active_fallback_robustness(report: dict, generated_queue: dict | None) -> float:
-    raw_score = _max_fallback_robustness(report)
-    if raw_score <= 0.0:
-        return 0.0
-    if not _queue_has_active_probe_pressure(generated_queue):
-        return 0.0
-    return raw_score
-
-
-def _record_fallback_pressure_state(
-    state: dict,
-    *,
-    raw_score: float,
-    active_score: float,
-    generated_queue: dict | None,
-) -> None:
-    active_score = max(0.0, min(1.0, float(active_score or 0.0)))
-    raw_score = max(0.0, min(1.0, float(raw_score or 0.0)))
-    state["last_raw_fallback_overuse_score"] = raw_score
-    state["last_active_fallback_overuse_score"] = active_score
-    state["last_fallback_overuse_score"] = active_score
-    state["last_fallback_pressure_active"] = bool(active_score > 0.0 and _queue_has_active_probe_pressure(generated_queue))
-    state["last_fallback_pressure_queue_status"] = str(
-        (generated_queue or {}).get("queue_status") or (generated_queue or {}).get("status") or ""
-    ).strip()
 
 
 def _build_micro_patch_zip(state: dict) -> Path | None:
@@ -1387,43 +1795,145 @@ def _run_daily_regression_if_due(state: dict) -> str:
     if str(state.get("last_regression_date") or "") == today:
         return "daily_regression_skipped_already_ran"
 
-    cmd = [str(VENV_PY), "-m", "unittest", "discover", "-s", "tests", "-p", "test_*.py", "--buffer"]
-    proc = subprocess.run(cmd, cwd=str(ROOT), capture_output=True, text=True, timeout=5400)
+    cmd = [str(VENV_PY), str(REGRESSION_RUNNER), "all"]
+    proc = subprocess.run(
+        cmd,
+        cwd=str(ROOT),
+        capture_output=True,
+        text=True,
+        timeout=5400,
+        env=_validation_subprocess_env(),
+    )
     output = ((proc.stdout or "") + "\n" + (proc.stderr or "")).strip()
     summary = "OK" if proc.returncode == 0 else "FAILED"
 
-    state["last_regression_date"] = today
-    state["last_regression_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
-    state["last_regression_status"] = summary
-    state["last_regression_stale"] = False
-    state["last_regression_returncode"] = int(proc.returncode)
-    state["last_regression_tail"] = output[-2000:]
+    synced = _sync_regression_status_from_file(state, status_path=REGRESSION_STATUS_FILE)
+    if not synced:
+        state["last_regression_date"] = today
+        state["last_regression_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
+        state["last_regression_status"] = summary
+        state["last_regression_stale"] = False
+        state["last_regression_returncode"] = int(proc.returncode)
+        state["last_regression_source"] = "scripts/run_regression.py"
+        state["last_regression_lanes"] = ["all"]
+        state["last_regression_tail"] = output[-2000:]
     return f"daily_regression_{summary.lower()}"
 
 
-def _sync_signal_intake_work_tree(state: dict) -> dict:
+def _sync_regression_status_from_file(state: dict, *, status_path: Path = REGRESSION_STATUS_FILE) -> bool:
+    try:
+        data = json.loads(Path(status_path).read_text(encoding="utf-8"))
+    except Exception:
+        return False
+    if not isinstance(data, dict):
+        return False
+
+    generated_at = str(data.get("generated_at") or "").strip()
+    status = str(data.get("status") or "").strip().upper()
+    if not generated_at or not status:
+        return False
+
+    current_at = str(state.get("last_regression_at") or "").strip()
+    if current_at and generated_at <= current_at:
+        return False
+
+    state["last_regression_date"] = str(data.get("date") or generated_at[:10] or time.strftime("%Y-%m-%d"))
+    state["last_regression_at"] = generated_at
+    state["last_regression_status"] = status
+    state["last_regression_stale"] = False
+    state["last_regression_returncode"] = _safe_int(data.get("returncode"), 0)
+    state["last_regression_source"] = str(data.get("source") or Path(status_path).name)
+    state["last_regression_lanes"] = list(data.get("lanes") or []) if isinstance(data.get("lanes"), list) else []
+    detail = str(data.get("detail") or "").strip()
+    state["last_regression_tail"] = detail or f"{state['last_regression_source']} reported {status}."
+    return True
+
+
+def _sync_signal_intake_work_tree(state: dict, kidney_summary: dict | None = None) -> dict:
     maintenance_payload = {
         "last_regression_status": str(state.get("last_regression_status") or ""),
         "last_regression_stale": bool(state.get("last_regression_stale", False)),
     }
+    try:
+        pulse_payload = nova_core.build_pulse_payload()
+    except Exception:
+        pulse_payload = {}
+    memory_health = pulse_payload.get("memory_health") if isinstance(pulse_payload.get("memory_health"), dict) else {}
     status_payload = {
         "alerts": [],
         "self_check_pass_ratio": 1.0,
         "autonomy_maintenance": maintenance_payload,
+        "memory_enabled": bool(nova_core.mem_enabled()),
+        "memory_health": memory_health,
+        "memory_health_status": str(pulse_payload.get("memory_health_status") or memory_health.get("status") or "unknown"),
+        "memory_health_issue_count": int(pulse_payload.get("memory_health_issue_count", memory_health.get("issue_count", 0)) or 0),
+        "memory_health_issues": list(pulse_payload.get("memory_health_issues") or []) if isinstance(pulse_payload.get("memory_health_issues"), list) else list(memory_health.get("issues") or []),
+        "memory_db_total": int(pulse_payload.get("memory_db_total", 0) or 0),
+        "memory_events_log_status": str(pulse_payload.get("memory_events_log_status") or ""),
     }
+    status_payload.update(_validation_artifact_truth_payload_for_signal_ingestion())
+    status_payload = _live_control_status_payload_for_signal_ingestion(status_payload)
     results = WORK_TREE_SIGNAL_INGESTION_SERVICE.sync_status_snapshot(status_payload)
+    try:
+        generated_queue = _generated_work_queue(limit=200)
+    except Exception:
+        generated_queue = {}
+    try:
+        latest_report = _latest_subconscious_report_for_triage()
+    except Exception:
+        latest_report = {}
+    subconscious_signals = _subconscious_triage_signals_for_work_tree(
+        state=state,
+        generated_queue=generated_queue if isinstance(generated_queue, dict) else {},
+        latest_report=latest_report if isinstance(latest_report, dict) else {},
+        kidney_summary=kidney_summary,
+        limit=8,
+    )
+    active_subconscious_source_keys = {
+        WORK_TREE_SIGNAL_INGESTION_SERVICE.source_key_for_signal(signal)
+        for signal in subconscious_signals
+        if isinstance(signal, dict)
+    }
+    for signal in subconscious_signals:
+        results.append(WORK_TREE_SIGNAL_INGESTION_SERVICE.ingest_signal(signal))
+    if isinstance(latest_report, dict) and (latest_report.get("generated_at") or latest_report.get("families")):
+        results.extend(
+            WORK_TREE_SIGNAL_INGESTION_SERVICE.resolve_inactive_signal_branches(
+                signal_class="subconscious_candidate",
+                source="subconscious",
+                active_source_keys=active_subconscious_source_keys,
+                reason="Latest actionable subconscious triage no longer carries this pressure as active repair work.",
+                resolution_mode="retire",
+            )
+        )
     tree = None
     for candidate in work_tree.list_trees():
         meta = dict(getattr(candidate, "meta", {}) or {})
+        status = str(getattr(getattr(candidate, "status", ""), "value", getattr(candidate, "status", "")) or "").strip().lower()
+        if status == "archived":
+            continue
         if str(meta.get("kind") or "").strip().lower() == WORK_TREE_SIGNAL_INGESTION_SERVICE.SIGNAL_TREE_KIND:
             tree = candidate
             break
-    active_regression = bool(
+    active_maintenance_regression = bool(
         maintenance_payload["last_regression_status"]
         and "pass" not in maintenance_payload["last_regression_status"].lower()
         and maintenance_payload["last_regression_status"].lower() != "ok"
         and not maintenance_payload["last_regression_stale"]
     )
+    validation_truth = status_payload.get("validation_artifact_truth") if isinstance(status_payload.get("validation_artifact_truth"), dict) else {}
+    active_validation_artifact_failure = bool(
+        not bool(status_payload.get("validation_artifact_truth_ok", validation_truth.get("ok", True)))
+        and _safe_int(
+            status_payload.get(
+                "validation_artifact_failure_count",
+                validation_truth.get("current_window_failure_count", validation_truth.get("failure_count", 0)),
+            ),
+            0,
+        )
+        > 0
+    )
+    active_regression = bool(active_maintenance_regression or active_validation_artifact_failure)
     payload = {
         "ts": _patch_queue_timestamp(),
         "status": "ok",
@@ -1433,10 +1943,42 @@ def _sync_signal_intake_work_tree(state: dict) -> dict:
         "created_count": sum(1 for item in results if str((item or {}).get("action") or "") == "created"),
         "updated_count": sum(1 for item in results if str((item or {}).get("action") or "") == "updated"),
         "reopened_count": sum(1 for item in results if str((item or {}).get("action") or "") == "reopened"),
+        "observing_count": sum(1 for item in results if str((item or {}).get("action") or "") == "observing"),
         "resolved_count": sum(1 for item in results if str((item or {}).get("action") or "") == "resolved"),
+        "retired_count": sum(1 for item in results if str((item or {}).get("action") or "") == "retired"),
+        "subconscious_signal_count": len(subconscious_signals),
         "active_regression_failure": active_regression,
+        "active_maintenance_regression_failure": active_maintenance_regression,
+        "active_validation_artifact_failure": active_validation_artifact_failure,
+        "validation_artifact_truth_status": str(status_payload.get("validation_artifact_truth_status") or validation_truth.get("status") or ""),
+        "validation_artifact_failure_count": _safe_int(
+            status_payload.get(
+                "validation_artifact_failure_count",
+                validation_truth.get("current_window_failure_count", validation_truth.get("failure_count", 0)),
+            ),
+            0,
+        ),
+        "validation_artifact_llm_unavailable_count": _safe_int(
+            status_payload.get(
+                "validation_artifact_llm_unavailable_count",
+                validation_truth.get("current_window_llm_unavailable_count", validation_truth.get("llm_unavailable_count", 0)),
+            ),
+            0,
+        ),
         "last_regression_status": maintenance_payload["last_regression_status"],
         "last_regression_stale": maintenance_payload["last_regression_stale"],
+    }
+    report_totals = dict(latest_report.get("totals") or {}) if isinstance(latest_report.get("totals"), dict) else {}
+    state["last_subconscious_triage"] = {
+        "ts": payload["ts"],
+        "status": "ok",
+        "latest_generated_at": str(latest_report.get("generated_at") or ""),
+        "source_freshness_sec": _safe_int(latest_report.get("_source_freshness_sec"), 0),
+        "training_priority_count": _safe_int(report_totals.get("training_priority_count"), 0),
+        "robust_signal_count": _safe_int(report_totals.get("robust_signal_count"), 0),
+        "script_specific_signal_count": _safe_int(report_totals.get("script_specific_signal_count"), 0),
+        "subconscious_signal_count": len(subconscious_signals),
+        "active_source_keys": sorted(active_subconscious_source_keys),
     }
     if results:
         payload["results"] = list(results)
@@ -2577,62 +3119,7 @@ def _run_generated_queue_work_tree_cycle(state: dict) -> dict:
     return payload
 
 
-def _resolve_nonexecutable_active_work_tree_steps(
-    state: dict,
-    *,
-    limit: int = ACTIVE_WORK_TREE_MAX_TREES,
-    max_resolutions: int = ACTIVE_WORK_TREE_MAX_BLOCKER_RESOLUTIONS,
-) -> dict:
-    resolved: list[dict] = []
-    inspected = 0
-    tree_limit = max(int(limit or ACTIVE_WORK_TREE_MAX_TREES) * 4, 16)
-    resolution_limit = max(1, int(max_resolutions or ACTIVE_WORK_TREE_MAX_BLOCKER_RESOLUTIONS))
-    for payload in work_tree.list_visual_trees(limit=tree_limit):
-        if len(resolved) >= resolution_limit:
-            break
-        if not isinstance(payload, dict):
-            continue
-        if str(payload.get("status") or "").strip().lower() != "active":
-            continue
-        if str(payload.get("kind") or "").strip().lower() in {PATCH_QUEUE_TREE_KIND, GENERATED_QUEUE_TREE_KIND}:
-            continue
-        tree_id = str(payload.get("tree_id") or "").strip()
-        if not tree_id:
-            continue
-        inspected += 1
-        while len(resolved) < resolution_limit:
-            current_payload = work_tree.get_visual_tree_data(tree_id) or {}
-            next_step = current_payload.get("next_step") if isinstance(current_payload.get("next_step"), dict) else {}
-            if str(next_step.get("action") or "").strip().lower() != "missing_target":
-                break
-            result = work_tree.resolve_next_nonexecutable_step(tree_id, persist=True)
-            if not bool((result or {}).get("resolved", False)):
-                break
-            resolved.append(
-                {
-                    "tree_id": tree_id,
-                    "tree_title": str(current_payload.get("title") or payload.get("title") or ""),
-                    "branch_id": str(result.get("branch_id") or ""),
-                    "task_id": str(result.get("task_id") or ""),
-                    "tool": str(result.get("recommended_tool") or result.get("tool") or ""),
-                    "reason": str(result.get("reason") or ""),
-                    "resolution": str(result.get("resolution") or ""),
-                }
-            )
-    result_payload = {
-        "ts": _patch_queue_timestamp(),
-        "status": "ok" if resolved else "idle",
-        "inspected_count": inspected,
-        "resolved_count": len(resolved),
-        "resolved": resolved,
-    }
-    state["last_active_work_tree_blocker_resolution"] = result_payload
-    return result_payload
-
-
-def _active_work_tree_candidates(
-    limit: int = ACTIVE_WORK_TREE_MAX_TREES,
-) -> list[dict]:
+def _active_work_tree_candidates(limit: int = ACTIVE_WORK_TREE_MAX_TREES) -> list[dict]:
     candidates: list[dict] = []
     for payload in work_tree.list_visual_trees(limit=max(int(limit or ACTIVE_WORK_TREE_MAX_TREES) * 4, 16)):
         if not isinstance(payload, dict):
@@ -2644,8 +3131,6 @@ def _active_work_tree_candidates(
         next_step = payload.get("next_step") if isinstance(payload.get("next_step"), dict) else {}
         if not next_step:
             continue
-        if str(next_step.get("action") or "").strip().lower() != "execute":
-            continue
         candidates.append(payload)
         if len(candidates) >= max(1, int(limit or ACTIVE_WORK_TREE_MAX_TREES)):
             break
@@ -2655,41 +3140,6 @@ def _active_work_tree_candidates(
 def _candidate_uses_tool(candidate: dict, tool_name: str) -> bool:
     next_step = candidate.get("next_step") if isinstance(candidate.get("next_step"), dict) else {}
     return str(next_step.get("recommended_tool") or "").strip() == tool_name
-
-
-def _is_structured_cli_system_tree(payload: dict) -> bool:
-    return (
-        str((payload or {}).get("kind") or "").strip().lower() == "system"
-        and str((payload or {}).get("source") or "").strip().lower() == "cli"
-    )
-
-
-def _next_step_action(payload: dict) -> str:
-    next_step = (payload or {}).get("next_step") if isinstance((payload or {}).get("next_step"), dict) else {}
-    return str(next_step.get("action") or "").strip().lower()
-
-
-def _is_structurally_nonexecutable_cli_payload(payload: dict) -> bool:
-    if not _is_structured_cli_system_tree(payload):
-        return False
-    return _next_step_action(payload) in {
-        "missing_target",
-        "missing_tool_assignment",
-        "governance_blocked",
-        "wait_for_tools",
-        "no_tool_selected",
-    }
-
-
-def _is_resolved_missing_target_cli_tree(branches: list, open_tasks: list) -> bool:
-    if not open_tasks:
-        return False
-    if any(getattr(task, "status", None) != TaskStatus.BLOCKED for task in open_tasks):
-        return False
-    return any(
-        str(getattr(branch, "resolution_state", "") or "").strip().lower() == "missing_target"
-        for branch in branches
-    )
 
 
 def _sync_core_thinning_work_tree(state: dict) -> dict:
@@ -2728,12 +3178,10 @@ def _run_active_work_tree_cycle(
 ) -> dict:
     tree_limit = max(1, _safe_int(max_trees, ACTIVE_WORK_TREE_MAX_TREES)) if max_trees is not None else ACTIVE_WORK_TREE_MAX_TREES
     step_limit = max(1, _safe_int(max_steps, ACTIVE_WORK_TREE_MAX_STEPS)) if max_steps is not None else ACTIVE_WORK_TREE_MAX_STEPS
-    blocker_resolution = _resolve_nonexecutable_active_work_tree_steps(state, limit=tree_limit)
     candidates = _active_work_tree_candidates(tree_limit)
     core_thinning_sync: dict = {}
     if sync_core_thinning and any(_candidate_uses_tool(candidate, "core_thinning") for candidate in candidates):
         core_thinning_sync = _sync_core_thinning_work_tree(state)
-        blocker_resolution = _resolve_nonexecutable_active_work_tree_steps(state, limit=tree_limit)
         candidates = _active_work_tree_candidates(tree_limit)
     executed_total = 0
     attempted_total = 0
@@ -2802,10 +3250,8 @@ def _run_active_work_tree_cycle(
     }
     if core_thinning_sync:
         payload["core_thinning_sync"] = core_thinning_sync
-    if blocker_resolution:
-        payload["blocker_resolution"] = blocker_resolution
     if full_history:
-        payload["history"] = full_history
+        payload["history"] = _compact_work_tree_history(full_history)
     state["last_active_work_tree_cycle"] = payload
     return payload
 
@@ -2814,16 +3260,12 @@ def _retire_legacy_patch_update_trees(state: dict) -> dict:
     retired: list[dict] = []
     now = work_tree._now()
     reason = "Retired legacy patch/update shell after governed patch queue adoption."
-    for candidate in work_tree.list_visual_trees(limit=256):
-        if not isinstance(candidate, dict):
-            continue
-        if str(candidate.get("status") or "").strip().lower() != "active":
-            continue
+    for candidate in _active_work_tree_candidates(limit=64):
         tree_id = str(candidate.get("tree_id") or "").strip()
         tree_kind = str(candidate.get("kind") or "").strip().lower()
         tree_source = str(candidate.get("source") or "").strip().lower()
         next_step = candidate.get("next_step") if isinstance(candidate.get("next_step"), dict) else {}
-        tool_name = str(next_step.get("recommended_tool") or next_step.get("tool") or "").strip()
+        tool_name = str(next_step.get("recommended_tool") or "").strip()
         if not tree_id or tree_kind != "system" or tree_source != "cli":
             continue
         if tool_name not in LEGACY_PATCH_UPDATE_TOOLS:
@@ -2956,31 +3398,23 @@ def _archive_stale_cli_active_trees(state: dict) -> dict:
         if tree.status != work_tree.TreeStatus.ACTIVE:
             continue
         meta = dict(tree.meta or {}) if isinstance(tree.meta, dict) else {}
-        payload = work_tree.get_visual_tree_data(tree.tree_id) or {}
-        kind = str(payload.get("kind") or meta.get("kind") or "").strip().lower()
-        source = str(payload.get("source") or meta.get("source") or "").strip().lower()
+        kind = str(meta.get("kind") or "").strip().lower()
+        source = str(meta.get("source") or "").strip().lower()
         title = str(tree.title or "").strip()
-        if kind != "system" or source != "cli":
+        if kind != "system" or source != "cli" or not title.lower().startswith("cli:"):
+            continue
+        age_sec = max(0.0, (now - tree.created_at).total_seconds())
+        if age_sec < float(STALE_CLI_ACTIVE_TREE_ARCHIVE_MIN_AGE_SEC):
+            skipped_recent += 1
             continue
         branches = work_tree.list_tree_branches(tree.tree_id)
         open_tasks = [
             task for task in work_tree.list_tree_tasks(tree.tree_id)
             if task.status not in {TaskStatus.COMPLETE, TaskStatus.DROPPED}
         ]
-        structurally_nonexecutable = _is_structurally_nonexecutable_cli_payload(payload)
-        resolved_missing_target = _is_resolved_missing_target_cli_tree(branches, open_tasks)
-        immediate_nonexecutable = _next_step_action(payload) == "missing_target" or resolved_missing_target
-        age_sec = max(0.0, (now - tree.created_at).total_seconds())
-        if (
-            age_sec < float(STALE_CLI_ACTIVE_TREE_ARCHIVE_MIN_AGE_SEC)
-            and not immediate_nonexecutable
-        ):
-            skipped_recent += 1
-            continue
         if len(branches) > int(STALE_CLI_ACTIVE_TREE_MAX_BRANCHES) or len(open_tasks) > int(STALE_CLI_ACTIVE_TREE_MAX_OPEN_TASKS):
-            if not structurally_nonexecutable and not resolved_missing_target:
-                skipped_complex += 1
-                continue
+            skipped_complex += 1
+            continue
         work_tree.archive_tree(tree.tree_id, reason=reason)
         archived.append(
             {
@@ -2990,7 +3424,6 @@ def _archive_stale_cli_active_trees(state: dict) -> dict:
                 "branch_count": len(branches),
                 "open_tasks": len(open_tasks),
                 "work_identity_key": str(meta.get("work_identity_key") or ""),
-                "nonexecutable": bool(structurally_nonexecutable or resolved_missing_target),
             }
         )
     payload = {
@@ -3005,43 +3438,71 @@ def _archive_stale_cli_active_trees(state: dict) -> dict:
     return payload
 
 
-def run_once() -> int:
+def run_once(*, worker_loop: bool = False) -> int:
     state = _load_state()
+    if not worker_loop and _clear_non_loop_runtime_worker_state(state):
+        _save_state(state)
+        _append_log("runtime_worker_state_cleared one_shot_cycle_not_worker_loop")
     autonomy_settings = _autonomy_policy_settings()
     legacy_execution_enabled = _legacy_maintenance_execution_enabled(autonomy_settings)
 
     ok, pack_out = _run_subconscious_pack()
     _append_log(f"subconscious_pack={'ok' if ok else 'fail'}")
     if not ok:
+        state["last_subconscious_run"] = {
+            "ts": _patch_queue_timestamp(),
+            "status": "failed",
+            "label": "phase1_auto",
+            "error": str(pack_out or ""),
+        }
         state["last_error"] = pack_out
         _save_state(state)
         _append_log(pack_out)
         return 1
+    state["last_subconscious_run"] = {
+        "ts": _patch_queue_timestamp(),
+        "status": "ok",
+        "label": "phase1_auto",
+        "output_tail": str(pack_out or "")[-2000:],
+    }
+    state["last_error"] = ""
 
     if not LATEST_SUBCONSCIOUS.exists():
+        state["last_subconscious_run"] = {
+            "ts": _patch_queue_timestamp(),
+            "status": "failed",
+            "label": "phase1_auto",
+            "error": "latest_subconscious_missing",
+        }
+        state["last_error"] = "latest_subconscious_missing"
+        _save_state(state)
         _append_log("latest_subconscious_missing")
         return 1
 
     report = json.loads(LATEST_SUBCONSCIOUS.read_text(encoding="utf-8"))
     generated_at = str(report.get("generated_at") or "")
     threshold = float(state.get("auto_apply_threshold", AUTO_APPLY_THRESHOLD) or AUTO_APPLY_THRESHOLD)
-    raw_fallback_score = _max_fallback_robustness(report)
-    preliminary_generated_queue = _generated_work_queue(limit=200)
-    active_fallback_score = _active_fallback_robustness(report, preliminary_generated_queue)
+    fallback_score = _max_fallback_robustness(report)
 
     state["auto_apply_threshold"] = threshold
     state["last_generated_at"] = generated_at
-    _record_fallback_pressure_state(
-        state,
-        raw_score=raw_fallback_score,
-        active_score=active_fallback_score,
-        generated_queue=preliminary_generated_queue,
+    state["last_fallback_overuse_score"] = fallback_score
+    totals = dict(report.get("totals") or {}) if isinstance(report.get("totals"), dict) else {}
+    state["last_subconscious_run"].update(
+        {
+            "generated_at": generated_at,
+            "family_count": _safe_int(totals.get("family_count"), 0),
+            "variation_count": _safe_int(totals.get("variation_count"), 0),
+            "training_priority_count": _safe_int(totals.get("training_priority_count"), 0),
+            "robust_signal_count": _safe_int(totals.get("robust_signal_count"), 0),
+            "script_specific_signal_count": _safe_int(totals.get("script_specific_signal_count"), 0),
+        }
     )
 
     if not legacy_execution_enabled:
         state["last_auto_apply"] = "skipped_orchestrator_owns_execution"
         _append_log("auto_apply_skipped_orchestrator_owns_execution")
-    elif active_fallback_score >= threshold:
+    elif fallback_score >= threshold:
         patch_candidates = list(select_patch_candidate_definition_paths(GENERATED_DEFS) or [])
         if not patch_candidates:
             state["last_auto_apply"] = "skipped_no_generated_defs"
@@ -3061,7 +3522,7 @@ def run_once() -> int:
                 _append_log(f"auto_apply_result={apply_result[:200]}")
     else:
         state["last_auto_apply"] = "skipped_threshold"
-        _append_log(f"auto_apply_skipped_threshold score={active_fallback_score:.2f} threshold={threshold:.2f}")
+        _append_log(f"auto_apply_skipped_threshold score={fallback_score:.2f} threshold={threshold:.2f}")
 
     try:
         pending_review_recheck = _reevaluate_pending_review_queue(state)
@@ -3157,13 +3618,6 @@ def run_once() -> int:
 
     try:
         generated_queue_sync = _sync_generated_queue_work_tree(state)
-        active_fallback_score = _active_fallback_robustness(report, generated_queue_sync)
-        _record_fallback_pressure_state(
-            state,
-            raw_score=raw_fallback_score,
-            active_score=active_fallback_score,
-            generated_queue=generated_queue_sync,
-        )
         _append_log(
             "generated_queue_sync"
             f" status={generated_queue_sync.get('status')}"
@@ -3179,6 +3633,26 @@ def run_once() -> int:
         }
         state["last_generated_queue_sync"] = generated_queue_sync
         _append_log(f"generated_queue_sync_failed {exc}")
+
+    try:
+        pre_execution_signal_ingestion = _sync_signal_intake_work_tree(state, kidney_summary=kidney_summary)
+        state["last_pre_execution_signal_ingestion"] = pre_execution_signal_ingestion
+        _append_log(
+            "pre_execution_signal_ingestion"
+            f" status={pre_execution_signal_ingestion.get('status')}"
+            f" results={int(pre_execution_signal_ingestion.get('result_count', 0) or 0)}"
+            f" resolved={int(pre_execution_signal_ingestion.get('resolved_count', 0) or 0)}"
+        )
+    except Exception as exc:
+        pre_execution_signal_ingestion = {
+            "ts": _patch_queue_timestamp(),
+            "status": "failed",
+            "result_count": 0,
+            "resolved_count": 0,
+            "error": str(exc),
+        }
+        state["last_pre_execution_signal_ingestion"] = pre_execution_signal_ingestion
+        _append_log(f"pre_execution_signal_ingestion_failed {exc}")
 
     try:
         autonomy_orchestrator = _run_autonomy_orchestrator_advisory(state, kidney_summary)
@@ -3335,19 +3809,21 @@ def run_once() -> int:
         _append_log(f"legacy_tree_retirement_failed {exc}")
 
     regression_status = _run_daily_regression_if_due(state)
-    if regression_status == "daily_regression_skipped_already_ran":
+    regression_status_synced = _sync_regression_status_from_file(state)
+    if regression_status == "daily_regression_skipped_already_ran" and not regression_status_synced:
         last_regression_status = str(state.get("last_regression_status") or "").strip()
         state["last_regression_stale"] = bool(last_regression_status and "pass" not in last_regression_status.lower() and last_regression_status.lower() != "ok")
     else:
         state["last_regression_stale"] = False
-    _append_log(regression_status)
+    _append_log(f"{regression_status}{'_synced_status_file' if regression_status_synced else ''}")
 
     try:
-        signal_ingestion = _sync_signal_intake_work_tree(state)
+        signal_ingestion = _sync_signal_intake_work_tree(state, kidney_summary=kidney_summary)
         _append_log(
             "signal_ingestion"
             f" status={signal_ingestion.get('status')}"
             f" results={int(signal_ingestion.get('result_count', 0) or 0)}"
+            f" subconscious={int(signal_ingestion.get('subconscious_signal_count', 0) or 0)}"
             f" resolved={int(signal_ingestion.get('resolved_count', 0) or 0)}"
             f" active_regression={bool(signal_ingestion.get('active_regression_failure'))}"
         )
@@ -3371,7 +3847,7 @@ def run_worker(
     interval_sec: int = 300,
     max_cycles: int = 0,
     continue_on_error: bool = True,
-    run_once_fn: Callable[[], int] = run_once,
+    run_once_fn: Callable[[], int] | None = None,
     sleep_fn: Callable[[float], None] = time.sleep,
 ) -> int:
     normalized_interval = max(1, int(interval_sec or 300))
@@ -3383,7 +3859,10 @@ def run_worker(
         cycle += 1
         _record_worker_cycle(cycle=cycle, interval_sec=normalized_interval, status="running")
         _append_log(f"worker_cycle_start cycle={cycle}")
-        last_code = int(run_once_fn())
+        if run_once_fn is None:
+            last_code = int(run_once(worker_loop=True))
+        else:
+            last_code = int(run_once_fn())
         cycle_status = "ok" if last_code == 0 else "failed"
         _record_worker_cycle(cycle=cycle, interval_sec=normalized_interval, status=cycle_status, code=last_code)
         _append_log(f"worker_cycle_end cycle={cycle} code={last_code}")

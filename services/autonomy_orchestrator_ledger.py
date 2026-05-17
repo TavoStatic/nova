@@ -92,6 +92,16 @@ class AutonomyOrchestratorLedgerService:
         return _safe_text(row.get("ts") or row.get("timestamp_utc"), 80)
 
     @staticmethod
+    def _row_execution_result(row: dict[str, Any]) -> str:
+        execution = _as_dict(row.get("execution"))
+        return _safe_text(row.get("execution_result") or execution.get("result"), 80)
+
+    @staticmethod
+    def _row_execution_action_type(row: dict[str, Any]) -> str:
+        execution = _as_dict(row.get("execution"))
+        return _safe_text(row.get("execution_action_type") or execution.get("action_type"), 120)
+
+    @staticmethod
     def _recommendation_key(row: dict[str, Any]) -> str:
         decision = AutonomyOrchestratorLedgerService._row_decision(row)
         action = AutonomyOrchestratorLedgerService._row_action(row)
@@ -120,6 +130,7 @@ class AutonomyOrchestratorLedgerService:
             "decision_counts": {},
             "action_counts": {},
             "rejection_reason_counts": {},
+            "execution_result_counts": {},
             "recommend_count": 0,
             "defer_count": 0,
             "block_count": 0,
@@ -134,6 +145,8 @@ class AutonomyOrchestratorLedgerService:
             "last_decision": "",
             "last_action": "",
             "last_reason": "",
+            "last_execution_result": "",
+            "last_execution_action_type": "",
             "last_rejection_reasons": [],
             "last_recommendation_key": "",
         }
@@ -161,6 +174,9 @@ class AutonomyOrchestratorLedgerService:
                 clean = _safe_text(reason, 120)
                 if clean:
                     out["rejection_reason_counts"][clean] = int(out["rejection_reason_counts"].get(clean, 0)) + 1
+            execution_result = self._row_execution_result(row)
+            if execution_result:
+                out["execution_result_counts"][execution_result] = int(out["execution_result_counts"].get(execution_result, 0)) + 1
 
             if self._weak_posture(row):
                 out["weak_posture_count"] += 1
@@ -188,6 +204,8 @@ class AutonomyOrchestratorLedgerService:
             out["last_decision"] = self._row_decision(last)
             out["last_action"] = self._row_action(last)
             out["last_reason"] = self._row_reason(last)
+            out["last_execution_result"] = self._row_execution_result(last)
+            out["last_execution_action_type"] = self._row_execution_action_type(last)
             out["last_rejection_reasons"] = self._row_rejection_reasons(last)[:8]
             out["last_recommendation_key"] = self._recommendation_key(last)
         return out

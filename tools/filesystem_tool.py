@@ -18,6 +18,24 @@ class FileSystemTool(NovaTool):
     mutating = False
     scope = "user"
 
+    _DEFAULT_FIND_SKIP_DIR_NAMES = {
+        ".git",
+        ".mypy_cache",
+        ".pytest_cache",
+        ".ruff_cache",
+        ".venv",
+        "__pycache__",
+        "venv",
+    }
+    _DEFAULT_FIND_SKIP_RELATIVE_DIRS = {
+        ("runtime", "_internal", "generated_sessions"),
+        ("runtime", "exports"),
+        ("runtime", "generated"),
+        ("runtime", "recovery_quarantine"),
+        ("runtime", "test_sessions"),
+        ("runtime", "validation"),
+    }
+
     def check_policy(self, args: dict, context: ToolContext) -> tuple[bool, str]:
         ok, reason = super().check_policy(args, context)
         if not ok:
@@ -73,14 +91,41 @@ class FileSystemTool(NovaTool):
         keyword = str(args.get("keyword") or "").strip().lower()
         if not keyword:
             raise ToolInvocationError("keyword_required")
-        start = self._allowed_root(context)
+        allowed_root = self._allowed_root(context)
+        start = allowed_root
         if args.get("path"):
             start = self._safe_path(str(args.get("path") or ""), context)
-        if not start.exists() or not start.is_dir():
-            raise ToolInvocationError(f"Not a folder: {start}")
         exts = {".txt", ".md", ".log", ".json", ".xml", ".csv", ".ini", ".conf", ".php", ".js", ".ts", ".css", ".html", ".htm", ".py", ".sql"}
+        if not start.exists():
+            raise ToolInvocationError(f"Not found: {start}")
+        if start.is_file():
+            if start.suffix.lower() not in exts:
+                return "No matches found."
+            try:
+                content = start.read_text(encoding="utf-8", errors="ignore")
+            except Exception:
+                return "No matches found."
+            return str(start) if keyword in content.lower() else "No matches found."
+        if not start.is_dir():
+            raise ToolInvocationError(f"Not a folder: {start}")
         hits = []
-        for root, _dirs, files in os.walk(start):
+        skip_defaults = start == allowed_root
+        for root, dirs, files in os.walk(start):
+            if skip_defaults:
+                root_path = Path(root)
+                kept_dirs = []
+                for dirname in dirs:
+                    if dirname in self._DEFAULT_FIND_SKIP_DIR_NAMES:
+                        continue
+                    child = root_path / dirname
+                    try:
+                        relative_parts = tuple(child.resolve().relative_to(allowed_root).parts)
+                    except Exception:
+                        relative_parts = ()
+                    if relative_parts in self._DEFAULT_FIND_SKIP_RELATIVE_DIRS:
+                        continue
+                    kept_dirs.append(dirname)
+                dirs[:] = kept_dirs
             for name in files:
                 p = Path(root) / name
                 if p.suffix.lower() not in exts:

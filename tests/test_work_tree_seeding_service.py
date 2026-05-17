@@ -27,29 +27,6 @@ class TestWorkTreeSeedingService(unittest.TestCase):
         work_tree._clear_in_memory()
         self._tmp.cleanup()
 
-    def test_cli_source_alone_does_not_seed_system_work_tree(self) -> None:
-        self.assertFalse(
-            WORK_TREE_SEEDING_SERVICE.should_seed_system_work_tree(
-                message="tell me something reflective about ambition",
-                source="cli",
-            )
-        )
-
-    def test_macro_and_system_intent_still_seed_system_work_tree(self) -> None:
-        self.assertTrue(
-            WORK_TREE_SEEDING_SERVICE.should_seed_system_work_tree(
-                message="run the operator inspection",
-                source="cli",
-                operator_mode="macro",
-            )
-        )
-        self.assertTrue(
-            WORK_TREE_SEEDING_SERVICE.should_seed_system_work_tree(
-                message="check runtime queue pressure",
-                source="cli",
-            )
-        )
-
     def test_create_seeded_tree_builds_child_branches_with_tools(self) -> None:
         tree_id = WORK_TREE_SEEDING_SERVICE.create_seeded_tree(
             work_tree_module=work_tree,

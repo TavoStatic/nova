@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+
 import shutil
 import unittest
 import uuid
@@ -9,7 +11,7 @@ from services.nova_runtime_context import WORK_DECISION_LEARNING_FILE
 from services.work_tree_decision_adapter import WorkTreeDecisionAdapter
 
 
-WORK_TMP_ROOT = Path(__file__).resolve().parents[1] / "runtime" / "pytest_temp"
+WORK_TMP_ROOT = Path(os.environ.get("NOVA_VALIDATION_RUNTIME_DIR") or Path(__file__).resolve().parents[1] / "runtime" / "validation") / "pytest_temp"
 
 
 def _workspace_case_dir(prefix: str) -> Path:

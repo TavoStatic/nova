@@ -71,20 +71,20 @@ class TestNovaPipelineTools(unittest.TestCase):
             "network_probe": {"reachable": True, "reason": "connected"},
             "auth_probe": {"authenticated": False, "reason": "windows_identity_mismatch"},
             "live_query_ready": False,
-            "current_windows_identity": "EXAMPLE-DOMAIN\\current.user",
-            "intended_windows_identity": "EXAMPLE-DOMAIN\\pipeline.user",
+            "current_windows_identity": "K12AD\\guribe",
+            "intended_windows_identity": "K12AD\\guribe.tst",
             "readiness": {
                 "state": "blocked",
                 "blockers": ["windows_identity_mismatch"],
-                "next_step": "Run the SIS pipeline under the intended Windows identity EXAMPLE-DOMAIN\\pipeline.user.",
+                "next_step": "Run the SIS pipeline under the intended Windows identity K12AD\\guribe.tst.",
             },
         })
 
         self.assertIn("auth_mode: trusted", out)
         self.assertIn("readiness: blocked", out)
         self.assertIn("readiness_blockers: windows_identity_mismatch", out)
-        self.assertIn("current_windows_identity: EXAMPLE-DOMAIN\\current.user", out)
-        self.assertIn("intended_windows_identity: EXAMPLE-DOMAIN\\pipeline.user", out)
+        self.assertIn("current_windows_identity: K12AD\\guribe", out)
+        self.assertIn("intended_windows_identity: K12AD\\guribe.tst", out)
         self.assertIn("next_step: Run the SIS pipeline", out)
 
     def test_preview_uses_dry_run_registry_path(self):

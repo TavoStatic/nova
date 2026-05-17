@@ -22,18 +22,6 @@ def looks_like_open_fallback_turn(
     if is_location_request_fn(candidate):
         return False
     normalized = normalize_turn_text_fn(candidate)
-    if normalized in {
-        "weather",
-        "weather now",
-        "weather current",
-        "weather today",
-        "current weather",
-        "what's the weather",
-        "what is the weather",
-        "what is the weather now",
-        "what's the weather now",
-    }:
-        return False
     if is_peims_broad_query_fn(candidate) or is_local_knowledge_topic_query_fn(candidate):
         return False
     if re.match(r"^(hi|hello|hey)\b", normalized, flags=re.I):

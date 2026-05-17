@@ -207,8 +207,6 @@ def extract_weather_followup_location_candidate(user_text: str, low: str) -> str
         return ""
     if "weather" in low or uses_prior_reference(low):
         return ""
-    if any(token in low for token in ("your location", "our location", "same location", "shared location", "that location", "there")):
-        return ""
     return text
 
 
@@ -227,8 +225,6 @@ def classify_followup_move(user_text: str, low: str) -> str:
         return "meta_question"
     if looks_like_affirmative_followup(low):
         return "affirmation"
-    if looks_like_shared_location_reference(low):
-        return "reference_answer"
     if looks_like_retrieval_continuation(low) or looks_like_contextual_continuation(low):
         return "continuation"
     if extract_weather_followup_location_candidate(raw, low):

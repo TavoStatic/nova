@@ -31,6 +31,59 @@ class TestStorageWatchService(unittest.TestCase):
         self.assertEqual(payload.get("kidney_snapshot_count"), 25)
         self.assertIn("kidney cleanup snapshots", payload.get("note", ""))
 
+    def test_snapshot_reports_release_validation_extract_pressure(self):
+        with TemporaryDirectory() as td:
+            base_dir = Path(td)
+            runtime_dir = base_dir / "runtime"
+            extract_dir = runtime_dir / "validation" / "release" / "candidate-a"
+            stage_dir = runtime_dir / "exports" / "release_packages" / "_stage" / "candidate-a"
+            package_dir = runtime_dir / "exports" / "release_packages"
+            extract_dir.mkdir(parents=True)
+            stage_dir.mkdir(parents=True)
+            package_dir.mkdir(parents=True, exist_ok=True)
+            (extract_dir / "payload.bin").write_bytes(b"x" * 2048)
+            (stage_dir / "payload.bin").write_bytes(b"y" * 1024)
+            (package_dir / "candidate-a.zip").write_bytes(b"z" * 512)
+
+            payload = STORAGE_WATCH_SERVICE.snapshot(
+                base_dir=base_dir,
+                runtime_dir=runtime_dir,
+                kidney_config={
+                    "release_validation_extract_max_total_mb": 0.001,
+                    "release_stage_max_total_mb": 10,
+                    "release_zip_warn_count": 10,
+                    "release_zip_max_total_mb": 10,
+                },
+            )
+
+        self.assertEqual(payload.get("status"), "danger")
+        self.assertEqual(payload.get("release_validation_extract_count"), 1)
+        self.assertGreater(payload.get("release_validation_extract_bytes"), 0)
+        self.assertEqual(payload.get("release_stage_count"), 1)
+        self.assertEqual(payload.get("release_zip_count"), 1)
+        self.assertIn("release validation extracts", payload.get("note", ""))
+
+    def test_snapshot_reports_full_runtime_storage_pressure(self):
+        with TemporaryDirectory() as td:
+            base_dir = Path(td)
+            runtime_dir = base_dir / "runtime"
+            runtime_dir.mkdir(parents=True)
+            (runtime_dir / "large.bin").write_bytes(b"x" * 2048)
+
+            payload = STORAGE_WATCH_SERVICE.snapshot(
+                base_dir=base_dir,
+                runtime_dir=runtime_dir,
+                kidney_config={
+                    "runtime_total_warn_gb": 0.000001,
+                    "runtime_total_danger_gb": 0.000002,
+                },
+            )
+
+        self.assertEqual(payload.get("status"), "warn")
+        self.assertGreater(payload.get("runtime_total_bytes"), 0)
+        self.assertGreaterEqual(payload.get("total_bytes"), payload.get("runtime_total_bytes"))
+        self.assertIn("runtime storage totals", payload.get("note", ""))
+
 
 if __name__ == "__main__":
     unittest.main()

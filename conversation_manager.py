@@ -13,6 +13,12 @@ class ConversationSession:
     pending_correction_target: str = ""
     continuation_used_last_turn: bool = False
     last_reflection: Optional[dict] = None
+    active_work_tree_id: str = ""
+    active_work_identity: str = ""
+    last_work_continuity: str = ""
+    last_branch_decision: str = ""
+    last_work_decision: Optional[dict] = None
+    decision_adapter_bias: Optional[dict] = None
 
     def reset_turn_flags(self) -> None:
         self.continuation_used_last_turn = False
@@ -89,10 +95,35 @@ class ConversationSession:
     def set_last_reflection(self, reflection: Optional[dict]) -> None:
         self.last_reflection = reflection if isinstance(reflection, dict) else None
 
+    def set_active_work_tree_id(self, tree_id: Optional[str]) -> None:
+        self.active_work_tree_id = str(tree_id or "").strip()
+
+    def set_active_work_identity(self, identity: Optional[str]) -> None:
+        self.active_work_identity = str(identity or "").strip()
+
+    def set_last_work_continuity(self, continuity: Optional[str]) -> None:
+        self.last_work_continuity = str(continuity or "").strip()
+
+    def set_last_branch_decision(self, decision: Optional[str]) -> None:
+        self.last_branch_decision = str(decision or "").strip()
+
+    def record_decision(self, *, decision_type: str, work_identity_key: str, branch_id: str = "") -> None:
+        self.last_work_decision = {
+            "decision_type": str(decision_type or "").strip(),
+            "work_identity_key": str(work_identity_key or "").strip(),
+            "branch_id": str(branch_id or "").strip(),
+        }
+
+    def set_decision_adapter_bias(self, bias: Optional[dict]) -> None:
+        self.decision_adapter_bias = bias if isinstance(bias, dict) else None
+
     def ledger_fields(self) -> dict:
         return {
             "active_subject": self.active_subject(),
             "continuation_used": self.continuation_used_last_turn,
+            "active_work_tree_id": self.active_work_tree_id,
+            "active_work_identity": self.active_work_identity,
+            "last_work_continuity": self.last_work_continuity,
         }
 
     def reflection_summary(self) -> dict:
@@ -102,9 +133,17 @@ class ConversationSession:
         summary = {
             "active_subject": self.active_subject(),
             "continuation_used": self.continuation_used_last_turn,
+            "active_work_tree_id": self.active_work_tree_id,
+            "active_work_identity": self.active_work_identity,
+            "last_work_continuity": self.last_work_continuity,
+            "last_branch_decision": self.last_branch_decision,
             "overrides_active": overrides,
             "language_mix_spanish_pct": int(self.language_mix_spanish_pct or 0),
         }
+        if isinstance(self.last_work_decision, dict):
+            summary["last_work_decision"] = dict(self.last_work_decision)
+        if isinstance(self.decision_adapter_bias, dict):
+            summary["decision_adapter_bias"] = dict(self.decision_adapter_bias)
         if isinstance(self.last_reflection, dict):
             summary["probe_summary"] = str(self.last_reflection.get("probe_summary") or "")
             summary["probe_results"] = list(self.last_reflection.get("probe_results") or [])

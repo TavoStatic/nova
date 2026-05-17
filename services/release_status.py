@@ -1,7 +1,102 @@
 from __future__ import annotations
 
 import json
+import os
+import re
+from datetime import datetime
 from pathlib import Path
+
+from services.release_promotion_judgment import release_validation_record_payload
+
+
+_SOURCE_EXCLUDED_DIRS = {
+    ".git",
+    ".github",
+    ".ci_venv",
+    ".venv",
+    ".pytest_cache",
+    "__pycache__",
+    "logs",
+    "memory",
+    "runtime",
+    "updates",
+}
+
+_SOURCE_EXCLUDED_PREFIXES = {
+    "knowledge/packs",
+    "knowledge/peims",
+    "knowledge/web",
+}
+
+_SOURCE_EXCLUDED_FILES = {
+    "LAST_SESSION.json",
+    "RESUME_HERE.txt",
+    "This_is_nova",
+    "tests_to_review.txt",
+    "full_suite_out.txt",
+    "runtime_full_suite_out.txt",
+    "discovery_results_phase_i.txt",
+    "nova_memory.sqlite",
+}
+
+
+def _parse_recorded_at_epoch(value: str) -> float | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+    text = re.sub(r"(\.\d{6})\d+([+-]\d\d:\d\d)$", r"\1\2", text)
+    try:
+        return datetime.fromisoformat(text).timestamp()
+    except Exception:
+        return None
+
+
+def _source_rel(path: Path, root: Path) -> str:
+    try:
+        return path.relative_to(root).as_posix()
+    except Exception:
+        return path.as_posix()
+
+
+def _is_source_candidate(path: Path, root: Path) -> bool:
+    rel = _source_rel(path, root)
+    if not rel or rel.startswith("../"):
+        return False
+    parts = rel.split("/")
+    if any(part in _SOURCE_EXCLUDED_DIRS for part in parts[:-1]):
+        return False
+    if any(rel == prefix or rel.startswith(prefix + "/") for prefix in _SOURCE_EXCLUDED_PREFIXES):
+        return False
+    if parts[-1] in _SOURCE_EXCLUDED_FILES:
+        return False
+    if path.suffix.lower() in {".pyc", ".pyo", ".log", ".db", ".sqlite", ".jsonl"}:
+        return False
+    return path.is_file()
+
+
+def _is_excluded_source_dir(path: Path, root: Path) -> bool:
+    rel = _source_rel(path, root)
+    if not rel or rel == ".":
+        return False
+    parts = rel.split("/")
+    if any(part in _SOURCE_EXCLUDED_DIRS for part in parts):
+        return True
+    return any(rel == prefix or rel.startswith(prefix + "/") for prefix in _SOURCE_EXCLUDED_PREFIXES)
+
+
+def _iter_source_candidates(root: Path):
+    for current, dirs, files in os.walk(root):
+        current_path = Path(current)
+        dirs[:] = [
+            name for name in dirs
+            if not _is_excluded_source_dir(current_path / name, root)
+        ]
+        for name in files:
+            path = current_path / name
+            if _is_source_candidate(path, root):
+                yield path
 
 
 class ReleaseStatusService:
@@ -45,7 +140,54 @@ class ReleaseStatusService:
         build_label = str(build_entry.get("release_label") or "").strip()
         return bool(entry_version and entry_version == build_version and entry_channel == build_channel and entry_label == build_label)
 
-    def status_payload(self, ledger_path: Path, limit: int = 8) -> dict:
+    def source_freshness_payload(self, source_root: Path, build_recorded_at: str) -> dict:
+        root = Path(source_root)
+        build_epoch = _parse_recorded_at_epoch(build_recorded_at)
+        out = {
+            "latest_source_status": "unknown",
+            "latest_artifact_stale": False,
+            "latest_source_changed_after_build": False,
+            "latest_source_changed_after_build_count": 0,
+            "latest_source_newest_path": "",
+            "latest_source_newest_mtime": "",
+            "latest_source_changed_after_build_sample": [],
+        }
+        if build_epoch is None or not root.exists():
+            return out
+
+        newest_path = ""
+        newest_mtime = 0.0
+        changed: list[tuple[float, str]] = []
+        try:
+            for path in _iter_source_candidates(root):
+                try:
+                    mtime = float(path.stat().st_mtime)
+                except OSError:
+                    continue
+                rel = _source_rel(path, root)
+                if mtime > newest_mtime:
+                    newest_mtime = mtime
+                    newest_path = rel
+                if mtime > build_epoch:
+                    changed.append((mtime, rel))
+        except Exception:
+            return out
+
+        changed.sort(key=lambda item: item[0], reverse=True)
+        if newest_mtime > 0:
+            out["latest_source_newest_path"] = newest_path
+            out["latest_source_newest_mtime"] = datetime.fromtimestamp(newest_mtime).isoformat()
+        out["latest_source_changed_after_build_count"] = len(changed)
+        out["latest_source_changed_after_build_sample"] = [rel for _mtime, rel in changed[:12]]
+        if changed:
+            out["latest_source_status"] = "changed-after-build"
+            out["latest_artifact_stale"] = True
+            out["latest_source_changed_after_build"] = True
+        else:
+            out["latest_source_status"] = "current"
+        return out
+
+    def status_payload(self, ledger_path: Path, limit: int = 8, source_root: Path | None = None) -> dict:
         out = {
             "ok": True,
             "ledger_path": str(ledger_path),
@@ -67,6 +209,19 @@ class ReleaseStatusService:
             "latest_follow_up_owner": "",
             "latest_validation_machine": "",
             "latest_validation_seed_path": "",
+            "latest_validation_record": {},
+            "latest_validation_record_exists": False,
+            "latest_validation_record_complete": False,
+            "latest_validation_record_result": "",
+            "latest_validation_record_missing_fields": [],
+            "latest_validation_record_artifact_matches": False,
+            "latest_source_status": "unknown",
+            "latest_artifact_stale": False,
+            "latest_source_changed_after_build": False,
+            "latest_source_changed_after_build_count": 0,
+            "latest_source_newest_path": "",
+            "latest_source_newest_mtime": "",
+            "latest_source_changed_after_build_sample": [],
             "recent_entries": [],
         }
         entries = self.ledger_entries(ledger_path, max(6, int(limit)))
@@ -158,6 +313,25 @@ class ReleaseStatusService:
             "latest_validation_machine": str((latest_promotion or {}).get("validation_machine") or ""),
             "latest_validation_seed_path": str(latest_build.get("validation_record_seed_path") or ""),
         })
+        validation_record = release_validation_record_payload(
+            out.get("latest_validation_seed_path") or "",
+            release_status=out,
+        )
+        out.update({
+            "latest_validation_record": validation_record,
+            "latest_validation_record_exists": bool(validation_record.get("exists")),
+            "latest_validation_record_complete": bool(validation_record.get("complete")),
+            "latest_validation_record_result": str(validation_record.get("result") or ""),
+            "latest_validation_record_missing_fields": list(validation_record.get("missing_fields") or []),
+            "latest_validation_record_artifact_matches": bool(validation_record.get("artifact_matches")),
+        })
+        if source_root is not None:
+            freshness = self.source_freshness_payload(Path(source_root), str(latest_build.get("recorded_at") or ""))
+            out.update(freshness)
+            if freshness.get("latest_source_changed_after_build"):
+                out["latest_readiness_state"] = "source-changed-after-build"
+                out["latest_ready_to_ship"] = False
+                out["latest_readiness_note"] = "Live source changed after the latest release build; rebuild and verify before promotion."
         return out
 
 

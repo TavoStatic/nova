@@ -118,8 +118,6 @@ const subconsciousLiveList = document.getElementById('subconsciousLiveList');
 const subconsciousPriorityList = document.getElementById('subconsciousPriorityList');
 const generatedQueueBox = document.getElementById('generatedQueueBox');
 const generatedQueueCount = document.getElementById('generatedQueueCount');
-const testingEcologyBox = document.getElementById('testingEcologyBox');
-const testingEcologyCount = document.getElementById('testingEcologyCount');
 const overviewFocusStrip = document.getElementById('overviewFocusStrip');
 const centerMissionBrief = document.getElementById('centerMissionBrief');
 const liveTrackingSummary = document.getElementById('liveTrackingSummary');
@@ -1383,6 +1381,17 @@ async function stopAutonomyMaintenanceWorker() {
     setAction(`${payload.message || 'autonomy maintenance worker stopped'}\nWorker status: ${status}`);
 }
 
+function formatStorageBytes(value) {
+    const bytes = Number(value != null ? value : 0);
+    if (!Number.isFinite(bytes) || bytes <= 0) return '0 MB';
+    const mb = bytes / (1024 * 1024);
+    if (mb >= 1024) {
+        const gb = mb / 1024;
+        return `${gb.toFixed(gb >= 10 ? 1 : 2)} GB`;
+    }
+    return `${mb.toFixed(mb >= 10 ? 1 : 2)} MB`;
+}
+
 function renderMetricGrid(status) {
     if (!statusKv) return;
     const standardKeys = [
@@ -1395,6 +1404,10 @@ function renderMetricGrid(status) {
     const subconsciousRow = [
         'subconscious_family_count', 'subconscious_training_priority_count', 'subconscious_generated_definition_count'
     ];
+    const storageRows = [
+        ['storage_watch_summary', 'storage_watch_total', 'release_validation_extracts'],
+        ['release_package_stages', 'release_package_zips', 'snapshot_storage'],
+    ];
     const displayLabels = {
         memory_health_status: 'Memory Health',
         memory_db_total: 'Memory DB Rows',
@@ -1403,7 +1416,51 @@ function renderMetricGrid(status) {
         subconscious_family_count: 'Families',
         subconscious_training_priority_count: 'Priorities',
         subconscious_generated_definition_count: 'Definitions',
+        storage_watch_summary: 'Storage Watch',
+        storage_watch_total: 'Watched Total',
+        release_validation_extracts: 'Release Extracts',
+        release_package_stages: 'Release Stages',
+        release_package_zips: 'Release Zips',
+        snapshot_storage: 'Snapshots',
     };
+    const storageValue = (key) => {
+        if (!status) return '';
+        if (key === 'storage_watch_summary') {
+            const state = String(status.storage_watch_status || 'unknown');
+            const note = String(status.storage_watch_note || 'no note');
+            return `${state} | ${note}`;
+        }
+        if (key === 'storage_watch_total') {
+            return formatStorageBytes(status.storage_watch_total_bytes);
+        }
+        if (key === 'release_validation_extracts') {
+            return `${status.release_validation_extract_count || 0} | ${formatStorageBytes(status.release_validation_extract_bytes)}`;
+        }
+        if (key === 'release_package_stages') {
+            return `${status.release_stage_count || 0} | ${formatStorageBytes(status.release_stage_bytes)}`;
+        }
+        if (key === 'release_package_zips') {
+            return `${status.release_zip_count || 0} | ${formatStorageBytes(status.release_zip_bytes)}`;
+        }
+        if (key === 'snapshot_storage') {
+            return `patch ${status.patch_snapshot_count || 0} | kidney ${status.kidney_snapshot_count || 0}`;
+        }
+        return status[key] != null ? status[key] : '';
+    };
+    const matrixCell = (key) => [
+        '<td class="system-matrix-cell">',
+        '<table class="system-matrix-entry" aria-hidden="true">',
+        '<tbody>',
+        '<tr>',
+        `<th scope="row" class="system-matrix-key">${escapeHtml(displayLabels[key] || key)}</th>`,
+        '</tr>',
+        '<tr>',
+        `<td class="system-matrix-value">${escapeHtml(storageValue(key))}</td>`,
+        '</tr>',
+        '</tbody>',
+        '</table>',
+        '</td>'
+    ].join('');
     const columnCount = 3;
     const rows = [];
 
@@ -1415,40 +1472,22 @@ function renderMetricGrid(status) {
         '<tbody>',
         rows.map((row) => [
             '<tr class="system-matrix-row">',
-            row.map((key) => [
-                '<td class="system-matrix-cell">',
-                '<table class="system-matrix-entry" aria-hidden="true">',
-                '<tbody>',
-                '<tr>',
-                `<th scope="row" class="system-matrix-key">${escapeHtml(displayLabels[key] || key)}</th>`,
-                '</tr>',
-                '<tr>',
-                `<td class="system-matrix-value">${escapeHtml(status && status[key] != null ? status[key] : '')}</td>`,
-                '</tr>',
-                '</tbody>',
-                '</table>',
-                '</td>'
-            ].join('')).join(''),
+            row.map((key) => matrixCell(key)).join(''),
+            '</tr>'
+        ].join('')).join(''),
+        '<tr class="system-matrix-section-row">',
+        '<td class="system-matrix-section-cell" colspan="3">STORAGE WATCH</td>',
+        '</tr>',
+        storageRows.map((row) => [
+            '<tr class="system-matrix-row">',
+            row.map((key) => matrixCell(key)).join(''),
             '</tr>'
         ].join('')).join(''),
         '<tr class="system-matrix-section-row">',
         '<td class="system-matrix-section-cell" colspan="3">SUBCONSCIOUS</td>',
         '</tr>',
         '<tr class="system-matrix-row system-matrix-row-subconscious">',
-        subconsciousRow.map((key) => [
-            '<td class="system-matrix-cell">',
-            '<table class="system-matrix-entry" aria-hidden="true">',
-            '<tbody>',
-            '<tr>',
-            `<th scope="row" class="system-matrix-key">${escapeHtml(displayLabels[key] || key)}</th>`,
-            '</tr>',
-            '<tr>',
-            `<td class="system-matrix-value">${escapeHtml(status && status[key] != null ? status[key] : '')}</td>`,
-            '</tr>',
-            '</tbody>',
-            '</table>',
-            '</td>'
-        ].join('')).join(''),
+        subconsciousRow.map((key) => matrixCell(key)).join(''),
         '</tr>',
         '</tbody>'
     ].join('');
@@ -1459,7 +1498,6 @@ function renderSubconscious(status) {
     const liveSummary = status && status.subconscious_live_summary ? status.subconscious_live_summary : {};
     const topPriorities = Array.isArray(status && status.subconscious_top_priorities) ? status.subconscious_top_priorities : [];
     const workQueue = status && status.generated_work_queue ? status.generated_work_queue : {};
-    const testingEcology = status && status.testing_ecology ? status.testing_ecology : {};
     const maintenance = status && status.autonomy_maintenance ? status.autonomy_maintenance : {};
     const runtimeWorker = maintenance && maintenance.runtime_worker ? maintenance.runtime_worker : {};
     const maintenanceSchedulerStatus = status && status.maintenance_scheduler_status ? status.maintenance_scheduler_status : '';
@@ -1473,7 +1511,6 @@ function renderSubconscious(status) {
         : (maintenance && maintenance.autonomy_orchestrator_summary ? maintenance.autonomy_orchestrator_summary : {});
     const advisorAction = advisor && advisor.action ? advisor.action : {};
     const queueItems = Array.isArray(workQueue && workQueue.items) ? workQueue.items : [];
-    const ecologyItems = Array.isArray(testingEcology && testingEcology.items) ? testingEcology.items : [];
     const liveSessions = Array.isArray(liveSummary && liveSummary.sessions) ? liveSummary.sessions : [];
     const pressureConfig = liveSummary && liveSummary.pressure_config ? liveSummary.pressure_config : {};
     const weakSignalThresholds = pressureConfig && pressureConfig.weak_signal_thresholds ? pressureConfig.weak_signal_thresholds : {};
@@ -1520,10 +1557,6 @@ function renderSubconscious(status) {
         {label: 'Weak thresholds', value: thresholdText || 'n/a'},
         {label: 'Open queue', value: workQueue.open_count != null ? workQueue.open_count : 0},
         {label: 'Next item', value: workQueue.next_item && workQueue.next_item.file ? workQueue.next_item.file : 'none'},
-        {label: 'Test ecology', value: testingEcology.ecology_status || 'n/a'},
-        {label: 'Growth pressure', value: testingEcology.growth_pressure_count != null ? testingEcology.growth_pressure_count : 0},
-        {label: 'Mutation due', value: testingEcology.mutation_due_count != null ? testingEcology.mutation_due_count : 0},
-        {label: 'Stale evidence', value: testingEcology.stale_evidence_count != null ? testingEcology.stale_evidence_count : 0},
         {label: 'Last queue run', value: lastQueueRunText},
         {label: 'Last queue report', value: lastQueueReport},
         {label: 'Advisor decision', value: advisorDecision},
@@ -1581,26 +1614,6 @@ function renderSubconscious(status) {
         const total = queueItems.length;
         const open = workQueue.open_count != null ? workQueue.open_count : total;
         generatedQueueCount.textContent = `${total} queued | ${open} open`;
-    }
-
-    renderInspectorList(testingEcologyBox, ecologyItems.map((item) => {
-        const badge = subconsciousSeamBadgeMeta(item.top_seam || item.family_id || '');
-        const state = item.mutation_due ? 'mutation_due' : (item.lifecycle_state || item.latest_status || 'unknown');
-        const owner = item.owner_hint ? ` | ${item.owner_hint}` : '';
-        const age = item.evidence_age_hours != null ? ` | ${Number(item.evidence_age_hours).toFixed(1)}h` : '';
-        return {
-            label: `${item.file || 'test item'} [${state}]`,
-            badgeText: badge ? badge.text : '',
-            badgeClass: badge ? badge.className : '',
-            value: `${item.growth_action || 'watch'}${owner}${age}`,
-        };
-    }));
-
-    if (testingEcologyCount) {
-        const count = testingEcology.count != null ? testingEcology.count : ecologyItems.length;
-        const growth = testingEcology.growth_pressure_count != null ? testingEcology.growth_pressure_count : 0;
-        const mutation = testingEcology.mutation_due_count != null ? testingEcology.mutation_due_count : 0;
-        testingEcologyCount.textContent = `${count} watched | ${growth} growth | ${mutation} mutation`;
     }
 }
 
@@ -2623,9 +2636,29 @@ function memoryHealthDetails(status) {
     };
 }
 
+function storageWatchDetails(status) {
+    const storageStatus = String(status && status.storage_watch_status ? status.storage_watch_status : 'unknown');
+    const storageNote = String(status && status.storage_watch_note ? status.storage_watch_note : 'No storage watch note.');
+    const releaseExtractCount = Number(status && status.release_validation_extract_count != null ? status.release_validation_extract_count : 0);
+    const releaseStageCount = Number(status && status.release_stage_count != null ? status.release_stage_count : 0);
+    const releaseZipCount = Number(status && status.release_zip_count != null ? status.release_zip_count : 0);
+    const patchCount = Number(status && status.patch_snapshot_count != null ? status.patch_snapshot_count : 0);
+    const kidneyCount = Number(status && status.kidney_snapshot_count != null ? status.kidney_snapshot_count : 0);
+    return {
+        status: storageStatus,
+        note: storageNote,
+        totalText: formatStorageBytes(status && status.storage_watch_total_bytes),
+        releaseExtractsText: `${Number.isFinite(releaseExtractCount) ? releaseExtractCount : 0} | ${formatStorageBytes(status && status.release_validation_extract_bytes)}`,
+        releaseStagesText: `${Number.isFinite(releaseStageCount) ? releaseStageCount : 0} | ${formatStorageBytes(status && status.release_stage_bytes)}`,
+        releaseZipsText: `${Number.isFinite(releaseZipCount) ? releaseZipCount : 0} | ${formatStorageBytes(status && status.release_zip_bytes)}`,
+        snapshotsText: `patch ${Number.isFinite(patchCount) ? patchCount : 0} | kidney ${Number.isFinite(kidneyCount) ? kidneyCount : 0}`,
+    };
+}
+
 function renderHealthSummary(status) {
     const alerts = status && Array.isArray(status.alerts) ? status.alerts : [];
     const memory = memoryHealthDetails(status);
+    const storage = storageWatchDetails(status);
     renderInspectorList(healthSummary, [
         {label: 'Health Score', value: status && status.health_score != null ? status.health_score : 'n/a'},
         {label: 'Pass Ratio', value: status && status.self_check_pass_ratio != null ? status.self_check_pass_ratio : 'n/a'},
@@ -2633,6 +2666,9 @@ function renderHealthSummary(status) {
         {label: 'Memory Rows', value: `db ${memory.dbTotal} | scope ${memory.scopedTotal}`},
         {label: 'Memory Event Log', value: memory.eventLogText},
         {label: 'Memory Watch', value: memory.issueText || 'No amnesia signals'},
+        {label: 'Storage Watch', value: `${storage.status} | ${storage.totalText}\n${storage.note}`},
+        {label: 'Release Storage', value: `extracts ${storage.releaseExtractsText}\nstages ${storage.releaseStagesText}\nzips ${storage.releaseZipsText}`},
+        {label: 'Snapshot Storage', value: storage.snapshotsText},
         {label: 'Alerts', value: alerts.length ? alerts.join('\n') : 'Alert board clear'},
     ]);
 }
@@ -2665,13 +2701,18 @@ function renderHeroMeta(container, items) {
 function recommendedCenterTab(status) {
     const alerts = status && Array.isArray(status.alerts) ? status.alerts : [];
     const queueOpen = Number(status && status.generated_work_queue_open_count != null ? status.generated_work_queue_open_count : 0);
-    const ecologyGrowth = Number(status && status.testing_ecology_growth_pressure_count != null ? status.testing_ecology_growth_pressure_count : 0);
-    const ecologyMutation = Number(status && status.testing_ecology_mutation_due_count != null ? status.testing_ecology_mutation_due_count : 0);
     const patchStatus = String(status && status.patch_status ? status.patch_status : '').trim().toLowerCase();
     const releaseReadiness = String(status && status.release_status && status.release_status.latest_readiness_state ? status.release_status.latest_readiness_state : '').trim().toLowerCase();
+    const operatorAttention = status && status.operator_attention && typeof status.operator_attention === 'object'
+        ? status.operator_attention
+        : {};
+    const attentionActive = Boolean((status && status.operator_attention_active) || operatorAttention.active);
+    const attentionMessage = String((status && status.operator_attention_message) || operatorAttention.message || '').trim();
     if (alerts.length) return {tab: 'failure-reasons', label: 'Failure Reasons', why: `${alerts.length} live alert${alerts.length === 1 ? '' : 's'} need attention`};
-    if (ecologyMutation > 0) return {tab: 'subconscious-watch', label: 'Subconscious Watch', why: `${ecologyMutation} test contract${ecologyMutation === 1 ? '' : 's'} need mutation or revalidation`};
-    if (ecologyGrowth > 0) return {tab: 'subconscious-watch', label: 'Subconscious Watch', why: `${ecologyGrowth} testing growth item${ecologyGrowth === 1 ? '' : 's'} need attention`};
+    if (attentionActive && attentionMessage) {
+        const targetTab = /release/i.test(attentionMessage) ? 'release-governance' : 'system-matrix';
+        return {tab: targetTab, label: 'Operator Attention', why: attentionMessage};
+    }
     if (queueOpen > 0) return {tab: 'subconscious-watch', label: 'Subconscious Watch', why: `${queueOpen} queue item${queueOpen === 1 ? '' : 's'} are still open`};
     if (patchStatus && !patchStatus.includes('eligible') && !patchStatus.includes('ready')) {
         return {tab: 'patch-readiness', label: 'Patch Readiness', why: 'patch governance needs review'};
@@ -2702,6 +2743,11 @@ function renderOverviewFocus(status) {
     const selected = selectedSession();
     const centerTarget = recommendedCenterTab(status);
     const inspectorTarget = recommendedInspectorTab(status, selected);
+    const operatorAttention = status && status.operator_attention && typeof status.operator_attention === 'object'
+        ? status.operator_attention
+        : {};
+    const attentionActive = Boolean((status && status.operator_attention_active) || operatorAttention.active);
+    const attentionMessage = String((status && status.operator_attention_message) || operatorAttention.message || '').trim();
     const queueOpen = Number(status.generated_work_queue_open_count != null ? status.generated_work_queue_open_count : 0);
     const queueNext = shortArtifactName(status.generated_work_queue_next_file || '');
     const memory = memoryHealthDetails(status);
@@ -2725,7 +2771,9 @@ function renderOverviewFocus(status) {
         },
         {
             key: 'Operator Focus',
-            value: `${centerTarget.label}\n${centerTarget.why}`,
+            value: attentionActive && attentionMessage
+                ? `Needs Help\n${attentionMessage}`
+                : `${centerTarget.label}\n${centerTarget.why}`,
             actions: [
                 {label: centerTarget.label, center: centerTarget.tab},
                 {label: inspectorTarget.label, inspector: inspectorTarget.tab},

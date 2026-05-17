@@ -233,6 +233,173 @@ def _route_evidence(*, owner: str, action_type: str, tool: str = "") -> dict:
     return payload
 
 
+def _actions_from_semantic_tool_intent(intent: dict | None) -> list[dict]:
+    payload = intent if isinstance(intent, dict) else {}
+    tool = str(payload.get("tool") or "").strip()
+    if not tool or tool == "none":
+        return []
+    args = payload.get("args")
+    normalized_args = [str(item).strip() for item in list(args or []) if str(item).strip()] if isinstance(args, list) else []
+    if tool in {"work_tree_next", "work_tree_execute", "work_tree_status", "work_tree_create"}:
+        return [{"type": "work_tree", "tool": tool, "args": normalized_args, "semantic_intent": dict(payload)}]
+    return [{"type": "run_tool", "tool": tool, "args": normalized_args, "semantic_intent": dict(payload)}]
+
+
+def _classify_semantic_tool_actions(
+    *,
+    text: str,
+    turns: list[tuple[str, str]],
+    pending_action: dict | None,
+    core,
+    trace: Callable[..., None],
+) -> tuple[list[dict], int, str]:
+    classify_tool_intent_fn = getattr(core, "_llm_classify_routing_intent", None)
+    if not callable(classify_tool_intent_fn):
+        return [], 0, "unavailable"
+    semantic_started = time.perf_counter()
+    try:
+        semantic_intent = classify_tool_intent_fn(
+            text,
+            turns=turns,
+            pending_action=pending_action,
+            return_none_payload=True,
+        )
+    except TypeError:
+        try:
+            semantic_intent = classify_tool_intent_fn(text, turns=turns)
+        except Exception:
+            semantic_intent = None
+    except Exception:
+        semantic_intent = None
+    semantic_ms = int((time.perf_counter() - semantic_started) * 1000)
+    trace("timing", "completed", "semantic_tool_intent", duration_ms=semantic_ms)
+    if isinstance(semantic_intent, dict) and str(semantic_intent.get("tool") or "").strip() == "none":
+        trace(
+            "action_planner",
+            "semantic_none",
+            str(semantic_intent.get("reason") or ""),
+            confidence=float(semantic_intent.get("confidence") or 0.0),
+        )
+        return [], semantic_ms, "none"
+    semantic_actions = _actions_from_semantic_tool_intent(semantic_intent)
+    if semantic_actions:
+        trace(
+            "action_planner",
+            "semantic_intent",
+            str((semantic_intent or {}).get("reason") or ""),
+            tool=str((semantic_intent or {}).get("tool") or ""),
+            confidence=float((semantic_intent or {}).get("confidence") or 0.0),
+        )
+        return semantic_actions, semantic_ms, "tool"
+    return [], semantic_ms, "unavailable"
+
+
+def _handle_semantic_work_tree_action(
+    *,
+    action: dict,
+    text: str,
+    pending_action: dict | None,
+    session,
+    core,
+    trace: Callable[..., None],
+    normalize_reply: Callable[[str], str],
+    ensure_active_work_tree_fn: Callable[[str], str] | None = None,
+) -> tuple[str, dict] | None:
+    work_tree_started = time.perf_counter()
+    tool = str(action.get("tool") or "").strip()
+    tree_id = _active_work_tree_id(pending_action=pending_action, session=session)
+    active_identity = _active_work_identity(pending_action=pending_action, session=session)
+    if tool == "work_tree_create" and not tree_id and callable(ensure_active_work_tree_fn):
+        tree_id = str(ensure_active_work_tree_fn(text) or "").strip()
+    if tree_id and hasattr(session, "set_active_work_tree_id"):
+        try:
+            session.set_active_work_tree_id(tree_id)
+        except Exception:
+            pass
+    if tree_id and hasattr(session, "set_active_work_identity") and not active_identity:
+        inferred_identity = WORK_TREE_SEEDING_SERVICE.build_work_identity_key(text)
+        if inferred_identity:
+            try:
+                session.set_active_work_identity(inferred_identity)
+                active_identity = inferred_identity
+            except Exception:
+                pass
+    if not tree_id:
+        reply = "No active Work Tree is selected."
+        return normalize_reply(reply), {
+            "planner_decision": "work_tree",
+            "tool": tool,
+            "tool_args": {"query": text},
+            "tool_result": "",
+            "grounded": False,
+            "pending_action": dict(pending_action or {}),
+            "route_evidence": _route_evidence(owner="work_tree", action_type="no_active_tree", tool=tool),
+        }
+    try:
+        import work_tree
+    except Exception:
+        return None
+    if tool == "work_tree_create":
+        step = {
+            "action": "created",
+            "tree_id": tree_id,
+            "snapshot_text": work_tree.format_tree_snapshot(tree_id),
+        }
+    elif tool == "work_tree_status":
+        step = {
+            "action": "inspect",
+            "tree_id": tree_id,
+            "snapshot_text": work_tree.format_tree_snapshot(tree_id),
+        }
+    elif tool == "work_tree_execute":
+        step_started = time.perf_counter()
+        step = work_tree.execute_autonomous_step(tree_id, execute_planned_action_fn=core.execute_planned_action)
+        trace("timing", "completed", "work_tree_step", duration_ms=int((time.perf_counter() - step_started) * 1000))
+    else:
+        step_started = time.perf_counter()
+        step = work_tree.next_autonomous_step(tree_id)
+        trace("timing", "completed", "work_tree_step", duration_ms=int((time.perf_counter() - step_started) * 1000))
+    action_type = str((step or {}).get("action") or tool or "work_tree")
+    trace("work_tree", "semantic_matched", detail=action_type)
+    trace("timing", "completed", "work_tree_sequence", duration_ms=int((time.perf_counter() - work_tree_started) * 1000))
+    reply = _format_work_tree_reply(step)
+    return normalize_reply(reply), {
+        "planner_decision": "work_tree",
+        "tool": str((step or {}).get("recommended_tool") or tool or "work_tree"),
+        "tool_args": {"tree_id": tree_id},
+        "tool_result": json.dumps(step, ensure_ascii=True) if isinstance(step, dict) else "",
+        "grounded": True,
+        "pending_action": {
+            **dict(pending_action or {}),
+            "work_tree_id": tree_id,
+            "work_identity_key": active_identity or WORK_TREE_SEEDING_SERVICE.build_work_identity_key(text),
+        },
+        "route_evidence": _route_evidence(owner="work_tree", action_type=action_type, tool=str((step or {}).get("recommended_tool") or tool)),
+    }
+
+
+def _weather_location_available(core) -> bool:
+    available_fn = getattr(core, "_weather_current_location_available", None)
+    if not callable(available_fn):
+        return True
+    try:
+        return bool(available_fn())
+    except Exception:
+        return True
+
+
+def _pending_weather_action(core) -> dict:
+    pending_fn = getattr(core, "make_pending_weather_action", None)
+    if callable(pending_fn):
+        try:
+            pending = pending_fn()
+            if isinstance(pending, dict):
+                return pending
+        except Exception:
+            pass
+    return {"kind": "weather_lookup", "status": "awaiting_location", "preferred_tool": "weather_location"}
+
+
 def merge_route_evidence(routing_decision: dict | None, meta: dict | None) -> dict | None:
     if not isinstance(meta, dict):
         return routing_decision
@@ -287,27 +454,41 @@ def maybe_handle_planner_sequence(
         pending_action=pending_action,
         prefer_web_for_data_queries=prefer_web_for_data_queries,
     )
-    work_tree_outcome = _maybe_handle_work_tree_sequence(
+    actions, semantic_ms, semantic_status = _classify_semantic_tool_actions(
         text=text,
+        turns=turns,
         pending_action=pending_action,
-        session=session,
         core=core,
         trace=trace,
-        normalize_reply=normalize_reply,
-        ensure_active_work_tree_fn=ensure_active_work_tree_fn,
-        work_tree_seed_source=work_tree_seed_source,
-        work_tree_seed_mode=work_tree_seed_mode,
     )
-    if work_tree_outcome is not None:
-        return _return_with_timing(work_tree_outcome[0], work_tree_outcome[1])
-    decide_started = time.perf_counter()
-    try:
-        actions = core.decide_actions(text, config=config)
-    except Exception:
-        actions = []
-    tool_selection_ms = int((time.perf_counter() - decide_started) * 1000)
-    trace("timing", "completed", "planner_decide_actions", duration_ms=tool_selection_ms)
+    tool_selection_ms += semantic_ms
     trace("timing", "completed", "tool_selection", duration_ms=tool_selection_ms)
+
+    if not actions and semantic_status != "none":
+        work_tree_outcome = _maybe_handle_work_tree_sequence(
+            text=text,
+            pending_action=pending_action,
+            session=session,
+            core=core,
+            trace=trace,
+            normalize_reply=normalize_reply,
+            ensure_active_work_tree_fn=ensure_active_work_tree_fn,
+            work_tree_seed_source=work_tree_seed_source,
+            work_tree_seed_mode=work_tree_seed_mode,
+        )
+        if work_tree_outcome is not None:
+            return _return_with_timing(work_tree_outcome[0], work_tree_outcome[1])
+
+    if not actions and semantic_status != "none":
+        decide_started = time.perf_counter()
+        try:
+            actions = core.decide_actions(text, config=config)
+        except Exception:
+            actions = []
+        decide_ms = int((time.perf_counter() - decide_started) * 1000)
+        tool_selection_ms += decide_ms
+        trace("timing", "completed", "planner_decide_actions", duration_ms=decide_ms)
+        trace("timing", "completed", "tool_selection", duration_ms=tool_selection_ms)
 
     if actions:
         act = actions[0]
@@ -321,7 +502,7 @@ def maybe_handle_planner_sequence(
                 "tool_args": {"query": text},
                 "tool_result": str(reply or ""),
                 "grounded": False,
-                "pending_action": core.make_pending_weather_action() if "weather lookup" in str(reply or "").lower() else {},
+                "pending_action": {},
                 "route_evidence": _route_evidence(owner="action_planner", action_type=atype),
             })
 
@@ -336,6 +517,21 @@ def maybe_handle_planner_sequence(
                 "grounded": False,
                 "route_evidence": _route_evidence(owner="action_planner", action_type=atype),
             })
+
+        if atype == "work_tree":
+            trace("action_planner", "work_tree", tool=str(act.get("tool") or ""))
+            work_tree_action = _handle_semantic_work_tree_action(
+                action=act,
+                text=text,
+                pending_action=pending_action,
+                session=session,
+                core=core,
+                trace=trace,
+                normalize_reply=normalize_reply,
+                ensure_active_work_tree_fn=ensure_active_work_tree_fn,
+            )
+            if work_tree_action is not None:
+                return _return_with_timing(work_tree_action[0], work_tree_action[1])
 
         if atype == "route_command":
             trace("action_planner", "route_command")
@@ -375,6 +571,23 @@ def maybe_handle_planner_sequence(
             tool = str(act.get("tool") or "")
             args = act.get("args") or []
             trace("action_planner", "run_tool", tool=tool)
+            if tool == "weather_current_location" and not _weather_location_available(core):
+                reply = "What location should I use for the weather lookup?"
+                return _return_with_timing(normalize_reply(reply), {
+                    "planner_decision": "ask_clarify",
+                    "tool": "",
+                    "tool_args": {"query": text},
+                    "tool_result": str(reply or ""),
+                    "grounded": False,
+                    "pending_action": _pending_weather_action(core),
+                    "route_evidence": _route_evidence(owner="action_planner", action_type="semantic_weather_needs_location"),
+                    "reply_contract": "weather_lookup.clarify",
+                    "reply_outcome": {
+                        "intent": "weather_lookup",
+                        "kind": "needs_location",
+                        "reply_contract": "weather_lookup.clarify",
+                    },
+                })
             tool_started = time.perf_counter()
             out = core.execute_planned_action(tool, args)
             tool_time_ms = int((time.perf_counter() - tool_started) * 1000)
@@ -413,6 +626,31 @@ def maybe_handle_planner_sequence(
                 grounded_out = core._ground_web_research_reply(text, rendered_out)
                 if grounded_out:
                     rendered_out = grounded_out
+            reply_contract = ""
+            reply_outcome: dict[str, object] = {}
+            if tool == "weather_current_location":
+                reply_contract = "weather_lookup.current_location"
+                reply_outcome = {
+                    "intent": "weather_lookup",
+                    "kind": "current_location",
+                    "reply_contract": reply_contract,
+                }
+            elif tool == "weather_location":
+                reply_contract = "weather_lookup.explicit_location"
+                location_value = str(args[0] if isinstance(args, (list, tuple)) and args else "").strip()
+                reply_outcome = {
+                    "intent": "weather_lookup",
+                    "kind": "explicit_location",
+                    "reply_contract": reply_contract,
+                    "location_value": location_value,
+                }
+            elif tool == "self_status":
+                reply_contract = "self_status.current"
+                reply_outcome = {
+                    "intent": "self_status",
+                    "kind": "current",
+                    "reply_contract": reply_contract,
+                }
             trace("tool_execution", "ok", tool=tool, grounded=bool(rendered_out.strip()))
             return _return_with_timing(normalize_reply(rendered_out), {
                 "planner_decision": "run_tool",
@@ -422,45 +660,8 @@ def maybe_handle_planner_sequence(
                 "grounded": bool(rendered_out.strip()),
                 "pending_action": {},
                 "route_evidence": route_evidence,
+                "reply_contract": reply_contract,
+                "reply_outcome": reply_outcome,
             })
-
-    if prefer_web_for_data_queries and is_web_preferred_data_query(text):
-        trace("session_override", "matched", detail="prefer_web_for_data_queries", tool="web_research")
-        tool_started = time.perf_counter()
-        out = core.execute_planned_action("web_research", [text])
-        tool_time_ms = int((time.perf_counter() - tool_started) * 1000)
-        _record_tool_timing("web_research", tool_time_ms)
-        if out is None or (isinstance(out, str) and not out.strip()):
-            fallback_tool_started = time.perf_counter()
-            out = core.tool_web_research(text)
-            fallback_tool_ms = int((time.perf_counter() - fallback_tool_started) * 1000)
-            tool_time_ms += fallback_tool_ms
-            _record_tool_timing("web_research", fallback_tool_ms)
-        route_evidence = _route_evidence(owner="session_override", action_type="prefer_web_for_data_queries", tool="web_research")
-        if isinstance(out, dict) and not out.get("ok", True):
-            trace("tool_execution", "error", tool="web_research", error=str(out.get("error") or "unknown error"))
-            err = out.get("error", "unknown error")
-            reply = f"Tool web_research failed: {err}"
-            return _return_with_timing(normalize_reply(reply), {
-                "planner_decision": "run_tool",
-                "tool": "web_research",
-                "tool_args": {"args": [text]},
-                "tool_result": json.dumps(out, ensure_ascii=True),
-                "grounded": False,
-                "pending_action": {},
-                "route_evidence": route_evidence,
-            })
-        if str(out or "").strip():
-            trace("tool_execution", "ok", tool="web_research", grounded=True)
-            return _return_with_timing(normalize_reply(str(out or "")), {
-                "planner_decision": "run_tool",
-                "tool": "web_research",
-                "tool_args": {"args": [text]},
-                "tool_result": str(out or ""),
-                "grounded": True,
-                "pending_action": {},
-                "route_evidence": route_evidence,
-            })
-        trace("tool_execution", "empty_result", tool="web_research")
 
     return None

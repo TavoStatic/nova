@@ -148,12 +148,6 @@ class TestSubconsciousWorkTreeTriageService(unittest.TestCase):
                 "yes get the weather for our location",
             ),
             (
-                "memory-capture-fallthrough-family",
-                "memory_capture_route_fallthrough",
-                "test_memory_capture_route",
-                "Remember this: my favorite color is teal. Don't forget.",
-            ),
-            (
                 "retrieval-followup-fallthrough-family",
                 "retrieval_followup_route_fallthrough",
                 "test_retrieval_followup_route",
@@ -189,7 +183,7 @@ class TestSubconsciousWorkTreeTriageService(unittest.TestCase):
                 review_context = dict((signal.get("payload") or {}).get("review_context") or {})
                 self.assertEqual(review_context.get("review_text"), expected_text)
 
-    def test_build_signal_uses_memory_capture_family_context_when_available(self):
+    def test_build_signal_ignores_retired_memory_capture_family_context(self):
         signal = SUBCONSCIOUS_WORK_TREE_TRIAGE_SERVICE.build_signal(
             family_id="memory-capture-fallthrough-family",
             target_seam="memory_capture_route_fallthrough",
@@ -209,9 +203,10 @@ class TestSubconsciousWorkTreeTriageService(unittest.TestCase):
 
         payload = dict(signal.get("payload") or {})
         review_context = dict(payload.get("review_context") or {})
-        self.assertEqual(payload.get("preferred_owner"), "supervisor")
-        self.assertEqual(review_context.get("scenario_id"), "memory-capture-fallthrough")
-        self.assertEqual(review_context.get("review_text"), "Remember this: my favorite color is teal. Don't forget.")
+        self.assertEqual(payload.get("preferred_owner"), "maintenance_review")
+        self.assertEqual(payload.get("route_hint"), "retired_content_route")
+        self.assertEqual(review_context.get("scenario_id"), None)
+        self.assertEqual(review_context.get("review_text"), "")
 
     def test_build_signal_adds_family_specific_retrieval_guidance(self):
         signal = SUBCONSCIOUS_WORK_TREE_TRIAGE_SERVICE.build_signal(
@@ -230,7 +225,7 @@ class TestSubconsciousWorkTreeTriageService(unittest.TestCase):
         self.assertIn("selected result or provider context", str(signal.get("next_task") or "").lower())
         self.assertIn("Retrieval-followup review", str(payload.get("branch_note") or ""))
 
-    def test_build_signal_adds_family_specific_memory_guidance(self):
+    def test_build_signal_uses_generic_route_guidance_for_retired_memory_family(self):
         signal = SUBCONSCIOUS_WORK_TREE_TRIAGE_SERVICE.build_signal(
             family_id="memory-capture-fallthrough-family",
             target_seam="memory_capture_route_fallthrough",
@@ -243,9 +238,9 @@ class TestSubconsciousWorkTreeTriageService(unittest.TestCase):
         )
 
         payload = dict(signal.get("payload") or {})
-        self.assertIn("memory capture still falls through", str(signal.get("next_task") or "").lower())
-        self.assertIn("store memory, ask for confirmation, or defer learning", str(signal.get("next_task") or "").lower())
-        self.assertIn("Memory-capture review", str(payload.get("branch_note") or ""))
+        self.assertIn("retired content-owned memory capture pressure", str(signal.get("next_task") or "").lower())
+        self.assertNotIn("memory capture still falls through", str(signal.get("next_task") or "").lower())
+        self.assertIn("Retired memory-capture review", str(payload.get("branch_note") or ""))
 
     def test_build_signal_adds_family_specific_weather_guidance(self):
         signal = SUBCONSCIOUS_WORK_TREE_TRIAGE_SERVICE.build_signal(
@@ -280,6 +275,24 @@ class TestSubconsciousWorkTreeTriageService(unittest.TestCase):
         self.assertIn("session fact recall still falls through", str(signal.get("next_task") or "").lower())
         self.assertIn("recap or fact-followup state is missing", str(signal.get("next_task") or "").lower())
         self.assertIn("Session-fact review", str(payload.get("branch_note") or ""))
+
+    def test_build_signal_sequences_subconscious_judgment_after_evidence(self):
+        signal = SUBCONSCIOUS_WORK_TREE_TRIAGE_SERVICE.build_signal(
+            family_id="fulfillment-fallthrough-family",
+            target_seam="fulfillment_bridge_entry_fallthrough",
+            signal_name="fulfillment_missed",
+            suggested_test_name="test_fulfillment_route",
+            rationale="Fulfillment route still falls through.",
+            urgency="high",
+            robustness=0.97,
+            variation_results=[],
+        )
+
+        sequence = list(signal.get("task_sequence") or [])
+        last_step = dict(sequence[-1])
+        self.assertEqual(last_step.get("preferred_tool"), "subconscious_review_judgment")
+        self.assertIn("subconscious_review_judgment", signal.get("allowed_tools") or [])
+        self.assertIn("using synthesized judgment", str(signal.get("blocked_task") or ""))
 
     def test_build_signal_prefers_report_review_context_when_present(self):
         signal = SUBCONSCIOUS_WORK_TREE_TRIAGE_SERVICE.build_signal(

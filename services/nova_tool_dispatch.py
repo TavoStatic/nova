@@ -20,9 +20,18 @@ _PLANNED_TOOL_NAMES = (
     "tool_queue_status",
     "tool_phase2_audit",
     "tool_nova_pulse",
+    "tool_memory_bootstrap_judgment",
+    "tool_memory_bootstrap_confirm",
+    "tool_memory_identity_bootstrap",
+    "tool_subconscious_review_judgment",
+    "tool_pipeline",
     "tool_nova_self_status",
     "tool_core_health_brief",
     "tool_core_thinning",
+    "tool_release_promotion_judgment",
+    "tool_release_validation_run",
+    "tool_release_record_validation_outcome",
+    "tool_release_rebuild_verify",
     "tool_patch_preview_approve",
     "patch_apply",
     "tool_patch_preview_apply",
@@ -33,11 +42,14 @@ _PLANNED_TOOL_NAMES = (
     "tool_update_now_confirm",
     "tool_update_now_cancel",
     "tool_web_search",
+    "tool_web_fetch",
     "tool_web_research",
     "tool_web_gather",
     "tool_wikipedia_lookup",
     "tool_stackexchange_search",
     "tool_health",
+    "tool_screen",
+    "tool_camera",
 )
 
 _PLANNED_TOOL_ALIASES = {
@@ -46,9 +58,18 @@ _PLANNED_TOOL_ALIASES = {
     "tool_queue_status": "queue_status",
     "tool_phase2_audit": "phase2_audit",
     "tool_nova_pulse": "pulse",
+    "tool_memory_bootstrap_judgment": "memory_bootstrap_judgment",
+    "tool_memory_bootstrap_confirm": "memory_bootstrap_confirm",
+    "tool_memory_identity_bootstrap": "memory_identity_bootstrap",
+    "tool_subconscious_review_judgment": "subconscious_review_judgment",
+    "tool_pipeline": "pipeline",
     "tool_nova_self_status": "self_status",
     "tool_core_health_brief": "core_health",
     "tool_core_thinning": "core_thinning",
+    "tool_release_promotion_judgment": "release_promotion_judgment",
+    "tool_release_validation_run": "release_validation_run",
+    "tool_release_record_validation_outcome": "release_record_validation_outcome",
+    "tool_release_rebuild_verify": "release_rebuild_verify",
     "tool_patch_preview_approve": "patch_preview_approve",
     "patch_apply": "patch_apply",
     "tool_patch_preview_apply": "patch_preview_apply",
@@ -59,11 +80,20 @@ _PLANNED_TOOL_ALIASES = {
     "tool_update_now_confirm": "update_now_confirm",
     "tool_update_now_cancel": "update_now_cancel",
     "tool_web_search": "web_search",
+    "tool_web_fetch": "web_fetch",
     "tool_web_research": "web_research",
     "tool_web_gather": "web_gather",
     "tool_wikipedia_lookup": "wikipedia_lookup",
     "tool_stackexchange_search": "stackexchange_search",
     "tool_health": "health",
+    "tool_screen": "screen",
+    "tool_camera": "camera",
+}
+
+_OPTIONAL_PLANNED_TOOL_DEFAULTS = {
+    "tool_pipeline": lambda *args: {"ok": False, "error": "Pipeline tool is not available in this runtime scope."},
+    "tool_screen": lambda *args: {"ok": False, "error": "Screen tool is not available in this runtime scope."},
+    "tool_camera": lambda *args: {"ok": False, "error": "Camera tool is not available in this runtime scope."},
 }
 
 
@@ -72,6 +102,10 @@ def _planned_tool_map(runtime_scope: Mapping[str, Any]) -> dict[str, Callable[..
     for runtime_name in _PLANNED_TOOL_NAMES:
         value = runtime_scope.get(runtime_name)
         if not callable(value):
+            fallback = _OPTIONAL_PLANNED_TOOL_DEFAULTS.get(runtime_name)
+            if callable(fallback):
+                tool_map[_PLANNED_TOOL_ALIASES[runtime_name]] = fallback
+                continue
             raise TypeError(f"{runtime_name} must be callable")
         tool_map[_PLANNED_TOOL_ALIASES[runtime_name]] = value
     return tool_map

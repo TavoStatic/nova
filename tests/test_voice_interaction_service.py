@@ -26,20 +26,26 @@ class TestVoiceInteractionService(unittest.TestCase):
             def __init__(self, size, device=None, compute_type=None):
                 created.append((size, device, compute_type))
 
-        service = VoiceInteractionService(speaker_factory=lambda: _FakeEngine(), whisper_model_cls=_FakeWhisper)
-
-        with mock.patch("services.voice_interaction.nova_core.whisper_size", return_value="base"):
-            service.load_whisper(device="cpu", compute_type="int8")
+        service = VoiceInteractionService(
+            speaker_factory=lambda: _FakeEngine(),
+            whisper_model_cls=_FakeWhisper,
+            whisper_size_fn=lambda: "base",
+        )
+        service.load_whisper(device="cpu", compute_type="int8")
 
         self.assertEqual(created, [("base", "cpu", "int8")])
 
     def test_record_and_transcribe_delegate_to_nova_core(self):
-        service = VoiceInteractionService(speaker_factory=lambda: _FakeEngine(), whisper_model_cls=object)
-
-        with mock.patch("services.voice_interaction.nova_core.record_seconds", return_value="audio") as record_mock, \
-            mock.patch("services.voice_interaction.nova_core.transcribe", return_value="hello") as transcribe_mock:
-            audio = service.record_seconds(4)
-            text = service.transcribe("model", "audio")
+        record_mock = mock.Mock(return_value="audio")
+        transcribe_mock = mock.Mock(return_value="hello")
+        service = VoiceInteractionService(
+            speaker_factory=lambda: _FakeEngine(),
+            whisper_model_cls=object,
+            record_seconds_fn=record_mock,
+            transcribe_fn=transcribe_mock,
+        )
+        audio = service.record_seconds(4)
+        text = service.transcribe("model", "audio")
 
         self.assertEqual(audio, "audio")
         self.assertEqual(text, "hello")
@@ -47,32 +53,33 @@ class TestVoiceInteractionService(unittest.TestCase):
         transcribe_mock.assert_called_once_with("model", "audio")
 
     def test_chat_uses_http_process_chat_by_default(self):
-        service = VoiceInteractionService(speaker_factory=lambda: _FakeEngine(), whisper_model_cls=object)
-
-        with mock.patch("nova_http.process_chat", return_value="reply") as chat_mock:
-            reply = service.chat("hello", session_id="voice-test", user_id="runner")
+        chat_mock = mock.Mock(return_value="reply")
+        service = VoiceInteractionService(speaker_factory=lambda: _FakeEngine(), whisper_model_cls=object, chat_fn=chat_mock)
+        reply = service.chat("hello", session_id="voice-test", user_id="runner")
 
         self.assertEqual(reply, "reply")
-        chat_mock.assert_called_once_with("voice-test", "hello", user_id="runner")
+        chat_mock.assert_called_once_with("voice-test", "hello", "runner")
 
     def test_chat_defaults_to_shared_voice_session_id(self):
-        service = VoiceInteractionService(speaker_factory=lambda: _FakeEngine(), whisper_model_cls=object)
-
-        with mock.patch("nova_http.process_chat", return_value="reply") as chat_mock:
-            reply = service.chat("hello")
+        chat_mock = mock.Mock(return_value="reply")
+        service = VoiceInteractionService(speaker_factory=lambda: _FakeEngine(), whisper_model_cls=object, chat_fn=chat_mock)
+        reply = service.chat("hello")
 
         self.assertEqual(reply, "reply")
-        chat_mock.assert_called_once_with("voice-session", "hello", user_id="")
+        chat_mock.assert_called_once_with("voice-session", "hello", "")
 
     def test_chat_falls_back_to_direct_llm_if_http_chat_raises(self):
-        service = VoiceInteractionService(speaker_factory=lambda: _FakeEngine(), whisper_model_cls=object)
-
-        with mock.patch("nova_http.process_chat", side_effect=RuntimeError("boom")), \
-            mock.patch("services.voice_interaction.nova_core.ollama_chat", return_value="reply") as chat_mock:
-            reply = service.chat("hello", session_id="voice-test")
+        fallback_mock = mock.Mock(return_value="reply")
+        service = VoiceInteractionService(
+            speaker_factory=lambda: _FakeEngine(),
+            whisper_model_cls=object,
+            chat_fn=mock.Mock(side_effect=RuntimeError("boom")),
+            fallback_chat_fn=fallback_mock,
+        )
+        reply = service.chat("hello", session_id="voice-test")
 
         self.assertEqual(reply, "reply")
-        chat_mock.assert_called_once_with("hello", retrieved_context="", language_mix_spanish_pct=0)
+        fallback_mock.assert_called_once_with("hello")
 
     def test_speak_uses_engine_factory(self):
         engine = _FakeEngine()

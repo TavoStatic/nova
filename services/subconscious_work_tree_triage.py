@@ -7,7 +7,6 @@ from subconscious_config import SUBCONSCIOUS_CHARTER
 _SUPERVISOR_SEAM_HINTS = {
     "supervisor_ownership_boundary",
     "weather_continuation_route_fallthrough",
-    "memory_capture_route_fallthrough",
     "retrieval_followup_route_fallthrough",
     "patch_routing_fallthrough",
     "session_fact_recall_route_fallthrough",
@@ -15,6 +14,10 @@ _SUPERVISOR_SEAM_HINTS = {
 
 _FULFILLMENT_SEAM_HINTS = {
     "fulfillment_bridge_entry_fallthrough",
+}
+
+_RETIRED_CONTENT_SEAM_HINTS = {
+    "memory_capture_route_fallthrough",
 }
 
 
@@ -30,13 +33,6 @@ def _fallback_review_context_for_source(source_key: str) -> dict[str, Any]:
     if "weather" in key:
         return {
             "review_text": "yes get the weather for our location",
-            "pending_action": None,
-            "conversation_state": None,
-            "turns": [],
-        }
-    if "memory" in key:
-        return {
-            "review_text": "Remember this: my favorite color is teal. Don't forget.",
             "pending_action": None,
             "conversation_state": None,
             "turns": [],
@@ -235,6 +231,12 @@ class SubconsciousWorkTreeTriageService:
         signal_key = str(signal_name or "").strip().lower()
         seam_key = str(target_seam or "").strip().lower()
 
+        if seam_key in _RETIRED_CONTENT_SEAM_HINTS:
+            return {
+                "preferred_owner": "maintenance_review",
+                "route_hint": "retired_content_route",
+                "triage_reason": "target seam belongs to retired content-owned chat routing",
+            }
         if seam_key in _SUPERVISOR_SEAM_HINTS:
             return {
                 "preferred_owner": "supervisor",
@@ -311,10 +313,20 @@ class SubconsciousWorkTreeTriageService:
         owner_key = str(preferred_owner or "").strip().lower()
         test_name = str(suggested_test_name or "").strip() or "the suggested review session"
 
+        if "memory-capture" in family_key or "memory_capture" in seam_key:
+            return {
+                "next_task": (
+                    f"Trace evidence from {test_name}, confirm this is retired content-owned memory capture pressure, "
+                    "and do not reopen supervisor ownership for normal chat phrases."
+                ),
+                "branch_note": (
+                    "Retired memory-capture review: normal chat phrases should not create a supervisor-owned memory lane."
+                ),
+            }
         if "patch" in family_key or "patch" in seam_key:
             return {
                 "next_task": (
-                    f"Run or inspect {test_name}, confirm whether patch routing still falls through, "
+                    f"Trace evidence from {test_name}, confirm whether patch routing still falls through, "
                     "and capture whether patch_apply or patch_rollback is the governed next step."
                 ),
                 "branch_note": (
@@ -325,7 +337,7 @@ class SubconsciousWorkTreeTriageService:
         if "retrieval" in family_key or "retrieval" in seam_key:
             return {
                 "next_task": (
-                    f"Run or inspect {test_name}, confirm whether retrieval followup state is preserved, "
+                    f"Trace evidence from {test_name}, confirm whether retrieval followup state is preserved, "
                     "and record which selected result or provider context is being lost."
                 ),
                 "branch_note": (
@@ -333,21 +345,10 @@ class SubconsciousWorkTreeTriageService:
                     "and whether supervisor routing is dropping the active result context."
                 ),
             }
-        if "memory" in family_key or "memory" in seam_key:
-            return {
-                "next_task": (
-                    f"Run or inspect {test_name}, confirm whether memory capture still falls through, "
-                    "and record whether the turn should store memory, ask for confirmation, or defer learning."
-                ),
-                "branch_note": (
-                    "Memory-capture review: check whether user fact capture, confirmation, and learning invite logic "
-                    "are routing through the intended supervisor-owned memory lane."
-                ),
-            }
         if "weather" in family_key or "weather" in seam_key:
             return {
                 "next_task": (
-                    f"Run or inspect {test_name}, confirm whether weather continuation still falls through, "
+                    f"Trace evidence from {test_name}, confirm whether weather continuation still falls through, "
                     "and verify pending weather action plus saved-location handling."
                 ),
                 "branch_note": (
@@ -358,7 +359,7 @@ class SubconsciousWorkTreeTriageService:
         if "session_fact" in family_key or "session_fact" in seam_key or "fact_recall" in seam_key:
             return {
                 "next_task": (
-                    f"Run or inspect {test_name}, confirm whether session fact recall still falls through, "
+                    f"Trace evidence from {test_name}, confirm whether session fact recall still falls through, "
                     "and record what recap or fact-followup state is missing."
                 ),
                 "branch_note": (
@@ -369,7 +370,7 @@ class SubconsciousWorkTreeTriageService:
         if "fulfillment" in family_key or "fulfillment" in seam_key or signal_key == "fulfillment_missed":
             return {
                 "next_task": (
-                    f"Run or inspect {test_name}, compare fulfillment against the competing route, "
+                    f"Trace evidence from {test_name}, compare fulfillment against the competing route, "
                     "and confirm which viable option was collapsed too early."
                 ),
                 "branch_note": (
@@ -380,7 +381,7 @@ class SubconsciousWorkTreeTriageService:
         if owner_key == "supervisor":
             return {
                 "next_task": (
-                    f"Run or inspect {test_name}, confirm whether supervisor-owned handling still drifts, "
+                    f"Trace evidence from {test_name}, confirm whether supervisor-owned handling still drifts, "
                     "and capture the exact route or ownership boundary that fails."
                 ),
                 "branch_note": (
@@ -391,7 +392,7 @@ class SubconsciousWorkTreeTriageService:
         if owner_key == "fulfillment_supervisor" or signal_key in {"route_conflict", "fallback_overuse", "route_unclear", "route_fit_weak"}:
             return {
                 "next_task": (
-                    f"Run or inspect {test_name}, compare fulfillment and supervisor outcomes, "
+                    f"Trace evidence from {test_name}, compare fulfillment and supervisor outcomes, "
                     "and record why this family still degrades into fallback or route conflict."
                 ),
                 "branch_note": (
@@ -400,12 +401,48 @@ class SubconsciousWorkTreeTriageService:
                 ),
             }
         return {
-            "next_task": f"Run or inspect {test_name} and confirm whether {signal_name} is still active in {target_seam}",
+            "next_task": f"Trace evidence from {test_name} and confirm whether {signal_name} is still active in {target_seam}",
             "branch_note": (
                 "Subconscious review: inspect the suggested family, confirm whether the pressure is still active, "
                 "and leave behind the exact owner, route, and missing behavior."
             ),
         }
+
+    @staticmethod
+    def _evidence_sequence(*, target_seam: str, signal_name: str) -> list[dict[str, object]]:
+        seam = str(target_seam or "").strip() or "subconscious_pressure"
+        signal = str(signal_name or "").strip() or "route_pressure"
+        pressure_source = "services" if signal == "fallback_overuse" else "tests"
+        return [
+            {
+                "title": f"Find route evidence for {seam} without running generated tests",
+                "allowed_tools": ["find"],
+                "preferred_tool": "find",
+                "tool_args": [seam, "subconscious_live_simulator.py"],
+            },
+            {
+                "title": f"Find pressure evidence for {signal} in {seam}",
+                "allowed_tools": ["find"],
+                "preferred_tool": "find",
+                "tool_args": [signal, pressure_source],
+            },
+            {
+                "title": "Read runtime/subconscious_runs/latest.json subconscious priority report",
+                "allowed_tools": ["read"],
+                "preferred_tool": "read",
+                "tool_args": ["runtime/subconscious_runs/latest.json"],
+            },
+            {
+                "title": "Queue status after subconscious pressure ingestion",
+                "allowed_tools": ["queue_status"],
+                "preferred_tool": "queue_status",
+            },
+            {
+                "title": f"Synthesize subconscious review judgment for {seam} / {signal}",
+                "allowed_tools": ["subconscious_review_judgment"],
+                "preferred_tool": "subconscious_review_judgment",
+            },
+        ]
 
     def build_signal(
         self,
@@ -482,6 +519,10 @@ class SubconsciousWorkTreeTriageService:
             suggested_test_name=suggested_test_name,
             preferred_owner=preferred_owner,
         )
+        sequence = self._evidence_sequence(target_seam=target_seam, signal_name=signal_name)
+        evidence_first_task = str(sequence[0].get("title") or "").strip()
+        family_task = str(guidance.get("next_task") or "").strip()
+        next_task = f"{evidence_first_task}; {family_task}" if evidence_first_task and family_task else (family_task or evidence_first_task)
         return {
             "source": "subconscious",
             "signal_class": "subconscious_candidate",
@@ -509,7 +550,15 @@ class SubconsciousWorkTreeTriageService:
             },
             "severity": severity,
             "actionability": actionability,
-            "next_task": str(guidance.get("next_task") or "").strip(),
+            "allowed_tools": ["find", "read", "queue_status", "subconscious_review_judgment"],
+            "preferred_tool": "find",
+            "next_task": next_task,
+            "task_sequence": sequence,
+            "blocked_task": (
+                f"Hold owner-root repair lane for {target_seam} / {signal_name} "
+                "using synthesized judgment instead of running generated tests as progress"
+            ),
+            "blocked_reason": "subconscious_pressure_owner_repair_required",
         }
 
     def review_gate(self, signal: dict[str, Any]) -> dict[str, Any]:

@@ -32,7 +32,7 @@ from typing import Any, Optional, Tuple
 from conversation_manager import ConversationSession
 from subconscious_config import SUBCONSCIOUS_CHARTER
 from supervisor import Supervisor
-from capabilities import explain_missing, describe_capabilities
+from capabilities import explain_missing, describe_capabilities, describe_runtime_identity
 from task_engine import analyze_request
 from action_planner import decide_actions
 from env_inspector import inspect_environment, format_report
@@ -90,6 +90,9 @@ from services.nova_self_status import build_self_status_payload as service_build
 from services.nova_self_status import build_repo_change_snapshot as service_build_repo_change_snapshot
 from services.nova_self_status import read_recent_ops_events as service_read_recent_ops_events
 from services.nova_self_status import render_self_status as service_render_self_status
+from services.nova_grounded_self_report import GROUNDED_SELF_REPORT_SERVICE
+from services.control_work_trees import CONTROL_WORK_TREES_SERVICE
+from services.release_status import RELEASE_STATUS_SERVICE
 from services.core_health_brief import build_core_health_brief as service_build_core_health_brief
 from services.core_health_brief import feed_core_health_brief_to_work_tree as service_feed_core_health_brief_to_work_tree
 from services.core_health_brief import render_core_health_brief as service_render_core_health_brief
@@ -178,6 +181,7 @@ from services.nova_reply_contracts import classify_set_location_outcome as servi
 from services.nova_reply_contracts import execute_weather_lookup_outcome as service_execute_weather_lookup_outcome
 from services.nova_reply_contracts import render_reply as service_render_reply_contract
 from services.nova_reply_sanitizer import sanitize_llm_reply as service_sanitize_llm_reply
+from services.nova_routing_support import classify_supervisor_bypass as service_classify_supervisor_bypass
 from services.nova_routing_support import finalize_routing_decision as service_finalize_routing_decision
 from services.nova_routing_support import llm_classify_routing_intent as service_llm_classify_routing_intent
 from services.nova_routing_support import looks_like_open_fallback_turn as service_looks_like_open_fallback_turn
@@ -209,7 +213,6 @@ from services.nova_turn_heuristics import build_greeting_reply as service_build_
 from services.nova_turn_heuristics import is_declarative_info as service_is_declarative_info
 from services.nova_turn_helpers import extract_memory_teach_text as service_extract_memory_teach_text
 from services.nova_turn_helpers import is_location_request as service_is_location_request
-from services.nova_turn_helpers import is_web_research_override_request as service_is_web_research_override_request
 from services.nova_turn_helpers import location_reply as service_location_reply
 from services.nova_turn_helpers import retrieval_status_reply as service_retrieval_status_reply
 from services.nova_turn_helpers import uses_prior_reference as service_uses_prior_reference
@@ -223,6 +226,7 @@ from services.nova_correction_parsing import normalize_correction_for_storage as
 from services.nova_correction_parsing import parse_correction as service_parse_correction
 from services.nova_correction_parsing import safe_eval_arithmetic_expression as service_safe_eval_arithmetic_expression
 from services.nova_ollama_chat import ollama_chat as service_ollama_chat
+from services.ollama_health import build_ollama_health_payload as service_build_ollama_health_payload
 from services.nova_reply_guards import apply_claim_gate as service_apply_claim_gate
 from services.nova_reply_guards import content_tokens as service_content_tokens
 from services.nova_reply_guards import is_risky_claim_sentence as service_is_risky_claim_sentence
@@ -256,11 +260,27 @@ from services.nova_web_tools import seed_urls_for_domain as service_seed_urls_fo
 from services.nova_web_tools import tool_stackexchange_search as service_tool_stackexchange_search
 from services.nova_web_tools import tool_web_fetch as service_tool_web_fetch
 from services.nova_web_tools import tool_web_gather as service_tool_web_gather
+from services.nova_web_tools import tool_search as service_tool_search
 from services.nova_web_tools import tool_web_research as service_tool_web_research
 from services.nova_web_tools import tool_web_search as service_tool_web_search
 from services.nova_web_tools import tool_wikipedia_lookup as service_tool_wikipedia_lookup
+from services.nova_web_tools import web_search as service_web_search
 from services.nova_cli_loop import run_loop as service_run_loop
 from services.nova_followup_dispatch import consume_conversation_followup_from_runtime as service_consume_conversation_followup_from_runtime
+from services.memory_bootstrap_judgment import build_memory_bootstrap_judgment as service_build_memory_bootstrap_judgment
+from services.memory_bootstrap_judgment import render_memory_bootstrap_judgment as service_render_memory_bootstrap_judgment
+from services.memory_bootstrap_origin import confirm_origin_contract as service_confirm_origin_contract
+from services.memory_bootstrap_origin import load_origin_contract as service_load_origin_contract
+from services.memory_identity_bootstrap import apply_identity_bootstrap as service_apply_identity_bootstrap
+from services.memory_identity_bootstrap import render_identity_bootstrap_result as service_render_identity_bootstrap_result
+from services.subconscious_review_judgment import build_subconscious_review_judgment as service_build_subconscious_review_judgment
+from services.subconscious_review_judgment import render_subconscious_review_judgment as service_render_subconscious_review_judgment
+from services.release_promotion_judgment import build_release_promotion_judgment as service_build_release_promotion_judgment
+from services.release_promotion_judgment import render_release_promotion_judgment as service_render_release_promotion_judgment
+from services.release_validation import record_release_validation_outcome as service_record_release_validation_outcome
+from services.release_validation import render_release_outcome_recording as service_render_release_outcome_recording
+from services.release_validation import render_release_validation_report as service_render_release_validation_report
+from services.release_validation import run_release_validation as service_run_release_validation
 from services.nova_memory_events import append_memory_event as service_append_memory_event
 from services.nova_memory_events import record_memory_event as service_record_memory_event
 from services.nova_memory_learning import learn_from_user_correction as service_learn_from_user_correction
@@ -285,6 +305,7 @@ from services.nova_runtime_context import HEALTH_LOG
 from services.nova_runtime_context import IDENTITY_FILE
 from services.nova_runtime_context import LEARNED_FACTS_FILE
 from services.nova_runtime_context import LOG_DIR
+from services.nova_runtime_context import MEMORY_BOOTSTRAP_ORIGIN_FILE
 from services.nova_runtime_context import MEMORY_DIR
 from services.nova_runtime_context import MEMORY_EVENTS_LOG
 from services.nova_runtime_context import PENDING_REVIEW_DIR
@@ -299,12 +320,16 @@ from services.nova_runtime_context import SELF_REFLECTION_LOG
 from services.nova_runtime_context import TEST_SESSIONS_DIR
 from services.nova_runtime_context import UPDATE_NOW_PENDING_FILE
 from services.nova_runtime_context import get_active_user
+from services.nova_runtime_context import runtime_scope_name
 from services.nova_runtime_context import set_active_user
 from services.nova_voice_runtime import SubprocessTTS as ServiceSubprocessTTS
 from services.nova_voice_runtime import ensure_voice_deps as service_ensure_voice_deps
 from services.nova_voice_runtime import record_seconds as service_record_seconds
 from services.nova_voice_runtime import speak_chunked as service_speak_chunked
 from services.nova_voice_runtime import transcribe as service_transcribe
+from services.nova_voice_runtime import voice_status_payload as service_voice_status_payload
+from services.generated_work_queue_snapshot import generated_work_queue_payload as service_generated_work_queue_payload
+from services.nova_vision_runtime import vision_status_payload as service_vision_status_payload
 try:
     import memory as memory_mod
 except Exception:
@@ -325,6 +350,37 @@ def _ensure_voice_deps() -> bool:
     """Import voice dependencies only when voice features are actually used."""
     return service_ensure_voice_deps(globals())
 
+
+def voice_status_payload() -> dict:
+    return service_voice_status_payload(globals())
+
+
+def vision_status_payload(*, policy: dict | None = None, ollama_health: dict | None = None) -> dict:
+    return service_vision_status_payload(
+        policy=policy if isinstance(policy, dict) else load_policy(),
+        ollama_health=ollama_health if isinstance(ollama_health, dict) else ollama_health_payload(),
+    )
+
+
+def record_seconds(seconds: int = 3):
+    return service_record_seconds(
+        seconds,
+        ensure_voice_deps_fn=_ensure_voice_deps,
+        runtime_scope=globals(),
+        sample_rate=SAMPLE_RATE,
+        channels=CHANNELS,
+    )
+
+
+def transcribe(model, audio_int16) -> str:
+    return service_transcribe(
+        model,
+        audio_int16,
+        ensure_voice_deps_fn=_ensure_voice_deps,
+        runtime_scope=globals(),
+        sample_rate=SAMPLE_RATE,
+    )
+
 import sys
 
 
@@ -340,15 +396,6 @@ CHANNELS = 1
 RECORD_SECONDS = 3
 OLLAMA_BOOT_RETRIES = 15
 OLLAMA_REQ_TIMEOUT = 1800
-
-
-def record_seconds(seconds: int = RECORD_SECONDS):
-    return service_record_seconds(seconds, ensure_voice_deps_fn=_ensure_voice_deps, runtime_scope=globals(), sample_rate=SAMPLE_RATE, channels=CHANNELS)
-
-
-def transcribe(model, audio_int16):
-    return service_transcribe(model, audio_int16, ensure_voice_deps_fn=_ensure_voice_deps, runtime_scope=globals(), sample_rate=SAMPLE_RATE)
-
 
 # Knowledge packs (B-mode)
 KNOWLEDGE_ROOT = BASE_DIR / "knowledge"
@@ -376,7 +423,7 @@ WEB_CACHE_DIR = KNOWLEDGE_ROOT / "web"
 DATA_SOURCES_ROOT = BASE_DIR / "data_sources"
 
 # Self patching
-UPDATES_DIR = BASE_DIR / "updates"
+UPDATES_DIR = RUNTIME_DIR / "updates" if runtime_scope_name() == "validation" else BASE_DIR / "updates"
 SNAPSHOTS_DIR = UPDATES_DIR / "snapshots"
 PATCH_LOG = UPDATES_DIR / "patch.log"
 PATCH_REVISION_FILE = UPDATES_DIR / "revision.json"
@@ -405,11 +452,6 @@ def _identity_memory_service() -> IdentityMemoryService:
     """Dynamic service creation with test-time path override support."""
     service = build_identity_memory_service(
         normalize_text_fn=_normalize_turn_text,
-        location_query_fn=_is_location_recall_query,
-        location_name_fn=_is_location_name_query,
-        saved_location_weather_fn=_is_saved_location_weather_query,
-        peims_query_fn=_is_peims_broad_query,
-        declarative_info_fn=_is_declarative_info,
     )
     return service
 
@@ -418,25 +460,6 @@ TURN_SUPERVISOR = Supervisor()
 
 def _identity_memory_text_allowed(kind: str, text: str) -> bool:
     return _identity_memory_service().is_identity_memory_text_allowed(kind, text)
-
-
-def _session_identity_only_mode(session_id: str) -> bool:
-    normalized = re.sub(r"\s+", " ", str(session_id or "").strip().lower())
-    if not normalized:
-        return False
-    return "clean_slate" in normalized or "clean slate" in normalized
-
-
-def _looks_like_identity_only_location_text(user_text: str) -> bool:
-    return _identity_memory_service().looks_like_identity_only_location_text(user_text)
-
-
-def _identity_only_block_kind(user_text: str, *, intent_result: Optional[dict] = None) -> str:
-    return _identity_memory_service().get_identity_only_block_kind(user_text, intent_result=intent_result)
-
-
-def _identity_only_block_reply(block_kind: str) -> str:
-    return _identity_memory_service().get_identity_only_block_reply(block_kind)
 
 
 def _save_behavior_metrics() -> None:
@@ -549,7 +572,16 @@ def _infer_turn_intent(user_input: str) -> str:
     t = (user_input or "").strip().lower()
     if not t:
         return "empty"
-    if "weather" in t:
+    if t in {"weather current location", "weather current"}:
+        return "weather_lookup"
+    if t.startswith((
+        "weather for ",
+        "weather in ",
+        "weather at ",
+        "check weather for ",
+        "check weather in ",
+        "check weather at ",
+    )):
         return "weather_lookup"
     if t.startswith("web research "):
         return "web_research"
@@ -557,12 +589,8 @@ def _infer_turn_intent(user_input: str) -> str:
         return "web_search"
     if t.startswith("web gather "):
         return "web_gather"
-    if "http://" in t or "https://" in t:
+    if t.startswith("web http://") or t.startswith("web https://"):
         return "web_fetch"
-    if "my name is" in t or "your name is" in t or "full name" in t:
-        return "identity_update_or_query"
-    if _is_negative_feedback(t):
-        return "correction_feedback"
     return "chat"
 
 
@@ -795,14 +823,8 @@ def _looks_like_affirmative_followup(text: str) -> bool:
 
 def _looks_like_shared_location_reference(text: str) -> bool:
     normalized = _normalize_turn_text(text).strip(" .,!?")
-    if not normalized:
-        return False
-    return (
-        normalized in {"our location", "our location nova", "same location", "shared location"}
-        or (("your" in normalized or "our" in normalized) and "location" in normalized)
-        or "that location" in normalized
-        or normalized in {"there", "same place"}
-    )
+    del normalized
+    return False
 
 
 def _intent_trace_preview(text: str, *, limit: int = 120) -> str:
@@ -856,31 +878,12 @@ def _normalize_bypass_phrase(text: str) -> str:
 
 
 def _classify_supervisor_bypass(text: str) -> dict:
-    normalized = _normalize_bypass_phrase(text)
-    if not normalized:
-        return {"allowed": False, "category": "unlisted", "reason": "empty"}
-    for item in _ALLOWED_SUPERVISOR_BYPASSES:
-        phrases = item.get("phrases")
-        if isinstance(phrases, set) and normalized in phrases:
-            return {
-                "allowed": True,
-                "category": str(item.get("category") or "fallback.allowlisted"),
-                "reason": "allowlisted_bypass",
-                "normalized_input": normalized,
-            }
-    if _looks_like_open_fallback_turn(text):
-        return {
-            "allowed": False,
-            "category": "intentional_fallback.open_fulfillment_or_model",
-            "reason": "open_fallback_candidate",
-            "normalized_input": normalized,
-        }
-    return {
-        "allowed": False,
-        "category": "unlisted",
-        "reason": "not_allowlisted",
-        "normalized_input": normalized,
-    }
+    return service_classify_supervisor_bypass(
+        text,
+        normalize_bypass_phrase_fn=_normalize_bypass_phrase,
+        allowed_supervisor_bypasses=_ALLOWED_SUPERVISOR_BYPASSES,
+        looks_like_open_fallback_turn_fn=_looks_like_open_fallback_turn,
+    )
 
 
 def _supervisor_candidate_trace(rule_result: Optional[dict]) -> list[dict]:
@@ -1004,31 +1007,8 @@ def _handle_supervisor_bypass(text: str, *, entry_point: str, routing_decision: 
 
 
 def _should_warn_supervisor_bypass(text: str) -> bool:
-    candidate = str(text or "").strip()
-    if not candidate:
-        return False
-    if _looks_like_open_fallback_turn(candidate):
-        return False
-    if _is_explicit_command_like(candidate):
-        return False
-    if _is_location_request(candidate):
-        return False
-    normalized = _normalize_turn_text(candidate)
-    if normalized in {
-        "weather",
-        "weather now",
-        "weather current",
-        "weather today",
-        "current weather",
-        "what's the weather",
-        "what is the weather",
-        "what is the weather now",
-        "what's the weather now",
-    }:
-        return False
-    if _is_peims_broad_query(candidate) or _is_local_knowledge_topic_query(candidate):
-        return False
-    return True
+    del text
+    return False
 
 
 def _should_clarify_unlabeled_numeric_turn(
@@ -1037,22 +1017,8 @@ def _should_clarify_unlabeled_numeric_turn(
     pending_action: Optional[dict] = None,
     current_state: Optional[dict] = None,
 ) -> bool:
-    raw = str(text or "").strip()
-    if not re.fullmatch(r"\d{5}", raw):
-        return False
-    state = current_state if isinstance(current_state, dict) else {}
-    if str(state.get("kind") or "").strip() in {"numeric_reference", "numeric_reference_clarify"} and str(state.get("value") or "").strip() == raw:
-        return False
-    action = pending_action if isinstance(pending_action, dict) else {}
-    if (
-        str(action.get("kind") or "") == "weather_lookup"
-        and str(action.get("status") or "") == "awaiting_location"
-    ):
-        return False
-    try:
-        return bool(str(get_saved_location_text() or "").strip())
-    except Exception:
-        return True
+    del text, pending_action, current_state
+    return False
 
 
 def _runtime_set_location_intent(
@@ -1060,57 +1026,29 @@ def _runtime_set_location_intent(
     *,
     pending_action: Optional[dict] = None,
 ) -> Optional[dict[str, object]]:
-    raw = str(text or "").strip()
-    if not re.fullmatch(r"\d{5}", raw):
-        return None
-    action = pending_action if isinstance(pending_action, dict) else {}
-    if (
-        str(action.get("kind") or "") == "weather_lookup"
-        and str(action.get("status") or "") == "awaiting_location"
-    ):
-        return None
-    try:
-        if str(get_saved_location_text() or "").strip():
-            return None
-    except Exception:
-        pass
-    return {
-        "handled": True,
-        "intent": "set_location",
-        "rule_name": "set_location_zip",
-        "matched_rule_name": "set_location_zip",
-        "location_value": raw,
-        "location_kind": "zip",
-        "location_ack_kind": "fact_only",
-    }
+    del text, pending_action
+    return None
 
 
-_ROUTING_INTENT_PROMPT = """\
-Classify the user message into exactly one routing intent. Reply with the label only — no explanation.
-
-Labels:
-weather_lookup   – user wants current conditions, temperature, rain, forecast, or whether to dress for outdoors
-web_research     – user wants online research on a topic
-web_search       – user wants a quick web search
-store_fact       – user is telling a personal fact to remember
-set_location     – user is providing their location or zip code
-general_chat     – everything else
-
-User message: {text}
-Label:"""
+_ROUTING_INTENT_PROMPT = ""
 
 
 def _llm_classify_routing_intent(
     text: str,
     turns: Optional[list[tuple[str, str]]] = None,
+    pending_action: Optional[dict] = None,
+    return_none_payload: bool = False,
 ) -> Optional[dict[str, object]]:
     return service_llm_classify_routing_intent(
         text,
         turns,
+        pending_action=pending_action,
+        return_none_payload=return_none_payload,
         live_ollama_calls_allowed_fn=_live_ollama_calls_allowed,
         chat_model_fn=chat_model,
         ollama_base=OLLAMA_BASE,
         get_saved_location_text_fn=get_saved_location_text,
+        requests_post_fn=requests.post,
     )
 
 
@@ -1220,10 +1158,11 @@ REPLY_TEMPLATES: dict[str, str] = {
     "store_fact.explicit_store": "Learned: {fact_text}",
     "store_fact.prompted_store": "Learned: {fact_text}",
     "store_fact.correctional_store": "Learned correction: {fact_text}",
-    "store_fact.declarative_ack": "Noted.",
-    "weather_lookup.clarify": "What location should I use for the weather lookup?",
+    "store_fact.storage_unavailable": "Memory storage is not available for that fact.",
+    "store_fact.declarative_ack": "Memory storage requires an explicit store request.",
     "weather_lookup.current_location": "{tool_result}",
     "weather_lookup.explicit_location": "{tool_result}",
+    "weather_lookup.clarify": "What location should I use for the weather lookup?",
     "web_research_family.research_prompt": "{tool_result}",
     "web_research_family.deep_search": "{tool_result}",
     "name_origin.story_known": "{reply_text}",
@@ -1907,7 +1846,7 @@ def _weather_unavailable_message() -> str:
     return (
         "I can access websites, but I don't yet have a reliable structured weather source configured. "
         "I cannot honestly claim weather results from raw weather.com pages. "
-        "Add a source like 'policy allow api.weather.gov' and then use 'weather <location-or-lat,lon>'."
+        "Add a source like 'policy allow api.weather.gov' and then use 'weather in <location-or-lat,lon>'."
     )
 
 
@@ -2323,9 +2262,7 @@ def _make_retrieval_conversation_state(tool_name: str, query: str, tool_output: 
 
 def _load_generated_queue_payload(limit: int = 12) -> dict:
     try:
-        import nova_http
-
-        payload = nova_http._generated_work_queue(int(limit or 12))
+        payload = service_generated_work_queue_payload(int(limit or 12), base_dir=BASE_DIR, runtime_dir=RUNTIME_DIR)
         return payload if isinstance(payload, dict) else {}
     except Exception:
         return {}
@@ -2435,10 +2372,6 @@ def _retrieval_status_reply(text: str) -> str:
     return service_retrieval_status_reply(text)
 
 
-def _is_web_research_override_request(text: str) -> bool:
-    return service_is_web_research_override_request(text, normalize_turn_text_fn=_normalize_turn_text)
-
-
 def set_location_coords(value: str) -> str:
     parsed = _parse_lat_lon(value)
     if not parsed:
@@ -2506,7 +2439,7 @@ def allowed_root() -> Path:
 
 def chat_model() -> str:
     m = policy_models()
-    return m.get("chat", "llama3.1:8b")
+    return m.get("chat", "llama3.2:3b")
 
 
 def whisper_size() -> str:
@@ -2684,9 +2617,11 @@ def memory_health_payload(update_snapshot: bool = True) -> dict:
         memory_db_path=db_path,
         learned_facts_file=LEARNED_FACTS_FILE,
         identity_file=IDENTITY_FILE,
+        bootstrap_origin_file=MEMORY_BOOTSTRAP_ORIGIN_FILE,
         memory_events_log=MEMORY_EVENTS_LOG,
         snapshot_file=RUNTIME_DIR / "memory_health_snapshot.json",
         update_snapshot=update_snapshot,
+        memory_enabled=mem_enabled(),
     )
 
 
@@ -3156,26 +3091,73 @@ def build_fallback_context_details(query: str, turns: list[tuple[str, str]] | No
     learning_details = build_learning_context_details(query)
     learning_context = str(learning_details.get("context") or "")
     chat_context = _render_chat_context(session_turns)
-    session_fact_sheet = _build_session_fact_sheet(session_turns)
+    runtime_context = _runtime_self_context_for_chat()
 
     context_blocks: list[str] = []
     if learning_context:
         context_blocks.append(learning_context)
+    if runtime_context:
+        context_blocks.append(runtime_context)
     if chat_context:
         context_blocks.append("CURRENT CHAT CONTEXT:\n" + chat_context)
-    if session_fact_sheet:
-        context_blocks.append("SESSION FACT SHEET:\n" + session_fact_sheet)
 
     return {
         "context": "\n\n".join(context_blocks).strip()[:6000],
         "learning_context": learning_context,
+        "runtime_context": runtime_context,
         "chat_context": chat_context,
-        "session_fact_sheet": session_fact_sheet,
+        "session_fact_sheet": "",
         "memory_used": bool(learning_details.get("memory_used")),
         "knowledge_used": bool(learning_details.get("knowledge_used")),
         "memory_chars": int(learning_details.get("memory_chars") or 0),
         "knowledge_chars": int(learning_details.get("knowledge_chars") or 0),
     }
+
+
+def _runtime_self_context_for_chat(max_chars: int = 1800) -> str:
+    """Ambient self context for model chat; this does not own or route the turn."""
+    try:
+        assistant_name = str(get_learned_fact("assistant_name", "Nova") or "Nova").strip() or "Nova"
+        identity_line = describe_runtime_identity(assistant_name)
+    except Exception:
+        identity_line = "I am Nova, a local AI runtime."
+
+    lines = [
+        "NOVA RUNTIME CONTEXT (ambient; use only if relevant to the user's turn):",
+        identity_line,
+    ]
+    try:
+        work_trees_payload = _self_report_work_trees_payload(limit=16)
+        status_payload = _self_report_local_status_payload(work_trees_payload)
+        report_payload = GROUNDED_SELF_REPORT_SERVICE.build_payload(status_payload, work_trees_payload)
+        runtime = report_payload.get("runtime") if isinstance(report_payload.get("runtime"), dict) else {}
+        release = report_payload.get("release") if isinstance(report_payload.get("release"), dict) else {}
+        memory = report_payload.get("memory") if isinstance(report_payload.get("memory"), dict) else {}
+        ollama = report_payload.get("ollama") if isinstance(report_payload.get("ollama"), dict) else {}
+        attention = GROUNDED_SELF_REPORT_SERVICE.build_operator_attention(report_payload)
+        lines.extend(
+            [
+                (
+                    "State: "
+                    f"work_tree={report_payload.get('work_tree_truth_status', 'unknown')}, "
+                    f"open_tasks={report_payload.get('work_tree_open_task_count', 'unknown')}, "
+                    f"runtime core={runtime.get('core', 'unknown')}, guard={runtime.get('guard', 'unknown')}, "
+                    f"webui={runtime.get('webui', 'unknown')}."
+                ),
+                (
+                    "Services: "
+                    f"ollama_chat_ready={ollama.get('chat_ready', 'unknown')}, "
+                    f"memory_enabled={memory.get('enabled', 'unknown')}, "
+                    f"release_readiness={release.get('readiness', 'unknown')}, "
+                    f"artifact_stale={release.get('latest_artifact_stale', 'unknown')}."
+                ),
+            ]
+        )
+        if isinstance(attention, dict) and bool(attention.get("active")):
+            lines.append(f"Current attention: {str(attention.get('message') or '').strip()}")
+    except Exception as exc:
+        lines.append(f"Live state summary unavailable: {str(exc)[:160]}")
+    return "\n".join(line for line in lines if str(line or "").strip())[:max_chars]
 
 
 def _build_session_fact_sheet(turns: list[tuple[str, str]], max_chars: int = 1200) -> str:
@@ -3324,7 +3306,7 @@ def _looks_like_continue_thread_turn(
         return True
     if _extract_retrieval_result_index(raw) is not None:
         return True
-    if _looks_like_affirmative_followup(raw) or _looks_like_shared_location_reference(raw):
+    if _looks_like_affirmative_followup(raw):
         return True
     return bool(assistant_turn) and _assistant_offered_weather_lookup(assistant_turn) and _looks_like_affirmative_followup(raw)
 
@@ -3334,9 +3316,6 @@ def _assistant_offered_weather_lookup(text: str) -> bool:
     if not normalized:
         return False
     return any(phrase in normalized for phrase in (
-        "what location should i use for the weather lookup",
-        "tell me what location to use",
-        "ask for our current location",
         "check the weather for you",
     ))
 
@@ -3368,11 +3347,7 @@ def _looks_like_mixed_info_request_turn(text: str) -> bool:
 
 def _mixed_info_request_clarify_reply(text: str) -> str:
     del text
-    return (
-        "I think you're both giving context and asking me to do something. "
-        "Do you want me to treat the first part as context and answer the request, "
-        "or focus on just one part first?"
-    )
+    return ""
 
 
 def _extract_urls(text: str) -> list[str]:
@@ -4196,19 +4171,39 @@ def tcp_listening(host="127.0.0.1", port=11434, timeout=1.0) -> bool:
 def _live_ollama_calls_allowed() -> bool:
     argv_text = " ".join(str(arg or "") for arg in list(sys.argv or []))
     test_runner = str(os.environ.get("NOVA_TEST_RUNNER") or "").strip().lower() in {"1", "true", "yes", "on"}
-    if "unittest" not in argv_text.lower() and not test_runner:
+    argv_low = argv_text.lower()
+    pytest_active = "pytest" in argv_low or bool(os.environ.get("PYTEST_CURRENT_TEST"))
+    if "unittest" not in argv_low and not pytest_active and not test_runner:
         return True
     return str(os.environ.get("NOVA_ALLOW_LIVE_OLLAMA_TESTS") or "").strip().lower() in {"1", "true", "yes", "on"}
 
 
 def ollama_api_up(timeout=2.0) -> bool:
+    return bool(ollama_health_payload(timeout=timeout).get("ok"))
+
+
+def ollama_server_up(timeout=2.0) -> bool:
+    return bool(ollama_health_payload(timeout=timeout).get("server_ok"))
+
+
+def ollama_health_payload(timeout=2.0) -> dict:
     if not _live_ollama_calls_allowed():
-        return False
-    try:
-        r = requests.get(f"{OLLAMA_BASE}/api/tags", timeout=timeout)
-        return r.status_code == 200
-    except Exception:
-        return False
+        return service_build_ollama_health_payload(
+            requests_get_fn=requests.get,
+            requests_post_fn=requests.post,
+            ollama_base=OLLAMA_BASE,
+            chat_model=chat_model(),
+            timeout=timeout,
+            live_calls_allowed=False,
+        )
+    return service_build_ollama_health_payload(
+        requests_get_fn=requests.get,
+        requests_post_fn=requests.post,
+        ollama_base=OLLAMA_BASE,
+        chat_model=chat_model(),
+        timeout=timeout,
+        live_calls_allowed=True,
+    )
 
 
 def start_ollama_serve_detached() -> bool:
@@ -4234,17 +4229,14 @@ def ensure_ollama_boot():
     if not _live_ollama_calls_allowed():
         return False
     if not tcp_listening():
-        warn("Ollama not listening on 11434. Starting ollama serve...")
-        start_ollama_serve_detached()
+        warn("Ollama not listening on 11434. Leaving startup to operator or explicit repair.")
+        return False
 
-    if tcp_listening() and not ollama_api_up():
-        warn("Ollama port open but API not responding. Restarting...")
-        kill_ollama()
-        time.sleep(1.2)
-        start_ollama_serve_detached()
+    if tcp_listening() and not ollama_server_up():
+        warn("Ollama port open but API not responding. Leaving process untouched for status/work-tree diagnosis.")
 
     for _ in range(OLLAMA_BOOT_RETRIES):
-        if ollama_api_up():
+        if ollama_server_up():
             ok("Ollama API up")
             return True
         time.sleep(1)
@@ -4255,17 +4247,16 @@ def ensure_ollama_boot():
 
 def ensure_ollama():
     if not _live_ollama_calls_allowed():
-        return
+        return False
     if not tcp_listening():
-        start_ollama_serve_detached()
-    if tcp_listening() and not ollama_api_up():
-        kill_ollama()
-        time.sleep(1.0)
-        start_ollama_serve_detached()
+        return False
+    if tcp_listening() and not ollama_server_up():
+        return False
     for _ in range(10):
-        if ollama_api_up():
-            return
+        if ollama_server_up():
+            return True
         time.sleep(0.5)
+    return False
 
 
 # =========================
@@ -5382,7 +5373,346 @@ def tool_nova_pulse():
     )
 
 
+def _latest_memory_health_branch() -> tuple[object | None, list[dict]]:
+    try:
+        import work_tree as work_tree_module
 
+        newest = None
+        for tree in work_tree_module.list_trees():
+            for branch in work_tree_module.list_tree_branches(tree.tree_id):
+                if str(getattr(branch, "source_type", "") or "").strip() != "memory_health":
+                    continue
+                if newest is None or getattr(branch, "updated_at", None) > getattr(newest, "updated_at", None):
+                    newest = branch
+        evidence = work_tree_module.list_branch_evidence(newest.branch_id, limit=20) if newest is not None else []
+        return newest, evidence
+    except Exception:
+        return None, []
+
+
+def _release_readiness_branch(branch_id: str = "") -> tuple[object | None, list[dict]]:
+    try:
+        import work_tree as work_tree_module
+
+        branch = None
+        target_id = str(branch_id or "").strip()
+        if target_id:
+            branch = work_tree_module.get_branch(target_id)
+        if branch is None:
+            newest = None
+            for tree in work_tree_module.list_trees():
+                for candidate in work_tree_module.list_tree_branches(tree.tree_id):
+                    if str(getattr(candidate, "source_type", "") or "").strip() != "release_status":
+                        continue
+                    if str(getattr(candidate, "work_class", "") or "").strip() != "release_readiness_gap":
+                        continue
+                    if newest is None or getattr(candidate, "updated_at", None) > getattr(newest, "updated_at", None):
+                        newest = candidate
+            branch = newest
+        evidence = work_tree_module.list_branch_evidence(branch.branch_id, limit=50) if branch is not None else []
+        return branch, evidence
+    except Exception:
+        return None, []
+
+
+def tool_memory_bootstrap_judgment():
+    branch, evidence_rows = _latest_memory_health_branch()
+    pulse = build_pulse_payload()
+    memory_health = pulse.get("memory_health") if isinstance(pulse.get("memory_health"), dict) else {}
+    branch_payload = dict(getattr(branch, "source_payload", {}) or {}) if branch is not None else {}
+    judgment = service_build_memory_bootstrap_judgment(
+        memory_enabled=mem_enabled(),
+        memory_health=memory_health,
+        identity_file=IDENTITY_FILE,
+        learned_facts_file=LEARNED_FACTS_FILE,
+        memory_events_log=MEMORY_EVENTS_LOG,
+        branch_payload=branch_payload,
+        evidence_rows=evidence_rows,
+    )
+    return service_render_memory_bootstrap_judgment(judgment)
+
+
+def tool_memory_bootstrap_confirm(
+    assistant_name: str = "",
+    developer_name: str = "",
+    developer_nickname: str = "",
+    confirmed_by: str = "operator",
+):
+    values = {
+        "assistant_name": str(assistant_name or "").strip(),
+        "developer_name": str(developer_name or "").strip(),
+        "developer_nickname": str(developer_nickname or "").strip(),
+    }
+    missing = [key for key, value in values.items() if not value]
+    if missing:
+        return (
+            "Memory Bootstrap Confirm\n"
+            "- status: blocked\n"
+            f"- reason: missing confirmation values: {', '.join(missing)}\n"
+            "- required: assistant_name, developer_name, developer_nickname"
+        )
+    contract = service_confirm_origin_contract(
+        MEMORY_BOOTSTRAP_ORIGIN_FILE,
+        values,
+        confirmed_by=confirmed_by,
+        evidence="operator-confirmed memory bootstrap values",
+    )
+    status = str(contract.get("status") or "unknown")
+    authority = str(contract.get("authority") or "none")
+    pending = ", ".join(str(item) for item in list(contract.get("pending_slots") or [])) or "none"
+    _record_memory_event(
+        "bootstrap_origin_confirm",
+        "ok" if status == "ready" else "blocked",
+        reason="" if status == "ready" else "pending_slots",
+        result_count=len(contract.get("confirmed_slots") or []),
+        lane="memory_bootstrap",
+        mode=authority,
+    )
+    return "\n".join(
+        [
+            "Memory Bootstrap Confirm",
+            f"- status: {status}",
+            f"- authority: {authority}",
+            f"- pending_slots: {pending}",
+            f"- assistant_name: {values['assistant_name']}",
+            f"- developer_name: {values['developer_name']}",
+            f"- developer_nickname: {values['developer_nickname']}",
+        ]
+    )
+
+
+def tool_memory_identity_bootstrap():
+    origin_contract = service_load_origin_contract(MEMORY_BOOTSTRAP_ORIGIN_FILE)
+    result = service_apply_identity_bootstrap(
+        origin_contract=origin_contract,
+        identity_file=IDENTITY_FILE,
+        learned_facts_file=LEARNED_FACTS_FILE,
+        load_identity_profile_fn=load_identity_profile,
+        save_identity_profile_fn=save_identity_profile,
+        load_learned_facts_fn=load_learned_facts,
+        save_learned_facts_fn=save_learned_facts,
+        mem_add_fn=mem_add,
+        record_memory_event_fn=_record_memory_event,
+    )
+    return service_render_identity_bootstrap_result(result)
+
+
+def tool_subconscious_review_judgment(branch_id: str = ""):
+    import work_tree as work_tree_module
+
+    judgment = service_build_subconscious_review_judgment(
+        branch_id=branch_id,
+        work_tree_module=work_tree_module,
+        probe_turn_routes_fn=_probe_turn_routes,
+        session_factory=ConversationSession,
+        evaluate_supervisor_rules_fn=lambda user_text, **kwargs: TURN_SUPERVISOR.evaluate_rules(user_text, **kwargs),
+        supervisor_has_route_fn=_supervisor_result_has_route,
+        fulfillment_viability_fn=_fulfillment_route_viability,
+        supervisor_process_turn_fn=lambda **kwargs: TURN_SUPERVISOR.process_turn(**kwargs),
+    )
+    return service_render_subconscious_review_judgment(judgment)
+
+
+def tool_release_promotion_judgment(branch_id: str = ""):
+    branch, evidence_rows = _release_readiness_branch(branch_id)
+    release_ledger_path = RUNTIME_DIR / "exports" / "release_packages" / "release_ledger.jsonl"
+    release_status = RELEASE_STATUS_SERVICE.status_payload(release_ledger_path, 8, source_root=BASE_DIR)
+    branch_payload = dict(getattr(branch, "source_payload", {}) or {}) if branch is not None else {}
+    judgment = service_build_release_promotion_judgment(
+        release_status=release_status,
+        branch_payload=branch_payload,
+        evidence_rows=evidence_rows,
+        branch_id=str(getattr(branch, "branch_id", "") or branch_id or ""),
+    )
+    return service_render_release_promotion_judgment(judgment)
+
+
+def tool_release_validation_run(branch_id: str = ""):
+    branch, _evidence_rows = _release_readiness_branch(branch_id)
+    release_ledger_path = RUNTIME_DIR / "exports" / "release_packages" / "release_ledger.jsonl"
+    release_status = RELEASE_STATUS_SERVICE.status_payload(release_ledger_path, 8, source_root=BASE_DIR)
+    branch_payload = dict(getattr(branch, "source_payload", {}) or {}) if branch is not None else {}
+    artifact_path = str(release_status.get("latest_artifact_path") or branch_payload.get("latest_artifact_path") or "")
+    record_path = str(release_status.get("latest_validation_seed_path") or branch_payload.get("latest_validation_seed_path") or "")
+    include_runtime = str(branch_payload.get("latest_validation_record_ollama_expected") or "").strip().lower() in {"yes", "true", "required"}
+    report = service_run_release_validation(
+        repo_root=BASE_DIR,
+        artifact_path=artifact_path,
+        record_path=record_path,
+        artifact_version=str(release_status.get("latest_version") or branch_payload.get("latest_version") or ""),
+        release_channel=str(release_status.get("latest_channel") or branch_payload.get("latest_channel") or "rc"),
+        release_label=str(release_status.get("latest_label") or branch_payload.get("latest_label") or ""),
+        version_source=str(branch_payload.get("version_source") or ""),
+        ledger_path=str(release_status.get("ledger_path") or branch_payload.get("ledger_path") or release_ledger_path),
+        include_runtime=include_runtime,
+    )
+    return service_render_release_validation_report(report)
+
+
+def tool_release_record_validation_outcome(branch_id: str = ""):
+    branch, _evidence_rows = _release_readiness_branch(branch_id)
+    release_ledger_path = RUNTIME_DIR / "exports" / "release_packages" / "release_ledger.jsonl"
+    release_status = RELEASE_STATUS_SERVICE.status_payload(release_ledger_path, 8, source_root=BASE_DIR)
+    branch_payload = dict(getattr(branch, "source_payload", {}) or {}) if branch is not None else {}
+    record_path = str(release_status.get("latest_validation_seed_path") or branch_payload.get("latest_validation_seed_path") or "")
+    report = service_record_release_validation_outcome(
+        repo_root=BASE_DIR,
+        record_path=record_path,
+        release_status=release_status,
+    )
+    return service_render_release_outcome_recording(report)
+
+
+
+
+
+def _self_report_control_status_payload() -> dict:
+    url = str(os.environ.get("NOVA_SELF_REPORT_STATUS_URL") or "http://127.0.0.1:8080/api/control/status").strip()
+    if not url:
+        return {}
+    try:
+        timeout = float(os.environ.get("NOVA_SELF_REPORT_STATUS_TIMEOUT_SEC") or 5.0)
+    except Exception:
+        timeout = 5.0
+    try:
+        response = requests.get(url, timeout=max(0.2, timeout))
+        if int(getattr(response, "status_code", 0) or 0) != 200:
+            return {}
+        payload = response.json()
+        return dict(payload or {}) if isinstance(payload, dict) else {}
+    except Exception:
+        return {}
+
+
+def _self_report_work_trees_payload(limit: int = 32) -> dict:
+    try:
+        import work_tree as work_tree_module
+
+        return CONTROL_WORK_TREES_SERVICE.payload(
+            list_visual_trees_fn=work_tree_module.list_visual_trees,
+            limit=limit,
+        )
+    except Exception as exc:
+        return {
+            "ok": False,
+            "error": f"work_tree_payload_failed:{exc}",
+            "counts": {"total": 0, "active": 0, "branches": 0, "open_tasks": 0},
+            "trees": [],
+        }
+
+
+def _self_report_work_tree_truth(work_trees_payload: dict) -> dict:
+    work_trees = dict(work_trees_payload or {}) if isinstance(work_trees_payload, dict) else {}
+    counts = work_trees.get("counts") if isinstance(work_trees.get("counts"), dict) else {}
+    open_task_count = int(counts.get("open_tasks", 0) or 0)
+    pending_count = int(counts.get("pending", 0) or 0)
+    working_count = int(counts.get("working", 0) or 0)
+    blocked_count = int(counts.get("blocked", 0) or 0)
+    operator_hold_count = 0
+    self_repair_blocked_count = 0
+    self_repair_observing_count = 0
+    observing_count = 0
+    for tree_payload in list(work_trees.get("trees") or []):
+        if not isinstance(tree_payload, dict):
+            continue
+        for node in list(tree_payload.get("nodes") or []):
+            if not isinstance(node, dict):
+                continue
+            status_text = str(node.get("status") or "").strip().lower()
+            resolution_text = str(node.get("resolution_state") or "").strip().lower()
+            source_type = str(node.get("source_type") or "").strip().lower()
+            work_class = str(node.get("work_class") or "").strip().lower()
+            actionability = str(node.get("actionability") or "").strip().lower()
+            source_payload = node.get("source_payload") if isinstance(node.get("source_payload"), dict) else {}
+            memory_origin = (
+                source_payload.get("memory_bootstrap_origin")
+                if isinstance(source_payload.get("memory_bootstrap_origin"), dict)
+                else {}
+            )
+            memory_bootstrap = (
+                source_payload.get("memory_bootstrap")
+                if isinstance(source_payload.get("memory_bootstrap"), dict)
+                else {}
+            )
+            memory_operator_hold = bool(
+                status_text == "blocked"
+                and source_type == "memory_health"
+                and work_class == "governance_pressure"
+                and str(memory_origin.get("status") or memory_bootstrap.get("origin_status") or "").strip().lower()
+                == "pending_operator_confirmation"
+            )
+            operator_hold = memory_operator_hold
+            if operator_hold:
+                operator_hold_count += 1
+            elif status_text == "blocked":
+                self_repair_blocked_count += 1
+            if resolution_text == "observing" and status_text not in {"complete", "archived"}:
+                observing_count += 1
+                if not operator_hold:
+                    self_repair_observing_count += 1
+    if self_repair_blocked_count > 0 or self_repair_observing_count > 0:
+        status = "blocked_observing"
+    elif operator_hold_count > 0:
+        status = "operator_hold"
+    elif open_task_count > 0 or pending_count > 0 or working_count > 0:
+        status = "open"
+    else:
+        status = "clear"
+    return {
+        "status": status,
+        "open_task_count": open_task_count,
+        "blocked_branch_count": blocked_count,
+        "operator_hold_branch_count": operator_hold_count,
+        "self_repair_blocked_branch_count": self_repair_blocked_count,
+        "self_repair_observing_branch_count": self_repair_observing_count,
+        "observing_branch_count": observing_count,
+    }
+
+
+def _self_report_local_status_payload(work_trees_payload: dict) -> dict:
+    pulse_payload = _apply_latest_regression_validation(build_pulse_payload())
+    release_ledger_path = RUNTIME_DIR / "exports" / "release_packages" / "release_ledger.jsonl"
+    release_status = RELEASE_STATUS_SERVICE.status_payload(release_ledger_path, 8, source_root=BASE_DIR)
+    try:
+        ollama_health = ollama_health_payload(timeout=1.5)
+    except Exception as exc:
+        ollama_health = {"ok": False, "status": "error", "info": str(exc)}
+    memory_health = pulse_payload.get("memory_health") if isinstance(pulse_payload.get("memory_health"), dict) else {}
+    memory_status = str(
+        pulse_payload.get("memory_health_status")
+        or memory_health.get("status")
+        or ("ok" if pulse_payload.get("memory_ok") else "")
+    )
+    alerts: list[str] = []
+    if not bool(ollama_health.get("ok")):
+        alerts.append(f"ollama_not_ready:{ollama_health.get('status') or 'unknown'}")
+    if memory_status and memory_status not in {"ok", "ready", "healthy"}:
+        alerts.append(f"memory_health:{memory_status}")
+    last_regression_status = str(pulse_payload.get("last_regression_status") or "").strip().upper()
+    if last_regression_status.startswith("FAIL") and not bool(pulse_payload.get("last_regression_stale")):
+        alerts.append(f"regression:{last_regression_status}")
+    work_tree_truth = _self_report_work_tree_truth(work_trees_payload)
+    return {
+        "health_score": None,
+        "alerts": alerts,
+        "work_tree_truth_status": work_tree_truth.get("status"),
+        "work_tree_open_task_count": work_tree_truth.get("open_task_count"),
+        "release_status": release_status,
+        "ollama_chat_ready": bool(ollama_health.get("ok")),
+        "ollama_health": ollama_health,
+        "memory_health": memory_health,
+        "memory_health_status": memory_status,
+        "memory_enabled": bool(mem_enabled()),
+        "core": {"status": "running"},
+        "guard": {"status": "unknown"},
+        "webui": {"status": "unknown"},
+    }
+
+
+def runtime_identity_reply(text: str = "") -> str:
+    del text
+    assistant_name = str(get_learned_fact("assistant_name", "Nova") or "Nova").strip() or "Nova"
+    return describe_runtime_identity(assistant_name)
 
 
 def tool_nova_self_status():
@@ -5502,6 +5832,50 @@ def tool_core_thinning(feed: str = ""):
     return service_render_core_thinning_brief(brief, feed_result=feed_result)
 
 
+def tool_release_rebuild_verify(label: str = "work-tree-rebuild"):
+    from services.release_clean import run_release_clean
+
+    safe_label = str(label or "work-tree-rebuild").strip() or "work-tree-rebuild"
+    report = run_release_clean(
+        root=BASE_DIR,
+        label=safe_label,
+        python_executable=str(PYTHON),
+        run_regression=False,
+        promote=False,
+        timeout_sec=1800,
+    )
+    readiness = report.get("readiness") if isinstance(report.get("readiness"), dict) else {}
+    steps = [
+        {
+            "name": str(step.get("name") or ""),
+            "returncode": int(step.get("returncode", 1) or 0),
+            "duration_sec": step.get("duration_sec"),
+        }
+        for step in list(report.get("steps") or [])
+        if isinstance(step, dict)
+    ]
+    required = {"repo_hygiene", "smoke_runtime", "package_build", "package_verify"}
+    successful = {
+        str(step.get("name") or "")
+        for step in steps
+        if int(step.get("returncode", 1) or 0) == 0
+    }
+    rebuild_verified = bool(report.get("artifact")) and required.issubset(successful)
+    readiness_state = str(readiness.get("latest_readiness_state") or readiness.get("state") or "")
+    failure_reason = "" if rebuild_verified else str(report.get("failure_reason") or "release_rebuild_verify_failed")
+    return {
+        "ok": rebuild_verified,
+        "artifact": str(report.get("artifact") or ""),
+        "failure_reason": failure_reason,
+        "readiness_state": readiness_state,
+        "ready_to_ship": bool(readiness.get("latest_ready_to_ship", False)),
+        "report_path": str(report.get("report_path") or ""),
+        "promoted": False,
+        "run_regression": False,
+        "steps": steps,
+    }
+
+
 def _read_update_now_pending() -> dict:
     return service_read_update_now_pending(UPDATE_NOW_PENDING_FILE, load_json_file_fn=_load_json_file)
 
@@ -5586,7 +5960,7 @@ def make_pending_weather_action() -> dict:
         "kind": "weather_lookup",
         "status": "awaiting_location",
         "saved_location_available": bool(saved_location),
-        "preferred_tool": "weather_current_location" if saved_location else "weather_location",
+        "preferred_tool": "weather_location",
     }
 
 
@@ -5673,6 +6047,20 @@ def _seed_urls_for_domain(domain: str, query_tokens: list[str], max_seed: int = 
         expand_research_terms_fn=_expand_research_terms,
     )
 
+
+
+def web_search(query: str, save_dir: Path = WEB_CACHE_DIR, max_results: int = 5) -> dict:
+    return service_web_search(query, save_dir, requests_post_fn=requests.post, max_results=max_results)
+
+
+def tool_search(query: str):
+    return service_tool_search(
+        query,
+        explain_missing_fn=explain_missing,
+        policy_tools_enabled_fn=policy_tools_enabled,
+        web_search_fn=web_search,
+        web_cache_dir=WEB_CACHE_DIR,
+    )
 
 
 def tool_web_fetch(url: str):

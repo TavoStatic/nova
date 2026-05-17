@@ -42,16 +42,22 @@ def _default_command_runner(
             "command": [str(part) for part in command],
             "returncode": completed.returncode,
             "stdout": _tail(completed.stdout or ""),
+            "_stdout_raw": completed.stdout or "",
             "stderr": _tail(completed.stderr or ""),
+            "_stderr_raw": completed.stderr or "",
             "duration_sec": round(time.monotonic() - started, 3),
         }
     except subprocess.TimeoutExpired as exc:
+        stdout = exc.stdout or ""
+        stderr = (exc.stderr or "") + f"\nTimed out after {timeout_sec} seconds."
         return {
             "name": name,
             "command": [str(part) for part in command],
             "returncode": 124,
-            "stdout": _tail(exc.stdout or ""),
-            "stderr": _tail((exc.stderr or "") + f"\nTimed out after {timeout_sec} seconds."),
+            "stdout": _tail(stdout),
+            "_stdout_raw": stdout,
+            "stderr": _tail(stderr),
+            "_stderr_raw": stderr,
             "duration_sec": round(time.monotonic() - started, 3),
         }
 
@@ -72,6 +78,19 @@ def _latest_release_zip(package_dir: Path) -> Path | None:
 def _artifact_from_build_stdout(stdout: str, repo_root: Path) -> Path | None:
     for line in stdout.splitlines():
         match = re.search(r"Zip artifact\s*:\s*(.+\.zip)\s*$", line)
+        if not match:
+            continue
+        candidate = Path(match.group(1).strip())
+        if not candidate.is_absolute():
+            candidate = repo_root / candidate
+        if candidate.exists():
+            return candidate
+    return None
+
+
+def _validation_record_from_build_stdout(stdout: str, repo_root: Path) -> Path | None:
+    for line in stdout.splitlines():
+        match = re.search(r"Validation seed\s*:\s*(.+\.md)\s*$", line)
         if not match:
             continue
         candidate = Path(match.group(1).strip())
@@ -121,6 +140,14 @@ def _write_report(report: dict[str, Any], report_path: Path) -> None:
     report_path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
+def _public_step(step: dict[str, Any]) -> dict[str, Any]:
+    return {
+        str(key): value
+        for key, value in dict(step or {}).items()
+        if not str(key).startswith("_")
+    }
+
+
 def run_release_clean(
     *,
     root: Path | None = None,
@@ -140,6 +167,7 @@ def run_release_clean(
     steps: list[dict[str, Any]] = []
     readiness: dict[str, Any] = {}
     artifact: Path | None = None
+    validation_record: Path | None = None
 
     commands: list[tuple[str, list[str], int]] = [
         ("repo_hygiene", [py, str(repo_root / "scripts" / "repo_hygiene_check.py")], 300),
@@ -178,6 +206,7 @@ def run_release_clean(
     if ok:
         build_step = next((step for step in reversed(steps) if step.get("name") == "package_build"), {})
         artifact = _artifact_from_build_stdout(str(build_step.get("stdout", "")), repo_root)
+        validation_record = _validation_record_from_build_stdout(str(build_step.get("stdout", "")), repo_root)
         if artifact is None:
             artifact = _latest_release_zip(package_dir)
         if artifact is None:
@@ -206,10 +235,35 @@ def run_release_clean(
             failure_reason = "package_verify_failed"
 
     if ok and promote and artifact is not None:
+        if validation_record is None:
+            ok = False
+            failure_reason = "validation_record_missing"
+
+    if ok and promote and artifact is not None and validation_record is not None:
+        validate_step = _run_step(
+            steps,
+            runner,
+            "package_validate",
+            [
+                py,
+                str(repo_root / "scripts" / "validate_release_package.py"),
+                "--artifact",
+                str(artifact),
+                "--record",
+                str(validation_record),
+            ],
+            repo_root,
+            timeout_sec,
+        )
+        if not _step_ok(validate_step):
+            ok = False
+            failure_reason = "package_validate_failed"
+
+    if ok and promote and artifact is not None and validation_record is not None:
         promote_step = _run_step(
             steps,
             runner,
-            "package_promote",
+            "package_record_outcome",
             [
                 "powershell.exe",
                 "-NoProfile",
@@ -217,21 +271,15 @@ def run_release_clean(
                 "Bypass",
                 "-File",
                 str(repo_root / "scripts" / "promote_release_package.ps1"),
-                "-Artifact",
-                str(artifact),
-                "-Result",
-                "pass-with-notes",
-                "-Note",
-                "local release-clean validation passed; independent fresh-machine validation pending",
-                "-Owner",
-                "release-clean",
+                "-Record",
+                str(validation_record),
             ],
             repo_root,
             300,
         )
         if not _step_ok(promote_step):
             ok = False
-            failure_reason = "package_promote_failed"
+            failure_reason = "package_record_outcome_failed"
 
     if ok:
         readiness_step = _run_step(
@@ -251,7 +299,7 @@ def run_release_clean(
             300,
         )
         if _step_ok(readiness_step):
-            readiness = _parse_readiness(str(readiness_step.get("stdout", "")))
+            readiness = _parse_readiness(str(readiness_step.get("_stdout_raw") or readiness_step.get("stdout", "")))
         else:
             ok = False
             failure_reason = "package_readiness_failed"
@@ -265,9 +313,10 @@ def run_release_clean(
         "ok": ok,
         "label": label,
         "artifact": str(artifact) if artifact is not None else None,
+        "validation_record": str(validation_record) if validation_record is not None else None,
         "failure_reason": failure_reason,
         "readiness": readiness,
-        "steps": steps,
+        "steps": [_public_step(step) for step in steps],
         "report_path": str(report_path),
         "created_at_epoch": time.time(),
     }

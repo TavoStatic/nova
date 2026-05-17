@@ -18,7 +18,7 @@ def looks_like_command_route(low: str) -> bool:
         return True
     if low.startswith("remember:"):
         return True
-    if low in {"what can you do", "capabilities", "show capabilities"}:
+    if low in {"capabilities", "show capabilities"}:
         return True
     if low in {"mem stats", "memory stats"} or low.startswith("mem audit ") or low.startswith("memory audit "):
         return True
@@ -34,6 +34,6 @@ def looks_like_command_route(low: str) -> bool:
         return True
     if low in {"behavior stats", "behavior metrics", "behavior"}:
         return True
-    if low in {"learning state", "learning status", "self correction status", "what are you learning"}:
+    if low in {"learning state", "learning status", "self correction status"}:
         return True
     return False

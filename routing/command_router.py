@@ -22,20 +22,7 @@ def classify_direct_tool_route(turn: TurnUnderstanding, *, looks_like_find_comma
     if low in {"update now cancel", "cancel update now"}:
         return RouteDecision(kind="direct_tool", tool="update_now_cancel")
 
-    if low in {"queue status", "show queue status", "work queue", "generated queue"}:
-        return RouteDecision(kind="direct_tool", tool="queue_status")
-    if any(
-        phrase in low
-        for phrase in (
-            "what should you work on next",
-            "what should we work on next",
-            "what should i work on next",
-            "what is next in the queue",
-            "what's next in the queue",
-            "what is the next item in the queue",
-            "what's the next item in the queue",
-        )
-    ):
+    if low in {"queue status", "show queue status", "check queue status", "work queue", "generated queue"}:
         return RouteDecision(kind="direct_tool", tool="queue_status")
 
     if low in {
@@ -87,53 +74,32 @@ def classify_direct_tool_route(turn: TurnUnderstanding, *, looks_like_find_comma
     if low in {"weather current location", "weather current"}:
         return RouteDecision(kind="direct_tool", tool="weather_current_location")
 
-    if ("use your" in low or low.startswith("use ")) and turn.mentions_location:
-        return RouteDecision(kind="clarify", message="What do you want me to use my location for?")
-
-    if turn.mentions_shared_location and (turn.mentions_weather or any(p in low for p in ("rain", "raining", "forecast", "temperature"))):
-        return RouteDecision(kind="direct_tool", tool="weather_current_location")
-
-    if low in {"weather", "check weather"}:
-        return RouteDecision(kind="clarify", message="What location should I use for the weather lookup?")
+    weather_location_prefixes = (
+        ("weather for ", len("weather for ")),
+        ("weather in ", len("weather in ")),
+        ("weather at ", len("weather at ")),
+        ("check weather for ", len("check weather for ")),
+        ("check weather in ", len("check weather in ")),
+        ("check weather at ", len("check weather at ")),
+    )
+    for prefix, prefix_len in weather_location_prefixes:
+        if low.startswith(prefix):
+            value = t[prefix_len:].strip()
+            return RouteDecision(kind="direct_tool", tool="weather_location", args=(value,))
 
     if low.startswith("weather ") or low.startswith("check weather "):
-        value = t[len("check weather "):].strip() if low.startswith("check weather ") else t[len("weather "):].strip()
-        return RouteDecision(kind="direct_tool", tool="weather_location", args=(value,))
+        return RouteDecision(kind="none")
 
-    if turn.mentions_weather:
-        if ("your" in low and turn.mentions_location) or turn.mentions_shared_location or "there" in low or "that location" in low:
-            return RouteDecision(kind="direct_tool", tool="weather_current_location")
-        if (
-            "?" in low
-            or any(
-                p in low
-                for p in [
-                    "give me",
-                    "check",
-                    "show",
-                    "tell me",
-                    "what is",
-                    "what's",
-                    "today",
-                    "now",
-                    "current",
-                    "forecast",
-                    "temperature",
-                    "outside",
-                    "notice",
-                    "changes in the weather",
-                ]
-            )
-        ):
-            return RouteDecision(kind="clarify", message="What location should I use for the weather lookup?")
+    if low in {"weather", "check weather"}:
+        return RouteDecision(kind="none")
 
-    if any(x in low for x in ("nmap", "scan my", "scan the")):
-        return RouteDecision(kind="clarify", message="I can't run network scans. What specific check would you like me to help with?")
-
-    if turn.url and any(x in low for x in ("gather", "summarize", "collect")):
+    if low.startswith("web gather ") and turn.url:
         return RouteDecision(kind="direct_tool", tool="web_gather", args=(turn.url,))
 
-    if turn.url:
+    if low.startswith("web fetch ") and turn.url:
+        return RouteDecision(kind="direct_tool", tool="web_fetch", args=(turn.url,))
+
+    if low.startswith("web ") and turn.url:
         return RouteDecision(kind="direct_tool", tool="web_fetch", args=(turn.url,))
 
     if low.startswith("wikipedia ") or low.startswith("wiki "):
@@ -151,12 +117,6 @@ def classify_direct_tool_route(turn: TurnUnderstanding, *, looks_like_find_comma
     if low.startswith("web search "):
         query = t[11:].strip()
         return RouteDecision(kind="direct_tool", tool="web_search", args=(query,))
-    search_web_match = re.search(r"\bsearch\s+the\s+web(?:\s+for)?\s+(.+)", t, flags=re.I)
-    if search_web_match:
-        query = str(search_web_match.group(1) or "").strip(" .!?")
-        if query:
-            return RouteDecision(kind="direct_tool", tool="web_search", args=(query,))
-
     research_intent = low.startswith("web research ")
     if research_intent:
         query = t[13:].strip() if low.startswith("web research ") else t
@@ -169,8 +129,5 @@ def classify_direct_tool_route(turn: TurnUnderstanding, *, looks_like_find_comma
 
     if "patch rollback" in low or "rollback" in low:
         return RouteDecision(kind="direct_tool", tool="patch_rollback")
-
-    if any(x in low for x in ("fix my code", "debug", "bug in", "refactor")):
-        return RouteDecision(kind="respond", message="Paste the failing output or file path and I'll look.")
 
     return RouteDecision(kind="none")

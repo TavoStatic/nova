@@ -4,17 +4,17 @@ from services import nova_reply_guards
 
 
 class TestNovaReplyGuards(unittest.TestCase):
-    def test_self_correct_reply_realigns_capability_answers(self):
+    def test_self_correct_reply_does_not_rewrite_content_claims(self):
         corrected, changed, reason = nova_reply_guards.self_correct_reply(
             "what are your abilities?",
-            "I can do anything.",
+            "I can autonomously enhance myself and self-sustain.",
             is_capability_query_fn=lambda text: "abilities" in text,
             describe_capabilities_fn=lambda: "Deterministic capability summary.",
         )
 
-        self.assertTrue(changed)
-        self.assertEqual(reason, "capability_alignment")
-        self.assertEqual(corrected, "Deterministic capability summary.")
+        self.assertFalse(changed)
+        self.assertEqual(reason, "")
+        self.assertEqual(corrected, "I can autonomously enhance myself and self-sustain.")
 
     def test_apply_claim_gate_removes_unsupported_risky_claims(self):
         gated, changed, reason = nova_reply_guards.apply_claim_gate(

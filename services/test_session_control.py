@@ -234,71 +234,17 @@ class TestSessionControlService:
     def generated_work_queue_status_rank(status: str) -> int:
         normalized = str(status or "never_run").strip().lower() or "never_run"
         return {
-            "drift": 0,
-            "warning": 1,
-            "never_run": 2,
-            "green": 3,
+            "runtime_failure": 0,
+            "drift": 1,
+            "warning": 2,
+            "never_run": 3,
+            "green": 4,
         }.get(normalized, 4)
 
     @staticmethod
-    def generated_definition_lifecycle(
-        *,
-        latest_status: str,
-        already_reviewed_current: bool,
-        has_training_priorities: bool,
-    ) -> dict:
-        status = str(latest_status or "never_run").strip().lower() or "never_run"
-        reviewed = bool(already_reviewed_current)
-        if status == "green":
-            return {
-                "lifecycle_state": "stable_contract",
-                "ecology_role": "contract",
-                "growth_action": "watch_for_regression",
-                "growth_ready": False,
-                "lifecycle_reason": "latest run is green; keep as a contract instead of treating it as growth work",
-            }
-        if status == "drift" and reviewed:
-            return {
-                "lifecycle_state": "reviewed_drift",
-                "ecology_role": "historical",
-                "growth_action": "wait_for_new_fingerprint",
-                "growth_ready": False,
-                "lifecycle_reason": "current definition fingerprint was already reviewed",
-            }
-        if status == "drift":
-            return {
-                "lifecycle_state": "drift_candidate",
-                "ecology_role": "growth_candidate",
-                "growth_action": "repair_or_promote",
-                "growth_ready": True,
-                "lifecycle_reason": "drift needs code, route, or test evolution",
-            }
-        if status == "warning":
-            return {
-                "lifecycle_state": "probe_followup",
-                "ecology_role": "growth_candidate",
-                "growth_action": "inspect_probe_signal",
-                "growth_ready": True,
-                "lifecycle_reason": "flagged probe needs review before it becomes contract pressure",
-            }
-        if status == "never_run":
-            return {
-                "lifecycle_state": "seed",
-                "ecology_role": "growth_candidate" if has_training_priorities else "seed",
-                "growth_action": "run_first_observation",
-                "growth_ready": True,
-                "lifecycle_reason": "generated definition has not produced evidence yet",
-            }
-        return {
-            "lifecycle_state": "unknown",
-            "ecology_role": "growth_candidate",
-            "growth_action": "inspect_unknown_status",
-            "growth_ready": True,
-            "lifecycle_reason": f"unrecognized generated status: {status}",
-        }
-
-    @staticmethod
-    def report_status_label(diff_count: int, flagged_probe_count: int) -> str:
+    def report_status_label(diff_count: int, flagged_probe_count: int, runtime_failure_count: int = 0) -> str:
+        if runtime_failure_count > 0:
+            return "runtime_failure"
         if diff_count > 0:
             return "drift"
         if flagged_probe_count > 0:
@@ -352,6 +298,12 @@ class TestSessionControlService:
             flagged_probe_count = len(cli_flagged) + len(http_flagged)
             if not flagged_probe_count:
                 flagged_probe_count = len(left_flagged) + len(right_flagged)
+            runtime_failures = comparison.get("runtime_failures") if isinstance(comparison.get("runtime_failures"), list) else []
+            left_runtime_failures = comparison.get("left_runtime_failures") if isinstance(comparison.get("left_runtime_failures"), list) else []
+            right_runtime_failures = comparison.get("right_runtime_failures") if isinstance(comparison.get("right_runtime_failures"), list) else []
+            runtime_failure_count = int(comparison.get("runtime_failure_count", 0) or 0)
+            if runtime_failure_count <= 0:
+                runtime_failure_count = len(runtime_failures) or (len(left_runtime_failures) + len(right_runtime_failures))
             diff_count = len(diffs)
 
             out.append(
@@ -362,7 +314,7 @@ class TestSessionControlService:
                     "generated_at": str(report.get("generated_at") or ""),
                     "message_count": len(messages),
                     "report_path": str(report_path),
-                    "status": self.report_status_label(diff_count, flagged_probe_count),
+                    "status": self.report_status_label(diff_count, flagged_probe_count, runtime_failure_count),
                     "comparison": {
                         "left_mode": left_mode,
                         "right_mode": right_mode,
@@ -380,6 +332,10 @@ class TestSessionControlService:
                         "left_flagged_probes": left_flagged,
                         "right_flagged_probes": right_flagged,
                         "flagged_probe_count": flagged_probe_count,
+                        "runtime_failures": runtime_failures,
+                        "left_runtime_failures": left_runtime_failures,
+                        "right_runtime_failures": right_runtime_failures,
+                        "runtime_failure_count": runtime_failure_count,
                     },
                     "artifacts": {
                         "run_dir": str(run_dir),
@@ -515,11 +471,6 @@ class TestSessionControlService:
             else:
                 opportunity_reason = "unrun_generated_candidate"
             priorities = list(item.get("training_priorities") or []) if isinstance(item.get("training_priorities"), list) else []
-            lifecycle = self.generated_definition_lifecycle(
-                latest_status=latest_status,
-                already_reviewed_current=already_reviewed_current,
-                has_training_priorities=bool(priorities),
-            )
             highest_priority = None
             if priorities:
                 ordered = sorted(
@@ -527,7 +478,6 @@ class TestSessionControlService:
                     key=lambda priority: self.generated_definition_priority_tuple({"training_priorities": [priority], "file": file_name}),
                 )
                 highest_priority = ordered[0]
-            growth_ready = bool(lifecycle.get("growth_ready"))
             queue_item = {
                 "file": file_name,
                 "name": str(item.get("name") or file_name),
@@ -540,13 +490,8 @@ class TestSessionControlService:
                 "highest_priority": dict(highest_priority) if isinstance(highest_priority, dict) else {},
                 "latest_status": latest_status,
                 "opportunity_reason": opportunity_reason,
-                "lifecycle_state": str(lifecycle.get("lifecycle_state") or ""),
-                "ecology_role": str(lifecycle.get("ecology_role") or ""),
-                "growth_action": str(lifecycle.get("growth_action") or ""),
-                "growth_ready": growth_ready,
-                "lifecycle_reason": str(lifecycle.get("lifecycle_reason") or ""),
-                "open": growth_ready,
-                "actionable": growth_ready,
+                "open": latest_status != "green",
+                "actionable": latest_status != "green" and not (latest_status == "drift" and already_reviewed_current),
                 "reviewed_current_fingerprint": already_reviewed_current,
                 "latest_run_id": str(latest_report.get("run_id") or ""),
                 "latest_report_path": str(latest_report.get("report_path") or ""),
@@ -572,13 +517,6 @@ class TestSessionControlService:
         warning_count = sum(1 for item in items if str(item.get("latest_status") or "") == "warning")
         drift_count = sum(1 for item in items if str(item.get("latest_status") or "") == "drift")
         never_run_count = sum(1 for item in items if str(item.get("latest_status") or "never_run") == "never_run")
-        lifecycle_counts: dict[str, int] = {}
-        ecology_role_counts: dict[str, int] = {}
-        for item in items:
-            lifecycle_state = str(item.get("lifecycle_state") or "unknown").strip() or "unknown"
-            ecology_role = str(item.get("ecology_role") or "unknown").strip() or "unknown"
-            lifecycle_counts[lifecycle_state] = int(lifecycle_counts.get(lifecycle_state, 0) or 0) + 1
-            ecology_role_counts[ecology_role] = int(ecology_role_counts.get(ecology_role, 0) or 0) + 1
         blocked_reason_counts: dict[str, int] = {}
         blocked_files: list[str] = []
         for item in blocked_items:
@@ -593,19 +531,8 @@ class TestSessionControlService:
             status = "actionable"
         else:
             status = "blocked"
-        if actionable_count > 0:
-            ecology_status = "growth_ready"
-        elif int(ecology_role_counts.get("historical", 0) or 0) > 0:
-            ecology_status = "historical_watch"
-        elif int(ecology_role_counts.get("contract", 0) or 0) > 0:
-            ecology_status = "stable_watch"
-        elif len(items) <= 0:
-            ecology_status = "empty"
-        else:
-            ecology_status = "needs_review"
         return {
             "status": status,
-            "ecology_status": ecology_status,
             "count": len(items),
             "open_count": open_count,
             "actionable_count": actionable_count,
@@ -616,13 +543,6 @@ class TestSessionControlService:
             "warning_count": warning_count,
             "drift_count": drift_count,
             "never_run_count": never_run_count,
-            "growth_candidate_count": int(ecology_role_counts.get("growth_candidate", 0) or 0),
-            "contract_count": int(ecology_role_counts.get("contract", 0) or 0),
-            "historical_count": int(ecology_role_counts.get("historical", 0) or 0),
-            "seed_count": int(lifecycle_counts.get("seed", 0) or 0),
-            "lifecycle_counts": lifecycle_counts,
-            "ecology_role_counts": ecology_role_counts,
-            "next_growth_action": str(next_item.get("growth_action") or ""),
             "next_item": next_item,
             "items": capped_items,
         }

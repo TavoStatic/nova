@@ -33,6 +33,44 @@ class TestNovaVoiceRuntime(unittest.TestCase):
         self.assertEqual(runtime_scope["wav"], "wav_mod")
         self.assertEqual(runtime_scope["WhisperModel"], "whisper_mod")
 
+    def test_voice_status_payload_reports_unrequested_voice_without_failure(self):
+        payload = nova_voice_runtime.voice_status_payload(
+            {
+                "VOICE_OK": False,
+                "VOICE_READY": False,
+                "VOICE_IMPORT_ERR": "",
+                "sd": None,
+                "wav": None,
+                "WhisperModel": None,
+                "SAMPLE_RATE": 16000,
+                "CHANNELS": 1,
+            }
+        )
+
+        self.assertTrue(payload.get("ok"))
+        self.assertEqual(payload.get("status"), "not_initialized")
+        self.assertFalse(payload.get("requested"))
+        self.assertEqual(payload.get("sample_rate"), 16000)
+        self.assertEqual(payload.get("channels"), 1)
+
+    def test_voice_status_payload_reports_requested_dependency_failure(self):
+        runtime_scope = {
+            "VOICE_OK": False,
+            "VOICE_READY": True,
+            "VOICE_IMPORT_ERR": "No module named 'sounddevice'",
+            "sd": None,
+            "wav": None,
+            "WhisperModel": None,
+        }
+
+        payload = nova_voice_runtime.voice_status_payload(runtime_scope)
+
+        self.assertFalse(payload.get("ok"))
+        self.assertEqual(payload.get("status"), "disabled")
+        self.assertTrue(payload.get("requested"))
+        self.assertEqual(payload.get("import_error"), "No module named 'sounddevice'")
+        self.assertFalse(payload.get("sounddevice_available"))
+
     def test_speak_chunked_groups_sentences_under_max_len(self):
         tts = _FakeTTS()
 

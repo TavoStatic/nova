@@ -1,0 +1,58 @@
+﻿{
+    "schema_version":  1,
+    "package_name":  "NYO System Base",
+    "artifact_type":  "source-bootstrap-zip",
+    "artifact_version":  "2026.05.09",
+    "version_source":  "auto-date-sequence",
+    "version_sequence":  0,
+    "release_channel":  "rc",
+    "release_label":  "pipeline-leak-fix",
+    "built_at":  "2026-05-09T00:23:43.4034087-05:00",
+    "built_on_host":  "ROGUE_ONE",
+    "source_root":  "C:\\NOVA",
+    "bootstrap_entrypoint":  ".\\\\nova.cmd install",
+    "validation_commands":  [
+                                ".\\\\nova.cmd doctor",
+                                ".\\\\nova.cmd runtime-status",
+                                ".\\\\nova.cmd wiring-check --offline",
+                                ".\\\\nova.cmd smoke-base --fix",
+                                ".\\\\nova.cmd smoke --fix",
+                                ".\\\\nova.cmd test"
+                            ],
+    "validation_profiles":  {
+                                "base_package":  ".\\\\nova.cmd smoke-base --fix",
+                                "runtime_model":  ".\\\\nova.cmd smoke --fix",
+                                "fresh_machine_checklist":  "docs\\\\FRESH_MACHINE_VALIDATION.md",
+                                "validation_record_template":  "docs\\\\RC_VALIDATION_TEMPLATE.md"
+                            },
+    "includes":  [
+                     "tracked source files",
+                     "docs",
+                     "tests",
+                     "templates and static assets",
+                     "requirements.txt",
+                     "policy.json",
+                     "piper runtime assets"
+                 ],
+    "excludes":  [
+                     ".github",
+                     ".ci_venv",
+                     ".venv",
+                     ".pytest_cache",
+                     "knowledge/packs",
+                     "knowledge/peims",
+                     "knowledge/web",
+                     "data_sources/*/local_config.json",
+                     "data_sources/*/operator_intake.jsonl",
+                     "data_sources/*/lane_control.json",
+                     "nova_memory.sqlite",
+                     "runtime",
+                     "logs",
+                     "memory",
+                     "updates",
+                     "interpreter caches",
+                     "ad hoc local status files",
+                     "operator-only notes",
+                     "codex scratch telemetry"
+                 ]
+}

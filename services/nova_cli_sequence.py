@@ -11,6 +11,8 @@ def execute_cli_sequence(
     options = dict(kwargs or {})
     options["planner_before_deterministic_content"] = True
     options["stop_before_llm_fallback"] = True
+    options.setdefault("pre_planner_branch_group", "none")
+    options.setdefault("post_planner_branch_group", None)
     return execute_reply_sequence_fn(**options)
 
 

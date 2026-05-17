@@ -4,11 +4,10 @@ import planner_decision
 
 
 class TestPlannerDecisionIntentGate(unittest.TestCase):
-    def test_city_name_without_context_asks_for_clarification(self):
+    def test_city_name_without_context_stays_unowned(self):
         actions = planner_decision.decide_turn("what is the name of the city", config={})
 
-        self.assertEqual(actions[0]["type"], "ask_clarify")
-        self.assertIn("Which location", actions[0]["question"])
+        self.assertEqual(actions, [])
 
     def test_city_name_with_location_context_does_not_route_to_wikipedia(self):
         actions = planner_decision.decide_turn(
@@ -35,7 +34,7 @@ class TestPlannerDecisionIntentGate(unittest.TestCase):
 
         self.assertEqual(actions, [])
 
-    def test_research_followup_after_web_offer_can_accept_offer(self):
+    def test_research_followup_after_web_offer_stays_conversation_owned(self):
         actions = planner_decision.decide_turn(
             "yes, find more information",
             config={
@@ -46,8 +45,7 @@ class TestPlannerDecisionIntentGate(unittest.TestCase):
             },
         )
 
-        self.assertEqual(actions[0]["type"], "run_tool")
-        self.assertEqual(actions[0]["tool"], "web_research")
+        self.assertEqual(actions, [])
 
 
 if __name__ == "__main__":

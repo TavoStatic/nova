@@ -1,3 +1,4 @@
+import os
 import importlib.util
 import shutil
 import unittest
@@ -13,7 +14,7 @@ assert SPEC is not None and SPEC.loader is not None
 SPEC.loader.exec_module(SMOKE_E2E)
 
 
-WORK_TMP_ROOT = Path(__file__).resolve().parents[1] / "runtime" / "pytest_temp"
+WORK_TMP_ROOT = Path(os.environ.get("NOVA_VALIDATION_RUNTIME_DIR") or Path(__file__).resolve().parents[1] / "runtime" / "validation") / "pytest_temp"
 
 
 def _workspace_case_dir(prefix: str) -> Path:

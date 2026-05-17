@@ -21,6 +21,11 @@ BASE = Path(__file__).resolve().parents[1]
 PY = str(Path(sys.executable).resolve())
 if str(BASE) not in sys.path:
     sys.path.insert(0, str(BASE))
+from services.validation_artifact_truth import VALIDATION_ARTIFACT_TRUTH_SERVICE
+from services.regression_profile_inventory import build_regression_profile_inventory_payload
+from services.regression_lanes import COMPACT_REGRESSION_LANES
+from services.regression_lanes import SOURCE_PROFILE_LANES
+
 REGRESSION_STATUS_FILE = BASE / "runtime" / "regression_status.json"
 
 COMPILE_TARGETS = [
@@ -33,100 +38,8 @@ COMPILE_TARGETS = [
 ]
 
 TEST_LANES: dict[str, list[str]] = {
-    "unit": [
-        "tests.test_health",
-        "tests.test_smoke_test",
-        "tests.test_action_planner",
-        "tests.test_autonomy_execution_gate",
-        "tests.test_autonomy_maintenance",
-        "tests.test_autonomy_orchestrator_ledger_service",
-        "tests.test_autonomy_orchestrator_service",
-        "tests.test_behavior_metrics_service",
-        "tests.test_chat_identity_service",
-        "tests.test_control_actions_service",
-        "tests.test_control_assets_service",
-        "tests.test_control_auth_service",
-        "tests.test_control_status_cache_service",
-        "tests.test_control_status_service",
-        "tests.test_control_telemetry_service",
-        "tests.test_core_steward_service",
-        "tests.test_end_to_end_wiring_service",
-        "tests.test_fulfillment_flow_service",
-        "tests.test_http_session_store",
-        "tests.test_http_test_session_helpers",
-        "tests.test_identity_memory_service",
-        "tests.test_memory_adapter_service",
-        "tests.test_memory_health_service",
-        "tests.test_memory_scope",
-        "tests.test_nova_action_ledger_service",
-        "tests.test_nova_control_action_dispatcher",
-        "tests.test_nova_fulfillment_routing",
-        "tests.test_nova_identity_history",
-        "tests.test_nova_profile_followups",
-        "tests.test_nova_pulse_service",
-        "tests.test_nova_query_classifiers",
-        "tests.test_nova_reply_sequence",
-        "tests.test_nova_route_probing",
-        "tests.test_nova_runtime_context",
-        "tests.test_nova_self_status_service",
-        "tests.test_nova_turn_direction",
-        "tests.test_ollama_test_guard",
-        "tests.test_patch_control_service",
-        "tests.test_policy_control_service",
-        "tests.test_policy_manager_resolver",
-        "tests.test_policy_manager_service",
-        "tests.test_regression_contracts",
-        "tests.test_release_status_service",
-        "tests.test_release_clean_service",
-        "tests.test_run_regression",
-        "tests.test_run_tools",
-        "tests.test_runtime_artifacts_service",
-        "tests.test_runtime_control_service",
-        "tests.test_runtime_process_state_service",
-        "tests.test_runtime_status_service",
-        "tests.test_runtime_timeline_service",
-        "tests.test_session_admin_service",
-        "tests.test_session_state_service",
-        "tests.test_smoke_placeholder",
-        "tests.test_subconscious_control_service",
-        "tests.test_supervisor_intent_rules",
-        "tests.test_supervisor_patterns",
-        "tests.test_supervisor_probes",
-        "tests.test_supervisor_reflective_rules",
-        "tests.test_supervisor_registry",
-        "tests.test_supervisor_routing_rules",
-        "tests.test_test_session_control_service",
-        "tests.test_tool_console_service",
-        "tests.test_tool_execution_service",
-        "tests.test_tool_registry",
-        "tests.test_tool_registry_service",
-        "tests.test_voice_entrypoints",
-        "tests.test_web_research_session_service",
-    ],
-    "behavior": [
-        "tests.test_core_identity_learning",
-        "tests.test_http_chat_flow",
-        "tests.test_http_identity_chat",
-        "tests.test_http_resume_pending",
-        "tests.test_http_session_manager",
-        "tests.test_nova_core_fulfillment_bridge",
-        "tests.test_nova_http",
-        "tests.test_policy_commands",
-        "tests.test_subconscious_fallback_seams",
-        "tests.test_supervisor_ownership_gate",
-        "tests.test_weather_behavior",
-    ],
-    "integration": [
-        "tests.test_integration_override",
-        "tests.test_memory_capture.TestMemoryCapture.test_mem_add_and_recall",
-        "tests.test_memory_cli",
-        "tests.test_release_package_scripts",
-        "tests.test_run_test_session",
-        "tests.test_runtime_recovery",
-        "tests.test_subconscious_live_simulator",
-        "tests.test_subconscious_runner",
-        "tests.test_windows_installer_scripts",
-    ],
+    lane: list(targets)
+    for lane, targets in COMPACT_REGRESSION_LANES.items()
 }
 
 
@@ -180,13 +93,26 @@ def print_available_lanes() -> None:
     print("Available test lanes:")
     for lane, test_names in TEST_LANES.items():
         print(f"- {lane}: {len(test_names)} targets")
+    inventory = build_regression_profile_inventory_payload(root=BASE, test_lanes=SOURCE_PROFILE_LANES)
+    print(
+        "Validation profile inventory: "
+        f"{inventory.get('curated_test_file_count')} curated files, "
+        f"{inventory.get('source_observed_count', inventory.get('outside_curated_count'))} source-observed outside compact lanes, "
+        f"{inventory.get('install_profile_inactive_count')} stale inactive install-profile tests, "
+        f"{inventory.get('install_profile_optional_inactive_count')} optional inactive install-profile tests"
+    )
 
 
 def run_unittest_suite(test_names: list[str], *, verbosity: int = 1) -> tuple[bool, list[str]]:
     previous_test_runner = os.environ.get("NOVA_TEST_RUNNER")
     previous_validation_runtime = os.environ.get("NOVA_VALIDATION_RUNTIME_DIR")
+    previous_work_tree_db = os.environ.get("NOVA_WORK_TREE_DB")
+    previous_memory_db = os.environ.get("NOVA_MEMORY_DB")
+    validation_runtime = BASE / "runtime" / "validation"
     os.environ["NOVA_TEST_RUNNER"] = "1"
-    os.environ.setdefault("NOVA_VALIDATION_RUNTIME_DIR", str(BASE / "runtime" / "validation"))
+    os.environ.setdefault("NOVA_VALIDATION_RUNTIME_DIR", str(validation_runtime))
+    os.environ.setdefault("NOVA_WORK_TREE_DB", str(validation_runtime / "_internal" / "work_tree.db"))
+    os.environ.setdefault("NOVA_MEMORY_DB", str(validation_runtime / "nova_memory.sqlite"))
     loader = unittest.defaultTestLoader
     try:
         suite = loader.loadTestsFromNames(test_names)
@@ -201,6 +127,14 @@ def run_unittest_suite(test_names: list[str], *, verbosity: int = 1) -> tuple[bo
             os.environ.pop("NOVA_VALIDATION_RUNTIME_DIR", None)
         else:
             os.environ["NOVA_VALIDATION_RUNTIME_DIR"] = previous_validation_runtime
+        if previous_work_tree_db is None:
+            os.environ.pop("NOVA_WORK_TREE_DB", None)
+        else:
+            os.environ["NOVA_WORK_TREE_DB"] = previous_work_tree_db
+        if previous_memory_db is None:
+            os.environ.pop("NOVA_MEMORY_DB", None)
+        else:
+            os.environ["NOVA_MEMORY_DB"] = previous_memory_db
     failed_ids: list[str] = []
     for case, _ in list(result.failures) + list(result.errors):
         try:
@@ -241,7 +175,14 @@ def run_test_lane(lane: str, *, verbosity: int = 1) -> int:
     return 1
 
 
-def write_regression_status(*, status: str, lanes: list[str], returncode: int, detail: str = "") -> None:
+def write_regression_status(
+    *,
+    status: str,
+    lanes: list[str],
+    returncode: int,
+    detail: str = "",
+    extra: dict | None = None,
+) -> None:
     payload = {
         "generated_at": time.strftime("%Y-%m-%d %H:%M:%S"),
         "date": time.strftime("%Y-%m-%d"),
@@ -251,6 +192,8 @@ def write_regression_status(*, status: str, lanes: list[str], returncode: int, d
         "detail": str(detail or "").strip()[:500],
         "source": "scripts/run_regression.py",
     }
+    if isinstance(extra, dict):
+        payload.update({str(key): value for key, value in extra.items()})
     try:
         REGRESSION_STATUS_FILE.parent.mkdir(parents=True, exist_ok=True)
         REGRESSION_STATUS_FILE.write_text(json.dumps(payload, ensure_ascii=True, indent=2), encoding="utf-8")
@@ -258,13 +201,71 @@ def write_regression_status(*, status: str, lanes: list[str], returncode: int, d
         pass
 
 
+def _validation_artifact_status_extra(payload: dict) -> dict:
+    latest_failure = payload.get("latest_failure") if isinstance(payload.get("latest_failure"), dict) else {}
+    return {
+        "validation_artifact_truth_status": str(payload.get("status") or ""),
+        "validation_artifact_truth_ok": bool(payload.get("ok", True)),
+        "validation_artifact_failure_count": int(payload.get("current_window_failure_count", 0) or 0),
+        "validation_artifact_llm_unavailable_count": int(payload.get("current_window_llm_unavailable_count", 0) or 0),
+        "validation_artifact_hidden_by_green_regression": bool(payload.get("hidden_by_green_regression", False)),
+        "validation_artifact_latest_failure": {
+            "path": str(latest_failure.get("path") or ""),
+            "failure_kind": str(latest_failure.get("failure_kind") or ""),
+            "final_answer": str(latest_failure.get("final_answer") or "")[:160],
+        },
+    }
+
+
+def _regression_profile_status_extra(payload: dict) -> dict:
+    gap_tests = [dict(item) for item in list(payload.get("gap_tests") or []) if isinstance(item, dict)]
+    profile_drift_tests = [
+        dict(item)
+        for item in list(payload.get("profile_drift_tests") or [])
+        if isinstance(item, dict)
+    ]
+    return {
+        "test_profile_inventory_ok": bool(payload.get("ok", False)),
+        "test_profile_profile_gap_count": int(payload.get("profile_gap_count", 0) or 0),
+        "test_profile_profile_drift_count": int(payload.get("profile_drift_count", 0) or 0),
+        "test_profile_profile_attention_count": int(payload.get("profile_attention_count", 0) or 0),
+        "test_profile_curated_target_count": int(payload.get("curated_target_count", 0) or 0),
+        "test_profile_curated_test_file_count": int(payload.get("curated_test_file_count", 0) or 0),
+        "test_profile_root_test_file_count": int(payload.get("root_test_file_count", 0) or 0),
+        "test_profile_all_test_file_count": int(payload.get("all_test_file_count", 0) or 0),
+        "test_profile_source_observed_count": int(payload.get("source_observed_count", payload.get("outside_curated_count", 0)) or 0),
+        "test_profile_outside_curated_count": int(payload.get("outside_curated_count", 0) or 0),
+        "test_profile_install_profile_inactive_count": int(payload.get("install_profile_inactive_count", 0) or 0),
+        "test_profile_install_profile_optional_inactive_count": int(payload.get("install_profile_optional_inactive_count", 0) or 0),
+        "test_profile_unclassified_count": int(payload.get("unclassified_count", 0) or 0),
+        "test_profile_gap_tests": gap_tests[:24],
+        "test_profile_profile_drift_tests": profile_drift_tests[:24],
+    }
+
+
+def audit_validation_artifacts_after_green_run(*, window_start_epoch: float, window_end_epoch: float) -> dict:
+    return VALIDATION_ARTIFACT_TRUTH_SERVICE.payload(
+        runtime_dir=BASE / "runtime",
+        regression_status_path=REGRESSION_STATUS_FILE,
+        limit=2000,
+        window_start_epoch=window_start_epoch,
+        window_end_epoch=window_end_epoch,
+        regression_status_label="OK",
+        regression_returncode=0,
+        regression_generated_at=time.strftime("%Y-%m-%d %H:%M:%S"),
+    )
+
+
 def main(argv: list[str] | None = None) -> int:
+    run_started_epoch = time.time()
     args = parse_args(argv)
     if args.list_lanes:
         print_available_lanes()
         return 0
 
     selected_lanes = resolve_requested_lanes(args)
+    profile_inventory = build_regression_profile_inventory_payload(root=BASE, test_lanes=SOURCE_PROFILE_LANES)
+    profile_status_extra = _regression_profile_status_extra(profile_inventory)
     steps = [
         (
             "Python compile check",
@@ -280,17 +281,41 @@ def main(argv: list[str] | None = None) -> int:
     for name, cmd in steps:
         code = run_step(name, cmd)
         if code != 0:
-            write_regression_status(status="FAILED", lanes=selected_lanes, returncode=code, detail=name)
+            write_regression_status(status="FAILED", lanes=selected_lanes, returncode=code, detail=name, extra=profile_status_extra)
             return code
 
     for lane in selected_lanes:
         code = run_test_lane(lane, verbosity=max(1, int(args.verbosity or 1)))
         if code != 0:
-            write_regression_status(status="FAILED", lanes=selected_lanes, returncode=code, detail=f"{lane} lane")
+            write_regression_status(status="FAILED", lanes=selected_lanes, returncode=code, detail=f"{lane} lane", extra=profile_status_extra)
             return code
 
     print("\nAll selected regression checks passed.")
-    write_regression_status(status="OK", lanes=selected_lanes, returncode=0)
+    validation_truth = audit_validation_artifacts_after_green_run(
+        window_start_epoch=run_started_epoch,
+        window_end_epoch=time.time(),
+    )
+    if not bool(validation_truth.get("ok", True)):
+        status = str(validation_truth.get("status") or "validation_artifact_failure")
+        failure_count = int(validation_truth.get("current_window_failure_count", 0) or 0)
+        llm_count = int(validation_truth.get("current_window_llm_unavailable_count", 0) or 0)
+        detail = f"validation_artifact_truth:{status};failures={failure_count};llm_unavailable={llm_count}"
+        print(f"[FAIL] {detail}")
+        write_regression_status(
+            status="FAILED",
+            lanes=selected_lanes,
+            returncode=1,
+            detail=detail,
+            extra={**profile_status_extra, **_validation_artifact_status_extra(validation_truth)},
+        )
+        return 1
+
+    write_regression_status(
+        status="OK",
+        lanes=selected_lanes,
+        returncode=0,
+        extra={**profile_status_extra, **_validation_artifact_status_extra(validation_truth)},
+    )
     return 0
 
 

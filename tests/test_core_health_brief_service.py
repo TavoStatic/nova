@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 import unittest
 import uuid
@@ -12,9 +13,13 @@ from services.core_health_brief import (
 )
 
 
+def _validation_tmp_root() -> Path:
+    return Path(os.environ.get("NOVA_VALIDATION_RUNTIME_DIR") or Path(__file__).resolve().parents[1] / "runtime" / "validation") / "_test_tmp"
+
+
 class TestCoreHealthBriefService(unittest.TestCase):
     def setUp(self) -> None:
-        base_tmp = Path("C:/Nova/runtime/_test_tmp")
+        base_tmp = _validation_tmp_root()
         base_tmp.mkdir(parents=True, exist_ok=True)
         self._db_path = base_tmp / f"core_health_brief_{uuid.uuid4().hex}.sqlite3"
         work_tree._set_db_path(self._db_path)

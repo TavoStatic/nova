@@ -49,6 +49,9 @@ def build_core_steward_payload(
     runtime_worker = {}
     if isinstance(autonomy_maintenance, dict) and isinstance(autonomy_maintenance.get("runtime_worker"), dict):
         runtime_worker = dict(autonomy_maintenance.get("runtime_worker") or {})
+    scheduler_active = bool((autonomy_maintenance or {}).get("maintenance_scheduler_active", False)) if isinstance(autonomy_maintenance, dict) else False
+    scheduler_mode = str((autonomy_maintenance or {}).get("maintenance_scheduler_mode") or "").strip().lower() if isinstance(autonomy_maintenance, dict) else ""
+    scheduler_status = str((autonomy_maintenance or {}).get("maintenance_scheduler_status") or "").strip().lower() if isinstance(autonomy_maintenance, dict) else ""
 
     fallback_score = float(
         pulse_payload.get("active_fallback_overuse_score", pulse_payload.get("last_fallback_overuse_score", 0.0)) or 0.0
@@ -64,6 +67,7 @@ def build_core_steward_payload(
     kidney_candidates = int(kidney_summary.get("candidate_count", 0) or 0) if isinstance(kidney_summary, dict) else 0
     kidney_mode = str(kidney_summary.get("mode") or "unknown").strip() if isinstance(kidney_summary, dict) else "unknown"
     worker_status = str(runtime_worker.get("last_cycle_status") or "").strip().lower()
+    worker_or_scheduler_ok = worker_status in {"running", "ok"} or scheduler_active
     last_generated_queue_run = dict(autonomy_maintenance.get("last_generated_queue_run") or {}) if isinstance(autonomy_maintenance, dict) else {}
     latest_report_status = str(last_generated_queue_run.get("latest_report_status") or last_generated_queue_run.get("status") or "").strip().lower()
     fallback_penalty_active = fallback_score >= 0.75 and latest_report_status in {"drift", "failed", "error", "blocked"}
@@ -91,14 +95,14 @@ def build_core_steward_payload(
             score -= 10
         elif kidney_candidates >= 1:
             score -= 5
-    if worker_status not in {"running", "ok"}:
+    if not worker_or_scheduler_ok:
         score -= 5
     score = max(0, min(100, score))
 
     level = "strong"
     if required_failed or not bool(heartbeat.get("ok")) or not bool(core_state.get("ok")):
         level = "repair"
-    elif score < 85 or not memory_health_ok or fallback_penalty_active or kidney_penalty_active or worker_status not in {"running", "ok"}:
+    elif score < 85 or not memory_health_ok or fallback_penalty_active or kidney_penalty_active or not worker_or_scheduler_ok:
         level = "watch"
 
     queue: list[dict[str, str]] = []
@@ -138,7 +142,7 @@ def build_core_steward_payload(
                 "pulse",
             )
         )
-    if worker_status not in {"running", "ok"}:
+    if not worker_or_scheduler_ok:
         queue.append(
             _queue_item(
                 "medium",
@@ -198,7 +202,7 @@ def build_core_steward_payload(
         summary_lines.append(f"fallback_pressure:{fallback_score:.2f}")
     if kidney_penalty_active:
         summary_lines.append(f"kidney_candidates:{kidney_candidates}")
-    if worker_status not in {"running", "ok"}:
+    if not worker_or_scheduler_ok:
         summary_lines.append(f"maintenance_worker:{worker_status or 'inactive'}")
     if not summary_lines:
         summary_lines.append("core surfaces look stable")
@@ -237,6 +241,9 @@ def build_core_steward_payload(
             "worker_status": worker_status or "unknown",
             "interval_sec": int(runtime_worker.get("interval_sec", 0) or 0),
             "last_completed_at": str(runtime_worker.get("last_completed_at") or ""),
+            "scheduler_active": scheduler_active,
+            "scheduler_mode": scheduler_mode,
+            "scheduler_status": scheduler_status,
         },
         "maintenance_queue": queue,
     }

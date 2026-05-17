@@ -1,4 +1,23 @@
-from services.voice_interaction import VOICE_INTERACTION_SERVICE
+import nova_core
+import nova_http
+from services.voice_interaction import VoiceInteractionService
+
+
+def _fallback_chat(text: str) -> str:
+    return nova_core.ollama_chat(
+        text,
+        retrieved_context="",
+        language_mix_spanish_pct=0,
+    )
+
+
+VOICE_INTERACTION_SERVICE = VoiceInteractionService(
+    whisper_size_fn=nova_core.whisper_size,
+    record_seconds_fn=nova_core.record_seconds,
+    transcribe_fn=nova_core.transcribe,
+    chat_fn=lambda session_id, text, user_id: nova_http.process_chat(session_id, text, user_id=user_id),
+    fallback_chat_fn=_fallback_chat,
+)
 
 DEFAULT_RECORD_SECONDS = 6
 

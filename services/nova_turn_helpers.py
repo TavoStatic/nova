@@ -13,23 +13,8 @@ def retrieval_status_reply(text: str) -> str:
 
 def is_location_request(user_text: str, *, normalize_turn_text_fn: Callable[[str], str]) -> bool:
     normalized = normalize_turn_text_fn(user_text)
-    if not normalized:
-        return False
-    if normalized.startswith("use "):
-        return False
-    return any(
-        cue in normalized
-        for cue in (
-            "where is nova",
-            "where are you",
-            "your location",
-            "what is your location",
-            "what is your current location",
-            "what is your current physical location",
-            "where are you located",
-            "where is nova located",
-        )
-    )
+    del normalized
+    return False
 
 
 def location_reply(
@@ -48,32 +33,15 @@ def location_reply(
     if live.get("available") and not live.get("stale"):
         accuracy = live.get("accuracy_m")
         accuracy_note = f" Accuracy about {int(round(float(accuracy)))}m." if accuracy is not None else ""
-        return f"My current device location is {live.get('coords_text')}.{accuracy_note}"
+        return f"Current runtime device location is {live.get('coords_text')}.{accuracy_note}"
     if live.get("available") and live.get("stale"):
         accuracy = live.get("accuracy_m")
         accuracy_note = f" Accuracy about {int(round(float(accuracy)))}m." if accuracy is not None else ""
-        return f"My last device location fix is {live.get('coords_text')}.{accuracy_note} It is stale, so I won't call it current."
+        return f"Last runtime device location fix is {live.get('coords_text')}.{accuracy_note} It is stale, so I won't call it current."
     preview = get_saved_location_text_fn()
     if preview:
-        return f"My location is {preview}."
-    return "I don't have a stored location yet. You can tell me: 'My location is ...'"
-
-
-def is_web_research_override_request(text: str, *, normalize_turn_text_fn: Callable[[str], str]) -> bool:
-    lowered = normalize_turn_text_fn(text)
-    if not lowered:
-        return False
-    phrases = (
-        "just use the web",
-        "use the web for this",
-        "only need web",
-        "all you need is the web",
-        "all you need is web",
-        "need is the web",
-        "use web instead",
-        "search online instead",
-    )
-    return any(phrase in lowered for phrase in phrases)
+        return f"Stored runtime location label is {preview}."
+    return "No runtime location is stored yet."
 
 
 def uses_prior_reference(user_text: str) -> bool:

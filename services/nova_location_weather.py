@@ -42,7 +42,7 @@ def weather_unavailable_message() -> str:
     return (
         "I can access websites, but I don't yet have a reliable structured weather source configured. "
         "I cannot honestly claim weather results from raw weather.com pages. "
-        "Add a source like 'policy allow api.weather.gov' and then use 'weather <location-or-lat,lon>'."
+        "Add a source like 'policy allow api.weather.gov' and then use 'weather in <location-or-lat,lon>'."
     )
 
 
@@ -645,10 +645,10 @@ def store_location_fact_reply(
         return ""
 
     try:
-        set_location_text_fn(location_value, input_source=input_source)
+        reply = str(set_location_text_fn(location_value, input_source=input_source) or "").strip()
     except Exception:
         return ""
-    return "Noted."
+    return reply or f"Saved current location: {location_value}"
 
 
 def store_declarative_fact_outcome(
@@ -660,29 +660,8 @@ def store_declarative_fact_outcome(
     mem_add_fn: Callable[[str, str, str], None],
     classify_store_fact_outcome_fn: Callable[..., Optional[dict[str, object]]],
 ) -> Optional[dict[str, object]]:
-    fact_text = str(text or "").strip()
-    if not fact_text or not is_declarative_info_fn(fact_text):
-        return None
-
-    storage_performed = False
-    try:
-        if mem_should_store_fn(fact_text):
-            mem_add_fn("fact", input_source, fact_text)
-            storage_performed = True
-    except Exception:
-        storage_performed = False
-
-    return classify_store_fact_outcome_fn(
-        {
-            "fact_text": fact_text,
-            "store_fact_kind": "declarative_ack",
-            "user_commitment": "implied",
-            "memory_kind": "fact",
-        },
-        fact_text,
-        source="declarative",
-        storage_performed=storage_performed,
-    )
+    del text, input_source, is_declarative_info_fn, mem_should_store_fn, mem_add_fn, classify_store_fact_outcome_fn
+    return None
 
 
 def store_declarative_fact_reply(
@@ -1027,7 +1006,7 @@ def tool_weather(
             return f"Weather lookup failed: {e}"
 
     if not loc:
-        return "Usage: weather <location-or-lat,lon>"
+        return "Usage: weather in <location-or-lat,lon>"
 
     if source == "wttr.in":
         url = f"https://wttr.in/{quote(loc)}?format=j1"

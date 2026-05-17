@@ -6,6 +6,10 @@ from pathlib import Path
 from .base_tool import NovaTool, ToolContext, ToolInvocationError
 
 
+def _completed_text(process) -> str:
+    return ((process.stdout or "") + (("\n" + process.stderr) if process.stderr else "")).strip()
+
+
 class VisionTool(NovaTool):
     name = "vision"
     description = "Screenshot and camera helper tools"
@@ -49,5 +53,9 @@ class VisionTool(NovaTool):
         else:
             raise ToolInvocationError("unknown_vision_action")
         p = subprocess.run(cmd, capture_output=True, text=True)
-        out = (p.stdout or "") + (("\n" + p.stderr) if p.stderr else "")
-        return out.strip()
+        out = _completed_text(p)
+        returncode = int(getattr(p, "returncode", 0) or 0)
+        if returncode != 0:
+            detail = out[:500] if out else f"exit:{returncode}"
+            raise ToolInvocationError(f"vision_helper_failed:exit:{returncode}:{detail}")
+        return out

@@ -10,6 +10,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Callable, Iterator
 import uuid
+from services.evidence_validity import invalid_tool_result
 from work_tree_contracts import WorkTree, Branch, Task, TreeStatus, BranchStatus, TaskStatus, ToolStatus
 
 
@@ -17,13 +18,42 @@ _TREES: dict[str, WorkTree] = {}
 _BRANCHES: dict[str, Branch] = {}
 _TASKS: dict[str, Task] = {}
 _SCORES: dict[str, float] = {}
-_DB_PATH = Path(__file__).resolve().parent / "runtime" / "_internal" / "work_tree.db"
+
+
+_BASE_DIR = Path(__file__).resolve().parent
+
+
+def _path_from_env(value: str, *, base_dir: Path) -> Path:
+    path = Path(str(value or "").strip()).expanduser()
+    return path if path.is_absolute() else base_dir / path
+
+
+def _resolve_initial_db_path() -> Path:
+    override = str(os.environ.get("NOVA_WORK_TREE_DB") or "").strip()
+    if override:
+        return _path_from_env(override, base_dir=_BASE_DIR)
+    try:
+        from services.nova_runtime_context import resolve_runtime_dir
+
+        return resolve_runtime_dir(_BASE_DIR) / "_internal" / "work_tree.db"
+    except Exception:
+        return _BASE_DIR / "runtime" / "_internal" / "work_tree.db"
+
+
+def _runtime_dir_for_db_path(db_path: Path) -> Path:
+    parent = Path(db_path).parent
+    if parent.name == "_internal":
+        return parent.parent
+    return parent
+
+
+_DB_PATH = _resolve_initial_db_path()
 _DB_REQUESTED_PATH = _DB_PATH
 _DB_CONNECT_TARGET: str = str(_DB_PATH)
 _DB_CONNECT_USE_URI = False
 _DB_MEMORY_ANCHORS: dict[str, sqlite3.Connection] = {}
-_DB_GUARD_LOG = Path(__file__).resolve().parent / "runtime" / "work_tree_db_guard.log"
-_DB_SCHEMA_VERSION = 3
+_DB_GUARD_LOG = _runtime_dir_for_db_path(_DB_PATH) / "work_tree_db_guard.log"
+_DB_SCHEMA_VERSION = 4
 _DB_RETRY_ATTEMPTS = 4
 _DB_RETRY_SLEEP_SEC = 0.15
 _DEFAULT_TREE_ALLOWED_TOOLS = (
@@ -39,10 +69,19 @@ _DEFAULT_TREE_ALLOWED_TOOLS = (
     "health",
     "core_health",
     "core_thinning",
+    "release_promotion_judgment",
+    "release_validation_run",
+    "release_record_validation_outcome",
+    "release_rebuild_verify",
     "system_check",
     "queue_status",
     "phase2_audit",
     "pulse",
+    "memory_bootstrap_judgment",
+    "memory_bootstrap_confirm",
+    "memory_identity_bootstrap",
+    "subconscious_review_judgment",
+    "pipeline",
     "weather_current_location",
     "weather_location",
     "location_coords",
@@ -53,10 +92,15 @@ _KNOWN_TOOL_NAMES = frozenset(
         "generated_queue_run",
         "core_health",
         "core_thinning",
+        "release_promotion_judgment",
+        "release_validation_run",
+        "release_record_validation_outcome",
+        "release_rebuild_verify",
         "patch_preview_approve",
         "patch_preview_apply",
         "patch_apply",
         "patch_rollback",
+        "pipeline",
         "camera",
         "screen",
         "update_now",
@@ -228,7 +272,7 @@ def _guard_db_header(stage: str) -> None:
         )
 
 
-_DB_ACCESS_LOG = Path(__file__).resolve().parent / "runtime" / "work_tree_access.log"
+_DB_ACCESS_LOG = _runtime_dir_for_db_path(_DB_PATH) / "work_tree_access.log"
 
 
 def _log_db_access() -> None:
@@ -410,6 +454,16 @@ def _apply_schema_migrations(connection: sqlite3.Connection) -> None:
             depends_on_json TEXT NOT NULL,
             meta_json TEXT NOT NULL DEFAULT '{}'
         );
+
+        CREATE TABLE IF NOT EXISTS work_tree_evidence (
+            evidence_id TEXT PRIMARY KEY,
+            branch_id TEXT NOT NULL,
+            task_id TEXT NOT NULL,
+            tool_name TEXT NOT NULL,
+            tool_args_json TEXT NOT NULL,
+            result_text TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        );
         """
     )
 
@@ -545,10 +599,14 @@ def _set_db_path(db_path: str | Path) -> None:
     global _DB_REQUESTED_PATH
     global _DB_CONNECT_TARGET
     global _DB_CONNECT_USE_URI
+    global _DB_GUARD_LOG
+    global _DB_ACCESS_LOG
     _DB_REQUESTED_PATH = Path(db_path)
     _DB_PATH = _DB_REQUESTED_PATH
     _DB_CONNECT_TARGET = str(_DB_PATH)
     _DB_CONNECT_USE_URI = False
+    _DB_GUARD_LOG = _runtime_dir_for_db_path(_DB_PATH) / "work_tree_db_guard.log"
+    _DB_ACCESS_LOG = _runtime_dir_for_db_path(_DB_PATH) / "work_tree_access.log"
     try:
         _ensure_db()
     except sqlite3.OperationalError as exc:
@@ -715,12 +773,27 @@ def _branch_candidate_tool(branch: Branch) -> str:
     for tool_name in declared:
         if branch.tool_state.get(tool_name, ToolStatus.READY) == ToolStatus.READY:
             return tool_name
-    if preferred and branch.tool_state.get(preferred, ToolStatus.READY) != ToolStatus.BLOCKED:
+    if preferred:
         return preferred
     for tool_name in declared:
-        if tool_name and branch.tool_state.get(tool_name, ToolStatus.READY) != ToolStatus.BLOCKED:
+        if tool_name:
             return tool_name
     return ""
+
+
+def _task_declared_tools(task: Task | None) -> list[str]:
+    if task is None or not isinstance(task.meta, dict):
+        return []
+    raw_allowed = task.meta.get("allowed_tools")
+    allowed = _normalize_tool_names(raw_allowed if isinstance(raw_allowed, list) else None)
+    expected = str(task.meta.get("expected_tool") or "").strip()
+    declared = _normalize_tool_names(([expected] if expected else []) + allowed)
+    return [tool_name for tool_name in declared if tool_name in _KNOWN_TOOL_NAMES]
+
+
+def _task_declared_tools_allowed_by_tree(task: Task | None, tree: WorkTree | None) -> list[str]:
+    tree_allowed = set(_tree_allowed_tools(tree))
+    return [tool_name for tool_name in _task_declared_tools(task) if tool_name in tree_allowed]
 
 
 def _tool_governance_status(tree: WorkTree | None, branch: Branch, tool_name: str) -> tuple[bool, str]:
@@ -765,50 +838,6 @@ def _blocked_dependencies(branch: Branch) -> list[str]:
     return blocked
 
 
-def _terminal_dependency_resolution(branch: Branch) -> tuple[str, str]:
-    for dependency_id in branch.depends_on:
-        dependency = _BRANCHES.get(dependency_id)
-        if dependency is None or dependency.status != BranchStatus.BLOCKED:
-            continue
-        resolution = str(dependency.resolution_state or "").strip().lower()
-        if resolution in {"missing_target", "blocked_by_missing_target"}:
-            return dependency_id, "missing_target"
-    return "", ""
-
-
-def _propagate_terminal_blocked_dependencies(tree_id: str) -> bool:
-    now = _now()
-    dirty = False
-    changed = True
-    while changed:
-        changed = False
-        for branch in _tree_branches(tree_id):
-            if branch.status in {BranchStatus.COMPLETE, BranchStatus.ARCHIVED}:
-                continue
-            dependency_id, resolution = _terminal_dependency_resolution(branch)
-            if not dependency_id or not resolution:
-                continue
-            next_resolution = f"blocked_by_{resolution}"
-            branch_dirty = False
-            for task in _branch_tasks(branch.branch_id):
-                if task.status in {TaskStatus.COMPLETE, TaskStatus.DROPPED, TaskStatus.BLOCKED}:
-                    continue
-                task.status = TaskStatus.BLOCKED
-                task.updated_at = now
-                branch_dirty = True
-            if branch.status != BranchStatus.BLOCKED:
-                branch.status = BranchStatus.BLOCKED
-                branch_dirty = True
-            if str(branch.resolution_state or "").strip().lower() != next_resolution:
-                branch.resolution_state = next_resolution
-                branch_dirty = True
-            if branch_dirty:
-                branch.updated_at = now
-                dirty = True
-                changed = True
-    return dirty
-
-
 def _branch_ancestor_ids(branch_id: str) -> list[str]:
     ancestors: list[str] = []
     current = _BRANCHES.get(branch_id)
@@ -845,7 +874,9 @@ def _refresh_branch_state(branch: Branch) -> bool:
             or previous_status != branch.status
             or abs(previous_score - float(branch.score)) > 1e-9
         )
-    if branch.blocked_by or blocked_tasks:
+    if branch.blocked_by:
+        branch.status = BranchStatus.BLOCKED
+    elif open_tasks and len(blocked_tasks) == len(open_tasks):
         branch.status = BranchStatus.BLOCKED
     elif branch.open_stem_count == 0:
         branch.status = BranchStatus.COMPLETE
@@ -872,11 +903,6 @@ def _refresh_tree_state(tree_id: str, persist: bool = False) -> bool:
     branches = _tree_branches(tree_id)
     for branch in branches:
         branch_dirty = _refresh_branch_state(branch) or branch_dirty
-    if _propagate_terminal_blocked_dependencies(tree_id):
-        branch_dirty = True
-        branches = _tree_branches(tree_id)
-        for branch in branches:
-            branch_dirty = _refresh_branch_state(branch) or branch_dirty
     if tree.status != TreeStatus.ARCHIVED:
         tree.status = TreeStatus.COMPLETE if is_tree_complete(tree_id) else TreeStatus.ACTIVE
     dirty = branch_dirty or tree.status != previous_status
@@ -961,6 +987,88 @@ def list_tree_tasks(tree_id: str) -> list[Task]:
     tasks = [task for task in _TASKS.values() if get_branch(task.branch_id) and str(get_branch(task.branch_id).tree_id) == str(tree_id)]
     tasks.sort(key=lambda task: (task.created_at, task.task_id))
     return tasks
+
+
+def _compact_tool_result_text(result: object, *, max_chars: int = 8000) -> str:
+    if isinstance(result, (dict, list)):
+        text = _json_dump(result)
+    else:
+        text = str(result or "")
+    text = text.strip()
+    if len(text) <= max_chars:
+        return text
+    return text[: max(0, max_chars - 32)].rstrip() + "\n...[truncated]"
+
+
+def record_task_evidence(
+    *,
+    branch_id: str,
+    task_id: str,
+    tool_name: str,
+    tool_args: list[str] | None,
+    result: object,
+) -> str:
+    branch = _BRANCHES.get(str(branch_id or "").strip())
+    task = _TASKS.get(str(task_id or "").strip())
+    if branch is None:
+        raise ValueError(f"Branch {branch_id} not found")
+    if task is None:
+        raise ValueError(f"Task {task_id} not found")
+    evidence_id = f"evidence_{uuid.uuid4().hex[:10]}"
+    created_at = _dt(_now())
+    _ensure_db()
+    with _db_transaction() as connection:
+        connection.execute(
+            """
+            INSERT INTO work_tree_evidence (
+                evidence_id, branch_id, task_id, tool_name, tool_args_json, result_text, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                evidence_id,
+                branch.branch_id,
+                task.task_id,
+                str(tool_name or "").strip(),
+                _json_dump(list(tool_args or [])),
+                _compact_tool_result_text(result),
+                created_at,
+            ),
+        )
+    return evidence_id
+
+
+def list_branch_evidence(branch_id: str, *, limit: int = 20) -> list[dict[str, object]]:
+    branch_key = str(branch_id or "").strip()
+    if not branch_key:
+        return []
+    _ensure_db()
+    max_rows = max(1, int(limit or 20))
+    with closing(_db_connect()) as connection:
+        rows = list(
+            connection.execute(
+                """
+                SELECT evidence_id, branch_id, task_id, tool_name, tool_args_json, result_text, created_at
+                FROM work_tree_evidence
+                WHERE branch_id = ?
+                ORDER BY created_at DESC, evidence_id DESC
+                LIMIT ?
+                """,
+                (branch_key, max_rows),
+            )
+        )
+    rows.reverse()
+    return [
+        {
+            "evidence_id": str(row["evidence_id"]),
+            "branch_id": str(row["branch_id"]),
+            "task_id": str(row["task_id"]),
+            "tool_name": str(row["tool_name"]),
+            "tool_args": _json_list(row["tool_args_json"]),
+            "result_text": str(row["result_text"] or ""),
+            "created_at": str(row["created_at"]),
+        }
+        for row in rows
+    ]
 
 
 def list_visual_trees(limit: int | None = None) -> list[dict]:
@@ -1125,6 +1233,93 @@ def mark_task_dropped(task_id: str, reason: str = "") -> None:
     _refresh_tree_state(branch.tree_id, persist=True)
 
 
+def mark_task_blocked(task_id: str, reason: str = "") -> None:
+    task = _TASKS.get(task_id)
+    if task is None:
+        raise ValueError(f"Task {task_id} not found")
+
+    if task.status == TaskStatus.BLOCKED:
+        return
+
+    now = _now()
+    task.status = TaskStatus.BLOCKED
+    task.updated_at = now
+    if reason:
+        meta = dict(task.meta or {})
+        meta["blocked_reason"] = str(reason)
+        meta["block_reason"] = str(reason)
+        task.meta = meta
+
+    branch = _BRANCHES.get(task.branch_id)
+    if branch is None:
+        return
+    branch.updated_at = now
+    _refresh_tree_state(branch.tree_id, persist=True)
+
+
+def update_blocked_task(task_id: str, *, title: str = "", reason: str = "") -> None:
+    task = _TASKS.get(task_id)
+    if task is None:
+        raise ValueError(f"Task {task_id} not found")
+
+    now = _now()
+    changed = False
+    next_title = str(title or "").strip()
+    if next_title and task.title != next_title:
+        task.title = next_title
+        changed = True
+    if task.status != TaskStatus.BLOCKED:
+        task.status = TaskStatus.BLOCKED
+        changed = True
+    if reason:
+        meta = dict(task.meta or {})
+        reason_text = str(reason)
+        if meta.get("blocked_reason") != reason_text or meta.get("block_reason") != reason_text:
+            meta["blocked_reason"] = reason_text
+            meta["block_reason"] = reason_text
+            task.meta = meta
+            changed = True
+    if not changed:
+        return
+
+    task.updated_at = now
+    branch = _BRANCHES.get(task.branch_id)
+    if branch is None:
+        return
+    branch.updated_at = now
+    _refresh_tree_state(branch.tree_id, persist=True)
+
+
+def update_task_meta(task_id: str, meta_updates: dict[str, object]) -> None:
+    task = _TASKS.get(task_id)
+    if task is None:
+        raise ValueError(f"Task {task_id} not found")
+    if not isinstance(meta_updates, dict) or not meta_updates:
+        return
+
+    meta = dict(task.meta or {}) if isinstance(task.meta, dict) else {}
+    changed = False
+    for key, value in meta_updates.items():
+        key_text = str(key or "").strip()
+        if not key_text:
+            continue
+        if meta.get(key_text) == value:
+            continue
+        meta[key_text] = value
+        changed = True
+    if not changed:
+        return
+
+    now = _now()
+    task.meta = meta
+    task.updated_at = now
+    branch = _BRANCHES.get(task.branch_id)
+    if branch is None:
+        return
+    branch.updated_at = now
+    _refresh_tree_state(branch.tree_id, persist=True)
+
+
 def next_open_branch(tree_id: str) -> Branch | None:
     tree = get_tree(tree_id)
     if tree is None:
@@ -1219,7 +1414,8 @@ def touch_branch(branch_id: str) -> None:
     if branch is None:
         raise ValueError(f"Branch {branch_id} not found")
     branch.updated_at = _now()
-    _refresh_tree_state(branch.tree_id, persist=True)
+    _refresh_tree_state(branch.tree_id, persist=False)
+    _persist_tree_state(branch.tree_id)
 
 
 def recompute_branch_score(branch: Branch) -> float:
@@ -1272,7 +1468,7 @@ def is_branch_ready(branch_id: str) -> bool:
     branch = _BRANCHES.get(branch_id)
     if branch is None:
         return False
-    if branch.status in (BranchStatus.COMPLETE, BranchStatus.ARCHIVED, BranchStatus.BLOCKED, BranchStatus.STALLED):
+    if branch.status in (BranchStatus.COMPLETE, BranchStatus.ARCHIVED, BranchStatus.BLOCKED):
         return False
     return not _blocked_dependencies(branch)
 
@@ -1354,6 +1550,20 @@ def _next_open_task(branch_id: str) -> Task | None:
         (
             task
             for task in tasks
+            if task.status not in (TaskStatus.COMPLETE, TaskStatus.DROPPED, TaskStatus.BLOCKED)
+        ),
+        None,
+    )
+
+
+def _current_visible_task(branch_id: str) -> Task | None:
+    current = _next_open_task(branch_id)
+    if current is not None:
+        return current
+    return next(
+        (
+            task
+            for task in _branch_tasks(branch_id)
             if task.status not in (TaskStatus.COMPLETE, TaskStatus.DROPPED)
         ),
         None,
@@ -1367,15 +1577,21 @@ def _extract_read_path_from_task_title(title: str) -> str:
     # Common pattern: "read <path> <section/details>"
     normalized = raw.replace("\\", "/")
     tokens = [token.strip(" ,;:.\"'()[]{}") for token in normalized.split() if token.strip()]
+    base_dir = Path(__file__).resolve().parent
     for token in tokens:
-        candidate = token
-        if "/" in candidate:
-            candidate = candidate.split("/")[-1]
-        if "." not in candidate:
-            continue
-        resolved = (Path(__file__).resolve().parent / candidate).resolve()
-        if resolved.exists() and resolved.is_file():
-            return candidate
+        candidates = [token]
+        if "/" in token:
+            candidates.append(token.split("/")[-1])
+        for candidate in candidates:
+            if "." not in candidate:
+                continue
+            resolved = (base_dir / candidate).resolve()
+            try:
+                resolved.relative_to(base_dir)
+            except Exception:
+                continue
+            if resolved.exists() and resolved.is_file():
+                return candidate
     return ""
 
 
@@ -1487,6 +1703,17 @@ def _tool_args_for_task(tool_name: str, task: Task) -> list[str]:
                 }
             )
         ]
+    explicit_args = task_meta.get("tool_args")
+    if isinstance(explicit_args, list):
+        return [str(item) for item in explicit_args]
+    if tool_name == "subconscious_review_judgment":
+        return [task.branch_id]
+    if tool_name == "release_promotion_judgment":
+        return [task.branch_id]
+    if tool_name == "release_validation_run":
+        return [task.branch_id]
+    if tool_name == "release_record_validation_outcome":
+        return [task.branch_id]
     if tool_name in {"patch_preview_apply", "patch_preview_approve"}:
         preview_name = _extract_patch_preview_name(task)
         if preview_name:
@@ -1496,10 +1723,11 @@ def _tool_args_for_task(tool_name: str, task: Task) -> list[str]:
         if session_file:
             return [session_file]
     no_arg_tools = {
-        "camera",
         "core_health",
         "core_thinning",
         "health",
+        "memory_bootstrap_judgment",
+        "memory_identity_bootstrap",
         "phase2_audit",
         "pulse",
         "queue_status",
@@ -1515,7 +1743,6 @@ def _tool_args_for_task(tool_name: str, task: Task) -> list[str]:
         resolved_dir = _extract_ls_path_from_task_title(title)
         if resolved_dir:
             return [resolved_dir]
-        return []
     if tool_name == "find":
         find_keyword = _extract_find_keyword_from_task_title(title)
         if find_keyword:
@@ -1524,72 +1751,7 @@ def _tool_args_for_task(tool_name: str, task: Task) -> list[str]:
         resolved_path = _extract_read_path_from_task_title(title)
         if resolved_path:
             return [resolved_path]
-        return []
-    if tool_name == "patch_apply":
-        resolved_path = _extract_read_path_from_task_title(title)
-        if resolved_path:
-            return [resolved_path]
-        return []
     return [title] if title else []
-
-
-def _tool_target_required(tool_name: str) -> bool:
-    return str(tool_name or "").strip() in {"ls", "read", "patch_apply"}
-
-
-def _tool_target_kind(tool_name: str) -> str:
-    tool = str(tool_name or "").strip()
-    if tool == "ls":
-        return "folder"
-    if tool in {"read", "patch_apply"}:
-        return "file"
-    return ""
-
-
-def _missing_tool_target_reason(tool_name: str) -> str:
-    tool = str(tool_name or "").strip()
-    if tool == "ls":
-        return "missing_folder_target"
-    if tool in {"read", "patch_apply"}:
-        return "missing_file_target"
-    return "missing_target"
-
-
-def _tool_target_validation(tool_name: str, task: Task | None) -> dict[str, object]:
-    tool = str(tool_name or "").strip()
-    if task is None:
-        return {
-            "required": _tool_target_required(tool),
-            "valid": not _tool_target_required(tool),
-            "target_kind": _tool_target_kind(tool),
-            "args": [],
-            "reason": "missing_task" if _tool_target_required(tool) else "",
-        }
-    args = _tool_args_for_task(tool, task)
-    required = _tool_target_required(tool)
-    valid = bool(args) if required else True
-    return {
-        "required": required,
-        "valid": valid,
-        "target_kind": _tool_target_kind(tool),
-        "args": args,
-        "reason": "" if valid else _missing_tool_target_reason(tool),
-    }
-
-
-def _missing_target_payload(branch: Branch, task: Task | None, tool_name: str, target_validation: dict[str, object]) -> dict:
-    return {
-        "action": "missing_target",
-        "branch_id": branch.branch_id,
-        "branch_title": branch.title,
-        "task_id": str(task.task_id) if task is not None else "",
-        "task_title": str(task.title) if task is not None else "",
-        "tool": str(tool_name or "").strip(),
-        "recommended_tool": str(tool_name or "").strip(),
-        "tool_args": list(target_validation.get("args") or []),
-        "reason": str(target_validation.get("reason") or _missing_tool_target_reason(tool_name)),
-        "target_validation": dict(target_validation),
-    }
 
 
 def _scoped_task_target(task: Task) -> dict[str, object]:
@@ -1627,23 +1789,7 @@ def _scoped_target_valid(task: Task) -> tuple[bool, str]:
 
 def _is_invalid_tool_result(tool_name: str, result: object) -> tuple[bool, str]:
     """Detect no-op results that should not be marked as completed work."""
-    if isinstance(result, dict):
-        if not bool(result.get("ok", True)):
-            return True, str(result.get("error") or "unknown error")
-        return False, ""
-    text = str(result or "").strip().lower()
-    if not text:
-        return True, "empty_result"
-    invalid_prefixes = (
-        "not a file:",
-        "not a folder:",
-        "file not found:",
-        "not found:",
-        "error:",
-    )
-    if any(text.startswith(prefix) for prefix in invalid_prefixes):
-        return True, str(result or "invalid_result")
-    return False, ""
+    return invalid_tool_result(tool_name, result)
 
 
 def _restore_task_after_failed_execution(task: Task, branch: Branch) -> None:
@@ -1651,48 +1797,6 @@ def _restore_task_after_failed_execution(task: Task, branch: Branch) -> None:
     task.status = TaskStatus.OPEN
     task.updated_at = now
     branch.updated_at = now
-
-
-def _block_task_after_missing_target(task: Task, branch: Branch, tool_name: str) -> None:
-    now = _now()
-    task.status = TaskStatus.BLOCKED
-    task.updated_at = now
-    selected_tool = str(tool_name or "").strip()
-    if selected_tool:
-        branch.tool_state[selected_tool] = ToolStatus.BLOCKED
-    branch.status = BranchStatus.BLOCKED
-    branch.resolution_state = "missing_target"
-    branch.updated_at = now
-
-
-def resolve_next_nonexecutable_step(tree_id: str, *, persist: bool = True) -> dict:
-    """Persist terminal planning blockers that do not require a tool call."""
-    step = _preview_next_autonomous_step(tree_id)
-    if not isinstance(step, dict) or str(step.get("action") or "").strip() != "missing_target":
-        return {
-            "resolved": False,
-            "step": dict(step) if isinstance(step, dict) else None,
-        }
-
-    branch = _BRANCHES.get(str(step.get("branch_id") or "").strip())
-    task = _TASKS.get(str(step.get("task_id") or "").strip())
-    tool_name = str(step.get("recommended_tool") or step.get("tool") or "").strip()
-    if branch is None or task is None or not tool_name:
-        return {
-            "resolved": False,
-            "reason": "missing_resolution_target",
-            "step": dict(step),
-        }
-
-    _block_task_after_missing_target(task, branch, tool_name)
-    _refresh_tree_state(tree_id, persist=False)
-    if persist:
-        _persist_tree_state(tree_id)
-
-    resolved = dict(step)
-    resolved["resolved"] = True
-    resolved["resolution"] = "blocked_missing_target"
-    return resolved
 
 
 def _ordered_tool_suggestions_from_text(text: str) -> list[str]:
@@ -1705,12 +1809,24 @@ def _ordered_tool_suggestions_from_text(text: str) -> list[str]:
         if tool_name and tool_name in _KNOWN_TOOL_NAMES and tool_name not in suggestions:
             suggestions.append(tool_name)
 
+    if low.startswith("find ") or " find " in low:
+        _push("find")
+    if low.startswith("read ") or " read " in low:
+        _push("read")
     if "test_" in low:
         _push("find")
         _push("read")
     if any(token in low for token in ("metadata", "symbol reference", "missing symbol", "evidence counter", "branch metadata")):
         _push("find")
         _push("read")
+    if "memory bootstrap judgment" in low or ("judgment" in low and "memory" in low):
+        _push("memory_bootstrap_judgment")
+    if "memory bootstrap confirm" in low or ("confirm" in low and "memory bootstrap" in low):
+        _push("memory_bootstrap_confirm")
+    if "memory identity bootstrap" in low or ("identity bootstrap" in low and "memory" in low):
+        _push("memory_identity_bootstrap")
+    if "subconscious review judgment" in low or ("judgment" in low and "subconscious" in low):
+        _push("subconscious_review_judgment")
     if any(token in low for token in ("health", "heartbeat", "pulse", "runtime", "diagnose", "status", "check")):
         if "core" in low or "repair" in low:
             _push("core_health")
@@ -1719,8 +1835,18 @@ def _ordered_tool_suggestions_from_text(text: str) -> list[str]:
         _push("pulse")
     if any(token in low for token in ("queue", "backlog", "pending", "generated")):
         _push("queue_status")
+    if any(token in low for token in ("pipeline", "data lane", "data source", "schema probe")):
+        _push("pipeline")
     if any(token in low for token in ("generated session", "session drift", "parity drift", "generated queue")):
         _push("generated_queue_run")
+    if "release promotion judgment" in low or ("judgment" in low and "release" in low):
+        _push("release_promotion_judgment")
+    if "release validation" in low or "validation profile" in low:
+        _push("release_validation_run")
+    if "validation outcome" in low or "record completed validation" in low:
+        _push("release_record_validation_outcome")
+    if any(token in low for token in ("release package", "release rebuild", "rebuild and verify", "source changed after build")):
+        _push("release_rebuild_verify")
     if any(token in low for token in ("rollback", "revert", "undo patch")):
         _push("patch_rollback")
     if "approve pending preview" in low or low.startswith("approve preview"):
@@ -1821,24 +1947,22 @@ def list_autonomous_options(tree_id: str) -> list[dict]:
             continue
         if not is_tooling_ready(branch.branch_id):
             continue
+        current_task = _current_visible_task(branch.branch_id)
         recommended_tool = _branch_candidate_tool(branch)
         if not recommended_tool:
             continue
         allowed, _ = _tool_governance_status(tree, branch, recommended_tool)
         if not allowed:
             continue
-        task = _next_open_task(branch.branch_id)
-        target_validation = _tool_target_validation(recommended_tool, task)
-        if not bool(target_validation.get("valid", True)):
-            continue
         options.append(
             {
                 "branch_id": branch.branch_id,
                 "branch_title": branch.title,
+                "task_id": current_task.task_id if current_task is not None else "",
+                "task_title": current_task.title if current_task is not None else "",
                 "recommended_tool": recommended_tool,
                 "required_tools": list(branch.required_tools),
                 "allowed_tools": list(branch.allowed_tools),
-                "target_validation": target_validation,
             }
         )
     return options
@@ -1877,6 +2001,10 @@ def _preview_recommended_tool(tree: WorkTree | None, branch: Branch, task: Task 
 
     if task is None:
         return "", list(branch.allowed_tools), ""
+
+    task_declared = _task_declared_tools_allowed_by_tree(task, tree)
+    if task_declared:
+        return task_declared[0], task_declared, ""
 
     tree_allowed = _tree_allowed_tools(tree)
     suggestions = _ordered_tool_suggestions_from_text(f"{branch.title} {str(task.title or '').strip()}".strip())
@@ -1925,19 +2053,16 @@ def _preview_next_autonomous_step(tree_id: str) -> dict | None:
             "tree_allowed_tools": _tree_allowed_tools(tree),
         }
 
-    target_validation = _tool_target_validation(recommended_tool, current_task)
-    if not bool(target_validation.get("valid", True)):
-        return _missing_target_payload(branch, current_task, recommended_tool, target_validation)
-
     return {
         "action": "execute",
         "branch_id": branch.branch_id,
         "branch_title": branch.title,
+        "task_id": str(current_task.task_id) if current_task is not None else "",
+        "task_title": str(current_task.title) if current_task is not None else "",
         "recommended_tool": recommended_tool,
         "required_tools": branch.required_tools,
         "allowed_tools": allowed_tools,
         "task_target": _scoped_task_target(current_task) if current_task is not None else {},
-        "target_validation": target_validation,
     }
 
 
@@ -1973,10 +2098,11 @@ def next_autonomous_step(tree_id: str, decide_next_step_fn: DecisionCallback | N
                     "action": "execute",
                     "branch_id": str(selected.get("branch_id") or ""),
                     "branch_title": str(selected.get("branch_title") or ""),
+                    "task_id": str(selected.get("task_id") or ""),
+                    "task_title": str(selected.get("task_title") or ""),
                     "recommended_tool": str(selected.get("recommended_tool") or ""),
                     "required_tools": list(selected.get("required_tools") or []),
                     "allowed_tools": list(selected.get("allowed_tools") or []),
-                    "target_validation": dict(selected.get("target_validation") or {}),
                 }
     branch = next_open_branch(tree_id)
     if branch is None:
@@ -1988,7 +2114,15 @@ def next_autonomous_step(tree_id: str, decide_next_step_fn: DecisionCallback | N
         _rebalance_branch_tool_for_task(branch, current_task)
     recommended_tool = _branch_candidate_tool(branch)
     if not recommended_tool:
-        if current_task is not None:
+        task_declared = _task_declared_tools_allowed_by_tree(current_task, tree)
+        if task_declared:
+            set_branch_tools(
+                branch.branch_id,
+                allowed_tools=task_declared,
+                preferred_tool=task_declared[0],
+            )
+            recommended_tool = _branch_candidate_tool(branch)
+        if not recommended_tool and current_task is not None:
             assigned_tool = assign_branch_tool_from_text(branch.branch_id, current_task.title)
             if assigned_tool:
                 recommended_tool = _branch_candidate_tool(branch)
@@ -1996,18 +2130,16 @@ def next_autonomous_step(tree_id: str, decide_next_step_fn: DecisionCallback | N
             allowed, reason = _tool_governance_status(tree, branch, recommended_tool)
             if not allowed:
                 return _governance_payload(tree, branch, recommended_tool, reason)
-            target_validation = _tool_target_validation(recommended_tool, current_task)
-            if not bool(target_validation.get("valid", True)):
-                return _missing_target_payload(branch, current_task, recommended_tool, target_validation)
             return {
                 "action": "execute",
                 "branch_id": branch.branch_id,
                 "branch_title": branch.title,
+                "task_id": str(current_task.task_id) if current_task is not None else "",
+                "task_title": str(current_task.title) if current_task is not None else "",
                 "recommended_tool": recommended_tool,
                 "required_tools": branch.required_tools,
                 "allowed_tools": branch.allowed_tools,
                 "task_target": _scoped_task_target(current_task) if current_task is not None else {},
-                "target_validation": target_validation,
             }
         return {
             "action": "missing_tool_assignment",
@@ -2020,18 +2152,16 @@ def next_autonomous_step(tree_id: str, decide_next_step_fn: DecisionCallback | N
     allowed, reason = _tool_governance_status(tree, branch, recommended_tool)
     if not allowed:
         return _governance_payload(tree, branch, recommended_tool, reason)
-    target_validation = _tool_target_validation(recommended_tool, current_task)
-    if not bool(target_validation.get("valid", True)):
-        return _missing_target_payload(branch, current_task, recommended_tool, target_validation)
     return {
         "action": "execute",
         "branch_id": branch.branch_id,
         "branch_title": branch.title,
+        "task_id": str(current_task.task_id) if current_task is not None else "",
+        "task_title": str(current_task.title) if current_task is not None else "",
         "recommended_tool": recommended_tool,
         "required_tools": branch.required_tools,
         "allowed_tools": branch.allowed_tools,
         "task_target": _scoped_task_target(current_task) if current_task is not None else {},
-        "target_validation": target_validation,
     }
 
 
@@ -2044,13 +2174,6 @@ def execute_autonomous_step(
     if step is None:
         return None
     if str(step.get("action") or "") != "execute":
-        if str(step.get("action") or "") == "missing_target":
-            branch = _BRANCHES.get(str(step.get("branch_id") or "").strip())
-            task = _TASKS.get(str(step.get("task_id") or "").strip())
-            tool_name = str(step.get("recommended_tool") or step.get("tool") or "").strip()
-            if branch is not None and task is not None and tool_name:
-                _block_task_after_missing_target(task, branch, tool_name)
-                _persist_tree_state(tree_id)
         return step
 
     branch_id = str(step.get("branch_id") or "").strip()
@@ -2086,13 +2209,6 @@ def execute_autonomous_step(
                 "task_target": _scoped_task_target(task),
             }
 
-    target_validation = _tool_target_validation(tool_name, task)
-    tool_args = list(target_validation.get("args") or [])
-    if not bool(target_validation.get("valid", True)):
-        _block_task_after_missing_target(task, branch, tool_name)
-        _persist_tree_state(tree_id)
-        return _missing_target_payload(branch, task, tool_name, target_validation)
-
     now = _now()
     task.status = TaskStatus.ACTIVE
     task.updated_at = now
@@ -2100,6 +2216,7 @@ def execute_autonomous_step(
     branch.tool_state[tool_name] = ToolStatus.RUNNING
     _persist_tree_state(tree_id)
 
+    tool_args = _tool_args_for_task(tool_name, task)
     result = execute_planned_action_fn(tool_name, tool_args)
 
     if _is_scoped_stabilization_task(task):
@@ -2183,6 +2300,28 @@ def execute_autonomous_step(
 
     branch.tool_state[tool_name] = ToolStatus.READY
     branch.updated_at = _now()
+    try:
+        evidence_id = record_task_evidence(
+            branch_id=branch_id,
+            task_id=task.task_id,
+            tool_name=tool_name,
+            tool_args=tool_args,
+            result=result,
+        )
+    except Exception as exc:
+        branch.tool_state[tool_name] = ToolStatus.FAILED
+        _restore_task_after_failed_execution(task, branch)
+        _persist_tree_state(tree_id)
+        return {
+            "action": "evidence_record_failed",
+            "branch_id": branch_id,
+            "branch_title": branch.title,
+            "task_id": task.task_id,
+            "task_title": task.title,
+            "tool": tool_name,
+            "tool_args": tool_args,
+            "error": str(exc),
+        }
     mark_task_complete(task.task_id)
     return {
         "action": "executed",
@@ -2193,6 +2332,7 @@ def execute_autonomous_step(
         "tool": tool_name,
         "tool_args": tool_args,
         "tool_result": result,
+        "evidence_id": evidence_id,
         "task_target": _scoped_task_target(task),
     }
 
@@ -2240,11 +2380,15 @@ def get_visual_tree_data(tree_id: str) -> dict | None:
         tasks_open = sum(1 for t in branch_tasks if t.status not in (TaskStatus.COMPLETE, TaskStatus.DROPPED))
         for task in branch_tasks:
             task_counts[task.status.value] = task_counts.get(task.status.value, 0) + 1
-        current_task = _next_open_task(branch.branch_id)
+        current_task = _current_visible_task(branch.branch_id)
         display_tool = str(branch.preferred_tool or "").strip()
         if current_task is not None:
-            suggestions = _ordered_tool_suggestions_from_text(f"{branch.title} {str(current_task.title or '').strip()}".strip())
-            display_tool = next((tool for tool in suggestions if tool in _tree_allowed_tools(tree)), display_tool)
+            task_declared = _task_declared_tools_allowed_by_tree(current_task, tree)
+            if task_declared:
+                display_tool = task_declared[0]
+            else:
+                suggestions = _ordered_tool_suggestions_from_text(f"{branch.title} {str(current_task.title or '').strip()}".strip())
+                display_tool = next((tool for tool in suggestions if tool in _tree_allowed_tools(tree)), display_tool)
         nodes.append({
             "id": branch.branch_id,
             "title": branch.title,
@@ -2271,6 +2415,7 @@ def get_visual_tree_data(tree_id: str) -> dict | None:
                 "task_id": current_task.task_id,
                 "title": current_task.title,
                 "status": current_task.status.value,
+                "meta": dict(current_task.meta or {}),
             } if current_task is not None else None,
         })
         for dep_id in branch.depends_on:
@@ -2325,15 +2470,20 @@ def inspect_tree(tree_id: str) -> dict | None:
         task_counts[task.status.value] = task_counts.get(task.status.value, 0) + 1
 
     def _branch_summary(branch: Branch) -> dict:
-        current_task = _next_open_task(branch.branch_id)
+        current_task = _current_visible_task(branch.branch_id)
         display_tool = str(branch.preferred_tool or "").strip()
         display_allowed_tools = list(branch.allowed_tools)
         if current_task is not None:
-            suggestions = _ordered_tool_suggestions_from_text(f"{branch.title} {str(current_task.title or '').strip()}".strip())
-            selected_tool = next((tool for tool in suggestions if tool in _tree_allowed_tools(tree)), "")
-            if selected_tool:
-                display_tool = selected_tool
-                display_allowed_tools = [selected_tool]
+            task_declared = _task_declared_tools_allowed_by_tree(current_task, tree)
+            if task_declared:
+                display_tool = task_declared[0]
+                display_allowed_tools = task_declared
+            else:
+                suggestions = _ordered_tool_suggestions_from_text(f"{branch.title} {str(current_task.title or '').strip()}".strip())
+                selected_tool = next((tool for tool in suggestions if tool in _tree_allowed_tools(tree)), "")
+                if selected_tool:
+                    display_tool = selected_tool
+                    display_allowed_tools = [selected_tool]
         return {
             "branch_id": branch.branch_id,
             "title": branch.title,
@@ -2357,6 +2507,7 @@ def inspect_tree(tree_id: str) -> dict | None:
                 "task_id": current_task.task_id,
                 "title": current_task.title,
                 "status": current_task.status.value,
+                "meta": dict(current_task.meta or {}),
             } if current_task is not None else None,
         }
 

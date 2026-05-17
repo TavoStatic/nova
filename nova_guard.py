@@ -10,6 +10,8 @@ from typing import Optional
 
 import psutil
 
+from services.runtime_restart_provenance import RUNTIME_RESTART_PROVENANCE_SERVICE
+
 ROOT = Path(__file__).resolve().parent
 VENV_PY = ROOT / ".venv" / "Scripts" / "python.exe"
 NOVA_CORE = ROOT / "nova_core.py"
@@ -23,6 +25,7 @@ GUARD_PID_FILE = RUNTIME_DIR / "guard_pid.json"
 GUARD_LOG = LOG_DIR / "guard.log"
 STOP_FILE = RUNTIME_DIR / "guard.stop"
 BOOT_HISTORY_FILE = RUNTIME_DIR / "guard_boot_history.json"
+RESTART_INTENT_FILE = RUNTIME_DIR / "restart_intent.json"
 
 CORE_STATE = RUNTIME_DIR / "core_state.json"
 CORE_HEARTBEAT = RUNTIME_DIR / "core.heartbeat"
@@ -34,6 +37,7 @@ BOOT_TIMEOUT_MARGIN_SECONDS = 10
 BOOT_TIMEOUT_CEILING_SECONDS = 60
 BOOT_HISTORY_LIMIT = 20
 HEARTBEAT_STALE_SECONDS = 5
+HEARTBEAT_FAILURE_GRACE_SECONDS = 15
 TERMINATE_TIMEOUT_SECONDS = 3
 RESTART_BASE_DELAY_SECONDS = 2
 RESTART_MAX_DELAY_SECONDS = 30
@@ -68,8 +72,12 @@ class GuardAttempt:
     boot_timeout_seconds: float = BOOT_TIMEOUT_CEILING_SECONDS
     state_seen_at: Optional[float] = None
     heartbeat_seen_at: Optional[float] = None
+    heartbeat_stale_since: Optional[float] = None
     resolution_started_at: Optional[float] = None
     resolution_targets: list[tuple[int, float]] = field(default_factory=list)
+    start_reason: str = ""
+    restart_intent: Optional[dict] = None
+    restart_cause_reason: str = ""
 
 
 def _append_identity(targets: list[tuple[int, float]], identity: Optional[tuple[int, float]]) -> list[tuple[int, float]]:
@@ -208,14 +216,18 @@ def acquire_lock_or_exit():
     sys.exit(1)
 
 
-def is_heartbeat_fresh() -> bool:
+def heartbeat_age_seconds() -> Optional[float]:
     try:
         if not CORE_HEARTBEAT.exists():
-            return False
-        age = time.time() - CORE_HEARTBEAT.stat().st_mtime
-        return age <= HEARTBEAT_STALE_SECONDS
+            return None
+        return time.time() - CORE_HEARTBEAT.stat().st_mtime
     except Exception:
-        return False
+        return None
+
+
+def is_heartbeat_fresh() -> bool:
+    age = heartbeat_age_seconds()
+    return age is not None and age <= HEARTBEAT_STALE_SECONDS
 
 
 def read_core_state():
@@ -294,15 +306,46 @@ def _boot_observation_entry(attempt: GuardAttempt, *, success: bool, reason: str
     if attempt.started_at is None:
         return None
     now = time.time()
-    return {
+    intent = dict(attempt.restart_intent or {}) if isinstance(attempt.restart_intent, dict) else {}
+    start_reason = str(attempt.start_reason or "")
+    action = str(intent.get("action") or "").strip()
+    requested_by = str(intent.get("requested_by") or "").strip()
+    if intent:
+        restart_origin = requested_by or str(intent.get("source") or "operator").strip() or "operator"
+        restart_action = action or "runtime_restart"
+        if restart_action == "guard_stop" and start_reason == "initial_start":
+            restart_action = "guard_restart_after_stop"
+        planned_restart = bool(intent.get("planned", False))
+        provenance_complete = True
+    elif start_reason == "restart":
+        restart_origin = "guard_supervisor"
+        restart_action = "supervised_restart"
+        planned_restart = False
+        provenance_complete = True
+    else:
+        restart_origin = "unattributed_guard_start"
+        restart_action = start_reason or "unknown"
+        planned_restart = False
+        provenance_complete = False
+    restart_cause_reason = str(attempt.restart_cause_reason or "").strip()
+    entry = {
         "ts": now,
         "success": bool(success),
         "reason": str(reason or ""),
+        "start_reason": start_reason,
+        "restart_origin": restart_origin,
+        "restart_action": restart_action,
+        "planned_restart": planned_restart,
+        "provenance_complete": provenance_complete,
+        "restart_intent": intent,
         "total_observed_s": round(now - attempt.started_at, 3),
         "state_seen_after_s": round(attempt.state_seen_at - attempt.started_at, 3) if attempt.state_seen_at is not None else None,
         "heartbeat_seen_after_s": round(attempt.heartbeat_seen_at - attempt.started_at, 3) if attempt.heartbeat_seen_at is not None else None,
         "boot_timeout_seconds": round(float(attempt.boot_timeout_seconds or 0.0), 3),
     }
+    if restart_cause_reason:
+        entry["restart_cause_reason"] = restart_cause_reason
+    return entry
 
 
 def _record_boot_observation(attempt: GuardAttempt, *, success: bool, reason: str) -> None:
@@ -313,12 +356,16 @@ def _record_boot_observation(attempt: GuardAttempt, *, success: bool, reason: st
     history.append(entry)
     history = history[-BOOT_HISTORY_LIMIT:]
     atomic_write_json(BOOT_HISTORY_FILE, history)
+    cause_text = f" cause={entry.get('restart_cause_reason')} " if entry.get("restart_cause_reason") else " "
     log(
         "[GUARD] Boot metrics: "
         f"success={entry['success']} reason={entry['reason'] or 'n/a'} "
-        f"state_after={entry['state_seen_after_s']}s heartbeat_after={entry['heartbeat_seen_after_s']}s "
+        f"origin={entry['restart_origin']} action={entry['restart_action']} "
+        f"state_after={entry['state_seen_after_s']}s heartbeat_after={entry['heartbeat_seen_after_s']}s"
+        f"{cause_text}"
         f"total={entry['total_observed_s']}s window={entry['boot_timeout_seconds']}s"
     )
+    attempt.restart_cause_reason = ""
 
 
 def _state_matches_identity(state: Optional[dict], pid: Optional[int], create_time: Optional[float]) -> bool:
@@ -453,8 +500,11 @@ def _reset_attempt_runtime_fields(attempt: GuardAttempt) -> None:
     attempt.next_restart_at = None
     attempt.state_seen_at = None
     attempt.heartbeat_seen_at = None
+    attempt.heartbeat_stale_since = None
     attempt.resolution_started_at = None
     attempt.resolution_targets = []
+    attempt.start_reason = ""
+    attempt.restart_intent = None
     attempt.boot_timeout_seconds = _derive_boot_timeout_seconds()
 
 
@@ -478,6 +528,10 @@ def spawn_core(reason: str) -> int:
 def start_new_attempt(attempt: GuardAttempt, reason: str) -> None:
     _clear_core_runtime_artifacts()
     pid = spawn_core(reason)
+    intent = RUNTIME_RESTART_PROVENANCE_SERVICE.consume_pending_intent(
+        RESTART_INTENT_FILE,
+        now=time.time(),
+    )
     attempt.pid = pid
     attempt.create_time = _process_create_time(pid)
     attempt.started_at = time.time()
@@ -487,8 +541,20 @@ def start_new_attempt(attempt: GuardAttempt, reason: str) -> None:
     attempt.boot_timeout_seconds = _derive_boot_timeout_seconds()
     attempt.state_seen_at = None
     attempt.heartbeat_seen_at = None
+    attempt.heartbeat_stale_since = None
     attempt.resolution_started_at = None
     attempt.resolution_targets = _append_identity([], _process_identity(pid))
+    attempt.start_reason = str(reason or "")
+    attempt.restart_intent = intent
+    if str(reason or "") != "restart":
+        attempt.restart_cause_reason = ""
+    if intent:
+        log(
+            "[GUARD] Restart intent consumed: "
+            f"action={intent.get('action') or 'unknown'} "
+            f"source={intent.get('source') or 'unknown'} "
+            f"requested_by={intent.get('requested_by') or 'unknown'}"
+        )
     log(f"[GUARD] Boot observation window set to {attempt.boot_timeout_seconds:.1f}s")
 
 
@@ -550,12 +616,30 @@ def _boot_failed(attempt: GuardAttempt) -> tuple[bool, str]:
 
 def _runtime_failed(attempt: GuardAttempt) -> tuple[bool, str]:
     if not _attempt_is_alive(attempt):
+        attempt.heartbeat_stale_since = None
         return True, "pid_missing"
     state = read_core_state()
     if not _runtime_state_matches_attempt(attempt, state):
+        attempt.heartbeat_stale_since = None
         return True, "state_mismatch"
-    if not is_heartbeat_fresh():
-        return True, "heartbeat_stale"
+
+    heartbeat_age = heartbeat_age_seconds()
+    if heartbeat_age is not None and heartbeat_age <= HEARTBEAT_STALE_SECONDS:
+        attempt.heartbeat_stale_since = None
+        return False, ""
+
+    now = time.time()
+    if attempt.heartbeat_stale_since is None:
+        attempt.heartbeat_stale_since = now
+        age_text = "missing" if heartbeat_age is None else f"{heartbeat_age:.1f}s"
+        log(
+            "[GUARD] Heartbeat stale observation "
+            f"(age={age_text}); waiting for sustained confirmation"
+        )
+        return False, ""
+    if (now - attempt.heartbeat_stale_since) < HEARTBEAT_FAILURE_GRACE_SECONDS:
+        return False, ""
+    return True, "heartbeat_stale"
     return False, ""
 
 
@@ -596,14 +680,18 @@ def _schedule_restart_wait(attempt: GuardAttempt) -> None:
     delay = min(RESTART_MAX_DELAY_SECONDS, RESTART_BASE_DELAY_SECONDS * (2 ** max(0, attempt.restart_count - 1)))
     attempt.state = STATE_RESTART_WAIT
     attempt.next_restart_at = time.time() + delay
+    attempt.restart_cause_reason = str(attempt.failure_reason or "").strip()
     log(f"[GUARD] Restart wait {delay}s after failure: {attempt.failure_reason}")
     attempt.pid = None
     attempt.create_time = None
     attempt.started_at = None
     attempt.state_seen_at = None
     attempt.heartbeat_seen_at = None
+    attempt.heartbeat_stale_since = None
     attempt.resolution_started_at = None
     attempt.resolution_targets = []
+    attempt.start_reason = ""
+    attempt.restart_intent = None
 
 
 def build_initial_attempt() -> GuardAttempt:

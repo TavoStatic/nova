@@ -274,6 +274,8 @@ class TestAutonomyOrchestratorService(unittest.TestCase):
                             "status": "active",
                             "owner": "core_thinning",
                             "age_min": 4,
+                            "recommended_tool": "core_thinning",
+                            "executable": True,
                         }
                     ],
                 }
@@ -283,6 +285,110 @@ class TestAutonomyOrchestratorService(unittest.TestCase):
         self.assertEqual(packet["decision_type"], SPEC_DECISION_RECOMMEND_ACTION)
         self.assertEqual(packet["recommended_action"]["action_type"], "active_work_tree_run_next")
         self.assertEqual(packet["recommended_action"]["execution_group"], "active_work_tree")
+        self.assertEqual(packet["recommended_action"]["target_id"], "branch-active")
+
+    def test_evaluate_next_action_recommends_concrete_active_work_tree_in_watch_posture(self):
+        service = AutonomyOrchestratorService()
+
+        packet = service.evaluate_next_action(
+            _spec_envelope(
+                posture={"health_score": 89, "pass_ratio": 0.89, "posture_band": "yellow"},
+                work_tree={
+                    "open_count": 2,
+                    "active_candidate_count": 1,
+                    "active_executable_count": 1,
+                    "active_unsafe_count": 0,
+                    "branches": [
+                        {
+                            "branch_id": "branch-memory",
+                            "title": "Investigate memory persistence bootstrap gap",
+                            "status": "ready",
+                            "owner": "signal_ingestion",
+                            "recommended_tool": "system_check",
+                            "executable": True,
+                        }
+                    ],
+                },
+            )
+        )
+
+        self.assertEqual(packet["decision_type"], SPEC_DECISION_RECOMMEND_ACTION)
+        self.assertEqual(packet["recommended_action"]["action_type"], "active_work_tree_run_next")
+        self.assertEqual(packet["policy_checks"]["recommendation_threshold"], "concrete_active_work_tree")
+        self.assertIn("Investigate memory persistence bootstrap gap", packet["recommended_action"]["expected_effect"])
+        self.assertEqual(packet["recommended_action"]["target_id"], "branch-memory")
+        self.assertEqual(packet["recommended_action"]["cooldown_sec"], 0)
+
+    def test_active_work_tree_cooldown_is_branch_aware_for_evidence_steps(self):
+        service = AutonomyOrchestratorService()
+
+        packet = service.evaluate_next_action(
+            _spec_envelope(
+                work_tree={
+                    "open_count": 1,
+                    "active_candidate_count": 1,
+                    "active_executable_count": 1,
+                    "branches": [
+                        {
+                            "branch_id": "branch-new",
+                            "title": "Read release ledger for current package",
+                            "status": "ready",
+                            "owner": "signal_ingestion",
+                            "recommended_tool": "read",
+                            "executable": True,
+                        }
+                    ],
+                },
+                last_action={
+                    "last_action_type": "active_work_tree_run_next",
+                    "last_target_id": "branch-old",
+                    "cooldown_active": True,
+                    "cooldown_remaining_sec": 90,
+                },
+            )
+        )
+
+        self.assertEqual(packet["decision_type"], SPEC_DECISION_RECOMMEND_ACTION)
+        self.assertEqual(packet["recommended_action"]["target_id"], "branch-new")
+        self.assertEqual(packet["recommended_action"]["cooldown_sec"], 0)
+        self.assertNotIn("cooldown_active", packet["refusal_reasons"])
+
+    def test_active_work_tree_cooldown_is_task_aware_within_same_branch(self):
+        service = AutonomyOrchestratorService()
+
+        packet = service.evaluate_next_action(
+            _spec_envelope(
+                work_tree={
+                    "open_count": 1,
+                    "active_candidate_count": 1,
+                    "active_executable_count": 1,
+                    "branches": [
+                        {
+                            "branch_id": "branch-release",
+                            "title": "Release package is verified but validation outcome is missing",
+                            "status": "ready",
+                            "owner": "signal_ingestion",
+                            "task_id": "task-promotion",
+                            "task_title": "Run release promotion judgment from validation evidence",
+                            "recommended_tool": "release_promotion_judgment",
+                            "executable": True,
+                        }
+                    ],
+                },
+                last_action={
+                    "last_action_type": "active_work_tree_run_next",
+                    "last_target_id": "branch-release",
+                    "last_target_step_id": "task-validation",
+                    "cooldown_active": True,
+                    "cooldown_remaining_sec": 90,
+                },
+            )
+        )
+
+        self.assertEqual(packet["decision_type"], SPEC_DECISION_RECOMMEND_ACTION)
+        self.assertEqual(packet["recommended_action"]["target_id"], "branch-release")
+        self.assertEqual(packet["recommended_action"]["target_step_id"], "task-promotion")
+        self.assertNotIn("cooldown_active", packet["refusal_reasons"])
 
     def test_evaluate_next_action_prefers_concrete_active_lane_over_pulse(self):
         service = AutonomyOrchestratorService()
@@ -391,6 +497,47 @@ class TestAutonomyOrchestratorService(unittest.TestCase):
 
         self.assertEqual(packet["decision_type"], SPEC_DECISION_DEFER)
         self.assertIn("operator_ack_required", packet["refusal_reasons"])
+
+    def test_operator_hold_does_not_turn_into_generic_queue_investigation(self):
+        service = AutonomyOrchestratorService()
+
+        packet = service.evaluate_next_action(
+            _spec_envelope(
+                work_tree={
+                    "blocked_count": 1,
+                    "observing_count": 1,
+                    "operator_hold_count": 1,
+                    "latent_root_signal_count": 0,
+                },
+                policy={"requires_operator_ack_for": ["generated_queue_investigate"]},
+            )
+        )
+
+        self.assertEqual(packet["decision_type"], SPEC_DECISION_DEFER)
+        self.assertIn("operator_hold_pending", packet["refusal_reasons"])
+        self.assertNotIn("operator_ack_required", packet["refusal_reasons"])
+        self.assertEqual(packet["candidates_considered"], [])
+
+    def test_blocked_observing_work_tree_does_not_become_generated_queue_ack_hold(self):
+        service = AutonomyOrchestratorService()
+
+        packet = service.evaluate_next_action(
+            _spec_envelope(
+                work_tree={
+                    "blocked_count": 1,
+                    "observing_count": 1,
+                    "operator_hold_count": 0,
+                    "latent_root_signal_count": 0,
+                    "active_executable_count": 0,
+                },
+                policy={"requires_operator_ack_for": ["generated_queue_investigate"]},
+            )
+        )
+
+        self.assertEqual(packet["decision_type"], SPEC_DECISION_DEFER)
+        self.assertIn("work_tree_observing_root_truth", packet["refusal_reasons"])
+        self.assertNotIn("operator_ack_required", packet["refusal_reasons"])
+        self.assertEqual(packet["candidates_considered"], [])
 
     def test_evaluate_next_action_defers_for_active_cooldown(self):
         service = AutonomyOrchestratorService()

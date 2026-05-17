@@ -1,7 +1,7 @@
 from services.nova_supervisor_flow import apply_cli_supervisor_intent
 
 
-def test_apply_cli_supervisor_intent_marks_weather_clarify():
+def test_apply_cli_supervisor_intent_retire_weather_clarify():
     ledger = {}
     events = []
     states = []
@@ -22,16 +22,14 @@ def test_apply_cli_supervisor_intent_marks_weather_clarify():
         trace_fn=lambda *args, **kwargs: events.append((args, kwargs)),
     )
 
-    assert handled is True
-    assert final == "Which location should I use?"
-    assert ledger["planner_decision"] == "ask_clarify"
-    assert ledger["grounded"] is False
-    assert ledger["reply_contract"] == "weather.clarify"
-    assert ledger["reply_outcome"] == {"intent": "weather_lookup"}
-    assert states[-1] == {"kind": "location_recall"}
+    assert handled is False
+    assert final == ""
+    assert ledger == {}
+    assert states == []
+    assert events == []
 
 
-def test_apply_cli_supervisor_intent_marks_web_research_tool():
+def test_apply_cli_supervisor_intent_retires_web_research_tool():
     ledger = {"reply_outcome": {"tool_name": "web_research", "query": "nova status"}}
 
     handled, final = apply_cli_supervisor_intent(
@@ -50,9 +48,6 @@ def test_apply_cli_supervisor_intent_marks_web_research_tool():
         trace_fn=lambda *args, **kwargs: None,
     )
 
-    assert handled is True
-    assert final == "Research results"
-    assert ledger["planner_decision"] == "run_tool"
-    assert ledger["tool"] == "web_research"
-    assert ledger["tool_args"] == {"args": ["nova status"]}
-    assert ledger["grounded"] is True
+    assert handled is False
+    assert final == ""
+    assert ledger == {"reply_outcome": {"tool_name": "web_research", "query": "nova status"}}

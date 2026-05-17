@@ -7,6 +7,7 @@ import unittest
 from pathlib import Path
 
 from services.memory_health import build_memory_health_payload
+from services.memory_bootstrap_origin import default_pending_origin_contract, write_origin_contract
 from services.nova_memory_learning import load_learned_facts, save_learned_facts
 
 
@@ -128,6 +129,50 @@ class TestMemoryHealthService(unittest.TestCase):
             sources = {item["source"] for item in payload["issues"]}
             self.assertIn("memory_events_jsonl_tail_invalid", codes)
             self.assertIn("memory_events_log", sources)
+
+    def test_memory_health_names_missing_bootstrap_when_memory_enabled(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            db_path = root / "nova_memory.sqlite"
+            _create_memory_db(db_path, 0)
+
+            payload = build_memory_health_payload(
+                memory_db_path=db_path,
+                learned_facts_file=root / "memory" / "learned_facts.json",
+                identity_file=root / "memory" / "identity.json",
+                memory_enabled=True,
+                now_fn=lambda: 987.0,
+            )
+
+            self.assertEqual(payload["status"], "watch")
+            self.assertEqual(payload["bootstrap"]["status"], "incomplete")
+            self.assertEqual(set(payload["bootstrap"]["missing"]), {"learned_facts", "identity"})
+            codes = {item["code"] for item in payload["issues"]}
+            self.assertIn("learned_facts_missing", codes)
+            self.assertIn("identity_missing", codes)
+
+    def test_memory_health_distinguishes_pending_bootstrap_origin(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            db_path = root / "nova_memory.sqlite"
+            _create_memory_db(db_path, 0)
+            origin = root / "memory" / "bootstrap_origin.json"
+            write_origin_contract(origin, default_pending_origin_contract(now_fn=lambda: 123.0))
+
+            payload = build_memory_health_payload(
+                memory_db_path=db_path,
+                learned_facts_file=root / "memory" / "learned_facts.json",
+                identity_file=root / "memory" / "identity.json",
+                bootstrap_origin_file=origin,
+                memory_enabled=True,
+                now_fn=lambda: 987.0,
+            )
+
+            self.assertEqual(payload["bootstrap"]["status"], "waiting_for_origin_confirmation")
+            self.assertEqual(payload["bootstrap"]["origin_status"], "pending_operator_confirmation")
+            codes = {item["code"] for item in payload["issues"]}
+            self.assertIn("memory_bootstrap_origin_pending", codes)
+            self.assertIn("identity_missing", codes)
 
 
 if __name__ == "__main__":

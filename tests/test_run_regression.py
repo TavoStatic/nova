@@ -6,6 +6,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from services.regression_lanes import COMPACT_REGRESSION_LANES
+
 
 SCRIPT_PATH = Path(__file__).resolve().parents[1] / "scripts" / "run_regression.py"
 SPEC = importlib.util.spec_from_file_location("nova_run_regression_script", SCRIPT_PATH)
@@ -14,11 +16,18 @@ assert SPEC is not None and SPEC.loader is not None
 SPEC.loader.exec_module(RUN_REGRESSION)
 
 
+def _validation_tmp_root() -> Path:
+    return Path(os.environ.get("NOVA_VALIDATION_RUNTIME_DIR") or RUN_REGRESSION.BASE / "runtime" / "validation") / "_test_tmp"
+
+
 class TestRunRegressionScript(unittest.TestCase):
     def test_resolve_requested_lanes_defaults_to_unit(self):
         args = RUN_REGRESSION.parse_args([])
 
         self.assertEqual(RUN_REGRESSION.resolve_requested_lanes(args), ["unit"])
+
+    def test_compact_lane_map_uses_shared_regression_source(self):
+        self.assertEqual(RUN_REGRESSION.TEST_LANES, COMPACT_REGRESSION_LANES)
 
     def test_resolve_requested_lanes_expands_all(self):
         args = RUN_REGRESSION.parse_args(["--lane", "all"])
@@ -32,6 +41,7 @@ class TestRunRegressionScript(unittest.TestCase):
         lane_calls = []
 
         with patch.object(RUN_REGRESSION, "run_step", return_value=0), \
+             patch.object(RUN_REGRESSION, "audit_validation_artifacts_after_green_run", return_value={"ok": True, "status": "ok"}), \
              patch.object(RUN_REGRESSION, "write_regression_status") as status_mock, \
              patch.object(
                  RUN_REGRESSION,
@@ -43,6 +53,35 @@ class TestRunRegressionScript(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertEqual(lane_calls, [("behavior", 2)])
         status_mock.assert_called_once()
+
+    def test_main_fails_when_validation_artifacts_disagree_after_green_lanes(self):
+        with patch.object(RUN_REGRESSION, "run_step", return_value=0), \
+             patch.object(RUN_REGRESSION, "run_test_lane", return_value=0), \
+             patch.object(
+                 RUN_REGRESSION,
+                 "audit_validation_artifacts_after_green_run",
+                 return_value={
+                     "ok": False,
+                     "status": "llm_unavailable_in_green_regression",
+                     "current_window_failure_count": 2,
+                     "current_window_llm_unavailable_count": 2,
+                     "hidden_by_green_regression": True,
+                     "latest_failure": {
+                         "path": "runtime/validation/actions/bad.json",
+                         "failure_kind": "llm_service_unavailable",
+                         "final_answer": "(error: LLM service unavailable)",
+                     },
+                 },
+             ), \
+             patch.object(RUN_REGRESSION, "write_regression_status") as status_mock:
+            code = RUN_REGRESSION.main(["unit"])
+
+        self.assertEqual(code, 1)
+        status_mock.assert_called_once()
+        kwargs = status_mock.call_args.kwargs
+        self.assertEqual(kwargs.get("status"), "FAILED")
+        self.assertIn("validation_artifact_truth:llm_unavailable_in_green_regression", kwargs.get("detail"))
+        self.assertEqual((kwargs.get("extra") or {}).get("validation_artifact_failure_count"), 2)
 
     def test_main_lists_available_lanes(self):
         with patch("sys.stdout", new_callable=io.StringIO) as stdout:
@@ -109,7 +148,7 @@ class TestRunRegressionScript(unittest.TestCase):
         self.assertIsNone(restored_validation)
 
     def test_write_regression_status_records_validation_marker(self):
-        marker = Path("C:/Nova/runtime/_test_tmp") / "regression_status_test.json"
+        marker = _validation_tmp_root() / "regression_status_test.json"
         marker.parent.mkdir(parents=True, exist_ok=True)
         try:
             with patch.object(RUN_REGRESSION, "REGRESSION_STATUS_FILE", marker):

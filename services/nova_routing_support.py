@@ -5,24 +5,58 @@ import os
 import re
 from typing import Callable, Optional
 
-from services.nova_reply_deterministic import should_skip_llm_routing_for_deterministic_query
-
 import requests
 
+ROUTING_TOOL_NAMES = (
+    "none",
+    "self_status",
+    "weather_current_location",
+    "weather_location",
+    "web_fetch",
+    "web_search",
+    "web_research",
+    "web_gather",
+    "wikipedia_lookup",
+    "stackexchange_search",
+    "queue_status",
+    "pulse",
+    "system_check",
+    "phase2_audit",
+    "read",
+    "find",
+    "ls",
+    "screen",
+    "camera",
+    "location_coords",
+    "patch_apply",
+    "patch_rollback",
+    "update_now",
+    "update_now_confirm",
+    "update_now_cancel",
+    "work_tree_next",
+    "work_tree_execute",
+    "work_tree_status",
+    "work_tree_create",
+)
 
-ROUTING_INTENT_PROMPT = """\
-Classify the user message into exactly one routing intent. Reply with the label only â€” no explanation.
 
-Labels:
-weather_lookup   â€“ user wants current conditions, temperature, rain, forecast, or whether to dress for outdoors
-web_research     â€“ user wants online research on a topic
-web_search       â€“ user wants a quick web search
-store_fact       â€“ user is telling a personal fact to remember
-set_location     â€“ user is providing their location or zip code
-general_chat     â€“ everything else
-
-User message: {text}
-Label:"""
+ROUTING_INTENT_PROMPT = (
+    "You classify whether a local AI runtime should use a tool for the next user turn.\n"
+    "Use the actual goal in the conversation, not keyword matching or surface phrasing.\n"
+    "Return JSON only with this shape: "
+    '{"tool":"'
+    + "|".join(ROUTING_TOOL_NAMES)
+    + '",'
+    '"args":[],"confidence":0.0,"reason":""}.\n'
+    "Tool purposes: self_status reads Nova's live operational condition; weather tools read weather; "
+    "web tools retrieve external pages or research; queue_status and pulse read Nova queues and pulse; "
+    "system_check reads local runtime checks; read/find/ls inspect local files; screen/camera inspect local input; "
+    "patch/update tools operate on governed update flows.\n"
+    "Work Tree tools continue, inspect, execute, or create Nova's internal work plan.\n"
+    "Choose none when the user is discussing a previous answer, asking why a tool failed, "
+    "sharing context, or asking for normal conversation.\n"
+    "Choose a tool only when the user goal cannot be answered honestly without that tool."
+)
 
 
 def last_assistant_turn_text(turns: Optional[list[tuple[str, str]]]) -> str:
@@ -92,18 +126,6 @@ def looks_like_open_fallback_turn(
     if is_location_request_fn(candidate):
         return False
     normalized = normalize_turn_text_fn(candidate)
-    if normalized in {
-        "weather",
-        "weather now",
-        "weather current",
-        "weather today",
-        "current weather",
-        "what's the weather",
-        "what is the weather",
-        "what is the weather now",
-        "what's the weather now",
-    }:
-        return False
     if is_student_data_broad_query_fn(candidate) or is_local_knowledge_topic_query_fn(candidate):
         return False
     if normalized in {
@@ -371,31 +393,16 @@ def should_warn_supervisor_bypass(
     is_student_data_broad_query_fn: Callable[[str], bool],
     is_local_knowledge_topic_query_fn: Callable[[str], bool],
 ) -> bool:
-    candidate = str(text or "").strip()
-    if not candidate:
-        return False
-    if looks_like_open_fallback_turn_fn(candidate):
-        return False
-    if is_explicit_command_like_fn(candidate):
-        return False
-    if is_location_request_fn(candidate):
-        return False
-    normalized = normalize_turn_text_fn(candidate)
-    if normalized in {
-        "weather",
-        "weather now",
-        "weather current",
-        "weather today",
-        "current weather",
-        "what's the weather",
-        "what is the weather",
-        "what is the weather now",
-        "what's the weather now",
-    }:
-        return False
-    if is_student_data_broad_query_fn(candidate) or is_local_knowledge_topic_query_fn(candidate):
-        return False
-    return True
+    del (
+        text,
+        looks_like_open_fallback_turn_fn,
+        is_explicit_command_like_fn,
+        is_location_request_fn,
+        normalize_turn_text_fn,
+        is_student_data_broad_query_fn,
+        is_local_knowledge_topic_query_fn,
+    )
+    return False
 
 
 def should_clarify_unlabeled_numeric_turn(
@@ -405,19 +412,8 @@ def should_clarify_unlabeled_numeric_turn(
     current_state: Optional[dict] = None,
     get_saved_location_text_fn: Callable[[], str],
 ) -> bool:
-    raw = str(text or "").strip()
-    if not re.fullmatch(r"\d{5}", raw):
-        return False
-    state = current_state if isinstance(current_state, dict) else {}
-    if str(state.get("kind") or "").strip() in {"numeric_reference", "numeric_reference_clarify"} and str(state.get("value") or "").strip() == raw:
-        return False
-    action = pending_action if isinstance(pending_action, dict) else {}
-    if str(action.get("kind") or "") == "weather_lookup" and str(action.get("status") or "") == "awaiting_location":
-        return False
-    try:
-        return bool(str(get_saved_location_text_fn() or "").strip())
-    except Exception:
-        return True
+    del text, pending_action, current_state, get_saved_location_text_fn
+    return False
 
 
 def runtime_set_location_intent(
@@ -426,86 +422,164 @@ def runtime_set_location_intent(
     pending_action: Optional[dict] = None,
     get_saved_location_text_fn: Callable[[], str],
 ) -> Optional[dict[str, object]]:
-    raw = str(text or "").strip()
-    if not re.fullmatch(r"\d{5}", raw):
-        return None
-    action = pending_action if isinstance(pending_action, dict) else {}
-    if str(action.get("kind") or "") == "weather_lookup" and str(action.get("status") or "") == "awaiting_location":
-        return None
-    try:
-        if str(get_saved_location_text_fn() or "").strip():
-            return None
-    except Exception:
-        pass
-    return {
-        "handled": True,
-        "intent": "set_location",
-        "rule_name": "set_location_zip",
-        "matched_rule_name": "set_location_zip",
-        "location_value": raw,
-        "location_kind": "zip",
-        "location_ack_kind": "fact_only",
-    }
+    del text, pending_action, get_saved_location_text_fn
+    return None
 
 
 def llm_classify_routing_intent(
     text: str,
     turns: Optional[list[tuple[str, str]]] = None,
     *,
+    pending_action: Optional[dict] = None,
+    return_none_payload: bool = False,
     live_ollama_calls_allowed_fn: Callable[[], bool],
     chat_model_fn: Callable[[], str],
     ollama_base: str,
     get_saved_location_text_fn: Callable[[], str],
+    requests_post_fn: Callable[..., object] | None = None,
 ) -> Optional[dict[str, object]]:
-    raw = str(text or "").strip()
-    if not raw:
-        return None
-    if should_skip_llm_routing_for_deterministic_query(raw):
-        return None
-    if not live_ollama_calls_allowed_fn():
+    user_text = str(text or "").strip()
+    if not user_text:
         return None
     try:
-        prompt = ROUTING_INTENT_PROMPT.format(text=raw[:500])
-        payload = {
-            "model": chat_model_fn(),
-            "stream": False,
-            "options": {"temperature": 0.0, "top_p": 1.0, "num_predict": 8},
-            "messages": [{"role": "user", "content": prompt}],
-        }
-        response = requests.post(
-            f"{ollama_base}/api/chat",
-            json=payload,
-            timeout=8,
-        )
-        response.raise_for_status()
-        label = str(response.json().get("message", {}).get("content") or "").strip().lower()
-        label = re.sub(r"[^a-z_]", "", (label.split() or [""])[0])
+        if not live_ollama_calls_allowed_fn():
+            return None
     except Exception:
         return None
 
-    if label == "weather_lookup":
+    recent_turns: list[dict[str, str]] = []
+    for role, content in list(turns or [])[-8:]:
+        role_name = str(role or "").strip().lower()
+        if role_name not in {"user", "assistant"}:
+            continue
+        recent_turns.append({"role": role_name, "content": str(content or "").strip()[:900]})
+
+    pending = pending_action if isinstance(pending_action, dict) else {}
+    saved_location = ""
+    try:
+        saved_location = str(get_saved_location_text_fn() or "").strip()
+    except Exception:
         saved_location = ""
-        try:
-            saved_location = str(get_saved_location_text_fn() or "").strip()
-        except Exception:
-            pass
-        if saved_location:
-            return {
-                "handled": True,
-                "intent": "weather_lookup",
-                "rule_name": "weather_lookup",
-                "matched_rule_name": "weather_lookup",
-                "weather_mode": "current_location",
-                "location_value": saved_location,
-            }
-        return {
-            "handled": True,
-            "intent": "weather_lookup",
-            "rule_name": "weather_lookup",
-            "matched_rule_name": "weather_lookup",
-            "weather_mode": "clarify",
-        }
-    return None
+
+    request_payload = {
+        "turn": user_text,
+        "recent_turns": recent_turns,
+        "pending_action": pending,
+        "saved_location_available": bool(saved_location),
+    }
+    payload = {
+        "model": chat_model_fn(),
+        "stream": False,
+        "options": {"temperature": 0.0, "top_p": 0.8},
+        "messages": [
+            {"role": "system", "content": ROUTING_INTENT_PROMPT},
+            {"role": "user", "content": json.dumps(request_payload, ensure_ascii=True)},
+        ],
+    }
+
+    post = requests_post_fn if callable(requests_post_fn) else requests.post
+    try:
+        response = post(f"{str(ollama_base or '').rstrip('/')}/api/chat", json=payload, timeout=4.0)
+        response.raise_for_status()
+        content = str(response.json().get("message", {}).get("content") or "").strip()
+    except Exception:
+        return None
+
+    return _coerce_tool_intent_payload(
+        content,
+        user_text=user_text,
+        return_none_payload=return_none_payload,
+    )
+
+
+def _coerce_none_payload(parsed: dict[str, object], *, reason: str = "") -> dict[str, object]:
+    try:
+        confidence = float(parsed.get("confidence", 0.0) or 0.0)
+    except (TypeError, ValueError):
+        confidence = 0.0
+    return {
+        "tool": "none",
+        "args": [],
+        "confidence": max(0.0, min(1.0, confidence)),
+        "reason": str(parsed.get("reason") or reason or "").strip()[:240],
+        "source": "llm_intent",
+    }
+
+
+def _coerce_tool_intent_payload(
+    content: str,
+    *,
+    user_text: str,
+    return_none_payload: bool = False,
+) -> Optional[dict[str, object]]:
+    raw = str(content or "").strip()
+    if not raw:
+        return None
+    parsed: object
+    try:
+        parsed = json.loads(raw)
+    except Exception:
+        parsed = {"tool": raw.strip().lower(), "args": []}
+    if not isinstance(parsed, dict):
+        return None
+
+    allowed_tools = set(ROUTING_TOOL_NAMES) - {"none"}
+    aliases = {
+        "nova_status": "self_status",
+        "runtime_status": "self_status",
+        "internal_status": "self_status",
+        "self_report": "self_status",
+        "weather_lookup": "weather_current_location",
+        "current_weather": "weather_current_location",
+        "research": "web_research",
+        "wiki": "wikipedia_lookup",
+        "stack_overflow": "stackexchange_search",
+        "queue": "queue_status",
+        "nova_pulse": "pulse",
+        "diagnostics": "system_check",
+        "general_chat": "none",
+        "chat": "none",
+        "conversation": "none",
+    }
+    tool = str(parsed.get("tool") or parsed.get("intent") or "").strip().lower()
+    tool = aliases.get(tool, tool)
+    if tool in {"", "none", "no_tool"}:
+        return _coerce_none_payload(parsed) if return_none_payload else None
+    if tool not in allowed_tools:
+        return _coerce_none_payload(parsed, reason=f"unsupported_tool:{tool}") if return_none_payload else None
+
+    args_raw = parsed.get("args")
+    args = [str(item).strip() for item in list(args_raw or []) if str(item).strip()] if isinstance(args_raw, list) else []
+    query = str(parsed.get("query") or parsed.get("url") or parsed.get("location") or parsed.get("path") or "").strip()
+    if query and not args:
+        args = [query]
+    if tool in {"web_search", "web_research", "stackexchange_search"} and not args:
+        args = [user_text]
+    if tool == "wikipedia_lookup" and not args:
+        args = [user_text]
+    if tool in {"web_fetch", "web_gather"} and not args:
+        url_match = re.search(r"https?://[\w\-\./:?=&%]+", user_text)
+        if not url_match:
+            return _coerce_none_payload(parsed, reason=f"missing_url:{tool}") if return_none_payload else None
+        args = [url_match.group(0)]
+    if tool == "weather_location" and not args:
+        tool = "weather_current_location"
+    if tool in {"read", "find", "location_coords", "patch_apply", "update_now_confirm"} and not args:
+        return _coerce_none_payload(parsed, reason=f"missing_args:{tool}") if return_none_payload else None
+    if tool == "camera" and not args:
+        args = ["what do you see"]
+
+    try:
+        confidence = float(parsed.get("confidence", 0.0) or 0.0)
+    except (TypeError, ValueError):
+        confidence = 0.0
+    return {
+        "tool": tool,
+        "args": args,
+        "confidence": max(0.0, min(1.0, confidence)),
+        "reason": str(parsed.get("reason") or "").strip()[:240],
+        "source": "llm_intent",
+    }
 
 
 def unlabeled_numeric_turn_reply(text: str) -> str:

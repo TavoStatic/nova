@@ -14,10 +14,20 @@ def normalize_identity_path(value: str | Path) -> str:
         return str(value or "").strip().lower()
 
 
-def matches_script_process(cmdline: list[str] | tuple[str, ...] | None, script_path: str | Path) -> bool:
+def matches_script_process(
+    cmdline: list[str] | tuple[str, ...] | None,
+    script_path: str | Path,
+    cwd: str | Path | None = None,
+) -> bool:
     target = normalize_identity_path(script_path)
     for token in list(cmdline or []):
-        if normalize_identity_path(token) == target:
+        candidates = [str(token or "")]
+        try:
+            if cwd is not None and not Path(str(token or "")).is_absolute():
+                candidates.append(str(Path(cwd) / str(token or "")))
+        except Exception:
+            pass
+        if any(normalize_identity_path(candidate) == target for candidate in candidates):
             return True
     return False
 
@@ -28,7 +38,11 @@ def logical_service_processes(script_path: str | Path) -> list[dict[str, Any]]:
     for process in psutil.process_iter(["pid", "ppid", "cmdline", "create_time"]):
         try:
             info = process.info or {}
-            if not matches_script_process(info.get("cmdline"), script_path):
+            try:
+                cwd = process.cwd()
+            except Exception:
+                cwd = None
+            if not matches_script_process(info.get("cmdline"), script_path, cwd=cwd):
                 continue
             pid = int(info.get("pid") or 0)
             ppid = int(info.get("ppid") or 0)

@@ -1,12 +1,14 @@
 import base64
 import io
 import sys
+from pathlib import Path
 import requests
 import cv2
 from PIL import Image
+from services.nova_vision_runtime import vision_model_from_policy_file
 
 OLLAMA_URL = "http://localhost:11434/api/chat"
-MODEL = "qwen2.5vl:7b"
+MODEL = vision_model_from_policy_file(Path(__file__).resolve().parent)
 
 def webcam_png_bytes(cam_index=0):
     cap = cv2.VideoCapture(cam_index, cv2.CAP_DSHOW)

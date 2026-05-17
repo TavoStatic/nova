@@ -1,4 +1,5 @@
 import unittest
+import inspect
 
 from services.nova_http_routing import execute_http_routing_sequence
 
@@ -41,79 +42,60 @@ def _call_route(**overrides):
     session = overrides.pop("session", _FakeSession())
     fulfillment = overrides.pop("fulfillment", _FakeFulfillmentService())
     ledger = overrides.pop("ledger", {})
+    del fulfillment
     return execute_http_routing_sequence(
         text=overrides.pop("text", "hello"),
         routed_text=overrides.pop("routed_text", "hello"),
-        identity_only_block_kind=overrides.pop("identity_only_block_kind", ""),
         turns=overrides.pop("turns", [("user", "hello")]),
         turn_acts=overrides.pop("turn_acts", []),
         intent_rule=overrides.pop("intent_rule", {}),
         session=session,
         conversation_state=overrides.pop("conversation_state", session.conversation_state),
         ledger=ledger,
-        identity_only_block_reply=overrides.pop("identity_only_block_reply", lambda kind: f"blocked:{kind}"),
         should_clarify_unlabeled_numeric_turn=overrides.pop("should_clarify_unlabeled_numeric_turn", lambda *_args, **_kwargs: False),
         unlabeled_numeric_turn_reply=overrides.pop("unlabeled_numeric_turn_reply", lambda text: f"clarify:{text}"),
-        mixed_info_request_clarify_reply=overrides.pop("mixed_info_request_clarify_reply", lambda text: f"mixed:{text}"),
         build_routing_decision=overrides.pop("build_routing_decision", lambda text, **kwargs: {"text": text, **kwargs}),
         handle_supervisor_intent=overrides.pop("handle_supervisor_intent", lambda *_args, **_kwargs: (False, "", None, {})),
         supervisor_has_route=overrides.pop("supervisor_has_route", lambda rule: bool(rule.get("intent") or rule.get("action")) if isinstance(rule, dict) else False),
         should_warn_supervisor_bypass=overrides.pop("should_warn_supervisor_bypass", lambda _text: False),
         emit_supervisor_intent_trace=overrides.pop("emit_supervisor_intent_trace", lambda *args, **kwargs: None),
-        is_web_research_override_request=overrides.pop("is_web_research_override_request", lambda _text: False),
-        learn_self_identity_binding=overrides.pop("learn_self_identity_binding", lambda _text: (False, "")),
         evaluate_supervisor_rules=overrides.pop("evaluate_supervisor_rules", lambda *_args, **_kwargs: {}),
         execute_registered_supervisor_rule=overrides.pop("execute_registered_supervisor_rule", lambda *_args, **_kwargs: (False, "", None)),
-        fulfillment_flow_service=fulfillment,
-        fast_smalltalk_reply=overrides.pop("fast_smalltalk_reply", lambda _text: None),
-        learn_contextual_developer_facts=overrides.pop("learn_contextual_developer_facts", lambda *_args: (False, "")),
-        infer_profile_conversation_state=overrides.pop("infer_profile_conversation_state", lambda _text: None),
         make_conversation_state=overrides.pop("make_conversation_state", lambda kind, **data: {"kind": kind, **data}),
-        learn_contextual_self_facts=overrides.pop("learn_contextual_self_facts", lambda *_args, **_kwargs: (False, "")),
-        extract_memory_teach_text=overrides.pop("extract_memory_teach_text", lambda _text: ""),
-        mem_enabled=overrides.pop("mem_enabled", lambda: False),
-        store_location_fact_reply=overrides.pop("store_location_fact_reply", lambda *_args, **_kwargs: ""),
-        weather_for_saved_location=overrides.pop("weather_for_saved_location", lambda: ""),
-        is_saved_location_weather_query=overrides.pop("is_saved_location_weather_query", lambda _text: False),
-        get_saved_location_text=overrides.pop("get_saved_location_text", lambda: ""),
-        store_declarative_fact_outcome=overrides.pop("store_declarative_fact_outcome", lambda *_args, **_kwargs: None),
-        render_reply=overrides.pop("render_reply", lambda outcome: str(outcome)),
-        consume_conversation_followup=overrides.pop("consume_conversation_followup", lambda *_args, **_kwargs: (False, "", None)),
-        conversation_active_subject=overrides.pop("conversation_active_subject", lambda state: str((state or {}).get("kind") or "")),
-        developer_work_guess_turn=overrides.pop("developer_work_guess_turn", lambda _text: ("", None)),
-        developer_location_turn=overrides.pop("developer_location_turn", lambda *_args, **_kwargs: ("", None)),
         action_ledger_add_step=overrides.pop("action_ledger_add_step", lambda *args, **kwargs: None),
         ensure_reply=overrides.pop("ensure_reply", lambda text: text),
     )
 
 
 class TestNovaHttpRoutingSequence(unittest.TestCase):
-    def test_routing_sequence_short_circuits_identity_only_block(self):
-        result = _call_route(
-            text="open the browser",
-            routed_text="open the browser",
-            identity_only_block_kind="tools",
-            handle_supervisor_intent=lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("should not reach supervisor intent")),
-        )
+    def test_routing_sequence_has_no_identity_only_block_surface(self):
+        signature = inspect.signature(execute_http_routing_sequence)
 
-        self.assertTrue(result.get("handled"))
-        self.assertEqual(result.get("decision_stage"), "identity_only_mode")
-        self.assertEqual((result.get("flow_result") or {}).get("planner_decision"), "policy_block")
+        self.assertNotIn("identity_only_block_kind", signature.parameters)
+        self.assertNotIn("identity_only_block_reply", signature.parameters)
 
-    def test_routing_sequence_handles_supervisor_intent(self):
+    def test_routing_sequence_does_not_handle_retired_weather_supervisor_intent(self):
         result = _call_route(
-            text="what is the weather",
-            routed_text="what is the weather",
-            intent_rule={"intent": "weather_lookup"},
+            text="weather current location",
+            routed_text="weather current location",
+            intent_rule={"intent": "weather_lookup", "weather_mode": "current_location"},
             handle_supervisor_intent=lambda *_args, **_kwargs: (True, "Sunny.", {"kind": "weather"}, {"reply_contract": "weather.current"}),
         )
 
-        self.assertTrue(result.get("handled"))
-        self.assertEqual(result.get("decision_stage"), "supervisor_intent")
-        self.assertEqual((result.get("flow_result") or {}).get("reply"), "Sunny.")
-        self.assertEqual((result.get("conversation_state") or {}).get("kind"), "weather")
+        self.assertFalse(result.get("handled"))
+        self.assertNotEqual(result.get("decision_stage"), "supervisor_intent")
 
-    def test_routing_sequence_handles_saved_location_weather_before_supervisor_intent(self):
+    def test_routing_sequence_does_not_own_mixed_turn_clarification(self):
+        result = _call_route(
+            text="this is context and can you use it",
+            routed_text="this is context and can you use it",
+            turn_acts=["inform", "ask", "mixed"],
+        )
+
+        self.assertFalse(result.get("handled"))
+        self.assertNotEqual(result.get("decision_stage"), "mixed_turn_clarify")
+
+    def test_routing_sequence_does_not_auto_use_saved_location_weather_before_supervisor_intent(self):
         session = _FakeSession()
         session.conversation_state = {"kind": "location_recall"}
 
@@ -123,35 +105,30 @@ class TestNovaHttpRoutingSequence(unittest.TestCase):
             routed_text="weather now",
             conversation_state={"kind": "location_recall"},
             intent_rule={"intent": "weather_lookup"},
-            weather_for_saved_location=lambda: "Brownsville, TX: Sunny.",
-            is_saved_location_weather_query=lambda text: text == "weather now",
-            handle_supervisor_intent=lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("saved-location weather should handle first")),
+            handle_supervisor_intent=lambda *_args, **_kwargs: (True, "What location should I use for the weather lookup?", {"kind": "weather"}, {}),
         )
 
-        self.assertTrue(result.get("handled"))
-        self.assertEqual(result.get("decision_stage"), "saved_location_weather")
-        self.assertIn("Brownsville", (result.get("flow_result") or {}).get("reply", ""))
+        self.assertFalse(result.get("handled"))
+        self.assertNotEqual(result.get("decision_stage"), "supervisor_intent")
+        self.assertEqual(session.conversation_state, {"kind": "location_recall"})
 
-    def test_routing_sequence_returns_web_override_before_later_branches(self):
-        fulfillment = _FakeFulfillmentService()
-        session = _FakeSession()
-
+    def test_routing_sequence_rejects_removed_grounded_self_report_intent(self):
         result = _call_route(
-            session=session,
-            fulfillment=fulfillment,
-            text="all you need is the Web",
-            routed_text="all you need is the Web",
-            is_web_research_override_request=lambda _text: True,
-            learn_self_identity_binding=lambda _text: (_ for _ in ()).throw(AssertionError("should not reach identity binding")),
+            text="what is your health percentage at?",
+            routed_text="what is your health percentage at?",
+            intent_rule={"intent": "grounded_self_report", "report_mode": "health"},
+            handle_supervisor_intent=lambda *_args, **_kwargs: (
+                True,
+                "Live health score is 95/100.",
+                None,
+                {"reply_contract": "grounded_self_report.health"},
+            ),
         )
 
-        self.assertTrue(result.get("handled"))
-        self.assertEqual(result.get("decision_stage"), "web_research_override")
-        self.assertEqual((result.get("flow_result") or {}).get("intent"), "session_override")
-        self.assertTrue(session.prefer_web_for_data_queries)
-        self.assertEqual(fulfillment.calls, [])
+        self.assertFalse(result.get("handled"))
+        self.assertNotEqual(result.get("decision_stage"), "supervisor_intent")
 
-    def test_routing_sequence_handles_registered_supervisor_rule_and_returns_routing_decision(self):
+    def test_routing_sequence_does_not_allow_removed_profile_supervisor_rule(self):
         result = _call_route(
             text="who made you?",
             routed_text="who made you?",
@@ -163,17 +140,9 @@ class TestNovaHttpRoutingSequence(unittest.TestCase):
                 "reply_outcome": {"kind": "followup"},
                 "grounded": True,
             },
-            execute_registered_supervisor_rule=lambda *_args, **_kwargs: (
-                True,
-                "Gus made me.",
-                {"kind": "identity_profile", "subject": "developer"},
-            ),
         )
 
-        self.assertTrue(result.get("handled"))
-        self.assertEqual(result.get("decision_stage"), "registered_supervisor_rule")
-        self.assertEqual((result.get("flow_result") or {}).get("intent"), "developer_identity_followup")
-        self.assertEqual((result.get("routing_decision") or {}).get("handle_result", {}).get("intent"), "developer_identity_followup")
+        self.assertFalse(result.get("handled"))
 
     def test_routing_sequence_does_not_use_location_fallback_after_supervisor(self):
         fulfillment = _FakeFulfillmentService()
@@ -185,7 +154,7 @@ class TestNovaHttpRoutingSequence(unittest.TestCase):
         )
 
         self.assertFalse(result.get("handled"))
-        self.assertEqual(fulfillment.calls, [("what is the name of the city", None)])
+        self.assertEqual(fulfillment.calls, [])
 
 
 if __name__ == "__main__":

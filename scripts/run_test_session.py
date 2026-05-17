@@ -3,11 +3,12 @@ from __future__ import annotations
 import argparse
 import io
 import json
+import os
 import re
 import sys
 import time
 import uuid
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 from pathlib import Path
 from typing import Any
 from unittest import mock
@@ -19,13 +20,17 @@ if str(BASE_DIR) not in sys.path:
 
 from services.nova_runtime_context import resolve_runtime_dir
 
-import nova_core
-import nova_http
-import run_tools
-
 
 RUNTIME_DIR = resolve_runtime_dir(BASE_DIR)
 RUNNER_ROOT = RUNTIME_DIR / "test_sessions"
+_IMPORT_SANDBOX = RUNTIME_DIR / "validation" / "session_runner_import"
+os.environ.setdefault("NOVA_WORK_TREE_DB", str(_IMPORT_SANDBOX / "_internal" / "work_tree.db"))
+os.environ.setdefault("NOVA_MEMORY_DB", str(_IMPORT_SANDBOX / "nova_memory.sqlite"))
+
+import nova_core
+import nova_http
+import work_tree
+
 DEFAULT_SESSIONS_DIR = BASE_DIR / "tests" / "sessions"
 DEFAULT_COMPARE_MODES = ("cli", "http")
 VALID_COMPARE_MODES = {"cli", "http", "run_tools"}
@@ -38,6 +43,13 @@ _ROUTE_NOISE_PREFIXES = (
     "session_fact_sheet:",
     "llm_fallback:",
     "llm_call:",
+)
+_RUNTIME_ERROR_MARKERS = (
+    "llm service unavailable",
+    "ollama chat model missing",
+    "ollama chat api unavailable",
+    "ollama chat failed",
+    "ollama chat route unavailable",
 )
 
 
@@ -249,6 +261,37 @@ def _flagged_probe_lines(turns: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return flagged
 
 
+def _runtime_failure_kind(turn: dict[str, Any]) -> str:
+    assistant = _normalize_text(turn.get("assistant"))
+    low = assistant.lower()
+    if not low:
+        return ""
+    if any(marker in low for marker in _RUNTIME_ERROR_MARKERS):
+        return "llm_service_unavailable"
+    if low.startswith("(error:") or low.startswith("error:"):
+        return "final_answer_error"
+    return ""
+
+
+def _runtime_failure_lines(mode: str, turns: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    failures: list[dict[str, Any]] = []
+    for turn in turns:
+        failure_kind = _runtime_failure_kind(turn)
+        if not failure_kind:
+            continue
+        failures.append(
+            {
+                "mode": str(mode or ""),
+                "turn": int(turn.get("turn") or 0),
+                "failure_kind": failure_kind,
+                "assistant": _preview_value(turn.get("assistant", ""), limit=220),
+                "planner_decision": str(turn.get("planner_decision") or ""),
+                "route_summary": _preview_value(turn.get("route_summary", ""), limit=260),
+            }
+        )
+    return failures
+
+
 def _turn_record(index: int, user_text: str, assistant_text: str, ledger: dict[str, Any] | None, reflection: dict[str, Any] | None) -> dict[str, Any]:
     ledger = ledger if isinstance(ledger, dict) else {}
     reflection = reflection if isinstance(reflection, dict) else {}
@@ -275,21 +318,47 @@ def _isolated_runner_state(mode_dir: Path):
     session_store = mode_dir / "http_chat_sessions.json"
     health_log = mode_dir / "health.log"
     reflection_log = mode_dir / "self_reflection.jsonl"
+    memory_events_log = mode_dir / "memory_events.jsonl"
+    behavior_metrics_file = mode_dir / "behavior_metrics.json"
+    tool_events_log = mode_dir / "tool_events.jsonl"
     learned_facts = mode_dir / "learned_facts.json"
     identity_file = mode_dir / "identity.json"
+    memory_db = mode_dir / "nova_memory.sqlite"
+    work_tree_db = mode_dir / "_internal" / "work_tree.db"
+    updates_dir = mode_dir / "updates"
 
     saved_turns = dict(nova_http.SESSION_TURNS)
     saved_owners = dict(nova_http.SESSION_OWNERS)
     saved_active_user = nova_core.get_active_user()
+    saved_work_tree_db = getattr(work_tree, "_DB_PATH", None)
+    saved_work_tree_db_exists = bool(saved_work_tree_db and Path(saved_work_tree_db).exists())
+    saved_tool_events_path = getattr(nova_core.TOOL_REGISTRY_SERVICE, "events_log_path", None)
 
-    with mock.patch.object(nova_core, "ACTION_LEDGER_DIR", action_dir), \
-         mock.patch.object(nova_core, "SELF_REFLECTION_LOG", reflection_log), \
-         mock.patch.object(nova_core, "HEALTH_LOG", health_log), \
-         mock.patch.object(nova_core, "LEARNED_FACTS_FILE", learned_facts), \
-         mock.patch.object(nova_core, "IDENTITY_FILE", identity_file), \
-         mock.patch.object(nova_http, "RUNTIME_DIR", mode_dir), \
-         mock.patch.object(nova_http, "SESSION_STORE_PATH", session_store):
+    with ExitStack() as stack:
+        stack.enter_context(mock.patch.object(nova_core, "ACTION_LEDGER_DIR", action_dir))
+        stack.enter_context(mock.patch.object(nova_core, "SELF_REFLECTION_LOG", reflection_log))
+        stack.enter_context(mock.patch.object(nova_core, "HEALTH_LOG", health_log))
+        stack.enter_context(mock.patch.object(nova_core, "MEMORY_EVENTS_LOG", memory_events_log))
+        stack.enter_context(mock.patch.object(nova_core, "BEHAVIOR_METRICS_FILE", behavior_metrics_file))
+        if hasattr(nova_core, "BehaviorMetricsStore"):
+            behavior_store = nova_core.BehaviorMetricsStore(behavior_metrics_file)
+            stack.enter_context(mock.patch.object(nova_core, "BEHAVIOR_METRICS_STORE", behavior_store))
+            stack.enter_context(mock.patch.object(nova_core, "BEHAVIOR_METRICS", behavior_store.metrics))
+        stack.enter_context(mock.patch.object(nova_core, "LEARNED_FACTS_FILE", learned_facts))
+        stack.enter_context(mock.patch.object(nova_core, "IDENTITY_FILE", identity_file))
+        stack.enter_context(mock.patch.object(nova_core, "UPDATES_DIR", updates_dir))
+        stack.enter_context(mock.patch.object(nova_core, "SNAPSHOTS_DIR", updates_dir / "snapshots"))
+        stack.enter_context(mock.patch.object(nova_core, "PATCH_LOG", updates_dir / "patch.log"))
+        stack.enter_context(mock.patch.object(nova_core, "PATCH_REVISION_FILE", updates_dir / "revision.json"))
+        stack.enter_context(mock.patch.object(nova_core, "POLICY_AUDIT_LOG", mode_dir / "policy_changes.jsonl"))
+        if nova_core.memory_mod is not None and hasattr(nova_core.memory_mod, "DB_PATH"):
+            stack.enter_context(mock.patch.object(nova_core.memory_mod, "DB_PATH", memory_db))
+        if hasattr(nova_core.TOOL_REGISTRY_SERVICE, "events_log_path"):
+            nova_core.TOOL_REGISTRY_SERVICE.events_log_path = tool_events_log
+        stack.enter_context(mock.patch.object(nova_http, "RUNTIME_DIR", mode_dir))
+        stack.enter_context(mock.patch.object(nova_http, "SESSION_STORE_PATH", session_store))
         try:
+            work_tree._set_db_path(work_tree_db)
             nova_core.set_active_user(None)
             nova_http.SESSION_TURNS.clear()
             nova_http.SESSION_OWNERS.clear()
@@ -301,6 +370,12 @@ def _isolated_runner_state(mode_dir: Path):
                 "health_log": health_log,
                 "reflection_log": reflection_log,
                 "session_store": session_store,
+                "memory_events_log": memory_events_log,
+                "behavior_metrics_file": behavior_metrics_file,
+                "tool_events_log": tool_events_log,
+                "memory_db": memory_db,
+                "work_tree_db": work_tree_db,
+                "updates_dir": updates_dir,
             }
         finally:
             nova_core.set_active_user(saved_active_user)
@@ -310,6 +385,22 @@ def _isolated_runner_state(mode_dir: Path):
             nova_http.SESSION_OWNERS.update(saved_owners)
             nova_http.SESSION_STATE_MANAGER.clear()
             nova_core.TURN_SUPERVISOR.reset()
+            if saved_tool_events_path is not None and hasattr(nova_core.TOOL_REGISTRY_SERVICE, "events_log_path"):
+                nova_core.TOOL_REGISTRY_SERVICE.events_log_path = saved_tool_events_path
+            if saved_work_tree_db is not None:
+                if saved_work_tree_db_exists:
+                    work_tree._set_db_path(saved_work_tree_db)
+                else:
+                    work_tree._TREES.clear()
+                    work_tree._BRANCHES.clear()
+                    work_tree._TASKS.clear()
+                    work_tree._SCORES.clear()
+                    work_tree._DB_REQUESTED_PATH = Path(saved_work_tree_db)
+                    work_tree._DB_PATH = Path(saved_work_tree_db)
+                    work_tree._DB_CONNECT_TARGET = str(saved_work_tree_db)
+                    work_tree._DB_CONNECT_USE_URI = False
+                    work_tree._DB_GUARD_LOG = work_tree._runtime_dir_for_db_path(Path(saved_work_tree_db)) / "work_tree_db_guard.log"
+                    work_tree._DB_ACCESS_LOG = work_tree._runtime_dir_for_db_path(Path(saved_work_tree_db)) / "work_tree_access.log"
 
 
 def run_cli_session(messages: list[str], mode_dir: Path) -> dict[str, Any]:
@@ -369,7 +460,7 @@ def run_run_tools_session(messages: list[str], mode_dir: Path) -> dict[str, Any]
         reflection_rows: list[dict[str, Any]] = []
 
         for index, message in enumerate(messages, start=1):
-            reply = run_tools.ask_nova(message)
+            reply = nova_http.process_chat("run-tools", message)
             ledgers = _read_ledger_rows(paths["action_dir"])
             reflections = _read_jsonl(paths["reflection_log"])
             ledger = ledgers[-1] if ledgers else {}
@@ -412,6 +503,8 @@ def compare_sessions(left_result: dict[str, Any], right_result: dict[str, Any]) 
     right_mode = str(right_result.get("mode") or "right").strip().lower() or "right"
     left_turns = list(left_result.get("turns") or [])
     right_turns = list(right_result.get("turns") or [])
+    left_runtime_failures = _runtime_failure_lines(left_mode, left_turns)
+    right_runtime_failures = _runtime_failure_lines(right_mode, right_turns)
     turn_count = max(len(left_turns), len(right_turns))
     diffs: list[dict[str, Any]] = []
 
@@ -443,6 +536,10 @@ def compare_sessions(left_result: dict[str, Any], right_result: dict[str, Any]) 
         "diffs": diffs,
         "left_flagged_probes": _flagged_probe_lines(left_turns),
         "right_flagged_probes": _flagged_probe_lines(right_turns),
+        "left_runtime_failures": left_runtime_failures,
+        "right_runtime_failures": right_runtime_failures,
+        "runtime_failures": left_runtime_failures + right_runtime_failures,
+        "runtime_failure_count": len(left_runtime_failures) + len(right_runtime_failures),
     }
     for mode_name, turns, flagged in (
         (left_mode, left_turns, comparison["left_flagged_probes"]),
@@ -450,6 +547,11 @@ def compare_sessions(left_result: dict[str, Any], right_result: dict[str, Any]) 
     ):
         comparison[f"{mode_name}_turns"] = len(turns)
         comparison[f"{mode_name}_flagged_probes"] = flagged
+    for mode_name, runtime_failures in (
+        (left_mode, left_runtime_failures),
+        (right_mode, right_runtime_failures),
+    ):
+        comparison[f"{mode_name}_runtime_failures"] = runtime_failures
     return comparison
 
 
@@ -527,8 +629,29 @@ def _print_summary(session_meta: dict[str, Any], comparison: dict[str, Any], rep
     else:
         print("No red/yellow drift-style probes were flagged in either path.")
 
+    runtime_failures = comparison.get("runtime_failures") or []
+    if runtime_failures:
+        print("")
+        print("Runtime failures:")
+        for row in runtime_failures:
+            mode = str(row.get("mode") or "")
+            label = left_label if mode == left_mode else right_label if mode == right_mode else _mode_label(mode)
+            print(f"- {label} turn {row.get('turn')}: {row.get('failure_kind')}: {_preview_value(row.get('assistant', ''))}")
+    else:
+        print("No runtime error answers were produced in either path.")
+
     print("")
     print(f"Saved full report to {report_path}")
+
+
+def _comparison_failed(comparison: dict[str, Any]) -> bool:
+    if not bool(comparison.get("turn_count_match", False)):
+        return True
+    if comparison.get("diffs"):
+        return True
+    if comparison.get("left_flagged_probes") or comparison.get("right_flagged_probes"):
+        return True
+    return int(comparison.get("runtime_failure_count", 0) or 0) > 0
 
 
 def main() -> int:
@@ -549,7 +672,7 @@ def main() -> int:
     comparison = compare_sessions(left_result, right_result)
     report_path = _write_report(run_dir, session_meta, left_result, right_result, comparison)
     _print_summary(session_meta, comparison, report_path)
-    return 0
+    return 1 if _comparison_failed(comparison) else 0
 
 
 if __name__ == "__main__":

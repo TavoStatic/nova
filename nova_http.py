@@ -21,9 +21,7 @@ import work_tree
 import capabilities as capabilities_mod
 import http_chat_flow
 import http_session_store
-import services.nova_profile_followups as nova_profile_followups
 import services.nova_query_classifiers as nova_query_classifiers
-import services.nova_web_tools as nova_web_tools
 from conversation_manager import ConversationManager
 from services.control_assets import CONTROL_ASSETS_SERVICE
 from services.control_actions import CONTROL_ACTIONS_SERVICE
@@ -57,18 +55,23 @@ from services.runtime_analytics import RUNTIME_ANALYTICS_SERVICE
 from services.runtime_artifacts import RUNTIME_ARTIFACTS_SERVICE
 from services.runtime_control import RUNTIME_CONTROL_SERVICE
 from services.runtime_process_state import RUNTIME_PROCESS_STATE_SERVICE
+from services.runtime_restart_provenance import RUNTIME_RESTART_PROVENANCE_SERVICE
 from services.runtime_status import RUNTIME_STATUS_SERVICE
 from services.runtime_timeline import RUNTIME_TIMELINE_SERVICE
+from services.validation_artifact_truth import VALIDATION_ARTIFACT_TRUTH_SERVICE
+from services.port_ownership import PORT_OWNERSHIP_SERVICE
 from services.autonomy_orchestrator_ledger import AUTONOMY_ORCHESTRATOR_LEDGER_SERVICE
 from services.nova_runtime_context import AUTONOMY_ORCHESTRATOR_LEDGER_FILE
+from services.nova_runtime_context import OPERATOR_OUTBOX_FILE
 from services.nova_runtime_context import resolve_runtime_dir
+from services.operator_outbox import OPERATOR_OUTBOX_SERVICE
 from services.session_admin import SESSION_ADMIN_SERVICE
 from services.data_pipeline_registry import get_pipeline_schema_probe as pipeline_get_schema_probe
 from services.data_pipeline_registry import get_pipeline_status as pipeline_get_status
 from services.data_pipeline_registry import list_pipeline_summaries as pipeline_list_summaries
+from services.generated_work_queue_snapshot import generated_work_queue_payload as service_generated_work_queue_payload
 from services.subconscious_control import SUBCONSCIOUS_CONTROL_SERVICE
 from services.test_session_control import TEST_SESSION_CONTROL_SERVICE
-from services.testing_ecology import TESTING_ECOLOGY_SERVICE
 from services.subconscious_runtime import SUBCONSCIOUS_SERVICE
 from services.runtime_console_frontdoor import RUNTIME_CONSOLE_FRONTDOOR_SERVICE
 import tools.runtime_processes as runtime_processes
@@ -133,6 +136,7 @@ TOOL_EVENTS_LOG = RUNTIME_DIR / "tool_events.jsonl"
 MEMORY_EVENTS_LOG = RUNTIME_DIR / "memory_events.jsonl"
 GUARD_LOG_PATH = LOG_DIR / "guard.log"
 GUARD_BOOT_HISTORY_PATH = RUNTIME_DIR / "guard_boot_history.json"
+RESTART_INTENT_PATH = RUNTIME_DIR / "restart_intent.json"
 
 CONTROL_SESSIONS: Dict[str, float] = {}
 CONTROL_SESSION_TTL_SECONDS = 8 * 60 * 60
@@ -438,23 +442,7 @@ def _subconscious_live_summary(limit: int = 6) -> dict:
 
 
 def _generated_work_queue(limit: int = 24) -> dict:
-    definitions = _available_test_session_definitions(500)
-    return TEST_SESSION_CONTROL_SERVICE.generated_work_queue(
-        definitions,
-        _test_session_report_summaries(max(200, len(definitions) * 2)),
-        limit=limit,
-        runtime_dir=RUNTIME_DIR,
-    )
-
-
-def _testing_ecology_report(limit: int = 200) -> dict:
-    definitions = _available_test_session_definitions(500)
-    return TESTING_ECOLOGY_SERVICE.build_report(
-        definitions,
-        _test_session_report_summaries(max(200, len(definitions) * 2)),
-        runtime_dir=RUNTIME_DIR,
-        limit=limit,
-    )
+    return service_generated_work_queue_payload(limit=limit, base_dir=BASE_DIR, runtime_dir=RUNTIME_DIR)
 
 
 def _report_status_label(diff_count: int, flagged_probe_count: int) -> str:
@@ -908,6 +896,8 @@ def _start_guard() -> tuple[bool, str]:
         runtime_dir=RUNTIME_DIR,
         base_dir=BASE_DIR,
         guard_status_fn=_guard_status_payload,
+        restart_intent_path=RESTART_INTENT_PATH,
+        restart_provenance_service=RUNTIME_RESTART_PROVENANCE_SERVICE,
         subprocess_module=subprocess,
         os_name=os.name,
     )
@@ -996,6 +986,8 @@ def _restart_guard() -> tuple[bool, str]:
         stop_guard_fn=_stop_guard,
         schedule_detached_start_fn=_schedule_detached_start,
         start_guard_fn=_start_guard,
+        restart_intent_path=RESTART_INTENT_PATH,
+        restart_provenance_service=RUNTIME_RESTART_PROVENANCE_SERVICE,
     )
 
 
@@ -1004,6 +996,8 @@ def _restart_core() -> tuple[bool, str]:
         guard_status_fn=_guard_status_payload,
         stop_core_owned_process_fn=_stop_core_owned_process,
         start_guard_fn=_start_guard,
+        restart_intent_path=RESTART_INTENT_PATH,
+        restart_provenance_service=RUNTIME_RESTART_PROVENANCE_SERVICE,
     )
 
 
@@ -1112,7 +1106,12 @@ def _release_entry_matches_build(entry: dict, build_entry: dict) -> bool:
 
 
 def _release_status_payload(limit: int = 8) -> dict:
-    return RELEASE_STATUS_SERVICE.status_payload(RELEASE_LEDGER_PATH, limit)
+    source_root = BASE_DIR
+    try:
+        Path(RELEASE_LEDGER_PATH).resolve().relative_to(RELEASE_PACKAGES_DIR.resolve())
+    except Exception:
+        source_root = None
+    return RELEASE_STATUS_SERVICE.status_payload(RELEASE_LEDGER_PATH, limit, source_root=source_root)
 
 
 def _coerce_epoch_seconds(value) -> int | None:
@@ -1245,9 +1244,18 @@ def _runtime_artifacts_payload() -> dict:
     )
 
 
+def _validation_artifact_truth_payload() -> dict:
+    return VALIDATION_ARTIFACT_TRUTH_SERVICE.payload(
+        runtime_dir=RUNTIME_DIR,
+        regression_status_path=RUNTIME_DIR / "regression_status.json",
+    )
+
+
 def _runtime_restart_analytics_payload() -> dict:
     return RUNTIME_ANALYTICS_SERVICE.restart_analytics_payload(
         boot_history_path=GUARD_BOOT_HISTORY_PATH,
+        guard_log_path=GUARD_LOG_PATH,
+        now=int(time.time()),
     )
 
 
@@ -1270,6 +1278,10 @@ def _failure_reason_for_service(service: str, payload: dict, timeline_payload: d
 
 def _runtime_failure_reasons_payload(guard: dict, core: dict, webui: dict, timeline_payload: dict | None = None) -> dict:
     return RUNTIME_STATUS_SERVICE.runtime_failure_reasons_payload(guard, core, webui, timeline_payload)
+
+
+def _port_ownership_payload() -> dict:
+    return PORT_OWNERSHIP_SERVICE.payload(psutil_module=psutil)
 
 
 def _heartbeat_age_seconds() -> int | None:
@@ -1333,8 +1345,8 @@ def _prune_orphaned_core_artifacts(
     )
 
 
-def _matches_script_process(cmdline: list[str], script_path: Path) -> bool:
-    return RUNTIME_PROCESS_STATE_SERVICE.matches_script_process(cmdline, script_path)
+def _matches_script_process(cmdline: list[str], script_path: Path, cwd: str | Path | None = None) -> bool:
+    return RUNTIME_PROCESS_STATE_SERVICE.matches_script_process(cmdline, script_path, cwd=cwd)
 
 
 def _snapshot_script_process(process: psutil.Process, script_path: Path) -> dict | None:
@@ -1459,12 +1471,15 @@ def _control_action(action: str, payload: dict) -> tuple[bool, str, dict]:
 
 
 def _health_payload() -> dict:
+    outbox_summary = OPERATOR_OUTBOX_SERVICE.summary(OPERATOR_OUTBOX_FILE, limit=5)
     return {
         "ok": True,
         "ollama_api_up": bool(nova_core.ollama_api_up()),
         "chat_model": nova_core.chat_model(),
         "memory_enabled": bool(nova_core.mem_enabled()),
         "chat_login_enabled": bool(_chat_login_enabled()),
+        "operator_outbox": outbox_summary,
+        "operator_outbox_latest_id": str(outbox_summary.get("latest_id") or ""),
     }
 
 
@@ -1479,10 +1494,6 @@ def _json_response(handler: BaseHTTPRequestHandler, code: int, payload: dict) ->
         payload,
         record_http_response_fn=_record_http_response,
     )
-
-
-def _fast_smalltalk_reply(user_text: str) -> str | None:
-    return nova_core._quick_smalltalk_reply(user_text, active_user=nova_core.get_active_user())
 
 
 def _text_response(handler: BaseHTTPRequestHandler, code: int, text: str) -> None:
@@ -1504,107 +1515,6 @@ def _file_response(handler: BaseHTTPRequestHandler, code: int, path: Path, conte
     )
 
 
-def _developer_color_reply(turns: List[Tuple[str, str]]) -> str:
-    return nova_profile_followups.developer_color_reply(
-        turns,
-        extract_developer_color_preferences_fn=nova_core._extract_developer_color_preferences,
-        extract_developer_color_preferences_from_memory_fn=nova_core._extract_developer_color_preferences_from_memory,
-        prefix_from_earlier_memory_fn=nova_core._prefix_from_earlier_memory,
-    )
-
-
-def _developer_bilingual_reply(turns: List[Tuple[str, str]]) -> str:
-    return nova_profile_followups.developer_bilingual_reply(
-        turns,
-        developer_is_bilingual_fn=nova_core._developer_is_bilingual,
-        developer_is_bilingual_from_memory_fn=nova_core._developer_is_bilingual_from_memory,
-        prefix_from_earlier_memory_fn=nova_core._prefix_from_earlier_memory,
-    )
-
-
-def _is_developer_profile_request(user_text: str) -> bool:
-    return nova_core._is_developer_profile_request(user_text)
-
-
-def _developer_profile_reply(turns: List[Tuple[str, str]], user_text: str) -> str:
-    return nova_core._developer_profile_reply(turns, user_text)
-
-
-def _is_developer_location_request(user_text: str, state: dict | None = None, turns: List[Tuple[str, str]] | None = None) -> bool:
-    return nova_profile_followups.is_developer_location_request(
-        user_text,
-        state=state,
-        turns=turns,
-        recent_turn_mentions_fn=nova_core._recent_turn_mentions,
-    )
-
-
-def _developer_location_reply() -> str:
-    return nova_profile_followups.developer_location_reply(
-        get_learned_fact_fn=nova_core.get_learned_fact,
-        get_saved_location_text_fn=nova_core.get_saved_location_text,
-        prefix_from_earlier_memory_fn=nova_core._prefix_from_earlier_memory,
-    )
-
-
-def _learn_contextual_developer_facts(turns: List[Tuple[str, str]], text: str) -> tuple[bool, str]:
-    return nova_core._learn_contextual_developer_facts(turns, text, input_source="typed")
-
-
-def _is_location_request(user_text: str) -> bool:
-    return nova_core._is_location_request(user_text)
-
-
-def _location_reply() -> str:
-    return nova_core._location_reply()
-
-
-def _color_reply(turns: List[Tuple[str, str]]) -> str:
-    return nova_profile_followups.color_reply(
-        turns,
-        extract_color_preferences_fn=nova_core._extract_color_preferences,
-        extract_color_preferences_from_memory_fn=nova_core._extract_color_preferences_from_memory,
-        prefix_from_earlier_memory_fn=nova_core._prefix_from_earlier_memory,
-    )
-
-
-def _animal_reply(turns: List[Tuple[str, str]]) -> str:
-    return nova_profile_followups.animal_reply(
-        turns,
-        extract_animal_preferences_fn=nova_core._extract_animal_preferences,
-        extract_animal_preferences_from_memory_fn=nova_core._extract_animal_preferences_from_memory,
-        prefix_from_earlier_memory_fn=nova_core._prefix_from_earlier_memory,
-    )
-
-
-def _extract_last_user_question(turns: List[Tuple[str, str]], current_text: str) -> str:
-    return nova_core._extract_last_user_question(turns, current_text)
-
-
-def _is_name_origin_question(text: str) -> bool:
-    return nova_core._is_name_origin_question(text)
-
-
-def _is_assistant_name_query(text: str) -> bool:
-    return nova_core._is_assistant_name_query(text)
-
-
-def _assistant_name_reply(text: str) -> str:
-    return nova_core._assistant_name_reply(text)
-
-
-def _is_developer_full_name_query(text: str) -> bool:
-    return nova_core._is_developer_full_name_query(text)
-
-
-def _developer_full_name_reply() -> str:
-    return nova_core._developer_full_name_reply()
-
-
-def _rules_reply() -> str:
-    return nova_core._rules_reply()
-
-
 def _strip_ui_tip_leak(text: str) -> str:
     t = (text or "").strip()
     if not t:
@@ -1619,48 +1529,8 @@ def _strip_ui_tip_leak(text: str) -> str:
     return t
 
 
-def _is_session_recap_request(text: str) -> bool:
-    return nova_core._is_session_recap_request(text)
-
-
-def _session_recap_reply(turns: List[Tuple[str, str]], current_text: str) -> str:
-    return nova_core._session_recap_reply(turns, current_text)
-
-
-def _is_deep_search_followup_request(text: str) -> bool:
-    del text
-    return False
-
-
-def _infer_research_query_from_turns(turns: List[Tuple[str, str]]) -> str:
-    return nova_core._infer_research_query_from_turns(turns)
-
-
 def _read_text_safely(path: Path) -> str:
     return nova_core._read_text_safely(path)
-
-
-def _build_local_topic_digest_answer(query_text: str, max_files: int = 4, max_points: int = 10) -> str:
-    return nova_core._build_local_topic_digest_answer(query_text, max_files=max_files, max_points=max_points)
-
-
-def _build_grounded_answer(query_text: str, max_sources: int = 2) -> str:
-    return nova_web_tools.build_grounded_answer(
-        query_text,
-        max_sources=max_sources,
-        tool_web_research_fn=nova_core.tool_web_research,
-        tool_web_gather_fn=nova_core.tool_web_gather,
-    )
-
-
-def _peims_attendance_rules_reply() -> str:
-    grounded = _build_grounded_answer("PEIMS attendance reporting rules Texas TEA", max_sources=2)
-    if grounded:
-        return grounded
-    local_grounded = _build_local_topic_digest_answer("PEIMS attendance reporting rules")
-    if local_grounded:
-        return local_grounded
-    return nova_core._detached_domain_reply("PEIMS", "web research PEIMS attendance reporting rules")
 
 
 def _generate_chat_reply(
@@ -1671,6 +1541,7 @@ def _generate_chat_reply(
     prefer_web_for_data_queries: bool = False,
     language_mix_spanish_pct: int = 0,
     session=None,
+    ensure_active_work_tree_fn=None,
 ) -> tuple[str, dict]:
     return execute_http_reply_sequence_from_runtime(
         turns=turns,
@@ -1683,8 +1554,9 @@ def _generate_chat_reply(
         ensure_reply=nova_core._ensure_reply,
         core=nova_core,
         runtime_scope=globals(),
-        pre_planner_branch_group="operational",
-        post_planner_branch_group="general",
+        ensure_active_work_tree_fn=ensure_active_work_tree_fn,
+        pre_planner_branch_group="none",
+        post_planner_branch_group=None,
     )
 
 

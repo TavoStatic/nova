@@ -17,9 +17,17 @@ class TestNovaToolDispatchService(unittest.TestCase):
             "tool_queue_status": lambda *args: ("queue_status", args),
             "tool_phase2_audit": lambda *args: ("phase2_audit", args),
             "tool_nova_pulse": lambda *args: ("pulse", args),
+            "tool_memory_bootstrap_judgment": lambda *args: ("memory_bootstrap_judgment", args),
+            "tool_memory_bootstrap_confirm": lambda *args: ("memory_bootstrap_confirm", args),
+            "tool_memory_identity_bootstrap": lambda *args: ("memory_identity_bootstrap", args),
+            "tool_subconscious_review_judgment": lambda *args: ("subconscious_review_judgment", args),
             "tool_nova_self_status": lambda *args: ("self_status", args),
             "tool_core_health_brief": lambda *args: ("core_health", args),
             "tool_core_thinning": lambda *args: ("core_thinning", args),
+            "tool_release_promotion_judgment": lambda *args: ("release_promotion_judgment", args),
+            "tool_release_validation_run": lambda *args: ("release_validation_run", args),
+            "tool_release_record_validation_outcome": lambda *args: ("release_record_validation_outcome", args),
+            "tool_release_rebuild_verify": lambda *args: ("release_rebuild_verify", args),
             "tool_patch_preview_approve": lambda *args: ("patch_preview_approve", args),
             "patch_apply": lambda *args: ("patch_apply", args),
             "tool_patch_preview_apply": lambda *args: ("patch_preview_apply", args),
@@ -30,6 +38,7 @@ class TestNovaToolDispatchService(unittest.TestCase):
             "tool_update_now_confirm": lambda *args: ("update_now_confirm", args),
             "tool_update_now_cancel": lambda *args: ("update_now_cancel", args),
             "tool_web_search": lambda *args: ("web_search", args),
+            "tool_web_fetch": lambda *args: ("web_fetch", args),
             "tool_web_research": lambda *args: ("web_research", args),
             "tool_web_gather": lambda *args: ("web_gather", args),
             "tool_wikipedia_lookup": lambda *args: ("wikipedia_lookup", args),
@@ -43,6 +52,56 @@ class TestNovaToolDispatchService(unittest.TestCase):
         )
 
         self.assertEqual(out, ("system_check", ()))
+
+    def test_execute_planned_action_from_runtime_wires_web_fetch(self):
+        runtime_scope = {
+            "resolve_current_device_coords": lambda: None,
+            "tool_weather": lambda value: value,
+            "get_saved_location_text": lambda: "",
+            "_coords_from_saved_location": lambda: None,
+            "_need_confirmed_location_message": lambda: "need location",
+            "set_location_coords": lambda value: value,
+            "tool_find": lambda *args: ("find", args),
+            "tool_ls": lambda *args: ("ls", args),
+            "tool_queue_status": lambda *args: ("queue_status", args),
+            "tool_phase2_audit": lambda *args: ("phase2_audit", args),
+            "tool_nova_pulse": lambda *args: ("pulse", args),
+            "tool_memory_bootstrap_judgment": lambda *args: ("memory_bootstrap_judgment", args),
+            "tool_memory_bootstrap_confirm": lambda *args: ("memory_bootstrap_confirm", args),
+            "tool_memory_identity_bootstrap": lambda *args: ("memory_identity_bootstrap", args),
+            "tool_subconscious_review_judgment": lambda *args: ("subconscious_review_judgment", args),
+            "tool_nova_self_status": lambda *args: ("self_status", args),
+            "tool_core_health_brief": lambda *args: ("core_health", args),
+            "tool_core_thinning": lambda *args: ("core_thinning", args),
+            "tool_release_promotion_judgment": lambda *args: ("release_promotion_judgment", args),
+            "tool_release_validation_run": lambda *args: ("release_validation_run", args),
+            "tool_release_record_validation_outcome": lambda *args: ("release_record_validation_outcome", args),
+            "tool_release_rebuild_verify": lambda *args: ("release_rebuild_verify", args),
+            "tool_patch_preview_approve": lambda *args: ("patch_preview_approve", args),
+            "patch_apply": lambda *args: ("patch_apply", args),
+            "tool_patch_preview_apply": lambda *args: ("patch_preview_apply", args),
+            "patch_rollback": lambda *args: ("patch_rollback", args),
+            "tool_read": lambda *args: ("read", args),
+            "tool_system_check": lambda *args: ("system_check", args),
+            "tool_update_now": lambda *args: ("update_now", args),
+            "tool_update_now_confirm": lambda *args: ("update_now_confirm", args),
+            "tool_update_now_cancel": lambda *args: ("update_now_cancel", args),
+            "tool_web_search": lambda *args: ("web_search", args),
+            "tool_web_fetch": lambda *args: ("web_fetch", args),
+            "tool_web_research": lambda *args: ("web_research", args),
+            "tool_web_gather": lambda *args: ("web_gather", args),
+            "tool_wikipedia_lookup": lambda *args: ("wikipedia_lookup", args),
+            "tool_stackexchange_search": lambda *args: ("stackexchange_search", args),
+            "tool_health": lambda *args: ("health", args),
+        }
+
+        out = nova_tool_dispatch.execute_planned_action_from_runtime(
+            "web_fetch",
+            ["http://127.0.0.1:8080/control"],
+            runtime_scope=runtime_scope,
+        )
+
+        self.assertEqual(out, ("web_fetch", ("http://127.0.0.1:8080/control",)))
 
     def test_weather_current_location_prefers_live_coords(self):
         out = nova_tool_dispatch.execute_planned_action(

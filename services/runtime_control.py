@@ -17,6 +17,31 @@ class RuntimeControlService:
     def _runtime_fn(runtime_scope: dict[str, object], name: str):
         return runtime_scope[name]
 
+    @staticmethod
+    def _write_restart_intent(
+        *,
+        restart_intent_path: Path | None,
+        restart_provenance_service,
+        source: str,
+        action: str,
+        reason: str,
+        replace: bool = True,
+    ) -> tuple[bool, str]:
+        if restart_intent_path is None or restart_provenance_service is None:
+            return True, ""
+        intent = restart_provenance_service.write_pending_intent(
+            Path(restart_intent_path),
+            source=source,
+            action=action,
+            reason=reason,
+            requested_by="operator",
+            planned=True,
+            replace=replace,
+        )
+        if not bool(intent.get("ok", False)):
+            return False, f"restart_intent_write_failed:{intent.get('error') or 'unknown'}"
+        return True, str(intent.get("intent_id") or "")
+
     def autonomy_maintenance_summary(
         self,
         *,
@@ -28,16 +53,29 @@ class RuntimeControlService:
         payload = dict(state_payload or {}) if isinstance(state_payload, dict) else {}
         runtime_worker = dict(payload.get("runtime_worker") or {}) if isinstance(payload.get("runtime_worker"), dict) else {}
         last_generated_queue_run = dict(payload.get("last_generated_queue_run") or {}) if isinstance(payload.get("last_generated_queue_run"), dict) else {}
+        last_generated_queue_sync = dict(payload.get("last_generated_queue_sync") or {}) if isinstance(payload.get("last_generated_queue_sync"), dict) else {}
         last_work_tree_cycle = dict(payload.get("last_work_tree_cycle") or {}) if isinstance(payload.get("last_work_tree_cycle"), dict) else {}
         last_patch_queue_sync = dict(payload.get("last_patch_queue_sync") or {}) if isinstance(payload.get("last_patch_queue_sync"), dict) else {}
         last_patch_cleanup = dict(payload.get("last_patch_cleanup") or {}) if isinstance(payload.get("last_patch_cleanup"), dict) else {}
         last_complete_tree_archive = dict(payload.get("last_complete_tree_archive") or {}) if isinstance(payload.get("last_complete_tree_archive"), dict) else {}
         last_kidney_status = dict(payload.get("last_kidney_status") or {}) if isinstance(payload.get("last_kidney_status"), dict) else {}
         last_autonomy_orchestrator = dict(payload.get("last_autonomy_orchestrator") or {}) if isinstance(payload.get("last_autonomy_orchestrator"), dict) else {}
+        last_signal_ingestion = dict(payload.get("last_signal_ingestion") or {}) if isinstance(payload.get("last_signal_ingestion"), dict) else {}
+        last_subconscious_triage = dict(payload.get("last_subconscious_triage") or {}) if isinstance(payload.get("last_subconscious_triage"), dict) else {}
         pid = runtime_worker.get("pid")
         create_time = runtime_worker.get("create_time")
+        logical_processes = runtime_processes_module.logical_service_processes(maintenance_py)
+        worker_processes = self._autonomy_worker_processes(logical_processes)
+        cycle_processes = self._autonomy_cycle_processes(logical_processes)
+        runtime_worker["cycle_process_active"] = bool(cycle_processes)
+        runtime_worker["cycle_process_count"] = len(cycle_processes)
+        runtime_worker["cycle_process_pids"] = [
+            int(item.get("pid") or 0)
+            for item in cycle_processes[:8]
+            if int(item.get("pid") or 0) > 0
+        ]
         selected = runtime_processes_module.select_logical_process(
-            runtime_processes_module.logical_service_processes(maintenance_py),
+            worker_processes,
             pid=int(pid) if isinstance(pid, int) else (int(pid) if isinstance(pid, str) and pid.isdigit() else None),
             create_time=float(create_time) if isinstance(create_time, (int, float)) else None,
         )
@@ -68,14 +106,85 @@ class RuntimeControlService:
                 and last_regression_status.lower() != "ok"
                 and str(payload.get("last_regression_date") or "") != strftime_fn("%Y-%m-%d")
             )
-        queue_status = str(last_generated_queue_run.get("status") or "").strip().lower()
-        queue_open_count = int(last_generated_queue_run.get("queue_open_count", 0) or 0)
-        queue_actionable_count = int(last_generated_queue_run.get("queue_actionable_count", 0) or 0)
-        queue_blocked_count = int(last_generated_queue_run.get("queue_blocked_count", 0) or 0)
+        queue_sync_has_truth = any(
+            key in last_generated_queue_sync
+            for key in ("queue_status", "open_count", "actionable_count", "blocked_count")
+        )
+        queue_status = str(
+            (last_generated_queue_sync.get("queue_status") if queue_sync_has_truth else last_generated_queue_run.get("status"))
+            or ""
+        ).strip().lower()
+        queue_open_count = int(
+            last_generated_queue_sync.get(
+                "open_count",
+                0 if queue_sync_has_truth else last_generated_queue_run.get("queue_open_count", 0),
+            )
+            or 0
+        )
+        queue_actionable_count = int(
+            last_generated_queue_sync.get(
+                "actionable_count",
+                0 if queue_sync_has_truth else last_generated_queue_run.get("queue_actionable_count", 0),
+            )
+            or 0
+        )
+        queue_blocked_count = int(
+            last_generated_queue_sync.get(
+                "blocked_count",
+                0 if queue_sync_has_truth else last_generated_queue_run.get("queue_blocked_count", 0),
+            )
+            or 0
+        )
         if queue_open_count > 0 and queue_blocked_count <= 0 and queue_actionable_count <= 0:
             queue_blocked_count = queue_open_count
-        queue_blocked_reason_counts = dict(last_generated_queue_run.get("queue_blocked_reason_counts") or {}) if isinstance(last_generated_queue_run.get("queue_blocked_reason_counts"), dict) else {}
-        queue_blocked_files = list(last_generated_queue_run.get("queue_blocked_files") or []) if isinstance(last_generated_queue_run.get("queue_blocked_files"), list) else []
+        if queue_sync_has_truth and not queue_status:
+            if queue_open_count <= 0:
+                queue_status = "clear"
+            elif queue_actionable_count > 0:
+                queue_status = "actionable"
+            elif queue_blocked_count > 0:
+                queue_status = "blocked"
+            else:
+                queue_status = "open"
+        if queue_sync_has_truth:
+            queue_blocked_reason_counts = (
+                dict(last_generated_queue_sync.get("blocked_reason_counts") or {})
+                if isinstance(last_generated_queue_sync.get("blocked_reason_counts"), dict)
+                else {}
+            )
+            queue_blocked_files = (
+                list(last_generated_queue_sync.get("blocked_files") or [])
+                if isinstance(last_generated_queue_sync.get("blocked_files"), list)
+                else []
+            )
+        else:
+            queue_blocked_reason_counts = (
+                dict(last_generated_queue_run.get("queue_blocked_reason_counts") or {})
+                if isinstance(last_generated_queue_run.get("queue_blocked_reason_counts"), dict)
+                else {}
+            )
+            queue_blocked_files = (
+                list(last_generated_queue_run.get("queue_blocked_files") or [])
+                if isinstance(last_generated_queue_run.get("queue_blocked_files"), list)
+                else []
+            )
+        last_queue_run_status = str(last_generated_queue_run.get("status") or "").strip().lower()
+        last_queue_run_status_mismatch = bool(
+            last_queue_run_status
+            and last_queue_run_status not in {"ok", "success"}
+            and last_queue_run_status != queue_status
+        )
+        last_generated_queue_run_stale = any(
+            (
+                queue_sync_has_truth,
+                last_queue_run_status_mismatch,
+                int(last_generated_queue_run.get("queue_open_count", 0) or 0) != queue_open_count,
+                int(last_generated_queue_run.get("queue_actionable_count", 0) or 0) != queue_actionable_count,
+                int(last_generated_queue_run.get("queue_blocked_count", 0) or 0) != queue_blocked_count,
+                dict(last_generated_queue_run.get("queue_blocked_reason_counts") or {}) != queue_blocked_reason_counts,
+                list(last_generated_queue_run.get("queue_blocked_files") or []) != queue_blocked_files,
+            )
+        )
         last_error = str(payload.get("last_error") or "")
         return {
             "ok": bool(payload),
@@ -94,12 +203,15 @@ class RuntimeControlService:
             "last_error_stale": False if not last_error else False,
             "runtime_worker": runtime_worker,
             "last_generated_queue_run": last_generated_queue_run,
-            "last_generated_queue_run_stale": False,
+            "last_generated_queue_sync": last_generated_queue_sync,
+            "last_generated_queue_run_stale": last_generated_queue_run_stale,
             "last_work_tree_cycle": last_work_tree_cycle,
             "last_patch_queue_sync": last_patch_queue_sync,
             "last_patch_cleanup": last_patch_cleanup,
             "last_complete_tree_archive": last_complete_tree_archive,
             "last_kidney_status": last_kidney_status,
+            "last_signal_ingestion": last_signal_ingestion,
+            "last_subconscious_triage": last_subconscious_triage,
             "last_autonomy_orchestrator": {
                 "ts": str(last_autonomy_orchestrator.get("ts") or ""),
                 "created_at_utc": str(last_autonomy_orchestrator.get("created_at_utc") or ""),
@@ -269,6 +381,29 @@ class RuntimeControlService:
             return int(value)
         return None
 
+    @staticmethod
+    def _is_autonomy_worker_process(process: dict) -> bool:
+        cmdline = [str(item or "").strip().lower() for item in list((process or {}).get("cmdline") or [])]
+        if not cmdline:
+            return True
+        return "--loop" in cmdline
+
+    @classmethod
+    def _autonomy_worker_processes(cls, processes: list[dict]) -> list[dict]:
+        return [
+            dict(process)
+            for process in list(processes or [])
+            if cls._is_autonomy_worker_process(process)
+        ]
+
+    @classmethod
+    def _autonomy_cycle_processes(cls, processes: list[dict]) -> list[dict]:
+        return [
+            dict(process)
+            for process in list(processes or [])
+            if not cls._is_autonomy_worker_process(process)
+        ]
+
     def autonomy_maintenance_identity_from_state(self, *, state_path: Path) -> tuple[int | None, float | None, dict]:
         try:
             payload = json.loads(Path(state_path).read_text(encoding="utf-8") or "{}")
@@ -298,6 +433,8 @@ class RuntimeControlService:
         runtime_dir: Path,
         base_dir: Path,
         guard_status_fn,
+        restart_intent_path: Path | None = None,
+        restart_provenance_service=None,
         subprocess_module=subprocess,
         os_name: str = os.name,
     ) -> tuple[bool, str]:
@@ -316,6 +453,17 @@ class RuntimeControlService:
         status = guard_status_fn()
         if status.get("running"):
             return True, "guard_already_running"
+
+        intent_ok, intent_msg = self._write_restart_intent(
+            restart_intent_path=restart_intent_path,
+            restart_provenance_service=restart_provenance_service,
+            source="runtime_control",
+            action="guard_start",
+            reason="operator_requested_guard_start",
+            replace=False,
+        )
+        if not intent_ok:
+            return False, intent_msg
 
         try:
             flags = self.detached_creation_flags(os_name=os_name, subprocess_module=subprocess_module)
@@ -348,7 +496,7 @@ class RuntimeControlService:
             return False, f"autonomy_maintenance_script_missing:{maintenance_py}"
 
         pid, create_time, _worker_state = self.autonomy_maintenance_identity_from_state(state_path=state_path)
-        logical = runtime_processes_module.logical_service_processes(maintenance_py)
+        logical = self._autonomy_worker_processes(runtime_processes_module.logical_service_processes(maintenance_py))
         selected = runtime_processes_module.select_logical_process(logical, pid=pid, create_time=create_time)
         if selected is not None:
             return True, "autonomy_maintenance_already_running"
@@ -480,7 +628,7 @@ class RuntimeControlService:
         psutil_module=psutil,
     ) -> tuple[bool, str]:
         pid, create_time, _worker_state = self.autonomy_maintenance_identity_from_state(state_path=state_path)
-        logical = runtime_processes_module.logical_service_processes(maintenance_py)
+        logical = self._autonomy_worker_processes(runtime_processes_module.logical_service_processes(maintenance_py))
         selected = runtime_processes_module.select_logical_process(logical, pid=pid, create_time=create_time)
         if selected is None:
             if pid and psutil_module.pid_exists(pid):
@@ -511,6 +659,8 @@ class RuntimeControlService:
         stop_guard_fn,
         schedule_detached_start_fn,
         start_guard_fn,
+        restart_intent_path: Path | None = None,
+        restart_provenance_service=None,
     ) -> tuple[bool, str]:
         guard_status = guard_status_fn(include_fallback_scan=False)
         core_status = core_status_fn()
@@ -521,6 +671,15 @@ class RuntimeControlService:
             or guard_status.get("lock_exists")
         )
         if should_stop_first:
+            intent_ok, intent_msg = RuntimeControlService._write_restart_intent(
+                restart_intent_path=restart_intent_path,
+                restart_provenance_service=restart_provenance_service,
+                source="runtime_control",
+                action="guard_restart",
+                reason="operator_requested_guard_restart",
+            )
+            if not intent_ok:
+                return False, intent_msg
             ok, msg = stop_guard_fn()
             if not ok:
                 return False, msg
@@ -537,8 +696,24 @@ class RuntimeControlService:
         return ok, f"guard_restart_requested:{msg}" if ok else msg
 
     @staticmethod
-    def restart_core(*, guard_status_fn, stop_core_owned_process_fn, start_guard_fn) -> tuple[bool, str]:
+    def restart_core(
+        *,
+        guard_status_fn,
+        stop_core_owned_process_fn,
+        start_guard_fn,
+        restart_intent_path: Path | None = None,
+        restart_provenance_service=None,
+    ) -> tuple[bool, str]:
         guard_status = guard_status_fn()
+        intent_ok, intent_msg = RuntimeControlService._write_restart_intent(
+            restart_intent_path=restart_intent_path,
+            restart_provenance_service=restart_provenance_service,
+            source="runtime_control",
+            action="core_restart",
+            reason="operator_requested_core_restart",
+        )
+        if not intent_ok:
+            return False, intent_msg
         stop_ok, stop_msg = stop_core_owned_process_fn()
         if not stop_ok and not any(token in str(stop_msg or "") for token in ["core_pid_missing", "core_not_running"]):
             return False, stop_msg

@@ -15,12 +15,13 @@ from services.nova_runtime_context import PROMOTION_AUDIT_LOG
 from services.nova_runtime_context import QUARANTINE_DIR
 from services.nova_runtime_context import RUNTIME_DIR
 from services.nova_runtime_context import TEST_SESSIONS_DIR
+from services.nova_runtime_context import runtime_scope_name
 from services.test_session_definitions import iter_definition_files
 
 
 ROOT = Path(__file__).resolve().parent
 POLICY_PATH = ROOT / "policy.json"
-UPDATES_DIR = ROOT / "updates"
+UPDATES_DIR = RUNTIME_DIR / "updates" if runtime_scope_name() == "validation" else ROOT / "updates"
 PREVIEWS_DIR = UPDATES_DIR / "previews"
 SNAPSHOTS_DIR = UPDATES_DIR / "snapshots"
 KIDNEY_ROOT = RUNTIME_DIR / "kidney"

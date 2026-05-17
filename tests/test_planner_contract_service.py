@@ -5,17 +5,26 @@ from services import nova_planner_contract
 
 
 class _PlannerCoreStub:
-    def __init__(self, actions=None, tool_result=""):
+    def __init__(self, actions=None, tool_result="", semantic_intent=None, weather_available=True):
         self._actions = list(actions or [])
         self._tool_result = tool_result
+        self._semantic_intent = semantic_intent
+        self._weather_available = weather_available
         self.last_config = None
+        self.executed = []
 
     def decide_actions(self, text, config=None):
         self.last_config = dict(config or {})
         return list(self._actions)
 
+    def _llm_classify_routing_intent(self, text, turns=None, pending_action=None, return_none_payload=False):
+        return self._semantic_intent
+
+    def _weather_current_location_available(self):
+        return bool(self._weather_available)
+
     def make_pending_weather_action(self):
-        return {"tool": "weather", "awaiting": "location"}
+        return {"kind": "weather_lookup", "status": "awaiting_location", "preferred_tool": "weather_location"}
 
     def handle_commands(self, text, session_turns=None, session=None):
         return ""
@@ -24,6 +33,7 @@ class _PlannerCoreStub:
         return None
 
     def execute_planned_action(self, tool, args):
+        self.executed.append((tool, list(args or [])))
         return self._tool_result
 
     def tool_web_research(self, text):
@@ -84,6 +94,127 @@ class TestPlannerContractService(unittest.TestCase):
         self.assertGreaterEqual((meta.get("timing") or {}).get("planner_time", -1), 0)
         self.assertGreaterEqual((meta.get("timing") or {}).get("tool_selection_time", -1), 0)
         self.assertGreaterEqual((meta.get("timing") or {}).get("tool_time", -1), 0)
+
+    def test_maybe_handle_planner_sequence_uses_semantic_tool_intent(self):
+        core = _PlannerCoreStub(
+            actions=[],
+            semantic_intent={"tool": "weather_current_location", "args": [], "confidence": 0.91, "reason": "weather goal"},
+            tool_result="Weather reply",
+            weather_available=True,
+        )
+
+        reply, meta = nova_planner_contract.maybe_handle_planner_sequence(
+            text="should I bring a jacket today?",
+            turns=[],
+            pending_action=None,
+            prefer_web_for_data_queries=False,
+            session=None,
+            core=core,
+            trace=lambda *args, **kwargs: None,
+            normalize_reply=lambda text: text,
+            is_web_preferred_data_query=lambda text: False,
+        )
+
+        self.assertEqual(reply, "Weather reply")
+        self.assertEqual(meta.get("planner_decision"), "run_tool")
+        self.assertEqual(meta.get("tool"), "weather_current_location")
+        self.assertEqual(meta.get("reply_contract"), "weather_lookup.current_location")
+        self.assertEqual(core.executed, [("weather_current_location", [])])
+
+    def test_maybe_handle_planner_sequence_prefers_semantic_intent_over_static_parser(self):
+        core = _PlannerCoreStub(
+            actions=[{"type": "run_tool", "tool": "web_search", "args": ["surface parse"]}],
+            semantic_intent={"tool": "self_status", "args": [], "confidence": 0.94, "reason": "live runtime state"},
+            tool_result="Nova Self Status",
+            weather_available=True,
+        )
+
+        reply, meta = nova_planner_contract.maybe_handle_planner_sequence(
+            text="tell me what is going on inside Nova",
+            turns=[],
+            pending_action=None,
+            prefer_web_for_data_queries=False,
+            session=None,
+            core=core,
+            trace=lambda *args, **kwargs: None,
+            normalize_reply=lambda text: text,
+            is_web_preferred_data_query=lambda text: False,
+        )
+
+        self.assertEqual(reply, "Nova Self Status")
+        self.assertEqual(meta.get("planner_decision"), "run_tool")
+        self.assertEqual(meta.get("tool"), "self_status")
+        self.assertEqual(meta.get("reply_contract"), "self_status.current")
+        self.assertEqual(core.executed, [("self_status", [])])
+
+    def test_maybe_handle_planner_sequence_does_not_fallback_to_static_parser_after_semantic_none(self):
+        core = _PlannerCoreStub(
+            actions=[{"type": "run_tool", "tool": "web_search", "args": ["surface parse"]}],
+            semantic_intent={"tool": "none", "args": [], "confidence": 0.81, "reason": "conversation"},
+            tool_result="should not run",
+        )
+
+        outcome = nova_planner_contract.maybe_handle_planner_sequence(
+            text="tell me why your last answer was odd",
+            turns=[],
+            pending_action=None,
+            prefer_web_for_data_queries=False,
+            session=None,
+            core=core,
+            trace=lambda *args, **kwargs: None,
+            normalize_reply=lambda text: text,
+            is_web_preferred_data_query=lambda text: False,
+        )
+
+        self.assertIsNone(outcome)
+        self.assertEqual(core.executed, [])
+
+    def test_maybe_handle_planner_sequence_routes_semantic_work_tree_status(self):
+        core = _PlannerCoreStub(
+            actions=[],
+            semantic_intent={"tool": "work_tree_status", "args": [], "confidence": 0.89, "reason": "work plan status"},
+        )
+
+        with mock.patch("work_tree.format_tree_snapshot", return_value="Active work tree: Repair tree (active)."):
+            reply, meta = nova_planner_contract.maybe_handle_planner_sequence(
+                text="show me the current work plan state",
+                turns=[],
+                pending_action=None,
+                prefer_web_for_data_queries=False,
+                session=_SessionStub(active_work_tree_id="tree_1"),
+                core=core,
+                trace=lambda *args, **kwargs: None,
+                normalize_reply=lambda text: text,
+                is_web_preferred_data_query=lambda text: False,
+            )
+
+        self.assertIn("Active work tree:", reply)
+        self.assertEqual(meta.get("planner_decision"), "work_tree")
+        self.assertEqual((meta.get("route_evidence") or {}).get("planner_action"), "inspect")
+
+    def test_maybe_handle_planner_sequence_sets_pending_weather_when_location_missing(self):
+        core = _PlannerCoreStub(
+            actions=[],
+            semantic_intent={"tool": "weather_current_location", "args": [], "confidence": 0.91},
+            weather_available=False,
+        )
+
+        reply, meta = nova_planner_contract.maybe_handle_planner_sequence(
+            text="should I bring a jacket today?",
+            turns=[],
+            pending_action=None,
+            prefer_web_for_data_queries=False,
+            session=None,
+            core=core,
+            trace=lambda *args, **kwargs: None,
+            normalize_reply=lambda text: text,
+            is_web_preferred_data_query=lambda text: False,
+        )
+
+        self.assertIn("What location", reply)
+        self.assertEqual(meta.get("planner_decision"), "ask_clarify")
+        self.assertEqual((meta.get("pending_action") or {}).get("kind"), "weather_lookup")
+        self.assertEqual(core.executed, [])
 
     def test_merge_route_evidence_updates_routing_decision(self):
         merged = nova_planner_contract.merge_route_evidence(

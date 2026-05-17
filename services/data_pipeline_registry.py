@@ -15,7 +15,7 @@ def _lane_control_state(pipeline_id: str, *, data_sources_root: Optional[Path] =
     safe_id = "".join(ch for ch in str(pipeline_id or "").strip() if ch.isalnum() or ch in {"_", "-"})
     path = root / safe_id / "lane_control.json"
     if not path.exists():
-        return {"enabled": True, "state": "running"}
+        return {"enabled": True, "state": "uncontrolled", "control_present": False}
     try:
         import json
 
@@ -25,7 +25,7 @@ def _lane_control_state(pipeline_id: str, *, data_sources_root: Optional[Path] =
     if not isinstance(data, dict):
         data = {}
     enabled = bool(data.get("enabled", True))
-    return {**data, "enabled": enabled, "state": "running" if enabled else "paused"}
+    return {**data, "enabled": enabled, "state": "running" if enabled else "paused", "control_present": True}
 
 
 def _lane_paused_result(pipeline_id: str, operation: str) -> dict[str, Any]:

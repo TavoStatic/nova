@@ -385,9 +385,9 @@ class TestNovaCoreFulfillmentBridge(unittest.TestCase):
         self.assertIn("script_specific_signals", ranking)
         self.assertIn("robust_backlog_candidates", ranking)
         self.assertIn("quiet_control_verdict", ranking)
-        self.assertEqual(ranking.get("robust_signals")[0].get("signal"), "fallback_overuse")
-        self.assertEqual(ranking.get("robust_backlog_candidates")[0].get("signal"), "fallback_overuse")
-        self.assertEqual(ranking.get("quiet_control_verdict", {}).get("status"), "low_noise")
+        self.assertEqual(ranking.get("robust_signals"), [])
+        self.assertEqual(ranking.get("robust_backlog_candidates"), [])
+        self.assertEqual(ranking.get("quiet_control_verdict", {}).get("status"), "noise_present")
 
     def test_self_reflection_report_includes_robust_weakness_summary_when_present(self):
         payload = nova_core.maybe_log_self_reflection(
@@ -450,9 +450,12 @@ class TestNovaCoreFulfillmentBridge(unittest.TestCase):
         ranking = reflection.get("subconscious_robust_weakness") or {}
         self.assertEqual(ranking.get("target_seam"), "session_fact_recall_route_fallthrough")
         self.assertEqual(ranking.get("ownership_focus"), "session_fact_recall")
-        self.assertEqual(ranking.get("robust_signals")[0].get("signal"), "fallback_overuse")
+        signals = [item.get("signal") for item in list(ranking.get("robust_signals") or [])]
+        self.assertIn("route_unclear", signals)
+        self.assertIn("route_fit_weak", signals)
+        self.assertEqual(ranking.get("robust_backlog_candidates"), [])
 
-    def test_probe_turn_routes_reports_supervisor_owned_without_claiming(self):
+    def test_probe_turn_routes_reports_weather_followup_unowned(self):
         session = ConversationSession()
         session.set_pending_action(
             {
@@ -467,7 +470,7 @@ class TestNovaCoreFulfillmentBridge(unittest.TestCase):
 
         self.assertEqual(probe.get("comparison_strength"), "clear")
         routes = probe.get("routes") or {}
-        self.assertTrue((routes.get("supervisor_owned") or {}).get("viable"))
+        self.assertFalse((routes.get("supervisor_owned") or {}).get("viable"))
         self.assertFalse((routes.get("fulfillment_applicable") or {}).get("viable"))
         self.assertTrue((routes.get("generic_fallback") or {}).get("viable"))
 
@@ -486,7 +489,7 @@ class TestNovaCoreFulfillmentBridge(unittest.TestCase):
         self.assertTrue((routes.get("fulfillment_applicable") or {}).get("viable"))
         self.assertTrue((routes.get("generic_fallback") or {}).get("viable"))
 
-    def test_probe_turn_routes_reports_retrieval_followup_without_claiming(self):
+    def test_probe_turn_routes_leaves_retrieval_followup_content_model_owned(self):
         session = ConversationSession()
         session.set_retrieval_state(
             {
@@ -502,9 +505,9 @@ class TestNovaCoreFulfillmentBridge(unittest.TestCase):
 
         self.assertEqual(probe.get("comparison_strength"), "clear")
         routes = probe.get("routes") or {}
-        self.assertTrue((routes.get("supervisor_owned") or {}).get("viable"))
+        self.assertFalse((routes.get("supervisor_owned") or {}).get("viable"))
         self.assertFalse((routes.get("fulfillment_applicable") or {}).get("viable"))
-        self.assertIn("retrieval_followup", " ".join((routes.get("supervisor_owned") or {}).get("fit_notes") or []))
+        self.assertTrue((routes.get("generic_fallback") or {}).get("viable"))
 
     def test_probe_turn_routes_reports_keyword_retrieval_continue_without_claiming(self):
         session = ConversationSession()

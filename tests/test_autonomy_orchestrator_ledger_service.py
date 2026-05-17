@@ -33,6 +33,7 @@ class TestAutonomyOrchestratorLedgerService(unittest.TestCase):
                     "action": {"act": "generated_queue_run_next"},
                     "reason": "Generated Work Queue has 1 actionable item.",
                     "rejection_reasons": [],
+                    "execution": {"result": "success", "action_type": "generated_queue_run_next"},
                     "evidence": {"posture": {"score": 96, "threshold": 85, "level": "strong"}},
                 },
             ]
@@ -52,6 +53,9 @@ class TestAutonomyOrchestratorLedgerService(unittest.TestCase):
         self.assertEqual(summary.get("weak_posture_refusal_rate"), 1.0)
         self.assertEqual(summary.get("last_action"), "generated_queue_run_next")
         self.assertEqual(summary.get("last_recommendation_key"), "recommend_action:generated_queue_run_next")
+        self.assertEqual(summary.get("execution_result_counts"), {"success": 1})
+        self.assertEqual(summary.get("last_execution_result"), "success")
+        self.assertEqual(summary.get("last_execution_action_type"), "generated_queue_run_next")
 
     def test_summary_returns_empty_shape_when_ledger_missing(self):
         summary = AUTONOMY_ORCHESTRATOR_LEDGER_SERVICE.summary(Path("C:/Nova/runtime/_missing_advisor_ledger.jsonl"))

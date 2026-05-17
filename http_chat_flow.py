@@ -2,19 +2,17 @@ from __future__ import annotations
 
 from typing import Callable, Any
 
-from services.nova_turn_outcomes import apply_declarative_store_outcome
-from services.nova_turn_outcomes import apply_developer_guess_outcome
-from services.nova_turn_outcomes import apply_developer_location_outcome
-from services.nova_turn_outcomes import apply_developer_profile_learning
-from services.nova_turn_outcomes import apply_fast_smalltalk
-from services.nova_turn_outcomes import apply_identity_binding_learning
-from services.nova_turn_outcomes import apply_location_store_outcome
-from services.nova_turn_outcomes import apply_mixed_turn_clarify
 from services.nova_turn_outcomes import apply_numeric_clarify_outcome
-from services.nova_turn_outcomes import apply_saved_location_weather_outcome
-from services.nova_turn_outcomes import apply_self_profile_learning
-from services.nova_turn_outcomes import apply_supervisor_bypass_safe_fallback
-from services.nova_turn_outcomes import apply_web_research_override
+
+
+CHAT_SUPERVISOR_INTENTS_RETIRED_FOR_HTTP = frozenset({
+    "grounded_self_report",
+    "capability_inventory",
+    "runtime_identity",
+    "retrieval_followup",
+    "web_research_family",
+    "weather_lookup",
+})
 
 
 def apply_handled_supervisor_intent(
@@ -31,7 +29,16 @@ def apply_handled_supervisor_intent(
     action_ledger_add_step: Callable[..., None],
     ensure_reply: Callable[[str], str],
 ) -> dict:
-    weather_mode = str(intent_rule.get("weather_mode") or "").strip().lower()
+    intent_name = str(intent_rule.get("intent") or "")
+    if intent_name in CHAT_SUPERVISOR_INTENTS_RETIRED_FOR_HTTP:
+        return {
+            "handled": False,
+            "reply": "",
+            "planner_decision": "unhandled",
+            "grounded": False,
+            "intent": intent_name,
+            "conversation_state": conversation_state,
+        }
     emit_supervisor_intent_trace(intent_rule, user_text=routed_text)
     reply_contract = ""
     reply_outcome = {}
@@ -45,37 +52,15 @@ def apply_handled_supervisor_intent(
             else {}
         )
 
-    session.apply_state_update(intent_state, fallback_state=conversation_state)
     planner_decision = "deterministic"
     tool = ""
     tool_args = {}
     tool_result = ""
     grounded = True
-    intent_name = str(intent_rule.get("intent") or "")
-    if intent_name == "weather_lookup":
-        if weather_mode == "clarify":
-            planner_decision = "ask_clarify"
-            grounded = False
-            action_ledger_add_step(ledger, "action_planner", "ask_clarify")
-            action_ledger_add_step(ledger, "pending_action", "awaiting_location", tool="weather")
-        else:
-            planner_decision = "run_tool"
-            tool = "weather_current_location" if weather_mode == "current_location" else "weather_location"
-            tool_result = str(intent_msg or "")
-            if tool == "weather_location":
-                tool_args = {"args": [str(intent_rule.get("location_value") or "").strip()]}
-            action_ledger_add_step(ledger, "action_planner", "run_tool", tool=tool)
-            action_ledger_add_step(ledger, "tool_execution", "ok", tool=tool)
-    elif intent_name == "web_research_family":
-        planner_decision = "run_tool"
-        tool = str(intent_rule.get("tool_name") or "web_research").strip() or "web_research"
-        query = str((intent_effects or {}).get("reply_outcome", {}).get("query") or intent_rule.get("query") or routed_text).strip()
-        tool_args = {"args": [query]} if query else {}
-        tool_result = str(intent_msg or "")
-        grounded = bool(tool_result.strip())
-        action_ledger_add_step(ledger, "action_planner", "run_tool", tool=tool)
-        action_ledger_add_step(ledger, "tool_execution", "ok", tool=tool)
-
+    if intent_name == "apply_correction" and intent_state is None:
+        session.apply_state_update(None)
+    else:
+        session.apply_state_update(intent_state, fallback_state=conversation_state)
     action_ledger_add_step(
         ledger,
         "supervisor_intent",
@@ -205,50 +190,6 @@ def apply_conversation_followup_outcome(
     }
 
 
-def apply_identity_only_mode_block(
-    *,
-    routed_text: str,
-    intent_rule: dict,
-    identity_only_block_kind: str,
-    ledger: dict,
-    build_routing_decision: Callable[..., dict],
-    identity_only_block_reply: Callable[[str], str],
-    action_ledger_add_step: Callable[..., None],
-) -> dict:
-    block_kind = str(identity_only_block_kind or "").strip()
-    if not block_kind:
-        return {"handled": False}
-
-    reply_outcome = {
-        "intent": "policy_block",
-        "kind": "identity_only_block",
-        "blocked_domain": block_kind,
-        "reply_contract": "policy.identity_only_mode",
-    }
-    action_ledger_add_step(
-        ledger,
-        "policy_gate",
-        "blocked",
-        "identity_only_mode",
-        blocked_domain=block_kind,
-    )
-    return {
-        "handled": True,
-        "routing_decision": build_routing_decision(
-            routed_text,
-            entry_point="http",
-            intent_result=intent_rule,
-            handle_result=None,
-        ),
-        "reply": identity_only_block_reply(block_kind),
-        "planner_decision": "policy_block",
-        "grounded": False,
-        "intent": "policy_block",
-        "reply_contract": "policy.identity_only_mode",
-        "reply_outcome": reply_outcome,
-    }
-
-
 def prepare_chat_turn(
     *,
     session_id: str,
@@ -262,9 +203,6 @@ def prepare_chat_turn(
     evaluate_supervisor_rules: Callable[..., dict],
     supervisor_has_route: Callable[[dict], bool],
     runtime_set_location_intent: Callable[..., dict | None],
-    llm_classify_routing_intent: Callable[..., dict | None],
-    is_identity_only_session: Callable[[str], bool],
-    identity_only_block_kind: Callable[[str], str],
 ) -> dict:
     turns = append_session_turn(session_id, "user", text)
     routed_text = text
@@ -312,22 +250,11 @@ def prepare_chat_turn(
         if isinstance(runtime_intent, dict):
             intent_rule = runtime_intent
             intent_has_route = supervisor_has_route(intent_rule)
-    if not intent_has_route:
-        llm_intent = llm_classify_routing_intent(routed_text, turns=turns)
-        if isinstance(llm_intent, dict) and supervisor_has_route(llm_intent):
-            intent_rule = llm_intent
-            intent_has_route = True
-
-    block_kind = ""
-    if is_identity_only_session(session_id):
-        block_kind = str(identity_only_block_kind(routed_text, intent_result=intent_rule) or "").strip()
-
     return {
         "turns": turns,
         "routed_text": routed_text,
         "turn_acts": turn_acts,
         "intent_rule": intent_rule,
-        "identity_only_block_kind": block_kind,
     }
 
 

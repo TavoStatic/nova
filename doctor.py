@@ -50,7 +50,7 @@ def _default_policy() -> dict:
             "web": False,
         },
         "models": {
-            "chat": "llama3.1:8b",
+            "chat": "llama3.2:3b",
             "vision": "qwen2.5vl:7b",
             "stt_size": "base",
         },

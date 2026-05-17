@@ -16,10 +16,10 @@ class TestNovaRoutingSupport(unittest.TestCase):
         self.assertEqual(result["category"], "intentional_fallback.open_fulfillment_or_model")
         self.assertEqual(result["reason"], "open_fallback_candidate")
 
-    def test_should_warn_supervisor_bypass_ignores_weather_shortcuts(self):
+    def test_should_warn_supervisor_bypass_is_retired_for_model_owned_chat(self):
         self.assertFalse(
             nova_routing_support.should_warn_supervisor_bypass(
-                "weather now",
+                "anything at all",
                 looks_like_open_fallback_turn_fn=lambda text: False,
                 is_explicit_command_like_fn=lambda text: False,
                 is_location_request_fn=lambda text: False,
@@ -92,8 +92,8 @@ class TestNovaRoutingSupport(unittest.TestCase):
         self.assertEqual(decision["intent_phase"], {"phase": "intent", "handled": True})
         self.assertEqual(decision["handle_phase"], {"phase": "handle", "handled": True})
 
-    def test_should_clarify_unlabeled_numeric_turn_respects_saved_location_state(self):
-        self.assertTrue(
+    def test_should_clarify_unlabeled_numeric_turn_is_retired_for_chat(self):
+        self.assertFalse(
             nova_routing_support.should_clarify_unlabeled_numeric_turn(
                 "78521",
                 pending_action=None,
@@ -110,23 +110,139 @@ class TestNovaRoutingSupport(unittest.TestCase):
             )
         )
 
-    def test_llm_classify_routing_intent_skips_deterministic_operator_truth_queries(self):
+    def test_llm_classify_routing_intent_returns_none_for_model_none(self):
         called = {"live_gate": 0}
 
         def _live_gate():
             called["live_gate"] += 1
             return True
 
+        class _Resp:
+            def raise_for_status(self):
+                pass
+
+            def json(self):
+                return {"message": {"content": '{"tool":"none","args":[],"confidence":0.9}'}}
+
         result = nova_routing_support.llm_classify_routing_intent(
             "Now tell me what would make that storage watch go back into warning.",
             live_ollama_calls_allowed_fn=_live_gate,
-            chat_model_fn=lambda: (_ for _ in ()).throw(AssertionError("chat model should not be called")),
+            chat_model_fn=lambda: "llama3.2:3b",
             ollama_base="http://127.0.0.1:11434",
             get_saved_location_text_fn=lambda: "Brownsville, Texas",
+            requests_post_fn=lambda *args, **kwargs: _Resp(),
         )
 
         self.assertIsNone(result)
-        self.assertEqual(called["live_gate"], 0)
+        self.assertEqual(called["live_gate"], 1)
+
+    def test_llm_classify_routing_intent_can_return_explicit_none_payload(self):
+        called = {"live_gate": 0}
+
+        def _live_gate():
+            called["live_gate"] += 1
+            return True
+
+        class _Resp:
+            def raise_for_status(self):
+                pass
+
+            def json(self):
+                return {"message": {"content": '{"tool":"none","args":[],"confidence":0.84,"reason":"conversation"}'}}
+
+        result = nova_routing_support.llm_classify_routing_intent(
+            "Now tell me why that answer was confusing.",
+            return_none_payload=True,
+            live_ollama_calls_allowed_fn=_live_gate,
+            chat_model_fn=lambda: "llama3.2:3b",
+            ollama_base="http://127.0.0.1:11434",
+            get_saved_location_text_fn=lambda: "Brownsville, Texas",
+            requests_post_fn=lambda *args, **kwargs: _Resp(),
+        )
+
+        self.assertEqual(result.get("tool"), "none")
+        self.assertEqual(result.get("args"), [])
+        self.assertEqual(called["live_gate"], 1)
+
+    def test_llm_classify_routing_intent_maps_weather_tool_goal(self):
+        called = {"live_gate": 0}
+
+        def _live_gate():
+            called["live_gate"] += 1
+            return True
+
+        class _Resp:
+            def raise_for_status(self):
+                pass
+
+            def json(self):
+                return {
+                    "message": {
+                        "content": '{"tool":"weather_current_location","args":[],"confidence":0.88,"reason":"outdoor conditions"}'
+                    }
+                }
+
+        result = nova_routing_support.llm_classify_routing_intent(
+            "should I bring a jacket today?",
+            live_ollama_calls_allowed_fn=_live_gate,
+            chat_model_fn=lambda: "llama3.2:3b",
+            ollama_base="http://127.0.0.1:11434",
+            get_saved_location_text_fn=lambda: "Brownsville, Texas",
+            requests_post_fn=lambda *args, **kwargs: _Resp(),
+        )
+
+        self.assertEqual(result.get("tool"), "weather_current_location")
+        self.assertEqual(result.get("args"), [])
+        self.assertEqual(called["live_gate"], 1)
+
+    def test_llm_classify_routing_intent_maps_live_self_status_goal(self):
+        called = {"live_gate": 0}
+
+        def _live_gate():
+            called["live_gate"] += 1
+            return True
+
+        class _Resp:
+            def raise_for_status(self):
+                pass
+
+            def json(self):
+                return {
+                    "message": {
+                        "content": '{"tool":"self_status","args":[],"confidence":0.92,"reason":"live operational state"}'
+                    }
+                }
+
+        result = nova_routing_support.llm_classify_routing_intent(
+            "tell me what is happening inside Nova right now",
+            live_ollama_calls_allowed_fn=_live_gate,
+            chat_model_fn=lambda: "llama3.2:3b",
+            ollama_base="http://127.0.0.1:11434",
+            get_saved_location_text_fn=lambda: "Brownsville, Texas",
+            requests_post_fn=lambda *args, **kwargs: _Resp(),
+        )
+
+        self.assertEqual(result.get("tool"), "self_status")
+        self.assertEqual(result.get("args"), [])
+        self.assertEqual(called["live_gate"], 1)
+
+    def test_coerce_tool_intent_accepts_operational_alias_as_model_output(self):
+        result = nova_routing_support._coerce_tool_intent_payload(
+            '{"tool":"runtime_status","args":[],"confidence":0.8}',
+            user_text="tell me what is happening inside Nova right now",
+        )
+
+        self.assertEqual(result.get("tool"), "self_status")
+        self.assertEqual(result.get("args"), [])
+
+    def test_coerce_tool_intent_accepts_work_tree_tool(self):
+        result = nova_routing_support._coerce_tool_intent_payload(
+            '{"tool":"work_tree_status","args":[],"confidence":0.8}',
+            user_text="show me the current work plan state",
+        )
+
+        self.assertEqual(result.get("tool"), "work_tree_status")
+        self.assertEqual(result.get("args"), [])
 
 
 if __name__ == "__main__":

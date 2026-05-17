@@ -1,3 +1,4 @@
+import os
 import shutil
 import unittest
 import uuid
@@ -6,7 +7,7 @@ from pathlib import Path
 from services import nova_action_ledger_helpers
 
 
-WORK_TMP_ROOT = Path(__file__).resolve().parents[1] / "runtime" / "pytest_temp"
+WORK_TMP_ROOT = Path(os.environ.get("NOVA_VALIDATION_RUNTIME_DIR") or Path(__file__).resolve().parents[1] / "runtime" / "validation") / "pytest_temp"
 
 
 def _workspace_case_dir(prefix: str) -> Path:
@@ -89,7 +90,7 @@ class TestNovaActionLedgerHelpers(unittest.TestCase):
         self.assertEqual(payload["intent"], "web_research")
         self.assertIn("Web research route selected 2 times", payload["summary"])
 
-    def test_count_unsupported_claim_blocks_recently_counts_claim_gate_and_autonomy_guard(self):
+    def test_count_unsupported_claim_blocks_recently_counts_claim_gate_only(self):
         root = _workspace_case_dir("nova_action_ledger_helpers")
         try:
             (root / "001.json").write_text(
@@ -105,7 +106,7 @@ class TestNovaActionLedgerHelpers(unittest.TestCase):
         finally:
             shutil.rmtree(root, ignore_errors=True)
 
-        self.assertEqual(count, 2)
+        self.assertEqual(count, 1)
 
     def test_sample_intents_last_returns_unknown_for_blank_intent(self):
         root = _workspace_case_dir("nova_action_ledger_helpers")

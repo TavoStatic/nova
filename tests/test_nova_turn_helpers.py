@@ -10,8 +10,8 @@ class TestNovaTurnHelpers(unittest.TestCase):
             "What data do you want me to retrieve?",
         )
 
-    def test_is_location_request_detects_self_location_question(self):
-        self.assertTrue(
+    def test_is_location_request_rejects_natural_self_location_question(self):
+        self.assertFalse(
             nova_turn_helpers.is_location_request(
                 "What is your current physical location Nova?",
                 normalize_turn_text_fn=lambda text: text.lower(),
@@ -37,7 +37,7 @@ class TestNovaTurnHelpers(unittest.TestCase):
             get_saved_location_text_fn=lambda: "Brownsville, Texas",
         )
 
-        self.assertIn("My current device location is 26.19,-97.69.", reply)
+        self.assertIn("Current runtime device location is 26.19,-97.69.", reply)
         self.assertIn("Accuracy about 12m.", reply)
 
     def test_location_reply_falls_back_to_saved_location(self):
@@ -46,7 +46,7 @@ class TestNovaTurnHelpers(unittest.TestCase):
             get_saved_location_text_fn=lambda: "Brownsville, Texas",
         )
 
-        self.assertEqual(reply, "My location is Brownsville, Texas.")
+        self.assertEqual(reply, "Stored runtime location label is Brownsville, Texas.")
 
     def test_location_reply_refreshes_stale_device_location(self):
         calls = {"n": 0}
@@ -72,7 +72,7 @@ class TestNovaTurnHelpers(unittest.TestCase):
         )
 
         self.assertEqual(calls["n"], 1)
-        self.assertIn("My current device location is 25.90974,-97.50606.", reply)
+        self.assertIn("Current runtime device location is 25.90974,-97.50606.", reply)
 
     def test_location_reply_reports_stale_device_fix_before_saved_location(self):
         reply = nova_turn_helpers.location_reply(
@@ -86,24 +86,8 @@ class TestNovaTurnHelpers(unittest.TestCase):
             resolve_current_device_coords_fn=lambda: None,
         )
 
-        self.assertIn("My last device location fix is 25.90974,-97.50606.", reply)
+        self.assertIn("Last runtime device location fix is 25.90974,-97.50606.", reply)
         self.assertIn("stale", reply)
-
-    def test_is_web_research_override_request_matches_override_phrase(self):
-        self.assertTrue(
-            nova_turn_helpers.is_web_research_override_request(
-                "all you need is the Web",
-                normalize_turn_text_fn=lambda text: text.lower(),
-            )
-        )
-
-    def test_is_web_research_override_request_rejects_database_negation(self):
-        self.assertFalse(
-            nova_turn_helpers.is_web_research_override_request(
-                "no database for this one",
-                normalize_turn_text_fn=lambda text: text.lower(),
-            )
-        )
 
     def test_uses_prior_reference_detects_short_reference(self):
         self.assertTrue(nova_turn_helpers.uses_prior_reference("summarize that"))

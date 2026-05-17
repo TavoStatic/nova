@@ -6,6 +6,8 @@ import time
 from pathlib import Path
 from typing import Any, Callable
 
+from services.memory_bootstrap_origin import load_origin_contract
+
 
 def _compact(value: Any, max_chars: int = 220) -> str:
     text = str(value or "").strip()
@@ -255,15 +257,52 @@ def build_memory_health_payload(
     memory_db_path: Path,
     learned_facts_file: Path,
     identity_file: Path,
+    bootstrap_origin_file: Path | None = None,
     memory_events_log: Path | None = None,
     snapshot_file: Path | None = None,
     update_snapshot: bool = False,
+    memory_enabled: bool | None = None,
     now_fn: Callable[[], float] = time.time,
 ) -> dict[str, object]:
     db = _sqlite_memory_health(Path(memory_db_path))
     learned_facts = _json_file_health(Path(learned_facts_file), label="learned_facts")
     identity = _json_file_health(Path(identity_file), label="identity")
+    bootstrap_origin = load_origin_contract(Path(bootstrap_origin_file)) if bootstrap_origin_file is not None else {}
     memory_events = _jsonl_log_health(Path(memory_events_log), label="memory_events") if memory_events_log is not None else {}
+
+    if memory_enabled is True:
+        if not bool(learned_facts.get("exists")):
+            learned_facts.setdefault("issues", []).append(
+                _issue(
+                    "warning",
+                    "learned_facts_missing",
+                    "Memory is enabled but learned_facts.json has not been bootstrapped.",
+                    path=Path(learned_facts_file),
+                )
+            )
+        if not bool(identity.get("exists")):
+            identity.setdefault("issues", []).append(
+                _issue(
+                    "warning",
+                    "identity_missing",
+                    "Memory is enabled but identity.json has not been bootstrapped.",
+                    path=Path(identity_file),
+                )
+            )
+        origin_issue_codes = {
+            str(item.get("code") or "").strip()
+            for item in list(bootstrap_origin.get("issues") or [])
+            if isinstance(item, dict)
+        }
+        if not bool(bootstrap_origin.get("exists", True)) and "memory_bootstrap_origin_missing" not in origin_issue_codes:
+            bootstrap_origin.setdefault("issues", []).append(
+                _issue(
+                    "warning",
+                    "memory_bootstrap_origin_missing",
+                    "Memory is enabled but the bootstrap origin contract has not been created.",
+                    path=Path(bootstrap_origin_file) if bootstrap_origin_file is not None else None,
+                )
+            )
 
     issues: list[dict[str, str]] = []
     source_payloads: list[tuple[str, dict[str, object]]] = [
@@ -271,6 +310,8 @@ def build_memory_health_payload(
         ("learned_facts", learned_facts),
         ("identity", identity),
     ]
+    if bootstrap_origin:
+        source_payloads.append(("bootstrap_origin", bootstrap_origin))
     if memory_events:
         source_payloads.append(("memory_events_log", memory_events))
     for source_name, source_payload in source_payloads:
@@ -301,6 +342,21 @@ def build_memory_health_payload(
     elif issues:
         status = "watch"
     ok = bool(db.get("ok")) and status == "ok"
+    bootstrap_missing = [
+        source_name
+        for source_name, source_payload in (("learned_facts", learned_facts), ("identity", identity))
+        if not bool(source_payload.get("exists"))
+    ]
+    origin_status = str(bootstrap_origin.get("status") or "").strip().lower() if bootstrap_origin else ""
+    origin_pending = origin_status == "pending_operator_confirmation"
+    bootstrap_status = "unknown"
+    if memory_enabled is False:
+        bootstrap_status = "disabled"
+    elif memory_enabled is True:
+        if bootstrap_missing and origin_pending:
+            bootstrap_status = "waiting_for_origin_confirmation"
+        else:
+            bootstrap_status = "incomplete" if bootstrap_missing else "ready"
 
     if snapshot_file is not None and update_snapshot and bool(db.get("ok")):
         should_update = not prior_total or current_total >= prior_total
@@ -323,7 +379,17 @@ def build_memory_health_payload(
         "memory_db": db,
         "learned_facts": learned_facts,
         "identity": identity,
+        "bootstrap_origin": bootstrap_origin,
         "memory_events_log": memory_events,
+        "bootstrap": {
+            "memory_enabled": memory_enabled,
+            "status": bootstrap_status,
+            "missing": bootstrap_missing,
+            "origin_status": origin_status,
+            "origin_authority": str(bootstrap_origin.get("authority") or "") if bootstrap_origin else "",
+            "origin_pending_slots": list(bootstrap_origin.get("pending_slots") or []) if bootstrap_origin else [],
+            "origin_contract_path": str(bootstrap_origin.get("path") or "") if bootstrap_origin else "",
+        },
         "snapshot": {
             "path": str(snapshot_file) if snapshot_file is not None else "",
             "last_good_total": prior_total,

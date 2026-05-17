@@ -352,7 +352,9 @@ def make_queue_status_conversation_state(
     if not str(tool_output or "").strip():
         return None
 
-    queue = load_generated_queue_payload_fn(12)
+    queue = _queue_status_payload_from_output(tool_output)
+    if not queue:
+        queue = load_generated_queue_payload_fn(12)
     if not queue:
         return None
 
@@ -377,6 +379,74 @@ def make_queue_status_conversation_state(
         next_urgency=str(highest.get("urgency") or "").strip(),
         next_seam=str(highest.get("seam") or "").strip(),
     )
+
+
+def _parse_queue_int(value: str) -> int:
+    try:
+        return int(str(value or "").strip())
+    except Exception:
+        return 0
+
+
+def _queue_status_payload_from_output(tool_output: str) -> dict:
+    lines = [str(line or "").strip() for line in str(tool_output or "").splitlines()]
+    if not any(line.lower().startswith("standing work queue") for line in lines):
+        return {}
+
+    payload: dict[str, object] = {"next_item": {}}
+    next_item: dict[str, object] = {}
+    highest: dict[str, str] = {}
+
+    for line in lines:
+        low = line.lower()
+        if low.startswith("- open:"):
+            match = re.search(r"open:\s*(\d+)\s+of\s+(\d+)", line, flags=re.I)
+            if match:
+                payload["open_count"] = _parse_queue_int(match.group(1))
+                payload["count"] = _parse_queue_int(match.group(2))
+            continue
+        for key, label in (
+            ("green_count", "- green:"),
+            ("drift_count", "- drift:"),
+            ("warning_count", "- warning:"),
+            ("never_run_count", "- never run:"),
+        ):
+            if low.startswith(label):
+                payload[key] = _parse_queue_int(line.split(":", 1)[1] if ":" in line else "")
+                break
+        if low.startswith("next item:"):
+            next_item["file"] = line.split(":", 1)[1].strip()
+        elif low.startswith("family:"):
+            next_item["family_id"] = line.split(":", 1)[1].strip()
+        elif low.startswith("status:"):
+            value = line.split(":", 1)[1].strip()
+            match = re.match(r"(.+?)\s*\((.*?)\)\s*$", value)
+            if match:
+                next_item["latest_status"] = match.group(1).strip()
+                next_item["opportunity_reason"] = match.group(2).strip()
+            else:
+                next_item["latest_status"] = value
+        elif low.startswith("latest report:"):
+            next_item["latest_report_path"] = line.split(":", 1)[1].strip()
+        elif low.startswith("highest priority:"):
+            detail = line.split(":", 1)[1] if ":" in line else ""
+            for part in detail.split(";"):
+                if "=" not in part:
+                    continue
+                key, value = part.split("=", 1)
+                clean_key = key.strip().lower()
+                clean_value = value.strip()
+                if clean_value and clean_value.lower() != "n/a":
+                    highest[clean_key] = clean_value
+
+    if highest:
+        next_item["highest_priority"] = {
+            "signal": highest.get("signal", ""),
+            "urgency": highest.get("urgency", ""),
+            "seam": highest.get("seam", ""),
+        }
+    payload["next_item"] = next_item
+    return payload
 
 
 def make_tool_conversation_state(
@@ -410,6 +480,9 @@ def infer_post_reply_conversation_state(
     looks_like_location_recall_followup_fn: Callable[[list[tuple[str, str]], str], bool],
     make_conversation_state_fn: Callable[..., dict],
 ) -> Optional[dict]:
+    if str(planner_decision or "").strip().lower() == "llm_fallback":
+        return fallback_state if isinstance(fallback_state, dict) else None
+
     next_state = None
     if planner_decision == "run_tool":
         args_dict = tool_args if isinstance(tool_args, dict) else {}

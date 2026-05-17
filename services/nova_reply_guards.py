@@ -11,30 +11,10 @@ def self_correct_reply(
     is_capability_query_fn: Callable[[str], bool],
     describe_capabilities_fn: Callable[[], str],
 ) -> tuple[str, bool, str]:
+    del user_text, is_capability_query_fn, describe_capabilities_fn
     out = (reply or "").strip()
     if not out:
         return out, False, ""
-
-    if is_capability_query_fn(user_text):
-        target = describe_capabilities_fn().strip()
-        if target and re.sub(r"\s+", " ", out).lower() != re.sub(r"\s+", " ", target).lower():
-            return target, True, "capability_alignment"
-
-    low = out.lower()
-    bad_autonomy = [
-        "enhance myself on my own",
-        "enhance myself autonomously",
-        "i can enhance myself",
-        "i will enhance myself",
-        "self-sustenance",
-    ]
-    if any(fragment in low for fragment in bad_autonomy):
-        corrected = (
-            "I cannot self-enhance on my own. I can only improve through your explicit guidance, "
-            "validated tool runs, and saved corrections."
-        )
-        return corrected, True, "autonomy_guard"
-
     return out, False, ""
 
 

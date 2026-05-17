@@ -20,7 +20,12 @@ class TestNovaRuntimeContext(unittest.TestCase):
             nova_runtime_context.RUNTIME_DIR,
             nova_runtime_context.resolve_runtime_dir(nova_runtime_context.BASE_DIR),
         )
-        self.assertEqual(nova_runtime_context.MEMORY_DIR, nova_runtime_context.BASE_DIR / "memory")
+        expected_memory_dir = (
+            nova_runtime_context.RUNTIME_DIR / "memory"
+            if nova_runtime_context.RUNTIME_SCOPE == "validation"
+            else nova_runtime_context.BASE_DIR / "memory"
+        )
+        self.assertEqual(nova_runtime_context.MEMORY_DIR, expected_memory_dir)
         self.assertEqual(nova_runtime_context.POLICY_PATH, nova_runtime_context.BASE_DIR / "policy.json")
         self.assertEqual(
             nova_runtime_context.AUTONOMY_ORCHESTRATOR_LEDGER_FILE,

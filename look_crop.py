@@ -1,11 +1,13 @@
 import base64
 import io
+from pathlib import Path
 import requests
 import mss
 from PIL import Image
+from services.nova_vision_runtime import vision_model_from_policy_file
 
 OLLAMA_URL = "http://localhost:11434/api/chat"
-MODEL = "qwen2.5vl:7b"
+MODEL = vision_model_from_policy_file(Path(__file__).resolve().parent)
 
 TIMEOUT_SECONDS = 1800  # 30 minutes (first runs can be slow)
 

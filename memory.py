@@ -11,7 +11,24 @@ from typing import List, Tuple, Iterable, Optional
 import requests
 
 BASE_DIR = Path(__file__).resolve().parent
-DB_PATH = Path(os.environ.get("NOVA_MEMORY_DB") or (BASE_DIR / "nova_memory.sqlite"))
+
+
+def _resolve_memory_db_path() -> Path:
+    override = str(os.environ.get("NOVA_MEMORY_DB") or "").strip()
+    if override:
+        path = Path(override).expanduser()
+        return path if path.is_absolute() else BASE_DIR / path
+    try:
+        from services.nova_runtime_context import resolve_runtime_dir, runtime_scope_name
+
+        if runtime_scope_name() == "validation":
+            return resolve_runtime_dir(BASE_DIR) / "nova_memory.sqlite"
+    except Exception:
+        pass
+    return BASE_DIR / "nova_memory.sqlite"
+
+
+DB_PATH = _resolve_memory_db_path()
 POLICY_PATH = BASE_DIR / "policy.json"
 
 OLLAMA_BASE = "http://127.0.0.1:11434"

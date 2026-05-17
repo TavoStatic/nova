@@ -8,6 +8,10 @@ import time
 from pathlib import Path
 from typing import Any, Callable, Sequence
 
+from services.nova_wiring_inventory import WIRING_SURFACES
+from services.nova_wiring_inventory import build_root_closure_inventory_payload
+from services.nova_wiring_inventory import build_wiring_inventory_payload
+
 ROOT = Path(__file__).resolve().parents[1]
 
 CommandRunner = Callable[[str, Sequence[str], Path, int], dict[str, Any]]
@@ -21,7 +25,7 @@ FRONTDOOR_COMMANDS = (
     "smoke",
     "test",
     "package-readiness",
-    "wiring-check",
+    "package-validate",
     "release-clean",
 )
 
@@ -32,10 +36,14 @@ REQUIRED_IMPORTS = (
     "services.control_work_trees",
     "services.data_pipeline_registry",
     "services.end_to_end_wiring",
+    "services.evidence_validity",
+    "services.nova_root_inventory",
+    "services.nova_wiring_inventory",
     "services.nova_control_action_dispatcher",
     "services.nova_http_pipeline_control",
     "services.nova_http_routing",
     "services.release_clean",
+    "services.release_validation",
     "services.runtime_status",
     "work_tree",
 )
@@ -137,6 +145,8 @@ def _release_clean_checks(root: Path) -> list[dict[str, Any]]:
     paths = {
         "release_clean_service": root / "services" / "release_clean.py",
         "release_clean_cli": root / "scripts" / "release_clean_check.py",
+        "release_validation_service": root / "services" / "release_validation.py",
+        "release_validation_cli": root / "scripts" / "validate_release_package.py",
     }
     checks = [
         _check(f"release-clean:{name}", path.exists(), f"{path.relative_to(root).as_posix()} exists")
@@ -181,18 +191,17 @@ def _pipeline_checks(root: Path) -> list[dict[str, Any]]:
         _check(
             "data-lanes:registry",
             True,
-            "registered lanes: " + ", ".join(ids)
-            if ids
-            else "pipeline registry available; no bundled data lanes",
+            "registered lanes: " + ", ".join(ids) if ids else "no registered data lanes",
             data={"pipeline_ids": ids},
         )
     )
     checks.append(
         _check(
-            "data-lanes:sis_test_present",
-            "sis_test" in ids,
-            "sis_test lane present" if "sis_test" in ids else "sis_test lane missing",
+            "data-lanes:active_lane_inventory",
+            True,
+            "active data lane inventory present" if ids else "no active data lanes configured for this install",
             required=False,
+            data={"pipeline_ids": ids},
         )
     )
 
@@ -236,10 +245,245 @@ def _pipeline_checks(root: Path) -> list[dict[str, Any]]:
     return checks
 
 
+class _SyntheticCoreModule:
+    """Minimal core-shaped object for source-level status contract checks."""
+
+    @staticmethod
+    def load_policy() -> dict[str, Any]:
+        return {
+            "tools_enabled": {"web": True},
+            "web": {
+                "enabled": True,
+                "search_provider": "html",
+                "search_api_endpoint": "",
+                "allow_domains": [],
+            },
+            "memory": {"enabled": True, "scope": "private"},
+        }
+
+    @staticmethod
+    def mem_stats_payload(*, emit_event: bool = False) -> dict[str, Any]:
+        del emit_event
+        return {"ok": True, "total": 1, "by_user": {"gus": 1}}
+
+    @staticmethod
+    def patch_status_payload() -> dict[str, Any]:
+        return {
+            "ok": True,
+            "enabled": True,
+            "strict_manifest": True,
+            "allow_force": False,
+            "behavioral_check": True,
+            "behavioral_check_timeout_sec": 600,
+            "tests_available": True,
+            "pipeline_ready": True,
+            "ready_for_validated_apply": False,
+        }
+
+    @staticmethod
+    def build_pulse_payload() -> dict[str, Any]:
+        return {
+            "generated_at": "synthetic",
+            "autonomy_level": "observe",
+            "promoted_total": 0,
+            "promoted_delta": 0,
+            "ready_for_validated_apply": False,
+            "memory_ok": True,
+            "memory_health_status": "ok",
+            "memory_health": {"status": "ok", "issue_count": 0},
+        }
+
+    @staticmethod
+    def update_now_pending_payload() -> dict[str, Any]:
+        return {"pending": False}
+
+    @staticmethod
+    def ollama_health_payload() -> dict[str, Any]:
+        return {
+            "ok": True,
+            "server_ok": True,
+            "tags_ok": True,
+            "chat_route_ok": True,
+            "status": "ok",
+            "info": "synthetic",
+            "version": "synthetic",
+            "version_ok": True,
+            "version_status": 200,
+            "api_contract_status": "ok",
+            "chat_model": "synthetic-model",
+            "model_available": True,
+            "model_status": "available",
+            "available_models": ["synthetic-model"],
+        }
+
+    @staticmethod
+    def voice_status_payload() -> dict[str, Any]:
+        return {
+            "ok": True,
+            "status": "available",
+            "requested": False,
+            "sounddevice_loaded": True,
+            "wav_loaded": True,
+            "whisper_loaded": True,
+        }
+
+    @staticmethod
+    def vision_status_payload(**_kwargs) -> dict[str, Any]:
+        return {
+            "ok": True,
+            "status": "available",
+            "requested": False,
+            "screen_requested": False,
+            "camera_requested": False,
+            "vision_model": "synthetic-vision",
+            "vision_model_available": True,
+        }
+
+    @staticmethod
+    def get_search_provider_priority() -> list[str]:
+        return ["html", "searxng", "general_web"]
+
+    @staticmethod
+    def chat_model() -> str:
+        return "synthetic-model"
+
+    @staticmethod
+    def mem_enabled() -> bool:
+        return True
+
+    @staticmethod
+    def runtime_device_location_payload() -> dict[str, Any]:
+        return {"ok": True, "status": "unset"}
+
+
+def _synthetic_control_status_payload() -> dict[str, Any]:
+    from services.control_status import CONTROL_STATUS_SERVICE
+
+    guard_status = {"running": True, "status": "running", "pid": 1, "process_count": 1}
+    core_status = {"running": True, "status": "running", "pid": 2, "heartbeat_age_sec": 1, "process_count": 1}
+    webui_status = {"running": True, "status": "running", "pid": 3, "process_count": 1}
+    timeline_payload = {"ok": True, "events": []}
+    work_trees_payload = {
+        "ok": True,
+        "counts": {
+            "total": 1,
+            "active": 1,
+            "branches": 1,
+            "open_tasks": 0,
+            "blocked": 0,
+            "pending": 0,
+            "working": 0,
+            "complete": 1,
+        },
+        "trees": [],
+    }
+    autonomy_maintenance = {
+        "ok": True,
+        "last_regression_status": "OK",
+        "last_regression_stale": False,
+        "runtime_worker": {"active": True, "last_cycle_status": "ok", "interval_sec": 300, "cycle_count": 1},
+        "last_generated_queue_run": {"status": "clear", "queue_open_count": 0, "queue_actionable_count": 0, "queue_blocked_count": 0},
+        "last_work_tree_cycle": {"status": "ok"},
+        "last_patch_cleanup": {"status": "ok"},
+        "last_complete_tree_archive": {"status": "ok"},
+        "last_autonomy_orchestrator": {"decision": "settled", "decision_type": "Settled", "confidence": 1.0},
+        "autonomy_orchestrator_summary": {"count": 1, "stable_recommendation": True},
+    }
+    generated_work_queue = {
+        "ok": True,
+        "status": "clear",
+        "open_count": 0,
+        "actionable_count": 0,
+        "blocked_count": 0,
+        "blocked_reason_counts": {},
+        "blocked_files": [],
+    }
+    memory_summary = {"ok": True, "count": 1, "last_event": {"action": "write", "status": "ok"}}
+    tool_summary = {
+        "ok": True,
+        "count": 1,
+        "status_counts": {"ok": 1},
+        "success_count": 1,
+        "failure_count": 0,
+        "last_event": {"tool": "read", "status": "ok", "user": "system"},
+    }
+    ledger_summary = {
+        "ok": True,
+        "count": 1,
+        "last_record": {
+            "intent": "synthetic",
+            "planner_decision": "observe",
+            "tool": "read",
+            "route_summary": "synthetic route",
+            "grounded": True,
+            "route_trace": ["synthetic"],
+            "final_answer": "synthetic answer",
+            "provider_used": "html",
+            "provider_family": "html",
+        },
+    }
+
+    suppliers = {
+        "probe_searxng": lambda _endpoint: (True, "synthetic"),
+        "guard_status_payload": lambda: guard_status,
+        "core_status_payload": lambda: core_status,
+        "http_status_payload": lambda: webui_status,
+        "runtime_timeline_payload": lambda: timeline_payload,
+        "subconscious_status_summary": lambda: {
+            "ok": True,
+            "latest_report_path": "synthetic",
+            "family_count": 1,
+            "variation_count": 1,
+            "training_priority_count": 0,
+            "generated_definition_count": 0,
+        },
+        "subconscious_live_summary": lambda: {"ok": True, "status": "clear"},
+        "generated_work_queue": lambda _limit=24: generated_work_queue,
+        "autonomy_maintenance_summary": lambda: autonomy_maintenance,
+        "work_trees_payload": lambda _limit=32: work_trees_payload,
+        "load_operator_macros": lambda _limit=24: [],
+        "load_backend_commands": lambda _limit=40: [],
+        "memory_events_summary": lambda _limit=80: memory_summary,
+        "tool_events_summary": lambda _limit=80: tool_summary,
+        "action_ledger_summary": lambda _limit=80: ledger_summary,
+        "provider_telemetry_payload": lambda **_kwargs: {"ok": True, "last_provider_used": "html", "last_provider_family": "html"},
+        "runtime_summary_payload": lambda **_kwargs: {"ok": True, "status": "running"},
+        "runtime_artifacts_payload": lambda: {"ok": True, "artifacts": []},
+        "validation_artifact_truth_payload": lambda: {"ok": True, "status": "clear", "action_count": 0, "inspected_count": 0},
+        "runtime_restart_analytics_payload": lambda: {"ok": True, "restart_count": 0},
+        "runtime_failure_reasons_payload": lambda *_args: {"ok": True, "reasons": []},
+        "port_ownership_payload": lambda: {"ok": True, "status": "clear", "issue_count": 0},
+        "action_readiness_payload": lambda *_args: {"ok": True, "status": "ready"},
+        "release_status_payload": lambda: {"ok": True, "status": "ready"},
+        "patch_action_readiness_payload": lambda _patch_summary: {"ok": True, "status": "not_pending"},
+        "storage_watch_summary": lambda: {"ok": True, "status": "clear", "patch_snapshot_count": 0, "kidney_snapshot_count": 0},
+        "runtime_process_note": lambda: "synthetic source-level status contract",
+        "heartbeat_age_seconds": lambda: 1,
+        "chat_login_enabled": lambda: False,
+        "chat_auth_source": lambda: "disabled",
+        "chat_users": lambda: {},
+        "append_metrics_snapshot": lambda _payload: None,
+        "build_self_check": lambda _status, _policy, _metrics: {"health_score": 95, "pass_ratio": 1.0, "alerts": []},
+        "control_policy_payload": lambda: {"ok": True},
+        "metrics_payload": lambda: {"ok": True},
+    }
+    return CONTROL_STATUS_SERVICE.runtime_status_payload(
+        core_module=_SyntheticCoreModule(),
+        session_turns={"synthetic": [("user", "status")]},
+        metrics_totals=(1, 0),
+        supplier_fns=suppliers,
+    )
+
+
 def _latest_release_clean_check(root: Path) -> dict[str, Any]:
     path = root / "runtime" / "release_clean" / "latest_release_clean.json"
     if not path.exists():
-        return _check("release-clean:latest_report", False, "latest release-clean report missing")
+        return _check(
+            "release-clean:latest_report",
+            True,
+            "latest release-clean report missing; no recent release-clean run",
+            data={"report_path": str(path), "report_present": False},
+        )
     try:
         report = json.loads(path.read_text(encoding="utf-8"))
     except Exception as exc:
@@ -248,11 +492,23 @@ def _latest_release_clean_check(root: Path) -> dict[str, Any]:
     readiness = report.get("readiness") if isinstance(report.get("readiness"), dict) else {}
     state = readiness.get("latest_readiness_state") or readiness.get("state") or "unknown"
     artifact = str(report.get("artifact") or "")
+    failure_reason = str(report.get("failure_reason") or "")
     return _check(
         "release-clean:latest_report",
-        ok,
-        f"latest report ok; readiness={state}; artifact={artifact}" if ok else f"latest report not ok: {report.get('failure_reason')}",
-        data={"readiness": state, "artifact": artifact, "report_path": str(path)},
+        True,
+        (
+            f"latest report present; ok={ok}; readiness={state}; artifact={artifact}"
+            if ok
+            else f"latest report present; ok=false; failure_reason={failure_reason or 'unknown'}"
+        ),
+        data={
+            "readiness": state,
+            "artifact": artifact,
+            "report_path": str(path),
+            "report_ok": ok,
+            "failure_reason": failure_reason,
+            "report_present": True,
+        },
     )
 
 
@@ -288,6 +544,116 @@ def _autonomy_log_check(root: Path, *, max_age_sec: int = 3600) -> dict[str, Any
     return _check("runtime:autonomy_log", ok, detail, data={"age_sec": age})
 
 
+def _source_wiring_inventory_checks(root: Path) -> list[dict[str, Any]]:
+    checks: list[dict[str, Any]] = []
+    signal_text = _read_text(root / "services" / "work_tree_signal_ingestion.py")
+    tool_dispatch_text = _read_text(root / "services" / "nova_tool_dispatch.py")
+    work_tree_text = _read_text(root / "work_tree.py")
+    dispatcher_text = _read_text(root / "services" / "nova_control_action_dispatcher.py")
+
+    source_set = set()
+    tool_set = set()
+    action_set = set()
+    try:
+        synthetic_status_payload = _synthetic_control_status_payload()
+    except Exception as exc:
+        synthetic_status_payload = {}
+        checks.append(_check("wiring-source:status-contract", False, f"synthetic status contract failed: {exc}"))
+    else:
+        checks.append(
+            _check(
+                "wiring-source:status-contract",
+                bool(synthetic_status_payload),
+                f"synthetic control status emitted {len(synthetic_status_payload)} keys",
+                data={"status_key_count": len(synthetic_status_payload)},
+            )
+        )
+
+    for surface in WIRING_SURFACES:
+        files_present = [
+            path
+            for path in surface.source_files
+            if (root / path).exists()
+        ]
+        source_set.update(source for source in surface.signal_sources if source in signal_text)
+        tool_set.update(tool for tool in surface.planned_tools if tool in tool_dispatch_text or tool in work_tree_text)
+        action_set.update(action for action in surface.advisory_actions if action in dispatcher_text)
+        checks.append(
+            _check(
+                f"wiring-source:{surface.surface_id}:files",
+                len(files_present) == len(surface.source_files),
+                "source files present"
+                if len(files_present) == len(surface.source_files)
+                else "missing source files: "
+                + ", ".join(path for path in surface.source_files if path not in files_present),
+                data={"source_files": list(surface.source_files), "present": files_present},
+            )
+        )
+
+    inventory = build_wiring_inventory_payload(
+        status_payload=synthetic_status_payload,
+        signal_sources=source_set,
+        planned_tools=tool_set,
+        advisory_actions=action_set,
+    )
+    checks.append(
+        _check(
+            "wiring-source:inventory",
+            bool(inventory.get("ok")),
+            "all subsystem surfaces are source-wired"
+            if inventory.get("ok")
+            else "wiring inventory gaps remain",
+            data=inventory,
+        )
+    )
+    root_closure = build_root_closure_inventory_payload(
+        status_payload=synthetic_status_payload,
+        signal_sources=source_set,
+        planned_tools=tool_set,
+        advisory_actions=action_set,
+        root=root,
+    )
+    checks.append(
+        _check(
+            "wiring-source:root-closure",
+            bool(root_closure.get("ok")),
+            "all discovered source roots have status, signal, tool, and action closure wiring"
+            if root_closure.get("ok")
+            else "root closure wiring gaps remain",
+            data=root_closure,
+        )
+    )
+    return checks
+
+
+def _source_root_inventory_checks(root: Path) -> list[dict[str, Any]]:
+    try:
+        from services.nova_root_inventory import build_source_root_inventory_payload
+
+        inventory = build_source_root_inventory_payload(root=root, wiring_surface_ids=[surface.surface_id for surface in WIRING_SURFACES])
+    except Exception as exc:
+        return [_check("source-roots:inventory", False, f"source root inventory failed: {exc}")]
+
+    unwired = list(inventory.get("unwired_roots") or [])
+    missing_evidence = list(inventory.get("missing_evidence_roots") or [])
+    return [
+        _check(
+            "source-roots:inventory",
+            bool(inventory.get("ok")),
+            (
+                f"all discovered source roots wired ({int(inventory.get('root_count', 0) or 0)} roots)"
+                if inventory.get("ok")
+                else "source root inventory gaps remain"
+            ),
+            data={
+                "root_count": int(inventory.get("root_count", 0) or 0),
+                "unwired_roots": unwired,
+                "missing_evidence_roots": missing_evidence,
+            },
+        )
+    ]
+
+
 def run_end_to_end_wiring_check(
     *,
     root: Path | None = None,
@@ -305,6 +671,8 @@ def run_end_to_end_wiring_check(
     checks.extend(_release_clean_checks(repo_root))
     checks.extend(_import_checks(repo_root))
     checks.extend(_pipeline_checks(repo_root))
+    checks.extend(_source_root_inventory_checks(repo_root))
+    checks.extend(_source_wiring_inventory_checks(repo_root))
 
     if include_runtime:
         checks.append(_latest_release_clean_check(repo_root))

@@ -25,7 +25,7 @@ _NOISE_SUPPRESSION_RULES = SUBCONSCIOUS_CHARTER["noise_suppression_rules"]
 @dataclass(slots=True)
 class LiveSimulationTurn:
     user_text: str
-    chosen_route: str = "generic_fallback"
+    chosen_route: str = "auto"
     pending_action: Optional[dict] = None
     conversation_state: Optional[dict] = None
     assistant_reply: str = ""
@@ -81,6 +81,55 @@ class TrainingPriorityItem:
     urgency: str
 
 
+def _route_viable(probe: dict, route_name: str) -> bool:
+    routes = probe.get("routes") if isinstance(probe.get("routes"), dict) else {}
+    route = routes.get(route_name) if isinstance(routes.get(route_name), dict) else {}
+    return bool(route.get("viable"))
+
+
+def _should_observe_live_route(scenario: LiveSimulationScenario, turn: LiveSimulationTurn) -> bool:
+    chosen = str(turn.chosen_route or "").strip().lower()
+    if chosen.startswith("force:"):
+        return False
+    return chosen in {"", "auto", "live", "observed"}
+
+
+def _observed_live_route(
+    scenario: LiveSimulationScenario,
+    turn: LiveSimulationTurn,
+    probe: dict,
+    sim_session: ConversationSession,
+    recent_turns: list[tuple[str, str]],
+    *,
+    pending_action: Optional[dict] = None,
+) -> str:
+    if not _should_observe_live_route(scenario, turn):
+        chosen = str(turn.chosen_route or "").strip()
+        if chosen.lower().startswith("force:"):
+            chosen = chosen.split(":", 1)[1].strip()
+        return chosen or "generic_fallback"
+
+    if _route_viable(probe, "supervisor_owned"):
+        return "supervisor_owned"
+
+    try:
+        fulfillment_attempt = nova_core._fulfillment_flow_service().should_attempt_fulfillment_flow(
+            turn.user_text,
+            sim_session,
+            list(recent_turns),
+            pending_action=pending_action,
+        )
+    except Exception:
+        fulfillment_attempt = (
+            _route_viable(probe, "fulfillment_applicable")
+            and str(probe.get("comparison_strength") or "").strip().lower() == "clear"
+        )
+    if fulfillment_attempt:
+        return "fulfillment_applicable"
+
+    return "generic_fallback"
+
+
 def simulate_live_scenario(
     scenario: LiveSimulationScenario,
     *,
@@ -109,10 +158,18 @@ def simulate_live_scenario(
             list(recent_turns),
             pending_action=pending_action,
         )
+        chosen_route = _observed_live_route(
+            scenario,
+            turn,
+            probe,
+            sim_session,
+            recent_turns,
+            pending_action=pending_action,
+        )
         state = SUBCONSCIOUS_SERVICE.update_state(
             sim_session,
             probe,
-            chosen_route=turn.chosen_route,
+            chosen_route=chosen_route,
         )
         if state is not None and list(getattr(state, "recent_pressure_records", []) or []):
             pressure_records.append(getattr(state, "recent_pressure_records")[-1])
@@ -455,7 +512,7 @@ def build_default_live_scenarios() -> list[LiveSimulationScenario]:
             turns=[
                 LiveSimulationTurn(
                     user_text="Show me workable options without collapsing too early.",
-                    chosen_route="generic_fallback",
+                    chosen_route="auto",
                 ),
             ],
         ),
@@ -463,8 +520,8 @@ def build_default_live_scenarios() -> list[LiveSimulationScenario]:
             scenario_id="repeated-weak-pressure",
             target_seam="subconscious_pressure_backlog_generation",
             turns=[
-                LiveSimulationTurn(user_text="how are you doing today ?", chosen_route="generic_fallback"),
-                LiveSimulationTurn(user_text="what now", chosen_route="generic_fallback"),
+                LiveSimulationTurn(user_text="how are you doing today ?", chosen_route="auto"),
+                LiveSimulationTurn(user_text="what now", chosen_route="auto"),
             ],
         ),
     ]
@@ -560,7 +617,7 @@ def build_default_live_scenario_families() -> list[LiveSimulationFamily]:
                     turns=[
                         LiveSimulationTurn(
                             user_text="Show me workable options without collapsing too early.",
-                            chosen_route="generic_fallback",
+                            chosen_route="auto",
                         )
                     ],
                 ),
@@ -571,7 +628,7 @@ def build_default_live_scenario_families() -> list[LiveSimulationFamily]:
                     turns=[
                         LiveSimulationTurn(
                             user_text="Can you compare a few viable ways forward before picking one for me ?",
-                            chosen_route="generic_fallback",
+                            chosen_route="auto",
                         )
                     ],
                 ),
@@ -582,7 +639,7 @@ def build_default_live_scenario_families() -> list[LiveSimulationFamily]:
                     turns=[
                         LiveSimulationTurn(
                             user_text="I need options here. Do not collapse to one answer yet.",
-                            chosen_route="generic_fallback",
+                            chosen_route="auto",
                         )
                     ],
                 ),
@@ -593,12 +650,12 @@ def build_default_live_scenario_families() -> list[LiveSimulationFamily]:
                     turns=[
                         LiveSimulationTurn(
                             user_text="I need help deciding.",
-                            chosen_route="generic_fallback",
+                            chosen_route="auto",
                             assistant_reply="Tell me whether you want a comparison of options or a single answer.",
                         ),
                         LiveSimulationTurn(
                             user_text="Show me the possible paths first so I can compare tradeoffs.",
-                            chosen_route="generic_fallback",
+                            chosen_route="auto",
                         ),
                     ],
                 ),
@@ -613,8 +670,8 @@ def build_default_live_scenario_families() -> list[LiveSimulationFamily]:
                     variation_id="plain_followup",
                     target_seam="subconscious_pressure_backlog_generation",
                     turns=[
-                        LiveSimulationTurn(user_text="how are you doing today ?", chosen_route="generic_fallback"),
-                        LiveSimulationTurn(user_text="what now", chosen_route="generic_fallback"),
+                        LiveSimulationTurn(user_text="how are you doing today ?", chosen_route="auto"),
+                        LiveSimulationTurn(user_text="what now", chosen_route="auto"),
                     ],
                 ),
                 LiveSimulationScenario(
@@ -622,8 +679,8 @@ def build_default_live_scenario_families() -> list[LiveSimulationFamily]:
                     variation_id="casual_checkin",
                     target_seam="subconscious_pressure_backlog_generation",
                     turns=[
-                        LiveSimulationTurn(user_text="how is your day going right now ?", chosen_route="generic_fallback"),
-                        LiveSimulationTurn(user_text="where does that leave us ?", chosen_route="generic_fallback"),
+                        LiveSimulationTurn(user_text="how is your day going right now ?", chosen_route="auto"),
+                        LiveSimulationTurn(user_text="where does that leave us ?", chosen_route="auto"),
                     ],
                 ),
                 LiveSimulationScenario(
@@ -633,10 +690,10 @@ def build_default_live_scenario_families() -> list[LiveSimulationFamily]:
                     turns=[
                         LiveSimulationTurn(
                             user_text="can you help me a little here ?",
-                            chosen_route="generic_fallback",
+                            chosen_route="auto",
                             assistant_reply="What kind of help do you want?",
                         ),
-                        LiveSimulationTurn(user_text="what do you think then ?", chosen_route="generic_fallback"),
+                        LiveSimulationTurn(user_text="what do you think then ?", chosen_route="auto"),
                     ],
                 ),
                 LiveSimulationScenario(
@@ -644,58 +701,8 @@ def build_default_live_scenario_families() -> list[LiveSimulationFamily]:
                     variation_id="soft_smalltalk_then_ambiguity",
                     target_seam="subconscious_pressure_backlog_generation",
                     turns=[
-                        LiveSimulationTurn(user_text="are you doing alright today nova ?", chosen_route="generic_fallback"),
-                        LiveSimulationTurn(user_text="okay so what next ?", chosen_route="generic_fallback"),
-                    ],
-                ),
-            ],
-        ),
-        LiveSimulationFamily(
-            family_id="memory-capture-fallthrough-family",
-            target_seam="memory_capture_route_fallthrough",
-            scenarios=[
-                LiveSimulationScenario(
-                    scenario_id="memory-capture-fallthrough",
-                    variation_id="favorite_color_fact",
-                    target_seam="memory_capture_route_fallthrough",
-                    turns=[
-                        LiveSimulationTurn(
-                            user_text="Remember this: my favorite color is teal. Don't forget.",
-                            chosen_route="generic_fallback",
-                        )
-                    ],
-                ),
-                LiveSimulationScenario(
-                    scenario_id="memory-capture-fallthrough",
-                    variation_id="location_fact",
-                    target_seam="memory_capture_route_fallthrough",
-                    turns=[
-                        LiveSimulationTurn(
-                            user_text="remember this Brownsville is my location",
-                            chosen_route="generic_fallback",
-                        )
-                    ],
-                ),
-                LiveSimulationScenario(
-                    scenario_id="memory-capture-fallthrough",
-                    variation_id="preference_fact",
-                    target_seam="memory_capture_route_fallthrough",
-                    turns=[
-                        LiveSimulationTurn(
-                            user_text="remember this I prefer concise summaries with the key facts first",
-                            chosen_route="generic_fallback",
-                        )
-                    ],
-                ),
-                LiveSimulationScenario(
-                    scenario_id="memory-capture-fallthrough",
-                    variation_id="identity_fact",
-                    target_seam="memory_capture_route_fallthrough",
-                    turns=[
-                        LiveSimulationTurn(
-                            user_text="remember this my integration marker is memory-route-alpha",
-                            chosen_route="generic_fallback",
-                        )
+                        LiveSimulationTurn(user_text="are you doing alright today nova ?", chosen_route="auto"),
+                        LiveSimulationTurn(user_text="okay so what next ?", chosen_route="auto"),
                     ],
                 ),
             ],
@@ -711,7 +718,7 @@ def build_default_live_scenario_families() -> list[LiveSimulationFamily]:
                     turns=[
                         LiveSimulationTurn(
                             user_text="go ahead",
-                            chosen_route="generic_fallback",
+                            chosen_route="auto",
                             pending_action={
                                 "kind": "weather_lookup",
                                 "status": "awaiting_location",
@@ -728,7 +735,7 @@ def build_default_live_scenario_families() -> list[LiveSimulationFamily]:
                     turns=[
                         LiveSimulationTurn(
                             user_text="yes please use the saved location",
-                            chosen_route="generic_fallback",
+                            chosen_route="auto",
                             pending_action={
                                 "kind": "weather_lookup",
                                 "status": "awaiting_location",
@@ -745,7 +752,7 @@ def build_default_live_scenario_families() -> list[LiveSimulationFamily]:
                     turns=[
                         LiveSimulationTurn(
                             user_text="yes get the weather for our location",
-                            chosen_route="generic_fallback",
+                            chosen_route="auto",
                         )
                     ],
                 ),
@@ -756,7 +763,7 @@ def build_default_live_scenario_families() -> list[LiveSimulationFamily]:
                     turns=[
                         LiveSimulationTurn(
                             user_text="okay do that",
-                            chosen_route="generic_fallback",
+                            chosen_route="auto",
                             pending_action={
                                 "kind": "weather_lookup",
                                 "status": "awaiting_location",
@@ -779,7 +786,7 @@ def build_default_live_scenario_families() -> list[LiveSimulationFamily]:
                     turns=[
                         LiveSimulationTurn(
                             user_text="tell me about the first one",
-                            chosen_route="generic_fallback",
+                            chosen_route="auto",
                             conversation_state={
                                 "kind": "retrieval",
                                 "subject": "web_research",
@@ -797,7 +804,7 @@ def build_default_live_scenario_families() -> list[LiveSimulationFamily]:
                     turns=[
                         LiveSimulationTurn(
                             user_text="what did you find",
-                            chosen_route="generic_fallback",
+                            chosen_route="auto",
                             conversation_state={
                                 "kind": "retrieval",
                                 "subject": "web_research",
@@ -815,7 +822,7 @@ def build_default_live_scenario_families() -> list[LiveSimulationFamily]:
                     turns=[
                         LiveSimulationTurn(
                             user_text="web continue",
-                            chosen_route="generic_fallback",
+                            chosen_route="auto",
                             conversation_state={
                                 "kind": "retrieval",
                                 "subject": "web_research",
@@ -840,7 +847,7 @@ def build_default_live_scenario_families() -> list[LiveSimulationFamily]:
                     turns=[
                         LiveSimulationTurn(
                             user_text="please patch apply updates.zip",
-                            chosen_route="generic_fallback",
+                            chosen_route="auto",
                         )
                     ],
                 ),
@@ -851,7 +858,7 @@ def build_default_live_scenario_families() -> list[LiveSimulationFamily]:
                     turns=[
                         LiveSimulationTurn(
                             user_text="patch preview teach.zip",
-                            chosen_route="generic_fallback",
+                            chosen_route="auto",
                         )
                     ],
                 ),
@@ -862,7 +869,7 @@ def build_default_live_scenario_families() -> list[LiveSimulationFamily]:
                     turns=[
                         LiveSimulationTurn(
                             user_text="patch rollback",
-                            chosen_route="generic_fallback",
+                            chosen_route="auto",
                         )
                     ],
                 ),
@@ -883,7 +890,7 @@ def build_default_live_scenario_families() -> list[LiveSimulationFamily]:
                     turns=[
                         LiveSimulationTurn(
                             user_text="What codeword did I just ask you to remember?",
-                            chosen_route="generic_fallback",
+                            chosen_route="auto",
                         )
                     ],
                 ),
@@ -898,7 +905,7 @@ def build_default_live_scenario_families() -> list[LiveSimulationFamily]:
                     turns=[
                         LiveSimulationTurn(
                             user_text="What topic did I ask you to track?",
-                            chosen_route="generic_fallback",
+                            chosen_route="auto",
                         )
                     ],
                 ),
@@ -913,7 +920,7 @@ def build_default_live_scenario_families() -> list[LiveSimulationFamily]:
                     turns=[
                         LiveSimulationTurn(
                             user_text="Which review was blocked?",
-                            chosen_route="generic_fallback",
+                            chosen_route="auto",
                         )
                     ],
                 ),
@@ -928,7 +935,7 @@ def build_default_live_scenario_families() -> list[LiveSimulationFamily]:
                     turns=[
                         LiveSimulationTurn(
                             user_text="Who owns it?",
-                            chosen_route="generic_fallback",
+                            chosen_route="auto",
                         )
                     ],
                 ),

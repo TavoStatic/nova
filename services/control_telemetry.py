@@ -82,6 +82,10 @@ class ControlTelemetryService:
             "avg_latency_ms": 0,
             "avg_latency_ms_by_tool": {},
             "last_error_summary": "",
+            "last_error_event": {},
+            "last_error_ts": 0,
+            "last_error_age_sec": None,
+            "last_error_stale": False,
             "last_event": {},
         }
         try:
@@ -93,6 +97,7 @@ class ControlTelemetryService:
             latency_total = 0
             latency_count = 0
             latency_by_tool: dict[str, list[int]] = {}
+            last_ok_ts = 0
             for line in recent:
                 if not line.strip():
                     continue
@@ -106,14 +111,27 @@ class ControlTelemetryService:
                 out["tool_counts"][tool] = int(out["tool_counts"].get(tool, 0)) + 1
                 if status == "ok":
                     out["success_count"] += 1
+                    last_ok_ts = max(last_ok_ts, int(entry.get("ts") or 0))
                 elif status == "error":
                     out["failure_count"] += 1
-                    if not out["last_error_summary"]:
-                        out["last_error_summary"] = f"{tool}: {str(entry.get('error') or '')}".strip().strip(": ")
+                    out["last_error_summary"] = f"{tool}: {str(entry.get('error') or '')}".strip().strip(": ")
+                    out["last_error_event"] = {
+                        "tool": tool,
+                        "status": status,
+                        "user": str(entry.get("user") or ""),
+                        "ts": int(entry.get("ts") or 0),
+                        "error": str(entry.get("error") or ""),
+                    }
                 elif status == "denied":
                     out["denied_count"] += 1
-                    if not out["last_error_summary"]:
-                        out["last_error_summary"] = f"{tool}: {str(entry.get('reason') or '')}".strip().strip(": ")
+                    out["last_error_summary"] = f"{tool}: {str(entry.get('reason') or '')}".strip().strip(": ")
+                    out["last_error_event"] = {
+                        "tool": tool,
+                        "status": status,
+                        "user": str(entry.get("user") or ""),
+                        "ts": int(entry.get("ts") or 0),
+                        "reason": str(entry.get("reason") or ""),
+                    }
                 duration_ms = entry.get("duration_ms")
                 if isinstance(duration_ms, (int, float)) and duration_ms >= 0:
                     latency_total += int(duration_ms)
@@ -130,6 +148,12 @@ class ControlTelemetryService:
                 tool: int(round(sum(values) / len(values)))
                 for tool, values in sorted(latency_by_tool.items()) if values
             }
+            last_error = out["last_error_event"] if isinstance(out.get("last_error_event"), dict) else {}
+            last_error_ts = int(last_error.get("ts") or 0)
+            out["last_error_ts"] = last_error_ts
+            if last_error_ts > 0:
+                out["last_error_age_sec"] = max(0, int(time.time()) - last_error_ts)
+                out["last_error_stale"] = bool(last_ok_ts > last_error_ts)
             return out
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
@@ -464,8 +488,27 @@ class ControlTelemetryService:
         def add_check(name: str, ok: bool, detail: str = "") -> None:
             checks.append({"name": name, "ok": bool(ok), "detail": str(detail or "")})
 
+        def safe_int(value, default: int = 0) -> int:
+            try:
+                return int(value)
+            except (TypeError, ValueError):
+                return default
+
         add_check("status_payload", bool(status.get("ok")), "status endpoint payload built")
         add_check("ollama_api", bool(status.get("ollama_api_up")), "ollama api reachability")
+        if "ollama_model_available" in status:
+            configured_model = str(status.get("ollama_configured_model") or status.get("chat_model") or "")
+            add_check("ollama_chat_model", bool(status.get("ollama_model_available")), f"model={configured_model}")
+        if "ollama_chat_ready" in status:
+            add_check("ollama_chat_ready", bool(status.get("ollama_chat_ready")), "configured chat path ready")
+        if "ollama_api_contract_status" in status:
+            add_check(
+                "ollama_api_contract",
+                bool(status.get("ollama_chat_route_ok")),
+                str(status.get("ollama_api_contract_status") or "ollama api contract"),
+            )
+        if bool(status.get("vision_runtime_requested")):
+            add_check("vision_runtime", bool(status.get("vision_runtime_ok")), str(status.get("vision_note") or "vision dependency readiness"))
         add_check("policy_payload", bool(policy.get("ok")), "policy payload built")
         add_check("metrics_payload", bool(metrics.get("ok")), "metrics payload built")
         add_check("session_manager", True, "session summaries available")
@@ -508,6 +551,146 @@ class ControlTelemetryService:
         add_check("patch_behavioral_tests_available", (not patch_enabled) or (not patch_behavioral) or patch_tests_available, f"tests_available={patch_tests_available}")
         if patch_enabled and patch_behavioral and not patch_tests_available:
             alerts.append("patch_tests_missing")
+
+        if "validation_artifact_truth" in status or "validation_artifact_truth_ok" in status:
+            validation_truth = (
+                status.get("validation_artifact_truth")
+                if isinstance(status.get("validation_artifact_truth"), dict)
+                else {}
+            )
+            validation_ok = bool(status.get("validation_artifact_truth_ok", validation_truth.get("ok", True)))
+            validation_status = str(
+                status.get("validation_artifact_truth_status")
+                or validation_truth.get("status")
+                or "unknown"
+            )
+            validation_failures = safe_int(
+                status.get(
+                    "validation_artifact_failure_count",
+                    validation_truth.get("current_window_failure_count", validation_truth.get("failure_count", 0)),
+                ),
+                0,
+            )
+            validation_llm_failures = safe_int(
+                status.get(
+                    "validation_artifact_llm_unavailable_count",
+                    validation_truth.get(
+                        "current_window_llm_unavailable_count",
+                        validation_truth.get("llm_unavailable_count", 0),
+                    ),
+                ),
+                0,
+            )
+            validation_hidden = bool(
+                status.get(
+                    "validation_artifact_hidden_by_green_regression",
+                    validation_truth.get("hidden_by_green_regression", False),
+                )
+            )
+            validation_detail = (
+                f"status={validation_status}; failures={validation_failures}; "
+                f"llm_unavailable={validation_llm_failures}; hidden_by_green_regression={validation_hidden}"
+            )
+            add_check("validation_artifact_truth_clear", validation_ok, validation_detail)
+            if not validation_ok:
+                alerts.append(
+                    "validation_artifact_truth:"
+                    f"{validation_status};failures={validation_failures};"
+                    f"llm_unavailable={validation_llm_failures};"
+                    f"hidden_by_green_regression={validation_hidden}"
+                )
+
+        if "test_profile_inventory" in status or "test_profile_inventory_ok" in status:
+            test_profile = status.get("test_profile_inventory") if isinstance(status.get("test_profile_inventory"), dict) else {}
+            profile_ok = bool(status.get("test_profile_inventory_ok", test_profile.get("ok", True)))
+            profile_gap_count = safe_int(
+                status.get("test_profile_profile_gap_count", test_profile.get("profile_gap_count", 0)),
+                0,
+            )
+            profile_drift_count = safe_int(
+                status.get("test_profile_profile_drift_count", test_profile.get("profile_drift_count", profile_gap_count)),
+                profile_gap_count,
+            )
+            profile_attention_count = safe_int(
+                status.get(
+                    "test_profile_profile_attention_count",
+                    test_profile.get("profile_attention_count", profile_drift_count),
+                ),
+                profile_drift_count,
+            )
+            outside_curated_count = safe_int(
+                status.get("test_profile_outside_curated_count", test_profile.get("outside_curated_count", 0)),
+                0,
+            )
+            source_observed_count = safe_int(
+                status.get(
+                    "test_profile_source_observed_count",
+                    test_profile.get("source_observed_count", outside_curated_count),
+                ),
+                outside_curated_count,
+            )
+            inactive_profile_count = safe_int(
+                status.get("test_profile_install_profile_inactive_count", test_profile.get("install_profile_inactive_count", 0)),
+                0,
+            )
+            optional_inactive_profile_count = safe_int(
+                status.get(
+                    "test_profile_install_profile_optional_inactive_count",
+                    test_profile.get("install_profile_optional_inactive_count", 0),
+                ),
+                0,
+            )
+            profile_detail = (
+                f"drift={profile_drift_count}; gaps={profile_gap_count}; "
+                f"source_observed={source_observed_count}; attention={profile_attention_count}; "
+                f"inactive_install_profile={inactive_profile_count}; "
+                f"optional_inactive_install_profile={optional_inactive_profile_count}"
+            )
+            add_check("test_profile_inventory_clear", profile_ok, profile_detail)
+            if not profile_ok:
+                alerts.append(
+                    "test_profile_inventory:"
+                    f"drift={profile_drift_count};gaps={profile_gap_count};"
+                    f"source_observed={source_observed_count};"
+                    f"inactive_install_profile={inactive_profile_count}"
+                )
+
+        work_tree_blocked = safe_int(status.get("work_tree_blocked_branch_count", 0), 0)
+        work_tree_observing = safe_int(status.get("work_tree_observing_branch_count", 0), 0)
+        work_tree_latent = safe_int(status.get("work_tree_latent_root_signal_count", 0), 0)
+        work_tree_operator_hold = safe_int(status.get("work_tree_operator_hold_branch_count", 0), 0)
+        work_tree_self_repair_blocked = safe_int(
+            status.get("work_tree_self_repair_blocked_branch_count", work_tree_blocked),
+            work_tree_blocked,
+        )
+        work_tree_self_repair_observing = safe_int(
+            status.get("work_tree_self_repair_observing_branch_count", work_tree_observing),
+            work_tree_observing,
+        )
+        work_tree_truth_status = str(status.get("work_tree_truth_status") or "unknown")
+        work_tree_truth_clear = (
+            work_tree_self_repair_blocked <= 0
+            and work_tree_self_repair_observing <= 0
+            and work_tree_latent <= 0
+        )
+        add_check(
+            "work_tree_unresolved_truth_clear",
+            work_tree_truth_clear,
+            (
+                f"status={work_tree_truth_status}; blocked={work_tree_self_repair_blocked}; "
+                f"observing={work_tree_self_repair_observing}; latent_root={work_tree_latent}; "
+                f"operator_hold={work_tree_operator_hold}; raw_blocked={work_tree_blocked}; "
+                f"raw_observing={work_tree_observing}"
+            ),
+        )
+        if not work_tree_truth_clear:
+            alerts.append(
+                "work_tree_unresolved_truth:"
+                f"blocked={work_tree_self_repair_blocked};"
+                f"observing={work_tree_self_repair_observing};"
+                f"latent_root={work_tree_latent};"
+                f"operator_hold={work_tree_operator_hold}"
+            )
 
         points = list(metrics.get("points") or [])
         err_spike = False

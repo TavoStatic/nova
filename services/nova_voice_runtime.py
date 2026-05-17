@@ -42,6 +42,43 @@ def ensure_voice_deps(
     return bool(runtime_scope.get("VOICE_OK"))
 
 
+def voice_status_payload(runtime_scope: MutableMapping[str, Any]) -> dict[str, Any]:
+    ready = bool(runtime_scope.get("VOICE_READY"))
+    ok = bool(runtime_scope.get("VOICE_OK"))
+    import_error = str(runtime_scope.get("VOICE_IMPORT_ERR") or "").strip()
+    sd_ready = runtime_scope.get("sd") is not None
+    wav_ready = runtime_scope.get("wav") is not None
+    whisper_ready = runtime_scope.get("WhisperModel") is not None
+
+    if not ready:
+        status = "not_initialized"
+        note = "Voice dependencies have not been requested in this runtime."
+    elif ok and sd_ready and wav_ready and whisper_ready:
+        status = "ok"
+        note = "Voice dependencies are loaded."
+    else:
+        status = "disabled"
+        note = import_error or "Voice dependency state is incomplete."
+
+    return {
+        "ok": bool(status in {"not_initialized", "ok"}),
+        "status": status,
+        "requested": ready,
+        "voice_ready": ready,
+        "voice_ok": ok,
+        "import_error": import_error,
+        "sounddevice_loaded": sd_ready,
+        "sounddevice_available": sd_ready,
+        "wav_loaded": wav_ready,
+        "wav_available": wav_ready,
+        "whisper_loaded": whisper_ready,
+        "whisper_available": whisper_ready,
+        "sample_rate": int(runtime_scope.get("SAMPLE_RATE", 0) or 0),
+        "channels": int(runtime_scope.get("CHANNELS", 0) or 0),
+        "note": note,
+    }
+
+
 def record_seconds(
     seconds: int = 3,
     *,

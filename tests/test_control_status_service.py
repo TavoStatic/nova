@@ -14,8 +14,8 @@ class TestControlStatusService(unittest.TestCase):
             "_subconscious_status_summary": object(),
             "_subconscious_live_summary": object(),
             "_generated_work_queue": object(),
-            "_testing_ecology_report": object(),
             "_autonomy_maintenance_summary": object(),
+            "_work_trees_payload": object(),
             "_load_operator_macros": object(),
             "_load_backend_commands": object(),
             "_memory_events_summary": object(),
@@ -24,8 +24,10 @@ class TestControlStatusService(unittest.TestCase):
             "_provider_telemetry_payload": object(),
             "_runtime_summary_payload": object(),
             "_runtime_artifacts_payload": object(),
+            "_validation_artifact_truth_payload": object(),
             "_runtime_restart_analytics_payload": object(),
             "_runtime_failure_reasons_payload": object(),
+            "_port_ownership_payload": object(),
             "_action_readiness_payload": object(),
             "_release_status_payload": object(),
             "_patch_action_readiness_payload": object(),
@@ -45,9 +47,10 @@ class TestControlStatusService(unittest.TestCase):
 
         self.assertIs(payload["probe_searxng"], scope["_probe_searxng"])
         self.assertIs(payload["provider_telemetry_payload"], scope["_provider_telemetry_payload"])
-        self.assertIs(payload["testing_ecology_report"], scope["_testing_ecology_report"])
+        self.assertIs(payload["work_trees_payload"], scope["_work_trees_payload"])
+        self.assertIs(payload["validation_artifact_truth_payload"], scope["_validation_artifact_truth_payload"])
         self.assertIs(payload["metrics_payload"], scope["_metrics_payload"])
-        self.assertEqual(len(payload), 33)
+        self.assertEqual(len(payload), 35)
 
     def test_runtime_status_payload_collects_supplier_outputs(self):
         class _Core:
@@ -110,6 +113,32 @@ class TestControlStatusService(unittest.TestCase):
             def runtime_device_location_payload():
                 return {"available": False}
 
+            @staticmethod
+            def voice_status_payload():
+                return {
+                    "ok": False,
+                    "status": "disabled",
+                    "requested": True,
+                    "import_error": "No module named 'sounddevice'",
+                    "sounddevice_available": False,
+                    "wav_available": False,
+                    "whisper_available": False,
+                }
+
+            @staticmethod
+            def vision_status_payload(**_kwargs):
+                return {
+                    "ok": False,
+                    "status": "missing_python_dependency",
+                    "requested": True,
+                    "screen_requested": True,
+                    "camera_requested": True,
+                    "missing_modules": ["mss", "pillow"],
+                    "vision_model": "qwen2.5vl:7b",
+                    "vision_model_available": True,
+                    "note": "Missing Python modules: mss, pillow",
+                }
+
         payload = CONTROL_STATUS_SERVICE.runtime_status_payload(
             core_module=_Core(),
             session_turns={"s1": [], "s2": []},
@@ -123,14 +152,8 @@ class TestControlStatusService(unittest.TestCase):
                 "subconscious_status_summary": lambda: {"ok": True},
                 "subconscious_live_summary": lambda: {},
                 "generated_work_queue": lambda limit: {"status": "clear", "open_count": 0, "actionable_count": 0, "next_item": {}},
-                "testing_ecology_report": lambda limit: {
-                    "ecology_status": "stable_watch",
-                    "growth_pressure_count": 0,
-                    "lifecycle_counts": {"stable_contract": 2},
-                    "owner_counts": {"fulfillment": 1},
-                    "origin_counts": {"saved": 2},
-                },
                 "autonomy_maintenance_summary": lambda: {},
+                "work_trees_payload": lambda limit: {"ok": True, "counts": {"total": 0, "active": 0, "branches": 0, "open_tasks": 0, "blocked": 0, "pending": 0, "working": 0, "complete": 0}, "trees": []},
                 "load_operator_macros": lambda limit: [],
                 "load_backend_commands": lambda limit: [],
                 "memory_events_summary": lambda limit: {"ok": True, "count": 0},
@@ -139,8 +162,19 @@ class TestControlStatusService(unittest.TestCase):
                 "provider_telemetry_payload": lambda **kwargs: {"last_provider_used": "general_web"},
                 "runtime_summary_payload": lambda **kwargs: {"guard": kwargs.get("guard")},
                 "runtime_artifacts_payload": lambda: {"count": 0, "items": []},
+                "validation_artifact_truth_payload": lambda: {
+                    "ok": False,
+                    "status": "llm_unavailable_in_green_regression",
+                    "action_count": 3,
+                    "inspected_count": 3,
+                    "current_window_failure_count": 1,
+                    "current_window_llm_unavailable_count": 1,
+                    "hidden_by_green_regression": True,
+                    "latest_failure": {"path": "runtime/validation/actions/bad.json"},
+                },
                 "runtime_restart_analytics_payload": lambda: {},
                 "runtime_failure_reasons_payload": lambda guard, core, webui, timeline: {},
+                "port_ownership_payload": lambda: {"ok": True, "status": "ok", "issue_count": 0, "ports": {}},
                 "action_readiness_payload": lambda guard, core, webui: {},
                 "release_status_payload": lambda: {},
                 "patch_action_readiness_payload": lambda patch_summary: {"ready": True},
@@ -163,17 +197,191 @@ class TestControlStatusService(unittest.TestCase):
         self.assertEqual(payload.get("health_score"), 97)
         self.assertEqual(payload.get("self_check_pass_ratio"), 0.75)
         self.assertEqual(payload.get("alerts"), ["warn"])
+        self.assertTrue(payload.get("operator_attention_active"))
+        self.assertIn("warn", payload.get("operator_attention_message", ""))
         self.assertTrue(payload.get("metrics_snapshot_test"))
         self.assertEqual(payload.get("searxng_note"), "ok:http://127.0.0.1:8081/search")
+        self.assertEqual(payload.get("ollama_configured_model"), "test-model")
+        self.assertTrue(payload.get("ollama_model_available"))
         self.assertEqual(payload.get("memory_health_status"), "ok")
         self.assertEqual(payload.get("memory_db_total"), 756)
         self.assertEqual(payload.get("memory_scoped_total"), 1)
         self.assertEqual(payload.get("memory_events_log_status"), "ok")
         self.assertEqual(payload.get("memory_events_log_bytes"), 42)
-        self.assertEqual(payload.get("testing_ecology_status"), "stable_watch")
-        self.assertEqual(payload.get("testing_ecology_lifecycle_counts"), {"stable_contract": 2})
-        self.assertEqual(payload.get("testing_ecology_owner_counts"), {"fulfillment": 1})
-        self.assertEqual(payload.get("testing_ecology_origin_counts"), {"saved": 2})
+        self.assertEqual(payload.get("voice_runtime_status"), "disabled")
+        self.assertTrue(payload.get("voice_runtime_requested"))
+        self.assertFalse(payload.get("voice_runtime_ok"))
+        self.assertEqual(payload.get("voice_import_error"), "No module named 'sounddevice'")
+        self.assertEqual(payload.get("vision_runtime_status"), "missing_python_dependency")
+        self.assertFalse(payload.get("vision_runtime_ok"))
+        self.assertEqual(payload.get("vision_missing_modules"), ["mss", "pillow"])
+        self.assertEqual(payload.get("port_ownership_status"), "ok")
+        self.assertFalse(payload.get("validation_artifact_truth_ok"))
+        self.assertEqual(payload.get("validation_artifact_failure_count"), 1)
+        self.assertEqual(payload.get("validation_artifact_llm_unavailable_count"), 1)
+        self.assertTrue(payload.get("validation_artifact_hidden_by_green_regression"))
+        self.assertGreater(payload.get("test_profile_curated_target_count"), 0)
+        self.assertGreater(payload.get("test_profile_curated_test_file_count"), 0)
+        self.assertEqual(payload.get("test_profile_profile_gap_count"), 0)
+
+    def test_status_payload_includes_voice_runtime_fields_when_provided(self):
+        payload = CONTROL_STATUS_SERVICE.status_payload(
+            policy={"memory": {"scope": "private"}},
+            provider="html",
+            endpoint="",
+            searx_ok=None,
+            searx_note="n/a",
+            search_provider_priority=[],
+            provider_telemetry={},
+            ollama_api_up=True,
+            chat_model="test-model",
+            memory_enabled=False,
+            subconscious_summary={"ok": True},
+            subconscious_live_summary={},
+            generated_work_queue={},
+            autonomy_maintenance={},
+            operator_macros=[],
+            backend_commands=[],
+            memory_scope="private",
+            web_enabled=False,
+            allow_domains_count=0,
+            process_counting_mode="logical_leaf_processes",
+            runtime_process_note="",
+            heartbeat_age_sec=0,
+            active_http_sessions=0,
+            chat_login_enabled=False,
+            chat_auth_source="disabled",
+            chat_users_count=0,
+            guard_status={},
+            core_status={},
+            webui_status={},
+            runtime_summary={},
+            timeline_payload={},
+            runtime_artifacts={},
+            runtime_restart_analytics={},
+            runtime_failures={},
+            live_tracking={},
+            action_readiness={},
+            release_status={},
+            memory_stats={},
+            memory_summary={},
+            tool_summary={},
+            ledger_summary={},
+            patch_summary={},
+            patch_action_readiness={},
+            pulse_payload={},
+            update_now_pending={},
+            requests_total=0,
+            errors_total=0,
+            voice_status={
+                "ok": True,
+                "status": "not_initialized",
+                "requested": False,
+                "sounddevice_loaded": False,
+                "wav_loaded": False,
+                "whisper_loaded": False,
+            },
+            vision_status={
+                "ok": True,
+                "status": "ok",
+                "requested": True,
+                "screen_requested": True,
+                "camera_requested": False,
+                "missing_modules": [],
+                "vision_model": "qwen2.5vl:7b",
+                "vision_model_available": True,
+            },
+        )
+
+        self.assertEqual(payload.get("voice_runtime_status"), "not_initialized")
+        self.assertFalse(payload.get("voice_runtime_requested"))
+        self.assertTrue(payload.get("voice_runtime_ok"))
+        self.assertFalse(payload.get("voice_sounddevice_loaded"))
+        self.assertEqual(payload.get("vision_runtime_status"), "ok")
+        self.assertTrue(payload.get("vision_runtime_requested"))
+        self.assertTrue(payload.get("vision_runtime_ok"))
+
+    def test_status_payload_counts_release_validation_gap_as_self_repair_blocked(self):
+        payload = CONTROL_STATUS_SERVICE.status_payload(
+            policy={"memory": {"scope": "private"}},
+            provider="html",
+            endpoint="",
+            searx_ok=None,
+            searx_note="n/a",
+            search_provider_priority=[],
+            provider_telemetry={},
+            ollama_api_up=True,
+            chat_model="test-model",
+            memory_enabled=True,
+            subconscious_summary={"ok": True},
+            subconscious_live_summary={},
+            generated_work_queue={},
+            autonomy_maintenance={},
+            operator_macros=[],
+            backend_commands=[],
+            memory_scope="private",
+            web_enabled=False,
+            allow_domains_count=0,
+            process_counting_mode="logical_leaf_processes",
+            runtime_process_note="",
+            heartbeat_age_sec=0,
+            active_http_sessions=0,
+            chat_login_enabled=False,
+            chat_auth_source="disabled",
+            chat_users_count=0,
+            guard_status={"status": "running", "running": True},
+            core_status={"status": "running", "running": True, "heartbeat_age_sec": 0},
+            webui_status={"status": "running", "running": True},
+            runtime_summary={},
+            timeline_payload={},
+            runtime_artifacts={},
+            runtime_restart_analytics={},
+            runtime_failures={},
+            live_tracking={},
+            action_readiness={},
+            release_status={},
+            memory_stats={},
+            memory_summary={},
+            tool_summary={},
+            ledger_summary={},
+            patch_summary={},
+            patch_action_readiness={},
+            pulse_payload={},
+            update_now_pending={},
+            requests_total=0,
+            errors_total=0,
+            work_trees_payload={
+                "ok": True,
+                "counts": {
+                    "total": 1,
+                    "active": 1,
+                    "branches": 1,
+                    "open_tasks": 1,
+                    "blocked": 0,
+                    "pending": 1,
+                    "working": 0,
+                    "complete": 0,
+                },
+                "trees": [
+                    {
+                        "nodes": [
+                            {
+                                "status": "ready",
+                                "resolution_state": "observing",
+                                "source_type": "release_status",
+                                "work_class": "release_readiness_gap",
+                                "actionability": "blocked",
+                                "source_payload": {"latest_readiness_state": "needs-promotion"},
+                            }
+                        ]
+                    }
+                ],
+            },
+        )
+
+        self.assertEqual(payload.get("work_tree_truth_status"), "blocked_observing")
+        self.assertEqual(payload.get("work_tree_operator_hold_branch_count"), 0)
+        self.assertEqual(payload.get("work_tree_self_repair_observing_branch_count"), 1)
 
     def test_status_payload_includes_runtime_timeline_and_patch_fields(self):
         payload = CONTROL_STATUS_SERVICE.status_payload(
@@ -190,17 +398,6 @@ class TestControlStatusService(unittest.TestCase):
             subconscious_summary={"ok": True},
             subconscious_live_summary={"tracked_session_count": 0},
             generated_work_queue={"open_count": 0, "next_item": {}},
-            testing_ecology={
-                "ecology_status": "mutation_due",
-                "growth_pressure_count": 2,
-                "mutation_due_count": 1,
-                "stale_evidence_count": 1,
-                "lifecycle_counts": {"stable_contract": 3, "seed": 1},
-                "ecology_role_counts": {"contract": 3, "growth_candidate": 1},
-                "owner_counts": {"route_comparison": 1},
-                "origin_counts": {"generated": 1, "saved": 3},
-                "next_growth_item": {"file": "old_contract.json"},
-            },
             autonomy_maintenance={
                 "runtime_worker": {"last_cycle_status": "ok", "interval_sec": 300, "cycle_count": 4, "last_completed_at": "2026-04-04 02:10:00"},
                 "last_generated_queue_run": {"status": "ok", "selected_file": "demo.json", "ts": "2026-04-04 02:09:00", "latest_report_status": "green"},
@@ -306,6 +503,31 @@ class TestControlStatusService(unittest.TestCase):
             update_now_pending={"pending": False},
             requests_total=7,
             errors_total=1,
+            work_trees_payload={
+                "ok": True,
+                "counts": {
+                    "total": 1,
+                    "active": 1,
+                    "branches": 1,
+                    "open_tasks": 1,
+                    "blocked": 0,
+                    "pending": 1,
+                    "working": 0,
+                    "complete": 0,
+                },
+                "trees": [
+                    {
+                        "nodes": [
+                            {
+                                "status": "ready",
+                                "resolution_state": "observing",
+                                "source_type": "release_status",
+                                "work_class": "release_readiness_gap",
+                            }
+                        ]
+                    }
+                ],
+            },
         )
 
         self.assertEqual((payload.get("runtime_timeline") or {}).get("count"), 1)
@@ -356,12 +578,9 @@ class TestControlStatusService(unittest.TestCase):
         self.assertEqual(payload.get("autonomy_orchestrator_change_rate"), 0.3333)
         self.assertFalse(payload.get("autonomy_orchestrator_stable"))
         self.assertEqual(payload.get("autonomy_orchestrator_weak_refusal_rate"), 1.0)
-        self.assertEqual(payload.get("testing_ecology_status"), "mutation_due")
-        self.assertEqual(payload.get("testing_ecology_growth_pressure_count"), 2)
-        self.assertEqual(payload.get("testing_ecology_mutation_due_count"), 1)
-        self.assertEqual(payload.get("testing_ecology_stale_evidence_count"), 1)
-        self.assertEqual(payload.get("testing_ecology_next_growth_file"), "old_contract.json")
-        self.assertEqual(payload.get("testing_ecology_origin_counts"), {"generated": 1, "saved": 3})
+        self.assertEqual(payload.get("work_tree_truth_status"), "blocked_observing")
+        self.assertEqual(payload.get("work_tree_observing_branch_count"), 1)
+        self.assertEqual(payload.get("work_tree_pending_branch_count"), 1)
 
     def test_status_payload_includes_subconscious_and_queue_fields(self):
         payload = CONTROL_STATUS_SERVICE.status_payload(
@@ -574,6 +793,90 @@ class TestControlStatusService(unittest.TestCase):
         self.assertFalse(payload.get("last_provider_available"))
         self.assertEqual(payload.get("last_provider_note"), "no_provider_hit_recorded")
 
+    def test_status_payload_splits_operator_hold_from_self_repair_truth(self):
+        payload = CONTROL_STATUS_SERVICE.status_payload(
+            policy={"memory": {"scope": "private"}},
+            provider="searxng",
+            endpoint="http://127.0.0.1:8081/search",
+            searx_ok=True,
+            searx_note="status=200",
+            search_provider_priority=["wikipedia", "stackexchange", "general_web"],
+            provider_telemetry={},
+            ollama_api_up=False,
+            chat_model="test-model",
+            memory_enabled=False,
+            subconscious_summary={"ok": True},
+            subconscious_live_summary={},
+            generated_work_queue={"open_count": 0, "next_item": {}},
+            autonomy_maintenance={},
+            operator_macros=[],
+            backend_commands=[],
+            memory_scope="private",
+            web_enabled=False,
+            allow_domains_count=0,
+            process_counting_mode="logical_leaf_processes",
+            runtime_process_note="note",
+            heartbeat_age_sec=1,
+            active_http_sessions=0,
+            chat_login_enabled=False,
+            chat_auth_source="disabled",
+            chat_users_count=0,
+            guard_status={},
+            core_status={},
+            webui_status={},
+            runtime_summary={},
+            timeline_payload={"count": 0, "events": []},
+            runtime_artifacts={"count": 0, "items": []},
+            runtime_restart_analytics={},
+            runtime_failures={},
+            live_tracking={},
+            action_readiness={},
+            release_status={},
+            memory_stats={"ok": True, "total": 0, "by_user": {}},
+            memory_summary={"ok": True, "count": 0},
+            tool_summary={"ok": True, "count": 0, "status_counts": {}},
+            ledger_summary={"ok": True, "count": 0},
+            patch_summary={"ok": True},
+            patch_action_readiness={},
+            pulse_payload={},
+            update_now_pending={},
+            requests_total=0,
+            errors_total=0,
+            work_trees_payload={
+                "ok": True,
+                "counts": {
+                    "total": 1,
+                    "active": 1,
+                    "branches": 1,
+                    "open_tasks": 1,
+                    "blocked": 1,
+                    "pending": 0,
+                    "working": 0,
+                    "complete": 0,
+                },
+                "trees": [
+                    {
+                        "nodes": [
+                            {
+                                "status": "blocked",
+                                "resolution_state": "observing",
+                                "source_type": "release_status",
+                                "work_class": "release_readiness_gap",
+                                "actionability": "blocked",
+                                "source_payload": {"latest_readiness_state": "needs-promotion"},
+                            }
+                        ]
+                    }
+                ],
+            },
+        )
+
+        self.assertEqual(payload.get("work_tree_truth_status"), "blocked_observing")
+        self.assertEqual(payload.get("work_tree_blocked_branch_count"), 1)
+        self.assertEqual(payload.get("work_tree_operator_hold_branch_count"), 0)
+        self.assertEqual(payload.get("work_tree_self_repair_blocked_branch_count"), 1)
+        self.assertEqual(payload.get("work_tree_self_repair_observing_branch_count"), 1)
+
     def test_status_payload_marks_guard_scheduled_maintenance_when_worker_is_not_persistent(self):
         payload = CONTROL_STATUS_SERVICE.status_payload(
             policy={"memory": {"scope": "private"}},
@@ -693,6 +996,12 @@ class TestControlStatusService(unittest.TestCase):
                 "total_bytes": 12345,
                 "patch_snapshot_count": 2,
                 "kidney_snapshot_count": 25,
+                "release_validation_extract_count": 3,
+                "release_validation_extract_bytes": 777,
+                "release_stage_count": 4,
+                "release_stage_bytes": 888,
+                "release_zip_count": 5,
+                "release_zip_bytes": 999,
             },
         )
 
@@ -701,6 +1010,12 @@ class TestControlStatusService(unittest.TestCase):
         self.assertEqual(payload.get("storage_watch_total_bytes"), 12345)
         self.assertEqual(payload.get("patch_snapshot_count"), 2)
         self.assertEqual(payload.get("kidney_snapshot_count"), 25)
+        self.assertEqual(payload.get("release_validation_extract_count"), 3)
+        self.assertEqual(payload.get("release_validation_extract_bytes"), 777)
+        self.assertEqual(payload.get("release_stage_count"), 4)
+        self.assertEqual(payload.get("release_stage_bytes"), 888)
+        self.assertEqual(payload.get("release_zip_count"), 5)
+        self.assertEqual(payload.get("release_zip_bytes"), 999)
 
 
 if __name__ == "__main__":

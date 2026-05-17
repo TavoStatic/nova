@@ -170,40 +170,6 @@ def consume_conversation_followup(
             return True, numeric_reference_binding_reply_fn(value, referent), state
         return False, "", state
 
-    if kind == "developer_role_guess":
-        if "?" in (text or ""):
-            return False, "", None
-        roles = extract_work_role_parts_fn(text)
-        learned, learned_text = store_developer_role_facts_fn(roles, input_source=input_source)
-        if learned:
-            return True, "Understood. I learned: " + learned_text + ".", None
-        if strip_confirmation_prefix_fn(text):
-            return True, "I still need the actual role or job title to store, not just a confirmation.", state
-        return False, "", state
-
-    if kind == "developer_identity":
-        low = normalize_turn_text_fn(text)
-        if "my name" in low or ("name" in low and any(token in low for token in ("tell me more", "more about", "go on", "continue"))):
-            return True, developer_identity_followup_reply_fn(turns=turns, name_focus=True), state
-        if looks_like_profile_followup_fn(text):
-            return True, developer_identity_followup_reply_fn(turns=turns, name_focus=False), state
-        return False, "", state
-
-    if kind == "identity_profile":
-        low = normalize_turn_text_fn(text)
-        if is_retrieval_meta_question_fn(text):
-            return True, non_retrieval_resource_meta_reply_fn(), state
-        if str(state.get("subject") or "") == "developer":
-            if is_developer_location_request_fn(text, state=state, turns=turns):
-                return True, developer_location_reply_fn(), state
-        if "my name" in low or "name" in low and any(token in low for token in ("tell me more", "more about", "go on", "continue")):
-            subject = str(state.get("subject") or "self")
-            return True, identity_name_followup_reply_fn(subject), state
-        if looks_like_profile_followup_fn(text):
-            subject = str(state.get("subject") or "self")
-            return True, identity_profile_followup_reply_fn(subject, turns=turns), state
-        return False, "", state
-
     return False, "", state
 
 

@@ -447,9 +447,19 @@ class TestNovaReplyDeterministic(unittest.TestCase):
                 "total_bytes": 50 * 1024 * 1024,
                 "patch_snapshot_count": 2,
                 "kidney_snapshot_count": 25,
+                "release_validation_extract_count": 1,
+                "release_validation_extract_bytes": 5 * 1024 * 1024,
+                "release_stage_count": 2,
+                "release_stage_bytes": 10 * 1024 * 1024,
+                "release_zip_count": 12,
+                "release_zip_bytes": 30 * 1024 * 1024,
                 "patch_snapshot_warn_count": 3,
                 "kidney_snapshot_warn_count": 24,
                 "kidney_snapshot_warn_total_mb": 128,
+                "release_validation_extract_warn_total_mb": 1024,
+                "release_stage_warn_total_mb": 256,
+                "release_zip_warn_count": 12,
+                "release_zip_warn_total_mb": 1024,
             },
             get_name_origin_story=lambda: "",
             _is_developer_color_lookup_request=lambda _text: False,
@@ -460,7 +470,9 @@ class TestNovaReplyDeterministic(unittest.TestCase):
             "Tell me whether Nova's snapshot storage is healthy right now and what numbers prove it.",
             core=core,
         )
-        self.assertIn("snapshot storage", reply.lower())
+        self.assertIn("watched storage", reply.lower())
+        self.assertIn("release validation", reply.lower())
+        self.assertIn("release package zip", reply.lower())
         self.assertIn("25", reply)
         self.assertEqual(meta.get("tool"), "storage_watch_truth")
         self.assertEqual(return_mode, "logged")

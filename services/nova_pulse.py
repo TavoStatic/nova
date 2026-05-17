@@ -170,12 +170,7 @@ def build_pulse_payload(
     )
     ollama_up = bool(ollama_api_up_fn())
     routing_stable = bool(behavior.get("routing_stable", False))
-    legacy_fallback_score = float(autonomy.get("last_fallback_overuse_score") or 0.0)
-    raw_fallback_score = float(autonomy.get("last_raw_fallback_overuse_score", legacy_fallback_score) or 0.0)
-    stored_active_fallback_score = float(
-        autonomy.get("last_active_fallback_overuse_score", legacy_fallback_score) or 0.0
-    )
-    stored_fallback_pressure_active = bool(autonomy.get("last_fallback_pressure_active"))
+    raw_fallback_score = float(autonomy.get("last_fallback_overuse_score") or 0.0)
     last_generated_queue_run = autonomy.get("last_generated_queue_run") if isinstance(autonomy.get("last_generated_queue_run"), dict) else {}
     latest_queue_status = str(last_generated_queue_run.get("status") or "").strip().lower()
     latest_queue_report_status = str(last_generated_queue_run.get("latest_report_status") or "").strip().lower()
@@ -196,14 +191,8 @@ def build_pulse_payload(
             latest_queue_report_status = "never_run"
         elif int(live_queue.get("green_count", 0) or 0) >= int(live_queue.get("count", 0) or 0) and int(live_queue.get("count", 0) or 0) > 0:
             latest_queue_report_status = "green"
-    live_fallback_pressure_active = raw_fallback_score >= 0.75 and latest_queue_report_status in {"drift", "failed", "error", "blocked"}
-    fallback_pressure_active = (
-        stored_active_fallback_score >= 0.75 and stored_fallback_pressure_active
-    ) or live_fallback_pressure_active
-    if fallback_pressure_active:
-        active_fallback_score = max(stored_active_fallback_score, raw_fallback_score if live_fallback_pressure_active else 0.0)
-    else:
-        active_fallback_score = 0.0
+    fallback_pressure_active = raw_fallback_score >= 0.75 and latest_queue_report_status in {"drift", "failed", "error", "blocked"}
+    active_fallback_score = raw_fallback_score if fallback_pressure_active else 0.0
     promoted_total = int(audit.get("promoted_total", 0) or 0)
     prior_promoted_total = int(prior.get("promoted_total", 0) or 0)
     promoted_delta = promoted_total - prior_promoted_total if prior_promoted_total else 0

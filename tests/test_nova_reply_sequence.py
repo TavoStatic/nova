@@ -187,9 +187,9 @@ class TestNovaReplySequence(unittest.TestCase):
         self.assertEqual(reply, "ok")
         self.assertEqual(meta.get("planner_decision"), "deterministic")
         normalize_reply = execute_mock.call_args.kwargs.get("normalize_reply")
-        self.assertEqual(normalize_reply("draft UI-TIP"), "ENSURE:corrected reply +override")
-        self.assertEqual(events, ["correction_applied", "self_correction_applied"])
-        self.assertIn(("llm_postprocess", "self_corrected", ""), traces)
+        self.assertEqual(normalize_reply("draft UI-TIP"), "ENSURE:draft")
+        self.assertEqual(events, [])
+        self.assertEqual(traces, [])
 
     def test_session_recap_beats_planner_run_tool(self):
         core = SimpleNamespace(

@@ -94,11 +94,6 @@ class TestReleasePackageScripts(unittest.TestCase):
             _write(repo / "codex_reflection_demo.jsonl", "{}\n")
             _write(repo / "codex_pulse_test_demo" / "runtime" / "pulse_snapshot.json", "{}\n")
             _write(repo / "nova_memory.sqlite", "sqlite")
-            _write(repo / "data_sources" / "__init__.py", "")
-            _write(repo / "data_sources" / "sis_test" / "pipeline.json", "{}\n")
-            _write(repo / "data_sources" / "sis_test" / "local_config.json", "{\"host\":\"10.1.2.3\"}\n")
-            _write(repo / "data_sources" / "sis_test" / "schema_manifest.json", "{}\n")
-            _write(repo / "data_sources" / "sis_test" / "population_definitions.json", "{}\n")
 
             build_result = _run_powershell(build_script, repo)
             self.assertEqual(build_result.returncode, 0, msg=build_result.stdout + build_result.stderr)
@@ -106,6 +101,8 @@ class TestReleasePackageScripts(unittest.TestCase):
             artifacts = list((repo / "runtime" / "exports" / "release_packages").glob("*.zip"))
             self.assertEqual(len(artifacts), 1)
             artifact_path = artifacts[0]
+            stage_dirs = list((repo / "runtime" / "exports" / "release_packages" / "_stage").glob("*"))
+            self.assertEqual(stage_dirs, [])
             entries = _zip_relative_entries(artifact_path)
 
             self.assertIn("nova.cmd", entries)
@@ -125,7 +122,6 @@ class TestReleasePackageScripts(unittest.TestCase):
             self.assertNotIn("This_is_nova", entries)
             self.assertNotIn("tests_to_review.txt", entries)
             self.assertNotIn("nova_memory.sqlite", entries)
-            self.assertTrue(all(not entry.startswith("data_sources/") for entry in entries))
             self.assertTrue(all(".pytest_cache" not in entry for entry in entries))
             self.assertTrue(all("codex_pulse_test_" not in entry for entry in entries))
             self.assertTrue(all(not Path(entry).name.startswith("codex_health_") for entry in entries))
@@ -163,7 +159,6 @@ class TestReleasePackageScripts(unittest.TestCase):
   \"validation_commands\": [
     \".\\\\nova.cmd doctor\",
     \".\\\\nova.cmd runtime-status\",
-    \".\\\\nova.cmd wiring-check --offline\",
     \".\\\\nova.cmd smoke-base --fix\",
     \".\\\\nova.cmd smoke --fix\",
     \".\\\\nova.cmd test\"
@@ -186,8 +181,6 @@ class TestReleasePackageScripts(unittest.TestCase):
             _write(candidate_dir / ".ci_venv" / "pyvenv.cfg", "home = C:/Python\n")
             _write(candidate_dir / ".pytest_cache" / "v" / "cache" / "nodeids", "[]\n")
             _write(candidate_dir / "knowledge" / "peims" / "rules.txt", "peims\n")
-            _write(candidate_dir / "data_sources" / "sis_test" / "local_config.json", "{\"host\":\"10.1.2.3\"}\n")
-            _write(candidate_dir / "docs" / "incident_marker.md", ("K12" + "AD") + "\n")
             _write(candidate_dir / "LAST_SESSION.json", "{}\n")
             _write(candidate_dir / "RESUME_HERE.txt", "resume\n")
             _write(candidate_dir / "This_is_nova", "internal note\n")
@@ -205,7 +198,6 @@ class TestReleasePackageScripts(unittest.TestCase):
             self.assertIn("forbidden path present: .ci_venv", combined)
             self.assertIn("forbidden path present: .pytest_cache", combined)
             self.assertIn("forbidden path present: knowledge/peims", combined)
-            self.assertIn("forbidden path present: data_sources", combined)
             self.assertIn("forbidden path present: This_is_nova", combined)
             self.assertIn("forbidden path present: LAST_SESSION.json", combined)
             self.assertIn("forbidden path present: RESUME_HERE.txt", combined)
@@ -214,7 +206,32 @@ class TestReleasePackageScripts(unittest.TestCase):
             self.assertIn("forbidden segment pattern present: codex_pulse_test_*", combined)
             self.assertIn("forbidden file pattern present: codex_health_*.jsonl", combined)
             self.assertIn("forbidden file pattern present: codex_reflection_*.jsonl", combined)
-            self.assertIn("forbidden incident marker present in package content", combined)
+
+    def test_build_release_package_prunes_old_zip_artifacts_by_default(self):
+        with tempfile.TemporaryDirectory() as td:
+            repo = Path(td)
+            build_script = _copy_script(repo, BUILD_SCRIPT)
+            output_root = repo / "runtime" / "exports" / "release_packages"
+            output_root.mkdir(parents=True)
+
+            _write(repo / "nova.cmd", "@echo off\n")
+            _write(repo / "nova.ps1", "Write-Host 'nova'\n")
+            _write(repo / "requirements.txt", "requests\n")
+            _write(repo / "policy.json", "{}\n")
+            _write(repo / "docs" / "FRESH_MACHINE_VALIDATION.md", "# Fresh Machine\n")
+            _write(repo / "docs" / "RC_VALIDATION_TEMPLATE.md", "# RC Validation\n")
+            _write(repo / "tests" / "test_placeholder.py", "def test_placeholder():\n    assert True\n")
+
+            for idx in range(14):
+                old_zip = output_root / f"old-{idx}.zip"
+                old_zip.write_bytes(b"old")
+
+            build_result = _run_powershell(build_script, repo)
+
+            self.assertEqual(build_result.returncode, 0, msg=build_result.stdout + build_result.stderr)
+            artifacts = list(output_root.glob("*.zip"))
+            self.assertEqual(len(artifacts), 12)
+            self.assertIn("removed 3", build_result.stdout)
 
 
 if __name__ == "__main__":

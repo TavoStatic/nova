@@ -5,10 +5,13 @@ from pathlib import Path
 import psutil
 import tools.runtime_processes as runtime_processes
 
+from services.runtime_restart_provenance import RUNTIME_RESTART_PROVENANCE_SERVICE
+
 ROOT = Path(__file__).resolve().parent
 RUNTIME = ROOT / "runtime"
 
 GUARD_STOP = RUNTIME / "guard.stop"
+RESTART_INTENT = RUNTIME / "restart_intent.json"
 CORE_STATE = RUNTIME / "core_state.json"
 CORE_PY = ROOT / "nova_core.py"
 
@@ -24,6 +27,15 @@ def read_core_identity():
 def main():
     # 1) Deterministic guard stop signal
     RUNTIME.mkdir(parents=True, exist_ok=True)
+    RUNTIME_RESTART_PROVENANCE_SERVICE.write_pending_intent(
+        RESTART_INTENT,
+        source="stop_guard_script",
+        action="guard_stop",
+        reason="operator_requested_guard_stop",
+        requested_by="operator",
+        planned=True,
+        replace=False,
+    )
     GUARD_STOP.write_text(str(time.time()), encoding="utf-8")
     ok("Sent guard stop signal: runtime/guard.stop")
 

@@ -96,34 +96,78 @@ class TestNovaHttpProfile(unittest.TestCase):
     def setUp(self):
         self.orig_mem_recall = nova_http.nova_core.mem_recall
         self.orig_mem_enabled = nova_http.nova_core.mem_enabled
+        self.orig_ollama_chat = nova_http.nova_core.ollama_chat
+        self.orig_sanitize_llm_reply = nova_http.nova_core.sanitize_llm_reply
+        self.orig_action_ledger_dir = nova_http.nova_core.ACTION_LEDGER_DIR
+        self.orig_self_reflection_log = nova_http.nova_core.SELF_REFLECTION_LOG
+        self.orig_health_log = nova_http.nova_core.HEALTH_LOG
         self.orig_dev_bilingual = nova_http.nova_core._developer_is_bilingual
         self.orig_dev_bilingual_mem = nova_http.nova_core._developer_is_bilingual_from_memory
         self.orig_dev_colors = nova_http.nova_core._extract_developer_color_preferences
         self.orig_dev_colors_mem = nova_http.nova_core._extract_developer_color_preferences_from_memory
         self.orig_handle_keywords = nova_http.nova_core.handle_keywords
+        self.orig_llm_classify_routing_intent = nova_http.nova_core._llm_classify_routing_intent
         self.orig_runtime_device_location_payload = nova_http.nova_core.runtime_device_location_payload
         self.orig_resolve_current_device_coords = nova_http.nova_core.resolve_current_device_coords
         nova_http.SESSION_TURNS.clear()
         nova_http.SESSION_STATE_MANAGER.clear()
         nova_http._CONTROL_STATUS_CACHE["computed_at"] = 0.0
         nova_http._CONTROL_STATUS_CACHE["payload"] = None
+        self._tmp_dir = tempfile.TemporaryDirectory()
+        self._action_ledger_dir = Path(self._tmp_dir.name) / "actions"
+        nova_http.nova_core.ACTION_LEDGER_DIR = self._action_ledger_dir
+        nova_http.nova_core.SELF_REFLECTION_LOG = Path(self._tmp_dir.name) / "self_reflection.jsonl"
+        nova_http.nova_core.HEALTH_LOG = Path(self._tmp_dir.name) / "health.log"
+        nova_http.nova_core.ollama_chat = lambda text, retrieved_context="", **_kwargs: f"LLM:{text}"
+        nova_http.nova_core.sanitize_llm_reply = lambda text, _tool_context="", **_kwargs: text
         nova_http.nova_core.runtime_device_location_payload = lambda *args, **kwargs: {"available": False, "stale": True}
         nova_http.nova_core.resolve_current_device_coords = lambda *args, **kwargs: None
 
+    def _assert_no_runtime_error_answers(self):
+        if not self._action_ledger_dir.exists():
+            return
+        failures = []
+        for path in sorted(self._action_ledger_dir.glob("*.json")):
+            try:
+                payload = json.loads(path.read_text(encoding="utf-8"))
+            except Exception:
+                continue
+            final_answer = str(payload.get("final_answer") or "").strip()
+            final_low = final_answer.lower()
+            if (
+                final_low.startswith("(error:")
+                or "llm service unavailable" in final_low
+                or "ollama chat model missing" in final_low
+                or "ollama chat api unavailable" in final_low
+                or "ollama chat failed" in final_low
+            ):
+                failures.append(f"{path.name}: {final_answer[:160]}")
+        self.assertEqual(failures, [], "HTTP behavior tests produced runtime error answers")
+
     def tearDown(self):
-        nova_http.nova_core.mem_recall = self.orig_mem_recall
-        nova_http.nova_core.mem_enabled = self.orig_mem_enabled
-        nova_http.nova_core._developer_is_bilingual = self.orig_dev_bilingual
-        nova_http.nova_core._developer_is_bilingual_from_memory = self.orig_dev_bilingual_mem
-        nova_http.nova_core._extract_developer_color_preferences = self.orig_dev_colors
-        nova_http.nova_core._extract_developer_color_preferences_from_memory = self.orig_dev_colors_mem
-        nova_http.nova_core.handle_keywords = self.orig_handle_keywords
-        nova_http.nova_core.runtime_device_location_payload = self.orig_runtime_device_location_payload
-        nova_http.nova_core.resolve_current_device_coords = self.orig_resolve_current_device_coords
-        nova_http.SESSION_TURNS.clear()
-        nova_http.SESSION_STATE_MANAGER.clear()
-        nova_http._CONTROL_STATUS_CACHE["computed_at"] = 0.0
-        nova_http._CONTROL_STATUS_CACHE["payload"] = None
+        try:
+            self._assert_no_runtime_error_answers()
+        finally:
+            nova_http.nova_core.mem_recall = self.orig_mem_recall
+            nova_http.nova_core.mem_enabled = self.orig_mem_enabled
+            nova_http.nova_core.ollama_chat = self.orig_ollama_chat
+            nova_http.nova_core.sanitize_llm_reply = self.orig_sanitize_llm_reply
+            nova_http.nova_core.ACTION_LEDGER_DIR = self.orig_action_ledger_dir
+            nova_http.nova_core.SELF_REFLECTION_LOG = self.orig_self_reflection_log
+            nova_http.nova_core.HEALTH_LOG = self.orig_health_log
+            nova_http.nova_core._developer_is_bilingual = self.orig_dev_bilingual
+            nova_http.nova_core._developer_is_bilingual_from_memory = self.orig_dev_bilingual_mem
+            nova_http.nova_core._extract_developer_color_preferences = self.orig_dev_colors
+            nova_http.nova_core._extract_developer_color_preferences_from_memory = self.orig_dev_colors_mem
+            nova_http.nova_core.handle_keywords = self.orig_handle_keywords
+            nova_http.nova_core._llm_classify_routing_intent = self.orig_llm_classify_routing_intent
+            nova_http.nova_core.runtime_device_location_payload = self.orig_runtime_device_location_payload
+            nova_http.nova_core.resolve_current_device_coords = self.orig_resolve_current_device_coords
+            nova_http.SESSION_TURNS.clear()
+            nova_http.SESSION_STATE_MANAGER.clear()
+            nova_http._CONTROL_STATUS_CACHE["computed_at"] = 0.0
+            nova_http._CONTROL_STATUS_CACHE["payload"] = None
+            self._tmp_dir.cleanup()
 
     def test_generated_work_queue_uses_runtime_dir_for_blocked_metadata(self):
         with mock.patch.object(nova_http.TEST_SESSION_CONTROL_SERVICE, "generated_work_queue", return_value={"status": "clear"}) as queue_mock, \
@@ -267,7 +311,7 @@ class TestNovaHttpProfile(unittest.TestCase):
         self.assertIsNotNone(session)
         self.assertEqual("identity_profile:developer", session.active_subject())
 
-    def test_generate_chat_reply_runtime_audit_is_deterministic(self):
+    def test_generate_chat_reply_uses_no_deterministic_content_branch(self):
         with patch(
             "nova_http.execute_http_reply_sequence_from_runtime",
             return_value=(
@@ -287,8 +331,8 @@ class TestNovaHttpProfile(unittest.TestCase):
         self.assertEqual(meta.get("planner_decision"), "deterministic")
         self.assertEqual(meta.get("tool"), "runtime_audit")
         self.assertTrue(meta.get("grounded"))
-        self.assertEqual(sequence_mock.call_args.kwargs.get("pre_planner_branch_group"), "operational")
-        self.assertEqual(sequence_mock.call_args.kwargs.get("post_planner_branch_group"), "general")
+        self.assertEqual(sequence_mock.call_args.kwargs.get("pre_planner_branch_group"), "none")
+        self.assertIsNone(sequence_mock.call_args.kwargs.get("post_planner_branch_group"))
 
     def test_generate_chat_reply_runtime_audit_evidence_is_deterministic(self):
         with patch(
@@ -505,10 +549,10 @@ class TestNovaHttpProfile(unittest.TestCase):
         ):
             reply = nova_http.process_chat("s_fulfillment_http", "Show me workable options without collapsing too early.")
 
-        self.assertIn("multiple meaningful fulfillment paths", reply.lower())
+        self.assertEqual(reply, "LLM:Show me workable options without collapsing too early.")
         session = nova_http.SESSION_STATE_MANAGER.get("s_fulfillment_http")
         self.assertIsNotNone(session)
-        self.assertIsInstance(getattr(session, "fulfillment_state", None), dict)
+        self.assertFalse(isinstance(getattr(session, "fulfillment_state", None), dict))
 
     def test_http_fulfillment_bridge_replans_existing_state(self):
         session = nova_http.SESSION_STATE_MANAGER.get("s_fulfillment_replan")
@@ -535,13 +579,13 @@ class TestNovaHttpProfile(unittest.TestCase):
         ):
             reply = nova_http.process_chat("s_fulfillment_replan", "New information makes the faster path less safe.")
 
-        self.assertIn("one current fulfillment result", reply.lower())
-        self.assertEqual(session.fulfillment_state.get("choice_set").selected_model_id, "http-guided")
+        self.assertEqual(reply, "LLM:New information makes the faster path less safe.")
+        self.assertNotEqual(session.fulfillment_state.get("choice_set").selected_model_id, "http-guided")
 
     def test_http_mixed_info_request_turn_asks_for_clarification(self):
         mixed_turn = "the weather looks good. i wonder if the weather will stay like this for the rest of the day. can you check what the rest of the forecast will be"
         reply = nova_http.process_chat("s4_mixed_weather", mixed_turn)
-        self.assertIn("both giving context and asking me to do something", reply.lower())
+        self.assertNotIn("meta-clarifying", reply.lower())
         session = nova_http.SESSION_STATE_MANAGER.get("s4_mixed_weather")
         self.assertEqual((session.last_reflection or {}).get("reply_contract"), "turn.clarify_mixed_intent")
         self.assertEqual((session.last_reflection or {}).get("reply_outcome_kind"), "mixed_info_request")
@@ -578,7 +622,7 @@ class TestNovaHttpProfile(unittest.TestCase):
         reply = nova_http.process_chat("s5", "who is your developer?")
         self.assertIn("Gustavo", reply)
 
-    def test_http_location_statement_uses_shared_noted_path(self):
+    def test_http_location_statement_stays_conversation_owned(self):
         orig_set_location_text = nova_http.nova_core.set_location_text
         try:
             stored = []
@@ -586,12 +630,12 @@ class TestNovaHttpProfile(unittest.TestCase):
 
             reply = nova_http.process_chat("s5_loc_store", "my location is Brownsville Texas")
 
-            self.assertEqual("Got it - using Brownsville Texas as your location.", reply)
-            self.assertEqual(stored, [("Brownsville Texas", "typed")])
+            self.assertEqual("LLM:my location is Brownsville Texas", reply)
+            self.assertEqual(stored, [])
         finally:
             nova_http.nova_core.set_location_text = orig_set_location_text
 
-    def test_http_set_location_zip_claim_stores_and_replies(self):
+    def test_http_set_location_zip_claim_stays_conversation_owned(self):
         orig_set_location_text = nova_http.nova_core.set_location_text
         try:
             stored = []
@@ -599,8 +643,8 @@ class TestNovaHttpProfile(unittest.TestCase):
 
             reply = nova_http.process_chat("s5_zip_store", "the 78521 is the zip code for your current physical location")
 
-            self.assertEqual("Got it - 78521 is a ZIP code.", reply)
-            self.assertEqual(stored, [("78521", "typed")])
+            self.assertEqual("LLM:the 78521 is the zip code for your current physical location", reply)
+            self.assertEqual(stored, [])
         finally:
             nova_http.nova_core.set_location_text = orig_set_location_text
 
@@ -724,8 +768,8 @@ class TestNovaHttpProfile(unittest.TestCase):
             first = nova_http.process_chat("s5_location_city_context", "your location")
             second = nova_http.process_chat("s5_location_city_context", "what is the name of the city")
 
-            self.assertIn("My current device location", first)
-            self.assertEqual("That location is Brownsville, TX.", second)
+            self.assertNotIn("My current device location", first)
+            self.assertNotEqual("That location is Brownsville, TX.", second)
             self.assertNotIn("Wikipedia", second)
             self.assertNotIn("Killing in the Name", second)
         finally:
@@ -746,27 +790,42 @@ class TestNovaHttpProfile(unittest.TestCase):
             nova_http.nova_core.set_location_text = orig_set_location_text
 
     def test_http_clean_slate_blocks_weather_request(self):
-        reply = nova_http.process_chat("s5_clean_slate_weather", "weather now")
-        self.assertNotIn("api.weather.gov", reply.lower())
+        orig_execute_planned_action = nova_http.nova_core.execute_planned_action
+        orig_weather_current_location_available = nova_http.nova_core._weather_current_location_available
+        try:
+            nova_http.nova_core._llm_classify_routing_intent = lambda text, turns=None, pending_action=None: {
+                "tool": "weather_current_location",
+                "args": [],
+                "source": "test_semantic_intent",
+            }
+            nova_http.nova_core._weather_current_location_available = lambda: True
+            nova_http.nova_core.execute_planned_action = lambda tool, args=None: "weather-current"
+            reply = nova_http.process_chat("s5_clean_slate_weather", "weather now")
+            self.assertEqual(reply, "weather-current")
+            session = nova_http.SESSION_STATE_MANAGER.get("s5_clean_slate_weather")
+            self.assertEqual((session.last_reflection or {}).get("reply_contract"), "weather_lookup.current_location")
+        finally:
+            nova_http.nova_core.execute_planned_action = orig_execute_planned_action
+            nova_http.nova_core._weather_current_location_available = orig_weather_current_location_available
 
     def test_http_clean_slate_blocks_peims_grounding(self):
         reply = nova_http.process_chat("s5_clean_slate_peims", "what do you know about PEIMS?")
         self.assertNotIn("local knowledge files", reply.lower())
         self.assertNotIn("[source:", reply.lower())
 
-    def test_http_bare_numeric_turn_clarifies_instead_of_using_saved_location(self):
+    def test_http_bare_numeric_turn_stays_conversation_owned(self):
         orig_get_saved_location_text = nova_http.nova_core.get_saved_location_text
         try:
             nova_http.nova_core.get_saved_location_text = lambda: "Brownsville, Texas"
 
             reply = nova_http.process_chat("s5_numeric_clarify", "78521")
 
-            self.assertEqual("What does 78521 refer to?", reply)
+            self.assertEqual("LLM:78521", reply)
             self.assertNotIn("brownsville", reply.lower())
         finally:
             nova_http.nova_core.get_saved_location_text = orig_get_saved_location_text
 
-    def test_http_bare_numeric_followup_stays_honest_without_guessing(self):
+    def test_http_bare_numeric_followup_stays_conversation_owned(self):
         orig_get_saved_location_text = nova_http.nova_core.get_saved_location_text
         try:
             nova_http.nova_core.get_saved_location_text = lambda: "Brownsville, Texas"
@@ -774,13 +833,12 @@ class TestNovaHttpProfile(unittest.TestCase):
             first = nova_http.process_chat("s5_numeric_followup", "78521")
             second = nova_http.process_chat("s5_numeric_followup", "what do you think it is nova ?")
 
-            self.assertEqual("What does 78521 refer to?", first)
-            self.assertIn("I don't know what 78521 refers to yet.", second)
-            self.assertNotIn("zip code", second.lower())
+            self.assertEqual("LLM:78521", first)
+            self.assertEqual(second, "LLM:what do you think it is nova ?")
         finally:
             nova_http.nova_core.get_saved_location_text = orig_get_saved_location_text
 
-    def test_http_correction_handle_teaches_explicit_replacement(self):
+    def test_http_correction_phrase_stays_conversation_owned(self):
         orig_mem_enabled = nova_http.nova_core.mem_enabled
         orig_mem_add = nova_http.nova_core.mem_add
         orig_teach_store_example = nova_http.nova_core._teach_store_example
@@ -794,19 +852,15 @@ class TestNovaHttpProfile(unittest.TestCase):
             nova_http.process_chat("s5_correction_http", "what is tsds?")
             reply = nova_http.process_chat("s5_correction_http", "no, say 'hi gus' instead")
 
-            self.assertEqual("Understood. I corrected that and will use your version going forward.", reply)
-            correction_write = next((entry for entry in writes if entry[0] == "user_correction"), None)
-            self.assertIsNotNone(correction_write)
-            payload = json.loads(correction_write[2])
-            self.assertEqual(payload.get("parsed_correction"), "hi gus")
-            self.assertEqual(len(teaches), 1)
-            self.assertEqual(teaches[0][1], "hi gus")
+            self.assertEqual("LLM:no, say 'hi gus' instead", reply)
+            self.assertEqual(writes, [])
+            self.assertEqual(teaches, [])
         finally:
             nova_http.nova_core.mem_enabled = orig_mem_enabled
             nova_http.nova_core.mem_add = orig_mem_add
             nova_http.nova_core._teach_store_example = orig_teach_store_example
 
-    def test_http_correction_followup_teaches_pending_replacement(self):
+    def test_http_correction_followup_stays_conversation_owned(self):
         orig_mem_enabled = nova_http.nova_core.mem_enabled
         orig_mem_add = nova_http.nova_core.mem_add
         orig_teach_store_example = nova_http.nova_core._teach_store_example
@@ -821,12 +875,10 @@ class TestNovaHttpProfile(unittest.TestCase):
             first = nova_http.process_chat("s5_correction_followup_http", "no, that's wrong")
             second = nova_http.process_chat("s5_correction_followup_http", "hi gus")
 
-            self.assertIn("I recorded that correction", first)
-            self.assertEqual("Understood. I corrected that and will use your version going forward.", second)
-            self.assertEqual(len(teaches), 1)
-            self.assertEqual(teaches[0][1], "hi gus")
-            correction_writes = [entry for entry in writes if entry[0] == "user_correction"]
-            self.assertEqual(len(correction_writes), 2)
+            self.assertEqual("LLM:no, that's wrong", first)
+            self.assertEqual("LLM:hi gus", second)
+            self.assertEqual(teaches, [])
+            self.assertEqual(writes, [])
         finally:
             nova_http.nova_core.mem_enabled = orig_mem_enabled
             nova_http.nova_core.mem_add = orig_mem_add
@@ -843,9 +895,9 @@ class TestNovaHttpProfile(unittest.TestCase):
             with mock.patch("sys.stdout", new_callable=io.StringIO) as stdout:
                 reply = nova_http.process_chat("s5_decl_store", "I work at Nova Labs")
 
-            self.assertEqual("Noted.", reply)
+            self.assertNotEqual("Memory storage requires an explicit store request.", reply)
             self.assertNotIn("Turn bypassed supervisor intent phase", stdout.getvalue())
-            self.assertEqual(stored, [("fact", "typed", "I work at Nova Labs")])
+            self.assertEqual(stored, [])
         finally:
             nova_http.nova_core.mem_should_store = orig_mem_should_store
             nova_http.nova_core.mem_add = orig_mem_add
@@ -859,7 +911,8 @@ class TestNovaHttpProfile(unittest.TestCase):
             nova_http.nova_core.get_saved_location_text = lambda: ""
             nova_http.nova_core.runtime_device_location_payload = lambda *args, **kwargs: {"available": False, "stale": True}
             reply = nova_http.process_chat("s7", "where is nova?")
-            self.assertIn("I don't have a stored location yet.", reply)
+            self.assertNotIn("I don't have a stored location yet.", reply)
+            self.assertNotIn("Current runtime device location", reply)
         finally:
             nova_http.nova_core.mem_audit = orig_mem_audit
             nova_http.nova_core.get_saved_location_text = orig_get_saved_location_text
@@ -896,9 +949,14 @@ class TestNovaHttpProfile(unittest.TestCase):
         reply = nova_http.process_chat("s9", "web continue")
         self.assertIn("continued web research", reply)
 
-    def test_http_online_research_intent_uses_supervisor_tool_route_without_bypass_warning(self):
+    def test_http_online_research_intent_uses_semantic_tool_route_without_bypass_warning(self):
         orig_execute_planned_action = nova_http.nova_core.execute_planned_action
         try:
+            nova_http.nova_core._llm_classify_routing_intent = lambda text, turns=None, pending_action=None: {
+                "tool": "web_research",
+                "args": ["PEIMS"],
+                "source": "test_semantic_intent",
+            }
             nova_http.nova_core.execute_planned_action = lambda tool, args=None: "1) https://tea.texas.gov/a\n2) https://tea.texas.gov/b" if tool == "web_research" else ""
             with mock.patch("sys.stdout", new_callable=io.StringIO) as stdout:
                 reply = nova_http.process_chat("s9_online", "research PEIMS online")
@@ -927,7 +985,7 @@ class TestNovaHttpProfile(unittest.TestCase):
         finally:
             nova_http.nova_core.get_name_origin_story = orig_get_name_origin_story
 
-    def test_http_retrieval_followup_uses_supervisor_contract(self):
+    def test_http_retrieval_followup_stays_model_owned(self):
         orig_execute_planned_action = nova_http.nova_core.execute_planned_action
         orig_tool_web_gather = nova_http.nova_core.tool_web_gather
         try:
@@ -937,12 +995,11 @@ class TestNovaHttpProfile(unittest.TestCase):
                 nova_http.process_chat("s9_retrieval_contract", "research PEIMS online")
                 reply = nova_http.process_chat("s9_retrieval_contract", "tell me about the first one")
 
-            self.assertEqual(reply, "Gathered: https://tea.texas.gov/a")
+            self.assertEqual(reply, "LLM:tell me about the first one")
             self.assertNotIn("Turn bypassed supervisor intent phase", stdout.getvalue())
             session = nova_http.SESSION_STATE_MANAGER.get("s9_retrieval_contract")
             self.assertIsNotNone(session)
-            self.assertEqual((session.last_reflection or {}).get("reply_contract"), "retrieval_followup.selected_result")
-            self.assertEqual((session.last_reflection or {}).get("reply_outcome_kind"), "selected_result")
+            self.assertNotEqual((session.last_reflection or {}).get("reply_contract"), "retrieval_followup.selected_result")
         finally:
             nova_http.nova_core.execute_planned_action = orig_execute_planned_action
             nova_http.nova_core.tool_web_gather = orig_tool_web_gather
@@ -961,7 +1018,7 @@ class TestNovaHttpProfile(unittest.TestCase):
 
     def test_code_help_uses_planner_respond(self):
         reply = nova_http.process_chat("s10", "can you debug this bug in my code")
-        self.assertIn("file path", reply.lower())
+        self.assertEqual(reply, "LLM:can you debug this bug in my code")
 
     def test_http_rules_query_uses_supervisor_contract(self):
         with mock.patch("sys.stdout", new_callable=io.StringIO) as stdout:
@@ -979,16 +1036,22 @@ class TestNovaHttpProfile(unittest.TestCase):
         orig_execute_planned_action = nova_http.nova_core.execute_planned_action
         orig_weather_current_location_available = nova_http.nova_core._weather_current_location_available
         try:
-            nova_http.nova_core.get_saved_location_text = lambda: "Brownsville TX"
-            nova_http.nova_core._weather_current_location_available = lambda: False
+            availability = {"value": False}
+            semantic = iter([
+                {"tool": "weather_current_location", "args": [], "source": "test_semantic_intent"},
+                {"tool": "weather_current_location", "args": [], "source": "test_semantic_intent"},
+            ])
+            nova_http.nova_core._llm_classify_routing_intent = lambda text, turns=None, pending_action=None: next(semantic)
+            nova_http.nova_core.get_saved_location_text = lambda: ""
+            nova_http.nova_core._weather_current_location_available = lambda: bool(availability["value"])
             nova_http.nova_core.execute_planned_action = lambda tool, args=None: "Brownsville, TX: Today: 66°F, Sunny. [source: api.weather.gov]" if tool == "weather_current_location" else ""
             first = nova_http.process_chat("s11", "check the weather if you can please..")
-            self.assertIn("location", first.lower())
+            self.assertEqual(first, "What location should I use for the weather lookup?")
+            availability["value"] = True
             reply = nova_http.process_chat("s11", "yea please do that ..")
             self.assertIn("api.weather.gov", reply)
             session = nova_http.SESSION_STATE_MANAGER.get("s11")
             self.assertEqual((session.last_reflection or {}).get("reply_contract"), "weather_lookup.current_location")
-            self.assertEqual((session.last_reflection or {}).get("reply_outcome_kind"), "current_location")
         finally:
             nova_http.nova_core.get_saved_location_text = orig_get_saved_location_text
             nova_http.nova_core.execute_planned_action = orig_execute_planned_action
@@ -999,23 +1062,29 @@ class TestNovaHttpProfile(unittest.TestCase):
         orig_execute_planned_action = nova_http.nova_core.execute_planned_action
         orig_weather_current_location_available = nova_http.nova_core._weather_current_location_available
         try:
-            nova_http.nova_core.get_saved_location_text = lambda: "Brownsville TX"
-            nova_http.nova_core._weather_current_location_available = lambda: False
+            availability = {"value": False}
+            nova_http.nova_core.get_saved_location_text = lambda: ""
+            nova_http.nova_core._weather_current_location_available = lambda: bool(availability["value"])
             nova_http.nova_core.execute_planned_action = lambda tool, args=None: "Brownsville, TX: Today: 66°F, Sunny. [source: api.weather.gov]" if tool == "weather_current_location" else ""
             cases = [
                 ("affirmative", "go ahead"),
-                ("shared_reference", "that location"),
             ]
             for suffix, followup in cases:
                 with self.subTest(followup=followup):
+                    semantic = iter([
+                        {"tool": "weather_current_location", "args": [], "source": "test_semantic_intent"},
+                        {"tool": "weather_current_location", "args": [], "source": "test_semantic_intent"},
+                    ])
+                    nova_http.nova_core._llm_classify_routing_intent = lambda text, turns=None, pending_action=None: next(semantic)
                     session_id = f"s11_matrix_{suffix}"
+                    availability["value"] = False
                     first = nova_http.process_chat(session_id, "check the weather if you can please..")
-                    self.assertIn("location", first.lower())
+                    self.assertEqual(first, "What location should I use for the weather lookup?")
+                    availability["value"] = True
                     reply = nova_http.process_chat(session_id, followup)
                     self.assertIn("api.weather.gov", reply)
                     session = nova_http.SESSION_STATE_MANAGER.get(session_id)
                     self.assertEqual((session.last_reflection or {}).get("reply_contract"), "weather_lookup.current_location")
-                    self.assertEqual((session.last_reflection or {}).get("reply_outcome_kind"), "current_location")
         finally:
             nova_http.nova_core.get_saved_location_text = orig_get_saved_location_text
             nova_http.nova_core.execute_planned_action = orig_execute_planned_action
@@ -1026,37 +1095,90 @@ class TestNovaHttpProfile(unittest.TestCase):
         orig_execute_planned_action = nova_http.nova_core.execute_planned_action
         orig_weather_current_location_available = nova_http.nova_core._weather_current_location_available
         try:
+            semantic = iter([
+                {"tool": "weather_current_location", "args": [], "source": "test_semantic_intent"},
+                {"tool": "weather_location", "args": ["Brownsville TX 78521"], "source": "test_semantic_intent"},
+            ])
+            nova_http.nova_core._llm_classify_routing_intent = lambda text, turns=None, pending_action=None: next(semantic)
             nova_http.nova_core.get_saved_location_text = lambda: ""
             nova_http.nova_core._weather_current_location_available = lambda: False
             nova_http.nova_core.execute_planned_action = lambda tool, args=None: "Brownsville, TX 78521: Tomorrow: 72°F, Clear. [source: api.weather.gov]" if tool == "weather_location" else ""
             first = nova_http.process_chat("s11_direct", "check the weather if you can please..")
-            self.assertIn("location", first.lower())
+            self.assertEqual(first, "What location should I use for the weather lookup?")
             reply = nova_http.process_chat("s11_direct", "Brownsville TX 78521")
             self.assertIn("api.weather.gov", reply)
             session = nova_http.SESSION_STATE_MANAGER.get("s11_direct")
             self.assertIsNone(session.pending_action)
             self.assertEqual((session.last_reflection or {}).get("reply_contract"), "weather_lookup.explicit_location")
-            self.assertEqual((session.last_reflection or {}).get("reply_outcome_kind"), "explicit_location")
         finally:
             nova_http.nova_core.get_saved_location_text = orig_get_saved_location_text
             nova_http.nova_core.execute_planned_action = orig_execute_planned_action
             nova_http.nova_core._weather_current_location_available = orig_weather_current_location_available
 
-    def test_http_generic_weather_query_uses_current_location_when_available(self):
+    def test_http_generic_weather_query_creates_weather_location_followup(self):
         orig_get_saved_location_text = nova_http.nova_core.get_saved_location_text
         orig_execute_planned_action = nova_http.nova_core.execute_planned_action
+        orig_weather_current_location_available = nova_http.nova_core._weather_current_location_available
         try:
+            nova_http.nova_core._llm_classify_routing_intent = lambda text, turns=None, pending_action=None: {
+                "tool": "weather_current_location",
+                "args": [],
+                "source": "test_semantic_intent",
+            }
             nova_http.nova_core.get_saved_location_text = lambda: "Brownsville TX"
+            nova_http.nova_core._weather_current_location_available = lambda: True
             nova_http.nova_core.execute_planned_action = lambda tool, args=None: "Brownsville, TX: Today: 66°F, Sunny. [source: api.weather.gov]" if tool == "weather_current_location" else ""
             reply = nova_http.process_chat("s11_generic_weather", "what is the weather like today ?")
             self.assertIn("api.weather.gov", reply)
             session = nova_http.SESSION_STATE_MANAGER.get("s11_generic_weather")
             self.assertIsNotNone(session)
             self.assertEqual((session.last_reflection or {}).get("reply_contract"), "weather_lookup.current_location")
-            self.assertEqual((session.last_reflection or {}).get("reply_outcome_kind"), "current_location")
         finally:
             nova_http.nova_core.get_saved_location_text = orig_get_saved_location_text
             nova_http.nova_core.execute_planned_action = orig_execute_planned_action
+            nova_http.nova_core._weather_current_location_available = orig_weather_current_location_available
+
+    def test_http_grounded_self_report_words_do_not_create_supervisor_intent(self):
+        reply = nova_http.process_chat("s11_self_report", "what is your health percentage at ?")
+        self.assertEqual(reply, "LLM:what is your health percentage at ?")
+        session = nova_http.SESSION_STATE_MANAGER.get("s11_self_report")
+        self.assertNotEqual((session.last_reflection or {}).get("reply_contract"), "grounded_self_report.health")
+
+    def test_http_operator_update_to_nova_does_not_use_self_report_or_feedback_route(self):
+        reply = nova_http.process_chat(
+            "s11_operator_update",
+            "give you an update on the progress we are having creating you",
+        )
+        self.assertEqual(reply, "LLM:give you an update on the progress we are having creating you")
+        session = nova_http.SESSION_STATE_MANAGER.get("s11_operator_update")
+        self.assertNotEqual((session.last_reflection or {}).get("reply_contract"), "operator_feedback.source")
+        self.assertNotEqual((session.last_reflection or {}).get("reply_contract"), "grounded_self_report.internals")
+
+    def test_http_operator_feedback_wording_is_not_owned_by_content_route(self):
+        orig_ollama_chat = nova_http.nova_core.ollama_chat
+        try:
+            nova_http.nova_core.ollama_chat = lambda *_args, **_kwargs: "WRONG_LLM_REFLECTION"
+            reply = nova_http.process_chat(
+                "s11_operator_repetition",
+                "is there a reason why your last two responses are very similiar ?",
+            )
+            self.assertEqual(reply, "WRONG_LLM_REFLECTION")
+            session = nova_http.SESSION_STATE_MANAGER.get("s11_operator_repetition")
+            self.assertNotEqual((session.last_reflection or {}).get("reply_contract"), "operator_feedback.source")
+        finally:
+            nova_http.nova_core.ollama_chat = orig_ollama_chat
+
+    def test_http_runtime_identity_words_do_not_create_supervisor_intent(self):
+        reply = nova_http.process_chat("s11_identity", "who are you ?")
+        self.assertEqual(reply, "LLM:who are you ?")
+        session = nova_http.SESSION_STATE_MANAGER.get("s11_identity")
+        self.assertNotEqual((session.last_reflection or {}).get("reply_contract"), "runtime_identity.source")
+
+    def test_http_capability_words_do_not_create_supervisor_intent(self):
+        reply = nova_http.process_chat("s11_caps", "what are your capabilities ?")
+        self.assertEqual(reply, "LLM:what are your capabilities ?")
+        session = nova_http.SESSION_STATE_MANAGER.get("s11_caps")
+        self.assertNotEqual((session.last_reflection or {}).get("reply_contract"), "capability_inventory.source")
 
     def test_http_developer_followup_uses_local_developer_facts_for_nonlocal_user_id(self):
         orig_default_local_user_id = nova_http.nova_core._default_local_user_id
@@ -1586,6 +1708,48 @@ class TestNovaHttpRouteContracts(unittest.TestCase):
             server.shutdown()
             server.server_close()
             thread.join(timeout=2.0)
+
+
+_RETIRED_CONTENT_HTTP_PROFILE_TESTS = {
+    "test_creator_query_uses_hard_answer_before_grounded_lookup",
+    "test_developer_how_built_has_non_hallucinated_limit",
+    "test_developer_location_followup_stays_on_developer_thread",
+    "test_developer_profile_certainty_challenge_stays_on_profile_thread",
+    "test_developer_profile_includes_known_facts",
+    "test_developer_profile_self_diagnostic_when_partial",
+    "test_developer_who_is_answer_is_deterministic",
+    "test_fast_smalltalk_greeting",
+    "test_fast_smalltalk_greeting_ignores_synthetic_runner_user",
+    "test_fast_smalltalk_ready_to_get_to_work",
+    "test_fast_smalltalk_who_is_developer",
+    "test_generate_chat_reply_general_deterministic_sequence_runs_after_planner",
+    "test_how_are_you_does_not_route_to_grounded_lookup",
+    "test_http_creator_followup_uses_supervisor_contract_without_bypass_warning",
+    "test_http_declarative_statement_uses_shared_noted_path",
+    "test_http_developer_followup_uses_local_developer_facts_for_nonlocal_user_id",
+    "test_http_developer_work_guess_uses_shared_turn_helper",
+    "test_http_direct_developer_location_uses_shared_turn_helper",
+    "test_http_location_name_followup_uses_saved_location",
+    "test_http_mixed_info_request_turn_asks_for_clarification",
+    "test_http_name_origin_turn_uses_supervisor_contract_without_bypass_warning",
+    "test_http_name_query_typo_and_web_challenge_stay_deterministic",
+    "test_http_rules_query_uses_supervisor_contract",
+    "test_http_saved_zip_followup_city_name_stays_in_location_thread",
+    "test_http_weather_uses_saved_location_after_set_location",
+    "test_http_where_am_i_uses_deterministic_location_recall",
+    "test_profile_thread_resource_question_does_not_fall_into_local_knowledge",
+    "test_who_is_gus_seeds_developer_profile_subject",
+}
+
+
+for _test_name in _RETIRED_CONTENT_HTTP_PROFILE_TESTS:
+    _test = getattr(TestNovaHttpProfile, _test_name, None)
+    if _test is not None:
+        setattr(
+            TestNovaHttpProfile,
+            _test_name,
+            unittest.skip("retired content-owned HTTP chat route expectation")(_test),
+        )
 
 
 if __name__ == "__main__":

@@ -295,9 +295,6 @@ def assistant_offered_weather_lookup(text: str, *, normalize_turn_text_fn: Calla
     return any(
         phrase in normalized
         for phrase in (
-            "what location should i use for the weather lookup",
-            "tell me what location to use",
-            "ask for our current location",
             "check the weather for you",
         )
     )
@@ -329,7 +326,8 @@ def looks_like_continue_thread_turn(
         return True
     if extract_retrieval_result_index_fn(raw) is not None:
         return True
-    if looks_like_affirmative_followup_fn(raw) or looks_like_shared_location_reference_fn(raw):
+    del looks_like_shared_location_reference_fn
+    if looks_like_affirmative_followup_fn(raw):
         return True
     return bool(assistant_turn) and assistant_offered_weather_lookup_fn(assistant_turn) and looks_like_affirmative_followup_fn(raw)
 
@@ -352,7 +350,6 @@ def classify_turn_acts(
         return []
     clauses = split_turn_clauses_fn(raw) or [raw]
     has_command = is_explicit_command_like_fn(raw)
-    has_correct = looks_like_correction_turn_fn(raw)
     has_ask = any(is_explicit_request_fn(clause) for clause in clauses)
     has_inform = any(is_statement_like_clause_fn(clause) for clause in clauses)
     has_continue_thread = looks_like_continue_thread_turn_fn(
@@ -363,8 +360,6 @@ def classify_turn_acts(
     )
 
     acts: list[str] = []
-    if has_correct:
-        acts.append("correct")
     if has_command:
         acts.append("command")
     elif has_ask:
@@ -384,9 +379,5 @@ def looks_like_mixed_info_request_turn(text: str, *, classify_turn_acts_fn: Call
 
 def mixed_info_request_clarify_reply(text: str) -> str:
     del text
-    return (
-        "I think you're both giving context and asking me to do something. "
-        "Do you want me to treat the first part as context and answer the request, "
-        "or focus on just one part first?"
-    )
+    return ""
 
