@@ -83,6 +83,8 @@ def _runtime_scope(events):
         "_backend_command_list_action": _ok_action,
         "_backend_command_run_action": _ok_action,
         "_operator_prompt_action": lambda payload: (True, "prompt_ok", {}, "prompt_ok", payload),
+        "_operator_outbox_respond_action": _ok_action,
+        "_operator_outbox_status_action": _ok_action,
         "_session_delete_action": _ok_action,
         "_policy_allow_action": _ok_action,
         "_policy_remove_action": _ok_action,
@@ -152,6 +154,22 @@ class TestNovaControlActionDispatcher(unittest.TestCase):
                 self.assertTrue(ok)
                 self.assertNotEqual(msg, "unknown_action")
                 self.assertIn((action_type, "ok", "refresh_ok"), events)
+
+    def test_dispatches_operator_outbox_response_and_seen_actions(self):
+        events = []
+        for action_type in ("operator_outbox_respond", "operator_outbox_seen"):
+            with self.subTest(action_type=action_type):
+                ok, msg, _extra = NOVA_CONTROL_ACTION_DISPATCHER.dispatch_control_action_from_runtime(
+                    action_type,
+                    {"action": action_type, "event_id": "notice-1", "message": "operator evidence"},
+                    patch_control_service=_PatchControlService(),
+                    updates_dir="C:/Nova/updates",
+                    runtime_scope=_runtime_scope(events),
+                )
+                self.assertTrue(ok)
+                self.assertEqual(msg, "refresh_ok")
+        self.assertIn(("operator_outbox_respond", "ok", "refresh_ok"), events)
+        self.assertIn(("operator_outbox_seen", "ok", "refresh_ok"), events)
 
 
 if __name__ == "__main__":

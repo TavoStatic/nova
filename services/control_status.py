@@ -36,6 +36,7 @@ class ControlStatusService:
             "generated_work_queue",
             "autonomy_maintenance_summary",
             "work_trees_payload",
+            "operator_outbox_summary",
             "load_operator_macros",
             "load_backend_commands",
             "memory_events_summary",
@@ -86,6 +87,7 @@ class ControlStatusService:
         generated_work_queue_fn = supplier_fns["generated_work_queue"]
         autonomy_maintenance_summary_fn = supplier_fns["autonomy_maintenance_summary"]
         work_trees_payload_fn = supplier_fns["work_trees_payload"]
+        operator_outbox_summary_fn = supplier_fns["operator_outbox_summary"]
         load_operator_macros_fn = supplier_fns["load_operator_macros"]
         load_backend_commands_fn = supplier_fns["load_backend_commands"]
         memory_events_summary_fn = supplier_fns["memory_events_summary"]
@@ -134,6 +136,7 @@ class ControlStatusService:
         generated_work_queue = generated_work_queue_fn(24)
         autonomy_maintenance = autonomy_maintenance_summary_fn()
         work_trees_payload = work_trees_payload_fn(32)
+        operator_outbox_summary = operator_outbox_summary_fn(20)
         operator_macros = load_operator_macros_fn(24)
         backend_commands = load_backend_commands_fn(40)
         memory_stats = core_module.mem_stats_payload(emit_event=False)
@@ -189,6 +192,7 @@ class ControlStatusService:
             generated_work_queue=generated_work_queue,
             autonomy_maintenance=autonomy_maintenance,
             work_trees_payload=work_trees_payload,
+            operator_outbox=operator_outbox_summary,
             operator_macros=operator_macros,
             backend_commands=backend_commands,
             memory_scope=str((policy.get("memory") or {}).get("scope") or "private"),
@@ -293,6 +297,7 @@ class ControlStatusService:
         validation_artifact_truth: dict | None = None,
         storage_watch_summary: dict | None = None,
         work_trees_payload: dict | None = None,
+        operator_outbox: dict | None = None,
         ollama_health: dict | None = None,
         voice_status: dict | None = None,
         vision_status: dict | None = None,
@@ -307,6 +312,7 @@ class ControlStatusService:
             if isinstance(validation_artifact_truth, dict)
             else {"ok": True, "status": "not_supplied"}
         )
+        operator_outbox_payload = dict(operator_outbox or {}) if isinstance(operator_outbox, dict) else {}
         voice_status_payload = dict(voice_status or {}) if isinstance(voice_status, dict) else {}
         vision_status_payload = dict(vision_status or {}) if isinstance(vision_status, dict) else {}
         data_pipeline_payload = dict(data_pipelines or {}) if isinstance(data_pipelines, dict) else {"ok": True, "pipelines": []}
@@ -379,6 +385,15 @@ class ControlStatusService:
             "generated_work_queue_open_count": int(generated_work_queue.get("open_count", 0) or 0),
             "generated_work_queue_next_file": str((generated_work_queue.get("next_item") or {}).get("file") or ""),
             "autonomy_maintenance": autonomy_payload,
+            "operator_outbox": operator_outbox_payload,
+            "operator_outbox_open_count": int(operator_outbox_payload.get("open_count", 0) or 0),
+            "operator_outbox_latest_id": str(operator_outbox_payload.get("latest_id") or ""),
+            "operator_outbox_latest_open_id": str((operator_outbox_payload.get("latest_open") or {}).get("id") or ""),
+            "operator_outbox_status_counts": (
+                dict(operator_outbox_payload.get("status_counts") or {})
+                if isinstance(operator_outbox_payload.get("status_counts"), dict)
+                else {}
+            ),
             "operator_macros": operator_macros,
             "backend_commands": backend_commands,
             "backend_command_count": len(backend_commands),

@@ -40,63 +40,6 @@ _SYSTEM_TOOL_NAMES = frozenset({
     "update_now",
 })
 
-_EXPLICIT_WORK_TREE_PHRASES = (
-    "start a work tree",
-    "create a work tree",
-    "make a work tree",
-    "open a work tree",
-    "use a work tree",
-    "track this in a work tree",
-    "put this in a work tree",
-    "create work tree",
-    "start work tree",
-    "build work tree",
-    "work tree for",
-)
-
-_SYSTEM_NERVOUS_SYSTEM_CUES = (
-    "runtime",
-    "health",
-    "system status",
-    "heartbeat",
-    "pulse",
-    "queue",
-    "backlog",
-    "generated work",
-    "data lane",
-    "pipeline",
-    "ollama",
-    "model",
-    "voice",
-    "vision",
-    "evidence",
-    "wiring",
-    "subconscious",
-    "pressure",
-    "drift",
-    "parity",
-    "seam",
-    "regression",
-    "patch",
-    "release",
-    "assessment",
-    "operator",
-    "guard",
-    "worker",
-    "maintenance",
-)
-
-_CONTENT_ORIENTED_CUES = (
-    "news",
-    "wikipedia",
-    "research",
-    "attendance guidance",
-    "district action items",
-    "summarize ",
-    "collect ",
-    "write a blog",
-)
-
 _DECOMPOSE_SYSTEM = (
     "You are a system maintenance task decomposition engine for a local AI runtime called Nova. "
     "Nova's work tree is used ONLY for internal system health and maintenance tasks — "
@@ -119,19 +62,6 @@ class WorkTreeSeedingService:
         "then", "also", "next",
     })
 
-    _FOLLOWUP_CONTINUATION_CUES = (
-        "also",
-        "and",
-        "then",
-        "next",
-        "after that",
-        "while you're at it",
-        "while you re at it",
-        "in the same work",
-        "same work",
-        "same tree",
-        "keep going",
-    )
     _OUTCOME_WINDOW_SECONDS = 5 * 60
     _REOPEN_WINDOW_SECONDS = 15 * 60
     _BRANCH_EXPLOSION_THRESHOLD = 6
@@ -233,10 +163,7 @@ class WorkTreeSeedingService:
 
     @classmethod
     def _looks_like_followup_continuation(cls, message: str) -> bool:
-        low = cls._normalize_intake_text(message)
-        if not low:
-            return False
-        return any(cue in low for cue in cls._FOLLOWUP_CONTINUATION_CUES)
+        return False
 
     @classmethod
     def should_continue_active_identity(cls, *, message: str, active_work_identity: str = "") -> bool:
@@ -258,19 +185,12 @@ class WorkTreeSeedingService:
         next_terms = _terms(key)
         overlap = len(active_terms.intersection(next_terms)) if active_terms and next_terms else 0
 
-        # Follow-up turns should prefer continuity even when additional detail
-        # introduces new terms, as long as overlap indicates same thread.
-        if cls._looks_like_followup_continuation(message) and overlap >= 2:
-            return True
-
         # If the identity terms are highly overlapping, treat as same work.
         if active_terms and next_terms:
             smaller = max(1, min(len(active_terms), len(next_terms)))
             if float(overlap) / float(smaller) >= 0.70:
                 return True
 
-        if not key and cls._looks_like_followup_continuation(message):
-            return True
         return False
 
     @classmethod
@@ -303,17 +223,7 @@ class WorkTreeSeedingService:
         raw = str(text or "").strip()
         if not raw:
             return ""
-        normalized = re.sub(r"\s+", " ", raw).strip()
-        low = normalized.lower()
-        for phrase in _EXPLICIT_WORK_TREE_PHRASES:
-            idx = low.find(phrase)
-            if idx < 0:
-                continue
-            tail = normalized[idx + len(phrase):].strip(" .,:;-")
-            tail = re.sub(r"^(for|about|on)\s+", "", tail, flags=re.I).strip(" .,:;-")
-            if tail:
-                return tail
-        return normalized
+        return re.sub(r"\s+", " ", raw).strip()
 
     @staticmethod
     def _tree_is_recent_or_active(tree, *, now_epoch: float, recent_seconds: int) -> bool:
@@ -454,7 +364,6 @@ class WorkTreeSeedingService:
                 if self._normalize_intake_text(getattr(task, "title", "")) == normalized_step:
                     return
             work_tree_module.add_task_to_branch(best_branch.branch_id, step_text)
-            work_tree_module.assign_branch_tool_from_text(best_branch.branch_id, step_text)
             return
 
         child = work_tree_module.add_branch_to_tree(
@@ -464,11 +373,10 @@ class WorkTreeSeedingService:
             root.branch_id,
         )
         work_tree_module.add_task_to_branch(child.branch_id, step_text)
-        inferred = self._infer_tool(step_text)
         work_tree_module.set_branch_tools(
             child.branch_id,
-            allowed_tools=self._allowed_tools(inferred),
-            preferred_tool=inferred,
+            allowed_tools=[],
+            preferred_tool="",
         )
 
     def _get_intent_overlap_strength(
@@ -528,19 +436,9 @@ class WorkTreeSeedingService:
             active_work_identity=active_work_identity,
             new_work_identity=new_work_identity,
         )
-
-        # Only branch if there's partial overlap (not strong, not weak)
-        if strength != "partial":
-            return False
-
-        # Check if message has directional cues suggesting different work
-        low = self._normalize_intake_text(message)
-        direction_cues = {"fix", "refactor", "redesign", "optimize", "debug", "rewrite", "migrate", "switch"}
-        has_direction_cue = any(cue in low.split() for cue in direction_cues)
-        base_should_branch = bool(strength == "partial" and has_direction_cue)
         return self._apply_adaptive_bias_to_branch(
             work_identity_key=str(new_work_identity or active_work_identity or "").strip(),
-            should_branch=base_should_branch,
+            should_branch=False,
             overlap_strength=strength,
         )
 
@@ -585,18 +483,6 @@ class WorkTreeSeedingService:
         return len(open_tasks) == 0
 
     def _detect_completion_signals(self, *, message: str) -> bool:
-        """Detect explicit completion signals in message.
-
-        Signals: done, finished, complete, wrap up, close, conclude, finish
-        """
-        low = self._normalize_intake_text(message)
-        signals = {
-            "done", "finished", "complete", "wrap up", "close", "conclude", "finish",
-            "winding down", "final step", "last task", "all done"
-        }
-        for signal in signals:
-            if signal in low:
-                return True
         return False
 
     def _mark_tree_complete(
@@ -750,13 +636,6 @@ class WorkTreeSeedingService:
             except Exception:
                 age = 0.0
             if age >= float(self._OUTCOME_WINDOW_SECONDS):
-                decision_type = str(pending.get("decision_type") or "").strip()
-                if decision_type:
-                    WORK_TREE_DECISION_ADAPTER.record_outcome(
-                        work_identity_key=key,
-                        decision_type=decision_type,
-                        outcome="success",
-                    )
                 stale.append(key)
         for key in stale:
             self._pending_decisions.pop(key, None)
@@ -915,11 +794,10 @@ class WorkTreeSeedingService:
                                     root.branch_id,
                                 )
                                 work_tree_module.add_task_to_branch(child.branch_id, title_text)
-                                inferred = self._infer_tool(title_text)
                                 work_tree_module.set_branch_tools(
                                     child.branch_id,
-                                    allowed_tools=self._allowed_tools(inferred),
-                                    preferred_tool=inferred,
+                                    allowed_tools=[],
+                                    preferred_tool="",
                                 )
                                 selected_key = str(work_identity_key or active_work_identity or "").strip()
                                 self._ensure_tree_identity_meta(
@@ -1020,42 +898,6 @@ class WorkTreeSeedingService:
                         "branch_id": self._root_branch_id_for_tree(work_tree_module=work_tree_module, tree_id=identity_tree_id),
                     }
 
-        # Backward compatibility: explicit duplicate create prompts still check similarity (Phase 3)
-        if self.looks_like_explicit_work_tree_request(title_text):
-            similar_tree_id = self._find_similar_existing_tree_id(
-                work_tree_module=work_tree_module,
-                title_seed=intent_seed or title_text,
-            )
-            if similar_tree_id:
-                tree = work_tree_module.get_tree(similar_tree_id)
-                if tree is not None:
-                    status = self._tree_status_value(tree)
-                    if status != "complete":
-                        self._ensure_tree_identity_meta(
-                            work_tree_module=work_tree_module,
-                            tree_id=similar_tree_id,
-                            work_identity_key=work_identity_key,
-                            identity_intent=intent_seed or title_text,
-                            source=source,
-                            user_id=user_id,
-                        )
-                        self._append_continuation_if_needed(work_tree_module=work_tree_module, tree_id=similar_tree_id, request_text=title_text)
-                        self._record_work_decision(
-                            work_identity_key=work_identity_key,
-                            decision_type="continue",
-                            tree_id=str(similar_tree_id),
-                            branch_id=self._root_branch_id_for_tree(work_tree_module=work_tree_module, tree_id=similar_tree_id),
-                            branch_count=self._branch_count_for_tree(work_tree_module=work_tree_module, tree_id=similar_tree_id),
-                        )
-                        self._mark_reuse(tree_id=similar_tree_id, request_text=title_text)
-                        return {
-                            "tree_id": similar_tree_id,
-                            "work_identity_key": work_identity_key,
-                            "continuity": "continuing_existing_work",
-                            "decision_type": "continue",
-                            "branch_id": self._root_branch_id_for_tree(work_tree_module=work_tree_module, tree_id=similar_tree_id),
-                        }
-
         # Create new tree (Phase 3)
         title_base = intent_seed or title_text
         title = title_base if len(title_base) <= 80 else title_base[:77].rstrip() + "..."
@@ -1109,7 +951,7 @@ class WorkTreeSeedingService:
                 )
                 work_tree_module.add_task_to_branch(child.branch_id, step_text)
                 llm_tool = str(item.get("tool") or "").strip().lower()
-                tool = llm_tool if llm_tool in _SYSTEM_TOOL_NAMES else self._infer_tool(step_text)
+                tool = llm_tool if llm_tool in _SYSTEM_TOOL_NAMES else ""
                 work_tree_module.set_branch_tools(
                     child.branch_id,
                     allowed_tools=self._allowed_tools(tool),
@@ -1131,11 +973,10 @@ class WorkTreeSeedingService:
                     root_branch.branch_id,
                 )
                 work_tree_module.add_task_to_branch(child.branch_id, step_text)
-                preferred = self._infer_tool(step_text)
                 work_tree_module.set_branch_tools(
                     child.branch_id,
-                    allowed_tools=self._allowed_tools(preferred),
-                    preferred_tool=preferred,
+                    allowed_tools=[],
+                    preferred_tool="",
                 )
                 if previous_branch_id:
                     work_tree_module.add_dependency(child.branch_id, previous_branch_id)
@@ -1239,44 +1080,16 @@ class WorkTreeSeedingService:
 
     @staticmethod
     def looks_like_explicit_work_tree_request(message: str) -> bool:
-        low = str(message or "").strip().lower()
-        return any(phrase in low for phrase in _EXPLICIT_WORK_TREE_PHRASES)
-
-    @staticmethod
-    def _looks_like_content_oriented_prompt(message: str) -> bool:
-        low = str(message or "").strip().lower()
-        if not low:
-            return False
-        return any(cue in low for cue in _CONTENT_ORIENTED_CUES)
-
-    @staticmethod
-    def _looks_like_system_nervous_system_prompt(message: str) -> bool:
-        low = str(message or "").strip().lower()
-        if not low:
-            return False
-        return any(cue in low for cue in _SYSTEM_NERVOUS_SYSTEM_CUES)
+        return False
 
     @staticmethod
     def should_seed_system_work_tree(*, message: str, source: str = "", operator_mode: str = "") -> bool:
-        """Shared activation rule for auto-seeding system work trees.
-
-        Rules:
-        1) explicit work-tree request always seeds
-        2) clear content prompts do not seed
-        3) internal maintenance cues seed
-        4) operator macro / CLI flows default to seed unless content-oriented
-        """
-        if WorkTreeSeedingService.looks_like_explicit_work_tree_request(message):
-            return True
-        if WorkTreeSeedingService._looks_like_content_oriented_prompt(message):
-            return False
-        if WorkTreeSeedingService._looks_like_system_nervous_system_prompt(message):
-            return True
+        """Seed only when source metadata gives the seeding layer authority."""
         normalized_source = str(source or "").strip().lower()
         normalized_mode = str(operator_mode or "").strip().lower()
-        if normalized_mode == "macro" or normalized_source == "cli":
+        if normalized_mode == "macro":
             return True
-        return False
+        return normalized_source in {"operator", "control", "maintenance", "autonomy"}
 
     @staticmethod
     def _split_steps(message: str, *, limit: int = 4) -> list[str]:
@@ -1305,40 +1118,7 @@ class WorkTreeSeedingService:
 
     @staticmethod
     def _infer_tool(step_text: str) -> str:
-        low = str(step_text or "").strip().lower()
-        if not low:
-            return "health"
-        if any(token in low for token in ("pulse", "beat", "heartbeat")):
-            return "pulse"
-        if "preview" in low and any(token in low for token in ("apply", "approved", "eligible")):
-            return "patch_preview_apply"
-        if any(token in low for token in ("patch", "apply patch", "rollback")):
-            return "patch_apply"
-        if any(token in low for token in ("update", "install update")):
-            return "update_now"
-        if any(token in low for token in ("queue", "backlog", "pending", "generated", "work queue")):
-            return "queue_status"
-        if any(token in low for token in ("pipeline", "data lane", "data source", "schema probe")):
-            return "pipeline"
-        if any(token in low for token in ("list files", "directory", "folder", "list dir", "ls ")):
-            return "ls"
-        if any(token in low for token in ("read", "inspect file", "open file", "scan", "log", "snapshot", "report")):
-            return "read"
-        if any(token in low for token in ("phase2", "audit", "safety envelope")):
-            return "phase2_audit"
-        if any(token in low for token in ("release validation", "validation outcome", "validation profile")):
-            return "release_validation_run"
-        if any(token in low for token in ("record validation", "ledger outcome")):
-            return "release_record_validation_outcome"
-        if any(token in low for token in ("release package", "release readiness", "rebuild release")):
-            return "release_rebuild_verify"
-        if any(token in low for token in ("core thinning", "thin core", "large core", "wrapper")):
-            return "core_thinning"
-        if any(token in low for token in ("core health", "health brief")):
-            return "core_health"
-        if any(token in low for token in ("system", "runtime", "status", "check", "verify", "validate", "diagnose")):
-            return "system_check"
-        return "health"
+        return ""
 
     @staticmethod
     def _allowed_tools(preferred_tool: str) -> list[str]:
@@ -1367,8 +1147,7 @@ class WorkTreeSeedingService:
             return ["update_now", "patch_preview_apply", "patch_apply"]
         if tool in {"phase2_audit"}:
             return ["phase2_audit", "system_check"]
-        # Default: general system health tools
-        return ["health", "system_check", "pulse", "queue_status"]
+        return []
 
     @staticmethod
     def _step_branch_title(index: int, step_text: str) -> str:

@@ -44,6 +44,7 @@ class ToolExecutionService:
             "camera_tool_disabled": "Camera tool disabled by policy.",
             "files_tool_disabled": "File tools disabled by policy.",
             "health_tool_disabled": "Health tool disabled by policy.",
+            "os_capability_tool_disabled": "OS capability tool disabled by policy.",
             "patch_tool_disabled": "Patch tool disabled by policy.",
             "patch_force_disabled": "Forced patch apply is disabled by policy.",
             "admin_required": f"{tool_name} is restricted to admin-approved execution.",

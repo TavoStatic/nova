@@ -26,6 +26,7 @@ class TestToolRegistry(unittest.TestCase):
         self.assertIn("vision", names)
         self.assertIn("research", names)
         self.assertIn("system", names)
+        self.assertIn("os_capability", names)
         filesystem = next(item for item in metadata if item["name"] == "filesystem")
         self.assertEqual(filesystem["locality"], "local")
         self.assertEqual(filesystem["scope"], "user")
@@ -34,6 +35,8 @@ class TestToolRegistry(unittest.TestCase):
         self.assertTrue(patch_meta["requires_admin"])
         self.assertEqual(patch_meta["scope"], "system")
         self.assertFalse(patch_meta["read_only"])
+        os_meta = next(item for item in metadata if item["name"] == "os_capability")
+        self.assertEqual(os_meta["scope"], "system")
 
     def test_filesystem_ls_uses_allowed_root(self):
         registry = build_default_registry()
@@ -245,6 +248,49 @@ class TestToolRegistry(unittest.TestCase):
         self.assertGreaterEqual(len(called_cmd), 3)
         self.assertIn("health.py", str(called_cmd[1]).lower())
         self.assertEqual(called_cmd[2], "check")
+
+    def test_os_capability_tool_executes_through_controller_contract(self):
+        registry = build_default_registry()
+        calls = []
+
+        class FakeController:
+            def execute_capability(self, capability, args, **kwargs):
+                calls.append((capability, args, kwargs))
+                return {"ok": True, "status": "success", "reason": "", "executed": True}
+
+        ctx = ToolContext(
+            user_id="tester",
+            session_id="sess-os-cap",
+            policy={"tools_enabled": {}},
+            allowed_root=".",
+            extra={"os_script_controller": FakeController()},
+        )
+
+        raw = registry.run_tool(
+            "os_capability",
+            {"request": {"capability": "verify_ollama_model", "args": {"probe_chat": False}}},
+            ctx,
+        )
+
+        payload = json.loads(raw)
+        self.assertTrue(payload["ok"])
+        self.assertEqual(calls[0][0], "verify_ollama_model")
+        self.assertEqual(calls[0][1], {"probe_chat": False})
+        self.assertIn("authority_context", calls[0][2])
+
+    def test_os_capability_tool_can_be_disabled_by_policy(self):
+        registry = build_default_registry()
+        ctx = ToolContext(
+            user_id="tester",
+            session_id="sess-os-cap-disabled",
+            policy={"tools_enabled": {"os_capability": False}},
+            allowed_root=".",
+        )
+
+        with self.assertRaises(ToolInvocationError) as err:
+            registry.run_tool("os_capability", {"capability": "verify_ollama_model"}, ctx)
+
+        self.assertEqual(str(err.exception), "os_capability_tool_disabled")
 
     def test_vision_tool_nonzero_helper_exit_is_recorded_as_error(self):
         registry = build_default_registry()

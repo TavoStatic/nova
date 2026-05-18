@@ -69,6 +69,7 @@ _DEFAULT_TREE_ALLOWED_TOOLS = (
     "health",
     "core_health",
     "core_thinning",
+    "os_capability",
     "release_promotion_judgment",
     "release_validation_run",
     "release_record_validation_outcome",
@@ -90,6 +91,7 @@ _KNOWN_TOOL_NAMES = frozenset(
     _DEFAULT_TREE_ALLOWED_TOOLS
     + (
         "generated_queue_run",
+        "os_capability",
         "core_health",
         "core_thinning",
         "release_promotion_judgment",
@@ -1014,9 +1016,12 @@ def record_task_evidence(
         raise ValueError(f"Branch {branch_id} not found")
     if task is None:
         raise ValueError(f"Task {task_id} not found")
-    evidence_id = f"evidence_{uuid.uuid4().hex[:10]}"
-    created_at = _dt(_now())
     _ensure_db()
+    evidence_id = f"evidence_{uuid.uuid4().hex[:10]}"
+    now = _now()
+    created_at = _dt(now)
+    branch.evidence_count = int(branch.evidence_count or 0) + 1
+    branch.updated_at = now
     with _db_transaction() as connection:
         connection.execute(
             """
@@ -1034,6 +1039,7 @@ def record_task_evidence(
                 created_at,
             ),
         )
+        _save_branch_record(connection, branch)
     return evidence_id
 
 
@@ -1706,6 +1712,14 @@ def _tool_args_for_task(tool_name: str, task: Task) -> list[str]:
     explicit_args = task_meta.get("tool_args")
     if isinstance(explicit_args, list):
         return [str(item) for item in explicit_args]
+    if tool_name == "os_capability":
+        request = task_meta.get("capability_request") if isinstance(task_meta.get("capability_request"), dict) else None
+        if request is not None:
+            return [_json_dump(request)]
+        capability_name = str(task_meta.get("capability") or "").strip()
+        capability_args = task_meta.get("capability_args") if isinstance(task_meta.get("capability_args"), dict) else {}
+        if capability_name:
+            return [_json_dump({"capability": capability_name, "args": dict(capability_args or {})})]
     if tool_name == "subconscious_review_judgment":
         return [task.branch_id]
     if tool_name == "release_promotion_judgment":
@@ -1799,104 +1813,6 @@ def _restore_task_after_failed_execution(task: Task, branch: Branch) -> None:
     branch.updated_at = now
 
 
-def _ordered_tool_suggestions_from_text(text: str) -> list[str]:
-    low = str(text or "").strip().lower()
-    if not low:
-        return []
-    suggestions: list[str] = []
-
-    def _push(tool_name: str) -> None:
-        if tool_name and tool_name in _KNOWN_TOOL_NAMES and tool_name not in suggestions:
-            suggestions.append(tool_name)
-
-    if low.startswith("find ") or " find " in low:
-        _push("find")
-    if low.startswith("read ") or " read " in low:
-        _push("read")
-    if "test_" in low:
-        _push("find")
-        _push("read")
-    if any(token in low for token in ("metadata", "symbol reference", "missing symbol", "evidence counter", "branch metadata")):
-        _push("find")
-        _push("read")
-    if "memory bootstrap judgment" in low or ("judgment" in low and "memory" in low):
-        _push("memory_bootstrap_judgment")
-    if "memory bootstrap confirm" in low or ("confirm" in low and "memory bootstrap" in low):
-        _push("memory_bootstrap_confirm")
-    if "memory identity bootstrap" in low or ("identity bootstrap" in low and "memory" in low):
-        _push("memory_identity_bootstrap")
-    if "subconscious review judgment" in low or ("judgment" in low and "subconscious" in low):
-        _push("subconscious_review_judgment")
-    if any(token in low for token in ("health", "heartbeat", "pulse", "runtime", "diagnose", "status", "check")):
-        if "core" in low or "repair" in low:
-            _push("core_health")
-        _push("system_check")
-        _push("health")
-        _push("pulse")
-    if any(token in low for token in ("queue", "backlog", "pending", "generated")):
-        _push("queue_status")
-    if any(token in low for token in ("pipeline", "data lane", "data source", "schema probe")):
-        _push("pipeline")
-    if any(token in low for token in ("generated session", "session drift", "parity drift", "generated queue")):
-        _push("generated_queue_run")
-    if "release promotion judgment" in low or ("judgment" in low and "release" in low):
-        _push("release_promotion_judgment")
-    if "release validation" in low or "validation profile" in low:
-        _push("release_validation_run")
-    if "validation outcome" in low or "record completed validation" in low:
-        _push("release_record_validation_outcome")
-    if any(token in low for token in ("release package", "release rebuild", "rebuild and verify", "source changed after build")):
-        _push("release_rebuild_verify")
-    if any(token in low for token in ("rollback", "revert", "undo patch")):
-        _push("patch_rollback")
-    if "approve pending preview" in low or low.startswith("approve preview"):
-        _push("patch_preview_approve")
-    if "preview" in low and any(token in low for token in ("apply", "approved", "eligible")):
-        _push("patch_preview_apply")
-    if any(token in low for token in ("patch", "fix", "apply", "diff", "regression")):
-        _push("patch_apply")
-    if any(token in low for token in ("thin", "thinning", "extract", "wrapper", "large core")):
-        _push("core_thinning")
-    if any(token in low for token in ("update", "upgrade", "install")):
-        _push("update_now")
-    if any(token in low for token in ("read", "inspect", "file", "log", "snapshot", "report")):
-        _push("read")
-    if any(token in low for token in ("list", "directory", "folder", "tree")):
-        _push("ls")
-    if any(token in low for token in ("find", "search file", "locate")):
-        _push("find")
-    if any(token in low for token in ("web", "research", "wikipedia", "stack", "sources")):
-        _push("web_research")
-        _push("web_search")
-        _push("web_fetch")
-    return suggestions
-
-
-def assign_branch_tool_from_text(branch_id: str, task_text: str = "") -> str:
-    branch = _BRANCHES.get(branch_id)
-    if branch is None:
-        return ""
-    tree = _TREES.get(branch.tree_id)
-    allowed = _tree_allowed_tools(tree)
-    if not allowed:
-        return ""
-
-    merged_text = f"{branch.title} {str(task_text or '').strip()}".strip()
-    suggestions = _ordered_tool_suggestions_from_text(merged_text)
-    selected = next((tool for tool in suggestions if tool in allowed), "")
-    if not selected:
-        selected = str(allowed[0] or "").strip() if allowed else ""
-    if not selected:
-        return ""
-
-    set_branch_tools(
-        branch.branch_id,
-        allowed_tools=[selected],
-        preferred_tool=selected,
-    )
-    return selected
-
-
 def _rebalance_branch_tool_for_task(branch: Branch, task: Task | None) -> str:
     if branch is None or task is None:
         return ""
@@ -1906,24 +1822,7 @@ def _rebalance_branch_tool_for_task(branch: Branch, task: Task | None) -> str:
     # Preserve explicit branch tool declarations when a ready candidate already exists.
     if _branch_candidate_tool(branch):
         return ""
-    allowed = _tree_allowed_tools(tree)
-    if not allowed:
-        return ""
-    suggestions = _ordered_tool_suggestions_from_text(f"{branch.title} {str(task.title or '').strip()}".strip())
-    selected = next((tool for tool in suggestions if tool in allowed), "")
-    if not selected:
-        return ""
-    current = str(branch.preferred_tool or "").strip()
-    if current == selected and list(branch.allowed_tools or []) == [selected]:
-        return selected
-    if selected == "find" and "read" in suggestions:
-        branch.tool_state["read"] = ToolStatus.FAILED
-    set_branch_tools(
-        branch.branch_id,
-        allowed_tools=[selected],
-        preferred_tool=selected,
-    )
-    return selected
+    return ""
 
 
 def list_autonomous_options(tree_id: str) -> list[dict]:
@@ -2006,12 +1905,7 @@ def _preview_recommended_tool(tree: WorkTree | None, branch: Branch, task: Task 
     if task_declared:
         return task_declared[0], task_declared, ""
 
-    tree_allowed = _tree_allowed_tools(tree)
-    suggestions = _ordered_tool_suggestions_from_text(f"{branch.title} {str(task.title or '').strip()}".strip())
-    selected = next((tool for tool in suggestions if tool in tree_allowed), "")
-    if not selected:
-        return "", list(branch.allowed_tools), ""
-    return selected, [selected], ""
+    return "", list(branch.allowed_tools), ""
 
 
 def _preview_next_autonomous_step(tree_id: str) -> dict | None:
@@ -2122,10 +2016,6 @@ def next_autonomous_step(tree_id: str, decide_next_step_fn: DecisionCallback | N
                 preferred_tool=task_declared[0],
             )
             recommended_tool = _branch_candidate_tool(branch)
-        if not recommended_tool and current_task is not None:
-            assigned_tool = assign_branch_tool_from_text(branch.branch_id, current_task.title)
-            if assigned_tool:
-                recommended_tool = _branch_candidate_tool(branch)
         if recommended_tool:
             allowed, reason = _tool_governance_status(tree, branch, recommended_tool)
             if not allowed:
@@ -2285,9 +2175,25 @@ def execute_autonomous_step(
     invalid_result, invalid_reason = _is_invalid_tool_result(tool_name, result)
     if invalid_result:
         branch.tool_state[tool_name] = ToolStatus.FAILED
+        failure_evidence_id = ""
+        failure_evidence_error = ""
+        try:
+            failure_evidence_id = record_task_evidence(
+                branch_id=branch_id,
+                task_id=task.task_id,
+                tool_name=tool_name,
+                tool_args=tool_args,
+                result={
+                    "ok": False,
+                    "reason": invalid_reason or "unknown error",
+                    "tool_result": result,
+                },
+            )
+        except Exception as exc:
+            failure_evidence_error = str(exc)
         _restore_task_after_failed_execution(task, branch)
         _persist_tree_state(tree_id)
-        return {
+        payload = {
             "action": "tool_failed",
             "branch_id": branch_id,
             "branch_title": branch.title,
@@ -2297,6 +2203,11 @@ def execute_autonomous_step(
             "tool_args": tool_args,
             "error": invalid_reason or "unknown error",
         }
+        if failure_evidence_id:
+            payload["failure_evidence_id"] = failure_evidence_id
+        if failure_evidence_error:
+            payload["failure_evidence_error"] = failure_evidence_error
+        return payload
 
     branch.tool_state[tool_name] = ToolStatus.READY
     branch.updated_at = _now()
@@ -2386,9 +2297,6 @@ def get_visual_tree_data(tree_id: str) -> dict | None:
             task_declared = _task_declared_tools_allowed_by_tree(current_task, tree)
             if task_declared:
                 display_tool = task_declared[0]
-            else:
-                suggestions = _ordered_tool_suggestions_from_text(f"{branch.title} {str(current_task.title or '').strip()}".strip())
-                display_tool = next((tool for tool in suggestions if tool in _tree_allowed_tools(tree)), display_tool)
         nodes.append({
             "id": branch.branch_id,
             "title": branch.title,
@@ -2478,12 +2386,6 @@ def inspect_tree(tree_id: str) -> dict | None:
             if task_declared:
                 display_tool = task_declared[0]
                 display_allowed_tools = task_declared
-            else:
-                suggestions = _ordered_tool_suggestions_from_text(f"{branch.title} {str(current_task.title or '').strip()}".strip())
-                selected_tool = next((tool for tool in suggestions if tool in _tree_allowed_tools(tree)), "")
-                if selected_tool:
-                    display_tool = selected_tool
-                    display_allowed_tools = [selected_tool]
         return {
             "branch_id": branch.branch_id,
             "title": branch.title,

@@ -1,6 +1,7 @@
 ﻿from __future__ import annotations
 
 from contextlib import closing
+import json
 import os
 import unittest
 from pathlib import Path
@@ -167,22 +168,25 @@ class TestWorkTree(unittest.TestCase):
         self.assertEqual(step["required_tools"], ["web_search"])
         self.assertEqual(step["allowed_tools"], ["web_search", "web_fetch"])
 
-    def test_next_autonomous_step_assigns_deterministic_tool_when_branch_has_none(self) -> None:
-        tree = work_tree.initialize_tree("Deterministic assignment")
+    def test_next_autonomous_step_reports_missing_tool_when_branch_has_none(self) -> None:
+        tree = work_tree.initialize_tree("Missing assignment")
         root_branch = work_tree._BRANCHES[tree.root_branch_id]
         work_tree.add_task_to_branch(root_branch.branch_id, "collect student_data attendance guidance")
 
         step = work_tree.next_autonomous_step(tree.tree_id)
 
-        self.assertEqual(step["action"], "execute")
-        self.assertTrue(str(step.get("recommended_tool") or "").strip())
-        self.assertEqual(root_branch.preferred_tool, step["recommended_tool"])
-        self.assertEqual(root_branch.allowed_tools, [step["recommended_tool"]])
+        self.assertEqual(step["action"], "missing_tool_assignment")
+        self.assertEqual(str(root_branch.preferred_tool or ""), "")
+        self.assertEqual(root_branch.allowed_tools, [])
 
     def test_next_autonomous_step_prefers_patch_rollback_for_rollback_task(self) -> None:
         tree = work_tree.initialize_tree("Patch rollback tree")
         root_branch = work_tree._BRANCHES[tree.root_branch_id]
-        work_tree.add_task_to_branch(root_branch.branch_id, "patch rollback")
+        work_tree.add_task_to_branch(
+            root_branch.branch_id,
+            "patch rollback",
+            meta={"expected_tool": "patch_rollback", "allowed_tools": ["patch_rollback"]},
+        )
         work_tree.set_tree_policy(
             tree.tree_id,
             allowed_tools=["patch_apply", "patch_rollback"],
@@ -202,7 +206,11 @@ class TestWorkTree(unittest.TestCase):
         work_tree.add_task_to_branch(
             root_branch.branch_id,
             "apply approved preview preview_queue_item.txt",
-            meta={"patch_preview": "preview_queue_item.txt"},
+            meta={
+                "patch_preview": "preview_queue_item.txt",
+                "expected_tool": "patch_preview_apply",
+                "allowed_tools": ["patch_preview_apply"],
+            },
         )
         work_tree.set_tree_policy(
             tree.tree_id,
@@ -223,7 +231,11 @@ class TestWorkTree(unittest.TestCase):
         work_tree.add_task_to_branch(
             root_branch.branch_id,
             "approve pending preview preview_queue_item.txt",
-            meta={"patch_preview": "preview_queue_item.txt"},
+            meta={
+                "patch_preview": "preview_queue_item.txt",
+                "expected_tool": "patch_preview_approve",
+                "allowed_tools": ["patch_preview_approve"],
+            },
         )
         work_tree.set_tree_policy(
             tree.tree_id,
@@ -244,7 +256,11 @@ class TestWorkTree(unittest.TestCase):
         work_tree.add_task_to_branch(
             root_branch.branch_id,
             "run generated session subconscious_demo_family_turn.json",
-            meta={"session_file": "subconscious_demo_family_turn.json"},
+            meta={
+                "session_file": "subconscious_demo_family_turn.json",
+                "expected_tool": "generated_queue_run",
+                "allowed_tools": ["generated_queue_run"],
+            },
         )
         work_tree.set_tree_policy(
             tree.tree_id,
@@ -285,8 +301,43 @@ class TestWorkTree(unittest.TestCase):
         self.assertEqual(calls, [("generated_queue_run", ["subconscious_demo_family_turn.json"])])
         self.assertEqual(work_tree._TASKS[task.task_id].status, work_tree.TaskStatus.COMPLETE)
 
-    def test_execute_autonomous_step_assigns_and_runs_tool_when_branch_has_none(self) -> None:
-        tree = work_tree.initialize_tree("Auto assign boundary")
+    def test_os_capability_task_uses_structured_capability_request_args(self) -> None:
+        tree = work_tree.initialize_tree("OS capability route")
+        root_branch = work_tree._BRANCHES[tree.root_branch_id]
+        work_tree.set_tree_policy(tree.tree_id, allowed_tools=["os_capability"])
+        work_tree.set_branch_tools(
+            root_branch.branch_id,
+            required_tools=["os_capability"],
+            allowed_tools=["os_capability"],
+            preferred_tool="os_capability",
+        )
+        task = work_tree.add_task_to_branch(
+            root_branch.branch_id,
+            "Verify local Ollama model",
+            meta={
+                "capability_request": {
+                    "capability": "verify_ollama_model",
+                    "args": {"probe_chat": False},
+                }
+            },
+        )
+        calls = []
+
+        step = work_tree.execute_autonomous_step(
+            tree.tree_id,
+            execute_planned_action_fn=lambda tool, args=None: calls.append((tool, list(args or []))) or {"ok": True, "status": "success"},
+        )
+
+        self.assertEqual(step["action"], "executed")
+        self.assertEqual(calls[0][0], "os_capability")
+        self.assertEqual(
+            json.loads(calls[0][1][0]),
+            {"capability": "verify_ollama_model", "args": {"probe_chat": False}},
+        )
+        self.assertEqual(work_tree._TASKS[task.task_id].status, work_tree.TaskStatus.COMPLETE)
+
+    def test_execute_autonomous_step_stops_when_branch_has_no_tool_assignment(self) -> None:
+        tree = work_tree.initialize_tree("Missing assignment boundary")
         root_branch = work_tree._BRANCHES[tree.root_branch_id]
         task = work_tree.add_task_to_branch(root_branch.branch_id, "collect runtime diagnostics")
 
@@ -296,10 +347,10 @@ class TestWorkTree(unittest.TestCase):
             execute_planned_action_fn=lambda tool, args=None: called.append((tool, list(args or []))) or "ok",
         )
 
-        self.assertEqual(step["action"], "executed")
+        self.assertEqual(step["action"], "missing_tool_assignment")
         self.assertEqual(step["task_id"], task.task_id)
-        self.assertEqual(len(called), 1)
-        self.assertEqual(work_tree._TASKS[task.task_id].status, work_tree.TaskStatus.COMPLETE)
+        self.assertEqual(called, [])
+        self.assertEqual(work_tree._TASKS[task.task_id].status, work_tree.TaskStatus.OPEN)
 
     def test_next_autonomous_step_does_not_wait_when_required_tool_failed(self) -> None:
         tree = work_tree.initialize_tree("Retry failed tool")
@@ -387,8 +438,14 @@ class TestWorkTree(unittest.TestCase):
 
         self.assertEqual(step["action"], "tool_failed")
         self.assertEqual(step["tool"], "web_search")
+        self.assertTrue(str(step.get("failure_evidence_id") or "").startswith("evidence_"))
         self.assertEqual(work_tree._TASKS[task.task_id].status, work_tree.TaskStatus.OPEN)
         self.assertEqual(root_branch.tool_state["web_search"], ToolStatus.FAILED)
+        evidence = work_tree.list_branch_evidence(root_branch.branch_id)
+        self.assertEqual(len(evidence), 1)
+        self.assertEqual(evidence[0]["task_id"], task.task_id)
+        self.assertEqual(evidence[0]["tool_name"], "web_search")
+        self.assertIn("tool offline", evidence[0]["result_text"])
 
     def test_blocked_task_blocks_branch_without_becoming_executable(self) -> None:
         tree = work_tree.initialize_tree("Blocked task tree")
@@ -557,6 +614,11 @@ class TestWorkTree(unittest.TestCase):
         task = work_tree.add_task_to_branch(
             root_branch.branch_id,
             "Run or inspect test_generic_fallback_does_not_hide_viable_specific_route and confirm whether fallback_overuse is still active",
+            meta={
+                "expected_tool": "find",
+                "allowed_tools": ["find"],
+                "tool_args": ["test_generic_fallback_does_not_hide_viable_specific_route"],
+            },
         )
 
         step = work_tree.execute_autonomous_step(
@@ -569,7 +631,6 @@ class TestWorkTree(unittest.TestCase):
         self.assertEqual(step["tool_result"], {"tool": "find", "args": ["test_generic_fallback_does_not_hide_viable_specific_route"]})
         self.assertEqual(root_branch.preferred_tool, "find")
         self.assertEqual(work_tree._TASKS[task.task_id].status, work_tree.TaskStatus.COMPLETE)
-        self.assertEqual(root_branch.tool_state["read"], ToolStatus.FAILED)
 
     def test_execute_autonomous_step_uses_explicit_task_tool_args(self) -> None:
         tree = work_tree.initialize_tree("Scoped evidence tree")

@@ -110,7 +110,7 @@ class TestWorkTreeSignalIngestionService(unittest.TestCase):
         self.assertEqual(getattr(work_tree.get_tree(duplicate.tree_id).status, "value", ""), "archived")
         self.assertEqual(getattr(work_tree.get_tree(canonical.tree_id).status, "value", ""), "active")
 
-    def test_repeated_signal_update_rebalances_stale_branch_tool(self) -> None:
+    def test_repeated_signal_update_clears_stale_branch_tool_without_explicit_tool(self) -> None:
         signal = {
             "source": "subconscious",
             "signal_class": "subconscious_candidate",
@@ -138,8 +138,8 @@ class TestWorkTreeSignalIngestionService(unittest.TestCase):
 
         self.assertEqual(second.get("action"), "updated")
         branch = next(branch for branch in self._signal_branches() if branch.branch_id == first.get("branch_id"))
-        self.assertEqual(branch.preferred_tool, "find")
-        self.assertEqual(branch.allowed_tools, ["find"])
+        self.assertIsNone(branch.preferred_tool)
+        self.assertEqual(branch.allowed_tools, [])
 
     def test_inactive_subconscious_candidate_retires_without_blocking_truth(self) -> None:
         signal = {
@@ -1985,6 +1985,8 @@ class TestWorkTreeSignalIngestionService(unittest.TestCase):
             "payload": {"alert": "heartbeat drift"},
             "severity": "high",
             "actionability": "safe_now",
+            "allowed_tools": ["pulse"],
+            "preferred_tool": "pulse",
             "next_task": "check runtime heartbeat and queue status",
         }
 

@@ -66,6 +66,11 @@ const btnOperatorMic = document.getElementById('btnOperatorMic');
 const backendCommandSelect = document.getElementById('backendCommandSelect');
 const backendCommandArgs = document.getElementById('backendCommandArgs');
 const backendCommandOutput = document.getElementById('backendCommandOutput');
+const operatorOutboxSelect = document.getElementById('operatorOutboxSelect');
+const operatorOutboxResolution = document.getElementById('operatorOutboxResolution');
+const operatorOutboxResponse = document.getElementById('operatorOutboxResponse');
+const operatorOutboxBox = document.getElementById('operatorOutboxBox');
+const operatorOutboxBadge = document.getElementById('operatorOutboxBadge');
 const memoryScopeSelect = document.getElementById('memoryScope');
 const memoryScopeBox = document.getElementById('memoryScopeBox');
 const searchEndpointInput = document.getElementById('searchEndpoint');
@@ -168,6 +173,7 @@ let operatorRecognition = null;
 let operatorRecognitionActive = false;
 const OperatorSpeechRecognitionCtor = window.SpeechRecognition || window.webkitSpeechRecognition || null;
 let operatorMacroValueCache = {};
+let operatorOutboxEvents = [];
 let telemetryGraphMode = 'combined';
 let locationTrackingWatchId = null;
 let locationTrackingLastObserved = null;
@@ -1176,6 +1182,143 @@ function renderOperatorReply(payload) {
     if (payload.reply) {
         speakOperatorReply(payload.reply);
     }
+}
+
+function selectedOperatorOutboxEvent() {
+    const selectedId = operatorOutboxSelect ? String(operatorOutboxSelect.value || '').trim() : '';
+    return operatorOutboxEvents.find((event) => String(event && event.id || '') === selectedId) || null;
+}
+
+function operatorOutboxEventLabel(event) {
+    const status = String(event && event.status ? event.status : 'new').trim();
+    const title = String(event && event.title ? event.title : 'operator notice').trim();
+    const eventId = String(event && event.id ? event.id : '').trim();
+    const shortId = eventId.length > 18 ? eventId.slice(-18) : eventId;
+    return `${status} | ${title}${shortId ? ` | ${shortId}` : ''}`;
+}
+
+function operatorOutboxTargetLines(event) {
+    const payload = event && event.payload && typeof event.payload === 'object' ? event.payload : {};
+    const task = payload.task && typeof payload.task === 'object' ? payload.task : {};
+    const nextStep = payload.next_step && typeof payload.next_step === 'object' ? payload.next_step : {};
+    return [
+        `Tree: ${payload.tree_title || payload.tree_id || 'n/a'}`,
+        `Branch: ${payload.branch_title || nextStep.branch_title || payload.branch_id || nextStep.branch_id || 'n/a'}`,
+        `Task: ${payload.task_title || task.title || nextStep.task_title || payload.task_id || task.task_id || nextStep.task_id || 'n/a'}`,
+        `Request: ${payload.request_kind || 'n/a'}`,
+        `Blocked reason: ${payload.blocked_reason || 'n/a'}`,
+    ];
+}
+
+function renderOperatorOutbox(status) {
+    const summary = status && status.operator_outbox && typeof status.operator_outbox === 'object'
+        ? status.operator_outbox
+        : {};
+    const events = Array.isArray(summary.events)
+        ? summary.events.filter((event) => event && typeof event === 'object')
+        : [];
+    const openEvents = events.filter((event) => !['resolved', 'dismissed', 'stale'].includes(String(event.status || '').trim().toLowerCase()));
+    const selectable = openEvents.length ? openEvents : events;
+    const previous = operatorOutboxSelect ? String(operatorOutboxSelect.value || '').trim() : '';
+    operatorOutboxEvents = selectable;
+
+    const openCount = Number(summary.open_count || 0);
+    const totalCount = Number(summary.total_count || events.length || 0);
+    if (operatorOutboxBadge) {
+        operatorOutboxBadge.className = openCount > 0 ? 'status-pill status-pill-warn' : 'status-pill status-pill-good';
+        operatorOutboxBadge.textContent = `${Number.isFinite(openCount) ? openCount : 0} open / ${Number.isFinite(totalCount) ? totalCount : 0} total`;
+    }
+
+    if (operatorOutboxSelect) {
+        operatorOutboxSelect.innerHTML = '';
+        if (!selectable.length) {
+            const option = document.createElement('option');
+            option.value = '';
+            option.textContent = '(operator outbox clear)';
+            operatorOutboxSelect.appendChild(option);
+        } else {
+            selectable.forEach((event) => {
+                const option = document.createElement('option');
+                option.value = String(event.id || '');
+                option.textContent = operatorOutboxEventLabel(event);
+                operatorOutboxSelect.appendChild(option);
+            });
+            const latestOpenId = String(status && status.operator_outbox_latest_open_id ? status.operator_outbox_latest_open_id : '').trim();
+            const nextId = previous && selectable.some((event) => String(event.id || '') === previous)
+                ? previous
+                : (latestOpenId && selectable.some((event) => String(event.id || '') === latestOpenId) ? latestOpenId : String(selectable[selectable.length - 1].id || ''));
+            operatorOutboxSelect.value = nextId;
+        }
+    }
+
+    if (!operatorOutboxBox) return;
+    const selected = selectedOperatorOutboxEvent();
+    if (!selected) {
+        operatorOutboxBox.textContent = 'Operator outbox clear.';
+        return;
+    }
+    const responses = Array.isArray(selected.responses) ? selected.responses : [];
+    const latestResponse = responses.length ? responses[responses.length - 1] : null;
+    const lines = [
+        `ID: ${selected.id || 'n/a'}`,
+        `Status: ${selected.status || 'new'}`,
+        `Source: ${selected.source || 'n/a'} | Severity: ${selected.severity || 'n/a'}`,
+        `Updated: ${selected.updated_ts || selected.ts || 'n/a'}`,
+        '',
+        `Title: ${selected.title || 'n/a'}`,
+        String(selected.message || '').trim() || 'No message recorded.',
+        '',
+        ...operatorOutboxTargetLines(selected),
+        '',
+        `Responses: ${responses.length}`,
+    ];
+    if (latestResponse) {
+        lines.push(
+            `Latest response: ${latestResponse.ts || 'n/a'} | ${latestResponse.responder || 'operator'} | ${latestResponse.resolution || 'evidence_only'}`,
+            String(latestResponse.message || '').trim() || 'No response text recorded.'
+        );
+    }
+    operatorOutboxBox.textContent = lines.join('\n');
+}
+
+async function setOperatorOutboxStatus(statusText) {
+    const event = selectedOperatorOutboxEvent();
+    if (!event) {
+        setAction('Select an operator outbox notice first.');
+        return;
+    }
+    const payload = await postAction('operator_outbox_status', {
+        event_id: String(event.id || ''),
+        status: statusText,
+    });
+    setAction(payload.message || `operator_outbox_status ${statusText}`);
+    await refresh();
+}
+
+async function respondOperatorOutbox(forcedResolution = '') {
+    const event = selectedOperatorOutboxEvent();
+    if (!event) {
+        setAction('Select an operator outbox notice first.');
+        return;
+    }
+    const resolution = String(forcedResolution || (operatorOutboxResolution ? operatorOutboxResolution.value : '') || 'evidence_only').trim();
+    let message = operatorOutboxResponse ? operatorOutboxResponse.value.trim() : '';
+    if (!message && resolution === 'dismissed') message = 'Dismissed by operator.';
+    if (!message) {
+        setAction('Enter an operator response first.');
+        return;
+    }
+    const payload = await postAction('operator_outbox_respond', {
+        event_id: String(event.id || ''),
+        message,
+        resolution,
+        responder: 'operator',
+    });
+    if (operatorOutboxResponse) operatorOutboxResponse.value = '';
+    const workTree = payload.work_tree && typeof payload.work_tree === 'object' ? payload.work_tree : {};
+    const evidenceId = String(workTree.evidence_id || '').trim();
+    setAction(`${payload.message || 'operator_outbox_response_ok'}${evidenceId ? `\nEvidence: ${evidenceId}` : ''}`);
+    await refresh();
 }
 
 function syncOperatorAudioButton() {
@@ -3871,6 +4014,7 @@ async function performRefresh() {
             renderSubconscious(latestStatus);
             renderOperatorMacros(latestStatus);
             renderBackendCommands(latestStatus);
+            renderOperatorOutbox(latestStatus);
             renderPlannerInspector(latestStatus);
             renderLedgerInspector(latestStatus);
             renderPatchReadiness(latestStatus);
@@ -3890,6 +4034,7 @@ async function performRefresh() {
             setHealthBadge(latestStatus.health_score, latestStatus.self_check_pass_ratio, latestStatus.alerts || []);
         } else {
             renderSubconscious(null);
+            renderOperatorOutbox(null);
             renderLiveTracking(null);
         }
         if (latestPolicy) {
@@ -3976,6 +4121,7 @@ if (workTreeSelect) {
         renderSelectedWorkTreeView();
     });
 }
+if (operatorOutboxSelect) operatorOutboxSelect.addEventListener('change', () => renderOperatorOutbox(latestStatus));
 if (patchPreviewSelect) patchPreviewSelect.addEventListener('change', () => renderPatchActionReadiness(latestStatus));
 if (chatUserSelect && chatUserNameInput) {
     chatUserSelect.addEventListener('change', () => {
@@ -4775,6 +4921,10 @@ bindClick('btnExportLedger', async () => { const payload = await postAction('exp
 bindClick('btnExportBundle', async () => { const payload = await postAction('export_diagnostics_bundle'); const fileName = payload.filename || 'diagnostics_bundle.json'; const path = (payload.path || '').trim(); setAction(`Diagnostics bundle exported: ${fileName}${path ? ' @ ' + path : ''}`); });
 bindClick('btnOut', async () => { const payload = await postAction('tail_log', {name: 'nova_http.out.log'}); setAction(payload.text || 'No output'); });
 bindClick('btnErr', async () => { const payload = await postAction('tail_log', {name: 'nova_http.err.log'}); setAction(payload.text || 'No output'); });
+bindClick('btnOperatorOutboxSeen', async () => { await setOperatorOutboxStatus('seen'); });
+bindClick('btnOperatorOutboxAnswer', async () => { await respondOperatorOutbox(); });
+bindClick('btnOperatorOutboxResolve', async () => { await respondOperatorOutbox('task_resolved'); });
+bindClick('btnOperatorOutboxDismiss', async () => { await respondOperatorOutbox('dismissed'); });
 bindClick('btnLocationTrackStart', async () => { startLiveTracking(); });
 bindClick('btnLocationTrackAutoArm', async () => { toggleLiveTrackingAutoArm(); });
 bindClick('btnLocationTrackStop', async () => { stopLiveTracking(); });

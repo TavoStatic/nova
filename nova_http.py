@@ -418,6 +418,37 @@ def _operator_prompt_action(payload: dict) -> tuple[bool, str, dict, str, dict]:
     return OPERATOR_CONTROL_SERVICE.operator_prompt_action_from_runtime(payload, runtime_scope=globals())
 
 
+def _operator_outbox_respond_action(payload: dict) -> tuple[bool, str, dict, str]:
+    result = OPERATOR_OUTBOX_SERVICE.respond_to_notice(
+        OPERATOR_OUTBOX_FILE,
+        event_id=str(payload.get("event_id") or payload.get("id") or "").strip(),
+        message=str(payload.get("message") or payload.get("response") or "").strip(),
+        responder=str(payload.get("responder") or payload.get("user_id") or "operator").strip(),
+        resolution=str(payload.get("resolution") or "evidence_only").strip(),
+        response_payload=payload,
+        work_tree_module=work_tree,
+    )
+    ok = bool(result.get("ok", False))
+    msg = "operator_outbox_response_ok" if ok else str(result.get("reason") or "operator_outbox_response_failed")
+    detail = f"{msg}:{str(payload.get('event_id') or payload.get('id') or '').strip()}"
+    return ok, msg, result, detail
+
+
+def _operator_outbox_status_action(payload: dict) -> tuple[bool, str, dict, str]:
+    event_id = str(payload.get("event_id") or payload.get("id") or "").strip()
+    status = str(payload.get("status") or "").strip()
+    result = OPERATOR_OUTBOX_SERVICE.set_notice_status(
+        OPERATOR_OUTBOX_FILE,
+        event_id=event_id,
+        status=status,
+        note=str(payload.get("note") or "").strip(),
+    )
+    ok = bool(result.get("ok", False))
+    msg = "operator_outbox_status_ok" if ok else str(result.get("reason") or "operator_outbox_status_failed")
+    detail = f"{msg}:{event_id}:{status}"
+    return ok, msg, result, detail
+
+
 def _latest_subconscious_report() -> dict:
     return SUBCONSCIOUS_CONTROL_SERVICE.latest_report(_subconscious_runs_root())
 
@@ -1438,6 +1469,10 @@ def _work_trees_payload(limit: int = 32) -> dict:
     )
 
 
+def _operator_outbox_summary(limit: int = 20) -> dict:
+    return OPERATOR_OUTBOX_SERVICE.summary(OPERATOR_OUTBOX_FILE, limit=limit)
+
+
 def _control_policy_payload() -> dict:
     p = nova_core.load_policy()
     return {
@@ -1480,6 +1515,7 @@ def _health_payload() -> dict:
         "chat_login_enabled": bool(_chat_login_enabled()),
         "operator_outbox": outbox_summary,
         "operator_outbox_latest_id": str(outbox_summary.get("latest_id") or ""),
+        "operator_outbox_latest_open_id": str(outbox_summary.get("latest_open_id") or ""),
     }
 
 

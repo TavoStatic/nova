@@ -25,63 +25,6 @@ def _active_work_identity(*, pending_action: dict | None, session) -> str:
     return str(pending.get("work_identity_key") or "").strip()
 
 
-def _looks_like_work_tree_request(text: str) -> bool:
-    low = str(text or "").strip().lower()
-    if _looks_like_work_tree_create_request(low) or _looks_like_work_tree_inspect_request(low):
-        return True
-    if low in {"continue", "continue.", "resume", "resume."}:
-        return True
-    phrases = (
-        "next step",
-        "next task",
-        "what next",
-        "what should i do next",
-        "continue work",
-        "resume work",
-        "resume plan",
-        "continue the tree",
-        "continue the work tree",
-        "next autonomous step",
-    )
-    return any(phrase in low for phrase in phrases)
-
-
-def _looks_like_work_tree_create_request(text: str) -> bool:
-    return WORK_TREE_SEEDING_SERVICE.looks_like_explicit_work_tree_request(text)
-
-
-def _looks_like_work_tree_inspect_request(text: str) -> bool:
-    low = str(text or "").strip().lower()
-    phrases = (
-        "show work tree",
-        "show the work tree",
-        "show active work tree",
-        "inspect work tree",
-        "work tree status",
-        "active work tree",
-        "tree status",
-    )
-    return any(phrase in low for phrase in phrases)
-
-
-def _looks_like_work_tree_execute_request(text: str) -> bool:
-    low = str(text or "").strip().lower()
-    phrases = (
-        "continue",
-        "continue.",
-        "continue work",
-        "continue the tree",
-        "continue the work tree",
-        "resume",
-        "resume.",
-        "resume work",
-        "resume plan",
-        "run next step",
-        "execute next step",
-    )
-    return low in phrases or any(low.startswith(phrase + " ") for phrase in phrases)
-
-
 def _format_work_tree_reply(step: dict | None) -> str:
     if step is None:
         return "The active work tree is complete."
@@ -120,94 +63,6 @@ def _format_work_tree_reply(step: dict | None) -> str:
     if recommended_tool:
         return f"Next work tree step: {branch_title}. Recommended tool: {recommended_tool}."
     return f"Next work tree step: {branch_title}."
-
-
-def _maybe_handle_work_tree_sequence(*, text: str, pending_action: dict | None, session, core, trace: Callable[..., None], normalize_reply: Callable[[str], str], ensure_active_work_tree_fn: Callable[[str], str] | None = None, work_tree_seed_source: str = "", work_tree_seed_mode: str = "") -> tuple[str, dict] | None:
-    work_tree_started = time.perf_counter()
-    tree_id = _active_work_tree_id(pending_action=pending_action, session=session)
-    active_identity = _active_work_identity(pending_action=pending_action, session=session)
-    low = str(text or "").strip().lower()
-    wants_create = _looks_like_work_tree_create_request(low)
-    wants_inspect = _looks_like_work_tree_inspect_request(low)
-    wants_identity_continuity = WORK_TREE_SEEDING_SERVICE.should_continue_active_identity(
-        message=text,
-        active_work_identity=active_identity,
-    )
-    should_auto_seed = WORK_TREE_SEEDING_SERVICE.should_seed_system_work_tree(
-        message=text,
-        source=work_tree_seed_source,
-        operator_mode=work_tree_seed_mode,
-    )
-    if not tree_id and callable(ensure_active_work_tree_fn) and (wants_create or should_auto_seed or wants_identity_continuity):
-        tree_id = str(ensure_active_work_tree_fn(text) or "").strip()
-    if tree_id and hasattr(session, "set_active_work_tree_id"):
-        try:
-            session.set_active_work_tree_id(tree_id)
-        except Exception:
-            pass
-    if tree_id and (wants_identity_continuity or _looks_like_work_tree_request(text)) and hasattr(session, "set_last_work_continuity"):
-        try:
-            session.set_last_work_continuity("continuing_existing_work")
-        except Exception:
-            pass
-    if tree_id and hasattr(session, "set_active_work_identity") and not active_identity:
-        inferred_identity = WORK_TREE_SEEDING_SERVICE.build_work_identity_key(text)
-        if inferred_identity:
-            try:
-                session.set_active_work_identity(inferred_identity)
-                active_identity = inferred_identity
-            except Exception:
-                pass
-    if not tree_id:
-        return None
-    if not (_looks_like_work_tree_request(text) or wants_identity_continuity):
-        return None
-    try:
-        import work_tree
-    except Exception:
-        return None
-    if wants_create:
-        reuse_note = WORK_TREE_SEEDING_SERVICE.consume_reuse_note(tree_id=tree_id, request_text=text)
-        snapshot_text = work_tree.format_tree_snapshot(tree_id)
-        if reuse_note:
-            snapshot_text = reuse_note + "\n" + snapshot_text
-        step = {
-            "action": "created",
-            "tree_id": tree_id,
-            "snapshot_text": snapshot_text,
-        }
-    elif wants_inspect:
-        step = {
-            "action": "inspect",
-            "tree_id": tree_id,
-            "snapshot_text": work_tree.format_tree_snapshot(tree_id),
-        }
-    elif _looks_like_work_tree_execute_request(text):
-        step_started = time.perf_counter()
-        step = work_tree.execute_autonomous_step(tree_id, execute_planned_action_fn=core.execute_planned_action)
-        trace("timing", "completed", "work_tree_step", duration_ms=int((time.perf_counter() - step_started) * 1000))
-    else:
-        step_started = time.perf_counter()
-        step = work_tree.next_autonomous_step(tree_id)
-        trace("timing", "completed", "work_tree_step", duration_ms=int((time.perf_counter() - step_started) * 1000))
-    action = str((step or {}).get("action") or "complete")
-    trace("work_tree", "matched", detail=action)
-    trace("timing", "completed", "work_tree_sequence", duration_ms=int((time.perf_counter() - work_tree_started) * 1000))
-    reply = _format_work_tree_reply(step)
-    return normalize_reply(reply), {
-        "planner_decision": "work_tree",
-        "tool": str((step or {}).get("recommended_tool") or "work_tree"),
-        "tool_args": {"tree_id": tree_id},
-        "tool_result": json.dumps(step, ensure_ascii=True) if isinstance(step, dict) else "",
-        "grounded": True,
-        "pending_action": {
-            **dict(pending_action or {}),
-            "work_tree_id": tree_id,
-            "work_identity_key": active_identity or WORK_TREE_SEEDING_SERVICE.build_work_identity_key(text),
-        },
-        "route_evidence": _route_evidence(owner="work_tree", action_type=action, tool=str((step or {}).get("recommended_tool") or "work_tree")),
-    }
-
 
 def build_planner_config(
     *,
@@ -307,17 +162,26 @@ def _handle_semantic_work_tree_action(
 ) -> tuple[str, dict] | None:
     work_tree_started = time.perf_counter()
     tool = str(action.get("tool") or "").strip()
+    semantic_args = action.get("args")
+    seed_text = " ".join(str(item).strip() for item in list(semantic_args or []) if str(item).strip()) if isinstance(semantic_args, list) else ""
+    if not seed_text:
+        seed_text = str(text or "")
     tree_id = _active_work_tree_id(pending_action=pending_action, session=session)
     active_identity = _active_work_identity(pending_action=pending_action, session=session)
     if tool == "work_tree_create" and not tree_id and callable(ensure_active_work_tree_fn):
-        tree_id = str(ensure_active_work_tree_fn(text) or "").strip()
+        tree_id = str(ensure_active_work_tree_fn(seed_text) or "").strip()
     if tree_id and hasattr(session, "set_active_work_tree_id"):
         try:
             session.set_active_work_tree_id(tree_id)
         except Exception:
             pass
+    if tree_id and tool in {"work_tree_next", "work_tree_execute", "work_tree_status"} and hasattr(session, "set_last_work_continuity"):
+        try:
+            session.set_last_work_continuity("continuing_existing_work")
+        except Exception:
+            pass
     if tree_id and hasattr(session, "set_active_work_identity") and not active_identity:
-        inferred_identity = WORK_TREE_SEEDING_SERVICE.build_work_identity_key(text)
+        inferred_identity = WORK_TREE_SEEDING_SERVICE.build_work_identity_key(seed_text)
         if inferred_identity:
             try:
                 session.set_active_work_identity(inferred_identity)
@@ -329,7 +193,7 @@ def _handle_semantic_work_tree_action(
         return normalize_reply(reply), {
             "planner_decision": "work_tree",
             "tool": tool,
-            "tool_args": {"query": text},
+            "tool_args": {"query": seed_text},
             "tool_result": "",
             "grounded": False,
             "pending_action": dict(pending_action or {}),
@@ -372,7 +236,7 @@ def _handle_semantic_work_tree_action(
         "pending_action": {
             **dict(pending_action or {}),
             "work_tree_id": tree_id,
-            "work_identity_key": active_identity or WORK_TREE_SEEDING_SERVICE.build_work_identity_key(text),
+            "work_identity_key": active_identity or WORK_TREE_SEEDING_SERVICE.build_work_identity_key(seed_text),
         },
         "route_evidence": _route_evidence(owner="work_tree", action_type=action_type, tool=str((step or {}).get("recommended_tool") or tool)),
     }
@@ -463,21 +327,6 @@ def maybe_handle_planner_sequence(
     )
     tool_selection_ms += semantic_ms
     trace("timing", "completed", "tool_selection", duration_ms=tool_selection_ms)
-
-    if not actions and semantic_status != "none":
-        work_tree_outcome = _maybe_handle_work_tree_sequence(
-            text=text,
-            pending_action=pending_action,
-            session=session,
-            core=core,
-            trace=trace,
-            normalize_reply=normalize_reply,
-            ensure_active_work_tree_fn=ensure_active_work_tree_fn,
-            work_tree_seed_source=work_tree_seed_source,
-            work_tree_seed_mode=work_tree_seed_mode,
-        )
-        if work_tree_outcome is not None:
-            return _return_with_timing(work_tree_outcome[0], work_tree_outcome[1])
 
     if not actions and semantic_status != "none":
         decide_started = time.perf_counter()

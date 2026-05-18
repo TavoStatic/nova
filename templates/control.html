@@ -630,6 +630,33 @@
                                 </div>
 
                                 <div class="panel-card main-card span-2">
+                                    <div class="section-head">
+                                        <div>
+                                            <div class="section-title"><span class="section-title-wrap"><i class="bi bi-inbox section-title-icon" aria-hidden="true"></i><span>Operator Outbox</span></span></div>
+                                        </div>
+                                        <span id="operatorOutboxBadge" class="status-pill status-pill-neutral">Outbox pending</span>
+                                    </div>
+                                    <div class="button-row mb-2 wrap-buttons">
+                                        <select id="operatorOutboxSelect" class="form-select form-select-sm"></select>
+                                        <select id="operatorOutboxResolution" class="form-select form-select-sm">
+                                            <option value="continue_work">Continue Work</option>
+                                            <option value="evidence_only">Evidence Only</option>
+                                            <option value="task_resolved">Task Resolved</option>
+                                            <option value="dismissed">Dismissed</option>
+                                            <option value="stale">Stale</option>
+                                        </select>
+                                        <button id="btnOperatorOutboxSeen" class="btn btn-sm btn-operator-alt" type="button">Seen</button>
+                                        <button id="btnOperatorOutboxAnswer" class="btn btn-sm btn-operator-primary" type="button">Answer</button>
+                                        <button id="btnOperatorOutboxResolve" class="btn btn-sm btn-operator-warn" type="button">Resolve Task</button>
+                                        <button id="btnOperatorOutboxDismiss" class="btn btn-sm btn-operator-danger" type="button">Dismiss</button>
+                                    </div>
+                                    <div class="button-row mb-2">
+                                        <textarea id="operatorOutboxResponse" class="form-control form-control-sm" rows="3" placeholder="operator response"></textarea>
+                                    </div>
+                                    <pre id="operatorOutboxBox" class="console-box compact-console">Operator outbox pending.</pre>
+                                </div>
+
+                                <div class="panel-card main-card span-2">
                                     <div class="section-title"><span class="section-title-wrap"><i class="bi bi-lightning-charge section-title-icon" aria-hidden="true"></i><span>Operator Actions</span></span></div>
                                     <div class="button-row wrap-buttons">
                                         <button id="btnInspect" class="btn btn-sm btn-operator-warn" type="button">Inspect Environment</button>

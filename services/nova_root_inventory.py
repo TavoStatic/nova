@@ -47,7 +47,7 @@ SOURCE_ROOTS: tuple[SourceRoot, ...] = (
     SourceRoot(
         "operator_control",
         "Operator macros, backend commands, local operator CLI, and control-action dispatcher",
-        ("services/operator_control.py", "services/nova_control_action_dispatcher.py", "scripts/operator_cli.py"),
+        ("services/operator_control.py", "services/operator_outbox.py", "services/nova_control_action_dispatcher.py", "scripts/operator_cli.py"),
     ),
     SourceRoot(
         "policy_gates",
@@ -107,7 +107,18 @@ SOURCE_ROOTS: tuple[SourceRoot, ...] = (
     SourceRoot(
         "tool_registry_policy",
         "Tool registry, direct tool catalog, tool policy, console, and planned action dispatch",
-        ("tools/registry.py", "services/tool_registry.py", "services/tool_console.py", "services/nova_tool_policy.py"),
+        (
+            "tools/registry.py",
+            "services/tool_registry.py",
+            "services/tool_console.py",
+            "services/nova_tool_policy.py",
+            "services/os_capability_registry.py",
+            "services/os_capability_operator_outbox.py",
+            "services/os_script_controller.py",
+            "tools/os_capability_tool.py",
+            "tools/os_capabilities/os_capabilities.json",
+            "tools/os_capabilities/verify_ollama_model.ps1",
+        ),
     ),
     SourceRoot(
         "tool_evidence",
@@ -413,7 +424,7 @@ def _coverage_root_for_path(path: str) -> str:
         return "web_search"
     if "weather" in low or "location" in low:
         return "weather_location"
-    if "tool" in low or low.startswith("tools/") or "capabilities" in low:
+    if "tool" in low or low.startswith("tools/") or "capability" in low or "capabilities" in low or "os_script" in low:
         return "tool_registry_policy"
     if "ledger" in low or "telemetry" in low or "metrics" in low or "journal" in low:
         return "metrics_ops_journal"

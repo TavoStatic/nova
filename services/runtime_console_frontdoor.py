@@ -144,7 +144,9 @@ RUNTIME_CONSOLE_HTML = """<!doctype html>
   }
 
     function handleOperatorOutbox(payload) {
-        const events = Array.isArray(payload?.events) ? payload.events : [];
+        const openEvents = Array.isArray(payload?.open_events) ? payload.open_events : [];
+        const latestOpen = payload?.latest_open && typeof payload.latest_open === 'object' ? payload.latest_open : null;
+        const events = openEvents.length ? openEvents : (latestOpen && latestOpen.id ? [latestOpen] : []);
         if (!events.length) return;
         let newest = lastOperatorOutboxId || '';
         events.forEach(event => {

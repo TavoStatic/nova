@@ -38,21 +38,23 @@ FORBIDDEN_EXTENSIONS = {
 }
 
 MAX_TRACKED_FILE_BYTES = 50 * 1024 * 1024
+LFS_POINTER_MARKER = b"version https://git-lfs.github.com/spec/v1"
+MAX_POINTER_BLOB_BYTES = 4096
 
 
-def _run(cmd: list[str]) -> str:
-    out = subprocess.check_output(cmd, stderr=subprocess.STDOUT)
+def _run(cmd: list[str], *, cwd: Path | None = None) -> str:
+    out = subprocess.check_output(cmd, stderr=subprocess.STDOUT, cwd=str(cwd) if cwd else None)
     return out.decode("utf-8", errors="replace")
 
 
-def tracked_files() -> list[str]:
-    raw = _run(["git", "ls-files", "-z"])
+def tracked_files(repo_root: Path | None = None) -> list[str]:
+    raw = _run(["git", "ls-files", "-z"], cwd=repo_root)
     return [item for item in raw.split("\x00") if item]
 
 
-def is_git_work_tree() -> bool:
+def is_git_work_tree(repo_root: Path | None = None) -> bool:
     try:
-        return _run(["git", "rev-parse", "--is-inside-work-tree"]).strip().lower() == "true"
+        return _run(["git", "rev-parse", "--is-inside-work-tree"], cwd=repo_root).strip().lower() == "true"
     except Exception:
         return False
 
@@ -63,27 +65,57 @@ def is_lfs_pointer(path: Path) -> bool:
             head = handle.read(256)
     except OSError:
         return False
-    return b"version https://git-lfs.github.com/spec/v1" in head
+    return LFS_POINTER_MARKER in head
 
 
-def is_lfs_tracked(rel_path: str) -> bool:
+def is_lfs_tracked(rel_path: str, repo_root: Path | None = None) -> bool:
     try:
-        output = _run(["git", "check-attr", "filter", "--", rel_path])
+        output = _run(["git", "check-attr", "filter", "--", rel_path], cwd=repo_root)
     except Exception:
         return False
     return output.strip().endswith(": lfs")
 
 
-def main() -> int:
-    repo_root = Path(__file__).resolve().parents[1]
-    if not is_git_work_tree():
+def _git_blob_head(spec: str, repo_root: Path | None = None, *, max_bytes: int = 512) -> bytes:
+    try:
+        size_raw = _run(["git", "cat-file", "-s", spec], cwd=repo_root).strip()
+        size = int(size_raw)
+    except Exception:
+        return b""
+    if size <= 0 or size > MAX_POINTER_BLOB_BYTES:
+        return b""
+    try:
+        out = subprocess.check_output(
+            ["git", "cat-file", "blob", spec],
+            stderr=subprocess.STDOUT,
+            cwd=str(repo_root) if repo_root else None,
+            timeout=10,
+        )
+    except Exception:
+        return b""
+    return out[: max(1, int(max_bytes or 512))]
+
+
+def is_tracked_lfs_pointer(rel_path: str, repo_root: Path | None = None) -> bool:
+    normalized = str(rel_path or "").replace("\\", "/").strip()
+    if not normalized:
+        return False
+    for spec in (f":{normalized}", f"HEAD:{normalized}"):
+        if LFS_POINTER_MARKER in _git_blob_head(spec, repo_root):
+            return True
+    return False
+
+
+def run_hygiene(repo_root: Path | None = None) -> int:
+    root = Path(repo_root) if repo_root is not None else Path(__file__).resolve().parents[1]
+    if not is_git_work_tree(root):
         print("repo_hygiene_check: SKIP (not a git work tree)")
         return 0
 
     violations: list[str] = []
     size_violations: list[str] = []
 
-    for rel in tracked_files():
+    for rel in tracked_files(root):
         normalized = rel.replace("\\", "/")
         leaf = Path(normalized).name
 
@@ -100,11 +132,16 @@ def main() -> int:
         if suffix in FORBIDDEN_EXTENSIONS:
             violations.append(f"forbidden tracked extension ({suffix}): {normalized}")
 
-        abs_path = repo_root / normalized
+        abs_path = root / normalized
         if not abs_path.exists():
             continue
         size = abs_path.stat().st_size
-        if size > MAX_TRACKED_FILE_BYTES and not is_lfs_pointer(abs_path) and not is_lfs_tracked(normalized):
+        if (
+            size > MAX_TRACKED_FILE_BYTES
+            and not is_lfs_pointer(abs_path)
+            and not is_lfs_tracked(normalized, root)
+            and not is_tracked_lfs_pointer(normalized, root)
+        ):
             size_mb = size / (1024 * 1024)
             size_violations.append(f"oversized tracked blob ({size_mb:.2f} MB): {normalized}")
 
@@ -118,6 +155,10 @@ def main() -> int:
 
     print("repo_hygiene_check: OK")
     return 0
+
+
+def main() -> int:
+    return run_hygiene()
 
 
 if __name__ == "__main__":

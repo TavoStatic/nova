@@ -154,6 +154,8 @@ _CONTROL_ACTION_RUNTIME_HOOKS = {
     "backend_command_list_action_fn": "_backend_command_list_action",
     "backend_command_run_action_fn": "_backend_command_run_action",
     "operator_prompt_action_fn": "_operator_prompt_action",
+    "operator_outbox_respond_action_fn": "_operator_outbox_respond_action",
+    "operator_outbox_status_action_fn": "_operator_outbox_status_action",
     "session_delete_action_fn": "_session_delete_action",
     "policy_allow_action_fn": "_policy_allow_action",
     "policy_remove_action_fn": "_policy_remove_action",
@@ -276,6 +278,8 @@ class NovaControlActionDispatcher:
         backend_command_list_action_fn,
         backend_command_run_action_fn,
         operator_prompt_action_fn,
+        operator_outbox_respond_action_fn,
+        operator_outbox_status_action_fn,
         session_delete_action_fn,
         policy_allow_action_fn,
         policy_remove_action_fn,
@@ -483,6 +487,19 @@ class NovaControlActionDispatcher:
         if act == "operator_prompt":
             ok, msg, extra, detail, audit_payload = operator_prompt_action_fn(payload)
             record_control_action_event_fn(act, "ok" if ok else "fail", detail, audit_payload)
+            return ok, msg, extra
+
+        if act == "operator_outbox_respond":
+            ok, msg, extra, detail = operator_outbox_respond_action_fn(payload)
+            record_control_action_event_fn(act, "ok" if ok else "fail", detail, payload)
+            return ok, msg, extra
+
+        if act in {"operator_outbox_status", "operator_outbox_seen"}:
+            next_payload = {**payload}
+            if act == "operator_outbox_seen" and not str(next_payload.get("status") or "").strip():
+                next_payload["status"] = "seen"
+            ok, msg, extra, detail = operator_outbox_status_action_fn(next_payload)
+            record_control_action_event_fn(act, "ok" if ok else "fail", detail, next_payload)
             return ok, msg, extra
 
         if act == "session_delete":

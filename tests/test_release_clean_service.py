@@ -1,12 +1,26 @@
 from __future__ import annotations
 
+import contextlib
+import importlib.util
+import io
 import json
+import subprocess
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any, Sequence
+from unittest import mock
 
 from services.release_clean import run_release_clean
+
+
+def _load_repo_hygiene_module():
+    path = Path(__file__).resolve().parents[1] / "scripts" / "repo_hygiene_check.py"
+    spec = importlib.util.spec_from_file_location("repo_hygiene_check_test", path)
+    module = importlib.util.module_from_spec(spec)
+    assert spec is not None and spec.loader is not None
+    spec.loader.exec_module(module)
+    return module
 
 
 class ReleaseCleanServiceTests(unittest.TestCase):
@@ -142,6 +156,55 @@ class ReleaseCleanServiceTests(unittest.TestCase):
             self.assertTrue(report["ok"])
             self.assertEqual((report.get("readiness") or {}).get("latest_readiness_state"), "ready-with-notes")
             self.assertFalse(any("_stdout_raw" in step for step in report.get("steps") or []))
+
+
+class RepoHygieneCheckTests(unittest.TestCase):
+    def _init_repo(self, root: Path) -> None:
+        subprocess.run(["git", "init"], cwd=str(root), check=True, capture_output=True, text=True)
+
+    def test_hygiene_accepts_smudged_lfs_asset_when_index_blob_is_pointer(self) -> None:
+        module = _load_repo_hygiene_module()
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._init_repo(root)
+            asset = root / "piper" / "models" / "voice.onnx"
+            asset.parent.mkdir(parents=True)
+            asset.write_text(
+                "\n".join(
+                    [
+                        "version https://git-lfs.github.com/spec/v1",
+                        "oid sha256:" + ("a" * 64),
+                        "size 63201234",
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            subprocess.run(["git", "add", "piper/models/voice.onnx"], cwd=str(root), check=True, capture_output=True, text=True)
+            asset.write_bytes(b"x" * 64)
+
+            with mock.patch.object(module, "MAX_TRACKED_FILE_BYTES", 16):
+                with contextlib.redirect_stdout(io.StringIO()) as stdout:
+                    result = module.run_hygiene(root)
+
+        self.assertEqual(result, 0)
+        self.assertIn("repo_hygiene_check: OK", stdout.getvalue())
+
+    def test_hygiene_rejects_large_non_lfs_blob(self) -> None:
+        module = _load_repo_hygiene_module()
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._init_repo(root)
+            asset = root / "source_blob.bin"
+            asset.write_bytes(b"x" * 64)
+            subprocess.run(["git", "add", "source_blob.bin"], cwd=str(root), check=True, capture_output=True, text=True)
+
+            with mock.patch.object(module, "MAX_TRACKED_FILE_BYTES", 16):
+                with contextlib.redirect_stdout(io.StringIO()) as stdout:
+                    result = module.run_hygiene(root)
+
+        self.assertEqual(result, 1)
+        self.assertIn("oversized tracked blob", stdout.getvalue())
 
 
 if __name__ == "__main__":

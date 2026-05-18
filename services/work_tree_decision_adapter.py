@@ -278,13 +278,7 @@ class WorkTreeDecisionAdapter:
             self._save_state()
 
     def _close_stale_successes_locked(self, *, now_ts: float) -> int:
-        """Mark old undecided work decisions as successful.
-
-        Work-tree seeding also keeps an in-memory pending-decision map, but
-        replay subprocesses and restarts can exit before that map has a chance
-        to flush. The persisted adapter owns the durable fallback so learning
-        does not stay blank forever.
-        """
+        """Expire old undecided work decisions without scoring them."""
         closed = 0
         threshold = self._stale_success_seconds
         if threshold <= 0.0:
@@ -303,19 +297,13 @@ class WorkTreeDecisionAdapter:
                 continue
             if age < threshold:
                 continue
-            if key not in self._identity_scores:
-                self._identity_scores[key] = IdentityDecisionScores(work_identity_key=key)
-            self._identity_scores[key].record_outcome(
-                decision_type=decision,
-                outcome="success",
-            )
-            row.outcome = "success"
+            row.outcome = "expired"
             row.outcome_timestamp = float(now_ts)
             closed += 1
         return closed
 
     def flush_stale_pending_successes(self, *, now_ts: float = 0.0) -> int:
-        """Close persisted undecided decisions that aged past the success window."""
+        """Expire persisted undecided decisions that aged past the outcome window."""
         with self._lock:
             closed = self._close_stale_successes_locked(now_ts=float(now_ts or time.time()))
             if closed:

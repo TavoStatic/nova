@@ -6,6 +6,7 @@ from typing import Any
 
 from .base_tool import NovaTool, ToolContext, ToolInvocationError
 from .filesystem_tool import FileSystemTool
+from .os_capability_tool import OsCapabilityTool
 from .patch_tool import PatchTool
 from .research_tool import ResearchTool
 from .system_tool import SystemTool
@@ -147,4 +148,5 @@ def build_default_registry() -> ToolRegistry:
         VisionTool(),
         ResearchTool(),
         SystemTool(),
+        OsCapabilityTool(),
     ])

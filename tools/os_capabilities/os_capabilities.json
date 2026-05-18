@@ -1,0 +1,179 @@
+{
+  "schema_version": "1.0.0",
+  "registry_version": "0.1.0",
+  "default_operator_outbox_on": [
+    "missing_capability",
+    "contract_stale",
+    "invalid_args",
+    "authority_blocked"
+  ],
+  "capabilities": [
+    {
+      "name": "inspect_processes",
+      "contract_version": "0.1.0",
+      "status": "active",
+      "authority_level": "read_only",
+      "mutating": false,
+      "locality": "local_os",
+      "script": {
+        "kind": "powershell",
+        "path": "tools/os_capabilities/inspect_processes.ps1",
+        "sha256": "ae5286a1ff08adac69bd4ec529d5f958f2f7d5530a036709a0bea0733bc0ef8f",
+        "timeout_ms": 8000,
+        "working_directory": "."
+      },
+      "arg_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {},
+        "required": []
+      },
+      "evidence_schema_version": "1.0.0"
+    },
+    {
+      "name": "inspect_ports",
+      "contract_version": "0.1.0",
+      "status": "active",
+      "authority_level": "read_only",
+      "mutating": false,
+      "locality": "local_os",
+      "script": {
+        "kind": "powershell",
+        "path": "tools/os_capabilities/inspect_ports.ps1",
+        "sha256": "496a136073d2e3e8456b2a79d4cc3cbaa540bd8e11d594999db75e48ac347068",
+        "timeout_ms": 8000,
+        "working_directory": "."
+      },
+      "arg_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "ports": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 65535
+            },
+            "default": [
+              8080,
+              8081,
+              11434
+            ]
+          }
+        },
+        "required": []
+      },
+      "evidence_schema_version": "1.0.0"
+    },
+    {
+      "name": "scan_large_files",
+      "contract_version": "0.1.0",
+      "status": "active",
+      "authority_level": "read_only_expensive",
+      "mutating": false,
+      "locality": "local_filesystem",
+      "allowed_roots": [
+        "runtime",
+        "logs",
+        "memory",
+        "exports"
+      ],
+      "script": {
+        "kind": "powershell",
+        "path": "tools/os_capabilities/scan_large_files.ps1",
+        "sha256": "100584ac38c8dfd4a55b45e83f149f86f7dbb492dd1877e574221c6683a98b9d",
+        "timeout_ms": 30000,
+        "working_directory": "."
+      },
+      "arg_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "root": {
+            "type": "string"
+          },
+          "limit": {
+            "type": "integer",
+            "default": 25,
+            "minimum": 1,
+            "maximum": 200
+          }
+        },
+        "required": [
+          "root"
+        ]
+      },
+      "evidence_schema_version": "1.0.0"
+    },
+    {
+      "name": "collect_diagnostics_bundle",
+      "contract_version": "0.1.0",
+      "status": "active",
+      "authority_level": "evidence_write",
+      "mutating": false,
+      "locality": "local_filesystem",
+      "writes_only_to": "runtime/os_capability_evidence",
+      "script": {
+        "kind": "powershell",
+        "path": "tools/os_capabilities/collect_diagnostics_bundle.ps1",
+        "sha256": "da050bae398e2dcb974bf8f153fcc1253b384f61dc273aa2675821d4710a0b1f",
+        "timeout_ms": 20000,
+        "working_directory": "."
+      },
+      "arg_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "label": {
+            "type": "string",
+            "default": "diagnostics"
+          },
+          "include_runtime_tail": {
+            "type": "boolean",
+            "default": true
+          }
+        },
+        "required": []
+      },
+      "evidence_schema_version": "1.0.0",
+      "notes": "mutating=false means this capability does not change process/service/runtime state; evidence_write still requires the controller to verify writes_only_to after execution."
+    },
+    {
+      "name": "verify_ollama_model",
+      "contract_version": "0.1.0",
+      "status": "active",
+      "authority_level": "read_only_network",
+      "mutating": false,
+      "locality": "local_network",
+      "network_scope": "127.0.0.1",
+      "script": {
+        "kind": "powershell",
+        "path": "tools/os_capabilities/verify_ollama_model.ps1",
+        "sha256": "4ace559960b741c2f043e6260af07b3c5b2ce25b0a41b7a51d5f025bfc5f1de8",
+        "timeout_ms": 12000,
+        "working_directory": "."
+      },
+      "arg_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "base_url": {
+            "type": "string",
+            "default": "http://127.0.0.1:11434"
+          },
+          "model": {
+            "type": "string",
+            "default": "llama3.2:3b"
+          },
+          "probe_chat": {
+            "type": "boolean",
+            "default": false
+          }
+        },
+        "required": []
+      },
+      "evidence_schema_version": "1.0.0"
+    }
+  ]
+}

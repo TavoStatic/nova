@@ -241,7 +241,7 @@ class TestPlannerContractService(unittest.TestCase):
                 pending_action=None,
                 prefer_web_for_data_queries=False,
                 session=_SessionStub(active_work_tree_id="tree_1"),
-                core=_PlannerCoreStub(),
+                core=_PlannerCoreStub(semantic_intent={"tool": "work_tree_next", "args": [], "confidence": 0.9}),
                 trace=lambda *args, **kwargs: None,
                 normalize_reply=lambda text: text,
                 is_web_preferred_data_query=lambda text: False,
@@ -266,7 +266,7 @@ class TestPlannerContractService(unittest.TestCase):
                 pending_action=None,
                 prefer_web_for_data_queries=False,
                 session=_SessionStub(active_work_tree_id="tree_1"),
-                core=_PlannerCoreStub(),
+                core=_PlannerCoreStub(semantic_intent={"tool": "work_tree_next", "args": [], "confidence": 0.9}),
                 trace=lambda *args, **kwargs: None,
                 normalize_reply=lambda text: text,
                 is_web_preferred_data_query=lambda text: False,
@@ -294,7 +294,7 @@ class TestPlannerContractService(unittest.TestCase):
                 pending_action=None,
                 prefer_web_for_data_queries=False,
                 session=_SessionStub(active_work_tree_id="tree_1"),
-                core=_PlannerCoreStub(),
+                core=_PlannerCoreStub(semantic_intent={"tool": "work_tree_execute", "args": [], "confidence": 0.9}),
                 trace=lambda *args, **kwargs: None,
                 normalize_reply=lambda text: text,
                 is_web_preferred_data_query=lambda text: False,
@@ -312,7 +312,7 @@ class TestPlannerContractService(unittest.TestCase):
                 pending_action=None,
                 prefer_web_for_data_queries=False,
                 session=_SessionStub(active_work_tree_id=""),
-                core=_PlannerCoreStub(),
+                core=_PlannerCoreStub(semantic_intent={"tool": "work_tree_create", "args": ["inspect runtime"], "confidence": 0.9}),
                 trace=lambda *args, **kwargs: None,
                 normalize_reply=lambda text: text,
                 is_web_preferred_data_query=lambda text: False,
@@ -332,7 +332,7 @@ class TestPlannerContractService(unittest.TestCase):
                 pending_action=None,
                 prefer_web_for_data_queries=False,
                 session=_SessionStub(active_work_tree_id="tree_1"),
-                core=_PlannerCoreStub(),
+                core=_PlannerCoreStub(semantic_intent={"tool": "work_tree_status", "args": [], "confidence": 0.9}),
                 trace=lambda *args, **kwargs: None,
                 normalize_reply=lambda text: text,
                 is_web_preferred_data_query=lambda text: False,
@@ -342,7 +342,7 @@ class TestPlannerContractService(unittest.TestCase):
         self.assertIn("Active work tree:", reply)
         self.assertEqual(meta.get("planner_decision"), "work_tree")
 
-    def test_maybe_handle_planner_sequence_auto_seeds_tree_for_system_prompt(self):
+    def test_maybe_handle_planner_sequence_does_not_auto_seed_from_message_content(self):
         ensure_calls = []
 
         outcome = nova_planner_contract.maybe_handle_planner_sequence(
@@ -360,9 +360,8 @@ class TestPlannerContractService(unittest.TestCase):
             work_tree_seed_mode="",
         )
 
-        # Auto-seeding is silent when this turn is not a work-tree request.
         self.assertIsNone(outcome)
-        self.assertEqual(ensure_calls, ["inspect runtime worker queue pressure and patch status"])
+        self.assertEqual(ensure_calls, [])
 
     def test_maybe_handle_planner_sequence_does_not_auto_seed_for_content_prompt(self):
         ensure_calls = []
@@ -404,7 +403,7 @@ class TestPlannerContractService(unittest.TestCase):
                 pending_action=None,
                 prefer_web_for_data_queries=False,
                 session=session,
-                core=_PlannerCoreStub(),
+                core=_PlannerCoreStub(semantic_intent={"tool": "work_tree_next", "args": [], "confidence": 0.9}),
                 trace=lambda *args, **kwargs: None,
                 normalize_reply=lambda text: text,
                 is_web_preferred_data_query=lambda text: False,

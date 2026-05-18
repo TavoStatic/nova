@@ -10,6 +10,7 @@ import uuid
 
 import autonomy_maintenance
 import work_tree
+from services.operator_outbox import OPERATOR_OUTBOX_SERVICE
 
 
 def _validation_tmp_root() -> Path:
@@ -700,6 +701,62 @@ class TestAutonomyMaintenance(unittest.TestCase):
         self.assertEqual(result.get("action_type"), "active_work_tree_run_next")
         self.assertEqual(((result.get("extra") or {}).get("cycle") or {}).get("executed_count"), 3)
         self.assertEqual((result.get("events") or [])[0].get("act"), "active_work_tree_run_next")
+
+    def test_execute_autonomy_recommendation_treats_active_work_tree_tool_failed_as_failed(self):
+        state: dict = {}
+        packet = {
+            "cycle_id": "cycle-test",
+            "decision_type": "RecommendAction",
+            "recommended_action": {
+                "action_type": "active_work_tree_run_next",
+                "target_kind": "lane",
+                "target_id": "active_work_tree",
+                "reason_code": "active_work_tree_ready",
+                "requires_ack": False,
+                "cooldown_sec": 120,
+            },
+            "confidence": 0.72,
+            "refusal_reasons": [],
+        }
+        policy = {
+            "enabled": True,
+            "mode": "canary",
+            "execute_enabled": True,
+            "execute_allowed_actions": [],
+            "execute_allowed_action_groups": ["active_work_tree"],
+            "execute_blocked_actions": [],
+            "requires_operator_ack_for": [],
+            "execute_min_confidence": 0.55,
+        }
+
+        with mock.patch.object(
+            autonomy_maintenance,
+            "_run_active_work_tree_cycle",
+            return_value={
+                "status": "tool_failed",
+                "attempted_count": 1,
+                "executed_count": 0,
+                "history": [
+                    {
+                        "action": "tool_failed",
+                        "tool": "release_rebuild_verify",
+                        "failure_evidence_id": "evidence_failure",
+                        "error": "repo_hygiene_failed",
+                    }
+                ],
+            },
+        ) as cycle_mock:
+            result = autonomy_maintenance._execute_autonomy_recommendation(state, packet, policy)
+
+        cycle_mock.assert_called_once_with(state, max_steps=3, max_trees=8)
+        self.assertEqual(result.get("result"), "failed")
+        self.assertFalse(result.get("ok"))
+        self.assertEqual(result.get("message"), "active_work_tree_run_next_tool_failed")
+        self.assertEqual((result.get("events") or [])[0].get("status"), "fail")
+        self.assertEqual(
+            (((result.get("extra") or {}).get("cycle") or {}).get("history") or [])[0].get("evidence_id"),
+            "evidence_failure",
+        )
 
     def test_execute_autonomy_recommendation_honors_active_work_tree_step_budget(self):
         state: dict = {}
@@ -1998,6 +2055,94 @@ class TestAutonomyMaintenance(unittest.TestCase):
         self.assertEqual(payload.get("executed_count"), 1)
         self.assertEqual(calls[0][0], "release_validation_run")
         self.assertEqual(calls[0][1], [root.branch_id])
+
+    def test_operator_continue_work_answer_feeds_next_active_work_tree_cycle(self):
+        self._isolated_work_tree_db()
+        state = {}
+        tree = work_tree.initialize_tree(
+            "Signal Intake: Operator Continuation",
+            meta={"kind": "signal_ingestion", "source": "runtime_signals", "signal_ingestion": True},
+        )
+        root = work_tree._BRANCHES[tree.root_branch_id]
+        wait_task = work_tree.add_task_to_branch(root.branch_id, "Wait for operator context")
+        work_tree.mark_task_blocked(wait_task.task_id, "pending_operator_context")
+        next_task = work_tree.add_task_to_branch(
+            root.branch_id,
+            "Synthesize memory bootstrap judgment from collected evidence",
+            meta={
+                "expected_tool": "memory_bootstrap_judgment",
+                "allowed_tools": ["memory_bootstrap_judgment"],
+            },
+        )
+        work_tree.set_branch_tools(
+            root.branch_id,
+            allowed_tools=["memory_bootstrap_judgment"],
+            preferred_tool="memory_bootstrap_judgment",
+        )
+
+        with tempfile.TemporaryDirectory() as td:
+            outbox_path = Path(td) / "operator_outbox.jsonl"
+            notice = OPERATOR_OUTBOX_SERVICE.append_notice(
+                outbox_path,
+                source="work_tree",
+                severity="attention",
+                title="Nova needs operator information",
+                message="I need operator context before continuing this branch.",
+                dedupe_key=f"work_tree|blocked_task|{root.branch_id}|{wait_task.task_id}|pending_operator_context",
+                payload={
+                    "tree_id": tree.tree_id,
+                    "tree_title": tree.title,
+                    "branch_id": root.branch_id,
+                    "branch_title": root.title,
+                    "task": {
+                        "task_id": wait_task.task_id,
+                        "title": wait_task.title,
+                        "status": "blocked",
+                    },
+                    "request_kind": "operator_information",
+                    "blocked_reason": "pending_operator_context",
+                },
+                now_fn=lambda: 3000.0,
+                uuid_fn=lambda: "noticego",
+            )
+            event_id = str((notice.get("event") or {}).get("id") or "")
+            response = OPERATOR_OUTBOX_SERVICE.respond_to_notice(
+                outbox_path,
+                event_id=event_id,
+                message="Use this as the missing operator context and keep moving.",
+                responder="operator",
+                resolution="continue_work",
+                work_tree_module=work_tree,
+                now_fn=lambda: 3005.0,
+                uuid_fn=lambda: "responsego",
+            )
+
+        calls = []
+
+        def _execute(tool_name, tool_args=None):
+            calls.append((tool_name, list(tool_args or [])))
+            return "Memory Bootstrap Judgment\n- verdict: continue from operator context"
+
+        with mock.patch.object(autonomy_maintenance.nova_core, "execute_planned_action", side_effect=_execute):
+            payload = autonomy_maintenance._run_active_work_tree_cycle(
+                state,
+                max_steps=1,
+                max_trees=1,
+                sync_core_thinning=False,
+            )
+
+        evidence_tools = [row.get("tool_name") for row in work_tree.list_branch_evidence(root.branch_id)]
+        inspect = work_tree.inspect_tree(tree.tree_id)
+        self.assertTrue(response.get("ok"))
+        self.assertEqual((response.get("work_tree") or {}).get("task_completed"), True)
+        self.assertEqual(payload.get("status"), "ok")
+        self.assertEqual(payload.get("executed_count"), 1)
+        self.assertEqual(calls, [("memory_bootstrap_judgment", [])])
+        self.assertEqual(work_tree._TASKS[wait_task.task_id].status, work_tree.TaskStatus.COMPLETE)
+        self.assertEqual(work_tree._TASKS[next_task.task_id].status, work_tree.TaskStatus.COMPLETE)
+        self.assertIn("operator_response", evidence_tools)
+        self.assertIn("memory_bootstrap_judgment", evidence_tools)
+        self.assertEqual((inspect or {}).get("counts", {}).get("open_tasks"), 0)
 
     def test_work_tree_snapshot_uses_active_candidate_execution_truth(self):
         snapshot = autonomy_maintenance._work_tree_snapshot_for_orchestrator(

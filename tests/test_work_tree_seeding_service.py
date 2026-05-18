@@ -27,13 +27,16 @@ class TestWorkTreeSeedingService(unittest.TestCase):
         work_tree._clear_in_memory()
         self._tmp.cleanup()
 
-    def test_create_seeded_tree_builds_child_branches_with_tools(self) -> None:
-        tree_id = WORK_TREE_SEEDING_SERVICE.create_seeded_tree(
-            work_tree_module=work_tree,
-            title_seed="check runtime pulse then verify Ollama system status",
-            source="operator",
-            user_id="operator",
-        )
+    def test_create_seeded_tree_builds_child_branches_without_text_inferred_tools(self) -> None:
+        import services.work_tree_seeding as _mod
+
+        with patch.object(_mod, "_requests", None):
+            tree_id = WORK_TREE_SEEDING_SERVICE.create_seeded_tree(
+                work_tree_module=work_tree,
+                title_seed="check runtime pulse then verify Ollama system status",
+                source="operator",
+                user_id="operator",
+            )
 
         tree = work_tree.get_tree(tree_id)
         self.assertIsNotNone(tree)
@@ -44,16 +47,19 @@ class TestWorkTreeSeedingService(unittest.TestCase):
             child = work_tree._BRANCHES[child_id]
             child_tasks = [task for task in work_tree._TASKS.values() if task.branch_id == child.branch_id]
             self.assertGreaterEqual(len(child_tasks), 1)
-            self.assertTrue(str(child.preferred_tool or "").strip())
-            self.assertGreaterEqual(len(child.allowed_tools), 1)
+            self.assertEqual(str(child.preferred_tool or ""), "")
+            self.assertEqual(child.allowed_tools, [])
 
-    def test_seeded_tree_executes_from_child_branch(self) -> None:
-        tree_id = WORK_TREE_SEEDING_SERVICE.create_seeded_tree(
-            work_tree_module=work_tree,
-            title_seed="runtime health check",
-            source="chat",
-            user_id="",
-        )
+    def test_seeded_tree_without_declared_tool_reports_missing_assignment(self) -> None:
+        import services.work_tree_seeding as _mod
+
+        with patch.object(_mod, "_requests", None):
+            tree_id = WORK_TREE_SEEDING_SERVICE.create_seeded_tree(
+                work_tree_module=work_tree,
+                title_seed="runtime health check",
+                source="chat",
+                user_id="",
+            )
 
         tree = work_tree.get_tree(tree_id)
         self.assertIsNotNone(tree)
@@ -63,7 +69,7 @@ class TestWorkTreeSeedingService(unittest.TestCase):
 
         step = work_tree.next_autonomous_step(tree_id)
         self.assertIsNotNone(step)
-        self.assertEqual((step or {}).get("action"), "execute")
+        self.assertEqual((step or {}).get("action"), "missing_tool_assignment")
         self.assertIn((step or {}).get("branch_id"), root.children)
 
     # ------------------------------------------------------------------
@@ -120,8 +126,8 @@ class TestWorkTreeSeedingService(unittest.TestCase):
         # Rule-based splitter splits on "then" → 2 branches
         self.assertGreaterEqual(len(root.children), 2)
 
-    def test_llm_decompose_non_system_tool_falls_back_to_inferred(self) -> None:
-        """LLM returning a non-system tool (e.g. web_search) is silently replaced by inferred tool."""
+    def test_llm_decompose_non_system_tool_does_not_infer_from_text(self) -> None:
+        """LLM returning a non-system tool leaves the branch without a tool assignment."""
         llm_steps = [
             {"title": "check runtime pulse", "tool": "web_search"},  # invalid for system tree
             {"title": "verify system health", "tool": "web_fetch"},   # invalid for system tree
@@ -147,8 +153,8 @@ class TestWorkTreeSeedingService(unittest.TestCase):
         root = work_tree._BRANCHES[tree.root_branch_id]
         for child_id in root.children:
             child = work_tree._BRANCHES[child_id]
-            # preferred_tool must be a system tool, never web_search or web_fetch
-            self.assertNotIn(child.preferred_tool, ("web_search", "web_fetch", "heartbeat"))
+            self.assertEqual(str(child.preferred_tool or ""), "")
+            self.assertEqual(child.allowed_tools, [])
 
     def test_seeded_tree_tagged_as_system_kind(self) -> None:
         """Trees created by the seeding service must carry kind='system' in their meta."""
@@ -401,12 +407,12 @@ class TestWorkTreeSeedingService(unittest.TestCase):
         )
         self.assertTrue(is_complete_after)
 
-    def test_phase4_completion_signal_detection(self) -> None:
-        """Phase 4: Should detect explicit completion signals."""
+    def test_phase4_completion_signal_detection_is_not_phrase_owned(self) -> None:
+        """Completion requires structured state, not surface text."""
         messages = [
-            ("all done with this work", True),
-            ("finished the task", True),
-            ("wrap up the current work", True),
+            ("all done with this work", False),
+            ("finished the task", False),
+            ("wrap up the current work", False),
             ("check pulse", False),
             ("inspect the logs", False),
         ]

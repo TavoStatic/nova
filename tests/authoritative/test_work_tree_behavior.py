@@ -87,7 +87,7 @@ class TestWorkTreeIngestion(unittest.TestCase):
 
 
 class TestMissingToolAssignment(unittest.TestCase):
-    """Tests deterministic tool handoff for undeclared branches in governed trees."""
+    """Tests undeclared branches stop for explicit tool assignment."""
 
     def setUp(self) -> None:
         self._tmp = _workspace_case_dir("authoritative_work_tree_assignment")
@@ -96,31 +96,28 @@ class TestMissingToolAssignment(unittest.TestCase):
     def tearDown(self) -> None:
         shutil.rmtree(self._tmp, ignore_errors=True)
 
-    def test_branch_with_no_tools_gets_deterministic_assignment(self):
+    def test_branch_with_no_tools_reports_missing_assignment(self):
         tree = work_tree.initialize_tree("No tools tree")
         root = work_tree._BRANCHES[tree.root_branch_id]
         work_tree.add_task_to_branch(root.branch_id, "Do task without tools")
 
         step = work_tree.next_autonomous_step(tree.tree_id)
 
-        self.assertEqual(step["action"], "execute")
-        self.assertTrue(str(step.get("recommended_tool") or "").strip())
-        self.assertEqual(root.preferred_tool, step["recommended_tool"])
+        self.assertEqual(step["action"], "missing_tool_assignment")
+        self.assertEqual(str(root.preferred_tool or ""), "")
 
-    def test_deterministic_assignment_is_explicit_on_branch(self):
+    def test_text_does_not_create_branch_tool_assignment(self):
         tree = work_tree.initialize_tree("Suggestions tree")
         root = work_tree._BRANCHES[tree.root_branch_id]
         work_tree.add_task_to_branch(root.branch_id, "research attendance web data")
 
         step = work_tree.next_autonomous_step(tree.tree_id)
 
-        self.assertEqual(step["action"], "execute")
-        selected = str(step.get("recommended_tool") or "").strip()
-        self.assertTrue(selected)
-        self.assertEqual(root.allowed_tools, [selected])
-        self.assertEqual(root.preferred_tool, selected)
+        self.assertEqual(step["action"], "missing_tool_assignment")
+        self.assertEqual(root.allowed_tools, [])
+        self.assertEqual(str(root.preferred_tool or ""), "")
 
-    def test_execute_calls_executor_after_deterministic_assignment(self):
+    def test_execute_stops_before_executor_without_assignment(self):
         tree = work_tree.initialize_tree("No exec tree")
         root = work_tree._BRANCHES[tree.root_branch_id]
         task = work_tree.add_task_to_branch(root.branch_id, "task without tools")
@@ -131,11 +128,11 @@ class TestMissingToolAssignment(unittest.TestCase):
             execute_planned_action_fn=lambda tool, args=None: executor_calls.append(tool) or "ran",
         )
 
-        self.assertEqual(step["action"], "executed")
+        self.assertEqual(step["action"], "missing_tool_assignment")
         self.assertEqual(step["task_id"], task.task_id)
-        self.assertEqual(len(executor_calls), 1)
+        self.assertEqual(executor_calls, [])
 
-    def test_task_completes_after_deterministic_assignment(self):
+    def test_task_stays_open_without_assignment(self):
         tree = work_tree.initialize_tree("Task open tree")
         root = work_tree._BRANCHES[tree.root_branch_id]
         task = work_tree.add_task_to_branch(root.branch_id, "undeclared task")
@@ -147,7 +144,7 @@ class TestMissingToolAssignment(unittest.TestCase):
 
         reloaded_task = work_tree._TASKS.get(task.task_id)
         self.assertIsNotNone(reloaded_task)
-        self.assertEqual(reloaded_task.status, TaskStatus.COMPLETE)
+        self.assertEqual(reloaded_task.status, TaskStatus.OPEN)
 
     def test_branch_with_declared_tool_proceeds_to_execute(self):
         tree = work_tree.initialize_tree("With tools tree")

@@ -115,6 +115,21 @@ ACTIVE_WORK_TREE_EXECUTE_TOOLS = [
 ACTIVE_WORK_TREE_MAX_TREES = 8
 ACTIVE_WORK_TREE_MAX_STEPS = 8
 ACTIVE_WORK_TREE_DEFAULT_DISPATCH_STEPS = 3
+WORK_TREE_CYCLE_ATTENTION_STATUSES = {
+    "decision_error",
+    "evidence_record_failed",
+    "execution_failed",
+    "governance_blocked",
+    "invalid_decision",
+    "missing_branch",
+    "missing_tool_assignment",
+    "no_open_task",
+    "no_tool_selected",
+    "scope_blocked",
+    "tool_failed",
+    "verification_failed",
+    "wait_for_tools",
+}
 LEGACY_PATCH_UPDATE_TOOLS = {"patch_apply", "patch_rollback", "update_now"}
 COMPLETE_TREE_VISIBLE_KEEP = 12
 COMPLETE_TREE_ARCHIVE_MIN_AGE_SEC = 0
@@ -187,12 +202,17 @@ def _publish_operator_notices_from_work_tree(work_tree_state: dict) -> dict:
         work_tree_state,
         executable_tools=ACTIVE_WORK_TREE_EXECUTE_TOOLS,
     )
+    reconcile_result = OPERATOR_OUTBOX_SERVICE.reconcile_work_tree_notices(
+        OPERATOR_OUTBOX,
+        active_notices=notices,
+    )
     if not notices:
         return {
-            "ok": True,
+            "ok": bool(reconcile_result.get("ok", True)),
             "published_count": 0,
             "deduped_count": 0,
             "notice_count": 0,
+            "staled_count": int(reconcile_result.get("staled_count", 0) or 0),
             "reason": "no_work_tree_operator_requests",
         }
 
@@ -220,6 +240,7 @@ def _publish_operator_notices_from_work_tree(work_tree_state: dict) -> dict:
         "published_count": published,
         "deduped_count": deduped,
         "notice_count": len(notices),
+        "staled_count": int(reconcile_result.get("staled_count", 0) or 0),
         "event_ids": event_ids,
         "errors": errors[:5],
     }
@@ -1264,7 +1285,7 @@ def _compact_work_tree_history(history: list[dict] | None, *, limit: int = 8) ->
             "task_id": str(item.get("task_id") or ""),
             "task_title": str(item.get("task_title") or ""),
             "tool": str(item.get("tool") or item.get("recommended_tool") or ""),
-            "evidence_id": str(item.get("evidence_id") or ""),
+            "evidence_id": str(item.get("evidence_id") or item.get("failure_evidence_id") or ""),
             "reason": str(item.get("reason") or ""),
         }
         if "tool_args" in item:
@@ -1398,6 +1419,11 @@ def _maintenance_generated_queue_investigate_action(_payload: dict) -> tuple[boo
     return False, "generated_queue_investigate_requires_http_session_scope", {}, "generated_queue_investigate_requires_http_session_scope"
 
 
+def _work_tree_cycle_dispatch_ok(status: str) -> bool:
+    clean = str(status or "").strip().lower()
+    return clean not in WORK_TREE_CYCLE_ATTENTION_STATUSES and clean not in {"failed", "error"}
+
+
 def _maintenance_patch_queue_run_next_action(_payload: dict, state: dict) -> tuple[bool, str, dict, str]:
     try:
         cycle = _run_patch_queue_work_tree_cycle(state, max_steps=1)
@@ -1406,7 +1432,7 @@ def _maintenance_patch_queue_run_next_action(_payload: dict, state: dict) -> tup
         return False, msg, {}, msg
     status = str((cycle or {}).get("status") or "unknown").strip() or "unknown"
     msg = f"patch_queue_run_next_{status}"
-    return status not in {"failed", "error"}, msg, {"cycle": cycle if isinstance(cycle, dict) else {}}, msg
+    return _work_tree_cycle_dispatch_ok(status), msg, {"cycle": cycle if isinstance(cycle, dict) else {}}, msg
 
 
 def _maintenance_active_work_tree_run_next_action(_payload: dict, state: dict) -> tuple[bool, str, dict, str]:
@@ -1423,7 +1449,7 @@ def _maintenance_active_work_tree_run_next_action(_payload: dict, state: dict) -
         return False, msg, {}, msg
     status = str((cycle or {}).get("status") or "unknown").strip() or "unknown"
     msg = f"active_work_tree_run_next_{status}"
-    return status not in {"failed", "error"}, msg, {"cycle": cycle if isinstance(cycle, dict) else {}}, msg
+    return _work_tree_cycle_dispatch_ok(status), msg, {"cycle": cycle if isinstance(cycle, dict) else {}}, msg
 
 
 def _dispatch_autonomy_control_action(action_type: str, payload: dict, events: list[dict], state: dict | None = None) -> tuple[bool, str, dict]:
@@ -1474,6 +1500,8 @@ def _dispatch_autonomy_control_action(action_type: str, payload: dict, events: l
         backend_command_list_action_fn=_unsupported_control_action,
         backend_command_run_action_fn=_unsupported_control_action,
         operator_prompt_action_fn=lambda event_payload: (False, "operator_prompt_unavailable_in_maintenance", {}, "operator_prompt_unavailable_in_maintenance", event_payload),
+        operator_outbox_respond_action_fn=_unsupported_control_action,
+        operator_outbox_status_action_fn=_unsupported_control_action,
         session_delete_action_fn=_unsupported_control_action,
         policy_allow_action_fn=_unsupported_control_action,
         policy_remove_action_fn=_unsupported_control_action,

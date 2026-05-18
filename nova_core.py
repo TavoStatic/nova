@@ -5273,6 +5273,36 @@ def tool_pipeline(command_text: str = "pipeline help"):
     )
 
 
+def tool_os_capability(request: str = "", capability: str = "", args: Optional[dict] = None):
+    from services.os_capability_operator_outbox import publish_os_capability_notice
+    from services.os_script_controller import OS_SCRIPT_CONTROLLER_SERVICE
+
+    capability_name = str(capability or "").strip()
+    capability_args = dict(args or {}) if isinstance(args, dict) else {}
+    raw = str(request or "").strip()
+    if raw.startswith("{"):
+        try:
+            parsed = json.loads(raw)
+        except Exception as exc:
+            return {"ok": False, "reason": "invalid_os_capability_request", "error": str(exc)}
+        if isinstance(parsed, dict):
+            capability_name = str(parsed.get("capability") or parsed.get("name") or capability_name).strip()
+            capability_args = dict(parsed.get("args") or {}) if isinstance(parsed.get("args"), dict) else capability_args
+    elif raw and not capability_name:
+        capability_name = raw
+    if not capability_name:
+        return {"ok": False, "reason": "capability_required"}
+    result = OS_SCRIPT_CONTROLLER_SERVICE.execute_capability(
+        capability_name,
+        capability_args,
+        authority_context={"allowed_authority_levels": ["read_only", "read_only_expensive", "read_only_network"]},
+    )
+    if isinstance(result, dict) and result.get("operator_outbox"):
+        result = dict(result)
+        result["operator_notice"] = publish_os_capability_notice(result)
+    return result
+
+
 def tool_phase2_audit():
     import kidney
     import nova_safety_envelope

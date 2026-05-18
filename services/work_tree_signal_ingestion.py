@@ -3262,6 +3262,8 @@ class WorkTreeSignalIngestionService:
                 allowed_tools=explicit_tools,
                 preferred_tool=preferred_tool if preferred_tool in explicit_tools else explicit_tools[0],
             )
+        else:
+            work_tree.set_branch_tools(branch.branch_id, allowed_tools=[], preferred_tool="")
 
         summary = _branch_why_summary(normalized)
         existing_notes = _strip_inactive_resolution_notes(str(branch.notes or "").strip())
@@ -3387,8 +3389,6 @@ class WorkTreeSignalIngestionService:
                     allowed_tools=task_allowed_tools,
                     preferred_tool=task_preferred_tool if task_preferred_tool in task_allowed_tools else task_allowed_tools[0],
                 )
-            elif not explicit_tools:
-                work_tree.assign_branch_tool_from_text(branch.branch_id, task_text)
 
     def _normalize_signal(self, signal: dict[str, Any]) -> dict[str, Any]:
         source = str(signal.get("source") or "").strip().lower() or "control_status"

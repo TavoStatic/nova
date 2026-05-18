@@ -14,7 +14,8 @@
       "stackexchange.com",
       "docs.python.org",
       "python.org",
-      "github.com"
+      "github.com",
+      "127.0.0.1"
     ],
     "max_bytes": 20000000,
     "research_domains_limit": 4,
@@ -34,7 +35,7 @@
     "stackexchange_api_key_env": "STACKEXCHANGE_API_KEY",
     "github_api_key_env": "GITHUB_TOKEN"
   },
-  "allowed_root": "C:\\Nova",
+  "allowed_root": "C:\\NOVA",
   "tools_enabled": {
     "screen": true,
     "camera": true,
@@ -43,7 +44,7 @@
     "web": true
   },
   "models": {
-    "chat": "llama3.1:8b",
+    "chat": "llama3.2:3b",
     "vision": "qwen2.5vl:7b",
     "stt_size": "base"
   },

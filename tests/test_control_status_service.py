@@ -16,6 +16,7 @@ class TestControlStatusService(unittest.TestCase):
             "_generated_work_queue": object(),
             "_autonomy_maintenance_summary": object(),
             "_work_trees_payload": object(),
+            "_operator_outbox_summary": object(),
             "_load_operator_macros": object(),
             "_load_backend_commands": object(),
             "_memory_events_summary": object(),
@@ -48,9 +49,10 @@ class TestControlStatusService(unittest.TestCase):
         self.assertIs(payload["probe_searxng"], scope["_probe_searxng"])
         self.assertIs(payload["provider_telemetry_payload"], scope["_provider_telemetry_payload"])
         self.assertIs(payload["work_trees_payload"], scope["_work_trees_payload"])
+        self.assertIs(payload["operator_outbox_summary"], scope["_operator_outbox_summary"])
         self.assertIs(payload["validation_artifact_truth_payload"], scope["_validation_artifact_truth_payload"])
         self.assertIs(payload["metrics_payload"], scope["_metrics_payload"])
-        self.assertEqual(len(payload), 35)
+        self.assertEqual(len(payload), 36)
 
     def test_runtime_status_payload_collects_supplier_outputs(self):
         class _Core:
@@ -154,6 +156,7 @@ class TestControlStatusService(unittest.TestCase):
                 "generated_work_queue": lambda limit: {"status": "clear", "open_count": 0, "actionable_count": 0, "next_item": {}},
                 "autonomy_maintenance_summary": lambda: {},
                 "work_trees_payload": lambda limit: {"ok": True, "counts": {"total": 0, "active": 0, "branches": 0, "open_tasks": 0, "blocked": 0, "pending": 0, "working": 0, "complete": 0}, "trees": []},
+                "operator_outbox_summary": lambda limit: {"ok": True, "open_count": 1, "latest_id": "notice-1", "latest_open": {"id": "notice-1"}, "status_counts": {"new": 1}},
                 "load_operator_macros": lambda limit: [],
                 "load_backend_commands": lambda limit: [],
                 "memory_events_summary": lambda limit: {"ok": True, "count": 0},
@@ -223,6 +226,8 @@ class TestControlStatusService(unittest.TestCase):
         self.assertGreater(payload.get("test_profile_curated_target_count"), 0)
         self.assertGreater(payload.get("test_profile_curated_test_file_count"), 0)
         self.assertEqual(payload.get("test_profile_profile_gap_count"), 0)
+        self.assertEqual(payload.get("operator_outbox_open_count"), 1)
+        self.assertEqual(payload.get("operator_outbox_latest_open_id"), "notice-1")
 
     def test_status_payload_includes_voice_runtime_fields_when_provided(self):
         payload = CONTROL_STATUS_SERVICE.status_payload(

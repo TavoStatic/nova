@@ -67,6 +67,9 @@ COMPACT_REGRESSION_LANES: dict[str, list[str]] = {
         "tests.test_test_session_control_service",
         "tests.test_tool_console_service",
         "tests.test_tool_execution_service",
+        "tests.test_os_capability_operator_outbox_service",
+        "tests.test_os_capability_registry_service",
+        "tests.test_os_script_controller_service",
         "tests.test_tool_registry",
         "tests.test_tool_registry_service",
         "tests.test_validation_artifact_truth_service",
@@ -220,6 +223,7 @@ SOURCE_PROFILE_LANES: dict[str, list[str]] = {
     ],
     "source_tool_registry_policy": [
         "tests.test_nova_keyword_tools",
+        "tests.test_os_capability_operator_outbox_service",
     ],
     "source_web_search": [
         "tests.test_nova_search_endpoint",

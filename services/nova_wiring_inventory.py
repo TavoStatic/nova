@@ -254,11 +254,11 @@ WIRING_SURFACES: tuple[WiringSurface, ...] = (
     WiringSurface(
         "operator_control",
         "Operator macros, backend commands, local operator CLI, and control-action dispatcher",
-        ("operator_macros", "backend_commands", "source_root_inventory"),
+        ("operator_macros", "backend_commands", "operator_outbox", "operator_outbox_open_count", "source_root_inventory"),
         ("source_root_inventory",),
         ("read", "find", "pulse"),
         ("active_work_tree_run_next",),
-        ("services/operator_control.py", "services/nova_control_action_dispatcher.py", "scripts/operator_cli.py"),
+        ("services/operator_control.py", "services/operator_outbox.py", "services/nova_control_action_dispatcher.py", "scripts/operator_cli.py"),
     ),
     WiringSurface(
         "session_identity_auth",
@@ -330,7 +330,17 @@ WIRING_SURFACES: tuple[WiringSurface, ...] = (
         ("tool_events", "source_root_inventory"),
         ("read", "find", "queue_status"),
         ("active_work_tree_run_next",),
-        ("tools/registry.py", "services/tool_registry.py", "services/nova_tool_policy.py"),
+        (
+            "tools/registry.py",
+            "services/tool_registry.py",
+            "services/nova_tool_policy.py",
+            "services/os_capability_registry.py",
+            "services/os_capability_operator_outbox.py",
+            "services/os_script_controller.py",
+            "tools/os_capability_tool.py",
+            "tools/os_capabilities/os_capabilities.json",
+            "tools/os_capabilities/verify_ollama_model.ps1",
+        ),
     ),
     WiringSurface(
         "installer_packaging",
