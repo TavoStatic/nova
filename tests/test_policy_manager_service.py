@@ -131,6 +131,18 @@ class TestPolicyManager(unittest.TestCase):
             saved = json.loads((base / "policy.json").read_text(encoding="utf-8"))
             self.assertEqual(saved.get("web", {}).get("search_api_endpoint"), "http://127.0.0.1:8080/search")
 
+    def test_auto_repair_search_endpoint_ignores_local_alias_only_drift(self):
+        with tempfile.TemporaryDirectory() as td:
+            base = Path(td)
+            manager = self._make_manager(base)
+            manager.set_search_endpoint("http://127.0.0.1:8081/search", user="tester")
+
+            msg = manager.auto_repair_search_endpoint("http://localhost:8081/search", user="tester")
+
+            self.assertEqual(msg, "")
+            saved = json.loads((base / "policy.json").read_text(encoding="utf-8"))
+            self.assertEqual(saved.get("web", {}).get("search_api_endpoint"), "http://127.0.0.1:8081/search")
+
     def test_set_search_endpoint_normalizes_and_updates_policy(self):
         with tempfile.TemporaryDirectory() as td:
             base = Path(td)

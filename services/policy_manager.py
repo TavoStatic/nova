@@ -33,6 +33,48 @@ WEB_RESEARCH_PRESETS = {
 
 SEARCH_PROVIDER_PRIORITY_DEFAULT = ["wikipedia", "stackexchange", "general_web"]
 SEARCH_PROVIDER_PRIORITY_ALLOWED = set(SEARCH_PROVIDER_PRIORITY_DEFAULT)
+LOCAL_SEARCH_ENDPOINT_HOST_ALIASES = {"127.0.0.1", "localhost"}
+
+
+def _search_endpoint_parts(endpoint: str) -> tuple[str, str, int, str] | None:
+    raw = str(endpoint or "").strip()
+    if not raw:
+        return None
+    if "://" not in raw:
+        raw = "http://" + raw
+
+    try:
+        parsed = urlparse(raw)
+    except Exception:
+        return None
+
+    scheme = str(parsed.scheme or "http").strip().lower() or "http"
+    host = str(parsed.hostname or "").strip().lower()
+    if not host:
+        return None
+    try:
+        port = int(parsed.port or (443 if scheme == "https" else 80))
+    except ValueError:
+        return None
+    path = str(parsed.path or "/search").strip() or "/search"
+    return scheme, host, port, path
+
+
+def _same_local_search_endpoint_contract(current: str, candidate: str) -> bool:
+    current_parts = _search_endpoint_parts(current)
+    candidate_parts = _search_endpoint_parts(candidate)
+    if not current_parts or not candidate_parts:
+        return False
+
+    current_scheme, current_host, current_port, current_path = current_parts
+    candidate_scheme, candidate_host, candidate_port, candidate_path = candidate_parts
+    return (
+        current_host in LOCAL_SEARCH_ENDPOINT_HOST_ALIASES
+        and candidate_host in LOCAL_SEARCH_ENDPOINT_HOST_ALIASES
+        and current_scheme == candidate_scheme
+        and current_port == candidate_port
+        and current_path == candidate_path
+    )
 
 
 class PolicyManager:
@@ -509,6 +551,8 @@ class PolicyManager:
         web = data.get("web") if isinstance(data.get("web"), dict) else {}
         prev = str(web.get("search_api_endpoint") or "").strip()
         if prev == normalized:
+            return ""
+        if _same_local_search_endpoint_contract(prev, normalized):
             return ""
 
         web["search_api_endpoint"] = normalized
