@@ -30,6 +30,7 @@ def _safe_set(value: Any) -> set[str]:
 NOTICE_STATUSES = {"new", "seen", "answered", "resolved", "dismissed", "stale"}
 CLOSED_NOTICE_STATUSES = {"resolved", "dismissed", "stale"}
 RESPONSE_RESOLUTIONS = {"evidence_only", "continue_work", "task_resolved", "dismissed", "stale"}
+AUTONOMY_INTERNAL_WAIT_REASONS = {"cooldown_active"}
 
 
 def _safe_status(value: Any, default: str = "new") -> str:
@@ -723,6 +724,15 @@ class OperatorOutboxService:
             if _safe_text(item, 120)
         ]
         requires_ack = bool(recommended.get("requires_ack") or execution_data.get("requires_ack"))
+
+        if (
+            decision in {"defer_with_reason", "defer"}
+            and result in {"", "blocked"}
+            and rejection_reasons
+            and set(rejection_reasons).issubset(AUTONOMY_INTERNAL_WAIT_REASONS)
+            and not requires_ack
+        ):
+            return {}
 
         should_notice = False
         if decision and decision != "recommend_action":

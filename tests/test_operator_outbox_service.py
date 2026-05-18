@@ -106,6 +106,23 @@ class TestOperatorOutboxService(unittest.TestCase):
         self.assertIn("I am stuck on active_work_tree_run_next.", notice.get("message", ""))
         self.assertIn("operator_ack_required", notice.get("message", ""))
 
+    def test_notice_from_autonomy_ignores_internal_cooldown_wait(self):
+        notice = OPERATOR_OUTBOX_SERVICE.notice_from_autonomy(
+            {
+                "decision": "defer_with_reason",
+                "recommended_action": {},
+                "reason": "Waiting for cooldown before the next action.",
+                "rejection_reasons": ["cooldown_active"],
+            },
+            {
+                "result": "blocked",
+                "gate_reason": "decision_not_recommend_action",
+                "refusal_reasons": ["cooldown_active"],
+            },
+        )
+
+        self.assertEqual(notice, {})
+
     def test_work_tree_notice_names_missing_maintenance_tool_dispatch(self):
         notices = OPERATOR_OUTBOX_SERVICE.notices_from_work_tree_state(
             {
