@@ -1291,6 +1291,30 @@ class TestAutonomyMaintenance(unittest.TestCase):
         self.assertEqual((payload.get("release_status") or {}).get("latest_readiness_state"), "source-changed-after-build")
         self.assertEqual(mocked.call_args.kwargs.get("timeout"), 10.0)
 
+    def test_live_control_status_timeout_preserves_local_ollama_failure_for_ingestion(self):
+        fallback = {"alerts": [], "autonomy_maintenance": {"last_regression_status": ""}}
+        ollama_down = {
+            "ok": False,
+            "server_ok": False,
+            "status": "tags_unreachable",
+            "info": "tags failed",
+            "tags_ok": False,
+            "chat_route_ok": False,
+            "model_available": False,
+            "chat_model": "llama3.2:3b",
+            "api_contract_status": "tags_unreachable",
+        }
+
+        with mock.patch.object(autonomy_maintenance.urllib.request, "urlopen", side_effect=TimeoutError("slow status")), \
+             mock.patch.object(autonomy_maintenance.nova_core, "ollama_health_payload", return_value=ollama_down):
+            payload = autonomy_maintenance._live_control_status_payload_for_signal_ingestion(fallback)
+
+        self.assertEqual(payload.get("signal_ingestion_status_source"), "local_dependency_probe")
+        self.assertFalse(payload.get("ollama_server_ok"))
+        self.assertFalse(payload.get("ollama_tags_ok"))
+        self.assertEqual(payload.get("ollama_health_status"), "tags_unreachable")
+        self.assertEqual(payload.get("ollama_api_contract_status"), "tags_unreachable")
+
     def test_sync_signal_intake_work_tree_uses_local_validation_truth_when_http_falls_back(self):
         self._isolated_work_tree_db()
         state = {

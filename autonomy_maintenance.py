@@ -936,9 +936,9 @@ def _live_control_status_payload_for_signal_ingestion(fallback_payload: dict) ->
             raw = response.read(2_000_000)
         live = json.loads(raw.decode("utf-8", errors="replace"))
     except Exception:
-        return fallback
+        return _local_dependency_payload_for_signal_ingestion(fallback)
     if not isinstance(live, dict):
-        return fallback
+        return _local_dependency_payload_for_signal_ingestion(fallback)
     merged = {**fallback, **live}
     fallback_maintenance = fallback.get("autonomy_maintenance") if isinstance(fallback.get("autonomy_maintenance"), dict) else {}
     live_maintenance = live.get("autonomy_maintenance") if isinstance(live.get("autonomy_maintenance"), dict) else {}
@@ -946,6 +946,46 @@ def _live_control_status_payload_for_signal_ingestion(fallback_payload: dict) ->
         merged["autonomy_maintenance"] = {**dict(live_maintenance or {}), **dict(fallback_maintenance or {})}
     merged["signal_ingestion_status_source"] = "control_status_http"
     return merged
+
+
+def _local_dependency_payload_for_signal_ingestion(fallback_payload: dict) -> dict:
+    payload = dict(fallback_payload or {})
+    try:
+        ollama_health = nova_core.ollama_health_payload(timeout=1.0)
+    except Exception as exc:
+        ollama_health = {
+            "ok": False,
+            "server_ok": False,
+            "status": "local_ollama_probe_failed",
+            "info": str(exc),
+            "tags_ok": False,
+            "chat_route_ok": False,
+            "model_available": False,
+            "api_contract_status": "local_probe_failed",
+        }
+    if not isinstance(ollama_health, dict):
+        return payload
+
+    payload.update({
+        "ollama_api_up": bool(ollama_health.get("server_ok", ollama_health.get("ok", False))),
+        "ollama_server_ok": bool(ollama_health.get("server_ok", ollama_health.get("ok", False))),
+        "ollama_chat_ready": bool(ollama_health.get("ok", False)),
+        "ollama_health": dict(ollama_health),
+        "ollama_health_status": str(ollama_health.get("status") or ""),
+        "ollama_health_info": str(ollama_health.get("info") or ""),
+        "ollama_tags_ok": bool(ollama_health.get("tags_ok", False)),
+        "ollama_chat_route_ok": bool(ollama_health.get("chat_route_ok", False)),
+        "ollama_version": str(ollama_health.get("version") or ""),
+        "ollama_version_ok": bool(ollama_health.get("version_ok", False)),
+        "ollama_version_status": int(ollama_health.get("version_status", 0) or 0),
+        "ollama_api_contract_status": str(ollama_health.get("api_contract_status") or ""),
+        "ollama_configured_model": str(ollama_health.get("chat_model") or ""),
+        "ollama_model_available": bool(ollama_health.get("model_available", False)),
+        "ollama_model_status": str(ollama_health.get("model_status") or ""),
+        "ollama_available_models": list(ollama_health.get("available_models") or []),
+        "signal_ingestion_status_source": "local_dependency_probe",
+    })
+    return payload
 
 
 def _validation_artifact_truth_payload_for_signal_ingestion() -> dict:

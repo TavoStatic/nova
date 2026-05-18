@@ -184,11 +184,17 @@ class OsScriptControllerService:
             popen_factory=popen_factory,
             now_fn=now_fn,
         )
+        evidence_contract = self._verify_evidence_ok(capability, run_result)
         write_contract = self._verify_writes_only_to(capability, run_result, root)
         final_status = run_result["status"]
         final_reason = run_result["reason"]
         final_errors = _safe_list(run_result.get("errors"))
         final_operator_outbox = False
+        if not bool(evidence_contract.get("ok")):
+            final_status = "failed"
+            final_reason = _safe_text(evidence_contract.get("reason"), 120) or "capability_evidence_not_ok"
+            final_errors.extend(_safe_list(evidence_contract.get("errors")))
+            final_operator_outbox = True
         if not bool(write_contract.get("ok")):
             final_status = "failed"
             final_reason = _safe_text(write_contract.get("reason"), 120) or "write_contract_violation"
@@ -217,6 +223,7 @@ class OsScriptControllerService:
                 "stdout": self._limit_text(run_result.get("stdout")),
                 "stderr": self._limit_text(run_result.get("stderr")),
                 "errors": final_errors,
+                "evidence_contract": evidence_contract,
                 "write_contract": write_contract,
             }
         )
@@ -330,6 +337,45 @@ class OsScriptControllerService:
             "allowed_root": str(allowed_root),
             "verified_paths": verified,
             "errors": errors,
+        }
+
+    def _verify_evidence_ok(
+        self,
+        capability: dict[str, Any],
+        run_result: dict[str, Any],
+    ) -> dict[str, Any]:
+        if _safe_text(run_result.get("status"), 80) != "success":
+            return {"ok": True, "reason": "", "checked": False, "deferred": True, "errors": []}
+
+        stdout = _safe_text(run_result.get("stdout"), MAX_LEDGER_TEXT_CHARS)
+        if not stdout:
+            return {"ok": True, "reason": "", "checked": False, "errors": []}
+        try:
+            payload = json.loads(stdout)
+        except Exception:
+            return {"ok": True, "reason": "", "checked": False, "errors": []}
+        if not isinstance(payload, dict) or "ok" not in payload:
+            return {"ok": True, "reason": "", "checked": False, "errors": []}
+        if bool(payload.get("ok")):
+            return {"ok": True, "reason": "", "checked": True, "errors": []}
+
+        evidence_errors = [
+            _safe_text(item, 500)
+            for item in _safe_list(payload.get("errors"))
+            if _safe_text(item, 500)
+        ]
+        if not evidence_errors:
+            error_text = _safe_text(payload.get("error") or payload.get("reason"), 500)
+            if error_text:
+                evidence_errors.append(error_text)
+        evidence_errors.insert(0, "evidence_ok_false")
+        return {
+            "ok": False,
+            "reason": "capability_evidence_not_ok",
+            "checked": True,
+            "capability": _safe_text(capability.get("name"), 120),
+            "errors": evidence_errors,
+            "payload": _compact(payload),
         }
 
     @staticmethod

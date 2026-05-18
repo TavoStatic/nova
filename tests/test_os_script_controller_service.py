@@ -250,6 +250,39 @@ class TestOsScriptControllerService(unittest.TestCase):
         self.assertEqual(rows[0]["exit_code"], 7)
         self.assertEqual(rows[0]["stderr"], "bad")
 
+    def test_json_evidence_ok_false_records_failed_evidence(self):
+        with TemporaryDirectory() as td:
+            root = Path(td)
+            script_hash = _write_script(root / "tools" / "os_capabilities" / "verify_ollama_model.ps1", "ok")
+            registry_path = self._write_registry(root, [self._capability(script_hash)])
+            ledger_path = root / "runtime" / "os_capability_ledger.jsonl"
+
+            result = OS_SCRIPT_CONTROLLER_SERVICE.execute_capability(
+                "verify_ollama_model",
+                {},
+                registry_path=registry_path,
+                ledger_path=ledger_path,
+                base_dir=root,
+                popen_factory=lambda *a, **k: FakeProcess(
+                    stdout=json.dumps({"ok": False, "errors": ["tags_probe_failed"]}),
+                    stderr="",
+                    returncode=0,
+                ),
+                powershell_executable="pwsh-test",
+                now_fn=lambda: 1000.0,
+                uuid_fn=lambda: "failok",
+            )
+            rows = _read_ledger(ledger_path)
+
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["status"], "failed")
+        self.assertEqual(result["reason"], "capability_evidence_not_ok")
+        self.assertTrue(result["operator_outbox"])
+        self.assertEqual(rows[0]["exit_code"], 0)
+        self.assertTrue(rows[0]["evidence_contract"]["checked"])
+        self.assertIn("evidence_ok_false", rows[0]["errors"])
+        self.assertIn("tags_probe_failed", rows[0]["errors"])
+
     def test_execution_time_hash_drift_is_ledgered_without_running(self):
         with TemporaryDirectory() as td:
             root = Path(td)

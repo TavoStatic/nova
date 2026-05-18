@@ -71,6 +71,9 @@ def _message_for(reason: str, capability: str, detail: str) -> tuple[str, str]:
     elif reason == "authority_blocked":
         title = f"OS capability authority blocked: {label}"
         message = f"I need OS capability {label}, but the current authority context does not satisfy the contract."
+    elif reason == "capability_evidence_not_ok":
+        title = f"OS capability evidence failed: {label}"
+        message = f"I ran OS capability {label}, but its structured evidence reports failure."
     else:
         title = f"OS capability blocked: {label}"
         message = f"I need OS capability {label}, but execution is blocked by the capability contract."

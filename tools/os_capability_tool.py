@@ -5,9 +5,10 @@ from pathlib import Path
 from typing import Any
 
 from .base_tool import NovaTool, ToolContext, ToolInvocationError
-from services.nova_runtime_context import BASE_DIR, OS_CAPABILITY_LEDGER_FILE, OS_CAPABILITY_REGISTRY_FILE
+from services.nova_runtime_context import BASE_DIR, OPERATOR_OUTBOX_FILE, OS_CAPABILITY_LEDGER_FILE, OS_CAPABILITY_REGISTRY_FILE
 from services.os_capability_operator_outbox import publish_os_capability_notice
 from services.os_script_controller import OS_SCRIPT_CONTROLLER_SERVICE
+from services.operator_outbox import OPERATOR_OUTBOX_SERVICE
 
 
 def _safe_dict(value: Any) -> dict[str, Any]:
@@ -82,5 +83,12 @@ class OsCapabilityTool(NovaTool):
                 result,
                 outbox_path=Path(str(extra.get("operator_outbox_path"))) if extra.get("operator_outbox_path") else None,
                 context=_safe_dict(extra.get("work_tree_target") or extra.get("work_tree")),
+            )
+        elif isinstance(result, dict) and bool(result.get("ok")) and str(result.get("status") or "") == "success":
+            result = dict(result)
+            result["operator_reconcile"] = OPERATOR_OUTBOX_SERVICE.reconcile_os_capability_notices(
+                Path(str(extra.get("operator_outbox_path") or OPERATOR_OUTBOX_FILE)),
+                capability=capability,
+                cleared_reasons={"contract_stale", "capability_evidence_not_ok"},
             )
         return json.dumps(result, ensure_ascii=True, sort_keys=True)

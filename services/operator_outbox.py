@@ -400,6 +400,51 @@ class OperatorOutboxService:
             self._write_events(path, rows)
         return {"ok": True, "staled_count": staled, "active_notice_count": len(active_keys)}
 
+    def reconcile_os_capability_notices(
+        self,
+        path: Path,
+        *,
+        capability: str,
+        cleared_reasons: list[str] | tuple[str, ...] | set[str] | None = None,
+        now_fn: Callable[[], float] | None = None,
+    ) -> dict[str, Any]:
+        """Close OS capability notices proven stale by a later clean capability run."""
+        clean_capability = _safe_text(capability, 120)
+        reasons = {
+            _safe_text(item, 120)
+            for item in _safe_list(list(cleared_reasons or []))
+            if _safe_text(item, 120)
+        } or {"contract_stale", "capability_evidence_not_ok"}
+        if not clean_capability:
+            return {"ok": False, "reason": "capability_required", "staled_count": 0}
+
+        rows = self._load_events(path)
+        if not rows:
+            return {"ok": True, "staled_count": 0, "cleared_reasons": sorted(reasons)}
+
+        now_value = float((now_fn or time.time)())
+        staled = 0
+        for event in rows:
+            if _safe_status(event.get("status")) in CLOSED_NOTICE_STATUSES:
+                continue
+            if _safe_text(event.get("source"), 120) != "os_capability":
+                continue
+            payload = event.get("payload") if isinstance(event.get("payload"), dict) else {}
+            if _safe_text(payload.get("capability"), 120) != clean_capability:
+                continue
+            blocked_reason = _safe_text(payload.get("blocked_reason"), 120)
+            if blocked_reason not in reasons:
+                continue
+            event["status"] = "stale"
+            event["status_note"] = "os_capability_pressure_cleared"
+            event["updated_ts_epoch"] = now_value
+            event["updated_ts"] = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(now_value))
+            staled += 1
+
+        if staled:
+            self._write_events(path, rows)
+        return {"ok": True, "staled_count": staled, "cleared_reasons": sorted(reasons)}
+
     def respond_to_notice(
         self,
         path: Path,

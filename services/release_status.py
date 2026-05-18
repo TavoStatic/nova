@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
+import zipfile
 from datetime import datetime
 from pathlib import Path
 
@@ -99,6 +101,46 @@ def _iter_source_candidates(root: Path):
                 yield path
 
 
+def _sha256_file(path: Path) -> str:
+    hasher = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            hasher.update(chunk)
+    return hasher.hexdigest()
+
+
+def _zip_relative_name(name: str) -> str:
+    normalized = str(name or "").replace("\\", "/").strip("/")
+    if not normalized:
+        return ""
+    parts = normalized.split("/")
+    if len(parts) > 1:
+        return "/".join(parts[1:])
+    return normalized
+
+
+def _artifact_hashes_for_paths(artifact_path: Path, relative_paths: set[str]) -> dict[str, str]:
+    if not relative_paths or not artifact_path.exists() or not artifact_path.is_file():
+        return {}
+    out: dict[str, str] = {}
+    try:
+        with zipfile.ZipFile(artifact_path) as archive:
+            for entry in archive.infolist():
+                if entry.is_dir():
+                    continue
+                rel = _zip_relative_name(entry.filename)
+                if rel not in relative_paths:
+                    continue
+                hasher = hashlib.sha256()
+                with archive.open(entry) as handle:
+                    for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                        hasher.update(chunk)
+                out[rel] = hasher.hexdigest()
+    except Exception:
+        return {}
+    return out
+
+
 class ReleaseStatusService:
     """Own release ledger parsing and latest release readiness summaries."""
 
@@ -140,7 +182,13 @@ class ReleaseStatusService:
         build_label = str(build_entry.get("release_label") or "").strip()
         return bool(entry_version and entry_version == build_version and entry_channel == build_channel and entry_label == build_label)
 
-    def source_freshness_payload(self, source_root: Path, build_recorded_at: str) -> dict:
+    def source_freshness_payload(
+        self,
+        source_root: Path,
+        build_recorded_at: str,
+        *,
+        artifact_path: Path | None = None,
+    ) -> dict:
         root = Path(source_root)
         build_epoch = _parse_recorded_at_epoch(build_recorded_at)
         out = {
@@ -151,6 +199,9 @@ class ReleaseStatusService:
             "latest_source_newest_path": "",
             "latest_source_newest_mtime": "",
             "latest_source_changed_after_build_sample": [],
+            "latest_source_touched_after_build_count": 0,
+            "latest_source_content_unchanged_after_build_count": 0,
+            "latest_source_freshness_basis": "mtime",
         }
         if build_epoch is None or not root.exists():
             return out
@@ -174,12 +225,35 @@ class ReleaseStatusService:
             return out
 
         changed.sort(key=lambda item: item[0], reverse=True)
+        content_changed = list(changed)
+        content_unchanged_count = 0
+        artifact = Path(artifact_path) if artifact_path else None
+        if artifact and artifact.exists():
+            rels = {rel for _mtime, rel in changed}
+            artifact_hashes = _artifact_hashes_for_paths(artifact, rels)
+            content_changed = []
+            for mtime, rel in changed:
+                path = root / rel
+                artifact_hash = artifact_hashes.get(rel)
+                if artifact_hash:
+                    try:
+                        current_hash = _sha256_file(path)
+                    except Exception:
+                        content_changed.append((mtime, rel))
+                        continue
+                    if current_hash == artifact_hash:
+                        content_unchanged_count += 1
+                        continue
+                content_changed.append((mtime, rel))
+            out["latest_source_freshness_basis"] = "content"
         if newest_mtime > 0:
             out["latest_source_newest_path"] = newest_path
             out["latest_source_newest_mtime"] = datetime.fromtimestamp(newest_mtime).isoformat()
-        out["latest_source_changed_after_build_count"] = len(changed)
-        out["latest_source_changed_after_build_sample"] = [rel for _mtime, rel in changed[:12]]
-        if changed:
+        out["latest_source_touched_after_build_count"] = len(changed)
+        out["latest_source_content_unchanged_after_build_count"] = content_unchanged_count
+        out["latest_source_changed_after_build_count"] = len(content_changed)
+        out["latest_source_changed_after_build_sample"] = [rel for _mtime, rel in content_changed[:12]]
+        if content_changed:
             out["latest_source_status"] = "changed-after-build"
             out["latest_artifact_stale"] = True
             out["latest_source_changed_after_build"] = True
@@ -326,7 +400,11 @@ class ReleaseStatusService:
             "latest_validation_record_artifact_matches": bool(validation_record.get("artifact_matches")),
         })
         if source_root is not None:
-            freshness = self.source_freshness_payload(Path(source_root), str(latest_build.get("recorded_at") or ""))
+            freshness = self.source_freshness_payload(
+                Path(source_root),
+                str(latest_build.get("recorded_at") or ""),
+                artifact_path=Path(str(latest_build.get("artifact_path") or "")),
+            )
             out.update(freshness)
             if freshness.get("latest_source_changed_after_build"):
                 out["latest_readiness_state"] = "source-changed-after-build"

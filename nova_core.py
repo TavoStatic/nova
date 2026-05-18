@@ -5276,6 +5276,8 @@ def tool_pipeline(command_text: str = "pipeline help"):
 def tool_os_capability(request: str = "", capability: str = "", args: Optional[dict] = None):
     from services.os_capability_operator_outbox import publish_os_capability_notice
     from services.os_script_controller import OS_SCRIPT_CONTROLLER_SERVICE
+    from services.nova_runtime_context import OPERATOR_OUTBOX_FILE
+    from services.operator_outbox import OPERATOR_OUTBOX_SERVICE
 
     capability_name = str(capability or "").strip()
     capability_args = dict(args or {}) if isinstance(args, dict) else {}
@@ -5300,6 +5302,13 @@ def tool_os_capability(request: str = "", capability: str = "", args: Optional[d
     if isinstance(result, dict) and result.get("operator_outbox"):
         result = dict(result)
         result["operator_notice"] = publish_os_capability_notice(result)
+    elif isinstance(result, dict) and bool(result.get("ok")) and str(result.get("status") or "") == "success":
+        result = dict(result)
+        result["operator_reconcile"] = OPERATOR_OUTBOX_SERVICE.reconcile_os_capability_notices(
+            OPERATOR_OUTBOX_FILE,
+            capability=capability_name,
+            cleared_reasons={"contract_stale", "capability_evidence_not_ok"},
+        )
     return result
 
 

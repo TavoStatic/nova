@@ -247,6 +247,59 @@ class TestOperatorOutboxService(unittest.TestCase):
             "new",
         )
 
+    def test_reconcile_os_capability_notices_stales_restored_contract_pressure(self):
+        with TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "operator_outbox.jsonl"
+            stale = OPERATOR_OUTBOX_SERVICE.append_notice(
+                path,
+                source="os_capability",
+                severity="attention",
+                title="OS capability contract stale: verify_ollama_model",
+                message="hash mismatch",
+                dedupe_key="os_capability|verify_ollama_model|contract_stale|aaa",
+                payload={
+                    "capability": "verify_ollama_model",
+                    "blocked_reason": "contract_stale",
+                },
+                now_fn=lambda: 1000.0,
+                uuid_fn=lambda: "oldoscap",
+            )
+            kept = OPERATOR_OUTBOX_SERVICE.append_notice(
+                path,
+                source="os_capability",
+                severity="attention",
+                title="OS capability request invalid: verify_ollama_model",
+                message="bad args",
+                dedupe_key="os_capability|verify_ollama_model|invalid_args|bbb",
+                payload={
+                    "capability": "verify_ollama_model",
+                    "blocked_reason": "invalid_args",
+                },
+                now_fn=lambda: 1001.0,
+                uuid_fn=lambda: "keepargs",
+            )
+
+            result = OPERATOR_OUTBOX_SERVICE.reconcile_os_capability_notices(
+                path,
+                capability="verify_ollama_model",
+                cleared_reasons={"contract_stale"},
+                now_fn=lambda: 1010.0,
+            )
+            events = OPERATOR_OUTBOX_SERVICE.read_events(path, limit=10)
+
+        self.assertTrue(stale.get("ok"))
+        self.assertTrue(kept.get("ok"))
+        self.assertEqual(result.get("staled_count"), 1)
+        by_key = {event.get("dedupe_key"): event for event in events}
+        self.assertEqual(
+            by_key["os_capability|verify_ollama_model|contract_stale|aaa"].get("status"),
+            "stale",
+        )
+        self.assertEqual(
+            by_key["os_capability|verify_ollama_model|invalid_args|bbb"].get("status"),
+            "new",
+        )
+
     def test_work_tree_notice_asks_for_operator_information_from_blocked_task(self):
         notices = OPERATOR_OUTBOX_SERVICE.notices_from_work_tree_state(
             {
