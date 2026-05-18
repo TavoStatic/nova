@@ -362,6 +362,43 @@ class OperatorOutboxService:
             self._write_events(path, rows)
         return {"ok": True, "staled_count": staled, "active_notice_count": len(active_keys)}
 
+    def reconcile_autonomy_notices(
+        self,
+        path: Path,
+        *,
+        active_notices: list[dict[str, Any]] | None = None,
+        now_fn: Callable[[], float] | None = None,
+    ) -> dict[str, Any]:
+        """Close autonomy notices whose current autonomy decision no longer supports them."""
+        active_keys = {
+            _safe_text(notice.get("dedupe_key"), 220)
+            for notice in _safe_list(active_notices)
+            if isinstance(notice, dict) and _safe_text(notice.get("dedupe_key"), 220)
+        }
+        rows = self._load_events(path)
+        if not rows:
+            return {"ok": True, "staled_count": 0, "active_notice_count": len(active_keys)}
+
+        now_value = float((now_fn or time.time)())
+        staled = 0
+        for event in rows:
+            if _safe_status(event.get("status")) in CLOSED_NOTICE_STATUSES:
+                continue
+            if _safe_text(event.get("source"), 120) != "autonomy_maintenance":
+                continue
+            dedupe = _safe_text(event.get("dedupe_key"), 220)
+            if dedupe and dedupe in active_keys:
+                continue
+            event["status"] = "stale"
+            event["status_note"] = "autonomy_pressure_cleared"
+            event["updated_ts_epoch"] = now_value
+            event["updated_ts"] = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(now_value))
+            staled += 1
+
+        if staled:
+            self._write_events(path, rows)
+        return {"ok": True, "staled_count": staled, "active_notice_count": len(active_keys)}
+
     def respond_to_notice(
         self,
         path: Path,

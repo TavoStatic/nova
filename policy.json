@@ -5,7 +5,7 @@
   "web": {
     "search_provider": "searxng",
     "enabled": true,
-    "search_api_endpoint": "http://127.0.0.1:8081/search",
+    "search_api_endpoint": "http://localhost:8081/search",
     "allow_domains": [
       "api.weather.gov",
       "weather.com",

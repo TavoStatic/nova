@@ -184,16 +184,30 @@ def _append_autonomy_orchestrator_ledger(row: dict) -> None:
 def _publish_operator_notice_from_autonomy(packet: dict, execution: dict) -> dict:
     notice = OPERATOR_OUTBOX_SERVICE.notice_from_autonomy(packet, execution)
     if not notice:
-        return {"ok": True, "published": False, "reason": "no_operator_notice_needed"}
+        reconcile_result = OPERATOR_OUTBOX_SERVICE.reconcile_autonomy_notices(
+            OPERATOR_OUTBOX,
+            active_notices=[],
+        )
+        return {
+            "ok": bool(reconcile_result.get("ok", True)),
+            "published": False,
+            "reason": "no_operator_notice_needed",
+            "staled_count": int(reconcile_result.get("staled_count", 0) or 0),
+        }
     try:
         result = OPERATOR_OUTBOX_SERVICE.append_notice(OPERATOR_OUTBOX, **notice)
     except Exception as exc:
         return {"ok": False, "published": False, "reason": f"operator_outbox_failed:{exc}"}
+    reconcile_result = OPERATOR_OUTBOX_SERVICE.reconcile_autonomy_notices(
+        OPERATOR_OUTBOX,
+        active_notices=[notice],
+    )
     return {
-        "ok": bool(result.get("ok", False)),
+        "ok": bool(result.get("ok", False)) and bool(reconcile_result.get("ok", True)),
         "published": bool(result.get("ok", False)) and not bool(result.get("deduped", False)),
         "deduped": bool(result.get("deduped", False)),
         "event_id": str((result.get("event") or {}).get("id") or ""),
+        "staled_count": int(reconcile_result.get("staled_count", 0) or 0),
     }
 
 

@@ -182,6 +182,54 @@ class TestOperatorOutboxService(unittest.TestCase):
             "new",
         )
 
+    def test_reconcile_autonomy_notices_stales_cleared_pressure(self):
+        with TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "operator_outbox.jsonl"
+            stale = OPERATOR_OUTBOX_SERVICE.append_notice(
+                path,
+                source="autonomy_maintenance",
+                severity="attention",
+                title="Old autonomy pressure",
+                message="This pressure cleared.",
+                dedupe_key="block_with_reason|block_with_reason|blocked|old_reason|posture_red",
+                now_fn=lambda: 1000.0,
+                uuid_fn=lambda: "oldauto",
+            )
+            kept = OPERATOR_OUTBOX_SERVICE.append_notice(
+                path,
+                source="autonomy_maintenance",
+                severity="attention",
+                title="Current autonomy pressure",
+                message="This pressure is still active.",
+                dedupe_key="block_with_reason|block_with_reason|blocked|current_reason|runtime_evidence_stale",
+                now_fn=lambda: 1001.0,
+                uuid_fn=lambda: "keepauto",
+            )
+
+            result = OPERATOR_OUTBOX_SERVICE.reconcile_autonomy_notices(
+                path,
+                active_notices=[
+                    {
+                        "dedupe_key": "block_with_reason|block_with_reason|blocked|current_reason|runtime_evidence_stale",
+                    }
+                ],
+                now_fn=lambda: 1010.0,
+            )
+            events = OPERATOR_OUTBOX_SERVICE.read_events(path, limit=10)
+
+        self.assertTrue(stale.get("ok"))
+        self.assertTrue(kept.get("ok"))
+        self.assertEqual(result.get("staled_count"), 1)
+        by_key = {event.get("dedupe_key"): event for event in events}
+        self.assertEqual(
+            by_key["block_with_reason|block_with_reason|blocked|old_reason|posture_red"].get("status"),
+            "stale",
+        )
+        self.assertEqual(
+            by_key["block_with_reason|block_with_reason|blocked|current_reason|runtime_evidence_stale"].get("status"),
+            "new",
+        )
+
     def test_work_tree_notice_asks_for_operator_information_from_blocked_task(self):
         notices = OPERATOR_OUTBOX_SERVICE.notices_from_work_tree_state(
             {
@@ -534,6 +582,44 @@ class TestOperatorOutboxService(unittest.TestCase):
         self.assertEqual(result.get("published_count"), 0)
         self.assertEqual(result.get("staled_count"), 1)
         self.assertEqual(events[0].get("status"), "stale")
+
+    def test_autonomy_publish_stales_old_autonomy_request_when_pressure_clears(self):
+        with TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "operator_outbox.jsonl"
+            OPERATOR_OUTBOX_SERVICE.append_notice(
+                path,
+                source="autonomy_maintenance",
+                severity="attention",
+                title="Nova needs operator attention: block_with_reason",
+                message="I am stuck on block_with_reason. decision_not_recommend_action; rejections: posture_red",
+                dedupe_key="block_with_reason|block_with_reason|blocked|decision_not_recommend_action|posture_red",
+                now_fn=lambda: 3000.0,
+                uuid_fn=lambda: "oldauto",
+            )
+
+            with mock.patch.object(autonomy_maintenance, "OPERATOR_OUTBOX", path):
+                result = autonomy_maintenance._publish_operator_notice_from_autonomy(
+                    {
+                        "decision": "recommend_action",
+                        "recommended_action": {
+                            "action_type": "pulse_status",
+                            "requires_ack": False,
+                        },
+                    },
+                    {
+                        "action_type": "pulse_status",
+                        "result": "success",
+                        "gate_reason": "execution_allowed",
+                        "refusal_reasons": [],
+                    },
+                )
+                events = OPERATOR_OUTBOX_SERVICE.read_events(path, limit=10)
+
+        self.assertTrue(result.get("ok"))
+        self.assertFalse(result.get("published"))
+        self.assertEqual(result.get("staled_count"), 1)
+        self.assertEqual(events[0].get("status"), "stale")
+        self.assertEqual(events[0].get("status_note"), "autonomy_pressure_cleared")
 
     def test_summary_keeps_open_notices_visible_when_latest_event_is_closed(self):
         with TemporaryDirectory() as temp_dir:
