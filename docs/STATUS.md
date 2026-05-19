@@ -1,361 +1,143 @@
 # Nova Status
 
-Date: 2026-05-06
+Date: 2026-05-18
 
-## Release-Clean Candidate (May 6, 2026)
+## Current Read
 
-Current release-clean read:
+Nova is in a release-candidate posture for the current base runtime source.
 
-- workspace runtime validation is green:
-	- `python health.py`
-	- `python doctor.py`
-	- `python smoke_test.py --tier base`
-	- `python scripts\run_regression.py`
-- `nova runtime-status` now reports the live guard and core processes as `running` when Windows hides command-line details but the runtime identity PID and creation time still match
-- `nova.ps1` now forwards launcher output while preserving child-process exit codes, so package/install commands no longer hide logs or turn dependency failures into false success
-- package boundary enforcement now excludes and verifies absence of local `codex_reflect_*` scratch directories, matching the documented disposable-artifact boundary in `docs/PACKAGING_MATRIX.md`
-- the control panel now labels work-tree counts as total, open, working, and ready branches so active trees do not look like every historical branch is running
-- autonomy maintenance now archives stale CLI prompt-shell work trees after they age out, keeping the scheduled-work surface focused on real lanes like Core Thinning and Generated Queue
-- latest release-clean package candidate:
-	- label: `release_clean_20260506`
-	- exact artifact, version, verification, and promotion state are tracked by `.\nova.cmd package-readiness`
-- same-machine short-path extracted-package validation passed for the May 6 rebuild:
-	- `.\nova.cmd package-verify .`
-	- `.\nova.cmd install`
-	- `.\nova.cmd doctor`
-	- `.\nova.cmd runtime-status`
-	- `.\nova.cmd smoke-base --fix`
-	- `.\nova.cmd test`
-- promotion note is intentionally limited: workspace validation and same-machine short-path extracted-package validation passed on May 6, 2026; independent fresh-machine or VM validation is still pending
+Current evidence:
 
-Current remaining release note:
+- latest source commit: `ccc2767 Close Nova intent and release lanes`
+- latest package artifact: `runtime/exports/release_packages/nyo-system-base-rc-2026.05.18.23-proof-shape-closed-20260518_203219.zip`
+- release validation result: `pass-with-notes`
+- blocking release issues: none
+- promotion judgment: `ready`, `already_promoted`
+- release readiness: `ready-with-notes`
+- Work Tree: `Signal Intake: Runtime Governance` is `complete`, with `0` open tasks
+- operator help surface reports no active stuck point
+- regression status: `OK`
+- validation artifact truth: `ok`
 
-- treat the May 6 release-clean package as a release candidate, not a final broadly deployable release, until the independent fresh-machine validation checklist is completed.
+This is not final broad production language yet. The package is still waiting on independent fresh-machine or VM validation and the interactive `nova run` front door was not exercised by the noninteractive release validator.
 
-## Packaging Checkpoint (March 30, 2026)
+## Closed Lanes
 
-This checkpoint is historical context for the first productization pass. Current base-package readiness is tracked by the May 6 release-clean section above and by `.\nova.cmd package-readiness`.
+The current code/release evidence closes these four lanes:
 
-Verified then:
+- Chat intent core: CLI and HTTP chat routing now carry turn intent, continuation state, and context before deciding whether a tool or runtime self-report is needed.
+- Proof reply shape: grounded self-report replies use live control status and Work Tree evidence, and completed branches no longer leak as current stuck work.
+- OS capability chain: registered PowerShell capabilities now run through a contract chain of registry, hash verification, argument validation, authority check, script execution, ledger evidence, and result judgment.
+- Operator outbox: Work Tree, autonomy pressure, and OS capability gaps can surface durable operator notices instead of disappearing or waiting for a user chat turn.
 
-- `nova install` is now a real bootstrap path rather than a placeholder
-- fresh canonical package docs now exist for bootstrap, handoff, and readiness:
-	- `docs/BOOTSTRAP.md`
-	- `docs/HANDOFF.md`
-	- `docs/BASE_PACKAGE_READINESS.md`
-- the release artifact strategy is now defined as a source-bootstrap zip built by `nova package-build`
-- release governance now includes `nova package-verify`, `nova package-ledger`, `nova package-status`, `nova package-promote`, auto-versioned daily RC builds, and a build ledger at `runtime/exports/release_packages/release_ledger.jsonl`
-- release governance now also tracks verification events and a ship-gate summary through `nova package-readiness`
-- the package validation gate is now split into `nova smoke-base --fix` and the Ollama-backed `nova smoke --fix`
-- the repo now has a real Windows installer build path via `nova installer-build`, which compiles the existing Inno Setup wrapper from a verified package zip when Inno Setup is installed
-- installer artifacts now participate in the shared release discipline through `nova installer-verify`, `nova installer-ledger`, `nova installer-status`, `nova installer-readiness`, and `nova installer-promote`
-- launcher validation is green on the current workspace path:
-	- `nova doctor`
-	- `nova runtime-status`
-	- `nova package-verify`
-	- `nova package-ledger`
-	- `nova smoke-base --fix`
-	- `nova smoke --fix`
-	- `nova test`
-- compact regression remains green on the latest run: `53` tests, `OK`
-- near-clean staged package validation is green:
-	- staged `nova package-verify .`
-	- staged `nova install`
-	- staged `nova doctor`
-	- staged `nova runtime-status`
-	- staged `nova test`
+These lanes are source-backed by:
 
-Current packaging posture:
+- `routing/context_router.py`
+- `services/nova_turn_heuristics.py`
+- `services/nova_planner_contract.py`
+- `services/nova_reply_sequence.py`
+- `services/nova_grounded_self_report.py`
+- `services/operator_outbox.py`
+- `services/os_capability_registry.py`
+- `services/os_script_controller.py`
+- `services/os_capability_operator_outbox.py`
+- `tools/os_capabilities/os_capabilities.json`
+- `tools/os_capability_tool.py`
 
-- source package plus bootstrap command is now credible and documented
-- source-bootstrap zip artifact is now the canonical release candidate format
-- package boundary is defined and linked from the canonical docs index
-- remaining work is now about fresh-machine validation, dependency isolation, and release-candidate discipline
+## Current Validation
 
-## Stabilization Checkpoint (March 25, 2026)
-
-This checkpoint is historical context for the Phase 1/2 acceleration slice. The current release-clean posture is the May 6 section at the top of this file.
-
-Verified then:
-
-- full regression was green on that pass: `672` tests, `OK`
-- representative runtime path smoke remained green:
-	- `tests.test_run_test_session`
-	- `tests.test_http_identity_chat`
-	- `52` tests, `OK`
-- maintenance loop was healthy and applying validated micro-patches
-- safety envelope and kidney were still in `observe`
-
-Current governance posture as of May 6, 2026:
-
-- `policy.json` has `safety_envelope.mode` set to `enforce`
-- `policy.json` has `kidney.mode` set to `enforce`
-- release claims still need the May 6 package-readiness gate plus independent fresh-machine or VM validation before broad deployment language is appropriate
-
-New canonical docs for this slice:
-
-- `docs/PHASE2_SAFETY_ENVELOPE.md`
-- `docs/KIDNEY_SYSTEM.md`
-- `docs/PACKAGE_PRODUCT_ROADMAP.md`
-
-Latest local audit artifact:
-
-- `runtime/stability_audit_20260325_1419.md`
-
-## Active Runtime Loop
-
-Nova now has a first active-use loop built from existing subconscious and operator machinery rather than a new architecture layer.
-
-Current loop shape:
-
-- generated subconscious test definitions act as the standing work queue
-- latest report summaries act as opportunity detection for open work
-- existing priority metadata chooses the next candidate
-- the existing session runner executes the selected item
-- the control room now reports queue state and can run the next open item directly
-
-This keeps the loop grounded in artifacts Nova already produces:
-
-- subconscious report generation
-- generated regression definitions
-- priority sorting
-- CLI/HTTP parity execution
-- operator-visible report summaries
-
-## Product Direction
-
-Nova is becoming the runtime core of NYO AI SYSTEMS: a supervised local runtime for routing, memory, research, tool execution, operator-console operations, and governed self-change.
-
-The current evaluation is:
-
-- not primarily a chatbot product
-- not a bundled domain expert application
-- closer to an operator-run execution system with chat, CLI, and admin surfaces on top
-
-The important boundary for this phase is:
-
-- generic public runtime by default
-- domain specialization loaded explicitly through packs, policy, tools, or future product layers
-- no hidden dependency on bundled vertical-repo knowledge
-
-## Base Package Readiness
-
-Base-package readiness is now tracked explicitly in `docs/BASE_PACKAGE_READINESS.md`.
-
-Current read:
-
-- close to a base runtime package
-- moderately close to a base model package
-- not yet a clean drop-in distributable package
-
-Main remaining gaps:
-
-- packaging-boundary maintenance and enforcement as the repo evolves
-- bootstrap hardening and reduction of workstation-specific assumptions
-- cleaner runtime dependency isolation for broad validation
-- continued hardening of the consolidated operator handoff story
-
-Current decision:
-
-- dependency-isolation refactor is intentionally deferred until more of Nova's core behavior is finished
-- while deferred, avoid expanding direct live-runtime/model coupling beyond the current known hotspots
-- treat dependency isolation as a later hardening phase, not current feature work
-
-The packaging boundary now has a canonical matrix in `docs/PACKAGING_MATRIX.md`.
-
-The fresh-machine bootstrap path is now documented in `docs/BOOTSTRAP.md`.
-
-The single operator handoff flow now lives in `docs/HANDOFF.md`.
-
-## Current Verified State (March 23, 2026)
-
-- Focused operator-surface / subconscious / fulfillment validation is green: `c:/Nova/.venv/Scripts/python.exe -m unittest tests.test_subconscious_runner tests.test_http_session_manager tests.test_fit_evaluator tests.test_choice_presenter`
-- Latest focused operator-surface result: `60` tests, `OK`
-
-- Full discovered suite is green: `c:/Nova/.venv/Scripts/python.exe -m unittest discover -s tests -p "test_*.py"`
-- Latest full-suite result: `808` tests, `OK`
-- Latest focused runtime recovery result: `22` tests, `OK`
-- Latest focused domain-detachment results:
-	- `293` tests, `OK` for `tests.test_http_identity_chat tests.test_nova_http tests.test_core_identity_learning`
-	- `21` tests, `OK` for `tests.test_action_planner tests.test_task_engine`
-- Recent root-cause fixes now locked by regression:
-	- bare clarification probes such as `what?` are again classified as clarification turns instead of falling through as `other`
-	- heartbeat-only runtime status preserves persisted core identity when the stored pid is dead and an unrelated live `nova_core.py` process exists
-	- runtime recovery coverage now explicitly proves heartbeat-only fallback ignores unrelated live core processes
-- Public-repo domain posture is now explicit:
-	- bundled PEIMS repo knowledge has been detached from shipped runtime behavior
-	- local domain grounding now searches only the active knowledge pack instead of arbitrary repo knowledge files
-	- PEIMS-style domain help now resolves through sourced web research first, optional active knowledge packs second, and a truthful detached fallback otherwise
-- Targeted answer-path closure slice remains green on top of those repairs
-- Verified command slices:
-	- `c:/Nova/.venv/Scripts/python.exe -m unittest tests.test_core_identity_learning.TestCoreIdentityLearning.test_supervisor_reflective_retry_rule_handles_developer_location tests.test_core_identity_learning.TestCoreIdentityLearning.test_supervisor_profile_certainty_rule_handles_identity_profile_followup tests.test_core_identity_learning.TestCoreIdentityLearning.test_profile_state_followup_handles_are_you_sure_thats_all tests.test_core_identity_learning.TestCoreIdentityLearning.test_cli_open_probe_prompt_records_reply_contract_and_avoids_bypass_warning tests.test_core_identity_learning.TestCoreIdentityLearning.test_handle_supervisor_bypass_raises_in_dev_mode`
-	- `c:/Nova/.venv/Scripts/python.exe -m unittest tests.test_http_identity_chat.TestHttpIdentityChat.test_clarification_prompt_does_not_trigger_web_lookup tests.test_http_identity_chat.TestHttpIdentityChat.test_http_writes_action_ledger_record tests.test_http_identity_chat.TestHttpIdentityChat.test_http_reflective_followup_uses_learned_developer_location_relation tests.test_nova_http.TestNovaHttpProfile.test_developer_profile_certainty_challenge_stays_on_profile_thread tests.test_nova_http.TestNovaHttpProfile.test_developer_how_built_has_non_hallucinated_limit`
-	- `c:/Nova/.venv/Scripts/python.exe -m unittest tests.test_core_identity_learning.TestCoreIdentityLearning.test_supervisor_location_recall_rule_rejects_clarification_move tests.test_core_identity_learning.TestCoreIdentityLearning.test_supervisor_identity_history_rule_rejects_clarification_move tests.test_core_identity_learning.TestCoreIdentityLearning.test_cli_name_origin_turn_uses_supervisor_contract_without_bypass_warning tests.test_core_identity_learning.TestCoreIdentityLearning.test_cli_identity_history_prompt_uses_supervisor_contract_without_bypass_warning tests.test_core_identity_learning.TestCoreIdentityLearning.test_cli_creator_followup_uses_supervisor_contract_without_bypass_warning tests.test_nova_http.TestNovaHttpProfile.test_http_name_origin_turn_uses_supervisor_contract_without_bypass_warning tests.test_nova_http.TestNovaHttpProfile.test_http_creator_followup_uses_supervisor_contract_without_bypass_warning tests.test_http_identity_chat.TestHttpIdentityChat.test_http_llm_fallback_appends_learning_invitation`
-	- `c:/Nova/.venv/Scripts/python.exe -m unittest tests.test_http_identity_chat tests.test_nova_http tests.test_core_identity_learning`
-	- `c:/Nova/.venv/Scripts/python.exe -m unittest tests.test_action_planner tests.test_task_engine`
-- Broad rerun of the three answer-path suites no longer showed the prior assertion failures, but the run was interrupted later by a live `ollama_chat(...)` dependency during an unrelated test; do not treat that interruption as an answer-path regression
-- Supervisor contract: documented in `docs/SUPERVISOR_CONTRACT.md`
-- Hard quality bar: documented through `docs/SUPERVISOR_CONTRACT.md`, the regression contracts, and the compact `nova test` lane
-- Move-first and continuation coverage now lives in the supervisor, turn-direction, and followup service tests instead of a standalone stress-harness file
-- Architectural seams landed:
-	- followup move classification now lives in `followup_move_classifier.py` and is covered through the supervisor/turn-direction regression lane
-	- active-task context and binding rules now live in `active_task_constraints.py` and are covered through the supervisor/turn-direction regression lane
-	- `nova_http.py` control-room ownership is now narrowed to transport/session glue plus stable wrappers; service modules own control auth, chat auth, telemetry and exports, control assets, subconscious live summaries, generated test-session investigation, test-session root discovery, and operator macro/backend command path logic
-- Enforcement: supervisor-bypass warnings now carry categorized allowlist metadata, dev mode raises on unallowlisted bypasses via `NOVA_DEV_MODE=1`, each turn records a structured `routing_decision`, and the closed answer-path slice now prefers supervisor-owned reply contracts over generic open fallback
-- Migrated families on the outcome + reply-contract layer:
-	- `set_location`
-	- `apply_correction`
-	- `store_fact`
-	- `weather_lookup` clarify + execution paths
-	- `web_research_family` for explicit online/search and deep-search prompts
-	- `name_origin` identity/history followups for saved-story recall
-	- `retrieval_followup` for result selection, continued-results followups, and retrieval meta replies
-- Parity: CLI and HTTP are aligned on the migrated paths and both persist `reply_contract` / `reply_outcome`
-- Health tooling: `scripts/health_check.py` provides a one-command suite baseline check
-
-## Current Architecture
-
-Nova now has:
-
-- one planner-owned routing spine for command/tool selection
-- a documented supervisor contract for deterministic ownership
-- shared core execution for supervisor-selected actions
-- a reply contract / outcome layer for key deterministic acknowledgment families
-- ledger and reflection tracking for reply contracts on migrated paths
-
-## Recently Completed
-
-- migrated `set_location` to semantic outcome + renderer + ledger/reflection contracts
-- migrated `apply_correction` to semantic outcome + renderer + ledger/reflection contracts
-- migrated `store_fact` to semantic outcome + renderer + ledger/reflection contracts
-- migrated the full `weather_lookup` family, including execution acknowledgments, to the shared contract layer
-- repaired the research handler shim so deep-search and recap flows no longer fail building the research tool handler map
-- migrated the `name_origin` identity/history recall family into supervisor-owned deterministic replies
-- migrated `retrieval_followup` into supervisor-owned continuation handling with reply contracts for result selection, continued-results followups, and retrieval meta replies
-- added per-turn `routing_decision` metadata plus categorized allowlist-backed bypass enforcement for remaining fallback families
-- migrated the `identity_history_family` followup slice so creator-thread `what else?` and explicit build-history prompts are now supervisor-owned handle paths with reply contracts
-- migrated the `open_probe_family` slice so clarification prompts and safe open-ended probes now resolve through supervisor-owned handle execution with reply contracts
-- migrated `last_question_recall` so `what was my last question?` now resolves through supervisor-owned handle execution with reply contracts
-- migrated `rules_list` so `do you have any rules` now resolves through supervisor-owned handle execution with reply contracts
-- reduced false supervisor-bypass warning noise by delaying bypass warnings until after deterministic handle/followup/store paths have had a chance to claim the turn
-- closed the open answer-path cleanup slice so reflective retry, profile certainty, identity history, and open-probe families are explicitly supervisor-owned handle paths
-- removed the broad implicit blessing for generic open fallback candidates; unmatched open turns now count as real bypasses unless they are explicitly categorized
-- forced CLI and HTTP unmatched open turns through the existing `open_probe.safe_fallback` contract instead of continuing into generic planner / LLM fallback
-- tightened weak clarifier handling so bare `what?` is no longer over-owned as an open-probe clarification
-- kept CLI and HTTP aligned on migrated deterministic behavior
-- added an initial move-first stress harness covering bare values, corrections, declarations, selections, continuations, meta/challenge turns, active-task ambiguity, retrieval followups, weather followups, and conversational non-tool statements
-- extracted the first architectural seam by moving followup move classification and its supporting heuristics into `followup_move_classifier.py`, while keeping supervisor-compatible entry points stable
-- added regression coverage through the supervisor/turn-direction lane so classifier behavior stays locked independently of ad hoc route ordering
-- extracted the next architectural seam by moving active-task context resolution and pending-thread bindings into `active_task_constraints.py`, while keeping supervisor rule entry points stable
-- added regression coverage through the supervisor/turn-direction lane so active-task bindings stay locked independently of supervisor rule ordering
-- kept sqlite cleanup stable and avoided reintroducing the prior connection leak / resource-warning path
-- fixed teach-proposal manifests so generated proposal zips carry forward `patch_revision` metadata and preview as eligible patches
-- hardened live patch apply with a behavioral validation gate plus rollback on behavioral regression
-- exposed patch-readiness telemetry in the control room so operators can see revision, preview queue state, and validated-apply readiness
-- detached bundled PEIMS knowledge from the public repo runtime
-- removed direct runtime fallbacks that read `knowledge/peims/` content from shipped code paths
-- constrained repo-local topic grounding to the active knowledge pack so domain content is operator-supplied rather than silently bundled
-- updated HTTP and core identity tests to lock the new detached-domain contract
-- deleted tracked `knowledge/peims/*.txt` content from the repo working set and ignored future local PEIMS drops via `.gitignore`
-- turned subconscious hourly findings into generated review-first test-session definitions and surfaced the latest subconscious summary in the operator console
-- improved fulfillment evaluation and choice presentation with weighted fit scoring, stronger option ordering, and concise plurality reasons
-- added an operator command deck inside the control console so Nova can be driven from the operator surface without switching to the chat page
-- added one-click generated-pack execution for subconscious-generated regression sessions from the operator console
-- added a priority-targeted generated-pack mode so the operator can run the highest-value subconscious regressions first
-- surfaced generated-session priority rationale directly in the operator dropdown so ranking choices are visible before execution
-- added browser mic and speech-output controls to the operator command deck for hands-free operator prompting
-- added a shared saved operator-macro catalog used by the control deck and the local `nova operator` CLI mode
-- added an operator-session filter in the Sessions view so operator-driven threads can be isolated from ordinary chat traffic
-- tagged operator timeline events by source and mode so manual, CLI, and macro-driven prompts are distinguishable in runtime history
-- added placeholder-aware operator macros with backend rendering so the control deck and CLI share the same parameterized prompt path
-- added a standing generated-session work queue derived from subconscious-generated definitions plus latest report status
-- added control-room queue reporting and a one-click `Run Next Queue Item` action that selects the highest-priority non-green generated session and executes it through the existing runner
-- added a one-click `Investigate Next Queue Item` action that turns the next open generated-session drift into an operator-session prompt through the existing macro/session flow
-- updated `Run Next Queue Item` so the control room auto-selects the newest parity report after execution
-- tightened generated-session parity reporting so route-summary drift now counts as a real CLI/HTTP drift signal instead of being silently ignored
-- pinned `subconscious_fulfillment-fallthrough-family_clarified-second-turn.json` as a deterministic CLI/HTTP parity regression target
-- burned down the full repeated-weak-pressure family by moving vague weak-pressure prompts and soft check-ins onto shared deterministic smalltalk/open-probe paths and aligning the CLI/HTTP route trace
-- added a narrow `queue_status` capability so Nova can inspect the standing generated work queue from chat and report the next open regression item through the normal tool/ledger path
-- fixed the root follow-up seam for planner-owned direct tools by projecting tool results into shared conversation state, so queue-status replies now support deterministic follow-up reasoning instead of falling through to raw LLM chat
-
-## Validation
-
-Current compact validation:
-
-- date: `2026-05-06`
-- `.\nova.cmd test`: `319` tests, `OK`
-- data-lane focused suite: `52` tests, `OK`
-- `.\nova.cmd package-readiness`: `ready-with-notes` for `2026.05.06.2`
-
-Current full-discovery status:
-
-- date: `2026-05-06`
-- command: `.\.venv\Scripts\python.exe -m unittest discover -s tests`
-- observed result: `1694` tests, `OK`
-- cleanup closed stale full-discovery expectations plus test-isolation leaks in HTTP/weather, Kidney promoted-definition scanning, legacy control branding/timeline expectations, and CLI clean-slate weather assertion coverage
-- full-discovery is now green on the local workspace; independent fresh-machine or VM validation remains the final release-readiness gap
-
-Run manually:
+Full regression:
 
 ```powershell
-c:/Nova/.venv/Scripts/python.exe -m unittest discover -s tests -p "test_*.py"
+.\.venv\Scripts\python.exe scripts\run_regression.py all
 ```
 
-Quick health check:
+Result:
+
+- unit lane: `528` tests, `OK`, `1` skipped
+- behavior lane: `561` tests, `OK`, `100` skipped
+- integration lane: `84` tests, `OK`
+- `runtime/regression_status.json`: `status=OK`
+- test profile inventory: no gaps, no drift, no unclassified tests
+- validation artifact truth: no hidden LLM-unavailable failure
+
+Release validation for `.23`:
+
+- `nova package-verify .`: passed inside extracted package
+- `nova install`: passed inside extracted package
+- `nova doctor`: passed
+- `nova runtime-status`: passed
+- `nova wiring-check --offline`: passed, `72` checks, `0` failed
+- `nova smoke-base --fix`: passed
+- `nova test`: passed
+- temporary web UI start/stop validation: passed
+
+Nonblocking notes from release validation:
+
+- fresh-machine or VM independence is not proven by same-machine extracted-package validation
+- `nova run` interactive front door was not exercised by the noninteractive validation runner
+
+## Current Architecture Posture
+
+Nova is no longer only a chat runtime. It is a local AI runtime with:
+
+- CLI and HTTP chat front doors
+- a planner/intent spine
+- Work Tree task pressure
+- operator-visible status and outbox surfaces
+- OS capability contracts
+- release and validation evidence
+- memory, runtime, web, voice, and control surfaces
+
+The current root rule for chat behavior is:
+
+- understand the user's intent first
+- do not route only because a word or phrase appeared
+- use tools only when the intent and context require a tool
+- answer from live evidence when the user asks about Nova's internal state
+
+## Remaining Production Gaps
+
+Before calling this a full production package, finish or prove:
+
+- independent fresh-machine or VM package validation
+- interactive `nova run` validation against the current artifact
+- Git LFS installation/configuration for Piper assets on development and release machines
+- a production packaging decision for whether Piper remains bundled or moves to a bootstrap-fetch path
+- a follow-up assessment of LEAH and the control panel before shifting momentum there
+
+## Git And Asset Notes
+
+The current source commit intentionally excludes local Piper binary dirt.
+
+The repo tracks these Piper assets through Git LFS pointers:
+
+- `piper/espeak-ng.dll`
+- `piper/models/en_US-lessac-medium.onnx`
+- `piper/onnxruntime.dll`
+- `piper/onnxruntime_providers_shared.dll`
+- `piper/piper.exe`
+- `piper/piper_phonemize.dll`
+
+On the current machine, `git lfs` is not installed and local Git LFS filters were configured to pass files through. The working binaries matched the hashes and sizes declared by the LFS pointers, so they were local materialized payloads rather than source changes. They were marked `skip-worktree` locally to keep Git status clean without committing binary payloads.
+
+Proper fix for another machine:
 
 ```powershell
-c:/Nova/.venv/Scripts/python.exe scripts/health_check.py
+git lfs install
+git lfs pull
 ```
 
-## Remaining Debt
+## Resume Order
 
-- `nova_core.py` is still the main structural risk because too many concerns remain centralized there
-- broad suite completion still depends on isolating or mocking live `ollama_chat(...)` calls in tests that are not part of the closed answer-path assertion slice
-- planner-owned command/tool paths and supervisor-owned deterministic paths are cleaner, but cleanup should continue removing dead or duplicated fallback branches that can no longer win under the contract-first model
-- some planner comments, prompts, and regression fixtures may still use PEIMS-shaped example text even though bundled PEIMS product content has been detached
+Use this order when resuming:
 
-## Current Answer-Path Position
+1. `docs/STATUS.md`
+2. `runtime/regression_status.json`
+3. `runtime/validation/release/latest_release_validation.json`
+4. `runtime/exports/release_packages/release_ledger.jsonl`
+5. `docs/BASE_PACKAGE_READINESS.md`
+6. `docs/ARCHITECTURE.md`
+7. `docs/SERVICES_INDEX.md`
 
-Closed answer-path expectations now are:
-
-- one enforced answer contract for the targeted open/followup slice
-- one safe fallback path via `open_probe.safe_fallback` for unmatched open turns
-- the same fallback posture in CLI and HTTP for that slice
-- clarification and identity-history followups should resolve through supervisor-owned handle rules rather than generic no-contract fallthrough
-
-## Enforcement Target
-
-- Target: keep shrinking uncategorized bypasses and dead legacy fallback branches without reintroducing generic open-fallback drift
-
-## Next Recommended Work
-
-1. prune answer-path branches that are now unreachable or redundant under the contract-first fallback model
-2. isolate broad-suite tests from live `ollama_chat(...)` dependencies so answer-path reruns finish deterministically
-3. keep shrinking the responsibility footprint of `nova_core.py`
-4. use the existing subconscious simulator only as a contract-audit stress lens for the closed answer-path slice, not as a new behavior layer
-
-## Documentation Rule
-
-Project documentation is centralized under `C:\Nova\docs`.
-
-- update `docs/STATUS.md` for project-state changes
-- update `docs/ARCHITECTURE.md`, `docs/SERVICES_INDEX.md`, `docs/OPERATIONS.md`, and tool/service tests for tool changes
-- use `docs/DOC_OWNERSHIP.md` to decide which doc owns a change
-- do not reintroduce root-level resume/status artifacts; the old March handoff files were removed because they created overlapping planning surfaces
-
-## Resume Guidance
-
-Primary current-state order:
-
-1. `C:\Nova\docs\STATUS.md`
-2. `.\nova.cmd package-readiness`
-3. `C:\Nova\docs\PHASE_CLOSEOUT_CHECKLIST.md`
-4. `C:\Nova\docs\HANDOFF.md`
-
-`This_is_nova` is append-only build history and a cross-system context guide. It is not the authority for current governance, release readiness, policy, runtime truth, or test results.
-
-Suggested resume prompt:
-
-```text
-review C:\Nova\docs\STATUS.md, then consult C:\Nova\This_is_nova for append-only build history
-```
+`This_is_nova` remains append-only build history. It is not the current authority for release readiness, policy, runtime state, or test results.

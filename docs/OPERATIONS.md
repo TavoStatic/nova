@@ -47,6 +47,22 @@ C:\Nova\nova.cmd smoke-base --fix
 C:\Nova\nova.cmd smoke --fix
 ```
 
+Run the current curated regression loop:
+
+```powershell
+C:\Nova\.venv\Scripts\python.exe C:\Nova\scripts\run_regression.py all
+```
+
+Run the current release-validation loop after building a candidate:
+
+```powershell
+C:\Nova\nova.cmd package-build --label <label>
+C:\Nova\nova.cmd package-verify
+C:\Nova\nova.cmd package-readiness
+C:\Nova\.venv\Scripts\python.exe C:\Nova\scripts\validate_release_package.py
+C:\Nova\nova.cmd package-promote --record runtime\exports\release_packages\validation_records\<candidate-validation-record>.md --result pass-with-notes
+```
+
 ## Typical Startup Sequence
 
 1. `nova.cmd install`
@@ -67,6 +83,7 @@ C:\Nova\nova.cmd test
 C:\Nova\nova.cmd webui-start --host 127.0.0.1 --port 8080
 C:\Nova\nova.cmd webui-status --port 8080
 C:\Nova\nova.cmd webui-stop
+```
 
 ## Bootstrap Notes
 
@@ -84,7 +101,6 @@ It does not install optional external services such as Ollama or SearXNG.
 `nova smoke-base --fix` is the package-level smoke gate that does not require Ollama.
 
 `nova smoke --fix` remains the model-backed runtime smoke gate.
-```
 
 ## Central Backend Command Console
 
@@ -155,6 +171,20 @@ Local-generated state is not source of truth and should stay out of normal Git h
 
 If the repo later gains a documented asset bootstrap or download step, those shipped assets can move into the local-only bucket in a separate policy change.
 
+Piper asset note:
+
+- Piper binaries are tracked through Git LFS pointers.
+- Development and release machines should have Git LFS installed before checkout or push work.
+- If Git LFS is missing, valid materialized binaries can appear as modified even when their hashes match the pointers.
+- Do not commit Piper binary payloads as ordinary Git changes unless the packaging policy intentionally changes.
+
+Expected setup:
+
+```powershell
+git lfs install
+git lfs pull
+```
+
 Current policy supports explicit memory scopes:
 
 - `private`: per-user only
@@ -176,7 +206,7 @@ Session definitions live under `tests/sessions/`. Runner outputs are written und
 Run the full automated suite:
 
 ```powershell
-C:\Nova\.venv\Scripts\python.exe -m unittest discover -s C:\Nova\tests
+C:\Nova\.venv\Scripts\python.exe C:\Nova\scripts\run_regression.py all
 ```
 
 Run the focused HTTP/privacy slice:
@@ -199,3 +229,5 @@ C:\Nova\.venv\Scripts\python.exe -m unittest \
 - `run.py`: voice chat front door using the shared voice interaction service
 - `run_tools.py`: voice/tool runner and registered-tool listing helper
 - `nova_guard.py`: supervisor/heartbeat management
+- `tools/os_capabilities/os_capabilities.json`: registered OS capability contracts
+- `services/operator_outbox.py`: durable Nova-to-operator notice lane

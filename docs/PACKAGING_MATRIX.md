@@ -1,7 +1,7 @@
 # Nova Packaging Matrix
 
-Date: 2026-03-25
-Last verified: 2026-05-06
+Date: 2026-05-18
+Last verified: 2026-05-18
 
 ## Purpose
 
@@ -47,7 +47,7 @@ Inputs intentionally supplied by the operator or deployment environment, rather 
 | `capabilities.json` | Shipped source | Yes | Declared capability inventory |
 | `scripts/` | Shipped source | Yes | Smoke, diagnostics, session replay, probes, and support tooling |
 | `nova_safety_envelope.py`, `kidney.py`, `autonomy_maintenance.py`, `subconscious_runner.py`, related subconscious modules | Shipped source | Yes | Runtime governance, maintenance orchestration, and unattended scenario generation |
-| `piper/`, `tts/` shipped runtime assets | Shipped assets | Yes, for now | Keep tracked until bootstrap/download path exists for recreating them |
+| `piper/`, `tts/` shipped runtime assets | Shipped assets | Yes, for now | Piper is tracked through Git LFS pointers; keep bundled until bootstrap/download path exists for recreating it |
 | `.venv/` | Generated local state | No | Local environment only |
 | `runtime/` | Generated local state | No | Runtime identity, heartbeat, session state, audits, exports |
 | `logs/` | Generated local state | No | Machine-local execution logs |
@@ -59,6 +59,7 @@ Inputs intentionally supplied by the operator or deployment environment, rather 
 | `updates/*.zip`, local patch proposals, snapshots | Disposable runtime artifacts | No | Generated upgrade artifacts, not base package definition |
 | `runtime/test_sessions/pending_review/`, `runtime/test_sessions/quarantine/`, `runtime/test_sessions/promotion_audit.jsonl` | Disposable runtime artifacts | No | Safety-envelope governance outputs and review queues |
 | `runtime/kidney/` | Disposable runtime artifacts | No | Kidney status, protect patterns, snapshots, and archives |
+| `runtime/operator_outbox.jsonl`, `runtime/os_capability_ledger.jsonl`, `runtime/os_capability_evidence/` | Generated local state | No | Operator notices and OS capability evidence are runtime truth, not package payload |
 | `full_suite_out.txt`, `*.log`, ad hoc output captures | Disposable runtime artifacts | No | Debug output only |
 | `codex_*` scratch files and directories | Disposable runtime artifacts | No | Local agent probes, reflection scratch space, pulse tests, and health traces |
 | `knowledge/packs/*` active pack content | Operator-provided inputs | No by default | Optional domain extension points loaded explicitly by operators |

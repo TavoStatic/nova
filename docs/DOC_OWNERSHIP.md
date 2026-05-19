@@ -1,6 +1,6 @@
 # Documentation Ownership
 
-Last verified: 2026-05-06
+Last verified: 2026-05-18
 
 Use this page when deciding where a change should be documented.
 
@@ -13,7 +13,7 @@ Use this page when deciding where a change should be documented.
 
 ## Architecture And Runtime Ownership
 
-- `ARCHITECTURE.md`: system shape, decision spine, routing map, and major component boundaries.
+- `ARCHITECTURE.md`: system shape, decision spine, routing map, OS capability chain, operator-outbox shape, and major component boundaries.
 - `SERVICES_INDEX.md`: services-by-domain map for the extracted service layer.
 - `SUPERVISOR_CONTRACT.md`: deterministic ownership, supervisor routing, and no-trigger-word routing principles.
 - `SEARCH_PROVIDER_ARCHITECTURE.md`: web/search provider roles and routing expectations.

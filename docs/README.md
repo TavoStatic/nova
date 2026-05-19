@@ -31,4 +31,11 @@ Nova should be read here as a supervised local AI runtime with an operator contr
 - [KIDNEY_SYSTEM.md](KIDNEY_SYSTEM.md): cleanup, retention, and runtime hygiene
 - [REAL_WORLD_TASKS.md](REAL_WORLD_TASKS.md): realistic operator-grade validation tasks
 
+## Current Runtime Surfaces To Know
+
+- Chat intent and proof replies are documented in [ARCHITECTURE.md](ARCHITECTURE.md) and mapped in [SERVICES_INDEX.md](SERVICES_INDEX.md).
+- OS capability contracts live under `tools/os_capabilities/` and route through `services/os_capability_registry.py`, `services/os_script_controller.py`, and `tools/os_capability_tool.py`.
+- Operator notices route through `services/operator_outbox.py` and write to `runtime/operator_outbox.jsonl`.
+- Current release evidence is tracked in [STATUS.md](STATUS.md), [RELEASE_ARTIFACT.md](RELEASE_ARTIFACT.md), and [BASE_PACKAGE_READINESS.md](BASE_PACKAGE_READINESS.md).
+
 Internal notes, local packs, and historical audit artifacts are intentionally kept out of this public docs index so the repo reads like a platform, not an internal handoff bundle.

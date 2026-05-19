@@ -1,9 +1,9 @@
 # NYO System Handoff
 
-Date: 2026-05-07
-Last verified: 2026-05-07
+Date: 2026-05-18
+Last verified: 2026-05-18
 
-Verification note: handoff commands remain source-first. The 2026-05-07 refresh aligned operator truth surfaces for runtime artifacts, provider telemetry, and SIS data-lane readiness. Independent fresh-machine or VM validation is still pending.
+Verification note: handoff commands remain source-first. The `2026.05.18.23` release candidate passed same-machine extracted-package validation and reports `ready-with-notes`; independent fresh-machine or VM validation is still pending.
 
 ## Purpose
 
@@ -64,6 +64,12 @@ Check:
 .\nova.cmd smoke-base --fix
 .\nova.cmd smoke --fix
 .\nova.cmd test
+```
+
+For the current release lane, the curated regression command is:
+
+```powershell
+.\.venv\Scripts\python.exe scripts\run_regression.py all
 ```
 
 If the candidate came from the local packaging flow rather than an extracted zip, verify the built artifact directly before handoff:

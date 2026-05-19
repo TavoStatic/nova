@@ -1,7 +1,7 @@
 # NYO System Phase Completion Assessment
 
-Date: 2026-04-01
-Last verified: 2026-05-06
+Date: 2026-05-18
+Last verified: 2026-05-18
 
 ## Purpose
 
@@ -28,15 +28,16 @@ The product direction is clear:
 
 The current problem is not lack of substance.
 
-The current problem is that the phase still has too many simultaneous finish lines:
+The current problem is no longer that the current source candidate lacks release truth. `2026.05.18.23` now has a matching source commit, extracted-package validation, promotion record, and Work Tree closure.
 
-- architecture consolidation
-- runtime hardening
-- packaging and installer work
-- governance maturity
-- operator handoff discipline
+The remaining phase problem is narrower:
 
-Each of those matters, but they do not all deserve equal priority in the current phase.
+- independent fresh-machine or VM validation is still pending
+- interactive `nova run` validation was not exercised by the noninteractive release validator
+- installer validation remains separate from the source-bootstrap package truth
+- LEAH and the control panel need a separate momentum assessment before the project shifts there
+
+Each of those matters, but they should not rewrite the current source/release truth: the `.23` source-bootstrap package is ready-with-notes, not production-final.
 
 ## What Is Actually Complete
 
@@ -114,37 +115,29 @@ That means the project is no longer operating purely from tribal memory.
 
 These are the items that still prevent this phase from being called truly complete.
 
-### 1. Installed Artifact Truth Is Not Fully Closed
+### 1. Independent Package Validation Is Not Fully Closed
 
-The workspace can pass checks that the installed copy still fails.
+The workspace and same-machine extracted package now agree for the `.23` source-bootstrap candidate.
 
-Recent same-machine installer validation proved this directly:
+What remains unproven:
 
-- the real installer built successfully
-- isolated base-only install worked
-- isolated guided install worked and created `.venv`
-- installed-copy `doctor` passed
-- installed-copy `runtime-status` exposed a real launcher/runtime issue in `nova.ps1`
+- independent fresh-machine or VM validation
+- interactive `nova run` validation from the current artifact
+- installer validation for the current source package
 
-That means the project still has a gap between:
+Until those are done, the project should keep `ready-with-notes` language instead of final production language.
 
-- repo truth
-- package truth
-- installed-copy truth
+### 2. Chat Intent And Proof Reply Lanes Are Closed For This Candidate
 
-Until those match, the phase is not truly done.
+The recent source lane closed the main HTTP/CLI chat intent and proof reply shape issues for this release candidate:
 
-### 2. HTTP Boundary Consolidation Is Still In Progress
+- intent/context routing is used before tool selection
+- internal self-report answers are grounded in live status and Work Tree evidence
+- completed Work Tree branches no longer leak as current stuck work
 
-The architecture is better than before, but not fully consolidated.
+Future HTTP cleanup can continue, but it is not currently the blocking reason for this candidate.
 
-The repo still carries explicit cleanup work around duplicated HTTP helpers and stale logic in `nova_http.py`.
-
-That matters because `nova_http.py` is one of the largest sources of branching work: transport glue, operator surface behavior, control-room payloads, and runtime truth all intersect there.
-
-Until the boundary cleanup is finished, changes in adjacent areas will keep reopening HTTP concerns.
-
-### 3. Governance Is Enforced But Still Needs Monitored Release Confidence
+### 3. Runtime Governance Is Enforced But Still Needs Monitored Release Confidence
 
 The repo has meaningful governance layers and the current policy has moved them into enforce mode:
 
@@ -157,7 +150,7 @@ It means the project should avoid claiming final governance maturity until enfor
 
 ### 4. Release Discipline Still Depends Too Much On Local Context
 
-The project now has proper release tools, but completion still depends too much on remembering what was recently tested, what was only tested in the workspace, and what was only tested from an extracted or installed copy.
+The project now has proper release tools, but completion still depends on making sure local runtime truth, extracted-package truth, and future clean-machine truth keep agreeing.
 
 The current phase needs one release-candidate truth that outranks local intuition.
 
@@ -237,14 +230,14 @@ This phase should be considered complete only when these are true:
 
 ### Must Close Now
 
-1. fix installed-copy runtime truth gaps, starting with the packaged `runtime-status` path
-2. finish the remaining `nova_http.py` duplicate/helper boundary cleanup
-3. rerun the release-candidate flow from artifact, not just from workspace
-4. rerun clean-machine or VM validation and record the result in the ledger
+1. rerun clean-machine or VM validation for `2026.05.18.23` and record the result in the ledger
+2. exercise the interactive `nova run` front door from the current artifact
+3. decide whether the next momentum lane is production packaging, LEAH, or the control panel
+4. keep release docs tied to the latest validation record instead of older phase notes
 
 ### Should Continue, But Behind The Main Objective
 
-1. governance monitoring after the enforced cycle completes
+1. runtime monitoring after the enforced cleanup/review cycles
 2. dependency isolation cleanup
 3. additional installer convenience and polish
 

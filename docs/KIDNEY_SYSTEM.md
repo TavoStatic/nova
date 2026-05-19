@@ -1,6 +1,6 @@
 # Kidney System
 
-Last verified: 2026-05-06
+Last verified: 2026-05-18
 
 Current policy posture: `kidney.mode` is `enforce` in `policy.json`.
 

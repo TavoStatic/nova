@@ -1,5 +1,7 @@
 # Privileged Pipeline Protocol
 
+Status: protocol scaffold only; no active data lane is present in the current source tree.
+
 This protocol exists so Nova can keep its main runtime under a normal user account while a narrow data lane runs under a different Windows identity.
 
 ## Goal
@@ -14,40 +16,38 @@ Only the protected pipeline worker runs under the trusted account.
 
 ```text
 runtime/
-└─ pipelines/
-   └─ sis_test/
-      ├─ requests/
-      ├─ responses/
-      └─ archive/
+`-- pipelines/
+    `-- <pipeline_id>/
+        |-- requests/
+        |-- responses/
+        `-- archive/
 ```
 
-1. Nova writes a request file into `requests/`
-2. The trusted worker claims it by renaming it to `.working.json`
-3. The worker executes the governed live query
-4. The worker writes a response file into `responses/`
-5. The processed request moves into `archive/`
+1. Nova writes a request file into `requests/`.
+2. The trusted worker claims it by renaming it to `.working.json`.
+3. The worker executes the governed live query.
+4. The worker writes a response file into `responses/`.
+5. The processed request moves into `archive/`.
 
 ## Entry Points
 
-- Queue/wait bridge:
-  - [C:\Nova\services\pipeline_privileged_bridge.py](C:/Nova/services/pipeline_privileged_bridge.py)
-- Worker loop:
-  - [C:\Nova\scripts\pipeline_worker.py](C:/Nova/scripts/pipeline_worker.py)
+- Queue/wait bridge: `services/pipeline_privileged_bridge.py`
+- Worker loop: `scripts/pipeline_worker.py`
 
-## Run the SIS Worker Under the Trusted Identity
+## Run A Worker Under The Trusted Identity
 
-From the trusted `guribe.tst` / district account session:
+From the trusted account session:
 
 ```powershell
 cd C:\Nova
-.\.venv\Scripts\python.exe .\scripts\pipeline_worker.py --pipeline sis_test
+.\.venv\Scripts\python.exe .\scripts\pipeline_worker.py --pipeline <pipeline_id>
 ```
 
 For a single request only:
 
 ```powershell
 cd C:\Nova
-.\.venv\Scripts\python.exe .\scripts\pipeline_worker.py --pipeline sis_test --once
+.\.venv\Scripts\python.exe .\scripts\pipeline_worker.py --pipeline <pipeline_id> --once
 ```
 
 ## Nova-Side Usage
@@ -56,9 +56,9 @@ cd C:\Nova
 from services.pipeline_privileged_bridge import run_privileged_pipeline_query
 
 result = run_privileged_pipeline_query(
-    "sis_test",
-    "student_lookup",
-    {"student_id": "12345"},
+    "<pipeline_id>",
+    "<operation>",
+    {"arg": "value"},
     row_limit=5,
     requested_by="nova_core",
     timeout_sec=60,
@@ -67,6 +67,6 @@ result = run_privileged_pipeline_query(
 
 ## Why This Protocol Exists
 
-- Nova should not need the whole runtime under the district identity
-- the SIS lane still needs trusted Windows auth
-- the protocol keeps the sensitive execution boundary narrow and inspectable
+- Nova should not need the whole runtime under a privileged identity.
+- A future data lane may need trusted Windows auth.
+- The protocol keeps the sensitive execution boundary narrow and inspectable.

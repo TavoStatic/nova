@@ -1,7 +1,7 @@
 # NYO System Base Package Readiness
 
-Date: 2026-03-30
-Last verified: 2026-05-06
+Date: 2026-05-18
+Last verified: 2026-05-18
 
 ## Purpose
 
@@ -11,15 +11,16 @@ It is intentionally stricter than "the repo runs on my machine" and narrower tha
 
 ## Current Read
 
-- release-clean candidate exists and is promoted `ready-with-notes`
-- base runtime package validation passed from a same-machine short-path extract
+- release-clean candidate `2026.05.18.23` exists and is promoted `ready-with-notes`
+- base runtime package validation passed from a same-machine extracted package
+- Work Tree is complete with `0` open tasks for the current runtime governance tree
 - not yet a final broadly deployable package until independent fresh-machine or VM validation is complete
 
 ## Current Gate Status
 
 ### Gate 1: Runtime Stability
 
-Status: mostly satisfied, must be re-verified at release time
+Status: satisfied for the current candidate, must be re-verified for each release
 
 Required:
 
@@ -49,7 +50,7 @@ Required:
 
 ### Gate 4: Operator Handoff
 
-Status: improved and near-clean validation completed, must be rerun per release candidate
+Status: improved and current for the `.23` release candidate, must be rerun per release candidate
 
 Required:
 
@@ -99,19 +100,24 @@ The package is a release candidate only when all items below are true.
 - package validation has been run on a clean or near-clean environment
 - the latest candidate reports `ready` or `ready-with-notes` from `nova package-readiness`
 
-Latest packaging validation on `2026-05-06`:
+Latest packaging validation on `2026-05-18`:
 
-- release-clean candidate `2026.05.06.2` reports `ready-with-notes`
-- zip verification and extracted-package verification passed
-- extracted package bootstrap succeeded from short path `C:\N\r62_082924`
-- extracted `nova doctor`, `nova runtime-status`, `nova smoke-base --fix`, and `nova test` passed
+- release-clean candidate `2026.05.18.23` reports `ready-with-notes`
+- artifact: `runtime/exports/release_packages/nyo-system-base-rc-2026.05.18.23-proof-shape-closed-20260518_203219.zip`
+- zip verification and extracted-package validation passed
+- extracted package bootstrap succeeded from `runtime/validation/release/x-20260518203249-9bec6380/pkg`
+- extracted `nova doctor`, `nova runtime-status`, `nova wiring-check --offline`, `nova smoke-base --fix`, and `nova test` passed
+- temporary extracted web UI start/stop passed
+- release validation result is `pass-with-notes` with no blocking issues
 
 ## Main Remaining Gaps
 
 - packaging-boundary maintenance as the repo evolves
 - independent fresh-machine or VM execution of the built zip artifact is still outstanding
+- interactive `nova run` execution of the current artifact is still outstanding
+- Git LFS must be installed/configured on release machines so Piper assets resolve from pointers cleanly
 - cleaner runtime dependency isolation for broad validation
-- keep both compact and full-discovery validation rerun discipline before promoting beyond release-candidate language
+- keep regression and release-validation rerun discipline before promoting beyond release-candidate language
 
 ## Non-Goals For This Gate
 

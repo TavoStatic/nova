@@ -1,9 +1,9 @@
 # NYO System Bootstrap
 
-Date: 2026-05-07
-Last verified: 2026-05-07
+Date: 2026-05-18
+Last verified: 2026-05-18
 
-Verification note: the source-bootstrap flow was previously revalidated from the `2026.05.06.2` release-clean package on the same machine from a short extracted path. On 2026-05-07, the live code posture was refreshed for runtime truth artifacts, provider telemetry null handling, and SIS data-lane readiness reporting. Independent fresh-machine or VM validation is still pending.
+Verification note: the source-bootstrap flow was revalidated from the `2026.05.18.23` release candidate on the same machine from an extracted package path. `nova package-verify .`, `nova install`, `nova doctor`, `nova runtime-status`, `nova wiring-check --offline`, `nova smoke-base --fix`, and `nova test` passed. Independent fresh-machine or VM validation is still pending.
 
 ## Purpose
 
@@ -25,6 +25,7 @@ Current packaging reality:
 
 Optional but recommended:
 
+- Git LFS for clean checkout of tracked Piper assets
 - Ollama on `PATH` for local chat/model-backed runtime flows
 - bundled Piper assets kept intact for voice output
 - SearXNG only if the deployment wants that search provider

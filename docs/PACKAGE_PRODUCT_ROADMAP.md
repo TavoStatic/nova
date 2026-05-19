@@ -1,15 +1,16 @@
 # Nova Package Product Roadmap
 
-Date: 2026-03-25
-Last verified: 2026-05-06
+Date: 2026-05-18
+Last verified: 2026-05-18
 
 ## Goal
 Drive Nova from an actively evolving supervised runtime to a repeatable package product with clear release gates, documented operations, and stable governance defaults.
 
 ## Immediate Priorities
-1. Protect stability while Phase 2 governance settles.
-2. Keep repository documentation synchronized with actual runtime behavior.
-3. Reduce packaging ambiguity so a fresh operator can bootstrap and validate the product quickly.
+1. Complete independent fresh-machine or VM validation for `2026.05.18.23`.
+2. Exercise the interactive `nova run` front door against the current artifact.
+3. Keep repository documentation synchronized with actual runtime behavior.
+4. Decide whether Piper remains bundled through Git LFS or moves to a bootstrap-fetch path later.
 
 ## Release Gate Stack
 
@@ -18,6 +19,9 @@ Drive Nova from an actively evolving supervised runtime to a repeatable package 
 - Critical path smoke tests must pass:
   - session replay parity
   - HTTP identity/profile continuity
+  - chat intent and grounded proof replies
+  - OS capability contract execution and blocked-contract evidence
+  - operator-outbox notice/reconciliation path
   - patch governance path
   - maintenance loop execution
 
@@ -49,10 +53,10 @@ Drive Nova from an actively evolving supervised runtime to a repeatable package 
 3. Keep product-facing docs consistent with shipped behavior, not aspirational behavior.
 
 ## Near-Term Plan
-1. Monitor `safety_envelope.mode=enforce` and `kidney.mode=enforce` for uncontrolled destructive behavior or promotion drift.
-2. Keep the source-bootstrap zip as the current release artifact and rerun its validation for each candidate.
-3. Use `nova package-readiness` as the release-candidate truth gate.
-4. Complete independent fresh-machine or VM validation before final release language.
+1. Keep the source-bootstrap zip as the current release artifact and rerun its validation for each candidate.
+2. Use `nova package-readiness` and the release validation record as the release-candidate truth gate.
+3. Complete independent fresh-machine or VM validation before final release language.
+4. Verify the interactive `nova run` front door for the current artifact.
 5. Keep product-facing docs consistent with shipped behavior, not aspirational behavior.
 
 ## Definition of "Close To Package Product"

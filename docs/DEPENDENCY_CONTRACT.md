@@ -1,9 +1,9 @@
 # NYO System Dependency Contract
 
-Date: 2026-05-07
-Last verified: 2026-05-07
+Date: 2026-05-18
+Last verified: 2026-05-18
 
-Verification note: dependencies were installed successfully by `nova install` from the `2026.05.06.2` extracted package. The 2026-05-07 refresh did not change base bootstrap dependencies; SIS live data-lane execution still depends on operator-provided SQL Server client/ODBC readiness and district-network access. Package bootstrap remains source-first and does not lock every transitive dependency version.
+Verification note: dependencies were installed successfully by `nova install` from the `2026.05.18.23` extracted package. Package bootstrap remains source-first and does not lock every transitive dependency version. Git LFS is also required for clean source checkout of the tracked Piper assets.
 
 ## Purpose
 
@@ -34,6 +34,7 @@ These ship inside the current package artifact.
 Current decision:
 
 - Piper remains bundled until there is a trustworthy bootstrap-fetch path for those assets
+- Piper assets are tracked by Git LFS pointers; release/development machines need Git LFS installed so the pointers resolve cleanly
 
 ### Level 3: Installed Python Dependencies
 

@@ -1,6 +1,6 @@
 # Phase 2 Safety Envelope
 
-Last verified: 2026-05-06
+Last verified: 2026-05-18
 
 Current policy posture: `safety_envelope.mode` is `enforce` in `policy.json`.
 

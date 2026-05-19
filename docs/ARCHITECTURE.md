@@ -43,6 +43,16 @@ Architecturally, that means Nova should be treated as a supervised local runtime
   - registry-backed dispatch from `run_tools.py`
   - manifest and structured tool-event logging
 
+- `tools/os_capabilities/`
+  - registered PowerShell capabilities for bounded OS inspection and evidence collection
+  - JSON registry with version, authority level, hash, argument schema, locality, and evidence contract metadata
+  - current active capabilities: `inspect_processes`, `inspect_ports`, `scan_large_files`, `collect_diagnostics_bundle`, and `verify_ollama_model`
+
+- `services/operator_outbox.py`
+  - durable Nova-to-operator notice lane
+  - records missing authority, missing capability, stale contracts, invalid arguments, and unresolved runtime or Work Tree pressure
+  - feeds control status and runtime console surfaces
+
 ## Current Identity and Privacy Model
 
 - HTTP chat sessions are persisted and bound to a session owner.
@@ -74,6 +84,9 @@ The control room now exposes:
 - `runtime/control_action_audit.jsonl`: control room audit events
 - `runtime/policy_changes.jsonl`: policy mutations
 - `runtime/tool_events.jsonl`: structured tool execution events
+- `runtime/operator_outbox.jsonl`: durable operator notices from Work Tree, autonomy, and OS capability gaps
+- `runtime/os_capability_ledger.jsonl`: OS capability execution and blocked-request evidence
+- `runtime/os_capability_evidence/`: bounded evidence output for evidence-writing OS capabilities
 - `runtime/memory_events.jsonl`: structured memory operation events
 - `runtime/actions/*.json`: per-turn action ledger records including route trace and final planner decision
 - `runtime/exports`: exported diagnostics and snapshots
@@ -98,6 +111,19 @@ tool invocation (optional)
 response assembly
   ↓
 UI / CLI output
+```
+
+Current intent-centered request flow:
+
+```text
+user turn
+  -> CLI / HTTP / tool runner
+  -> turn parsing and conversation state
+  -> planner intent route
+  -> memory, runtime, or Work Tree context when needed
+  -> tool or OS capability only when the intent requires it
+  -> response synthesis from available evidence
+  -> action ledger and operator-visible status
 ```
 
 ## Architectural Shape
@@ -183,6 +209,7 @@ The rule is:
 - one routing authority owns turn classification and dispatch decisions
 - execution remains distributed across specialized paths
 - tools are capabilities selected by the decision spine, not automatic keyword triggers
+- internal self-report answers must come from live control status and Work Tree evidence
 
 That means Nova should prefer this shape:
 
@@ -197,6 +224,13 @@ In practical terms, the decision spine should answer only a few questions:
 - is a direct answer possible
 - is clarification required
 - should this dispatch to a tool path, research path, memory path, or heavier workflow
+
+For chat behavior, the current root rule is intent before routing:
+
+- understand the user's actual goal and conversation state first
+- do not decide from trigger words or phrase presence alone
+- route to a tool only when the intent and context require a tool
+- if Nova cannot verify an internal claim, answer from live evidence or say what is missing
 
 It should not become the heavy processor for every task. Large retrieval, multi-step workflows, document processing, research expansion, and tool execution should remain outside the routing core once the lane has been chosen.
 
@@ -262,3 +296,42 @@ Deterministic operator and control-room ownership has been pushed into services,
 - `services/operator_control.py`
 
 That leaves the HTTP layer primarily as transport glue instead of a mixed transport-plus-business-logic module.
+
+## OS Capability Chain
+
+The OS capability chain extends the same intent-to-evidence model into bounded local OS actions.
+
+Flow:
+
+```text
+intent
+  -> Work Tree or tool request
+  -> registered capability
+  -> registry contract
+  -> load-time hash check
+  -> argument schema validation
+  -> authority check
+  -> execution-time hash check
+  -> script execution
+  -> ledger evidence
+  -> result judgment
+  -> operator outbox when the contract cannot be satisfied
+```
+
+The registry is the contract and the script hash is the witness. If the script changes without the registry changing, the capability becomes `contract_stale` and routes to operator outbox instead of executing.
+
+Current registry path:
+
+- `tools/os_capabilities/os_capabilities.json`
+
+Current execution services:
+
+- `services/os_capability_registry.py`
+- `services/os_script_controller.py`
+- `services/os_capability_operator_outbox.py`
+- `tools/os_capability_tool.py`
+
+Current evidence paths:
+
+- `runtime/os_capability_ledger.jsonl`
+- `runtime/os_capability_evidence/`

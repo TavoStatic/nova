@@ -1,6 +1,6 @@
 # Data Pipelines
 
-Last verified: 2026-05-06
+Last verified: 2026-05-18
 
 Nova can host multiple governed data pipelines without turning `nova_core.py` into a pile of one-off database logic.
 
@@ -51,44 +51,23 @@ C:\Nova\
 - redaction defaults
 - population definitions and report notes that belong only to that lane
 
-## SIS Test Pipeline
+## Current Lane Inventory
 
-The first scaffold lives at [data_sources/sis_test](../data_sources/sis_test).
+There are no active data lanes in the current source tree.
 
-It is intentionally:
+The previous `data_sources/sis_test` scaffold has been removed from the active package surface and archived under `data_sources/_archived/`. Do not treat SIS test docs or old collection failures as active Nova package truth.
 
-- read-only
-- district-network scoped
-- config-driven
-- query-preview first
+Current source-owned pipeline pieces remain:
 
-The scaffold is ready for:
+- `pipelines/base.py`
+- `pipelines/registry.py`
+- `pipelines/query_guard.py`
+- `pipelines/audit.py`
+- `services/data_pipeline_registry.py`
+- `services/control_pipelines.py`
+- `services/nova_http_pipeline_control.py`
 
-- `status`
-- `schema_probe`
-- `safe_query`
-- `student_lookup`
-- `campus_enrollment_summary`
-- `program_membership_lookup`
-- `schema_inventory`
-
-The SIS test pipeline also carries lane-specific grounding files:
-
-- [data_sources/sis_test/field_dictionary.json](../data_sources/sis_test/field_dictionary.json)
-- [data_sources/sis_test/source_notes.md](../data_sources/sis_test/source_notes.md)
-- [data_sources/sis_test/population_definitions.json](../data_sources/sis_test/population_definitions.json)
-- [data_sources/sis_test/vendor_dictionary_index.json](../data_sources/sis_test/vendor_dictionary_index.json)
-- [data_sources/sis_test/predefined_reports_index.json](../data_sources/sis_test/predefined_reports_index.json)
-
-It supports:
-
-- truthful connectivity/auth readiness checks
-- governed dry-run previews
-- live read-only execution for allowlisted query templates once local config, driver, and credentials are valid
-- schema inventory discovery for table/column grounding
-- a temporary 20-row hard cap on governed queries while the data shape is being verified
-
-The first live lane is intentionally small and grounded to the table usage already present in the local UniServer dashboard references.
+The lane system is still available for future operator-provided pipelines, but active data content must be explicitly created or restored before it is considered part of runtime behavior.
 
 ## Data Lane Control
 
@@ -109,9 +88,9 @@ When a lane is paused, query execution returns a blocked result before connector
 
 ## Query Guard Posture
 
-The SIS lane remains read-only and query-template governed.
+Future lanes should remain read-only and query-template governed until their connector, credentials, and operator intent are explicit.
 
-- Live execution is allowed only for allowlisted operations in `pipeline.json`.
-- `safe_query` routes through the connector and query guard.
-- `schema_inventory` supports structured schema discovery without hand-maintained table guesses.
-- Default row limiting stays in force while operators verify that a request is pulling the intended data shape.
+- Live execution should be allowed only for allowlisted operations in `pipeline.json`.
+- `safe_query` should route through the connector and query guard.
+- schema discovery should be structured and recorded instead of guessed from chat text.
+- default row limiting should remain in force while operators verify that a request is pulling the intended data shape.

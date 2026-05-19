@@ -1,9 +1,9 @@
 # NYO System Fresh Machine Validation
 
-Date: 2026-05-07
-Last reviewed: 2026-05-07
+Date: 2026-05-18
+Last reviewed: 2026-05-18
 
-Status note: same-machine extracted-package validation passed for `2026.05.06.2`. The 2026-05-07 live-code refresh hardened runtime truth artifacts, provider telemetry null handling, and SIS data-lane readiness reporting. This checklist still needs an independent fresh-machine or VM pass before final release language is appropriate.
+Status note: same-machine extracted-package validation passed for `2026.05.18.23` with `pass-with-notes` and no blocking issues. This checklist still needs an independent fresh-machine or VM pass before final release language is appropriate.
 
 ## Purpose
 
@@ -17,6 +17,7 @@ Use it together with [RELEASE_ARTIFACT.md](RELEASE_ARTIFACT.md) and record the r
 - matching prefilled validation seed from `runtime/exports/release_packages/validation_records/` when available
 - target Windows machine or VM
 - confirmation whether Ollama is expected in the target deployment
+- Git LFS installed before source checkout work, or a release zip whose Piper assets are already materialized
 
 ## Validation Flow
 
@@ -44,6 +45,7 @@ Expected result:
 ```powershell
 .\nova.cmd doctor
 .\nova.cmd runtime-status
+.\nova.cmd wiring-check --offline
 .\nova.cmd smoke-base --fix
 .\nova.cmd test
 ```
@@ -52,6 +54,7 @@ Expected result:
 
 - doctor passes
 - runtime-status is readable and scoped to the extracted package root
+- offline wiring check passes
 - base smoke passes
 - compact regression passes
 

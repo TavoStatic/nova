@@ -1,6 +1,6 @@
 # NYO System RC Validation Record
 
-Date: 2026-03-30
+Date: 2026-05-18
 
 Use this template to record each release-candidate validation run.
 
@@ -33,6 +33,7 @@ Use this template to record each release-candidate validation run.
 
 - `nova doctor`:
 - `nova runtime-status`:
+- `nova wiring-check --offline`:
 - `nova smoke-base --fix`:
 - `nova test`:
 - Notes:

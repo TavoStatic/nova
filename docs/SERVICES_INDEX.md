@@ -1,6 +1,6 @@
 # Services Index
 
-Last verified: 2026-05-08
+Last verified: 2026-05-18
 
 This page maps the major service clusters under `services/`. It is a practical orientation guide, not an exhaustive API reference.
 
@@ -20,8 +20,9 @@ This page maps the major service clusters under `services/`. It is a practical o
 ## Decision And Reply Behavior
 
 - `decision_pipeline.py`, `fulfillment_flow.py`, `nova_fulfillment_routing.py`, `nova_query_classifiers.py`
-- `nova_reply_contracts.py`, `nova_reply_deterministic.py`, `nova_reply_guards.py`, `nova_reply_runtime.py`, `nova_reply_sanitizer.py`, `nova_reply_sequence.py`, `nova_turn_outcomes.py`
-- owns structured outcomes, deterministic reply contracts, fallback control, and reply safety shaping
+- `nova_planner_contract.py`, `nova_reply_contracts.py`, `nova_reply_deterministic.py`, `nova_reply_guards.py`, `nova_reply_runtime.py`, `nova_reply_sanitizer.py`, `nova_reply_sequence.py`, `nova_turn_heuristics.py`, `nova_turn_outcomes.py`
+- `nova_grounded_self_report.py`
+- owns structured outcomes, deterministic reply contracts, grounded internal self-reports, fallback control, and reply shape
 
 ## Supervisor And Routing Rules
 
@@ -39,16 +40,17 @@ This page maps the major service clusters under `services/`. It is a practical o
 ## Tools, Research, And Data Lanes
 
 - `tool_registry.py`, `tool_execution.py`, `tool_console.py`, `nova_tool_dispatch.py`, `nova_tool_policy.py`
+- `os_capability_registry.py`, `os_script_controller.py`, `os_capability_operator_outbox.py`, `operator_outbox.py`
 - `nova_web_tools.py`, `web_research_session.py`, `nova_research_contracts.py`, `nova_search_endpoint.py`
 - `data_pipeline_registry.py`, `control_pipelines.py`, `nova_http_pipeline_control.py`, `nova_pipeline_tools.py`, `pipeline_privileged_bridge.py`
-- owns tool registration/execution, web research sessions, and governed data-lane access
+- owns tool registration/execution, OS capability contracts, operator notices, web research sessions, and governed data-lane access
 
 ## Runtime Health And Maintenance
 
 - `runtime_status.py`, `runtime_process_state.py`, `runtime_timeline.py`, `runtime_control.py`, `runtime_heartbeat.py`, `runtime_artifacts.py`, `runtime_analytics.py`
 - `core_health_brief.py`, `core_steward.py`, `core_thinning.py`, `core_seam_guard.py`
 - `subconscious_control.py`, `subconscious_runtime.py`, `subconscious_reporting.py`, `subconscious_review_authority.py`, `subconscious_work_tree_triage.py`
-- owns runtime truth, health summaries, maintenance pressure, core-thinning work, and subconscious/reporting surfaces
+- owns runtime truth, health summaries, maintenance pressure, core-thinning work, subconscious/reporting surfaces, and status projection of operator-outbox pressure
 
 ## CLI And Voice
 
@@ -57,5 +59,5 @@ This page maps the major service clusters under `services/`. It is a practical o
 
 ## Patch And Release Support
 
-- `nova_patching.py`, `patch_control.py`, `policy_control.py`, `policy_manager.py`, `release_status.py`
-- owns patch governance, policy mutation flows, and release/readiness status services
+- `nova_patching.py`, `patch_control.py`, `policy_control.py`, `policy_manager.py`, `release_status.py`, `release_validation.py`
+- owns patch governance, policy mutation flows, extracted-package validation, and release/readiness status services

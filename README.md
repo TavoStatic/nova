@@ -40,6 +40,8 @@ That runtime already includes:
 - a Safety Envelope for promotion and review governance
 - a Kidney System for cleanup, retention, and artifact hygiene
 - operator-observable control surfaces that expose live system state instead of hiding it
+- an operator outbox for durable Nova-to-operator notices
+- OS capability contracts for bounded local inspection and evidence collection
 
 This is not “one assistant with some tools.”
 It is a growing local AI operations system with an inspectable control plane.
@@ -64,6 +66,7 @@ Today, the repository should be read as:
 - a runtime core
 - a control and inspection surface
 - a governed patch and maintenance system
+- an OS capability and operator-outbox evidence path
 - a growing body of service-owned behavior instead of one monolithic shell
 - a platform base that can support external packs, policies, tools, and product layers
 
