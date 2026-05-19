@@ -79,6 +79,7 @@ class TestNovaOllamaChatService(unittest.TestCase):
         self.assertEqual(out, "hello back")
         self.assertEqual(captured["url"], "http://127.0.0.1:11434/api/chat")
         self.assertEqual(captured["payload"]["model"], "gpt-local")
+        self.assertEqual(captured["payload"]["keep_alive"], "10m")
         system_msg = captured["payload"]["messages"][0]["content"]
         self.assertIn("local AI runtime", system_msg)
         self.assertIn("Conversation is one interface", system_msg)

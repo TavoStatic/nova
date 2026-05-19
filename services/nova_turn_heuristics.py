@@ -197,6 +197,8 @@ def is_explicit_request(text: str) -> bool:
     qwords = ["who", "what", "when", "where", "why", "how", "which"]
     if low.endswith("?"):
         return True
+    if low in qwords:
+        return True
     if any(low.startswith(word + " ") for word in qwords):
         return True
     if any(keyword in low for keyword in ["please", "could you", "can you", "would you", "show me", "find", "search", "do you"]):
@@ -332,6 +334,25 @@ def looks_like_continue_thread_turn(
     return bool(assistant_turn) and assistant_offered_weather_lookup_fn(assistant_turn) and looks_like_affirmative_followup_fn(raw)
 
 
+def looks_like_answer_to_assistant_prompt_turn(
+    text: str,
+    *,
+    turns: Optional[list[tuple[str, str]]] = None,
+    pending_action: Optional[dict] = None,
+    last_assistant_turn_text_fn: Callable[[Optional[list[tuple[str, str]]]], str],
+) -> bool:
+    raw = str(text or "").strip()
+    if not raw:
+        return False
+    pending = pending_action if isinstance(pending_action, dict) else {}
+    if pending:
+        return False
+    assistant_turn = str(last_assistant_turn_text_fn(list(turns or [])) or "").strip()
+    if not assistant_turn or "?" not in assistant_turn:
+        return False
+    return True
+
+
 def classify_turn_acts(
     text: str,
     *,
@@ -344,12 +365,14 @@ def classify_turn_acts(
     is_explicit_request_fn: Callable[[str], bool],
     is_statement_like_clause_fn: Callable[[str], bool],
     looks_like_continue_thread_turn_fn: Callable[..., bool],
+    looks_like_answer_to_assistant_prompt_turn_fn: Callable[..., bool] | None = None,
 ) -> list[str]:
     raw = str(text or "").strip()
     if not raw:
         return []
     clauses = split_turn_clauses_fn(raw) or [raw]
     has_command = is_explicit_command_like_fn(raw)
+    has_correction = looks_like_correction_turn_fn(raw)
     has_ask = any(is_explicit_request_fn(clause) for clause in clauses)
     has_inform = any(is_statement_like_clause_fn(clause) for clause in clauses)
     has_continue_thread = looks_like_continue_thread_turn_fn(
@@ -358,6 +381,19 @@ def classify_turn_acts(
         active_subject=active_subject,
         pending_action=pending_action,
     )
+    has_answer_to_prompt = False
+    if (
+        not has_command
+        and not has_correction
+        and not has_ask
+        and not has_inform
+        and callable(looks_like_answer_to_assistant_prompt_turn_fn)
+    ):
+        has_answer_to_prompt = looks_like_answer_to_assistant_prompt_turn_fn(
+            raw,
+            turns=turns,
+            pending_action=pending_action,
+        )
 
     acts: list[str] = []
     if has_command:
@@ -368,6 +404,8 @@ def classify_turn_acts(
         acts.append("inform")
     if has_continue_thread:
         acts.append("continue_thread")
+    if has_answer_to_prompt:
+        acts.append("answer_to_prompt")
     if has_inform and (has_ask or has_command):
         acts.append("mixed")
     return acts

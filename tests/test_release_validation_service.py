@@ -15,6 +15,13 @@ def _build_artifact(path: Path) -> None:
         archive.writestr("nova-package/nova.ps1", "")
 
 
+def _build_long_named_artifact(path: Path) -> None:
+    package_dir = "nyo-system-base-rc-2026.05.18.16-operator-help-ready-notes-20260518_161322"
+    with zipfile.ZipFile(path, "w") as archive:
+        archive.writestr(f"{package_dir}/nova.cmd", "@echo off\n")
+        archive.writestr(f"{package_dir}/nova.ps1", "")
+
+
 def test_release_validation_run_writes_complete_record_from_observed_steps(tmp_path: Path) -> None:
     artifact = tmp_path / "nova-rc.zip"
     record = tmp_path / "nova-rc.md"
@@ -104,6 +111,41 @@ def test_release_validation_removes_fresh_extract_root_for_repeated_artifact(tmp
     assert second["extract_root_removed"] is True
     assert not Path(first["extract_root"]).exists()
     assert not Path(second["extract_root"]).exists()
+
+
+def test_release_validation_collapses_long_package_root_before_running_commands(tmp_path: Path) -> None:
+    artifact = tmp_path / "nyo-system-base-rc-2026.05.18.16-operator-help-ready-notes-20260518_161322.zip"
+    record = tmp_path / "nova-rc.md"
+    _build_long_named_artifact(artifact)
+    command_roots: list[Path] = []
+
+    def runner(name, command, cwd, timeout_sec):
+        command_roots.append(Path(cwd))
+        return {
+            "name": name,
+            "command": list(command),
+            "returncode": 0,
+            "stdout": "",
+            "stderr": "",
+            "duration_sec": 0.01,
+        }
+
+    report = run_release_validation(
+        repo_root=tmp_path,
+        artifact_path=artifact,
+        record_path=record,
+        artifact_version="2026.05.18.16",
+        release_channel="rc",
+        command_runner=runner,
+        http_get=lambda _url, _timeout: (200, "<html>control</html>"),
+        work_root=tmp_path / "validation",
+        keep_extract=True,
+    )
+
+    assert Path(report["package_root"]).name == "pkg"
+    assert Path(report["extract_root"]).name.startswith("x-")
+    assert command_roots
+    assert all(root.name == "pkg" for root in command_roots)
 
 
 def test_release_validation_can_keep_extract_root_when_requested(tmp_path: Path) -> None:

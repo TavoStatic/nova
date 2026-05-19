@@ -22,6 +22,9 @@ class TestNovaToolDispatchService(unittest.TestCase):
             "tool_memory_identity_bootstrap": lambda *args: ("memory_identity_bootstrap", args),
             "tool_subconscious_review_judgment": lambda *args: ("subconscious_review_judgment", args),
             "tool_nova_self_status": lambda *args: ("self_status", args),
+            "tool_operator_help": lambda *args: ("operator_help", args),
+            "tool_runtime_identity": lambda *args: ("runtime_identity", args),
+            "tool_capability_inventory": lambda *args: ("capability_inventory", args),
             "tool_core_health_brief": lambda *args: ("core_health", args),
             "tool_core_thinning": lambda *args: ("core_thinning", args),
             "tool_os_capability": lambda *args: ("os_capability", args),
@@ -53,6 +56,27 @@ class TestNovaToolDispatchService(unittest.TestCase):
         )
 
         self.assertEqual(out, ("system_check", ()))
+        self.assertEqual(
+            nova_tool_dispatch.execute_planned_action_from_runtime(
+                "runtime_identity",
+                runtime_scope=runtime_scope,
+            ),
+            ("runtime_identity", ()),
+        )
+        self.assertEqual(
+            nova_tool_dispatch.execute_planned_action_from_runtime(
+                "capability_inventory",
+                runtime_scope=runtime_scope,
+            ),
+            ("capability_inventory", ()),
+        )
+        self.assertEqual(
+            nova_tool_dispatch.execute_planned_action_from_runtime(
+                "operator_help",
+                runtime_scope=runtime_scope,
+            ),
+            ("operator_help", ()),
+        )
 
     def test_execute_planned_action_from_runtime_wires_web_fetch(self):
         runtime_scope = {
@@ -72,6 +96,9 @@ class TestNovaToolDispatchService(unittest.TestCase):
             "tool_memory_identity_bootstrap": lambda *args: ("memory_identity_bootstrap", args),
             "tool_subconscious_review_judgment": lambda *args: ("subconscious_review_judgment", args),
             "tool_nova_self_status": lambda *args: ("self_status", args),
+            "tool_operator_help": lambda *args: ("operator_help", args),
+            "tool_runtime_identity": lambda *args: ("runtime_identity", args),
+            "tool_capability_inventory": lambda *args: ("capability_inventory", args),
             "tool_core_health_brief": lambda *args: ("core_health", args),
             "tool_core_thinning": lambda *args: ("core_thinning", args),
             "tool_os_capability": lambda *args: ("os_capability", args),
@@ -123,6 +150,9 @@ class TestNovaToolDispatchService(unittest.TestCase):
             "tool_memory_identity_bootstrap": lambda *args: ("memory_identity_bootstrap", args),
             "tool_subconscious_review_judgment": lambda *args: ("subconscious_review_judgment", args),
             "tool_nova_self_status": lambda *args: ("self_status", args),
+            "tool_operator_help": lambda *args: ("operator_help", args),
+            "tool_runtime_identity": lambda *args: ("runtime_identity", args),
+            "tool_capability_inventory": lambda *args: ("capability_inventory", args),
             "tool_core_health_brief": lambda *args: ("core_health", args),
             "tool_core_thinning": lambda *args: ("core_thinning", args),
             "tool_os_capability": lambda *args: ("os_capability", args),

@@ -156,7 +156,7 @@ def _prepare_package_root(artifact_path: Path, work_root: Path) -> tuple[Path, P
         raise ValueError(f"release validation expects a zip artifact or extracted package directory: {artifact}")
 
     work_root.mkdir(parents=True, exist_ok=True)
-    extract_root = work_root / f"{_safe_fragment(artifact.stem)}-{time.strftime('%Y%m%d_%H%M%S')}-{uuid.uuid4().hex[:8]}"
+    extract_root = work_root / f"x-{time.strftime('%Y%m%d%H%M%S')}-{uuid.uuid4().hex[:8]}"
     extract_root.mkdir(parents=True, exist_ok=True)
     with zipfile.ZipFile(artifact, "r") as archive:
         archive.extractall(extract_root)
@@ -167,7 +167,12 @@ def _prepare_package_root(artifact_path: Path, work_root: Path) -> tuple[Path, P
     direct_children = [path for path in extract_root.iterdir() if path.is_dir()]
     for child in direct_children:
         if (child / "nova.cmd").exists():
-            return child, extract_root
+            short_root = extract_root / "pkg"
+            if child != short_root:
+                if short_root.exists():
+                    shutil.rmtree(short_root)
+                child.rename(short_root)
+            return short_root, extract_root
     for candidate in extract_root.rglob("nova.cmd"):
         return candidate.parent, extract_root
     raise FileNotFoundError(f"extracted artifact does not contain nova.cmd: {artifact}")

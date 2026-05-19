@@ -6,6 +6,7 @@ from services.nova_query_classifiers import is_capability_query
 from services.nova_query_classifiers import is_conversational_clarification
 from services.nova_query_classifiers import is_developer_full_name_query
 from services.nova_query_classifiers import is_identity_or_developer_query
+from services.nova_query_classifiers import is_action_history_query
 from services.nova_query_classifiers import is_runtime_identity_query
 from services.nova_query_classifiers import is_self_identity_web_challenge
 from services.nova_query_classifiers import is_student_data_attendance_rules_query
@@ -27,6 +28,9 @@ class TestNovaQueryClassifiers(unittest.TestCase):
 
     def test_runtime_identity_query_accepts_direct_question_after_context(self):
         self.assertTrue(is_runtime_identity_query("Here is the context I want you to use.\nWhat are you?"))
+
+    def test_action_history_query_accepts_answer_rationale_request(self):
+        self.assertTrue(is_action_history_query("nova why did you give me all that information ?"))
 
     def test_capability_query_ignores_abilities_inside_context_body(self):
         context = (

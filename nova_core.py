@@ -209,6 +209,7 @@ from services.nova_search_endpoint import normalize_search_endpoint as service_n
 from services.nova_search_endpoint import probe_search_endpoint as service_probe_search_endpoint
 from services.nova_search_endpoint import search_endpoint_candidates as service_search_endpoint_candidates
 from services.nova_turn_heuristics import classify_turn_acts as service_classify_turn_acts
+from services.nova_turn_heuristics import looks_like_answer_to_assistant_prompt_turn as service_looks_like_answer_to_assistant_prompt_turn
 from services.nova_turn_heuristics import build_greeting_reply as service_build_greeting_reply
 from services.nova_turn_heuristics import is_declarative_info as service_is_declarative_info
 from services.nova_turn_helpers import extract_memory_teach_text as service_extract_memory_teach_text
@@ -396,6 +397,7 @@ CHANNELS = 1
 RECORD_SECONDS = 3
 OLLAMA_BOOT_RETRIES = 15
 OLLAMA_REQ_TIMEOUT = 1800
+OLLAMA_WARM_TIMEOUT = 45.0
 
 # Knowledge packs (B-mode)
 KNOWLEDGE_ROOT = BASE_DIR / "knowledge"
@@ -3086,18 +3088,72 @@ def _render_chat_context(turns: list[tuple[str, str]], max_chars: int = 1800) ->
     return out[:max_chars]
 
 
-def build_fallback_context_details(query: str, turns: list[tuple[str, str]] | None = None) -> dict[str, Any]:
+def _render_session_state_context(
+    *,
+    conversation_state: dict | None = None,
+    pending_action: dict | None = None,
+    max_chars: int = 1600,
+) -> str:
+    lines: list[str] = []
+    state = conversation_state if isinstance(conversation_state, dict) else {}
+    pending = pending_action if isinstance(pending_action, dict) else {}
+    if state:
+        kind = str(state.get("kind") or "").strip()
+        subject = str(state.get("subject") or "").strip()
+        header = "ACTIVE SESSION STATE"
+        if kind:
+            header += f": {kind}"
+        if subject:
+            header += f" / {subject}"
+        lines.append(header)
+        if str(state.get("tool_result") or "").strip():
+            lines.append("Last tool evidence:")
+            lines.append(str(state.get("tool_result") or "").strip()[:1200])
+        else:
+            public_state = {
+                key: value
+                for key, value in state.items()
+                if key not in {"tool_result"} and value not in (None, "", [], {})
+            }
+            if public_state:
+                lines.append(json.dumps(public_state, ensure_ascii=True, sort_keys=True)[:900])
+    if pending:
+        lines.append("PENDING ACTION:")
+        lines.append(json.dumps(pending, ensure_ascii=True, sort_keys=True)[:600])
+    return "\n".join(line for line in lines if str(line or "").strip())[:max_chars]
+
+
+def build_fallback_context_details(
+    query: str,
+    turns: list[tuple[str, str]] | None = None,
+    *,
+    conversation_state: dict | None = None,
+    pending_action: dict | None = None,
+    include_runtime_context: bool = True,
+    include_state_context: bool = True,
+    include_chat_context: bool = True,
+) -> dict[str, Any]:
     session_turns = turns if isinstance(turns, list) else []
     learning_details = build_learning_context_details(query)
     learning_context = str(learning_details.get("context") or "")
-    chat_context = _render_chat_context(session_turns)
-    runtime_context = _runtime_self_context_for_chat()
+    chat_context = _render_chat_context(session_turns) if bool(include_chat_context) else ""
+    runtime_context = _runtime_self_context_for_chat() if bool(include_runtime_context) else ""
+    state_context = (
+        _render_session_state_context(
+            conversation_state=conversation_state,
+            pending_action=pending_action,
+        )
+        if bool(include_state_context)
+        else ""
+    )
 
     context_blocks: list[str] = []
     if learning_context:
         context_blocks.append(learning_context)
     if runtime_context:
         context_blocks.append(runtime_context)
+    if state_context:
+        context_blocks.append(state_context)
     if chat_context:
         context_blocks.append("CURRENT CHAT CONTEXT:\n" + chat_context)
 
@@ -3105,6 +3161,7 @@ def build_fallback_context_details(query: str, turns: list[tuple[str, str]] | No
         "context": "\n\n".join(context_blocks).strip()[:6000],
         "learning_context": learning_context,
         "runtime_context": runtime_context,
+        "state_context": state_context,
         "chat_context": chat_context,
         "session_fact_sheet": "",
         "memory_used": bool(learning_details.get("memory_used")),
@@ -3226,6 +3283,8 @@ def _is_explicit_request(text: str) -> bool:
     qwords = ["who", "what", "when", "where", "why", "how", "which"]
     if low.endswith("?"):
         return True
+    if low in qwords:
+        return True
     if any(low.startswith(w + " ") for w in qwords):
         return True
     # polite request patterns
@@ -3338,6 +3397,11 @@ def _classify_turn_acts(
         is_explicit_request_fn=_is_explicit_request,
         is_statement_like_clause_fn=_is_statement_like_clause,
         looks_like_continue_thread_turn_fn=_looks_like_continue_thread_turn,
+        looks_like_answer_to_assistant_prompt_turn_fn=lambda raw, **kwargs: service_looks_like_answer_to_assistant_prompt_turn(
+            raw,
+            last_assistant_turn_text_fn=_last_assistant_turn_text,
+            **kwargs,
+        ),
     )
 
 
@@ -4243,6 +4307,36 @@ def ensure_ollama_boot():
 
     bad("Ollama API still down.")
     return False
+
+
+def warm_ollama_chat_model(reason: str = "startup") -> bool:
+    if not _live_ollama_calls_allowed():
+        return False
+    if not ollama_server_up():
+        return False
+
+    model = str(chat_model() or "").strip()
+    if not model:
+        return False
+
+    payload = {
+        "model": model,
+        "stream": False,
+        "keep_alive": "10m",
+        "options": {"temperature": 0.0, "num_predict": 1},
+        "messages": [
+            {"role": "system", "content": "Warm the configured runtime model for the next routed chat turn."},
+            {"role": "user", "content": str(reason or "startup")[:120]},
+        ],
+    }
+    try:
+        response = requests.post(f"{OLLAMA_BASE}/api/chat", json=payload, timeout=OLLAMA_WARM_TIMEOUT)
+        response.raise_for_status()
+        ok(f"Ollama chat model warm: {model}")
+        return True
+    except Exception as exc:
+        warn(f"Ollama chat model warm failed: {str(exc)[:180]}")
+        return False
 
 
 def ensure_ollama():
@@ -5754,6 +5848,14 @@ def runtime_identity_reply(text: str = "") -> str:
     return describe_runtime_identity(assistant_name)
 
 
+def tool_runtime_identity():
+    return runtime_identity_reply()
+
+
+def tool_capability_inventory():
+    return describe_capabilities()
+
+
 def tool_nova_self_status():
     pulse_payload = _apply_latest_regression_validation(build_pulse_payload())
     payload = service_build_self_status_payload(
@@ -5762,6 +5864,13 @@ def tool_nova_self_status():
         repo_change_snapshot=service_build_repo_change_snapshot(BASE_DIR),
     )
     return service_render_self_status(payload)
+
+
+def tool_operator_help():
+    work_trees_payload = _self_report_work_trees_payload(limit=32)
+    status_payload = _self_report_local_status_payload(work_trees_payload)
+    report_payload = GROUNDED_SELF_REPORT_SERVICE.build_payload(status_payload, work_trees_payload)
+    return GROUNDED_SELF_REPORT_SERVICE.render("trouble", report_payload)
 
 
 def _core_health_runtime_health() -> dict:

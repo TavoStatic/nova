@@ -201,6 +201,61 @@ class TestHttpIdentityChat(unittest.TestCase):
         self.assertIn("CURRENT CHAT CONTEXT", captured["retrieved"])
         self.assertIn("Explain photosynthesis briefly.", captured["retrieved"])
 
+    def test_non_actionable_http_fallback_does_not_inject_runtime_context(self):
+        nova_core.remember_name_origin = lambda _text: "Stored"
+        nova_core.get_name_origin_story = lambda: ""
+        captured = {"retrieved": ""}
+
+        def fake_ollama(text: str, retrieved_context: str = "", **_kwargs) -> str:
+            captured["retrieved"] = retrieved_context
+            return f"ok:{text}"
+
+        nova_core.ollama_chat = fake_ollama
+
+        reply = nova_http.process_chat(
+            "s9_operator_update_context",
+            "give you an update on the progress we are having creating you",
+        )
+
+        self.assertIn("ok:give you an update", reply)
+        self.assertNotIn("NOVA RUNTIME CONTEXT", captured["retrieved"])
+        self.assertNotIn("ACTIVE SESSION STATE", captured["retrieved"])
+        self.assertNotIn("CURRENT CHAT CONTEXT", captured["retrieved"])
+
+    def test_http_answer_to_previous_prompt_uses_conversation_intake_not_llm_guess(self):
+        nova_core.remember_name_origin = lambda _text: "Stored"
+        nova_core.get_name_origin_story = lambda: ""
+        nova_core.ollama_chat = lambda text, retrieved_context="", **_kwargs: "WRONG_LLM_GUESS"
+        session_id = "s9_operator_update_offer"
+        nova_http._append_session_turn(session_id, "user", "hi nova")
+        nova_http._append_session_turn(session_id, "assistant", "What brings you here today?")
+
+        reply = nova_http.process_chat(
+            session_id,
+            "give you an update on the progress we are having creating you",
+        )
+        payload = self._latest_action_payload()
+
+        self.assertEqual(reply, "Go ahead. I'm listening.")
+        self.assertEqual(payload.get("planner_decision"), "conversation_intake")
+        self.assertEqual(payload.get("reply_contract"), "conversation_intake.ready")
+        self.assertIn("answer_to_prompt", payload.get("turn_acts") or [])
+        self.assertNotIn("WRONG_LLM_GUESS", payload.get("final_answer") or "")
+
+    def test_session_state_context_keeps_self_status_evidence_for_next_turn(self):
+        context = nova_core._render_session_state_context(
+            conversation_state={
+                "kind": "self_status",
+                "subject": "runtime",
+                "tool_result": "Work Tree is blocked_observing with 2 open task(s).",
+            },
+            pending_action={"kind": "work_tree", "status": "active"},
+        )
+
+        self.assertIn("ACTIVE SESSION STATE: self_status / runtime", context)
+        self.assertIn("blocked_observing", context)
+        self.assertIn("PENDING ACTION", context)
+
     def test_llm_path_does_not_inject_session_fact_sheet(self):
         nova_core.remember_name_origin = lambda _text: "Stored"
         nova_core.get_name_origin_story = lambda: "Nova was named by Gus."

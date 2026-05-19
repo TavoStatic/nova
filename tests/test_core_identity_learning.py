@@ -2087,6 +2087,14 @@ class TestCoreIdentityLearning(unittest.TestCase):
         self.assertIn("continue_thread", acts)
         self.assertNotIn("mixed", acts)
 
+    def test_classify_turn_acts_marks_bare_question_word_as_ask(self):
+        acts = nova_core._classify_turn_acts(
+            "why?",
+            turns=[("assistant", "Photosynthesis is how plants convert light into energy.")],
+        )
+
+        self.assertIn("ask", acts)
+
     def test_classify_turn_acts_marks_command(self):
         acts = nova_core._classify_turn_acts("chat context")
         self.assertEqual(acts, ["command"])

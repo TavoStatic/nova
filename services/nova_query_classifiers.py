@@ -158,6 +158,14 @@ def is_policy_domain_query(text: str) -> bool:
 def is_action_history_query(text: str) -> bool:
     if not str(text or "").strip():
         return False
+    fragments = _intent_fragments(text)
+    for fragment in fragments:
+        if not fragment.startswith(("why ", "nova why ")):
+            continue
+        if " you " not in f" {fragment} ":
+            continue
+        if any(action in fragment for action in ("answer", "respond", "say", "said", "give", "gave", "provide", "provided")):
+            return True
     cues = [
         "what did you just do",
         "what did you do",

@@ -46,7 +46,14 @@ class TestNovaHttpFrontdoorService(unittest.TestCase):
         events = []
         runtime_scope = {
             "_load_persisted_sessions": lambda: events.append("load_sessions"),
-            "nova_core": type("CoreStub", (), {"ensure_ollama_boot": staticmethod(lambda: events.append("ensure_boot"))})(),
+            "nova_core": type(
+                "CoreStub",
+                (),
+                {
+                    "ensure_ollama_boot": staticmethod(lambda: events.append("ensure_boot")),
+                    "warm_ollama_chat_model": staticmethod(lambda reason="": events.append(("warm_chat_model", reason))),
+                },
+            )(),
             "ThreadingHTTPServer": lambda addr, handler: type(
                 "ServerStub",
                 (),
@@ -76,6 +83,7 @@ class TestNovaHttpFrontdoorService(unittest.TestCase):
         self.assertIsNone(runtime_scope["_HTTP_SERVER"])
         self.assertIn("load_sessions", events)
         self.assertIn("ensure_boot", events)
+        self.assertIn(("warm_chat_model", "http_startup"), events)
         self.assertIn("close", events)
         self.assertTrue(any("http://127.0.0.1:9090" in line for line, _flush in printed))
 

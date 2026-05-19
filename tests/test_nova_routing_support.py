@@ -166,6 +166,7 @@ class TestNovaRoutingSupport(unittest.TestCase):
 
     def test_llm_classify_routing_intent_maps_weather_tool_goal(self):
         called = {"live_gate": 0}
+        captured = {}
 
         def _live_gate():
             called["live_gate"] += 1
@@ -182,18 +183,23 @@ class TestNovaRoutingSupport(unittest.TestCase):
                     }
                 }
 
+        def _post(_url, json=None, **_kwargs):
+            captured["payload"] = json
+            return _Resp()
+
         result = nova_routing_support.llm_classify_routing_intent(
             "should I bring a jacket today?",
             live_ollama_calls_allowed_fn=_live_gate,
             chat_model_fn=lambda: "llama3.2:3b",
             ollama_base="http://127.0.0.1:11434",
             get_saved_location_text_fn=lambda: "Brownsville, Texas",
-            requests_post_fn=lambda *args, **kwargs: _Resp(),
+            requests_post_fn=_post,
         )
 
         self.assertEqual(result.get("tool"), "weather_current_location")
         self.assertEqual(result.get("args"), [])
         self.assertEqual(called["live_gate"], 1)
+        self.assertEqual(captured["payload"]["keep_alive"], "10m")
 
     def test_llm_classify_routing_intent_maps_live_self_status_goal(self):
         called = {"live_gate": 0}
@@ -233,6 +239,30 @@ class TestNovaRoutingSupport(unittest.TestCase):
         )
 
         self.assertEqual(result.get("tool"), "self_status")
+        self.assertEqual(result.get("args"), [])
+
+    def test_coerce_tool_intent_accepts_verified_identity_and_capability_tools(self):
+        identity = nova_routing_support._coerce_tool_intent_payload(
+            '{"tool":"nova_identity","args":[],"confidence":0.86}',
+            user_text="tell me what you can verify about yourself",
+        )
+        capability = nova_routing_support._coerce_tool_intent_payload(
+            '{"tool":"capabilities","args":[],"confidence":0.84}',
+            user_text="tell me what you can actually do from your registry",
+        )
+
+        self.assertEqual(identity.get("tool"), "runtime_identity")
+        self.assertEqual(identity.get("args"), [])
+        self.assertEqual(capability.get("tool"), "capability_inventory")
+        self.assertEqual(capability.get("args"), [])
+
+    def test_coerce_tool_intent_accepts_operator_help_tool(self):
+        result = nova_routing_support._coerce_tool_intent_payload(
+            '{"tool":"help_needed","args":[],"confidence":0.86}',
+            user_text="neutral user turn",
+        )
+
+        self.assertEqual(result.get("tool"), "operator_help")
         self.assertEqual(result.get("args"), [])
 
     def test_coerce_tool_intent_accepts_work_tree_tool(self):

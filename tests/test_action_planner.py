@@ -109,6 +109,48 @@ class TestActionPlanner(unittest.TestCase):
         actions = decide_actions("use your location")
         self.assertEqual(actions, [])
 
+    def test_pending_weather_location_slot_uses_runtime_location_reference(self):
+        actions = decide_actions(
+            "use your current location nova",
+            config={
+                "pending_action": {
+                    "kind": "weather_lookup",
+                    "status": "awaiting_location",
+                    "preferred_tool": "weather_location",
+                }
+            },
+        )
+        self.assertEqual(actions[0]["type"], "run_tool")
+        self.assertEqual(actions[0]["tool"], "weather_current_location")
+
+    def test_pending_weather_location_slot_uses_direct_place_answer(self):
+        actions = decide_actions(
+            "Brownsville TX 78521",
+            config={
+                "pending_action": {
+                    "kind": "weather_lookup",
+                    "status": "awaiting_location",
+                    "preferred_tool": "weather_location",
+                }
+            },
+        )
+        self.assertEqual(actions[0]["type"], "run_tool")
+        self.assertEqual(actions[0]["tool"], "weather_location")
+        self.assertEqual(actions[0]["args"], ["Brownsville TX 78521"])
+
+    def test_pending_weather_location_slot_does_not_consume_diagnostic_question(self):
+        actions = decide_actions(
+            "why are you asking for location?",
+            config={
+                "pending_action": {
+                    "kind": "weather_lookup",
+                    "status": "awaiting_location",
+                    "preferred_tool": "weather_location",
+                }
+            },
+        )
+        self.assertEqual(actions, [])
+
     def test_plain_weather_stays_conversation_owned(self):
         actions = decide_actions("weather")
         self.assertEqual(actions, [])

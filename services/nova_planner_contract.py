@@ -64,6 +64,62 @@ def _format_work_tree_reply(step: dict | None) -> str:
         return f"Next work tree step: {branch_title}. Recommended tool: {recommended_tool}."
     return f"Next work tree step: {branch_title}."
 
+
+def _parse_system_check_payload(tool_output: str) -> dict:
+    try:
+        payload = json.loads(str(tool_output or "").strip())
+    except Exception:
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _system_check_rows(payload: dict) -> list[dict]:
+    rows: list[dict] = []
+    for name, value in payload.items():
+        if name in {"ok", "profile"} or not isinstance(value, dict):
+            continue
+        if "ok" not in value and "info" not in value:
+            continue
+        rows.append(
+            {
+                "name": str(name or "").strip(),
+                "ok": bool(value.get("ok")),
+                "info": str(value.get("info") or "").strip(),
+                "required": bool(value.get("required", True)),
+            }
+        )
+    return rows
+
+
+def _render_system_check_reply(tool_output: str) -> tuple[str, dict]:
+    payload = _parse_system_check_payload(tool_output)
+    if not payload:
+        return str(tool_output or ""), {}
+
+    rows = _system_check_rows(payload)
+    overall_ok = bool(payload.get("ok"))
+    profile = str(payload.get("profile") or "").strip()
+    lines = [f"System check: {'OK' if overall_ok else 'needs attention'}."]
+    if profile:
+        lines.append(f"Profile: {profile}.")
+    if rows:
+        lines.append("Evidence:")
+        for row in rows:
+            state = "ok" if row.get("ok") else "attention"
+            info = str(row.get("info") or "").strip()
+            required = "" if bool(row.get("required", True)) else " optional"
+            suffix = f" ({info})" if info else ""
+            lines.append(f"- {row.get('name')}: {state}{required}{suffix}")
+    needs_attention = [str(row.get("name") or "") for row in rows if not bool(row.get("ok")) and bool(row.get("required", True))]
+    if needs_attention:
+        lines.append("Needs attention: " + ", ".join(needs_attention) + ".")
+    return "\n".join(lines).strip(), {
+        "ok": overall_ok,
+        "profile": profile,
+        "checks": rows,
+    }
+
+
 def build_planner_config(
     *,
     turns: list[tuple[str, str]],
@@ -100,17 +156,33 @@ def _actions_from_semantic_tool_intent(intent: dict | None) -> list[dict]:
     return [{"type": "run_tool", "tool": tool, "args": normalized_args, "semantic_intent": dict(payload)}]
 
 
+def _semantic_tool_route_allowed(turn_acts: list[str] | None, pending_action: dict | None = None) -> bool:
+    if turn_acts is None:
+        return True
+    acts = {str(item or "").strip().lower() for item in list(turn_acts or []) if str(item or "").strip()}
+    pending = pending_action if isinstance(pending_action, dict) else {}
+    if pending:
+        return True
+    if acts.intersection({"inform", "answer_to_prompt"}) and not acts.intersection({"ask", "command", "continue_thread", "mixed"}):
+        return False
+    return True
+
+
 def _classify_semantic_tool_actions(
     *,
     text: str,
     turns: list[tuple[str, str]],
     pending_action: dict | None,
+    turn_acts: list[str] | None = None,
     core,
     trace: Callable[..., None],
 ) -> tuple[list[dict], int, str]:
     classify_tool_intent_fn = getattr(core, "_llm_classify_routing_intent", None)
     if not callable(classify_tool_intent_fn):
         return [], 0, "unavailable"
+    if not _semantic_tool_route_allowed(turn_acts, pending_action=pending_action):
+        trace("action_planner", "semantic_not_actionable", turn_acts=",".join(str(item) for item in list(turn_acts or [])))
+        return [], 0, "none"
     semantic_started = time.perf_counter()
     try:
         semantic_intent = classify_tool_intent_fn(
@@ -134,6 +206,17 @@ def _classify_semantic_tool_actions(
             "semantic_none",
             str(semantic_intent.get("reason") or ""),
             confidence=float(semantic_intent.get("confidence") or 0.0),
+        )
+        return [], semantic_ms, "none"
+    semantic_tool = str((semantic_intent or {}).get("tool") or "").strip()
+    acts = {str(item or "").strip().lower() for item in list(turn_acts or []) if str(item or "").strip()} if turn_acts is not None else set()
+    if turn_acts is not None and semantic_tool == "self_status" and not acts.intersection({"ask", "command", "continue_thread", "mixed"}):
+        trace(
+            "action_planner",
+            "semantic_not_actionable",
+            "self_status_requires_actionable_turn",
+            tool=semantic_tool,
+            confidence=float((semantic_intent or {}).get("confidence") or 0.0),
         )
         return [], semantic_ms, "none"
     semantic_actions = _actions_from_semantic_tool_intent(semantic_intent)
@@ -280,6 +363,7 @@ def maybe_handle_planner_sequence(
     text: str,
     turns: list[tuple[str, str]],
     pending_action: dict | None,
+    turn_acts: list[str] | None = None,
     prefer_web_for_data_queries: bool,
     session,
     core,
@@ -322,6 +406,7 @@ def maybe_handle_planner_sequence(
         text=text,
         turns=turns,
         pending_action=pending_action,
+        turn_acts=turn_acts,
         core=core,
         trace=trace,
     )
@@ -500,6 +585,39 @@ def maybe_handle_planner_sequence(
                     "kind": "current",
                     "reply_contract": reply_contract,
                 }
+            elif tool == "operator_help":
+                reply_contract = "operator_help.current"
+                reply_outcome = {
+                    "intent": "operator_help",
+                    "kind": "current",
+                    "reply_contract": reply_contract,
+                }
+            elif tool == "runtime_identity":
+                reply_contract = "runtime_identity.current"
+                reply_outcome = {
+                    "intent": "runtime_identity",
+                    "kind": "current",
+                    "reply_contract": reply_contract,
+                }
+            elif tool == "capability_inventory":
+                reply_contract = "capability_inventory.current"
+                reply_outcome = {
+                    "intent": "capability_inventory",
+                    "kind": "current",
+                    "reply_contract": reply_contract,
+                }
+            elif tool == "system_check":
+                reply_contract = "system_check.current"
+                rendered_reply, evidence = _render_system_check_reply(rendered_out)
+                if rendered_reply:
+                    rendered_out = rendered_reply
+                reply_outcome = {
+                    "intent": "system_check",
+                    "kind": "current",
+                    "reply_contract": reply_contract,
+                }
+                if evidence:
+                    reply_outcome["evidence"] = evidence
             trace("tool_execution", "ok", tool=tool, grounded=bool(rendered_out.strip()))
             return _return_with_timing(normalize_reply(rendered_out), {
                 "planner_decision": "run_tool",

@@ -23,6 +23,7 @@ def execute_reply_sequence_from_runtime(
     turns: list[tuple[str, str]],
     text: str,
     pending_action: dict | None,
+    turn_acts: list[str] | None = None,
     prefer_web_for_data_queries: bool,
     language_mix_spanish_pct: int,
     session,
@@ -48,6 +49,7 @@ def execute_reply_sequence_from_runtime(
         turns=turns,
         text=text,
         pending_action=pending_action,
+        turn_acts=turn_acts,
         prefer_web_for_data_queries=prefer_web_for_data_queries,
         language_mix_spanish_pct=language_mix_spanish_pct,
         session=session,
@@ -121,10 +123,15 @@ def execute_http_reply_sequence_from_runtime(
         reply_local = _runtime_fn(runtime_scope, "_strip_ui_tip_leak")(reply_text)
         return ensure_reply(reply_local)
 
+    turn_acts = None
+    if isinstance(ledger_record, dict) and isinstance(ledger_record.get("turn_acts"), list):
+        turn_acts = [str(item).strip() for item in ledger_record.get("turn_acts") if str(item).strip()]
+
     return execute_reply_sequence_from_runtime(
         turns=turns,
         text=text,
         pending_action=pending_action,
+        turn_acts=turn_acts,
         prefer_web_for_data_queries=prefer_web_for_data_queries,
         language_mix_spanish_pct=language_mix_spanish_pct,
         session=session,
@@ -145,6 +152,7 @@ def execute_reply_sequence(
     turns: list[tuple[str, str]],
     text: str,
     pending_action: dict | None,
+    turn_acts: list[str] | None = None,
     prefer_web_for_data_queries: bool,
     language_mix_spanish_pct: int,
     session,
@@ -253,18 +261,58 @@ def execute_reply_sequence(
 
     def _build_fallback_context_details(user_text: str, session_turns: list[tuple[str, str]]):
         build_fn = core.build_fallback_context_details
+        scoped_acts = None if turn_acts is None else {str(item or "").strip().lower() for item in list(turn_acts or []) if str(item or "").strip()}
+        include_runtime_context = True if scoped_acts is None else bool(scoped_acts.intersection({"ask", "command", "continue_thread", "mixed"}))
         try:
             return build_fn(
                 user_text,
                 session_turns,
                 conversation_state=getattr(session, "conversation_state", None),
                 pending_action=pending_action,
+                include_runtime_context=include_runtime_context,
+                include_state_context=include_runtime_context,
+                include_chat_context=include_runtime_context,
             )
         except TypeError:
             return build_fn(user_text, session_turns)
 
     low = text.lower()
     allow_general_content = pre_planner_branch_group in {"all", "general"}
+    scoped_turn_acts = {
+        str(item or "").strip().lower()
+        for item in list(turn_acts or [])
+        if str(item or "").strip()
+    }
+
+    is_action_history_query = getattr(core, "_is_action_history_query", None)
+    if callable(is_action_history_query) and is_action_history_query(text):
+        handled, reply, truth_source, truth_grounded = core.truth_hierarchy_answer(text)
+        if handled:
+            trace("truth_hierarchy", "matched", source=str(truth_source or ""), grounded=bool(truth_grounded), operational=True)
+            return _timed_return(ensure_reply(reply), {
+                "planner_decision": "truth_hierarchy",
+                "tool": str(truth_source or ""),
+                "tool_args": {"query": text},
+                "tool_result": str(reply or ""),
+                "grounded": bool(truth_grounded),
+            })
+
+    if "answer_to_prompt" in scoped_turn_acts and not scoped_turn_acts.intersection({"ask", "command", "mixed"}):
+        trace("conversation_intake", "prompt_answer", turn_acts=",".join(sorted(scoped_turn_acts)))
+        reply = normalize_reply("Go ahead. I'm listening.")
+        return _logged_return(reply, {
+            "planner_decision": "conversation_intake",
+            "tool": "",
+            "tool_args": {"query": text},
+            "tool_result": "",
+            "grounded": False,
+            "reply_contract": "conversation_intake.ready",
+            "reply_outcome": {
+                "intent": "conversation_intake",
+                "kind": "ready_for_user_input",
+                "reply_contract": "conversation_intake.ready",
+            },
+        })
 
     if allow_general_content and is_developer_profile_request(text):
         trace("developer_profile", "matched")
@@ -335,6 +383,7 @@ def execute_reply_sequence(
             text=text,
             turns=turns,
             pending_action=pending_action,
+            turn_acts=turn_acts,
             prefer_web_for_data_queries=prefer_web_for_data_queries,
             session=session,
             core=core,
@@ -396,6 +445,7 @@ def execute_reply_sequence(
             text=text,
             turns=turns,
             pending_action=pending_action,
+            turn_acts=turn_acts,
             prefer_web_for_data_queries=prefer_web_for_data_queries,
             session=session,
             core=core,

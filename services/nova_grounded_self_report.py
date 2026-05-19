@@ -226,7 +226,7 @@ class NovaGroundedSelfReportService:
                     "control_status.release_status",
                 )
             )
-        elif release_readiness and release_readiness not in {"ready", "current", "ok", "unknown"}:
+        elif release_readiness and release_readiness not in {"ready", "ready-with-notes", "current", "ok", "unknown"}:
             items.append(
                 TroubleItem(
                     "release",
@@ -327,7 +327,14 @@ class NovaGroundedSelfReportService:
                 if self._node_is_cleared(node_dict, cleared):
                     continue
                 open_tasks = node_dict.get("open_task_count", node_dict.get("tasks_open"))
-                resolution = _text(node_dict.get("resolution_state") or node_dict.get("status"), "")
+                node_status = _text(node_dict.get("status"), "")
+                resolution_state = _text(node_dict.get("resolution_state"), "")
+                if (
+                    node_status in {"complete", "completed", "resolved", "retired", "archived"}
+                    or resolution_state in {"complete", "completed", "resolved", "retired", "archived"}
+                ):
+                    continue
+                resolution = resolution_state or node_status
                 current_task = _as_dict(node_dict.get("current_task"))
                 has_open_task = bool(current_task) or (isinstance(open_tasks, int) and open_tasks > 0)
                 if has_open_task or resolution in {"open", "observing", "blocked", "operator_hold", "active"}:

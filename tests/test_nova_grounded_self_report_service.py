@@ -107,6 +107,64 @@ def test_operator_attention_does_not_label_open_work_as_operator_hold() -> None:
     assert attention["level"] == "work_tree_attention"
 
 
+def test_ready_with_notes_release_is_status_not_stuck_point() -> None:
+    payload = GROUNDED_SELF_REPORT_SERVICE.build_payload(
+        {
+            "health_score": 100,
+            "work_tree_truth_status": "clear",
+            "work_tree_open_task_count": 0,
+            "release_status": {
+                "latest_readiness_state": "ready-with-notes",
+                "latest_source_status": "current",
+                "latest_artifact_stale": False,
+                "latest_ready_to_ship": True,
+            },
+        },
+        {"trees": []},
+    )
+    attention = GROUNDED_SELF_REPORT_SERVICE.build_operator_attention(payload)
+    reply = GROUNDED_SELF_REPORT_SERVICE.render("trouble", payload)
+
+    assert attention["active"] is False
+    assert "I do not see an active stuck point" in reply
+    assert "Release readiness: ready-with-notes." in reply
+
+
+def test_completed_branch_with_stale_current_task_is_not_current_work() -> None:
+    payload = GROUNDED_SELF_REPORT_SERVICE.build_payload(
+        {
+            "health_score": 100,
+            "work_tree_truth_status": "clear",
+            "work_tree_open_task_count": 0,
+            "release_status": {
+                "latest_readiness_state": "ready-with-notes",
+                "latest_source_status": "current",
+                "latest_artifact_stale": False,
+            },
+        },
+        {
+            "trees": [
+                {
+                    "nodes": [
+                        {
+                            "title": "Runtime restart provenance is incomplete",
+                            "status": "complete",
+                            "resolution_state": "open",
+                            "open_task_count": 0,
+                            "current_task": {"title": "Read completed evidence"},
+                        }
+                    ]
+                }
+            ]
+        },
+    )
+    reply = GROUNDED_SELF_REPORT_SERVICE.render("trouble", payload)
+
+    assert payload["work_item"] == {}
+    assert "Runtime restart provenance is incomplete" not in reply
+    assert "I do not see an active stuck point" in reply
+
+
 def test_live_cleared_runtime_branch_does_not_drive_attention() -> None:
     payload = GROUNDED_SELF_REPORT_SERVICE.build_payload(
         {

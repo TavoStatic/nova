@@ -1,4 +1,5 @@
 ﻿import unittest
+import json
 from unittest import mock
 
 from services import nova_planner_contract
@@ -146,6 +147,178 @@ class TestPlannerContractService(unittest.TestCase):
         self.assertEqual(meta.get("tool"), "self_status")
         self.assertEqual(meta.get("reply_contract"), "self_status.current")
         self.assertEqual(core.executed, [("self_status", [])])
+
+    def test_maybe_handle_planner_sequence_skips_semantic_tool_when_turn_has_no_actionable_act(self):
+        core = _PlannerCoreStub(
+            actions=[{"type": "run_tool", "tool": "web_search", "args": ["surface parse"]}],
+            semantic_intent={"tool": "self_status", "args": [], "confidence": 0.94, "reason": "live runtime state"},
+            tool_result="Nova Self Status",
+        )
+        traces = []
+
+        outcome = nova_planner_contract.maybe_handle_planner_sequence(
+            text="operator is providing context",
+            turns=[],
+            pending_action=None,
+            turn_acts=[],
+            prefer_web_for_data_queries=False,
+            session=None,
+            core=core,
+            trace=lambda *args, **kwargs: traces.append((args, kwargs)),
+            normalize_reply=lambda text: text,
+            is_web_preferred_data_query=lambda text: False,
+        )
+
+        self.assertIsNone(outcome)
+        self.assertEqual(core.executed, [])
+        self.assertTrue(any(args[:2] == ("action_planner", "semantic_not_actionable") for args, _kwargs in traces))
+
+    def test_maybe_handle_planner_sequence_allows_semantic_non_self_tool_with_empty_turn_acts(self):
+        core = _PlannerCoreStub(
+            actions=[],
+            semantic_intent={"tool": "weather_current_location", "args": [], "confidence": 0.91, "reason": "weather intent"},
+            tool_result="Weather from current location",
+            weather_available=True,
+        )
+
+        reply, meta = nova_planner_contract.maybe_handle_planner_sequence(
+            text="weather now",
+            turns=[],
+            pending_action=None,
+            turn_acts=[],
+            prefer_web_for_data_queries=False,
+            session=None,
+            core=core,
+            trace=lambda *args, **kwargs: None,
+            normalize_reply=lambda text: text,
+            is_web_preferred_data_query=lambda text: False,
+        )
+
+        self.assertEqual(reply, "Weather from current location")
+        self.assertEqual(meta.get("tool"), "weather_current_location")
+        self.assertEqual(meta.get("reply_contract"), "weather_lookup.current_location")
+
+    def test_maybe_handle_planner_sequence_contracts_verified_identity_and_capability_tools(self):
+        identity_core = _PlannerCoreStub(
+            semantic_intent={"tool": "runtime_identity", "args": [], "confidence": 0.91, "reason": "verified runtime identity"},
+            tool_result="Nova runtime identity",
+        )
+        identity_reply, identity_meta = nova_planner_contract.maybe_handle_planner_sequence(
+            text="tell me what you can verify about yourself",
+            turns=[],
+            pending_action=None,
+            prefer_web_for_data_queries=False,
+            session=None,
+            core=identity_core,
+            trace=lambda *args, **kwargs: None,
+            normalize_reply=lambda text: text,
+            is_web_preferred_data_query=lambda text: False,
+        )
+
+        capability_core = _PlannerCoreStub(
+            semantic_intent={"tool": "capability_inventory", "args": [], "confidence": 0.9, "reason": "verified capability inventory"},
+            tool_result="Nova capability inventory",
+        )
+        capability_reply, capability_meta = nova_planner_contract.maybe_handle_planner_sequence(
+            text="tell me what you can actually do from your registry",
+            turns=[],
+            pending_action=None,
+            prefer_web_for_data_queries=False,
+            session=None,
+            core=capability_core,
+            trace=lambda *args, **kwargs: None,
+            normalize_reply=lambda text: text,
+            is_web_preferred_data_query=lambda text: False,
+        )
+
+        self.assertEqual(identity_reply, "Nova runtime identity")
+        self.assertEqual(identity_meta.get("reply_contract"), "runtime_identity.current")
+        self.assertEqual(identity_core.executed, [("runtime_identity", [])])
+        self.assertEqual(capability_reply, "Nova capability inventory")
+        self.assertEqual(capability_meta.get("reply_contract"), "capability_inventory.current")
+        self.assertEqual(capability_core.executed, [("capability_inventory", [])])
+
+    def test_maybe_handle_planner_sequence_contracts_operator_help_tool(self):
+        core = _PlannerCoreStub(
+            semantic_intent={"tool": "operator_help", "args": [], "confidence": 0.91, "reason": "operator assistance request"},
+            tool_result="Today I am mainly stuck on: Work Tree needs operator context.\nSource: live control status and Work Tree.",
+        )
+
+        reply, meta = nova_planner_contract.maybe_handle_planner_sequence(
+            text="neutral user turn",
+            turns=[],
+            pending_action=None,
+            turn_acts=["ask"],
+            prefer_web_for_data_queries=False,
+            session=None,
+            core=core,
+            trace=lambda *args, **kwargs: None,
+            normalize_reply=lambda text: text,
+            is_web_preferred_data_query=lambda text: False,
+        )
+
+        self.assertIn("Work Tree needs operator context", reply)
+        self.assertEqual(meta.get("tool"), "operator_help")
+        self.assertEqual(meta.get("reply_contract"), "operator_help.current")
+        self.assertEqual((meta.get("reply_outcome") or {}).get("intent"), "operator_help")
+        self.assertEqual(core.executed, [("operator_help", [])])
+
+    def test_maybe_handle_planner_sequence_contracts_system_check_tool(self):
+        core = _PlannerCoreStub(
+            semantic_intent={"tool": "system_check", "args": [], "confidence": 0.88, "reason": "verify runtime checks"},
+            tool_result="System check: OK",
+        )
+
+        reply, meta = nova_planner_contract.maybe_handle_planner_sequence(
+            text="can you prove that from your internals?",
+            turns=[],
+            pending_action=None,
+            prefer_web_for_data_queries=False,
+            session=None,
+            core=core,
+            trace=lambda *args, **kwargs: None,
+            normalize_reply=lambda text: text,
+            is_web_preferred_data_query=lambda text: False,
+        )
+
+        self.assertEqual(reply, "System check: OK")
+        self.assertEqual(meta.get("reply_contract"), "system_check.current")
+        self.assertEqual(core.executed, [("system_check", [])])
+
+    def test_maybe_handle_planner_sequence_renders_system_check_json_by_contract(self):
+        payload = {
+            "profile": "runtime",
+            "heartbeat": {"ok": True, "info": "age=0s", "required": True},
+            "core_state": {"ok": True, "info": "pid=123", "required": True},
+            "ollama": {"ok": False, "info": "chat_model_missing", "required": True},
+            "ok": False,
+        }
+        core = _PlannerCoreStub(
+            semantic_intent={"tool": "system_check", "args": [], "confidence": 0.88, "reason": "verify runtime checks"},
+            tool_result=json.dumps(payload),
+        )
+
+        reply, meta = nova_planner_contract.maybe_handle_planner_sequence(
+            text="can you prove that from your internals?",
+            turns=[],
+            pending_action=None,
+            prefer_web_for_data_queries=False,
+            session=None,
+            core=core,
+            trace=lambda *args, **kwargs: None,
+            normalize_reply=lambda text: text,
+            is_web_preferred_data_query=lambda text: False,
+        )
+
+        self.assertIn("System check: needs attention.", reply)
+        self.assertIn("- heartbeat: ok (age=0s)", reply)
+        self.assertIn("- ollama: attention (chat_model_missing)", reply)
+        self.assertIn("Needs attention: ollama.", reply)
+        self.assertFalse(reply.strip().startswith("{"))
+        self.assertEqual(meta.get("reply_contract"), "system_check.current")
+        evidence = (meta.get("reply_outcome") or {}).get("evidence") or {}
+        self.assertFalse(evidence.get("ok"))
+        self.assertEqual(evidence.get("profile"), "runtime")
 
     def test_maybe_handle_planner_sequence_does_not_fallback_to_static_parser_after_semantic_none(self):
         core = _PlannerCoreStub(

@@ -462,6 +462,21 @@ def make_tool_conversation_state(
         return next_state
     if str(tool_name or "").strip().lower() == "queue_status":
         return make_queue_status_conversation_state_fn(tool_output)
+    if str(tool_name or "").strip().lower() == "self_status" and str(tool_output or "").strip():
+        return {
+            "kind": "self_status",
+            "subject": "runtime",
+            "query": str(query or "").strip(),
+            "tool_result": str(tool_output or "").strip()[:2500],
+        }
+    if str(tool_name or "").strip().lower() in {"runtime_identity", "capability_inventory", "system_check", "operator_help"} and str(tool_output or "").strip():
+        tool_kind = str(tool_name or "").strip().lower()
+        return {
+            "kind": tool_kind,
+            "subject": "runtime",
+            "query": str(query or "").strip(),
+            "tool_result": str(tool_output or "").strip()[:2500],
+        }
     return None
 
 

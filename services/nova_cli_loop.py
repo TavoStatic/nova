@@ -73,6 +73,18 @@ def run_loop(tts, *, core: object) -> None:
         language_mix_spanish_pct = core._clamp_language_mix(value)
         session_state.set_language_mix_spanish_pct(language_mix_spanish_pct)
 
+    def _build_fallback_context_details(text: str, turns: list[tuple[str, str]]) -> dict:
+        build_fn = core.build_fallback_context_details
+        try:
+            return build_fn(
+                text,
+                turns,
+                conversation_state=conversation_state,
+                pending_action=pending_action,
+            )
+        except TypeError:
+            return build_fn(text, turns)
+
     def _sync_pending_conversation_tracking() -> None:
         if not pending_action_ledger:
             return
@@ -551,7 +563,7 @@ def run_loop(tts, *, core: object) -> None:
             prefer_web_for_data_queries=prefer_web_for_data_queries,
             analyze_request_fn=lambda *_args, **_kwargs: SimpleNamespace(allow_llm=True, message=""),
             normalize_policy_reply_fn=lambda reply: reply,
-            build_fallback_context_details_fn=core.build_fallback_context_details,
+            build_fallback_context_details_fn=_build_fallback_context_details,
             uses_prior_reference_fn=core._uses_prior_reference,
             action_ledger_add_step=lambda stage, outcome, detail="", **data: _trace(stage, outcome, detail, **data),
         )

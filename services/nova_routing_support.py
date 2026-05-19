@@ -10,6 +10,9 @@ import requests
 ROUTING_TOOL_NAMES = (
     "none",
     "self_status",
+    "operator_help",
+    "runtime_identity",
+    "capability_inventory",
     "weather_current_location",
     "weather_location",
     "web_fetch",
@@ -48,7 +51,10 @@ ROUTING_INTENT_PROMPT = (
     + "|".join(ROUTING_TOOL_NAMES)
     + '",'
     '"args":[],"confidence":0.0,"reason":""}.\n'
-    "Tool purposes: self_status reads Nova's live operational condition; weather tools read weather; "
+    "Tool purposes: self_status reads Nova's live operational condition; "
+    "operator_help reads what Nova currently needs from the operator using live status and Work Tree evidence; "
+    "runtime_identity reads Nova's verified runtime identity; "
+    "capability_inventory reads Nova's verified capability inventory; weather tools read weather; "
     "web tools retrieve external pages or research; queue_status and pulse read Nova queues and pulse; "
     "system_check reads local runtime checks; read/find/ls inspect local files; screen/camera inspect local input; "
     "patch/update tools operate on governed update flows.\n"
@@ -470,6 +476,7 @@ def llm_classify_routing_intent(
     payload = {
         "model": chat_model_fn(),
         "stream": False,
+        "keep_alive": "10m",
         "options": {"temperature": 0.0, "top_p": 0.8},
         "messages": [
             {"role": "system", "content": ROUTING_INTENT_PROMPT},
@@ -529,6 +536,16 @@ def _coerce_tool_intent_payload(
         "runtime_status": "self_status",
         "internal_status": "self_status",
         "self_report": "self_status",
+        "help_needed": "operator_help",
+        "operator_help_needed": "operator_help",
+        "needs_help": "operator_help",
+        "assist_nova": "operator_help",
+        "identity": "runtime_identity",
+        "nova_identity": "runtime_identity",
+        "runtime_self": "runtime_identity",
+        "capabilities": "capability_inventory",
+        "capability_query": "capability_inventory",
+        "capability_report": "capability_inventory",
         "weather_lookup": "weather_current_location",
         "current_weather": "weather_current_location",
         "research": "web_research",

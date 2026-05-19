@@ -114,6 +114,7 @@ def ollama_chat(
     payload = {
         "model": chat_model_fn(),
         "stream": False,
+        "keep_alive": "10m",
         "options": {"temperature": 0.2, "top_p": 0.9, "repeat_penalty": 1.1},
         "messages": [
             {"role": "system", "content": system_msg},

@@ -1154,6 +1154,33 @@ class TestNovaHttpProfile(unittest.TestCase):
         self.assertNotEqual((session.last_reflection or {}).get("reply_contract"), "operator_feedback.source")
         self.assertNotEqual((session.last_reflection or {}).get("reply_contract"), "grounded_self_report.internals")
 
+    def test_http_operator_update_does_not_execute_semantic_self_status_without_actionable_act(self):
+        orig_execute_planned_action = nova_http.nova_core.execute_planned_action
+        calls = []
+        try:
+            nova_http.nova_core._llm_classify_routing_intent = lambda text, turns=None, pending_action=None, return_none_payload=False: {
+                "tool": "self_status",
+                "args": [],
+                "source": "test_semantic_intent",
+            }
+
+            def fake_execute(tool, args=None):
+                calls.append((tool, args))
+                return "WRONG_SELF_STATUS"
+
+            nova_http.nova_core.execute_planned_action = fake_execute
+            reply = nova_http.process_chat(
+                "s11_operator_update_semantic",
+                "give you an update on the progress we are having creating you",
+            )
+            self.assertEqual(reply, "LLM:give you an update on the progress we are having creating you")
+            session = nova_http.SESSION_STATE_MANAGER.get("s11_operator_update_semantic")
+            self.assertIsNotNone(session)
+            self.assertNotEqual((session.last_reflection or {}).get("reply_contract"), "self_status.current")
+            self.assertEqual(calls, [])
+        finally:
+            nova_http.nova_core.execute_planned_action = orig_execute_planned_action
+
     def test_http_operator_feedback_wording_is_not_owned_by_content_route(self):
         orig_ollama_chat = nova_http.nova_core.ollama_chat
         try:
@@ -1168,17 +1195,99 @@ class TestNovaHttpProfile(unittest.TestCase):
         finally:
             nova_http.nova_core.ollama_chat = orig_ollama_chat
 
+    def test_http_answer_rationale_uses_action_ledger_not_llm_guess(self):
+        replies = iter(["First answer with too much information.", "WRONG_SECOND_LLM_GUESS"])
+        nova_http.nova_core.ollama_chat = lambda *_args, **_kwargs: next(replies)
+
+        first = nova_http.process_chat("s11_answer_rationale", "hi nova")
+        second = nova_http.process_chat("s11_answer_rationale", "nova why did you give me all that information ?")
+
+        self.assertEqual(first, "First answer with too much information.")
+        self.assertIn("Last action record:", second)
+        self.assertIn("decision=llm_fallback", second)
+        self.assertNotIn("WRONG_SECOND_LLM_GUESS", second)
+        records = [
+            json.loads(path.read_text(encoding="utf-8"))
+            for path in sorted(self._action_ledger_dir.glob("*.json"))
+        ]
+        self.assertEqual(records[-1].get("tool"), "action_ledger")
+        self.assertEqual(records[-1].get("planner_decision"), "truth_hierarchy")
+
     def test_http_runtime_identity_words_do_not_create_supervisor_intent(self):
-        reply = nova_http.process_chat("s11_identity", "who are you ?")
-        self.assertEqual(reply, "LLM:who are you ?")
-        session = nova_http.SESSION_STATE_MANAGER.get("s11_identity")
-        self.assertNotEqual((session.last_reflection or {}).get("reply_contract"), "runtime_identity.source")
+        orig_execute_planned_action = nova_http.nova_core.execute_planned_action
+        try:
+            nova_http.nova_core._llm_classify_routing_intent = lambda text, turns=None, pending_action=None, return_none_payload=False: {
+                "tool": "runtime_identity",
+                "args": [],
+                "source": "test_semantic_intent",
+            }
+            nova_http.nova_core.execute_planned_action = lambda tool, args=None: "VERIFIED_RUNTIME_IDENTITY" if tool == "runtime_identity" else ""
+            reply = nova_http.process_chat("s11_identity", "who are you ?")
+            self.assertEqual(reply, "VERIFIED_RUNTIME_IDENTITY")
+            session = nova_http.SESSION_STATE_MANAGER.get("s11_identity")
+            self.assertEqual((session.last_reflection or {}).get("reply_contract"), "runtime_identity.current")
+            self.assertNotEqual((session.last_reflection or {}).get("reply_contract"), "runtime_identity.source")
+            self.assertEqual((session.conversation_state or {}).get("kind"), "runtime_identity")
+            self.assertIn("VERIFIED_RUNTIME_IDENTITY", (session.conversation_state or {}).get("tool_result", ""))
+        finally:
+            nova_http.nova_core.execute_planned_action = orig_execute_planned_action
 
     def test_http_capability_words_do_not_create_supervisor_intent(self):
-        reply = nova_http.process_chat("s11_caps", "what are your capabilities ?")
-        self.assertEqual(reply, "LLM:what are your capabilities ?")
-        session = nova_http.SESSION_STATE_MANAGER.get("s11_caps")
-        self.assertNotEqual((session.last_reflection or {}).get("reply_contract"), "capability_inventory.source")
+        orig_execute_planned_action = nova_http.nova_core.execute_planned_action
+        try:
+            nova_http.nova_core._llm_classify_routing_intent = lambda text, turns=None, pending_action=None, return_none_payload=False: {
+                "tool": "capability_inventory",
+                "args": [],
+                "source": "test_semantic_intent",
+            }
+            nova_http.nova_core.execute_planned_action = lambda tool, args=None: "VERIFIED_CAPABILITY_INVENTORY" if tool == "capability_inventory" else ""
+            reply = nova_http.process_chat("s11_caps", "what are your capabilities ?")
+            self.assertEqual(reply, "VERIFIED_CAPABILITY_INVENTORY")
+            session = nova_http.SESSION_STATE_MANAGER.get("s11_caps")
+            self.assertEqual((session.last_reflection or {}).get("reply_contract"), "capability_inventory.current")
+            self.assertNotEqual((session.last_reflection or {}).get("reply_contract"), "capability_inventory.source")
+            self.assertEqual((session.conversation_state or {}).get("kind"), "capability_inventory")
+            self.assertIn("VERIFIED_CAPABILITY_INVENTORY", (session.conversation_state or {}).get("tool_result", ""))
+        finally:
+            nova_http.nova_core.execute_planned_action = orig_execute_planned_action
+
+    def test_http_operator_help_uses_grounded_tool_not_llm_fallback(self):
+        orig_execute_planned_action = nova_http.nova_core.execute_planned_action
+        orig_classify_turn_acts = nova_http.nova_core._classify_turn_acts
+        try:
+            nova_http.nova_core.ollama_chat = lambda *_args, **_kwargs: "WRONG_LLM_FALLBACK"
+            nova_http.nova_core._classify_turn_acts = lambda *_args, **_kwargs: ["ask"]
+            nova_http.nova_core._llm_classify_routing_intent = lambda text, turns=None, pending_action=None, return_none_payload=False: {
+                "tool": "operator_help",
+                "args": [],
+                "source": "test_semantic_intent",
+            }
+            nova_http.nova_core.execute_planned_action = (
+                lambda tool, args=None: (
+                    "Today I am mainly stuck on: Work Tree needs operator context.\n"
+                    "Source: live control status and Work Tree."
+                )
+                if tool == "operator_help"
+                else ""
+            )
+
+            reply = nova_http.process_chat("s11_operator_help", "neutral user turn")
+
+            self.assertIn("Work Tree needs operator context", reply)
+            self.assertNotIn("WRONG_LLM_FALLBACK", reply)
+            session = nova_http.SESSION_STATE_MANAGER.get("s11_operator_help")
+            self.assertEqual((session.last_reflection or {}).get("reply_contract"), "operator_help.current")
+            self.assertEqual((session.conversation_state or {}).get("kind"), "operator_help")
+            self.assertIn("operator context", (session.conversation_state or {}).get("tool_result", ""))
+            records = [
+                json.loads(path.read_text(encoding="utf-8"))
+                for path in sorted(self._action_ledger_dir.glob("*.json"))
+            ]
+            self.assertEqual(records[-1].get("tool"), "operator_help")
+            self.assertEqual(records[-1].get("planner_decision"), "run_tool")
+        finally:
+            nova_http.nova_core._classify_turn_acts = orig_classify_turn_acts
+            nova_http.nova_core.execute_planned_action = orig_execute_planned_action
 
     def test_http_developer_followup_uses_local_developer_facts_for_nonlocal_user_id(self):
         orig_default_local_user_id = nova_http.nova_core._default_local_user_id

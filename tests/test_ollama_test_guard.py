@@ -132,6 +132,39 @@ class TestOllamaTestGuard(unittest.TestCase):
             start_mock.assert_not_called()
             kill_mock.assert_not_called()
 
+    def test_warm_ollama_chat_model_is_blocked_under_unittest_by_default(self):
+        with mock.patch.object(nova_core.sys, "argv", ["python", "-m", "unittest", "discover"]), \
+             mock.patch.dict(os.environ, {}, clear=False), \
+             mock.patch("nova_core.requests.post") as post_mock:
+            self.assertFalse(nova_core.warm_ollama_chat_model(reason="test"))
+            post_mock.assert_not_called()
+
+    def test_warm_ollama_chat_model_posts_bounded_probe_when_allowed(self):
+        captured = {}
+
+        class _Resp:
+            def raise_for_status(self):
+                return None
+
+        def _post(url, json=None, timeout=None):
+            captured["url"] = url
+            captured["payload"] = json
+            captured["timeout"] = timeout
+            return _Resp()
+
+        with mock.patch.object(nova_core, "_live_ollama_calls_allowed", return_value=True), \
+             mock.patch.object(nova_core, "ollama_server_up", return_value=True), \
+             mock.patch.object(nova_core, "chat_model", return_value="llama3.2:3b"), \
+             mock.patch("nova_core.requests.post", side_effect=_post), \
+             mock.patch("nova_core.ok") as ok_mock:
+            self.assertTrue(nova_core.warm_ollama_chat_model(reason="http_startup"))
+            self.assertEqual(captured["url"], f"{nova_core.OLLAMA_BASE}/api/chat")
+            self.assertEqual(captured["payload"]["model"], "llama3.2:3b")
+            self.assertEqual(captured["payload"]["keep_alive"], "10m")
+            self.assertEqual(captured["payload"]["options"]["num_predict"], 1)
+            self.assertEqual(captured["timeout"], nova_core.OLLAMA_WARM_TIMEOUT)
+            ok_mock.assert_called_once()
+
     def test_ensure_ollama_does_not_start_process_under_unittest_by_default(self):
         with mock.patch.object(nova_core.sys, "argv", ["python", "-m", "unittest", "discover"]), \
              mock.patch.dict(os.environ, {}, clear=False), \

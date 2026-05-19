@@ -85,6 +85,68 @@ class TestNovaConversationFollowupsService(unittest.TestCase):
         )
         self.assertEqual(tool_state, {"kind": "queue_status", "subject": "generated_work_queue"})
 
+    def test_make_tool_conversation_state_records_self_status_evidence(self):
+        state = nova_conversation_followups.make_tool_conversation_state(
+            "self_status",
+            "what is troubling you today",
+            "Work Tree is blocked_observing with 2 open task(s).",
+            make_retrieval_conversation_state_fn=lambda tool, query, output: None,
+            make_queue_status_conversation_state_fn=lambda output: None,
+        )
+
+        self.assertEqual(state["kind"], "self_status")
+        self.assertEqual(state["subject"], "runtime")
+        self.assertIn("blocked_observing", state["tool_result"])
+
+    def test_make_tool_conversation_state_records_verified_self_evidence(self):
+        identity_state = nova_conversation_followups.make_tool_conversation_state(
+            "runtime_identity",
+            "who are you",
+            "I am Nova, a local AI runtime.",
+            make_retrieval_conversation_state_fn=lambda tool, query, output: None,
+            make_queue_status_conversation_state_fn=lambda output: None,
+        )
+        capability_state = nova_conversation_followups.make_tool_conversation_state(
+            "capability_inventory",
+            "what can you do",
+            "Current capabilities:\n- runtime_core",
+            make_retrieval_conversation_state_fn=lambda tool, query, output: None,
+            make_queue_status_conversation_state_fn=lambda output: None,
+        )
+
+        self.assertEqual(identity_state["kind"], "runtime_identity")
+        self.assertEqual(identity_state["subject"], "runtime")
+        self.assertIn("local AI runtime", identity_state["tool_result"])
+        self.assertEqual(capability_state["kind"], "capability_inventory")
+        self.assertEqual(capability_state["subject"], "runtime")
+        self.assertIn("runtime_core", capability_state["tool_result"])
+
+    def test_make_tool_conversation_state_records_system_check_evidence(self):
+        state = nova_conversation_followups.make_tool_conversation_state(
+            "system_check",
+            "can you prove that from your internals?",
+            "System check: OK",
+            make_retrieval_conversation_state_fn=lambda tool, query, output: None,
+            make_queue_status_conversation_state_fn=lambda output: None,
+        )
+
+        self.assertEqual(state["kind"], "system_check")
+        self.assertEqual(state["subject"], "runtime")
+        self.assertIn("System check", state["tool_result"])
+
+    def test_make_tool_conversation_state_records_operator_help_evidence(self):
+        state = nova_conversation_followups.make_tool_conversation_state(
+            "operator_help",
+            "neutral user turn",
+            "Today I am mainly stuck on: Work Tree needs operator context.",
+            make_retrieval_conversation_state_fn=lambda tool, query, output: None,
+            make_queue_status_conversation_state_fn=lambda output: None,
+        )
+
+        self.assertEqual(state["kind"], "operator_help")
+        self.assertEqual(state["subject"], "runtime")
+        self.assertIn("operator context", state["tool_result"])
+
     def test_retrieval_query_requires_explicit_web_search_command(self):
         query = nova_conversation_followups.retrieval_query_from_text(
             "web_search",
