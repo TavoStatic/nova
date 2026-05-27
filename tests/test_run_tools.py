@@ -23,13 +23,11 @@ class TestRunTools(unittest.TestCase):
 
         self.assertEqual(out, "What location should I use?")
 
-    def test_handle_tools_uses_legacy_command_router_when_requested(self):
-        with mock.patch("run_tools.planner_decision.decide_turn", return_value=[{"type": "route_command"}]), \
-            mock.patch("run_tools.nova_core.handle_commands", return_value="Command output") as handle_mock:
+    def test_handle_tools_ignores_unknown_planner_steps(self):
+        with mock.patch("run_tools.planner_decision.decide_turn", return_value=[{"type": "route_command"}]):
             out = run_tools.handle_tools("patch list-previews")
 
-        self.assertEqual(out, "Command output")
-        handle_mock.assert_called_once_with("patch list-previews")
+        self.assertIsNone(out)
 
     def test_list_tools_text_includes_direct_and_registered_sections(self):
         with mock.patch.object(run_tools.nova_core.TOOL_REGISTRY_SERVICE, "describe_tools", return_value="filesystem\nvision"):

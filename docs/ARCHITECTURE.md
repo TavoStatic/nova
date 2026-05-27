@@ -171,21 +171,24 @@ The decision spine should route between those providers intentionally based on t
 
 The current routing surface is a concrete subsystem, not just helper code inside `nova_core.py`.
 
-- `routing/turn_parser.py`: turns raw input into structured turn text and candidate metadata.
 - `routing/turn_model.py`: shared turn data structures.
-- `routing/heuristics.py`: reusable routing heuristics that should not drift back into HTTP or UI code.
-- `routing/command_router.py`: command-oriented route decisions.
-- `routing/context_router.py`: context and continuation routing support.
 - `routing/execution_plan.py`: execution-plan representation for downstream handlers.
-- `routing/legacy_routes.py`: compatibility layer for older routes that have not fully moved into the newer spine.
+- `services/nova_turn_intent_trace.py`: turn evidence and route trace capture.
+- `services/nova_routing_support.py`: planner support for intent, context, and route decisions.
+- `services/nova_routing_helpers.py`: shared helpers for routing support.
+- `services/nova_reply_context_contract.py`: structural reply context contract for chat turns.
+- `services/nova_reply_runtime.py`: reply runtime execution helpers.
+- `services/nova_reply_sequence.py`: reply sequence assembly and final delivery shape.
+- `services/nova_fallback_flow.py`: fallback flow after structural routes have been considered.
+- `services/nova_fulfillment_routing.py`: maps planner intent into fulfillment paths.
+- `services/fulfillment_flow.py`: fulfillment flow orchestration.
+- `services/decision_pipeline.py`: pipeline-level decision coordination.
 
 Related top-level routing modules:
 
 - `planner_decision.py`: planner-owned turn classification and route choice.
 - `action_planner.py`: compatibility adapter over planner decisions.
 - `supervisor.py` and `services/supervisor_*.py`: deterministic rule arbitration and rule-family ownership.
-- `followup_move_classifier.py`: continuation move classification.
-- `active_task_constraints.py`: active-task and pending-thread constraints.
 
 ## Services Module Map
 
@@ -244,8 +247,8 @@ That shape now has an explicit planner boundary:
 - route classification lives in `planner_decision.py`
 - execution choice is mapped back into planner actions before `nova_core.py` and `nova_http.py` dispatch to specialized handlers
 - `action_planner.py` is now a thin adapter over that decision module rather than the primary home for mixed string heuristics
-- followup move classification for supervisor-owned continuation handling now lives in `followup_move_classifier.py` rather than remaining embedded only inside `supervisor.py`
-- active-task context resolution and pending-thread bindings for supervisor-owned continuation handling now live in `active_task_constraints.py` rather than remaining embedded only inside `supervisor.py`
+- continuation handling now flows through the planner, routing support, reply context contract, and supervisor runtime rather than deleted standalone classifiers
+- active-task and pending-thread context now belongs to the planner/routing support path and Work Tree evidence surfaces rather than a separate root-level constraints file
 
 ## Current Refactor Risk
 
@@ -266,10 +269,12 @@ The next cleanup priority is therefore not basic route ownership. It is keeping 
 
 For the supervisor-owned continuation path, the current seam shape is now:
 
-- `followup_move_classifier.py` owns move classification and the shared heuristics that support it
-- `active_task_constraints.py` owns active-task context resolution plus shared pending-thread bindings
+- `services/nova_turn_intent_trace.py` records what evidence the turn actually carried
+- `services/nova_routing_support.py` owns shared routing support for continuation and context-sensitive decisions
+- `services/nova_reply_context_contract.py` owns the structural reply context the model receives
+- `services/nova_fulfillment_routing.py` maps the chosen intent into work or tool fulfillment
 - `supervisor.py` owns rule-family arbitration
-- domain families should decide execution only after move classification and active-task constraints have been applied
+- domain families should decide execution only after turn evidence, conversation context, and Work Tree constraints have been applied
 
 ## Request Flow Summary
 

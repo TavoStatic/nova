@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import ast
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable
+
+from services.nova_inventory_labels import shared_inventory_label
 
 
 @dataclass(frozen=True)
@@ -21,25 +24,31 @@ WIRING_SURFACES: tuple[WiringSurface, ...] = (
         "runtime_core",
         "Runtime guard, core, HTTP UI, heartbeat, and process health",
         ("guard", "core", "webui", "runtime_summary", "runtime_failures"),
-        ("control_status", "runtime_failures", "runtime_restart_analytics"),
+        ("runtime_core",),
         ("pulse", "system_check", "read", "find"),
         ("guard_start", "autonomy_maintenance_start", "active_work_tree_run_next"),
         ("services/control_status.py", "services/work_tree_signal_ingestion.py", "services/runtime_status.py"),
     ),
     WiringSurface(
         "model_runtime",
-        "Ollama server, version/API contract, model availability, chat route, and port ownership",
+        shared_inventory_label("model_runtime"),
         ("ollama_health", "ollama_api_up", "ollama_version", "ollama_api_contract_status", "ollama_chat_route_ok", "port_ownership"),
-        ("control_status",),
-        ("system_check", "read", "find"),
+        ("model_runtime",),
+        ("os_capability", "system_check", "read", "find"),
         ("active_work_tree_run_next",),
-        ("services/ollama_health.py", "services/work_tree_signal_ingestion.py", "services/port_ownership.py"),
+        (
+            "services/ollama_health.py",
+            "services/work_tree_signal_ingestion.py",
+            "services/port_ownership.py",
+            "tools/os_capabilities/verify_ollama_model.ps1",
+            "tools/os_capabilities/inspect_ports.ps1",
+        ),
     ),
     WiringSurface(
         "web_search",
-        "Web/search provider policy, SearXNG, provider telemetry, and research tools",
+        shared_inventory_label("web_search"),
         ("web_enabled", "search_provider", "searxng_ok", "provider_telemetry"),
-        ("control_status",),
+        ("web_search",),
         ("web_search", "web_research", "web_gather", "system_check"),
         ("active_work_tree_run_next",),
         ("services/nova_web_tools.py", "services/nova_http_policy_search.py", "services/work_tree_signal_ingestion.py"),
@@ -48,25 +57,34 @@ WIRING_SURFACES: tuple[WiringSurface, ...] = (
         "policy_gates",
         "Policy gates that can block Nova self-observation",
         ("web_enabled", "memory_enabled", "patch_enabled", "vision_status", "voice_status"),
-        ("patch_status", "memory_health", "voice_status", "vision_status"),
+        ("policy_gates",),
         ("read", "find", "system_check"),
         ("active_work_tree_run_next",),
         ("services/policy_manager.py", "services/policy_control.py", "services/work_tree_signal_ingestion.py"),
     ),
     WiringSurface(
         "memory_identity",
-        "Memory health, bootstrap origin, identity persistence, and learned facts",
+        shared_inventory_label("memory_identity"),
         ("memory_health", "memory_health_status", "memory_enabled", "memory_stats_ok"),
-        ("memory_health",),
+        ("memory_identity",),
         ("memory_bootstrap_judgment", "memory_identity_bootstrap", "read", "find"),
         ("active_work_tree_run_next",),
         ("services/memory_health.py", "services/memory_bootstrap_judgment.py", "services/work_tree_signal_ingestion.py"),
     ),
     WiringSurface(
+        "identity_profile_answers",
+        shared_inventory_label("identity_profile_answers"),
+        ("memory_health", "memory_health_status", "memory_enabled", "source_root_inventory"),
+        ("identity_profile_answers",),
+        ("memory_bootstrap_judgment", "memory_identity_bootstrap", "read", "find"),
+        ("active_work_tree_run_next",),
+        ("services/memory_routing.py", "services/nova_memory_learning.py", "services/memory_identity_bootstrap.py", "services/work_tree_signal_ingestion.py"),
+    ),
+    WiringSurface(
         "work_tree",
-        "Work Tree truth, active branches, evidence, and autonomous step execution",
+        shared_inventory_label("work_tree"),
         ("work_tree_truth", "work_tree_tree_count", "work_tree_open_task_count"),
-        ("wiring_inventory",),
+        ("work_tree",),
         ("read", "find", "pulse", "queue_status"),
         ("active_work_tree_run_next",),
         ("work_tree.py", "services/control_work_trees.py", "services/work_tree_signal_ingestion.py"),
@@ -75,14 +93,14 @@ WIRING_SURFACES: tuple[WiringSurface, ...] = (
         "tool_evidence",
         "Tool event ledger and evidence validity",
         ("tool_events_total", "last_tool_status", "last_tool_error_summary"),
-        ("tool_events",),
+        ("tool_evidence",),
         ("read", "find", "queue_status"),
         ("active_work_tree_run_next",),
         ("services/tool_execution.py", "services/evidence_validity.py", "work_tree.py"),
     ),
     WiringSurface(
         "action_ledger",
-        "Action ledger readback, route summaries, and final answer evidence",
+        shared_inventory_label("action_ledger"),
         ("action_ledger_ok", "action_ledger_total", "last_route_summary", "last_action_final_answer"),
         ("action_ledger",),
         ("read", "find", "pulse"),
@@ -93,7 +111,7 @@ WIRING_SURFACES: tuple[WiringSurface, ...] = (
         "generated_queue",
         "Generated session queue, blocked reasons, and echo-work pressure",
         ("generated_work_queue", "generated_queue_status", "queue_open_count", "queue_blocked_count"),
-        ("generated_work_queue",),
+        ("generated_queue",),
         ("queue_status", "generated_queue_run", "read", "find"),
         ("generated_queue_run_next", "generated_queue_investigate"),
         ("services/nova_http_generated_work.py", "autonomy_maintenance.py", "services/work_tree_signal_ingestion.py"),
@@ -102,7 +120,7 @@ WIRING_SURFACES: tuple[WiringSurface, ...] = (
         "subconscious",
         "Subconscious reports, triage signals, and review judgment",
         ("subconscious_summary", "subconscious_ok", "subconscious_latest_report_path"),
-        ("subconscious_status", "subconscious"),
+        ("subconscious",),
         ("subconscious_review_judgment", "read", "find"),
         ("active_work_tree_run_next",),
         ("subconscious_live_simulator.py", "services/subconscious_work_tree_triage.py", "services/work_tree_signal_ingestion.py"),
@@ -111,7 +129,7 @@ WIRING_SURFACES: tuple[WiringSurface, ...] = (
         "patch_pipeline",
         "Patch previews, validated apply readiness, cleanup, and rollback",
         ("patch_status_ok", "patch_enabled", "patch_pipeline_ready", "patch_cleanup_status"),
-        ("patch_status",),
+        ("patch_pipeline",),
         ("patch_preview_approve", "patch_preview_apply", "patch_apply", "patch_rollback", "read"),
         ("patch_queue_run_next", "update_now_dry_run"),
         ("services/nova_patching.py", "services/patch_control.py", "services/work_tree_signal_ingestion.py"),
@@ -120,7 +138,7 @@ WIRING_SURFACES: tuple[WiringSurface, ...] = (
         "release",
         "Release package readiness, validation evidence, promotion judgment, and rebuild",
         ("release_status",),
-        ("release_status",),
+        ("release",),
         (
             "release_validation_run",
             "release_promotion_judgment",
@@ -152,7 +170,7 @@ WIRING_SURFACES: tuple[WiringSurface, ...] = (
         "voice",
         "Voice runtime dependency loading and entrypoint wrappers",
         ("voice_status", "voice_runtime_status", "voice_runtime_requested"),
-        ("voice_status",),
+        ("voice",),
         ("read", "find", "system_check"),
         ("active_work_tree_run_next",),
         ("services/nova_voice_runtime.py", "services/voice_interaction.py", "nova_core.py"),
@@ -161,16 +179,16 @@ WIRING_SURFACES: tuple[WiringSurface, ...] = (
         "vision",
         "Vision runtime, screen/camera policy, and model availability",
         ("vision_status", "vision_runtime_status", "vision_runtime_requested"),
-        ("vision_status",),
+        ("vision",),
         ("screen", "camera", "read", "find", "system_check"),
         ("active_work_tree_run_next",),
         ("tools/vision_tool.py", "services/nova_vision_runtime.py", "look_crop.py"),
     ),
     WiringSurface(
         "http_continuity",
-        "HTTP conversation state, grounded self-report continuity, and active Work Tree identity",
+        shared_inventory_label("http_continuity"),
         ("active_http_sessions", "last_route_summary", "last_action_final_answer"),
-        ("http_conversation",),
+        ("http_continuity",),
         ("read", "find", "pulse"),
         ("active_work_tree_run_next",),
         ("conversation_manager.py", "services/nova_http_chat_runtime.py", "services/nova_reply_sequence.py"),
@@ -187,7 +205,7 @@ WIRING_SURFACES: tuple[WiringSurface, ...] = (
             "test_profile_inventory_ok",
             "test_profile_profile_drift_count",
         ),
-        ("regression", "validation_artifact_truth", "test_profile_inventory"),
+        ("test_ecosystem",),
         ("read", "find", "queue_status"),
         ("active_work_tree_run_next",),
         (
@@ -210,125 +228,146 @@ WIRING_SURFACES: tuple[WiringSurface, ...] = (
             "release_stage_bytes",
             "release_zip_bytes",
         ),
-        ("storage_watch",),
+        ("storage_release_pressure",),
         ("read", "find", "system_check"),
         ("active_work_tree_run_next",),
         ("services/storage_watch.py", "kidney.py", "services/release_clean.py"),
     ),
     WiringSurface(
         "runtime_control",
-        "Runtime start/stop/restart control, process identity, timelines, and restart provenance",
+        shared_inventory_label("runtime_control"),
         ("action_readiness", "runtime_timeline", "runtime_restart_analytics", "runtime_failures"),
-        ("control_status", "runtime_failures", "runtime_restart_analytics"),
+        ("runtime_control",),
         ("system_check", "read", "find"),
         ("active_work_tree_run_next",),
         ("services/runtime_control.py", "services/runtime_process_state.py", "services/runtime_restart_provenance.py"),
     ),
     WiringSurface(
         "scheduler_registry",
-        "Maintenance schedule registry and detached worker cycle ownership",
+        shared_inventory_label("scheduler_registry"),
         ("maintenance_scheduler_status", "runtime_worker_status", "autonomy_maintenance"),
-        ("control_status",),
+        ("scheduler_registry",),
         ("queue_status", "read", "find"),
         ("autonomy_maintenance_start", "active_work_tree_run_next"),
         ("services/schedule_registry.py", "autonomy_maintenance.py", "nova_guard.py"),
     ),
     WiringSurface(
+        "autonomy_maintenance",
+        "Autonomy maintenance worker state, cycle execution, and maintenance error pressure",
+        ("autonomy_maintenance", "runtime_worker_status", "runtime_worker_stale_identity"),
+        ("autonomy_maintenance",),
+        ("read", "find", "pulse", "system_check", "source_root_judgment"),
+        ("autonomy_maintenance_start", "active_work_tree_run_next"),
+        ("autonomy_maintenance.py", "services/work_tree_signal_ingestion.py", "services/runtime_control.py"),
+    ),
+    WiringSurface(
+        "autonomy_orchestrator",
+        "Autonomy orchestrator decisions, advisory actions, ledger evidence, and blockage pressure",
+        (
+            "autonomy_orchestrator",
+            "autonomy_orchestrator_summary",
+            "autonomy_orchestrator_ledger_status",
+            "autonomy_orchestrator_rejection_reasons",
+        ),
+        ("autonomy_orchestrator",),
+        ("read", "find", "pulse", "source_root_judgment"),
+        ("active_work_tree_run_next",),
+        ("services/autonomy_orchestrator.py", "autonomy_maintenance.py", "services/work_tree_signal_ingestion.py"),
+    ),
+    WiringSurface(
         "frontdoor_cli",
-        "Nova command front door, shell dispatch, and local CLI entrypoints",
+        shared_inventory_label("frontdoor_cli"),
         ("backend_commands", "backend_command_count", "source_root_inventory"),
-        ("source_root_inventory",),
+        ("frontdoor_cli",),
         ("read", "find", "system_check"),
         ("active_work_tree_run_next",),
-        ("nova.cmd", "nova.ps1", "agent.py", "run.py"),
+        ("nova.cmd", "nova.ps1", "agent.py", "run.py", "services/work_tree_signal_ingestion.py"),
     ),
     WiringSurface(
         "http_api_control",
-        "HTTP transport, API route dispatch, control room, auth, and action hooks",
+        shared_inventory_label("http_api_control"),
         ("requests_total", "errors_total", "chat_login_enabled", "source_root_inventory"),
-        ("control_status", "http_conversation"),
+        ("http_api_control", "http_continuity"),
         ("read", "find", "pulse"),
         ("active_work_tree_run_next",),
         ("nova_http.py", "services/nova_http_get_routes.py", "services/nova_http_post_dispatch.py"),
     ),
     WiringSurface(
         "operator_control",
-        "Operator macros, backend commands, local operator CLI, and control-action dispatcher",
+        shared_inventory_label("operator_control"),
         ("operator_macros", "backend_commands", "operator_outbox", "operator_outbox_open_count", "source_root_inventory"),
-        ("source_root_inventory",),
+        ("operator_control",),
         ("read", "find", "pulse"),
         ("active_work_tree_run_next",),
-        ("services/operator_control.py", "services/operator_outbox.py", "services/nova_control_action_dispatcher.py", "scripts/operator_cli.py"),
+        ("services/operator_control.py", "services/operator_outbox.py", "services/nova_control_action_dispatcher.py", "scripts/operator_cli.py", "services/work_tree_signal_ingestion.py"),
     ),
     WiringSurface(
         "session_identity_auth",
-        "Chat users, control sessions, active session state, and auth identity",
+        shared_inventory_label("session_identity_auth"),
         ("chat_auth_source", "chat_users_count", "chat_login_enabled", "source_root_inventory"),
-        ("http_conversation", "source_root_inventory"),
+        ("session_identity_auth",),
         ("read", "find", "pulse"),
         ("active_work_tree_run_next",),
-        ("services/chat_identity.py", "services/session_admin.py", "http_session_store.py"),
-    ),
-    WiringSurface(
-        "identity_profile_answers",
-        "Developer identity, preference answers, profile followups, and identity-specific reply paths",
-        ("memory_health", "last_route_summary", "source_root_inventory"),
-        ("memory_health", "http_conversation", "source_root_inventory"),
-        ("read", "find", "pulse"),
-        ("active_work_tree_run_next",),
-        ("services/nova_developer_profile.py", "services/nova_identity_answers.py", "services/nova_identity_preferences.py"),
+        ("services/chat_identity.py", "services/session_admin.py", "http_session_store.py", "services/work_tree_signal_ingestion.py"),
     ),
     WiringSurface(
         "conversation_routing",
-        "Turn parsing, HTTP routing, route probes, deterministic reply sequencing, and continuity",
+        shared_inventory_label("conversation_routing"),
         ("last_intent", "last_planner_decision", "last_route_summary", "source_root_inventory"),
-        ("http_conversation", "action_ledger", "source_root_inventory"),
+        ("conversation_routing",),
         ("read", "find", "pulse"),
         ("active_work_tree_run_next",),
-        ("routing/context_router.py", "routing/command_router.py", "services/nova_http_routing.py"),
+        ("services/nova_routing_support.py", "services/nova_reply_sequence.py", "services/nova_planner_contract.py", "services/work_tree_signal_ingestion.py"),
     ),
     WiringSurface(
         "supervisor_fulfillment",
-        "Supervisor ownership, fulfillment flow, shared routing rules, and follow-up dispatch",
+        shared_inventory_label("supervisor_fulfillment"),
         ("last_route_summary", "last_route_trace", "source_root_inventory"),
-        ("source_root_inventory", "http_conversation"),
+        ("supervisor_fulfillment",),
         ("read", "find", "pulse"),
         ("active_work_tree_run_next",),
-        ("supervisor.py", "services/supervisor_registry.py", "services/fulfillment_flow.py"),
+        ("supervisor.py", "services/supervisor_registry.py", "services/fulfillment_flow.py", "services/work_tree_signal_ingestion.py"),
     ),
     WiringSurface(
         "reply_quality_contracts",
-        "Reply contracts, guards, truth hierarchy, reflection health, and final-turn shaping",
+        shared_inventory_label("reply_quality_contracts"),
         ("last_action_final_answer", "last_route_grounded", "last_route_trace", "source_root_inventory"),
-        ("action_ledger", "http_conversation", "source_root_inventory"),
+        ("reply_quality_contracts",),
         ("read", "find", "pulse"),
         ("active_work_tree_run_next",),
-        ("services/nova_reply_contracts.py", "services/nova_reply_guards.py", "services/nova_truth_hierarchy.py"),
+        ("services/nova_reflection_health.py", "services/nova_reply_runtime.py", "services/work_tree_signal_ingestion.py"),
     ),
     WiringSurface(
         "retrieval_knowledge",
-        "Local knowledge packs, retrieval followups, keyword tools, and research contracts",
+        shared_inventory_label("retrieval_knowledge"),
         ("web_enabled", "last_provider_hit", "source_root_inventory"),
-        ("control_status", "source_root_inventory"),
+        ("retrieval_knowledge",),
         ("web_search", "web_research", "read", "find"),
         ("active_work_tree_run_next",),
-        ("services/nova_knowledge_packs.py", "services/nova_retrieval_followups.py", "services/nova_keyword_tools.py"),
+        ("services/nova_knowledge_packs.py", "services/work_tree_signal_ingestion.py"),
     ),
     WiringSurface(
         "weather_location",
-        "Weather, device location, saved location, and location-aware task constraints",
+        shared_inventory_label("weather_location"),
         ("web_enabled", "last_route_summary", "source_root_inventory"),
-        ("control_status", "source_root_inventory"),
+        ("weather_location",),
         ("weather_current_location", "weather_location", "location_coords", "read", "find"),
         ("active_work_tree_run_next",),
-        ("services/nova_location_weather.py", "active_task_constraints.py"),
+        ("services/nova_location_weather.py", "services/work_tree_signal_ingestion.py"),
     ),
     WiringSurface(
         "tool_registry_policy",
-        "Tool registry, direct tool catalog, tool policy, console, and planned action dispatch",
-        ("tool_events_total", "backend_command_count", "source_root_inventory"),
-        ("tool_events", "source_root_inventory"),
-        ("read", "find", "queue_status"),
+        shared_inventory_label("tool_registry_policy"),
+        (
+            "tool_events_total",
+            "backend_command_count",
+            "os_capability_ledger",
+            "os_capability_ledger_ok",
+            "os_capability_ledger_current_issue_count",
+            "source_root_inventory",
+        ),
+        ("tool_registry_policy", "source_root_inventory"),
+        ("read", "find", "queue_status", "os_capability"),
         ("active_work_tree_run_next",),
         (
             "tools/registry.py",
@@ -339,62 +378,73 @@ WIRING_SURFACES: tuple[WiringSurface, ...] = (
             "services/os_script_controller.py",
             "tools/os_capability_tool.py",
             "tools/os_capabilities/os_capabilities.json",
+            "tools/os_capabilities/collect_diagnostics_bundle.ps1",
+            "tools/os_capabilities/inspect_ports.ps1",
+            "tools/os_capabilities/inspect_processes.ps1",
+            "tools/os_capabilities/inspect_runtime_health.ps1",
+            "tools/os_capabilities/scan_large_files.ps1",
             "tools/os_capabilities/verify_ollama_model.ps1",
         ),
     ),
     WiringSurface(
         "installer_packaging",
-        "Windows installer build, verification, ledger, and readiness flow",
-        ("release_status", "source_root_inventory"),
-        ("release_status", "source_root_inventory"),
-        ("read", "find", "system_check"),
+        shared_inventory_label("installer_packaging"),
+        ("release_status", "installer_release_status", "installer_status", "source_root_inventory"),
+        ("installer_packaging",),
+        ("installer_validation_run", "read", "find", "system_check", "source_root_judgment"),
         ("active_work_tree_run_next",),
-        ("scripts/build_windows_installer.ps1", "scripts/verify_windows_installer.ps1", "docs/WINDOWS_INSTALLER_PLAN.md"),
+        (
+            "services/installer_validation.py",
+            "scripts/build_windows_installer.ps1",
+            "scripts/verify_windows_installer.ps1",
+            "docs/WINDOWS_INSTALLER_PLAN.md",
+            "services/work_tree_signal_ingestion.py",
+        ),
     ),
     WiringSurface(
         "tts_audio_output",
-        "TTS output, Piper bridge, model assets, and spoken response delivery",
+        shared_inventory_label("tts_audio_output"),
         ("voice_status", "voice_runtime_status", "source_root_inventory"),
-        ("voice_status", "source_root_inventory"),
+        ("tts_audio_output",),
         ("read", "find", "system_check"),
         ("active_work_tree_run_next",),
-        ("tts_say.py", "tts_piper.py", "tts_say.ps1"),
+        ("tts_say.py", "tts_piper.py", "tts_say.ps1", "services/work_tree_signal_ingestion.py"),
     ),
     WiringSurface(
         "diagnostics_hygiene",
-        "Doctor, health checks, diagnostics, smoke checks, and repo hygiene",
+        shared_inventory_label("diagnostics_hygiene"),
         ("health_score", "self_check_pass_ratio", "source_root_inventory"),
-        ("source_root_inventory", "control_status"),
+        ("diagnostics_hygiene", "source_root_inventory"),
         ("health", "system_check", "read", "find"),
         ("active_work_tree_run_next",),
         ("doctor.py", "health.py", "scripts/repo_hygiene_check.py"),
     ),
     WiringSurface(
         "safety_envelope",
-        "Phase 2 safety envelope, review authority, generated-session quarantine, and promotion gates",
+        shared_inventory_label("safety_envelope"),
         ("subconscious_summary", "generated_work_queue", "source_root_inventory"),
-        ("subconscious_status", "source_root_inventory"),
+        ("safety_envelope",),
         ("phase2_audit", "read", "find"),
         ("active_work_tree_run_next",),
-        ("nova_safety_envelope.py", "services/subconscious_review_authority.py", "docs/PHASE2_SAFETY_ENVELOPE.md"),
+        ("nova_safety_envelope.py", "services/subconscious_review_authority.py", "docs/PHASE2_SAFETY_ENVELOPE.md", "services/work_tree_signal_ingestion.py"),
     ),
     WiringSurface(
         "metrics_ops_journal",
-        "Behavior metrics, ops journal, metrics snapshots, and operator-visible telemetry",
+        shared_inventory_label("metrics_ops_journal"),
         ("requests_total", "errors_total", "tool_events_total", "source_root_inventory"),
-        ("action_ledger", "control_status", "source_root_inventory"),
+        ("metrics_ops_journal",),
         ("read", "find", "pulse"),
         ("active_work_tree_run_next",),
-        ("services/behavior_metrics.py", "services/ops_journal.py", "services/control_telemetry.py"),
+        ("services/behavior_metrics.py", "services/ops_journal.py", "services/control_telemetry.py", "services/work_tree_signal_ingestion.py"),
     ),
     WiringSurface(
         "core_steward_reflection",
-        "Core steward posture, core health brief, thinning, and reflective health pressure",
+        shared_inventory_label("core_steward_reflection"),
         ("pulse", "health_score", "source_root_inventory"),
-        ("control_status", "source_root_inventory"),
+        ("core_steward_reflection",),
         ("core_health", "core_thinning", "pulse", "read", "find"),
         ("active_work_tree_run_next",),
-        ("services/core_steward.py", "services/core_health_brief.py", "services/core_thinning.py"),
+        ("services/core_steward.py", "services/core_health_brief.py", "services/core_thinning.py", "services/work_tree_signal_ingestion.py"),
     ),
     WiringSurface(
         "source_root_inventory",
@@ -409,8 +459,11 @@ WIRING_SURFACES: tuple[WiringSurface, ...] = (
             "root_closure_inventory",
             "root_closure_inventory_ok",
             "root_closure_inventory_gap_count",
+            "self_repair_closure_inventory",
+            "self_repair_closure_inventory_ok",
+            "self_repair_closure_inventory_gap_count",
         ),
-        ("source_root_inventory", "root_closure_inventory"),
+        ("source_root_inventory", "root_closure_inventory", "self_repair_closure_inventory"),
         ("read", "find", "pulse"),
         ("active_work_tree_run_next",),
         ("services/nova_root_inventory.py", "services/nova_wiring_inventory.py", "services/end_to_end_wiring.py"),
@@ -436,9 +489,232 @@ DEFAULT_ADVISORY_ACTIONS = frozenset(
     for action in surface.advisory_actions
 )
 
+EXECUTION_TOOL_CONSTANTS = (
+    "ACTIVE_WORK_TREE_EXECUTE_TOOLS",
+    "PATCH_QUEUE_EXECUTE_TOOLS",
+    "GENERATED_QUEUE_EXECUTE_TOOLS",
+)
+
+REQUIRED_EVIDENCE_PATHS = frozenset(("work_tree_evidence",))
+REQUIRED_JUDGMENT_PATHS = frozenset(("signal_branch_resolution", "source_root_judgment", "tool_result_validation"))
+REQUIRED_CLOSURE_PATHS = frozenset(("work_tree_task_completion", "signal_branch_resolution"))
+REQUIRED_OPERATOR_OUTBOX_PATHS = frozenset(("operator_outbox_notice", "work_tree_operator_notice"))
+REQUIRED_OWNED_ROOT_ROUTES = frozenset(("self_repair_closure_inventory", "source_root_judgment_sequence"))
+
 
 def _clean_set(values: Iterable[str] | None) -> set[str]:
     return {str(item or "").strip() for item in list(values or []) if str(item or "").strip()}
+
+
+def _read_source(repo_root: Path, relative_path: str) -> str:
+    path = repo_root / relative_path
+    if not path.exists():
+        return ""
+    try:
+        return path.read_text(encoding="utf-8", errors="replace")
+    except Exception:
+        return ""
+
+
+def _literal_string_sequence(source: str, constant_names: Iterable[str]) -> set[str]:
+    wanted = _clean_set(constant_names)
+    if not source.strip() or not wanted:
+        return set()
+    try:
+        module = ast.parse(source)
+    except SyntaxError:
+        return set()
+
+    values: set[str] = set()
+    for node in module.body:
+        targets = []
+        value_node = None
+        if isinstance(node, ast.Assign):
+            targets = list(node.targets)
+            value_node = node.value
+        elif isinstance(node, ast.AnnAssign):
+            targets = [node.target]
+            value_node = node.value
+        else:
+            continue
+        if value_node is None:
+            continue
+        target_names = {
+            target.id
+            for target in targets
+            if isinstance(target, ast.Name)
+        }
+        if not target_names.intersection(wanted):
+            continue
+        if not isinstance(value_node, (ast.List, ast.Tuple, ast.Set)):
+            continue
+        for item in value_node.elts:
+            if isinstance(item, ast.Constant) and isinstance(item.value, str) and item.value.strip():
+                values.add(item.value.strip())
+    return values
+
+
+def _literal_dict_string_values(source: str, key_name: str) -> set[str]:
+    if not source.strip() or not key_name.strip():
+        return set()
+    try:
+        module = ast.parse(source)
+    except SyntaxError:
+        return set()
+
+    values: set[str] = set()
+    for node in ast.walk(module):
+        if not isinstance(node, ast.Dict):
+            continue
+        for key_node, value_node in zip(node.keys, node.values):
+            if not (
+                isinstance(key_node, ast.Constant)
+                and isinstance(key_node.value, str)
+                and key_node.value == key_name
+            ):
+                continue
+            if isinstance(value_node, ast.Constant) and isinstance(value_node.value, str) and value_node.value.strip():
+                values.add(value_node.value.strip())
+    return values
+
+
+def build_source_wiring_probe_payload(*, root: str | Path | None = None) -> dict[str, Any]:
+    """Probe the source tree for the code paths required by Nova self-repair.
+
+    This is intentionally source-derived instead of declared-by-registry.  The
+    registry says what should exist; this probe checks whether the execution,
+    evidence, judgment, closure, and outbox paths are actually present in code.
+    """
+    repo_root = Path(root).resolve() if root is not None else Path(__file__).resolve().parents[1]
+    signal_text = _read_source(repo_root, "services/work_tree_signal_ingestion.py")
+    tool_dispatch_text = _read_source(repo_root, "services/nova_tool_dispatch.py")
+    work_tree_text = _read_source(repo_root, "work_tree.py")
+    dispatcher_text = _read_source(repo_root, "services/nova_control_action_dispatcher.py")
+    autonomy_text = _read_source(repo_root, "autonomy_maintenance.py")
+    operator_outbox_text = _read_source(repo_root, "services/operator_outbox.py")
+    os_controller_text = _read_source(repo_root, "services/os_script_controller.py")
+    tool_registry_text = _read_source(repo_root, "tools/registry.py")
+    actual_signal_sources = _literal_dict_string_values(signal_text, "source")
+
+    signal_sources = {
+        source
+        for surface in WIRING_SURFACES
+        for source in surface.signal_sources
+        if source in actual_signal_sources
+    }
+    planned_tools = {
+        tool
+        for surface in WIRING_SURFACES
+        for tool in surface.planned_tools
+        if tool in tool_dispatch_text or tool in work_tree_text
+    }
+    advisory_actions = {
+        action
+        for surface in WIRING_SURFACES
+        for action in surface.advisory_actions
+        if action in dispatcher_text
+    }
+    executable_tools = _literal_string_sequence(autonomy_text, EXECUTION_TOOL_CONSTANTS)
+    executable_actions = {
+        action
+        for action in DEFAULT_ADVISORY_ACTIONS
+        if action in dispatcher_text and action in autonomy_text
+    }
+
+    evidence_paths: set[str] = set()
+    if "def record_task_evidence" in work_tree_text and "work_tree_evidence" in work_tree_text:
+        evidence_paths.add("work_tree_evidence")
+    if "TOOL_EVENTS_FILE" in tool_registry_text or "ToolExecutionService" in _read_source(repo_root, "services/tool_execution.py"):
+        evidence_paths.add("tool_events")
+    if "AUTONOMY_ORCHESTRATOR_LEDGER" in autonomy_text:
+        evidence_paths.add("autonomy_orchestrator_ledger")
+    if "append_ledger" in os_controller_text or "ledger" in os_controller_text:
+        evidence_paths.add("os_capability_ledger")
+
+    judgment_paths: set[str] = set()
+    if "def resolve_signal_branches" in signal_text:
+        judgment_paths.add("signal_branch_resolution")
+    if "def mark_task_complete" in work_tree_text:
+        judgment_paths.add("work_tree_task_completion")
+    if "invalid_tool_result" in work_tree_text or "_is_invalid_tool_result" in work_tree_text:
+        judgment_paths.add("tool_result_validation")
+    if "release_promotion_judgment" in tool_dispatch_text and "release_promotion_judgment" in work_tree_text:
+        judgment_paths.add("release_promotion_judgment")
+    if "memory_bootstrap_judgment" in tool_dispatch_text and "memory_bootstrap_judgment" in work_tree_text:
+        judgment_paths.add("memory_bootstrap_judgment")
+    if "subconscious_review_judgment" in tool_dispatch_text and "subconscious_review_judgment" in work_tree_text:
+        judgment_paths.add("subconscious_review_judgment")
+    if (
+        "source_root_judgment" in tool_dispatch_text
+        and "source_root_judgment" in work_tree_text
+        and "SOURCE_ROOT_JUDGMENT_TOOL" in signal_text
+    ):
+        judgment_paths.add("source_root_judgment")
+    if "def respond_to_notice" in operator_outbox_text and "_record_response_in_work_tree" in operator_outbox_text:
+        judgment_paths.add("operator_response_judgment")
+
+    closure_paths: set[str] = set()
+    if "def mark_task_complete" in work_tree_text:
+        closure_paths.add("work_tree_task_completion")
+    if "def is_tree_complete" in work_tree_text:
+        closure_paths.add("tree_completion")
+    if "def resolve_signal_branches" in signal_text:
+        closure_paths.add("signal_branch_resolution")
+    if "def resolve_inactive_signal_branches" in signal_text:
+        closure_paths.add("inactive_signal_retirement")
+    if "def reconcile_work_tree_notices" in operator_outbox_text:
+        closure_paths.add("operator_notice_reconciliation")
+
+    operator_outbox_paths: set[str] = set()
+    if "def append_notice" in operator_outbox_text:
+        operator_outbox_paths.add("operator_outbox_notice")
+    if "def notices_from_work_tree_state" in operator_outbox_text:
+        operator_outbox_paths.add("work_tree_operator_notice")
+    if "def notice_from_autonomy" in operator_outbox_text:
+        operator_outbox_paths.add("autonomy_operator_notice")
+    if "os_capability" in operator_outbox_text and "reconcile_os_capability_notices" in operator_outbox_text:
+        operator_outbox_paths.add("os_capability_operator_notice")
+    if "publish_source_root_operator_notice" in _read_source(repo_root, "services/source_root_judgment.py"):
+        operator_outbox_paths.add("source_root_operator_notice")
+
+    owned_root_routes: set[str] = set()
+    if (
+        "def _root_closure_inventory_signals_from_status" in signal_text
+        and '"symbol": root_id' in signal_text
+        and '"source": "root_closure_inventory"' in signal_text
+        and '"tool_args": [first_source_file]' in signal_text
+    ):
+        owned_root_routes.add("root_closure_inventory")
+    if (
+        "def _self_repair_closure_inventory_signals_from_status" in signal_text
+        and '"symbol": root_id' in signal_text
+        and '"source": "self_repair_closure_inventory"' in signal_text
+        and '"tool_args": [first_source_file]' in signal_text
+        and "active_source_keys" in signal_text
+        and 'source="self_repair_closure_inventory"' in signal_text
+    ):
+        owned_root_routes.add("self_repair_closure_inventory")
+    if (
+        "def _append_source_root_judgment_task" in signal_text
+        and "SOURCE_ROOT_JUDGMENT_TOOL" in signal_text
+        and "SOURCE_ROOT_JUDGMENT_TASK_TITLE" in signal_text
+    ):
+        owned_root_routes.add("source_root_judgment_sequence")
+
+    return {
+        "ok": True,
+        "root": str(repo_root),
+        "signal_sources": sorted(signal_sources),
+        "planned_tools": sorted(planned_tools),
+        "advisory_actions": sorted(advisory_actions),
+        "executable_tools": sorted(executable_tools),
+        "executable_actions": sorted(executable_actions),
+        "evidence_paths": sorted(evidence_paths),
+        "judgment_paths": sorted(judgment_paths),
+        "closure_paths": sorted(closure_paths),
+        "operator_outbox_paths": sorted(operator_outbox_paths),
+        "owned_root_routes": sorted(owned_root_routes),
+    }
 
 
 def build_wiring_inventory_payload(
@@ -634,6 +910,197 @@ def build_root_closure_inventory_payload(
         "missing_signal_roots": missing_signal_roots,
         "missing_tool_roots": missing_tool_roots,
         "missing_action_roots": missing_action_roots,
+        "roots": roots,
+    }
+
+
+def _closure_depth(row: dict[str, Any]) -> str:
+    if not bool(row.get("source_evidence_available", False)):
+        return "source_missing"
+    if not bool(row.get("status_visible", False)) or not bool(row.get("signal_wired", False)):
+        return "visible_only"
+    if not bool(row.get("owned_root_route_available", False)):
+        return "signal_borrowed"
+    if not bool(row.get("action_available", False)):
+        return "signal_wired"
+    if not bool(row.get("execution_available", False)):
+        return "action_wired"
+    if not bool(row.get("evidence_available", False)):
+        return "execution_wired"
+    if not bool(row.get("judgment_available", False)):
+        return "evidence_wired"
+    if not bool(row.get("closure_available", False)):
+        return "judgment_wired"
+    if not bool(row.get("operator_outbox_available", False)):
+        return "closure_no_outbox"
+    return "source_contract_ready"
+
+
+def build_self_repair_closure_inventory_payload(
+    status_payload: dict[str, Any] | None = None,
+    *,
+    root: str | Path | None = None,
+    signal_sources: Iterable[str] | None = None,
+    planned_tools: Iterable[str] | None = None,
+    advisory_actions: Iterable[str] | None = None,
+    executable_tools: Iterable[str] | None = None,
+    executable_actions: Iterable[str] | None = None,
+    evidence_paths: Iterable[str] | None = None,
+    judgment_paths: Iterable[str] | None = None,
+    closure_paths: Iterable[str] | None = None,
+    operator_outbox_paths: Iterable[str] | None = None,
+    owned_root_routes: Iterable[str] | None = None,
+) -> dict[str, Any]:
+    """Classify each root by static self-repair wiring depth.
+
+    A root is only source-contract ready when code evidence shows the full chain:
+    signal -> Work Tree -> action/capability -> execution -> evidence ->
+    judgment -> branch closure, with operator outbox available for authority
+    or missing-tool gaps. Live closure is intentionally not claimed here.
+    """
+    probe = build_source_wiring_probe_payload(root=root)
+
+    available_sources = _clean_set(signal_sources) if signal_sources is not None else set(probe.get("signal_sources") or [])
+    available_tools = _clean_set(planned_tools) if planned_tools is not None else set(probe.get("planned_tools") or [])
+    available_actions = _clean_set(advisory_actions) if advisory_actions is not None else set(probe.get("advisory_actions") or [])
+    available_executable_tools = (
+        _clean_set(executable_tools) if executable_tools is not None else set(probe.get("executable_tools") or [])
+    )
+    available_executable_actions = (
+        _clean_set(executable_actions) if executable_actions is not None else set(probe.get("executable_actions") or [])
+    )
+    available_evidence_paths = _clean_set(evidence_paths) if evidence_paths is not None else set(probe.get("evidence_paths") or [])
+    available_judgment_paths = _clean_set(judgment_paths) if judgment_paths is not None else set(probe.get("judgment_paths") or [])
+    available_closure_paths = _clean_set(closure_paths) if closure_paths is not None else set(probe.get("closure_paths") or [])
+    available_outbox_paths = (
+        _clean_set(operator_outbox_paths)
+        if operator_outbox_paths is not None
+        else set(probe.get("operator_outbox_paths") or [])
+    )
+    available_owned_root_routes = (
+        _clean_set(owned_root_routes)
+        if owned_root_routes is not None
+        else set(probe.get("owned_root_routes") or [])
+    )
+
+    root_closure = build_root_closure_inventory_payload(
+        status_payload,
+        root=root,
+        signal_sources=available_sources,
+        planned_tools=available_tools,
+        advisory_actions=available_actions,
+    )
+
+    roots: list[dict[str, Any]] = []
+    gap_roots: list[str] = []
+    missing_execution_roots: list[str] = []
+    missing_evidence_roots: list[str] = []
+    missing_judgment_roots: list[str] = []
+    missing_closure_roots: list[str] = []
+    missing_outbox_roots: list[str] = []
+    missing_owned_route_roots: list[str] = []
+    depth_counts: dict[str, int] = {}
+
+    evidence_missing = sorted(REQUIRED_EVIDENCE_PATHS - available_evidence_paths)
+    judgment_missing = sorted(REQUIRED_JUDGMENT_PATHS - available_judgment_paths)
+    closure_missing = sorted(REQUIRED_CLOSURE_PATHS - available_closure_paths)
+    outbox_missing = sorted(REQUIRED_OPERATOR_OUTBOX_PATHS - available_outbox_paths)
+    owned_route_missing = sorted(REQUIRED_OWNED_ROOT_ROUTES - available_owned_root_routes)
+
+    for base_row in list(root_closure.get("roots") or []):
+        if not isinstance(base_row, dict):
+            continue
+        row = dict(base_row)
+        root_id = str(row.get("root_id") or "").strip()
+        present_source_files = list(row.get("present_source_files") or [])
+        present_planned_tools = _clean_set(row.get("present_planned_tools") or [])
+        present_advisory_actions = _clean_set(row.get("present_advisory_actions") or [])
+        executable_planned_tools = sorted(present_planned_tools & available_executable_tools)
+        executable_advisory_actions = sorted(present_advisory_actions & available_executable_actions)
+
+        source_evidence_available = bool(present_source_files)
+        status_visible = not list(row.get("missing_status_keys") or [])
+        signal_wired = not list(row.get("missing_signal_sources") or [])
+        action_available = bool(present_planned_tools or present_advisory_actions)
+        execution_available = bool(executable_planned_tools or executable_advisory_actions)
+        evidence_available = not evidence_missing
+        judgment_available = not judgment_missing
+        closure_available = not closure_missing
+        operator_outbox_available = not outbox_missing
+        owned_root_route_available = not owned_route_missing
+
+        gaps = [str(item or "").strip() for item in list(row.get("gaps") or []) if str(item or "").strip()]
+        if not owned_root_route_available:
+            gaps.append("missing_owned_root_route")
+            missing_owned_route_roots.append(root_id)
+        if not execution_available:
+            gaps.append("missing_execution_path")
+            missing_execution_roots.append(root_id)
+        if not evidence_available:
+            gaps.append("missing_evidence_path")
+            missing_evidence_roots.append(root_id)
+        if not judgment_available:
+            gaps.append("missing_judgment_path")
+            missing_judgment_roots.append(root_id)
+        if not closure_available:
+            gaps.append("missing_closure_path")
+            missing_closure_roots.append(root_id)
+        if not operator_outbox_available:
+            gaps.append("missing_operator_outbox_path")
+            missing_outbox_roots.append(root_id)
+
+        row.update(
+            {
+                "source_evidence_available": source_evidence_available,
+                "status_visible": status_visible,
+                "signal_wired": signal_wired,
+                "action_available": action_available,
+                "execution_available": execution_available,
+                "evidence_available": evidence_available,
+                "judgment_available": judgment_available,
+                "closure_available": closure_available,
+                "operator_outbox_available": operator_outbox_available,
+                "owned_root_route_available": owned_root_route_available,
+                "owned_root_routes": sorted(available_owned_root_routes),
+                "missing_owned_root_routes": owned_route_missing,
+                "executable_planned_tools": executable_planned_tools,
+                "executable_advisory_actions": executable_advisory_actions,
+                "non_executable_planned_tools": sorted(present_planned_tools - available_executable_tools),
+                "non_executable_advisory_actions": sorted(present_advisory_actions - available_executable_actions),
+                "missing_evidence_paths": evidence_missing,
+                "missing_judgment_paths": judgment_missing,
+                "missing_closure_paths": closure_missing,
+                "missing_operator_outbox_paths": outbox_missing,
+                "gaps": gaps,
+            }
+        )
+        row["closure_depth"] = _closure_depth(row)
+        row["ok"] = row["closure_depth"] == "source_contract_ready" and not gaps
+        depth_counts[row["closure_depth"]] = depth_counts.get(row["closure_depth"], 0) + 1
+        if not row["ok"]:
+            gap_roots.append(root_id)
+        roots.append(row)
+
+    return {
+        "ok": not gap_roots,
+        "proof_scope": "source_contract",
+        "root_count": len(roots),
+        "source_contract_ready_count": sum(1 for row in roots if row.get("closure_depth") == "source_contract_ready"),
+        "gap_count": len(gap_roots),
+        "gap_roots": gap_roots,
+        "depth_counts": depth_counts,
+        "missing_execution_roots": missing_execution_roots,
+        "missing_evidence_roots": missing_evidence_roots,
+        "missing_judgment_roots": missing_judgment_roots,
+        "missing_closure_roots": missing_closure_roots,
+        "missing_operator_outbox_roots": missing_outbox_roots,
+        "missing_owned_route_roots": missing_owned_route_roots,
+        "required_owned_root_routes": sorted(REQUIRED_OWNED_ROOT_ROUTES),
+        "required_evidence_paths": sorted(REQUIRED_EVIDENCE_PATHS),
+        "required_judgment_paths": sorted(REQUIRED_JUDGMENT_PATHS),
+        "required_closure_paths": sorted(REQUIRED_CLOSURE_PATHS),
+        "required_operator_outbox_paths": sorted(REQUIRED_OPERATOR_OUTBOX_PATHS),
+        "source_probe": probe,
         "roots": roots,
     }
 

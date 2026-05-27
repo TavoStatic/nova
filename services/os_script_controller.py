@@ -13,6 +13,8 @@ from services.os_capability_registry import OS_CAPABILITY_REGISTRY_SERVICE
 
 
 MAX_LEDGER_TEXT_CHARS = 20000
+MUTATING_CAPABILITY_REQUIRES_ADMIN_AUTHORITY = "mutating_capability_requires_admin_authority"
+EVIDENCE_WRITE_REQUIRES_WRITE_VERIFICATION = "evidence_write_requires_write_verification"
 
 
 def _safe_text(value: Any, limit: int = 1000) -> str:
@@ -251,7 +253,8 @@ class OsScriptControllerService:
         return rows[-max(1, int(limit or 1)) :]
 
     def summary(self, path: Path | None = None, *, limit: int = 80) -> dict[str, Any]:
-        rows = self.recent_ledger_rows(path, limit=limit)
+        ledger_path = Path(path or OS_CAPABILITY_LEDGER_FILE)
+        rows = self.recent_ledger_rows(ledger_path, limit=limit)
         status_counts: dict[str, int] = {}
         reason_counts: dict[str, int] = {}
         for row in rows:
@@ -263,6 +266,7 @@ class OsScriptControllerService:
                 reason_counts[reason] = reason_counts.get(reason, 0) + 1
         return {
             "ok": True,
+            "path": str(ledger_path),
             "count": len(rows),
             "status_counts": status_counts,
             "reason_counts": reason_counts,
@@ -424,17 +428,17 @@ class OsScriptControllerService:
         if mutating and not (bool(context.get("is_admin")) and bool(context.get("allow_mutating"))):
             return {
                 "ok": False,
-                "reason": "mutating_capability_requires_admin_authority",
+                "reason": MUTATING_CAPABILITY_REQUIRES_ADMIN_AUTHORITY,
                 "authority_level": authority_level,
                 "mutating": True,
-                "errors": ["mutating_capability_requires_admin_authority"],
+                "errors": [MUTATING_CAPABILITY_REQUIRES_ADMIN_AUTHORITY],
             }
         if authority_level == "evidence_write" and not bool(context.get("allow_evidence_write")):
             return {
                 "ok": False,
-                "reason": "evidence_write_requires_write_verification",
+                "reason": EVIDENCE_WRITE_REQUIRES_WRITE_VERIFICATION,
                 "authority_level": authority_level,
-                "errors": ["evidence_write_requires_write_verification"],
+                "errors": [EVIDENCE_WRITE_REQUIRES_WRITE_VERIFICATION],
             }
         return {
             "ok": True,

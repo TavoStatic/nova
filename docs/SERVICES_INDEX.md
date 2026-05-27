@@ -1,6 +1,6 @@
 # Services Index
 
-Last verified: 2026-05-18
+Last verified: 2026-05-20
 
 This page maps the major service clusters under `services/`. It is a practical orientation guide, not an exhaustive API reference.
 
@@ -14,34 +14,34 @@ This page maps the major service clusters under `services/`. It is a practical o
 
 - `nova_http_frontdoor.py`, `nova_http_transport.py`, `nova_http_get_routes.py`, `nova_http_post_routes.py`, `nova_http_post_dispatch.py`
 - `nova_http_chat_runtime.py`, `nova_http_turn_finalization.py`
-- `nova_http_request_binding.py`, `nova_http_responses.py`, `nova_http_routing.py`
+- `nova_http_request_binding.py`, `nova_http_responses.py`, `nova_http_policy_search.py`, `nova_http_generated_work.py`
 - owns HTTP request binding, route dispatch, response emission, and chat-turn runtime/finalization while `nova_http.py` remains the stable transport wrapper
 
 ## Decision And Reply Behavior
 
-- `decision_pipeline.py`, `fulfillment_flow.py`, `nova_fulfillment_routing.py`, `nova_query_classifiers.py`
-- `nova_planner_contract.py`, `nova_reply_contracts.py`, `nova_reply_deterministic.py`, `nova_reply_guards.py`, `nova_reply_runtime.py`, `nova_reply_sanitizer.py`, `nova_reply_sequence.py`, `nova_turn_heuristics.py`, `nova_turn_outcomes.py`
-- `nova_grounded_self_report.py`
-- owns structured outcomes, deterministic reply contracts, grounded internal self-reports, fallback control, and reply shape
+- `decision_pipeline.py`, `fulfillment_flow.py`, `nova_fulfillment_routing.py`
+- `nova_planner_contract.py`, `nova_reply_context_contract.py`, `nova_reply_runtime.py`, `nova_reply_sequence.py`
+- `nova_routing_support.py`, `nova_routing_helpers.py`, `nova_turn_intent_trace.py`
+- `nova_grounded_self_report.py`, `nova_self_evidence_reply.py`, `nova_fallback_flow.py`, `nova_ollama_chat.py`
+- owns turn evidence, planner contracts, grounded internal self-reports, fallback control, reply context, and reply shape
 
 ## Supervisor And Routing Rules
 
-- `supervisor_authority.py`, `supervisor_registry.py`, `supervisor_runtime.py`
-- `supervisor_intent_rules.py`, `supervisor_identity_rules.py`, `supervisor_reflective_rules.py`, `supervisor_routing_rules.py`, `supervisor_patterns.py`, `supervisor_probes.py`
+- `supervisor_authority.py`, `supervisor_registry.py`, `supervisor_runtime.py`, `supervisor_patterns.py`, `supervisor_probes.py`
 - owns deterministic rule ownership and the rule-family arbitration surface
 
 ## Memory And Identity
 
 - `memory_adapter.py`, `memory_routing.py`, `identity_memory.py`
-- `nova_memory_events.py`, `nova_memory_learning.py`
-- `chat_identity.py`, `nova_identity_answers.py`, `nova_identity_history.py`, `nova_identity_preferences.py`
-- owns scoped memory access, learning events, identity answers, and identity/history followups
+- `memory_bootstrap_contracts.py`, `memory_bootstrap_judgment.py`, `memory_bootstrap_origin.py`, `memory_identity_bootstrap.py`, `memory_health.py`
+- `nova_memory_events.py`, `nova_memory_learning.py`, `chat_identity.py`, `nova_operational_identity.py`
+- owns scoped memory access, learning events, identity bootstrap evidence, and operational identity surfaces
 
 ## Tools, Research, And Data Lanes
 
 - `tool_registry.py`, `tool_execution.py`, `tool_console.py`, `nova_tool_dispatch.py`, `nova_tool_policy.py`
 - `os_capability_registry.py`, `os_script_controller.py`, `os_capability_operator_outbox.py`, `operator_outbox.py`
-- `nova_web_tools.py`, `web_research_session.py`, `nova_research_contracts.py`, `nova_search_endpoint.py`
+- `nova_web_tools.py`, `nova_web_contracts.py`, `web_research_session.py`, `nova_search_endpoint.py`
 - `data_pipeline_registry.py`, `control_pipelines.py`, `nova_http_pipeline_control.py`, `nova_pipeline_tools.py`, `pipeline_privileged_bridge.py`
 - owns tool registration/execution, OS capability contracts, operator notices, web research sessions, and governed data-lane access
 
@@ -54,7 +54,7 @@ This page maps the major service clusters under `services/`. It is a practical o
 
 ## CLI And Voice
 
-- `nova_cli_loop.py`, `nova_cli_delivery.py`, `nova_cli_sequence.py`, `nova_command_handlers.py`, `voice_interaction.py`, `nova_voice_runtime.py`
+- `nova_cli_loop.py`, `nova_cli_delivery.py`, `nova_cli_sequence.py`, `runtime_console_frontdoor.py`, `voice_interaction.py`, `nova_voice_runtime.py`
 - owns CLI loop behavior, command delivery, voice interaction, and local runtime speech paths
 
 ## Patch And Release Support

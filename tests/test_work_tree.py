@@ -53,6 +53,15 @@ class TestWorkTree(unittest.TestCase):
         self.assertEqual(root_branch.status, BranchStatus.ACTIVE)
         self.assertEqual(child_branch.status, BranchStatus.READY)
 
+    def test_default_tree_allowed_tools_returns_full_copy(self) -> None:
+        tools = work_tree.default_tree_allowed_tools()
+        tools.append("local_mutation")
+
+        self.assertIn("source_root_judgment", work_tree.default_tree_allowed_tools())
+        self.assertIn("os_capability", work_tree.default_tree_allowed_tools())
+        self.assertIn("memory_bootstrap_confirm", work_tree.default_tree_allowed_tools())
+        self.assertNotIn("local_mutation", work_tree.default_tree_allowed_tools())
+
     def test_inspect_tree_does_not_persist_snapshot_reads(self) -> None:
         tree = work_tree.initialize_tree("Inspect tree")
         root_branch = work_tree._BRANCHES[tree.root_branch_id]
@@ -446,6 +455,9 @@ class TestWorkTree(unittest.TestCase):
         self.assertEqual(evidence[0]["task_id"], task.task_id)
         self.assertEqual(evidence[0]["tool_name"], "web_search")
         self.assertIn("tool offline", evidence[0]["result_text"])
+        visual = work_tree.get_visual_tree_data(tree.tree_id)
+        node = (visual or {}).get("nodes", [])[0]
+        self.assertEqual((node.get("tool_state") or {}).get("web_search"), "failed")
 
     def test_blocked_task_blocks_branch_without_becoming_executable(self) -> None:
         tree = work_tree.initialize_tree("Blocked task tree")
@@ -546,6 +558,49 @@ class TestWorkTree(unittest.TestCase):
         self.assertEqual(step["action"], "tool_failed")
         self.assertEqual(step["tool"], "read")
         self.assertEqual(work_tree._TASKS[task.task_id].status, work_tree.TaskStatus.OPEN)
+
+    def test_execute_autonomous_step_fail_marker_marks_failed(self) -> None:
+        tree = work_tree.initialize_tree("Web search failure tree")
+        root_branch = work_tree._BRANCHES[tree.root_branch_id]
+        task = work_tree.add_task_to_branch(root_branch.branch_id, "Probe configured web search route")
+        work_tree.set_branch_tools(root_branch.branch_id, allowed_tools=["web_search"], preferred_tool="web_search")
+
+        step = work_tree.execute_autonomous_step(
+            tree.tree_id,
+            execute_planned_action_fn=lambda tool, args=None: "[FAIL] Local web search backend is unavailable.",
+        )
+
+        self.assertEqual(step["action"], "tool_failed")
+        self.assertEqual(step["tool"], "web_search")
+        self.assertEqual(work_tree._TASKS[task.task_id].status, work_tree.TaskStatus.OPEN)
+
+    def test_execute_autonomous_step_records_structured_judgment_false_ok(self) -> None:
+        tree = work_tree.initialize_tree("Judgment tree")
+        root_branch = work_tree._BRANCHES[tree.root_branch_id]
+        task = work_tree.add_task_to_branch(
+            root_branch.branch_id,
+            "Synthesize source-root judgment from collected evidence",
+            meta={"expected_tool": "source_root_judgment", "allowed_tools": ["source_root_judgment"]},
+        )
+        work_tree.set_branch_tools(
+            root_branch.branch_id,
+            allowed_tools=["source_root_judgment"],
+            preferred_tool="source_root_judgment",
+        )
+
+        step = work_tree.execute_autonomous_step(
+            tree.tree_id,
+            execute_planned_action_fn=lambda tool, args=None: {
+                "ok": False,
+                "schema": "nova.source_root_judgment.v1",
+                "verdict": "evidence_failed",
+                "reason": "evidence_failed",
+            },
+        )
+
+        self.assertEqual(step["action"], "executed")
+        self.assertEqual(step["tool"], "source_root_judgment")
+        self.assertEqual(work_tree._TASKS[task.task_id].status, work_tree.TaskStatus.COMPLETE)
 
     def test_execute_autonomous_step_read_preserves_relative_path(self) -> None:
         tree = work_tree.initialize_tree("Read relative path tree")

@@ -21,7 +21,6 @@ import work_tree
 import capabilities as capabilities_mod
 import http_chat_flow
 import http_session_store
-import services.nova_query_classifiers as nova_query_classifiers
 from conversation_manager import ConversationManager
 from services.control_assets import CONTROL_ASSETS_SERVICE
 from services.control_actions import CONTROL_ACTIONS_SERVICE
@@ -58,10 +57,12 @@ from services.runtime_process_state import RUNTIME_PROCESS_STATE_SERVICE
 from services.runtime_restart_provenance import RUNTIME_RESTART_PROVENANCE_SERVICE
 from services.runtime_status import RUNTIME_STATUS_SERVICE
 from services.runtime_timeline import RUNTIME_TIMELINE_SERVICE
+from services.os_script_controller import OS_SCRIPT_CONTROLLER_SERVICE
 from services.validation_artifact_truth import VALIDATION_ARTIFACT_TRUTH_SERVICE
 from services.port_ownership import PORT_OWNERSHIP_SERVICE
 from services.autonomy_orchestrator_ledger import AUTONOMY_ORCHESTRATOR_LEDGER_SERVICE
 from services.nova_runtime_context import AUTONOMY_ORCHESTRATOR_LEDGER_FILE
+from services.nova_runtime_context import OS_CAPABILITY_LEDGER_FILE
 from services.nova_runtime_context import OPERATOR_OUTBOX_FILE
 from services.nova_runtime_context import resolve_runtime_dir
 from services.operator_outbox import OPERATOR_OUTBOX_SERVICE
@@ -149,6 +150,11 @@ CONTROL_STATUS_CACHE_TTL_SECONDS = 2.0
 _CONTROL_STATUS_CACHE_LOCK = threading.Lock()
 _CONTROL_STATUS_CACHE: Dict[str, Any] = {"computed_at": 0.0, "payload": None}
 AUTONOMY_MAINTENANCE_STATE_PATH = RUNTIME_DIR / "autonomy_maintenance_state.json"
+SEARXNG_STATUS_TIMEOUT_SEC = 0.35
+SEARXNG_STATUS_CANDIDATE_LIMIT = 2
+STORAGE_WATCH_CACHE_TTL_SECONDS = 20.0
+_STORAGE_WATCH_CACHE_LOCK = threading.Lock()
+_STORAGE_WATCH_CACHE: Dict[str, Any] = {"computed_at": 0.0, "payload": None}
 
 
 def _invalidate_control_status_cache() -> None:
@@ -163,11 +169,46 @@ def _load_autonomy_maintenance_state() -> dict:
     return payload if isinstance(payload, dict) else {}
 
 
+class _StatusRuntimeProcessesModule:
+    """Bound process evidence for status assembly without changing control actions."""
+
+    @staticmethod
+    def logical_service_processes(script_path: str | Path) -> list[dict[str, Any]]:
+        try:
+            resolved = str(Path(script_path).resolve())
+        except Exception:
+            resolved = str(script_path)
+        cache_key = f"status-runtime-processes:{resolved.lower()}"
+        now = time.monotonic()
+        cached = _PROCESS_SCAN_CACHE.get(cache_key)
+        if cached and now - float(cached[0]) <= PROCESS_SCAN_CACHE_TTL_SECONDS:
+            return [dict(item) for item in cached[1]]
+        processes = runtime_processes.logical_service_processes(script_path)
+        _PROCESS_SCAN_CACHE[cache_key] = (now, [dict(item) for item in processes])
+        return processes
+
+    @staticmethod
+    def select_logical_process(
+        processes: list[dict[str, Any]],
+        *,
+        pid: int | None = None,
+        create_time: float | None = None,
+    ) -> dict[str, Any] | None:
+        return runtime_processes.select_logical_process(processes, pid=pid, create_time=create_time)
+
+
+_STATUS_RUNTIME_PROCESSES = _StatusRuntimeProcessesModule()
+
+
+def _status_runtime_processes_module() -> _StatusRuntimeProcessesModule:
+    return _STATUS_RUNTIME_PROCESSES
+
+
 def _autonomy_maintenance_summary() -> dict:
     payload = RUNTIME_CONTROL_SERVICE.autonomy_maintenance_summary(
         state_payload=_load_autonomy_maintenance_state(),
         maintenance_py=AUTONOMY_MAINTENANCE_PY,
-        runtime_processes_module=runtime_processes,
+        runtime_processes_module=_status_runtime_processes_module(),
         strftime_fn=time.strftime,
     )
     payload["autonomy_orchestrator_summary"] = AUTONOMY_ORCHESTRATOR_LEDGER_SERVICE.summary(
@@ -255,6 +296,10 @@ def _provider_telemetry_payload(*, ledger_summary: dict, tool_summary: dict) -> 
 
 def _tool_events_summary(limit: int = 80) -> dict:
     return _control_telemetry_service().tool_events_summary(TOOL_EVENTS_LOG, limit=limit)
+
+
+def _os_capability_ledger_summary(limit: int = 80) -> dict:
+    return OS_SCRIPT_CONTROLLER_SERVICE.summary(OS_CAPABILITY_LEDGER_FILE, limit=limit)
 
 
 def _memory_events_summary(limit: int = 80) -> dict:
@@ -1142,7 +1187,16 @@ def _release_status_payload(limit: int = 8) -> dict:
         Path(RELEASE_LEDGER_PATH).resolve().relative_to(RELEASE_PACKAGES_DIR.resolve())
     except Exception:
         source_root = None
-    return RELEASE_STATUS_SERVICE.status_payload(RELEASE_LEDGER_PATH, limit, source_root=source_root)
+    return RELEASE_STATUS_SERVICE.status_payload(RELEASE_LEDGER_PATH, limit, source_root=source_root, artifact_kind="package-zip")
+
+
+def _installer_status_payload(limit: int = 8) -> dict:
+    return RELEASE_STATUS_SERVICE.status_payload(
+        RELEASE_LEDGER_PATH,
+        limit,
+        source_root=None,
+        artifact_kind="windows-installer",
+    )
 
 
 def _coerce_epoch_seconds(value) -> int | None:
@@ -1326,13 +1380,30 @@ def _heartbeat_age_seconds() -> int | None:
 
 
 def _storage_watch_summary() -> dict:
+    now = time.monotonic()
+    with _STORAGE_WATCH_CACHE_LOCK:
+        cached_at = float(_STORAGE_WATCH_CACHE.get("computed_at") or 0.0)
+        cached_payload = _STORAGE_WATCH_CACHE.get("payload")
+        if isinstance(cached_payload, dict) and now - cached_at <= STORAGE_WATCH_CACHE_TTL_SECONDS:
+            payload = dict(cached_payload)
+            payload["snapshot_cached"] = True
+            payload["snapshot_age_sec"] = round(max(0.0, now - cached_at), 3)
+            return payload
+
     policy = nova_core.load_policy()
     kidney_config = dict((policy.get("kidney") or {})) if isinstance(policy, dict) else {}
-    return STORAGE_WATCH_SERVICE.snapshot(
+    payload = STORAGE_WATCH_SERVICE.snapshot(
         base_dir=BASE_DIR,
         runtime_dir=RUNTIME_DIR,
         kidney_config=kidney_config,
     )
+    payload = dict(payload)
+    payload["snapshot_cached"] = False
+    payload["snapshot_age_sec"] = 0.0
+    with _STORAGE_WATCH_CACHE_LOCK:
+        _STORAGE_WATCH_CACHE["computed_at"] = now
+        _STORAGE_WATCH_CACHE["payload"] = dict(payload)
+    return payload
 
 
 def _artifact_age_seconds(path: Path) -> int | None:
@@ -1432,11 +1503,13 @@ def _runtime_process_note() -> str:
     return "Process counts reflect the active service process state."
 
 
-SEARXNG_STATUS_TIMEOUT_SEC = 5.0
-
-
 def _probe_searxng(endpoint: str, timeout: float = SEARXNG_STATUS_TIMEOUT_SEC) -> tuple[bool, str]:
-    probe = nova_core.probe_search_endpoint(endpoint, timeout=timeout, persist_repair=True)
+    probe = nova_core.probe_search_endpoint(
+        endpoint,
+        timeout=timeout,
+        persist_repair=False,
+        candidate_limit=SEARXNG_STATUS_CANDIDATE_LIMIT,
+    )
     return bool(probe.get("ok")), str(probe.get("note") or "endpoint_unreachable")
 
 
@@ -1591,8 +1664,6 @@ def _generate_chat_reply(
         core=nova_core,
         runtime_scope=globals(),
         ensure_active_work_tree_fn=ensure_active_work_tree_fn,
-        pre_planner_branch_group="none",
-        post_planner_branch_group=None,
     )
 
 

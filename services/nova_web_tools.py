@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any, Callable, Optional
 from urllib.parse import parse_qs, quote, unquote, urljoin, urlparse
 
+from services.nova_web_contracts import STACKEXCHANGE_API_ENDPOINT_DEFAULT
 from services.web_research_session import WebResearchSessionStore
 
 
@@ -664,7 +665,7 @@ def tool_stackexchange_search(
         return "Usage: stackexchange <query>"
 
     cfg = policy_web_fn()
-    endpoint = str(cfg.get("stackexchange_api_endpoint") or "https://api.stackexchange.com/2.3/search/advanced").strip()
+    endpoint = str(cfg.get("stackexchange_api_endpoint") or STACKEXCHANGE_API_ENDPOINT_DEFAULT).strip()
     site = str(cfg.get("stackexchange_site") or "stackoverflow").strip() or "stackoverflow"
     key_env = str(cfg.get("stackexchange_api_key_env") or "STACKEXCHANGE_API_KEY").strip() or "STACKEXCHANGE_API_KEY"
     api_key = str(env.get(key_env) or "").strip()
@@ -950,6 +951,12 @@ def tool_web_gather(
     return f"[OK] Saved: {out['path']} ({out['content_type']}, {out['bytes']} bytes)"
 
 
+NO_ACTIVE_WEB_RESEARCH_SESSION = "No active web research session. Start with: web research <query>"
+NO_RELEVANT_ALLOWLISTED_PAGES = "No relevant pages found across allowlisted domains for that query."
+WEB_CONTINUE_AVAILABLE_SUFFIX = "more result(s) available. Type 'web continue' to keep going."
+WEB_GATHER_TIP = "Tip: run 'web gather <url>' for any source above to fetch and summarize it fully."
+
+
 def tool_web_research(
     query: str,
     *,
@@ -982,12 +989,12 @@ def tool_web_research(
     q = str(query or "").strip()
     if continue_mode:
         if not session_store.has_results():
-            return "No active web research session. Start with: web research <query>"
+            return NO_ACTIVE_WEB_RESEARCH_SESSION
 
         max_results = max(1, min(40, int((policy_web_fn().get("research_max_results") or 8))))
         page = session_store.next_page(max_results)
         if page is None:
-            return "No active web research session. Start with: web research <query>"
+            return NO_ACTIVE_WEB_RESEARCH_SESSION
         if not page.rows and page.start >= page.total:
             return "No more cached research results. Start a new search with: web research <query>"
 
@@ -1001,11 +1008,11 @@ def tool_web_research(
 
         remaining = session_store.remaining_count()
         if remaining > 0:
-            lines.append(f"{remaining} more result(s) available. Type 'web continue' to keep going.")
+            lines.append(f"{remaining} {WEB_CONTINUE_AVAILABLE_SUFFIX}")
         else:
             lines.append("End of cached research results.")
 
-        lines.append("Tip: run 'web gather <url>' for any source above to fetch and summarize it fully.")
+        lines.append(WEB_GATHER_TIP)
         return "\n".join(lines)
 
     if not q:
@@ -1078,7 +1085,7 @@ def tool_web_research(
             break
 
     if not all_hits:
-        return "No relevant pages found across allowlisted domains for that query."
+        return NO_RELEVANT_ALLOWLISTED_PAGES
 
     all_hits.sort(key=lambda item: item[0], reverse=True)
     used: set[str] = set()
@@ -1093,7 +1100,7 @@ def tool_web_research(
 
     page = session_store.next_page(max_results)
     if page is None:
-        return "No relevant pages found across allowlisted domains for that query."
+        return NO_RELEVANT_ALLOWLISTED_PAGES
 
     lines = [f"Web research results (allowlisted crawl) for: {q}"]
     rank = page.start
@@ -1105,11 +1112,11 @@ def tool_web_research(
 
     remaining = session_store.remaining_count()
     if remaining > 0:
-        lines.append(f"{remaining} more result(s) available. Type 'web continue' to keep going.")
+        lines.append(f"{remaining} {WEB_CONTINUE_AVAILABLE_SUFFIX}")
     else:
         lines.append("No more results pending for this query.")
 
-    lines.append("Tip: run 'web gather <url>' for any source above to fetch and summarize it fully.")
+    lines.append(WEB_GATHER_TIP)
     return "\n".join(lines)
 
 

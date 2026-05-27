@@ -23,45 +23,19 @@ class TestRegressionContracts(unittest.TestCase):
         self.assertIn("scope", stats_params)
         self.assertIn("user", stats_params)
 
-    def test_queue_status_natural_phrase_stays_conversation_owned(self):
-        actions = decide_turn("what should you work on next", config={})
-        self.assertEqual(actions, [])
-
-        check_actions = decide_turn("check queue status", config={})
-        self.assertTrue(check_actions)
-        self.assertEqual(check_actions[0].get("type"), "run_tool")
-        self.assertEqual(check_actions[0].get("tool"), "queue_status")
-
-    def test_system_check_phrase_routes_to_direct_tool(self):
-        actions = decide_turn("run system checks", config={})
-        self.assertTrue(actions)
-        self.assertEqual(actions[0].get("type"), "run_tool")
-        self.assertEqual(actions[0].get("tool"), "system_check")
-
-    def test_phase2_audit_phrase_routes_to_direct_tool(self):
-        actions = decide_turn("phase 2 status", config={})
-        self.assertTrue(actions)
-        self.assertEqual(actions[0].get("type"), "run_tool")
-        self.assertEqual(actions[0].get("tool"), "phase2_audit")
-
-    def test_pulse_phrase_routes_to_direct_tool(self):
-        actions = decide_turn("nova pulse", config={})
-        self.assertTrue(actions)
-        self.assertEqual(actions[0].get("type"), "run_tool")
-        self.assertEqual(actions[0].get("tool"), "pulse")
-
-    def test_update_now_confirm_phrase_routes_to_direct_tool(self):
-        actions = decide_turn("update now confirm abc12345", config={})
-        self.assertTrue(actions)
-        self.assertEqual(actions[0].get("type"), "run_tool")
-        self.assertEqual(actions[0].get("tool"), "update_now_confirm")
-        self.assertEqual(actions[0].get("args"), ["abc12345"])
-
-    def test_update_now_cancel_phrase_routes_to_direct_tool(self):
-        actions = decide_turn("update now cancel", config={})
-        self.assertTrue(actions)
-        self.assertEqual(actions[0].get("type"), "run_tool")
-        self.assertEqual(actions[0].get("tool"), "update_now_cancel")
+    def test_static_planner_does_not_claim_phrase_routes(self):
+        samples = [
+            "what should you work on next",
+            "check queue status",
+            "run system checks",
+            "phase 2 status",
+            "nova pulse",
+            "update now confirm abc12345",
+            "update now cancel",
+        ]
+        for text in samples:
+            with self.subTest(text=text):
+                self.assertEqual(decide_turn(text, config={}), [])
 
     def test_pending_correction_target_tracks_conversation_state(self):
         session = ConversationSession()
@@ -71,20 +45,19 @@ class TestRegressionContracts(unittest.TestCase):
         session.apply_state_update({"kind": "retrieval", "subject": "web_research"})
         self.assertEqual(session.pending_correction_target, "")
 
-    def test_creator_hard_answer_contains_canonical_name(self):
-        reply = nova_core.hard_answer("who made you?") or ""
-        self.assertIn("my creator is gustavo uribe", reply.lower())
-
     def test_core_thinning_keeps_runtime_public_adapters(self):
         required_public_adapters = [
-            "_store_declarative_fact_reply",
             "clear_runtime_device_location",
-            "handle_commands",
-            "handle_keywords",
-            "learn_from_user_correction",
-            "sanitize_llm_reply",
+            "execute_planned_action",
+            "policy_allow_domain",
+            "policy_audit",
+            "policy_remove_domain",
+            "set_location_coords",
+            "set_runtime_device_location",
+            "set_web_mode",
             "speak_chunked",
             "update_now_pending_payload",
+            "web_mode_status",
             "write_action_ledger_record",
         ]
         for adapter_name in required_public_adapters:

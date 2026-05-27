@@ -277,6 +277,9 @@ class TestToolRegistry(unittest.TestCase):
         self.assertEqual(calls[0][0], "verify_ollama_model")
         self.assertEqual(calls[0][1], {"probe_chat": False})
         self.assertIn("authority_context", calls[0][2])
+        authority = calls[0][2]["authority_context"]
+        self.assertIn("evidence_write", authority.get("allowed_authority_levels") or [])
+        self.assertTrue(authority.get("allow_evidence_write"))
 
     def test_os_capability_tool_can_be_disabled_by_policy(self):
         registry = build_default_registry()
@@ -369,9 +372,7 @@ class TestToolRegistry(unittest.TestCase):
                      patch("nova_http._core_status_payload", return_value={"running": False, "pid": None, "heartbeat_age_sec": None}), \
                      patch("nova_http._append_metrics_snapshot", return_value=None), \
                      patch("nova_http._metrics_payload", return_value={"ok": True, "points": []}):
-                    kind, tool_name, out = nova_core.handle_keywords("ls")
-                    self.assertEqual(kind, "tool")
-                    self.assertEqual(tool_name, "ls")
+                    out = nova_core.execute_planned_action("ls", [])
                     self.assertIn("alpha.txt", out)
                     status = nova_http._control_status_payload()
                     self.assertTrue(status["tool_events_ok"])

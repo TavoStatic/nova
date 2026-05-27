@@ -32,11 +32,11 @@ class TestMemoryAdapterService(unittest.TestCase):
         self.assertTrue(keep)
         self.assertEqual(reason, "policy_include")
 
-    def test_memory_should_keep_text_durable_marker(self):
+    def test_memory_should_keep_text_declarative_statement(self):
         svc = self._service({"store_min_chars": 2})
         keep, reason = svc.memory_should_keep_text("my favorite color is teal")
         self.assertTrue(keep)
-        self.assertEqual(reason, "durable_fact")
+        self.assertEqual(reason, "declarative_statement")
 
     def test_format_memory_recall_hits_dedup(self):
         svc = self._service({"context_top_k": 3})

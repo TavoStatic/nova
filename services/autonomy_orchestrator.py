@@ -10,6 +10,7 @@ from services.nova_control_action_dispatcher import (
     autonomy_advisory_action_types,
     is_autonomy_advisory_action,
 )
+from services.core_steward_contracts import AUTONOMY_MAINTENANCE_NOT_RUNNING_REASON
 
 
 DECISION_RECOMMEND_ACTION = "recommend_action"
@@ -298,6 +299,7 @@ class AutonomyOrchestratorService:
         policy_raw = _as_dict(input_envelope.get("policy_snapshot"))
         triage_raw = _as_dict(input_envelope.get("triage_hints"))
         last_action_raw = _as_dict(input_envelope.get("last_action_context"))
+        maintenance_raw = _as_dict(input_envelope.get("autonomy_maintenance"))
 
         branches: list[dict[str, Any]] = []
         for item in _as_list(work_tree_raw.get("branches"))[:40]:
@@ -336,6 +338,7 @@ class AutonomyOrchestratorService:
             "policy_snapshot": self._source_present(input_envelope, "policy_snapshot"),
             "triage_hints": self._source_present(input_envelope, "triage_hints"),
             "last_action_context": self._source_present(input_envelope, "last_action_context"),
+            "autonomy_maintenance": self._source_present(input_envelope, "autonomy_maintenance"),
         }
         freshness = {
             "work_tree_snapshot": self._freshness_sec(work_tree_raw),
@@ -345,6 +348,7 @@ class AutonomyOrchestratorService:
             "policy_snapshot": self._freshness_sec(policy_raw),
             "triage_hints": self._freshness_sec(triage_raw),
             "last_action_context": self._freshness_sec(last_action_raw),
+            "autonomy_maintenance": self._freshness_sec(maintenance_raw),
         }
         seam_scores = _as_dict(triage_raw.get("seam_pressure_scores"))
         owner_scores = _as_dict(triage_raw.get("owner_pressure_scores"))
@@ -410,6 +414,15 @@ class AutonomyOrchestratorService:
             "runtime_guard_status": {
                 **runtime_summary,
                 "source_freshness_sec": freshness["runtime_guard_status"],
+            },
+            "autonomy_maintenance": {
+                "worker_status": _safe_text(maintenance_raw.get("worker_status"), 80).lower(),
+                "worker_active": bool(maintenance_raw.get("worker_active", False)),
+                "worker_stale_identity": bool(maintenance_raw.get("worker_stale_identity", False)),
+                "scheduler_active": bool(maintenance_raw.get("scheduler_active", False)),
+                "scheduler_mode": _safe_text(maintenance_raw.get("scheduler_mode"), 80).lower(),
+                "scheduler_status": _safe_text(maintenance_raw.get("scheduler_status"), 80).lower(),
+                "source_freshness_sec": freshness["autonomy_maintenance"],
             },
             "policy_snapshot": {
                 "autonomy_enabled": policy_autonomy,
@@ -599,12 +612,33 @@ class AutonomyOrchestratorService:
         queue = _as_dict(evidence.get("queue_pressure"))
         runtime = _as_dict(evidence.get("runtime_guard_status"))
         triage = _as_dict(evidence.get("triage_hints"))
+        maintenance = _as_dict(evidence.get("autonomy_maintenance"))
 
         if runtime.get("guard_running") is False:
             candidates.append(
                 {
                     "action": self._contract_action("guard_start", reason_code="runtime_guard_stopped"),
                     "source": "runtime_guard_status",
+                }
+            )
+
+        worker_status = _safe_text(maintenance.get("worker_status"), 80).lower()
+        scheduler_active = bool(maintenance.get("scheduler_active", False))
+        worker_stale_identity = bool(maintenance.get("worker_stale_identity", False))
+        if (
+            runtime.get("guard_running") is True
+            and not scheduler_active
+            and not worker_stale_identity
+            and worker_status
+            and worker_status not in {"running", "ok"}
+        ):
+            candidates.append(
+                {
+                    "action": self._contract_action(
+                        "autonomy_maintenance_start",
+                        reason_code="maintenance_worker_not_running",
+                    ),
+                    "source": "autonomy_maintenance",
                 }
             )
 
@@ -1444,7 +1478,7 @@ class AutonomyOrchestratorService:
                     act="autonomy_maintenance_start",
                     source="core_steward.autonomy_maintenance",
                     priority=20,
-                    reason="Autonomy maintenance is not reporting an active running cycle.",
+                    reason=AUTONOMY_MAINTENANCE_NOT_RUNNING_REASON,
                     evidence=autonomy,
                 )
             )

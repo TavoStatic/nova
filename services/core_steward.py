@@ -3,6 +3,9 @@ from __future__ import annotations
 import time
 from typing import Any
 
+from services.core_steward_contracts import AUTONOMY_MAINTENANCE_NOT_RUNNING_REASON
+from services.core_steward_contracts import NO_APPROVED_ELIGIBLE_PREVIEW_REASON
+
 
 def _check_name(item: Any) -> str:
     if isinstance(item, dict):
@@ -147,7 +150,7 @@ def build_core_steward_payload(
             _queue_item(
                 "medium",
                 "Restart maintenance worker",
-                "Autonomy maintenance is not reporting an active running cycle.",
+                AUTONOMY_MAINTENANCE_NOT_RUNNING_REASON,
                 "start autonomy maintenance worker",
             )
         )
@@ -239,6 +242,8 @@ def build_core_steward_payload(
         },
         "autonomy_maintenance": {
             "worker_status": worker_status or "unknown",
+            "worker_active": bool(runtime_worker.get("active", False)),
+            "worker_stale_identity": bool(runtime_worker.get("stale_identity", False)),
             "interval_sec": int(runtime_worker.get("interval_sec", 0) or 0),
             "last_completed_at": str(runtime_worker.get("last_completed_at") or ""),
             "scheduler_active": scheduler_active,
@@ -279,8 +284,8 @@ def build_core_steward_gates(
         patch_apply = {"enabled": False, "reason": "Patch pipeline is disabled by policy."}
         update_now_confirm = {"enabled": False, "reason": "Patch pipeline is disabled by policy."}
     elif not patch_ready:
-        patch_apply = {"enabled": False, "reason": "No approved eligible preview is ready to apply."}
-        update_now_confirm = {"enabled": False, "reason": "No approved eligible preview is ready to apply."}
+        patch_apply = {"enabled": False, "reason": NO_APPROVED_ELIGIBLE_PREVIEW_REASON}
+        update_now_confirm = {"enabled": False, "reason": NO_APPROVED_ELIGIBLE_PREVIEW_REASON}
     else:
         patch_apply = {"enabled": True, "reason": "Core Steward is strong and the patch pipeline is ready for validated apply."}
         update_now_confirm = {"enabled": True, "reason": "Core Steward is strong and the pending update is eligible for confirmation."}

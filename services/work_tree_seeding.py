@@ -34,6 +34,7 @@ _SYSTEM_TOOL_NAMES = frozenset({
     "release_validation_run",
     "release_record_validation_outcome",
     "release_rebuild_verify",
+    "installer_validation_run",
     "patch_preview_apply",
     "patch_apply",
     "patch_rollback",
@@ -47,7 +48,7 @@ _DECOMPOSE_SYSTEM = (
     "Break the given system maintenance task into 2 to 4 sequential steps. "
     "Each step is a concise action phrase of at most 60 characters describing a system check or repair action. "
     "For each step choose the single best tool from: "
-    "health, system_check, pulse, queue_status, read, ls, find, pipeline, core_health, core_thinning, release_validation_run, release_record_validation_outcome, release_rebuild_verify, patch_apply, patch_rollback, update_now. "
+    "health, system_check, pulse, queue_status, read, ls, find, pipeline, core_health, core_thinning, release_validation_run, release_record_validation_outcome, release_rebuild_verify, installer_validation_run, patch_apply, patch_rollback, update_now. "
     "Reply ONLY with a JSON array — no markdown, no prose, no code fences. "
     'Example: [{"title":"check runtime pulse","tool":"pulse"},{"title":"verify Ollama model availability","tool":"health"}]'
 )
@@ -1137,6 +1138,8 @@ class WorkTreeSeedingService:
             return ["core_thinning", "read", "find"]
         if tool in {"release_rebuild_verify"}:
             return ["release_rebuild_verify", "read", "find"]
+        if tool in {"installer_validation_run"}:
+            return ["installer_validation_run", "read", "find", "source_root_judgment"]
         if tool in {"release_validation_run"}:
             return ["release_validation_run", "release_promotion_judgment", "read", "find"]
         if tool in {"release_record_validation_outcome"}:

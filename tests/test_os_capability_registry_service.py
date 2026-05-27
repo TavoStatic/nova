@@ -347,6 +347,7 @@ class TestOsCapabilityRegistryService(unittest.TestCase):
             for name in (
                 "inspect_processes",
                 "inspect_ports",
+                "inspect_runtime_health",
                 "scan_large_files",
                 "collect_diagnostics_bundle",
                 "verify_ollama_model",

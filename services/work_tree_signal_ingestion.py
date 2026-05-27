@@ -8,7 +8,9 @@ from typing import Any
 import work_tree
 from services.evidence_validity import evidence_result_valid
 from services.nova_wiring_inventory import build_root_closure_inventory_payload
+from services.nova_wiring_inventory import build_self_repair_closure_inventory_payload
 from services.nova_wiring_inventory import build_wiring_inventory_payload
+from services.nova_wiring_inventory import WIRING_SURFACES
 from work_tree_contracts import BranchStatus
 
 
@@ -37,6 +39,35 @@ _SIGNAL_TO_WORK_CLASS = {
     "subconscious_candidate": "candidate_review",
     "release_readiness_gap": "release_readiness_gap",
 }
+
+MEMORY_BOOTSTRAP_PULSE_TASK_TITLE = "Pulse current memory bootstrap evidence without writing memory files"
+MEMORY_IDENTITY_BOOTSTRAP_TASK_TITLE = "Apply operator-confirmed memory identity bootstrap"
+MEMORY_BOOTSTRAP_ORIGIN_CONTRACT_REQUIRED = "memory_bootstrap_origin_contract_required"
+VOICE_RUNTIME_READ_TASK_TITLE = "Read voice runtime dependency loader and entrypoint wiring"
+AUTONOMY_MAINTENANCE_LOG_TASK_TITLE = "Read runtime/autonomy_maintenance.log around the latest maintenance error"
+TOOL_EVENTS_READ_TASK_TITLE = "Read runtime/tool_events.jsonl recent tool execution events"
+OS_CAPABILITY_LEDGER_READ_TASK_TITLE = "Read runtime/os_capability_ledger.jsonl recent OS capability evidence"
+SOURCE_ROOT_JUDGMENT_TASK_TITLE = "Synthesize source-root judgment from collected evidence"
+SOURCE_ROOT_JUDGMENT_TOOL = "source_root_judgment"
+
+_SOURCE_ROOT_SIGNAL_SOURCES = frozenset(
+    source
+    for surface in WIRING_SURFACES
+    for source in surface.signal_sources
+)
+_SPECIALIZED_SEQUENCE_TOOLS = frozenset(
+    {
+        "memory_bootstrap_judgment",
+        "memory_identity_bootstrap",
+        "release_promotion_judgment",
+        "release_validation_run",
+        "release_record_validation_outcome",
+        "release_rebuild_verify",
+        "installer_validation_run",
+        "subconscious_review_judgment",
+        SOURCE_ROOT_JUDGMENT_TOOL,
+    }
+)
 
 _BUCKET_BY_WORK_CLASS = {
     "runtime_failure": "runtime",
@@ -85,11 +116,98 @@ def _strip_inactive_resolution_notes(notes: str) -> str:
     return "\n".join(line for line in lines if line.strip()).strip()
 
 
+def _same_artifact_path(left: Any, right: Any) -> bool:
+    lhs = str(left or "").strip().replace("\\", "/").rstrip("/").lower()
+    rhs = str(right or "").strip().replace("\\", "/").rstrip("/").lower()
+    return bool(lhs and rhs and lhs == rhs)
+
+
 def _port_ownership_for(status_payload: dict[str, Any], port: int) -> dict[str, Any]:
     port_ownership = status_payload.get("port_ownership") if isinstance(status_payload.get("port_ownership"), dict) else {}
     ports = port_ownership.get("ports") if isinstance(port_ownership.get("ports"), dict) else {}
     row = ports.get(str(int(port))) or ports.get(int(port))
     return dict(row) if isinstance(row, dict) else {}
+
+
+def _model_runtime_model(status_payload: dict[str, Any], ollama_health: dict[str, Any]) -> str:
+    return str(
+        status_payload.get("ollama_configured_model")
+        or ollama_health.get("chat_model")
+        or status_payload.get("chat_model")
+        or ""
+    ).strip()
+
+
+def _model_runtime_verify_request(
+    status_payload: dict[str, Any],
+    ollama_health: dict[str, Any],
+    *,
+    probe_chat: bool,
+) -> str:
+    base_url = str(
+        status_payload.get("ollama_base_url")
+        or status_payload.get("ollama_api_endpoint")
+        or ollama_health.get("base_url")
+        or "http://127.0.0.1:11434"
+    ).strip()
+    args: dict[str, Any] = {
+        "base_url": base_url or "http://127.0.0.1:11434",
+        "probe_chat": bool(probe_chat),
+    }
+    model = _model_runtime_model(status_payload, ollama_health)
+    if model:
+        args["model"] = model
+    return json.dumps({"capability": "verify_ollama_model", "args": args}, sort_keys=True)
+
+
+def _model_runtime_port_request() -> str:
+    return json.dumps({"capability": "inspect_ports", "args": {"ports": [11434]}}, sort_keys=True)
+
+
+def _model_runtime_task_sequence(
+    status_payload: dict[str, Any],
+    ollama_health: dict[str, Any],
+    *,
+    probe_chat: bool,
+    inspect_port_first: bool = False,
+    include_action_ledger: bool = False,
+) -> list[dict[str, Any]]:
+    sequence: list[dict[str, Any]] = []
+    if inspect_port_first:
+        sequence.append({
+            "title": "Inspect model runtime port ownership through registered OS capability",
+            "allowed_tools": ["os_capability"],
+            "preferred_tool": "os_capability",
+            "tool_args": [_model_runtime_port_request()],
+        })
+    sequence.append({
+        "title": "Verify Ollama model runtime contract through registered OS capability",
+        "allowed_tools": ["os_capability"],
+        "preferred_tool": "os_capability",
+        "tool_args": [_model_runtime_verify_request(status_payload, ollama_health, probe_chat=probe_chat)],
+    })
+    if include_action_ledger:
+        sequence.append({
+            "title": "Read runtime/action_ledger.jsonl around the last LLM failure",
+            "allowed_tools": ["read"],
+            "preferred_tool": "read",
+            "tool_args": ["runtime/action_ledger.jsonl"],
+        })
+    sequence.extend([
+        {
+            "title": "Read model runtime health source",
+            "allowed_tools": ["read"],
+            "preferred_tool": "read",
+            "tool_args": ["services/ollama_health.py"],
+        },
+        {
+            "title": "Read model runtime port ownership source",
+            "allowed_tools": ["read"],
+            "preferred_tool": "read",
+            "tool_args": ["services/port_ownership.py"],
+        },
+    ])
+    return sequence
 
 
 def _as_int(value: Any, default: int = 0) -> int:
@@ -134,7 +252,7 @@ def _memory_health_signal_from_status(status_payload: dict[str, Any]) -> dict[st
     if bootstrap_missing:
         error_symbol = "memory_bootstrap_incomplete"
     blocked_task = "Await operator-confirmed memory bootstrap origin contract before writing identity facts"
-    blocked_reason = "memory_bootstrap_origin_contract_required"
+    blocked_reason = MEMORY_BOOTSTRAP_ORIGIN_CONTRACT_REQUIRED
     if origin_status == "pending_operator_confirmation":
         blocked_task = "Await operator confirmation of memory bootstrap origin before writing identity facts"
         blocked_reason = "memory_bootstrap_origin_confirmation_pending"
@@ -144,10 +262,10 @@ def _memory_health_signal_from_status(status_payload: dict[str, Any]) -> dict[st
 
     allowed_tools = ["pulse", "read", "find", "memory_bootstrap_judgment"]
     preferred_tool = "pulse"
-    next_task = "Pulse current memory bootstrap evidence without writing memory files"
+    next_task = MEMORY_BOOTSTRAP_PULSE_TASK_TITLE
     task_sequence = [
         {
-            "title": "Pulse current memory bootstrap evidence without writing memory files",
+            "title": MEMORY_BOOTSTRAP_PULSE_TASK_TITLE,
             "allowed_tools": ["pulse"],
             "preferred_tool": "pulse",
         },
@@ -175,10 +293,10 @@ def _memory_health_signal_from_status(status_payload: dict[str, Any]) -> dict[st
     if origin_ready and bootstrap_missing:
         allowed_tools = ["memory_identity_bootstrap", "pulse", "read"]
         preferred_tool = "memory_identity_bootstrap"
-        next_task = "Apply operator-confirmed memory identity bootstrap"
+        next_task = MEMORY_IDENTITY_BOOTSTRAP_TASK_TITLE
         task_sequence = [
             {
-                "title": "Apply operator-confirmed memory identity bootstrap",
+                "title": MEMORY_IDENTITY_BOOTSTRAP_TASK_TITLE,
                 "allowed_tools": ["memory_identity_bootstrap"],
                 "preferred_tool": "memory_identity_bootstrap",
             },
@@ -189,12 +307,12 @@ def _memory_health_signal_from_status(status_payload: dict[str, Any]) -> dict[st
             },
         ]
     return {
-        "source": "memory_health",
+        "source": "memory_identity",
         "signal_class": "governance_pressure",
         "title": "Investigate memory persistence bootstrap gap",
         "fingerprint": {
             "class": "governance_pressure",
-            "surface": "memory_health",
+            "surface": "memory_identity",
             "error": error_symbol,
             "symbol": "identity_memory",
         },
@@ -227,12 +345,12 @@ def _control_status_dependency_signals(status_payload: dict[str, Any]) -> list[d
     searx_ok = status_payload.get("searxng_ok")
     if provider == "searxng" and searx_ok is False:
         signals.append({
-            "source": "control_status",
+            "source": "web_search",
             "signal_class": "dependency_unreachable",
             "title": "SearXNG search dependency unreachable",
             "fingerprint": {
                 "class": "dependency_unreachable",
-                "surface": "control_status",
+                "surface": "web_search",
                 "error": "dependency_unreachable",
                 "symbol": "searxng",
             },
@@ -242,11 +360,36 @@ def _control_status_dependency_signals(status_payload: dict[str, Any]) -> list[d
                 "searxng_note": str(status_payload.get("searxng_note") or ""),
             },
             "severity": "medium",
-            "actionability": "dead_end",
-            "allowed_tools": ["system_check", "read", "find"],
-            "preferred_tool": "system_check",
-            "next_task": "Inspect search dependency status and endpoint configuration",
+            "actionability": "safe_now",
+            "allowed_tools": ["web_search", "system_check", "read", "find"],
+            "preferred_tool": "web_search",
+            "next_task": "Probe configured web search route through web_search tool",
+            "task_sequence": [
+                {
+                    "title": "Probe configured web search route through web_search tool",
+                    "allowed_tools": ["web_search"],
+                    "preferred_tool": "web_search",
+                    "tool_args": ["nova runtime search dependency probe"],
+                },
+                {
+                    "title": "Read web search provider implementation",
+                    "allowed_tools": ["read"],
+                    "preferred_tool": "read",
+                    "tool_args": ["services/nova_web_tools.py"],
+                },
+                {
+                    "title": "Read web search policy control surface",
+                    "allowed_tools": ["read"],
+                    "preferred_tool": "read",
+                    "tool_args": ["services/policy_manager.py"],
+                },
+            ],
         })
+    return signals
+
+
+def _model_runtime_dependency_signals(status_payload: dict[str, Any]) -> list[dict[str, Any]]:
+    signals: list[dict[str, Any]] = []
     ollama_health = status_payload.get("ollama_health") if isinstance(status_payload.get("ollama_health"), dict) else {}
     ollama_port_ownership = _port_ownership_for(status_payload, 11434)
     ollama_tags_ok = bool(status_payload.get("ollama_tags_ok", ollama_health.get("tags_ok", True)))
@@ -276,12 +419,12 @@ def _control_status_dependency_signals(status_payload: dict[str, Any]) -> list[d
             error_symbol = "ollama_api_unhealthy"
             title = "Ollama API health contract failed"
         signals.append({
-            "source": "control_status",
+            "source": "model_runtime",
             "signal_class": "dependency_unreachable",
             "title": title,
             "fingerprint": {
                 "class": "dependency_unreachable",
-                "surface": "control_status",
+                "surface": "model_runtime",
                 "error": error_symbol,
                 "symbol": "ollama",
             },
@@ -305,9 +448,10 @@ def _control_status_dependency_signals(status_payload: dict[str, Any]) -> list[d
             },
             "severity": "high",
             "actionability": "safe_now",
-            "allowed_tools": ["system_check", "read", "find"],
-            "preferred_tool": "system_check",
-            "next_task": "Probe Ollama version, listener, tags endpoint, and chat route separately before restart",
+            "allowed_tools": ["os_capability", "system_check", "read", "find"],
+            "preferred_tool": "os_capability",
+            "next_task": "Verify Ollama model runtime contract through registered OS capability",
+            "task_sequence": _model_runtime_task_sequence(status_payload, ollama_health, probe_chat=True),
         })
     final_answer = str(status_payload.get("last_action_final_answer") or "").strip()
     route_summary = str(status_payload.get("last_route_summary") or "").strip()
@@ -328,7 +472,7 @@ def _control_status_dependency_signals(status_payload: dict[str, Any]) -> list[d
         and ollama_model_available
     ):
         signals.append({
-            "source": "control_status",
+            "source": "model_runtime",
             "signal_class": "dependency_unreachable",
             "title": "Last LLM reply failed despite healthy Ollama probes",
             "fingerprint": {
@@ -346,18 +490,24 @@ def _control_status_dependency_signals(status_payload: dict[str, Any]) -> list[d
             },
             "severity": "high",
             "actionability": "safe_now",
-            "allowed_tools": ["read", "find", "system_check"],
-            "preferred_tool": "read",
-            "next_task": "Read latest action ledger and Ollama chat wrapper failure path",
+            "allowed_tools": ["os_capability", "read", "find", "system_check"],
+            "preferred_tool": "os_capability",
+            "next_task": "Verify Ollama model runtime contract through registered OS capability",
+            "task_sequence": _model_runtime_task_sequence(
+                status_payload,
+                ollama_health,
+                probe_chat=True,
+                include_action_ledger=True,
+            ),
         })
     if bool(ollama_port_ownership.get("listening")) and ollama_port_ownership.get("expected_owner_present") is False:
         signals.append({
-            "source": "control_status",
+            "source": "model_runtime",
             "signal_class": "dependency_unreachable",
             "title": "Ollama port is owned by an unexpected process",
             "fingerprint": {
                 "class": "dependency_unreachable",
-                "surface": "control_status",
+                "surface": "model_runtime",
                 "error": "ollama_port_owner_mismatch",
                 "symbol": "ollama",
             },
@@ -367,9 +517,15 @@ def _control_status_dependency_signals(status_payload: dict[str, Any]) -> list[d
             },
             "severity": "high",
             "actionability": "safe_now",
-            "allowed_tools": ["system_check", "read", "find"],
-            "preferred_tool": "system_check",
-            "next_task": "Inspect process ownership for port 11434 before restarting Ollama",
+            "allowed_tools": ["os_capability", "system_check", "read", "find"],
+            "preferred_tool": "os_capability",
+            "next_task": "Inspect model runtime port ownership through registered OS capability",
+            "task_sequence": _model_runtime_task_sequence(
+                status_payload,
+                ollama_health,
+                probe_chat=False,
+                inspect_port_first=True,
+            ),
         })
     return signals
 
@@ -397,12 +553,12 @@ def _voice_status_signal_from_status(status_payload: dict[str, Any]) -> dict[str
     )
 
     return {
-        "source": "voice_status",
+        "source": "voice",
         "signal_class": "dependency_unreachable",
         "title": "Voice runtime dependency unavailable after voice was requested",
         "fingerprint": {
             "class": "dependency_unreachable",
-            "surface": "voice_status",
+            "surface": "voice",
             "error": "voice_runtime_unavailable",
             "symbol": "voice_runtime",
         },
@@ -421,10 +577,10 @@ def _voice_status_signal_from_status(status_payload: dict[str, Any]) -> dict[str
         "actionability": "safe_now",
         "allowed_tools": ["read", "find", "system_check"],
         "preferred_tool": "read",
-        "next_task": "Read voice runtime dependency loader and entrypoint wiring",
+        "next_task": VOICE_RUNTIME_READ_TASK_TITLE,
         "task_sequence": [
             {
-                "title": "Read voice runtime dependency loader and entrypoint wiring",
+                "title": VOICE_RUNTIME_READ_TASK_TITLE,
                 "allowed_tools": ["read"],
                 "preferred_tool": "read",
                 "tool_args": ["services/nova_voice_runtime.py"],
@@ -455,12 +611,12 @@ def _vision_status_signal_from_status(status_payload: dict[str, Any]) -> dict[st
         if str(item or "").strip()
     ]
     return {
-        "source": "vision_status",
+        "source": "vision",
         "signal_class": "dependency_unreachable",
         "title": "Vision runtime dependency unavailable while vision tools are enabled",
         "fingerprint": {
             "class": "dependency_unreachable",
-            "surface": "vision_status",
+            "surface": "vision",
             "error": "vision_runtime_unavailable",
             "symbol": "vision_runtime",
         },
@@ -536,12 +692,12 @@ def _control_status_runtime_signals(status_payload: dict[str, Any]) -> list[dict
         if running is not False:
             continue
         signals.append({
-            "source": "control_status",
+            "source": "runtime_core",
             "signal_class": "runtime_failure",
             "title": title,
             "fingerprint": {
                 "class": "runtime_failure",
-                "surface": "control_status",
+                "surface": "runtime_core",
                 "error": "process_not_running",
                 "symbol": symbol,
             },
@@ -555,12 +711,12 @@ def _control_status_runtime_signals(status_payload: dict[str, Any]) -> list[dict
 
     if heartbeat_age > 30:
         signals.append({
-            "source": "control_status",
+            "source": "runtime_core",
             "signal_class": "runtime_failure",
             "title": "Core heartbeat is stale in control status",
             "fingerprint": {
                 "class": "runtime_failure",
-                "surface": "control_status",
+                "surface": "runtime_core",
                 "error": "heartbeat_stale",
                 "symbol": "core_heartbeat",
             },
@@ -578,12 +734,12 @@ def _control_status_maintenance_signals(status_payload: dict[str, Any]) -> list[
     if status_payload.get("maintenance_scheduler_active") is not False:
         return []
     return [{
-        "source": "control_status",
+        "source": "scheduler_registry",
         "signal_class": "maintenance_pressure",
         "title": "Maintenance scheduler is inactive",
         "fingerprint": {
             "class": "maintenance_pressure",
-            "surface": "control_status",
+            "surface": "scheduler_registry",
             "error": "maintenance_scheduler_inactive",
             "symbol": "autonomy_maintenance",
         },
@@ -593,9 +749,28 @@ def _control_status_maintenance_signals(status_payload: dict[str, Any]) -> list[
         },
         "severity": "high",
         "actionability": "safe_now",
-        "allowed_tools": ["pulse", "read", "find", "system_check"],
-        "preferred_tool": "pulse",
-        "next_task": "Inspect maintenance scheduler state and guard tick evidence",
+        "allowed_tools": ["queue_status", "pulse", "read", "find", "system_check"],
+        "preferred_tool": "queue_status",
+        "next_task": "Check maintenance scheduler queue and runtime worker state",
+        "task_sequence": [
+            {
+                "title": "Check maintenance scheduler queue and runtime worker state",
+                "allowed_tools": ["queue_status"],
+                "preferred_tool": "queue_status",
+            },
+            {
+                "title": "Read maintenance schedule registry",
+                "allowed_tools": ["read"],
+                "preferred_tool": "read",
+                "tool_args": ["services/schedule_registry.py"],
+            },
+            {
+                "title": "Read autonomy maintenance worker loop",
+                "allowed_tools": ["read"],
+                "preferred_tool": "read",
+                "tool_args": ["autonomy_maintenance.py"],
+            },
+        ],
     }]
 
 
@@ -648,10 +823,10 @@ def _autonomy_maintenance_error_signal_from_status(status_payload: dict[str, Any
         "actionability": "safe_now",
         "allowed_tools": ["read", "find", "pulse", "system_check"],
         "preferred_tool": "read",
-        "next_task": "Read runtime/autonomy_maintenance.log around the latest maintenance error",
+        "next_task": AUTONOMY_MAINTENANCE_LOG_TASK_TITLE,
         "task_sequence": [
             {
-                "title": "Read runtime/autonomy_maintenance.log around the latest maintenance error",
+                "title": AUTONOMY_MAINTENANCE_LOG_TASK_TITLE,
                 "allowed_tools": ["read"],
                 "preferred_tool": "read",
                 "tool_args": ["runtime/autonomy_maintenance.log"],
@@ -681,12 +856,12 @@ def _runtime_failure_reason_signals_from_status(status_payload: dict[str, Any]) 
         service_name = str(service or row.get("service") or "runtime").strip().lower()
         label = str(row.get("label") or service_name).strip() or service_name
         signals.append({
-            "source": "runtime_failures",
+            "source": "runtime_control",
             "signal_class": "runtime_failure",
             "title": f"{label} runtime failure reason is active",
             "fingerprint": {
                 "class": "runtime_failure",
-                "surface": "runtime_failures",
+                "surface": "runtime_control",
                 "error": "runtime_failure_reason",
                 "symbol": service_name,
             },
@@ -732,12 +907,12 @@ def _runtime_restart_signal_from_status(status_payload: dict[str, Any]) -> dict[
         return None
 
     return {
-        "source": "runtime_restart_analytics",
+        "source": "runtime_control",
         "signal_class": "runtime_failure",
         "title": "Runtime restart pressure is elevated",
         "fingerprint": {
             "class": "runtime_failure",
-            "surface": "runtime_restart_analytics",
+            "surface": "runtime_control",
             "error": "restart_pressure",
             "symbol": "guard_boot_history",
         },
@@ -783,12 +958,12 @@ def _runtime_restart_provenance_signal_from_status(status_payload: dict[str, Any
         return None
 
     return {
-        "source": "runtime_restart_analytics",
+        "source": "runtime_control",
         "signal_class": "governance_pressure",
         "title": "Runtime restart provenance is incomplete",
         "fingerprint": {
             "class": "governance_pressure",
-            "surface": "runtime_restart_analytics",
+            "surface": "runtime_control",
             "error": "restart_provenance_gap",
             "symbol": "guard_boot_history",
         },
@@ -825,12 +1000,12 @@ def _storage_watch_signal_from_status(status_payload: dict[str, Any]) -> dict[st
     if not status or status in {"ok", "clear", "normal", "idle"}:
         return None
     return {
-        "source": "storage_watch",
+        "source": "storage_release_pressure",
         "signal_class": "maintenance_pressure",
         "title": "Runtime storage watch reports pressure",
         "fingerprint": {
             "class": "maintenance_pressure",
-            "surface": "storage_watch",
+            "surface": "storage_release_pressure",
             "error": "storage_watch_pressure",
             "symbol": status,
         },
@@ -884,12 +1059,12 @@ def _patch_pipeline_signal_from_status(status_payload: dict[str, Any]) -> dict[s
         return None
 
     return {
-        "source": "patch_status",
+        "source": "patch_pipeline",
         "signal_class": "governance_pressure",
         "title": "Patch pipeline governance is not ready",
         "fingerprint": {
             "class": "governance_pressure",
-            "surface": "patch_status",
+            "surface": "patch_pipeline",
             "error": "patch_pipeline_not_ready",
             "symbol": reasons[0],
         },
@@ -993,6 +1168,832 @@ def _data_pipeline_signal_from_status(status_payload: dict[str, Any]) -> dict[st
     }
 
 
+_BAD_STATUS_WORDS = {
+    "blocked",
+    "degraded",
+    "denied",
+    "error",
+    "failed",
+    "failure",
+    "invalid",
+    "missing",
+    "stale",
+    "timeout",
+    "unavailable",
+    "unhandled",
+    "unreadable",
+}
+
+_CLEAR_STATUS_WORDS = {
+    "",
+    "clear",
+    "complete",
+    "healthy",
+    "idle",
+    "none",
+    "ok",
+    "ready",
+    "resolved",
+    "running",
+    "stable",
+    "success",
+    "valid",
+}
+
+
+def _status_word(value: Any) -> str:
+    return str(value or "").strip().lower()
+
+
+def _status_is_bad(value: Any) -> bool:
+    text = _status_word(value)
+    return bool(text and text not in _CLEAR_STATUS_WORDS and text in _BAD_STATUS_WORDS)
+
+
+def _route_trace_issue_steps(trace: Any, *, stage_terms: set[str] | None = None) -> list[dict[str, Any]]:
+    if not isinstance(trace, list):
+        return []
+    terms = {
+        str(item or "").strip().lower()
+        for item in set(stage_terms or set())
+        if str(item or "").strip()
+    }
+    issues: list[dict[str, Any]] = []
+    for raw in trace:
+        if not isinstance(raw, dict):
+            continue
+        stage = _status_word(raw.get("stage"))
+        if terms and not any(term in stage for term in terms):
+            continue
+        outcome = _status_word(raw.get("outcome") or raw.get("status") or raw.get("result"))
+        ok_value = raw.get("ok")
+        has_error_field = bool(str(raw.get("rule_error") or raw.get("error") or "").strip())
+        if ok_value is not False and not has_error_field and not _status_is_bad(outcome):
+            continue
+        issues.append({
+            "stage": stage or "unknown",
+            "outcome": outcome or ("error" if has_error_field else "not_ok"),
+            "detail": str(raw.get("detail") or raw.get("rule_error") or raw.get("error") or "")[:220],
+        })
+    return issues[:8]
+
+
+def _read_source_task(title: str, path: str) -> dict[str, Any]:
+    return {
+        "title": title,
+        "allowed_tools": ["read"],
+        "preferred_tool": "read",
+        "tool_args": [path],
+    }
+
+
+def _find_source_task(title: str, pattern: str, scope: str = "services tests") -> dict[str, Any]:
+    return {
+        "title": title,
+        "allowed_tools": ["find"],
+        "preferred_tool": "find",
+        "tool_args": [pattern, scope],
+    }
+
+
+def _task_tools(item: dict[str, Any]) -> set[str]:
+    tools = {
+        str(tool or "").strip()
+        for tool in list(item.get("allowed_tools") or [])
+        if str(tool or "").strip()
+    }
+    preferred = str(item.get("preferred_tool") or "").strip()
+    if preferred:
+        tools.add(preferred)
+    return tools
+
+
+def _source_root_judgment_task() -> dict[str, Any]:
+    return {
+        "title": SOURCE_ROOT_JUDGMENT_TASK_TITLE,
+        "allowed_tools": [SOURCE_ROOT_JUDGMENT_TOOL],
+        "preferred_tool": SOURCE_ROOT_JUDGMENT_TOOL,
+    }
+
+
+def _append_source_root_judgment_task(source: str, signal: dict[str, Any]) -> dict[str, Any]:
+    root_id = str(source or "").strip()
+    if root_id not in _SOURCE_ROOT_SIGNAL_SOURCES:
+        return signal
+    next_task = str(signal.get("next_task") or "").strip()
+    task_sequence = [
+        dict(item)
+        for item in list(signal.get("task_sequence") or [])
+        if isinstance(item, dict) and str(item.get("title") or "").strip()
+    ]
+    preferred_tool = str(signal.get("preferred_tool") or "").strip()
+    allowed_tools = [
+        str(tool or "").strip()
+        for tool in list(signal.get("allowed_tools") or [])
+        if str(tool or "").strip()
+    ]
+    sequence_tools = set().union(*(_task_tools(item) for item in task_sequence)) if task_sequence else set()
+    if sequence_tools & _SPECIALIZED_SEQUENCE_TOOLS or preferred_tool in _SPECIALIZED_SEQUENCE_TOOLS:
+        signal["task_sequence"] = task_sequence
+        return signal
+    if not task_sequence and next_task and not allowed_tools and not preferred_tool:
+        return signal
+    if not task_sequence and next_task:
+        task_sequence.append({
+            "title": next_task,
+            "allowed_tools": allowed_tools,
+            "preferred_tool": preferred_tool,
+        })
+    if not task_sequence:
+        return signal
+    task_sequence.append(_source_root_judgment_task())
+    signal["task_sequence"] = task_sequence
+    return signal
+
+
+def _frontdoor_cli_signal_from_status(status_payload: dict[str, Any]) -> dict[str, Any] | None:
+    if not _has_frontdoor_cli_surface(status_payload):
+        return None
+    commands = status_payload.get("backend_commands")
+    invalid_commands = "backend_commands" in status_payload and not isinstance(commands, list)
+    command_count = _as_int(status_payload.get("backend_command_count"), 0)
+    status_text = _status_word(status_payload.get("frontdoor_cli_status"))
+    if not invalid_commands and command_count >= 0 and not _status_is_bad(status_text):
+        return None
+    return {
+        "source": "frontdoor_cli",
+        "signal_class": "maintenance_pressure",
+        "title": "Frontdoor CLI command surface is not readable",
+        "fingerprint": {
+            "class": "maintenance_pressure",
+            "surface": "frontdoor_cli",
+            "error": "frontdoor_cli_unreadable",
+            "symbol": "backend_commands",
+        },
+        "payload": {
+            "backend_command_count": command_count,
+            "frontdoor_cli_status": status_text,
+            "backend_commands_type": type(commands).__name__,
+            "rationale": "The local command front door has status evidence, but the command surface is malformed or not readable.",
+        },
+        "severity": "medium",
+        "actionability": "safe_now",
+        "allowed_tools": ["read", "find", "system_check"],
+        "preferred_tool": "read",
+        "next_task": "Read frontdoor CLI entrypoints and backend command loading path",
+        "task_sequence": [
+            _read_source_task("Read Nova PowerShell frontdoor", "nova.ps1"),
+            _read_source_task("Read typed CLI entrypoint", "agent.py"),
+            _read_source_task("Read run.py dispatch entrypoint", "run.py"),
+        ],
+    }
+
+
+def _operator_control_signal_from_status(status_payload: dict[str, Any]) -> dict[str, Any] | None:
+    if not _has_operator_control_surface(status_payload):
+        return None
+    outbox = status_payload.get("operator_outbox") if isinstance(status_payload.get("operator_outbox"), dict) else {}
+    open_count = _as_int(status_payload.get("operator_outbox_open_count", outbox.get("open_count", 0)), 0)
+    outbox_ok = bool(outbox.get("ok", True))
+    if outbox_ok and open_count <= 0:
+        return None
+    error_symbol = "operator_outbox_open" if open_count > 0 else "operator_outbox_unreadable"
+    has_open_work = open_count > 0
+    return {
+        "source": "operator_control",
+        "signal_class": "operator_requested" if has_open_work else "maintenance_pressure",
+        "title": "Operator outbox has open operator-control work",
+        "fingerprint": {
+            "class": "operator_requested" if has_open_work else "maintenance_pressure",
+            "surface": "operator_control",
+            "error": error_symbol,
+            "symbol": "operator_outbox",
+        },
+        "payload": {
+            "operator_outbox_open_count": open_count,
+            "operator_outbox_latest_open_id": str(status_payload.get("operator_outbox_latest_open_id") or ""),
+            "operator_outbox_status_counts": dict(status_payload.get("operator_outbox_status_counts") or {}),
+            "operator_outbox": dict(outbox),
+            "rationale": "Operator-control pressure is visible and should stay attached to the Work Tree instead of sitting only in the outbox.",
+        },
+        "severity": "high" if has_open_work else "medium",
+        "actionability": "blocked" if has_open_work else "safe_now",
+        "allowed_tools": [] if has_open_work else ["read", "find", "pulse"],
+        "preferred_tool": "" if has_open_work else "read",
+        "next_task": "" if has_open_work else "Read operator outbox and control-action dispatcher evidence",
+        "task_sequence": [] if has_open_work else [
+            _read_source_task("Read operator outbox service", "services/operator_outbox.py"),
+            _read_source_task("Read control-action dispatcher", "services/nova_control_action_dispatcher.py"),
+        ],
+        "blocked_task": "Wait for operator response or authority assignment on the open outbox item" if has_open_work else "",
+        "blocked_reason": "operator_response_required" if has_open_work else "",
+    }
+
+
+def _policy_gates_signal_from_status(status_payload: dict[str, Any]) -> dict[str, Any] | None:
+    if not _has_policy_gates_surface(status_payload):
+        return None
+    reasons: list[str] = []
+    if bool(status_payload.get("web_enabled", False)) and _as_int(status_payload.get("allow_domains_count"), 0) <= 0:
+        reasons.append("web_enabled_without_allow_domains")
+    if bool(status_payload.get("patch_enabled", False)) and not bool(status_payload.get("patch_strict_manifest", True)):
+        reasons.append("patch_strict_manifest_disabled")
+    if bool(status_payload.get("patch_enabled", False)) and not bool(status_payload.get("patch_behavioral_check", True)):
+        reasons.append("patch_behavioral_check_disabled")
+    if (
+        bool(status_payload.get("patch_enabled", False))
+        and bool(status_payload.get("patch_behavioral_check", True))
+        and not bool(status_payload.get("patch_tests_available", True))
+    ):
+        reasons.append("patch_behavioral_tests_missing")
+    if not reasons:
+        return None
+    return {
+        "source": "policy_gates",
+        "signal_class": "governance_pressure",
+        "title": "Policy gates report an action or observation blocker",
+        "fingerprint": {
+            "class": "governance_pressure",
+            "surface": "policy_gates",
+            "error": "policy_gate_blocker",
+            "symbol": reasons[0],
+        },
+        "payload": {
+            "reasons": reasons,
+            "web_enabled": bool(status_payload.get("web_enabled", False)),
+            "allow_domains_count": _as_int(status_payload.get("allow_domains_count"), 0),
+            "memory_enabled": bool(status_payload.get("memory_enabled", False)),
+            "patch_enabled": bool(status_payload.get("patch_enabled", False)),
+            "patch_strict_manifest": bool(status_payload.get("patch_strict_manifest", False)),
+            "patch_behavioral_check": bool(status_payload.get("patch_behavioral_check", False)),
+            "patch_tests_available": bool(status_payload.get("patch_tests_available", False)),
+            "rationale": "Policy state is internally visible and currently blocks a declared capability or observation surface.",
+        },
+        "severity": "high",
+        "actionability": "safe_now",
+        "allowed_tools": ["read", "find", "system_check"],
+        "preferred_tool": "read",
+        "next_task": "Read policy gate configuration and control policy surface",
+        "task_sequence": [
+            _read_source_task("Read policy configuration", "policy.json"),
+            _read_source_task("Read policy manager", "services/policy_manager.py"),
+            _read_source_task("Read policy control surface", "services/policy_control.py"),
+        ],
+    }
+
+
+def _session_identity_auth_signal_from_status(status_payload: dict[str, Any]) -> dict[str, Any] | None:
+    if not _has_session_identity_auth_surface(status_payload):
+        return None
+    login_enabled = bool(status_payload.get("chat_login_enabled", False))
+    users_count = _as_int(status_payload.get("chat_users_count"), 0)
+    auth_source = _status_word(status_payload.get("chat_auth_source"))
+    reasons: list[str] = []
+    if login_enabled and users_count <= 0:
+        reasons.append("chat_login_enabled_without_users")
+    if login_enabled and auth_source in {"", "missing", "unknown", "none"}:
+        reasons.append("chat_auth_source_missing")
+    if not reasons:
+        return None
+    return {
+        "source": "session_identity_auth",
+        "signal_class": "governance_pressure",
+        "title": "Session identity/auth surface is not ready",
+        "fingerprint": {
+            "class": "governance_pressure",
+            "surface": "session_identity_auth",
+            "error": "session_identity_auth_gap",
+            "symbol": reasons[0],
+        },
+        "payload": {
+            "reasons": reasons,
+            "chat_login_enabled": login_enabled,
+            "chat_users_count": users_count,
+            "chat_auth_source": auth_source,
+            "rationale": "Chat identity/auth status is visible, but enabled login lacks the user or auth-source evidence needed for accountable sessions.",
+        },
+        "severity": "high",
+        "actionability": "safe_now",
+        "allowed_tools": ["read", "find", "pulse"],
+        "preferred_tool": "read",
+        "next_task": "Read chat identity and session admin surfaces",
+        "task_sequence": [
+            _read_source_task("Read chat identity service", "services/chat_identity.py"),
+            _read_source_task("Read session admin service", "services/session_admin.py"),
+            _read_source_task("Read HTTP session store", "http_session_store.py"),
+        ],
+    }
+
+
+def _identity_profile_answers_signal_from_status(status_payload: dict[str, Any]) -> dict[str, Any] | None:
+    if not _has_identity_profile_answers_surface(status_payload):
+        return None
+    memory_health = status_payload.get("memory_health") if isinstance(status_payload.get("memory_health"), dict) else {}
+    learned_facts = memory_health.get("learned_facts") if isinstance(memory_health.get("learned_facts"), dict) else {}
+    identity = memory_health.get("identity") if isinstance(memory_health.get("identity"), dict) else {}
+    memory_enabled = bool(status_payload.get("memory_enabled", memory_health.get("memory_enabled", False)))
+    profile_status = _status_word(status_payload.get("identity_profile_status") or status_payload.get("profile_answer_status"))
+    has_identity_evidence = isinstance(memory_health.get("identity"), dict)
+    has_learned_facts_evidence = isinstance(memory_health.get("learned_facts"), dict)
+    missing_profile_parts: list[str] = []
+    if memory_enabled and has_identity_evidence and not bool(identity.get("exists", False)):
+        missing_profile_parts.append("identity_profile_missing")
+    if memory_enabled and has_learned_facts_evidence and not bool(learned_facts.get("exists", False)):
+        missing_profile_parts.append("learned_facts_missing")
+    if _status_is_bad(profile_status):
+        missing_profile_parts.append(profile_status)
+    if not missing_profile_parts:
+        return None
+    return {
+        "source": "identity_profile_answers",
+        "signal_class": "governance_pressure",
+        "title": "Identity profile answer evidence is missing",
+        "fingerprint": {
+            "class": "governance_pressure",
+            "surface": "identity_profile_answers",
+            "error": "identity_profile_answer_gap",
+            "symbol": missing_profile_parts[0],
+        },
+        "payload": {
+            "missing_profile_parts": missing_profile_parts,
+            "memory_enabled": memory_enabled,
+            "identity_profile_status": profile_status,
+            "memory_health_status": str(status_payload.get("memory_health_status") or memory_health.get("status") or ""),
+            "identity": dict(identity),
+            "learned_facts": dict(learned_facts),
+            "rationale": "Nova can only answer durable identity/profile questions honestly when the identity and learned-facts evidence body exists.",
+        },
+        "severity": "high",
+        "actionability": "safe_now",
+        "allowed_tools": ["memory_bootstrap_judgment", "read", "find"],
+        "preferred_tool": "memory_bootstrap_judgment",
+        "next_task": "Synthesize identity profile answer judgment from memory evidence",
+        "task_sequence": [
+            _read_source_task("Read memory routing purpose controls", "services/memory_routing.py"),
+            _read_source_task("Read memory identity bootstrap service", "services/memory_identity_bootstrap.py"),
+            {
+                "title": "Synthesize identity profile answer judgment from memory evidence",
+                "allowed_tools": ["memory_bootstrap_judgment"],
+                "preferred_tool": "memory_bootstrap_judgment",
+            },
+        ],
+    }
+
+
+def _conversation_routing_signal_from_status(status_payload: dict[str, Any]) -> dict[str, Any] | None:
+    if not _has_conversation_routing_surface(status_payload):
+        return None
+    route_trace = status_payload.get("last_route_trace")
+    issue_steps = _route_trace_issue_steps(route_trace, stage_terms={"intent", "planner", "route", "router", "action_planner"})
+    planner_decision = str(status_payload.get("last_planner_decision") or "").strip()
+    action_ledger_total = _as_int(status_payload.get("action_ledger_total"), 0)
+    route_summary = str(status_payload.get("last_route_summary") or "").strip()
+    missing_decision = action_ledger_total > 0 and not planner_decision
+    missing_route = action_ledger_total > 0 and not route_summary
+    if not issue_steps and not missing_decision and not missing_route:
+        return None
+    symbol = "route_trace_issue"
+    if missing_decision:
+        symbol = "planner_decision_missing"
+    elif missing_route:
+        symbol = "route_summary_missing"
+    return {
+        "source": "conversation_routing",
+        "signal_class": "governance_pressure",
+        "title": "Conversation routing evidence is incomplete or not clean",
+        "fingerprint": {
+            "class": "governance_pressure",
+            "surface": "conversation_routing",
+            "error": "conversation_routing_evidence_gap",
+            "symbol": symbol,
+        },
+        "payload": {
+            "planner_decision": planner_decision,
+            "last_intent": str(status_payload.get("last_intent") or ""),
+            "last_route_summary": route_summary,
+            "issue_steps": issue_steps,
+            "missing_planner_decision": missing_decision,
+            "missing_route_summary": missing_route,
+            "rationale": "The last action ledger record has routing evidence, but the routing trace is incomplete or contains a structural failure state.",
+        },
+        "severity": "high" if missing_decision or missing_route else "medium",
+        "actionability": "safe_now",
+        "allowed_tools": ["read", "find", "pulse"],
+        "preferred_tool": "read",
+        "next_task": "Read routing support and planner contract for the current route gap",
+        "task_sequence": [
+            _read_source_task("Read semantic routing support", "services/nova_routing_support.py"),
+            _read_source_task("Read planner contract", "services/nova_planner_contract.py"),
+            _find_source_task("Find current route trace writer and ledger finalizer", "route_trace|planner_decision|finalize", "services nova_core.py nova_http.py"),
+        ],
+    }
+
+
+def _supervisor_fulfillment_signal_from_status(status_payload: dict[str, Any]) -> dict[str, Any] | None:
+    if not _has_supervisor_fulfillment_surface(status_payload):
+        return None
+    issue_steps = _route_trace_issue_steps(
+        status_payload.get("last_route_trace"),
+        stage_terms={"supervisor", "fulfillment"},
+    )
+    planner_decision = str(status_payload.get("last_planner_decision") or "").strip().lower()
+    grounded = bool(status_payload.get("last_route_grounded", True))
+    active_ungrounded = planner_decision.startswith("fulfillment") and not grounded
+    if not issue_steps and not active_ungrounded:
+        return None
+    return {
+        "source": "supervisor_fulfillment",
+        "signal_class": "governance_pressure",
+        "title": "Supervisor/fulfillment handoff is not clean",
+        "fingerprint": {
+            "class": "governance_pressure",
+            "surface": "supervisor_fulfillment",
+            "error": "supervisor_fulfillment_route_gap",
+            "symbol": "fulfillment_route",
+        },
+        "payload": {
+            "last_planner_decision": planner_decision,
+            "last_route_grounded": grounded,
+            "issue_steps": issue_steps,
+            "rationale": "Supervisor or fulfillment stages are visible in the route trace and report a structural handoff failure.",
+        },
+        "severity": "medium",
+        "actionability": "safe_now",
+        "allowed_tools": ["read", "find", "pulse"],
+        "preferred_tool": "read",
+        "next_task": "Read supervisor and fulfillment handoff code",
+        "task_sequence": [
+            _read_source_task("Read supervisor registry", "services/supervisor_registry.py"),
+            _read_source_task("Read fulfillment flow", "services/fulfillment_flow.py"),
+            _read_source_task("Read fulfillment routing bridge", "services/nova_fulfillment_routing.py"),
+        ],
+    }
+
+
+def _reply_quality_contracts_signal_from_status(status_payload: dict[str, Any]) -> dict[str, Any] | None:
+    if not _has_reply_quality_contracts_surface(status_payload):
+        return None
+    trace = status_payload.get("last_route_trace")
+    issue_steps = _route_trace_issue_steps(trace, stage_terms={"reply", "finalize", "delivery"})
+    has_finalize = any(isinstance(item, dict) and _status_word(item.get("stage")) == "finalize" for item in list(trace or []))
+    final_answer_present = bool(str(status_payload.get("last_action_final_answer") or "").strip())
+    if not issue_steps and (not has_finalize or final_answer_present):
+        return None
+    symbol = "final_answer_missing" if has_finalize and not final_answer_present else "reply_trace_issue"
+    return {
+        "source": "reply_quality_contracts",
+        "signal_class": "governance_pressure",
+        "title": "Reply quality contract evidence is incomplete",
+        "fingerprint": {
+            "class": "governance_pressure",
+            "surface": "reply_quality_contracts",
+            "error": "reply_quality_contract_gap",
+            "symbol": symbol,
+        },
+        "payload": {
+            "has_finalize_step": has_finalize,
+            "final_answer_present": final_answer_present,
+            "last_route_grounded": bool(status_payload.get("last_route_grounded", False)),
+            "issue_steps": issue_steps,
+            "rationale": "The final reply delivery path should leave structural evidence of a final answer and clean finalization.",
+        },
+        "severity": "medium",
+        "actionability": "safe_now",
+        "allowed_tools": ["read", "find", "pulse"],
+        "preferred_tool": "read",
+        "next_task": "Read reply runtime and finalization contract",
+        "task_sequence": [
+            _read_source_task("Read reply runtime effects", "services/nova_reply_runtime.py"),
+            _read_source_task("Read HTTP turn finalization", "services/nova_http_turn_finalization.py"),
+            _find_source_task("Find reply contract and final answer writers", "reply_contract|final_answer|reply_outcome", "services nova_core.py nova_http.py"),
+        ],
+    }
+
+
+def _retrieval_knowledge_signal_from_status(status_payload: dict[str, Any]) -> dict[str, Any] | None:
+    if not _has_retrieval_knowledge_surface(status_payload):
+        return None
+    retrieval_status = _status_word(status_payload.get("retrieval_knowledge_status") or status_payload.get("knowledge_pack_status"))
+    knowledge_used = status_payload.get("knowledge_used")
+    knowledge_chars = _as_int(status_payload.get("knowledge_chars"), 0)
+    explicit_bad_status = _status_is_bad(retrieval_status)
+    empty_used_context = knowledge_used is True and knowledge_chars <= 0
+    if not explicit_bad_status and not empty_used_context:
+        return None
+    return {
+        "source": "retrieval_knowledge",
+        "signal_class": "maintenance_pressure",
+        "title": "Retrieval/knowledge evidence is not usable",
+        "fingerprint": {
+            "class": "maintenance_pressure",
+            "surface": "retrieval_knowledge",
+            "error": "retrieval_knowledge_gap",
+            "symbol": retrieval_status or "knowledge_context",
+        },
+        "payload": {
+            "retrieval_knowledge_status": retrieval_status,
+            "knowledge_used": bool(knowledge_used),
+            "knowledge_chars": knowledge_chars,
+            "knowledge_active_pack": str(status_payload.get("knowledge_active_pack") or ""),
+            "rationale": "Local retrieval reported use or status evidence, but the retrieved context payload is empty or structurally unhealthy.",
+        },
+        "severity": "medium",
+        "actionability": "safe_now",
+        "allowed_tools": ["read", "find", "web_search"],
+        "preferred_tool": "read",
+        "next_task": "Read local knowledge pack retrieval implementation",
+        "task_sequence": [
+            _read_source_task("Read knowledge pack retrieval service", "services/nova_knowledge_packs.py"),
+            _find_source_task("Find knowledge context writers", "knowledge_used|knowledge_chars|kb_search", "services nova_core.py tests"),
+        ],
+    }
+
+
+def _weather_location_signal_from_status(status_payload: dict[str, Any]) -> dict[str, Any] | None:
+    if not _has_weather_location_surface(status_payload):
+        return None
+    weather_source = str(status_payload.get("weather_source_host") or "").strip()
+    web_enabled = bool(status_payload.get("web_enabled", False))
+    issue_steps = _route_trace_issue_steps(status_payload.get("last_route_trace"), stage_terms={"weather", "location"})
+    action_tool = str(status_payload.get("last_action_tool") or "").strip()
+    weather_tool_selected = action_tool in {"weather_current_location", "weather_location", "location_coords"}
+    source_missing = weather_tool_selected and web_enabled and not weather_source and "weather_source_host" in status_payload
+    if not issue_steps and not source_missing:
+        return None
+    return {
+        "source": "weather_location",
+        "signal_class": "dependency_unreachable",
+        "title": "Weather/location route lacks usable source evidence",
+        "fingerprint": {
+            "class": "dependency_unreachable",
+            "surface": "weather_location",
+            "error": "weather_location_source_gap",
+            "symbol": action_tool or "weather_location",
+        },
+        "payload": {
+            "last_action_tool": action_tool,
+            "weather_source_host": weather_source,
+            "web_enabled": web_enabled,
+            "live_tracking": dict(status_payload.get("live_tracking") or {}) if isinstance(status_payload.get("live_tracking"), dict) else {},
+            "issue_steps": issue_steps,
+            "rationale": "Weather/location tooling was selected or reported route issues without a usable weather/location evidence source.",
+        },
+        "severity": "medium",
+        "actionability": "safe_now",
+        "allowed_tools": ["weather_current_location", "weather_location", "location_coords", "read", "find"],
+        "preferred_tool": "weather_current_location" if action_tool != "location_coords" else "location_coords",
+        "next_task": "Probe weather/location route using the registered weather tool",
+        "task_sequence": [
+            {
+                "title": "Probe current weather/location route through registered tool",
+                "allowed_tools": ["weather_current_location"],
+                "preferred_tool": "weather_current_location",
+            },
+            _read_source_task("Read weather/location implementation", "services/nova_location_weather.py"),
+        ],
+    }
+
+
+def _installer_packaging_signal_from_status(status_payload: dict[str, Any]) -> dict[str, Any] | None:
+    if not _has_installer_packaging_surface(status_payload):
+        return None
+    installer_release = status_payload.get("installer_release_status") if isinstance(status_payload.get("installer_release_status"), dict) else {}
+    installer_status = _status_word(
+        status_payload.get("installer_status")
+        or status_payload.get("installer_packaging_status")
+        or installer_release.get("latest_readiness_state")
+    )
+    release = status_payload.get("release_status") if isinstance(status_payload.get("release_status"), dict) else {}
+    readiness = _status_word(release.get("latest_readiness_state"))
+    release_ready = bool(release.get("latest_ready_to_ship", False))
+    installer_ready = bool(installer_release.get("latest_ready_to_ship", False))
+    release_artifact_path = str(release.get("latest_artifact_path") or "").strip()
+    installer_source_package_path = str(installer_release.get("latest_source_package_artifact_path") or "").strip()
+    installer_matches_current_release = bool(
+        installer_ready
+        and release_ready
+        and _same_artifact_path(installer_source_package_path, release_artifact_path)
+    )
+    installer_provenance_gap = bool(release_ready and installer_ready and not installer_matches_current_release)
+    if installer_ready and installer_status in {"ready", "ready-with-notes"} and not installer_provenance_gap:
+        return None
+    stale_after_release = release_ready and (
+        installer_provenance_gap
+        or installer_status in {"", "missing", "stale", "unverified", "no-builds", "needs-verification", "needs-promotion"}
+    )
+    if not _status_is_bad(installer_status) and not stale_after_release:
+        return None
+    return {
+        "source": "installer_packaging",
+        "signal_class": "release_readiness_gap",
+        "title": "Installer package readiness is not verified against release truth",
+        "fingerprint": {
+            "class": "release_readiness_gap",
+            "surface": "installer_packaging",
+            "error": "installer_packaging_gap",
+            "symbol": str(release.get("latest_artifact_name") or "") or installer_status or readiness or "installer",
+        },
+        "payload": {
+            "installer_status": installer_status,
+            "installer_release_status": dict(installer_release),
+            "release_readiness_state": readiness,
+            "release_ready_to_ship": release_ready,
+            "latest_artifact_name": str(release.get("latest_artifact_name") or ""),
+            "latest_artifact_path": release_artifact_path,
+            "installer_source_package_artifact_path": installer_source_package_path,
+            "installer_matches_current_release": installer_matches_current_release,
+            "rationale": "Installer packaging is a release root; when release truth is ready, installer verification must have matching evidence before packaging is considered closed.",
+        },
+        "severity": "medium",
+        "actionability": "safe_now",
+        "allowed_tools": ["read", "find", "system_check", "installer_validation_run", SOURCE_ROOT_JUDGMENT_TOOL],
+        "preferred_tool": "installer_validation_run",
+        "next_task": "Run installer validation from current release package",
+        "task_sequence": [
+            _read_source_task("Read Windows installer build script", "scripts/build_windows_installer.ps1"),
+            _read_source_task("Read Windows installer verification script", "scripts/verify_windows_installer.ps1"),
+            _read_source_task("Read installer plan", "docs/WINDOWS_INSTALLER_PLAN.md"),
+            {
+                "title": "Run installer validation from current release package",
+                "allowed_tools": ["installer_validation_run"],
+                "preferred_tool": "installer_validation_run",
+            },
+            _source_root_judgment_task(),
+        ],
+    }
+
+
+def _tts_audio_output_signal_from_status(status_payload: dict[str, Any]) -> dict[str, Any] | None:
+    if not _has_tts_audio_output_surface(status_payload):
+        return None
+    tts_status = _status_word(status_payload.get("tts_status") or status_payload.get("tts_audio_status"))
+    voice_status = status_payload.get("voice_status") if isinstance(status_payload.get("voice_status"), dict) else {}
+    voice_requested = bool(status_payload.get("voice_runtime_requested", voice_status.get("requested", False)))
+    voice_ok = bool(status_payload.get("voice_runtime_ok", voice_status.get("ok", not voice_requested)))
+    tts_issue = _status_is_bad(tts_status) or (voice_requested and voice_ok and tts_status in {"missing", "unavailable", "failed", "error"})
+    if not tts_issue:
+        return None
+    return {
+        "source": "tts_audio_output",
+        "signal_class": "dependency_unreachable",
+        "title": "TTS audio output surface is unavailable",
+        "fingerprint": {
+            "class": "dependency_unreachable",
+            "surface": "tts_audio_output",
+            "error": "tts_audio_unavailable",
+            "symbol": tts_status or "tts_runtime",
+        },
+        "payload": {
+            "tts_status": tts_status,
+            "voice_runtime_requested": voice_requested,
+            "voice_runtime_ok": voice_ok,
+            "voice_status": dict(voice_status),
+            "rationale": "Spoken output is a separate delivery root and needs its own TTS evidence when voice delivery is requested.",
+        },
+        "severity": "medium",
+        "actionability": "safe_now",
+        "allowed_tools": ["read", "find", "system_check"],
+        "preferred_tool": "read",
+        "next_task": "Read TTS output bridge and Piper fallback",
+        "task_sequence": [
+            _read_source_task("Read TTS process wrapper", "tts_say.py"),
+            _read_source_task("Read Piper TTS bridge", "tts_piper.py"),
+            _read_source_task("Read TTS PowerShell bridge", "tts_say.ps1"),
+        ],
+    }
+
+
+def _safety_envelope_signal_from_status(status_payload: dict[str, Any]) -> dict[str, Any] | None:
+    if not _has_safety_envelope_surface(status_payload):
+        return None
+    pulse = status_payload.get("pulse") if isinstance(status_payload.get("pulse"), dict) else {}
+    safety_enabled = bool(status_payload.get("safety_enabled", pulse.get("safety_enabled", True)))
+    safety_mode = _status_word(status_payload.get("safety_mode") or pulse.get("safety_mode"))
+    pending_review = _as_int(status_payload.get("pending_review_total", pulse.get("pending_review_total", 0)), 0)
+    quarantine = _as_int(status_payload.get("quarantine_total", pulse.get("quarantine_total", 0)), 0)
+    status_bad = _status_is_bad(status_payload.get("safety_envelope_status"))
+    review_pressure = safety_enabled and (pending_review > 0 or quarantine > 0) and safety_mode not in {"off", "disabled"}
+    if not status_bad and not review_pressure:
+        return None
+    return {
+        "source": "safety_envelope",
+        "signal_class": "governance_pressure",
+        "title": "Safety envelope has pending review or quarantine pressure",
+        "fingerprint": {
+            "class": "governance_pressure",
+            "surface": "safety_envelope",
+            "error": "safety_envelope_review_pressure",
+            "symbol": "pending_review" if pending_review > 0 else ("quarantine" if quarantine > 0 else safety_mode or "safety_envelope"),
+        },
+        "payload": {
+            "safety_enabled": safety_enabled,
+            "safety_mode": safety_mode,
+            "pending_review_total": pending_review,
+            "quarantine_total": quarantine,
+            "generated_total": _as_int(status_payload.get("generated_total", pulse.get("generated_total", 0)), 0),
+            "promoted_total": _as_int(status_payload.get("promoted_total", pulse.get("promoted_total", 0)), 0),
+            "rationale": "Generated-session promotion safety has pending or quarantined evidence that needs review before learning pressure is treated as settled.",
+        },
+        "severity": "medium",
+        "actionability": "safe_now",
+        "allowed_tools": ["phase2_audit", "read", "find"],
+        "preferred_tool": "phase2_audit",
+        "next_task": "Run safety-envelope audit and read promotion evidence",
+        "task_sequence": [
+            {
+                "title": "Run safety-envelope audit",
+                "allowed_tools": ["phase2_audit"],
+                "preferred_tool": "phase2_audit",
+            },
+            _read_source_task("Read safety envelope implementation", "nova_safety_envelope.py"),
+        ],
+    }
+
+
+def _metrics_ops_journal_signal_from_status(status_payload: dict[str, Any]) -> dict[str, Any] | None:
+    if not _has_metrics_ops_journal_surface(status_payload):
+        return None
+    requests_total = _as_int(status_payload.get("requests_total"), 0)
+    errors_total = _as_int(status_payload.get("errors_total"), 0)
+    journal_status = _status_word(status_payload.get("ops_journal_status") or status_payload.get("metrics_ops_journal_status"))
+    impossible_counts = errors_total > requests_total and requests_total >= 0
+    if not impossible_counts and not _status_is_bad(journal_status):
+        return None
+    return {
+        "source": "metrics_ops_journal",
+        "signal_class": "maintenance_pressure",
+        "title": "Metrics/ops journal telemetry is inconsistent",
+        "fingerprint": {
+            "class": "maintenance_pressure",
+            "surface": "metrics_ops_journal",
+            "error": "metrics_ops_journal_gap",
+            "symbol": "error_count_gt_request_count" if impossible_counts else journal_status or "ops_journal",
+        },
+        "payload": {
+            "requests_total": requests_total,
+            "errors_total": errors_total,
+            "tool_events_total": _as_int(status_payload.get("tool_events_total"), 0),
+            "ops_journal_status": journal_status,
+            "rationale": "Operator-visible telemetry must remain numerically coherent and journal evidence must be readable.",
+        },
+        "severity": "medium",
+        "actionability": "safe_now",
+        "allowed_tools": ["read", "find", "pulse"],
+        "preferred_tool": "read",
+        "next_task": "Read behavior metrics and ops journal telemetry writers",
+        "task_sequence": [
+            _read_source_task("Read behavior metrics store", "services/behavior_metrics.py"),
+            _read_source_task("Read ops journal writer", "services/ops_journal.py"),
+            _read_source_task("Read control telemetry summaries", "services/control_telemetry.py"),
+        ],
+    }
+
+
+def _core_steward_reflection_signal_from_status(status_payload: dict[str, Any]) -> dict[str, Any] | None:
+    if not _has_core_steward_reflection_surface(status_payload):
+        return None
+    health_score = _as_int(status_payload.get("health_score"), 100)
+    pulse = status_payload.get("pulse") if isinstance(status_payload.get("pulse"), dict) else {}
+    pulse_missing = "pulse" in status_payload and not pulse
+    core_steward_status = _status_word(status_payload.get("core_steward_status") or status_payload.get("core_health_brief_status"))
+    fallback_pressure = float(pulse.get("active_fallback_overuse_score", 0.0) or 0.0) if pulse else 0.0
+    if health_score >= 90 and not pulse_missing and not _status_is_bad(core_steward_status) and fallback_pressure < 0.75:
+        return None
+    return {
+        "source": "core_steward_reflection",
+        "signal_class": "governance_pressure",
+        "title": "Core steward reflection reports repair or watch pressure",
+        "fingerprint": {
+            "class": "governance_pressure",
+            "surface": "core_steward_reflection",
+            "error": "core_steward_reflection_pressure",
+            "symbol": core_steward_status or ("pulse_missing" if pulse_missing else "health_score"),
+        },
+        "payload": {
+            "health_score": health_score,
+            "pulse_missing": pulse_missing,
+            "core_steward_status": core_steward_status,
+            "active_fallback_overuse_score": fallback_pressure,
+            "pulse_summary": dict(status_payload.get("pulse_summary") or {}) if isinstance(status_payload.get("pulse_summary"), dict) else {},
+            "rationale": "Core steward reflection is the root that turns health and pulse evidence into repair/watch pressure.",
+        },
+        "severity": "high" if health_score < 75 else "medium",
+        "actionability": "safe_now",
+        "allowed_tools": ["core_health", "core_thinning", "pulse", "read", "find"],
+        "preferred_tool": "core_health",
+        "next_task": "Build core health brief from steward and pulse evidence",
+        "task_sequence": [
+            {
+                "title": "Build core health brief from steward and pulse evidence",
+                "allowed_tools": ["core_health"],
+                "preferred_tool": "core_health",
+            },
+            _read_source_task("Read core steward service", "services/core_steward.py"),
+            _read_source_task("Read core health brief service", "services/core_health_brief.py"),
+        ],
+    }
+
+
 def _wiring_inventory_signal_from_status(status_payload: dict[str, Any]) -> dict[str, Any] | None:
     inventory = (
         status_payload.get("wiring_inventory")
@@ -1011,12 +2012,12 @@ def _wiring_inventory_signal_from_status(status_payload: dict[str, Any]) -> dict
         or ["wiring_inventory"]
     )[0]
     return {
-        "source": "wiring_inventory",
+        "source": "work_tree",
         "signal_class": "governance_pressure",
         "title": "Subsystem wiring inventory has uncovered coverage gaps",
         "fingerprint": {
             "class": "governance_pressure",
-            "surface": "wiring_inventory",
+            "surface": "work_tree",
             "error": "wiring_inventory_gap",
             "symbol": first_gap,
         },
@@ -1051,7 +2052,7 @@ def _wiring_inventory_signal_from_status(status_payload: dict[str, Any]) -> dict
                 "title": "Find planned tool catalog and advisory action catalog",
                 "allowed_tools": ["find"],
                 "preferred_tool": "find",
-                "tool_args": ["_PLANNED_TOOL_NAMES|AUTONOMY_ADVISORY_ACTION_CATALOG|_DEFAULT_TREE_ALLOWED_TOOLS", "services work_tree.py"],
+                "tool_args": ["_PLANNED_TOOL_NAMES|AUTONOMY_ADVISORY_ACTION_CATALOG|_DEFAULT_TREE_ALLOWED_TOOLS", "."],
             },
         ],
     }
@@ -1127,7 +2128,7 @@ def _source_root_inventory_signal_from_status(status_payload: dict[str, Any]) ->
                 "title": "Find missing source root wiring references",
                 "allowed_tools": ["find"],
                 "preferred_tool": "find",
-                "tool_args": [first_gap, "services docs scripts"],
+                "tool_args": [first_gap, "."],
             },
         ],
     }
@@ -1229,57 +2230,86 @@ def _root_closure_inventory_signals_from_status(status_payload: dict[str, Any]) 
     return signals
 
 
-def _http_conversation_signal_from_status(status_payload: dict[str, Any]) -> dict[str, Any] | None:
-    if int(status_payload.get("active_http_sessions", 0) or 0) <= 0:
-        return None
-    last_decision = str(status_payload.get("last_planner_decision") or "").strip().lower()
-    last_route = str(status_payload.get("last_route_summary") or "").strip()
-    if last_decision != "grounded_self_report":
-        return None
-    if "conversation_followup" in last_route or "planner" in last_route:
-        return None
-    return {
-        "source": "http_conversation",
-        "signal_class": "governance_pressure",
-        "title": "HTTP grounded self-report needs active work continuity",
-        "fingerprint": {
-            "class": "governance_pressure",
-            "surface": "http_conversation",
-            "error": "self_report_continuity_watch",
-            "symbol": "grounded_self_report",
-        },
-        "payload": {
-            "last_planner_decision": last_decision,
-            "last_route_summary": last_route,
-            "last_action_final_answer": str(status_payload.get("last_action_final_answer") or "")[:220],
-            "rationale": "A grounded self-report should leave enough conversation/work-tree continuity for the next turn to help with the active issue, not fall back to generic chat.",
-        },
-        "severity": "medium",
-        "actionability": "safe_now",
-        "allowed_tools": ["read", "find", "pulse"],
-        "preferred_tool": "read",
-        "next_task": "Read HTTP chat runtime, routing, and reply sequence continuity wiring",
-        "task_sequence": [
+def _self_repair_closure_inventory_signals_from_status(status_payload: dict[str, Any]) -> list[dict[str, Any]]:
+    inventory = (
+        status_payload.get("self_repair_closure_inventory")
+        if isinstance(status_payload.get("self_repair_closure_inventory"), dict)
+        else build_self_repair_closure_inventory_payload(status_payload)
+    )
+    if int(inventory.get("gap_count", 0) or 0) <= 0:
+        return []
+
+    signals: list[dict[str, Any]] = []
+    for row in list(inventory.get("roots") or []):
+        if not isinstance(row, dict) or bool(row.get("ok", False)):
+            continue
+        root_id = str(row.get("root_id") or "").strip()
+        if not root_id:
+            continue
+        gaps = [str(item or "").strip() for item in list(row.get("gaps") or []) if str(item or "").strip()]
+        source_files = [str(item or "").strip() for item in list(row.get("source_files") or []) if str(item or "").strip()]
+        first_source_file = source_files[0] if source_files else "services/nova_wiring_inventory.py"
+        closure_depth = str(row.get("closure_depth") or "").strip()
+        signals.append(
             {
-                "title": "Read HTTP chat runtime active Work Tree continuity wiring",
-                "allowed_tools": ["read"],
+                "source": "self_repair_closure_inventory",
+                "signal_class": "governance_pressure",
+                "title": f"Complete self-repair closure for source root: {root_id}",
+                "fingerprint": {
+                    "class": "governance_pressure",
+                    "surface": "self_repair_closure_inventory",
+                    "error": "self_repair_closure_gap",
+                    "symbol": root_id,
+                },
+                "payload": {
+                    "root_id": root_id,
+                    "label": str(row.get("label") or ""),
+                    "closure_depth": closure_depth,
+                    "gaps": gaps,
+                    "source_files": source_files,
+                    "missing_execution_path": "missing_execution_path" in gaps,
+                    "missing_evidence_paths": list(row.get("missing_evidence_paths") or []),
+                    "missing_judgment_paths": list(row.get("missing_judgment_paths") or []),
+                    "missing_closure_paths": list(row.get("missing_closure_paths") or []),
+                    "missing_operator_outbox_paths": list(row.get("missing_operator_outbox_paths") or []),
+                    "missing_owned_root_routes": list(row.get("missing_owned_root_routes") or []),
+                    "owned_root_routes": list(row.get("owned_root_routes") or []),
+                    "executable_planned_tools": list(row.get("executable_planned_tools") or []),
+                    "executable_advisory_actions": list(row.get("executable_advisory_actions") or []),
+                    "proof_scope": str(inventory.get("proof_scope") or "source_contract"),
+                    "rationale": (
+                        "A Nova source root is not counted as source-contract ready until code shows the full chain: "
+                        "signal, Work Tree action, execution, evidence, judgment, closure, and operator outbox fallback."
+                    ),
+                },
+                "severity": "high",
+                "actionability": "safe_now",
+                "allowed_tools": ["read", "find", "pulse", "system_check"],
                 "preferred_tool": "read",
-                "tool_args": ["services/nova_http_chat_runtime.py"],
-            },
-            {
-                "title": "Read HTTP grounded self-report routing state handoff",
-                "allowed_tools": ["read"],
-                "preferred_tool": "read",
-                "tool_args": ["services/nova_http_routing.py"],
-            },
-            {
-                "title": "Read HTTP reply sequence planner continuity hook",
-                "allowed_tools": ["read"],
-                "preferred_tool": "read",
-                "tool_args": ["services/nova_reply_sequence.py"],
-            },
-        ],
-    }
+                "next_task": f"Read self-repair closure evidence for {root_id}",
+                "task_sequence": [
+                    {
+                        "title": f"Read source root evidence for {root_id}",
+                        "allowed_tools": ["read"],
+                        "preferred_tool": "read",
+                        "tool_args": [first_source_file],
+                    },
+                    {
+                        "title": f"Read self-repair closure inventory for {root_id}",
+                        "allowed_tools": ["read"],
+                        "preferred_tool": "read",
+                        "tool_args": ["services/nova_wiring_inventory.py"],
+                    },
+                    {
+                        "title": f"Find execution, evidence, judgment, and closure references for {root_id}",
+                        "allowed_tools": ["find"],
+                        "preferred_tool": "find",
+                        "tool_args": [root_id, "."],
+                    },
+                ],
+            }
+        )
+    return signals
 
 
 def _autonomy_orchestrator_signal_from_status(status_payload: dict[str, Any]) -> dict[str, Any] | None:
@@ -1367,12 +2397,12 @@ def _subconscious_status_signal_from_status(status_payload: dict[str, Any]) -> d
         return None
     latest_report_path = str(status_payload.get("subconscious_latest_report_path") or summary.get("latest_report_path") or "").strip()
     return {
-        "source": "subconscious_status",
+        "source": "subconscious",
         "signal_class": "maintenance_pressure",
         "title": "Subconscious status report is unavailable",
         "fingerprint": {
             "class": "maintenance_pressure",
-            "surface": "subconscious_status",
+            "surface": "subconscious",
             "error": "subconscious_status_unavailable",
             "symbol": "latest_report",
         },
@@ -1444,6 +2474,151 @@ def _action_ledger_signal_from_status(status_payload: dict[str, Any]) -> dict[st
     }
 
 
+def _os_capability_ledger_signal_from_status(status_payload: dict[str, Any]) -> dict[str, Any] | None:
+    if not _has_os_capability_ledger_surface(status_payload):
+        return None
+    ledger = status_payload.get("os_capability_ledger") if isinstance(status_payload.get("os_capability_ledger"), dict) else {}
+    readable_ok = bool(status_payload.get("os_capability_ledger_readable_ok", ledger.get("readable_ok", True)))
+    issue_count = _as_int(
+        status_payload.get("os_capability_ledger_current_issue_count", ledger.get("current_issue_count", 0)),
+        0,
+    )
+    if readable_ok and issue_count <= 0:
+        return None
+
+    last_issue = (
+        status_payload.get("last_os_capability_issue")
+        if isinstance(status_payload.get("last_os_capability_issue"), dict)
+        else ledger.get("last_issue")
+    )
+    last_issue = dict(last_issue) if isinstance(last_issue, dict) else {}
+    capability = str(
+        status_payload.get("last_os_capability_issue_name")
+        or last_issue.get("capability")
+        or status_payload.get("last_os_capability_name")
+        or "os_capability"
+    ).strip()
+    status_text = str(
+        status_payload.get("last_os_capability_issue_status")
+        or last_issue.get("status")
+        or ("unreadable" if not readable_ok else "issue")
+    ).strip().lower()
+    reason_text = str(
+        status_payload.get("last_os_capability_issue_reason")
+        or last_issue.get("reason")
+        or ("ledger_unreadable" if not readable_ok else "os_capability_issue")
+    ).strip().lower()
+    current_issue_rows = [
+        dict(item)
+        for item in list(ledger.get("current_issue_rows") or [])
+        if isinstance(item, dict)
+    ]
+    title = "OS capability ledger has unresolved execution evidence"
+    if reason_text == "contract_stale":
+        title = "OS capability contract drift is blocking execution"
+    elif status_text == "timeout":
+        title = "OS capability execution timed out"
+    elif status_text == "blocked":
+        title = "OS capability request is blocked before execution"
+    elif not readable_ok:
+        title = "OS capability ledger summary is unavailable"
+
+    return {
+        "source": "tool_registry_policy",
+        "signal_class": "maintenance_pressure",
+        "title": title,
+        "fingerprint": {
+            "class": "maintenance_pressure",
+            "surface": "tool_registry_policy",
+            "error": reason_text or status_text or "os_capability_issue",
+            "symbol": capability or "os_capability",
+        },
+        "payload": {
+            "os_capability_ledger_ok": bool(status_payload.get("os_capability_ledger_ok", ledger.get("ok", False))),
+            "os_capability_ledger_readable_ok": readable_ok,
+            "os_capability_ledger_total": _as_int(status_payload.get("os_capability_ledger_total", ledger.get("count", 0)), 0),
+            "os_capability_ledger_current_issue_count": issue_count,
+            "os_capability_ledger_current_blocked_count": _as_int(
+                status_payload.get("os_capability_ledger_current_blocked_count", ledger.get("current_blocked_count", 0)),
+                0,
+            ),
+            "os_capability_ledger_current_failure_count": _as_int(
+                status_payload.get("os_capability_ledger_current_failure_count", ledger.get("current_failure_count", 0)),
+                0,
+            ),
+            "os_capability_ledger_current_timeout_count": _as_int(
+                status_payload.get("os_capability_ledger_current_timeout_count", ledger.get("current_timeout_count", 0)),
+                0,
+            ),
+            "os_capability_ledger_current_operator_outbox_count": _as_int(
+                status_payload.get(
+                    "os_capability_ledger_current_operator_outbox_count",
+                    ledger.get("current_operator_outbox_count", 0),
+                ),
+                0,
+            ),
+            "os_capability_ledger_path": str(status_payload.get("os_capability_ledger_path") or ledger.get("ledger_path") or ""),
+            "last_os_capability_issue": last_issue,
+            "current_issue_rows": current_issue_rows[:6],
+            "rationale": "OS capability execution evidence is unresolved, so Nova cannot claim the capability chain is clean.",
+        },
+        "severity": "high" if reason_text == "contract_stale" or status_text in {"timeout", "failed", "error"} else "medium",
+        "actionability": "safe_now",
+        "allowed_tools": ["read", "find", "os_capability"],
+        "preferred_tool": "read",
+        "next_task": OS_CAPABILITY_LEDGER_READ_TASK_TITLE,
+        "task_sequence": [
+            {
+                "title": OS_CAPABILITY_LEDGER_READ_TASK_TITLE,
+                "allowed_tools": ["read"],
+                "preferred_tool": "read",
+                "tool_args": ["runtime/os_capability_ledger.jsonl"],
+            },
+            {
+                "title": "Read OS capability registry contract for the unresolved capability",
+                "allowed_tools": ["read"],
+                "preferred_tool": "read",
+                "tool_args": ["tools/os_capabilities/os_capabilities.json"],
+            },
+            {
+                "title": "Find OS capability controller and operator-outbox routing",
+                "allowed_tools": ["find"],
+                "preferred_tool": "find",
+                "tool_args": ["os_capability_ledger|contract_stale|operator_outbox", "."],
+            },
+        ],
+    }
+
+
+def _http_conversation_signal_from_status(status_payload: dict[str, Any]) -> dict[str, Any] | None:
+    if not _has_http_conversation_surface(status_payload):
+        return None
+    active_sessions = _as_int(status_payload.get("active_http_sessions"), 0)
+    if active_sessions >= 0:
+        return None
+    return {
+        "source": "http_continuity",
+        "signal_class": "maintenance_pressure",
+        "title": "HTTP conversation state is reporting invalid session telemetry",
+        "fingerprint": {
+            "class": "maintenance_pressure",
+            "surface": "http_continuity",
+            "error": "invalid_active_session_count",
+            "symbol": "active_http_sessions",
+        },
+        "payload": {
+            "active_http_sessions": active_sessions,
+            "last_route_summary": str(status_payload.get("last_route_summary") or ""),
+            "last_action_final_answer": str(status_payload.get("last_action_final_answer") or "")[:220],
+        },
+        "severity": "medium",
+        "actionability": "safe_now",
+        "allowed_tools": ["read", "find", "pulse"],
+        "preferred_tool": "read",
+        "next_task": "Read HTTP session state and isolate invalid conversation telemetry",
+    }
+
+
 def _validation_artifact_truth_signal_from_status(status_payload: dict[str, Any]) -> dict[str, Any] | None:
     if not _has_validation_artifact_truth_surface(status_payload):
         return None
@@ -1481,7 +2656,11 @@ def _validation_artifact_truth_signal_from_status(status_payload: dict[str, Any]
     latest_failure = dict(latest_failure) if isinstance(latest_failure, dict) else {}
     latest_failure_path = str(latest_failure.get("path") or "").strip()
     failure_kind = str(latest_failure.get("failure_kind") or "").strip()
-    if hidden_by_green and llm_failure_count > 0:
+    missing_artifact = bool(truth.get("missing_artifact")) or status_text == "validation_actions_missing"
+    if missing_artifact:
+        error_symbol = "validation_actions_missing"
+        title = "Validation action artifact directory is missing"
+    elif hidden_by_green and llm_failure_count > 0:
         error_symbol = "llm_unavailable_hidden_by_green_regression"
         title = "Validation artifacts recorded LLM failure under green regression"
     elif llm_failure_count > 0:
@@ -1499,38 +2678,61 @@ def _validation_artifact_truth_signal_from_status(status_payload: dict[str, Any]
             "preferred_tool": "read",
             "tool_args": [latest_failure_path],
         })
-    task_sequence.extend([
-        {
-            "title": "Read regression status before trusting green status",
-            "allowed_tools": ["read"],
-            "preferred_tool": "read",
-            "tool_args": ["runtime/regression_status.json"],
-        },
-        {
-            "title": "Read regression runner contract before trusting green status",
-            "allowed_tools": ["read"],
-            "preferred_tool": "read",
-            "tool_args": ["scripts/run_regression.py"],
-        },
-        {
-            "title": "Find matching validation-runtime final-answer errors",
-            "allowed_tools": ["find"],
-            "preferred_tool": "find",
-            "tool_args": ["runtime/validation/actions", "(error:"],
-        },
-    ])
+    if missing_artifact:
+        task_sequence.extend([
+            {
+                "title": "Read regression status before trusting green status",
+                "allowed_tools": ["read"],
+                "preferred_tool": "read",
+                "tool_args": ["runtime/regression_status.json"],
+            },
+            {
+                "title": "List validation runtime artifact parent directory",
+                "allowed_tools": ["ls"],
+                "preferred_tool": "ls",
+                "tool_args": ["runtime/validation"],
+            },
+            {
+                "title": "Read validation artifact truth source",
+                "allowed_tools": ["read"],
+                "preferred_tool": "read",
+                "tool_args": ["services/validation_artifact_truth.py"],
+            },
+        ])
+    else:
+        task_sequence.extend([
+            {
+                "title": "Read regression status before trusting green status",
+                "allowed_tools": ["read"],
+                "preferred_tool": "read",
+                "tool_args": ["runtime/regression_status.json"],
+            },
+            {
+                "title": "Read regression runner contract before trusting green status",
+                "allowed_tools": ["read"],
+                "preferred_tool": "read",
+                "tool_args": ["scripts/run_regression.py"],
+            },
+            {
+                "title": "Find matching validation-runtime final-answer errors",
+                "allowed_tools": ["find"],
+                "preferred_tool": "find",
+                "tool_args": ["runtime/validation/actions", "(error:"],
+            },
+        ])
 
     return {
-        "source": "validation_artifact_truth",
+        "source": "test_ecosystem",
         "signal_class": "regression_failure",
         "title": title,
         "fingerprint": {
             "class": "regression_failure",
-            "surface": "validation_artifact_truth",
+            "surface": "test_ecosystem",
             "error": error_symbol,
             "symbol": failure_kind or "validation_actions",
         },
         "payload": {
+            "test_ecosystem_signal": "validation_artifact_truth",
             "status": status_text,
             "failure_count": failure_count,
             "llm_unavailable_count": llm_failure_count,
@@ -1538,11 +2740,12 @@ def _validation_artifact_truth_signal_from_status(status_payload: dict[str, Any]
             "latest_regression_status": str(truth.get("latest_regression_status") or ""),
             "latest_regression_at": str(truth.get("latest_regression_at") or ""),
             "action_dir": str(truth.get("action_dir") or ""),
+            "missing_artifact": missing_artifact,
             "latest_failure": latest_failure,
             "failures": [dict(item) for item in list(truth.get("failures") or []) if isinstance(item, dict)][:6],
             "rationale": (
                 "Validation runtime action ledgers are part of regression evidence. Nova must not report "
-                "a clean test ecosystem while validation artifacts show runtime final-answer errors."
+                "a clean test ecosystem when validation action evidence is missing or contains runtime errors."
             ),
         },
         "severity": "high",
@@ -1551,8 +2754,16 @@ def _validation_artifact_truth_signal_from_status(status_payload: dict[str, Any]
         "preferred_tool": "read",
         "next_task": "Read validation action artifact and regression runner contract before trusting green status",
         "task_sequence": task_sequence,
-        "blocked_task": "Wait for a new regression run to confirm validation artifact truth is clean",
-        "blocked_reason": "validation_artifact_failure_requires_new_regression_evidence",
+        "blocked_task": (
+            "Wait for validation action evidence to be produced before treating regression truth as proven"
+            if missing_artifact
+            else "Wait for a new regression run to confirm validation artifact truth is clean"
+        ),
+        "blocked_reason": (
+            "validation_action_evidence_missing"
+            if missing_artifact
+            else "validation_artifact_failure_requires_new_regression_evidence"
+        ),
     }
 
 
@@ -1666,16 +2877,17 @@ def _test_profile_inventory_signal_from_status(status_payload: dict[str, Any]) -
         })
 
     return {
-        "source": "test_profile_inventory",
+        "source": "test_ecosystem",
         "signal_class": "governance_pressure",
         "title": title,
         "fingerprint": {
             "class": "governance_pressure",
-            "surface": "test_profile_inventory",
+            "surface": "test_ecosystem",
             "error": error_symbol,
             "symbol": first_path,
         },
         "payload": {
+            "test_ecosystem_signal": "test_profile_inventory",
             "profile_gap_count": gap_count,
             "profile_drift_count": drift_count,
             "profile_attention_count": attention_count,
@@ -1714,8 +2926,13 @@ def _alert_surface(alert: str) -> str:
 
 
 def _self_check_unowned_alerts(alerts: list[str], routed_signals: list[dict[str, Any]]) -> list[str]:
+    surface_aliases = {
+        "test_ecosystem": {"test_profile_inventory", "validation_artifact_truth"},
+        "work_tree": {"wiring_inventory", "work_tree_unresolved_truth"},
+    }
     covered_surfaces = {
         "validation_artifact_truth",
+        "test_profile_inventory",
         "work_tree_unresolved_truth",
     }
     covered_alerts: set[str] = set()
@@ -1730,10 +2947,12 @@ def _self_check_unowned_alerts(alerts: list[str], routed_signals: list[dict[str,
         source = str(signal.get("source") or "").strip().lower()
         if source:
             covered_surfaces.add(source)
+            covered_surfaces.update(surface_aliases.get(source, set()))
         fingerprint = signal.get("fingerprint") if isinstance(signal.get("fingerprint"), dict) else {}
         surface = str(fingerprint.get("surface") or "").strip().lower()
         if surface:
             covered_surfaces.add(surface)
+            covered_surfaces.update(surface_aliases.get(surface, set()))
 
     return [
         alert
@@ -1753,12 +2972,12 @@ def _self_check_signal_from_status(
         return None
 
     return {
-        "source": "self_check",
+        "source": "diagnostics_hygiene",
         "signal_class": "governance_pressure",
         "title": "Resolve self-check failures in control status",
         "fingerprint": {
             "class": "governance_pressure",
-            "surface": "self_check",
+            "surface": "diagnostics_hygiene",
             "error": "self_check_failures",
             "symbol": "control_status",
         },
@@ -1793,12 +3012,24 @@ def _has_dependency_surface(status_payload: dict[str, Any]) -> bool:
         for key in (
             "search_provider",
             "searxng_ok",
+        )
+    )
+
+
+def _has_model_runtime_surface(status_payload: dict[str, Any]) -> bool:
+    return any(
+        key in status_payload
+        for key in (
             "ollama_api_up",
+            "ollama_server_ok",
             "ollama_health",
             "ollama_tags_ok",
             "ollama_chat_route_ok",
             "ollama_model_available",
             "ollama_configured_model",
+            "ollama_chat_ready",
+            "ollama_version",
+            "ollama_api_contract_status",
             "port_ownership",
         )
     )
@@ -1871,6 +3102,183 @@ def _has_data_pipeline_surface(status_payload: dict[str, Any]) -> bool:
     )
 
 
+def _has_frontdoor_cli_surface(status_payload: dict[str, Any]) -> bool:
+    return any(key in status_payload for key in ("backend_commands", "backend_command_count", "frontdoor_cli_status"))
+
+
+def _has_operator_control_surface(status_payload: dict[str, Any]) -> bool:
+    return any(
+        key in status_payload
+        for key in (
+            "operator_outbox",
+            "operator_outbox_open_count",
+            "operator_outbox_latest_open_id",
+            "operator_macros",
+            "backend_commands",
+        )
+    )
+
+
+def _has_policy_gates_surface(status_payload: dict[str, Any]) -> bool:
+    return any(
+        key in status_payload
+        for key in (
+            "web_enabled",
+            "allow_domains_count",
+            "memory_enabled",
+            "patch_enabled",
+            "patch_strict_manifest",
+            "patch_behavioral_check",
+            "patch_tests_available",
+            "vision_status",
+            "voice_status",
+        )
+    )
+
+
+def _has_session_identity_auth_surface(status_payload: dict[str, Any]) -> bool:
+    return any(key in status_payload for key in ("chat_login_enabled", "chat_auth_source", "chat_users_count"))
+
+
+def _has_identity_profile_answers_surface(status_payload: dict[str, Any]) -> bool:
+    return any(
+        key in status_payload
+        for key in (
+            "memory_health",
+            "memory_health_status",
+            "memory_enabled",
+            "identity_profile_status",
+        )
+    )
+
+
+def _has_conversation_routing_surface(status_payload: dict[str, Any]) -> bool:
+    return any(
+        key in status_payload
+        for key in (
+            "last_intent",
+            "last_planner_decision",
+            "last_route_summary",
+            "last_route_trace",
+            "action_ledger_total",
+        )
+    )
+
+
+def _has_supervisor_fulfillment_surface(status_payload: dict[str, Any]) -> bool:
+    return any(
+        key in status_payload
+        for key in (
+            "last_route_trace",
+            "last_route_summary",
+            "last_planner_decision",
+            "supervisor_fulfillment_status",
+        )
+    )
+
+
+def _has_reply_quality_contracts_surface(status_payload: dict[str, Any]) -> bool:
+    return any(
+        key in status_payload
+        for key in (
+            "last_action_final_answer",
+            "last_route_grounded",
+            "last_route_trace",
+            "reply_quality_status",
+        )
+    )
+
+
+def _has_retrieval_knowledge_surface(status_payload: dict[str, Any]) -> bool:
+    return any(
+        key in status_payload
+        for key in (
+            "retrieval_knowledge_status",
+            "knowledge_pack_status",
+            "knowledge_used",
+            "knowledge_chars",
+            "knowledge_active_pack",
+            "last_provider_hit",
+        )
+    )
+
+
+def _has_weather_location_surface(status_payload: dict[str, Any]) -> bool:
+    return any(
+        key in status_payload
+        for key in (
+            "weather_source_host",
+            "last_action_tool",
+            "last_route_trace",
+            "live_tracking",
+            "web_enabled",
+        )
+    )
+
+
+def _has_installer_packaging_surface(status_payload: dict[str, Any]) -> bool:
+    return any(
+        key in status_payload
+        for key in (
+            "installer_status",
+            "installer_packaging_status",
+            "release_status",
+        )
+    )
+
+
+def _has_tts_audio_output_surface(status_payload: dict[str, Any]) -> bool:
+    return any(
+        key in status_payload
+        for key in (
+            "tts_status",
+            "tts_audio_status",
+            "voice_status",
+            "voice_runtime_requested",
+        )
+    )
+
+
+def _has_safety_envelope_surface(status_payload: dict[str, Any]) -> bool:
+    return any(
+        key in status_payload
+        for key in (
+            "safety_envelope_status",
+            "safety_enabled",
+            "safety_mode",
+            "pending_review_total",
+            "quarantine_total",
+            "pulse",
+        )
+    )
+
+
+def _has_metrics_ops_journal_surface(status_payload: dict[str, Any]) -> bool:
+    return any(
+        key in status_payload
+        for key in (
+            "requests_total",
+            "errors_total",
+            "tool_events_total",
+            "ops_journal_status",
+            "metrics_ops_journal_status",
+        )
+    )
+
+
+def _has_core_steward_reflection_surface(status_payload: dict[str, Any]) -> bool:
+    return any(
+        key in status_payload
+        for key in (
+            "pulse",
+            "pulse_summary",
+            "health_score",
+            "core_steward_status",
+            "core_health_brief_status",
+        )
+    )
+
+
 def _has_wiring_inventory_surface(status_payload: dict[str, Any]) -> bool:
     return any(
         key in status_payload
@@ -1907,14 +3315,14 @@ def _has_root_closure_inventory_surface(status_payload: dict[str, Any]) -> bool:
     )
 
 
-def _has_http_conversation_surface(status_payload: dict[str, Any]) -> bool:
+def _has_self_repair_closure_inventory_surface(status_payload: dict[str, Any]) -> bool:
     return any(
         key in status_payload
         for key in (
-            "active_http_sessions",
-            "last_planner_decision",
-            "last_route_summary",
-            "last_action_final_answer",
+            "self_repair_closure_inventory",
+            "self_repair_closure_inventory_ok",
+            "self_repair_closure_inventory_gap_count",
+            "self_repair_closure_inventory_gap_roots",
         )
     )
 
@@ -1950,6 +3358,30 @@ def _has_action_ledger_surface(status_payload: dict[str, Any]) -> bool:
             "action_ledger_total",
             "last_planner_decision",
             "last_route_summary",
+        )
+    )
+
+
+def _has_os_capability_ledger_surface(status_payload: dict[str, Any]) -> bool:
+    return any(
+        key in status_payload
+        for key in (
+            "os_capability_ledger",
+            "os_capability_ledger_ok",
+            "os_capability_ledger_readable_ok",
+            "os_capability_ledger_current_issue_count",
+            "last_os_capability_issue",
+        )
+    )
+
+
+def _has_http_conversation_surface(status_payload: dict[str, Any]) -> bool:
+    return any(
+        key in status_payload
+        for key in (
+            "active_http_sessions",
+            "last_route_summary",
+            "last_action_final_answer",
         )
     )
 
@@ -2107,12 +3539,12 @@ def _generated_queue_signal_from_status(status_payload: dict[str, Any]) -> dict[
         )[0][0]
 
     return {
-        "source": "generated_work_queue",
+        "source": "generated_queue",
         "signal_class": "maintenance_pressure",
         "title": "Generated Work Queue is blocked with no actionable session",
         "fingerprint": {
             "class": "maintenance_pressure",
-            "surface": "generated_work_queue",
+            "surface": "generated_queue",
             "error": "generated_queue_blocked",
             "symbol": top_reason,
         },
@@ -2158,12 +3590,12 @@ def _tool_events_signal_from_status(status_payload: dict[str, Any]) -> dict[str,
     tool_name = str(status_payload.get("last_tool_name") or "").strip()
     symbol = tool_name or last_error_summary.split(":", 1)[0].strip() or "tool_execution"
     return {
-        "source": "tool_events",
+        "source": "tool_evidence",
         "signal_class": "runtime_failure",
         "title": "Tool execution has a current error event",
         "fingerprint": {
             "class": "runtime_failure",
-            "surface": "tool_events",
+            "surface": "tool_evidence",
             "error": "tool_execution_error",
             "symbol": symbol,
         },
@@ -2181,10 +3613,10 @@ def _tool_events_signal_from_status(status_payload: dict[str, Any]) -> dict[str,
         "actionability": "safe_now",
         "allowed_tools": ["read", "find", "queue_status"],
         "preferred_tool": "read",
-        "next_task": "Read runtime/tool_events.jsonl recent tool execution events",
+        "next_task": TOOL_EVENTS_READ_TASK_TITLE,
         "task_sequence": [
             {
-                "title": "Read runtime/tool_events.jsonl recent tool execution events",
+                "title": TOOL_EVENTS_READ_TASK_TITLE,
                 "allowed_tools": ["read"],
                 "preferred_tool": "read",
                 "tool_args": ["runtime/tool_events.jsonl"],
@@ -2311,12 +3743,12 @@ def _release_readiness_signal_from_status(status_payload: dict[str, Any]) -> dic
         )
 
     return {
-        "source": "release_status",
+        "source": "release",
         "signal_class": "release_readiness_gap",
         "title": title,
         "fingerprint": {
             "class": "release_readiness_gap",
-            "surface": "release_status",
+            "surface": "release",
             "error": error_symbol,
             "symbol": artifact_name or artifact_path or "release_package",
         },
@@ -2383,6 +3815,70 @@ def _next_sequence_task(branch_id: str, normalized: dict[str, Any]) -> dict[str,
         if not _sequence_item_satisfied(branch_id, item):
             return item
     return {}
+
+
+def _first_sequence_task(normalized: dict[str, Any]) -> dict[str, Any]:
+    for item in list(normalized.get("task_sequence") or []):
+        if isinstance(item, dict) and str(item.get("title") or "").strip():
+            return dict(item)
+    return {}
+
+
+def _sequence_has_tool(normalized: dict[str, Any], tool_name: str) -> bool:
+    selected = str(tool_name or "").strip()
+    if not selected:
+        return False
+    return any(
+        selected in _task_tools(item)
+        for item in list(normalized.get("task_sequence") or [])
+        if isinstance(item, dict)
+    )
+
+
+def _branch_has_failed_execution_evidence(branch_id: str) -> bool:
+    try:
+        evidence_rows = work_tree.list_branch_evidence(branch_id, limit=200)
+    except Exception:
+        evidence_rows = []
+    for row in evidence_rows:
+        if not isinstance(row, dict):
+            continue
+        text = str(row.get("result_text") or "").strip().lower()
+        if not text:
+            continue
+        if (
+            text.startswith("[fail]")
+            or '"ok": false' in text
+            or "'ok': false" in text
+            or " tool failed:" in text
+            or "tool error:" in text
+            or "unknown planned tool" in text
+            or "llm service unavailable" in text
+            or "ollama chat api unavailable" in text
+            or "ollama chat failed" in text
+        ):
+            return True
+    return False
+
+
+def _branch_has_failed_evidence(branch_id: str) -> bool:
+    return _branch_has_failed_execution_evidence(branch_id)
+
+
+def _branch_has_source_root_failed_judgment(branch_id: str) -> bool:
+    try:
+        evidence_rows = work_tree.list_branch_evidence(branch_id, limit=200)
+    except Exception:
+        evidence_rows = []
+    for row in evidence_rows:
+        if not isinstance(row, dict):
+            continue
+        if str(row.get("tool_name") or "").strip() != SOURCE_ROOT_JUDGMENT_TOOL:
+            continue
+        text = str(row.get("result_text") or "").strip().lower()
+        if "evidence_failed" in text or "operator_outbox: needed (failed_evidence)" in text:
+            return True
+    return False
 
 
 def _sequence_item_expected_tools(item: dict[str, Any]) -> list[str]:
@@ -2533,38 +4029,50 @@ class WorkTreeSignalIngestionService:
             low = alert.lower()
             if "error_spike" in low:
                 signals.append({
-                    "source": "control_status",
+                    "source": "http_api_control",
                     "signal_class": "error_spike",
                     "title": "Investigate control/status error spike",
                     "fingerprint": {
                         "class": "runtime_failure",
-                        "surface": "control_status",
+                        "surface": "http_api_control",
                         "error": "error_spike",
                         "symbol": "control_status",
                     },
                     "payload": {"alert": alert},
                     "severity": "high",
                     "actionability": "safe_now",
+                    "allowed_tools": ["read", "find", "system_check", "pulse"],
+                    "preferred_tool": "read",
                     "next_task": "Inspect control status logs and isolate failing endpoint path",
+                    "task_sequence": [
+                        _read_source_task("Read control status assembly", "services/control_status.py"),
+                        _read_source_task("Read HTTP control transport", "nova_http.py"),
+                        _read_source_task("Read control telemetry service", "services/control_telemetry.py"),
+                        _read_source_task("Read control action audit ledger", "runtime/control_action_audit.jsonl"),
+                    ],
                 })
             if "ollama_api" in low:
                 signals.append({
-                    "source": "control_status",
+                    "source": "model_runtime",
                     "signal_class": "dependency_unreachable",
                     "title": "Ollama API unreachable",
                     "fingerprint": {
                         "class": "dependency_unreachable",
-                        "surface": "control_status",
+                        "surface": "model_runtime",
                         "error": "dependency_unreachable",
                         "symbol": "ollama_api",
                     },
                     "payload": {"alert": alert},
                     "severity": "medium",
-                    "actionability": "dead_end",
-                    "next_task": "Observe dependency reachability and recheck when runtime path is blocked",
+                    "actionability": "safe_now",
+                    "allowed_tools": ["os_capability", "system_check", "read", "find"],
+                    "preferred_tool": "os_capability",
+                    "next_task": "Verify Ollama model runtime contract through registered OS capability",
+                    "task_sequence": _model_runtime_task_sequence(status_payload, {}, probe_chat=True),
                 })
 
         signals.extend(_control_status_dependency_signals(status_payload))
+        signals.extend(_model_runtime_dependency_signals(status_payload))
         voice_signal = _voice_status_signal_from_status(status_payload)
         if voice_signal is not None:
             signals.append(voice_signal)
@@ -2592,6 +4100,25 @@ class WorkTreeSignalIngestionService:
         data_pipeline_signal = _data_pipeline_signal_from_status(status_payload)
         if data_pipeline_signal is not None:
             signals.append(data_pipeline_signal)
+        for signal in (
+            _frontdoor_cli_signal_from_status(status_payload),
+            _operator_control_signal_from_status(status_payload),
+            _policy_gates_signal_from_status(status_payload),
+            _session_identity_auth_signal_from_status(status_payload),
+            _identity_profile_answers_signal_from_status(status_payload),
+            _conversation_routing_signal_from_status(status_payload),
+            _supervisor_fulfillment_signal_from_status(status_payload),
+            _reply_quality_contracts_signal_from_status(status_payload),
+            _retrieval_knowledge_signal_from_status(status_payload),
+            _weather_location_signal_from_status(status_payload),
+            _installer_packaging_signal_from_status(status_payload),
+            _tts_audio_output_signal_from_status(status_payload),
+            _safety_envelope_signal_from_status(status_payload),
+            _metrics_ops_journal_signal_from_status(status_payload),
+            _core_steward_reflection_signal_from_status(status_payload),
+        ):
+            if signal is not None:
+                signals.append(signal)
         if _has_wiring_inventory_surface(status_payload):
             wiring_inventory_signal = _wiring_inventory_signal_from_status(status_payload)
             if wiring_inventory_signal is not None:
@@ -2601,9 +4128,8 @@ class WorkTreeSignalIngestionService:
             signals.append(source_root_inventory_signal)
         if _has_root_closure_inventory_surface(status_payload):
             signals.extend(_root_closure_inventory_signals_from_status(status_payload))
-        http_conversation_signal = _http_conversation_signal_from_status(status_payload)
-        if http_conversation_signal is not None:
-            signals.append(http_conversation_signal)
+        if _has_self_repair_closure_inventory_surface(status_payload):
+            signals.extend(_self_repair_closure_inventory_signals_from_status(status_payload))
         orchestrator_signal = _autonomy_orchestrator_signal_from_status(status_payload)
         if orchestrator_signal is not None:
             signals.append(orchestrator_signal)
@@ -2613,6 +4139,12 @@ class WorkTreeSignalIngestionService:
         action_ledger_signal = _action_ledger_signal_from_status(status_payload)
         if action_ledger_signal is not None:
             signals.append(action_ledger_signal)
+        os_capability_ledger_signal = _os_capability_ledger_signal_from_status(status_payload)
+        if os_capability_ledger_signal is not None:
+            signals.append(os_capability_ledger_signal)
+        http_conversation_signal = _http_conversation_signal_from_status(status_payload)
+        if http_conversation_signal is not None:
+            signals.append(http_conversation_signal)
         validation_truth_signal = _validation_artifact_truth_signal_from_status(status_payload)
         if validation_truth_signal is not None:
             signals.append(validation_truth_signal)
@@ -2638,21 +4170,44 @@ class WorkTreeSignalIngestionService:
         last_regression_stale = bool(maintenance.get("last_regression_stale", False))
         if last_regression and "pass" not in last_regression.lower() and last_regression.lower() != "ok" and not last_regression_stale:
             signals.append({
-                "source": "regression",
+                "source": "test_ecosystem",
                 "signal_class": "regression_failure",
                 "title": "Resolve regression/test failures from maintenance cycle",
                 "fingerprint": {
                     "class": "regression_failure",
-                    "surface": "maintenance_cycle",
+                    "surface": "test_ecosystem",
                     "error": "regression_failure",
                     "symbol": "daily_regression",
                 },
                 "payload": {
+                    "test_ecosystem_signal": "daily_regression",
                     "last_regression_status": last_regression,
                 },
                 "severity": "high",
                 "actionability": "safe_now",
-                "next_task": "Run focused failing regression lane and isolate blocking failures",
+                "allowed_tools": ["read", "find", "queue_status"],
+                "preferred_tool": "read",
+                "next_task": "Read regression status and runner evidence before isolating failures",
+                "task_sequence": [
+                    {
+                        "title": "Read regression status from the maintenance cycle",
+                        "allowed_tools": ["read"],
+                        "preferred_tool": "read",
+                        "tool_args": ["runtime/regression_status.json"],
+                    },
+                    {
+                        "title": "Read regression runner contract for the failing lane",
+                        "allowed_tools": ["read"],
+                        "preferred_tool": "read",
+                        "tool_args": ["scripts/run_regression.py"],
+                    },
+                    {
+                        "title": "Find tests related to the failing regression lane",
+                        "allowed_tools": ["find"],
+                        "preferred_tool": "find",
+                        "tool_args": [last_regression, "tests scripts services"],
+                    },
+                ],
             })
 
         memory_signal = _memory_health_signal_from_status(status_payload)
@@ -2666,19 +4221,36 @@ class WorkTreeSignalIngestionService:
 
     def sync_status_snapshot(self, status_payload: dict[str, Any]) -> list[dict[str, Any]]:
         results = list(self.ingest_status_snapshot(status_payload))
+        alerts = [str(item or "").strip().lower() for item in list(status_payload.get("alerts") or [])]
+        if "alerts" in status_payload and not any("error_spike" in alert for alert in alerts):
+            results.extend(
+                self.resolve_signal_branches(
+                    signal_class="runtime_failure",
+                    source="http_api_control",
+                    reason="HTTP/control status alerts no longer report a control/status error spike.",
+                )
+            )
         if _has_dependency_surface(status_payload) and not _control_status_dependency_signals(status_payload):
             results.extend(
                 self.resolve_signal_branches(
                     signal_class="dependency_unreachable",
-                    source="control_status",
-                    reason="Control status reports no active dependency outage.",
+                    source="web_search",
+                    reason="Web search provider status reports no active search dependency outage.",
+                )
+            )
+        if _has_model_runtime_surface(status_payload) and not _model_runtime_dependency_signals(status_payload):
+            results.extend(
+                self.resolve_signal_branches(
+                    signal_class="dependency_unreachable",
+                    source="model_runtime",
+                    reason="Model runtime reports Ollama route, model, and listener ownership healthy.",
                 )
             )
         if _voice_status_reports_clear(status_payload) and _voice_status_signal_from_status(status_payload) is None:
             results.extend(
                 self.resolve_signal_branches(
                     signal_class="dependency_unreachable",
-                    source="voice_status",
+                    source="voice",
                     reason="Voice runtime reports requested dependencies loaded.",
                 )
             )
@@ -2686,7 +4258,7 @@ class WorkTreeSignalIngestionService:
             results.extend(
                 self.resolve_signal_branches(
                     signal_class="dependency_unreachable",
-                    source="vision_status",
+                    source="vision",
                     reason="Vision runtime reports requested dependencies loaded.",
                 )
             )
@@ -2694,16 +4266,16 @@ class WorkTreeSignalIngestionService:
             results.extend(
                 self.resolve_signal_branches(
                     signal_class="runtime_failure",
-                    source="control_status",
-                    reason="Control status reports runtime processes and heartbeat are healthy.",
+                    source="runtime_core",
+                    reason="Runtime core reports guard, core, HTTP UI, and heartbeat healthy.",
                 )
             )
         if _has_maintenance_surface(status_payload) and not _control_status_maintenance_signals(status_payload):
             results.extend(
                 self.resolve_signal_branches(
                     signal_class="maintenance_pressure",
-                    source="control_status",
-                    reason="Control status reports maintenance scheduler active.",
+                    source="scheduler_registry",
+                    reason="Scheduler registry reports maintenance scheduler active.",
                 )
             )
         if _has_autonomy_maintenance_error_surface(status_payload) and _autonomy_maintenance_error_signal_from_status(status_payload) is None:
@@ -2718,7 +4290,7 @@ class WorkTreeSignalIngestionService:
             results.extend(
                 self.resolve_signal_branches(
                     signal_class="runtime_failure",
-                    source="runtime_failures",
+                    source="runtime_control",
                     reason="Runtime failure-reason telemetry reports all services healthy.",
                 )
             )
@@ -2726,7 +4298,7 @@ class WorkTreeSignalIngestionService:
             results.extend(
                 self.resolve_signal_branches(
                     signal_class="runtime_failure",
-                    source="runtime_restart_analytics",
+                    source="runtime_control",
                     reason="Runtime restart analytics no longer reports elevated restart pressure.",
                 )
             )
@@ -2734,7 +4306,7 @@ class WorkTreeSignalIngestionService:
             results.extend(
                 self.resolve_signal_branches(
                     signal_class="governance_pressure",
-                    source="runtime_restart_analytics",
+                    source="runtime_control",
                     reason="Runtime restart analytics now attributes recent restart origins.",
                 )
             )
@@ -2742,7 +4314,7 @@ class WorkTreeSignalIngestionService:
             results.extend(
                 self.resolve_signal_branches(
                     signal_class="maintenance_pressure",
-                    source="storage_watch",
+                    source="storage_release_pressure",
                     reason="Storage watch reports normal snapshot and archive pressure.",
                 )
             )
@@ -2750,7 +4322,7 @@ class WorkTreeSignalIngestionService:
             results.extend(
                 self.resolve_signal_branches(
                     signal_class="governance_pressure",
-                    source="patch_status",
+                    source="patch_pipeline",
                     reason="Patch pipeline governance reports ready status.",
                 )
             )
@@ -2762,11 +4334,151 @@ class WorkTreeSignalIngestionService:
                     reason="Data pipeline registry and active lanes report no current wiring blocker.",
                 )
             )
+        if _has_frontdoor_cli_surface(status_payload) and _frontdoor_cli_signal_from_status(status_payload) is None:
+            results.extend(
+                self.resolve_signal_branches(
+                    signal_class="maintenance_pressure",
+                    source="frontdoor_cli",
+                    reason="Frontdoor CLI command surface reports readable command evidence.",
+                )
+            )
+        operator_control_signal = _operator_control_signal_from_status(status_payload) if _has_operator_control_surface(status_payload) else None
+        if _has_operator_control_surface(status_payload) and operator_control_signal is None:
+            results.extend(
+                self.resolve_signal_branches(
+                    signal_class="operator_requested",
+                    source="operator_control",
+                    reason="Operator control outbox no longer has open operator work.",
+                )
+            )
+            results.extend(
+                self.resolve_signal_branches(
+                    signal_class="maintenance_pressure",
+                    source="operator_control",
+                    reason="Operator control outbox reports readable state.",
+                )
+            )
+        elif operator_control_signal is not None:
+            normalized_operator_signal = self._normalize_signal(dict(operator_control_signal))
+            active_key = str(normalized_operator_signal.get("source_key") or "").strip()
+            if active_key:
+                results.extend(
+                    self.resolve_inactive_signal_branches(
+                        signal_class=str(operator_control_signal.get("signal_class") or ""),
+                        source="operator_control",
+                        active_source_keys={active_key},
+                        reason="Operator control pressure moved to the canonical operator outbox source key.",
+                    )
+                )
+        if _has_policy_gates_surface(status_payload) and _policy_gates_signal_from_status(status_payload) is None:
+            results.extend(
+                self.resolve_signal_branches(
+                    signal_class="governance_pressure",
+                    source="policy_gates",
+                    reason="Policy gates report no current action or observation blocker.",
+                )
+            )
+        if _has_session_identity_auth_surface(status_payload) and _session_identity_auth_signal_from_status(status_payload) is None:
+            results.extend(
+                self.resolve_signal_branches(
+                    signal_class="governance_pressure",
+                    source="session_identity_auth",
+                    reason="Session identity/auth status reports accountable chat identity state.",
+                )
+            )
+        if _has_identity_profile_answers_surface(status_payload) and _identity_profile_answers_signal_from_status(status_payload) is None:
+            results.extend(
+                self.resolve_signal_branches(
+                    signal_class="governance_pressure",
+                    source="identity_profile_answers",
+                    reason="Identity profile answer evidence reports required memory/profile parts present.",
+                )
+            )
+        if _has_conversation_routing_surface(status_payload) and _conversation_routing_signal_from_status(status_payload) is None:
+            results.extend(
+                self.resolve_signal_branches(
+                    signal_class="governance_pressure",
+                    source="conversation_routing",
+                    reason="Conversation routing evidence reports a complete planner decision and clean route trace.",
+                )
+            )
+        if _has_supervisor_fulfillment_surface(status_payload) and _supervisor_fulfillment_signal_from_status(status_payload) is None:
+            results.extend(
+                self.resolve_signal_branches(
+                    signal_class="governance_pressure",
+                    source="supervisor_fulfillment",
+                    reason="Supervisor/fulfillment route trace reports no active handoff gap.",
+                )
+            )
+        if _has_reply_quality_contracts_surface(status_payload) and _reply_quality_contracts_signal_from_status(status_payload) is None:
+            results.extend(
+                self.resolve_signal_branches(
+                    signal_class="governance_pressure",
+                    source="reply_quality_contracts",
+                    reason="Reply finalization reports a final answer and clean reply trace.",
+                )
+            )
+        if _has_retrieval_knowledge_surface(status_payload) and _retrieval_knowledge_signal_from_status(status_payload) is None:
+            results.extend(
+                self.resolve_signal_branches(
+                    signal_class="maintenance_pressure",
+                    source="retrieval_knowledge",
+                    reason="Retrieval/knowledge status reports usable context evidence.",
+                )
+            )
+        if _has_weather_location_surface(status_payload) and _weather_location_signal_from_status(status_payload) is None:
+            results.extend(
+                self.resolve_signal_branches(
+                    signal_class="dependency_unreachable",
+                    source="weather_location",
+                    reason="Weather/location status reports no active source or route gap.",
+                )
+            )
+        if _has_installer_packaging_surface(status_payload) and _installer_packaging_signal_from_status(status_payload) is None:
+            results.extend(
+                self.resolve_signal_branches(
+                    signal_class="release_readiness_gap",
+                    source="installer_packaging",
+                    reason="Installer packaging status reports no active release packaging gap.",
+                )
+            )
+        if _has_tts_audio_output_surface(status_payload) and _tts_audio_output_signal_from_status(status_payload) is None:
+            results.extend(
+                self.resolve_signal_branches(
+                    signal_class="dependency_unreachable",
+                    source="tts_audio_output",
+                    reason="TTS audio output status reports no active delivery dependency gap.",
+                )
+            )
+        if _has_safety_envelope_surface(status_payload) and _safety_envelope_signal_from_status(status_payload) is None:
+            results.extend(
+                self.resolve_signal_branches(
+                    signal_class="governance_pressure",
+                    source="safety_envelope",
+                    reason="Safety envelope reports no pending review or quarantine pressure.",
+                )
+            )
+        if _has_metrics_ops_journal_surface(status_payload) and _metrics_ops_journal_signal_from_status(status_payload) is None:
+            results.extend(
+                self.resolve_signal_branches(
+                    signal_class="maintenance_pressure",
+                    source="metrics_ops_journal",
+                    reason="Metrics and ops journal telemetry reports coherent readable state.",
+                )
+            )
+        if _has_core_steward_reflection_surface(status_payload) and _core_steward_reflection_signal_from_status(status_payload) is None:
+            results.extend(
+                self.resolve_signal_branches(
+                    signal_class="governance_pressure",
+                    source="core_steward_reflection",
+                    reason="Core steward reflection reports no current repair or watch pressure.",
+                )
+            )
         if _has_wiring_inventory_surface(status_payload) and _wiring_inventory_signal_from_status(status_payload) is None:
             results.extend(
                 self.resolve_signal_branches(
                     signal_class="governance_pressure",
-                    source="wiring_inventory",
+                    source="work_tree",
                     reason="Subsystem wiring inventory reports full source/status/signal/tool/action coverage.",
                 )
             )
@@ -2802,14 +4514,33 @@ class WorkTreeSignalIngestionService:
                         reason="Root closure inventory reports every declared root has status, signal, tool, and action wiring.",
                     )
                 )
-        if _has_http_conversation_surface(status_payload) and _http_conversation_signal_from_status(status_payload) is None:
-            results.extend(
-                self.resolve_signal_branches(
-                    signal_class="governance_pressure",
-                    source="http_conversation",
-                    reason="HTTP conversation continuity reports no active grounded self-report handoff gap.",
+        if _has_self_repair_closure_inventory_surface(status_payload):
+            self_repair_closure_signals = _self_repair_closure_inventory_signals_from_status(status_payload)
+            if self_repair_closure_signals:
+                active_keys = {
+                    self.source_key_for_signal(signal)
+                    for signal in self_repair_closure_signals
+                    if self.source_key_for_signal(signal)
+                }
+                results.extend(
+                    self.resolve_inactive_signal_branches(
+                        signal_class="governance_pressure",
+                        source="self_repair_closure_inventory",
+                        active_source_keys=active_keys,
+                        reason="Self-repair closure inventory moved to a newer active source signal.",
+                    )
                 )
-            )
+            else:
+                results.extend(
+                    self.resolve_signal_branches(
+                        signal_class="governance_pressure",
+                        source="self_repair_closure_inventory",
+                        reason=(
+                            "Self-repair closure inventory reports every declared root has signal, action, "
+                            "execution, evidence, judgment, closure, and operator outbox wiring."
+                        ),
+                    )
+                )
         if _has_autonomy_orchestrator_surface(status_payload) and _autonomy_orchestrator_signal_from_status(status_payload) is None:
             results.extend(
                 self.resolve_signal_branches(
@@ -2822,7 +4553,7 @@ class WorkTreeSignalIngestionService:
             results.extend(
                 self.resolve_signal_branches(
                     signal_class="maintenance_pressure",
-                    source="subconscious_status",
+                    source="subconscious",
                     reason="Subconscious status reports a readable latest report.",
                 )
             )
@@ -2834,11 +4565,28 @@ class WorkTreeSignalIngestionService:
                     reason="Action ledger summary reports readable ledger state.",
                 )
             )
+        if _has_os_capability_ledger_surface(status_payload) and _os_capability_ledger_signal_from_status(status_payload) is None:
+            results.extend(
+                self.resolve_signal_branches(
+                    signal_class="maintenance_pressure",
+                    source="tool_registry_policy",
+                    reason="OS capability ledger reports no unresolved capability execution evidence.",
+                )
+            )
+        if _has_http_conversation_surface(status_payload) and _http_conversation_signal_from_status(status_payload) is None:
+            results.extend(
+                self.resolve_signal_branches(
+                    signal_class="maintenance_pressure",
+                    source="http_continuity",
+                    reason="HTTP conversation status reports valid session telemetry.",
+                )
+            )
         if _has_validation_artifact_truth_surface(status_payload) and _validation_artifact_truth_signal_from_status(status_payload) is None:
             results.extend(
                 self.resolve_signal_branches(
                     signal_class="regression_failure",
-                    source="validation_artifact_truth",
+                    source="test_ecosystem",
+                    payload_match={"test_ecosystem_signal": "validation_artifact_truth"},
                     reason="Validation action artifacts no longer disagree with the latest regression window.",
                 )
             )
@@ -2846,7 +4594,8 @@ class WorkTreeSignalIngestionService:
             results.extend(
                 self.resolve_signal_branches(
                     signal_class="governance_pressure",
-                    source="test_profile_inventory",
+                    source="test_ecosystem",
+                    payload_match={"test_ecosystem_signal": "test_profile_inventory"},
                     reason="Validation profile inventory no longer reports source/test contract gaps.",
                 )
             )
@@ -2857,15 +4606,22 @@ class WorkTreeSignalIngestionService:
             results.extend(
                 self.resolve_signal_branches(
                     signal_class="governance_pressure",
-                    source="self_check",
+                    source="diagnostics_hygiene",
                     reason="Self-check alerts are either clear or owned by first-class signal branches.",
+                )
+            )
+            results.extend(
+                self.resolve_signal_branches(
+                    signal_class="governance_pressure",
+                    source="self_check",
+                    reason="Legacy generic self-check branch is owned by a first-class signal branch.",
                 )
             )
         if _has_generated_queue_surface(status_payload) and _generated_queue_signal_from_status(status_payload) is None:
             results.extend(
                 self.resolve_signal_branches(
                     signal_class="maintenance_pressure",
-                    source="generated_work_queue",
+                    source="generated_queue",
                     reason="Generated Work Queue no longer reports a blocked no-actionable state.",
                 )
             )
@@ -2873,7 +4629,7 @@ class WorkTreeSignalIngestionService:
             results.extend(
                 self.resolve_signal_branches(
                     signal_class="runtime_failure",
-                    source="tool_events",
+                    source="tool_evidence",
                     reason="Tool telemetry no longer reports a current unsuperseded tool error.",
                 )
             )
@@ -2896,7 +4652,8 @@ class WorkTreeSignalIngestionService:
             results.extend(
                 self.resolve_signal_branches(
                     signal_class="regression_failure",
-                    source="regression",
+                    source="test_ecosystem",
+                    payload_match={"test_ecosystem_signal": "daily_regression"},
                     reason=reason,
                 )
             )
@@ -2906,7 +4663,7 @@ class WorkTreeSignalIngestionService:
                 results.extend(
                     self.resolve_signal_branches(
                         signal_class="release_readiness_gap",
-                        source="release_status",
+                        source="release",
                         reason="Release status no longer reports an active readiness gap.",
                     )
                 )
@@ -2915,7 +4672,7 @@ class WorkTreeSignalIngestionService:
                 results.extend(
                     self.resolve_inactive_signal_branches(
                         signal_class="release_readiness_gap",
-                        source="release_status",
+                        source="release",
                         active_source_keys={active_key} if active_key else set(),
                         reason="Release readiness moved to a newer active source signal.",
                     )
@@ -2924,7 +4681,7 @@ class WorkTreeSignalIngestionService:
             results.extend(
                 self.resolve_signal_branches(
                     signal_class="governance_pressure",
-                    source="memory_health",
+                    source="memory_identity",
                     reason="Memory health no longer reports an active persistence bootstrap gap.",
                 )
             )
@@ -2936,6 +4693,7 @@ class WorkTreeSignalIngestionService:
         signal_class: str,
         source: str = "",
         reason: str = "",
+        payload_match: dict[str, Any] | None = None,
     ) -> list[dict[str, Any]]:
         tree = self._find_signal_tree()
         if tree is None:
@@ -2943,6 +4701,11 @@ class WorkTreeSignalIngestionService:
 
         target_work_class = _SIGNAL_TO_WORK_CLASS.get(str(signal_class or "").strip().lower(), "")
         normalized_source = str(source or "").strip().lower()
+        expected_payload = {
+            str(key): str(value or "").strip()
+            for key, value in dict(payload_match or {}).items()
+            if str(key or "").strip()
+        }
         note = str(reason or "").strip() or "Signal no longer active."
         results: list[dict[str, Any]] = []
         now = datetime.now()
@@ -2954,6 +4717,10 @@ class WorkTreeSignalIngestionService:
                 continue
             if normalized_source and str(getattr(branch, "source_type", "") or "").strip().lower() != normalized_source:
                 continue
+            if expected_payload:
+                branch_payload = dict(getattr(branch, "source_payload", {}) or {})
+                if any(str(branch_payload.get(key) or "").strip() != value for key, value in expected_payload.items()):
+                    continue
             resolution = str(getattr(branch, "resolution_state", "") or "").strip().lower()
             if resolution in {"resolved", "retired"} and branch.status == BranchStatus.COMPLETE:
                 continue
@@ -3168,17 +4935,7 @@ class WorkTreeSignalIngestionService:
                 for item in list(policy.get("allowed_tools") or [])
                 if str(item or "").strip()
             ]
-            needed_tools = [
-                "pipeline",
-                "core_health",
-                "memory_bootstrap_judgment",
-                "memory_identity_bootstrap",
-                "subconscious_review_judgment",
-                "release_validation_run",
-                "release_promotion_judgment",
-                "release_record_validation_outcome",
-                "release_rebuild_verify",
-            ]
+            needed_tools = work_tree.default_tree_allowed_tools()
             missing_tools = [tool for tool in needed_tools if tool not in allowed]
             if missing_tools:
                 work_tree.set_tree_execution_policy(
@@ -3277,7 +5034,7 @@ class WorkTreeSignalIngestionService:
         next_task = str(normalized.get("next_task") or "").strip()
         blocked_task = str(normalized.get("blocked_task") or "").strip()
         sequence_configured = bool(list(normalized.get("task_sequence") or []))
-        if (next_task or sequence_configured) and actionability != "dead_end":
+        if (next_task or sequence_configured or blocked_task) and actionability != "dead_end":
             task_text = next_task
             task_allowed_tools = list(explicit_tools)
             task_preferred_tool = preferred_tool
@@ -3303,9 +5060,76 @@ class WorkTreeSignalIngestionService:
                 str(getattr(task.status, "value", task.status) or "").strip().lower() == "blocked"
                 for task in open_tasks
             )
+            failed_source_root_evidence = (
+                sequence_configured
+                and _sequence_has_tool(normalized, SOURCE_ROOT_JUDGMENT_TOOL)
+                and _branch_has_failed_evidence(branch.branch_id)
+            )
+            source_root_failed_judged = failed_source_root_evidence and _branch_has_source_root_failed_judgment(branch.branch_id)
+            if source_root_failed_judged and not blocked_open_tasks:
+                for task in open_tasks:
+                    work_tree.mark_task_dropped(
+                        task.task_id,
+                        reason="source_root_failed_evidence_judged",
+                    )
+                blocked = work_tree.add_task_to_branch(
+                    branch.branch_id,
+                    "Hold source-root branch for operator/tool failure judgment",
+                    meta={"blocked_reason": "source_root_failed_evidence_operator_judgment_required"},
+                )
+                work_tree.mark_task_blocked(
+                    blocked.task_id,
+                    "source_root_failed_evidence_operator_judgment_required",
+                )
+                open_tasks = [blocked]
+                blocked_open_tasks = True
+                sequence_task = {}
+                task_text = ""
+                task_allowed_tools = []
+                task_preferred_tool = ""
+            elif source_root_failed_judged and blocked_open_tasks:
+                sequence_task = {}
+                task_text = ""
+                task_allowed_tools = []
+                task_preferred_tool = ""
+            if failed_source_root_evidence and not any(
+                str(getattr(task, "title", "") or "").strip() == SOURCE_ROOT_JUDGMENT_TASK_TITLE
+                for task in open_tasks
+            ) and not source_root_failed_judged:
+                for task in open_tasks:
+                    work_tree.mark_task_dropped(
+                        task.task_id,
+                        reason="failed_evidence_to_source_root_judgment",
+                    )
+                open_tasks = []
+                blocked_open_tasks = False
+                sequence_task = _source_root_judgment_task()
+                task_text = str(sequence_task.get("title") or "").strip()
+                task_allowed_tools = [
+                    str(tool or "").strip()
+                    for tool in list(sequence_task.get("allowed_tools") or [])
+                    if str(tool or "").strip()
+                ]
+                task_preferred_tool = str(sequence_task.get("preferred_tool") or "").strip()
+            if (
+                not open_tasks
+                and sequence_configured
+                and not sequence_task
+                and str(branch.resolution_state or "").strip().lower() == "open"
+                and _sequence_has_tool(normalized, SOURCE_ROOT_JUDGMENT_TOOL)
+            ):
+                sequence_task = _first_sequence_task(normalized)
+                if sequence_task:
+                    task_text = str(sequence_task.get("title") or "").strip()
+                    task_allowed_tools = [
+                        str(tool or "").strip()
+                        for tool in list(sequence_task.get("allowed_tools") or [])
+                        if str(tool or "").strip()
+                    ] or task_allowed_tools
+                    task_preferred_tool = str(sequence_task.get("preferred_tool") or "").strip() or task_preferred_tool
             source_name = str(normalized.get("source") or "").strip().lower()
             realign_blocked_sequence = source_name == "subconscious" or (
-                source_name == "memory_health"
+                source_name == "memory_identity"
                 and str((normalized.get("payload") or {}).get("memory_bootstrap_origin", {}).get("status") or "").strip().lower() == "ready"
             )
             if open_tasks and sequence_configured and sequence_task and task_text and (not blocked_open_tasks or realign_blocked_sequence):
@@ -3351,7 +5175,7 @@ class WorkTreeSignalIngestionService:
                     task_meta["tool_args"] = [str(arg) for arg in list(sequence_task.get("tool_args") or [])]
                 work_tree.add_task_to_branch(branch.branch_id, task_text, meta=task_meta)
             elif not open_tasks and blocked_task:
-                blocked_reason = str(normalized.get("blocked_reason") or "").strip() or "memory_bootstrap_origin_contract_required"
+                blocked_reason = str(normalized.get("blocked_reason") or "").strip() or MEMORY_BOOTSTRAP_ORIGIN_CONTRACT_REQUIRED
                 task = work_tree.add_task_to_branch(
                     branch.branch_id,
                     blocked_task,
@@ -3360,7 +5184,7 @@ class WorkTreeSignalIngestionService:
                 work_tree.mark_task_blocked(task.task_id, blocked_reason)
                 blocked_open_tasks = True
             elif blocked_open_tasks and blocked_task:
-                blocked_reason = str(normalized.get("blocked_reason") or "").strip() or "memory_bootstrap_origin_contract_required"
+                blocked_reason = str(normalized.get("blocked_reason") or "").strip() or MEMORY_BOOTSTRAP_ORIGIN_CONTRACT_REQUIRED
                 for task in open_tasks:
                     if str(getattr(task.status, "value", task.status) or "").strip().lower() != "blocked":
                         continue
@@ -3414,7 +5238,7 @@ class WorkTreeSignalIngestionService:
                 payload=payload,
             )
 
-        return {
+        normalized = {
             "source": source,
             "signal_class": incoming_class,
             "work_class": work_class,
@@ -3438,6 +5262,7 @@ class WorkTreeSignalIngestionService:
             "blocked_task": str(signal.get("blocked_task") or "").strip(),
             "blocked_reason": str(signal.get("blocked_reason") or "").strip(),
         }
+        return _append_source_root_judgment_task(source, normalized)
 
 
 def _signal_fingerprint_key(*, signal_class: str, source: str, title: str, fingerprint: Any, payload: dict[str, Any]) -> str:

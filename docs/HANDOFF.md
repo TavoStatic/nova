@@ -1,9 +1,9 @@
 # NYO System Handoff
 
 Date: 2026-05-18
-Last verified: 2026-05-18
+Last verified: 2026-05-20
 
-Verification note: handoff commands remain source-first. The `2026.05.18.23` release candidate passed same-machine extracted-package validation and reports `ready-with-notes`; independent fresh-machine or VM validation is still pending.
+Verification note: handoff commands remain source-first. The current ledger-owned release candidate passes same-machine extracted-package validation and reports `ready-with-notes`; independent fresh-machine or VM validation is still pending.
 
 ## Purpose
 

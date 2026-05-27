@@ -85,6 +85,7 @@ def _spec_envelope(
     work_tree=None,
     triage=None,
     last_action=None,
+    autonomy=None,
 ):
     return {
         "cycle_id": "cycle-test-001",
@@ -124,6 +125,16 @@ def _spec_envelope(
             "stop_flag": False,
             "source_freshness_sec": 0,
             **(runtime or {}),
+        },
+        "autonomy_maintenance": {
+            "worker_status": "running",
+            "worker_active": True,
+            "worker_stale_identity": False,
+            "scheduler_active": True,
+            "scheduler_mode": "worker_loop",
+            "scheduler_status": "running",
+            "source_freshness_sec": 0,
+            **(autonomy or {}),
         },
         "policy_snapshot": {
             "autonomy_enabled": True,
@@ -286,6 +297,50 @@ class TestAutonomyOrchestratorService(unittest.TestCase):
         self.assertEqual(packet["recommended_action"]["action_type"], "active_work_tree_run_next")
         self.assertEqual(packet["recommended_action"]["execution_group"], "active_work_tree")
         self.assertEqual(packet["recommended_action"]["target_id"], "branch-active")
+
+    def test_evaluate_next_action_recommends_maintenance_worker_start_from_worker_evidence(self):
+        service = AutonomyOrchestratorService()
+
+        packet = service.evaluate_next_action(
+            _spec_envelope(
+                autonomy={
+                    "worker_status": "stopped",
+                    "worker_active": False,
+                    "worker_stale_identity": False,
+                    "scheduler_active": False,
+                    "scheduler_mode": "inactive",
+                    "scheduler_status": "inactive",
+                }
+            )
+        )
+
+        self.assertEqual(packet["decision_type"], SPEC_DECISION_RECOMMEND_ACTION)
+        self.assertEqual(packet["recommended_action"]["action_type"], "autonomy_maintenance_start")
+        self.assertEqual(packet["recommended_action"]["execution_group"], "runtime_control")
+        self.assertEqual(packet["evidence"]["autonomy_maintenance"]["worker_status"], "stopped")
+
+    def test_evaluate_next_action_does_not_start_worker_when_guard_scheduler_is_active(self):
+        service = AutonomyOrchestratorService()
+
+        packet = service.evaluate_next_action(
+            _spec_envelope(
+                autonomy={
+                    "worker_status": "stopped",
+                    "worker_active": False,
+                    "worker_stale_identity": False,
+                    "scheduler_active": True,
+                    "scheduler_mode": "guard_tick",
+                    "scheduler_status": "guard_scheduled",
+                }
+            )
+        )
+
+        self.assertEqual(packet["decision_type"], SPEC_DECISION_DEFER)
+        action_types = [
+            (item.get("action") or {}).get("action_type")
+            for item in packet["candidates_considered"]
+        ]
+        self.assertNotIn("autonomy_maintenance_start", action_types)
 
     def test_evaluate_next_action_recommends_concrete_active_work_tree_in_watch_posture(self):
         service = AutonomyOrchestratorService()

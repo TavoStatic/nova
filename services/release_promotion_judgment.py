@@ -4,6 +4,8 @@ from pathlib import Path
 import re
 from typing import Any
 
+from services.release_validation_contracts import NOVA_WEBUI_START_8080_LABEL
+
 
 VALID_VALIDATION_RESULTS = {"pass", "pass-with-notes", "fail"}
 
@@ -30,7 +32,7 @@ _BASE_REQUIRED_FIELDS = (
     "nova smoke-base --fix",
     "nova test",
     "nova run",
-    "nova webui-start --host 127.0.0.1 --port 8080",
+    NOVA_WEBUI_START_8080_LABEL,
     "/control load result",
     "result",
 )

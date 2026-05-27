@@ -32,8 +32,7 @@ from typing import Any, Optional, Tuple
 from conversation_manager import ConversationSession
 from subconscious_config import SUBCONSCIOUS_CHARTER
 from supervisor import Supervisor
-from capabilities import explain_missing, describe_capabilities, describe_runtime_identity
-from task_engine import analyze_request
+from capabilities import explain_missing, load_capabilities
 from action_planner import decide_actions
 from env_inspector import inspect_environment, format_report
 import requests
@@ -56,33 +55,13 @@ from services.nova_route_probing import evaluate_deterministic_route_viability
 from services.nova_service_builders import build_fulfillment_flow_service
 from services.nova_service_builders import build_identity_memory_service
 from services.nova_service_builders import build_policy_manager
-from services.nova_turn_direction import analyze_routing_text
-from services.nova_turn_direction import determine_turn_direction
-from services.nova_turn_direction import is_explicit_command_like
 from services.nova_memory_learning import mem_get_recent_learned as service_mem_get_recent_learned
+from services.nova_memory_learning import identity_context_for_prompt as service_identity_context_for_prompt
+from services.nova_operational_identity import operational_identity_context_for_prompt as service_operational_identity_context_for_prompt
 from services.nova_memory_learning import load_json_dict_with_tmp_fallback as service_load_json_dict_with_tmp_fallback
 from services.nova_memory_learning import mem_stats_payload as service_mem_stats_payload
 from services.memory_health import build_memory_health_payload as service_build_memory_health_payload
-from services.nova_prompt_replies import attach_learning_invitation as service_attach_learning_invitation
-from services.nova_prompt_replies import last_question_recall_reply as service_last_question_recall_reply
-from services.nova_prompt_replies import open_probe_reply as service_open_probe_reply
-from services.nova_prompt_replies import session_fact_recall_reply as service_session_fact_recall_reply
-from services.nova_prompt_replies import truthful_limit_outcome as service_truthful_limit_outcome
-from services.nova_prompt_replies import truthful_limit_reply as service_truthful_limit_reply
 from services.nova_pipeline_tools import handle_pipeline_command as service_handle_pipeline_command
-from services.nova_profile_followups import developer_identity_followup_reply as service_developer_identity_followup_reply
-from services.nova_profile_followups import developer_profile_reply as service_developer_profile_reply
-from services.nova_profile_followups import infer_profile_conversation_state as service_infer_profile_conversation_state
-from services.nova_profile_followups import identity_profile_source_boundary_reply as service_identity_profile_source_boundary_reply
-from services.nova_query_classifiers import is_action_history_query as service_is_action_history_query
-from services.nova_query_classifiers import is_assistant_name_query as service_is_assistant_name_query
-from services.nova_query_classifiers import is_capability_query as service_is_capability_query
-from services.nova_query_classifiers import is_developer_full_name_query as service_is_developer_full_name_query
-from services.nova_query_classifiers import is_factual_identity_or_policy_query as service_is_factual_identity_or_policy_query
-from services.nova_query_classifiers import is_identity_or_developer_query as service_is_identity_or_developer_query
-from services.nova_query_classifiers import is_name_origin_question as service_is_name_origin_question
-from services.nova_query_classifiers import is_policy_domain_query as service_is_policy_domain_query
-from services.nova_query_classifiers import is_self_identity_web_challenge as service_is_self_identity_web_challenge
 from services.nova_pulse import render_nova_pulse as service_render_nova_pulse
 from services.nova_pulse import tool_nova_pulse as service_tool_nova_pulse
 from services.nova_pulse import write_pulse_snapshot as service_write_pulse_snapshot
@@ -90,7 +69,6 @@ from services.nova_self_status import build_self_status_payload as service_build
 from services.nova_self_status import build_repo_change_snapshot as service_build_repo_change_snapshot
 from services.nova_self_status import read_recent_ops_events as service_read_recent_ops_events
 from services.nova_self_status import render_self_status as service_render_self_status
-from services.nova_grounded_self_report import GROUNDED_SELF_REPORT_SERVICE
 from services.control_work_trees import CONTROL_WORK_TREES_SERVICE
 from services.release_status import RELEASE_STATUS_SERVICE
 from services.core_health_brief import build_core_health_brief as service_build_core_health_brief
@@ -106,7 +84,6 @@ from services.nova_tool_dispatch import execute_planned_action_from_runtime as s
 from services.nova_action_ledger_helpers import action_ledger_add_step as service_action_ledger_add_step
 from services.nova_action_ledger_helpers import action_ledger_route_summary as service_action_ledger_route_summary
 from services.nova_action_ledger_helpers import count_routing_overrides_recently as service_count_routing_overrides_recently
-from services.nova_action_ledger_helpers import count_unsupported_claim_blocks_recently as service_count_unsupported_claim_blocks_recently
 from services.nova_action_ledger_helpers import detect_repeated_tool_intent_without_execution as service_detect_repeated_tool_intent_without_execution
 from services.nova_action_ledger_helpers import recent_action_ledger_records as service_recent_action_ledger_records
 from services.nova_action_ledger_helpers import record_completed_tool_execution as service_record_completed_tool_execution
@@ -115,78 +92,35 @@ from services.nova_action_ledger_helpers import record_used_routing_override as 
 from services.nova_action_ledger_helpers import routing_stable_recently as service_routing_stable_recently
 from services.nova_action_ledger_helpers import sample_intents_last as service_sample_intents_last
 from services.nova_action_ledger_helpers import top_repeated_correction_class as service_top_repeated_correction_class
-from services.nova_action_ledger_helpers import unsupported_claims_blocked_recently as service_unsupported_claims_blocked_recently
-from services.nova_identity_history import classify_name_origin_outcome as service_classify_name_origin_outcome
-from services.nova_identity_history import execute_identity_history_outcome as service_execute_identity_history_outcome
 from services.nova_knowledge_packs import build_local_topic_digest_answer as service_build_local_topic_digest_answer
 from services.nova_location_weather import device_location_status_payload as service_device_location_status_payload
 from services.nova_location_weather import clear_runtime_device_location as service_clear_runtime_device_location
 from services.nova_location_weather import coords_for_location_hint as service_coords_for_location_hint
 from services.nova_location_weather import coords_from_saved_location as service_coords_from_saved_location
-from services.nova_location_weather import extract_location_fact as service_extract_location_fact
-from services.nova_location_weather import extract_weather_source_host as service_extract_weather_source_host
+from services.nova_location_weather import format_weather_output as service_format_weather_output
+from services.nova_location_weather import get_weather_for_location as service_get_weather_for_location
 from services.nova_location_weather import get_saved_location_text as service_get_saved_location_text
-from services.nova_location_weather import is_location_name_query as service_is_location_name_query
-from services.nova_location_weather import is_location_recall_query as service_is_location_recall_query
-from services.nova_location_weather import is_saved_location_weather_query as service_is_saved_location_weather_query
-from services.nova_location_weather import is_weather_meta_followup as service_is_weather_meta_followup
-from services.nova_location_weather import is_weather_status_followup as service_is_weather_status_followup
-from services.nova_location_weather import live_device_location_summary as service_live_device_location_summary
-from services.nova_location_weather import location_name_reply as service_location_name_reply
-from services.nova_location_weather import location_recall_reply as service_location_recall_reply
-from services.nova_location_weather import make_weather_result_state as service_make_weather_result_state
-from services.nova_location_weather import mentions_location_phrase as service_mentions_location_phrase
+from services.nova_location_weather import need_confirmed_location_message as service_need_confirmed_location_message
 from services.nova_location_weather import parse_lat_lon as service_parse_lat_lon
 from services.nova_location_weather import resolve_current_device_coords as service_resolve_current_device_coords
 from services.nova_location_weather import resolve_windows_device_coords as service_resolve_windows_device_coords
 from services.nova_location_weather import runtime_device_backend_provider as service_runtime_device_backend_provider
 from services.nova_location_weather import runtime_device_location_payload as service_runtime_device_location_payload
-from services.nova_location_weather import set_location_text as service_set_location_text
+from services.nova_location_weather import set_location_coords as service_set_location_coords
 from services.nova_location_weather import set_runtime_device_location as service_set_runtime_device_location
-from services.nova_location_weather import store_declarative_fact_outcome as service_store_declarative_fact_outcome
-from services.nova_location_weather import store_declarative_fact_reply as service_store_declarative_fact_reply
-from services.nova_location_weather import store_location_fact_reply as service_store_location_fact_reply
 from services.nova_location_weather import tool_weather as service_tool_weather
-from services.nova_location_weather import weather_for_saved_location as service_weather_for_saved_location
-from services.nova_location_weather import weather_location_label as service_weather_location_label
-from services.nova_location_weather import weather_meta_reply as service_weather_meta_reply
-from services.nova_location_weather import weather_status_reply as service_weather_status_reply
+from services.nova_location_weather import weather_response_style as service_weather_response_style
+from services.nova_location_weather import weather_source_host as service_weather_source_host
+from services.nova_location_weather import weather_unavailable_message as service_weather_unavailable_message
 from services.nova_patching import behavioral_check as service_behavioral_check
 from services.nova_patching import interactive_preview_review as service_interactive_preview_review
 from services.nova_patching import teach_autoapply_proposal as service_teach_autoapply_proposal
 from services.nova_patching import teach_propose_patch as service_teach_propose_patch
-from services.nova_developer_profile import learn_contextual_developer_facts as service_learn_contextual_developer_facts
-from services.nova_identity_preferences import extract_animal_preferences as service_extract_animal_preferences
-from services.nova_identity_preferences import extract_animal_preferences_from_memory as service_extract_animal_preferences_from_memory
-from services.nova_identity_preferences import extract_animal_preferences_from_text as service_extract_animal_preferences_from_text
-from services.nova_identity_preferences import extract_color_preferences as service_extract_color_preferences
-from services.nova_identity_preferences import extract_color_preferences_from_memory as service_extract_color_preferences_from_memory
-from services.nova_identity_preferences import extract_color_preferences_from_text as service_extract_color_preferences_from_text
-from services.nova_identity_preferences import extract_last_user_question as service_extract_last_user_question
-from services.nova_identity_preferences import is_color_animal_match_question as service_is_color_animal_match_question
-from services.nova_identity_preferences import is_color_lookup_request as service_is_color_lookup_request
-from services.nova_identity_preferences import pick_color_for_animals as service_pick_color_for_animals
-from services.nova_identity_answers import assistant_name_reply as service_assistant_name_reply
-from services.nova_identity_answers import developer_full_name_reply as service_developer_full_name_reply
-from services.nova_identity_answers import self_identity_web_challenge_reply as service_self_identity_web_challenge_reply
-from services.nova_keyword_tools import handle_keywords as service_handle_keywords
-from services.nova_keyword_tools import is_brief_command_form as service_is_brief_command_form
-from services.nova_profile_followups import identity_profile_followup_reply as service_identity_profile_followup_reply
-from services.nova_retrieval_followups import execute_retrieval_followup_outcome as service_execute_retrieval_followup_outcome
-from services.nova_reply_contracts import classify_weather_lookup_outcome as service_classify_weather_lookup_outcome
-from services.nova_reply_contracts import classify_correction_outcome as service_classify_correction_outcome
-from services.nova_reply_contracts import classify_store_fact_outcome as service_classify_store_fact_outcome
-from services.nova_reply_contracts import attach_reply_outcome as service_attach_reply_outcome
-from services.nova_reply_contracts import classify_set_location_outcome as service_classify_set_location_outcome
-from services.nova_reply_contracts import execute_weather_lookup_outcome as service_execute_weather_lookup_outcome
-from services.nova_reply_contracts import render_reply as service_render_reply_contract
-from services.nova_reply_sanitizer import sanitize_llm_reply as service_sanitize_llm_reply
-from services.nova_routing_support import classify_supervisor_bypass as service_classify_supervisor_bypass
 from services.nova_routing_support import finalize_routing_decision as service_finalize_routing_decision
 from services.nova_routing_support import llm_classify_routing_intent as service_llm_classify_routing_intent
-from services.nova_routing_support import looks_like_open_fallback_turn as service_looks_like_open_fallback_turn
+from services.nova_routing_helpers import strip_invocation_prefix as service_strip_invocation_prefix
 from services.nova_tool_policy import web_fetch as service_web_fetch
-from services import nova_conversation_followups as service_conversation_followups
+from services.nova_tool_policy import web_allowlist_message as service_web_allowlist_message
 from services.nova_web_tools import fetch_sitemap_urls as service_fetch_sitemap_urls
 from services.nova_web_tools import scan_candidate_urls_for_query as service_scan_candidate_urls_for_query
 from services.nova_action_ledger import finalize_action_ledger_record_from_runtime as service_finalize_action_ledger_record_from_runtime
@@ -197,47 +131,19 @@ from services.patch_control import PATCH_CONTROL_SERVICE
 from services.nova_memory_learning import mem_audit as service_mem_audit
 from services.nova_memory_learning import mem_recall as service_mem_recall
 from services.nova_patching import patch_preview as service_patch_preview
+from services.nova_patching import patch_rollback as service_patch_rollback
 from services.nova_patching import patch_preview_summaries as service_patch_preview_summaries
 from services.nova_patching import patch_status_payload as service_patch_status_payload
 from services.nova_patching import overlay_change_candidates as service_overlay_change_candidates
 from services.nova_patching import snapshot_should_skip_relpath as service_snapshot_should_skip_relpath
 from services.nova_pulse import build_pulse_payload as service_build_pulse_payload
 from services.nova_reflection_health import maybe_log_self_reflection as service_maybe_log_self_reflection
-from services.nova_research_contracts import classify_web_research_outcome as service_classify_web_research_outcome
 from services.nova_search_endpoint import is_local_search_endpoint as service_is_local_search_endpoint
 from services.nova_search_endpoint import normalize_search_endpoint as service_normalize_search_endpoint
 from services.nova_search_endpoint import probe_search_endpoint as service_probe_search_endpoint
 from services.nova_search_endpoint import search_endpoint_candidates as service_search_endpoint_candidates
-from services.nova_turn_heuristics import classify_turn_acts as service_classify_turn_acts
-from services.nova_turn_heuristics import looks_like_answer_to_assistant_prompt_turn as service_looks_like_answer_to_assistant_prompt_turn
-from services.nova_turn_heuristics import build_greeting_reply as service_build_greeting_reply
-from services.nova_turn_heuristics import is_declarative_info as service_is_declarative_info
-from services.nova_turn_helpers import extract_memory_teach_text as service_extract_memory_teach_text
-from services.nova_turn_helpers import is_location_request as service_is_location_request
-from services.nova_turn_helpers import location_reply as service_location_reply
-from services.nova_turn_helpers import retrieval_status_reply as service_retrieval_status_reply
-from services.nova_turn_helpers import uses_prior_reference as service_uses_prior_reference
-from services.nova_command_handlers import handle_commands as service_handle_commands
-from services.nova_correction_parsing import extract_authoritative_correction_text as service_extract_authoritative_correction_text
-from services.nova_correction_parsing import is_negative_feedback as service_is_negative_feedback
-from services.nova_correction_parsing import looks_like_correction_cancel as service_looks_like_correction_cancel
-from services.nova_correction_parsing import looks_like_correction_turn as service_looks_like_correction_turn
-from services.nova_correction_parsing import looks_like_pending_replacement_text as service_looks_like_pending_replacement_text
-from services.nova_correction_parsing import normalize_correction_for_storage as service_normalize_correction_for_storage
-from services.nova_correction_parsing import parse_correction as service_parse_correction
-from services.nova_correction_parsing import safe_eval_arithmetic_expression as service_safe_eval_arithmetic_expression
 from services.nova_ollama_chat import ollama_chat as service_ollama_chat
 from services.ollama_health import build_ollama_health_payload as service_build_ollama_health_payload
-from services.nova_reply_guards import apply_claim_gate as service_apply_claim_gate
-from services.nova_reply_guards import content_tokens as service_content_tokens
-from services.nova_reply_guards import is_risky_claim_sentence as service_is_risky_claim_sentence
-from services.nova_reply_guards import sentence_supported_by_evidence as service_sentence_supported_by_evidence
-from services.nova_reply_guards import self_correct_reply as service_self_correct_reply
-from services.nova_session_followups import build_session_fact_sheet as service_build_session_fact_sheet
-from services.nova_session_followups import session_recap_reply as service_session_recap_reply
-from services.nova_teaching import apply_reply_overrides as service_apply_reply_overrides
-from services.nova_truth_hierarchy import hard_answer as service_hard_answer
-from services.nova_truth_hierarchy import truth_hierarchy_answer as service_truth_hierarchy_answer
 from services.nova_update_now import build_update_now_token as service_build_update_now_token
 from services.nova_update_now import clear_update_now_pending as service_clear_update_now_pending
 from services.nova_update_now import read_update_now_pending as service_read_update_now_pending
@@ -255,7 +161,6 @@ from services.nova_web_tools import extract_same_host_links as service_extract_s
 from services.nova_web_tools import extract_text_from_html_content as service_extract_text_from_html_content
 from services.nova_web_tools import extract_text_from_path as service_extract_text_from_path
 from services.nova_web_tools import extract_urls as service_extract_urls
-from services.nova_web_tools import looks_like_code_discovery_query as service_looks_like_code_discovery_query
 from services.nova_web_tools import score_research_hit as service_score_research_hit
 from services.nova_web_tools import seed_urls_for_domain as service_seed_urls_for_domain
 from services.nova_web_tools import tool_stackexchange_search as service_tool_stackexchange_search
@@ -267,7 +172,6 @@ from services.nova_web_tools import tool_web_search as service_tool_web_search
 from services.nova_web_tools import tool_wikipedia_lookup as service_tool_wikipedia_lookup
 from services.nova_web_tools import web_search as service_web_search
 from services.nova_cli_loop import run_loop as service_run_loop
-from services.nova_followup_dispatch import consume_conversation_followup_from_runtime as service_consume_conversation_followup_from_runtime
 from services.memory_bootstrap_judgment import build_memory_bootstrap_judgment as service_build_memory_bootstrap_judgment
 from services.memory_bootstrap_judgment import render_memory_bootstrap_judgment as service_render_memory_bootstrap_judgment
 from services.memory_bootstrap_origin import confirm_origin_contract as service_confirm_origin_contract
@@ -278,13 +182,17 @@ from services.subconscious_review_judgment import build_subconscious_review_judg
 from services.subconscious_review_judgment import render_subconscious_review_judgment as service_render_subconscious_review_judgment
 from services.release_promotion_judgment import build_release_promotion_judgment as service_build_release_promotion_judgment
 from services.release_promotion_judgment import render_release_promotion_judgment as service_render_release_promotion_judgment
+from services.source_root_judgment import build_source_root_judgment as service_build_source_root_judgment
+from services.source_root_judgment import publish_source_root_operator_notice as service_publish_source_root_operator_notice
+from services.source_root_judgment import render_source_root_judgment as service_render_source_root_judgment
 from services.release_validation import record_release_validation_outcome as service_record_release_validation_outcome
 from services.release_validation import render_release_outcome_recording as service_render_release_outcome_recording
 from services.release_validation import render_release_validation_report as service_render_release_validation_report
 from services.release_validation import run_release_validation as service_run_release_validation
+from services.installer_validation import render_installer_validation_report as service_render_installer_validation_report
+from services.installer_validation import run_installer_validation as service_run_installer_validation
 from services.nova_memory_events import append_memory_event as service_append_memory_event
 from services.nova_memory_events import record_memory_event as service_record_memory_event
-from services.nova_memory_learning import learn_from_user_correction as service_learn_from_user_correction
 from services.nova_memory_learning import mem_add as service_mem_add
 from services.nova_patching import patch_apply as service_patch_apply
 from services.data_pipeline_registry import get_pipeline_schema_probe as service_get_pipeline_schema_probe
@@ -294,8 +202,6 @@ from services.data_pipeline_registry import plan_pipeline_report as service_plan
 from services.data_pipeline_registry import preview_pipeline_query as service_preview_pipeline_query
 from services.data_pipeline_registry import search_pipeline_vendor_dictionary as service_search_pipeline_vendor_dictionary
 from services.pipeline_privileged_bridge import run_privileged_pipeline_query as service_run_privileged_pipeline_query
-from services.nova_supervisor_flow import execute_registered_supervisor_rule_from_runtime as service_execute_registered_supervisor_rule_from_runtime
-from services.nova_supervisor_flow import handle_supervisor_intent_from_runtime as service_handle_supervisor_intent_from_runtime
 from services.nova_runtime_context import ACTION_LEDGER_DIR
 from services.nova_runtime_context import AUTONOMY_MAINTENANCE_FILE
 from services.nova_runtime_context import BASE_DIR
@@ -407,19 +313,6 @@ KB_MAX_FILES = 3
 KB_MAX_CHARS = 2000
 CHAT_CONTEXT_TURNS = 6
 
-KNOWN_COLORS = {
-    "red", "blue", "green", "yellow", "orange", "purple", "violet", "indigo",
-    "pink", "brown", "black", "white", "gray", "grey", "silver", "gold",
-    "teal", "cyan", "magenta", "maroon", "navy", "lime", "olive", "beige",
-    "turquoise", "lavender", "coral", "burgundy", "tan", "mint", "aqua",
-}
-
-KNOWN_ANIMALS = {
-    "dog", "dogs", "cat", "cats", "bird", "birds", "fish", "horse", "horses",
-    "rabbit", "rabbits", "hamster", "hamsters", "turtle", "turtles", "snake", "snakes",
-    "lizard", "lizards", "parrot", "parrots", "eagle", "eagles", "hawk", "hawks",
-}
-
 # Web cache folder
 WEB_CACHE_DIR = KNOWLEDGE_ROOT / "web"
 DATA_SOURCES_ROOT = BASE_DIR / "data_sources"
@@ -495,7 +388,6 @@ def _fulfillment_route_viability(
         recent_turns,
         pending_action=pending_action,
         get_fulfillment_state_fn=SessionStateService.get_fulfillment_state,
-        looks_like_affirmative_followup_fn=_looks_like_affirmative_followup,
     )
 
 
@@ -570,32 +462,6 @@ def behavior_get_metrics() -> dict:
     return BEHAVIOR_METRICS_STORE.snapshot()
 
 
-def _infer_turn_intent(user_input: str) -> str:
-    t = (user_input or "").strip().lower()
-    if not t:
-        return "empty"
-    if t in {"weather current location", "weather current"}:
-        return "weather_lookup"
-    if t.startswith((
-        "weather for ",
-        "weather in ",
-        "weather at ",
-        "check weather for ",
-        "check weather in ",
-        "check weather at ",
-    )):
-        return "weather_lookup"
-    if t.startswith("web research "):
-        return "web_research"
-    if t.startswith("web search ") or "search the web" in t:
-        return "web_search"
-    if t.startswith("web gather "):
-        return "web_gather"
-    if t.startswith("web http://") or t.startswith("web https://"):
-        return "web_fetch"
-    return "chat"
-
-
 def action_ledger_add_step(
     record: Optional[dict],
     stage: str,
@@ -641,10 +507,6 @@ def _detect_repeated_tool_intent_without_execution(records: Optional[list[dict]]
 
 def _top_repeated_correction_class(records: Optional[list[dict]] = None, limit: int = 20) -> dict:
     return service_top_repeated_correction_class(ACTION_LEDGER_DIR, records=records, limit=limit)
-
-
-def _count_unsupported_claim_blocks_recently(records: Optional[list[dict]] = None, limit: int = 20) -> int:
-    return service_count_unsupported_claim_blocks_recently(ACTION_LEDGER_DIR, records=records, limit=limit)
 
 
 def _count_routing_overrides_recently(records: Optional[list[dict]] = None, limit: int = 20) -> int:
@@ -737,7 +599,6 @@ def maybe_log_self_reflection(*, limit: int = 20, every: int = 5, records: Optio
         detect_repeated_tool_intent_without_execution_fn=_detect_repeated_tool_intent_without_execution,
         top_repeated_correction_class_fn=_top_repeated_correction_class,
         routing_stable_recently_fn=_routing_stable_recently,
-        count_unsupported_claim_blocks_recently_fn=_count_unsupported_claim_blocks_recently,
         count_routing_overrides_recently_fn=_count_routing_overrides_recently,
         record_used_routing_override_fn=_record_used_routing_override,
         sample_intents_last_fn=_sample_intents_last,
@@ -781,54 +642,6 @@ def build_turn_reflection(
     return reflection
 
 
-def _execute_registered_supervisor_rule(
-    rule_result: dict,
-    text: str,
-    current_state: Optional[dict],
-    *,
-    turns: Optional[list[tuple[str, str]]] = None,
-    input_source: str = "typed",
-    allowed_actions: Optional[set[str]] = None,
-) -> tuple[bool, str, Optional[dict]]:
-    return service_execute_registered_supervisor_rule_from_runtime(
-        rule_result,
-        text,
-        current_state,
-        turns=turns,
-        input_source=input_source,
-        allowed_actions=allowed_actions,
-        runtime_scope=globals(),
-    )
-
-
-
-def _last_assistant_turn_text(turns: Optional[list[tuple[str, str]]]) -> str:
-    for role, text in reversed(list(turns or [])):
-        if str(role or "").strip().lower() == "assistant":
-            return str(text or "").strip()
-    return ""
-
-
-def _looks_like_affirmative_followup(text: str) -> bool:
-    normalized = _normalize_turn_text(text).strip(" .,!?")
-    if not normalized:
-        return False
-    return (
-        normalized in {"yes", "yeah", "yea", "sure", "okay", "ok", "please", "do that", "go ahead"}
-        or normalized.startswith("yes ")
-        or normalized.startswith("yeah ")
-        or normalized.startswith("yea ")
-        or normalized.startswith("please ")
-        or "do that" in normalized
-    )
-
-
-def _looks_like_shared_location_reference(text: str) -> bool:
-    normalized = _normalize_turn_text(text).strip(" .,!?")
-    del normalized
-    return False
-
-
 def _intent_trace_preview(text: str, *, limit: int = 120) -> str:
     compact = re.sub(r"\s+", " ", str(text or "").strip())
     if len(compact) <= limit:
@@ -839,53 +652,6 @@ def _intent_trace_preview(text: str, *, limit: int = 120) -> str:
 def _supervisor_result_has_route(rule_result: Optional[dict]) -> bool:
     payload = rule_result if isinstance(rule_result, dict) else {}
     return bool(payload.get("handled")) or bool(str(payload.get("action") or "").strip())
-
-
-def _dev_mode_enabled() -> bool:
-    raw = str(os.environ.get("NOVA_DEV_MODE") or "").strip().lower()
-    return raw in {"1", "true", "yes", "on"}
-
-
-_ALLOWED_SUPERVISOR_BYPASSES: tuple[dict[str, object], ...] = (
-    {
-        "category": "fallback.meta_confusion",
-        "phrases": {
-        },
-    },
-    {
-        # These are intentionally open-ended prompts that currently remain model-owned.
-        "category": "intentional_fallback.general_qa",
-        "phrases": {
-            "can you debug this bug in my code",
-            "explain photosynthesis briefly",
-            "why",
-        },
-    },
-)
-
-
-def _looks_like_open_fallback_turn(text: str) -> bool:
-    return service_looks_like_open_fallback_turn(
-        text,
-        is_explicit_command_like_fn=_is_explicit_command_like,
-        is_location_request_fn=_is_location_request,
-        normalize_turn_text_fn=_normalize_turn_text,
-        is_student_data_broad_query_fn=_is_peims_broad_query,
-        is_local_knowledge_topic_query_fn=_is_local_knowledge_topic_query,
-    )
-
-
-def _normalize_bypass_phrase(text: str) -> str:
-    return _normalize_turn_text(text).strip(" .,!?:;\t\r\n")
-
-
-def _classify_supervisor_bypass(text: str) -> dict:
-    return service_classify_supervisor_bypass(
-        text,
-        normalize_bypass_phrase_fn=_normalize_bypass_phrase,
-        allowed_supervisor_bypasses=_ALLOWED_SUPERVISOR_BYPASSES,
-        looks_like_open_fallback_turn_fn=_looks_like_open_fallback_turn,
-    )
 
 
 def _supervisor_candidate_trace(rule_result: Optional[dict]) -> list[dict]:
@@ -935,9 +701,6 @@ def _build_routing_decision(
     intent_result: Optional[dict] = None,
     handle_result: Optional[dict] = None,
     final_owner: str = "pending",
-    allowed_bypass: bool = False,
-    allowed_bypass_category: str = "",
-    bypass_reason: str = "",
     reply_contract: str = "",
     reply_outcome: Optional[dict] = None,
     turn_acts: Optional[list[str]] = None,
@@ -950,9 +713,6 @@ def _build_routing_decision(
         "intent_phase": _supervisor_phase_record(intent_result, phase="intent"),
         "handle_phase": _supervisor_phase_record(handle_result, phase="handle"),
         "final_owner": str(final_owner or "pending").strip().lower() or "pending",
-        "allowed_bypass": bool(allowed_bypass),
-        "allowed_bypass_category": str(allowed_bypass_category or "").strip(),
-        "bypass_reason": str(bypass_reason or "").strip(),
         "reply_contract": str(reply_contract or "").strip(),
         "reply_outcome_kind": str(outcome.get("kind") or "").strip(),
         "turn_acts": acts,
@@ -974,62 +734,6 @@ def _finalize_routing_decision(
         reply_outcome=reply_outcome,
         turn_acts=turn_acts,
     )
-
-
-def _supervisor_bypass_warning(text: str, *, entry_point: str, routing_decision: Optional[dict] = None) -> str:
-    where = str(entry_point or "unknown").strip().lower() or "unknown"
-    category = str((routing_decision or {}).get("allowed_bypass_category") or "").strip()
-    if where == "http" and category.startswith("intentional_fallback."):
-        warning = (
-            "[INFO] Open fallback - learning invitation active"
-            f" [{where}] {_intent_trace_preview(text)}"
-        )
-    else:
-        warning = (
-            "[WARN] Turn bypassed supervisor intent phase — this will be an error soon"
-            f" [{where}] {_intent_trace_preview(text)}"
-        )
-    if category:
-        warning += f" [{category}]"
-    return warning
-
-
-def _handle_supervisor_bypass(text: str, *, entry_point: str, routing_decision: Optional[dict] = None) -> str:
-    classification = _classify_supervisor_bypass(text)
-    if isinstance(routing_decision, dict):
-        routing_decision["allowed_bypass"] = bool(classification.get("allowed"))
-        routing_decision["allowed_bypass_category"] = str(classification.get("category") or "").strip()
-        routing_decision["bypass_reason"] = str(classification.get("reason") or "").strip()
-        routing_decision["final_owner"] = "fallback"
-    warning = _supervisor_bypass_warning(text, entry_point=entry_point, routing_decision=routing_decision)
-    if _dev_mode_enabled() and not bool(classification.get("allowed")):
-        detail = routing_decision if isinstance(routing_decision, dict) else classification
-        raise RuntimeError(f"Bypass detected: {_intent_trace_preview(text)} :: {json.dumps(detail, ensure_ascii=True, sort_keys=True)}")
-    return warning
-
-
-def _should_warn_supervisor_bypass(text: str) -> bool:
-    del text
-    return False
-
-
-def _should_clarify_unlabeled_numeric_turn(
-    text: str,
-    *,
-    pending_action: Optional[dict] = None,
-    current_state: Optional[dict] = None,
-) -> bool:
-    del text, pending_action, current_state
-    return False
-
-
-def _runtime_set_location_intent(
-    text: str,
-    *,
-    pending_action: Optional[dict] = None,
-) -> Optional[dict[str, object]]:
-    del text, pending_action
-    return None
 
 
 _ROUTING_INTENT_PROMPT = ""
@@ -1054,46 +758,6 @@ def _llm_classify_routing_intent(
     )
 
 
-def _unlabeled_numeric_turn_reply(text: str) -> str:
-    value = str(text or "").strip()
-    return f"What does {value} refer to?"
-
-
-def _numeric_reference_guess_reply(value: str) -> str:
-    clean = str(value or "").strip()
-    return f"I don't know what {clean} refers to yet. Tell me what it refers to."
-
-
-def _numeric_reference_binding_reply(value: str, referent: str) -> str:
-    clean_value = str(value or "").strip()
-    clean_referent = str(referent or "").strip().rstrip(".!?")
-    return f"Understood. In this chat, {clean_value} refers to {clean_referent}."
-
-
-def _emit_supervisor_intent_trace(intent_result: dict, *, user_text: str = "") -> None:
-    intent = str((intent_result or {}).get("intent") or "intent").strip().lower() or "intent"
-    rule = str((intent_result or {}).get("matched_rule_name") or (intent_result or {}).get("rule_name") or "").strip()
-    reason = ""
-
-    if intent == "store_fact":
-        reason = str((intent_result or {}).get("fact_text") or user_text).strip()
-    elif intent == "set_location":
-        reason = str((intent_result or {}).get("location_value") or user_text).strip()
-    elif intent == "apply_correction":
-        reason = str((intent_result or {}).get("user_correction_text") or user_text).strip()
-    elif intent == "session_summary":
-        reason = str((intent_result or {}).get("target") or "current_session_only").strip()
-    else:
-        reason = str(user_text or "").strip()
-
-    label = rule or "supervisor"
-    detail = _intent_trace_preview(reason)
-    if detail:
-        print(f"[INTENT] {intent} :: {label} :: {detail}", flush=True)
-        return
-    print(f"[INTENT] {intent} :: {label}", flush=True)
-
-
 def _store_supervisor_correction_record(
     correction_text: str,
     *,
@@ -1112,276 +776,6 @@ def _store_supervisor_correction_record(
     mem_add("user_correction", input_source, json.dumps(record, ensure_ascii=False))
 
 
-def _handle_supervisor_intent(
-    intent_result: dict,
-    user_text: str,
-    *,
-    turns: Optional[list[tuple[str, str]]] = None,
-    input_source: str = "typed",
-    entry_point: str = "",
-) -> tuple[bool, str, Optional[dict], Optional[dict]]:
-    return service_handle_supervisor_intent_from_runtime(
-        intent_result,
-        user_text,
-        turns=turns,
-        input_source=input_source,
-        entry_point=entry_point,
-        runtime_scope=globals(),
-    )
-
-
-
-def _resolve_set_location_semantics(intent_result: dict, user_text: str = "") -> dict[str, str]:
-    payload = intent_result if isinstance(intent_result, dict) else {}
-    location_value = str(payload.get("location_value") or user_text).strip()
-    location_kind = str(payload.get("location_kind") or "").strip().lower()
-    if location_kind not in {"zip", "place"}:
-        location_kind = "zip" if re.fullmatch(r"\d{5}", location_value) else "place"
-    ack_kind = str(payload.get("location_ack_kind") or "").strip().lower()
-    if ack_kind not in {"fact_only", "confirmed_location"}:
-        ack_kind = "fact_only" if location_kind == "zip" else "confirmed_location"
-    return {
-        "location_value": location_value,
-        "location_kind": location_kind,
-        "location_ack_kind": ack_kind,
-    }
-
-
-REPLY_TEMPLATES: dict[str, str] = {
-    "set_location.missing_value": "I need a location value to store.",
-    "set_location.observed_zip": "Got it - {location_value} is a ZIP code.",
-    "set_location.explicit_location": "Got it - using {location_value} as your location.",
-    "correction.recorded": "Got it - I recorded that correction.",
-    "correction.pending_replacement": "You're right. I recorded that correction. Send the exact corrected answer if you want me to store the replacement answer.",
-    "correction.replacement_applied": "Understood. I corrected that and will use your version going forward.",
-    "correction.intent_ack": "Got it - correcting that.",
-    "correction.identity_correction": "{learned_message}",
-    "store_fact.missing_value": "I need the fact to store.",
-    "store_fact.explicit_store": "Learned: {fact_text}",
-    "store_fact.prompted_store": "Learned: {fact_text}",
-    "store_fact.correctional_store": "Learned correction: {fact_text}",
-    "store_fact.storage_unavailable": "Memory storage is not available for that fact.",
-    "store_fact.declarative_ack": "Memory storage requires an explicit store request.",
-    "weather_lookup.current_location": "{tool_result}",
-    "weather_lookup.explicit_location": "{tool_result}",
-    "weather_lookup.clarify": "What location should I use for the weather lookup?",
-    "web_research_family.research_prompt": "{tool_result}",
-    "web_research_family.deep_search": "{tool_result}",
-    "name_origin.story_known": "{reply_text}",
-    "name_origin.story_missing": "{reply_text}",
-    "name_origin.full_story": "{reply_text}",
-    "identity_history.name_origin": "{reply_text}",
-    "identity_history.creator_question": "{reply_text}",
-    "identity_history.history_recall": "{reply_text}",
-    "last_question.recall": "{reply_text}",
-    "last_question.empty": "{reply_text}",
-    "rules.list": "{reply_text}",
-    "open_probe.clarification": "{reply_text}",
-    "open_probe.safe_fallback": "{reply_text}",
-    "turn.truthful_limit": "{reply_text}",
-    "retrieval_followup.selected_result": "{reply_text}",
-    "retrieval_followup.continued_results": "{reply_text}",
-    "retrieval_followup.meta_summary": "{reply_text}",
-    "retrieval_followup.guidance": "{reply_text}",
-}
-
-
-def render_reply(outcome: Optional[dict]) -> str:
-    return service_render_reply_contract(outcome, reply_templates=REPLY_TEMPLATES)
-
-
-def _attach_reply_outcome(result_payload: Optional[dict], outcome: Optional[dict]) -> None:
-    return service_attach_reply_outcome(result_payload, outcome)
-
-
-
-
-def _classify_set_location_outcome(intent_result: dict, user_text: str = "") -> dict[str, object]:
-    return service_classify_set_location_outcome(intent_result, user_text)
-
-
-def _classify_correction_outcome(
-    *,
-    correction_text: str,
-    correction_value: str,
-    last_assistant: str,
-    pending_followup: bool,
-    learned_fact: bool = False,
-    learned_message: str = "",
-    replacement_applied: bool = False,
-    replacement_pending: bool = False,
-) -> dict[str, object]:
-    return service_classify_correction_outcome(
-        correction_text=correction_text,
-        correction_value=correction_value,
-        last_assistant=last_assistant,
-        pending_followup=pending_followup,
-        learned_fact=learned_fact,
-        learned_message=learned_message,
-        replacement_applied=replacement_applied,
-        replacement_pending=replacement_pending,
-    )
-
-
-def _classify_store_fact_outcome(
-    intent_result: dict,
-    user_text: str = "",
-    *,
-    source: str = "intent",
-    storage_performed: bool = False,
-) -> dict[str, object]:
-    return service_classify_store_fact_outcome(
-        intent_result,
-        user_text,
-        source=source,
-        storage_performed=storage_performed,
-    )
-
-
-def _classify_weather_lookup_outcome(intent_result: dict) -> dict[str, object]:
-    return service_classify_weather_lookup_outcome(
-        intent_result,
-        make_pending_weather_action_fn=make_pending_weather_action,
-    )
-
-
-def _execute_weather_lookup_outcome(weather_outcome: dict[str, object]) -> tuple[str, Optional[dict], dict[str, object]]:
-    return service_execute_weather_lookup_outcome(
-        weather_outcome,
-        render_reply_fn=render_reply,
-        execute_planned_action_fn=execute_planned_action,
-        make_weather_result_state_fn=_make_weather_result_state,
-        classify_weather_lookup_outcome_fn=_classify_weather_lookup_outcome,
-    )
-
-
-def _classify_name_origin_outcome(intent_result: dict) -> dict[str, object]:
-    return service_classify_name_origin_outcome(
-        intent_result,
-        get_learned_fact_fn=get_learned_fact,
-        get_name_origin_story_fn=get_name_origin_story,
-    )
-
-
-def _execute_identity_history_outcome(
-    rule_result: dict,
-    current_state: Optional[dict],
-    text: str,
-    *,
-    turns: Optional[list[tuple[str, str]]] = None,
-) -> tuple[str, Optional[dict], dict[str, object]]:
-    return service_execute_identity_history_outcome(
-        rule_result,
-        current_state,
-        text,
-        turns=turns,
-        normalize_turn_text_fn=_normalize_turn_text,
-        speaker_matches_developer_fn=_speaker_matches_developer,
-        make_conversation_state_fn=_make_conversation_state,
-        hard_answer_fn=hard_answer,
-        developer_profile_reply_fn=_developer_profile_reply,
-        developer_identity_followup_reply_fn=_developer_identity_followup_reply,
-        identity_name_followup_reply_fn=_identity_name_followup_reply,
-        identity_profile_followup_reply_fn=_identity_profile_followup_reply,
-        identity_profile_source_boundary_reply_fn=_identity_profile_source_boundary_reply,
-        classify_name_origin_outcome_fn=_classify_name_origin_outcome,
-        render_reply_fn=render_reply,
-    )
-
-
-
-def _open_probe_reply(text: str, turns: Optional[list[tuple[str, str]]] = None) -> tuple[str, str]:
-    return service_open_probe_reply(
-        text,
-        turns,
-        normalize_turn_text_fn=_normalize_turn_text,
-        truthful_limit_reply_fn=_truthful_limit_reply,
-    )
-
-
-def _truthful_limit_reply(
-    text: str = "",
-    *,
-    limitation: str = "cannot_verify",
-    include_next_step: bool = True,
-) -> str:
-    return service_truthful_limit_reply(
-        text,
-        limitation=limitation,
-        include_next_step=include_next_step,
-        normalize_turn_text_fn=_normalize_turn_text,
-        looks_like_mixed_info_request_turn_fn=_looks_like_mixed_info_request_turn,
-        is_explicit_request_fn=_is_explicit_request,
-    )
-
-
-def _attach_learning_invitation(reply_text: str, *, truthful_limit: bool = False) -> str:
-    return service_attach_learning_invitation(
-        reply_text,
-        truthful_limit=truthful_limit,
-        normalize_turn_text_fn=_normalize_turn_text,
-    )
-
-
-def _truthful_limit_outcome(
-    text: str = "",
-    *,
-    limitation: str = "cannot_verify",
-) -> dict[str, str]:
-    return service_truthful_limit_outcome(
-        text,
-        limitation=limitation,
-        truthful_limit_reply_fn=_truthful_limit_reply,
-    )
-
-
-def _last_question_recall_reply(text: str, turns: Optional[list[tuple[str, str]]] = None) -> tuple[str, str]:
-    return service_last_question_recall_reply(
-        text,
-        turns,
-        extract_last_user_question_fn=_extract_last_user_question,
-    )
-
-
-def _session_fact_recall_reply(rule_result: dict) -> tuple[str, str]:
-    return service_session_fact_recall_reply(rule_result)
-
-
-def _execute_retrieval_followup_outcome(state: dict, text: str) -> tuple[str, Optional[dict], dict[str, object]]:
-    return service_execute_retrieval_followup_outcome(
-        state,
-        text,
-        extract_retrieval_result_index_fn=_extract_retrieval_result_index,
-        is_retrieval_meta_question_fn=_is_retrieval_meta_question,
-        retrieval_meta_reply_fn=_retrieval_meta_reply,
-        tool_web_gather_fn=tool_web_gather,
-        make_retrieval_conversation_state_fn=_make_retrieval_conversation_state,
-        looks_like_retrieval_followup_fn=_looks_like_retrieval_followup,
-        tool_web_research_continue_fn=lambda: tool_web_research("", continue_mode=True),
-        web_research_query_fn=lambda: str(getattr(WEB_RESEARCH_SESSION, 'query', '') or ''),
-        web_research_result_count_fn=WEB_RESEARCH_SESSION.result_count,
-        web_research_has_results_fn=WEB_RESEARCH_SESSION.has_results,
-        render_reply_fn=render_reply,
-    )
-
-
-
-def _classify_web_research_outcome(
-    intent_result: dict,
-    user_text: str = "",
-    *,
-    turns: Optional[list[tuple[str, str]]] = None,
-) -> dict[str, object]:
-    return service_classify_web_research_outcome(
-        intent_result,
-        user_text,
-        turns=turns,
-        infer_research_query_from_turns_fn=_infer_research_query_from_turns,
-        resolve_research_provider_fn=_resolve_research_provider,
-        provider_name_from_tool_fn=_provider_name_from_tool,
-    )
-
-
 def start_action_ledger_record(
     user_input: str,
     *,
@@ -1396,7 +790,6 @@ def start_action_ledger_record(
         session_id=session_id,
         input_source=input_source,
         active_subject=active_subject,
-        infer_turn_intent_fn=_infer_turn_intent,
         action_ledger_add_step_fn=action_ledger_add_step,
     )
 
@@ -1484,193 +877,6 @@ def finalize_action_ledger_record(
         runtime_scope=globals(),
     )
 
-
-
-def _is_factual_identity_or_policy_query(text: str) -> bool:
-    return service_is_factual_identity_or_policy_query(text)
-
-
-def _is_capability_query(text: str) -> bool:
-    return service_is_capability_query(text)
-
-
-def _is_policy_domain_query(text: str) -> bool:
-    return service_is_policy_domain_query(text)
-
-
-def _is_action_history_query(text: str) -> bool:
-    return service_is_action_history_query(text)
-
-
-def _is_identity_or_developer_query(text: str) -> bool:
-    return service_is_identity_or_developer_query(text)
-
-
-def _is_name_origin_question(text: str) -> bool:
-    return service_is_name_origin_question(text)
-
-
-def _is_assistant_name_query(text: str) -> bool:
-    return service_is_assistant_name_query(text)
-
-
-
-
-def _self_identity_web_challenge_reply() -> str:
-    assistant_name = get_learned_fact("assistant_name", "Nova")
-    return service_self_identity_web_challenge_reply(assistant_name=assistant_name)
-
-
-def _assistant_name_reply(text: str) -> str:
-    assistant_name = get_learned_fact("assistant_name", "Nova")
-    return service_assistant_name_reply(text, assistant_name=assistant_name)
-
-
-def _is_developer_full_name_query(text: str) -> bool:
-    return service_is_developer_full_name_query(text)
-
-
-def _developer_full_name_reply() -> str:
-    full_name = get_learned_fact("developer_name", "Gustavo")
-    if str(full_name or "").strip().lower() == "gustavo":
-        full_name = "Gustavo Uribe"
-    nickname = get_learned_fact("developer_nickname", "Gus")
-    return service_developer_full_name_reply(
-        developer_name=full_name,
-        developer_nickname=nickname,
-    )
-
-
-def _is_location_request(user_text: str) -> bool:
-    return service_is_location_request(user_text, normalize_turn_text_fn=_normalize_turn_text)
-
-
-def _location_reply() -> str:
-    return service_location_reply(
-        runtime_device_location_payload_fn=runtime_device_location_payload,
-        get_saved_location_text_fn=get_saved_location_text,
-        resolve_current_device_coords_fn=resolve_current_device_coords,
-    )
-
-
-def _is_session_recap_request(text: str) -> bool:
-    low = (text or "").strip().lower()
-    cues = [
-        "recap",
-        "what were we talking about",
-        "what we just talked about",
-        "previous chat lines",
-        "entire chat session",
-        "go back to our previous chat",
-        "follow the chat",
-    ]
-    return any(c in low for c in cues)
-
-
-def _session_recap_reply(turns: list[tuple[str, str]], current_text: str) -> str:
-    return service_session_recap_reply(
-        turns,
-        current_text,
-        is_session_recap_request_fn=_is_session_recap_request,
-    )
-
-
-def _is_deep_search_followup_request(text: str) -> bool:
-    del text
-    return False
-
-
-def _infer_research_query_from_turns(turns: list[tuple[str, str]]) -> str:
-    for role, txt in reversed(turns):
-        if role != "user":
-            continue
-        low = (txt or "").strip().lower()
-        if not low:
-            continue
-        if _is_deep_search_followup_request(low) or _is_session_recap_request(low):
-            continue
-        if "peims" in low and "attendance" in low:
-            return "PEIMS attendance reporting rules Texas TEA ADA excused unexcused absences"
-        return txt
-    return ""
-
-
-def _latest_action_ledger_record() -> dict:
-    try:
-        if not ACTION_LEDGER_DIR.exists():
-            return {}
-        files = sorted(ACTION_LEDGER_DIR.glob("*.json"))
-        if not files:
-            return {}
-        data = json.loads(files[-1].read_text(encoding="utf-8"))
-        return data if isinstance(data, dict) else {}
-    except Exception:
-        return {}
-
-
-def _action_history_reply() -> str:
-    rec = _latest_action_ledger_record()
-    if not rec:
-        return "No action ledger record exists yet in this runtime."
-    tool = str(rec.get("tool") or "").strip() or "none"
-    decision = str(rec.get("planner_decision") or "").strip() or "unknown"
-    intent = str(rec.get("intent") or "").strip() or "unknown"
-    grounded = bool(rec.get("grounded"))
-    final_answer = str(rec.get("final_answer") or "").strip()
-    route_summary = action_ledger_route_summary(rec)
-    if len(final_answer) > 220:
-        final_answer = final_answer[:217] + "..."
-    return (
-        "Last action record: "
-        f"intent={intent}; decision={decision}; tool={tool}; grounded={grounded}. "
-        f"route={route_summary or '[none]'}. "
-        f"final_answer={final_answer or '[none]'}"
-    )
-
-
-def truth_hierarchy_answer(user_text: str) -> tuple[bool, str, str, bool]:
-    return service_truth_hierarchy_answer(
-        user_text,
-        is_action_history_query_fn=_is_action_history_query,
-        action_history_reply_fn=_action_history_reply,
-        is_identity_or_developer_query_fn=_is_identity_or_developer_query,
-        hard_answer_fn=hard_answer,
-        get_name_origin_story_fn=get_name_origin_story,
-        is_capability_query_fn=_is_capability_query,
-        describe_capabilities_fn=describe_capabilities,
-        is_policy_domain_query_fn=_is_policy_domain_query,
-        policy_web_fn=policy_web,
-    )
-
-
-def _self_correct_reply(user_text: str, reply: str) -> tuple[str, bool, str]:
-    return service_self_correct_reply(
-        user_text,
-        reply,
-        is_capability_query_fn=_is_capability_query,
-        describe_capabilities_fn=describe_capabilities,
-    )
-
-
-def should_block_low_confidence(user_text: str, retrieved_context: str = "", tool_context: str = "") -> bool:
-    # Only gate factual questions, not smalltalk/open-ended creative prompts.
-    if not _is_factual_identity_or_policy_query(user_text):
-        return False
-    has_ctx = bool((retrieved_context or "").strip())
-    has_tool = bool((tool_context or "").strip())
-    return not (has_ctx or has_tool)
-
-
-def detect_identity_conflict() -> bool:
-    learned = load_learned_facts()
-    assistant_name = str(learned.get("assistant_name") or "").strip().lower()
-    story = get_name_origin_story().strip().lower()
-    if not assistant_name or not story:
-        return False
-    # Flag obvious contradictions between learned assistant name and story mentions.
-    if "my name is" in story and assistant_name not in story:
-        return True
-    return False
 
 
 def ok(msg): print(f"[OK]   {msg}", flush=True)
@@ -1805,91 +1011,23 @@ def web_fetch(url: str, save_dir: Path) -> dict:
 
 
 def _web_allowlist_message(context: str = "") -> str:
-    """Return a friendly message explaining web allowlist restrictions and list allowed domains."""
-    cfg = policy_web()
-    allow_domains = cfg.get("allow_domains") or []
-    if not allow_domains:
-        base = "I attempted to access the web, but web access is restricted by policy and no allowlisted domains are configured."
-        return base
-
-    lines = [f"I attempted to access the web{(' for ' + context) if context else ''}, but my web tool only allows specific sources:"]
-    for d in allow_domains:
-        lines.append(f"- {d}")
-
-    # suggest common weather API if present in allowlist otherwise suggest a known source
-    preferred = None
-    for candidate in ("api.weather.gov", "noaa.gov", "weather.gov"):
-        for d in allow_domains:
-            if candidate in d:
-                preferred = candidate
-                break
-        if preferred:
-            break
-
-    if preferred:
-        lines.append(f"If you'd like, I can try again using {preferred}.")
-    else:
-        lines.append("If you'd like, tell me which of the allowlisted domains to try, or provide an allowed URL to fetch.")
-    lines.append("To add a new allowed domain, use: policy allow <domain>")
-
-    return "\n".join(lines)
+    return service_web_allowlist_message(context, policy_web_fn=policy_web)
 
 
 def _weather_source_host() -> Optional[str]:
-    allow_domains = [str(d).strip().lower() for d in (policy_web().get("allow_domains") or []) if str(d).strip()]
-    for preferred in ("api.weather.gov", "wttr.in"):
-        for d in allow_domains:
-            if d == preferred or d.endswith("." + preferred):
-                return preferred
-    return None
+    return service_weather_source_host(policy_web_fn=policy_web)
 
 
 def _weather_unavailable_message() -> str:
-    return (
-        "I can access websites, but I don't yet have a reliable structured weather source configured. "
-        "I cannot honestly claim weather results from raw weather.com pages. "
-        "Add a source like 'policy allow api.weather.gov' and then use 'weather in <location-or-lat,lon>'."
-    )
-
-
-def sanitize_llm_reply(reply: str, tool_context: str = "") -> str:
-    return service_sanitize_llm_reply(
-        reply,
-        tool_context,
-        weather_unavailable_message_fn=_weather_unavailable_message,
-        describe_capabilities_fn=describe_capabilities,
-    )
+    return service_weather_unavailable_message()
 
 
 def weather_response_style() -> str:
-    try:
-        s = str((policy_web().get("weather_response_style") or "concise")).strip().lower()
-        if s in {"concise", "tool"}:
-            return s
-    except Exception:
-        pass
-    return "concise"
+    return service_weather_response_style(policy_web_fn=policy_web)
 
 
 def _format_weather_output(label: str, summary: str) -> str:
-    # Normalize whitespace and strip any existing weather-style prefixes so output is never stacked.
-    s = re.sub(r"\s+", " ", (summary or "").strip())
-    s = re.sub(r"^(?:weather|forecast)\s+for\s+[^:]+:\s*", "", s, flags=re.I)
-    l = (label or "").strip() or "this location"
-
-    # Normalize common deterministic location aliases to cleaner display names.
-    aliases = {
-        "brownsville": "Brownsville, TX",
-        "brownsville tx": "Brownsville, TX",
-        "brownsville, tx": "Brownsville, TX",
-    }
-    n = re.sub(r"\s+", " ", l.lower()).strip()
-    l = aliases.get(n, l)
-
-    style = weather_response_style()
-    if style == "tool":
-        return f"Forecast for {l}: {s}"
-    return f"{l}: {s}"
+    return service_format_weather_output(label, summary, weather_response_style_fn=weather_response_style)
 
 
 DEVICE_LOCATION_MAX_AGE_SEC = 300.0
@@ -2017,8 +1155,6 @@ def _coords_from_saved_location() -> Optional[tuple[float, float]]:
     return service_coords_from_saved_location(
         read_core_state_fn=read_core_state,
         default_statefile=DEFAULT_STATEFILE,
-        mem_audit_fn=mem_audit,
-        get_saved_location_text_fn=get_saved_location_text,
     )
 
 
@@ -2026,143 +1162,6 @@ def get_saved_location_text() -> str:
     return service_get_saved_location_text(
         read_core_state_fn=read_core_state,
         default_statefile=DEFAULT_STATEFILE,
-        normalize_location_preview_fn=_normalize_location_preview,
-        mem_audit_fn=mem_audit,
-    )
-
-
-def set_location_text(value: str, input_source: str = "typed") -> str:
-    return service_set_location_text(
-        value,
-        input_source=input_source,
-        normalize_location_preview_fn=_normalize_location_preview,
-        set_core_state_fn=set_core_state,
-        default_statefile=DEFAULT_STATEFILE,
-        mem_add_fn=mem_add,
-    )
-
-
-def _extract_location_fact(text: str) -> str:
-    return service_extract_location_fact(
-        text,
-        normalize_location_preview_fn=_normalize_location_preview,
-    )
-
-
-def _store_location_fact_reply(
-    text: str,
-    *,
-    input_source: str = "typed",
-    pending_action: Optional[dict] = None,
-) -> str:
-    return service_store_location_fact_reply(
-        text,
-        input_source=input_source,
-        pending_action=pending_action,
-        extract_location_fact_fn=_extract_location_fact,
-        set_location_text_fn=set_location_text,
-    )
-
-
-
-
-def _store_declarative_fact_outcome(text: str, *, input_source: str = "typed") -> Optional[dict[str, object]]:
-    return service_store_declarative_fact_outcome(
-        text,
-        input_source=input_source,
-        is_declarative_info_fn=_is_declarative_info,
-        mem_should_store_fn=mem_should_store,
-        mem_add_fn=mem_add,
-        classify_store_fact_outcome_fn=_classify_store_fact_outcome,
-    )
-
-
-def _store_declarative_fact_reply(text: str, *, input_source: str = "typed") -> str:
-    return service_store_declarative_fact_reply(
-        text,
-        input_source=input_source,
-        store_declarative_fact_outcome_fn=_store_declarative_fact_outcome,
-        render_reply_fn=render_reply,
-    )
-
-
-def _is_saved_location_weather_query(text: str) -> bool:
-    return service_is_saved_location_weather_query(text, normalize_turn_text_fn=_normalize_turn_text)
-
-
-def _weather_for_saved_location() -> str:
-    return service_weather_for_saved_location(
-        get_saved_location_text_fn=get_saved_location_text,
-        tool_weather_fn=tool_weather,
-    )
-
-
-def _extract_weather_source_host(tool_result: str) -> str:
-    return service_extract_weather_source_host(tool_result)
-
-
-def _weather_location_label(weather_mode: str, location_value: str = "") -> str:
-    return service_weather_location_label(
-        weather_mode,
-        location_value,
-        get_saved_location_text_fn=get_saved_location_text,
-        coords_from_saved_location_fn=_coords_from_saved_location,
-    )
-
-
-def _make_weather_result_state(*, weather_mode: str, location_value: str = "", tool_result: str = "") -> dict:
-    return service_make_weather_result_state(
-        weather_mode=weather_mode,
-        location_value=location_value,
-        tool_result=tool_result,
-        make_conversation_state_fn=_make_conversation_state,
-        weather_location_label_fn=_weather_location_label,
-        extract_weather_source_host_fn=_extract_weather_source_host,
-        weather_source_host_fn=_weather_source_host,
-    )
-
-
-def _is_weather_meta_followup(text: str) -> bool:
-    return service_is_weather_meta_followup(text, normalize_turn_text_fn=_normalize_turn_text)
-
-
-def _is_weather_status_followup(text: str) -> bool:
-    return service_is_weather_status_followup(text, normalize_turn_text_fn=_normalize_turn_text)
-
-
-def _weather_meta_reply(state: dict) -> str:
-    return service_weather_meta_reply(state)
-
-
-def _weather_status_reply(state: dict) -> str:
-    return service_weather_status_reply(state)
-
-
-def _is_location_recall_query(text: str) -> bool:
-    return service_is_location_recall_query(text)
-
-
-def _location_recall_reply() -> str:
-    return service_location_recall_reply(
-        get_saved_location_text_fn=get_saved_location_text,
-        runtime_device_location_payload_fn=runtime_device_location_payload,
-        resolve_current_device_coords_fn=resolve_current_device_coords,
-    )
-
-
-def _is_location_name_query(text: str) -> bool:
-    return service_is_location_name_query(
-        text,
-        normalize_turn_text_fn=_normalize_turn_text,
-        uses_prior_reference_fn=_uses_prior_reference,
-    )
-
-
-def _location_name_reply() -> str:
-    return service_location_name_reply(
-        get_saved_location_text_fn=get_saved_location_text,
-        runtime_device_location_payload_fn=runtime_device_location_payload,
-        resolve_current_device_coords_fn=resolve_current_device_coords,
     )
 
 
@@ -2186,80 +1185,16 @@ def _conversation_active_subject(state: Optional[dict]) -> str:
 
 
 def _normalize_turn_text(text: str) -> str:
-    return service_conversation_followups.normalize_turn_text(text)
-
-
-def _looks_like_contextual_followup(text: str) -> bool:
-    return service_conversation_followups.looks_like_contextual_followup(
-        text,
-        normalize_turn_text_fn=_normalize_turn_text,
-        uses_prior_reference_fn=_uses_prior_reference,
-    )
-
-
-def _looks_like_contextual_continuation(text: str) -> bool:
-    return service_conversation_followups.looks_like_contextual_continuation(
-        text,
-        normalize_turn_text_fn=_normalize_turn_text,
-    )
-
-
-def _looks_like_profile_followup(text: str) -> bool:
-    return service_conversation_followups.looks_like_profile_followup(
-        text,
-        normalize_turn_text_fn=_normalize_turn_text,
-    )
-
-
-def _is_retrieval_meta_question(text: str) -> bool:
-    return service_conversation_followups.is_retrieval_meta_question(
-        text,
-        normalize_turn_text_fn=_normalize_turn_text,
-    )
-
-
-def _retrieval_meta_reply(state: dict) -> str:
-    return service_conversation_followups.retrieval_meta_reply(state)
-
-
-def _non_retrieval_resource_meta_reply() -> str:
-    return service_conversation_followups.non_retrieval_resource_meta_reply()
-
-
-def _extract_retrieval_result_index(text: str) -> Optional[int]:
-    return service_conversation_followups.extract_retrieval_result_index(
-        text,
-        normalize_turn_text_fn=_normalize_turn_text,
-    )
-
-
-def _looks_like_retrieval_followup(text: str) -> bool:
-    return service_conversation_followups.looks_like_retrieval_followup(
-        text,
-        normalize_turn_text_fn=_normalize_turn_text,
-        extract_retrieval_result_index_fn=_extract_retrieval_result_index,
-    )
-
-
-
-
+    normalized = str(text or "").lower()
+    normalized = re.sub(r"\s+", " ", normalized)
+    return normalized.strip()
 
 
 def _provider_name_from_tool(tool_name: str) -> str:
-    return service_conversation_followups.provider_name_from_tool(tool_name)
-
-
-def _make_retrieval_conversation_state(tool_name: str, query: str, tool_output: str) -> Optional[dict]:
-    return service_conversation_followups.make_retrieval_conversation_state(
-        tool_name,
-        query,
-        tool_output,
-        extract_urls_fn=_extract_urls,
-        make_conversation_state_fn=_make_conversation_state,
-        web_research_has_results_fn=WEB_RESEARCH_SESSION.has_results,
-        web_research_result_count_fn=WEB_RESEARCH_SESSION.result_count,
-        web_research_query_fn=lambda: WEB_RESEARCH_SESSION.query,
-    )
+    normalized = str(tool_name or "").strip().lower()
+    if normalized.startswith("web_"):
+        return normalized.replace("_", " ")
+    return normalized
 
 
 def _load_generated_queue_payload(limit: int = 12) -> dict:
@@ -2270,154 +1205,16 @@ def _load_generated_queue_payload(limit: int = 12) -> dict:
         return {}
 
 
-def _make_queue_status_conversation_state(tool_output: str) -> Optional[dict]:
-    return service_conversation_followups.make_queue_status_conversation_state(
-        tool_output,
-        load_generated_queue_payload_fn=_load_generated_queue_payload,
-        make_conversation_state_fn=_make_conversation_state,
-    )
-
-
-def _make_tool_conversation_state(tool_name: str, query: str, tool_output: str) -> Optional[dict]:
-    return service_conversation_followups.make_tool_conversation_state(
-        tool_name,
-        query,
-        tool_output,
-        make_retrieval_conversation_state_fn=_make_retrieval_conversation_state,
-        make_queue_status_conversation_state_fn=_make_queue_status_conversation_state,
-    )
-
-
-def _infer_post_reply_conversation_state(
-    routed_text: str,
-    *,
-    planner_decision: str,
-    tool: str = "",
-    tool_args: Optional[dict] = None,
-    tool_result: str = "",
-    turns: Optional[list[tuple[str, str]]] = None,
-    fallback_state: Optional[dict] = None,
-) -> Optional[dict]:
-    return service_conversation_followups.infer_post_reply_conversation_state(
-        routed_text,
-        planner_decision=planner_decision,
-        tool=tool,
-        tool_args=tool_args,
-        tool_result=tool_result,
-        turns=turns,
-        fallback_state=fallback_state,
-        make_tool_conversation_state_fn=_make_tool_conversation_state,
-        infer_profile_conversation_state_fn=_infer_profile_conversation_state,
-        is_location_recall_query_fn=_is_location_recall_query,
-        looks_like_location_recall_followup_fn=_looks_like_location_recall_followup,
-        make_conversation_state_fn=_make_conversation_state,
-    )
-
-
-def _retrieval_followup_reply(state: dict, text: str) -> tuple[str, Optional[dict]]:
-    return service_conversation_followups.retrieval_followup_reply(
-        state,
-        text,
-        extract_retrieval_result_index_fn=_extract_retrieval_result_index,
-        make_retrieval_conversation_state_fn=_make_retrieval_conversation_state,
-        looks_like_retrieval_followup_fn=_looks_like_retrieval_followup,
-        tool_web_gather_fn=tool_web_gather,
-        tool_web_research_continue_fn=lambda: tool_web_research("", continue_mode=True),
-        web_research_query_fn=lambda: WEB_RESEARCH_SESSION.query,
-    )
-
-
-def _is_queue_status_reason_followup(text: str) -> bool:
-    return service_conversation_followups.is_queue_status_reason_followup(
-        text,
-        normalize_turn_text_fn=_normalize_turn_text,
-    )
-
-
-def _queue_status_reason_reply(state: dict) -> str:
-    return service_conversation_followups.queue_status_reason_reply(state)
-
-
-def _is_queue_status_report_followup(text: str) -> bool:
-    return service_conversation_followups.is_queue_status_report_followup(
-        text,
-        normalize_turn_text_fn=_normalize_turn_text,
-    )
-
-
-def _queue_status_report_reply(state: dict) -> str:
-    return service_conversation_followups.queue_status_report_reply(state)
-
-
-def _is_queue_status_seam_followup(text: str) -> bool:
-    return service_conversation_followups.is_queue_status_seam_followup(
-        text,
-        normalize_turn_text_fn=_normalize_turn_text,
-    )
-
-
-def _queue_status_seam_reply(state: dict) -> str:
-    return service_conversation_followups.queue_status_seam_reply(state)
-
-
-
-
-def _looks_like_location_recall_followup(session_turns: list[tuple[str, str]], text: str) -> bool:
-    return service_conversation_followups.looks_like_location_recall_followup(
-        session_turns,
-        text,
-        looks_like_contextual_continuation_fn=_looks_like_contextual_continuation,
-    )
-
-
-def _retrieval_status_reply(text: str) -> str:
-    return service_retrieval_status_reply(text)
-
-
 def set_location_coords(value: str) -> str:
-    parsed = _parse_lat_lon(value)
-    if not parsed:
-        return "Usage: location coords <lat,lon>"
-    lat, lon = parsed
-    try:
-        set_core_state(DEFAULT_STATEFILE, "location_coords", {"lat": lat, "lon": lon})
-    except Exception:
-        return "Failed to save current location coordinates."
-    return f"Saved current location coordinates: {lat},{lon}"
+    return service_set_location_coords(value, set_core_state_fn=set_core_state, default_statefile=DEFAULT_STATEFILE)
 
 
 def get_weather_for_location(lat: float, lon: float) -> str:
-    headers = {
-        "User-Agent": "Nova/1.0 (local assistant)",
-        "Accept": "application/geo+json",
-    }
-
-    point_url = f"https://api.weather.gov/points/{lat},{lon}"
-    r1 = requests.get(point_url, headers=headers, timeout=20)
-    r1.raise_for_status()
-    point_data = r1.json()
-    forecast_url = ((point_data.get("properties") or {}).get("forecast") or "").strip()
-    if not forecast_url:
-        return "I reached the weather service, but no forecast URL was returned for that location."
-
-    r2 = requests.get(forecast_url, headers=headers, timeout=20)
-    r2.raise_for_status()
-    forecast_data = r2.json()
-
-    periods = ((forecast_data.get("properties") or {}).get("periods") or [])
-    if not periods:
-        return "I reached the weather service, but no forecast periods were returned."
-
-    now = periods[0]
-    return (
-        f"{now.get('name', 'Current')}: {now.get('temperature', '?')}°{now.get('temperatureUnit', 'F')}, "
-        f"{now.get('shortForecast', 'unknown')}. Wind {now.get('windSpeed', '?')} {now.get('windDirection', '?')}. "
-        f"[source: api.weather.gov]"
-    )
+    return service_get_weather_for_location(lat, lon)
 
 
 def _need_confirmed_location_message() -> str:
-    return "I have a weather tool now, but I still need a confirmed location or coordinates for the current device."
+    return service_need_confirmed_location_message()
 
 
 def tool_weather(location: str):
@@ -2839,208 +1636,29 @@ def save_learned_facts(data: dict) -> None:
         pass
 
 
-def _clean_fact_value(raw: str, max_words: int = 4) -> str:
-    t = re.sub(r"\s+", " ", (raw or "").strip()).strip(" .,:;!?\"'")
-    if not t:
-        return ""
-    words = t.split()
-    t = " ".join(words[:max_words])
-    return t[:80]
-
-
-def _title_name(s: str) -> str:
-    out = _clean_fact_value(s)
-    if not out:
-        return ""
-    return " ".join(w[:1].upper() + w[1:] for w in out.split())
-
-
-
-
-
 def get_learned_fact(key: str, default: str = "") -> str:
     data = load_learned_facts()
     v = str(data.get(key) or "").strip()
     return v or default
 
 
-def learn_from_user_correction(text: str) -> tuple[bool, str]:
-    return service_learn_from_user_correction(
-        text,
-        load_learned_facts_fn=load_learned_facts,
-        get_learned_fact_fn=get_learned_fact,
-        save_learned_facts_fn=save_learned_facts,
-        set_active_user_fn=set_active_user,
-        mem_enabled_fn=mem_enabled,
-        mem_add_fn=mem_add,
-    )
-
-
-def _speaker_matches_developer() -> bool:
-    active_user = (get_active_user() or "").strip().lower()
-    if not active_user:
-        return False
-    developer_name = get_learned_fact("developer_name", "Gustavo Uribe").strip().lower()
-    developer_nickname = get_learned_fact("developer_nickname", "Gus").strip().lower()
-    developer_first = developer_name.split()[0] if developer_name else ""
-    return active_user in {developer_name, developer_nickname, developer_first}
-
-
-def _learn_self_identity_binding(text: str) -> tuple[bool, str]:
-    raw = (text or "").strip()
-    low = raw.lower()
-    if not raw:
-        return False, ""
-
-    m = re.match(r"^i\s+am\s+([a-z][a-z '\-]{1,40})[.!?]*$", low)
-    if not m:
-        return False, ""
-
-    person_name = _title_name(m.group(1))
-    if not person_name or _looks_invalid_person_token(person_name):
-        return False, ""
-
-    developer_name = get_learned_fact("developer_name", "Gustavo Uribe")
-    developer_nickname = get_learned_fact("developer_nickname", "Gus")
-    developer_first = developer_name.split()[0] if developer_name else ""
-
-    if person_name.lower() in {developer_nickname.lower(), developer_first.lower()}:
-        set_active_user(developer_name or person_name)
-        return True, "Understood. Identity confirmed: you are my developer."
-
-    if person_name.lower() == developer_name.lower():
-        set_active_user(person_name)
-        return True, "Understood. Identity confirmed: you are my developer."
-
-    return False, ""
-
-
-def _learn_contextual_self_facts(text: str, input_source: str = "typed") -> tuple[bool, str]:
-    raw = (text or "").strip()
-    low = raw.lower()
-    if not raw:
-        return False, ""
-
-    learned: list[str] = []
-    if _speaker_matches_developer():
-        color_match = re.search(r"\bmy\s+fav(?:ou?rite|ortie)\s+colors?\s+are\s+(.+)$", raw, flags=re.I)
-        if color_match and mem_enabled():
-            colors = _extract_color_preferences_from_text(color_match.group(1))
-            if colors:
-                pretty = ", ".join(colors[:-1]) + (f", and {colors[-1]}" if len(colors) > 1 else colors[0])
-                mem_add("identity", input_source, f"Gus favorite colors are {pretty}.")
-                learned.append(f"Gus favorite colors are {pretty}")
-
-    if not learned:
-        return False, ""
-    return True, "Understood. I learned: " + "; ".join(learned) + "."
-
-
-def remember_name_origin(story_text: str) -> str:
-    story = re.sub(r"\s+", " ", (story_text or "").strip())
-    if len(story) < 30:
-        return "Please provide a longer origin story so I can store it accurately."
-
-    profile = load_identity_profile()
-    profile["name_origin"] = story
-    profile["updated_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
-    save_identity_profile(profile)
-
-    if mem_enabled():
-        try:
-            mem_add("identity", "typed", f"nova_name_origin: {story[:1400]}")
-        except Exception:
-            pass
-
-    return "Stored. I will remember this as the story behind my name."
-
-
-def get_name_origin_story() -> str:
-    p = load_identity_profile()
-    story = str(p.get("name_origin") or "").strip()
-    if story:
-        return story
-
-    # Fallback to memory recall if identity file has not been set yet.
-    # Only accept explicitly tagged identity lines to avoid polluted memory facts.
-    try:
-        recall = mem_recall("nova name origin story creator gus")
-        if recall:
-            for raw in str(recall).splitlines():
-                s = (raw or "").strip().lstrip("-*\u2022").strip()
-                if not s:
-                    continue
-                low = s.lower()
-                if "nova_name_origin:" in low:
-                    out = s.split(":", 1)[1].strip() if ":" in s else ""
-                    # Ignore obviously wrong identity contamination.
-                    if out and "my name is gus" not in out.lower() and "name: gus" not in out.lower():
-                        return out[:2000]
-    except Exception:
-        pass
-    return ""
-
-
-def identity_context_for_prompt() -> str:
-    p = load_identity_profile()
-    learned = load_learned_facts()
-    lines = []
-    story = str(p.get("name_origin") or "").strip()
-    if story:
-        lines.append("Identity fact: The assistant's name origin story is user-defined.")
-        lines.append(f"Name origin story: {story[:1400]}")
-    assistant_name = str(learned.get("assistant_name") or "").strip()
-    developer_name = str(learned.get("developer_name") or "").strip()
-    developer_nickname = str(learned.get("developer_nickname") or "").strip()
-    if assistant_name:
-        lines.append(f"Identity fact: assistant_name={assistant_name}")
-    if developer_name:
-        lines.append(f"Identity fact: developer_name={developer_name}")
-    if developer_nickname:
-        lines.append(f"Identity fact: developer_nickname={developer_nickname}")
-    if not lines:
-        return ""
-    return "\n".join(lines)
-
-
-def extract_name_origin_teach_text(text: str) -> str:
-    raw = (text or "").strip()
-    if not raw:
-        return ""
-    low = raw.lower()
-
-    # Preferred explicit trigger.
-    if "remember this" in low and any(cue in low for cue in (
-        "nova",
-        "name",
-        "story behind your name",
-        "story behing your name",
-        "gus gave you your name",
-        "gus named you",
-    )):
-        idx = low.find("remember this")
-        candidate = raw[idx:]
-        candidate = re.sub(r"(?is)^\s*remember\s+this\s*[:.\-]*\s*", "", candidate).strip()
-        return candidate
-
-    # Long origin-story style input should also be treated as teach content.
-    cues = [
-        "symbol of new light",
-        "new beginnings",
-        "story behind your name",
-        "nova was given",
-        "in astronomy, a nova occurs",
-    ]
-    if any(c in low for c in cues) and len(raw) >= 120:
-        return raw
-
-    return ""
-
-
 def build_learning_context_details(query: str) -> dict:
     blocks = []
+    identity_block = service_identity_context_for_prompt(
+        load_identity_profile_fn=load_identity_profile,
+        load_learned_facts_fn=load_learned_facts,
+    )
+    operational_identity_block = service_operational_identity_context_for_prompt(
+        load_capabilities_fn=load_capabilities,
+    )
     kb_block = kb_search(query)
     mem_block = mem_recall(query)
+
+    if identity_block:
+        blocks.append(identity_block)
+
+    if operational_identity_block:
+        blocks.append(operational_identity_block)
 
     if kb_block:
         blocks.append(kb_block)
@@ -3053,8 +1671,12 @@ def build_learning_context_details(query: str) -> dict:
         return {
             "context": "",
             "knowledge_used": False,
+            "identity_used": False,
+            "operational_identity_used": False,
             "memory_used": False,
             "knowledge_chars": 0,
+            "identity_chars": 0,
+            "operational_identity_chars": 0,
             "memory_chars": 0,
         }
 
@@ -3062,8 +1684,12 @@ def build_learning_context_details(query: str) -> dict:
     return {
         "context": context,
         "knowledge_used": bool(kb_block),
+        "identity_used": bool(identity_block),
+        "operational_identity_used": bool(operational_identity_block),
         "memory_used": bool(mem_block),
         "knowledge_chars": len(kb_block or ""),
+        "identity_chars": len(identity_block or ""),
+        "operational_identity_chars": len(operational_identity_block or ""),
         "memory_chars": len(mem_block or ""),
     }
 
@@ -3072,11 +1698,17 @@ def build_learning_context(query: str) -> str:
     return str(build_learning_context_details(query).get("context") or "")
 
 
-def _render_chat_context(turns: list[tuple[str, str]], max_chars: int = 1800) -> str:
+def _render_chat_context(turns: list[tuple[str, str]], max_chars: int = 1800, current_text: str = "") -> str:
     if not turns:
         return ""
     lines = []
-    for role, text in turns[-CHAT_CONTEXT_TURNS:]:
+    prior_turns = list(turns)
+    current = re.sub(r"\s+", " ", str(current_text or "").strip())
+    if prior_turns and prior_turns[-1][0] == "user":
+        latest = re.sub(r"\s+", " ", str(prior_turns[-1][1] or "").strip())
+        if current and latest == current:
+            prior_turns = prior_turns[:-1]
+    for role, text in prior_turns[-CHAT_CONTEXT_TURNS:]:
         role_name = "User" if role == "user" else "Assistant"
         t = re.sub(r"\s+", " ", (text or "").strip())
         if not t:
@@ -3129,15 +1761,13 @@ def build_fallback_context_details(
     *,
     conversation_state: dict | None = None,
     pending_action: dict | None = None,
-    include_runtime_context: bool = True,
     include_state_context: bool = True,
     include_chat_context: bool = True,
 ) -> dict[str, Any]:
     session_turns = turns if isinstance(turns, list) else []
     learning_details = build_learning_context_details(query)
     learning_context = str(learning_details.get("context") or "")
-    chat_context = _render_chat_context(session_turns) if bool(include_chat_context) else ""
-    runtime_context = _runtime_self_context_for_chat() if bool(include_runtime_context) else ""
+    chat_context = _render_chat_context(session_turns, current_text=query) if bool(include_chat_context) else ""
     state_context = (
         _render_session_state_context(
             conversation_state=conversation_state,
@@ -3148,270 +1778,29 @@ def build_fallback_context_details(
     )
 
     context_blocks: list[str] = []
-    if learning_context:
-        context_blocks.append(learning_context)
-    if runtime_context:
-        context_blocks.append(runtime_context)
+    if chat_context:
+        context_blocks.append("CURRENT CHAT CONTEXT (transcript evidence; answer the current user turn):\n" + chat_context)
     if state_context:
         context_blocks.append(state_context)
-    if chat_context:
-        context_blocks.append("CURRENT CHAT CONTEXT:\n" + chat_context)
+    if learning_context:
+        context_blocks.append(learning_context)
 
     return {
         "context": "\n\n".join(context_blocks).strip()[:6000],
         "learning_context": learning_context,
-        "runtime_context": runtime_context,
+        "runtime_context": "",
         "state_context": state_context,
         "chat_context": chat_context,
         "session_fact_sheet": "",
         "memory_used": bool(learning_details.get("memory_used")),
+        "identity_used": bool(learning_details.get("identity_used")),
+        "operational_identity_used": bool(learning_details.get("operational_identity_used")),
         "knowledge_used": bool(learning_details.get("knowledge_used")),
         "memory_chars": int(learning_details.get("memory_chars") or 0),
+        "identity_chars": int(learning_details.get("identity_chars") or 0),
+        "operational_identity_chars": int(learning_details.get("operational_identity_chars") or 0),
         "knowledge_chars": int(learning_details.get("knowledge_chars") or 0),
     }
-
-
-def _runtime_self_context_for_chat(max_chars: int = 1800) -> str:
-    """Ambient self context for model chat; this does not own or route the turn."""
-    try:
-        assistant_name = str(get_learned_fact("assistant_name", "Nova") or "Nova").strip() or "Nova"
-        identity_line = describe_runtime_identity(assistant_name)
-    except Exception:
-        identity_line = "I am Nova, a local AI runtime."
-
-    lines = [
-        "NOVA RUNTIME CONTEXT (ambient; use only if relevant to the user's turn):",
-        identity_line,
-    ]
-    try:
-        work_trees_payload = _self_report_work_trees_payload(limit=16)
-        status_payload = _self_report_local_status_payload(work_trees_payload)
-        report_payload = GROUNDED_SELF_REPORT_SERVICE.build_payload(status_payload, work_trees_payload)
-        runtime = report_payload.get("runtime") if isinstance(report_payload.get("runtime"), dict) else {}
-        release = report_payload.get("release") if isinstance(report_payload.get("release"), dict) else {}
-        memory = report_payload.get("memory") if isinstance(report_payload.get("memory"), dict) else {}
-        ollama = report_payload.get("ollama") if isinstance(report_payload.get("ollama"), dict) else {}
-        attention = GROUNDED_SELF_REPORT_SERVICE.build_operator_attention(report_payload)
-        lines.extend(
-            [
-                (
-                    "State: "
-                    f"work_tree={report_payload.get('work_tree_truth_status', 'unknown')}, "
-                    f"open_tasks={report_payload.get('work_tree_open_task_count', 'unknown')}, "
-                    f"runtime core={runtime.get('core', 'unknown')}, guard={runtime.get('guard', 'unknown')}, "
-                    f"webui={runtime.get('webui', 'unknown')}."
-                ),
-                (
-                    "Services: "
-                    f"ollama_chat_ready={ollama.get('chat_ready', 'unknown')}, "
-                    f"memory_enabled={memory.get('enabled', 'unknown')}, "
-                    f"release_readiness={release.get('readiness', 'unknown')}, "
-                    f"artifact_stale={release.get('latest_artifact_stale', 'unknown')}."
-                ),
-            ]
-        )
-        if isinstance(attention, dict) and bool(attention.get("active")):
-            lines.append(f"Current attention: {str(attention.get('message') or '').strip()}")
-    except Exception as exc:
-        lines.append(f"Live state summary unavailable: {str(exc)[:160]}")
-    return "\n".join(line for line in lines if str(line or "").strip())[:max_chars]
-
-
-def _build_session_fact_sheet(turns: list[tuple[str, str]], max_chars: int = 1200) -> str:
-    return service_build_session_fact_sheet(
-        turns,
-        max_chars=max_chars,
-        get_learned_fact_fn=get_learned_fact,
-        get_active_user_fn=get_active_user,
-        get_name_origin_story_fn=get_name_origin_story,
-        get_saved_location_text_fn=get_saved_location_text,
-        extract_color_preferences_fn=_extract_color_preferences,
-        extract_developer_color_preferences_fn=_extract_developer_color_preferences,
-        extract_developer_color_preferences_from_memory_fn=_extract_developer_color_preferences_from_memory,
-        developer_is_bilingual_fn=_developer_is_bilingual,
-        developer_is_bilingual_from_memory_fn=_developer_is_bilingual_from_memory,
-        extract_animal_preferences_fn=_extract_animal_preferences,
-    )
-
-
-
-def _content_tokens(text: str) -> list[str]:
-    return service_content_tokens(text)
-
-
-def _is_risky_claim_sentence(sentence: str) -> bool:
-    return service_is_risky_claim_sentence(sentence)
-
-
-def _sentence_supported_by_evidence(sentence: str, evidence_text: str, tool_context: str = "") -> bool:
-    return service_sentence_supported_by_evidence(
-        sentence,
-        evidence_text,
-        tool_context,
-        is_risky_claim_sentence_fn=_is_risky_claim_sentence,
-        content_tokens_fn=_content_tokens,
-    )
-
-
-def _apply_claim_gate(reply: str, evidence_text: str = "", tool_context: str = "") -> tuple[str, bool, str]:
-    return service_apply_claim_gate(
-        reply,
-        evidence_text,
-        tool_context,
-        sentence_supported_by_evidence_fn=_sentence_supported_by_evidence,
-        truthful_limit_reply_fn=_truthful_limit_reply,
-    )
-
-
-def _uses_prior_reference(user_text: str) -> bool:
-    return service_uses_prior_reference(user_text)
-
-
-def _is_declarative_info(text: str) -> bool:
-    return service_is_declarative_info(text)
-
-
-def _is_explicit_request(text: str) -> bool:
-    """Return True when the user is asking for an action or information.
-    Heuristics: questions (who/what/when/where/why/how), starts with a verb (imperative), contains polite verbs.
-    """
-    t = (text or "").strip()
-    if not t:
-        return False
-    low = t.lower().strip()
-    # explicit question words
-    qwords = ["who", "what", "when", "where", "why", "how", "which"]
-    if low.endswith("?"):
-        return True
-    if low in qwords:
-        return True
-    if any(low.startswith(w + " ") for w in qwords):
-        return True
-    # polite request patterns
-    if any(kw in low for kw in ["please", "could you", "can you", "would you", "show me", "find", "search", "do you"]):
-        return True
-    # imperative: starts with a verb like 'open', 'run', 'create', 'save', 'search'
-    verbs = ["open", "run", "create", "save", "search", "find", "read", "show", "list", "fetch", "gather"]
-    first = low.split()[0]
-    if first in verbs:
-        return True
-    return False
-
-
-def _split_turn_clauses(text: str) -> list[str]:
-    raw = str(text or "").strip()
-    if not raw:
-        return []
-    pieces: list[str] = []
-    for chunk in re.split(r"[.!?;]+", raw):
-        fragment = str(chunk or "").strip(" \t\r\n\"'")
-        if not fragment:
-            continue
-        subparts = re.split(
-            r"(?:,\s*|\b(?:and|but)\s+)(?=(?:can|could|would|do|does|did|what|how|why|where|when|which|please|show|tell|give|check|find|search|look|fetch|gather)\b)",
-            fragment,
-            flags=re.I,
-        )
-        for subpart in subparts:
-            cleaned = str(subpart or "").strip(" \t\r\n\"'")
-            if cleaned:
-                pieces.append(cleaned)
-    return pieces
-
-
-def _is_statement_like_clause(text: str) -> bool:
-    raw = str(text or "").strip()
-    if not raw:
-        return False
-    low = raw.lower()
-    if _is_explicit_request(raw) or _is_explicit_command_like(raw):
-        return False
-    if _is_declarative_info(raw):
-        return True
-    if low.startswith(("i wonder if", "i'm wondering if", "i am wondering if")):
-        return False
-    if len(raw.split()) < 3:
-        return False
-    subject_markers = ("the ", "this ", "that ", "it ", "i ", "we ", "you ", "he ", "she ", "they ")
-    verb_markers = (" is ", " are ", " was ", " were ", " looks ", " look ", " seems ", " seem ", " feels ", " feel ", " stays ", " stay ", " remains ", " remain ", " has ", " have ")
-    return low.startswith(subject_markers) and any(marker in low for marker in verb_markers)
-
-
-def _looks_like_correction_turn(text: str) -> bool:
-    return service_looks_like_correction_turn(text)
-
-
-def _looks_like_continue_thread_turn(
-    text: str,
-    *,
-    turns: Optional[list[tuple[str, str]]] = None,
-    active_subject: str = "",
-    pending_action: Optional[dict] = None,
-) -> bool:
-    raw = str(text or "").strip()
-    if not raw:
-        return False
-    normalized_active_subject = str(active_subject or "").strip()
-    pending = pending_action if isinstance(pending_action, dict) else {}
-    assistant_turn = _last_assistant_turn_text(list(turns or []))
-    thread_active = bool(
-        normalized_active_subject
-        or str(pending.get("kind") or "").strip()
-        or assistant_turn
-    )
-    if not thread_active:
-        return False
-    if _looks_like_contextual_followup(raw):
-        return True
-    if _extract_retrieval_result_index(raw) is not None:
-        return True
-    if _looks_like_affirmative_followup(raw):
-        return True
-    return bool(assistant_turn) and _assistant_offered_weather_lookup(assistant_turn) and _looks_like_affirmative_followup(raw)
-
-
-def _assistant_offered_weather_lookup(text: str) -> bool:
-    normalized = _normalize_turn_text(text)
-    if not normalized:
-        return False
-    return any(phrase in normalized for phrase in (
-        "check the weather for you",
-    ))
-
-
-def _classify_turn_acts(
-    text: str,
-    *,
-    turns: Optional[list[tuple[str, str]]] = None,
-    active_subject: str = "",
-    pending_action: Optional[dict] = None,
-) -> list[str]:
-    return service_classify_turn_acts(
-        text,
-        turns=turns,
-        active_subject=active_subject,
-        pending_action=pending_action,
-        split_turn_clauses_fn=_split_turn_clauses,
-        is_explicit_command_like_fn=_is_explicit_command_like,
-        looks_like_correction_turn_fn=_looks_like_correction_turn,
-        is_explicit_request_fn=_is_explicit_request,
-        is_statement_like_clause_fn=_is_statement_like_clause,
-        looks_like_continue_thread_turn_fn=_looks_like_continue_thread_turn,
-        looks_like_answer_to_assistant_prompt_turn_fn=lambda raw, **kwargs: service_looks_like_answer_to_assistant_prompt_turn(
-            raw,
-            last_assistant_turn_text_fn=_last_assistant_turn_text,
-            **kwargs,
-        ),
-    )
-
-
-def _looks_like_mixed_info_request_turn(text: str) -> bool:
-    return "mixed" in _classify_turn_acts(text)
-
-
-def _mixed_info_request_clarify_reply(text: str) -> str:
-    del text
-    return ""
 
 
 def _extract_urls(text: str) -> list[str]:
@@ -3419,32 +1808,7 @@ def _extract_urls(text: str) -> list[str]:
 
 
 def _strip_invocation_prefix(text: str) -> str:
-    """Normalize inputs like 'nova, ...' so routing sees the actual request."""
-    t = (text or "").strip()
-    if not t:
-        return t
-
-    m = re.match(r"^nova\b[\s,:\-]*(.*)$", t, flags=re.I)
-    if not m:
-        return t
-
-    rest = (m.group(1) or "").strip()
-    if not rest:
-        return ""
-
-    # Only strip when it looks like direct address/invocation.
-    starter = (rest.split(maxsplit=1)[0] or "").lower()
-    invoke_starters = {
-        "what", "which", "who", "where", "when", "why", "how",
-        "can", "could", "would", "do", "does", "did", "is", "are",
-        "say", "tell", "show", "find", "search", "read", "list", "give",
-        "web", "screen", "camera", "health", "inspect", "capabilities",
-        "patch", "kb", "mem", "teach",
-    }
-    if starter in invoke_starters:
-        return rest
-
-    return t
+    return service_strip_invocation_prefix(text)
 
 
 def _normalize_domain_input(value: str) -> str:
@@ -3574,11 +1938,18 @@ def _resolve_research_provider(candidates: list[str], *, default_tool: str = "we
 
 
 
-def probe_search_endpoint(endpoint: str = "", *, timeout: float = 2.5, persist_repair: bool = False) -> dict:
+def probe_search_endpoint(
+    endpoint: str = "",
+    *,
+    timeout: float = 2.5,
+    persist_repair: bool = False,
+    candidate_limit: int | None = None,
+) -> dict:
     return service_probe_search_endpoint(
         endpoint,
         timeout=timeout,
         persist_repair=persist_repair,
+        candidate_limit=candidate_limit,
         get_search_endpoint_fn=get_search_endpoint,
         auto_repair_search_endpoint_fn=auto_repair_search_endpoint,
         requests_get_fn=requests.get,
@@ -3590,614 +1961,6 @@ def toggle_search_provider() -> str:
     current = get_search_provider()
     target = "searxng" if current == "html" else "html"
     return set_search_provider(target)
-
-
-def _build_greeting_reply(user_text: str, active_user: Optional[str] = None) -> Optional[str]:
-    return service_build_greeting_reply(
-        user_text,
-        active_user=active_user,
-        default_local_user_id_fn=_default_local_user_id,
-    )
-
-
-def _quick_smalltalk_reply(user_text: str, active_user: Optional[str] = None) -> Optional[str]:
-    t = (user_text or "").strip().lower()
-    if not t:
-        return "Okay."
-
-    who = str(active_user or "").strip()
-    if who.lower() in {"runner", "local-user", "localuser", "unknown", "local"}:
-        who = ""
-
-    greeting = _build_greeting_reply(user_text, active_user=who)
-    if greeting:
-        return greeting
-
-    normalized = re.sub(r"[^a-z0-9 ]+", " ", t)
-    normalized = re.sub(r"\s+", " ", normalized).strip()
-    if normalized.startswith("how are you doing") or normalized.startswith("how is your day going") or normalized.startswith("are you doing alright today nova"):
-        return f"Hey {who}. I'm doing good today. What's going on?" if who else "Hey. I'm doing good today. What's going on?"
-
-    if "thank you" in t or t in {"thanks", "thx"}:
-        return "You're welcome."
-
-    if any(p in t for p in ["ready to get to work", "ready to work", "ready when you are"]):
-        return "Ready when you are. What's the task for today?"
-
-    if any(p in t for p in ["who is your developer", "who's your developer"]):
-        return "My developer is Gustavo (Gus). He created me."
-
-    return None
-
-
-def _extract_color_preferences(session_turns: list[tuple[str, str]]) -> list[str]:
-    return service_extract_color_preferences(session_turns, known_colors=KNOWN_COLORS)
-
-
-def _extract_color_preferences_from_text(text: str) -> list[str]:
-    return service_extract_color_preferences_from_text(text, known_colors=KNOWN_COLORS)
-
-
-def _extract_color_preferences_from_memory() -> list[str]:
-    return service_extract_color_preferences_from_memory(
-        mem_enabled_fn=mem_enabled,
-        mem_recall_fn=mem_recall,
-        extract_color_preferences_from_text_fn=_extract_color_preferences_from_text,
-    )
-
-
-def _extract_developer_color_preferences(session_turns: list[tuple[str, str]]) -> list[str]:
-    aliases = {"gus", "gustavo", "developer", "dev"}
-    out = []
-    seen = set()
-    for role, text in session_turns:
-        if role != "user":
-            continue
-        t = (text or "").lower().strip()
-        if not any(a in t for a in aliases):
-            continue
-        if not any(k in t for k in ["color", "colors", "favourite", "favorite", "likes", "like", "bilingual", "english", "spanish"]):
-            continue
-        for w in re.findall(r"[a-z]{3,20}", t):
-            if w in KNOWN_COLORS and w not in seen:
-                seen.add(w)
-                out.append(w)
-    return out
-
-
-def _developer_fact_memory_probe(query: str) -> str:
-    if not mem_enabled():
-        return ""
-
-    probe = mem_recall(query)
-    if probe:
-        return probe
-
-    active_user = (get_active_user() or "").strip()
-    fallback_user = _default_local_user_id()
-    if not active_user or not fallback_user or active_user.lower() == fallback_user.lower():
-        return ""
-
-    set_active_user(None)
-    try:
-        return mem_recall(query)
-    finally:
-        set_active_user(active_user)
-
-
-def _extract_developer_color_preferences_from_memory() -> list[str]:
-    if not mem_enabled():
-        return []
-    probe = _developer_fact_memory_probe("gustavo gus developer favorite colors color preference")
-    if not probe:
-        return []
-
-    out = []
-    seen = set()
-    lines = [ln.strip().lower() for ln in probe.splitlines() if ln.strip()]
-    candidate_lines = [
-        ln for ln in lines
-        if any(a in ln for a in ["gus", "gustavo", "developer"])
-        and any(k in ln for k in ["color", "colors", "favorite", "favourite", "likes", "like"])
-    ]
-    source = "\n".join(candidate_lines) if candidate_lines else probe
-    for w in re.findall(r"[a-z]{3,20}", source.lower()):
-        if w in KNOWN_COLORS and w not in seen:
-            seen.add(w)
-            out.append(w)
-    return out
-
-
-def _is_developer_color_lookup_request(user_text: str) -> bool:
-    t = (user_text or "").lower()
-    if not any(k in t for k in ["color", "colors"]):
-        return False
-    return any(k in t for k in ["developer", "gus", "gustavo", "he", "his"])
-
-
-def _is_developer_bilingual_request(user_text: str) -> bool:
-    t = (user_text or "").lower()
-    if not any(k in t for k in ["developer", "gus", "gustavo", "he", "his"]):
-        return False
-    return any(k in t for k in ["bilingual", "english", "spanish", "languages", "language"])
-
-
-def _developer_is_bilingual(session_turns: list[tuple[str, str]]) -> Optional[bool]:
-    aliases = ["developer", "gus", "gustavo"]
-    for role, text in reversed(session_turns):
-        if role != "user":
-            continue
-        t = (text or "").lower()
-        if not any(a in t for a in aliases):
-            continue
-        if "bilingual" in t and ("english" in t or "spanish" in t):
-            return True
-        if "not bilingual" in t:
-            return False
-    return None
-
-
-def _developer_is_bilingual_from_memory() -> Optional[bool]:
-    if not mem_enabled():
-        return None
-    probe = _developer_fact_memory_probe("is gustavo bilingual english spanish developer")
-    low = (probe or "").lower()
-    if not low:
-        return None
-    if ("gus" in low or "gustavo" in low or "developer" in low) and "bilingual" in low and ("english" in low or "spanish" in low):
-        return True
-    if "not bilingual" in low:
-        return False
-    return None
-
-
-def _recent_turn_mentions(turns: list[tuple[str, str]], keywords: list[str], limit: int = 6) -> bool:
-    keys = [str(k or "").strip().lower() for k in keywords if str(k or "").strip()]
-    if not keys:
-        return False
-    for role, text in reversed(turns[-max(1, int(limit)):]):
-        low = (text or "").strip().lower()
-        if not low:
-            continue
-        if any(k in low for k in keys):
-            return True
-    return False
-
-
-def _strip_confirmation_prefix(text: str) -> str:
-    cleaned = re.sub(r"\s+", " ", (text or "").strip())
-    patterns = [
-        r"^(?:yes|yeah|yep|correct|exactly|true|right)\b[\s,!.:-]*",
-        r"^(?:you(?:'| a)?re\s+right|your\s+correct|that(?:'| i)?s\s+right)\b[\s,!.:-]*",
-        r"^(?:yes\s+)?nova\b[\s,!.:-]*",
-    ]
-    changed = True
-    while cleaned and changed:
-        changed = False
-        for pattern in patterns:
-            newer = re.sub(pattern, "", cleaned, flags=re.I).strip()
-            if newer != cleaned:
-                cleaned = newer
-                changed = True
-    return cleaned
-
-
-def _extract_work_role_parts(raw: str) -> list[str]:
-    text = _strip_confirmation_prefix(raw)
-    low = text.lower()
-    role_parts: list[str] = []
-
-    if "full stack developer" in low:
-        role_parts.append("full stack developer")
-
-    work_match = re.search(r"\bworks?\s+as\s+(.+)$", text, flags=re.I)
-    if work_match:
-        work_text = work_match.group(1)
-        work_text = re.sub(r"^[^A-Za-z0-9]+", "", work_text).strip(" .,!?:;")
-        if work_text:
-            role_parts.append(work_text)
-
-    normalized_roles: list[str] = []
-    seen_roles = set()
-    for role in role_parts:
-        cleaned = re.sub(r"\s+", " ", str(role or "").strip())
-        if not cleaned:
-            continue
-        key = cleaned.lower()
-        if key in seen_roles:
-            continue
-        seen_roles.add(key)
-        normalized_roles.append(cleaned)
-    return normalized_roles
-
-
-def _store_developer_role_facts(roles: list[str], input_source: str = "typed") -> tuple[bool, str]:
-    if not roles or not mem_enabled():
-        return False, ""
-    if len(roles) == 1:
-        role_sentence = f"Gus works as a {roles[0]}."
-    else:
-        role_sentence = f"Gus works as a {roles[0]} and {roles[1]}."
-    mem_add("identity", input_source, role_sentence)
-    return True, role_sentence.rstrip(".")
-
-
-def _extract_developer_roles_from_memory() -> list[str]:
-    if not mem_enabled():
-        return []
-    probe = _developer_fact_memory_probe("gus gustavo developer works as role job title")
-    if not probe:
-        return []
-    roles: list[str] = []
-    seen = set()
-    for line in probe.splitlines():
-        match = re.search(r"\bworks?\s+as\s+(.+?)(?:[.!?]|$)", line, flags=re.I)
-        if not match:
-            continue
-        role_text = re.sub(r"^(?:a|an)\s+", "", match.group(1).strip(), flags=re.I)
-        parts = re.split(r"\s+(?:and|&)\s+|\s*,\s*", role_text)
-        for part in parts:
-            cleaned = re.sub(r"\s+", " ", part).strip(" .,!?:;")
-            if not cleaned:
-                continue
-            key = cleaned.lower()
-            if key in seen:
-                continue
-            seen.add(key)
-            roles.append(cleaned)
-    return roles
-
-
-def _format_fact_series(items: list[str]) -> str:
-    values = [str(item or "").strip() for item in items if str(item or "").strip()]
-    if not values:
-        return ""
-    if len(values) == 1:
-        return values[0]
-    if len(values) == 2:
-        return f"{values[0]} and {values[1]}"
-    return ", ".join(values[:-1]) + f", and {values[-1]}"
-
-
-def _is_developer_profile_request(user_text: str) -> bool:
-    t = (user_text or "").strip().lower()
-    if not t:
-        return False
-
-    creator_cues = [
-        "who is your developer", "who's your developer", "who is your creator", "who's your creator",
-        "who created you", "your creator", "is gus your creator", "so gus is your creator",
-        "is gustavo your creator", "is he your creator", "creator is gus", "creator is gustavo",
-    ]
-    if any(c in t for c in creator_cues):
-        return True
-
-    if any(c in t for c in ["how did he develop you", "how did he developed you", "how did he build you", "how was he able to develop you", "what else does he"]):
-        return True
-
-    if not any(k in t for k in ["developer", "gus", "gustavo"]):
-        return False
-
-    cues = [
-        "who is", "who's", "what do you know", "what else", "tell me about",
-        "about your developer", "about gus", "about gustavo", "how did", "created you",
-        "developed you", "built you",
-    ]
-    return any(c in t for c in cues)
-
-
-def _developer_profile_reply(turns: Optional[list[tuple[str, str]]] = None, user_text: str = "") -> str:
-    return service_developer_profile_reply(
-        turns,
-        user_text,
-        get_learned_fact_fn=get_learned_fact,
-        extract_developer_roles_from_memory_fn=_extract_developer_roles_from_memory,
-        extract_developer_color_preferences_fn=_extract_developer_color_preferences,
-        extract_developer_color_preferences_from_memory_fn=_extract_developer_color_preferences_from_memory,
-        developer_is_bilingual_fn=_developer_is_bilingual,
-        developer_is_bilingual_from_memory_fn=_developer_is_bilingual_from_memory,
-        prefix_from_earlier_memory_fn=_prefix_from_earlier_memory,
-        format_fact_series_fn=_format_fact_series,
-    )
-
-
-
-def _is_developer_location_request(
-    user_text: str,
-    state: Optional[dict] = None,
-    turns: Optional[list[tuple[str, str]]] = None,
-) -> bool:
-    low = (user_text or "").strip().lower()
-    if not low:
-        return False
-
-    explicit_cues = [
-        "where is gus",
-        "where is gustavo",
-        "where is your developer",
-        "developer current location",
-        "developer's current location",
-        "gus current location",
-        "gustavo current location",
-    ]
-    if any(cue in low for cue in explicit_cues):
-        return True
-
-    developer_context = False
-    if isinstance(state, dict) and str(state.get("subject") or "") == "developer":
-        developer_context = True
-    elif turns:
-        developer_context = _recent_turn_mentions(turns, ["gus", "gustavo", "developer", "creator"])
-
-    pronoun_cues = ["his current location", "his location", "current whereabouts", "where is he"]
-    return developer_context and any(cue in low for cue in pronoun_cues)
-
-
-def _developer_location_reply() -> str:
-    relation = get_learned_fact("developer_location_relation", "").strip().lower()
-    if relation == "same_as_assistant":
-        live = service_live_device_location_summary(
-            runtime_device_location_payload_fn=runtime_device_location_payload,
-            resolve_current_device_coords_fn=resolve_current_device_coords,
-            allow_stale=True,
-        )
-        if live:
-            preview = str(get_saved_location_text() or "").strip()
-            saved_note = f" Saved location label: {preview}." if preview else ""
-            accuracy = live.get("accuracy_m")
-            accuracy_note = f" Accuracy about {int(round(float(accuracy)))}m." if accuracy is not None else ""
-            label = str(live.get("label") or "").strip()
-            label_note = f" That is near {label}." if label else ""
-            if live.get("stale"):
-                return _prefix_from_earlier_memory(
-                    f"Based on the verified relation you gave me, Gus's last shared device location fix is {live.get('coords_text')}.{accuracy_note} It is stale, so I won't call it current.{label_note}{saved_note}"
-                )
-            return _prefix_from_earlier_memory(
-                f"Based on the verified relation you gave me, Gus's current location matches my current device location: {live.get('coords_text')}.{accuracy_note}{label_note}{saved_note}"
-            )
-        preview = get_saved_location_text()
-        if preview:
-            return _prefix_from_earlier_memory(f"Based on the verified relation you gave me, Gus's location is {preview}.")
-        return "You told me Gus shares my location, but I do not have my own stored location yet. You can tell me: 'My location is ...'"
-    return "I'm uncertain about Gus's current location. I do not have verified current whereabouts for him."
-
-
-def _developer_location_turn(
-    text: str,
-    *,
-    state: Optional[dict] = None,
-    turns: Optional[list[tuple[str, str]]] = None,
-) -> tuple[str, Optional[dict]]:
-    if not _is_developer_location_request(text, state=state, turns=turns):
-        return "", None
-    next_state = _infer_profile_conversation_state(text) or _make_conversation_state("identity_profile", subject="developer")
-    return _developer_location_reply(), next_state
-
-
-def _identity_profile_followup_reply(subject: str, turns: Optional[list[tuple[str, str]]] = None) -> str:
-    return service_identity_profile_followup_reply(
-        subject,
-        turns=turns,
-        get_active_user_fn=get_active_user,
-        get_learned_fact_fn=get_learned_fact,
-        speaker_matches_developer_fn=_speaker_matches_developer,
-        extract_developer_roles_from_memory_fn=_extract_developer_roles_from_memory,
-        extract_developer_color_preferences_fn=_extract_developer_color_preferences,
-        extract_developer_color_preferences_from_memory_fn=_extract_developer_color_preferences_from_memory,
-        developer_is_bilingual_fn=_developer_is_bilingual,
-        developer_is_bilingual_from_memory_fn=_developer_is_bilingual_from_memory,
-        get_name_origin_story_fn=get_name_origin_story,
-        extract_color_preferences_fn=_extract_color_preferences,
-        extract_color_preferences_from_memory_fn=_extract_color_preferences_from_memory,
-        extract_animal_preferences_fn=_extract_animal_preferences,
-        extract_animal_preferences_from_memory_fn=_extract_animal_preferences_from_memory,
-        format_fact_series_fn=_format_fact_series,
-    )
-
-
-def _identity_profile_source_boundary_reply(subject: str) -> str:
-    return service_identity_profile_source_boundary_reply(
-        subject,
-        get_active_user_fn=get_active_user,
-        get_learned_fact_fn=get_learned_fact,
-        speaker_matches_developer_fn=_speaker_matches_developer,
-    )
-
-
-
-def _identity_name_followup_reply(subject: str) -> str:
-    active_user_raw = str(get_active_user() or "").strip()
-    developer_name = get_learned_fact("developer_name", "Gustavo Uribe").strip()
-    developer_nickname = get_learned_fact("developer_nickname", "Gus").strip()
-    assistant_name = get_learned_fact("assistant_name", "Nova").strip()
-    story = get_name_origin_story().strip()
-
-    if subject == "developer" or (subject == "self" and _speaker_matches_developer()):
-        parts = []
-        if developer_name:
-            parts.append(f"Your verified full name is {developer_name}.")
-        if developer_nickname and developer_nickname.lower() != developer_name.lower():
-            parts.append(f"You also go by {developer_nickname}.")
-        if story:
-            parts.append(f"You gave me the name {assistant_name}.")
-        if parts:
-            return " ".join(parts)
-
-    if active_user_raw:
-        return f"The verified name I have for you in this session is {active_user_raw}."
-
-    return "I do not have a more detailed verified name record for this thread yet."
-
-
-def _rules_reply() -> str:
-    return (
-        "Yes. I follow strict operating rules: I do not fabricate tool actions or files, "
-        "I stay within enabled policy/tool limits, and I should say uncertain when I cannot verify something."
-    )
-
-
-def _developer_identity_followup_reply(turns: Optional[list[tuple[str, str]]] = None, *, name_focus: bool = False) -> str:
-    return service_developer_identity_followup_reply(
-        turns,
-        name_focus=name_focus,
-        get_learned_fact_fn=get_learned_fact,
-        get_name_origin_story_fn=get_name_origin_story,
-        extract_developer_roles_from_memory_fn=_extract_developer_roles_from_memory,
-        extract_developer_color_preferences_fn=_extract_developer_color_preferences,
-        extract_developer_color_preferences_from_memory_fn=_extract_developer_color_preferences_from_memory,
-        developer_is_bilingual_fn=_developer_is_bilingual,
-        developer_is_bilingual_from_memory_fn=_developer_is_bilingual_from_memory,
-        format_fact_series_fn=_format_fact_series,
-    )
-
-
-def _infer_profile_conversation_state(text: str) -> Optional[dict]:
-    return service_infer_profile_conversation_state(
-        text,
-        normalize_turn_text_fn=_normalize_turn_text,
-        evaluate_rule_state_fn=lambda candidate: TURN_SUPERVISOR.evaluate_rules(candidate, phase="state"),
-        speaker_matches_developer_fn=_speaker_matches_developer,
-        is_developer_color_lookup_request_fn=_is_developer_color_lookup_request,
-        is_developer_bilingual_request_fn=_is_developer_bilingual_request,
-        is_color_lookup_request_fn=_is_color_lookup_request,
-        make_conversation_state_fn=_make_conversation_state,
-    )
-
-
-def _is_developer_work_guess_query(text: str) -> bool:
-    low = _normalize_turn_text(text)
-    if not low or "?" not in str(text or ""):
-        return False
-    targets_developer = any(token in low for token in ("gus", "gustavo", "developer", "creator", "he do"))
-    work_intent = any(token in low for token in ("type of work", "kind of work", "what does", "job", "occupation", "work does"))
-    return targets_developer and work_intent
-
-
-def _developer_work_guess_reply(text: str) -> str:
-    if not _is_developer_work_guess_query(text):
-        return ""
-    return (
-        "Based on the context so far, my grounded guess is that Gus works in software or technical data systems. "
-        "If you confirm or correct that, I will store the verified role."
-    )
-
-
-def _developer_work_guess_turn(text: str) -> tuple[str, Optional[dict]]:
-    reply = _developer_work_guess_reply(text)
-    if not reply:
-        return "", None
-    return reply, _make_conversation_state("developer_role_guess", subject="Gus")
-
-
-def _consume_conversation_followup(state: Optional[dict], text: str, input_source: str = "typed", turns: Optional[list[tuple[str, str]]] = None) -> tuple[bool, str, Optional[dict]]:
-    return service_consume_conversation_followup_from_runtime(
-        state,
-        text,
-        input_source=input_source,
-        turns=turns,
-        runtime_scope=globals(),
-    )
-
-
-
-def _learn_contextual_developer_facts(turns: list[tuple[str, str]], text: str, input_source: str = "typed") -> tuple[bool, str]:
-    return service_learn_contextual_developer_facts(
-        turns,
-        text,
-        input_source=input_source,
-        normalize_turn_text_fn=_normalize_turn_text,
-        recent_turn_mentions_fn=_recent_turn_mentions,
-        mem_enabled_fn=mem_enabled,
-        mem_add_fn=mem_add,
-        extract_color_preferences_from_text_fn=_extract_color_preferences_from_text,
-        extract_work_role_parts_fn=_extract_work_role_parts,
-        store_developer_role_facts_fn=_store_developer_role_facts,
-        load_learned_facts_fn=load_learned_facts,
-        save_learned_facts_fn=save_learned_facts,
-        timestamp_fn=lambda: time.strftime("%Y-%m-%d %H:%M:%S"),
-    )
-
-
-def _extract_memory_teach_text(text: str) -> str:
-    return service_extract_memory_teach_text(
-        text,
-        memory_should_keep_text_fn=_memory_should_keep_text,
-    )
-
-
-def _extract_last_user_question(turns: list[tuple[str, str]], current_text: str) -> str:
-    return service_extract_last_user_question(
-        turns,
-        current_text,
-        is_identity_or_developer_query_fn=_is_identity_or_developer_query,
-        is_color_lookup_request_fn=_is_color_lookup_request,
-        is_developer_color_lookup_request_fn=_is_developer_color_lookup_request,
-        is_developer_bilingual_request_fn=_is_developer_bilingual_request,
-    )
-
-
-def _analyze_routing_text(turns: list[tuple[str, str]], text: str) -> tuple[str, str]:
-    return analyze_routing_text(
-        turns,
-        text,
-        evaluate_rules_fn=lambda user_text, **kwargs: TURN_SUPERVISOR.evaluate_rules(user_text, **kwargs),
-    )
-
-
-def _is_explicit_command_like(text: str) -> bool:
-    return is_explicit_command_like(text)
-
-
-def _determine_turn_direction(
-    turns: list[tuple[str, str]],
-    text: str,
-    *,
-    active_subject: str = "",
-    pending_action: Optional[dict] = None,
-) -> dict:
-    return determine_turn_direction(
-        turns,
-        text,
-        active_subject=active_subject,
-        pending_action=pending_action,
-        analyze_routing_text_fn=_analyze_routing_text,
-        classify_turn_acts_fn=_classify_turn_acts,
-        extract_memory_teach_text_fn=_extract_memory_teach_text,
-        is_identity_or_developer_query_fn=_is_identity_or_developer_query,
-        is_developer_color_lookup_request_fn=_is_developer_color_lookup_request,
-        is_developer_bilingual_request_fn=_is_developer_bilingual_request,
-        is_color_lookup_request_fn=_is_color_lookup_request,
-        build_greeting_reply_fn=_build_greeting_reply,
-        is_explicit_command_like_fn=_is_explicit_command_like,
-    )
-
-
-def _extract_animal_preferences(session_turns: list[tuple[str, str]]) -> list[str]:
-    return service_extract_animal_preferences(session_turns, known_animals=KNOWN_ANIMALS)
-
-
-def _extract_animal_preferences_from_text(text: str) -> list[str]:
-    return service_extract_animal_preferences_from_text(text, known_animals=KNOWN_ANIMALS)
-
-
-def _extract_animal_preferences_from_memory() -> list[str]:
-    return service_extract_animal_preferences_from_memory(
-        mem_enabled_fn=mem_enabled,
-        mem_recall_fn=mem_recall,
-        extract_animal_preferences_from_text_fn=_extract_animal_preferences_from_text,
-    )
-
-
-def _is_color_animal_match_question(user_text: str) -> bool:
-    return service_is_color_animal_match_question(user_text)
-
-
-def _pick_color_for_animals(colors: list[str], animals: list[str]) -> str:
-    return service_pick_color_for_animals(colors, animals)
-
-
-def _is_color_lookup_request(user_text: str) -> bool:
-    return service_is_color_lookup_request(user_text)
 
 
 # =========================
@@ -4468,7 +2231,7 @@ def _read_text_safely(path: Path) -> str:
 def _extract_key_lines(text: str, max_lines: int = 2) -> list[str]:
     out: list[str] = []
     for raw in (text or "").splitlines():
-        s = re.sub(r"\s+", " ", (raw or "").strip().lstrip("-*•")).strip()
+        s = re.sub(r"\s+", " ", (raw or "").strip().lstrip("-*â€¢")).strip()
         if len(s) < 20:
             continue
         if s.lower().startswith("source:"):
@@ -4501,7 +2264,7 @@ def _extract_matching_lines(text: str, tokens: list[str], max_lines: int = 3) ->
         return _extract_key_lines(text, max_lines=max_lines)
     out: list[str] = []
     for raw in (text or "").splitlines():
-        s = re.sub(r"\s+", " ", (raw or "").strip().lstrip("-*•")).strip()
+        s = re.sub(r"\s+", " ", (raw or "").strip().lstrip("-*â€¢")).strip()
         if not s or len(s) < 14:
             continue
         low = s.lower()
@@ -4793,39 +2556,15 @@ def patch_apply(zip_path: str, force: bool = False) -> str:
 
 
 def patch_rollback(snapshot_zip: Optional[str] = None) -> str:
-    SNAPSHOTS_DIR.mkdir(parents=True, exist_ok=True)
-    snaps = sorted(SNAPSHOTS_DIR.glob("snapshot_*.zip"), key=lambda p: p.name, reverse=True)
-    if snapshot_zip:
-        snap = Path(snapshot_zip)
-        if not snap.is_absolute():
-            snap = SNAPSHOTS_DIR / snapshot_zip
-    else:
-        snap = snaps[0] if snaps else None
-
-    if not snap or not snap.exists():
-        return "No snapshot found to rollback."
-
-    _log_patch(f"ROLLBACK {snap.name}")
-
-    with zipfile.ZipFile(snap, "r") as z:
-        for info in z.infolist():
-            if info.is_dir():
-                continue
-            out = BASE_DIR / info.filename
-            out.parent.mkdir(parents=True, exist_ok=True)
-            out.write_bytes(z.read(info))
-
-    meta = _read_snapshot_meta(snap)
-    if meta and "revision" in meta:
-        try:
-            _write_patch_revision(int(meta.get("revision", 0) or 0), source=f"rollback:{snap.name}")
-        except Exception:
-            pass
-
-    ok_compile, out = _py_compile_check()
-    if not ok_compile:
-        return "Rollback completed, but compile check still failing.\n\nCompile output:\n" + out[-3500:]
-    return f"Rollback completed from snapshot: {snap.name}"
+    return service_patch_rollback(
+        snapshot_zip,
+        base_dir=BASE_DIR,
+        snapshots_dir=SNAPSHOTS_DIR,
+        log_patch_fn=_log_patch,
+        read_snapshot_meta_fn=_read_snapshot_meta,
+        write_patch_revision_fn=lambda revision, source: _write_patch_revision(revision, source=source),
+        py_compile_check_fn=_py_compile_check,
+    )
 
 
 def patch_preview(zip_path: str, write_report: bool = False) -> str:
@@ -5005,28 +2744,6 @@ def _interactive_patch_review_enabled() -> bool:
     return raw in {"1", "true", "yes", "on"}
 
 
-# =========================
-# Deterministic answers & hallucination filters
-# =========================
-def hard_answer(user_text: str) -> Optional[str]:
-    return service_hard_answer(
-        user_text,
-        arithmetic_expression_reply_fn=_arithmetic_expression_reply,
-        get_learned_fact_fn=get_learned_fact,
-        get_active_user_fn=get_active_user,
-        speaker_matches_developer_fn=_speaker_matches_developer,
-        self_identity_web_challenge_reply_fn=_self_identity_web_challenge_reply,
-        get_name_origin_story_fn=get_name_origin_story,
-        prefix_from_earlier_memory_fn=_prefix_from_earlier_memory,
-        extract_developer_color_preferences_from_memory_fn=_extract_developer_color_preferences_from_memory,
-        describe_capabilities_fn=describe_capabilities,
-        mem_get_recent_learned_fn=mem_get_recent_learned,
-    )
-
-
-
-
-
 def _strip_mem_leak(reply: str, mem_block: str) -> str:
     """Remove raw memory dump snippets from a model reply for user-facing output.
     If mem_block appears verbatim in reply, strip it. Also remove any leading
@@ -5074,26 +2791,6 @@ def _ensure_reply(reply: Optional[str]) -> str:
         return "Okay."
 
 
-def _normalize_location_preview(preview: str) -> str:
-    """Normalize stored location previews into a clean canonical sentence fragment."""
-    if not preview:
-        return preview
-    p = preview.strip()
-    # remove common leading phrases
-    p = re.sub(r'^(?:my|your)(?: full| current| physical)? location is\s*:?', '', p, flags=re.I).strip()
-    p = re.sub(r'^you are located in\s*', '', p, flags=re.I).strip()
-    p = re.sub(r'^i am located in\s*', '', p, flags=re.I).strip()
-    p = re.sub(r'^location\s*:\s*', '', p, flags=re.I).strip()
-    # remove duplicate leading 'my' artifacts
-    p = re.sub(r'^my\s+', '', p, flags=re.I).strip()
-    p = re.sub(r'^your\s+', '', p, flags=re.I).strip()
-    # collapse whitespace and stray punctuation
-    p = re.sub(r'\s+', ' ', p).strip()
-    p = p.rstrip('.')
-    p = p.strip()
-    return p
-
-
 def _clamp_language_mix(value: Any) -> int:
     try:
         return max(0, min(100, int(value)))
@@ -5102,18 +2799,18 @@ def _clamp_language_mix(value: Any) -> int:
 
 
 def _estimate_spanish_ratio(text: str) -> float:
-    """Estimate Spanish content from Unicode character profile only — no keyword lists."""
+    """Estimate Spanish content from Unicode character profile only â€” no keyword lists."""
     raw = str(text or "")
     if not raw.strip():
         return 0.0
     # Spanish-specific characters not naturally present in standard English text.
     # Using character-level evidence avoids keyword-trigger brittleness.
-    spanish_chars = set("áéíóúüñÁÉÍÓÚÜÑ¿¡")
+    spanish_chars = set("Ã¡Ã©Ã­Ã³ÃºÃ¼Ã±ÃÃ‰ÃÃ“ÃšÃœÃ‘Â¿Â¡")
     letter_count = sum(1 for c in raw if c.isalpha())
     if letter_count == 0:
         return 0.0
     accent_count = sum(1 for c in raw if c in spanish_chars)
-    # Accented chars are a strong signal; scale so ~12% accent ratio → 1.0
+    # Accented chars are a strong signal; scale so ~12% accent ratio â†’ 1.0
     return min(1.0, float(accent_count) / max(1, letter_count) * 8.0)
 
 
@@ -5145,14 +2842,14 @@ def _language_mix_instruction(spanish_pct: int) -> str:
 # =========================
 # Ollama chat
 # =========================
-def ollama_chat(text: str, retrieved_context: str = "", language_mix_spanish_pct: int = 0) -> str:
+def ollama_chat(text: str, retrieved_context: str = "", language_mix_spanish_pct: int = 0, reply_form: str = "") -> str:
     return service_ollama_chat(
         text,
         retrieved_context=retrieved_context,
         language_mix_spanish_pct=language_mix_spanish_pct,
+        reply_form=reply_form,
         live_ollama_calls_allowed_fn=_live_ollama_calls_allowed,
         ensure_ollama_fn=ensure_ollama,
-        identity_context_for_prompt_fn=identity_context_for_prompt,
         language_mix_instruction_fn=_language_mix_instruction,
         chat_model_fn=chat_model,
         requests_post_fn=requests.post,
@@ -5181,69 +2878,6 @@ def _teach_store_example(original: str, correction: str, user: Optional[str] = N
         return "OK"
     except Exception as e:
         return f"Failed to store teach example: {e}"
-
-
-def _parse_correction(text: str) -> Optional[str]:
-    return service_parse_correction(text)
-
-
-def _looks_like_correction_cancel(text: str) -> bool:
-    return service_looks_like_correction_cancel(text, normalize_turn_text=_normalize_turn_text)
-
-
-def _looks_like_pending_replacement_text(text: str) -> bool:
-    return service_looks_like_pending_replacement_text(text, normalize_turn_text=_normalize_turn_text)
-
-
-def _safe_eval_arithmetic_expression(expr: str) -> Optional[float]:
-    return service_safe_eval_arithmetic_expression(expr)
-
-
-def _arithmetic_expression_reply(user_text: str) -> Optional[str]:
-    raw = str(user_text or "").strip()
-    if not raw:
-        return None
-    match = re.search(r"(?<!\d)(\d+(?:\s*[+\-*/]\s*\d+){1,8})\s*=?(?!\d)", raw)
-    if not match:
-        return None
-    expr = str(match.group(1) or "").strip()
-    value = _safe_eval_arithmetic_expression(expr)
-    if value is None:
-        return None
-    if float(value).is_integer():
-        rendered = str(int(value))
-    else:
-        rendered = str(round(float(value), 6)).rstrip("0").rstrip(".")
-    return rendered
-
-
-def _is_negative_feedback(text: str) -> bool:
-    return service_is_negative_feedback(text)
-
-
-def _extract_authoritative_correction_text(text: str) -> Optional[str]:
-    return service_extract_authoritative_correction_text(text)
-
-
-def _normalize_correction_for_storage(correction: str) -> str:
-    return service_normalize_correction_for_storage(correction)
-
-
-def _is_identity_stable_reply(reply: str) -> bool:
-    low = (reply or "").strip().lower()
-    if not low:
-        return False
-    cues = [
-        "my name is",
-        "my developer's full name",
-        "was given its name by",
-        "i do not have a saved name-origin story",
-    ]
-    return any(c in low for c in cues)
-
-
-def _apply_reply_overrides(reply: str) -> str:
-    return service_apply_reply_overrides(reply, updates_dir=UPDATES_DIR)
 
 
 def _teach_list_examples() -> str:
@@ -5391,7 +3025,10 @@ def tool_os_capability(request: str = "", capability: str = "", args: Optional[d
     result = OS_SCRIPT_CONTROLLER_SERVICE.execute_capability(
         capability_name,
         capability_args,
-        authority_context={"allowed_authority_levels": ["read_only", "read_only_expensive", "read_only_network"]},
+        authority_context={
+            "allowed_authority_levels": ["read_only", "read_only_expensive", "read_only_network", "evidence_write"],
+            "allow_evidence_write": True,
+        },
     )
     if isinstance(result, dict) and result.get("operator_outbox"):
         result = dict(result)
@@ -5646,6 +3283,19 @@ def tool_subconscious_review_judgment(branch_id: str = ""):
     return service_render_subconscious_review_judgment(judgment)
 
 
+def tool_source_root_judgment(branch_id: str = ""):
+    import work_tree as work_tree_module
+
+    judgment = service_build_source_root_judgment(
+        branch_id=branch_id,
+        work_tree_module=work_tree_module,
+    )
+    notice = service_publish_source_root_operator_notice(judgment)
+    if isinstance(notice, dict) and bool(notice.get("published")):
+        judgment["operator_notice"] = notice
+    return service_render_source_root_judgment(judgment)
+
+
 def tool_release_promotion_judgment(branch_id: str = ""):
     branch, evidence_rows = _release_readiness_branch(branch_id)
     release_ledger_path = RUNTIME_DIR / "exports" / "release_packages" / "release_ledger.jsonl"
@@ -5694,6 +3344,16 @@ def tool_release_record_validation_outcome(branch_id: str = ""):
         release_status=release_status,
     )
     return service_render_release_outcome_recording(report)
+
+
+def tool_installer_validation_run(branch_id: str = ""):
+    branch, _evidence_rows = _release_readiness_branch(branch_id)
+    branch_payload = dict(getattr(branch, "source_payload", {}) or {}) if branch is not None else {}
+    report = service_run_installer_validation(
+        repo_root=BASE_DIR,
+        package_artifact_path=str(branch_payload.get("latest_artifact_path") or ""),
+    )
+    return service_render_installer_validation_report(report)
 
 
 
@@ -5842,20 +3502,6 @@ def _self_report_local_status_payload(work_trees_payload: dict) -> dict:
     }
 
 
-def runtime_identity_reply(text: str = "") -> str:
-    del text
-    assistant_name = str(get_learned_fact("assistant_name", "Nova") or "Nova").strip() or "Nova"
-    return describe_runtime_identity(assistant_name)
-
-
-def tool_runtime_identity():
-    return runtime_identity_reply()
-
-
-def tool_capability_inventory():
-    return describe_capabilities()
-
-
 def tool_nova_self_status():
     pulse_payload = _apply_latest_regression_validation(build_pulse_payload())
     payload = service_build_self_status_payload(
@@ -5864,13 +3510,6 @@ def tool_nova_self_status():
         repo_change_snapshot=service_build_repo_change_snapshot(BASE_DIR),
     )
     return service_render_self_status(payload)
-
-
-def tool_operator_help():
-    work_trees_payload = _self_report_work_trees_payload(limit=32)
-    status_payload = _self_report_local_status_payload(work_trees_payload)
-    report_payload = GROUNDED_SELF_REPORT_SERVICE.build_payload(status_payload, work_trees_payload)
-    return GROUNDED_SELF_REPORT_SERVICE.render("trouble", report_payload)
 
 
 def _core_health_runtime_health() -> dict:
@@ -6092,16 +3731,6 @@ def execute_planned_action(tool: str, args=None):
     )
 
 
-def handle_commands(user_text: str, session_turns=None, session=None):
-    return service_handle_commands(
-        user_text,
-        session_turns=session_turns,
-        session=session,
-        core=sys.modules[__name__],
-    )
-
-
-
 def make_pending_weather_action() -> dict:
     saved_location = str(get_saved_location_text() or "").strip()
     return {
@@ -6294,23 +3923,6 @@ def tool_web_research(query: str, continue_mode: bool = False):
         session_store=WEB_RESEARCH_SESSION,
     )
 
-
-
-def handle_keywords(text: str):
-    return service_handle_keywords(
-        text,
-        tool_screen_fn=tool_screen,
-        tool_camera_fn=tool_camera,
-        tool_ls_fn=tool_ls,
-        tool_read_fn=tool_read,
-        tool_find_fn=tool_find,
-        tool_health_fn=tool_health,
-        is_brief_command_form_fn=_is_brief_command_form,
-    )
-
-
-def _is_brief_command_form(text: str, command: str, max_tokens: int) -> bool:
-    return service_is_brief_command_form(text, command, max_tokens)
 
 
 # =========================

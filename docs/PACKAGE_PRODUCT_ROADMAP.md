@@ -7,8 +7,8 @@ Last verified: 2026-05-18
 Drive Nova from an actively evolving supervised runtime to a repeatable package product with clear release gates, documented operations, and stable governance defaults.
 
 ## Immediate Priorities
-1. Complete independent fresh-machine or VM validation for `2026.05.18.23`.
-2. Exercise the interactive `nova run` front door against the current artifact.
+1. Complete independent fresh-machine or VM validation for the current ledger-owned candidate.
+2. Exercise model-backed `nova run` scripted-turn validation when the target includes Ollama/runtime chat.
 3. Keep repository documentation synchronized with actual runtime behavior.
 4. Decide whether Piper remains bundled through Git LFS or moves to a bootstrap-fetch path later.
 
@@ -56,7 +56,7 @@ Drive Nova from an actively evolving supervised runtime to a repeatable package 
 1. Keep the source-bootstrap zip as the current release artifact and rerun its validation for each candidate.
 2. Use `nova package-readiness` and the release validation record as the release-candidate truth gate.
 3. Complete independent fresh-machine or VM validation before final release language.
-4. Verify the interactive `nova run` front door for the current artifact.
+4. Keep `nova run` launch/exit in the base validation lane and require scripted-turn proof for Ollama-included targets.
 5. Keep product-facing docs consistent with shipped behavior, not aspirational behavior.
 
 ## Definition of "Close To Package Product"

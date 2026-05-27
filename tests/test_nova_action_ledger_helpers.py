@@ -90,24 +90,6 @@ class TestNovaActionLedgerHelpers(unittest.TestCase):
         self.assertEqual(payload["intent"], "web_research")
         self.assertIn("Web research route selected 2 times", payload["summary"])
 
-    def test_count_unsupported_claim_blocks_recently_counts_claim_gate_only(self):
-        root = _workspace_case_dir("nova_action_ledger_helpers")
-        try:
-            (root / "001.json").write_text(
-                '{"route_trace": [{"stage": "claim_gate", "outcome": "adjusted", "detail": "unsupported"}]}',
-                encoding="utf-8",
-            )
-            (root / "002.json").write_text(
-                '{"route_trace": [{"stage": "llm_postprocess", "outcome": "self_corrected", "detail": "autonomy_guard"}]}',
-                encoding="utf-8",
-            )
-
-            count = nova_action_ledger_helpers.count_unsupported_claim_blocks_recently(root)
-        finally:
-            shutil.rmtree(root, ignore_errors=True)
-
-        self.assertEqual(count, 1)
-
     def test_sample_intents_last_returns_unknown_for_blank_intent(self):
         root = _workspace_case_dir("nova_action_ledger_helpers")
         try:

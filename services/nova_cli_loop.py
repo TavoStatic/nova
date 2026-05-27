@@ -2,11 +2,9 @@ from __future__ import annotations
 
 import re
 import sys
-from types import SimpleNamespace
 from typing import Optional
 
 from services import nova_planner_contract
-from services.nova_cli_delivery import apply_cli_handled_outcome
 from services.nova_cli_delivery import apply_cli_outcome_to_ledger
 from services.nova_cli_delivery import emit_cli_reply_outcome
 from services.nova_cli_sequence import execute_cli_sequence as service_execute_cli_sequence
@@ -14,8 +12,6 @@ from services.nova_cli_sequence import apply_sequence_result as service_apply_se
 from services.nova_cli_sequence import normalize_sequence_reply as service_normalize_sequence_reply
 from services.nova_fallback_flow import prepare_fallback_flow
 from services.nova_fallback_flow import finalize_llm_fallback_reply
-from services.nova_supervisor_flow import apply_cli_supervisor_intent
-from services.nova_turn_outcomes import apply_numeric_clarify_outcome
 from services.nova_reply_sequence import execute_reply_sequence
 from services.nova_reply_runtime import apply_reply_runtime_effects
 from services.nova_session_state import apply_reply_session_updates
@@ -177,10 +173,6 @@ def run_loop(tts, *, core: object) -> None:
             merge_route_evidence_fn=nova_planner_contract.merge_route_evidence,
             set_pending_action_fn=_set_pending_action,
             session_state=session_state,
-            routed_text=routed_user_text,
-            turns=session_turns,
-            fallback_state=conversation_state,
-            infer_post_reply_conversation_state_fn=core._infer_post_reply_conversation_state,
             apply_reply_runtime_effects_fn=apply_reply_runtime_effects,
             apply_reply_session_updates_fn=apply_reply_session_updates,
             sync_pending_conversation_tracking_fn=_sync_pending_conversation_tracking,
@@ -193,7 +185,7 @@ def run_loop(tts, *, core: object) -> None:
             ),
             behavior_record_event_fn=core.behavior_record_event,
             extract_urls_fn=core._extract_urls,
-            detect_identity_conflict_fn=core.detect_identity_conflict,
+            session_turns=session_turns,
             recent_tool_context=recent_tool_context,
             recent_web_urls=recent_web_urls,
         )
@@ -311,7 +303,6 @@ def run_loop(tts, *, core: object) -> None:
                 active_subject=session_state.active_subject(),
             ),
             "start_idx": len(session_turns),
-            "intent": core._infer_turn_intent(user_text),
             "planner_decision": "deterministic",
             "tool": "",
             "tool_args": {},
@@ -322,193 +313,12 @@ def run_loop(tts, *, core: object) -> None:
         }
 
         routed_user_text = user_text
-        turn_direction = {
-            "primary": "general_chat",
-            "effective_query": user_text,
-            "analysis_reason": "",
-            "turn_acts": [],
-            "identity_focused": False,
-            "bypass_pattern_routes": False,
-        }
-        try:
-            turn_direction = core._determine_turn_direction(
-                session_turns,
-                user_text,
-                active_subject=session_state.active_subject(),
-                pending_action=pending_action,
-            )
-            routed_user_text = str(turn_direction.get("effective_query") or user_text)
-            _set_language_mix_spanish_pct(core._auto_adjust_language_mix(language_mix_spanish_pct, routed_user_text))
-            turn_acts = [str(item).strip() for item in list(turn_direction.get("turn_acts") or []) if str(item).strip()]
-            if pending_action_ledger is not None:
-                pending_action_ledger["turn_acts"] = turn_acts
-                record = pending_action_ledger.get("record")
-                if isinstance(record, dict):
-                    record["turn_acts"] = list(turn_acts)
-            _trace(
-                "direction_analysis",
-                str(turn_direction.get("primary") or "general_chat"),
-                str(turn_direction.get("analysis_reason") or "")[:120],
-                effective_query=routed_user_text[:180],
-                turn_acts=",".join(turn_acts),
-                identity_focused=bool(turn_direction.get("identity_focused")),
-                bypass_pattern_routes=bool(turn_direction.get("bypass_pattern_routes")),
-            )
-        except Exception:
-            routed_user_text = user_text
-            turn_acts = []
-
-        intent_rule = core.TURN_SUPERVISOR.evaluate_rules(
-            routed_user_text,
-            manager=session_state,
-            turns=session_turns,
-            phase="intent",
-            entry_point="cli",
-        )
-        if not core._supervisor_result_has_route(intent_rule):
-            runtime_intent = core._runtime_set_location_intent(routed_user_text, pending_action=pending_action)
-            if isinstance(runtime_intent, dict):
-                intent_rule = runtime_intent
-        numeric_clarify_outcome = apply_numeric_clarify_outcome(
-            has_intent_route=core._supervisor_result_has_route(intent_rule),
-            routed_text=routed_user_text,
-            pending_action=pending_action,
-            current_state=conversation_state,
-            session=session_state,
-            ledger=pending_action_ledger.get("record") if isinstance(pending_action_ledger, dict) else {},
-            should_clarify_unlabeled_numeric_turn=core._should_clarify_unlabeled_numeric_turn,
-            unlabeled_numeric_turn_reply=core._unlabeled_numeric_turn_reply,
-            make_conversation_state=core._make_conversation_state,
-            action_ledger_add_step=lambda _ledger, stage, outcome, detail="", **data: _trace(stage, outcome, detail, **data),
-        )
-        if numeric_clarify_outcome.get("handled"):
-            _set_conversation_state(session_state.conversation_state)
-            _sync_pending_conversation_tracking()
-            apply_cli_handled_outcome(
-                pending_action_ledger=pending_action_ledger,
-                outcome=numeric_clarify_outcome,
-                default_planner_decision="ask_clarify",
-                session_turns=session_turns,
-                print_fn=print,
-                speak_chunked_fn=lambda reply: core.speak_chunked(tts, reply),
-                say_done_fn=lambda _msg: None,
-                coerce_grounded=True,
-            )
-            continue
-        handled_intent, intent_msg, intent_state, intent_effects = core._handle_supervisor_intent(
-            intent_rule,
-            routed_user_text,
-            turns=session_turns,
-            input_source=input_source,
-            entry_point="cli",
-        )
-        if pending_action_ledger is not None:
-            pending_action_ledger["routing_decision"] = core._build_routing_decision(
-                routed_user_text,
-                entry_point="cli",
-                intent_result=intent_rule,
-                handle_result=None,
-                reply_contract=str(intent_effects.get("reply_contract") or "") if isinstance(intent_effects, dict) else "",
-                reply_outcome=dict(intent_effects.get("reply_outcome") or {}) if isinstance(intent_effects, dict) and isinstance(intent_effects.get("reply_outcome"), dict) else {},
-                turn_acts=turn_acts,
-            )
-        handled_cli_intent, final = apply_cli_supervisor_intent(
-            intent_rule=intent_rule,
-            routed_user_text=routed_user_text,
-            handled_intent=handled_intent,
-            intent_msg=intent_msg,
-            intent_state=intent_state,
-            intent_effects=intent_effects,
-            pending_action_ledger=pending_action_ledger,
-            ensure_reply_fn=core._ensure_reply,
-            emit_supervisor_intent_trace_fn=core._emit_supervisor_intent_trace,
-            set_pending_action_fn=_set_pending_action,
-            set_conversation_state_fn=_set_conversation_state,
-            sync_pending_conversation_tracking_fn=_sync_pending_conversation_tracking,
-            trace_fn=_trace,
-        )
-        if handled_cli_intent:
-            print(f"Nova: {final}\n", flush=True)
-            session_turns.append(("assistant", final))
-            core.speak_chunked(tts, final)
-            continue
-        general_rule = core.TURN_SUPERVISOR.evaluate_rules(
-            user_text,
-            manager=session_state,
-            turns=session_turns,
-            phase="handle",
-            entry_point="cli",
-        )
-        handled_rule, rule_msg, rule_state = core._execute_registered_supervisor_rule(
-            general_rule,
-            user_text,
-            conversation_state,
-            turns=session_turns,
-            input_source=input_source,
-            allowed_actions=set(),
-        )
-        if pending_action_ledger is not None:
-            pending_action_ledger["routing_decision"] = core._build_routing_decision(
-                routed_user_text,
-                entry_point="cli",
-                intent_result=intent_rule,
-                handle_result=general_rule,
-                reply_contract=str(general_rule.get("reply_contract") or "") if isinstance(general_rule, dict) else "",
-                reply_outcome=dict(general_rule.get("reply_outcome") or {}) if isinstance(general_rule, dict) and isinstance(general_rule.get("reply_outcome"), dict) else {},
-                turn_acts=turn_acts,
-            )
-        if handled_rule:
-            final = core._ensure_reply(rule_msg)
-            if pending_action_ledger is not None:
-                pending_action_ledger["reply_contract"] = str(general_rule.get("reply_contract") or "")
-                pending_action_ledger["reply_outcome"] = dict(general_rule.get("reply_outcome") or {}) if isinstance(general_rule.get("reply_outcome"), dict) else {}
-            _set_conversation_state(rule_state)
-            if bool(general_rule.get("continuation")):
-                session_state.mark_continuation_used()
-                if pending_action_ledger is not None:
-                    pending_action_ledger["continuation_used"] = True
-            _trace(
-                str(general_rule.get("ledger_stage") or "registered_rule"),
-                "matched",
-                str(general_rule.get("rule_name") or "registered_rule"),
-                rule=str(general_rule.get("rule_name") or ""),
-            )
-            core.SUBCONSCIOUS_SERVICE.update_state(
-                session_state,
-                core._probe_turn_routes(
-                    routed_user_text,
-                    session_state,
-                    session_turns,
-                    pending_action=pending_action,
-                ),
-                chosen_route="supervisor_owned",
-            )
-            _sync_pending_conversation_tracking()
-            print(f"Nova: {final}\n", flush=True)
-            session_turns.append(("assistant", final))
-            core.speak_chunked(tts, final)
-            continue
-
-        try:
-            id_m = None
-            if id_m:
-                name = id_m.group(1).strip().strip(".!,")
-                if name:
-                    core.mem_add("profile", input_source, f"name: {name}")
-                    core.set_active_user(name)
-                    ack = f"Nice to meet you, {name}. I'll remember that and use that identity for this session."
-                    print(f"Nova: {ack}\n", flush=True)
-                    session_turns.append(("assistant", ack))
-                    core.speak_chunked(tts, ack)
-                    continue
-        except Exception:
-            pass
+        turn_acts: list[str] = []
 
         def _normalize_sequence_reply(reply: str) -> str:
             return service_normalize_sequence_reply(
                 reply,
                 ensure_reply_fn=core._ensure_reply,
-                apply_reply_overrides_fn=lambda value: value,
             )
 
         sequence_reply, sequence_meta = service_execute_cli_sequence(
@@ -523,31 +333,6 @@ def run_loop(tts, *, core: object) -> None:
             normalize_reply=_normalize_sequence_reply,
             ensure_reply=core._ensure_reply,
             core=core,
-            is_developer_profile_request=lambda _text: False,
-            developer_profile_reply=lambda _turns, _text: "",
-            is_location_request=lambda _text: False,
-            location_reply=lambda: "",
-            is_web_preferred_data_query=getattr(core, "_is_web_preferred_data_query", lambda _text: False),
-            is_session_recap_request=lambda _text: False,
-            session_recap_reply=lambda _turns, _text: "",
-            is_assistant_name_query=lambda _text: False,
-            assistant_name_reply=lambda _text: "",
-            is_developer_full_name_query=lambda _text: False,
-            developer_full_name_reply=lambda: "",
-            is_name_origin_question=lambda _text: False,
-            is_student_data_attendance_rules_query=lambda _text: False,
-            student_data_attendance_rules_reply=lambda: "",
-            is_conversational_clarification=lambda _text: False,
-            clarification_reply=lambda _turns: "",
-            is_deep_search_followup_request=lambda _text: False,
-            infer_research_query_from_turns=lambda _turns: "",
-            build_grounded_answer=lambda _query, max_sources=2: "",
-            build_local_topic_digest_answer=lambda _query: "",
-            is_groundable_factual_query=lambda _text: False,
-            developer_color_reply=lambda _turns: "",
-            developer_bilingual_reply=lambda _turns: "",
-            color_reply=lambda _turns: "",
-            animal_reply=lambda _turns: "",
             ensure_active_work_tree_fn=_ensure_active_work_tree,
             work_tree_seed_source="cli",
             work_tree_seed_mode="",
@@ -559,52 +344,30 @@ def run_loop(tts, *, core: object) -> None:
         fallback_entry = prepare_fallback_flow(
             text=routed_user_text,
             turns=session_turns,
-            recent_tool_context=recent_tool_context,
-            prefer_web_for_data_queries=prefer_web_for_data_queries,
-            analyze_request_fn=lambda *_args, **_kwargs: SimpleNamespace(allow_llm=True, message=""),
-            normalize_policy_reply_fn=lambda reply: reply,
             build_fallback_context_details_fn=_build_fallback_context_details,
-            uses_prior_reference_fn=core._uses_prior_reference,
             action_ledger_add_step=lambda stage, outcome, detail="", **data: _trace(stage, outcome, detail, **data),
+            pending_action=pending_action,
+            semantic_tool_observation=sequence_meta.get("semantic_tool_observation") if isinstance(sequence_meta, dict) else {},
         )
-        if fallback_entry.get("handled"):
-            policy_block_outcome = fallback_entry.get("outcome") if isinstance(fallback_entry.get("outcome"), dict) else {}
-            apply_cli_handled_outcome(
-                pending_action_ledger=pending_action_ledger,
-                outcome=policy_block_outcome,
-                default_planner_decision="policy_block",
-                session_turns=session_turns,
-                print_fn=print,
-                speak_chunked_fn=lambda reply: core.speak_chunked(tts, reply),
-                say_done_fn=tts.say,
-                coerce_grounded=True,
-            )
-            continue
         retrieved_context = str(fallback_entry.get("retrieved_context") or "")
+        intent_evidence_packet = fallback_entry.get("intent_evidence_packet") if isinstance(fallback_entry.get("intent_evidence_packet"), dict) else {}
 
         llm_fallback_outcome = finalize_llm_fallback_reply(
             text=routed_user_text,
             raw_user_text=user_text,
             input_source=input_source,
             retrieved_context=retrieved_context,
-            recent_tool_context=recent_tool_context,
             language_mix_spanish_pct=language_mix_spanish_pct,
-            active_user=core.get_active_user() or "",
             ollama_chat_fn=core.ollama_chat,
-            sanitize_llm_reply_fn=lambda reply, _tool_context: str(reply or "").strip(),
             mem_enabled_fn=lambda: False,
             mem_should_store_fn=lambda _text: False,
             mem_add_fn=lambda *_args, **_kwargs: None,
             strip_mem_leak_fn=lambda reply, _retrieved_context: reply,
-            self_correct_reply_fn=lambda _text, reply: (reply, False, ""),
             behavior_record_event_fn=core.behavior_record_event,
             action_ledger_add_step=lambda stage, outcome, detail="", **data: _trace(stage, outcome, detail, **data),
-            teach_store_example_fn=core._teach_store_example,
-            truthful_limit_outcome_fn=core._truthful_limit_outcome,
-            apply_claim_gate_fn=lambda reply, evidence_text="", tool_context="": (reply, False, ""),
-            is_explicit_request_fn=lambda _text: True,
-            apply_reply_overrides_fn=lambda reply: reply,
             ensure_reply_fn=core._ensure_reply,
+            intent_evidence_packet=intent_evidence_packet,
+            fallback_context=fallback_entry.get("fallback_context") if isinstance(fallback_entry.get("fallback_context"), dict) else {},
         )
         apply_cli_outcome_to_ledger(
             pending_action_ledger=pending_action_ledger,

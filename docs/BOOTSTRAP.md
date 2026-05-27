@@ -1,9 +1,9 @@
 # NYO System Bootstrap
 
 Date: 2026-05-18
-Last verified: 2026-05-18
+Last verified: 2026-05-20
 
-Verification note: the source-bootstrap flow was revalidated from the `2026.05.18.23` release candidate on the same machine from an extracted package path. `nova package-verify .`, `nova install`, `nova doctor`, `nova runtime-status`, `nova wiring-check --offline`, `nova smoke-base --fix`, and `nova test` passed. Independent fresh-machine or VM validation is still pending.
+Verification note: the source-bootstrap flow is validated from the current ledger-owned release candidate on the same machine from an extracted package path. `nova package-verify .`, `nova install`, `nova doctor`, `nova runtime-status`, `nova run` launch/exit, `nova wiring-check --offline`, `nova smoke-base --fix`, and `nova test` are part of the package validation lane. Independent fresh-machine or VM validation is still pending.
 
 ## Purpose
 

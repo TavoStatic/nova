@@ -1,245 +1,771 @@
-﻿import unittest
-from types import SimpleNamespace
+import unittest
 
-from services.nova_fallback_flow import apply_low_confidence_block
-from services.nova_fallback_flow import apply_policy_gate_block
 from services.nova_fallback_flow import build_fallback_context
 from services.nova_fallback_flow import finalize_llm_fallback_reply
-from services.nova_fallback_flow import looks_like_open_fallback_turn
-from services.nova_fallback_flow import open_probe_reply
 from services.nova_fallback_flow import prepare_fallback_flow
+from services.nova_turn_intent_trace import build_turn_intent_evidence_packet
+from services.nova_turn_intent_trace import render_turn_intent_evidence_packet
 
 
 class TestNovaFallbackFlow(unittest.TestCase):
-    def test_build_fallback_context_appends_recent_tool_context_for_prior_reference(self):
+    def test_build_fallback_context_uses_context_builder_only(self):
         calls = []
         out = build_fallback_context(
             text="what about the first one?",
             turns=[("user", "research student_data")],
-            recent_tool_context="1) https://example.com/a",
             build_fallback_context_details_fn=lambda text, turns: {
                 "context": "BASE",
                 "learning_context": "BASE",
                 "chat_context": "CHAT",
                 "session_fact_sheet": "FACTS",
                 "memory_used": True,
+                "operational_identity_used": True,
                 "knowledge_used": False,
                 "memory_chars": 4,
+                "operational_identity_chars": 20,
                 "knowledge_chars": 0,
             },
-            uses_prior_reference_fn=lambda text: True,
             action_ledger_add_step=lambda *args, **kwargs: calls.append((args, kwargs)),
         )
-        self.assertEqual(out.get("retrieved_context"), "BASE\n\nRECENT TOOL OUTPUT:\n1) https://example.com/a")
+
+        self.assertIn("NOVA INTERNAL EVIDENCE SUMMARY", out.get("retrieved_context"))
+        self.assertNotIn("available_evidence", out.get("retrieved_context"))
+        self.assertIn("BASE", out.get("retrieved_context"))
+        self.assertEqual((out.get("intent_evidence_packet") or {}).get("trace_authority"), "hypothesis_only")
         self.assertTrue(any(args[0] == "memory_context" for args, _kwargs in calls))
-        self.assertTrue(any(args[0] == "recent_tool_context" for args, _kwargs in calls))
+        self.assertTrue(any(args[0] == "turn_intent_evidence" for args, _kwargs in calls))
+        self.assertFalse(any(args[0] == "recent_tool_context" for args, _kwargs in calls))
 
-    def test_apply_policy_gate_block_normalizes_reply_and_marks_policy_block(self):
-        steps = []
-        out = apply_policy_gate_block(
-            task=SimpleNamespace(allow_llm=False, message="Blocked by policy."),
-            action_ledger_add_step=lambda *args, **kwargs: steps.append((args, kwargs)),
-            normalize_reply_fn=lambda reply: f"normalized:{reply}",
-        )
-        self.assertTrue(out.get("handled"))
-        self.assertEqual(out.get("reply"), "normalized:Blocked by policy.")
-        self.assertEqual(out.get("planner_decision"), "policy_block")
-        self.assertTrue(out.get("grounded"))
-        self.assertTrue(any(args[0] == "policy_gate" for args, _kwargs in steps))
-
-    def test_prepare_fallback_flow_returns_policy_block_outcome(self):
+    def test_prepare_fallback_flow_builds_retrieved_context_without_policy_gate(self):
         steps = []
         out = prepare_fallback_flow(
-            text="I need help deciding.",
-            turns=[("user", "I need help deciding.")],
-            recent_tool_context="",
-            prefer_web_for_data_queries=False,
-            analyze_request_fn=lambda text, config=None: SimpleNamespace(allow_llm=False, message="Blocked by policy."),
-            normalize_policy_reply_fn=lambda reply: f"normalized:{reply}",
-            build_fallback_context_details_fn=lambda text, turns: {"context": "unused"},
-            uses_prior_reference_fn=lambda text: False,
-            action_ledger_add_step=lambda *args, **kwargs: steps.append((args, kwargs)),
-        )
-        self.assertTrue(out.get("handled"))
-        self.assertEqual((out.get("outcome") or {}).get("reply"), "normalized:Blocked by policy.")
-        self.assertTrue(any(args[0] == "policy_gate" for args, _kwargs in steps))
-
-    def test_prepare_fallback_flow_builds_retrieved_context_when_allowed(self):
-        steps = []
-        out = prepare_fallback_flow(
-            text="what about the first one?",
-            turns=[("user", "research student_data")],
-            recent_tool_context="1) https://example.com/a",
-            prefer_web_for_data_queries=True,
-            analyze_request_fn=lambda text, config=None: SimpleNamespace(allow_llm=True, message=""),
-            normalize_policy_reply_fn=lambda reply: reply,
+            text="tell me why that answer drifted",
+            turns=[("user", "tell me why that answer drifted")],
             build_fallback_context_details_fn=lambda text, turns: {
-                "context": "BASE",
-                "learning_context": "BASE",
+                "context": "CHAT CONTEXT",
+                "learning_context": "",
                 "chat_context": "CHAT",
-                "session_fact_sheet": "FACTS",
-                "memory_used": True,
+                "session_fact_sheet": "",
+                "memory_used": False,
+                "operational_identity_used": False,
                 "knowledge_used": False,
-                "memory_chars": 4,
+                "memory_chars": 0,
+                "operational_identity_chars": 0,
                 "knowledge_chars": 0,
             },
-            uses_prior_reference_fn=lambda text: True,
             action_ledger_add_step=lambda *args, **kwargs: steps.append((args, kwargs)),
         )
+
         self.assertFalse(out.get("handled"))
-        self.assertEqual(out.get("retrieved_context"), "BASE\n\nRECENT TOOL OUTPUT:\n1) https://example.com/a")
-        self.assertTrue(any(args[0] == "policy_gate" and args[1] == "allowed" for args, _kwargs in steps))
+        self.assertIn("NOVA INTERNAL EVIDENCE SUMMARY", out.get("retrieved_context"))
+        self.assertNotIn("current_user_turn", out.get("retrieved_context"))
+        self.assertIn("CHAT CONTEXT", out.get("retrieved_context"))
+        self.assertFalse(any(args[0] == "policy_gate" for args, _kwargs in steps))
 
-    def test_apply_low_confidence_block_returns_truthful_limit_reply(self):
-        events = []
-        steps = []
-        out = apply_low_confidence_block(
-            text="what is gus doing right now?",
-            retrieved_context="",
-            recent_tool_context="",
-            should_block_low_confidence_fn=lambda text, **kwargs: True,
-            behavior_record_event_fn=lambda event: events.append(event),
-            truthful_limit_outcome_fn=lambda text: {"reply_contract": "turn.truthful_limit", "reply_text": "I don't know that based on what I can verify."},
-            truthful_limit_reply_fn=lambda text: "fallback",
-            action_ledger_add_step=lambda *args, **kwargs: steps.append((args, kwargs)),
-            ensure_reply=lambda text: text,
+    def test_fallback_context_summary_does_not_expose_internal_packet_labels(self):
+        out = build_fallback_context(
+            text="status check",
+            turns=[("user", "status check")],
+            build_fallback_context_details_fn=lambda text, turns: {
+                "context": "Identity fact: assistant_name=Nova",
+                "learning_context": "Identity fact: assistant_name=Nova",
+                "chat_context": "",
+                "session_fact_sheet": "",
+                "identity_used": True,
+                "operational_identity_used": True,
+                "identity_chars": 30,
+                "operational_identity_chars": 45,
+            },
+            action_ledger_add_step=lambda *args, **kwargs: None,
         )
-        self.assertTrue(out.get("handled"))
-        self.assertEqual(out.get("planner_decision"), "blocked_low_confidence")
-        self.assertEqual(out.get("reply_contract"), "turn.truthful_limit")
-        self.assertEqual(out.get("reply"), "I don't know that based on what I can verify.")
-        self.assertIn("low_confidence_block", events)
-        self.assertTrue(any(args[0] == "low_confidence_gate" for args, _kwargs in steps))
 
-    def test_finalize_llm_fallback_reply_records_claim_gate_truthful_limit(self):
+        retrieved = str(out.get("retrieved_context") or "")
+        self.assertIn("NOVA INTERNAL EVIDENCE SUMMARY", retrieved)
+        self.assertIn("Confirmed Nova identity evidence is available.", retrieved)
+        self.assertIn("Operational Nova self evidence is available.", retrieved)
+        self.assertNotIn("confirmed_identity_context", retrieved)
+        self.assertNotIn("operational_self_context", retrieved)
+        self.assertNotIn("intent_evidence_packet", retrieved)
+        self.assertIn("assistant_name=Nova", retrieved)
+
+    def test_finalize_llm_fallback_reply_returns_model_reply_without_content_hooks(self):
         events = []
-        steps = []
         memories = []
-        taught = []
         out = finalize_llm_fallback_reply(
-            text="tell me something reflective about ambition",
-            raw_user_text="tell me something reflective about ambition",
+            text="tell me what you think happened",
+            raw_user_text="tell me what you think happened",
             input_source="typed",
-            retrieved_context="SESSION FACT SHEET",
-            recent_tool_context="",
+            retrieved_context="CURRENT CHAT CONTEXT",
             language_mix_spanish_pct=0,
-            active_user="gus",
-            ollama_chat_fn=lambda text, retrieved_context="", language_mix_spanish_pct=0: "Unsafe claim.",
-            sanitize_llm_reply_fn=lambda reply, tool_context: reply,
+            ollama_chat_fn=lambda text, retrieved_context="", language_mix_spanish_pct=0: f"model:{text}:{bool(retrieved_context)}",
             mem_enabled_fn=lambda: True,
             mem_should_store_fn=lambda text: True,
             mem_add_fn=lambda kind, source, text: memories.append((kind, source, text)),
             strip_mem_leak_fn=lambda reply, retrieved_context: reply,
-            self_correct_reply_fn=lambda text, reply: (reply, False, ""),
             behavior_record_event_fn=lambda event: events.append(event),
-            action_ledger_add_step=lambda *args, **kwargs: steps.append((args, kwargs)),
-            teach_store_example_fn=lambda before, after, user=None: taught.append((before, after, user)),
-            truthful_limit_outcome_fn=lambda text: {"reply_contract": "turn.truthful_limit", "kind": "cannot_verify"},
-            apply_claim_gate_fn=lambda reply, evidence_text="", tool_context="": ("I don't know that based on what I can verify.", True, "unsupported_claim_blocked"),
-            is_explicit_request_fn=lambda text: False,
-            apply_reply_overrides_fn=lambda text: text,
+            action_ledger_add_step=lambda *args, **kwargs: None,
             ensure_reply_fn=lambda text: text,
+            intent_evidence_packet={"trace_authority": "hypothesis_only"},
         )
+
         self.assertTrue(out.get("handled"))
         self.assertEqual(out.get("planner_decision"), "llm_fallback")
-        self.assertFalse(out.get("grounded"))
-        self.assertEqual(out.get("reply_contract"), "turn.truthful_limit")
-        self.assertEqual((out.get("reply_outcome") or {}).get("kind"), "cannot_verify")
-        self.assertEqual(out.get("reply"), "I don't know that based on what I can verify.")
-        self.assertIn("llm_fallback", events)
-        self.assertEqual(memories, [("chat_user", "typed", "tell me something reflective about ambition")])
-        self.assertFalse(taught)
-        self.assertTrue(any(args[0] == "claim_gate" for args, _kwargs in steps))
+        self.assertEqual(out.get("reply"), "model:tell me what you think happened:True")
+        self.assertEqual(out.get("reply_contract"), "")
+        self.assertEqual((out.get("reply_outcome") or {}).get("kind"), "llm_fallback")
+        self.assertEqual(
+            ((out.get("reply_outcome") or {}).get("intent_evidence_packet") or {}).get("trace_authority"),
+            "hypothesis_only",
+        )
+        self.assertEqual(memories, [("chat_user", "typed", "tell me what you think happened")])
+        self.assertEqual(events, ["llm_fallback"])
 
-    def test_finalize_llm_fallback_reply_supports_preprocess_and_post_claim_hooks(self):
+    def test_finalize_llm_fallback_reply_supports_preprocess_only(self):
         out = finalize_llm_fallback_reply(
-            text="tell me something reflective about ambition",
-            raw_user_text="tell me something reflective about ambition",
+            text="say it plainly",
+            raw_user_text="say it plainly",
             input_source="typed",
-            retrieved_context="SESSION FACT SHEET",
-            recent_tool_context="",
+            retrieved_context="",
             language_mix_spanish_pct=0,
-            active_user="gus",
             ollama_chat_fn=lambda text, retrieved_context="", language_mix_spanish_pct=0: "raw reply",
-            sanitize_llm_reply_fn=lambda reply, tool_context: reply,
             mem_enabled_fn=lambda: False,
             mem_should_store_fn=lambda text: False,
             mem_add_fn=lambda kind, source, text: None,
             strip_mem_leak_fn=lambda reply, retrieved_context: reply,
-            self_correct_reply_fn=lambda text, reply: (reply, False, ""),
             behavior_record_event_fn=lambda event: None,
             action_ledger_add_step=lambda *args, **kwargs: None,
-            teach_store_example_fn=lambda before, after, user=None: None,
-            truthful_limit_outcome_fn=lambda text: {},
-            apply_claim_gate_fn=lambda reply, evidence_text="", tool_context="": (reply, False, ""),
             preprocess_reply_fn=lambda reply: f"pre:{reply}",
-            post_claim_reply_transform_fn=lambda reply, reply_contract: f"post:{reply}",
-            is_explicit_request_fn=lambda text: True,
-            apply_reply_overrides_fn=lambda text: text,
             ensure_reply_fn=lambda text: text,
         )
-        self.assertEqual(out.get("reply"), "post:pre:raw reply")
 
-    def test_looks_like_open_fallback_turn_keeps_weather_chat_model_owned(self):
-        self.assertTrue(
-            looks_like_open_fallback_turn(
-                "what's the weather now",
-                is_explicit_command_like_fn=lambda text: False,
-                is_location_request_fn=lambda text: False,
-                normalize_turn_text_fn=lambda text: text.lower().strip(),
-                is_peims_broad_query_fn=lambda text: False,
-                is_local_knowledge_topic_query_fn=lambda text: False,
-            )
+        self.assertEqual(out.get("reply"), "pre:raw reply")
+
+    def test_finalize_conversation_scoped_fallback_drops_trailing_question_shape(self):
+        packet = build_turn_intent_evidence_packet(
+            text="continue the exchange",
+            turns=[("user", "continue the exchange")],
+            fallback_context={"chat_context": "recent turns"},
+            semantic_tool_observation={
+                "status": "none",
+                "intent": {
+                    "tool": "none",
+                    "confidence": 0.91,
+                    "evidence_need": "conversation",
+                    "answer_target": "current_conversation",
+                },
+            },
         )
 
-    def test_looks_like_open_fallback_turn_filters_location_requests(self):
-        self.assertFalse(
-            looks_like_open_fallback_turn(
-                "where am I",
-                is_explicit_command_like_fn=lambda text: False,
-                is_location_request_fn=lambda text: True,
-                normalize_turn_text_fn=lambda text: text.lower().strip(),
-                is_peims_broad_query_fn=lambda text: False,
-                is_local_knowledge_topic_query_fn=lambda text: False,
-            )
+        out = finalize_llm_fallback_reply(
+            text="continue the exchange",
+            raw_user_text="continue the exchange",
+            input_source="typed",
+            retrieved_context="",
+            language_mix_spanish_pct=0,
+            ollama_chat_fn=lambda *args, **kwargs: "Direct conversation reply. What should happen next?",
+            mem_enabled_fn=lambda: False,
+            mem_should_store_fn=lambda text: False,
+            mem_add_fn=lambda kind, source, text: None,
+            strip_mem_leak_fn=lambda reply, retrieved_context: reply,
+            behavior_record_event_fn=lambda event: None,
+            action_ledger_add_step=lambda *args, **kwargs: None,
+            ensure_reply_fn=lambda text: text,
+            intent_evidence_packet=packet,
+            fallback_context={},
         )
 
-    def test_looks_like_open_fallback_turn_accepts_general_chat_probe(self):
-        self.assertTrue(
-            looks_like_open_fallback_turn(
-                "can you help me here",
-                is_explicit_command_like_fn=lambda text: False,
-                is_location_request_fn=lambda text: False,
-                normalize_turn_text_fn=lambda text: text.lower().strip(),
-                is_peims_broad_query_fn=lambda text: False,
-                is_local_knowledge_topic_query_fn=lambda text: False,
-            )
+        self.assertEqual(out.get("planner_decision"), "llm_fallback")
+        self.assertEqual(out.get("reply"), "Direct conversation reply.")
+
+    def test_finalize_conversation_scoped_fallback_keeps_direct_paragraph_only(self):
+        packet = build_turn_intent_evidence_packet(
+            text="continue the exchange",
+            turns=[("user", "continue the exchange")],
+            fallback_context={"chat_context": "recent turns"},
+            semantic_tool_observation={
+                "status": "none",
+                "intent": {
+                    "tool": "none",
+                    "confidence": 0.91,
+                    "evidence_need": "conversation",
+                    "answer_target": "current_conversation",
+                },
+            },
         )
 
-    def test_open_probe_reply_returns_clarification_when_last_assistant_drifted_to_web(self):
-        reply, kind = open_probe_reply(
-            "what are you talking about?",
+        out = finalize_llm_fallback_reply(
+            text="continue the exchange",
+            raw_user_text="continue the exchange",
+            input_source="typed",
+            retrieved_context="",
+            language_mix_spanish_pct=0,
+            ollama_chat_fn=lambda *args, **kwargs: "Direct conversation reply.\n\nExtra steering paragraph.",
+            mem_enabled_fn=lambda: False,
+            mem_should_store_fn=lambda text: False,
+            mem_add_fn=lambda kind, source, text: None,
+            strip_mem_leak_fn=lambda reply, retrieved_context: reply,
+            behavior_record_event_fn=lambda event: None,
+            action_ledger_add_step=lambda *args, **kwargs: None,
+            ensure_reply_fn=lambda text: text,
+            intent_evidence_packet=packet,
+            fallback_context={},
+        )
+
+        self.assertEqual(out.get("reply"), "Direct conversation reply.")
+
+    def test_finalize_conversation_scoped_fallback_uses_conversation_reply_form_before_generation(self):
+        packet = build_turn_intent_evidence_packet(
+            text="continue the exchange",
+            turns=[("assistant", "prior reply"), ("user", "continue the exchange")],
+            fallback_context={
+                "context": "RAW OPERATIONAL SELF CONTEXT",
+                "chat_context": "CHAT ONLY",
+                "operational_identity_used": True,
+                "operational_identity_chars": 28,
+            },
+            semantic_tool_observation={
+                "status": "none",
+                "intent": {
+                    "tool": "none",
+                    "confidence": 0.91,
+                    "evidence_need": "conversation",
+                    "answer_target": "current_conversation",
+                },
+            },
+        )
+        captured = {}
+
+        def _chat(text, retrieved_context="", language_mix_spanish_pct=0, reply_form=""):
+            captured["text"] = text
+            captured["retrieved_context"] = retrieved_context
+            captured["reply_form"] = reply_form
+            captured["language_mix_spanish_pct"] = language_mix_spanish_pct
+            return "Direct conversation reply. Extra explanation follows."
+
+        out = finalize_llm_fallback_reply(
+            text="continue the exchange",
+            raw_user_text="continue the exchange",
+            input_source="typed",
+            retrieved_context="NOVA INTERNAL EVIDENCE SUMMARY\nRAW OPERATIONAL SELF CONTEXT",
+            language_mix_spanish_pct=7,
+            ollama_chat_fn=_chat,
+            mem_enabled_fn=lambda: False,
+            mem_should_store_fn=lambda text: False,
+            mem_add_fn=lambda kind, source, text: None,
+            strip_mem_leak_fn=lambda reply, retrieved_context: reply,
+            behavior_record_event_fn=lambda event: None,
+            action_ledger_add_step=lambda *args, **kwargs: None,
+            ensure_reply_fn=lambda text: text,
+            intent_evidence_packet=packet,
+            fallback_context={
+                "context": "RAW OPERATIONAL SELF CONTEXT",
+                "chat_context": "CHAT ONLY",
+                "operational_identity_used": True,
+                "operational_identity_chars": 28,
+            },
+        )
+
+        self.assertEqual(out.get("reply"), "Direct conversation reply.")
+        self.assertEqual(captured.get("reply_form"), "conversation_turn")
+        self.assertEqual(captured.get("language_mix_spanish_pct"), 7)
+        self.assertIn("reply_form: conversation_turn", captured.get("retrieved_context"))
+        self.assertIn("RECENT CHAT CONTEXT:\nCHAT ONLY", captured.get("retrieved_context"))
+        self.assertNotIn("RAW OPERATIONAL SELF CONTEXT", captured.get("retrieved_context"))
+
+    def test_finalize_conversation_scoped_fallback_keeps_session_evidence_available(self):
+        packet = build_turn_intent_evidence_packet(
+            text="what do you mean?",
+            turns=[("assistant", "Assistant returned a tool result. The result is available as last tool evidence."), ("user", "what do you mean?")],
+            fallback_context={
+                "chat_context": "Assistant returned a tool result.",
+                "state_context": "ACTIVE SESSION STATE: last_tool_evidence / self_status\nLast tool evidence:\nNova Self Status - stable",
+            },
+            semantic_tool_observation={
+                "status": "none",
+                "intent": {
+                    "tool": "none",
+                    "confidence": 0.0,
+                    "evidence_need": "conversation",
+                    "answer_target": "current_conversation",
+                },
+            },
+        )
+        captured = {}
+
+        def _chat(text, retrieved_context="", language_mix_spanish_pct=0, reply_form=""):
+            captured["retrieved_context"] = retrieved_context
+            captured["reply_form"] = reply_form
+            return "It means the last status said Nova was stable."
+
+        out = finalize_llm_fallback_reply(
+            text="what do you mean?",
+            raw_user_text="what do you mean?",
+            input_source="typed",
+            retrieved_context="",
+            language_mix_spanish_pct=0,
+            ollama_chat_fn=_chat,
+            mem_enabled_fn=lambda: False,
+            mem_should_store_fn=lambda text: False,
+            mem_add_fn=lambda kind, source, text: None,
+            strip_mem_leak_fn=lambda reply, retrieved_context: reply,
+            behavior_record_event_fn=lambda event: None,
+            action_ledger_add_step=lambda *args, **kwargs: None,
+            ensure_reply_fn=lambda text: text,
+            intent_evidence_packet=packet,
+            fallback_context={
+                "chat_context": "Assistant returned a tool result.",
+                "state_context": "ACTIVE SESSION STATE: last_tool_evidence / self_status\nLast tool evidence:\nNova Self Status - stable",
+            },
+        )
+
+        self.assertEqual(out.get("reply"), "It means the last status said Nova was stable.")
+        self.assertEqual(captured.get("reply_form"), "conversation_turn")
+        self.assertIn("SESSION EVIDENCE", captured.get("retrieved_context"))
+        self.assertIn("Nova Self Status - stable", captured.get("retrieved_context"))
+
+    def test_finalize_fallback_answers_from_existing_tool_evidence_without_rerun_or_model(self):
+        packet = build_turn_intent_evidence_packet(
+            text="what do you mean?",
+            turns=[("assistant", "Assistant returned a tool result. The result is available as last tool evidence."), ("user", "what do you mean?")],
+            fallback_context={
+                "state_context": (
+                    "ACTIVE SESSION STATE: last_tool_evidence / self_status\n"
+                    "Last tool evidence:\n"
+                    "Nova Self Status - 2026-05-20 10:00:00\n"
+                    "Level: updating\n"
+                    "Summary: Nova is stable and has update activity to review.\n"
+                ),
+            },
+            semantic_tool_observation={
+                "status": "tool_evidence_available",
+                "intent": {
+                    "tool": "none",
+                    "confidence": 1.0,
+                    "evidence_need": "conversation",
+                    "answer_target": "current_conversation",
+                },
+            },
+        )
+        calls = []
+
+        out = finalize_llm_fallback_reply(
+            text="what do you mean?",
+            raw_user_text="what do you mean?",
+            input_source="typed",
+            retrieved_context="",
+            language_mix_spanish_pct=0,
+            ollama_chat_fn=lambda *args, **kwargs: calls.append("llm") or "MODEL_SHOULD_NOT_RUN",
+            mem_enabled_fn=lambda: False,
+            mem_should_store_fn=lambda text: False,
+            mem_add_fn=lambda kind, source, text: None,
+            strip_mem_leak_fn=lambda reply, retrieved_context: reply,
+            behavior_record_event_fn=lambda event: calls.append(event),
+            action_ledger_add_step=lambda *args, **kwargs: calls.append(args[0]),
+            ensure_reply_fn=lambda text: text,
+            intent_evidence_packet=packet,
+            fallback_context={
+                "state_context": (
+                    "ACTIVE SESSION STATE: last_tool_evidence / self_status\n"
+                    "Last tool evidence:\n"
+                    "Nova Self Status - 2026-05-20 10:00:00\n"
+                    "Level: updating\n"
+                    "Summary: Nova is stable and has update activity to review.\n"
+                ),
+            },
+        )
+
+        self.assertEqual(out.get("planner_decision"), "evidence_bound_reply")
+        self.assertEqual(out.get("reply_contract"), "session_evidence.last_tool_result")
+        self.assertEqual(
+            out.get("reply"),
+            "The available evidence says Nova is stable and has update activity to review. Level: updating.",
+        )
+        self.assertNotIn("llm", calls)
+        self.assertIn("session_evidence", calls)
+
+    def test_finalize_conversation_scoped_fallback_keeps_first_complete_thought(self):
+        packet = build_turn_intent_evidence_packet(
+            text="continue the exchange",
+            turns=[("user", "continue the exchange")],
+            fallback_context={"chat_context": "recent turns"},
+            semantic_tool_observation={
+                "status": "none",
+                "intent": {
+                    "tool": "none",
+                    "confidence": 0.91,
+                    "evidence_need": "conversation",
+                    "answer_target": "current_conversation",
+                },
+            },
+        )
+
+        out = finalize_llm_fallback_reply(
+            text="continue the exchange",
+            raw_user_text="continue the exchange",
+            input_source="typed",
+            retrieved_context="",
+            language_mix_spanish_pct=0,
+            ollama_chat_fn=lambda *args, **kwargs: "I can stay with this conversation. Extra explanation follows. Another branch follows.",
+            mem_enabled_fn=lambda: False,
+            mem_should_store_fn=lambda text: False,
+            mem_add_fn=lambda kind, source, text: None,
+            strip_mem_leak_fn=lambda reply, retrieved_context: reply,
+            behavior_record_event_fn=lambda event: None,
+            action_ledger_add_step=lambda *args, **kwargs: None,
+            ensure_reply_fn=lambda text: text,
+            intent_evidence_packet=packet,
+            fallback_context={},
+        )
+
+        self.assertEqual(out.get("reply"), "I can stay with this conversation.")
+
+    def test_finalize_conversation_scoped_fallback_prefers_statement_over_question_opener(self):
+        packet = build_turn_intent_evidence_packet(
+            text="continue the exchange",
+            turns=[("user", "continue the exchange")],
+            fallback_context={"chat_context": "recent turns"},
+            semantic_tool_observation={
+                "status": "none",
+                "intent": {
+                    "tool": "none",
+                    "confidence": 0.91,
+                    "evidence_need": "conversation",
+                    "answer_target": "current_conversation",
+                },
+            },
+        )
+
+        out = finalize_llm_fallback_reply(
+            text="continue the exchange",
+            raw_user_text="continue the exchange",
+            input_source="typed",
+            retrieved_context="",
+            language_mix_spanish_pct=0,
+            ollama_chat_fn=lambda *args, **kwargs: "What path now? This can stay simple. Extra explanation follows.",
+            mem_enabled_fn=lambda: False,
+            mem_should_store_fn=lambda text: False,
+            mem_add_fn=lambda kind, source, text: None,
+            strip_mem_leak_fn=lambda reply, retrieved_context: reply,
+            behavior_record_event_fn=lambda event: None,
+            action_ledger_add_step=lambda *args, **kwargs: None,
+            ensure_reply_fn=lambda text: text,
+            intent_evidence_packet=packet,
+            fallback_context={},
+        )
+
+        self.assertEqual(out.get("reply"), "This can stay simple.")
+
+    def test_finalize_fallback_binds_operational_self_answer_to_evidence_without_llm(self):
+        calls = []
+        packet = build_turn_intent_evidence_packet(
+            text="what are you?",
+            turns=[("user", "what are you?")],
+            fallback_context={"identity_used": True, "identity_chars": 10, "operational_identity_used": True, "operational_identity_chars": 20},
+            semantic_tool_observation={
+                "status": "none",
+                "intent": {"tool": "none", "confidence": 0.9, "evidence_need": "operational_self", "answer_target": "nova_self"},
+            },
+        )
+
+        out = finalize_llm_fallback_reply(
+            text="what are you?",
+            raw_user_text="what are you?",
+            input_source="http",
+            retrieved_context="",
+            language_mix_spanish_pct=0,
+            ollama_chat_fn=lambda *args, **kwargs: calls.append("llm") or "MODEL",
+            mem_enabled_fn=lambda: False,
+            mem_should_store_fn=lambda text: False,
+            mem_add_fn=lambda kind, source, text: None,
+            strip_mem_leak_fn=lambda reply, retrieved_context: reply,
+            behavior_record_event_fn=lambda event: calls.append(event),
+            action_ledger_add_step=lambda *args, **kwargs: calls.append(args[0]),
+            ensure_reply_fn=lambda text: text,
+            intent_evidence_packet=packet,
+            fallback_context={
+                "learning_context": (
+                    "Confirmed Nova identity evidence: Nova identity origin was confirmed by the operator; identity bootstrap status: ready\n"
+                    "Identity fact: assistant_name=Nova\n"
+                    "Identity fact: developer_name=Gustavo Uribe\n"
+                    "Identity fact: developer_nickname=Gus\n"
+                    "Operational Nova self evidence:\n"
+                    "Registered internal surfaces observed from the capability registry:\n"
+                    "- runtime_core: Nova runs as a local runtime\n"
+                    "- work_tree: Nova can organize internal work\n"
+                    "- autonomy_handling: Nova has autonomy advisory machinery\n"
+                ),
+            },
+        )
+
+        self.assertEqual(out.get("planner_decision"), "evidence_bound_reply")
+        self.assertTrue(out.get("grounded"))
+        self.assertIn("I am Nova", out.get("reply"))
+        self.assertIn("Gustavo Uribe", out.get("reply"))
+        self.assertIn("runtime core", out.get("reply"))
+        self.assertNotIn("MODEL", out.get("reply"))
+        self.assertNotIn("llm", calls)
+
+    def test_finalize_fallback_binds_confirmed_identity_answer_to_evidence_without_llm(self):
+        packet = build_turn_intent_evidence_packet(
+            text="who made you?",
+            turns=[("user", "who made you?")],
+            fallback_context={"identity_used": True, "identity_chars": 10},
+            semantic_tool_observation={
+                "status": "none",
+                "intent": {"tool": "none", "confidence": 0.88, "evidence_need": "confirmed_identity", "answer_target": "nova_self"},
+            },
+        )
+
+        out = finalize_llm_fallback_reply(
+            text="who made you?",
+            raw_user_text="who made you?",
+            input_source="http",
+            retrieved_context="",
+            language_mix_spanish_pct=0,
+            ollama_chat_fn=lambda *args, **kwargs: "MODEL_SHOULD_NOT_RUN",
+            mem_enabled_fn=lambda: False,
+            mem_should_store_fn=lambda text: False,
+            mem_add_fn=lambda kind, source, text: None,
+            strip_mem_leak_fn=lambda reply, retrieved_context: reply,
+            behavior_record_event_fn=lambda event: None,
+            action_ledger_add_step=lambda *args, **kwargs: None,
+            ensure_reply_fn=lambda text: text,
+            intent_evidence_packet=packet,
+            fallback_context={
+                "learning_context": (
+                    "Confirmed Nova identity evidence: Nova identity origin was confirmed by the operator\n"
+                    "Identity fact: assistant_name=Nova\n"
+                    "Identity fact: developer_name=Gustavo Uribe\n"
+                    "Identity fact: developer_nickname=Gus\n"
+                ),
+            },
+        )
+
+        self.assertEqual(out.get("reply_contract"), "self_evidence.confirmed_identity")
+        self.assertIn("developer=Gustavo Uribe (Gus)", out.get("reply"))
+        self.assertNotIn("MODEL_SHOULD_NOT_RUN", out.get("reply"))
+
+    def test_finalize_fallback_does_not_upgrade_unclear_self_evidence_need(self):
+        packet = build_turn_intent_evidence_packet(
+            text="tell me more",
+            turns=[("user", "tell me more")],
+            fallback_context={"identity_used": True, "identity_chars": 10, "operational_identity_used": True, "operational_identity_chars": 20},
+            semantic_tool_observation={
+                "status": "none",
+                "intent": {"tool": "none", "confidence": 0.9, "evidence_need": "unknown", "answer_target": "nova_self"},
+            },
+        )
+
+        out = finalize_llm_fallback_reply(
+            text="tell me more",
+            raw_user_text="tell me more",
+            input_source="http",
+            retrieved_context="",
+            language_mix_spanish_pct=0,
+            ollama_chat_fn=lambda *args, **kwargs: "MODEL_REPLY",
+            mem_enabled_fn=lambda: False,
+            mem_should_store_fn=lambda text: False,
+            mem_add_fn=lambda kind, source, text: None,
+            strip_mem_leak_fn=lambda reply, retrieved_context: reply,
+            behavior_record_event_fn=lambda event: None,
+            action_ledger_add_step=lambda *args, **kwargs: None,
+            ensure_reply_fn=lambda text: text,
+            intent_evidence_packet=packet,
+            fallback_context={
+                "learning_context": (
+                    "Identity fact: assistant_name=Nova\n"
+                    "Operational Nova self evidence:\n"
+                    "- runtime_core: Nova runs as a local runtime\n"
+                ),
+            },
+        )
+
+        self.assertEqual(out.get("planner_decision"), "llm_fallback")
+        self.assertEqual(out.get("reply"), "MODEL_REPLY")
+
+    def test_finalize_fallback_does_not_bind_low_confidence_self_evidence(self):
+        packet = build_turn_intent_evidence_packet(
+            text="what are you?",
+            turns=[("user", "what are you?")],
+            fallback_context={"identity_used": True, "identity_chars": 10, "operational_identity_used": True, "operational_identity_chars": 20},
+            semantic_tool_observation={
+                "status": "none",
+                "intent": {"tool": "none", "confidence": 0.31, "evidence_need": "operational_self", "answer_target": "nova_self"},
+            },
+        )
+
+        out = finalize_llm_fallback_reply(
+            text="what are you?",
+            raw_user_text="what are you?",
+            input_source="http",
+            retrieved_context="",
+            language_mix_spanish_pct=0,
+            ollama_chat_fn=lambda *args, **kwargs: "MODEL_REPLY",
+            mem_enabled_fn=lambda: False,
+            mem_should_store_fn=lambda text: False,
+            mem_add_fn=lambda kind, source, text: None,
+            strip_mem_leak_fn=lambda reply, retrieved_context: reply,
+            behavior_record_event_fn=lambda event: None,
+            action_ledger_add_step=lambda *args, **kwargs: None,
+            ensure_reply_fn=lambda text: text,
+            intent_evidence_packet=packet,
+            fallback_context={
+                "learning_context": (
+                    "Identity fact: assistant_name=Nova\n"
+                    "Operational Nova self evidence:\n"
+                    "- runtime_core: Nova runs as a local runtime\n"
+                ),
+            },
+        )
+
+        self.assertEqual(out.get("planner_decision"), "llm_fallback")
+        self.assertEqual(out.get("reply"), "MODEL_REPLY")
+
+    def test_intent_evidence_packet_keeps_trace_below_authority(self):
+        packet = build_turn_intent_evidence_packet(
+            text="can you prove what you just said?",
             turns=[
-                ("user", "tell me directly"),
-                ("assistant", "I can use web lookup or web research for that"),
+                ("user", "who built this runtime?"),
+                ("assistant", "I am not sure from current evidence."),
+                ("user", "can you prove what you just said?"),
             ],
-            normalize_turn_text_fn=lambda text: text.lower().strip(),
-            truthful_limit_reply_fn=lambda text: "fallback",
+            fallback_context={"chat_context": "recent turns"},
+            semantic_tool_observation={"status": "none", "intent": {"tool": "none", "confidence": 0.9}},
         )
-        self.assertEqual(kind, "clarification")
-        self.assertIn("drifted into web lookup", reply)
 
-    def test_open_probe_reply_falls_back_to_truthful_limit(self):
-        reply, kind = open_probe_reply(
-            "say more",
-            turns=[],
-            normalize_turn_text_fn=lambda text: text.lower().strip(),
-            truthful_limit_reply_fn=lambda text: f"limit:{text}",
+        self.assertEqual(packet.get("trace_authority"), "hypothesis_only")
+        self.assertFalse((packet.get("answer_contract") or {}).get("trace_is_route_authority"))
+        self.assertTrue((packet.get("answer_contract") or {}).get("evidence_is_claim_authority"))
+        self.assertIn("I am not sure", (packet.get("conversation_frame") or {}).get("previous_assistant_turn"))
+        self.assertFalse((packet.get("conversation_frame") or {}).get("last_assistant_repeats_earlier_assistant"))
+        self.assertFalse((packet.get("answer_contract") or {}).get("conversation_can_be_complete_without_task"))
+
+    def test_conversation_scoped_intent_marks_conversation_as_complete_without_task(self):
+        packet = build_turn_intent_evidence_packet(
+            text="continue this exchange",
+            turns=[
+                ("user", "first turn"),
+                ("assistant", "first reply"),
+                ("user", "continue this exchange"),
+            ],
+            fallback_context={"chat_context": "recent turns"},
+            semantic_tool_observation={
+                "status": "none",
+                "intent": {
+                    "tool": "none",
+                    "confidence": 0.91,
+                    "evidence_need": "conversation",
+                    "answer_target": "current_conversation",
+                },
+            },
         )
-        self.assertEqual(kind, "safe_fallback")
-        self.assertEqual(reply, "limit:say more")
+
+        rendered = render_turn_intent_evidence_packet(packet)
+
+        self.assertTrue((packet.get("answer_contract") or {}).get("conversation_can_be_complete_without_task"))
+        self.assertEqual((packet.get("answer_contract") or {}).get("reply_form"), "conversation_turn")
+        self.assertEqual(
+            rendered.count("- The current turn is conversation-scoped; do not convert it into a task, help flow, confirmation loop, or closing question."),
+            1,
+        )
+        self.assertIn("without_task", str(packet.get("answer_contract")))
+
+    def test_conversation_scoped_intent_uses_structured_pair_not_numeric_confidence(self):
+        packet = build_turn_intent_evidence_packet(
+            text="keep this simple",
+            turns=[
+                ("user", "first turn"),
+                ("assistant", "first reply"),
+                ("user", "keep this simple"),
+            ],
+            fallback_context={"chat_context": "recent turns"},
+            semantic_tool_observation={
+                "status": "none",
+                "intent": {
+                    "tool": "none",
+                    "confidence": 0.0,
+                    "evidence_need": "conversation",
+                    "answer_target": "current_conversation",
+                },
+            },
+        )
+
+        rendered = render_turn_intent_evidence_packet(packet)
+
+        self.assertTrue((packet.get("answer_contract") or {}).get("conversation_can_be_complete_without_task"))
+        self.assertEqual((packet.get("answer_contract") or {}).get("reply_form"), "conversation_turn")
+        self.assertIn("conversation-scoped", rendered)
+
+    def test_intent_evidence_render_does_not_replay_prior_assistant_text(self):
+        packet = build_turn_intent_evidence_packet(
+            text="why did you repeat that?",
+            turns=[
+                ("user", "how can I help you?"),
+                ("assistant", "Prior answer that should not become the next draft."),
+                ("user", "why did you repeat that?"),
+            ],
+            fallback_context={"chat_context": "recent turns"},
+            semantic_tool_observation={"status": "none", "intent": {"tool": "none", "confidence": 0.0}},
+        )
+
+        rendered = render_turn_intent_evidence_packet(packet)
+
+        self.assertIn("Prior answer that should not become the next draft", (packet.get("conversation_frame") or {}).get("previous_assistant_turn"))
+        self.assertFalse((packet.get("conversation_frame") or {}).get("last_assistant_repeats_earlier_assistant"))
+        self.assertIn("prior assistant reply is available", rendered)
+        self.assertIn("current user turn is the answer target", rendered)
+        self.assertNotIn("Prior answer that should not become the next draft", rendered)
+
+    def test_finalize_fallback_answers_observed_assistant_repeat_from_conversation_evidence(self):
+        calls = []
+        repeated = "Same stale assistant answer."
+        packet = build_turn_intent_evidence_packet(
+            text="why did you repeat?",
+            turns=[
+                ("user", "first"),
+                ("assistant", repeated),
+                ("user", "second"),
+                ("assistant", repeated),
+                ("user", "why did you repeat?"),
+            ],
+            fallback_context={"chat_context": "recent turns"},
+            semantic_tool_observation={
+                "status": "none",
+                "intent": {
+                    "tool": "none",
+                    "confidence": 0.92,
+                    "evidence_need": "conversation",
+                    "answer_target": "current_conversation",
+                },
+            },
+        )
+
+        out = finalize_llm_fallback_reply(
+            text="why did you repeat?",
+            raw_user_text="why did you repeat?",
+            input_source="typed",
+            retrieved_context="",
+            language_mix_spanish_pct=0,
+            ollama_chat_fn=lambda *args, **kwargs: calls.append("llm") or "MODEL_SHOULD_NOT_RUN",
+            mem_enabled_fn=lambda: False,
+            mem_should_store_fn=lambda text: False,
+            mem_add_fn=lambda kind, source, text: None,
+            strip_mem_leak_fn=lambda reply, retrieved_context: reply,
+            behavior_record_event_fn=lambda event: calls.append(event),
+            action_ledger_add_step=lambda *args, **kwargs: calls.append(args[0]),
+            ensure_reply_fn=lambda text: text,
+            intent_evidence_packet=packet,
+            fallback_context={},
+        )
+
+        self.assertTrue((packet.get("conversation_frame") or {}).get("last_assistant_repeats_earlier_assistant"))
+        self.assertEqual(out.get("planner_decision"), "evidence_bound_reply")
+        self.assertEqual(out.get("reply_contract"), "conversation_evidence.assistant_repeat")
+        self.assertIn("last reply repeated an earlier assistant reply", out.get("reply"))
+        self.assertIn("conversation evidence", out.get("reply"))
+        self.assertNotIn("MODEL_SHOULD_NOT_RUN", out.get("reply"))
+        self.assertNotIn("llm", calls)
 
 
 if __name__ == "__main__":
     unittest.main()
-

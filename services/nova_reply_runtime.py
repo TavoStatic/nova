@@ -12,7 +12,6 @@ def apply_reply_runtime_effects(
     active_state: Optional[dict] = None,
     behavior_record_event_fn: Callable[[str], None],
     extract_urls_fn: Callable[[str], list[str]],
-    detect_identity_conflict_fn: Optional[Callable[[], bool]] = None,
 ) -> dict:
     decision = str(planner_decision or "").strip()
     tool_name = str(tool or "").strip()
@@ -26,12 +25,6 @@ def apply_reply_runtime_effects(
     elif decision == "llm_fallback":
         behavior_record_event_fn("llm_fallback")
 
-    identity_conflict = False
-    if decision == "deterministic" and tool_name == "hard_answer" and callable(detect_identity_conflict_fn):
-        identity_conflict = bool(detect_identity_conflict_fn())
-        if identity_conflict:
-            behavior_record_event_fn("conflict_detected")
-
     recent_tool_context = ""
     recent_web_urls: list[str] = []
     context_updated = False
@@ -39,18 +32,7 @@ def apply_reply_runtime_effects(
         recent_tool_context = tool_output.strip()[:2500]
         recent_web_urls = list(extract_urls_fn(tool_output) or [])
         context_updated = True
-    elif (
-        decision == "conversation_followup"
-        and reply_text.strip()
-        and isinstance(active_state, dict)
-        and str(active_state.get("kind") or "").strip() == "retrieval"
-    ):
-        recent_tool_context = reply_text.strip()[:2500]
-        recent_web_urls = list(extract_urls_fn(reply_text) or [])
-        context_updated = True
-
     return {
-        "identity_conflict": identity_conflict,
         "context_updated": context_updated,
         "recent_tool_context": recent_tool_context,
         "recent_web_urls": recent_web_urls,

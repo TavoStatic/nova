@@ -22,8 +22,9 @@ class TestProfileInventorySignalService(unittest.TestCase):
 
         self.assertIsNotNone(signal)
         assert signal is not None
-        self.assertEqual(signal["source"], "test_profile_inventory")
+        self.assertEqual(signal["source"], "test_ecosystem")
         self.assertEqual(signal["signal_class"], "governance_pressure")
+        self.assertEqual(signal["payload"]["test_ecosystem_signal"], "test_profile_inventory")
         self.assertEqual(signal["fingerprint"]["error"], "inactive_install_profile_tests")
         self.assertEqual(signal["payload"]["profile_gap_count"], 2)
 

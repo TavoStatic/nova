@@ -1,6 +1,6 @@
 # NYO System Release Artifact
 
-Date: 2026-05-18
+Date: 2026-05-20
 
 ## Purpose
 
@@ -22,18 +22,19 @@ It is intentionally not:
 
 ## Current Candidate
 
-Latest validated candidate:
+The current validated candidate is ledger-owned. Read the latest artifact, validation record, and promotion result from:
 
-- artifact: `runtime/exports/release_packages/nyo-system-base-rc-2026.05.18.23-proof-shape-closed-20260518_203219.zip`
-- version: `2026.05.18.23`
-- channel: `rc`
-- label: `proof-shape-closed`
+- `runtime/exports/release_packages/release_ledger.jsonl`
+- `runtime/validation/release/latest_release_validation.json`
+- `runtime/exports/release_packages/validation_records/`
+- `nova package-readiness`
+
+Expected current release-candidate posture:
+
 - verification result: `pass`
 - validation result: `pass-with-notes`
-- promotion judgment: `ready`, `already_promoted`
 - readiness state: `ready-with-notes`
 - blocking issues: none
-- validation record: `runtime/exports/release_packages/validation_records/nyo-system-base-rc-2026.05.18.23-proof-shape-closed-20260518_203219.md`
 
 This is a release candidate, not a final broad production package, until independent fresh-machine or VM validation is complete.
 
@@ -142,12 +143,13 @@ For the extended runtime gate, continue with:
 
 ## Validation Status
 
-The current artifact strategy is backed by same-machine extracted-package validation completed on `2026-05-18` for `2026.05.18.23`:
+The current artifact strategy is backed by same-machine extracted-package validation recorded in the release ledger and latest validation record:
 
 - extracted `nova package-verify .` passed
 - extracted `nova install` passed
 - extracted `nova doctor` passed
 - extracted `nova runtime-status` passed
+- extracted `nova run` launch/exit passed for the base target
 - extracted `nova wiring-check --offline` passed with `72` checks and `0` failures
 - extracted `nova smoke-base --fix` passed
 - extracted `nova test` passed
@@ -156,12 +158,12 @@ The current artifact strategy is backed by same-machine extracted-package valida
 Current nonblocking validation notes:
 
 - fresh-machine or VM independence is not proven by same-machine extracted-package validation
-- `nova run` interactive front door was not exercised by the noninteractive validation runner
+- model-backed `nova run` scripted-turn proof is required only when the runtime/Ollama target is included
 
 ## Remaining Work
 
 - rerun artifact validation from the produced zip on a fresh machine or VM for release candidates
-- exercise `nova run` interactively for the current candidate
+- exercise model-backed `nova run` scripted-turn validation when the target includes Ollama/runtime chat
 - decide later whether NYO System also needs a higher-convenience installer format
 
 ## Windows Installer Layer

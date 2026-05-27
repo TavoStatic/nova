@@ -2,110 +2,225 @@ from __future__ import annotations
 
 import re
 import time
-from typing import Callable, Optional
+from typing import Callable
+
+from services.nova_self_evidence_reply import maybe_build_self_evidence_reply
+from services.nova_turn_intent_trace import attach_turn_intent_evidence_packet
+from services.nova_turn_intent_trace import build_turn_intent_evidence_packet
+from services.nova_turn_intent_trace import CONVERSATION_CAN_COMPLETE_WITHOUT_TASK_KEY
+from services.nova_turn_intent_trace import CONVERSATION_REPLY_FORM
+from services.nova_turn_intent_trace import LAST_ASSISTANT_REPEATS_KEY
 
 
-def looks_like_open_fallback_turn(
-    text: str,
-    *,
-    is_explicit_command_like_fn: Callable[[str], bool],
-    is_location_request_fn: Callable[[str], bool],
-    normalize_turn_text_fn: Callable[[str], str],
-    is_peims_broad_query_fn: Callable[[str], bool],
-    is_local_knowledge_topic_query_fn: Callable[[str], bool],
-) -> bool:
-    candidate = str(text or "").strip()
-    if not candidate:
+def _semantic_conversation_evidence_need(packet: dict | None) -> bool:
+    payload = packet if isinstance(packet, dict) else {}
+    planner = payload.get("planner_frame") if isinstance(payload.get("planner_frame"), dict) else {}
+    semantic = planner.get("semantic_tool_observation") if isinstance(planner.get("semantic_tool_observation"), dict) else {}
+    if str(semantic.get("answer_target") or "").strip() != "current_conversation":
         return False
-    if is_explicit_command_like_fn(candidate):
+    if str(semantic.get("evidence_need") or "").strip() != "conversation":
         return False
-    if is_location_request_fn(candidate):
-        return False
-    normalized = normalize_turn_text_fn(candidate)
-    if is_peims_broad_query_fn(candidate) or is_local_knowledge_topic_query_fn(candidate):
-        return False
-    if re.match(r"^(hi|hello|hey)\b", normalized, flags=re.I):
-        return True
-    if candidate.endswith("?"):
-        return True
-    if len(normalized.split()) >= 3:
-        return True
-    return normalized.startswith((
-        "how ",
-        "why ",
-        "what ",
-        "who ",
-        "can you ",
-        "could you ",
-        "would you ",
-        "tell me ",
-        "explain ",
-        "help ",
-        "show me ",
-        "compare ",
-        "recap ",
-        "summarize ",
-    ))
+    return str(semantic.get("tool") or "").strip() in {"", "none"}
 
 
-def open_probe_reply(
-    text: str,
-    *,
-    turns: Optional[list[tuple[str, str]]] = None,
-    normalize_turn_text_fn: Callable[[str], str],
-    truthful_limit_reply_fn: Callable[[str], str],
-) -> tuple[str, str]:
-    normalized = normalize_turn_text_fn(text)
-    normalized_key = re.sub(r"[^a-z0-9 ]+", " ", normalized)
-    normalized_key = re.sub(r"\s+", " ", normalized_key).strip()
-    if normalized_key in {"can you help me a little here", "can you help me here"}:
-        return (
-            "What kind of help do you want?",
-            "safe_fallback",
-        )
-    if normalized_key in {"what do you think then", "what now", "what next", "okay so what next", "where does that leave us"}:
-        return (
-            "I don't have enough context to answer that yet. Tell me the topic or decision you want help with, and I'll stay on it.",
-            "safe_fallback",
-        )
-    if any(cue in normalized for cue in ("what are you talking about", "what are you talking", "what ?", "what?")):
-        last_assistant = ""
-        for role, txt in reversed(list(turns or [])):
-            if str(role or "").strip().lower() == "assistant":
-                last_assistant = str(txt or "").strip()
-                break
-        if last_assistant and any(token in last_assistant.lower() for token in ("allowlisted references", "web lookup", "web research")):
-            return (
-                "You're right. That response drifted into web lookup when you were asking a direct chat question. Ask it again and I'll answer it directly.",
-                "clarification",
-            )
-        return (
-            "You're right. I should stay with the current chat instead of jumping to web lookup for that kind of question.",
-            "clarification",
-        )
-    return (
-        truthful_limit_reply_fn(text),
-        "safe_fallback",
-    )
+def _maybe_build_conversation_evidence_reply(packet: dict | None) -> dict:
+    payload = packet if isinstance(packet, dict) else {}
+    conversation = payload.get("conversation_frame") if isinstance(payload.get("conversation_frame"), dict) else {}
+    if not bool(conversation.get(LAST_ASSISTANT_REPEATS_KEY)):
+        return {}
+    if not _semantic_conversation_evidence_need(payload):
+        return {}
+    return {
+        "handled": True,
+        "reply": (
+            "The transcript shows my last reply repeated an earlier assistant reply instead of answering the current turn. "
+            "That repeat is verified by conversation evidence; this turn does not include enough evidence to claim a hidden internal cause."
+        ),
+        "planner_decision": "evidence_bound_reply",
+        "grounded": True,
+        "reply_contract": "conversation_evidence.assistant_repeat",
+        "reply_outcome": {
+            "kind": "conversation_evidence",
+            "evidence_need": "conversation",
+            "observation": LAST_ASSISTANT_REPEATS_KEY,
+        },
+    }
+
+
+def _conversation_can_be_complete_without_task(packet: dict | None) -> bool:
+    payload = packet if isinstance(packet, dict) else {}
+    contract = payload.get("answer_contract") if isinstance(payload.get("answer_contract"), dict) else {}
+    return bool(contract.get(CONVERSATION_CAN_COMPLETE_WITHOUT_TASK_KEY))
+
+
+def _reply_form(packet: dict | None) -> str:
+    payload = packet if isinstance(packet, dict) else {}
+    contract = payload.get("answer_contract") if isinstance(payload.get("answer_contract"), dict) else {}
+    return str(contract.get("reply_form") or "").strip()
+
+
+def _semantic_status(packet: dict | None) -> str:
+    payload = packet if isinstance(packet, dict) else {}
+    planner = payload.get("planner_frame") if isinstance(payload.get("planner_frame"), dict) else {}
+    semantic = planner.get("semantic_tool_observation") if isinstance(planner.get("semantic_tool_observation"), dict) else {}
+    return str(semantic.get("status") or "").strip()
+
+
+def _last_tool_evidence_text(fallback_context: dict | None) -> str:
+    context = fallback_context if isinstance(fallback_context, dict) else {}
+    state_context = str(context.get("state_context") or "")
+    marker = "Last tool evidence:"
+    if marker not in state_context:
+        return ""
+    return state_context.split(marker, 1)[1].strip()
+
+
+def _line_after(label: str, evidence: str) -> str:
+    prefix = f"{label}:"
+    for raw in str(evidence or "").splitlines():
+        line = raw.strip()
+        if line.startswith(prefix):
+            return line.split(":", 1)[1].strip()
+    return ""
+
+
+def _maybe_build_session_evidence_reply(fallback_context: dict | None, packet: dict | None) -> dict:
+    if _semantic_status(packet) != "tool_evidence_available":
+        return {}
+    evidence = _last_tool_evidence_text(fallback_context)
+    if not evidence:
+        return {}
+    summary = _line_after("Summary", evidence)
+    level = _line_after("Level", evidence)
+    if summary:
+        reply = f"The available evidence says {summary}"
+        if level:
+            reply += f" Level: {level}."
+        elif not reply.endswith("."):
+            reply += "."
+    else:
+        first_line = next((line.strip() for line in evidence.splitlines() if line.strip()), "")
+        if not first_line:
+            return {}
+        reply = first_line if first_line.endswith(".") else f"{first_line}."
+    return {
+        "handled": True,
+        "reply": reply,
+        "planner_decision": "evidence_bound_reply",
+        "grounded": True,
+        "reply_contract": "session_evidence.last_tool_result",
+        "reply_outcome": {
+            "kind": "session_evidence",
+            "evidence_need": "conversation",
+            "observation": "last_tool_evidence",
+        },
+        "llm_time_ms": 0,
+        "post_time_ms": 0,
+    }
+
+
+def _conversation_generation_context(fallback_context: dict | None, packet: dict | None) -> str:
+    context = fallback_context if isinstance(fallback_context, dict) else {}
+    payload = packet if isinstance(packet, dict) else {}
+    conversation = payload.get("conversation_frame") if isinstance(payload.get("conversation_frame"), dict) else {}
+    lines = [
+        "NOVA INTERNAL REPLY FORM:",
+        f"- reply_form: {CONVERSATION_REPLY_FORM}",
+        "- evidence_scope: current_conversation",
+    ]
+    if str(conversation.get("previous_assistant_turn") or "").strip():
+        lines.append("- recent_assistant_turn: available")
+    rendered = "\n".join(lines)
+    chat_context = str(context.get("chat_context") or "").strip()
+    state_context = str(context.get("state_context") or "").strip()
+    blocks = [rendered] if rendered else []
+    if chat_context:
+        blocks.append(f"RECENT CHAT CONTEXT:\n{chat_context}")
+    if state_context:
+        blocks.append(f"SESSION EVIDENCE:\n{state_context}")
+    return "\n\n".join(blocks)
+
+
+def _remove_trailing_question(reply: str) -> str:
+    text = str(reply or "").strip()
+    if not text.endswith("?"):
+        return text
+    cleaned = re.sub(r"(?s)(?:^|\s+)[^\n.!?]*\?\s*$", "", text).strip()
+    return cleaned or text
+
+
+def _complete_thoughts(text: str) -> list[str]:
+    value = str(text or "").strip()
+    if not value:
+        return []
+    thoughts: list[str] = []
+    start = 0
+    for match in re.finditer(r"[.!?][\"')\]]*(?=\s|$)", value):
+        thought = value[start : match.end()].strip()
+        if thought:
+            thoughts.append(thought)
+        start = match.end()
+    tail = value[start:].strip()
+    if tail:
+        thoughts.append(tail)
+    return thoughts
+
+
+def _is_question_thought(text: str) -> bool:
+    value = str(text or "").strip().rstrip("\"')]")
+    return value.endswith("?")
+
+
+def _shape_conversation_scoped_reply(reply: str) -> str:
+    text = _remove_trailing_question(reply)
+    paragraphs = [part.strip() for part in re.split(r"\n\s*\n", text) if part.strip()]
+    if paragraphs:
+        text = paragraphs[0]
+    thoughts = _complete_thoughts(text)
+    for thought in thoughts:
+        if not _is_question_thought(thought):
+            return _remove_trailing_question(thought)
+    if thoughts:
+        return _remove_trailing_question(thoughts[0])
+    return _remove_trailing_question(text)
 
 
 def build_fallback_context(
     *,
     text: str,
     turns,
-    recent_tool_context: str,
     build_fallback_context_details_fn: Callable[..., dict],
-    uses_prior_reference_fn: Callable[[str], bool],
     action_ledger_add_step: Callable[..., None],
+    pending_action: dict | None = None,
+    semantic_tool_observation: dict | None = None,
+    planner_decision: str = "",
+    tool: str = "",
+    tool_result: str = "",
 ) -> dict:
-    fallback_context = build_fallback_context_details_fn(text, turns)
+    raw_fallback_context = build_fallback_context_details_fn(text, turns)
+    fallback_context = raw_fallback_context if isinstance(raw_fallback_context, dict) else {}
     retrieved_context = str(fallback_context.get("context") or "")
+    intent_evidence_packet = build_turn_intent_evidence_packet(
+        text=text,
+        turns=turns if isinstance(turns, list) else [],
+        pending_action=pending_action,
+        fallback_context=fallback_context if isinstance(fallback_context, dict) else {},
+        semantic_tool_observation=semantic_tool_observation,
+        planner_decision=planner_decision,
+        tool=tool,
+        tool_result=tool_result,
+    )
+    retrieved_context = attach_turn_intent_evidence_packet(retrieved_context, intent_evidence_packet)
     action_ledger_add_step(
         "memory_context",
         "used" if str(fallback_context.get("learning_context") or "") else "empty",
         memory_used=bool(fallback_context.get("memory_used")),
+        identity_used=bool(fallback_context.get("identity_used")),
+        operational_identity_used=bool(fallback_context.get("operational_identity_used")),
         knowledge_used=bool(fallback_context.get("knowledge_used")),
         memory_chars=int(fallback_context.get("memory_chars") or 0),
+        identity_chars=int(fallback_context.get("identity_chars") or 0),
+        operational_identity_chars=int(fallback_context.get("operational_identity_chars") or 0),
         knowledge_chars=int(fallback_context.get("knowledge_chars") or 0),
     )
     chat_ctx = str(fallback_context.get("chat_context") or "")
@@ -114,12 +229,16 @@ def build_fallback_context(
     session_fact_sheet = str(fallback_context.get("session_fact_sheet") or "")
     if session_fact_sheet:
         action_ledger_add_step("session_fact_sheet", "used", chars=len(session_fact_sheet))
-    if recent_tool_context and uses_prior_reference_fn(text):
-        retrieved_context = (retrieved_context + "\n\nRECENT TOOL OUTPUT:\n" + recent_tool_context).strip()[:6000]
-        action_ledger_add_step("recent_tool_context", "used", chars=len(recent_tool_context))
+    action_ledger_add_step(
+        "turn_intent_evidence",
+        "attached",
+        trace_authority=str(intent_evidence_packet.get("trace_authority") or ""),
+        answer_authority=str(intent_evidence_packet.get("answer_authority") or ""),
+    )
     return {
         "retrieved_context": retrieved_context,
         "fallback_context": fallback_context,
+        "intent_evidence_packet": intent_evidence_packet,
     }
 
 
@@ -127,94 +246,24 @@ def prepare_fallback_flow(
     *,
     text: str,
     turns,
-    recent_tool_context: str,
-    prefer_web_for_data_queries: bool,
-    analyze_request_fn: Callable[..., object],
-    normalize_policy_reply_fn: Callable[[str], str],
     build_fallback_context_details_fn: Callable[..., dict],
-    uses_prior_reference_fn: Callable[[str], bool],
     action_ledger_add_step: Callable[..., None],
+    pending_action: dict | None = None,
+    semantic_tool_observation: dict | None = None,
 ) -> dict:
-    task = analyze_request_fn(
-        text,
-        config={"prefer_web_for_data_queries": prefer_web_for_data_queries},
-    )
-    policy_block_outcome = apply_policy_gate_block(
-        task=task,
-        action_ledger_add_step=action_ledger_add_step,
-        normalize_reply_fn=normalize_policy_reply_fn,
-    )
-    if policy_block_outcome.get("handled"):
-        return {
-            "handled": True,
-            "outcome": policy_block_outcome,
-        }
-
-    action_ledger_add_step("policy_gate", "allowed")
     fallback_bundle = build_fallback_context(
         text=text,
         turns=turns,
-        recent_tool_context=recent_tool_context,
         build_fallback_context_details_fn=build_fallback_context_details_fn,
-        uses_prior_reference_fn=uses_prior_reference_fn,
         action_ledger_add_step=action_ledger_add_step,
+        pending_action=pending_action,
+        semantic_tool_observation=semantic_tool_observation,
     )
     return {
         "handled": False,
         "retrieved_context": str(fallback_bundle.get("retrieved_context") or ""),
         "fallback_context": fallback_bundle.get("fallback_context") if isinstance(fallback_bundle.get("fallback_context"), dict) else {},
-    }
-
-
-def apply_policy_gate_block(
-    *,
-    task,
-    action_ledger_add_step: Callable[..., None],
-    normalize_reply_fn: Callable[[str], str],
-) -> dict:
-    if bool(getattr(task, "allow_llm", False)):
-        return {"handled": False}
-
-    reply = str(getattr(task, "message", "") or "")
-    action_ledger_add_step("policy_gate", "blocked", detail=reply[:160])
-    return {
-        "handled": True,
-        "reply": normalize_reply_fn(reply),
-        "planner_decision": "policy_block",
-        "grounded": True,
-    }
-
-
-def apply_low_confidence_block(
-    *,
-    text: str,
-    retrieved_context: str,
-    recent_tool_context: str,
-    should_block_low_confidence_fn: Callable[..., bool],
-    behavior_record_event_fn: Callable[[str], None],
-    truthful_limit_outcome_fn: Callable[[str], dict],
-    truthful_limit_reply_fn: Callable[[str], str],
-    action_ledger_add_step: Callable[..., None],
-    ensure_reply: Callable[[str], str],
-) -> dict:
-    if not should_block_low_confidence_fn(
-        text,
-        retrieved_context=retrieved_context,
-        tool_context=recent_tool_context,
-    ):
-        return {"handled": False}
-
-    behavior_record_event_fn("low_confidence_block")
-    action_ledger_add_step("low_confidence_gate", "blocked")
-    truthful_outcome = truthful_limit_outcome_fn(text)
-    reply = str(truthful_outcome.get("reply_text") or truthful_limit_reply_fn(text))
-    return {
-        "handled": True,
-        "reply": ensure_reply(reply),
-        "planner_decision": "blocked_low_confidence",
-        "grounded": False,
-        "reply_contract": str(truthful_outcome.get("reply_contract") or ""),
-        "reply_outcome": dict(truthful_outcome),
+        "intent_evidence_packet": fallback_bundle.get("intent_evidence_packet") if isinstance(fallback_bundle.get("intent_evidence_packet"), dict) else {},
     }
 
 
@@ -224,97 +273,94 @@ def finalize_llm_fallback_reply(
     raw_user_text: str,
     input_source: str,
     retrieved_context: str,
-    recent_tool_context: str,
     language_mix_spanish_pct: int,
-    active_user: str,
     ollama_chat_fn: Callable[..., str],
-    sanitize_llm_reply_fn: Callable[[str, str], str],
     mem_enabled_fn: Callable[[], bool],
     mem_should_store_fn: Callable[[str], bool],
     mem_add_fn: Callable[[str, str, str], None],
     strip_mem_leak_fn: Callable[[str, str], str],
-    self_correct_reply_fn: Callable[[str, str], tuple[str, bool, str]],
     behavior_record_event_fn: Callable[[str], None],
     action_ledger_add_step: Callable[..., None],
-    teach_store_example_fn: Callable[..., None],
-    truthful_limit_outcome_fn: Callable[[str], dict],
-    apply_claim_gate_fn: Callable[[str, str, str], tuple[str, bool, str]],
     preprocess_reply_fn: Callable[[str], str] | None = None,
-    post_claim_reply_transform_fn: Callable[[str, str], str] | None = None,
-    is_explicit_request_fn: Callable[[str], bool],
-    apply_reply_overrides_fn: Callable[[str], str],
     ensure_reply_fn: Callable[[str], str],
+    intent_evidence_packet: dict | None = None,
+    fallback_context: dict | None = None,
 ) -> dict:
+    evidence_reply = maybe_build_self_evidence_reply(
+        fallback_context=fallback_context,
+        intent_evidence_packet=intent_evidence_packet,
+    )
+    if evidence_reply:
+        action_ledger_add_step(
+            "self_evidence",
+            "answered",
+            evidence_need=str((evidence_reply.get("reply_outcome") or {}).get("evidence_need") or ""),
+        )
+        out = dict(evidence_reply)
+        out["reply"] = ensure_reply_fn(str(out.get("reply") or ""))
+        return out
+
+    session_evidence_reply = _maybe_build_session_evidence_reply(fallback_context, intent_evidence_packet)
+    if session_evidence_reply:
+        action_ledger_add_step(
+            "session_evidence",
+            "answered",
+            observation=str((session_evidence_reply.get("reply_outcome") or {}).get("observation") or ""),
+        )
+        out = dict(session_evidence_reply)
+        out["reply"] = ensure_reply_fn(str(out.get("reply") or ""))
+        return out
+
+    conversation_reply = _maybe_build_conversation_evidence_reply(intent_evidence_packet)
+    if conversation_reply:
+        action_ledger_add_step(
+            "conversation_evidence",
+            "answered",
+            observation=str((conversation_reply.get("reply_outcome") or {}).get("observation") or ""),
+        )
+        out = dict(conversation_reply)
+        out["reply"] = ensure_reply_fn(str(out.get("reply") or ""))
+        return out
+
     behavior_record_event_fn("llm_fallback")
     action_ledger_add_step("llm_fallback", "invoked", retrieved_chars=len(retrieved_context))
 
     llm_started = time.perf_counter()
-    reply = ollama_chat_fn(
-        text,
-        retrieved_context=retrieved_context,
-        language_mix_spanish_pct=language_mix_spanish_pct,
-    )
+    reply_form = _reply_form(intent_evidence_packet)
+    generation_context = retrieved_context
+    if reply_form == CONVERSATION_REPLY_FORM:
+        generation_context = _conversation_generation_context(fallback_context, intent_evidence_packet)
+    ollama_kwargs = {
+        "retrieved_context": generation_context,
+        "language_mix_spanish_pct": language_mix_spanish_pct,
+    }
+    if reply_form == CONVERSATION_REPLY_FORM:
+        ollama_kwargs["reply_form"] = reply_form
+    reply = ollama_chat_fn(text, **ollama_kwargs)
     llm_time_ms = int((time.perf_counter() - llm_started) * 1000)
     post_started = time.perf_counter()
-    reply = sanitize_llm_reply_fn(reply, recent_tool_context)
     if callable(preprocess_reply_fn):
         reply = preprocess_reply_fn(reply)
+    if _conversation_can_be_complete_without_task(intent_evidence_packet):
+        reply = _shape_conversation_scoped_reply(reply)
 
     if mem_enabled_fn() and mem_should_store_fn(raw_user_text):
         mem_add_fn("chat_user", input_source, raw_user_text)
 
     clean_reply = strip_mem_leak_fn(reply, retrieved_context)
-    corrected_reply, was_corrected, correction_reason = self_correct_reply_fn(text, clean_reply)
     planner_decision = "llm_fallback"
     grounded = None
     reply_contract = ""
     reply_outcome = {}
-    if was_corrected:
-        behavior_record_event_fn("correction_applied")
-        behavior_record_event_fn("self_correction_applied")
-        action_ledger_add_step("llm_postprocess", "self_corrected", detail=str(correction_reason or "")[:120])
-        try:
-            teach_store_example_fn(clean_reply, corrected_reply, user=active_user or None)
-        except Exception:
-            pass
-        planner_decision = "llm_self_corrected"
-        grounded = True
-        clean_reply = corrected_reply
-
-    claim_gated_reply, claim_gate_changed, claim_gate_reason = apply_claim_gate_fn(
-        clean_reply,
-        evidence_text=retrieved_context,
-        tool_context=recent_tool_context,
-    )
-    if claim_gate_changed:
-        action_ledger_add_step("claim_gate", "adjusted", claim_gate_reason)
-        clean_reply = claim_gated_reply
-        if claim_gate_reason == "unsupported_claim_blocked":
-            truthful_outcome = truthful_limit_outcome_fn(text)
-            grounded = False
-            reply_contract = str(truthful_outcome.get("reply_contract") or "")
-            reply_outcome = dict(truthful_outcome)
-
-    if callable(post_claim_reply_transform_fn):
-        clean_reply = post_claim_reply_transform_fn(clean_reply, reply_contract)
-
-    try:
-        if not is_explicit_request_fn(text):
-            sents = re.split(r"(?<=[.!?])\s+", (clean_reply or "").strip())
-            short = " ".join([sentence for sentence in sents if sentence])[:600]
-            if short:
-                clean_reply = short
-    except Exception:
-        pass
-
-    try:
-        final = apply_reply_overrides_fn(clean_reply)
-    except Exception:
-        final = clean_reply
+    if isinstance(intent_evidence_packet, dict) and intent_evidence_packet:
+        reply_outcome = {
+            "kind": "llm_fallback",
+            "intent_evidence_packet": dict(intent_evidence_packet),
+        }
 
     return {
         "handled": True,
-        "reply": ensure_reply_fn(final),
+        "reply": ensure_reply_fn(clean_reply),
         "planner_decision": planner_decision,
         "grounded": grounded,
         "reply_contract": reply_contract,

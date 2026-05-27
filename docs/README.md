@@ -2,7 +2,7 @@
 
 This directory is the public documentation hub for NYO AI SYSTEMS.
 
-Nova should be read here as a supervised local AI runtime with an operator control plane, governed tool use, patch flow, inspectable state, and self-repair loops. The public repo stays generic on purpose. Domain packs, local operator notes, and dated internal audit trails do not define the platform.
+Nova should be read here as a supervised local AI runtime with an operator control plane, governed tool use, patch flow, inspectable state, and maintenance/repair surfaces that still require evidence-backed supervision. The public repo stays generic on purpose. Domain packs, local operator notes, and dated internal audit trails do not define the platform.
 
 ## Start Here
 

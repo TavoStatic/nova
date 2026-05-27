@@ -3,8 +3,10 @@ import threading
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
+from unittest import mock
 
 from services.runtime_process_state import RUNTIME_PROCESS_STATE_SERVICE
+import tools.runtime_processes as runtime_processes
 
 
 class TestRuntimeProcessStateService(unittest.TestCase):
@@ -70,6 +72,43 @@ class TestRuntimeProcessStateService(unittest.TestCase):
         self.assertEqual(out, [{"pid": 10}])
         self.assertEqual(service_calls, [(Path("guard.py"), None)])
         self.assertIn("guard", cache)
+
+    def test_runtime_process_tool_reads_expensive_process_fields_only_after_match(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            script = root / "autonomy_maintenance.py"
+            script.write_text("print('worker')\n", encoding="utf-8")
+
+            class _Process:
+                def __init__(self, pid, cmdline, *, ppid=0, create_time=0.0):
+                    self.info = {"pid": pid, "cmdline": cmdline}
+                    self._ppid = ppid
+                    self._create_time = create_time
+                    self.ppid_called = False
+                    self.create_time_called = False
+
+                def cwd(self):
+                    return root
+
+                def ppid(self):
+                    self.ppid_called = True
+                    return self._ppid
+
+                def create_time(self):
+                    self.create_time_called = True
+                    return self._create_time
+
+            skipped = _Process(10, ["python", "other.py"], ppid=1, create_time=1.0)
+            matched = _Process(11, ["python", str(script)], ppid=1, create_time=2.0)
+
+            with mock.patch.object(runtime_processes.psutil, "process_iter", return_value=[skipped, matched]):
+                processes = runtime_processes.logical_service_processes(script)
+
+        self.assertEqual([item.get("pid") for item in processes], [11])
+        self.assertFalse(skipped.ppid_called)
+        self.assertFalse(skipped.create_time_called)
+        self.assertTrue(matched.ppid_called)
+        self.assertTrue(matched.create_time_called)
 
     def test_prune_orphaned_core_artifacts_from_runtime_uses_runtime_scope(self):
         with tempfile.TemporaryDirectory() as td:

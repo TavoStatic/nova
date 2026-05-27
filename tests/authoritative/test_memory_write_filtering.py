@@ -32,12 +32,11 @@ class TestMemoryWriteFiltering(unittest.TestCase):
         self.assertFalse(keep)
         self.assertEqual(reason, "too_short")
 
-    def test_text_with_durable_fact_marker_is_accepted(self):
-        # Text containing a durable fact marker is kept regardless of word count
+    def test_short_declarative_statement_is_accepted(self):
         svc = _service({"store_min_chars": 5})
         keep, reason = svc.memory_should_keep_text("my name is Alex")
         self.assertTrue(keep)
-        self.assertEqual(reason, "durable_fact")
+        self.assertEqual(reason, "declarative_statement")
 
     def test_empty_text_is_rejected(self):
         svc = _service()
@@ -53,11 +52,11 @@ class TestMemoryWriteFiltering(unittest.TestCase):
         self.assertFalse(keep)
         self.assertEqual(reason, "question")
 
-    def test_question_starting_with_what_is_rejected(self):
+    def test_question_without_terminal_mark_is_not_classified_by_phrase(self):
         svc = _service({"store_min_chars": 2})
         keep, reason = svc.memory_should_keep_text("what time is it now")
-        self.assertFalse(keep)
-        self.assertEqual(reason, "question")
+        self.assertTrue(keep)
+        self.assertEqual(reason, "declarative_statement")
 
     def test_long_statement_eight_words_is_accepted(self):
         # 8+ word statements are kept as long_statement regardless of question word
@@ -68,31 +67,31 @@ class TestMemoryWriteFiltering(unittest.TestCase):
 
     # --- Ack/low-value ---
 
-    def test_ack_ok_is_rejected(self):
+    def test_one_word_low_signal_is_rejected(self):
         svc = _service({"store_min_chars": 1})
         keep, reason = svc.memory_should_keep_text("ok")
         self.assertFalse(keep)
-        self.assertEqual(reason, "ack")
+        self.assertEqual(reason, "low_signal")
 
-    def test_ack_thanks_is_rejected(self):
+    def test_one_word_thanks_is_low_signal_without_phrase_filter(self):
         svc = _service({"store_min_chars": 1})
         keep, reason = svc.memory_should_keep_text("thanks")
         self.assertFalse(keep)
-        self.assertEqual(reason, "ack")
+        self.assertEqual(reason, "low_signal")
 
-    # --- UI noise ---
+    # --- Source-shaped text ---
 
-    def test_ui_noise_nova_prefix_is_rejected(self):
+    def test_prefixed_text_is_not_blocked_by_builtin_phrase_filter(self):
         svc = _service({"store_min_chars": 2})
         keep, reason = svc.memory_should_keep_text("nova: checking the weather")
-        self.assertFalse(keep)
-        self.assertEqual(reason, "ui_noise")
+        self.assertTrue(keep)
+        self.assertEqual(reason, "declarative_statement")
 
-    def test_ui_noise_assistant_prefix_is_rejected(self):
+    def test_assistant_source_text_is_not_blocked_by_builtin_phrase_filter(self):
         svc = _service({"store_min_chars": 2})
         keep, reason = svc.memory_should_keep_text("assistant: here you go")
-        self.assertFalse(keep)
-        self.assertEqual(reason, "ui_noise")
+        self.assertTrue(keep)
+        self.assertEqual(reason, "declarative_statement")
 
     # --- Policy include patterns override ---
 

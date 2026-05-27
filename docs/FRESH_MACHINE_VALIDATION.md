@@ -1,9 +1,9 @@
 # NYO System Fresh Machine Validation
 
 Date: 2026-05-18
-Last reviewed: 2026-05-18
+Last reviewed: 2026-05-20
 
-Status note: same-machine extracted-package validation passed for `2026.05.18.23` with `pass-with-notes` and no blocking issues. This checklist still needs an independent fresh-machine or VM pass before final release language is appropriate.
+Status note: same-machine extracted-package validation is recorded through the current release ledger and validation record. This checklist still needs an independent fresh-machine or VM pass before final release language is appropriate.
 
 ## Purpose
 

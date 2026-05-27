@@ -71,17 +71,6 @@ def evaluate_deterministic_route_viability(
     action_type = str(first_action.get("type") or "").strip()
     tool_name = str(first_action.get("tool") or "").strip()
 
-    if action_type == "route_keyword":
-        return {
-            "viable": True,
-            "fit_notes": ["planner keyword route is deterministic", "keyword route keeps follow-up handling out of fallback"],
-            "comparison_strength": "clear",
-            "owner_kind": "planner_keyword",
-            "intent_result": intent_result,
-            "handle_result": handle_result,
-            "owned_result": {"action": "route_keyword", "rule_name": "planner_keyword"},
-        }
-
     if action_type == "run_tool" and tool_name in {"patch_apply", "patch_rollback"}:
         return {
             "viable": True,
@@ -92,19 +81,6 @@ def evaluate_deterministic_route_viability(
             "handle_result": handle_result,
             "owned_result": {"action": tool_name, "rule_name": "planner_direct_tool", "intent": tool_name},
         }
-
-    if action_type == "route_command":
-        normalized_text = str(user_text or "").strip().lower()
-        if normalized_text.startswith("patch ") or normalized_text == "patch rollback":
-            return {
-                "viable": True,
-                "fit_notes": ["planner command route is deterministic", "patch command should not be treated as generic fallback"],
-                "comparison_strength": "clear",
-                "owner_kind": "planner_command",
-                "intent_result": intent_result,
-                "handle_result": handle_result,
-                "owned_result": {"action": "route_command", "rule_name": "planner_command", "intent": "patch_command"},
-            }
 
     return {
         "viable": False,

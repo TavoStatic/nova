@@ -9,6 +9,8 @@ from services.regression_lanes import SOURCE_PROFILE_LANES
 from services.regression_profile_inventory import build_regression_profile_inventory_payload
 from services.nova_root_inventory import build_source_root_inventory_payload
 from services.nova_wiring_inventory import build_root_closure_inventory_payload
+from services.nova_wiring_inventory import build_self_repair_closure_inventory_payload
+from services.nova_wiring_inventory import build_source_wiring_probe_payload
 from services.nova_wiring_inventory import build_wiring_inventory_payload
 from services.nova_wiring_inventory import wiring_surface_ids
 
@@ -22,6 +24,96 @@ class ControlStatusService:
         if text in {"none", "null", "undefined", "n/a", "na"}:
             return ""
         return text
+
+    @staticmethod
+    def _os_capability_control_payload(summary: dict | None, operator_outbox: dict | None = None) -> dict:
+        raw = dict(summary or {}) if isinstance(summary, dict) else {}
+        outbox = dict(operator_outbox or {}) if isinstance(operator_outbox, dict) else {}
+        open_notice_keys: set[tuple[str, str]] = set()
+        open_notices = [
+            item
+            for item in list(outbox.get("open_events") or [])
+            if isinstance(item, dict)
+        ]
+        latest_open = outbox.get("latest_open") if isinstance(outbox.get("latest_open"), dict) else {}
+        if latest_open:
+            open_notices.append(dict(latest_open))
+        for notice in open_notices:
+            if str(notice.get("source") or "").strip() != "os_capability":
+                continue
+            payload = notice.get("payload") if isinstance(notice.get("payload"), dict) else {}
+            capability = str(payload.get("capability") or "").strip()
+            reason = str(payload.get("blocked_reason") or "").strip().lower()
+            if capability and reason:
+                open_notice_keys.add((capability, reason))
+        rows = [
+            dict(item)
+            for item in list(raw.get("rows") or [])
+            if isinstance(item, dict)
+        ]
+        status_counts = dict(raw.get("status_counts") or {}) if isinstance(raw.get("status_counts"), dict) else {}
+        reason_counts = dict(raw.get("reason_counts") or {}) if isinstance(raw.get("reason_counts"), dict) else {}
+        latest_by_capability: dict[str, dict] = {}
+        for row in rows:
+            capability = str(row.get("capability") or "").strip() or "unknown"
+            latest_by_capability[capability] = row
+        current_issue_rows: list[dict] = []
+        historic_issue_rows: list[dict] = []
+        now_epoch = time.time()
+        active_age_sec = 6 * 60 * 60
+        for row in latest_by_capability.values():
+            status_text = str(row.get("status") or "").strip().lower()
+            if status_text != "success" or bool(row.get("operator_outbox")):
+                capability = str(row.get("capability") or "").strip() or "unknown"
+                reason_text = str(row.get("reason") or "").strip().lower()
+                ts_epoch = float(row.get("ts_epoch", 0) or 0)
+                age_sec = max(0.0, now_epoch - ts_epoch) if ts_epoch > 0 else 0.0
+                row = dict(row)
+                row["age_sec"] = int(age_sec) if ts_epoch > 0 else None
+                if (capability, reason_text) in open_notice_keys or age_sec <= active_age_sec:
+                    current_issue_rows.append(row)
+                else:
+                    historic_issue_rows.append(row)
+        current_issue_rows.sort(key=lambda item: float(item.get("ts_epoch", 0) or 0))
+        last_row = dict(raw.get("last_row") or {}) if isinstance(raw.get("last_row"), dict) else (rows[-1] if rows else {})
+        last_issue = current_issue_rows[-1] if current_issue_rows else {}
+        current_status_counts: dict[str, int] = {}
+        current_reason_counts: dict[str, int] = {}
+        for row in current_issue_rows:
+            status_text = str(row.get("status") or "").strip().lower()
+            reason_text = str(row.get("reason") or "").strip().lower()
+            if status_text:
+                current_status_counts[status_text] = current_status_counts.get(status_text, 0) + 1
+            if reason_text:
+                current_reason_counts[reason_text] = current_reason_counts.get(reason_text, 0) + 1
+        current_blocked_count = int(current_status_counts.get("blocked", 0) or 0)
+        current_timeout_count = int(current_status_counts.get("timeout", 0) or 0)
+        current_failure_count = sum(
+            int(current_status_counts.get(status, 0) or 0)
+            for status in ("failed", "error", "timeout")
+        )
+        current_operator_outbox_count = sum(1 for row in current_issue_rows if bool(row.get("operator_outbox")))
+        readable_ok = bool(raw.get("ok", True))
+        return {
+            "ok": bool(readable_ok and not current_issue_rows),
+            "readable_ok": readable_ok,
+            "count": int(raw.get("count", len(rows)) or 0),
+            "ledger_path": str(raw.get("path") or raw.get("ledger_path") or "runtime/os_capability_ledger.jsonl"),
+            "status_counts": status_counts,
+            "reason_counts": reason_counts,
+            "current_issue_count": len(current_issue_rows),
+            "current_status_counts": current_status_counts,
+            "current_reason_counts": current_reason_counts,
+            "current_blocked_count": current_blocked_count,
+            "current_failure_count": current_failure_count,
+            "current_timeout_count": current_timeout_count,
+            "current_operator_outbox_count": current_operator_outbox_count,
+            "current_issue_rows": current_issue_rows[-12:],
+            "historic_issue_count": len(historic_issue_rows),
+            "historic_issue_rows": historic_issue_rows[-12:],
+            "last_row": last_row,
+            "last_issue": last_issue,
+        }
 
     @staticmethod
     def runtime_supplier_fns_from_scope(runtime_scope: dict[str, object]) -> dict[str, object]:
@@ -42,6 +134,7 @@ class ControlStatusService:
             "memory_events_summary",
             "tool_events_summary",
             "action_ledger_summary",
+            "os_capability_ledger_summary",
             "provider_telemetry_payload",
             "runtime_summary_payload",
             "runtime_artifacts_payload",
@@ -51,6 +144,7 @@ class ControlStatusService:
             "port_ownership_payload",
             "action_readiness_payload",
             "release_status_payload",
+            "installer_status_payload",
             "patch_action_readiness_payload",
             "storage_watch_summary",
             "runtime_process_note",
@@ -93,6 +187,17 @@ class ControlStatusService:
         memory_events_summary_fn = supplier_fns["memory_events_summary"]
         tool_events_summary_fn = supplier_fns["tool_events_summary"]
         action_ledger_summary_fn = supplier_fns["action_ledger_summary"]
+        os_capability_ledger_summary_fn = supplier_fns.get(
+            "os_capability_ledger_summary",
+            lambda limit: {
+                "ok": True,
+                "count": 0,
+                "status_counts": {},
+                "reason_counts": {},
+                "last_row": {},
+                "rows": [],
+            },
+        )
         provider_telemetry_payload_fn = supplier_fns["provider_telemetry_payload"]
         runtime_summary_payload_fn = supplier_fns["runtime_summary_payload"]
         runtime_artifacts_payload_fn = supplier_fns["runtime_artifacts_payload"]
@@ -102,6 +207,7 @@ class ControlStatusService:
         port_ownership_payload_fn = supplier_fns["port_ownership_payload"]
         action_readiness_payload_fn = supplier_fns["action_readiness_payload"]
         release_status_payload_fn = supplier_fns["release_status_payload"]
+        installer_status_payload_fn = supplier_fns.get("installer_status_payload", lambda: {})
         patch_action_readiness_payload_fn = supplier_fns["patch_action_readiness_payload"]
         storage_watch_summary_fn = supplier_fns["storage_watch_summary"]
         runtime_process_note_fn = supplier_fns["runtime_process_note"]
@@ -143,6 +249,7 @@ class ControlStatusService:
         memory_summary = memory_events_summary_fn(80)
         tool_summary = tool_events_summary_fn(80)
         ledger_summary = action_ledger_summary_fn(80)
+        os_capability_summary = os_capability_ledger_summary_fn(80)
         patch_summary = core_module.patch_status_payload()
         pulse_payload = core_module.build_pulse_payload()
         update_now_pending = core_module.update_now_pending_payload()
@@ -218,10 +325,12 @@ class ControlStatusService:
             live_tracking=core_module.runtime_device_location_payload(),
             action_readiness=action_readiness_payload_fn(guard_status, core_status, webui_status),
             release_status=release_status_payload_fn(),
+            installer_status=installer_status_payload_fn(),
             memory_stats=memory_stats,
             memory_summary=memory_summary,
             tool_summary=tool_summary,
             ledger_summary=ledger_summary,
+            os_capability_summary=os_capability_summary,
             patch_summary=patch_summary,
             patch_action_readiness=patch_action_readiness_payload_fn(patch_summary),
             pulse_payload=pulse_payload,
@@ -294,6 +403,7 @@ class ControlStatusService:
         update_now_pending: dict,
         requests_total: int,
         errors_total: int,
+        os_capability_summary: dict | None = None,
         validation_artifact_truth: dict | None = None,
         storage_watch_summary: dict | None = None,
         work_trees_payload: dict | None = None,
@@ -303,6 +413,7 @@ class ControlStatusService:
         vision_status: dict | None = None,
         port_ownership: dict | None = None,
         data_pipelines: dict | None = None,
+        installer_status: dict | None = None,
     ) -> dict:
         autonomy_payload = autonomy_maintenance.copy() if isinstance(autonomy_maintenance, dict) else {}
         ollama_health_payload = dict(ollama_health or {}) if isinstance(ollama_health, dict) else {}
@@ -316,6 +427,11 @@ class ControlStatusService:
         voice_status_payload = dict(voice_status or {}) if isinstance(voice_status, dict) else {}
         vision_status_payload = dict(vision_status or {}) if isinstance(vision_status, dict) else {}
         data_pipeline_payload = dict(data_pipelines or {}) if isinstance(data_pipelines, dict) else {"ok": True, "pipelines": []}
+        installer_status_payload = dict(installer_status or {}) if isinstance(installer_status, dict) else {}
+        os_capability_payload = ControlStatusService._os_capability_control_payload(
+            os_capability_summary,
+            operator_outbox_payload,
+        )
         data_pipeline_rows = [
             dict(item)
             for item in list(data_pipeline_payload.get("pipelines") or [])
@@ -454,6 +570,9 @@ class ControlStatusService:
             "live_tracking": live_tracking,
             "action_readiness": action_readiness,
             "release_status": release_status,
+            "installer_release_status": installer_status_payload,
+            "installer_status": str(installer_status_payload.get("latest_readiness_state") or ""),
+            "installer_packaging_status": str(installer_status_payload.get("latest_readiness_state") or ""),
             "subconscious_summary": subconscious_summary,
             "generated_work_queue": generated_work_queue,
             "data_pipelines": data_pipeline_payload,
@@ -847,6 +966,32 @@ class ControlStatusService:
         payload["last_tool_status"] = str(last_tool.get("status") or "")
         payload["last_tool_user"] = str(last_tool.get("user") or "")
 
+        last_os_capability = os_capability_payload.get("last_row") if isinstance(os_capability_payload.get("last_row"), dict) else {}
+        last_os_capability_issue = (
+            os_capability_payload.get("last_issue")
+            if isinstance(os_capability_payload.get("last_issue"), dict)
+            else {}
+        )
+        payload["os_capability_ledger"] = os_capability_payload
+        payload["os_capability_ledger_ok"] = bool(os_capability_payload.get("ok", False))
+        payload["os_capability_ledger_readable_ok"] = bool(os_capability_payload.get("readable_ok", False))
+        payload["os_capability_ledger_total"] = int(os_capability_payload.get("count", 0) or 0)
+        payload["os_capability_ledger_current_issue_count"] = int(os_capability_payload.get("current_issue_count", 0) or 0)
+        payload["os_capability_ledger_current_blocked_count"] = int(os_capability_payload.get("current_blocked_count", 0) or 0)
+        payload["os_capability_ledger_current_failure_count"] = int(os_capability_payload.get("current_failure_count", 0) or 0)
+        payload["os_capability_ledger_current_timeout_count"] = int(os_capability_payload.get("current_timeout_count", 0) or 0)
+        payload["os_capability_ledger_current_operator_outbox_count"] = int(
+            os_capability_payload.get("current_operator_outbox_count", 0) or 0
+        )
+        payload["os_capability_ledger_path"] = str(os_capability_payload.get("ledger_path") or "")
+        payload["last_os_capability_name"] = str(last_os_capability.get("capability") or "")
+        payload["last_os_capability_status"] = str(last_os_capability.get("status") or "")
+        payload["last_os_capability_reason"] = str(last_os_capability.get("reason") or "")
+        payload["last_os_capability_issue"] = dict(last_os_capability_issue)
+        payload["last_os_capability_issue_name"] = str(last_os_capability_issue.get("capability") or "")
+        payload["last_os_capability_issue_status"] = str(last_os_capability_issue.get("status") or "")
+        payload["last_os_capability_issue_reason"] = str(last_os_capability_issue.get("reason") or "")
+
         payload["action_ledger_ok"] = bool(ledger_summary.get("ok", False))
         payload["action_ledger_total"] = int(ledger_summary.get("count", 0) or 0)
         last_record = ledger_summary.get("last_record") if isinstance(ledger_summary.get("last_record"), dict) else {}
@@ -961,12 +1106,47 @@ class ControlStatusService:
             "root_closure_inventory": {},
             "root_closure_inventory_ok": True,
             "root_closure_inventory_gap_count": 0,
+            "self_repair_closure_inventory": {},
+            "self_repair_closure_inventory_ok": True,
+            "self_repair_closure_inventory_gap_count": 0,
         }
-        root_closure_inventory = build_root_closure_inventory_payload(root_closure_seed)
+        source_wiring_probe = build_source_wiring_probe_payload()
+        payload["source_wiring_probe"] = source_wiring_probe
+        root_closure_inventory = build_root_closure_inventory_payload(
+            root_closure_seed,
+            signal_sources=source_wiring_probe.get("signal_sources", []),
+            planned_tools=source_wiring_probe.get("planned_tools", []),
+            advisory_actions=source_wiring_probe.get("advisory_actions", []),
+        )
         payload["root_closure_inventory"] = root_closure_inventory
         payload["root_closure_inventory_ok"] = bool(root_closure_inventory.get("ok", False))
         payload["root_closure_inventory_gap_count"] = int(root_closure_inventory.get("gap_count", 0) or 0)
         payload["root_closure_inventory_gap_roots"] = list(root_closure_inventory.get("gap_roots") or [])
+        self_repair_closure_inventory = build_self_repair_closure_inventory_payload(
+            root_closure_seed,
+            signal_sources=source_wiring_probe.get("signal_sources", []),
+            planned_tools=source_wiring_probe.get("planned_tools", []),
+            advisory_actions=source_wiring_probe.get("advisory_actions", []),
+            executable_tools=source_wiring_probe.get("executable_tools", []),
+            executable_actions=source_wiring_probe.get("executable_actions", []),
+            evidence_paths=source_wiring_probe.get("evidence_paths", []),
+            judgment_paths=source_wiring_probe.get("judgment_paths", []),
+            closure_paths=source_wiring_probe.get("closure_paths", []),
+            operator_outbox_paths=source_wiring_probe.get("operator_outbox_paths", []),
+            owned_root_routes=source_wiring_probe.get("owned_root_routes", []),
+        )
+        payload["self_repair_closure_inventory"] = self_repair_closure_inventory
+        payload["self_repair_closure_inventory_ok"] = bool(self_repair_closure_inventory.get("ok", False))
+        payload["self_repair_closure_inventory_gap_count"] = int(
+            self_repair_closure_inventory.get("gap_count", 0) or 0
+        )
+        payload["self_repair_closure_inventory_gap_roots"] = list(
+            self_repair_closure_inventory.get("gap_roots") or []
+        )
+        payload["self_repair_closure_source_contract_ready_count"] = int(
+            self_repair_closure_inventory.get("source_contract_ready_count", 0) or 0
+        )
+        payload["self_repair_closure_depth_counts"] = dict(self_repair_closure_inventory.get("depth_counts") or {})
         wiring_inventory = build_wiring_inventory_payload(payload)
         payload["wiring_inventory"] = wiring_inventory
         payload["wiring_inventory_ok"] = bool(wiring_inventory.get("ok", False))

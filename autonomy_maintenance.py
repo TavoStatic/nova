@@ -89,6 +89,7 @@ ACTIVE_WORK_TREE_EXECUTE_TOOLS = [
     "stackexchange_search",
     "health",
     "system_check",
+    "os_capability",
     "queue_status",
     "phase2_audit",
     "pulse",
@@ -102,10 +103,13 @@ ACTIVE_WORK_TREE_EXECUTE_TOOLS = [
     "release_validation_run",
     "release_record_validation_outcome",
     "release_rebuild_verify",
+    "installer_validation_run",
+    "patch_apply",
     "memory_bootstrap_judgment",
     "memory_bootstrap_confirm",
     "memory_identity_bootstrap",
     "subconscious_review_judgment",
+    "source_root_judgment",
     "weather_current_location",
     "weather_location",
     "location_coords",
@@ -220,13 +224,20 @@ def _publish_operator_notices_from_work_tree(work_tree_state: dict) -> dict:
         OPERATOR_OUTBOX,
         active_notices=notices,
     )
+    source_root_reconcile_result = OPERATOR_OUTBOX_SERVICE.reconcile_source_root_judgment_notices(
+        OPERATOR_OUTBOX,
+        work_tree_state=work_tree_state,
+    )
+    staled_count = int(reconcile_result.get("staled_count", 0) or 0) + int(
+        source_root_reconcile_result.get("staled_count", 0) or 0
+    )
     if not notices:
         return {
-            "ok": bool(reconcile_result.get("ok", True)),
+            "ok": bool(reconcile_result.get("ok", True)) and bool(source_root_reconcile_result.get("ok", True)),
             "published_count": 0,
             "deduped_count": 0,
             "notice_count": 0,
-            "staled_count": int(reconcile_result.get("staled_count", 0) or 0),
+            "staled_count": staled_count,
             "reason": "no_work_tree_operator_requests",
         }
 
@@ -250,11 +261,11 @@ def _publish_operator_notices_from_work_tree(work_tree_state: dict) -> dict:
                 event_ids.append(event_id)
 
     return {
-        "ok": not errors,
+        "ok": not errors and bool(reconcile_result.get("ok", True)) and bool(source_root_reconcile_result.get("ok", True)),
         "published_count": published,
         "deduped_count": deduped,
         "notice_count": len(notices),
-        "staled_count": int(reconcile_result.get("staled_count", 0) or 0),
+        "staled_count": staled_count,
         "event_ids": event_ids,
         "errors": errors[:5],
     }
@@ -547,6 +558,23 @@ def _runtime_guard_status_for_orchestrator(core_steward: dict, guard_health: dic
         "webui_running": True,
         "restart_in_progress": False,
         "stop_flag": bool(guard.get("stop_flag", False)),
+        "source_freshness_sec": 0,
+    }
+
+
+def _autonomy_maintenance_for_orchestrator(core_steward: dict) -> dict:
+    maintenance = (
+        dict((core_steward or {}).get("autonomy_maintenance") or {})
+        if isinstance((core_steward or {}).get("autonomy_maintenance"), dict)
+        else {}
+    )
+    return {
+        "worker_status": str(maintenance.get("worker_status") or "").strip().lower(),
+        "worker_active": bool(maintenance.get("worker_active", False)),
+        "worker_stale_identity": bool(maintenance.get("worker_stale_identity", False)),
+        "scheduler_active": bool(maintenance.get("scheduler_active", False)),
+        "scheduler_mode": str(maintenance.get("scheduler_mode") or "").strip().lower(),
+        "scheduler_status": str(maintenance.get("scheduler_status") or "").strip().lower(),
         "source_freshness_sec": 0,
     }
 
@@ -1076,6 +1104,7 @@ def _autonomy_orchestrator_input_envelope(
         "steward_posture": _steward_posture_for_orchestrator(core_steward),
         "queue_pressure": _queue_pressure_for_orchestrator(generated_queue, state),
         "runtime_guard_status": _runtime_guard_status_for_orchestrator(core_steward, guard_health),
+        "autonomy_maintenance": _autonomy_maintenance_for_orchestrator(core_steward),
         "policy_snapshot": dict(policy_snapshot or _policy_snapshot_for_orchestrator()),
         "triage_hints": _triage_hints_for_orchestrator(
             core_steward,

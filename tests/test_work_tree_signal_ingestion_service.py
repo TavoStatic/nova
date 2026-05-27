@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import unittest
@@ -110,6 +111,44 @@ class TestWorkTreeSignalIngestionService(unittest.TestCase):
         self.assertEqual(getattr(work_tree.get_tree(duplicate.tree_id).status, "value", ""), "archived")
         self.assertEqual(getattr(work_tree.get_tree(canonical.tree_id).status, "value", ""), "active")
 
+    def test_signal_tree_repairs_legacy_policy_to_full_default_tools(self) -> None:
+        tree = work_tree.initialize_tree(
+            "Signal Intake: Runtime Governance",
+            meta={
+                "kind": "signal_ingestion",
+                "source": "runtime_signals",
+                "signal_ingestion": True,
+                "execution_policy": {
+                    "allowed_tools": ["read"],
+                    "require_explicit_allow": True,
+                },
+            },
+        )
+        signal = {
+            "source": "control_status",
+            "signal_class": "code_defect",
+            "title": "Fix legacy Signal Intake tool policy",
+            "fingerprint": {
+                "class": "code_defect",
+                "surface": "work_tree",
+                "error": "legacy_policy",
+                "symbol": "signal_ingestion",
+            },
+            "payload": {"symbol": "signal_ingestion"},
+            "severity": "medium",
+            "actionability": "safe_now",
+            "next_task": "Inspect Signal Intake policy",
+        }
+
+        self.service.ingest_signal(signal)
+
+        policy = work_tree.get_tree(tree.tree_id).meta.get("execution_policy")
+        allowed = policy.get("allowed_tools")
+        self.assertIn("read", allowed)
+        self.assertIn("source_root_judgment", allowed)
+        self.assertIn("os_capability", allowed)
+        self.assertIn("memory_bootstrap_confirm", allowed)
+
     def test_repeated_signal_update_clears_stale_branch_tool_without_explicit_tool(self) -> None:
         signal = {
             "source": "subconscious",
@@ -202,6 +241,47 @@ class TestWorkTreeSignalIngestionService(unittest.TestCase):
         self.assertIn("-11553", str((branch.source_payload or {}).get("last_error") or ""))
         self.assertEqual(branch.preferred_tool, "read")
 
+    def test_autonomy_maintenance_evidence_sequence_reaches_source_root_judgment(self) -> None:
+        status_payload = {
+            "autonomy_maintenance": {
+                "last_error": "subconscious_runner timed out after -11553 seconds",
+                "last_error_stale": False,
+                "last_generated_at": "2026-05-14 07:45:00",
+            },
+            "runtime_worker_status": "failed",
+            "runtime_worker_stale_identity": False,
+        }
+
+        self.service.sync_status_snapshot(status_payload)
+        branch = self._signal_branches()[0]
+
+        for _ in range(4):
+            open_tasks = [
+                task for task in work_tree.list_branch_tasks(branch.branch_id)
+                if task.status not in {work_tree.TaskStatus.COMPLETE, work_tree.TaskStatus.DROPPED}
+            ]
+            self.assertTrue(open_tasks)
+            task = open_tasks[0]
+            if task.title == "Synthesize source-root judgment from collected evidence":
+                break
+            expected_tool = str((task.meta or {}).get("expected_tool") or "read")
+            work_tree.record_task_evidence(
+                branch_id=branch.branch_id,
+                task_id=task.task_id,
+                tool_name=expected_tool,
+                tool_args=list((task.meta or {}).get("tool_args") or []),
+                result={"ok": True, "evidence": task.title},
+            )
+            work_tree.mark_task_complete(task.task_id)
+            self.service.sync_status_snapshot(status_payload)
+
+        open_tasks = [
+            task for task in work_tree.list_branch_tasks(branch.branch_id)
+            if task.status not in {work_tree.TaskStatus.COMPLETE, work_tree.TaskStatus.DROPPED}
+        ]
+        self.assertEqual(open_tasks[0].title, "Synthesize source-root judgment from collected evidence")
+        self.assertEqual((open_tasks[0].meta or {}).get("expected_tool"), "source_root_judgment")
+
     def test_status_snapshot_ingests_runtime_restart_pressure(self) -> None:
         results = self.service.ingest_status_snapshot(
             {
@@ -217,9 +297,9 @@ class TestWorkTreeSignalIngestionService(unittest.TestCase):
 
         self.assertTrue(any(item.get("action") == "created" for item in results))
         branch = self._signal_branches()[0]
-        self.assertEqual(str(branch.source_type or ""), "runtime_restart_analytics")
+        self.assertEqual(str(branch.source_type or ""), "runtime_control")
         self.assertEqual(str(branch.work_class or ""), "runtime_failure")
-        self.assertEqual(str(branch.source_key or ""), "runtime_failure:runtime_restart_analytics:restart_pressure:guard_boot_history")
+        self.assertEqual(str(branch.source_key or ""), "runtime_failure:runtime_control:restart_pressure:guard_boot_history")
 
     def test_status_snapshot_does_not_treat_planned_restarts_as_pressure(self) -> None:
         results = self.service.ingest_status_snapshot(
@@ -263,9 +343,9 @@ class TestWorkTreeSignalIngestionService(unittest.TestCase):
 
         self.assertTrue(any(item.get("action") == "created" for item in results))
         branch = self._signal_branches()[0]
-        self.assertEqual(str(branch.source_type or ""), "runtime_restart_analytics")
+        self.assertEqual(str(branch.source_type or ""), "runtime_control")
         self.assertEqual(str(branch.work_class or ""), "governance_pressure")
-        self.assertEqual(str(branch.source_key or ""), "governance_pressure:runtime_restart_analytics:restart_provenance_gap:guard_boot_history")
+        self.assertEqual(str(branch.source_key or ""), "governance_pressure:runtime_control:restart_provenance_gap:guard_boot_history")
 
     def test_status_snapshot_does_not_ingest_legacy_restart_provenance_gap(self) -> None:
         results = self.service.ingest_status_snapshot(
@@ -309,7 +389,7 @@ class TestWorkTreeSignalIngestionService(unittest.TestCase):
 
         self.assertTrue(any(item.get("action") == "created" for item in results))
         branch = self._signal_branches()[0]
-        self.assertEqual(str(branch.source_type or ""), "storage_watch")
+        self.assertEqual(str(branch.source_type or ""), "storage_release_pressure")
         self.assertEqual(str(branch.work_class or ""), "maintenance_pressure")
         self.assertIn("archive growth", str((branch.source_payload or {}).get("storage_watch_note") or ""))
         self.assertEqual((branch.source_payload or {}).get("release_validation_extract_count"), 4)
@@ -330,7 +410,7 @@ class TestWorkTreeSignalIngestionService(unittest.TestCase):
 
         self.assertTrue(any(item.get("action") == "created" for item in results))
         branch = self._signal_branches()[0]
-        self.assertEqual(str(branch.source_type or ""), "patch_status")
+        self.assertEqual(str(branch.source_type or ""), "patch_pipeline")
         self.assertEqual(str(branch.work_class or ""), "governance_pressure")
         self.assertIn("patch_strict_manifest_disabled", branch.source_payload.get("reasons") or [])
 
@@ -355,6 +435,49 @@ class TestWorkTreeSignalIngestionService(unittest.TestCase):
         self.assertEqual(str(branch.work_class or ""), "governance_pressure")
         self.assertIn("operator_ack_required", branch.source_payload.get("rejection_reasons") or [])
 
+    def test_autonomy_orchestrator_evidence_sequence_reaches_source_root_judgment(self) -> None:
+        status_payload = {
+            "autonomy_orchestrator_decision": "defer_with_reason",
+            "autonomy_orchestrator_decision_type": "Defer",
+            "autonomy_orchestrator_action_type": "generated_queue_investigate",
+            "autonomy_orchestrator_reason": "No candidate passed advisory preconditions.",
+            "autonomy_orchestrator_ledger_status": "recorded",
+            "autonomy_orchestrator_rejection_reasons": ["operator_ack_required"],
+            "autonomy_orchestrator_summary": {
+                "rejection_reason_counts": {"operator_ack_required": 7},
+            },
+        }
+
+        self.service.sync_status_snapshot(status_payload)
+        branch = self._signal_branches()[0]
+
+        for _ in range(4):
+            open_tasks = [
+                task for task in work_tree.list_branch_tasks(branch.branch_id)
+                if task.status not in {work_tree.TaskStatus.COMPLETE, work_tree.TaskStatus.DROPPED}
+            ]
+            self.assertTrue(open_tasks)
+            task = open_tasks[0]
+            if task.title == "Synthesize source-root judgment from collected evidence":
+                break
+            expected_tool = str((task.meta or {}).get("expected_tool") or "read")
+            work_tree.record_task_evidence(
+                branch_id=branch.branch_id,
+                task_id=task.task_id,
+                tool_name=expected_tool,
+                tool_args=list((task.meta or {}).get("tool_args") or []),
+                result={"ok": True, "evidence": task.title},
+            )
+            work_tree.mark_task_complete(task.task_id)
+            self.service.sync_status_snapshot(status_payload)
+
+        open_tasks = [
+            task for task in work_tree.list_branch_tasks(branch.branch_id)
+            if task.status not in {work_tree.TaskStatus.COMPLETE, work_tree.TaskStatus.DROPPED}
+        ]
+        self.assertEqual(open_tasks[0].title, "Synthesize source-root judgment from collected evidence")
+        self.assertEqual((open_tasks[0].meta or {}).get("expected_tool"), "source_root_judgment")
+
     def test_status_snapshot_ingests_subconscious_status_gap(self) -> None:
         results = self.service.ingest_status_snapshot(
             {
@@ -368,7 +491,7 @@ class TestWorkTreeSignalIngestionService(unittest.TestCase):
 
         self.assertTrue(any(item.get("action") == "created" for item in results))
         branch = self._signal_branches()[0]
-        self.assertEqual(str(branch.source_type or ""), "subconscious_status")
+        self.assertEqual(str(branch.source_type or ""), "subconscious")
         self.assertEqual(str(branch.work_class or ""), "maintenance_pressure")
         self.assertFalse(branch.source_payload.get("subconscious_ok"))
 
@@ -655,6 +778,19 @@ class TestWorkTreeSignalIngestionService(unittest.TestCase):
         self.assertIn("governance_pressure", classes)
         self.assertIn("regression_failure", classes)
 
+        http_branch = [branch for branch in branches if str(branch.source_type or "") == "http_api_control"][0]
+        self.assertEqual(str(http_branch.preferred_tool or ""), "read")
+        self.assertIn("read", list(http_branch.allowed_tools or []))
+
+    def test_sync_resolves_http_api_error_spike_when_alert_clears(self) -> None:
+        self.service.sync_status_snapshot({"alerts": ["error_spike on /api/control/status"]})
+        self.service.sync_status_snapshot({"alerts": []})
+
+        branches = self._signal_branches()
+        http_branch = [branch for branch in branches if str(branch.source_type or "") == "http_api_control"][0]
+        self.assertEqual(getattr(http_branch.status, "value", http_branch.status), "complete")
+        self.assertEqual(str(http_branch.resolution_state or ""), "resolved")
+
     def test_status_snapshot_does_not_duplicate_typed_test_profile_alert_as_self_check(self) -> None:
         status_payload = {
             "alerts": [
@@ -733,7 +869,7 @@ class TestWorkTreeSignalIngestionService(unittest.TestCase):
         self_check = [branch for branch in branches if str(branch.source_type or "") == "self_check"][0]
         self.assertEqual(getattr(self_check.status, "value", self_check.status), "complete")
         self.assertEqual(str(self_check.resolution_state or ""), "resolved")
-        self.assertTrue(any(str(branch.source_type or "") == "test_profile_inventory" for branch in branches))
+        self.assertTrue(any(str(branch.source_type or "") == "test_ecosystem" for branch in branches))
 
     def test_status_snapshot_ingests_direct_control_runtime_fields(self) -> None:
         status_payload = {
@@ -759,6 +895,452 @@ class TestWorkTreeSignalIngestionService(unittest.TestCase):
         self.assertIn("Guard process is not running", titles)
         self.assertIn("Core heartbeat is stale in control status", titles)
         self.assertIn("Maintenance scheduler is inactive", titles)
+        by_title = {branch.title: branch for branch in branches}
+        self.assertEqual(str(by_title["SearXNG search dependency unreachable"].source_type or ""), "web_search")
+        self.assertEqual(by_title["SearXNG search dependency unreachable"].preferred_tool, "web_search")
+        self.assertEqual(str(by_title["Guard process is not running"].source_type or ""), "runtime_core")
+        self.assertEqual(by_title["Guard process is not running"].preferred_tool, "pulse")
+        self.assertEqual(str(by_title["Core heartbeat is stale in control status"].source_type or ""), "runtime_core")
+        self.assertEqual(str(by_title["Maintenance scheduler is inactive"].source_type or ""), "scheduler_registry")
+        self.assertEqual(by_title["Maintenance scheduler is inactive"].preferred_tool, "queue_status")
+
+    def test_status_snapshot_ingests_remaining_owned_source_root_surfaces(self) -> None:
+        status_payload = {
+            "alerts": [],
+            "self_check_pass_ratio": 1.0,
+            "backend_commands": "unreadable",
+            "backend_command_count": 0,
+            "operator_outbox": {"ok": True, "open_count": 1},
+            "operator_outbox_open_count": 1,
+            "operator_outbox_latest_open_id": "outbox-1",
+            "web_enabled": True,
+            "allow_domains_count": 0,
+            "patch_enabled": True,
+            "patch_strict_manifest": False,
+            "chat_login_enabled": True,
+            "chat_users_count": 0,
+            "chat_auth_source": "",
+            "memory_enabled": True,
+            "memory_health": {
+                "status": "watch",
+                "identity": {"exists": False},
+                "learned_facts": {"exists": False},
+            },
+            "action_ledger_total": 1,
+            "last_intent": "synthetic",
+            "last_planner_decision": "fulfillment_plan",
+            "last_route_summary": "",
+            "last_route_grounded": False,
+            "last_action_final_answer": "",
+            "last_action_tool": "weather_current_location",
+            "last_route_trace": [
+                {"stage": "intent_router", "status": "failed", "detail": "synthetic route issue"},
+                {"stage": "supervisor_fulfillment", "status": "failed", "detail": "synthetic handoff issue"},
+                {"stage": "finalize_reply", "status": "failed", "detail": "synthetic reply issue"},
+                {"stage": "weather_location", "status": "failed", "detail": "synthetic weather issue"},
+            ],
+            "retrieval_knowledge_status": "failed",
+            "knowledge_used": True,
+            "knowledge_chars": 0,
+            "weather_source_host": "",
+            "installer_packaging_status": "stale",
+            "release_status": {
+                "ok": True,
+                "latest_readiness_state": "ready",
+                "latest_ready_to_ship": True,
+                "latest_artifact_name": "nova-rc.zip",
+            },
+            "tts_status": "missing",
+            "voice_runtime_requested": True,
+            "voice_runtime_ok": True,
+            "safety_enabled": True,
+            "pending_review_total": 1,
+            "quarantine_total": 0,
+            "requests_total": 1,
+            "errors_total": 2,
+            "health_score": 85,
+        }
+
+        results = self.service.sync_status_snapshot(status_payload)
+
+        self.assertGreaterEqual(len([item for item in results if item.get("action") == "created"]), 15)
+        by_source = {str(branch.source_type or ""): branch for branch in self._signal_branches()}
+        expected_sources = {
+            "frontdoor_cli",
+            "operator_control",
+            "policy_gates",
+            "session_identity_auth",
+            "identity_profile_answers",
+            "conversation_routing",
+            "supervisor_fulfillment",
+            "reply_quality_contracts",
+            "retrieval_knowledge",
+            "weather_location",
+            "installer_packaging",
+            "tts_audio_output",
+            "safety_envelope",
+            "metrics_ops_journal",
+            "core_steward_reflection",
+        }
+        self.assertFalse(expected_sources - set(by_source))
+        self.assertEqual(by_source["operator_control"].actionability, "blocked")
+        identity_tasks = work_tree.list_branch_tasks(by_source["identity_profile_answers"].branch_id)
+        self.assertIn("Read memory routing purpose controls", identity_tasks[0].title)
+        self.assertEqual(by_source["safety_envelope"].preferred_tool, "phase2_audit")
+        self.assertEqual(by_source["core_steward_reflection"].preferred_tool, "core_health")
+
+    def test_installer_packaging_gap_routes_to_installer_validation_tool(self) -> None:
+        status_payload = {
+            "installer_release_status": {"latest_readiness_state": "no-builds", "latest_ready_to_ship": False},
+            "release_status": {
+                "ok": True,
+                "latest_readiness_state": "ready-with-notes",
+                "latest_ready_to_ship": True,
+                "latest_artifact_name": "nova-rc.zip",
+                "latest_artifact_path": "C:\\NOVA\\runtime\\exports\\release_packages\\nova-rc.zip",
+            },
+        }
+
+        self.service.sync_status_snapshot(status_payload)
+
+        branch = self._signal_branches()[0]
+        self.assertEqual(str(branch.source_type or ""), "installer_packaging")
+        installer_task = None
+        for _ in range(5):
+            open_tasks = [
+                task for task in work_tree.list_branch_tasks(branch.branch_id)
+                if task.status not in {work_tree.TaskStatus.COMPLETE, work_tree.TaskStatus.DROPPED}
+            ]
+            self.assertEqual(len(open_tasks), 1)
+            task = open_tasks[0]
+            if task.title == "Run installer validation from current release package":
+                installer_task = task
+                break
+            work_tree.record_task_evidence(
+                branch_id=branch.branch_id,
+                task_id=task.task_id,
+                tool_name=str(task.meta.get("expected_tool") or "read"),
+                tool_args=list(task.meta.get("tool_args") or []),
+                result=f"{task.title} evidence",
+            )
+            work_tree.mark_task_complete(task.task_id)
+            self.service.sync_status_snapshot(status_payload)
+        self.assertIsNotNone(installer_task)
+        self.assertEqual(installer_task.meta.get("expected_tool"), "installer_validation_run")
+        branch = work_tree.get_branch(branch.branch_id)
+        self.assertIn("installer_validation_run", branch.allowed_tools)
+
+    def test_installer_packaging_ready_status_resolves_branch(self) -> None:
+        open_payload = {
+            "installer_release_status": {"latest_readiness_state": "no-builds", "latest_ready_to_ship": False},
+            "release_status": {
+                "ok": True,
+                "latest_readiness_state": "ready",
+                "latest_ready_to_ship": True,
+                "latest_artifact_name": "nova-rc.zip",
+            },
+        }
+        ready_payload = {
+            "installer_release_status": {
+                "latest_readiness_state": "ready-with-notes",
+                "latest_ready_to_ship": True,
+                "latest_source_package_artifact_path": "C:\\NOVA\\runtime\\exports\\release_packages\\nova-rc.zip",
+            },
+            "release_status": {
+                "ok": True,
+                "latest_readiness_state": "ready",
+                "latest_ready_to_ship": True,
+                "latest_artifact_name": "nova-rc.zip",
+                "latest_artifact_path": "C:\\NOVA\\runtime\\exports\\release_packages\\nova-rc.zip",
+            },
+        }
+
+        self.service.sync_status_snapshot(open_payload)
+        self.service.sync_status_snapshot(ready_payload)
+
+        branch = self._signal_branches()[0]
+        self.assertEqual(branch.resolution_state, "resolved")
+
+    def test_installer_packaging_ready_status_reopens_when_built_from_previous_package(self) -> None:
+        status_payload = {
+            "installer_release_status": {
+                "latest_readiness_state": "ready-with-notes",
+                "latest_ready_to_ship": True,
+                "latest_source_package_artifact_path": "C:\\NOVA\\runtime\\exports\\release_packages\\nova-rc-old.zip",
+            },
+            "release_status": {
+                "ok": True,
+                "latest_readiness_state": "ready",
+                "latest_ready_to_ship": True,
+                "latest_artifact_name": "nova-rc-new.zip",
+                "latest_artifact_path": "C:\\NOVA\\runtime\\exports\\release_packages\\nova-rc-new.zip",
+            },
+        }
+
+        self.service.sync_status_snapshot(status_payload)
+
+        branch = self._signal_branches()[0]
+        self.assertEqual(str(branch.source_type or ""), "installer_packaging")
+        self.assertEqual(branch.resolution_state, "open")
+        self.assertFalse(branch.source_payload.get("installer_matches_current_release"))
+        self.assertEqual(
+            branch.source_payload.get("installer_source_package_artifact_path"),
+            "C:\\NOVA\\runtime\\exports\\release_packages\\nova-rc-old.zip",
+        )
+
+    def test_operator_outbox_open_work_uses_stable_blocked_branch(self) -> None:
+        first = {
+            "operator_outbox": {"ok": True, "open_count": 1},
+            "operator_outbox_open_count": 1,
+            "operator_outbox_latest_open_id": "outbox-1",
+        }
+        second = {
+            "operator_outbox": {"ok": True, "open_count": 2},
+            "operator_outbox_open_count": 2,
+            "operator_outbox_latest_open_id": "outbox-2",
+        }
+
+        self.service.sync_status_snapshot(first)
+        self.service.sync_status_snapshot(second)
+
+        branches = self._signal_branches()
+        self.assertEqual(len(branches), 1)
+        branch = branches[0]
+        self.assertEqual(branch.source_key, "operator_requested:operator_control:operator_outbox_open:operator_outbox")
+        self.assertEqual(branch.status, work_tree.BranchStatus.BLOCKED)
+        self.assertEqual(branch.allowed_tools, [])
+        self.assertIsNone(branch.preferred_tool)
+        open_tasks = [
+            task for task in work_tree.list_branch_tasks(branch.branch_id)
+            if task.status not in {work_tree.TaskStatus.COMPLETE, work_tree.TaskStatus.DROPPED}
+        ]
+        self.assertEqual(len(open_tasks), 1)
+        self.assertEqual(open_tasks[0].status, work_tree.TaskStatus.BLOCKED)
+        self.assertIn("Wait for operator response", open_tasks[0].title)
+        self.assertNotIn("runtime/operator_outbox.jsonl", json.dumps(open_tasks[0].meta))
+
+    def test_find_task_contracts_do_not_use_space_joined_paths(self) -> None:
+        source = Path("services/work_tree_signal_ingestion.py").read_text(encoding="utf-8")
+
+        self.assertNotIn('"services docs scripts"', source)
+        self.assertNotIn('"services tools tests"', source)
+        self.assertNotIn('"services work_tree.py"', source)
+
+    def test_source_root_sequence_reaches_judgment_after_evidence_tasks(self) -> None:
+        status_payload = {
+            "alerts": [],
+            "self_check_pass_ratio": 1.0,
+            "action_ledger_total": 1,
+            "last_intent": "synthetic",
+            "last_planner_decision": "",
+            "last_route_summary": "",
+            "last_route_trace": [
+                {"stage": "intent_router", "status": "failed", "detail": "synthetic route issue"},
+            ],
+        }
+
+        self.service.sync_status_snapshot(status_payload)
+        branch = self._signal_branches()[0]
+
+        for _ in range(6):
+            open_tasks = [
+                task for task in work_tree.list_branch_tasks(branch.branch_id)
+                if task.status not in {work_tree.TaskStatus.COMPLETE, work_tree.TaskStatus.DROPPED}
+            ]
+            self.assertTrue(open_tasks)
+            task = open_tasks[0]
+            if task.title == "Synthesize source-root judgment from collected evidence":
+                break
+            expected_tool = str((task.meta or {}).get("expected_tool") or "read")
+            work_tree.record_task_evidence(
+                branch_id=branch.branch_id,
+                task_id=task.task_id,
+                tool_name=expected_tool,
+                tool_args=list((task.meta or {}).get("tool_args") or []),
+                result={"ok": True, "evidence": task.title},
+            )
+            work_tree.mark_task_complete(task.task_id)
+            self.service.sync_status_snapshot(status_payload)
+
+        open_tasks = [
+            task for task in work_tree.list_branch_tasks(branch.branch_id)
+            if task.status not in {work_tree.TaskStatus.COMPLETE, work_tree.TaskStatus.DROPPED}
+        ]
+        self.assertEqual(open_tasks[0].title, "Synthesize source-root judgment from collected evidence")
+        self.assertEqual((open_tasks[0].meta or {}).get("expected_tool"), "source_root_judgment")
+
+    def test_active_source_signal_restarts_sequence_after_open_resolution_completion(self) -> None:
+        status_payload = {
+            "search_provider": "searxng",
+            "searxng_ok": False,
+            "search_api_endpoint": "http://127.0.0.1:8081/search",
+            "searxng_note": "connection refused",
+        }
+
+        self.service.sync_status_snapshot(status_payload)
+        branch = self._signal_branches()[0]
+        completed_titles: list[str] = []
+
+        for _ in range(8):
+            open_tasks = [
+                task for task in work_tree.list_branch_tasks(branch.branch_id)
+                if task.status not in {work_tree.TaskStatus.COMPLETE, work_tree.TaskStatus.DROPPED}
+            ]
+            self.assertTrue(open_tasks)
+            task = open_tasks[0]
+            expected_tool = str((task.meta or {}).get("expected_tool") or "read")
+            work_tree.record_task_evidence(
+                branch_id=branch.branch_id,
+                task_id=task.task_id,
+                tool_name=expected_tool,
+                tool_args=list((task.meta or {}).get("tool_args") or []),
+                result={"ok": True, "evidence": task.title},
+            )
+            work_tree.mark_task_complete(task.task_id)
+            completed_titles.append(task.title)
+            if task.title == "Synthesize source-root judgment from collected evidence":
+                break
+            self.service.sync_status_snapshot(status_payload)
+
+        self.assertIn("Synthesize source-root judgment from collected evidence", completed_titles)
+        self.assertEqual(work_tree.get_branch(branch.branch_id).resolution_state, "open")
+        self.assertEqual(work_tree.get_branch(branch.branch_id).status, work_tree.BranchStatus.COMPLETE)
+
+        self.service.sync_status_snapshot(status_payload)
+
+        open_tasks = [
+            task for task in work_tree.list_branch_tasks(branch.branch_id)
+            if task.status not in {work_tree.TaskStatus.COMPLETE, work_tree.TaskStatus.DROPPED}
+        ]
+        self.assertEqual(open_tasks[0].title, "Probe configured web search route through web_search tool")
+        self.assertEqual((open_tasks[0].meta or {}).get("expected_tool"), "web_search")
+        self.assertEqual(work_tree.get_branch(branch.branch_id).status, work_tree.BranchStatus.READY)
+
+    def test_source_root_sequence_routes_failed_evidence_to_judgment(self) -> None:
+        status_payload = {
+            "search_provider": "searxng",
+            "searxng_ok": False,
+            "search_api_endpoint": "http://127.0.0.1:8081/search",
+            "searxng_note": "connection refused",
+        }
+
+        self.service.sync_status_snapshot(status_payload)
+        branch = self._signal_branches()[0]
+        open_tasks = [
+            task for task in work_tree.list_branch_tasks(branch.branch_id)
+            if task.status not in {work_tree.TaskStatus.COMPLETE, work_tree.TaskStatus.DROPPED}
+        ]
+        self.assertEqual(open_tasks[0].title, "Probe configured web search route through web_search tool")
+        work_tree.record_task_evidence(
+            branch_id=branch.branch_id,
+            task_id=open_tasks[0].task_id,
+            tool_name="web_search",
+            tool_args=["nova runtime search dependency probe"],
+            result="[FAIL] Local web search backend is unavailable.",
+        )
+
+        self.service.sync_status_snapshot(status_payload)
+
+        open_tasks = [
+            task for task in work_tree.list_branch_tasks(branch.branch_id)
+            if task.status not in {work_tree.TaskStatus.COMPLETE, work_tree.TaskStatus.DROPPED}
+        ]
+        dropped_tasks = [
+            task for task in work_tree.list_branch_tasks(branch.branch_id)
+            if task.status == work_tree.TaskStatus.DROPPED
+        ]
+        self.assertEqual(open_tasks[0].title, "Synthesize source-root judgment from collected evidence")
+        self.assertEqual((open_tasks[0].meta or {}).get("expected_tool"), "source_root_judgment")
+        self.assertEqual(dropped_tasks[0].title, "Probe configured web search route through web_search tool")
+
+        judgment_task = open_tasks[0]
+        work_tree.record_task_evidence(
+            branch_id=branch.branch_id,
+            task_id=judgment_task.task_id,
+            tool_name="source_root_judgment",
+            tool_args=[branch.branch_id],
+            result="Source Root Judgment\n- verdict: evidence_failed\n- operator_outbox: needed (failed_evidence)",
+        )
+        work_tree.mark_task_complete(judgment_task.task_id)
+
+        self.service.sync_status_snapshot(status_payload)
+
+        open_tasks = [
+            task for task in work_tree.list_branch_tasks(branch.branch_id)
+            if task.status not in {work_tree.TaskStatus.COMPLETE, work_tree.TaskStatus.DROPPED}
+        ]
+        self.assertEqual(open_tasks[0].title, "Hold source-root branch for operator/tool failure judgment")
+        self.assertEqual(open_tasks[0].status, work_tree.TaskStatus.BLOCKED)
+
+        self.service.sync_status_snapshot(status_payload)
+
+        open_tasks = [
+            task for task in work_tree.list_branch_tasks(branch.branch_id)
+            if task.status not in {work_tree.TaskStatus.COMPLETE, work_tree.TaskStatus.DROPPED}
+        ]
+        self.assertEqual(len(open_tasks), 1)
+        self.assertEqual(open_tasks[0].title, "Hold source-root branch for operator/tool failure judgment")
+        self.assertEqual(open_tasks[0].status, work_tree.TaskStatus.BLOCKED)
+        self.assertEqual(
+            (open_tasks[0].meta or {}).get("blocked_reason"),
+            "source_root_failed_evidence_operator_judgment_required",
+        )
+
+    def test_self_repair_inventory_alias_reaches_source_root_judgment(self) -> None:
+        status_payload = {
+            "alerts": [],
+            "self_check_pass_ratio": 1.0,
+            "self_repair_closure_inventory": {
+                "gap_count": 1,
+                "proof_scope": "source_contract",
+                "roots": [
+                    {
+                        "root_id": "runtime_core",
+                        "label": "Runtime core",
+                        "ok": False,
+                        "closure_depth": "execution_wired",
+                        "gaps": ["missing_judgment_path"],
+                        "source_files": ["nova_core.py"],
+                        "missing_evidence_paths": [],
+                        "missing_judgment_paths": ["source_root_judgment"],
+                        "missing_closure_paths": [],
+                        "missing_operator_outbox_paths": [],
+                        "missing_owned_root_routes": [],
+                    }
+                ],
+            },
+        }
+
+        self.service.sync_status_snapshot(status_payload)
+        branch = self._signal_branches()[0]
+        self.assertEqual(str(branch.source_type or ""), "self_repair_closure_inventory")
+
+        for _ in range(5):
+            open_tasks = [
+                task for task in work_tree.list_branch_tasks(branch.branch_id)
+                if task.status not in {work_tree.TaskStatus.COMPLETE, work_tree.TaskStatus.DROPPED}
+            ]
+            self.assertTrue(open_tasks)
+            task = open_tasks[0]
+            if task.title == "Synthesize source-root judgment from collected evidence":
+                break
+            expected_tool = str((task.meta or {}).get("expected_tool") or "read")
+            work_tree.record_task_evidence(
+                branch_id=branch.branch_id,
+                task_id=task.task_id,
+                tool_name=expected_tool,
+                tool_args=list((task.meta or {}).get("tool_args") or []),
+                result={"ok": True, "evidence": task.title},
+            )
+            work_tree.mark_task_complete(task.task_id)
+            self.service.sync_status_snapshot(status_payload)
+
+        open_tasks = [
+            task for task in work_tree.list_branch_tasks(branch.branch_id)
+            if task.status not in {work_tree.TaskStatus.COMPLETE, work_tree.TaskStatus.DROPPED}
+        ]
+        self.assertEqual(open_tasks[0].title, "Synthesize source-root judgment from collected evidence")
+        self.assertEqual((open_tasks[0].meta or {}).get("expected_tool"), "source_root_judgment")
 
     def test_status_snapshot_ingests_blocked_generated_queue_pressure(self) -> None:
         status_payload = {
@@ -783,9 +1365,9 @@ class TestWorkTreeSignalIngestionService(unittest.TestCase):
         self.assertTrue(any(item.get("action") == "created" for item in results))
         branch = self._signal_branches()[0]
         self.assertEqual(branch.title, "Generated Work Queue is blocked with no actionable session")
-        self.assertEqual(str(branch.source_type or ""), "generated_work_queue")
+        self.assertEqual(str(branch.source_type or ""), "generated_queue")
         self.assertEqual(str(branch.work_class or ""), "maintenance_pressure")
-        self.assertEqual(str(branch.source_key or ""), "maintenance_pressure:generated_work_queue:generated_queue_blocked:parity_drift_locked")
+        self.assertEqual(str(branch.source_key or ""), "maintenance_pressure:generated_queue:generated_queue_blocked:parity_drift_locked")
         self.assertEqual(branch.preferred_tool, "queue_status")
         self.assertEqual(branch.allowed_tools, ["queue_status", "read", "find"])
         self.assertEqual(branch.source_payload.get("queue_blocked_files"), ["drift_a.json", "drift_b.json"])
@@ -817,7 +1399,7 @@ class TestWorkTreeSignalIngestionService(unittest.TestCase):
 
         self.assertTrue(any(item.get("action") == "resolved" for item in results))
         branch = self._signal_branches()[0]
-        self.assertEqual(str(branch.source_type or ""), "generated_work_queue")
+        self.assertEqual(str(branch.source_type or ""), "generated_queue")
         self.assertEqual(str(branch.resolution_state or ""), "resolved")
 
     def test_status_snapshot_ingests_current_tool_error(self) -> None:
@@ -839,9 +1421,9 @@ class TestWorkTreeSignalIngestionService(unittest.TestCase):
         self.assertTrue(any(item.get("action") == "created" for item in results))
         branch = self._signal_branches()[0]
         self.assertEqual(branch.title, "Tool execution has a current error event")
-        self.assertEqual(str(branch.source_type or ""), "tool_events")
+        self.assertEqual(str(branch.source_type or ""), "tool_evidence")
         self.assertEqual(str(branch.work_class or ""), "runtime_failure")
-        self.assertEqual(str(branch.source_key or ""), "runtime_failure:tool_events:tool_execution_error:filesystem")
+        self.assertEqual(str(branch.source_key or ""), "runtime_failure:tool_evidence:tool_execution_error:filesystem")
         self.assertEqual(branch.preferred_tool, "read")
         task = work_tree.list_branch_tasks(branch.branch_id)[0]
         self.assertEqual(task.meta.get("tool_args"), ["runtime/tool_events.jsonl"])
@@ -867,7 +1449,94 @@ class TestWorkTreeSignalIngestionService(unittest.TestCase):
 
         self.assertTrue(any(item.get("action") == "resolved" for item in results))
         branch = self._signal_branches()[0]
-        self.assertEqual(str(branch.source_type or ""), "tool_events")
+        self.assertEqual(str(branch.source_type or ""), "tool_evidence")
+        self.assertEqual(str(branch.resolution_state or ""), "resolved")
+
+    def test_status_snapshot_ingests_os_capability_ledger_issue(self) -> None:
+        status_payload = {
+            "alerts": [],
+            "self_check_pass_ratio": 1.0,
+            "os_capability_ledger_ok": False,
+            "os_capability_ledger_readable_ok": True,
+            "os_capability_ledger_total": 2,
+            "os_capability_ledger_current_issue_count": 1,
+            "os_capability_ledger_current_blocked_count": 1,
+            "os_capability_ledger_current_failure_count": 0,
+            "os_capability_ledger_current_timeout_count": 0,
+            "os_capability_ledger_current_operator_outbox_count": 1,
+            "os_capability_ledger_path": "C:\\NOVA\\runtime\\os_capability_ledger.jsonl",
+            "last_os_capability_issue": {
+                "capability": "verify_ollama_model",
+                "status": "blocked",
+                "reason": "contract_stale",
+                "operator_outbox": True,
+            },
+            "os_capability_ledger": {
+                "ok": False,
+                "readable_ok": True,
+                "count": 2,
+                "current_issue_count": 1,
+                "current_issue_rows": [
+                    {
+                        "capability": "verify_ollama_model",
+                        "status": "blocked",
+                        "reason": "contract_stale",
+                        "operator_outbox": True,
+                    }
+                ],
+            },
+        }
+
+        results = self.service.sync_status_snapshot(status_payload)
+
+        self.assertTrue(any(item.get("action") == "created" for item in results))
+        branch = self._signal_branches()[0]
+        self.assertEqual(branch.title, "OS capability contract drift is blocking execution")
+        self.assertEqual(str(branch.source_type or ""), "tool_registry_policy")
+        self.assertEqual(str(branch.work_class or ""), "maintenance_pressure")
+        self.assertEqual(str(branch.source_key or ""), "maintenance_pressure:tool_registry_policy:contract_stale:verify_ollama_model")
+        self.assertEqual(branch.preferred_tool, "read")
+        self.assertEqual(branch.allowed_tools, ["read"])
+        task = work_tree.list_branch_tasks(branch.branch_id)[0]
+        self.assertEqual(task.meta.get("tool_args"), ["runtime/os_capability_ledger.jsonl"])
+
+    def test_status_snapshot_resolves_os_capability_ledger_issue_when_capability_runs_clean(self) -> None:
+        self.service.sync_status_snapshot(
+            {
+                "alerts": [],
+                "self_check_pass_ratio": 1.0,
+                "os_capability_ledger_ok": False,
+                "os_capability_ledger_readable_ok": True,
+                "os_capability_ledger_current_issue_count": 1,
+                "last_os_capability_issue": {
+                    "capability": "verify_ollama_model",
+                    "status": "blocked",
+                    "reason": "contract_stale",
+                },
+            }
+        )
+
+        results = self.service.sync_status_snapshot(
+            {
+                "alerts": [],
+                "self_check_pass_ratio": 1.0,
+                "os_capability_ledger_ok": True,
+                "os_capability_ledger_readable_ok": True,
+                "os_capability_ledger_total": 3,
+                "os_capability_ledger_current_issue_count": 0,
+                "os_capability_ledger": {
+                    "ok": True,
+                    "readable_ok": True,
+                    "count": 3,
+                    "current_issue_count": 0,
+                    "current_issue_rows": [],
+                },
+            }
+        )
+
+        self.assertTrue(any(item.get("action") == "resolved" for item in results))
+        branch = self._signal_branches()[0]
+        self.assertEqual(str(branch.source_type or ""), "tool_registry_policy")
         self.assertEqual(str(branch.resolution_state or ""), "resolved")
 
     def test_status_snapshot_ingests_ollama_chat_route_gap(self) -> None:
@@ -916,10 +1585,17 @@ class TestWorkTreeSignalIngestionService(unittest.TestCase):
         self.assertEqual(branch.title, "Ollama chat API/version contract unavailable while tags endpoint responds")
         self.assertEqual(str(branch.work_class or ""), "dependency_unreachable")
         self.assertEqual(str(branch.actionability or ""), "safe_now")
-        self.assertEqual(str(branch.source_key or ""), "dependency_unreachable:control_status:ollama_chat_route_unreachable:ollama")
+        self.assertEqual(str(branch.source_type or ""), "model_runtime")
+        self.assertEqual(str(branch.source_key or ""), "dependency_unreachable:model_runtime:ollama_chat_route_unreachable:ollama")
         self.assertEqual(((branch.source_payload.get("ollama_port_ownership") or {}).get("listener_count")), 1)
         self.assertEqual(branch.source_payload.get("ollama_version"), "0.0.0-old")
         self.assertEqual(branch.source_payload.get("ollama_api_contract_status"), "chat_api_missing_or_incompatible")
+        self.assertEqual(branch.preferred_tool, "os_capability")
+        task = work_tree.list_branch_tasks(branch.branch_id)[0]
+        self.assertEqual(task.meta.get("expected_tool"), "os_capability")
+        request = json.loads(task.meta["tool_args"][0])
+        self.assertEqual(request["capability"], "verify_ollama_model")
+        self.assertTrue(request["args"]["probe_chat"])
 
     def test_status_snapshot_ingests_ollama_model_missing_gap(self) -> None:
         status_payload = {
@@ -953,9 +1629,14 @@ class TestWorkTreeSignalIngestionService(unittest.TestCase):
         branch = self._signal_branches()[0]
         self.assertEqual(branch.title, "Ollama configured chat model is not installed")
         self.assertEqual(str(branch.work_class or ""), "dependency_unreachable")
-        self.assertEqual(str(branch.source_key or ""), "dependency_unreachable:control_status:ollama_chat_model_missing:ollama")
+        self.assertEqual(str(branch.source_type or ""), "model_runtime")
+        self.assertEqual(str(branch.source_key or ""), "dependency_unreachable:model_runtime:ollama_chat_model_missing:ollama")
         self.assertEqual(branch.source_payload.get("ollama_configured_model"), "llama3.1:8b")
         self.assertFalse(branch.source_payload.get("ollama_model_available"))
+        task = work_tree.list_branch_tasks(branch.branch_id)[0]
+        request = json.loads(task.meta["tool_args"][0])
+        self.assertEqual(request["capability"], "verify_ollama_model")
+        self.assertEqual(request["args"]["model"], "llama3.1:8b")
 
     def test_status_snapshot_ingests_llm_reply_error_despite_green_ollama(self) -> None:
         status_payload = {
@@ -986,7 +1667,61 @@ class TestWorkTreeSignalIngestionService(unittest.TestCase):
         branch = self._signal_branches()[0]
         self.assertEqual(branch.title, "Last LLM reply failed despite healthy Ollama probes")
         self.assertEqual(str(branch.work_class or ""), "dependency_unreachable")
+        self.assertEqual(str(branch.source_type or ""), "model_runtime")
         self.assertEqual(str(branch.source_key or ""), "dependency_unreachable:action_ledger:llm_reply_failed_after_healthy_probe:ollama")
+        task = work_tree.list_branch_tasks(branch.branch_id)[0]
+        request = json.loads(task.meta["tool_args"][0])
+        self.assertEqual(request["capability"], "verify_ollama_model")
+        self.assertTrue(request["args"]["probe_chat"])
+
+    def test_status_snapshot_resolves_model_runtime_gap_when_ollama_contract_clears(self) -> None:
+        self.service.sync_status_snapshot(
+            {
+                "alerts": [],
+                "self_check_pass_ratio": 1.0,
+                "chat_model": "llama3.2:3b",
+                "ollama_api_up": False,
+                "ollama_tags_ok": True,
+                "ollama_chat_route_ok": True,
+                "ollama_model_available": False,
+                "ollama_configured_model": "llama3.2:3b",
+                "ollama_health": {
+                    "ok": False,
+                    "tags_ok": True,
+                    "chat_route_ok": True,
+                    "model_available": False,
+                    "chat_model": "llama3.2:3b",
+                },
+            }
+        )
+
+        results = self.service.sync_status_snapshot(
+            {
+                "alerts": [],
+                "self_check_pass_ratio": 1.0,
+                "chat_model": "llama3.2:3b",
+                "ollama_api_up": True,
+                "ollama_server_ok": True,
+                "ollama_tags_ok": True,
+                "ollama_chat_route_ok": True,
+                "ollama_model_available": True,
+                "ollama_chat_ready": True,
+                "ollama_configured_model": "llama3.2:3b",
+                "ollama_health": {
+                    "ok": True,
+                    "server_ok": True,
+                    "tags_ok": True,
+                    "chat_route_ok": True,
+                    "model_available": True,
+                    "chat_model": "llama3.2:3b",
+                },
+            }
+        )
+
+        self.assertTrue(any(item.get("action") == "resolved" for item in results))
+        branch = self._signal_branches()[0]
+        self.assertEqual(str(branch.source_type or ""), "model_runtime")
+        self.assertEqual(str(branch.resolution_state or ""), "resolved")
 
     def test_status_snapshot_ingests_validation_artifact_truth_gap(self) -> None:
         status_payload = {
@@ -1028,11 +1763,11 @@ class TestWorkTreeSignalIngestionService(unittest.TestCase):
         self.assertEqual(len(branches), 1)
         branch = branches[0]
         self.assertEqual(branch.title, "Validation artifacts recorded LLM failure under green regression")
-        self.assertEqual(str(branch.source_type or ""), "validation_artifact_truth")
+        self.assertEqual(str(branch.source_type or ""), "test_ecosystem")
         self.assertEqual(str(branch.work_class or ""), "regression_failure")
         self.assertEqual(
             str(branch.source_key or ""),
-            "regression_failure:validation_artifact_truth:llm_unavailable_hidden_by_green_regression:llm_service_unavailable",
+            "regression_failure:test_ecosystem:llm_unavailable_hidden_by_green_regression:llm_service_unavailable",
         )
         self.assertEqual(branch.source_payload.get("failure_count"), 2)
         signal = _validation_artifact_truth_signal_from_status(status_payload)
@@ -1046,6 +1781,55 @@ class TestWorkTreeSignalIngestionService(unittest.TestCase):
         self.assertEqual(
             (signal or {}).get("blocked_reason"),
             "validation_artifact_failure_requires_new_regression_evidence",
+        )
+
+    def test_status_snapshot_ingests_missing_validation_artifact_directory_as_missing_evidence(self) -> None:
+        status_payload = {
+            "alerts": [],
+            "self_check_pass_ratio": 0.97,
+            "validation_artifact_truth": {
+                "ok": False,
+                "status": "validation_actions_missing",
+                "truth_state": "unknown",
+                "missing_artifact": True,
+                "action_dir": "runtime/validation/actions",
+                "action_count": 0,
+                "current_window_failure_count": 0,
+                "current_window_llm_unavailable_count": 0,
+                "hidden_by_green_regression": False,
+                "latest_regression_status": "OK",
+                "latest_regression_at": "2026-05-15 00:08:43",
+            },
+            "validation_artifact_truth_ok": False,
+            "validation_artifact_truth_status": "validation_actions_missing",
+            "validation_artifact_failure_count": 0,
+            "validation_artifact_llm_unavailable_count": 0,
+            "validation_artifact_hidden_by_green_regression": False,
+            "validation_artifact_latest_failure": {},
+        }
+
+        results = self.service.sync_status_snapshot(status_payload)
+
+        self.assertTrue(any(item.get("action") == "created" for item in results))
+        branches = self._signal_branches()
+        self.assertEqual(len(branches), 1)
+        branch = branches[0]
+        self.assertEqual(branch.title, "Validation action artifact directory is missing")
+        self.assertEqual(
+            str(branch.source_key or ""),
+            "regression_failure:test_ecosystem:validation_actions_missing:validation_actions",
+        )
+        self.assertTrue(branch.source_payload.get("missing_artifact"))
+        signal = _validation_artifact_truth_signal_from_status(status_payload)
+        self.assertEqual((signal or {}).get("blocked_reason"), "validation_action_evidence_missing")
+        steps = list((signal or {}).get("task_sequence") or [])
+        self.assertTrue(any(item.get("preferred_tool") == "ls" for item in steps))
+        self.assertFalse(
+            any(
+                item.get("preferred_tool") == "find"
+                and list(item.get("tool_args") or []) == ["runtime/validation/actions", "(error:"]
+                for item in steps
+            )
         )
 
     def test_sync_status_snapshot_resolves_validation_artifact_truth_gap_when_clear(self) -> None:
@@ -1088,7 +1872,7 @@ class TestWorkTreeSignalIngestionService(unittest.TestCase):
 
         self.assertTrue(any(item.get("action") == "resolved" for item in results))
         branch = self._signal_branches()[0]
-        self.assertEqual(str(branch.source_type or ""), "validation_artifact_truth")
+        self.assertEqual(str(branch.source_type or ""), "test_ecosystem")
         self.assertEqual(str(branch.resolution_state or ""), "resolved")
 
     def test_status_snapshot_ingests_ollama_port_owner_mismatch(self) -> None:
@@ -1120,7 +1904,12 @@ class TestWorkTreeSignalIngestionService(unittest.TestCase):
         self.assertTrue(any(item.get("action") == "created" for item in results))
         branch = self._signal_branches()[0]
         self.assertEqual(branch.title, "Ollama port is owned by an unexpected process")
-        self.assertEqual(str(branch.source_key or ""), "dependency_unreachable:control_status:ollama_port_owner_mismatch:ollama")
+        self.assertEqual(str(branch.source_type or ""), "model_runtime")
+        self.assertEqual(str(branch.source_key or ""), "dependency_unreachable:model_runtime:ollama_port_owner_mismatch:ollama")
+        task = work_tree.list_branch_tasks(branch.branch_id)[0]
+        request = json.loads(task.meta["tool_args"][0])
+        self.assertEqual(request["capability"], "inspect_ports")
+        self.assertEqual(request["args"]["ports"], [11434])
 
     def test_status_snapshot_ingests_requested_voice_dependency_gap(self) -> None:
         status_payload = {
@@ -1146,10 +1935,10 @@ class TestWorkTreeSignalIngestionService(unittest.TestCase):
         self.assertTrue(any(item.get("action") == "created" for item in results))
         branch = self._signal_branches()[0]
         self.assertEqual(branch.title, "Voice runtime dependency unavailable after voice was requested")
-        self.assertEqual(str(branch.source_type or ""), "voice_status")
+        self.assertEqual(str(branch.source_type or ""), "voice")
         self.assertEqual(str(branch.work_class or ""), "dependency_unreachable")
         self.assertEqual(str(branch.actionability or ""), "safe_now")
-        self.assertEqual(str(branch.source_key or ""), "dependency_unreachable:voice_status:voice_runtime_unavailable:voice_runtime")
+        self.assertEqual(str(branch.source_key or ""), "dependency_unreachable:voice:voice_runtime_unavailable:voice_runtime")
         self.assertEqual(branch.preferred_tool, "read")
         task = work_tree.list_branch_tasks(branch.branch_id)[0]
         self.assertEqual(task.meta.get("tool_args"), ["services/nova_voice_runtime.py"])
@@ -1190,7 +1979,7 @@ class TestWorkTreeSignalIngestionService(unittest.TestCase):
 
         self.assertFalse(any(item.get("action") == "resolved" for item in results))
         branch = work_tree.get_branch(branch.branch_id)
-        self.assertEqual(str(branch.source_type or ""), "voice_status")
+        self.assertEqual(str(branch.source_type or ""), "voice")
         self.assertEqual(str(branch.resolution_state or ""), "open")
 
     def test_status_snapshot_resolves_voice_dependency_gap_when_requested_voice_loads(self) -> None:
@@ -1231,7 +2020,7 @@ class TestWorkTreeSignalIngestionService(unittest.TestCase):
 
         self.assertTrue(any(item.get("action") == "resolved" for item in results))
         branch = self._signal_branches()[0]
-        self.assertEqual(str(branch.source_type or ""), "voice_status")
+        self.assertEqual(str(branch.source_type or ""), "voice")
         self.assertEqual(str(branch.resolution_state or ""), "resolved")
         self.assertEqual(branch.status, work_tree.BranchStatus.COMPLETE)
 
@@ -1260,9 +2049,9 @@ class TestWorkTreeSignalIngestionService(unittest.TestCase):
         self.assertTrue(any(item.get("action") == "created" for item in results))
         branch = self._signal_branches()[0]
         self.assertEqual(branch.title, "Vision runtime dependency unavailable while vision tools are enabled")
-        self.assertEqual(str(branch.source_type or ""), "vision_status")
+        self.assertEqual(str(branch.source_type or ""), "vision")
         self.assertEqual(str(branch.work_class or ""), "dependency_unreachable")
-        self.assertEqual(str(branch.source_key or ""), "dependency_unreachable:vision_status:vision_runtime_unavailable:vision_runtime")
+        self.assertEqual(str(branch.source_key or ""), "dependency_unreachable:vision:vision_runtime_unavailable:vision_runtime")
         self.assertEqual(branch.source_payload.get("vision_missing_modules"), ["mss", "pillow", "opencv"])
 
     def test_status_snapshot_resolves_vision_dependency_gap_when_requested_vision_loads(self) -> None:
@@ -1301,7 +2090,7 @@ class TestWorkTreeSignalIngestionService(unittest.TestCase):
 
         self.assertTrue(any(item.get("action") == "resolved" for item in results))
         branch = self._signal_branches()[0]
-        self.assertEqual(str(branch.source_type or ""), "vision_status")
+        self.assertEqual(str(branch.source_type or ""), "vision")
         self.assertEqual(str(branch.resolution_state or ""), "resolved")
         self.assertEqual(branch.status, work_tree.BranchStatus.COMPLETE)
 
@@ -1330,10 +2119,10 @@ class TestWorkTreeSignalIngestionService(unittest.TestCase):
         self.assertTrue(any(item.get("action") == "created" for item in results))
         branch = self._signal_branches()[0]
         self.assertEqual(branch.title, "Release package is verified but validation outcome is missing")
-        self.assertEqual(str(branch.source_type or ""), "release_status")
+        self.assertEqual(str(branch.source_type or ""), "release")
         self.assertEqual(str(branch.work_class or ""), "release_readiness_gap")
         self.assertEqual(str(branch.actionability or ""), "safe_now")
-        self.assertEqual(str(branch.source_key or ""), "release_readiness_gap:release_status:release_validation_outcome_missing:nova-rc.zip")
+        self.assertEqual(str(branch.source_key or ""), "release_readiness_gap:release:release_validation_outcome_missing:nova-rc.zip")
         self.assertEqual(branch.preferred_tool, "read")
         tasks = work_tree.list_branch_tasks(branch.branch_id)
         self.assertEqual(len(tasks), 1)
@@ -1536,8 +2325,8 @@ class TestWorkTreeSignalIngestionService(unittest.TestCase):
         created = [item for item in results if str(item.get("action") or "") == "created"]
         self.assertEqual(len(created), 1)
         branch = self._signal_branches()[0]
-        self.assertEqual(str(branch.source_type or ""), "memory_health")
-        self.assertEqual(str(branch.source_key or ""), "governance_pressure:memory_health:memory_bootstrap_incomplete:identity_memory")
+        self.assertEqual(str(branch.source_type or ""), "memory_identity")
+        self.assertEqual(str(branch.source_key or ""), "governance_pressure:memory_identity:memory_bootstrap_incomplete:identity_memory")
         self.assertEqual(str(branch.work_class or ""), "governance_pressure")
         self.assertEqual(str(branch.actionability or ""), "safe_now")
         self.assertEqual(branch.preferred_tool, "pulse")
@@ -1790,7 +2579,7 @@ class TestWorkTreeSignalIngestionService(unittest.TestCase):
         self.assertEqual(len(updated), 1)
         self.assertEqual(created[0].get("branch_id"), updated[0].get("branch_id"))
         branch = self._signal_branches()[0]
-        self.assertEqual(str(branch.source_key or ""), "regression_failure:maintenance_cycle:regression_failure:daily_regression")
+        self.assertEqual(str(branch.source_key or ""), "regression_failure:test_ecosystem:regression_failure:daily_regression")
         self.assertEqual(str((branch.source_payload or {}).get("last_regression_status") or ""), "failed: tests.test_runtime_recovery")
 
     def test_sync_status_snapshot_resolves_release_readiness_branch_when_ready(self) -> None:
@@ -1827,7 +2616,7 @@ class TestWorkTreeSignalIngestionService(unittest.TestCase):
         resolved = [item for item in results if str(item.get("action") or "") == "resolved"]
         self.assertEqual(len(resolved), 1)
         branch = self._signal_branches()[0]
-        self.assertEqual(str(branch.source_type or ""), "release_status")
+        self.assertEqual(str(branch.source_type or ""), "release")
         self.assertEqual(str(branch.resolution_state or ""), "resolved")
         self.assertEqual(branch.status, work_tree.BranchStatus.COMPLETE)
 
@@ -1897,7 +2686,7 @@ class TestWorkTreeSignalIngestionService(unittest.TestCase):
 
         self.assertFalse(any(item.get("action") == "resolved" for item in results))
         branch = self._signal_branches()[0]
-        self.assertEqual(str(branch.source_type or ""), "release_status")
+        self.assertEqual(str(branch.source_type or ""), "release")
         self.assertNotEqual(str(branch.resolution_state or ""), "resolved")
 
     def test_sync_status_snapshot_resolves_regression_branch_when_stale(self) -> None:
@@ -1967,7 +2756,7 @@ class TestWorkTreeSignalIngestionService(unittest.TestCase):
         resolved = [item for item in results if str(item.get("action") or "") == "resolved"]
         self.assertEqual(len(resolved), 1)
         branch = self._signal_branches()[0]
-        self.assertEqual(str(branch.source_type or ""), "memory_health")
+        self.assertEqual(str(branch.source_type or ""), "memory_identity")
         self.assertEqual(str(branch.resolution_state or ""), "resolved")
         self.assertEqual(branch.status, work_tree.BranchStatus.COMPLETE)
 

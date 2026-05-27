@@ -105,55 +105,6 @@ class TestNovaHttpChatRuntimeService(unittest.TestCase):
         self.assertEqual(set_user_mock.call_args_list[0].args, ("worker",))
         self.assertEqual(set_user_mock.call_args_list[-1].args, ("runner",))
 
-    def test_process_chat_finalizes_handled_http_routing_sequence(self):
-        session = _FakeSession()
-
-        with patch.object(nova_http.nova_core, "get_active_user", return_value="runner"), \
-             patch.object(nova_http.nova_core, "set_active_user") as set_user_mock, \
-             patch.object(nova_http.nova_core, "_strip_invocation_prefix", side_effect=lambda text: text), \
-             patch.object(nova_http.nova_core, "start_action_ledger_record", return_value={"turn_acts": []}), \
-             patch.object(
-                 nova_http.http_chat_flow,
-                 "prepare_chat_turn",
-                 return_value={
-                     "turns": [("user", "hello")],
-                     "routed_text": "hello",
-                     "turn_acts": [],
-                     "intent_rule": {},
-                 },
-             ), \
-             patch(
-                 "services.nova_http_chat_runtime.execute_http_routing_sequence",
-                 return_value={
-                     "handled": True,
-                     "flow_result": {
-                         "reply": "runtime delegated",
-                         "planner_decision": "deterministic",
-                         "reply_contract": "http.routing",
-                         "reply_outcome": {},
-                     },
-                     "routing_decision": {"entry_point": "http"},
-                     "conversation_state": {"kind": "idle"},
-                 },
-             ) as routing_mock, \
-             patch.object(nova_http.HTTP_TURN_FINALIZATION_SERVICE, "finalize_flow_reply", return_value="runtime delegated") as finalize_mock:
-            reply = HTTP_CHAT_RUNTIME_SERVICE.process_chat(
-                "s-runtime",
-                "hello",
-                core_module=nova_http.nova_core,
-                session_state_manager=_SessionManager(session),
-                turn_finalization_service=nova_http.HTTP_TURN_FINALIZATION_SERVICE,
-                http_chat_flow_module=nova_http.http_chat_flow,
-                append_session_turn_fn=nova_http._append_session_turn,
-                generate_chat_reply_fn=nova_http._generate_chat_reply,
-                invalidate_control_status_cache_fn=nova_http._invalidate_control_status_cache,
-            )
-
-        self.assertEqual(reply, "runtime delegated")
-        routing_mock.assert_called_once()
-        finalize_mock.assert_called_once()
-        self.assertEqual(set_user_mock.call_args_list[-1].args, ("runner",))
-
     def test_process_chat_url_fetch_reaches_runtime_web_fetch_tool(self):
         session = _FakeSession()
         turns = []
@@ -215,17 +166,15 @@ class TestNovaHttpChatRuntimeService(unittest.TestCase):
             finalized.append({"record": record, **kwargs})
             return "captured.json"
 
-        web_research_mock = None
         with patch.object(nova_http.nova_core, "get_active_user", return_value="runner"), \
              patch.object(nova_http.nova_core, "set_active_user"), \
-             patch.object(nova_http.nova_core, "analyze_request", return_value=SimpleNamespace(allow_llm=True, message="")), \
+             patch.object(
+                 nova_http.nova_core,
+                 "_llm_classify_routing_intent",
+                 return_value={"tool": "none", "args": [], "confidence": 0.91, "reason": "conversation about prior tool result"},
+             ), \
              patch.object(nova_http.nova_core, "build_fallback_context_details", return_value={}), \
-             patch.object(nova_http.nova_core, "should_block_low_confidence", return_value=False), \
              patch.object(nova_http.nova_core, "ollama_chat", return_value="LLM_DIAGNOSTIC"), \
-             patch.object(nova_http.nova_core, "sanitize_llm_reply", side_effect=lambda reply, _tool_context="": reply), \
-             patch.object(nova_http.nova_core, "_apply_claim_gate", side_effect=lambda reply, evidence_text="", tool_context="": (reply, False, "")), \
-             patch.object(nova_http.nova_core, "_attach_learning_invitation", side_effect=lambda reply: reply), \
-             patch.object(nova_http.nova_core, "tool_web_research", return_value="WRONG_WEB_RESEARCH") as web_research_mock, \
              patch.object(nova_http.nova_core, "build_turn_reflection", return_value={}), \
              patch.object(nova_http.nova_core, "finalize_action_ledger_record", side_effect=finalize_record), \
              patch.object(nova_http.nova_core, "behavior_record_event"):
@@ -243,7 +192,6 @@ class TestNovaHttpChatRuntimeService(unittest.TestCase):
             )
 
         self.assertEqual(reply, "LLM_DIAGNOSTIC")
-        web_research_mock.assert_not_called()
         self.assertTrue(finalized)
         self.assertEqual(finalized[-1].get("planner_decision"), "llm_fallback")
         self.assertEqual(finalized[-1].get("tool"), "")

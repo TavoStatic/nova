@@ -13,14 +13,7 @@ def run():
     print(repr(raw))
     print('RAW_OUTPUT_END')
     try:
-        sanit = nova_core.sanitize_llm_reply(raw, tool_context='')
-    except Exception as e:
-        sanit = f'(sanitize exception: {e})'
-    print('SANIT_OUTPUT_START')
-    print(repr(sanit))
-    print('SANIT_OUTPUT_END')
-    try:
-        clean = nova_core._strip_mem_leak(sanit, retrieved)
+        clean = nova_core._strip_mem_leak(raw, retrieved)
     except Exception as e:
         clean = f'(strip exception: {e})'
     print('CLEAN_OUTPUT_START')

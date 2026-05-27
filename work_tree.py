@@ -74,6 +74,7 @@ _DEFAULT_TREE_ALLOWED_TOOLS = (
     "release_validation_run",
     "release_record_validation_outcome",
     "release_rebuild_verify",
+    "installer_validation_run",
     "system_check",
     "queue_status",
     "phase2_audit",
@@ -82,6 +83,7 @@ _DEFAULT_TREE_ALLOWED_TOOLS = (
     "memory_bootstrap_confirm",
     "memory_identity_bootstrap",
     "subconscious_review_judgment",
+    "source_root_judgment",
     "pipeline",
     "weather_current_location",
     "weather_location",
@@ -94,10 +96,12 @@ _KNOWN_TOOL_NAMES = frozenset(
         "os_capability",
         "core_health",
         "core_thinning",
+        "source_root_judgment",
         "release_promotion_judgment",
         "release_validation_run",
         "release_record_validation_outcome",
         "release_rebuild_verify",
+        "installer_validation_run",
         "patch_preview_approve",
         "patch_preview_apply",
         "patch_apply",
@@ -743,6 +747,10 @@ def _normalize_tool_names(value: list[str] | tuple[str, ...] | None) -> list[str
         seen.add(tool_name)
         ordered.append(tool_name)
     return ordered
+
+
+def default_tree_allowed_tools() -> list[str]:
+    return list(_DEFAULT_TREE_ALLOWED_TOOLS)
 
 
 def _tree_policy(tree: WorkTree | None) -> dict[str, object]:
@@ -1722,11 +1730,15 @@ def _tool_args_for_task(tool_name: str, task: Task) -> list[str]:
             return [_json_dump({"capability": capability_name, "args": dict(capability_args or {})})]
     if tool_name == "subconscious_review_judgment":
         return [task.branch_id]
+    if tool_name == "source_root_judgment":
+        return [task.branch_id]
     if tool_name == "release_promotion_judgment":
         return [task.branch_id]
     if tool_name == "release_validation_run":
         return [task.branch_id]
     if tool_name == "release_record_validation_outcome":
+        return [task.branch_id]
+    if tool_name == "installer_validation_run":
         return [task.branch_id]
     if tool_name in {"patch_preview_apply", "patch_preview_approve"}:
         preview_name = _extract_patch_preview_name(task)
@@ -2308,6 +2320,10 @@ def get_visual_tree_data(tree_id: str) -> dict | None:
             "preferred_tool": display_tool,
             "required_tools": list(branch.required_tools),
             "allowed_tools": list(branch.allowed_tools),
+            "tool_state": {
+                str(tool): str(getattr(state, "value", state))
+                for tool, state in dict(branch.tool_state or {}).items()
+            },
             "blocked_by": list(branch.blocked_by),
             "depends_on": list(branch.depends_on),
             "source_type": str(branch.source_type or ""),
@@ -2395,6 +2411,10 @@ def inspect_tree(tree_id: str) -> dict | None:
             "required_tools": list(branch.required_tools),
             "allowed_tools": display_allowed_tools,
             "preferred_tool": display_tool,
+            "tool_state": {
+                str(tool): str(getattr(state, "value", state))
+                for tool, state in dict(branch.tool_state or {}).items()
+            },
             "open_stem_count": int(branch.open_stem_count),
             "source_type": str(branch.source_type or ""),
             "source_key": str(branch.source_key or ""),

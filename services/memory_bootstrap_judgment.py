@@ -3,6 +3,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from services.memory_bootstrap_contracts import DO_NOT_MARK_MEMORY_READY_WITHOUT_EVENT_EVIDENCE
+
 
 def _issue_codes(memory_health: dict[str, Any]) -> list[str]:
     issues = memory_health.get("issues") if isinstance(memory_health.get("issues"), list) else []
@@ -125,7 +127,7 @@ def build_memory_bootstrap_judgment(
         "blocked_shortcuts": [
             "do_not_flip_memory_enabled_as_a_fix",
             "do_not_seed_identity_from_code_defaults_or_guesses",
-            "do_not_mark_memory_ready_without_event_evidence",
+            DO_NOT_MARK_MEMORY_READY_WITHOUT_EVENT_EVIDENCE,
         ],
         "next_work": next_work,
     }

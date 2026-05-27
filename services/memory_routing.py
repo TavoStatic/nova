@@ -15,57 +15,14 @@ class MemoryRecallPlan:
 class MemoryRoutingService:
     """Plan durable recall so memory reads happen intentionally."""
 
-    _EXPLICIT_RECALL_MARKERS = (
-        "do you remember",
-        "what do you remember",
-        "remember about",
-        "from earlier",
-        "earlier memory",
-        "saved memory",
-        "stored memory",
-        "recall",
-    )
-
-    _PREFERENCE_MARKERS = (
-        "favorite color",
-        "favourite color",
-        "favorite colors",
-        "favourite colors",
-        "color preference",
-        "favorite animal",
-        "favourite animal",
-        "animal preference",
-        "what colors do i like",
-        "what animals do i like",
-    )
-
-    _IDENTITY_MARKERS = (
-        "nova name origin",
-        "name origin story",
-        "creator gus",
-        "assistant name",
-        "developer name",
-    )
-
-    _DEVELOPER_MARKERS = (
-        "developer",
-        "gus",
-        "gustavo",
-        "developer profile",
-    )
-
-    _GENERAL_MEMORY_MARKERS = (
-        "remember",
-        "preference",
-        "preferences",
-        "profile",
-        "favorite",
-        "favourite",
-        "i like",
-        "my name",
-        "my location",
-        "what do you know about",
-    )
+    _ALLOWED_PURPOSES = {
+        "identity_fallback",
+        "user_preferences",
+        "developer_profile",
+        "explicit_recall",
+        "general_context",
+        "recent_learning_summary",
+    }
 
     _SESSION_PRIORITY_STATES = {"retrieval", "location_recall", "correction_pending"}
     _SESSION_PRIORITY_ACTIONS = {"weather_lookup", "retrieval_followup", "set_location"}
@@ -76,19 +33,6 @@ class MemoryRoutingService:
         return raw or "general"
 
     def infer_purpose(self, query: str) -> str:
-        low = str(query or "").strip().lower()
-        if not low:
-            return "general"
-        if any(marker in low for marker in self._IDENTITY_MARKERS):
-            return "identity_fallback"
-        if any(marker in low for marker in self._PREFERENCE_MARKERS):
-            return "user_preferences"
-        if any(marker in low for marker in self._EXPLICIT_RECALL_MARKERS):
-            return "explicit_recall"
-        if any(marker in low for marker in self._DEVELOPER_MARKERS):
-            return "developer_profile"
-        if any(marker in low for marker in self._GENERAL_MEMORY_MARKERS):
-            return "general_context"
         return "general"
 
     def session_priority_active(
@@ -125,11 +69,11 @@ class MemoryRoutingService:
             normalized_purpose = self.infer_purpose(text)
 
         if self.session_priority_active(conversation_state=conversation_state, pending_action=pending_action):
-            if normalized_purpose in {"identity_fallback", "user_preferences", "developer_profile", "explicit_recall", "recent_learning_summary"}:
+            if normalized_purpose in self._ALLOWED_PURPOSES:
                 return MemoryRecallPlan(True, "durable_user", normalized_purpose, "purpose_override")
             return MemoryRecallPlan(False, "durable_user", normalized_purpose, "session_priority")
 
-        if normalized_purpose in {"identity_fallback", "user_preferences", "developer_profile", "explicit_recall", "general_context", "recent_learning_summary"}:
+        if normalized_purpose in self._ALLOWED_PURPOSES:
             return MemoryRecallPlan(True, "durable_user", normalized_purpose, "purpose_match")
 
         return MemoryRecallPlan(False, "durable_user", normalized_purpose, "not_memory_seeking")

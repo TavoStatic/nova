@@ -5,21 +5,11 @@ from services import nova_planner_contract
 
 
 class _PlannerCoreStub:
-    def __init__(self):
-        self.calls = []
+    def __init__(self, semantic_intent=None):
+        self.semantic_intent = semantic_intent or {"tool": "none", "args": [], "confidence": 0.9}
 
-    def decide_actions(self, text, config=None):
-        self.calls.append((text, dict(config or {})))
-        return []
-
-    def make_pending_weather_action(self):
-        return {"tool": "weather", "awaiting": "location"}
-
-    def handle_commands(self, text, session_turns=None, session=None):
-        return ""
-
-    def handle_keywords(self, text):
-        return None
+    def _llm_classify_routing_intent(self, text, turns=None, pending_action=None, return_none_payload=False):
+        return dict(self.semantic_intent)
 
     def execute_planned_action(self, tool, args):
         return ""
@@ -42,12 +32,12 @@ class _SessionStub:
 
 
 class TestAdaptiveBehaviorPaths(unittest.TestCase):
-    def test_related_work_variations_keep_work_tree_route_consistent(self):
+    def test_semantic_work_tree_intent_continues_active_tree(self):
         session = _SessionStub(
             active_work_tree_id="tree_1",
             active_work_identity="work:guard-pressure-queue-runtime|terms:guard|pressure|queue|runtime",
         )
-        core = _PlannerCoreStub()
+        core = _PlannerCoreStub({"tool": "work_tree_next", "args": [], "confidence": 0.9})
         step = {
             "action": "execute",
             "branch_id": "branch_1",
@@ -56,9 +46,10 @@ class TestAdaptiveBehaviorPaths(unittest.TestCase):
             "required_tools": ["queue_status"],
             "allowed_tools": ["queue_status"],
         }
+
         with mock.patch("work_tree.next_autonomous_step", return_value=step):
-            first_reply, first_meta = nova_planner_contract.maybe_handle_planner_sequence(
-                text="also inspect runtime queue pressure",
+            reply, meta = nova_planner_contract.maybe_handle_planner_sequence(
+                text="operator asks to continue active work",
                 turns=[],
                 pending_action=None,
                 prefer_web_for_data_queries=False,
@@ -66,82 +57,45 @@ class TestAdaptiveBehaviorPaths(unittest.TestCase):
                 core=core,
                 trace=lambda *args, **kwargs: None,
                 normalize_reply=lambda text: text,
-                is_web_preferred_data_query=lambda text: False,
-            )
-            second_reply, second_meta = nova_planner_contract.maybe_handle_planner_sequence(
-                text="check runtime queue pressure trends too",
-                turns=[],
-                pending_action=first_meta.get("pending_action"),
-                prefer_web_for_data_queries=False,
-                session=session,
-                core=core,
-                trace=lambda *args, **kwargs: None,
-                normalize_reply=lambda text: text,
-                is_web_preferred_data_query=lambda text: False,
             )
 
-        self.assertTrue(str(first_reply or "").strip())
-        self.assertTrue(str(second_reply or "").strip())
-        self.assertEqual(first_meta.get("planner_decision"), "work_tree")
-        self.assertEqual(second_meta.get("planner_decision"), "work_tree")
-        self.assertEqual((first_meta.get("pending_action") or {}).get("work_tree_id"), "tree_1")
-        self.assertEqual((second_meta.get("pending_action") or {}).get("work_tree_id"), "tree_1")
-        self.assertEqual((first_meta.get("pending_action") or {}).get("work_identity_key"), session.active_work_identity)
-        self.assertEqual((second_meta.get("pending_action") or {}).get("work_identity_key"), session.active_work_identity)
+        self.assertTrue(str(reply or "").strip())
+        self.assertEqual(meta.get("planner_decision"), "work_tree")
+        self.assertEqual((meta.get("pending_action") or {}).get("work_tree_id"), "tree_1")
+        self.assertEqual((meta.get("pending_action") or {}).get("work_identity_key"), session.active_work_identity)
         self.assertEqual(session.last_work_continuity, "continuing_existing_work")
 
-    def test_active_work_identity_is_reused_after_first_adaptive_match(self):
-        session = _SessionStub(active_work_tree_id="tree_1", active_work_identity="")
-        core = _PlannerCoreStub()
-        step = {
-            "action": "execute",
-            "branch_id": "branch_1",
-            "branch_title": "Inspect runtime queue pressure",
-            "recommended_tool": "queue_status",
-        }
-        with mock.patch("work_tree.next_autonomous_step", return_value=step):
-            _reply, first_meta = nova_planner_contract.maybe_handle_planner_sequence(
-                text="continue work on runtime queue pressure",
-                turns=[],
-                pending_action=None,
-                prefer_web_for_data_queries=False,
-                session=session,
-                core=core,
-                trace=lambda *args, **kwargs: None,
-                normalize_reply=lambda text: text,
-                is_web_preferred_data_query=lambda text: False,
-            )
-            _reply2, second_meta = nova_planner_contract.maybe_handle_planner_sequence(
-                text="also review queue pressure spikes",
-                turns=[],
-                pending_action=first_meta.get("pending_action"),
-                prefer_web_for_data_queries=False,
-                session=session,
-                core=core,
-                trace=lambda *args, **kwargs: None,
-                normalize_reply=lambda text: text,
-                is_web_preferred_data_query=lambda text: False,
-            )
-
-        self.assertTrue(session.active_work_identity)
-        self.assertEqual((first_meta.get("pending_action") or {}).get("work_identity_key"), session.active_work_identity)
-        self.assertEqual((second_meta.get("pending_action") or {}).get("work_identity_key"), session.active_work_identity)
-
-    def test_related_prompt_continues_while_unrelated_prompt_does_not_force_work_path(self):
+    def test_semantic_none_does_not_continue_active_tree_from_text_alone(self):
         session = _SessionStub(
             active_work_tree_id="tree_1",
             active_work_identity="work:guard-pressure-queue-runtime|terms:guard|pressure|queue|runtime",
         )
-        core = _PlannerCoreStub()
+        outcome = nova_planner_contract.maybe_handle_planner_sequence(
+            text="also inspect queue pressure spikes",
+            turns=[],
+            pending_action=None,
+            prefer_web_for_data_queries=False,
+            session=session,
+            core=_PlannerCoreStub({"tool": "none", "args": [], "confidence": 0.9}),
+            trace=lambda *args, **kwargs: None,
+            normalize_reply=lambda text: text,
+        )
+
+        self.assertIsNone(outcome)
+
+    def test_semantic_work_tree_intent_sets_identity_when_missing(self):
+        session = _SessionStub(active_work_tree_id="tree_1", active_work_identity="")
+        core = _PlannerCoreStub({"tool": "work_tree_next", "args": ["runtime queue pressure"], "confidence": 0.9})
         step = {
             "action": "execute",
             "branch_id": "branch_1",
             "branch_title": "Inspect runtime queue pressure",
             "recommended_tool": "queue_status",
         }
+
         with mock.patch("work_tree.next_autonomous_step", return_value=step):
-            related = nova_planner_contract.maybe_handle_planner_sequence(
-                text="also inspect queue pressure spikes",
+            _reply, meta = nova_planner_contract.maybe_handle_planner_sequence(
+                text="operator asks to continue active work",
                 turns=[],
                 pending_action=None,
                 prefer_web_for_data_queries=False,
@@ -149,20 +103,11 @@ class TestAdaptiveBehaviorPaths(unittest.TestCase):
                 core=core,
                 trace=lambda *args, **kwargs: None,
                 normalize_reply=lambda text: text,
-                is_web_preferred_data_query=lambda text: False,
-            )
-            unrelated = nova_planner_contract.maybe_handle_planner_sequence(
-                text="tell me about PEIMS deadlines",
-                turns=[],
-                pending_action=None,
-                prefer_web_for_data_queries=False,
-                session=session,
-                core=core,
-                trace=lambda *args, **kwargs: None,
-                normalize_reply=lambda text: text,
-                is_web_preferred_data_query=lambda text: False,
             )
 
-        self.assertIsNotNone(related)
-        self.assertEqual((related[1].get("route_evidence") or {}).get("final_owner"), "work_tree")
-        self.assertIsNone(unrelated)
+        self.assertTrue(session.active_work_identity)
+        self.assertEqual((meta.get("pending_action") or {}).get("work_identity_key"), session.active_work_identity)
+
+
+if __name__ == "__main__":
+    unittest.main()

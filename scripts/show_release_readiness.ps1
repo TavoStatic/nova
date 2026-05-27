@@ -60,8 +60,8 @@ payload = RELEASE_STATUS_SERVICE.status_payload(
     Path(sys.argv[1]),
     limit=8,
     source_root=Path(sys.argv[2]),
+    artifact_kind=sys.argv[3],
 )
-payload['artifact_kind'] = sys.argv[3]
 print(json.dumps(payload))
 '@
   $jsonText = & $pythonExe -c $code $ledgerPath $repoRoot $ArtifactKind

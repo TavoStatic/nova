@@ -45,6 +45,26 @@ class TestNovaSearchEndpoint(unittest.TestCase):
         self.assertEqual(repaired, ["http://127.0.0.1:8080/search"])
         self.assertEqual(calls[:2], ["http://127.0.0.1:8081/search", "http://127.0.0.1:8080/search"])
 
+    def test_probe_search_endpoint_can_bound_candidate_count(self):
+        calls = []
+
+        def _requests_get(url, **_kwargs):
+            calls.append(url)
+            raise RuntimeError("connection refused")
+
+        probe = nova_search_endpoint.probe_search_endpoint(
+            "http://127.0.0.1:8081/search",
+            timeout=0.1,
+            candidate_limit=2,
+            get_search_endpoint_fn=lambda: "http://127.0.0.1:8081/search",
+            auto_repair_search_endpoint_fn=lambda _endpoint: "repaired",
+            requests_get_fn=_requests_get,
+        )
+
+        self.assertFalse(probe.get("ok"))
+        self.assertEqual(calls, ["http://127.0.0.1:8081/search", "http://127.0.0.1:8080/search"])
+        self.assertEqual(probe.get("checked_endpoints"), calls)
+
 
 if __name__ == "__main__":
     unittest.main()

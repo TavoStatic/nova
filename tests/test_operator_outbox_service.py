@@ -46,6 +46,43 @@ class TestOperatorOutboxService(unittest.TestCase):
         self.assertEqual(events[0].get("status"), "new")
         self.assertIn("active_work_tree_run_next", events[0].get("message", ""))
 
+    def test_append_notice_updates_existing_open_pressure_instead_of_repeating(self):
+        with TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "operator_outbox.jsonl"
+
+            first = OPERATOR_OUTBOX_SERVICE.append_notice(
+                path,
+                source="work_tree",
+                severity="attention",
+                title="Nova needs a tool assignment",
+                message="First evidence.",
+                dedupe_key="work_tree|missing_tool_assignment|tree-a|branch-a|task-a",
+                payload={"request_kind": "tool_assignment", "task_id": "task-a"},
+                now_fn=lambda: 1000.0,
+                uuid_fn=lambda: "firstone",
+            )
+            second = OPERATOR_OUTBOX_SERVICE.append_notice(
+                path,
+                source="work_tree",
+                severity="attention",
+                title="Nova needs a tool assignment",
+                message="Updated evidence.",
+                dedupe_key="work_tree|missing_tool_assignment|tree-a|branch-a|task-a",
+                payload={"request_kind": "tool_assignment", "task_id": "task-a", "branch_id": "branch-a"},
+                now_fn=lambda: 5000.0,
+                uuid_fn=lambda: "secondone",
+            )
+            events = OPERATOR_OUTBOX_SERVICE.read_events(path, limit=10)
+
+        self.assertTrue(first.get("ok"))
+        self.assertTrue(second.get("deduped"))
+        self.assertTrue(second.get("updated"))
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0].get("message"), "Updated evidence.")
+        self.assertEqual(events[0].get("updated_ts_epoch"), 5000.0)
+        self.assertEqual(events[0].get("repeat_count"), 1)
+        self.assertEqual((events[0].get("payload") or {}).get("branch_id"), "branch-a")
+
     def test_closed_notice_does_not_dedupe_new_pressure(self):
         with TemporaryDirectory() as temp_dir:
             path = Path(temp_dir) / "operator_outbox.jsonl"
@@ -151,6 +188,113 @@ class TestOperatorOutboxService(unittest.TestCase):
         self.assertIn("operator_only_probe", notices[0].get("message", ""))
         self.assertIn("autonomy maintenance", notices[0].get("message", ""))
 
+    def test_work_tree_notice_payload_keeps_target_without_full_tree_snapshot(self):
+        notices = OPERATOR_OUTBOX_SERVICE.notices_from_work_tree_state(
+            {
+                "trees": [
+                    {
+                        "tree_id": "tree_big",
+                        "title": "Signal Intake",
+                        "status": "active",
+                        "next_step": {
+                            "action": "missing_tool_assignment",
+                            "branch_id": "branch_big",
+                            "branch_title": "Investigate control status size",
+                            "task_id": "task_big",
+                            "task_title": "Assign bounded status probe",
+                            "suggested_tools": ["read", "find"],
+                        },
+                        "nodes": [
+                            {
+                                "id": f"branch_{index}",
+                                "title": "Historical branch",
+                                "source_payload": {"large": "x" * 4000},
+                            }
+                            for index in range(20)
+                        ],
+                    }
+                ]
+            },
+            executable_tools=["read", "find"],
+        )
+
+        self.assertEqual(len(notices), 1)
+        payload = notices[0].get("payload") or {}
+        self.assertNotIn("tree", payload)
+        self.assertEqual(payload.get("tree_id"), "tree_big")
+        self.assertEqual(payload.get("branch_id"), "branch_big")
+        self.assertEqual(payload.get("task_id"), "task_big")
+        self.assertEqual(payload.get("request_kind"), "tool_assignment")
+        self.assertEqual(payload.get("suggested_tools"), ["read", "find"])
+
+    def test_work_tree_notice_names_failed_tool_judgment(self):
+        notices = OPERATOR_OUTBOX_SERVICE.notices_from_work_tree_state(
+            {
+                "trees": [
+                    {
+                        "tree_id": "tree_failed_tool",
+                        "title": "Signal Intake",
+                        "status": "active",
+                        "next_step": {
+                            "action": "execute",
+                            "branch_id": "branch_failed_tool",
+                            "branch_title": "Probe local runtime",
+                            "task_id": "task_failed_tool",
+                            "task_title": "Run runtime probe",
+                            "recommended_tool": "system_check",
+                        },
+                        "nodes": [
+                            {
+                                "id": "branch_failed_tool",
+                                "title": "Probe local runtime",
+                                "status": "ready",
+                                "tool_state": {"system_check": "failed"},
+                                "current_task": {
+                                    "task_id": "task_failed_tool",
+                                    "title": "Run runtime probe",
+                                    "status": "open",
+                                    "meta": {},
+                                },
+                            }
+                        ],
+                    }
+                ]
+            },
+            executable_tools=["system_check"],
+        )
+
+        self.assertEqual(len(notices), 1)
+        self.assertEqual((notices[0].get("payload") or {}).get("request_kind"), "tool_failure_judgment")
+        self.assertIn("system_check", notices[0].get("title", ""))
+        self.assertIn("judgment", notices[0].get("message", ""))
+
+    def test_work_tree_failed_tool_history_without_current_task_is_not_live_pressure(self):
+        notices = OPERATOR_OUTBOX_SERVICE.notices_from_work_tree_state(
+            {
+                "trees": [
+                    {
+                        "tree_id": "tree_failed_history",
+                        "title": "Signal Intake",
+                        "status": "active",
+                        "next_step": {},
+                        "nodes": [
+                            {
+                                "id": "branch_failed_history",
+                                "title": "Resolved routing root",
+                                "status": "complete",
+                                "resolution_state": "resolved",
+                                "tool_state": {"read": "failed"},
+                                "current_task": None,
+                            }
+                        ],
+                    }
+                ]
+            },
+            executable_tools=["read"],
+        )
+
+        self.assertEqual(notices, [])
+
     def test_reconcile_work_tree_notices_stales_cleared_pressure(self):
         with TemporaryDirectory() as temp_dir:
             path = Path(temp_dir) / "operator_outbox.jsonl"
@@ -196,6 +340,134 @@ class TestOperatorOutboxService(unittest.TestCase):
         )
         self.assertEqual(
             by_key["work_tree|missing_tool_assignment|tree-a|branch-b|task-b|tool-b"].get("status"),
+            "new",
+        )
+
+    def test_reconcile_work_tree_notices_stales_older_open_duplicates(self):
+        with TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "operator_outbox.jsonl"
+            key = "work_tree|missing_tool_assignment|tree-a|branch-a|task-a"
+            OPERATOR_OUTBOX_SERVICE._write_events(
+                path,
+                [
+                    {
+                        "id": "001-old",
+                        "ts_epoch": 1000.0,
+                        "ts": "old",
+                        "source": "work_tree",
+                        "severity": "attention",
+                        "title": "Old duplicate",
+                        "message": "Old duplicate",
+                        "dedupe_key": key,
+                        "status": "new",
+                        "payload": {"request_kind": "tool_assignment"},
+                    },
+                    {
+                        "id": "002-new",
+                        "ts_epoch": 2000.0,
+                        "ts": "new",
+                        "source": "work_tree",
+                        "severity": "attention",
+                        "title": "Current duplicate",
+                        "message": "Current duplicate",
+                        "dedupe_key": key,
+                        "status": "new",
+                        "payload": {"request_kind": "tool_assignment"},
+                    },
+                ],
+            )
+
+            result = OPERATOR_OUTBOX_SERVICE.reconcile_work_tree_notices(
+                path,
+                active_notices=[{"dedupe_key": key}],
+                now_fn=lambda: 3000.0,
+            )
+            events = OPERATOR_OUTBOX_SERVICE.read_events(path, limit=10)
+
+        self.assertEqual(result.get("staled_count"), 1)
+        self.assertEqual(events[0].get("status"), "stale")
+        self.assertEqual(events[0].get("status_note"), "work_tree_pressure_superseded")
+        self.assertEqual(events[1].get("status"), "new")
+
+    def test_reconcile_source_root_judgment_notices_stales_closed_branch_pressure(self):
+        with TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "operator_outbox.jsonl"
+            cleared = OPERATOR_OUTBOX_SERVICE.append_notice(
+                path,
+                source="source_root_judgment",
+                severity="attention",
+                title="Source root needs operator judgment: installer_packaging",
+                message="Installer evidence failed.",
+                dedupe_key="source_root_judgment|installer_packaging|failed_evidence|aaa",
+                payload={
+                    "request_kind": "source_root_judgment",
+                    "tree": {
+                        "branch_id": "branch_installer",
+                        "branch_title": "Installer package readiness",
+                        "task_id": "task_installer",
+                        "task_title": "Synthesize source-root judgment",
+                    },
+                },
+                now_fn=lambda: 1000.0,
+                uuid_fn=lambda: "oldsrc",
+            )
+            kept = OPERATOR_OUTBOX_SERVICE.append_notice(
+                path,
+                source="source_root_judgment",
+                severity="attention",
+                title="Source root needs operator judgment: web_search",
+                message="Search evidence failed.",
+                dedupe_key="source_root_judgment|web_search|failed_evidence|bbb",
+                payload={
+                    "request_kind": "source_root_judgment",
+                    "tree": {
+                        "branch_id": "branch_search",
+                        "branch_title": "SearXNG search dependency",
+                    },
+                },
+                now_fn=lambda: 1001.0,
+                uuid_fn=lambda: "keepsrc",
+            )
+
+            result = OPERATOR_OUTBOX_SERVICE.reconcile_source_root_judgment_notices(
+                path,
+                work_tree_state={
+                    "trees": [
+                        {
+                            "tree_id": "tree_signal",
+                            "nodes": [
+                                {
+                                    "id": "branch_installer",
+                                    "status": "complete",
+                                    "resolution_state": "resolved",
+                                },
+                                {
+                                    "id": "branch_search",
+                                    "status": "blocked",
+                                    "resolution_state": "open",
+                                },
+                            ],
+                        }
+                    ]
+                },
+                now_fn=lambda: 1010.0,
+            )
+            events = OPERATOR_OUTBOX_SERVICE.read_events(path, limit=10)
+
+        self.assertTrue(cleared.get("ok"))
+        self.assertTrue(kept.get("ok"))
+        self.assertEqual(result.get("staled_count"), 1)
+        by_key = {event.get("dedupe_key"): event for event in events}
+        self.assertEqual(
+            by_key["source_root_judgment|installer_packaging|failed_evidence|aaa"].get("status"),
+            "stale",
+        )
+        self.assertEqual(
+            by_key["source_root_judgment|installer_packaging|failed_evidence|aaa"].get("status_note"),
+            "source_root_pressure_cleared",
+        )
+        self.assertEqual(
+            by_key["source_root_judgment|web_search|failed_evidence|bbb"].get("status"),
             "new",
         )
 
@@ -728,6 +1000,47 @@ class TestOperatorOutboxService(unittest.TestCase):
         self.assertEqual(summary.get("open_count"), 1)
         self.assertEqual(summary.get("latest_open_id"), first_id)
         self.assertEqual([event.get("id") for event in summary.get("open_events") or []], [first_id])
+
+    def test_summary_projects_legacy_tree_payload_without_carrying_snapshot(self):
+        with TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "operator_outbox.jsonl"
+            OPERATOR_OUTBOX_SERVICE.append_notice(
+                path,
+                source="work_tree",
+                severity="attention",
+                title="Nova needs a tool assignment",
+                message="A legacy notice has a full Work Tree payload.",
+                payload={
+                    "tree": {
+                        "tree_id": "tree_legacy",
+                        "title": "Signal Intake",
+                        "next_step": {
+                            "action": "missing_tool_assignment",
+                            "branch_id": "branch_legacy",
+                            "branch_title": "Legacy branch",
+                            "task_id": "task_legacy",
+                            "task_title": "Legacy task",
+                            "suggested_tools": ["read", "find"],
+                        },
+                        "nodes": [{"payload": "x" * 5000} for _ in range(12)],
+                    },
+                    "request_kind": "tool_assignment",
+                },
+                now_fn=lambda: 4100.0,
+                uuid_fn=lambda: "legacy01",
+            )
+
+            summary = OPERATOR_OUTBOX_SERVICE.summary(path, limit=1)
+
+        latest = summary.get("latest") or {}
+        payload = latest.get("payload") or {}
+        self.assertNotIn("tree", payload)
+        self.assertNotIn("nodes", str(payload))
+        self.assertEqual(payload.get("tree_id"), "tree_legacy")
+        self.assertEqual(payload.get("branch_id"), "branch_legacy")
+        self.assertEqual(payload.get("task_id"), "task_legacy")
+        self.assertEqual(payload.get("request_kind"), "tool_assignment")
+        self.assertEqual((latest.get("work_tree_target") or {}).get("task_id"), "task_legacy")
 
     def test_runtime_console_polls_operator_outbox_from_health(self):
         self.assertIn("operator_outbox", RUNTIME_CONSOLE_HTML)

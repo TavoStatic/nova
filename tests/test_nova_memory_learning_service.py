@@ -63,6 +63,28 @@ class TestNovaMemoryLearningService(unittest.TestCase):
         self.assertIn("stored", result.lower())
         self.assertIn("new light", recalled.lower())
 
+    def test_identity_context_for_prompt_carries_confirmed_bootstrap_evidence(self):
+        context = nova_memory_learning.identity_context_for_prompt(
+            load_identity_profile_fn=lambda: {
+                "bootstrap": {
+                    "origin_authority": "operator_confirmed",
+                    "origin_status": "ready",
+                }
+            },
+            load_learned_facts_fn=lambda: {
+                "assistant_name": "Nova",
+                "developer_name": "Gustavo Uribe",
+                "developer_nickname": "Gus",
+            },
+        )
+
+        self.assertIn("Confirmed Nova identity evidence", context)
+        self.assertIn("confirmed by the operator", context)
+        self.assertIn("identity bootstrap status: ready", context)
+        self.assertIn("assistant_name=Nova", context)
+        self.assertIn("developer_name=Gustavo Uribe", context)
+        self.assertIn("developer_nickname=Gus", context)
+
     def test_mem_recall_skips_when_router_blocks(self):
         events = []
 

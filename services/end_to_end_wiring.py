@@ -10,6 +10,8 @@ from typing import Any, Callable, Sequence
 
 from services.nova_wiring_inventory import WIRING_SURFACES
 from services.nova_wiring_inventory import build_root_closure_inventory_payload
+from services.nova_wiring_inventory import build_self_repair_closure_inventory_payload
+from services.nova_wiring_inventory import build_source_wiring_probe_payload
 from services.nova_wiring_inventory import build_wiring_inventory_payload
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -41,7 +43,6 @@ REQUIRED_IMPORTS = (
     "services.nova_wiring_inventory",
     "services.nova_control_action_dispatcher",
     "services.nova_http_pipeline_control",
-    "services.nova_http_routing",
     "services.release_clean",
     "services.release_validation",
     "services.runtime_status",
@@ -558,14 +559,10 @@ def _autonomy_log_check(root: Path, *, max_age_sec: int = 3600) -> dict[str, Any
 
 def _source_wiring_inventory_checks(root: Path) -> list[dict[str, Any]]:
     checks: list[dict[str, Any]] = []
-    signal_text = _read_text(root / "services" / "work_tree_signal_ingestion.py")
-    tool_dispatch_text = _read_text(root / "services" / "nova_tool_dispatch.py")
-    work_tree_text = _read_text(root / "work_tree.py")
-    dispatcher_text = _read_text(root / "services" / "nova_control_action_dispatcher.py")
-
-    source_set = set()
-    tool_set = set()
-    action_set = set()
+    source_probe = build_source_wiring_probe_payload(root=root)
+    source_set = set(source_probe.get("signal_sources") or [])
+    tool_set = set(source_probe.get("planned_tools") or [])
+    action_set = set(source_probe.get("advisory_actions") or [])
     try:
         synthetic_status_payload = _synthetic_control_status_payload()
     except Exception as exc:
@@ -587,9 +584,6 @@ def _source_wiring_inventory_checks(root: Path) -> list[dict[str, Any]]:
             for path in surface.source_files
             if (root / path).exists()
         ]
-        source_set.update(source for source in surface.signal_sources if source in signal_text)
-        tool_set.update(tool for tool in surface.planned_tools if tool in tool_dispatch_text or tool in work_tree_text)
-        action_set.update(action for action in surface.advisory_actions if action in dispatcher_text)
         checks.append(
             _check(
                 f"wiring-source:{surface.surface_id}:files",
@@ -635,6 +629,32 @@ def _source_wiring_inventory_checks(root: Path) -> list[dict[str, Any]]:
             data=root_closure,
         )
     )
+    self_repair_closure = build_self_repair_closure_inventory_payload(
+        synthetic_status_payload,
+        signal_sources=source_probe.get("signal_sources", []),
+        planned_tools=source_probe.get("planned_tools", []),
+        advisory_actions=source_probe.get("advisory_actions", []),
+        executable_tools=source_probe.get("executable_tools", []),
+        executable_actions=source_probe.get("executable_actions", []),
+        evidence_paths=source_probe.get("evidence_paths", []),
+        judgment_paths=source_probe.get("judgment_paths", []),
+        closure_paths=source_probe.get("closure_paths", []),
+        operator_outbox_paths=source_probe.get("operator_outbox_paths", []),
+        owned_root_routes=source_probe.get("owned_root_routes", []),
+        root=root,
+    )
+    checks.append(
+        _check(
+            "wiring-source:self-repair-closure",
+            bool(self_repair_closure.get("ok")),
+            (
+                "all discovered source roots have source-level self-repair closure wiring"
+                if self_repair_closure.get("ok")
+                else "source-level self-repair closure gaps remain"
+            ),
+            data=self_repair_closure,
+        )
+    )
     return checks
 
 
@@ -648,6 +668,7 @@ def _source_root_inventory_checks(root: Path) -> list[dict[str, Any]]:
 
     unwired = list(inventory.get("unwired_roots") or [])
     missing_evidence = list(inventory.get("missing_evidence_roots") or [])
+    unclassified = list(inventory.get("unclassified_source_files") or [])
     return [
         _check(
             "source-roots:inventory",
@@ -661,6 +682,8 @@ def _source_root_inventory_checks(root: Path) -> list[dict[str, Any]]:
                 "root_count": int(inventory.get("root_count", 0) or 0),
                 "unwired_roots": unwired,
                 "missing_evidence_roots": missing_evidence,
+                "unclassified_source_file_count": len(unclassified),
+                "unclassified_source_files": unclassified,
             },
         )
     ]

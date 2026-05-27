@@ -23,12 +23,7 @@ class CoreSeamGuardService:
         "import services.supervisor_routing_rules",
     )
 
-    _CORE_REQUIRED_FRAGMENTS = (
-        "from services.nova_routing_support import classify_supervisor_bypass as service_classify_supervisor_bypass",
-        "from services.nova_routing_support import looks_like_open_fallback_turn as service_looks_like_open_fallback_turn",
-        "return service_classify_supervisor_bypass(",
-        "return service_looks_like_open_fallback_turn(",
-    )
+    _CORE_REQUIRED_FRAGMENTS = ()
 
     _CORE_FORBIDDEN_FRAGMENTS = (
         '"category": "general_qa"',
@@ -99,7 +94,7 @@ class CoreSeamGuardService:
                 "name": "seam:nova_core_routing_support_delegation",
                 "ok": not missing_core,
                 "required": True,
-                "info": "nova_core.py still delegates bypass/open-fallback classification through services.nova_routing_support"
+                "info": "nova_core.py no longer carries bypass/open-fallback chat classifiers"
                 if not missing_core
                 else "missing fragments: " + ", ".join(missing_core),
             },

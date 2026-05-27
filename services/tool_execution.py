@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Callable, Optional
 
+from services.tool_execution_contracts import ADMIN_APPROVED_EXECUTION_SUFFIX
 from tools import ToolContext, ToolInvocationError
 
 
@@ -47,7 +48,7 @@ class ToolExecutionService:
             "os_capability_tool_disabled": "OS capability tool disabled by policy.",
             "patch_tool_disabled": "Patch tool disabled by policy.",
             "patch_force_disabled": "Forced patch apply is disabled by policy.",
-            "admin_required": f"{tool_name} is restricted to admin-approved execution.",
+            "admin_required": f"{tool_name}{ADMIN_APPROVED_EXECUTION_SUFFIX}",
         }
         return mapping.get(r, r)
 

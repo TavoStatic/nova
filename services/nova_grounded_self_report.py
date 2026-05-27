@@ -6,6 +6,10 @@ from dataclasses import dataclass
 from typing import Any
 
 
+NO_ACTIVE_STUCK_POINT_LINE = "I do not see an active stuck point in live control status right now."
+LIVE_STATUS_SOURCE_LINE = "Source: live control status and Work Tree."
+
+
 def _as_dict(value: Any) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
@@ -256,16 +260,16 @@ class NovaGroundedSelfReportService:
         cleared: set[str] = set()
         for component in ("guard", "core", "webui"):
             if self._component_running(status.get(component)) is True:
-                cleared.add(f"runtime_failure:control_status:process_not_running:{component}")
+                cleared.add(f"runtime_failure:runtime_core:process_not_running:{component}")
         heartbeat_age = status.get("core_heartbeat_age_sec", status.get("heartbeat_age_sec"))
         try:
             heartbeat_age_int = int(heartbeat_age)
         except Exception:
             heartbeat_age_int = None
         if heartbeat_age_int is not None and heartbeat_age_int <= 30:
-            cleared.add("runtime_failure:control_status:heartbeat_stale:core_heartbeat")
+            cleared.add("runtime_failure:runtime_core:heartbeat_stale:core_heartbeat")
         if status.get("maintenance_scheduler_active") is True:
-            cleared.add("maintenance_pressure:control_status:maintenance_scheduler_inactive:autonomy_maintenance")
+            cleared.add("maintenance_pressure:scheduler_registry:maintenance_scheduler_inactive:autonomy_maintenance")
         failures = status.get("runtime_failures") if isinstance(status.get("runtime_failures"), dict) else {}
         for service, row in failures.items():
             if not isinstance(row, dict):
@@ -374,8 +378,8 @@ class NovaGroundedSelfReportService:
         if trouble:
             lines.append(f"What needs attention: {trouble}")
         else:
-            lines.append("I do not see an active stuck point in live control status right now.")
-        lines.append("Source: live control status and Work Tree.")
+            lines.append(NO_ACTIVE_STUCK_POINT_LINE)
+        lines.append(LIVE_STATUS_SOURCE_LINE)
         return "\n".join(line for line in lines if line)
 
     def _render_trouble(self, payload: dict[str, Any]) -> str:
@@ -384,7 +388,7 @@ class NovaGroundedSelfReportService:
         if trouble:
             lines.append(f"Today I am mainly stuck on: {trouble}")
         else:
-            lines.append("I do not see an active stuck point in live control status right now.")
+            lines.append(NO_ACTIVE_STUCK_POINT_LINE)
         lines.append(self._work_tree_line(payload))
         release = _as_dict(payload.get("release"))
         readiness = release.get("readiness")
@@ -393,7 +397,7 @@ class NovaGroundedSelfReportService:
         alerts = self._alert_line(payload)
         if alerts:
             lines.append(alerts)
-        lines.append("Source: live control status and Work Tree.")
+        lines.append(LIVE_STATUS_SOURCE_LINE)
         return "\n".join(line for line in lines if line)
 
     def _render_internals(self, payload: dict[str, Any]) -> str:
@@ -431,7 +435,7 @@ class NovaGroundedSelfReportService:
         alerts = self._alert_line(payload)
         if alerts:
             lines.append(alerts)
-        lines.append("Source: live control status and Work Tree.")
+        lines.append(LIVE_STATUS_SOURCE_LINE)
         return "\n".join(line for line in lines if line)
 
     def _work_tree_line(self, payload: dict[str, Any]) -> str:

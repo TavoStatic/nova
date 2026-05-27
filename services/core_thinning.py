@@ -13,12 +13,7 @@ from typing import Any
 CORE_THINNING_WORK_IDENTITY = "system:core-thinning"
 CORE_THINNING_ALLOWED_TOOLS = ["core_thinning", "read", "find", "patch_apply", "system_check", "health"]
 CORE_THINNING_PUBLIC_ADAPTER_NAMES = {
-    "_store_declarative_fact_reply",
     "clear_runtime_device_location",
-    "handle_commands",
-    "handle_keywords",
-    "learn_from_user_correction",
-    "sanitize_llm_reply",
     "speak_chunked",
     "update_now_pending_payload",
     "write_action_ledger_record",

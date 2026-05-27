@@ -85,9 +85,9 @@ def web_allowlist_message(context: str = "", *, policy_web_fn: Callable[[], dict
     cfg = policy_web_fn()
     allow_domains = cfg.get("allow_domains") or []
     if not allow_domains:
-        return "I attempted to access the web, but web access is restricted by policy and no allowlisted domains are configured."
+        return "I cannot access the web because policy has no allowlisted domains configured."
 
-    lines = [f"I attempted to access the web{(' for ' + context) if context else ''}, but my web tool only allows specific sources:"]
+    lines = [f"I cannot access the web{(' for ' + context) if context else ''} because my web tool only allows specific sources:"]
     for domain in allow_domains:
         lines.append(f"- {domain}")
 

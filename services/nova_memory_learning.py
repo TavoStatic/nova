@@ -8,6 +8,9 @@ from pathlib import Path
 from typing import Any, Callable, Optional
 
 
+IDENTITY_CONFIRMED_DEVELOPER_REPLY = "Understood. Identity confirmed: you are my developer."
+
+
 def mem_stats_payload(
     *,
     emit_event: bool = True,
@@ -901,14 +904,13 @@ def learn_self_identity_binding(
 
     if person_name.lower() in {developer_nickname.lower(), developer_first.lower()}:
         set_active_user_fn(developer_name or person_name)
-        return True, "Understood. Identity confirmed: you are my developer."
+        return True, IDENTITY_CONFIRMED_DEVELOPER_REPLY
 
     if person_name.lower() == developer_name.lower():
         set_active_user_fn(person_name)
-        return True, "Understood. Identity confirmed: you are my developer."
+        return True, IDENTITY_CONFIRMED_DEVELOPER_REPLY
 
     return False, ""
-
 
 def learn_contextual_self_facts(
     text: str,
@@ -995,6 +997,19 @@ def identity_context_for_prompt(*, load_identity_profile_fn: Callable[[], dict],
     profile = load_identity_profile_fn()
     learned = load_learned_facts_fn()
     lines = []
+    bootstrap = profile.get("bootstrap") if isinstance(profile.get("bootstrap"), dict) else {}
+    origin_authority = str(bootstrap.get("origin_authority") or "").strip()
+    origin_status = str(bootstrap.get("origin_status") or "").strip()
+    if origin_authority or origin_status:
+        authority_parts = []
+        if origin_authority:
+            if origin_authority == "operator_confirmed":
+                authority_parts.append("Nova identity origin was confirmed by the operator")
+            else:
+                authority_parts.append(f"Nova identity origin authority: {origin_authority}")
+        if origin_status:
+            authority_parts.append(f"identity bootstrap status: {origin_status}")
+        lines.append("Confirmed Nova identity evidence: " + "; ".join(authority_parts))
     story = str(profile.get("name_origin") or "").strip()
     if story:
         lines.append("Identity fact: The assistant's name origin story is user-defined.")

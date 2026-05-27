@@ -1,6 +1,7 @@
 ﻿from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from typing import Any
 
@@ -8,10 +9,13 @@ import psutil
 
 
 def normalize_identity_path(value: str | Path) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
     try:
-        return str(Path(value).resolve()).lower()
+        return os.path.normcase(os.path.normpath(text)).lower()
     except Exception:
-        return str(value or "").strip().lower()
+        return text.lower()
 
 
 def matches_script_process(
@@ -35,23 +39,27 @@ def matches_script_process(
 def logical_service_processes(script_path: str | Path) -> list[dict[str, Any]]:
     matches: list[dict[str, Any]] = []
     parent_ids: set[int] = set()
-    for process in psutil.process_iter(["pid", "ppid", "cmdline", "create_time"]):
+    for process in psutil.process_iter(["pid", "cmdline"]):
         try:
             info = process.info or {}
-            try:
-                cwd = process.cwd()
-            except Exception:
-                cwd = None
-            if not matches_script_process(info.get("cmdline"), script_path, cwd=cwd):
+            cmdline = info.get("cmdline") or []
+            matched = matches_script_process(cmdline, script_path)
+            if not matched:
+                try:
+                    cwd = process.cwd()
+                except Exception:
+                    cwd = None
+                matched = matches_script_process(cmdline, script_path, cwd=cwd)
+            if not matched:
                 continue
             pid = int(info.get("pid") or 0)
-            ppid = int(info.get("ppid") or 0)
-            create_time = float(info.get("create_time") or 0.0)
+            ppid = int(process.ppid() or 0)
+            create_time = float(process.create_time() or 0.0)
             matches.append({
                 "pid": pid,
                 "ppid": ppid,
                 "create_time": create_time,
-                "cmdline": list(info.get("cmdline") or []),
+                "cmdline": list(cmdline),
             })
             if ppid > 0:
                 parent_ids.add(ppid)

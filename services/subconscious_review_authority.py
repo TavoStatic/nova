@@ -3,6 +3,14 @@ from __future__ import annotations
 from typing import Any, Callable, Optional
 
 
+SUPERVISOR_RUNTIME_PRESSURE_BLOCKED_PREFIX = "runtime pressure blocked low-priority supervisor review:"
+FULFILLMENT_RUNTIME_PRESSURE_BLOCKED_PREFIX = "runtime pressure blocked low-priority fulfillment review:"
+
+
+def _runtime_pressure_blocked_reason(prefix: str, runtime_pressure: dict[str, Any]) -> str:
+    return f"{prefix} {runtime_pressure.get('reason')}"
+
+
 def _default_supervisor_review(signal: dict[str, Any], gate: dict[str, Any]) -> dict[str, Any]:
     payload = signal.get("payload") if isinstance(signal.get("payload"), dict) else {}
     preferred_owner = str(payload.get("preferred_owner") or "").strip().lower()
@@ -272,7 +280,10 @@ class SubconsciousReviewAuthorityService:
                     "approved": False,
                     "authority_owner": "supervisor",
                     "authority_status": "deferred_runtime_pressure",
-                    "authority_reason": f"runtime pressure blocked low-priority supervisor review: {runtime_pressure.get('reason')}",
+                    "authority_reason": _runtime_pressure_blocked_reason(
+                        SUPERVISOR_RUNTIME_PRESSURE_BLOCKED_PREFIX,
+                        runtime_pressure,
+                    ),
                 }
             if supervisor_viable:
                 return {
@@ -304,7 +315,10 @@ class SubconsciousReviewAuthorityService:
                             "approved": False,
                             "authority_owner": "supervisor",
                             "authority_status": "deferred_runtime_pressure",
-                            "authority_reason": f"runtime pressure blocked low-priority supervisor review: {runtime_pressure.get('reason')}",
+                            "authority_reason": _runtime_pressure_blocked_reason(
+                                SUPERVISOR_RUNTIME_PRESSURE_BLOCKED_PREFIX,
+                                runtime_pressure,
+                            ),
                         }
                     return {
                         "approved": True,
@@ -331,7 +345,10 @@ class SubconsciousReviewAuthorityService:
                     "approved": False,
                     "authority_owner": "fulfillment",
                     "authority_status": "deferred_runtime_pressure",
-                    "authority_reason": f"runtime pressure blocked low-priority fulfillment review: {runtime_pressure.get('reason')}",
+                    "authority_reason": _runtime_pressure_blocked_reason(
+                        FULFILLMENT_RUNTIME_PRESSURE_BLOCKED_PREFIX,
+                        runtime_pressure,
+                    ),
                 }
             if fulfillment_viable:
                 return {
@@ -362,7 +379,10 @@ class SubconsciousReviewAuthorityService:
                         "approved": False,
                         "authority_owner": "supervisor",
                         "authority_status": "deferred_runtime_pressure",
-                        "authority_reason": f"runtime pressure blocked low-priority supervisor review: {runtime_pressure.get('reason')}",
+                        "authority_reason": _runtime_pressure_blocked_reason(
+                            SUPERVISOR_RUNTIME_PRESSURE_BLOCKED_PREFIX,
+                            runtime_pressure,
+                        ),
                     }
                 return {
                     "approved": approved,
@@ -381,7 +401,10 @@ class SubconsciousReviewAuthorityService:
                         "approved": False,
                         "authority_owner": "fulfillment",
                         "authority_status": "deferred_runtime_pressure",
-                        "authority_reason": f"runtime pressure blocked low-priority fulfillment review: {runtime_pressure.get('reason')}",
+                        "authority_reason": _runtime_pressure_blocked_reason(
+                            FULFILLMENT_RUNTIME_PRESSURE_BLOCKED_PREFIX,
+                            runtime_pressure,
+                        ),
                     }
                 return {
                     "approved": approved,

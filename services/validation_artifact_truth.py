@@ -148,8 +148,10 @@ class ValidationArtifactTruthService:
 
         if not action_dir.exists():
             return {
-                "ok": True,
-                "status": "no_validation_actions",
+                "ok": False,
+                "status": "validation_actions_missing",
+                "truth_state": "unknown",
+                "missing_artifact": True,
                 "action_dir": str(action_dir),
                 "action_count": 0,
                 "inspected_count": 0,
@@ -163,7 +165,7 @@ class ValidationArtifactTruthService:
                 "latest_regression_at": regression_generated_label,
                 "latest_failure": {},
                 "failures": [],
-                "rationale": "Validation action artifact directory is absent.",
+                "rationale": "Validation action artifact directory is absent, so validation action truth cannot be proven.",
             }
 
         try:

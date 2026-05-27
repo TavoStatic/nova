@@ -21,7 +21,14 @@ class TestOllamaTestGuard(unittest.TestCase):
 
             @staticmethod
             def json():
-                return {"message": {"content": "weather_lookup"}}
+                return {
+                    "message": {
+                        "content": (
+                            '{"tool":"weather_current_location","args":[],'
+                            '"confidence":0.91,"reason":"weather requires current location"}'
+                        )
+                    }
+                }
 
         with mock.patch.object(nova_core.sys, "argv", ["python", "-m", "unittest", "discover"]), \
              mock.patch.dict(os.environ, {"NOVA_ALLOW_LIVE_OLLAMA_TESTS": "1"}, clear=False), \

@@ -65,6 +65,121 @@ class TestReleaseStatusService(unittest.TestCase):
         self.assertEqual(payload.get("latest_validation_machine"), "RC-VM-01")
         self.assertEqual(len(payload.get("recent_entries") or []), 3)
 
+    def test_status_payload_filters_by_artifact_kind(self):
+        with tempfile.TemporaryDirectory() as td:
+            ledger_path = Path(td) / "release_ledger.jsonl"
+            ledger_path.write_text(
+                "\n".join([
+                    json.dumps({
+                        "recorded_at": "2026-05-26T10:00:00-05:00",
+                        "event": "build",
+                        "artifact_kind": "package-zip",
+                        "artifact_name": "nova.zip",
+                        "artifact_path": "C:/Nova/nova.zip",
+                        "artifact_version": "2026.05.26",
+                        "release_channel": "rc",
+                    }),
+                    json.dumps({
+                        "recorded_at": "2026-05-26T11:00:00-05:00",
+                        "event": "build",
+                        "artifact_kind": "windows-installer",
+                        "artifact_name": "nova.exe",
+                        "artifact_path": "C:/Nova/nova.exe",
+                        "artifact_version": "2026.05.26",
+                        "release_channel": "rc",
+                        "source_package_artifact_path": "C:/Nova/nova.zip",
+                    }),
+                    json.dumps({
+                        "recorded_at": "2026-05-26T11:01:00-05:00",
+                        "event": "verify",
+                        "artifact_kind": "windows-installer",
+                        "artifact_name": "nova.exe",
+                        "artifact_path": "C:/Nova/nova.exe",
+                        "artifact_version": "2026.05.26",
+                        "release_channel": "rc",
+                        "verification_result": "pass",
+                    }),
+                    json.dumps({
+                        "recorded_at": "2026-05-26T11:02:00-05:00",
+                        "event": "promotion",
+                        "artifact_kind": "windows-installer",
+                        "artifact_name": "nova.exe",
+                        "artifact_path": "C:/Nova/nova.exe",
+                        "artifact_version": "2026.05.26",
+                        "release_channel": "rc",
+                        "validation_result": "pass-with-notes",
+                    }),
+                ]),
+                encoding="utf-8",
+            )
+
+            package_payload = RELEASE_STATUS_SERVICE.status_payload(ledger_path)
+            installer_payload = RELEASE_STATUS_SERVICE.status_payload(ledger_path, artifact_kind="windows-installer")
+
+        self.assertEqual(package_payload.get("artifact_kind"), "package-zip")
+        self.assertEqual(package_payload.get("latest_artifact_name"), "nova.zip")
+        self.assertEqual(package_payload.get("latest_readiness_state"), "needs-verification")
+        self.assertEqual(installer_payload.get("artifact_kind"), "windows-installer")
+        self.assertEqual(installer_payload.get("latest_artifact_name"), "nova.exe")
+        self.assertEqual(installer_payload.get("latest_readiness_state"), "ready-with-notes")
+        self.assertEqual(installer_payload.get("latest_source_package_artifact_path"), "C:/Nova/nova.zip")
+        self.assertEqual(installer_payload.get("latest_source_package_artifact_name"), "nova.zip")
+
+    def test_status_payload_filters_kind_before_recent_display_limit(self):
+        with tempfile.TemporaryDirectory() as td:
+            ledger_path = Path(td) / "release_ledger.jsonl"
+            rows = [
+                {
+                    "recorded_at": "2026-05-26T10:00:00-05:00",
+                    "event": "build",
+                    "artifact_kind": "windows-installer",
+                    "artifact_name": "nova.exe",
+                    "artifact_path": "C:/Nova/nova.exe",
+                    "artifact_version": "2026.05.26",
+                    "release_channel": "rc",
+                },
+                {
+                    "recorded_at": "2026-05-26T10:01:00-05:00",
+                    "event": "verify",
+                    "artifact_kind": "windows-installer",
+                    "artifact_name": "nova.exe",
+                    "artifact_path": "C:/Nova/nova.exe",
+                    "artifact_version": "2026.05.26",
+                    "release_channel": "rc",
+                    "verification_result": "pass",
+                },
+                {
+                    "recorded_at": "2026-05-26T10:02:00-05:00",
+                    "event": "promotion",
+                    "artifact_kind": "windows-installer",
+                    "artifact_name": "nova.exe",
+                    "artifact_path": "C:/Nova/nova.exe",
+                    "artifact_version": "2026.05.26",
+                    "release_channel": "rc",
+                    "validation_result": "pass-with-notes",
+                },
+            ]
+            for index in range(20):
+                rows.append(
+                    {
+                        "recorded_at": f"2026-05-26T11:{index:02d}:00-05:00",
+                        "event": "verify",
+                        "artifact_kind": "package-zip",
+                        "artifact_name": f"nova-{index}.zip",
+                        "artifact_path": f"C:/Nova/nova-{index}.zip",
+                        "artifact_version": f"2026.05.26.{index}",
+                        "release_channel": "rc",
+                        "verification_result": "pass",
+                    }
+                )
+            ledger_path.write_text("\n".join(json.dumps(row) for row in rows), encoding="utf-8")
+
+            installer_payload = RELEASE_STATUS_SERVICE.status_payload(ledger_path, limit=3, artifact_kind="windows-installer")
+
+        self.assertEqual(installer_payload.get("latest_artifact_name"), "nova.exe")
+        self.assertEqual(installer_payload.get("latest_readiness_state"), "ready-with-notes")
+        self.assertLessEqual(len(installer_payload.get("recent_entries") or []), 3)
+
     def test_status_payload_marks_release_stale_when_source_changed_after_build(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)

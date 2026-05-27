@@ -19,6 +19,7 @@ _FULFILLMENT_SEAM_HINTS = {
 _RETIRED_CONTENT_SEAM_HINTS = {
     "memory_capture_route_fallthrough",
 }
+FULFILLMENT_REVIEW_TEXT = "show me workable options without collapsing too early"
 
 
 def _fallback_review_context_for_source(source_key: str) -> dict[str, Any]:
@@ -173,7 +174,7 @@ class SubconsciousWorkTreeTriageService:
             }
         if signal_key == "fulfillment_missed":
             return {
-                "review_text": "show me workable options without collapsing too early",
+                "review_text": FULFILLMENT_REVIEW_TEXT,
                 "pending_action": None,
                 "conversation_state": None,
                 "turns": [],
@@ -208,7 +209,7 @@ class SubconsciousWorkTreeTriageService:
             }
         if "fulfillment" in seam_key:
             return {
-                "review_text": "show me workable options without collapsing too early",
+                "review_text": FULFILLMENT_REVIEW_TEXT,
                 "pending_action": None,
                 "conversation_state": None,
                 "turns": [],

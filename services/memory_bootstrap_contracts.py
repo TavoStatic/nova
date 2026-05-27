@@ -1,0 +1,3 @@
+from __future__ import annotations
+
+DO_NOT_MARK_MEMORY_READY_WITHOUT_EVENT_EVIDENCE = "do_not_mark_memory_ready_without_event_evidence"

@@ -1,88 +1,82 @@
 # NYO AI SYSTEMS
 
-Nova is no longer best understood as a chatbot project.
+Nova is not a finished autonomous system.
 
-It is becoming a supervised local AI runtime: a system that can route, inspect, remember, govern change, expose its own state, and carry maintenance pressure instead of waiting for an operator to do everything by hand.
+It is an actively evolving supervised local AI runtime. The repository contains a CLI, HTTP runtime console, control surfaces, Work Tree, patch and release flows, memory services, tool dispatch, OS capability contracts, operator outbox, runtime telemetry, and maintenance loops. Those pieces are real, but they are not all closed end to end yet.
 
-That matters because most AI projects stop at response generation. Nova keeps moving after the reply. It can open work, track it, review it, repair drift, govern patches, surface its own internals, and keep the operator in the loop while still building toward real autonomy.
+The current proof standard is simple:
+
+- source describes capability
+- runtime artifacts show what actually happened
+- release gates decide whether a package is promotable
+- documentation must not describe a target state as if it is already complete
 
 Project documentation is centralized under [docs/README.md](docs/README.md).
 
 Public branding uses `NYO AI SYSTEMS`.
 Internal runtime and module names may still reference `Nova`.
 
-## Why This Repo Is Different
+## What Runs Today
 
-This repository is not centered on a single UI and it is not built around one narrow assistant persona.
+Nova currently has:
 
-At its core is Nova: a runtime that behaves more like an operator-facing AI system than a simple prompt-response wrapper. The browser control room is one window into that runtime. The CLI is another. The maintenance loop, patch system, Work Tree, supervisor flow, and runtime telemetry are all part of the same organism.
+- CLI and HTTP chat front doors
+- operator console and status surfaces
+- Work Tree task and branch state
+- runtime health and process telemetry
+- memory and identity services
+- web, weather, voice, vision, and tool surfaces
+- patch preview, approval, apply, and rollback paths
+- OS capability registry and script controller for bounded local actions
+- operator outbox for durable notices when Nova lacks authority, tools, or information
+- release package build, verify, validation, and promotion records
 
-Nova is being shaped to do more than answer.
-It is being shaped to:
+Those systems are meant to work together, but the current repo should still be treated as a supervised runtime under active development. Nova can surface evidence, hold work, run bounded tools, validate packages, and expose its state. It should not be described as independently self-completing until the runtime evidence proves that.
 
-- route requests through a supervisor-owned decision spine
-- expose operator control through CLI flows, HTTP control surfaces, and runtime status views
-- maintain scoped memory, structured telemetry, and inspectable runtime artifacts
-- run operator-approved tools and web-backed research workflows
-- generate, review, and apply change proposals under governed patch flow
-- carry scheduled maintenance and self-repair loops instead of relying on ad hoc manual cleanup
+## What Is Still Being Proven
 
-## What Nova Has Become
+The main unfinished proof areas are:
 
-Nova is now the runtime core inside NYO AI SYSTEMS.
+- chat intent quality under ordinary conversation, especially avoiding forced help/task flows
+- end-to-end self-closure from signal to Work Tree to tool/action to evidence to judgment
+- autonomous maintenance that advances real work instead of only repeating validation loops
+- fresh-machine or VM package validation
+- interactive `nova run` validation against release artifacts
+- production packaging decisions for large local assets and optional runtime dependencies
 
-That runtime already includes:
+## How To Read This Repo
 
-- supervised runtime ownership and recovery behavior
-- Work Tree orchestration for governed branch and task execution
-- patch preview, approval, apply, and rollback workflows
-- subconscious session generation and training backlog paths
-- a Safety Envelope for promotion and review governance
-- a Kidney System for cleanup, retention, and artifact hygiene
-- operator-observable control surfaces that expose live system state instead of hiding it
-- an operator outbox for durable Nova-to-operator notices
-- OS capability contracts for bounded local inspection and evidence collection
+Read the repo as a platform base, not a polished assistant product.
 
-This is not “one assistant with some tools.”
-It is a growing local AI operations system with an inspectable control plane.
+Important current authorities:
 
-## Why It’s Interesting
+- [docs/STATUS.md](docs/STATUS.md): resume point and current source/readiness posture
+- `runtime/regression_status.json`: latest full regression evidence
+- `runtime/validation/release/latest_release_validation.json`: latest observed release validation
+- `runtime/exports/release_packages/release_ledger.jsonl`: package build, verify, and promotion history
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md): architecture map
+- [docs/SERVICES_INDEX.md](docs/SERVICES_INDEX.md): service ownership map
 
-Nova sits in a strange and more ambitious space:
+If this README disagrees with those artifacts, the artifacts win.
 
-- not a pure research prototype
-- not a polished consumer assistant
-- not just an automation script pile
+## Current Direction
 
-It is an attempt to build an AI runtime that can be watched, steered, corrected, and gradually trusted with more of its own upkeep.
+The direction is to make Nova more capable of maintaining continuity, surfacing its own blockers, requesting missing capability or operator input, and carrying work through evidence-backed loops.
 
-If that works, the result is not just a better chat loop.
-The result is a system that can participate in its own operation.
+That is a direction, not a claim of completion.
 
-## Current Shape
-
-Today, the repository should be read as:
-
-- a runtime core
-- a control and inspection surface
-- a governed patch and maintenance system
-- an OS capability and operator-outbox evidence path
-- a growing body of service-owned behavior instead of one monolithic shell
-- a platform base that can support external packs, policies, tools, and product layers
-
-Domain-specific behavior should live in explicit packs, policies, tools, or higher-level product layers, not as hidden assumptions buried inside the base runtime.
+The design goal is a local AI runtime that can be watched, steered, corrected, and gradually given more operational responsibility as evidence supports it. Until then, Nova remains a supervised system with explicit gates, ledgers, and operator-visible state.
 
 ## Start Here
 
 - [docs/README.md](docs/README.md)
+- [docs/STATUS.md](docs/STATUS.md)
 - [docs/OPERATIONS.md](docs/OPERATIONS.md)
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
 - [docs/SERVICES_INDEX.md](docs/SERVICES_INDEX.md)
 - [docs/SUPERVISOR_CONTRACT.md](docs/SUPERVISOR_CONTRACT.md)
-- [docs/STATUS.md](docs/STATUS.md)
 - [docs/DOC_OWNERSHIP.md](docs/DOC_OWNERSHIP.md)
 - [docs/PATCHING.md](docs/PATCHING.md)
 - [docs/PACKAGE_PRODUCT_ROADMAP.md](docs/PACKAGE_PRODUCT_ROADMAP.md)
 
-This root README is the short public entry point.
-The deeper operational and architectural record lives under [docs/README.md](docs/README.md).
+This root README is the short public entry point. The deeper operational and architectural record lives under [docs/README.md](docs/README.md).

@@ -7,6 +7,9 @@ from typing import Callable
 from services.work_tree_seeding import WORK_TREE_SEEDING_SERVICE
 
 
+MIN_NO_ARG_TOOL_CONFIDENCE = 0.70
+
+
 def _active_work_tree_id(*, pending_action: dict | None, session) -> str:
     if hasattr(session, "active_work_tree_id"):
         tree_id = str(getattr(session, "active_work_tree_id", "") or "").strip()
@@ -156,15 +159,28 @@ def _actions_from_semantic_tool_intent(intent: dict | None) -> list[dict]:
     return [{"type": "run_tool", "tool": tool, "args": normalized_args, "semantic_intent": dict(payload)}]
 
 
-def _semantic_tool_route_allowed(turn_acts: list[str] | None, pending_action: dict | None = None) -> bool:
-    if turn_acts is None:
-        return True
-    acts = {str(item or "").strip().lower() for item in list(turn_acts or []) if str(item or "").strip()}
-    pending = pending_action if isinstance(pending_action, dict) else {}
-    if pending:
-        return True
-    if acts.intersection({"inform", "answer_to_prompt"}) and not acts.intersection({"ask", "command", "continue_thread", "mixed"}):
+def _floatish(value, default: float = 0.0) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _semantic_tool_intent_has_authority(intent: dict | None) -> bool:
+    payload = intent if isinstance(intent, dict) else {}
+    tool = str(payload.get("tool") or "").strip()
+    if not tool or tool == "none":
         return False
+    answer_target = str(payload.get("answer_target") or "").strip()
+    evidence_need = str(payload.get("evidence_need") or "").strip()
+    if tool == "self_status":
+        return answer_target == "nova_live_state" and evidence_need == "live_self_status"
+    args = [str(item).strip() for item in list(payload.get("args") or []) if str(item).strip()] if isinstance(payload.get("args"), list) else []
+    confidence = _floatish(payload.get("confidence"), 0.0)
+    if not args and confidence < MIN_NO_ARG_TOOL_CONFIDENCE:
+        return False
+    if tool in {"web_fetch", "web_gather", "read", "find", "location_coords", "patch_apply", "update_now_confirm"}:
+        return bool(args)
     return True
 
 
@@ -176,13 +192,12 @@ def _classify_semantic_tool_actions(
     turn_acts: list[str] | None = None,
     core,
     trace: Callable[..., None],
+    semantic_tool_observer_fn: Callable[[dict], None] | None = None,
 ) -> tuple[list[dict], int, str]:
     classify_tool_intent_fn = getattr(core, "_llm_classify_routing_intent", None)
     if not callable(classify_tool_intent_fn):
         return [], 0, "unavailable"
-    if not _semantic_tool_route_allowed(turn_acts, pending_action=pending_action):
-        trace("action_planner", "semantic_not_actionable", turn_acts=",".join(str(item) for item in list(turn_acts or [])))
-        return [], 0, "none"
+    del turn_acts
     semantic_started = time.perf_counter()
     try:
         semantic_intent = classify_tool_intent_fn(
@@ -200,35 +215,51 @@ def _classify_semantic_tool_actions(
         semantic_intent = None
     semantic_ms = int((time.perf_counter() - semantic_started) * 1000)
     trace("timing", "completed", "semantic_tool_intent", duration_ms=semantic_ms)
+    def _observe(status: str, payload: dict | None = None) -> None:
+        if not callable(semantic_tool_observer_fn):
+            return
+        try:
+            semantic_tool_observer_fn(
+                {
+                    "status": str(status or "").strip(),
+                    "intent": dict(payload or {}) if isinstance(payload, dict) else {},
+                    "duration_ms": semantic_ms,
+                }
+            )
+        except Exception:
+            return
+
     if isinstance(semantic_intent, dict) and str(semantic_intent.get("tool") or "").strip() == "none":
+        _observe("none", semantic_intent)
         trace(
             "action_planner",
             "semantic_none",
             str(semantic_intent.get("reason") or ""),
-            confidence=float(semantic_intent.get("confidence") or 0.0),
-        )
-        return [], semantic_ms, "none"
-    semantic_tool = str((semantic_intent or {}).get("tool") or "").strip()
-    acts = {str(item or "").strip().lower() for item in list(turn_acts or []) if str(item or "").strip()} if turn_acts is not None else set()
-    if turn_acts is not None and semantic_tool == "self_status" and not acts.intersection({"ask", "command", "continue_thread", "mixed"}):
-        trace(
-            "action_planner",
-            "semantic_not_actionable",
-            "self_status_requires_actionable_turn",
-            tool=semantic_tool,
-            confidence=float((semantic_intent or {}).get("confidence") or 0.0),
+            confidence=_floatish(semantic_intent.get("confidence"), 0.0),
         )
         return [], semantic_ms, "none"
     semantic_actions = _actions_from_semantic_tool_intent(semantic_intent)
     if semantic_actions:
+        if not _semantic_tool_intent_has_authority(semantic_intent):
+            _observe("weak_tool_route", semantic_intent)
+            trace(
+                "action_planner",
+                "semantic_weak_tool_route",
+                "",
+                tool=str((semantic_intent or {}).get("tool") or ""),
+                confidence=_floatish((semantic_intent or {}).get("confidence"), 0.0),
+            )
+            return [], semantic_ms, "weak_tool_route"
+        _observe("tool", semantic_intent)
         trace(
             "action_planner",
             "semantic_intent",
             str((semantic_intent or {}).get("reason") or ""),
             tool=str((semantic_intent or {}).get("tool") or ""),
-            confidence=float((semantic_intent or {}).get("confidence") or 0.0),
+            confidence=_floatish((semantic_intent or {}).get("confidence"), 0.0),
         )
         return semantic_actions, semantic_ms, "tool"
+    _observe("unavailable", semantic_intent if isinstance(semantic_intent, dict) else {})
     return [], semantic_ms, "unavailable"
 
 
@@ -347,6 +378,17 @@ def _pending_weather_action(core) -> dict:
     return {"kind": "weather_lookup", "status": "awaiting_location", "preferred_tool": "weather_location"}
 
 
+def _session_has_tool_evidence(session, tool: str) -> bool:
+    state = getattr(session, "conversation_state", None)
+    if not isinstance(state, dict):
+        return False
+    if str(state.get("kind") or "").strip() != "last_tool_evidence":
+        return False
+    if str(state.get("tool") or "").strip() != str(tool or "").strip():
+        return False
+    return bool(str(state.get("tool_result") or "").strip())
+
+
 def merge_route_evidence(routing_decision: dict | None, meta: dict | None) -> dict | None:
     if not isinstance(meta, dict):
         return routing_decision
@@ -369,10 +411,10 @@ def maybe_handle_planner_sequence(
     core,
     trace: Callable[..., None],
     normalize_reply: Callable[[str], str],
-    is_web_preferred_data_query: Callable[[str], bool],
     ensure_active_work_tree_fn: Callable[[str], str] | None = None,
     work_tree_seed_source: str = "",
     work_tree_seed_mode: str = "",
+    semantic_tool_observer_fn: Callable[[dict], None] | None = None,
 ) -> tuple[str, dict] | None:
     planner_started = time.perf_counter()
     tool_selection_ms = 0
@@ -397,11 +439,7 @@ def maybe_handle_planner_sequence(
         payload["timing"] = timing
         return reply, payload
 
-    config = build_planner_config(
-        turns=turns,
-        pending_action=pending_action,
-        prefer_web_for_data_queries=prefer_web_for_data_queries,
-    )
+    del prefer_web_for_data_queries
     actions, semantic_ms, semantic_status = _classify_semantic_tool_actions(
         text=text,
         turns=turns,
@@ -409,20 +447,10 @@ def maybe_handle_planner_sequence(
         turn_acts=turn_acts,
         core=core,
         trace=trace,
+        semantic_tool_observer_fn=semantic_tool_observer_fn,
     )
     tool_selection_ms += semantic_ms
     trace("timing", "completed", "tool_selection", duration_ms=tool_selection_ms)
-
-    if not actions and semantic_status != "none":
-        decide_started = time.perf_counter()
-        try:
-            actions = core.decide_actions(text, config=config)
-        except Exception:
-            actions = []
-        decide_ms = int((time.perf_counter() - decide_started) * 1000)
-        tool_selection_ms += decide_ms
-        trace("timing", "completed", "planner_decide_actions", duration_ms=decide_ms)
-        trace("timing", "completed", "tool_selection", duration_ms=tool_selection_ms)
 
     if actions:
         act = actions[0]
@@ -467,44 +495,29 @@ def maybe_handle_planner_sequence(
             if work_tree_action is not None:
                 return _return_with_timing(work_tree_action[0], work_tree_action[1])
 
-        if atype == "route_command":
-            trace("action_planner", "route_command")
-            cmd_reply = core.handle_commands(text, session_turns=turns, session=session)
-            if cmd_reply:
-                tool_name = "weather" if "api.weather.gov" in str(cmd_reply).lower() else ""
-                trace("command", "matched", tool=tool_name)
-                return _return_with_timing(normalize_reply(cmd_reply), {
-                    "planner_decision": "command",
-                    "tool": tool_name,
-                    "tool_args": {"raw": text},
-                    "tool_result": str(cmd_reply or ""),
-                    "grounded": bool(tool_name),
-                    "pending_action": {},
-                    "route_evidence": _route_evidence(owner="action_planner", action_type=atype, tool=tool_name),
-                })
-            trace("command", "not_matched")
-
-        if atype == "route_keyword":
-            trace("action_planner", "route_keyword")
-            kw = core.handle_keywords(text)
-            if kw:
-                _kind, tool_name, out = kw
-                trace("keyword_tool", "matched", tool=str(tool_name or ""), grounded=bool(str(out or "").strip()))
-                return _return_with_timing(normalize_reply(str(out or "")), {
-                    "planner_decision": "run_tool",
-                    "tool": str(tool_name or ""),
-                    "tool_args": {"raw": text},
-                    "tool_result": str(out or ""),
-                    "grounded": bool(str(out or "").strip()),
-                    "pending_action": {},
-                    "route_evidence": _route_evidence(owner="action_planner", action_type=atype, tool=str(tool_name or "")),
-                })
-            trace("keyword_tool", "not_matched")
-
         if atype == "run_tool":
             tool = str(act.get("tool") or "")
             args = act.get("args") or []
             trace("action_planner", "run_tool", tool=tool)
+            normalized_args = [str(item).strip() for item in list(args or []) if str(item).strip()] if isinstance(args, list) else []
+            if not normalized_args and _session_has_tool_evidence(session, tool):
+                if callable(semantic_tool_observer_fn):
+                    semantic_tool_observer_fn(
+                        {
+                            "status": "tool_evidence_available",
+                            "intent": {
+                                "tool": "none",
+                                "args": [],
+                                "confidence": 1.0,
+                                "reason": "session_tool_evidence_available",
+                                "evidence_need": "conversation",
+                                "answer_target": "current_conversation",
+                                "source": "session_evidence",
+                            },
+                        }
+                    )
+                trace("action_planner", "tool_evidence_available", tool=tool)
+                return None
             if tool == "weather_current_location" and not _weather_location_available(core):
                 reply = "What location should I use for the weather lookup?"
                 return _return_with_timing(normalize_reply(reply), {
@@ -582,27 +595,6 @@ def maybe_handle_planner_sequence(
                 reply_contract = "self_status.current"
                 reply_outcome = {
                     "intent": "self_status",
-                    "kind": "current",
-                    "reply_contract": reply_contract,
-                }
-            elif tool == "operator_help":
-                reply_contract = "operator_help.current"
-                reply_outcome = {
-                    "intent": "operator_help",
-                    "kind": "current",
-                    "reply_contract": reply_contract,
-                }
-            elif tool == "runtime_identity":
-                reply_contract = "runtime_identity.current"
-                reply_outcome = {
-                    "intent": "runtime_identity",
-                    "kind": "current",
-                    "reply_contract": reply_contract,
-                }
-            elif tool == "capability_inventory":
-                reply_contract = "capability_inventory.current"
-                reply_outcome = {
-                    "intent": "capability_inventory",
                     "kind": "current",
                     "reply_contract": reply_contract,
                 }

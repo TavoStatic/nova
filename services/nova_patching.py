@@ -29,9 +29,9 @@ _SNAPSHOT_SKIP_ROOT_PREFIXES = ("codex_", "probe_sqlite_")
 _SNAPSHOT_SKIP_ROOT_NAMES = {
     "This_is_nova",
     "tests_to_review.txt",
-    "_handle_commands_current.txt",
     "_run_loop_current.txt",
 }
+NON_FORWARD_REVISION_REJECT_REASON = "non-forward revision (downgrade blocked)."
 
 
 def snapshot_should_skip_relpath(rel: Path) -> bool:
@@ -899,7 +899,7 @@ def patch_apply(
             if incoming_rev is not None and incoming_rev <= current_revision:
                 log_patch_fn(f"APPLY_REJECT downgrade current={current_revision} next={incoming_rev} zip={zip_file.name}")
                 return patch_reject_message_fn(
-                    "non-forward revision (downgrade blocked).",
+                    NON_FORWARD_REVISION_REJECT_REASON,
                     strict_manifest=strict_manifest,
                     current_revision=current_revision,
                     incoming_revision=incoming_rev,
@@ -990,7 +990,7 @@ def patch_apply(
         if next_revision <= current_revision:
             log_patch_fn(f"APPLY_REJECT downgrade current={current_revision} next={next_revision} zip={zip_file.name}")
             return patch_reject_message_fn(
-                "non-forward revision (downgrade blocked).",
+                NON_FORWARD_REVISION_REJECT_REASON,
                 strict_manifest=strict_manifest,
                 current_revision=current_revision,
                 incoming_revision=next_revision,

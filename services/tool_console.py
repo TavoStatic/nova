@@ -40,13 +40,11 @@ class ToolConsoleService:
         *,
         decide_turn_fn: Callable[[str], list],
         execute_planned_action_fn: Callable[[str, list], object],
-        handle_commands_fn: Callable[[str], object],
         describe_tools_fn: Callable[[], str],
         direct_tools: list[str] | None = None,
     ) -> None:
         self._decide_turn = decide_turn_fn
         self._execute_planned_action = execute_planned_action_fn
-        self._handle_commands = handle_commands_fn
         self._describe_tools = describe_tools_fn
         self._direct_tools = list(direct_tools or DEFAULT_DIRECT_TOOLS)
 
@@ -89,6 +87,4 @@ class ToolConsoleService:
             return str(step.get("question") or "").strip()
         if action_type == "respond":
             return str(step.get("note") or "").strip()
-        if action_type in {"route_command", "route_keyword"}:
-            return self.coerce_output(self._handle_commands(text))
         return None

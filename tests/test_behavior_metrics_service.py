@@ -32,7 +32,6 @@ class TestBehaviorMetricsStore(unittest.TestCase):
                 "top_repeated_failure_class": "routing_miss",
                 "top_repeated_correction_class": "self_fix",
                 "routing_stable": False,
-                "unsupported_claims_blocked": True,
                 "ts": "2026-03-27 12:00:00",
             }
             store.update_from_reflection(payload, 30)
@@ -41,7 +40,6 @@ class TestBehaviorMetricsStore(unittest.TestCase):
             self.assertEqual(snap.get("top_repeated_failure_class"), "routing_miss")
             self.assertEqual(snap.get("top_repeated_correction_class"), "self_fix")
             self.assertFalse(snap.get("routing_stable"))
-            self.assertTrue(snap.get("unsupported_claims_blocked"))
             self.assertEqual(snap.get("last_reflection_turn"), 30)
             self.assertEqual(snap.get("last_reflection_at"), "2026-03-27 12:00:00")
 

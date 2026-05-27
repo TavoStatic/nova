@@ -42,6 +42,11 @@ _SOURCE_EXCLUDED_FILES = {
 }
 
 
+def _entry_artifact_kind(entry: dict) -> str:
+    kind = str((entry or {}).get("artifact_kind") or "").strip()
+    return kind or "package-zip"
+
+
 def _parse_recorded_at_epoch(value: str) -> float | None:
     text = str(value or "").strip()
     if not text:
@@ -261,9 +266,18 @@ class ReleaseStatusService:
             out["latest_source_status"] = "current"
         return out
 
-    def status_payload(self, ledger_path: Path, limit: int = 8, source_root: Path | None = None) -> dict:
+    def status_payload(
+        self,
+        ledger_path: Path,
+        limit: int = 8,
+        source_root: Path | None = None,
+        *,
+        artifact_kind: str = "package-zip",
+    ) -> dict:
+        selected_kind = str(artifact_kind or "package-zip").strip() or "package-zip"
         out = {
             "ok": True,
+            "artifact_kind": selected_kind,
             "ledger_path": str(ledger_path),
             "latest_state": "no-builds",
             "latest_readiness_state": "no-builds",
@@ -283,6 +297,9 @@ class ReleaseStatusService:
             "latest_follow_up_owner": "",
             "latest_validation_machine": "",
             "latest_validation_seed_path": "",
+            "latest_source_package_artifact_path": "",
+            "latest_source_package_artifact_name": "",
+            "latest_source_package_manifest_path": "",
             "latest_validation_record": {},
             "latest_validation_record_exists": False,
             "latest_validation_record_complete": False,
@@ -298,7 +315,12 @@ class ReleaseStatusService:
             "latest_source_changed_after_build_sample": [],
             "recent_entries": [],
         }
-        entries = self.ledger_entries(ledger_path, max(6, int(limit)))
+        scan_limit = max(200, int(limit) * 20)
+        entries = [
+            entry
+            for entry in self.ledger_entries(ledger_path, scan_limit)
+            if _entry_artifact_kind(entry) == selected_kind
+        ]
         if not entries:
             return out
 
@@ -316,6 +338,7 @@ class ReleaseStatusService:
                 "note": str(entry.get("validation_note") or entry.get("verification_note") or ""),
                 "artifact_name": str(entry.get("artifact_name") or ""),
                 "artifact_path": str(entry.get("artifact_path") or ""),
+                "source_package_artifact_path": str(entry.get("source_package_artifact_path") or ""),
                 "verification_target_path": str(entry.get("verification_target_path") or ""),
                 "validation_record_seed_path": str(entry.get("validation_record_seed_path") or ""),
             })
@@ -386,6 +409,11 @@ class ReleaseStatusService:
             "latest_follow_up_owner": str((latest_promotion or {}).get("follow_up_owner") or ""),
             "latest_validation_machine": str((latest_promotion or {}).get("validation_machine") or ""),
             "latest_validation_seed_path": str(latest_build.get("validation_record_seed_path") or ""),
+            "latest_source_package_artifact_path": str(latest_build.get("source_package_artifact_path") or ""),
+            "latest_source_package_artifact_name": Path(str(latest_build.get("source_package_artifact_path") or "")).name
+            if str(latest_build.get("source_package_artifact_path") or "").strip()
+            else "",
+            "latest_source_package_manifest_path": str(latest_build.get("source_package_manifest_path") or ""),
         })
         validation_record = release_validation_record_payload(
             out.get("latest_validation_seed_path") or "",

@@ -1,10 +1,13 @@
 import zipfile
+import json
 from pathlib import Path
 import sys
 import time
 
 from services.release_promotion_judgment import release_validation_record_payload
 from services.release_validation import _default_command_runner
+from services.release_validation import _nova_run_probe_command
+from services.release_validation import _prepare_package_root
 from services.release_validation import record_release_validation_outcome
 from services.release_validation import run_release_validation
 
@@ -22,10 +25,30 @@ def _build_long_named_artifact(path: Path) -> None:
         archive.writestr(f"{package_dir}/nova.ps1", "")
 
 
+def _write_regression_status(root: Path, *, status: str = "OK", age_sec: int = 0, lanes: list[str] | None = None) -> Path:
+    path = root / "runtime" / "regression_status.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    generated_at = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(time.time() - int(age_sec)))
+    path.write_text(
+        json.dumps(
+            {
+                "generated_at": generated_at,
+                "status": status,
+                "returncode": 0 if status.upper() == "OK" else 1,
+                "lanes": lanes or ["unit", "behavior", "integration"],
+                "detail": "" if status.upper() == "OK" else "unit lane",
+            }
+        ),
+        encoding="utf-8",
+    )
+    return path
+
+
 def test_release_validation_run_writes_complete_record_from_observed_steps(tmp_path: Path) -> None:
     artifact = tmp_path / "nova-rc.zip"
     record = tmp_path / "nova-rc.md"
     _build_artifact(artifact)
+    _write_regression_status(tmp_path)
     calls: list[str] = []
 
     def runner(name, command, cwd, timeout_sec):
@@ -64,16 +87,89 @@ def test_release_validation_run_writes_complete_record_from_observed_steps(tmp_p
 
     assert report["completed"] is True
     assert report["validation_result"] == "pass-with-notes"
+    assert report["regression_gate"]["ok"] is True
     assert payload["complete"] is True
     assert payload["result"] == "pass-with-notes"
+    assert "- full regression status: pass" in record.read_text(encoding="utf-8")
     assert "nova test" in calls
+    assert "nova run" in calls
     assert "nova webui-stop" in calls
+    record_text = record.read_text(encoding="utf-8")
+    assert "- nova run: pass (launch/exit)" in record_text
+    assert "nova run interactive front door was not exercised" not in record_text
+
+
+def test_release_validation_blocks_when_regression_status_is_not_green(tmp_path: Path) -> None:
+    artifact = tmp_path / "nova-rc.zip"
+    record = tmp_path / "nova-rc.md"
+    _build_artifact(artifact)
+    _write_regression_status(tmp_path, status="FAILED")
+
+    def runner(name, command, cwd, timeout_sec):
+        return {
+            "name": name,
+            "command": list(command),
+            "returncode": 0,
+            "stdout": "",
+            "stderr": "",
+            "duration_sec": 0.01,
+        }
+
+    report = run_release_validation(
+        repo_root=tmp_path,
+        artifact_path=artifact,
+        record_path=record,
+        artifact_version="2026.05.14.10",
+        release_channel="rc",
+        command_runner=runner,
+        http_get=lambda _url, _timeout: (200, "<html>control</html>"),
+        work_root=tmp_path / "validation",
+    )
+
+    assert report["validation_result"] == "fail"
+    assert report["ok"] is False
+    assert report["regression_gate"]["ok"] is False
+    assert any("full regression status is not OK" in issue for issue in report["blocking_issues"])
+    assert "- full regression status: fail" in record.read_text(encoding="utf-8")
+
+
+def test_release_validation_blocks_when_regression_status_is_stale(tmp_path: Path) -> None:
+    artifact = tmp_path / "nova-rc.zip"
+    record = tmp_path / "nova-rc.md"
+    _build_artifact(artifact)
+    _write_regression_status(tmp_path, age_sec=7200)
+
+    def runner(name, command, cwd, timeout_sec):
+        return {
+            "name": name,
+            "command": list(command),
+            "returncode": 0,
+            "stdout": "",
+            "stderr": "",
+            "duration_sec": 0.01,
+        }
+
+    report = run_release_validation(
+        repo_root=tmp_path,
+        artifact_path=artifact,
+        record_path=record,
+        artifact_version="2026.05.14.10",
+        release_channel="rc",
+        command_runner=runner,
+        http_get=lambda _url, _timeout: (200, "<html>control</html>"),
+        work_root=tmp_path / "validation",
+        regression_max_age_sec=3600,
+    )
+
+    assert report["validation_result"] == "fail"
+    assert any("full regression status is stale" in issue for issue in report["blocking_issues"])
 
 
 def test_release_validation_removes_fresh_extract_root_for_repeated_artifact(tmp_path: Path) -> None:
     artifact = tmp_path / "nova-rc.zip"
     record = tmp_path / "nova-rc.md"
     _build_artifact(artifact)
+    _write_regression_status(tmp_path)
 
     def runner(name, command, cwd, timeout_sec):
         return {
@@ -117,6 +213,7 @@ def test_release_validation_collapses_long_package_root_before_running_commands(
     artifact = tmp_path / "nyo-system-base-rc-2026.05.18.16-operator-help-ready-notes-20260518_161322.zip"
     record = tmp_path / "nova-rc.md"
     _build_long_named_artifact(artifact)
+    _write_regression_status(tmp_path)
     command_roots: list[Path] = []
 
     def runner(name, command, cwd, timeout_sec):
@@ -148,10 +245,57 @@ def test_release_validation_collapses_long_package_root_before_running_commands(
     assert all(root.name == "pkg" for root in command_roots)
 
 
+def test_prepare_package_root_extracts_wrapped_zip_directly_into_short_pkg(tmp_path: Path) -> None:
+    artifact = tmp_path / "nyo-system-base-rc-2026.05.18.16-operator-help-ready-notes-20260518_161322.zip"
+    _build_long_named_artifact(artifact)
+
+    package_root, extract_root = _prepare_package_root(artifact, tmp_path / "validation")
+
+    assert package_root.name == "pkg"
+    assert package_root.parent == extract_root
+    assert (package_root / "nova.cmd").exists()
+    assert not (extract_root / "nyo-system-base-rc-2026.05.18.16-operator-help-ready-notes-20260518_161322").exists()
+
+
+def test_nova_run_probe_command_uses_front_door_without_runtime_turn_by_default() -> None:
+    command = _nova_run_probe_command(Path("nova.cmd"))
+
+    command_text = " ".join(command)
+    assert "run --fix" in command_text
+    assert "q" in command_text
+    assert "ping" not in command_text
+
+
+def test_nova_run_probe_command_can_exercise_scripted_runtime_turn() -> None:
+    command = _nova_run_probe_command(Path("nova.cmd"), exercise_turn=True)
+
+    command_text = " ".join(command)
+    assert "run --fix" in command_text
+    assert "ping" in command_text
+    assert "q" in command_text
+
+
+def test_prepare_package_root_removes_extract_workspace_when_prepare_fails(tmp_path: Path) -> None:
+    artifact = tmp_path / "bad.zip"
+    work_root = tmp_path / "validation"
+    with zipfile.ZipFile(artifact, "w") as archive:
+        archive.writestr("package/README.md", "# Missing front door\n")
+
+    try:
+        _prepare_package_root(artifact, work_root)
+    except FileNotFoundError:
+        pass
+    else:
+        raise AssertionError("expected missing nova.cmd to fail package preparation")
+
+    assert not [path for path in work_root.iterdir()]
+
+
 def test_release_validation_can_keep_extract_root_when_requested(tmp_path: Path) -> None:
     artifact = tmp_path / "nova-rc.zip"
     record = tmp_path / "nova-rc.md"
     _build_artifact(artifact)
+    _write_regression_status(tmp_path)
 
     def runner(name, command, cwd, timeout_sec):
         return {
@@ -183,6 +327,7 @@ def test_release_validation_can_keep_extract_root_when_requested(tmp_path: Path)
 def test_release_validation_does_not_complete_record_when_profile_never_runs(tmp_path: Path) -> None:
     artifact = tmp_path / "missing.zip"
     record = tmp_path / "nova-rc.md"
+    _write_regression_status(tmp_path)
 
     def runner(name, command, cwd, timeout_sec):
         raise AssertionError("validation commands should not run when artifact preparation fails")

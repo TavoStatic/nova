@@ -12,7 +12,6 @@ def _tool_console_service() -> ToolConsoleService:
     return ToolConsoleService(
         decide_turn_fn=planner_decision.decide_turn,
         execute_planned_action_fn=nova_core.execute_planned_action,
-        handle_commands_fn=nova_core.handle_commands,
         describe_tools_fn=nova_core.TOOL_REGISTRY_SERVICE.describe_tools,
     )
 

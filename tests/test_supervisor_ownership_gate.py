@@ -105,20 +105,20 @@ class TestSupervisorOwnershipGate(unittest.TestCase):
         self.assertNotIn("expand_triggers", source)
 
     def test_followup_dispatch_does_not_own_location_conversation_fallback(self):
-        source = (Path(__file__).resolve().parents[1] / "services" / "nova_followup_dispatch.py").read_text(encoding="utf-8")
-
-        self.assertNotIn("handle_location_conversation_turn", source)
+        path = Path(__file__).resolve().parents[1] / "services" / "nova_followup_dispatch.py"
+        self.assertFalse(path.exists())
 
     def test_cli_loop_does_not_own_pending_weather_followup_fallback(self):
         source = (Path(__file__).resolve().parents[1] / "services" / "nova_cli_loop.py").read_text(encoding="utf-8")
 
         self.assertNotIn("apply_pending_weather_followup_fallback", source)
 
-    def test_http_chat_flow_only_imports_active_numeric_turn_outcome(self):
+    def test_http_chat_flow_does_not_import_turn_outcomes(self):
         source = (Path(__file__).resolve().parents[1] / "http_chat_flow.py").read_text(encoding="utf-8")
 
-        self.assertIn("from services.nova_turn_outcomes import apply_numeric_clarify_outcome", source)
+        self.assertNotIn("from services.nova_turn_outcomes import", source)
         retired_outcomes = [
+            "apply_numeric_clarify_outcome",
             "apply_fast_smalltalk",
             "apply_identity_binding_learning",
             "apply_mixed_turn_clarify",
@@ -138,7 +138,7 @@ class TestSupervisorOwnershipGate(unittest.TestCase):
     def test_cli_loop_uses_shared_numeric_clarify_without_mixed_content_owner(self):
         source = (Path(__file__).resolve().parents[1] / "services" / "nova_cli_loop.py").read_text(encoding="utf-8")
 
-        self.assertIn("from services.nova_turn_outcomes import apply_numeric_clarify_outcome", source)
+        self.assertNotIn("from services.nova_turn_outcomes import apply_numeric_clarify_outcome", source)
         self.assertNotIn("from services.nova_turn_outcomes import apply_mixed_turn_clarify", source)
         self.assertNotIn("if \"mixed\" in turn_acts", source)
         self.assertNotIn("core._should_clarify_unlabeled_numeric_turn(", source)

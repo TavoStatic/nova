@@ -243,7 +243,7 @@ class TestSubconsciousReviewAuthorityService(unittest.TestCase):
         self.assertEqual(verdict.get("authority_status"), "rejected")
         self.assertIn("supervisor_viable=False", str(verdict.get("authority_reason") or ""))
 
-    def test_probe_backed_patch_family_context_approves_supervisor_review(self):
+    def test_probe_backed_patch_family_context_rejects_removed_supervisor_route(self):
         signal = SUBCONSCIOUS_WORK_TREE_TRIAGE_SERVICE.build_signal(
             family_id="patch-routing-fallthrough-family",
             target_seam="patch_routing_fallthrough",
@@ -269,9 +269,10 @@ class TestSubconsciousReviewAuthorityService(unittest.TestCase):
             session_factory=ConversationSession,
         )
 
-        self.assertTrue(verdict.get("approved"))
+        self.assertFalse(verdict.get("approved"))
         self.assertEqual(verdict.get("authority_owner"), "supervisor")
-        self.assertIn("supervisor_viable=True", str(verdict.get("authority_reason") or ""))
+        self.assertEqual(verdict.get("authority_status"), "rejected")
+        self.assertIn("supervisor_viable=False", str(verdict.get("authority_reason") or ""))
 
     def test_probe_backed_memory_capture_family_context_rejects_retired_supervisor_review(self):
         signal = SUBCONSCIOUS_WORK_TREE_TRIAGE_SERVICE.build_signal(

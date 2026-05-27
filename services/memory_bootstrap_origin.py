@@ -5,6 +5,8 @@ import time
 from pathlib import Path
 from typing import Any, Callable
 
+from services.memory_bootstrap_contracts import DO_NOT_MARK_MEMORY_READY_WITHOUT_EVENT_EVIDENCE
+
 
 BOOTSTRAP_ORIGIN_SCHEMA = "nova.memory_bootstrap_origin.v1"
 DEFAULT_REQUIRED_SLOTS = ("assistant_name", "developer_name", "developer_nickname")
@@ -65,7 +67,7 @@ def default_pending_origin_contract(*, created_by: str = "codex_root_repair", no
         "blocked_shortcuts": [
             "do_not_flip_memory_enabled_as_a_fix",
             "do_not_seed_identity_from_code_defaults",
-            "do_not_mark_memory_ready_without_event_evidence",
+            DO_NOT_MARK_MEMORY_READY_WITHOUT_EVENT_EVIDENCE,
         ],
     }
 

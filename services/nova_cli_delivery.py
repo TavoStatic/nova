@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import Callable
 
+from services.nova_reply_context_contract import TOOL_CONTEXT_PLACEHOLDER
+
 
 def apply_cli_outcome_to_ledger(
     *,
@@ -76,7 +78,7 @@ def emit_cli_reply_outcome(
     decision = str(planner_decision or "deterministic")
     if decision == "run_tool":
         print_fn(f"Nova (tool output):\n{reply}\n", flush=True)
-        session_turns.append(("assistant", reply.strip()[:350] if reply.strip() else reply))
+        session_turns.append(("assistant", TOOL_CONTEXT_PLACEHOLDER if reply.strip() else reply))
         say_done_fn("Done.")
         return {"spoken_mode": "tool_done", "assistant_turn": session_turns[-1][1]}
 

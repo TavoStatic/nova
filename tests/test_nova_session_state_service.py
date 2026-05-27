@@ -5,7 +5,7 @@ from services import nova_session_state
 
 
 class TestNovaSessionStateService(unittest.TestCase):
-    def test_apply_reply_session_updates_sets_pending_and_retrieval_state(self):
+    def test_apply_reply_session_updates_sets_pending_action_from_meta(self):
         session = ConversationSession()
 
         next_state = nova_session_state.apply_reply_session_updates(
@@ -17,18 +17,18 @@ class TestNovaSessionStateService(unittest.TestCase):
                 "tool_result": "Grounded",
                 "pending_action": {"tool": "followup"},
             },
-            routed_text="research student_data",
-            turns=[],
-            fallback_state=None,
-            infer_post_reply_conversation_state=lambda *args, **kwargs: {"kind": "retrieval", "subject": "student_data"},
         )
 
-        self.assertEqual(next_state, {"kind": "retrieval", "subject": "student_data"})
+        self.assertIsNone(next_state)
         self.assertEqual(session.pending_action, {"tool": "followup"})
-        self.assertEqual(session.retrieval_state(), {"kind": "retrieval", "subject": "student_data"})
+        self.assertIsNone(session.retrieval_state())
+        self.assertEqual(session.conversation_state["kind"], "last_tool_evidence")
+        self.assertEqual(session.conversation_state["tool"], "web_research")
+        self.assertEqual(session.conversation_state["tool_result"], "Grounded")
 
-    def test_apply_reply_session_updates_falls_back_to_regular_state_update(self):
+    def test_apply_reply_session_updates_clears_pending_when_meta_has_none(self):
         session = ConversationSession(conversation_state={"kind": "identity_profile", "subject": "developer"})
+        session.set_pending_action({"tool": "followup"})
 
         next_state = nova_session_state.apply_reply_session_updates(
             session,
@@ -38,14 +38,11 @@ class TestNovaSessionStateService(unittest.TestCase):
                 "tool_args": {},
                 "tool_result": "",
             },
-            routed_text="who is your developer",
-            turns=[],
-            fallback_state={"kind": "identity_profile", "subject": "developer"},
-            infer_post_reply_conversation_state=lambda *args, **kwargs: None,
         )
 
         self.assertIsNone(next_state)
-        self.assertEqual(session.conversation_state, {"kind": "identity_profile", "subject": "developer"})
+        self.assertIsNone(session.pending_action)
+        self.assertIsNone(session.conversation_state)
 
 
 if __name__ == "__main__":

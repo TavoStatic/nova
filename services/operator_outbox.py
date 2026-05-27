@@ -31,6 +31,23 @@ NOTICE_STATUSES = {"new", "seen", "answered", "resolved", "dismissed", "stale"}
 CLOSED_NOTICE_STATUSES = {"resolved", "dismissed", "stale"}
 RESPONSE_RESOLUTIONS = {"evidence_only", "continue_work", "task_resolved", "dismissed", "stale"}
 AUTONOMY_INTERNAL_WAIT_REASONS = {"cooldown_active"}
+SUMMARY_PAYLOAD_KEYS = {
+    "action",
+    "action_type",
+    "blocked_reason",
+    "capability",
+    "decision",
+    "execution_result",
+    "failed_tools",
+    "missing_tools",
+    "operator_reason",
+    "reason",
+    "recommended_tool",
+    "request_kind",
+    "source_type",
+    "suggested_tools",
+    "work_class",
+}
 
 
 def _safe_status(value: Any, default: str = "new") -> str:
@@ -81,6 +98,181 @@ class OperatorOutboxService:
             event["updated_ts"] = event.get("ts")
         return event
 
+    @staticmethod
+    def _small_list(value: Any, *, limit: int = 8) -> list[str]:
+        return [
+            _safe_text(item, 160)
+            for item in _safe_list(value)[: max(1, int(limit or 1))]
+            if _safe_text(item, 160)
+        ]
+
+    @staticmethod
+    def _task_projection(task: Any) -> dict[str, Any]:
+        task_payload = _safe_dict(task)
+        result = {
+            "task_id": _safe_text(task_payload.get("task_id"), 120),
+            "title": _safe_text(task_payload.get("title"), 260),
+            "status": _safe_text(task_payload.get("status"), 80),
+        }
+        meta = _safe_dict(task_payload.get("meta"))
+        blocked_reason = _safe_text(meta.get("blocked_reason") or meta.get("block_reason"), 220)
+        if blocked_reason:
+            result["meta"] = {"blocked_reason": blocked_reason}
+        return {key: value for key, value in result.items() if value not in ("", {}, [])}
+
+    @classmethod
+    def _next_step_projection(cls, next_step: Any) -> dict[str, Any]:
+        step = _safe_dict(next_step)
+        result: dict[str, Any] = {}
+        for key in ("action", "branch_id", "branch_title", "task_id", "task_title", "recommended_tool", "reason"):
+            text = _safe_text(step.get(key), 260 if key.endswith("title") else 160)
+            if text:
+                result[key] = text
+        for key in ("suggested_tools", "missing_tools"):
+            values = cls._small_list(step.get(key), limit=8)
+            if values:
+                result[key] = values
+        return result
+
+    @classmethod
+    def _work_tree_notice_payload(
+        cls,
+        *,
+        tree_id: str,
+        tree_title: str,
+        branch_id: str,
+        branch_title: str,
+        task_id: str,
+        task_title: str,
+        request_kind: str,
+        next_step: Any = None,
+        task: Any = None,
+        extra: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "tree_id": _safe_text(tree_id, 120),
+            "tree_title": _safe_text(tree_title, 220),
+            "branch_id": _safe_text(branch_id, 120),
+            "branch_title": _safe_text(branch_title, 220),
+            "task_id": _safe_text(task_id, 120),
+            "task_title": _safe_text(task_title, 260),
+            "request_kind": _safe_text(request_kind, 120),
+        }
+        step = cls._next_step_projection(next_step)
+        if step:
+            payload["next_step"] = step
+        task_payload = cls._task_projection(task)
+        if task_payload:
+            payload["task"] = task_payload
+        for key, value in _safe_dict(extra).items():
+            if isinstance(value, list):
+                cleaned = cls._small_list(value)
+                if cleaned:
+                    payload[str(key)] = cleaned
+            elif isinstance(value, dict):
+                compacted = _compact(value, depth=2)
+                if compacted:
+                    payload[str(key)] = compacted
+            else:
+                text = _safe_text(value, 260)
+                if text:
+                    payload[str(key)] = text
+        return {key: value for key, value in payload.items() if value not in ("", {}, [])}
+
+    def _summary_payload(self, event: dict[str, Any]) -> dict[str, Any]:
+        payload = _safe_dict(event.get("payload"))
+        target = self.work_tree_target_from_event(event)
+        tree_payload = _safe_dict(payload.get("tree"))
+        next_step = _safe_dict(payload.get("next_step")) or _safe_dict(tree_payload.get("next_step"))
+        task_payload = _safe_dict(payload.get("task"))
+        result: dict[str, Any] = {
+            key: value
+            for key, value in target.items()
+            if value
+        }
+        if task_payload and "task_id" not in result:
+            task_id = _safe_text(task_payload.get("task_id"), 120)
+            if task_id:
+                result["task_id"] = task_id
+        if task_payload and "task_title" not in result:
+            task_title = _safe_text(task_payload.get("title"), 260)
+            if task_title:
+                result["task_title"] = task_title
+        for key in sorted(SUMMARY_PAYLOAD_KEYS):
+            value = payload.get(key)
+            if value is None and key in {"action", "recommended_tool", "reason", "suggested_tools", "missing_tools"}:
+                value = next_step.get(key)
+            if isinstance(value, list):
+                values = self._small_list(value, limit=8)
+                if values:
+                    result[key] = values
+            elif isinstance(value, dict):
+                compacted = _compact(value, depth=2)
+                if compacted:
+                    result[key] = compacted
+            else:
+                text = _safe_text(value, 260)
+                if text:
+                    result[key] = text
+        step = self._next_step_projection(next_step)
+        if step:
+            result["next_step"] = step
+        task = self._task_projection(task_payload)
+        if task:
+            result["task"] = task
+        return result
+
+    @staticmethod
+    def _summary_response(response: dict[str, Any]) -> dict[str, Any]:
+        return {
+            key: value
+            for key, value in {
+                "id": _safe_text(response.get("id"), 120),
+                "ts": _safe_text(response.get("ts"), 80),
+                "ts_epoch": response.get("ts_epoch"),
+                "responder": _safe_text(response.get("responder"), 80),
+                "resolution": _safe_text(response.get("resolution"), 80),
+                "message": _safe_text(response.get("message"), 500),
+            }.items()
+            if value not in ("", None)
+        }
+
+    def _summary_event(self, event: dict[str, Any]) -> dict[str, Any]:
+        normalized = self._normalize_event(event)
+        payload = self._summary_payload(normalized)
+        target = self.work_tree_target_from_event(normalized)
+        responses = [
+            self._summary_response(dict(row))
+            for row in _safe_list(normalized.get("responses"))[-3:]
+            if isinstance(row, dict)
+        ]
+        result: dict[str, Any] = {
+            "id": _safe_text(normalized.get("id"), 120),
+            "ts_epoch": normalized.get("ts_epoch"),
+            "ts": _safe_text(normalized.get("ts"), 80),
+            "updated_ts_epoch": normalized.get("updated_ts_epoch"),
+            "updated_ts": _safe_text(normalized.get("updated_ts"), 80),
+            "source": _safe_text(normalized.get("source"), 120),
+            "audience": _safe_text(normalized.get("audience"), 80),
+            "severity": _safe_text(normalized.get("severity"), 40),
+            "title": _safe_text(normalized.get("title"), 180),
+            "message": _safe_text(normalized.get("message"), 1000),
+            "dedupe_key": _safe_text(normalized.get("dedupe_key"), 220),
+            "status": _safe_status(normalized.get("status")),
+            "response_count": int(normalized.get("response_count", 0) or 0),
+        }
+        status_note = _safe_text(normalized.get("status_note"), 220)
+        if status_note:
+            result["status_note"] = status_note
+        if payload:
+            result["payload"] = payload
+        compact_target = {key: value for key, value in target.items() if value}
+        if compact_target:
+            result["work_tree_target"] = compact_target
+        if responses:
+            result["responses"] = responses
+        return {key: value for key, value in result.items() if value not in ("", None, {}, [])}
+
     def _load_events(self, path: Path) -> list[dict[str, Any]]:
         outbox_path = Path(path)
         if not outbox_path.exists():
@@ -119,7 +311,9 @@ class OperatorOutboxService:
     def summary(self, path: Path, *, limit: int = 5) -> dict[str, Any]:
         all_events = self._load_events(path)
         result_limit = max(1, int(limit or 1))
-        events = all_events[-result_limit:]
+        raw_events = all_events[-result_limit:]
+        events = [self._summary_event(event) for event in raw_events]
+        latest_raw = raw_events[-1] if raw_events else {}
         latest = events[-1] if events else {}
         status_counts: dict[str, int] = {}
         for event in all_events:
@@ -129,17 +323,19 @@ class OperatorOutboxService:
             event for event in all_events
             if _safe_status(event.get("status")) not in CLOSED_NOTICE_STATUSES
         ]
-        visible_open_events = open_events[-result_limit:]
-        latest_open = open_events[-1] if open_events else {}
+        raw_visible_open_events = open_events[-result_limit:]
+        visible_open_events = [self._summary_event(event) for event in raw_visible_open_events]
+        latest_open_raw = open_events[-1] if open_events else {}
+        latest_open = self._summary_event(latest_open_raw) if latest_open_raw else {}
         return {
             "ok": True,
             "count": len(events),
             "total_count": len(all_events),
             "open_count": len(open_events),
             "status_counts": status_counts,
-            "latest_id": str(latest.get("id") or ""),
+            "latest_id": str(latest_raw.get("id") or latest.get("id") or ""),
             "latest": latest,
-            "latest_open_id": str(latest_open.get("id") or ""),
+            "latest_open_id": str(latest_open_raw.get("id") or latest_open.get("id") or ""),
             "latest_open": latest_open,
             "open_events": visible_open_events,
             "events": events,
@@ -170,18 +366,26 @@ class OperatorOutboxService:
         dedupe = _safe_text(dedupe_key, 220)
         existing = self._load_events(path)
         if dedupe:
-            for row in reversed(existing):
+            for index in range(len(existing) - 1, -1, -1):
+                row = existing[index]
                 if str(row.get("dedupe_key") or "") != dedupe:
                     continue
                 if _safe_status(row.get("status")) in CLOSED_NOTICE_STATUSES:
                     break
-                try:
-                    age = now_value - float(row.get("ts_epoch") or 0.0)
-                except Exception:
-                    age = 0.0
-                if age <= max(0, int(dedupe_window_sec or 0)):
-                    return {"ok": True, "deduped": True, "event": row}
-                break
+                row["source"] = _safe_text(source, 120)
+                row["audience"] = _safe_text(audience or "operator", 80)
+                row["severity"] = _safe_text(severity or "info", 40)
+                row["title"] = clean_title
+                row["message"] = clean_message
+                row["payload"] = _compact(payload or {})
+                row["updated_ts_epoch"] = now_value
+                row["updated_ts"] = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(now_value))
+                row["repeat_count"] = int(row.get("repeat_count", 0) or 0) + 1
+                row["last_repeat_ts_epoch"] = now_value
+                row["last_repeat_ts"] = row["updated_ts"]
+                existing[index] = row
+                self._write_events(path, existing[-max(1, int(max_events or 1)) :])
+                return {"ok": True, "deduped": True, "updated": True, "event": row}
 
         event_id = f"{int(now_value * 1000):013d}-{_safe_text((uuid_fn or (lambda: uuid.uuid4().hex))(), 12)}"
         event = {
@@ -215,10 +419,22 @@ class OperatorOutboxService:
         return {
             "tree_id": _safe_text(payload.get("tree_id") or tree_payload.get("tree_id"), 120),
             "tree_title": _safe_text(payload.get("tree_title") or tree_payload.get("title"), 220),
-            "branch_id": _safe_text(payload.get("branch_id") or next_step.get("branch_id"), 120),
-            "branch_title": _safe_text(payload.get("branch_title") or next_step.get("branch_title"), 220),
-            "task_id": _safe_text(payload.get("task_id") or task_payload.get("task_id") or next_step.get("task_id"), 120),
-            "task_title": _safe_text(payload.get("task_title") or task_payload.get("title") or next_step.get("task_title"), 260),
+            "branch_id": _safe_text(payload.get("branch_id") or tree_payload.get("branch_id") or next_step.get("branch_id"), 120),
+            "branch_title": _safe_text(payload.get("branch_title") or tree_payload.get("branch_title") or next_step.get("branch_title"), 220),
+            "task_id": _safe_text(
+                payload.get("task_id")
+                or tree_payload.get("task_id")
+                or task_payload.get("task_id")
+                or next_step.get("task_id"),
+                120,
+            ),
+            "task_title": _safe_text(
+                payload.get("task_title")
+                or tree_payload.get("task_title")
+                or task_payload.get("title")
+                or next_step.get("task_title"),
+                260,
+            ),
             "request_kind": _safe_text(payload.get("request_kind"), 120),
             "blocked_reason": _safe_text(payload.get("blocked_reason"), 220),
         }
@@ -343,7 +559,17 @@ class OperatorOutboxService:
 
         now_value = float((now_fn or time.time)())
         staled = 0
-        for event in rows:
+        latest_active_index_by_key: dict[str, int] = {}
+        for index, event in enumerate(rows):
+            if _safe_status(event.get("status")) in CLOSED_NOTICE_STATUSES:
+                continue
+            if _safe_text(event.get("source"), 120) != "work_tree":
+                continue
+            dedupe = _safe_text(event.get("dedupe_key"), 220)
+            if dedupe.startswith("work_tree|") and dedupe in active_keys:
+                latest_active_index_by_key[dedupe] = index
+
+        for index, event in enumerate(rows):
             if _safe_status(event.get("status")) in CLOSED_NOTICE_STATUSES:
                 continue
             if _safe_text(event.get("source"), 120) != "work_tree":
@@ -352,6 +578,13 @@ class OperatorOutboxService:
             if not dedupe.startswith("work_tree|"):
                 continue
             if dedupe in active_keys:
+                if latest_active_index_by_key.get(dedupe) == index:
+                    continue
+                event["status"] = "stale"
+                event["status_note"] = "work_tree_pressure_superseded"
+                event["updated_ts_epoch"] = now_value
+                event["updated_ts"] = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(now_value))
+                staled += 1
                 continue
             event["status"] = "stale"
             event["status_note"] = "work_tree_pressure_cleared"
@@ -362,6 +595,58 @@ class OperatorOutboxService:
         if staled:
             self._write_events(path, rows)
         return {"ok": True, "staled_count": staled, "active_notice_count": len(active_keys)}
+
+    def reconcile_source_root_judgment_notices(
+        self,
+        path: Path,
+        *,
+        work_tree_state: dict[str, Any] | None = None,
+        now_fn: Callable[[], float] | None = None,
+    ) -> dict[str, Any]:
+        """Close source-root notices once their owning Work Tree branch is closed."""
+        branch_closed: dict[str, bool] = {}
+        for tree in [
+            dict(item)
+            for item in _safe_list((_safe_dict(work_tree_state)).get("trees"))
+            if isinstance(item, dict)
+        ]:
+            for node in [
+                dict(item)
+                for item in _safe_list(tree.get("nodes"))
+                if isinstance(item, dict)
+            ]:
+                branch_id = _safe_text(node.get("id"), 120)
+                if not branch_id:
+                    continue
+                status = _safe_text(node.get("status"), 80).lower()
+                resolution_state = _safe_text(node.get("resolution_state"), 80).lower()
+                branch_closed[branch_id] = status in {"complete", "archived"} or resolution_state in {"resolved", "retired"}
+
+        rows = self._load_events(path)
+        if not rows:
+            return {"ok": True, "staled_count": 0, "known_branch_count": len(branch_closed)}
+
+        now_value = float((now_fn or time.time)())
+        staled = 0
+        for event in rows:
+            if _safe_status(event.get("status")) in CLOSED_NOTICE_STATUSES:
+                continue
+            if _safe_text(event.get("source"), 120) != "source_root_judgment":
+                continue
+            branch_id = self.work_tree_target_from_event(event).get("branch_id", "")
+            if not branch_id:
+                continue
+            if branch_closed.get(branch_id) is not True:
+                continue
+            event["status"] = "stale"
+            event["status_note"] = "source_root_pressure_cleared"
+            event["updated_ts_epoch"] = now_value
+            event["updated_ts"] = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(now_value))
+            staled += 1
+
+        if staled:
+            self._write_events(path, rows)
+        return {"ok": True, "staled_count": staled, "known_branch_count": len(branch_closed)}
 
     def reconcile_autonomy_notices(
         self,
@@ -631,7 +916,17 @@ class OperatorOutboxService:
                         "title": f"Nova needs a tool assignment: {branch_title or tree_title}",
                         "message": message,
                         "dedupe_key": f"work_tree|missing_tool_assignment|{tree_id}|{branch_id}|{task_id}",
-                        "payload": {"tree": tree, "next_step": next_step, "request_kind": "tool_assignment"},
+                        "payload": self._work_tree_notice_payload(
+                            tree_id=tree_id,
+                            tree_title=tree_title,
+                            branch_id=branch_id,
+                            branch_title=branch_title,
+                            task_id=task_id,
+                            task_title=task_title,
+                            request_kind="tool_assignment",
+                            next_step=next_step,
+                            extra={"suggested_tools": suggested},
+                        ),
                     }
                 )
             elif action == "wait_for_tools":
@@ -650,7 +945,17 @@ class OperatorOutboxService:
                             f"{', '.join(missing) if missing else 'required tools'}."
                         ),
                         "dedupe_key": f"work_tree|wait_for_tools|{tree_id}|{branch_id}|{','.join(missing)}",
-                        "payload": {"tree": tree, "next_step": next_step, "request_kind": "tool_readiness"},
+                        "payload": self._work_tree_notice_payload(
+                            tree_id=tree_id,
+                            tree_title=tree_title,
+                            branch_id=branch_id,
+                            branch_title=branch_title,
+                            task_id=task_id,
+                            task_title=task_title,
+                            request_kind="tool_readiness",
+                            next_step=next_step,
+                            extra={"missing_tools": missing},
+                        ),
                     }
                 )
             elif action == "governance_blocked":
@@ -665,7 +970,17 @@ class OperatorOutboxService:
                             f"{branch_title or tree_title}. Reason: {reason or 'governance_blocked'}."
                         ),
                         "dedupe_key": f"work_tree|governance_blocked|{tree_id}|{branch_id}|{tool_name}|{reason}",
-                        "payload": {"tree": tree, "next_step": next_step, "request_kind": "tool_policy"},
+                        "payload": self._work_tree_notice_payload(
+                            tree_id=tree_id,
+                            tree_title=tree_title,
+                            branch_id=branch_id,
+                            branch_title=branch_title,
+                            task_id=task_id,
+                            task_title=task_title,
+                            request_kind="tool_policy",
+                            next_step=next_step,
+                            extra={"blocked_reason": reason, "recommended_tool": tool_name},
+                        ),
                     }
                 )
             elif action == "execute" and executable and tool_name and tool_name not in executable:
@@ -679,7 +994,17 @@ class OperatorOutboxService:
                             f"{branch_title or tree_title}. Current task: {task_title or task_id or 'unknown task'}."
                         ),
                         "dedupe_key": f"work_tree|maintenance_tool_dispatch|{tree_id}|{branch_id}|{task_id}|{tool_name}",
-                        "payload": {"tree": tree, "next_step": next_step, "request_kind": "maintenance_tool_dispatch"},
+                        "payload": self._work_tree_notice_payload(
+                            tree_id=tree_id,
+                            tree_title=tree_title,
+                            branch_id=branch_id,
+                            branch_title=branch_title,
+                            task_id=task_id,
+                            task_title=task_title,
+                            request_kind="maintenance_tool_dispatch",
+                            next_step=next_step,
+                            extra={"recommended_tool": tool_name},
+                        ),
                     }
                 )
 
@@ -690,9 +1015,52 @@ class OperatorOutboxService:
             ]:
                 if len(notices) >= max(1, int(limit or 1)):
                     break
+                node_branch_id = _safe_text(node.get("id"), 120)
+                node_title = _safe_text(node.get("title"), 220)
+                current_task = _safe_dict(node.get("current_task"))
+                node_task_id = _safe_text(current_task.get("task_id"), 120)
+                node_task_title = _safe_text(current_task.get("title"), 260)
+                node_status = _safe_text(node.get("status"), 80).lower()
+                resolution_state = _safe_text(node.get("resolution_state"), 80).lower()
+                task_status = _safe_text(current_task.get("status"), 80).lower()
+                has_live_task = bool(node_task_id or node_task_title) and task_status not in {"complete", "dropped", "blocked"}
+                branch_closed = node_status in {"complete", "archived"} or resolution_state in {"resolved", "retired"}
+                tool_state = _safe_dict(node.get("tool_state"))
+                failed_tools = [
+                    _safe_text(tool, 120)
+                    for tool, state in tool_state.items()
+                    if _safe_text(state, 80).lower() == "failed" and _safe_text(tool, 120)
+                ]
+                if failed_tools and has_live_task and not branch_closed:
+                    failed_label = ", ".join(failed_tools[:4])
+                    add(
+                        {
+                            "source": "work_tree",
+                            "severity": "attention",
+                            "title": f"Nova needs tool failure judgment: {failed_label}",
+                            "message": (
+                                f"Tool failure evidence exists for {node_title or tree_title}: {failed_label}. "
+                                f"Current task: {node_task_title or node_task_id or 'unknown task'}. "
+                                "Nova needs judgment before treating this as retryable work."
+                            ),
+                            "dedupe_key": f"work_tree|tool_failed|{tree_id}|{node_branch_id}|{node_task_id}|{failed_label}",
+                            "payload": self._work_tree_notice_payload(
+                                tree_id=tree_id,
+                                tree_title=tree_title,
+                                branch_id=node_branch_id,
+                                branch_title=node_title,
+                                task_id=node_task_id,
+                                task_title=node_task_title,
+                                request_kind="tool_failure_judgment",
+                                task=current_task,
+                                extra={"failed_tools": failed_tools},
+                            ),
+                        }
+                    )
+                    if len(notices) >= max(1, int(limit or 1)):
+                        break
                 if _safe_text(node.get("status"), 80).lower() != "blocked":
                     continue
-                current_task = _safe_dict(node.get("current_task"))
                 if not current_task:
                     continue
                 task_status = _safe_text(current_task.get("status"), 80).lower()
@@ -706,10 +1074,6 @@ class OperatorOutboxService:
                     or node.get("actionability"),
                     220,
                 )
-                node_branch_id = _safe_text(node.get("id"), 120)
-                node_title = _safe_text(node.get("title"), 220)
-                node_task_id = _safe_text(current_task.get("task_id"), 120)
-                node_task_title = _safe_text(current_task.get("title"), 260)
                 source = "/".join(
                     item
                     for item in (
@@ -727,20 +1091,23 @@ class OperatorOutboxService:
                         "title": title,
                         "message": message,
                         "dedupe_key": f"work_tree|blocked_task|{tree_id}|{node_branch_id}|{node_task_id}|{reason}",
-                        "payload": {
-                            "tree_id": tree_id,
-                            "tree_title": tree_title,
-                            "branch_id": node_branch_id,
-                            "branch_title": node_title,
-                            "task": current_task,
-                            "blocked_reason": reason,
-                            "request_kind": kind,
-                            "source_type": _safe_text(node.get("source_type"), 120),
-                            "work_class": _safe_text(node.get("work_class"), 120),
-                            "actionability": _safe_text(node.get("actionability"), 80),
-                            "resolution_state": _safe_text(node.get("resolution_state"), 80),
-                            "source_payload": _safe_dict(node.get("source_payload")),
-                        },
+                        "payload": self._work_tree_notice_payload(
+                            tree_id=tree_id,
+                            tree_title=tree_title,
+                            branch_id=node_branch_id,
+                            branch_title=node_title,
+                            task_id=node_task_id,
+                            task_title=node_task_title,
+                            request_kind=kind,
+                            task=current_task,
+                            extra={
+                                "blocked_reason": reason,
+                                "source_type": _safe_text(node.get("source_type"), 120),
+                                "work_class": _safe_text(node.get("work_class"), 120),
+                                "actionability": _safe_text(node.get("actionability"), 80),
+                                "resolution_state": _safe_text(node.get("resolution_state"), 80),
+                            },
+                        ),
                     }
                 )
 

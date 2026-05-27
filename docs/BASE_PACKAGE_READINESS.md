@@ -1,7 +1,7 @@
 # NYO System Base Package Readiness
 
-Date: 2026-05-18
-Last verified: 2026-05-18
+Date: 2026-05-20
+Last verified: 2026-05-20
 
 ## Purpose
 
@@ -11,20 +11,22 @@ It is intentionally stricter than "the repo runs on my machine" and narrower tha
 
 ## Current Read
 
-- release-clean candidate `2026.05.18.23` exists and is promoted `ready-with-notes`
-- base runtime package validation passed from a same-machine extracted package
-- Work Tree is complete with `0` open tasks for the current runtime governance tree
+- the current source tree is in an active refactor posture and is not a clean release tag
+- full regression truth lives in `runtime/regression_status.json`
+- package build, verify, validation, and promotion truth lives in `runtime/exports/release_packages/release_ledger.jsonl`
+- the current candidate needs a fresh full regression, package verification, release validation, and promotion record before promoted language is valid
 - not yet a final broadly deployable package until independent fresh-machine or VM validation is complete
 
 ## Current Gate Status
 
 ### Gate 1: Runtime Stability
 
-Status: satisfied for the current candidate, must be re-verified for each release
+Status: satisfied by the latest full regression record, must be re-verified for each release
 
 Required:
 
-- full regression green
+- fresh full regression green through `scripts/run_regression.py all`
+- `runtime/regression_status.json` is `OK`, fresh, and includes `unit`, `behavior`, and `integration`
 - critical smoke path green
 - no known blocking regressions in operator-console runtime flows
 
@@ -50,7 +52,7 @@ Required:
 
 ### Gate 4: Operator Handoff
 
-Status: improved and current for the `.23` release candidate, must be rerun per release candidate
+Status: improved, must be rerun per release candidate
 
 Required:
 
@@ -94,27 +96,32 @@ The package is a release candidate only when all items below are true.
 
 ### Verification
 
+- `scripts/run_regression.py all` passes immediately before release validation
+- `runtime/regression_status.json` is fresh, `OK`, and includes `unit`, `behavior`, and `integration`
 - `nova smoke-base --fix` passes
 - `nova smoke --fix` passes when the runtime model backend is part of the target deployment
 - `nova test` passes or has explicitly documented exclusions
 - package validation has been run on a clean or near-clean environment
+- release validation reports `pass` or `pass-with-notes` only after the full-regression gate passes
+- release validation exercises `nova run` launch/exit for the base target, and a scripted turn when the runtime/Ollama target is included
 - the latest candidate reports `ready` or `ready-with-notes` from `nova package-readiness`
 
-Latest packaging validation on `2026-05-18`:
+Latest packaging validation is artifact-specific and should be read from the release ledger and validation record.
 
-- release-clean candidate `2026.05.18.23` reports `ready-with-notes`
-- artifact: `runtime/exports/release_packages/nyo-system-base-rc-2026.05.18.23-proof-shape-closed-20260518_203219.zip`
-- zip verification and extracted-package validation passed
-- extracted package bootstrap succeeded from `runtime/validation/release/x-20260518203249-9bec6380/pkg`
-- extracted `nova doctor`, `nova runtime-status`, `nova wiring-check --offline`, `nova smoke-base --fix`, and `nova test` passed
-- temporary extracted web UI start/stop passed
-- release validation result is `pass-with-notes` with no blocking issues
+For a candidate to be promotable:
+
+- zip verification must pass for the same artifact path
+- release validation must run against that same artifact path
+- the validation record must be complete and artifact-matched
+- full regression status must be fresh, `OK`, and include `unit`, `behavior`, and `integration`
+- blocking release-validation issues must be `none`
 
 ## Main Remaining Gaps
 
+- record promotion for the selected validated artifact when the operator decides to promote it
 - packaging-boundary maintenance as the repo evolves
 - independent fresh-machine or VM execution of the built zip artifact is still outstanding
-- interactive `nova run` execution of the current artifact is still outstanding
+- model-backed `nova run` scripted-turn proof is still outstanding for an Ollama-included target
 - Git LFS must be installed/configured on release machines so Piper assets resolve from pointers cleanly
 - cleaner runtime dependency isolation for broad validation
 - keep regression and release-validation rerun discipline before promoting beyond release-candidate language

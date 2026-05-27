@@ -76,10 +76,12 @@ class TestControlWorkTreesService(unittest.TestCase):
         }
 
         def _list_visual_trees(limit=None):
+            calls.append(limit)
             if limit is None:
                 return limited_payload + [generated_queue_tree]
             return limited_payload
 
+        calls = []
         result = CONTROL_WORK_TREES_SERVICE.payload(
             list_visual_trees_fn=_list_visual_trees,
             limit=1,
@@ -91,6 +93,7 @@ class TestControlWorkTreesService(unittest.TestCase):
             [tree.get("tree_id") for tree in result["trees"]],
             ["tree_1", "tree_generated"],
         )
+        self.assertEqual(calls, [None])
 
     def test_payload_semantically_dedupes_runtime_ops_shells(self):
         runtime_ops_chat = {

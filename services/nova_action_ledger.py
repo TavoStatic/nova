@@ -28,7 +28,6 @@ def start_action_ledger_record(
     session_id: str = "",
     input_source: str = "typed",
     active_subject: str = "",
-    infer_turn_intent_fn: Callable[[str], str],
     action_ledger_add_step_fn: Callable[..., None],
 ) -> dict:
     record = {
@@ -37,7 +36,7 @@ def start_action_ledger_record(
         "session_id": str(session_id or "").strip(),
         "input_source": str(input_source or "typed").strip().lower() or "typed",
         "user_input": str(user_input or "").strip(),
-        "intent": infer_turn_intent_fn(user_input),
+        "intent": "",
         "planner_decision": "",
         "tool": "",
         "tool_args": {},

@@ -1,7 +1,7 @@
 # NYO System Phase Completion Assessment
 
 Date: 2026-05-18
-Last verified: 2026-05-18
+Last verified: 2026-05-20
 
 ## Purpose
 
@@ -28,12 +28,13 @@ The product direction is clear:
 
 The current problem is not lack of substance.
 
-The current problem is no longer that the current source candidate lacks release truth. `2026.05.18.23` now has a matching source commit, extracted-package validation, promotion record, and Work Tree closure.
+The current problem is no longer that the source candidate lacks release truth. The current ledger-owned candidate has extracted-package validation, promotion record, and Work Tree closure.
 
 The remaining phase problem is narrower:
 
 - independent fresh-machine or VM validation is still pending
-- interactive `nova run` validation was not exercised by the noninteractive release validator
+- base `nova run` launch/exit validation is now part of the release validator
+- model-backed `nova run` scripted-turn validation remains required when the target includes Ollama/runtime chat
 - installer validation remains separate from the source-bootstrap package truth
 - LEAH and the control panel need a separate momentum assessment before the project shifts there
 
@@ -122,7 +123,7 @@ The workspace and same-machine extracted package now agree for the `.23` source-
 What remains unproven:
 
 - independent fresh-machine or VM validation
-- interactive `nova run` validation from the current artifact
+- model-backed `nova run` scripted-turn validation for an Ollama-included target
 - installer validation for the current source package
 
 Until those are done, the project should keep `ready-with-notes` language instead of final production language.
@@ -230,8 +231,8 @@ This phase should be considered complete only when these are true:
 
 ### Must Close Now
 
-1. rerun clean-machine or VM validation for `2026.05.18.23` and record the result in the ledger
-2. exercise the interactive `nova run` front door from the current artifact
+1. rerun clean-machine or VM validation for the current ledger-owned candidate and record the result in the ledger
+2. exercise model-backed `nova run` scripted-turn validation when the target includes Ollama/runtime chat
 3. decide whether the next momentum lane is production packaging, LEAH, or the control panel
 4. keep release docs tied to the latest validation record instead of older phase notes
 

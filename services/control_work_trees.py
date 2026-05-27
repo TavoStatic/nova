@@ -79,7 +79,7 @@ class ControlWorkTreesService:
 
     def payload(self, *, list_visual_trees_fn, limit: int = 32) -> dict:
         try:
-            trees = list_visual_trees_fn(limit)
+            all_trees = list_visual_trees_fn(None)
         except Exception as exc:
             return {
                 "ok": False,
@@ -88,14 +88,11 @@ class ControlWorkTreesService:
                 "trees": [],
             }
 
-        safe_trees = list(trees) if isinstance(trees, list) else []
+        full_tree_list = list(all_trees) if isinstance(all_trees, list) else []
         if limit is not None:
-            try:
-                all_trees = list_visual_trees_fn(None)
-            except Exception:
-                all_trees = []
+            safe_trees = full_tree_list[: max(1, int(limit or 1))]
             seen_tree_ids = {str(item.get("tree_id") or "").strip() for item in safe_trees if isinstance(item, dict)}
-            for tree_payload in list(all_trees or []):
+            for tree_payload in full_tree_list:
                 if not self._priority_tree(tree_payload):
                     continue
                 tree_id = str((tree_payload or {}).get("tree_id") or "").strip()
@@ -103,6 +100,8 @@ class ControlWorkTreesService:
                     continue
                 safe_trees.append(tree_payload)
                 seen_tree_ids.add(tree_id)
+        else:
+            safe_trees = full_tree_list
 
         safe_trees = self._dedupe_visible_trees(safe_trees)
 

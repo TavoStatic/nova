@@ -43,7 +43,7 @@ class TestSubconsciousLiveSimulator(unittest.TestCase):
         self.assertFalse(result.subconscious_snapshot.get("replan_requested"))
         self.assertIsNone(result.training_backlog)
 
-    def test_fulfillment_fallthrough_scenario_surfaces_backlog_candidate(self):
+    def test_single_weak_route_scenario_records_pressure_without_training_backlog(self):
         scenario = LiveSimulationScenario(
             scenario_id="fulfillment-fallthrough",
             target_seam="fulfillment_bridge_entry_fallthrough",
@@ -57,13 +57,11 @@ class TestSubconsciousLiveSimulator(unittest.TestCase):
 
         result = simulate_live_scenario(scenario)
 
-        self.assertTrue(result.subconscious_snapshot.get("replan_requested"))
+        self.assertFalse(result.subconscious_snapshot.get("replan_requested"))
         signals = result.subconscious_snapshot.get("active_recent_signals") or []
-        self.assertIn("fulfillment_missed", signals)
-        self.assertIsInstance(result.training_backlog, dict)
-        candidate_tests = result.training_backlog.get("candidate_tests") or []
-        self.assertGreaterEqual(len(candidate_tests), 1)
-        self.assertEqual(candidate_tests[0].get("signal"), "fallback_overuse")
+        self.assertIn("route_unclear", signals)
+        self.assertIn("route_fit_weak", signals)
+        self.assertIsNone(result.training_backlog)
 
     def test_multi_turn_weak_pressure_scenario_accumulates_cracks_and_backlog(self):
         scenario = LiveSimulationScenario(
@@ -156,7 +154,7 @@ class TestSubconsciousLiveSimulator(unittest.TestCase):
         self.assertTrue(result.quiet_control_verdict.get("quiet_control"))
         self.assertEqual(result.quiet_control_verdict.get("status"), "quiet_control")
 
-    def test_fulfillment_family_stops_backlog_when_live_route_handles_variations(self):
+    def test_fulfillment_family_records_weak_route_pressure_without_content_owner(self):
         family = next(
             item for item in build_default_live_scenario_families()
             if item.family_id == "fulfillment-fallthrough-family"
@@ -165,7 +163,8 @@ class TestSubconsciousLiveSimulator(unittest.TestCase):
         result = simulate_live_family(family)
 
         signals = {item.get("signal") for item in result.repeated_signals}
-        self.assertEqual(result.noise_summary.get("useful_variations"), 0)
+        self.assertIn("route_unclear", signals)
+        self.assertIn("route_fit_weak", signals)
         self.assertNotIn("fallback_overuse", signals)
         self.assertNotIn("fulfillment_missed", signals)
         self.assertEqual(result.robust_backlog_candidates, [])
@@ -210,10 +209,10 @@ class TestSubconsciousLiveSimulator(unittest.TestCase):
 
         by_signal = {item.get("signal"): item for item in result.repeated_signals}
         script_specific_by_signal = {item.get("signal"): item for item in result.script_specific_signals}
-        self.assertEqual(by_signal["fallback_overuse"].get("classification"), "script_specific")
-        self.assertEqual(by_signal["fulfillment_missed"].get("classification"), "script_specific")
-        self.assertEqual(script_specific_by_signal["fallback_overuse"].get("classification"), "script_specific")
-        self.assertLess(script_specific_by_signal["fallback_overuse"].get("robustness_score"), 0.7)
+        self.assertEqual(by_signal["route_fit_weak"].get("classification"), "script_specific")
+        self.assertEqual(by_signal["route_unclear"].get("classification"), "script_specific")
+        self.assertEqual(script_specific_by_signal["route_fit_weak"].get("classification"), "script_specific")
+        self.assertLess(script_specific_by_signal["route_fit_weak"].get("robustness_score"), 0.7)
 
     def test_repeated_family_pressure_becomes_training_backlog_when_routes_stay_weak(self):
         family = next(
@@ -272,7 +271,7 @@ class TestSubconsciousLiveSimulator(unittest.TestCase):
         self.assertEqual(result.noise_summary.get("quiet_variations"), len(family.scenarios))
         self.assertEqual(result.robust_signals, [])
 
-    def test_patch_routing_family_stays_quiet_when_live_route_handles(self):
+    def test_patch_routing_family_records_weak_pressure_without_training_backlog(self):
         family = next(
             item for item in build_default_live_scenario_families()
             if item.family_id == "patch-routing-fallthrough-family"
@@ -280,8 +279,11 @@ class TestSubconsciousLiveSimulator(unittest.TestCase):
 
         result = simulate_live_family(family)
 
-        self.assertEqual(result.noise_summary.get("quiet_variations"), len(family.scenarios))
-        self.assertEqual(result.robust_signals, [])
+        self.assertEqual(result.noise_summary.get("noisy_variations"), len(family.scenarios))
+        signals = [item.get("signal") for item in result.robust_signals]
+        self.assertIn("route_unclear", signals)
+        self.assertIn("route_fit_weak", signals)
+        self.assertEqual(result.robust_backlog_candidates, [])
 
     def test_session_fact_recall_family_records_noisy_unwired_pressure(self):
         family = next(

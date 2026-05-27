@@ -9,15 +9,9 @@ DEFAULT_BEHAVIOR_METRICS: dict = {
     "deterministic_hit": 0,
     "tool_route": 0,
     "llm_fallback": 0,
-    "low_confidence_block": 0,
-    "correction_learned": 0,
-    "correction_applied": 0,
-    "self_correction_applied": 0,
-    "conflict_detected": 0,
     "top_repeated_failure_class": "",
     "top_repeated_correction_class": "",
     "routing_stable": True,
-    "unsupported_claims_blocked": False,
     "last_reflection_turn": 0,
     "last_reflection_at": "",
     "last_event": "",
@@ -65,8 +59,6 @@ class BehaviorMetricsStore:
                 self.metrics["top_repeated_correction_class"] = payload["top_repeated_correction_class"]
             if "routing_stable" in payload:
                 self.metrics["routing_stable"] = bool(payload["routing_stable"])
-            if "unsupported_claims_blocked" in payload:
-                self.metrics["unsupported_claims_blocked"] = bool(payload["unsupported_claims_blocked"])
             self.metrics["last_reflection_turn"] = int(count_total or 0)
             if "ts" in payload:
                 self.metrics["last_reflection_at"] = payload["ts"]

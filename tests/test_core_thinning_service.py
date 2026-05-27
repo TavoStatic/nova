@@ -357,15 +357,15 @@ class TestCoreThinningService(unittest.TestCase):
                     "def _runtime_wrapper():",
                     "    return service_demo()",
                     "",
-                    "def handle_keywords(text):",
-                    "    return service_handle_keywords(text)",
+                    "def execute_planned_action(tool, args=None):",
+                    "    return service_execute_planned_action_from_runtime(tool, args)",
                     "",
                 ]
             ),
             encoding="utf-8",
         )
         (services_dir / "demo_attrs.py").write_text(
-            "def run(core):\n    core._runtime_wrapper()\n    return core.handle_keywords('status')\n",
+            "def run(core):\n    core._runtime_wrapper()\n    return core.execute_planned_action('status')\n",
             encoding="utf-8",
         )
         try:
@@ -394,23 +394,8 @@ class TestCoreThinningService(unittest.TestCase):
                     "def speak_chunked(tts, text):",
                     "    return service_speak_chunked(tts, text)",
                     "",
-                    "def sanitize_llm_reply(reply, tool_context=''):",
-                    "    return service_sanitize_llm_reply(reply, tool_context)",
-                    "",
                     "def clear_runtime_device_location():",
                     "    return service_clear_runtime_device_location()",
-                    "",
-                    "def _store_declarative_fact_reply(text):",
-                    "    return service_store_declarative_fact_reply(text)",
-                    "",
-                    "def learn_from_user_correction(text):",
-                    "    return service_learn_from_user_correction(text)",
-                    "",
-                    "def handle_commands(user_text):",
-                    "    return service_handle_commands(user_text)",
-                    "",
-                    "def handle_keywords(text):",
-                    "    return service_handle_keywords(text)",
                     "",
                 ]
             ),
@@ -422,7 +407,7 @@ class TestCoreThinningService(unittest.TestCase):
             sample.unlink(missing_ok=True)
 
         self.assertEqual(brief.get("wrapper_candidate_count"), 0)
-        self.assertEqual(brief.get("referenced_wrapper_count"), 9)
+        self.assertEqual(brief.get("referenced_wrapper_count"), 4)
         self.assertFalse(any(item.get("kind") == "wrapper_candidate" for item in list(brief.get("orders") or [])))
 
     def test_execute_core_thinning_order_blocks_public_runtime_adapter(self):

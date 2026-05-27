@@ -1,4 +1,4 @@
-﻿import unittest
+import unittest
 import json
 from unittest import mock
 
@@ -27,12 +27,6 @@ class _PlannerCoreStub:
     def make_pending_weather_action(self):
         return {"kind": "weather_lookup", "status": "awaiting_location", "preferred_tool": "weather_location"}
 
-    def handle_commands(self, text, session_turns=None, session=None):
-        return ""
-
-    def handle_keywords(self, text):
-        return None
-
     def execute_planned_action(self, tool, args):
         self.executed.append((tool, list(args or [])))
         return self._tool_result
@@ -45,10 +39,11 @@ class _PlannerCoreStub:
 
 
 class _SessionStub:
-    def __init__(self, active_work_tree_id="", active_work_identity=""):
+    def __init__(self, active_work_tree_id="", active_work_identity="", conversation_state=None):
         self.active_work_tree_id = active_work_tree_id
         self.active_work_identity = active_work_identity
         self.last_work_continuity = ""
+        self.conversation_state = conversation_state
 
     def set_last_work_continuity(self, value: str):
         self.last_work_continuity = value
@@ -71,7 +66,12 @@ class TestPlannerContractService(unittest.TestCase):
 
     def test_maybe_handle_planner_sequence_returns_route_evidence_for_tool_run(self):
         core = _PlannerCoreStub(
-            actions=[{"type": "run_tool", "tool": "web_research", "args": ["student_data"]}],
+            semantic_intent={
+                "tool": "web_research",
+                "args": ["student_data"],
+                "confidence": 0.92,
+                "reason": "research goal",
+            },
             tool_result="Grounded result",
         )
 
@@ -84,7 +84,6 @@ class TestPlannerContractService(unittest.TestCase):
             core=core,
             trace=lambda *args, **kwargs: None,
             normalize_reply=lambda text: text,
-            is_web_preferred_data_query=lambda text: False,
         )
 
         self.assertTrue(str(reply or "").strip())
@@ -113,7 +112,6 @@ class TestPlannerContractService(unittest.TestCase):
             core=core,
             trace=lambda *args, **kwargs: None,
             normalize_reply=lambda text: text,
-            is_web_preferred_data_query=lambda text: False,
         )
 
         self.assertEqual(reply, "Weather reply")
@@ -125,7 +123,14 @@ class TestPlannerContractService(unittest.TestCase):
     def test_maybe_handle_planner_sequence_prefers_semantic_intent_over_static_parser(self):
         core = _PlannerCoreStub(
             actions=[{"type": "run_tool", "tool": "web_search", "args": ["surface parse"]}],
-            semantic_intent={"tool": "self_status", "args": [], "confidence": 0.94, "reason": "live runtime state"},
+            semantic_intent={
+                "tool": "self_status",
+                "args": [],
+                "confidence": 0.94,
+                "reason": "live runtime state",
+                "answer_target": "nova_live_state",
+                "evidence_need": "live_self_status",
+            },
             tool_result="Nova Self Status",
             weather_available=True,
         )
@@ -139,7 +144,6 @@ class TestPlannerContractService(unittest.TestCase):
             core=core,
             trace=lambda *args, **kwargs: None,
             normalize_reply=lambda text: text,
-            is_web_preferred_data_query=lambda text: False,
         )
 
         self.assertEqual(reply, "Nova Self Status")
@@ -147,31 +151,6 @@ class TestPlannerContractService(unittest.TestCase):
         self.assertEqual(meta.get("tool"), "self_status")
         self.assertEqual(meta.get("reply_contract"), "self_status.current")
         self.assertEqual(core.executed, [("self_status", [])])
-
-    def test_maybe_handle_planner_sequence_skips_semantic_tool_when_turn_has_no_actionable_act(self):
-        core = _PlannerCoreStub(
-            actions=[{"type": "run_tool", "tool": "web_search", "args": ["surface parse"]}],
-            semantic_intent={"tool": "self_status", "args": [], "confidence": 0.94, "reason": "live runtime state"},
-            tool_result="Nova Self Status",
-        )
-        traces = []
-
-        outcome = nova_planner_contract.maybe_handle_planner_sequence(
-            text="operator is providing context",
-            turns=[],
-            pending_action=None,
-            turn_acts=[],
-            prefer_web_for_data_queries=False,
-            session=None,
-            core=core,
-            trace=lambda *args, **kwargs: traces.append((args, kwargs)),
-            normalize_reply=lambda text: text,
-            is_web_preferred_data_query=lambda text: False,
-        )
-
-        self.assertIsNone(outcome)
-        self.assertEqual(core.executed, [])
-        self.assertTrue(any(args[:2] == ("action_planner", "semantic_not_actionable") for args, _kwargs in traces))
 
     def test_maybe_handle_planner_sequence_allows_semantic_non_self_tool_with_empty_turn_acts(self):
         core = _PlannerCoreStub(
@@ -191,77 +170,11 @@ class TestPlannerContractService(unittest.TestCase):
             core=core,
             trace=lambda *args, **kwargs: None,
             normalize_reply=lambda text: text,
-            is_web_preferred_data_query=lambda text: False,
         )
 
         self.assertEqual(reply, "Weather from current location")
         self.assertEqual(meta.get("tool"), "weather_current_location")
         self.assertEqual(meta.get("reply_contract"), "weather_lookup.current_location")
-
-    def test_maybe_handle_planner_sequence_contracts_verified_identity_and_capability_tools(self):
-        identity_core = _PlannerCoreStub(
-            semantic_intent={"tool": "runtime_identity", "args": [], "confidence": 0.91, "reason": "verified runtime identity"},
-            tool_result="Nova runtime identity",
-        )
-        identity_reply, identity_meta = nova_planner_contract.maybe_handle_planner_sequence(
-            text="tell me what you can verify about yourself",
-            turns=[],
-            pending_action=None,
-            prefer_web_for_data_queries=False,
-            session=None,
-            core=identity_core,
-            trace=lambda *args, **kwargs: None,
-            normalize_reply=lambda text: text,
-            is_web_preferred_data_query=lambda text: False,
-        )
-
-        capability_core = _PlannerCoreStub(
-            semantic_intent={"tool": "capability_inventory", "args": [], "confidence": 0.9, "reason": "verified capability inventory"},
-            tool_result="Nova capability inventory",
-        )
-        capability_reply, capability_meta = nova_planner_contract.maybe_handle_planner_sequence(
-            text="tell me what you can actually do from your registry",
-            turns=[],
-            pending_action=None,
-            prefer_web_for_data_queries=False,
-            session=None,
-            core=capability_core,
-            trace=lambda *args, **kwargs: None,
-            normalize_reply=lambda text: text,
-            is_web_preferred_data_query=lambda text: False,
-        )
-
-        self.assertEqual(identity_reply, "Nova runtime identity")
-        self.assertEqual(identity_meta.get("reply_contract"), "runtime_identity.current")
-        self.assertEqual(identity_core.executed, [("runtime_identity", [])])
-        self.assertEqual(capability_reply, "Nova capability inventory")
-        self.assertEqual(capability_meta.get("reply_contract"), "capability_inventory.current")
-        self.assertEqual(capability_core.executed, [("capability_inventory", [])])
-
-    def test_maybe_handle_planner_sequence_contracts_operator_help_tool(self):
-        core = _PlannerCoreStub(
-            semantic_intent={"tool": "operator_help", "args": [], "confidence": 0.91, "reason": "operator assistance request"},
-            tool_result="Today I am mainly stuck on: Work Tree needs operator context.\nSource: live control status and Work Tree.",
-        )
-
-        reply, meta = nova_planner_contract.maybe_handle_planner_sequence(
-            text="neutral user turn",
-            turns=[],
-            pending_action=None,
-            turn_acts=["ask"],
-            prefer_web_for_data_queries=False,
-            session=None,
-            core=core,
-            trace=lambda *args, **kwargs: None,
-            normalize_reply=lambda text: text,
-            is_web_preferred_data_query=lambda text: False,
-        )
-
-        self.assertIn("Work Tree needs operator context", reply)
-        self.assertEqual(meta.get("tool"), "operator_help")
-        self.assertEqual(meta.get("reply_contract"), "operator_help.current")
-        self.assertEqual((meta.get("reply_outcome") or {}).get("intent"), "operator_help")
-        self.assertEqual(core.executed, [("operator_help", [])])
 
     def test_maybe_handle_planner_sequence_contracts_system_check_tool(self):
         core = _PlannerCoreStub(
@@ -278,7 +191,6 @@ class TestPlannerContractService(unittest.TestCase):
             core=core,
             trace=lambda *args, **kwargs: None,
             normalize_reply=lambda text: text,
-            is_web_preferred_data_query=lambda text: False,
         )
 
         self.assertEqual(reply, "System check: OK")
@@ -307,7 +219,6 @@ class TestPlannerContractService(unittest.TestCase):
             core=core,
             trace=lambda *args, **kwargs: None,
             normalize_reply=lambda text: text,
-            is_web_preferred_data_query=lambda text: False,
         )
 
         self.assertIn("System check: needs attention.", reply)
@@ -336,11 +247,158 @@ class TestPlannerContractService(unittest.TestCase):
             core=core,
             trace=lambda *args, **kwargs: None,
             normalize_reply=lambda text: text,
-            is_web_preferred_data_query=lambda text: False,
         )
 
         self.assertIsNone(outcome)
         self.assertEqual(core.executed, [])
+
+    def test_maybe_handle_planner_sequence_blocks_low_confidence_no_arg_tool_payload(self):
+        observed = []
+        core = _PlannerCoreStub(
+            semantic_intent={"tool": "system_check", "args": [], "confidence": 0.31, "reason": "weak numeric signal"},
+            tool_result="System check: OK",
+        )
+
+        outcome = nova_planner_contract.maybe_handle_planner_sequence(
+            text="verify the runtime checks",
+            turns=[],
+            pending_action=None,
+            prefer_web_for_data_queries=False,
+            session=None,
+            core=core,
+            trace=lambda *args, **kwargs: None,
+            normalize_reply=lambda text: text,
+            semantic_tool_observer_fn=lambda payload: observed.append(payload),
+        )
+
+        self.assertIsNone(outcome)
+        self.assertEqual(core.executed, [])
+        self.assertEqual(observed[-1].get("status"), "weak_tool_route")
+        self.assertEqual((observed[-1].get("intent") or {}).get("tool"), "system_check")
+
+    def test_maybe_handle_planner_sequence_does_not_run_no_confidence_status_route(self):
+        observed = []
+        core = _PlannerCoreStub(
+            actions=[{"type": "run_tool", "tool": "web_search", "args": ["surface parse"]}],
+            semantic_intent={"tool": "self_status", "args": [], "confidence": 0.0, "reason": ""},
+            tool_result="LIVE STATUS",
+        )
+
+        outcome = nova_planner_contract.maybe_handle_planner_sequence(
+            text="hello",
+            turns=[],
+            pending_action=None,
+            prefer_web_for_data_queries=False,
+            session=None,
+            core=core,
+            trace=lambda *args, **kwargs: None,
+            normalize_reply=lambda text: text,
+            semantic_tool_observer_fn=lambda payload: observed.append(payload),
+        )
+
+        self.assertIsNone(outcome)
+        self.assertEqual(core.executed, [])
+        self.assertEqual(observed[-1].get("status"), "weak_tool_route")
+        self.assertEqual((observed[-1].get("intent") or {}).get("tool"), "self_status")
+
+    def test_maybe_handle_planner_sequence_routes_live_status_from_structured_pair_without_numeric_confidence(self):
+        core = _PlannerCoreStub(
+            semantic_intent={
+                "tool": "self_status",
+                "args": [],
+                "confidence": 0.0,
+                "reason": "",
+                "answer_target": "nova_live_state",
+                "evidence_need": "live_self_status",
+            },
+            tool_result="Nova Self Status",
+        )
+
+        reply, meta = nova_planner_contract.maybe_handle_planner_sequence(
+            text="what is troubling you today?",
+            turns=[],
+            pending_action=None,
+            prefer_web_for_data_queries=False,
+            session=None,
+            core=core,
+            trace=lambda *args, **kwargs: None,
+            normalize_reply=lambda text: text,
+        )
+
+        self.assertEqual(reply, "Nova Self Status")
+        self.assertEqual(meta.get("planner_decision"), "run_tool")
+        self.assertEqual(meta.get("tool"), "self_status")
+        self.assertEqual(core.executed, [("self_status", [])])
+
+    def test_maybe_handle_planner_sequence_blocks_status_tool_without_live_status_contract(self):
+        observed = []
+        core = _PlannerCoreStub(
+            semantic_intent={
+                "tool": "self_status",
+                "args": [],
+                "confidence": 0.95,
+                "reason": "bare status tool is not enough",
+                "answer_target": "current_conversation",
+                "evidence_need": "conversation",
+            },
+            tool_result="Nova Self Status",
+        )
+
+        outcome = nova_planner_contract.maybe_handle_planner_sequence(
+            text="ordinary conversation turn",
+            turns=[],
+            pending_action=None,
+            prefer_web_for_data_queries=False,
+            session=None,
+            core=core,
+            trace=lambda *args, **kwargs: None,
+            normalize_reply=lambda text: text,
+            semantic_tool_observer_fn=lambda payload: observed.append(payload),
+        )
+
+        self.assertIsNone(outcome)
+        self.assertEqual(core.executed, [])
+        self.assertEqual(observed[-1].get("status"), "weak_tool_route")
+
+    def test_maybe_handle_planner_sequence_does_not_rerun_no_arg_tool_when_evidence_is_available(self):
+        core = _PlannerCoreStub(
+            semantic_intent={
+                "tool": "self_status",
+                "args": [],
+                "confidence": 0.0,
+                "answer_target": "nova_live_state",
+                "evidence_need": "live_self_status",
+            },
+            tool_result="Nova Self Status",
+        )
+        session = _SessionStub(
+            conversation_state={
+                "kind": "last_tool_evidence",
+                "tool": "self_status",
+                "tool_result": "Previous Nova Self Status",
+            }
+        )
+        traces = []
+        observed = []
+
+        outcome = nova_planner_contract.maybe_handle_planner_sequence(
+            text="explain the status you just gave",
+            turns=[],
+            pending_action=None,
+            prefer_web_for_data_queries=False,
+            session=session,
+            core=core,
+            trace=lambda *args, **kwargs: traces.append((args, kwargs)),
+            normalize_reply=lambda text: text,
+            semantic_tool_observer_fn=lambda payload: observed.append(payload),
+        )
+
+        self.assertIsNone(outcome)
+        self.assertEqual(core.executed, [])
+        self.assertTrue(any(args[:2] == ("action_planner", "tool_evidence_available") for args, _kwargs in traces))
+        self.assertEqual(observed[-1].get("status"), "tool_evidence_available")
+        self.assertEqual((observed[-1].get("intent") or {}).get("answer_target"), "current_conversation")
+        self.assertEqual((observed[-1].get("intent") or {}).get("evidence_need"), "conversation")
 
     def test_maybe_handle_planner_sequence_routes_semantic_work_tree_status(self):
         core = _PlannerCoreStub(
@@ -358,7 +416,6 @@ class TestPlannerContractService(unittest.TestCase):
                 core=core,
                 trace=lambda *args, **kwargs: None,
                 normalize_reply=lambda text: text,
-                is_web_preferred_data_query=lambda text: False,
             )
 
         self.assertIn("Active work tree:", reply)
@@ -381,7 +438,6 @@ class TestPlannerContractService(unittest.TestCase):
             core=core,
             trace=lambda *args, **kwargs: None,
             normalize_reply=lambda text: text,
-            is_web_preferred_data_query=lambda text: False,
         )
 
         self.assertIn("What location", reply)
@@ -417,7 +473,6 @@ class TestPlannerContractService(unittest.TestCase):
                 core=_PlannerCoreStub(semantic_intent={"tool": "work_tree_next", "args": [], "confidence": 0.9}),
                 trace=lambda *args, **kwargs: None,
                 normalize_reply=lambda text: text,
-                is_web_preferred_data_query=lambda text: False,
             )
 
         self.assertTrue(str(reply or "").strip())
@@ -442,7 +497,6 @@ class TestPlannerContractService(unittest.TestCase):
                 core=_PlannerCoreStub(semantic_intent={"tool": "work_tree_next", "args": [], "confidence": 0.9}),
                 trace=lambda *args, **kwargs: None,
                 normalize_reply=lambda text: text,
-                is_web_preferred_data_query=lambda text: False,
             )
 
         self.assertTrue(str(reply or "").strip())
@@ -470,7 +524,6 @@ class TestPlannerContractService(unittest.TestCase):
                 core=_PlannerCoreStub(semantic_intent={"tool": "work_tree_execute", "args": [], "confidence": 0.9}),
                 trace=lambda *args, **kwargs: None,
                 normalize_reply=lambda text: text,
-                is_web_preferred_data_query=lambda text: False,
             )
 
         self.assertTrue(str(reply or "").strip())
@@ -488,7 +541,6 @@ class TestPlannerContractService(unittest.TestCase):
                 core=_PlannerCoreStub(semantic_intent={"tool": "work_tree_create", "args": ["inspect runtime"], "confidence": 0.9}),
                 trace=lambda *args, **kwargs: None,
                 normalize_reply=lambda text: text,
-                is_web_preferred_data_query=lambda text: False,
                 ensure_active_work_tree_fn=lambda _text: "tree_1",
             )
 
@@ -508,7 +560,6 @@ class TestPlannerContractService(unittest.TestCase):
                 core=_PlannerCoreStub(semantic_intent={"tool": "work_tree_status", "args": [], "confidence": 0.9}),
                 trace=lambda *args, **kwargs: None,
                 normalize_reply=lambda text: text,
-                is_web_preferred_data_query=lambda text: False,
             )
 
         self.assertTrue(str(reply or "").strip())
@@ -527,7 +578,6 @@ class TestPlannerContractService(unittest.TestCase):
             core=_PlannerCoreStub(actions=[]),
             trace=lambda *args, **kwargs: None,
             normalize_reply=lambda text: text,
-            is_web_preferred_data_query=lambda text: False,
             ensure_active_work_tree_fn=lambda _text: ensure_calls.append(_text) or "tree_auto_1",
             work_tree_seed_source="chat",
             work_tree_seed_mode="",
@@ -548,7 +598,6 @@ class TestPlannerContractService(unittest.TestCase):
             core=_PlannerCoreStub(actions=[]),
             trace=lambda *args, **kwargs: None,
             normalize_reply=lambda text: text,
-            is_web_preferred_data_query=lambda text: False,
             ensure_active_work_tree_fn=lambda _text: ensure_calls.append(_text) or "tree_should_not_seed",
             work_tree_seed_source="chat",
             work_tree_seed_mode="",
@@ -579,7 +628,6 @@ class TestPlannerContractService(unittest.TestCase):
                 core=_PlannerCoreStub(semantic_intent={"tool": "work_tree_next", "args": [], "confidence": 0.9}),
                 trace=lambda *args, **kwargs: None,
                 normalize_reply=lambda text: text,
-                is_web_preferred_data_query=lambda text: False,
             )
 
         self.assertTrue(str(reply or "").strip())

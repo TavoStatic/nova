@@ -13,7 +13,6 @@ def test_normalize_sequence_reply_falls_back_when_override_raises():
     assert normalize_sequence_reply(
         "hello",
         ensure_reply_fn=lambda text: f"[{text}]",
-        apply_reply_overrides_fn=lambda _text: (_ for _ in ()).throw(RuntimeError("boom")),
     ) == "[hello]"
 
 
@@ -48,10 +47,6 @@ def test_apply_sequence_result_updates_ledger_and_context():
         },
         set_pending_action_fn=lambda value: setattr(session, "pending_action", value),
         session_state=session,
-        routed_text="nova",
-        turns=turns,
-        fallback_state={"kind": "before"},
-        infer_post_reply_conversation_state_fn=lambda *args, **kwargs: {"kind": "ignored"},
         apply_reply_runtime_effects_fn=lambda **kwargs: {
             "context_updated": True,
             "recent_tool_context": "tool ctx",
@@ -63,7 +58,7 @@ def test_apply_sequence_result_updates_ledger_and_context():
         emit_cli_reply_outcome_fn=lambda **kwargs: turns.append(("assistant", kwargs["reply_text"])),
         behavior_record_event_fn=lambda *args, **kwargs: None,
         extract_urls_fn=lambda text: [text],
-        detect_identity_conflict_fn=lambda *args, **kwargs: False,
+        session_turns=[("user", "nova")],
         recent_tool_context="old",
         recent_web_urls=[],
     )
@@ -95,5 +90,4 @@ def test_execute_cli_sequence_enables_early_planner_and_stops_before_llm():
 
     assert reply == "reply"
     assert meta["planner_decision"] == "unhandled"
-    assert captured["planner_before_deterministic_content"] is True
     assert captured["stop_before_llm_fallback"] is True

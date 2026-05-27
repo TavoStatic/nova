@@ -8,7 +8,10 @@ class TestMemoryRoutingService(unittest.TestCase):
         self.service = MemoryRoutingService()
 
     def test_preference_query_is_allowed(self):
-        plan = self.service.plan_durable_recall("what colors does the user like favorite color preference")
+        plan = self.service.plan_durable_recall(
+            "operator requested durable recall",
+            purpose="user_preferences",
+        )
 
         self.assertTrue(plan.allow)
         self.assertEqual(plan.lane, "durable_user")
@@ -31,7 +34,8 @@ class TestMemoryRoutingService(unittest.TestCase):
 
     def test_identity_fallback_overrides_session_priority(self):
         plan = self.service.plan_durable_recall(
-            "nova name origin story creator gus",
+            "operator requested durable recall",
+            purpose="identity_fallback",
             conversation_state={"kind": "retrieval"},
         )
 

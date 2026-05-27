@@ -115,26 +115,8 @@ class MemoryAdapterService:
         if len(t) < self.mem_store_min_chars():
             return False, "too_short"
 
-        q_starts = (
-            "what ", "where ", "who ", "why ", "how ", "when ", "which ",
-            "do ", "did ", "can ", "could ", "would ", "is ", "are ", "should ",
-        )
-        if low.endswith("?") or any(low.startswith(q) for q in q_starts):
+        if low.endswith("?"):
             return False, "question"
-
-        low_value = {
-            "ok", "okay", "k", "kk", "yes", "no", "thanks", "thank you",
-            "done", "cool", "nice", "great", "sounds good", "got it", "understood",
-        }
-        if low in low_value:
-            return False, "ack"
-
-        noise_prefixes = (
-            "tip:", "nova:", "assistant:", "user:", "i couldn't find grounded sources",
-            "please try:", "network error:", "loading", "checking",
-        )
-        if any(low.startswith(p) for p in noise_prefixes):
-            return False, "ui_noise"
 
         for pat in self.mem_store_exclude_patterns():
             try:
@@ -152,17 +134,16 @@ class MemoryAdapterService:
                 if pat.lower() in low:
                     return True, "policy_include"
 
-        durable_markers = (
-            "my name is", "i am", "i'm", "i live in", "my location is", "i work",
-            "my favorite", "i like ", "developer", "gus", "gustavo", "peims",
-            "always", "never", "remember this", "learned_fact:",
-        )
+        words = re.findall(r"[A-Za-z0-9_]+", t)
         has_number = bool(re.search(r"\b\d{2,}\b", t))
-        if any(m in low for m in durable_markers) or has_number:
-            return True, "durable_fact"
+        if has_number:
+            return True, "structured_value"
 
-        if len(t.split()) >= 8:
+        if len(words) >= 8:
             return True, "long_statement"
+
+        if len(words) >= 3:
+            return True, "declarative_statement"
 
         return False, "low_signal"
 

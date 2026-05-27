@@ -9,6 +9,31 @@ from services.validation_artifact_truth import ValidationArtifactTruthService
 
 
 class TestValidationArtifactTruthService(unittest.TestCase):
+    def test_missing_validation_action_directory_is_unknown_not_ok(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime_dir = Path(tmp)
+            (runtime_dir / "regression_status.json").write_text(
+                json.dumps({
+                    "generated_at": "2026-05-15 00:08:43",
+                    "status": "OK",
+                    "returncode": 0,
+                    "source": "scripts/run_regression.py",
+                }),
+                encoding="utf-8",
+            )
+
+            payload = ValidationArtifactTruthService().payload(
+                runtime_dir=runtime_dir,
+                regression_status_path=runtime_dir / "regression_status.json",
+            )
+
+        self.assertFalse(payload["ok"])
+        self.assertEqual(payload["status"], "validation_actions_missing")
+        self.assertEqual(payload["truth_state"], "unknown")
+        self.assertTrue(payload["missing_artifact"])
+        self.assertEqual(payload["action_count"], 0)
+        self.assertEqual(payload["latest_regression_status"], "OK")
+
     def test_detects_llm_failure_hidden_under_green_regression(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             runtime_dir = Path(tmp)

@@ -160,21 +160,11 @@ class TestWeatherBehavior(unittest.TestCase):
 
     def test_weather_current_location_requires_coords(self):
         self._write_policy(["api.weather.gov"])
-        out = nova_core.handle_commands("weather current location")
+        out = nova_core.execute_planned_action("weather_current_location", [])
         self.assertIn("need a confirmed location or coordinates", out)
 
-    def test_sanitize_blocks_ungrounded_weather_fetch_claim(self):
-        self._write_policy(["weather.com"])
-        out = nova_core.sanitize_llm_reply("I fetched the weather data but didn't display it directly.", tool_context="")
-        self.assertIn("reliable structured weather source", out)
-
-    def test_sanitize_blocks_fake_weather_action_promise(self):
-        out = nova_core.sanitize_llm_reply("I'll try to find out the weather for our location. Let me check...", tool_context="")
-        self.assertIn("haven't actually run the weather tool", out)
-        self.assertIn("our current location", out)
-
     def test_location_coords_command_saves_state(self):
-        out = nova_core.handle_commands("location coords 25.9017,-97.4975")
+        out = nova_core.set_location_coords("25.9017,-97.4975")
         self.assertIn("Saved current location coordinates", out)
 
         st = nova_core.read_core_state(self.state_path)
@@ -184,7 +174,7 @@ class TestWeatherBehavior(unittest.TestCase):
 
     def test_weather_current_location_uses_saved_coords(self):
         self._write_policy(["api.weather.gov"])
-        nova_core.handle_commands("location coords 25.9017,-97.4975")
+        nova_core.set_location_coords("25.9017,-97.4975")
 
         calls = {"n": 0}
 
@@ -210,7 +200,7 @@ class TestWeatherBehavior(unittest.TestCase):
             )
 
         nova_core.requests.get = fake_get
-        out = nova_core.handle_commands("weather current location")
+        out = nova_core.execute_planned_action("weather_current_location", [])
         self.assertIn("25.9017,-97.4975:", out)
         self.assertIn("[source: api.weather.gov]", out)
         self.assertEqual(calls["n"], 2)
@@ -254,7 +244,7 @@ class TestWeatherBehavior(unittest.TestCase):
             )
 
         nova_core.requests.get = fake_get
-        out = nova_core.handle_commands("weather current location")
+        out = nova_core.execute_planned_action("weather_current_location", [])
         self.assertIn("30.2672,-97.7431:", out)
         self.assertIn("[source: api.weather.gov]", out)
         self.assertEqual(calls["n"], 2)
@@ -285,128 +275,6 @@ class TestWeatherBehavior(unittest.TestCase):
         self.assertTrue(provider.get("winsdk_installed"))
         self.assertEqual(provider.get("name"), "windows_geolocator")
 
-    def test_natural_weather_phrase_stays_conversation_owned(self):
-        self._write_policy(["api.weather.gov"])
-        out = nova_core.handle_commands("nova give me the weather")
-        self.assertIsNone(out)
-
-    def test_natural_weather_phrase_with_your_location_does_not_auto_use_saved_location(self):
-        self._write_policy(["api.weather.gov"])
-        nova_core.set_location_text("Brownsville TX")
-        calls = {"n": 0}
-
-        def fake_get(url, headers=None, timeout=0):
-            calls["n"] += 1
-            if "api.weather.gov/points/" in url:
-                return _FakeResponse({"properties": {"forecast": "https://api.weather.gov/gridpoints/BRO/64,48/forecast"}})
-            return _FakeResponse(
-                {
-                    "properties": {
-                        "periods": [
-                            {
-                                "name": "Tonight",
-                                "temperature": 74,
-                                "temperatureUnit": "F",
-                                "shortForecast": "Mostly Clear",
-                                "windSpeed": "10 mph",
-                                "windDirection": "SE",
-                            }
-                        ]
-                    }
-                }
-            )
-
-        nova_core.requests.get = fake_get
-        out = nova_core.handle_commands("can you give me the current weather in your location ?")
-        self.assertIsNone(out)
-        self.assertEqual(calls["n"], 0)
-
-    def test_use_physical_location_without_task_context_clarifies(self):
-        self._write_policy(["api.weather.gov"])
-        nova_core.set_location_text("Brownsville TX")
-
-        calls = {"n": 0}
-
-        def fake_get(url, headers=None, timeout=0):
-            calls["n"] += 1
-            if "api.weather.gov/points/" in url:
-                return _FakeResponse({"properties": {"forecast": "https://api.weather.gov/gridpoints/BRO/64,48/forecast"}})
-            return _FakeResponse(
-                {
-                    "properties": {
-                        "periods": [
-                            {
-                                "name": "Tonight",
-                                "temperature": 74,
-                                "temperatureUnit": "F",
-                                "shortForecast": "Mostly Clear",
-                                "windSpeed": "10 mph",
-                                "windDirection": "SE",
-                            }
-                        ]
-                    }
-                }
-            )
-
-        out = nova_core.handle_commands("use your physical location")
-        self.assertIsNone(out)
-        self.assertEqual(calls["n"], 0)
-
-    def test_use_your_location_nova_without_task_context_clarifies(self):
-        self._write_policy(["api.weather.gov"])
-        nova_core.set_location_text("Brownsville TX")
-
-        def fake_get(url, headers=None, timeout=0):
-            if "api.weather.gov/points/" in url:
-                return _FakeResponse({"properties": {"forecast": "https://api.weather.gov/gridpoints/BRO/64,48/forecast"}})
-            return _FakeResponse(
-                {
-                    "properties": {
-                        "periods": [
-                            {
-                                "name": "Tonight",
-                                "temperature": 74,
-                                "temperatureUnit": "F",
-                                "shortForecast": "Mostly Clear",
-                                "windSpeed": "10 mph",
-                                "windDirection": "SE",
-                            }
-                        ]
-                    }
-                }
-            )
-
-        out = nova_core.handle_commands("use your location nova")
-        self.assertIsNone(out)
-
-    def test_weather_for_current_physical_locaiton_typo_stays_conversation_owned(self):
-        self._write_policy(["api.weather.gov"])
-        nova_core.set_location_text("Brownsville TX")
-
-        def fake_get(url, headers=None, timeout=0):
-            if "api.weather.gov/points/" in url:
-                return _FakeResponse({"properties": {"forecast": "https://api.weather.gov/gridpoints/BRO/64,48/forecast"}})
-            return _FakeResponse(
-                {
-                    "properties": {
-                        "periods": [
-                            {
-                                "name": "Tonight",
-                                "temperature": 74,
-                                "temperatureUnit": "F",
-                                "shortForecast": "Mostly Clear",
-                                "windSpeed": "10 mph",
-                                "windDirection": "SE",
-                            }
-                        ]
-                    }
-                }
-            )
-
-        nova_core.requests.get = fake_get
-        out = nova_core.handle_commands("Give me the weather for your current physical locaiton nova")
-        self.assertIsNone(out)
-
 
 class TestLlmRoutingIntentClassifier(unittest.TestCase):
     """Validates _llm_classify_routing_intent — the non-keyword routing path.
@@ -425,12 +293,18 @@ class TestLlmRoutingIntentClassifier(unittest.TestCase):
         nova_core.get_saved_location_text = self.orig_location
 
     def _mock_llm_label(self, label: str):
+        content = label
+        if label == "weather_lookup":
+            content = '{"tool":"weather_current_location","args":[],"confidence":0.91,"reason":"weather intent"}'
+        elif label == "general_chat":
+            content = '{"tool":"none","args":[],"confidence":0.88,"reason":"conversation"}'
+
         class _Resp:
             def raise_for_status(self):
                 pass
 
             def json(self):
-                return {"message": {"content": label}}
+                return {"message": {"content": content}}
 
         nova_core.requests.post = lambda *a, **kw: _Resp()
 

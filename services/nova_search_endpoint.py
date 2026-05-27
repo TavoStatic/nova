@@ -69,12 +69,15 @@ def probe_search_endpoint(
     *,
     timeout: float = 2.5,
     persist_repair: bool = False,
+    candidate_limit: int | None = None,
     get_search_endpoint_fn: Callable[[], str],
     auto_repair_search_endpoint_fn: Callable[[str], str],
     requests_get_fn: Callable[..., object],
 ) -> dict:
     configured = normalize_search_endpoint(endpoint or get_search_endpoint_fn())
     candidates = search_endpoint_candidates(configured)
+    if isinstance(candidate_limit, int) and candidate_limit > 0:
+        candidates = candidates[:candidate_limit]
     last_note = "endpoint_unreachable"
     candidate_errors: list[dict[str, str]] = []
     for candidate in candidates:

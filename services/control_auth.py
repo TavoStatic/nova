@@ -5,6 +5,9 @@ import secrets
 import time
 
 
+CONTROL_LOCAL_ONLY_REASON = "control_local_only_set_NOVA_CONTROL_TOKEN"
+
+
 class ControlAuthService:
     """Own control login/session gating helpers outside the HTTP transport layer."""
 
@@ -64,7 +67,7 @@ class ControlAuthService:
             return True, ""
         if is_local_client_fn(handler):
             return True, ""
-        return False, "control_local_only_set_NOVA_CONTROL_TOKEN"
+        return False, CONTROL_LOCAL_ONLY_REASON
 
     def control_api_auth(
         self,
@@ -91,7 +94,7 @@ class ControlAuthService:
 
         if is_local_client_fn(handler):
             return True, ""
-        return False, "control_local_only_set_NOVA_CONTROL_TOKEN"
+        return False, CONTROL_LOCAL_ONLY_REASON
 
     @staticmethod
     def new_control_session(*, control_sessions: dict, ttl_seconds: int, token_hex_fn=secrets.token_hex, now_fn=time.time) -> str:

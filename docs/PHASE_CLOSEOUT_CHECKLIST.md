@@ -44,14 +44,14 @@ The current phase is complete only when every item below is true.
 - [x] `nova install` works from the workspace root
 - [x] `nova doctor` passes from the workspace root
 - [x] `nova runtime-status` is readable and truthful from the workspace root
-- [-] `nova run` and `nova webui-start` launch cleanly enough for operator use
+- [x] `nova run` and `nova webui-start` launch cleanly enough for operator use
 - [x] focused or compact regression is green for the current candidate
 
 Current read:
 
 - workspace launcher validation is documented green in `docs/STATUS.md`
 - compact regression is documented green
-- operator use is credible, but should still be treated as part of final release-candidate rerun discipline
+- operator launch proof is now part of release-candidate validation; model-backed scripted turns remain target-specific when Ollama/runtime chat is included
 
 Primary references:
 
@@ -81,16 +81,15 @@ Primary references:
 
 - [x] installer or extracted-package validation has been run against an isolated or clean target
 - [x] the installed or extracted copy passes `doctor`
-- [ ] the installed or extracted copy passes `runtime-status`
-- [ ] the installed or extracted copy does not depend on hidden workspace assumptions
+- [x] the installed or extracted copy passes `runtime-status`
+- [-] the installed or extracted copy does not depend on hidden workspace assumptions
 - [x] any deviations are written into the release ledger as notes, not carried informally
 
 Current read:
 
-- isolated same-machine installer validation has been run
-- guided installed copy created `.venv` and passed `doctor`
-- installed-copy `runtime-status` still exposed a real launcher/runtime gap in the packaged `nova.ps1`
-- this section is still phase-blocking until installed-copy truth matches workspace truth
+- same-machine extracted-package validation has run and passed `doctor` and `runtime-status`
+- extracted-package validation still does not prove fresh-machine or VM independence
+- this section remains partial until clean-machine or VM truth matches workspace truth
 
 Primary references:
 
@@ -164,6 +163,7 @@ Treat these as blocking for phase closeout:
 
 - installed-copy failures that do not appear in workspace validation
 - incorrect launcher/runtime-status truth in a packaged or installed copy
+- missing model-backed `nova run` scripted-turn proof when the target includes Ollama/runtime chat
 - stale duplicated logic that leaves HTTP and core behavior disagreeing
 - package or installer readiness state that does not match the real validation evidence
 - documentation that instructs operators to do something the shipped candidate does not actually support

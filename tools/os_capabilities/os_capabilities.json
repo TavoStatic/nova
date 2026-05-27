@@ -67,6 +67,41 @@
       "evidence_schema_version": "1.0.0"
     },
     {
+      "name": "inspect_runtime_health",
+      "contract_version": "0.1.0",
+      "status": "active",
+      "authority_level": "read_only",
+      "mutating": false,
+      "locality": "local_os",
+      "script": {
+        "kind": "powershell",
+        "path": "tools/os_capabilities/inspect_runtime_health.ps1",
+        "sha256": "9e7a98e3268cd2aa66b7537a89e8c46b230eee53d1d949203391ce4d99ee1d31",
+        "timeout_ms": 12000,
+        "working_directory": "."
+      },
+      "arg_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "guard_log_lines": {
+            "type": "integer",
+            "default": 60,
+            "minimum": 1,
+            "maximum": 500
+          },
+          "stale_after_seconds": {
+            "type": "integer",
+            "default": 120,
+            "minimum": 1,
+            "maximum": 3600
+          }
+        },
+        "required": []
+      },
+      "evidence_schema_version": "1.0.0"
+    },
+    {
       "name": "scan_large_files",
       "contract_version": "0.1.0",
       "status": "active",

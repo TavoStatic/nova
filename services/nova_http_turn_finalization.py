@@ -1,6 +1,14 @@
 from __future__ import annotations
 
+from services.nova_reply_context_contract import TOOL_CONTEXT_PLACEHOLDER
 from services.nova_session_state import apply_reply_session_updates
+
+
+def session_reply_for_context(reply_text: str, *, planner_decision: str = "") -> str:
+    reply = str(reply_text or "")
+    if str(planner_decision or "").strip() == "run_tool" and reply.strip():
+        return TOOL_CONTEXT_PLACEHOLDER
+    return reply
 
 
 class NovaHttpTurnFinalizationService:
@@ -95,7 +103,11 @@ class NovaHttpTurnFinalizationService:
         action_ledger_route_summary_fn,
     ) -> str:
         reply = str(flow_result.get("reply") or "")
-        append_session_turn_fn(session_id, "assistant", reply)
+        append_session_turn_fn(
+            session_id,
+            "assistant",
+            session_reply_for_context(reply, planner_decision=str(flow_result.get("planner_decision") or "deterministic")),
+        )
         return self.finalize_http_reply(
             reply,
             session=session,
@@ -127,12 +139,8 @@ class NovaHttpTurnFinalizationService:
         ledger: dict,
         routing_decision: dict | None,
         meta: dict | None,
-        routed_text: str,
-        turns: list[tuple[str, str]],
-        fallback_state,
         append_session_turn_fn,
         behavior_record_event_fn,
-        infer_post_reply_conversation_state_fn,
         build_turn_reflection_fn,
         finalize_action_ledger_record_fn,
         finalize_routing_decision_fn,
@@ -141,13 +149,16 @@ class NovaHttpTurnFinalizationService:
         reply_outcome_payload = self.apply_reply_outcome(
             session=session,
             meta=meta,
-            routed_text=routed_text,
-            turns=turns,
-            fallback_state=fallback_state,
             behavior_record_event_fn=behavior_record_event_fn,
-            infer_post_reply_conversation_state_fn=infer_post_reply_conversation_state_fn,
         )
-        append_session_turn_fn(session_id, "assistant", reply_text)
+        append_session_turn_fn(
+            session_id,
+            "assistant",
+            session_reply_for_context(
+                reply_text,
+                planner_decision=str(reply_outcome_payload.get("planner_decision") or "deterministic"),
+            ),
+        )
         return self.finalize_http_reply(
             reply_text,
             session=session,
@@ -173,11 +184,7 @@ class NovaHttpTurnFinalizationService:
         *,
         session,
         meta: dict | None,
-        routed_text: str,
-        turns: list[tuple[str, str]],
-        fallback_state,
         behavior_record_event_fn,
-        infer_post_reply_conversation_state_fn,
     ) -> dict:
         payload = meta if isinstance(meta, dict) else {}
         planner_decision = str(payload.get("planner_decision") or "deterministic")
@@ -202,10 +209,6 @@ class NovaHttpTurnFinalizationService:
                 "tool_result": tool_result,
                 "pending_action": payload.get("pending_action"),
             },
-            routed_text=routed_text,
-            turns=turns,
-            fallback_state=fallback_state,
-            infer_post_reply_conversation_state=infer_post_reply_conversation_state_fn,
         )
         return {
             "planner_decision": planner_decision,

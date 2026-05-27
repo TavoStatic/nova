@@ -5,6 +5,8 @@ import os
 from pathlib import Path
 from typing import Iterable
 
+from services.nova_inventory_labels import shared_inventory_label
+
 
 @dataclass(frozen=True)
 class SourceRoot:
@@ -21,32 +23,42 @@ SOURCE_ROOTS: tuple[SourceRoot, ...] = (
     ),
     SourceRoot(
         "runtime_control",
-        "Runtime start/stop/restart control, process identity, timelines, and restart provenance",
+        shared_inventory_label("runtime_control"),
         ("services/runtime_control.py", "services/runtime_process_state.py", "services/runtime_restart_provenance.py"),
     ),
     SourceRoot(
         "scheduler_registry",
-        "Maintenance schedule registry and detached worker cycle ownership",
+        shared_inventory_label("scheduler_registry"),
         ("services/schedule_registry.py", "autonomy_maintenance.py", "nova_guard.py"),
     ),
     SourceRoot(
+        "autonomy_maintenance",
+        "Autonomy maintenance worker state, cycle execution, and maintenance error pressure",
+        ("autonomy_maintenance.py", "services/work_tree_signal_ingestion.py", "services/runtime_control.py"),
+    ),
+    SourceRoot(
+        "autonomy_orchestrator",
+        "Autonomy orchestrator decisions, advisory actions, ledger evidence, and blockage pressure",
+        ("services/autonomy_orchestrator.py", "autonomy_maintenance.py", "services/work_tree_signal_ingestion.py"),
+    ),
+    SourceRoot(
         "model_runtime",
-        "Ollama server, version/API contract, model availability, chat route, and port ownership",
+        shared_inventory_label("model_runtime"),
         ("services/ollama_health.py", "services/port_ownership.py", "services/nova_ollama_chat.py"),
     ),
     SourceRoot(
         "frontdoor_cli",
-        "Nova command front door, shell dispatch, and local CLI entrypoints",
+        shared_inventory_label("frontdoor_cli"),
         ("nova.cmd", "nova.ps1", "agent.py", "run.py", "run_tools.py"),
     ),
     SourceRoot(
         "http_api_control",
-        "HTTP transport, API route dispatch, control room, auth, and action hooks",
+        shared_inventory_label("http_api_control"),
         ("nova_http.py", "services/nova_http_get_routes.py", "services/nova_http_post_dispatch.py", "services/control_auth.py"),
     ),
     SourceRoot(
         "operator_control",
-        "Operator macros, backend commands, local operator CLI, and control-action dispatcher",
+        shared_inventory_label("operator_control"),
         ("services/operator_control.py", "services/operator_outbox.py", "services/nova_control_action_dispatcher.py", "scripts/operator_cli.py"),
     ),
     SourceRoot(
@@ -56,57 +68,57 @@ SOURCE_ROOTS: tuple[SourceRoot, ...] = (
     ),
     SourceRoot(
         "session_identity_auth",
-        "Chat users, control sessions, active session state, and auth identity",
+        shared_inventory_label("session_identity_auth"),
         ("services/chat_identity.py", "services/session_admin.py", "http_session_store.py", "services/control_login_frontdoor.py"),
     ),
     SourceRoot(
         "memory_identity",
-        "Memory health, bootstrap origin, identity persistence, and learned facts",
+        shared_inventory_label("memory_identity"),
         ("memory.py", "services/memory_health.py", "services/memory_identity_bootstrap.py", "services/memory_bootstrap_origin.py"),
     ),
     SourceRoot(
         "identity_profile_answers",
-        "Developer identity, preference answers, profile followups, and identity-specific reply paths",
-        ("services/nova_developer_profile.py", "services/nova_identity_answers.py", "services/nova_identity_preferences.py"),
+        shared_inventory_label("identity_profile_answers"),
+        ("services/memory_routing.py", "services/nova_memory_learning.py", "services/memory_identity_bootstrap.py"),
     ),
     SourceRoot(
         "conversation_routing",
-        "Turn parsing, HTTP routing, route probes, deterministic reply sequencing, and continuity",
-        ("routing/context_router.py", "routing/command_router.py", "services/nova_http_routing.py", "services/nova_reply_sequence.py"),
+        shared_inventory_label("conversation_routing"),
+        ("services/nova_routing_support.py", "services/nova_reply_sequence.py", "services/nova_planner_contract.py"),
     ),
     SourceRoot(
         "supervisor_fulfillment",
-        "Supervisor ownership, fulfillment flow, shared routing rules, and follow-up dispatch",
+        shared_inventory_label("supervisor_fulfillment"),
         ("supervisor.py", "services/supervisor_registry.py", "services/fulfillment_flow.py", "services/nova_fulfillment_routing.py"),
     ),
     SourceRoot(
         "reply_quality_contracts",
-        "Reply contracts, guards, truth hierarchy, reflection health, and final-turn shaping",
-        ("services/nova_reply_contracts.py", "services/nova_reply_guards.py", "services/nova_truth_hierarchy.py"),
+        shared_inventory_label("reply_quality_contracts"),
+        ("services/nova_reflection_health.py", "services/nova_reply_runtime.py"),
     ),
     SourceRoot(
         "web_search",
-        "Web/search provider policy, SearXNG, provider telemetry, and research tools",
+        shared_inventory_label("web_search"),
         ("services/nova_web_tools.py", "services/nova_http_policy_search.py", "services/web_research_session.py"),
     ),
     SourceRoot(
         "retrieval_knowledge",
-        "Local knowledge packs, retrieval followups, keyword tools, and research contracts",
-        ("services/nova_knowledge_packs.py", "services/nova_retrieval_followups.py", "services/nova_keyword_tools.py"),
+        shared_inventory_label("retrieval_knowledge"),
+        ("services/nova_knowledge_packs.py",),
     ),
     SourceRoot(
         "weather_location",
-        "Weather, device location, saved location, and location-aware task constraints",
-        ("services/nova_location_weather.py", "active_task_constraints.py"),
+        shared_inventory_label("weather_location"),
+        ("services/nova_location_weather.py",),
     ),
     SourceRoot(
         "work_tree",
-        "Work Tree truth, active branches, evidence, and autonomous step execution",
+        shared_inventory_label("work_tree"),
         ("work_tree.py", "work_tree_contracts.py", "services/control_work_trees.py"),
     ),
     SourceRoot(
         "tool_registry_policy",
-        "Tool registry, direct tool catalog, tool policy, console, and planned action dispatch",
+        shared_inventory_label("tool_registry_policy"),
         (
             "tools/registry.py",
             "services/tool_registry.py",
@@ -117,6 +129,11 @@ SOURCE_ROOTS: tuple[SourceRoot, ...] = (
             "services/os_script_controller.py",
             "tools/os_capability_tool.py",
             "tools/os_capabilities/os_capabilities.json",
+            "tools/os_capabilities/collect_diagnostics_bundle.ps1",
+            "tools/os_capabilities/inspect_ports.ps1",
+            "tools/os_capabilities/inspect_processes.ps1",
+            "tools/os_capabilities/inspect_runtime_health.ps1",
+            "tools/os_capabilities/scan_large_files.ps1",
             "tools/os_capabilities/verify_ollama_model.ps1",
         ),
     ),
@@ -127,7 +144,7 @@ SOURCE_ROOTS: tuple[SourceRoot, ...] = (
     ),
     SourceRoot(
         "action_ledger",
-        "Action ledger readback, route summaries, and final answer evidence",
+        shared_inventory_label("action_ledger"),
         ("services/nova_action_ledger.py", "services/nova_action_ledger_helpers.py", "services/control_telemetry.py"),
     ),
     SourceRoot(
@@ -159,8 +176,13 @@ SOURCE_ROOTS: tuple[SourceRoot, ...] = (
     ),
     SourceRoot(
         "installer_packaging",
-        "Windows installer build, verification, ledger, and readiness flow",
-        ("scripts/build_windows_installer.ps1", "scripts/verify_windows_installer.ps1", "docs/WINDOWS_INSTALLER_PLAN.md"),
+        shared_inventory_label("installer_packaging"),
+        (
+            "services/installer_validation.py",
+            "scripts/build_windows_installer.ps1",
+            "scripts/verify_windows_installer.ps1",
+            "docs/WINDOWS_INSTALLER_PLAN.md",
+        ),
     ),
     SourceRoot(
         "data_pipelines",
@@ -174,7 +196,7 @@ SOURCE_ROOTS: tuple[SourceRoot, ...] = (
     ),
     SourceRoot(
         "tts_audio_output",
-        "TTS output, Piper bridge, model assets, and spoken response delivery",
+        shared_inventory_label("tts_audio_output"),
         ("tts_say.py", "tts_piper.py", "tts_say.ps1", "piper/models/en_US-lessac-medium.onnx.json"),
     ),
     SourceRoot(
@@ -184,7 +206,7 @@ SOURCE_ROOTS: tuple[SourceRoot, ...] = (
     ),
     SourceRoot(
         "http_continuity",
-        "HTTP conversation state, grounded self-report continuity, and active Work Tree identity",
+        shared_inventory_label("http_continuity"),
         ("conversation_manager.py", "services/nova_http_chat_runtime.py", "services/nova_grounded_self_report.py"),
     ),
     SourceRoot(
@@ -200,12 +222,12 @@ SOURCE_ROOTS: tuple[SourceRoot, ...] = (
     ),
     SourceRoot(
         "diagnostics_hygiene",
-        "Doctor, health checks, diagnostics, smoke checks, and repo hygiene",
+        shared_inventory_label("diagnostics_hygiene"),
         ("doctor.py", "health.py", "diag.py", "scripts/repo_hygiene_check.py"),
     ),
     SourceRoot(
         "safety_envelope",
-        "Phase 2 safety envelope, review authority, generated-session quarantine, and promotion gates",
+        shared_inventory_label("safety_envelope"),
         ("nova_safety_envelope.py", "services/subconscious_review_authority.py", "docs/PHASE2_SAFETY_ENVELOPE.md"),
     ),
     SourceRoot(
@@ -215,12 +237,12 @@ SOURCE_ROOTS: tuple[SourceRoot, ...] = (
     ),
     SourceRoot(
         "metrics_ops_journal",
-        "Behavior metrics, ops journal, metrics snapshots, and operator-visible telemetry",
+        shared_inventory_label("metrics_ops_journal"),
         ("services/behavior_metrics.py", "services/ops_journal.py", "services/control_telemetry.py"),
     ),
     SourceRoot(
         "core_steward_reflection",
-        "Core steward posture, core health brief, thinning, and reflective health pressure",
+        shared_inventory_label("core_steward_reflection"),
         ("services/core_steward.py", "services/core_health_brief.py", "services/core_thinning.py"),
     ),
     SourceRoot(
@@ -335,9 +357,17 @@ def _coverage_root_for_path(path: str) -> str:
         return "frontdoor_cli"
     if name in {".gitattributes", ".gitignore", "pytest.ini"}:
         return "diagnostics_hygiene"
+    if "/" not in low and name.endswith(".md"):
+        return "diagnostics_hygiene"
     if name == "this_is_nova":
         return "source_root_inventory"
-    if "root_inventory" in low or "wiring_inventory" in low or "end_to_end_wiring" in low:
+    if (
+        "root_inventory" in low
+        or "wiring_inventory" in low
+        or "source_root_judgment" in low
+        or "inventory_labels" in low
+        or "end_to_end_wiring" in low
+    ):
         return "source_root_inventory"
     if "operator" in low or name in {"operator_macros.json"}:
         return "operator_control"
@@ -364,6 +394,10 @@ def _coverage_root_for_path(path: str) -> str:
         return "memory_identity"
     if low.startswith("piper/") or low.endswith(".onnx") or low.endswith(".dll") or low.endswith(".exe"):
         return "tts_audio_output"
+    if "autonomy_orchestrator" in low:
+        return "autonomy_orchestrator"
+    if "autonomy_maintenance" in low:
+        return "autonomy_maintenance"
     if "autonomy_" in low or "schedule_registry" in low:
         return "scheduler_registry"
     if low.startswith("pipelines/") or low.startswith("data_sources/") or "pipeline" in low:
@@ -374,12 +408,9 @@ def _coverage_root_for_path(path: str) -> str:
         or "route_" in low
         or "planner" in low
         or "turn_" in low
-        or "query_classifiers" in low
         or name in {
             "action_planner.py",
-            "active_task_constraints.py",
             "dynamic_replanner.py",
-            "followup_move_classifier.py",
             "intent_interpreter.py",
             "planner_decision.py",
             "task_engine.py",

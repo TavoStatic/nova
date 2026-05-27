@@ -1,9 +1,9 @@
 # NYO System Dependency Contract
 
 Date: 2026-05-18
-Last verified: 2026-05-18
+Last verified: 2026-05-20
 
-Verification note: dependencies were installed successfully by `nova install` from the `2026.05.18.23` extracted package. Package bootstrap remains source-first and does not lock every transitive dependency version. Git LFS is also required for clean source checkout of the tracked Piper assets.
+Verification note: dependencies are validated by `nova install` from the current ledger-owned extracted package during release validation. Package bootstrap remains source-first and does not lock every transitive dependency version. Git LFS is also required for clean source checkout of the tracked Piper assets.
 
 ## Purpose
 

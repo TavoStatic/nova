@@ -3,6 +3,7 @@ import unittest
 from services.nova_cli_delivery import apply_cli_handled_outcome
 from services.nova_cli_delivery import apply_cli_outcome_to_ledger
 from services.nova_cli_delivery import emit_cli_reply_outcome
+from services.nova_reply_context_contract import TOOL_CONTEXT_PLACEHOLDER
 
 
 class TestNovaCliDelivery(unittest.TestCase):
@@ -111,7 +112,10 @@ class TestNovaCliDelivery(unittest.TestCase):
         )
 
         self.assertEqual(out.get("spoken_mode"), "tool_done")
-        self.assertEqual(session_turns, [("assistant", "Standing work queue:\n- open: 2 of 4")])
+        self.assertEqual(
+            session_turns,
+            [("assistant", TOOL_CONTEXT_PLACEHOLDER)],
+        )
         self.assertEqual(spoken, [])
         self.assertEqual(done, ["Done."])
         self.assertEqual(printed[0][0], "Nova (tool output):\nStanding work queue:\n- open: 2 of 4\n")

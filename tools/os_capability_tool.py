@@ -72,9 +72,10 @@ class OsCapabilityTool(NovaTool):
             base_dir=base_dir,
             authority_context={
                 "is_admin": bool(context.is_admin),
-                "allowed_authority_levels": extra.get("allowed_authority_levels"),
+                "allowed_authority_levels": extra.get("allowed_authority_levels")
+                or ["read_only", "read_only_expensive", "read_only_network", "evidence_write"],
                 "allow_mutating": bool(extra.get("allow_mutating")),
-                "allow_evidence_write": bool(extra.get("allow_evidence_write")),
+                "allow_evidence_write": bool(extra.get("allow_evidence_write", True)),
             },
         )
         if isinstance(result, dict) and result.get("operator_outbox"):

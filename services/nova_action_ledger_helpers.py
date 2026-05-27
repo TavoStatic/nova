@@ -260,46 +260,11 @@ def top_repeated_correction_class(
             detail = str(step.get("detail") or "").strip()
             if stage == "llm_postprocess" and outcome == "self_corrected" and detail:
                 counts[detail] = int(counts.get(detail, 0)) + 1
-            elif stage == "claim_gate" and outcome == "adjusted":
-                key = detail or "claim_gate_adjusted"
-                counts[key] = int(counts.get(key, 0)) + 1
 
     if not counts:
         return {"class": "", "count": 0}
     reason, count = max(counts.items(), key=lambda item: item[1])
     return {"class": reason, "count": int(count)}
-
-
-def count_unsupported_claim_blocks_recently(
-    action_ledger_dir: Path,
-    *,
-    records: list[dict] | None = None,
-    limit: int = 20,
-) -> int:
-    recent = records if isinstance(records, list) else recent_action_ledger_records(action_ledger_dir, limit=limit)
-    count = 0
-    for rec in recent:
-        trace = rec.get("route_trace") if isinstance(rec, dict) else None
-        if not isinstance(trace, list):
-            continue
-        for step in trace:
-            if not isinstance(step, dict):
-                continue
-            stage = str(step.get("stage") or "").strip()
-            outcome = str(step.get("outcome") or "").strip()
-            detail = str(step.get("detail") or "").strip().lower()
-            if stage == "claim_gate" and outcome == "adjusted":
-                count += 1
-    return count
-
-
-def unsupported_claims_blocked_recently(
-    action_ledger_dir: Path,
-    *,
-    records: list[dict] | None = None,
-    limit: int = 20,
-) -> bool:
-    return count_unsupported_claim_blocks_recently(action_ledger_dir, records=records, limit=limit) > 0
 
 
 def count_routing_overrides_recently(

@@ -991,6 +991,35 @@ class TestAutonomyMaintenance(unittest.TestCase):
             self.assertEqual(rows[0].get("execution_result"), "blocked")
             self.assertEqual((rows[0].get("execution") or {}).get("result"), "blocked")
 
+    def test_orchestrator_input_envelope_carries_maintenance_worker_surface(self):
+        envelope = autonomy_maintenance._autonomy_orchestrator_input_envelope(
+            state={},
+            core_steward={
+                "score": 100,
+                "level": "strong",
+                "runtime": {
+                    "heartbeat": {"ok": True},
+                    "core_state": {"ok": True},
+                },
+                "autonomy_maintenance": {
+                    "worker_status": "stopped",
+                    "worker_active": False,
+                    "worker_stale_identity": True,
+                    "scheduler_active": False,
+                    "scheduler_mode": "inactive",
+                    "scheduler_status": "inactive",
+                },
+            },
+            work_tree_state={"ok": True, "counts": {}, "trees": []},
+            generated_queue={"status": "clear", "open_count": 0, "actionable_count": 0},
+            guard_health={"running": True, "status": "running"},
+        )
+
+        maintenance = envelope.get("autonomy_maintenance") or {}
+        self.assertEqual(maintenance.get("worker_status"), "stopped")
+        self.assertTrue(maintenance.get("worker_stale_identity"))
+        self.assertFalse(maintenance.get("scheduler_active"))
+
     def test_triage_hints_for_orchestrator_use_live_subconscious_triage(self):
         report = {
             "_source_freshness_sec": 9,
@@ -1266,7 +1295,8 @@ class TestAutonomyMaintenance(unittest.TestCase):
         self.assertEqual(len(branches), 1)
         branch = branches[0]
         self.assertEqual(str(branch.work_class or ""), "regression_failure")
-        self.assertEqual(str(branch.source_type or ""), "regression")
+        self.assertEqual(str(branch.source_type or ""), "test_ecosystem")
+        self.assertEqual((branch.source_payload or {}).get("test_ecosystem_signal"), "daily_regression")
         self.assertEqual(str(branch.resolution_state or ""), "open")
         self.assertEqual(branch.status, work_tree.BranchStatus.READY)
 
@@ -1359,8 +1389,9 @@ class TestAutonomyMaintenance(unittest.TestCase):
             branch for branch in work_tree.list_tree_branches(tree.tree_id)
             if branch.branch_id != tree.root_branch_id
         ][0]
-        self.assertEqual(str(branch.source_type or ""), "validation_artifact_truth")
+        self.assertEqual(str(branch.source_type or ""), "test_ecosystem")
         self.assertEqual(str(branch.work_class or ""), "regression_failure")
+        self.assertEqual((branch.source_payload or {}).get("test_ecosystem_signal"), "validation_artifact_truth")
 
     def test_sync_signal_intake_work_tree_resolves_stale_regression_branch(self):
         self._isolated_work_tree_db()
@@ -1442,9 +1473,9 @@ class TestAutonomyMaintenance(unittest.TestCase):
         ]
         self.assertEqual(len(branches), 1)
         branch = branches[0]
-        self.assertEqual(str(branch.source_type or ""), "memory_health")
+        self.assertEqual(str(branch.source_type or ""), "memory_identity")
         self.assertEqual(str(branch.work_class or ""), "governance_pressure")
-        self.assertEqual(str(branch.source_key or ""), "governance_pressure:memory_health:memory_bootstrap_incomplete:identity_memory")
+        self.assertEqual(str(branch.source_key or ""), "governance_pressure:memory_identity:memory_bootstrap_incomplete:identity_memory")
         self.assertEqual(branch.preferred_tool, "pulse")
         self.assertEqual(branch.allowed_tools, ["pulse"])
         self.assertEqual(len(work_tree.list_branch_tasks(branch.branch_id)), 1)
@@ -2002,6 +2033,47 @@ class TestAutonomyMaintenance(unittest.TestCase):
         self.assertEqual(safe_inspect.get("status"), "complete")
         self.assertEqual(unsafe_inspect.get("status"), "active")
         self.assertEqual((state.get("last_active_work_tree_cycle") or {}).get("executed_count"), 1)
+
+    def test_run_active_work_tree_cycle_executes_os_capability_lane(self):
+        self._isolated_work_tree_db()
+        state = {}
+        tree = work_tree.initialize_tree(
+            "OS capability route",
+            meta={"kind": "system", "source": "cli"},
+        )
+        root = work_tree._BRANCHES[tree.root_branch_id]
+        work_tree.set_tree_policy(tree.tree_id, allowed_tools=["os_capability"])
+        work_tree.set_branch_tools(
+            root.branch_id,
+            allowed_tools=["os_capability"],
+            preferred_tool="os_capability",
+        )
+        work_tree.add_task_to_branch(
+            root.branch_id,
+            "Verify Ollama model with registered capability",
+            meta={
+                "capability_request": {
+                    "capability": "verify_ollama_model",
+                    "args": {"probe_chat": False},
+                }
+            },
+        )
+        calls = []
+
+        with mock.patch.object(
+            autonomy_maintenance.nova_core,
+            "execute_planned_action",
+            side_effect=lambda tool, args=None: calls.append((tool, list(args or []))) or {"ok": True, "status": "success"},
+        ):
+            payload = autonomy_maintenance._run_active_work_tree_cycle(state, sync_core_thinning=False)
+
+        self.assertEqual(payload.get("status"), "ok")
+        self.assertEqual(payload.get("executed_count"), 1)
+        self.assertEqual(calls[0][0], "os_capability")
+        self.assertEqual(
+            json.loads(calls[0][1][0]),
+            {"capability": "verify_ollama_model", "args": {"probe_chat": False}},
+        )
 
     def test_run_active_work_tree_cycle_executes_core_thinning_lane(self):
         self._isolated_work_tree_db()

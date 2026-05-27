@@ -20,7 +20,7 @@ class TestNovaReplyRuntime(unittest.TestCase):
         self.assertIn("Standing work queue", str(payload.get("recent_tool_context") or ""))
         self.assertEqual(payload.get("recent_web_urls"), ["https://tea.texas.gov/a"])
 
-    def test_retrieval_followup_carries_recent_context_from_reply_text(self):
+    def test_conversation_followup_does_not_infer_context_from_reply_text(self):
         events = []
 
         payload = apply_reply_runtime_effects(
@@ -34,10 +34,10 @@ class TestNovaReplyRuntime(unittest.TestCase):
         )
 
         self.assertEqual(events, [])
-        self.assertTrue(payload.get("context_updated"))
-        self.assertEqual(payload.get("recent_web_urls"), ["https://tea.texas.gov/a"])
+        self.assertFalse(payload.get("context_updated"))
+        self.assertEqual(payload.get("recent_web_urls"), [])
 
-    def test_deterministic_hard_answer_conflict_records_both_events(self):
+    def test_deterministic_reply_records_hit_without_identity_conflict_hook(self):
         events = []
 
         payload = apply_reply_runtime_effects(
@@ -46,11 +46,11 @@ class TestNovaReplyRuntime(unittest.TestCase):
             tool_result="My name is Nova.",
             behavior_record_event_fn=events.append,
             extract_urls_fn=lambda _text: [],
-            detect_identity_conflict_fn=lambda: True,
         )
 
-        self.assertEqual(events, ["deterministic_hit", "conflict_detected"])
-        self.assertTrue(payload.get("identity_conflict"))
+        self.assertEqual(events, ["deterministic_hit"])
+        self.assertFalse(payload.get("context_updated"))
+        self.assertNotIn("identity_conflict", payload)
 
     def test_llm_fallback_records_fallback_without_context_update(self):
         events = []

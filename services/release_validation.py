@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime
 import json
 import platform
 import re
@@ -12,14 +13,19 @@ import urllib.request
 import uuid
 import zipfile
 from pathlib import Path
+from pathlib import PurePosixPath
 from typing import Any, Callable, Sequence
 
+from services.release_validation_contracts import NOVA_WEBUI_START_8080_LABEL
 from services.release_promotion_judgment import release_validation_record_payload
 
 
 ROOT = Path(__file__).resolve().parents[1]
 REPORT_DIR = ROOT / "runtime" / "validation" / "release"
 LATEST_REPORT = REPORT_DIR / "latest_release_validation.json"
+REGRESSION_STATUS_FILE = ROOT / "runtime" / "regression_status.json"
+REGRESSION_STATUS_MAX_AGE_SEC = 6 * 60 * 60
+REQUIRED_REGRESSION_LANES = ("unit", "behavior", "integration")
 
 CommandRunner = Callable[[str, Sequence[str], Path, int], dict[str, Any]]
 HttpGet = Callable[[str, float], tuple[int, str]]
@@ -146,6 +152,23 @@ def _remove_inside(parent: Path, target: Path) -> None:
         shutil.rmtree(target_resolved)
 
 
+def _safe_zip_parts(name: str) -> tuple[str, ...]:
+    normalized = str(name or "").replace("\\", "/")
+    path = PurePosixPath(normalized)
+    if path.is_absolute():
+        return ()
+    parts = tuple(part for part in path.parts if part not in {"", "."})
+    if not parts or any(part == ".." for part in parts):
+        return ()
+    return parts
+
+
+def _strip_prefix(parts: tuple[str, ...], prefix: tuple[str, ...]) -> tuple[str, ...]:
+    if prefix and parts[: len(prefix)] != prefix:
+        return ()
+    return parts[len(prefix) :]
+
+
 def _prepare_package_root(artifact_path: Path, work_root: Path) -> tuple[Path, Path]:
     artifact = artifact_path.resolve()
     if artifact.is_dir():
@@ -158,24 +181,45 @@ def _prepare_package_root(artifact_path: Path, work_root: Path) -> tuple[Path, P
     work_root.mkdir(parents=True, exist_ok=True)
     extract_root = work_root / f"x-{time.strftime('%Y%m%d%H%M%S')}-{uuid.uuid4().hex[:8]}"
     extract_root.mkdir(parents=True, exist_ok=True)
-    with zipfile.ZipFile(artifact, "r") as archive:
-        archive.extractall(extract_root)
+    try:
+        package_root = extract_root / "pkg"
+        package_root.mkdir(parents=True, exist_ok=True)
+        with zipfile.ZipFile(artifact, "r") as archive:
+            members = archive.infolist()
+            member_parts = [(info, _safe_zip_parts(info.filename)) for info in members]
+            nova_prefixes = [
+                parts[:-1]
+                for info, parts in member_parts
+                if parts and not info.is_dir() and parts[-1].lower() == "nova.cmd"
+            ]
+            if not nova_prefixes:
+                raise FileNotFoundError(f"release artifact does not contain nova.cmd: {artifact}")
+            package_prefix = sorted(nova_prefixes, key=len)[0]
+            for info, parts in member_parts:
+                if not parts:
+                    continue
+                relative_parts = _strip_prefix(parts, package_prefix)
+                if not relative_parts:
+                    continue
+                target = package_root.joinpath(*relative_parts)
+                target_resolved = target.resolve()
+                try:
+                    target_resolved.relative_to(package_root.resolve())
+                except ValueError as exc:
+                    raise ValueError(f"refusing to extract package member outside {package_root}: {info.filename}") from exc
+                if info.is_dir():
+                    target.mkdir(parents=True, exist_ok=True)
+                    continue
+                target.parent.mkdir(parents=True, exist_ok=True)
+                with archive.open(info, "r") as source, target.open("wb") as destination:
+                    shutil.copyfileobj(source, destination)
 
-    package_root = extract_root
-    if (package_root / "nova.cmd").exists():
-        return package_root, extract_root
-    direct_children = [path for path in extract_root.iterdir() if path.is_dir()]
-    for child in direct_children:
-        if (child / "nova.cmd").exists():
-            short_root = extract_root / "pkg"
-            if child != short_root:
-                if short_root.exists():
-                    shutil.rmtree(short_root)
-                child.rename(short_root)
-            return short_root, extract_root
-    for candidate in extract_root.rglob("nova.cmd"):
-        return candidate.parent, extract_root
-    raise FileNotFoundError(f"extracted artifact does not contain nova.cmd: {artifact}")
+        if (package_root / "nova.cmd").exists():
+            return package_root, extract_root
+        raise FileNotFoundError(f"extracted artifact does not contain nova.cmd: {artifact}")
+    except Exception:
+        _remove_inside(work_root, extract_root)
+        raise
 
 
 def _pick_local_port() -> int:
@@ -203,6 +247,95 @@ def _step_passed(step: dict[str, Any] | None) -> bool:
     return bool(step) and int(step.get("returncode", 1) or 0) == 0
 
 
+def _nova_run_probe_command(nova_cmd: Path, *, exercise_turn: bool = False) -> list[str]:
+    probe_input = "ping`nq`n" if exercise_turn else "q`n"
+    if platform.system().lower().startswith("windows"):
+        return [
+            "powershell.exe",
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-Command",
+            f'& {{ param($novaCmd) "{probe_input}" | & $novaCmd run --fix }}',
+            str(nova_cmd),
+        ]
+    probe_input = "ping\nq\n" if exercise_turn else "q\n"
+    return [
+        "sh",
+        "-c",
+        "printf '%s' \"$2\" | \"$1\" run --fix",
+        "nova-run-probe",
+        str(nova_cmd),
+        probe_input,
+    ]
+
+
+def _parse_regression_generated_at(payload: dict[str, Any]) -> float:
+    raw = str(payload.get("generated_at") or "").strip()
+    if not raw:
+        return 0.0
+    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S"):
+        try:
+            return float(datetime.strptime(raw, fmt).timestamp())
+        except ValueError:
+            continue
+    return 0.0
+
+
+def _load_regression_status(path: Path) -> dict[str, Any]:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _regression_status_gate(
+    *,
+    status_path: Path,
+    max_age_sec: int = REGRESSION_STATUS_MAX_AGE_SEC,
+    now_epoch: float | None = None,
+) -> dict[str, Any]:
+    now = float(now_epoch if now_epoch is not None else time.time())
+    path = Path(status_path)
+    payload = _load_regression_status(path)
+    status = str(payload.get("status") or "").strip().upper()
+    lanes = [str(item).strip() for item in list(payload.get("lanes") or []) if str(item).strip()]
+    generated_epoch = _parse_regression_generated_at(payload)
+    age_sec = max(0.0, now - generated_epoch) if generated_epoch else None
+    returncode = int(payload.get("returncode", 1) or 0) if payload else 1
+    missing_lanes = [lane for lane in REQUIRED_REGRESSION_LANES if lane not in set(lanes)]
+    blocking: list[str] = []
+    if not path.exists():
+        blocking.append(f"full regression status missing: {path}")
+    elif not payload:
+        blocking.append(f"full regression status unreadable: {path}")
+    if status != "OK" or returncode != 0:
+        detail = str(payload.get("detail") or "").strip()
+        suffix = f" detail={detail}" if detail else ""
+        blocking.append(f"full regression status is not OK: status={status or 'UNKNOWN'} returncode={returncode}{suffix}")
+    if missing_lanes:
+        blocking.append(f"full regression status missing required lanes: {', '.join(missing_lanes)}")
+    if generated_epoch <= 0:
+        blocking.append("full regression status has no parseable generated_at timestamp")
+    elif age_sec is not None and age_sec > int(max_age_sec):
+        blocking.append(f"full regression status is stale: age_sec={int(age_sec)} max_age_sec={int(max_age_sec)}")
+    return {
+        "ok": not blocking,
+        "path": str(path),
+        "status": status,
+        "returncode": returncode,
+        "generated_at": str(payload.get("generated_at") or ""),
+        "age_sec": None if age_sec is None else int(age_sec),
+        "max_age_sec": int(max_age_sec),
+        "lanes": lanes,
+        "required_lanes": list(REQUIRED_REGRESSION_LANES),
+        "missing_lanes": missing_lanes,
+        "detail": str(payload.get("detail") or ""),
+        "blocking_issues": blocking,
+    }
+
+
 def _write_json_report(report: dict[str, Any], path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
@@ -226,6 +359,7 @@ def _write_validation_record(
     result: str,
     blocking_issues: list[str],
     nonblocking_issues: list[str],
+    regression_gate: dict[str, Any],
     follow_up_owner: str,
 ) -> None:
     lines = [
@@ -262,6 +396,10 @@ def _write_validation_record(
         "",
         "### Base Validation",
         "",
+        f"- full regression status: {'pass' if regression_gate.get('ok') else 'fail'}",
+        f"- full regression source: {regression_gate.get('path') or ''}",
+        f"- full regression generated_at: {regression_gate.get('generated_at') or ''}",
+        f"- full regression lanes: {', '.join(list(regression_gate.get('lanes') or [])) or 'none'}",
         f"- nova doctor: {step_values.get('nova doctor', 'not-run')}",
         f"- nova runtime-status: {step_values.get('nova runtime-status', 'not-run')}",
         f"- nova smoke-base --fix: {step_values.get('nova smoke-base --fix', 'not-run')}",
@@ -272,7 +410,7 @@ def _write_validation_record(
         "### Operator Surface",
         "",
         f"- nova run: {step_values.get('nova run', 'not-run')}",
-        f"- nova webui-start --host 127.0.0.1 --port 8080: {step_values.get('nova webui-start --host 127.0.0.1 --port 8080', 'not-run')}",
+        f"- {NOVA_WEBUI_START_8080_LABEL}: {step_values.get(NOVA_WEBUI_START_8080_LABEL, 'not-run')}",
         f"- /control load result: {step_values.get('/control load result', 'not-run')}",
         "- Notes: web UI validation used an available local port when 8080 was already owned",
         "",
@@ -308,6 +446,8 @@ def run_release_validation(
     http_get: HttpGet | None = None,
     work_root: Path | None = None,
     keep_extract: bool = False,
+    regression_status_path: str | Path | None = None,
+    regression_max_age_sec: int = REGRESSION_STATUS_MAX_AGE_SEC,
 ) -> dict[str, Any]:
     root = (repo_root or ROOT).resolve()
     artifact = Path(artifact_path).resolve()
@@ -331,6 +471,13 @@ def run_release_validation(
     steps: list[dict[str, Any]] = []
     blocking_issues: list[str] = []
     nonblocking_issues: list[str] = []
+    regression_gate = _regression_status_gate(
+        status_path=Path(regression_status_path).resolve()
+        if regression_status_path is not None
+        else (root / "runtime" / "regression_status.json").resolve(),
+        max_age_sec=int(regression_max_age_sec),
+    )
+    blocking_issues.extend(list(regression_gate.get("blocking_issues") or []))
     step_by_label: dict[str, dict[str, Any]] = {}
     control_load_result = "not-run"
     package_root: Path | None = None
@@ -347,6 +494,7 @@ def run_release_validation(
             ("nova install", [str(nova_cmd), "install"], 900),
             ("nova doctor", [str(nova_cmd), "doctor"], 300),
             ("nova runtime-status", [str(nova_cmd), "runtime-status"], 120),
+            ("nova run", _nova_run_probe_command(nova_cmd, exercise_turn=include_runtime), 240),
             ("nova wiring-check --offline", [str(nova_cmd), "wiring-check", "--offline"], 300),
             ("nova smoke-base --fix", [str(nova_cmd), "smoke-base", "--fix"], 600),
             ("nova test", [str(nova_cmd), "test"], timeout_sec),
@@ -360,7 +508,7 @@ def run_release_validation(
             step_by_label[label] = step
 
         port = _pick_local_port()
-        webui_label = "nova webui-start --host 127.0.0.1 --port 8080"
+        webui_label = NOVA_WEBUI_START_8080_LABEL
         webui_attempted = True
         webui_step = runner(
             webui_label,
@@ -407,10 +555,11 @@ def run_release_validation(
         "nova install",
         "nova doctor",
         "nova runtime-status",
+        "nova run",
         "nova wiring-check --offline",
         "nova smoke-base --fix",
         "nova test",
-        "nova webui-start --host 127.0.0.1 --port 8080",
+        NOVA_WEBUI_START_8080_LABEL,
         "nova webui-stop",
     ):
         if _step_failed(step_by_label.get(label)):
@@ -421,11 +570,11 @@ def run_release_validation(
         blocking_issues.append("/control load failed")
 
     nonblocking_issues.append("fresh-machine or VM independence not proven by same-machine extracted-package profile")
-    nonblocking_issues.append("nova run interactive front door was not exercised by the noninteractive validation runner")
     result = "fail" if blocking_issues else ("pass-with-notes" if nonblocking_issues else "pass")
     step_values = {label: _step_value(step_by_label.get(label)) for label in step_by_label}
     step_values["/control load result"] = control_load_result
-    step_values["nova run"] = "not-run (interactive front door not exercised by noninteractive validation)"
+    if _step_passed(step_by_label.get("nova run")):
+        step_values["nova run"] = "pass (scripted turn)" if include_runtime else "pass (launch/exit)"
     if not include_runtime:
         step_values["nova smoke --fix"] = "not-run (Ollama not expected for this target)"
 
@@ -447,6 +596,7 @@ def run_release_validation(
             result=result,
             blocking_issues=blocking_issues,
             nonblocking_issues=nonblocking_issues,
+            regression_gate=regression_gate,
             follow_up_owner="release-validation",
         )
 
@@ -468,6 +618,7 @@ def run_release_validation(
         "extract_root_retained": bool(extract_root is not None and not extract_root_removed),
         "extract_cleanup_error": extract_cleanup_error,
         "include_runtime": include_runtime,
+        "regression_gate": regression_gate,
         "blocking_issues": blocking_issues,
         "nonblocking_issues": nonblocking_issues,
         "steps": steps,

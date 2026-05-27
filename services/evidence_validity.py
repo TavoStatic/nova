@@ -2,8 +2,11 @@ from __future__ import annotations
 
 from typing import Any
 
+from services.tool_execution_contracts import ADMIN_APPROVED_EXECUTION_SUFFIX
+
 
 _INVALID_PREFIXES = (
+    "[fail]",
     "no matches found.",
     "not a file:",
     "not a folder:",
@@ -25,7 +28,7 @@ _POLICY_DENIALS = (
 )
 
 _FAILURE_FRAGMENTS = (
-    " is restricted to admin-approved execution.",
+    ADMIN_APPROVED_EXECUTION_SUFFIX,
     " tool failed:",
     "tool error:",
     "llm service unavailable",
@@ -34,10 +37,26 @@ _FAILURE_FRAGMENTS = (
     "ollama chat failed",
 )
 
+_JUDGMENT_TOOLS = {
+    "memory_bootstrap_judgment",
+    "release_promotion_judgment",
+    "subconscious_review_judgment",
+    "source_root_judgment",
+}
+
+
+def _is_structured_judgment_result(tool_name: str, result: dict[str, Any]) -> bool:
+    tool = str(tool_name or "").strip()
+    if tool not in _JUDGMENT_TOOLS:
+        return False
+    return bool(str(result.get("schema") or "").strip() and str(result.get("verdict") or "").strip())
+
 
 def invalid_tool_result(tool_name: str, result: Any) -> tuple[bool, str]:
     """Return whether a tool result is blocked/failed evidence, not usable evidence."""
     if isinstance(result, dict):
+        if _is_structured_judgment_result(tool_name, result):
+            return False, ""
         if not bool(result.get("ok", True)):
             return True, str(result.get("error") or result.get("reason") or "unknown error")
         mode = str(result.get("execution_mode") or "").strip().lower()

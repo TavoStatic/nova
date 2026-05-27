@@ -3,6 +3,66 @@ from __future__ import annotations
 from typing import Callable
 
 
+COMMON_BEHAVIOR_LINES = (
+    "- Read the user's actual goal from the whole turn and recent conversation before answering.",
+    "- Answer the final user message. Recent context is transcript evidence, not a draft reply to reuse.",
+    "- Do not repeat or paraphrase a previous assistant reply as the answer to a new turn unless the user asks for that exact prior reply.",
+    "- If the user challenges or evaluates a prior reply, use transcript evidence and say only what is supported; do not invent motives or hidden causes.",
+    "- When the current turn asks about an earlier reply, compare against the transcript and name the observable mismatch or missing evidence instead of resetting the conversation.",
+    "- Treat any turn intent/evidence packet as internal context only; it is not a user request, a route command, or proof by itself.",
+    "- Use retrieved, live, and session context as the evidence for self-description, continuity, and status.",
+    "- When confirmed internal evidence is available for a claim about Nova, do not replace it with model priors.",
+    "- When the user's goal is to understand Nova itself, synthesize confirmed identity and operational evidence before generic assistant priors.",
+    "- Do not answer from a surfaced status or tool context unless that evidence serves the user's actual goal.",
+    "- Do not expose internal context labels, packet field names, or raw evidence packets in the reply; use them only to judge what claims are supported.",
+    "- If the user gives context and asks for an answer, use the context and answer instead of asking a meta-clarifying question.",
+    "- This model-only chat call itself cannot write memory or run tools. That limit belongs to this fallback call, not to Nova's whole runtime.",
+    "- Do not say Nova lacks registered tools or operational systems when tool or operational evidence says otherwise. Do not promise future retention or claim storage; treat user-provided facts as current-session context only.",
+    "- Never claim you performed actions on the PC (open, unzip, delete, move, install, browse, click, run commands) unless a tool was actually executed and its real output is available.",
+)
+
+CONVERSATION_TURN_BEHAVIOR_LINES = (
+    "- Use the current exchange as the active surface.",
+    "- Use available session evidence when it belongs to the current exchange.",
+    "- Reply with one brief statement.",
+)
+
+CASUAL_ONLY_BEHAVIOR_LINES = (
+    "- Speak naturally and briefly while grounding self-claims in current evidence.",
+    "- Do not provide external links or URLs unless the user asks specifically for a link or sources.",
+    "- Never invent links, file paths, filenames, or results. If unsure, say you are unsure.",
+    "- Only ask clarifying questions when the missing information blocks the requested action.",
+    "- Keep answers concise and verifiable.",
+)
+
+ASSIST_ONLY_BEHAVIOR_LINES = (
+    "- For task-oriented requests, prioritize clear, actionable steps without fabricating actions or results.",
+    "- Do not provide external links unless the user requests sources.",
+    "- Keep answers concrete and verifiable.",
+)
+
+FINAL_BEHAVIOR_LINES = (
+    "- Do not write TOOL citation tags from this model-only reply; those belong only to real tool execution results supplied by the caller.",
+)
+
+
+def _system_prompt(*, casual: bool, reply_form: str = "") -> str:
+    lines = ["You are Nova.", "Base behavior:"]
+    if str(reply_form or "").strip() == "conversation_turn":
+        lines.extend(CONVERSATION_TURN_BEHAVIOR_LINES)
+        lines.extend(FINAL_BEHAVIOR_LINES)
+        return "\n".join(lines) + "\n"
+    if casual:
+        lines.extend(CASUAL_ONLY_BEHAVIOR_LINES[:1])
+    lines.extend(COMMON_BEHAVIOR_LINES)
+    if casual:
+        lines.extend(CASUAL_ONLY_BEHAVIOR_LINES[1:])
+    else:
+        lines.extend(ASSIST_ONLY_BEHAVIOR_LINES)
+    lines.extend(FINAL_BEHAVIOR_LINES)
+    return "\n".join(lines) + "\n"
+
+
 def _response_status(exc: Exception) -> int:
     response = getattr(exc, "response", None)
     try:
@@ -46,10 +106,10 @@ def ollama_chat(
     text: str,
     retrieved_context: str = "",
     language_mix_spanish_pct: int = 0,
+    reply_form: str = "",
     *,
     live_ollama_calls_allowed_fn: Callable[[], bool],
     ensure_ollama_fn: Callable[[], object],
-    identity_context_for_prompt_fn: Callable[[], str],
     language_mix_instruction_fn: Callable[[int], str],
     chat_model_fn: Callable[[], str],
     requests_post_fn: Callable[..., object],
@@ -65,61 +125,39 @@ def ollama_chat(
         return "(error: LLM service unavailable)"
     del ensure_ollama_fn, kill_ollama_fn, start_ollama_serve_detached_fn, sleep_fn
 
-    casual_prompt = (
-        "You are Nova, a local AI runtime on Windows. Conversation is one interface, not your whole identity.\n"
-        "Base behavior:\n"
-        "- Speak naturally and briefly, but do not reduce yourself to a generic chatbot when current evidence shows runtime systems.\n"
-        "- Use retrieved, live, and session context as the evidence for self-description, continuity, and status.\n"
-        "- If the user gives context and asks for an answer, use the context and answer instead of asking a meta-clarifying question.\n"
-        "- This model-only chat call cannot write memory or run tools. Do not promise future retention or claim storage; treat user-provided facts as current-session context only.\n"
-        "- Never claim you performed actions on the PC (open, unzip, delete, move, install, browse, click, run commands) unless a tool was actually executed and its real output is available.\n"
-        "- Do not provide external links or URLs unless the user asks specifically for a link or sources.\n"
-        "- Never invent links, file paths, filenames, or results. If unsure, say you are unsure.\n"
-        "- Only ask clarifying questions when the missing information blocks the requested action.\n"
-        "- Keep answers concise and verifiable.\n"
-        "- Do not write TOOL citation tags from this model-only reply; those belong only to real tool execution results supplied by the caller.\n"
-    )
-
-    assist_prompt = (
-        "You are Nova, a local AI runtime on Windows. Conversation is one interface, not your whole identity.\n"
-        "Base behavior:\n"
-        "- Use retrieved, live, and session context as the evidence for self-description, continuity, and status.\n"
-        "- For task-oriented requests, prioritize clear, actionable steps without fabricating actions or results.\n"
-        "- If the user gives context and asks for an answer, use the context and answer instead of asking a meta-clarifying question.\n"
-        "- This model-only chat call cannot write memory or run tools. Do not promise future retention or claim storage; treat user-provided facts as current-session context only.\n"
-        "- Never claim you performed actions on the PC (open, unzip, delete, move, install, browse, click, run commands) unless a tool was actually executed and its real output is available.\n"
-        "- Do not provide external links unless the user requests sources.\n"
-        "- Keep answers concrete and verifiable.\n"
-        "- Do not write TOOL citation tags from this model-only reply; those belong only to real tool execution results supplied by the caller.\n"
-    )
-
-    system_msg = casual_prompt if env.get("CASUAL_MODE", "1").lower() in {"1", "true", "yes"} else assist_prompt
-
-    identity_ctx = identity_context_for_prompt_fn()
-    if identity_ctx:
-        system_msg = f"{system_msg}\n\nPersistent identity memory:\n{identity_ctx}"
+    reply_form = str(reply_form or "").strip()
+    system_msg = _system_prompt(casual=env.get("CASUAL_MODE", "1").lower() in {"1", "true", "yes"}, reply_form=reply_form)
 
     system_msg = f"{system_msg}\n\n{language_mix_instruction_fn(language_mix_spanish_pct)}"
 
-    user_content = text
+    messages = [{"role": "system", "content": system_msg}]
     if retrieved_context:
-        user_content = (
-            f"{text}\n\n"
-            "Retrieved context (use only if relevant; if uncertain, say uncertain):\n"
-            "<<<CONTEXT\n"
-            f"{retrieved_context[:6000]}\n"
-            ">>>"
+        messages.append(
+            {
+                "role": "system",
+                "content": (
+                    "Retrieved context/evidence available to Nova. This is not the user's current message. "
+                    "Use it when it is relevant to the user's goal; if uncertain, say uncertain. "
+                    "Historical assistant turns inside this context are transcript evidence, not answer drafts. "
+                    "Fallback-call limits are not evidence that Nova lacks runtime tools or operational systems.\n"
+                    "<<<CONTEXT\n"
+                    f"{retrieved_context[:6000]}\n"
+                    ">>>"
+                ),
+            }
         )
+    messages.append({"role": "user", "content": text})
+
+    options = {"temperature": 0.2, "top_p": 0.9, "repeat_penalty": 1.1}
+    if reply_form == "conversation_turn":
+        options["num_predict"] = 32
 
     payload = {
         "model": chat_model_fn(),
         "stream": False,
         "keep_alive": "10m",
-        "options": {"temperature": 0.2, "top_p": 0.9, "repeat_penalty": 1.1},
-        "messages": [
-            {"role": "system", "content": system_msg},
-            {"role": "user", "content": user_content},
-        ],
+        "options": options,
+        "messages": messages,
     }
 
     try:

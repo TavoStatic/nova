@@ -7,7 +7,6 @@ from unittest import mock
 
 import nova_core
 import nova_http
-from services.supervisor_identity_rules import session_fact_recall_rule
 from scripts.run_test_session import compare_sessions
 from scripts.run_test_session import _comparison_failed
 from scripts.run_test_session import _isolated_runner_state
@@ -114,12 +113,10 @@ class TestRunTestSessionIsolation(unittest.TestCase):
         orig_mem_recall = nova_core.mem_recall
         orig_kb_search = nova_core.kb_search
         orig_ollama_chat = nova_core.ollama_chat
-        orig_sanitize_llm_reply = nova_core.sanitize_llm_reply
 
         try:
             nova_core.mem_recall = lambda _query: f"- memory-user:{nova_core._memory_runtime_user() or 'none'}"
             nova_core.kb_search = lambda _query: ""
-            nova_core.sanitize_llm_reply = lambda text, tool_context="": text
 
             def fake_ollama(_text: str, retrieved_context: str = "", **_kwargs) -> str:
                 digest = sha1(retrieved_context.encode("utf-8")).hexdigest()[:12]
@@ -137,7 +134,6 @@ class TestRunTestSessionIsolation(unittest.TestCase):
             nova_core.mem_recall = orig_mem_recall
             nova_core.kb_search = orig_kb_search
             nova_core.ollama_chat = orig_ollama_chat
-            nova_core.sanitize_llm_reply = orig_sanitize_llm_reply
 
         self.assertTrue(comparison.get("turn_count_match"))
         self.assertEqual(comparison.get("diffs"), [])
@@ -163,12 +159,10 @@ class TestRunTestSessionIsolation(unittest.TestCase):
         orig_mem_recall = nova_core.mem_recall
         orig_kb_search = nova_core.kb_search
         orig_ollama_chat = nova_core.ollama_chat
-        orig_sanitize_llm_reply = nova_core.sanitize_llm_reply
 
         try:
             nova_core.mem_recall = lambda _query: f"- memory-user:{nova_core._memory_runtime_user() or 'none'}"
             nova_core.kb_search = lambda _query: ""
-            nova_core.sanitize_llm_reply = lambda text, tool_context="": text
 
             def fake_ollama(_text: str, retrieved_context: str = "", **_kwargs) -> str:
                 digest = sha1(retrieved_context.encode("utf-8")).hexdigest()[:12]
@@ -186,7 +180,6 @@ class TestRunTestSessionIsolation(unittest.TestCase):
             nova_core.mem_recall = orig_mem_recall
             nova_core.kb_search = orig_kb_search
             nova_core.ollama_chat = orig_ollama_chat
-            nova_core.sanitize_llm_reply = orig_sanitize_llm_reply
 
         self.assertEqual(comparison.get("left_mode"), "run_tools")
         self.assertEqual(comparison.get("right_mode"), "http")
@@ -365,50 +358,6 @@ class TestRunTestSessionIsolation(unittest.TestCase):
         comparison = compare_sessions(run_tools_result, http_result)
 
         self.assertEqual(comparison.get("diffs"), [])
-
-    def test_session_fact_recall_rule_extracts_codeword(self):
-        turns = [
-            ("user", "For this session, remember the codeword cobalt sparrow and the topic packaging drift."),
-            ("assistant", "Got it."),
-            ("user", "What codeword did I just ask you to remember?"),
-        ]
-
-        result = session_fact_recall_rule(
-            "What codeword did I just ask you to remember?",
-            "what codeword did i just ask you to remember?",
-            None,
-            3,
-            turns=turns,
-            phase="handle",
-        )
-
-        self.assertTrue(result.get("handled"))
-        self.assertEqual(result.get("action"), "session_fact_recall")
-        self.assertEqual(result.get("fact_target"), "codeword")
-        self.assertEqual(result.get("fact_value"), "cobalt sparrow")
-
-    def test_execute_registered_supervisor_rule_does_not_answer_session_fact_content(self):
-        turns = [
-            ("user", "For this session, remember the codeword cobalt sparrow and the topic packaging drift."),
-            ("assistant", "Got it."),
-            ("user", "What codeword did I just ask you to remember?"),
-        ]
-
-        handled, reply, next_state = nova_core._execute_registered_supervisor_rule(
-            {
-                "action": "session_fact_recall",
-                "fact_target": "codeword",
-                "fact_value": "cobalt sparrow",
-            },
-            "What codeword did I just ask you to remember?",
-            None,
-            turns=turns,
-            allowed_actions={"session_fact_recall"},
-        )
-
-        self.assertFalse(handled)
-        self.assertEqual(reply, "")
-        self.assertIsNone(next_state)
 
     def test_compare_sessions_surfaces_generic_mode_labels(self):
         run_tools_result = {

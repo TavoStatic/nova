@@ -83,46 +83,11 @@ def top_repeated_correction_class(
             detail = str(step.get("detail") or "").strip()
             if stage == "llm_postprocess" and outcome == "self_corrected" and detail:
                 counts[detail] = int(counts.get(detail, 0)) + 1
-            elif stage == "claim_gate" and outcome == "adjusted":
-                key = detail or "claim_gate_adjusted"
-                counts[key] = int(counts.get(key, 0)) + 1
 
     if not counts:
         return {"class": "", "count": 0}
     reason, count = max(counts.items(), key=lambda item: item[1])
     return {"class": reason, "count": int(count)}
-
-
-def count_unsupported_claim_blocks_recently(
-    *,
-    records: Optional[list[dict]] = None,
-    limit: int = 20,
-    recent_action_ledger_records_fn: Callable[[int], list[dict]],
-) -> int:
-    recent = records if isinstance(records, list) else recent_action_ledger_records_fn(limit)
-    count = 0
-    for rec in recent:
-        trace = rec.get("route_trace") if isinstance(rec, dict) else None
-        if not isinstance(trace, list):
-            continue
-        for step in trace:
-            if not isinstance(step, dict):
-                continue
-            stage = str(step.get("stage") or "").strip()
-            outcome = str(step.get("outcome") or "").strip()
-            detail = str(step.get("detail") or "").strip().lower()
-            if stage == "claim_gate" and outcome == "adjusted":
-                count += 1
-    return count
-
-
-def unsupported_claims_blocked_recently(
-    *,
-    records: Optional[list[dict]] = None,
-    limit: int = 20,
-    count_unsupported_claim_blocks_recently_fn: Callable[..., int],
-) -> bool:
-    return count_unsupported_claim_blocks_recently_fn(records=records, limit=limit) > 0
 
 
 def count_routing_overrides_recently(
@@ -260,7 +225,6 @@ def maybe_log_self_reflection(
     detect_repeated_tool_intent_without_execution_fn: Optional[Callable[..., dict]] = None,
     top_repeated_correction_class_fn: Optional[Callable[..., dict]] = None,
     routing_stable_recently_fn: Optional[Callable[..., bool]] = None,
-    count_unsupported_claim_blocks_recently_fn: Optional[Callable[..., int]] = None,
     count_routing_overrides_recently_fn: Optional[Callable[..., int]] = None,
     record_used_routing_override_fn: Optional[Callable[[Optional[dict]], bool]] = None,
     sample_intents_last_fn: Optional[Callable[..., list[str]]] = None,
@@ -273,7 +237,6 @@ def maybe_log_self_reflection(
     detect_repeated_tool_intent_without_execution_fn = _runtime_hook(runtime_scope, "_detect_repeated_tool_intent_without_execution", detect_repeated_tool_intent_without_execution_fn)
     top_repeated_correction_class_fn = _runtime_hook(runtime_scope, "_top_repeated_correction_class", top_repeated_correction_class_fn)
     routing_stable_recently_fn = _runtime_hook(runtime_scope, "_routing_stable_recently", routing_stable_recently_fn)
-    count_unsupported_claim_blocks_recently_fn = _runtime_hook(runtime_scope, "_count_unsupported_claim_blocks_recently", count_unsupported_claim_blocks_recently_fn)
     count_routing_overrides_recently_fn = _runtime_hook(runtime_scope, "_count_routing_overrides_recently", count_routing_overrides_recently_fn)
     record_used_routing_override_fn = _runtime_hook(runtime_scope, "_record_used_routing_override", record_used_routing_override_fn)
     sample_intents_last_fn = _runtime_hook(runtime_scope, "_sample_intents_last", sample_intents_last_fn)
@@ -288,7 +251,6 @@ def maybe_log_self_reflection(
         detect_repeated_tool_intent_without_execution_fn,
         top_repeated_correction_class_fn,
         routing_stable_recently_fn,
-        count_unsupported_claim_blocks_recently_fn,
         count_routing_overrides_recently_fn,
         record_used_routing_override_fn,
         sample_intents_last_fn,
@@ -310,7 +272,6 @@ def maybe_log_self_reflection(
     failure = detect_repeated_tool_intent_without_execution_fn(records=recent, limit=limit)
     correction = top_repeated_correction_class_fn(records=recent, limit=limit)
     routing_stable = routing_stable_recently_fn(records=recent, limit=limit)
-    claims_blocked = count_unsupported_claim_blocks_recently_fn(records=recent, limit=limit)
     routing_overrides = count_routing_overrides_recently_fn(records=recent, limit=limit)
     latest_record = recent[-1] if recent else {}
     continuation_count = sum(1 for rec in recent if isinstance(rec, dict) and bool(rec.get("continuation_used", False)))
@@ -347,8 +308,6 @@ def maybe_log_self_reflection(
             "count": int(correction.get("count", 0) or 0),
         },
         "routing_stable": bool(routing_stable),
-        "unsupported_claims_blocked": bool(claims_blocked),
-        "claims_blocked": int(claims_blocked),
         "routing_overrides": int(routing_overrides),
         "routing_override_used_latest_turn": bool(record_used_routing_override_fn(latest_record)),
         "active_subject": str(latest_record.get("active_subject") or ""),

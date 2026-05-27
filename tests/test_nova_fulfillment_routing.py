@@ -9,13 +9,24 @@ class _Session:
 
 
 class TestNovaFulfillmentRouting(unittest.TestCase):
-    def test_viable_when_model_space_cues_present(self):
+    def test_not_viable_without_existing_fulfillment_state(self):
         result = evaluate_fulfillment_route_viability(
             "Show me workable options for getting this done",
             _Session(),
             [("user", "Earlier context")],
             get_fulfillment_state_fn=lambda _session: None,
-            looks_like_affirmative_followup_fn=lambda _text: False,
+        )
+
+        self.assertFalse(result.get("viable"))
+        self.assertEqual(result.get("comparison_strength"), "weak")
+        self.assertIn("no existing fulfillment state", result.get("fit_notes") or [])
+
+    def test_viable_when_existing_fulfillment_state_exists(self):
+        result = evaluate_fulfillment_route_viability(
+            "revise the current options",
+            _Session(),
+            [],
+            get_fulfillment_state_fn=lambda _session: {"intent": "existing"},
         )
 
         self.assertTrue(result.get("viable"))
@@ -28,7 +39,17 @@ class TestNovaFulfillmentRouting(unittest.TestCase):
             [],
             pending_action={"kind": "weather_lookup"},
             get_fulfillment_state_fn=lambda _session: None,
-            looks_like_affirmative_followup_fn=lambda _text: False,
+        )
+
+        self.assertFalse(result.get("viable"))
+        self.assertEqual(result.get("comparison_strength"), "clear")
+
+    def test_not_viable_when_another_conversation_state_is_active(self):
+        result = evaluate_fulfillment_route_viability(
+            "revise the current options",
+            _Session({"kind": "retrieval"}),
+            [],
+            get_fulfillment_state_fn=lambda _session: None,
         )
 
         self.assertFalse(result.get("viable"))

@@ -188,14 +188,14 @@ def test_live_cleared_runtime_branch_does_not_drive_attention() -> None:
                         {
                             "title": "Guard process is not running",
                             "status": "ready",
-                            "source_key": "runtime_failure:control_status:process_not_running:guard",
+                            "source_key": "runtime_failure:runtime_core:process_not_running:guard",
                             "tasks_open": 1,
                             "current_task": {"title": "Inspect guard status"},
                         },
                         {
                             "title": "Release package is stale behind live source",
                             "status": "ready",
-                            "source_key": "release_readiness_gap:release_status:release_source_changed_after_build:demo.zip",
+                            "source_key": "release_readiness_gap:release:release_source_changed_after_build:demo.zip",
                             "tasks_open": 1,
                             "current_task": {"title": "Read release ledger for current package"},
                         },
@@ -227,7 +227,7 @@ def test_only_live_cleared_runtime_branch_leaves_attention_clear() -> None:
                         {
                             "title": "Guard process is not running",
                             "status": "ready",
-                            "source_key": "runtime_failure:control_status:process_not_running:guard",
+                            "source_key": "runtime_failure:runtime_core:process_not_running:guard",
                             "tasks_open": 1,
                             "current_task": {"title": "Inspect guard status"},
                         }

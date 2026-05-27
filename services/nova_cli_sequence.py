@@ -9,10 +9,7 @@ def execute_cli_sequence(
     **kwargs,
 ) -> tuple[str, dict]:
     options = dict(kwargs or {})
-    options["planner_before_deterministic_content"] = True
     options["stop_before_llm_fallback"] = True
-    options.setdefault("pre_planner_branch_group", "none")
-    options.setdefault("post_planner_branch_group", None)
     return execute_reply_sequence_fn(**options)
 
 
@@ -20,10 +17,9 @@ def normalize_sequence_reply(
     reply: str,
     *,
     ensure_reply_fn: Callable[[str], str],
-    apply_reply_overrides_fn: Callable[[str], str],
 ) -> str:
     try:
-        return ensure_reply_fn(apply_reply_overrides_fn(reply))
+        return ensure_reply_fn(reply)
     except Exception:
         return ensure_reply_fn(reply)
 
@@ -36,10 +32,6 @@ def apply_sequence_result(
     merge_route_evidence_fn: Callable[[dict | None, dict | None], dict | None],
     set_pending_action_fn: Callable[[Optional[dict]], None],
     session_state,
-    routed_text: str,
-    turns: list[tuple[str, str]],
-    fallback_state: Optional[dict],
-    infer_post_reply_conversation_state_fn: Callable[..., Optional[dict]],
     apply_reply_runtime_effects_fn: Callable[..., dict],
     apply_reply_session_updates_fn: Callable[..., None],
     sync_pending_conversation_tracking_fn: Callable[[], None],
@@ -47,7 +39,7 @@ def apply_sequence_result(
     emit_cli_reply_outcome_fn: Callable[..., dict],
     behavior_record_event_fn: Callable[..., None],
     extract_urls_fn: Callable[[str], list[str]],
-    detect_identity_conflict_fn: Callable[..., bool],
+    session_turns: list[tuple[str, str]] | None = None,
     recent_tool_context: str,
     recent_web_urls: list[str],
 ) -> dict:
@@ -87,10 +79,7 @@ def apply_sequence_result(
         tool_result=tool_result,
         behavior_record_event_fn=behavior_record_event_fn,
         extract_urls_fn=extract_urls_fn,
-        detect_identity_conflict_fn=detect_identity_conflict_fn,
     )
-    if runtime_effects.get("identity_conflict"):
-        trace_fn("identity_conflict", "detected")
 
     apply_reply_session_updates_fn(
         session_state,
@@ -101,10 +90,6 @@ def apply_sequence_result(
             "tool_result": tool_result,
             "pending_action": session_state.pending_action,
         },
-        routed_text=routed_text,
-        turns=turns,
-        fallback_state=fallback_state,
-        infer_post_reply_conversation_state=infer_post_reply_conversation_state_fn,
     )
     sync_pending_conversation_tracking_fn()
 
@@ -117,7 +102,7 @@ def apply_sequence_result(
     emit_cli_reply_outcome_fn(
         reply_text=final,
         planner_decision=planner_decision,
-        session_turns=turns,
+        session_turns=list(session_turns or []),
     )
 
     return {

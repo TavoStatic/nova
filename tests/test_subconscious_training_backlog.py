@@ -23,7 +23,7 @@ class TestSubconsciousTrainingBacklog(unittest.TestCase):
         self.assertIn("route_fit_weak", signals)
         self.assertEqual(backlog.record_window, {"count": 2, "cap": 12})
 
-    def test_clear_fulfillment_miss_generates_high_priority_candidates(self):
+    def test_single_weak_route_pressure_does_not_create_fulfillment_candidates(self):
         session = ConversationSession()
         probe = nova_core._probe_turn_routes(
             "Show me workable options without collapsing too early.",
@@ -35,12 +35,9 @@ class TestSubconsciousTrainingBacklog(unittest.TestCase):
 
         snapshot = SUBCONSCIOUS_SERVICE.get_snapshot(session)
         backlog = build_training_backlog(snapshot)
-        by_signal = {item.signal: item for item in backlog.candidate_tests}
 
-        self.assertTrue(backlog.replan_requested)
-        self.assertEqual(by_signal["fulfillment_missed"].priority, "high")
-        self.assertEqual(by_signal["fallback_overuse"].priority, "high")
-        self.assertIn("still active", by_signal["fulfillment_missed"].rationale.lower())
+        self.assertFalse(backlog.replan_requested)
+        self.assertEqual(backlog.candidate_tests, [])
 
     def test_clean_supervisor_snapshot_stays_empty(self):
         session = ConversationSession()

@@ -1,6 +1,7 @@
 import unittest
 
 from services.nova_http_turn_finalization import HTTP_TURN_FINALIZATION_SERVICE
+from services.nova_reply_context_contract import TOOL_CONTEXT_PLACEHOLDER
 
 
 class _FakeSession:
@@ -86,19 +87,20 @@ class TestNovaHttpTurnFinalizationService(unittest.TestCase):
                 "reply_contract": "weather.current",
                 "reply_outcome": {"kind": "weather"},
             },
-            routed_text="weather now",
-            turns=[("user", "weather now")],
-            fallback_state={"kind": "location_memory"},
             behavior_record_event_fn=events.append,
-            infer_post_reply_conversation_state_fn=lambda routed_text, **kwargs: {"kind": "retrieval", "topic": routed_text, "planner_decision": kwargs.get("planner_decision")},
         )
 
         self.assertEqual(events, ["tool_route"])
         self.assertEqual(session.pending_action, {"kind": "weather_followup", "zip": "78521"})
-        self.assertEqual(session.retrieval_state, {"kind": "retrieval", "topic": "weather now", "planner_decision": "run_tool"})
+        self.assertEqual(session.retrieval_state, None)
+        self.assertEqual(session.updated_state["state"], None)
+        self.assertEqual(session.updated_state["fallback_state"]["kind"], "last_tool_evidence")
+        self.assertEqual(session.updated_state["fallback_state"]["tool"], "weather_current_location")
+        self.assertEqual(session.updated_state["fallback_state"]["tool_result"], "Sunny and warm.")
         self.assertEqual(payload["tool"], "weather_current_location")
         self.assertEqual(payload["reply_contract"], "weather.current")
         self.assertEqual(payload["reply_outcome"], {"kind": "weather"})
+        self.assertIsNone(payload["next_state"])
 
     def test_finalize_reply_sequence_result_handles_writeback_and_finalization(self):
         session = _FakeSession()
@@ -132,12 +134,8 @@ class TestNovaHttpTurnFinalizationService(unittest.TestCase):
                 "reply_contract": "weather.current",
                 "reply_outcome": {"kind": "weather"},
             },
-            routed_text="weather now",
-            turns=[("user", "weather now")],
-            fallback_state={"kind": "location_memory"},
             append_session_turn_fn=lambda sid, role, text: appended.append((sid, role, text)),
             behavior_record_event_fn=events.append,
-            infer_post_reply_conversation_state_fn=lambda routed_text, **kwargs: {"kind": "retrieval", "topic": routed_text, "planner_decision": kwargs.get("planner_decision")},
             build_turn_reflection_fn=fake_build_turn_reflection,
             finalize_action_ledger_record_fn=fake_finalize_action_ledger_record,
             finalize_routing_decision_fn=lambda routing, **kwargs: {"merged": routing, "planner_decision": kwargs.get("planner_decision")},
@@ -146,7 +144,10 @@ class TestNovaHttpTurnFinalizationService(unittest.TestCase):
 
         self.assertEqual(reply, "Sunny and warm.")
         self.assertEqual(events, ["tool_route"])
-        self.assertEqual(appended, [("s-http", "assistant", "Sunny and warm.")])
+        self.assertEqual(
+            appended,
+            [("s-http", "assistant", TOOL_CONTEXT_PLACEHOLDER)],
+        )
         self.assertEqual(captured["current_decision"]["planner_decision"], "run_tool")
         self.assertEqual(captured["finalize_kwargs"]["tool"], "weather_current_location")
 

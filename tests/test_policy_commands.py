@@ -36,13 +36,12 @@ class TestPolicyCommands(unittest.TestCase):
         nova_core.POLICY_AUDIT_LOG = self.orig_policy_audit_log
         self.tmp.cleanup()
 
-    def test_typo_domains_command_is_context_aware(self):
-        out = nova_core.handle_commands("list the domanins")
-        self.assertIn('It looks like you meant "domains".', out)
+    def test_list_allowed_domains_reads_current_policy(self):
+        out = nova_core.list_allowed_domains()
         self.assertIn("tea.texas.gov", out)
 
     def test_policy_allow_adds_domain(self):
-        out = nova_core.handle_commands("policy allow https://weather.com")
+        out = nova_core.policy_allow_domain("https://weather.com")
         self.assertIn("Added allowed domain: weather.com", out)
 
         saved = json.loads(self.policy_path.read_text(encoding="utf-8"))
@@ -50,14 +49,14 @@ class TestPolicyCommands(unittest.TestCase):
         self.assertIn("weather.com", domains)
 
     def test_policy_allow_duplicate_domain(self):
-        first = nova_core.handle_commands("policy allow weather.com")
+        first = nova_core.policy_allow_domain("weather.com")
         self.assertIn("Added allowed domain: weather.com", first)
 
-        second = nova_core.handle_commands("policy allow weather.com")
+        second = nova_core.policy_allow_domain("weather.com")
         self.assertIn("Domain already allowed: weather.com", second)
 
     def test_policy_allow_writes_audit_log(self):
-        nova_core.handle_commands("policy allow weather.com")
+        nova_core.policy_allow_domain("weather.com")
         self.assertTrue(self.audit_path.exists())
         lines = [ln for ln in self.audit_path.read_text(encoding="utf-8").splitlines() if ln.strip()]
         self.assertGreaterEqual(len(lines), 1)
@@ -67,7 +66,7 @@ class TestPolicyCommands(unittest.TestCase):
         self.assertEqual(last.get("result"), "success")
 
     def test_policy_remove_domain(self):
-        out = nova_core.handle_commands("policy remove tea.texas.gov")
+        out = nova_core.policy_remove_domain("tea.texas.gov")
         self.assertIn("Removed allowed domain: tea.texas.gov", out)
 
         saved = json.loads(self.policy_path.read_text(encoding="utf-8"))
@@ -75,17 +74,17 @@ class TestPolicyCommands(unittest.TestCase):
         self.assertNotIn("tea.texas.gov", domains)
 
     def test_policy_remove_not_found(self):
-        out = nova_core.handle_commands("policy remove weather.com")
+        out = nova_core.policy_remove_domain("weather.com")
         self.assertIn("Domain not found in allowlist: weather.com", out)
 
     def test_policy_audit_command(self):
-        nova_core.handle_commands("policy allow weather.com")
-        out = nova_core.handle_commands("policy audit 5")
+        nova_core.policy_allow_domain("weather.com")
+        out = nova_core.policy_audit(5)
         self.assertIn("Recent policy changes", out)
         self.assertIn("action=allow_domain", out)
 
     def test_web_mode_max_updates_policy(self):
-        out = nova_core.handle_commands("web mode max")
+        out = nova_core.set_web_mode("max")
         self.assertIn("Web research mode set to max", out)
 
         saved = json.loads(self.policy_path.read_text(encoding="utf-8"))
@@ -94,7 +93,7 @@ class TestPolicyCommands(unittest.TestCase):
         self.assertEqual(web.get("research_pages_per_domain"), 25)
 
     def test_web_mode_status(self):
-        out = nova_core.handle_commands("web mode")
+        out = nova_core.web_mode_status()
         self.assertIn("Current web research limits", out)
         self.assertIn("research_max_depth", out)
 

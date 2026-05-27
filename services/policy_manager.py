@@ -6,7 +6,11 @@ import time
 from pathlib import Path
 from urllib.parse import urlparse
 
+from services.nova_web_contracts import STACKEXCHANGE_API_ENDPOINT_DEFAULT
 from services.nova_runtime_context import resolve_runtime_dir
+
+
+SEARCH_ENDPOINT_USAGE = "Usage: search endpoint <http://host:port/search>"
 
 
 WEB_RESEARCH_PRESETS = {
@@ -131,7 +135,7 @@ class PolicyManager:
         web.setdefault("search_api_endpoint", "")
         web.setdefault("search_provider_priority", list(SEARCH_PROVIDER_PRIORITY_DEFAULT))
         web.setdefault("stackexchange_site", "stackoverflow")
-        web.setdefault("stackexchange_api_endpoint", "https://api.stackexchange.com/2.3/search/advanced")
+        web.setdefault("stackexchange_api_endpoint", STACKEXCHANGE_API_ENDPOINT_DEFAULT)
         web.setdefault("stackexchange_api_key_env", "STACKEXCHANGE_API_KEY")
         web.setdefault("allow_domains", [])
         web.setdefault("max_bytes", 20_000_000)
@@ -515,7 +519,7 @@ class PolicyManager:
     def set_search_endpoint(self, endpoint: str, user: str | None = None) -> str:
         raw = str(endpoint or "").strip()
         if not raw:
-            return "Usage: search endpoint <http://host:port/search>"
+            return SEARCH_ENDPOINT_USAGE
 
         candidate = raw
         if "://" not in candidate:
@@ -523,9 +527,9 @@ class PolicyManager:
 
         parsed = urlparse(candidate)
         if not str(parsed.scheme or "").strip().lower() in {"http", "https"}:
-            return "Usage: search endpoint <http://host:port/search>"
+            return SEARCH_ENDPOINT_USAGE
         if not str(parsed.hostname or "").strip():
-            return "Usage: search endpoint <http://host:port/search>"
+            return SEARCH_ENDPOINT_USAGE
 
         path = str(parsed.path or "").strip()
         if not path:

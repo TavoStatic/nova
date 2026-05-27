@@ -15,6 +15,7 @@ class TestSourceRootInventoryService(unittest.TestCase):
             (root / "services").mkdir()
             (root / "services" / "nova_root_inventory.py").write_text("# inventory\n", encoding="utf-8")
             (root / "nova.cmd").write_text("@echo off\n", encoding="utf-8")
+            (root / "NOVA_HEALTH_REVIEW.md").write_text("# Review\n", encoding="utf-8")
             for ignored in (".venv", "runtime", ".pytest_cache", "__pycache__", "logs"):
                 ignored_dir = root / ignored
                 ignored_dir.mkdir()
@@ -22,7 +23,7 @@ class TestSourceRootInventoryService(unittest.TestCase):
 
             payload = build_source_root_inventory_payload(root=root, wiring_surface_ids=source_root_ids())
 
-        self.assertEqual(payload.get("source_file_count"), 2)
+        self.assertEqual(payload.get("source_file_count"), 3)
         covered = {
             path
             for row in payload.get("roots") or []
@@ -30,6 +31,7 @@ class TestSourceRootInventoryService(unittest.TestCase):
         }
         self.assertIn("services/nova_root_inventory.py", covered)
         self.assertIn("nova.cmd", covered)
+        self.assertIn("NOVA_HEALTH_REVIEW.md", covered)
         self.assertFalse(any("test_shadow.py" in path for path in covered))
         self.assertFalse(any("test_shadow.py" in path for path in payload.get("unclassified_source_files") or []))
 

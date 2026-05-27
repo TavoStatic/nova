@@ -22,6 +22,7 @@ class TestControlStatusService(unittest.TestCase):
             "_memory_events_summary": object(),
             "_tool_events_summary": object(),
             "_action_ledger_summary": object(),
+            "_os_capability_ledger_summary": object(),
             "_provider_telemetry_payload": object(),
             "_runtime_summary_payload": object(),
             "_runtime_artifacts_payload": object(),
@@ -31,6 +32,7 @@ class TestControlStatusService(unittest.TestCase):
             "_port_ownership_payload": object(),
             "_action_readiness_payload": object(),
             "_release_status_payload": object(),
+            "_installer_status_payload": object(),
             "_patch_action_readiness_payload": object(),
             "_storage_watch_summary": object(),
             "_runtime_process_note": object(),
@@ -51,8 +53,10 @@ class TestControlStatusService(unittest.TestCase):
         self.assertIs(payload["work_trees_payload"], scope["_work_trees_payload"])
         self.assertIs(payload["operator_outbox_summary"], scope["_operator_outbox_summary"])
         self.assertIs(payload["validation_artifact_truth_payload"], scope["_validation_artifact_truth_payload"])
+        self.assertIs(payload["os_capability_ledger_summary"], scope["_os_capability_ledger_summary"])
+        self.assertIs(payload["installer_status_payload"], scope["_installer_status_payload"])
         self.assertIs(payload["metrics_payload"], scope["_metrics_payload"])
-        self.assertEqual(len(payload), 36)
+        self.assertEqual(len(payload), 38)
 
     def test_runtime_status_payload_collects_supplier_outputs(self):
         class _Core:
@@ -156,12 +160,52 @@ class TestControlStatusService(unittest.TestCase):
                 "generated_work_queue": lambda limit: {"status": "clear", "open_count": 0, "actionable_count": 0, "next_item": {}},
                 "autonomy_maintenance_summary": lambda: {},
                 "work_trees_payload": lambda limit: {"ok": True, "counts": {"total": 0, "active": 0, "branches": 0, "open_tasks": 0, "blocked": 0, "pending": 0, "working": 0, "complete": 0}, "trees": []},
-                "operator_outbox_summary": lambda limit: {"ok": True, "open_count": 1, "latest_id": "notice-1", "latest_open": {"id": "notice-1"}, "status_counts": {"new": 1}},
+                "operator_outbox_summary": lambda limit: {
+                    "ok": True,
+                    "open_count": 1,
+                    "latest_id": "notice-1",
+                    "latest_open": {"id": "notice-1"},
+                    "open_events": [
+                        {
+                            "id": "notice-1",
+                            "source": "os_capability",
+                            "payload": {
+                                "capability": "verify_ollama_model",
+                                "blocked_reason": "contract_stale",
+                            },
+                        }
+                    ],
+                    "status_counts": {"new": 1},
+                },
                 "load_operator_macros": lambda limit: [],
                 "load_backend_commands": lambda limit: [],
                 "memory_events_summary": lambda limit: {"ok": True, "count": 0},
                 "tool_events_summary": lambda limit: {"ok": True, "count": 0, "status_counts": {}},
                 "action_ledger_summary": lambda limit: {"ok": True, "count": 0},
+                "os_capability_ledger_summary": lambda limit: {
+                    "ok": True,
+                    "path": "C:\\NOVA\\runtime\\os_capability_ledger.jsonl",
+                    "count": 2,
+                    "status_counts": {"blocked": 1, "success": 1},
+                    "reason_counts": {"contract_stale": 1},
+                    "last_row": {"capability": "inspect_processes", "status": "success", "reason": ""},
+                    "rows": [
+                        {
+                            "capability": "verify_ollama_model",
+                            "status": "blocked",
+                            "reason": "contract_stale",
+                            "operator_outbox": True,
+                            "ts_epoch": 1,
+                        },
+                        {
+                            "capability": "inspect_processes",
+                            "status": "success",
+                            "reason": "",
+                            "operator_outbox": False,
+                            "ts_epoch": 2,
+                        },
+                    ],
+                },
                 "provider_telemetry_payload": lambda **kwargs: {"last_provider_used": "general_web"},
                 "runtime_summary_payload": lambda **kwargs: {"guard": kwargs.get("guard")},
                 "runtime_artifacts_payload": lambda: {"count": 0, "items": []},
@@ -228,6 +272,11 @@ class TestControlStatusService(unittest.TestCase):
         self.assertEqual(payload.get("test_profile_profile_gap_count"), 0)
         self.assertEqual(payload.get("operator_outbox_open_count"), 1)
         self.assertEqual(payload.get("operator_outbox_latest_open_id"), "notice-1")
+        self.assertFalse(payload.get("os_capability_ledger_ok"))
+        self.assertEqual(payload.get("os_capability_ledger_total"), 2)
+        self.assertEqual(payload.get("os_capability_ledger_current_issue_count"), 1)
+        self.assertEqual(payload.get("last_os_capability_issue_name"), "verify_ollama_model")
+        self.assertEqual(payload.get("last_os_capability_issue_reason"), "contract_stale")
 
     def test_status_payload_includes_voice_runtime_fields_when_provided(self):
         payload = CONTROL_STATUS_SERVICE.status_payload(
@@ -305,6 +354,84 @@ class TestControlStatusService(unittest.TestCase):
         self.assertEqual(payload.get("vision_runtime_status"), "ok")
         self.assertTrue(payload.get("vision_runtime_requested"))
         self.assertTrue(payload.get("vision_runtime_ok"))
+
+    def test_status_payload_keeps_old_os_capability_failures_as_history_not_live_pressure(self):
+        payload = CONTROL_STATUS_SERVICE.status_payload(
+            policy={"memory": {"scope": "private"}},
+            provider="html",
+            endpoint="",
+            searx_ok=None,
+            searx_note="n/a",
+            search_provider_priority=[],
+            provider_telemetry={},
+            ollama_api_up=True,
+            chat_model="test-model",
+            memory_enabled=False,
+            subconscious_summary={"ok": True},
+            subconscious_live_summary={},
+            generated_work_queue={},
+            autonomy_maintenance={},
+            operator_macros=[],
+            backend_commands=[],
+            memory_scope="private",
+            web_enabled=False,
+            allow_domains_count=0,
+            process_counting_mode="logical_leaf_processes",
+            runtime_process_note="",
+            heartbeat_age_sec=0,
+            active_http_sessions=0,
+            chat_login_enabled=False,
+            chat_auth_source="disabled",
+            chat_users_count=0,
+            guard_status={},
+            core_status={},
+            webui_status={},
+            runtime_summary={},
+            timeline_payload={},
+            runtime_artifacts={},
+            runtime_restart_analytics={},
+            runtime_failures={},
+            live_tracking={},
+            action_readiness={},
+            release_status={},
+            memory_stats={},
+            memory_summary={},
+            tool_summary={},
+            ledger_summary={},
+            patch_summary={},
+            patch_action_readiness={},
+            pulse_payload={},
+            update_now_pending={},
+            requests_total=0,
+            errors_total=0,
+            os_capability_summary={
+                "ok": True,
+                "count": 1,
+                "status_counts": {"blocked": 1},
+                "reason_counts": {"invalid_args": 1},
+                "last_row": {
+                    "capability": "scan_large_files",
+                    "status": "blocked",
+                    "reason": "invalid_args",
+                    "operator_outbox": True,
+                    "ts_epoch": 1,
+                },
+                "rows": [
+                    {
+                        "capability": "scan_large_files",
+                        "status": "blocked",
+                        "reason": "invalid_args",
+                        "operator_outbox": True,
+                        "ts_epoch": 1,
+                    }
+                ],
+            },
+            operator_outbox={"open_events": []},
+        )
+
+        self.assertTrue(payload.get("os_capability_ledger_ok"))
+        self.assertEqual(payload.get("os_capability_ledger_current_issue_count"), 0)
+        self.assertEqual(payload.get("os_capability_ledger").get("historic_issue_count"), 1)
 
     def test_status_payload_counts_release_validation_gap_as_self_repair_blocked(self):
         payload = CONTROL_STATUS_SERVICE.status_payload(
