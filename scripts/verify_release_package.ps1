@@ -214,6 +214,26 @@ function Test-PayloadContainsPathSegmentPattern([hashtable]$payload, [string]$pa
   return $false
 }
 
+function Find-ForbiddenRuntimePath([hashtable]$payload) {
+  $allowedRuntimePaths = @(
+    "runtime",
+    "runtime/validation",
+    "runtime/validation/actions",
+    "runtime/validation/actions/.keep"
+  )
+
+  foreach ($entryPath in @($payload.relative_entry_paths)) {
+    $candidate = Normalize-RelativePath ([string]$entryPath.TrimEnd('/'))
+    if ([string]::IsNullOrWhiteSpace($candidate)) { continue }
+    if ($candidate -eq "runtime" -or $candidate.StartsWith("runtime/")) {
+      if ($allowedRuntimePaths -contains $candidate) { continue }
+      return $candidate
+    }
+  }
+
+  return ""
+}
+
 $targetPath = Resolve-VerificationTarget $Path
 $targetItem = Get-Item $targetPath
 $payload = if ($targetItem.PSIsContainer) {
@@ -257,7 +277,8 @@ $requiredPackageFiles = @(
   "nova.ps1",
   "requirements.txt",
   "docs/FRESH_MACHINE_VALIDATION.md",
-  "docs/RC_VALIDATION_TEMPLATE.md"
+  "docs/RC_VALIDATION_TEMPLATE.md",
+  "runtime/validation/actions/.keep"
 )
 $forbiddenPathPrefixes = @(
   ".github",
@@ -269,7 +290,6 @@ $forbiddenPathPrefixes = @(
   "knowledge/web",
   "logs",
   "memory",
-  "runtime",
   "updates"
 )
 $forbiddenExactPaths = @(
@@ -337,6 +357,9 @@ foreach ($profileDoc in $profileDocs) {
 foreach ($forbiddenPrefix in $forbiddenPathPrefixes) {
   Add-CheckResult $failures (-not (Test-PayloadContainsRelativePrefix $payload $forbiddenPrefix)) ("forbidden path absent: " + $forbiddenPrefix) ("forbidden path present: " + $forbiddenPrefix)
 }
+
+$forbiddenRuntimePath = Find-ForbiddenRuntimePath $payload
+Add-CheckResult $failures ([string]::IsNullOrWhiteSpace($forbiddenRuntimePath)) "runtime state absent except validation scaffold" ("forbidden runtime state present: " + $forbiddenRuntimePath)
 
 foreach ($forbiddenPath in $forbiddenExactPaths) {
   Add-CheckResult $failures (-not (Test-PayloadHasRelativePath $payload $forbiddenPath)) ("forbidden path absent: " + $forbiddenPath) ("forbidden path present: " + $forbiddenPath)

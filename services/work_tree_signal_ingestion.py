@@ -2134,6 +2134,83 @@ def _source_root_inventory_signal_from_status(status_payload: dict[str, Any]) ->
     }
 
 
+def _source_wiring_probe_signal_from_status(status_payload: dict[str, Any]) -> dict[str, Any] | None:
+    probe = status_payload.get("source_wiring_probe") if isinstance(status_payload.get("source_wiring_probe"), dict) else {}
+    gap_count = int(status_payload.get("source_wiring_probe_gap_count", probe.get("gap_count", 0)) or 0)
+    if gap_count <= 0 and bool(status_payload.get("source_wiring_probe_ok", probe.get("ok", True))):
+        return None
+
+    gap_fields = (
+        "missing_signal_sources",
+        "missing_planned_tools",
+        "missing_advisory_actions",
+        "planned_tools_without_execution",
+        "advisory_actions_without_execution",
+        "missing_required_evidence_paths",
+        "missing_required_judgment_paths",
+        "missing_required_closure_paths",
+        "missing_required_operator_outbox_paths",
+        "missing_required_owned_root_routes",
+    )
+    gaps_by_field: dict[str, list[str]] = {}
+    ordered_gaps: list[str] = []
+    for field in gap_fields:
+        values = [
+            str(item or "").strip()
+            for item in list(status_payload.get(f"source_wiring_probe_{field}", probe.get(field, [])) or [])
+            if str(item or "").strip()
+        ]
+        gaps_by_field[field] = values
+        ordered_gaps.extend(f"{field}:{value}" for value in values)
+    first_gap = ordered_gaps[0] if ordered_gaps else "source_wiring_probe"
+
+    return {
+        "source": "source_wiring_probe",
+        "signal_class": "governance_pressure",
+        "title": "Source wiring probe found missing source-derived paths",
+        "fingerprint": {
+            "class": "governance_pressure",
+            "surface": "source_wiring_probe",
+            "error": "source_wiring_probe_gap",
+            "symbol": first_gap,
+        },
+        "payload": {
+            "source_wiring_probe": dict(probe),
+            "gap_count": gap_count,
+            **gaps_by_field,
+            "rationale": (
+                "The source-derived wiring probe must verify signal sources, planned tools, execution paths, "
+                "evidence, judgment, closure, and operator outbox paths before root closure can be trusted."
+            ),
+        },
+        "severity": "high",
+        "actionability": "safe_now",
+        "allowed_tools": ["read", "find", "pulse", "system_check"],
+        "preferred_tool": "read",
+        "next_task": "Read source wiring probe and verify the missing source-derived path",
+        "task_sequence": [
+            {
+                "title": "Read central source wiring probe",
+                "allowed_tools": ["read"],
+                "preferred_tool": "read",
+                "tool_args": ["services/nova_wiring_inventory.py"],
+            },
+            {
+                "title": "Read Signal Intake source path detection",
+                "allowed_tools": ["read"],
+                "preferred_tool": "read",
+                "tool_args": ["services/work_tree_signal_ingestion.py"],
+            },
+            {
+                "title": "Find missing source-derived wiring path",
+                "allowed_tools": ["find"],
+                "preferred_tool": "find",
+                "tool_args": [first_gap, "."],
+            },
+        ],
+    }
+
+
 def _root_closure_inventory_signals_from_status(status_payload: dict[str, Any]) -> list[dict[str, Any]]:
     inventory = (
         status_payload.get("root_closure_inventory")
@@ -3303,6 +3380,17 @@ def _has_source_root_inventory_surface(status_payload: dict[str, Any]) -> bool:
     )
 
 
+def _has_source_wiring_probe_surface(status_payload: dict[str, Any]) -> bool:
+    return any(
+        key in status_payload
+        for key in (
+            "source_wiring_probe",
+            "source_wiring_probe_ok",
+            "source_wiring_probe_gap_count",
+        )
+    )
+
+
 def _has_root_closure_inventory_surface(status_payload: dict[str, Any]) -> bool:
     return any(
         key in status_payload
@@ -4126,6 +4214,9 @@ class WorkTreeSignalIngestionService:
         source_root_inventory_signal = _source_root_inventory_signal_from_status(status_payload)
         if source_root_inventory_signal is not None:
             signals.append(source_root_inventory_signal)
+        source_wiring_probe_signal = _source_wiring_probe_signal_from_status(status_payload)
+        if source_wiring_probe_signal is not None:
+            signals.append(source_wiring_probe_signal)
         if _has_root_closure_inventory_surface(status_payload):
             signals.extend(_root_closure_inventory_signals_from_status(status_payload))
         if _has_self_repair_closure_inventory_surface(status_payload):
@@ -4488,6 +4579,14 @@ class WorkTreeSignalIngestionService:
                     signal_class="governance_pressure",
                     source="source_root_inventory",
                     reason="Source root inventory reports every discovered root has a first-class wiring surface.",
+                )
+            )
+        if _has_source_wiring_probe_surface(status_payload) and _source_wiring_probe_signal_from_status(status_payload) is None:
+            results.extend(
+                self.resolve_signal_branches(
+                    signal_class="governance_pressure",
+                    source="source_wiring_probe",
+                    reason="Source wiring probe reports all required source-derived paths are present.",
                 )
             )
         if _has_root_closure_inventory_surface(status_payload):

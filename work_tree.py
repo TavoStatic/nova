@@ -1985,6 +1985,7 @@ def next_autonomous_step(tree_id: str, decide_next_step_fn: DecisionCallback | N
                 return {"action": "decision_error", "error": str(exc)}
             if isinstance(decision, dict):
                 selected_branch_id = str(decision.get("branch_id") or "").strip()
+                selected_task_id = str(decision.get("task_id") or decision.get("target_step_id") or "").strip()
                 selected_tool = str(decision.get("recommended_tool") or decision.get("tool") or "").strip()
                 selected = next((opt for opt in options if str(opt.get("branch_id") or "") == selected_branch_id), None)
                 if selected is None:
@@ -1999,6 +2000,14 @@ def next_autonomous_step(tree_id: str, decide_next_step_fn: DecisionCallback | N
                         "reason": "tool_mismatch",
                         "branch_id": selected_branch_id,
                         "recommended_tool": selected_tool,
+                    }
+                if selected_task_id and selected_task_id != str(selected.get("task_id") or ""):
+                    return {
+                        "action": "invalid_decision",
+                        "reason": "task_mismatch",
+                        "branch_id": selected_branch_id,
+                        "task_id": selected_task_id,
+                        "available_task_id": str(selected.get("task_id") or ""),
                     }
                 return {
                     "action": "execute",

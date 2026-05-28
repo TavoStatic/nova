@@ -456,6 +456,9 @@ WIRING_SURFACES: tuple[WiringSurface, ...] = (
             "source_root_inventory_source_file_count",
             "source_root_inventory_unclassified_source_file_count",
             "source_root_inventory_unclassified_source_files",
+            "source_wiring_probe",
+            "source_wiring_probe_ok",
+            "source_wiring_probe_gap_count",
             "root_closure_inventory",
             "root_closure_inventory_ok",
             "root_closure_inventory_gap_count",
@@ -463,7 +466,7 @@ WIRING_SURFACES: tuple[WiringSurface, ...] = (
             "self_repair_closure_inventory_ok",
             "self_repair_closure_inventory_gap_count",
         ),
-        ("source_root_inventory", "root_closure_inventory", "self_repair_closure_inventory"),
+        ("source_root_inventory", "source_wiring_probe", "root_closure_inventory", "self_repair_closure_inventory"),
         ("read", "find", "pulse"),
         ("active_work_tree_run_next",),
         ("services/nova_root_inventory.py", "services/nova_wiring_inventory.py", "services/end_to_end_wiring.py"),
@@ -701,9 +704,46 @@ def build_source_wiring_probe_payload(*, root: str | Path | None = None) -> dict
     ):
         owned_root_routes.add("source_root_judgment_sequence")
 
+    missing_signal_sources = sorted(DEFAULT_SIGNAL_SOURCES - signal_sources)
+    missing_planned_tools = sorted(DEFAULT_PLANNED_TOOLS - planned_tools)
+    missing_advisory_actions = sorted(DEFAULT_ADVISORY_ACTIONS - advisory_actions)
+    planned_tools_without_execution = sorted(DEFAULT_PLANNED_TOOLS - executable_tools)
+    advisory_actions_without_execution = sorted(DEFAULT_ADVISORY_ACTIONS - executable_actions)
+    missing_required_evidence_paths = sorted(REQUIRED_EVIDENCE_PATHS - evidence_paths)
+    missing_required_judgment_paths = sorted(REQUIRED_JUDGMENT_PATHS - judgment_paths)
+    missing_required_closure_paths = sorted(REQUIRED_CLOSURE_PATHS - closure_paths)
+    missing_required_operator_outbox_paths = sorted(REQUIRED_OPERATOR_OUTBOX_PATHS - operator_outbox_paths)
+    missing_required_owned_root_routes = sorted(REQUIRED_OWNED_ROOT_ROUTES - owned_root_routes)
+    gap_count = sum(
+        len(items)
+        for items in (
+            missing_signal_sources,
+            missing_planned_tools,
+            missing_advisory_actions,
+            planned_tools_without_execution,
+            advisory_actions_without_execution,
+            missing_required_evidence_paths,
+            missing_required_judgment_paths,
+            missing_required_closure_paths,
+            missing_required_operator_outbox_paths,
+            missing_required_owned_root_routes,
+        )
+    )
+
     return {
-        "ok": True,
+        "ok": gap_count == 0,
         "root": str(repo_root),
+        "gap_count": gap_count,
+        "missing_signal_sources": missing_signal_sources,
+        "missing_planned_tools": missing_planned_tools,
+        "missing_advisory_actions": missing_advisory_actions,
+        "planned_tools_without_execution": planned_tools_without_execution,
+        "advisory_actions_without_execution": advisory_actions_without_execution,
+        "missing_required_evidence_paths": missing_required_evidence_paths,
+        "missing_required_judgment_paths": missing_required_judgment_paths,
+        "missing_required_closure_paths": missing_required_closure_paths,
+        "missing_required_operator_outbox_paths": missing_required_operator_outbox_paths,
+        "missing_required_owned_root_routes": missing_required_owned_root_routes,
         "signal_sources": sorted(signal_sources),
         "planned_tools": sorted(planned_tools),
         "advisory_actions": sorted(advisory_actions),

@@ -272,7 +272,7 @@ class TestNovaFallbackFlow(unittest.TestCase):
         self.assertIn("RECENT CHAT CONTEXT:\nCHAT ONLY", captured.get("retrieved_context"))
         self.assertNotIn("RAW OPERATIONAL SELF CONTEXT", captured.get("retrieved_context"))
 
-    def test_finalize_conversation_scoped_fallback_keeps_session_evidence_available(self):
+    def test_finalize_conversation_scoped_fallback_keeps_stale_session_evidence_out(self):
         packet = build_turn_intent_evidence_packet(
             text="what do you mean?",
             turns=[("assistant", "Assistant returned a tool result. The result is available as last tool evidence."), ("user", "what do you mean?")],
@@ -320,10 +320,10 @@ class TestNovaFallbackFlow(unittest.TestCase):
 
         self.assertEqual(out.get("reply"), "It means the last status said Nova was stable.")
         self.assertEqual(captured.get("reply_form"), "conversation_turn")
-        self.assertIn("SESSION EVIDENCE", captured.get("retrieved_context"))
-        self.assertIn("Nova Self Status - stable", captured.get("retrieved_context"))
+        self.assertNotIn("SESSION EVIDENCE", captured.get("retrieved_context"))
+        self.assertNotIn("Nova Self Status - stable", captured.get("retrieved_context"))
 
-    def test_finalize_fallback_answers_from_existing_tool_evidence_without_rerun_or_model(self):
+    def test_finalize_fallback_uses_existing_tool_evidence_as_context_not_answer(self):
         packet = build_turn_intent_evidence_packet(
             text="what do you mean?",
             turns=[("assistant", "Assistant returned a tool result. The result is available as last tool evidence."), ("user", "what do you mean?")],
@@ -354,7 +354,7 @@ class TestNovaFallbackFlow(unittest.TestCase):
             input_source="typed",
             retrieved_context="",
             language_mix_spanish_pct=0,
-            ollama_chat_fn=lambda *args, **kwargs: calls.append("llm") or "MODEL_SHOULD_NOT_RUN",
+            ollama_chat_fn=lambda *args, **kwargs: calls.append("llm") or "The prior reply repeated status instead of answering.",
             mem_enabled_fn=lambda: False,
             mem_should_store_fn=lambda text: False,
             mem_add_fn=lambda kind, source, text: None,
@@ -374,14 +374,11 @@ class TestNovaFallbackFlow(unittest.TestCase):
             },
         )
 
-        self.assertEqual(out.get("planner_decision"), "evidence_bound_reply")
-        self.assertEqual(out.get("reply_contract"), "session_evidence.last_tool_result")
-        self.assertEqual(
-            out.get("reply"),
-            "The available evidence says Nova is stable and has update activity to review. Level: updating.",
-        )
-        self.assertNotIn("llm", calls)
-        self.assertIn("session_evidence", calls)
+        self.assertEqual(out.get("planner_decision"), "llm_fallback")
+        self.assertEqual(out.get("reply_contract"), "")
+        self.assertEqual(out.get("reply"), "The prior reply repeated status instead of answering.")
+        self.assertIn("llm", calls)
+        self.assertNotIn("session_evidence", calls)
 
     def test_finalize_conversation_scoped_fallback_keeps_first_complete_thought(self):
         packet = build_turn_intent_evidence_packet(
@@ -716,7 +713,7 @@ class TestNovaFallbackFlow(unittest.TestCase):
         self.assertIn("current user turn is the answer target", rendered)
         self.assertNotIn("Prior answer that should not become the next draft", rendered)
 
-    def test_finalize_fallback_answers_observed_assistant_repeat_from_conversation_evidence(self):
+    def test_finalize_fallback_does_not_answer_repeat_observation_without_model(self):
         calls = []
         repeated = "Same stale assistant answer."
         packet = build_turn_intent_evidence_packet(
@@ -746,7 +743,7 @@ class TestNovaFallbackFlow(unittest.TestCase):
             input_source="typed",
             retrieved_context="",
             language_mix_spanish_pct=0,
-            ollama_chat_fn=lambda *args, **kwargs: calls.append("llm") or "MODEL_SHOULD_NOT_RUN",
+            ollama_chat_fn=lambda *args, **kwargs: calls.append("llm") or "I repeated myself there.",
             mem_enabled_fn=lambda: False,
             mem_should_store_fn=lambda text: False,
             mem_add_fn=lambda kind, source, text: None,
@@ -759,12 +756,10 @@ class TestNovaFallbackFlow(unittest.TestCase):
         )
 
         self.assertTrue((packet.get("conversation_frame") or {}).get("last_assistant_repeats_earlier_assistant"))
-        self.assertEqual(out.get("planner_decision"), "evidence_bound_reply")
-        self.assertEqual(out.get("reply_contract"), "conversation_evidence.assistant_repeat")
-        self.assertIn("last reply repeated an earlier assistant reply", out.get("reply"))
-        self.assertIn("conversation evidence", out.get("reply"))
-        self.assertNotIn("MODEL_SHOULD_NOT_RUN", out.get("reply"))
-        self.assertNotIn("llm", calls)
+        self.assertEqual(out.get("planner_decision"), "llm_fallback")
+        self.assertEqual(out.get("reply_contract"), "")
+        self.assertEqual(out.get("reply"), "I repeated myself there.")
+        self.assertIn("llm", calls)
 
 
 if __name__ == "__main__":

@@ -622,6 +622,88 @@ class TestAutonomyMaintenance(unittest.TestCase):
         self.assertEqual((result.get("extra") or {}).get("definition_files"), ["demo.json", "next.json"])
         self.assertEqual(((result.get("extra") or {}).get("work_queue") or {}).get("next_file"), "next.json")
 
+    def test_execute_autonomy_recommendation_dispatches_guard_start_runtime_control_action(self):
+        state: dict = {}
+        packet = {
+            "cycle_id": "cycle-test",
+            "decision_type": "RecommendAction",
+            "recommended_action": {
+                "action_type": "guard_start",
+                "target_kind": "runtime",
+                "target_id": "guard",
+                "reason_code": "guard_not_running",
+                "requires_ack": False,
+                "cooldown_sec": 300,
+            },
+            "confidence": 0.82,
+            "refusal_reasons": [],
+        }
+        policy = {
+            "enabled": True,
+            "mode": "canary",
+            "execute_enabled": True,
+            "execute_allowed_actions": [],
+            "execute_allowed_action_groups": ["runtime_control"],
+            "execute_blocked_actions": [],
+            "requires_operator_ack_for": [],
+            "execute_min_confidence": 0.55,
+        }
+
+        with mock.patch.object(autonomy_maintenance, "_maintenance_start_guard", return_value=(True, "guard_start_requested")), \
+             mock.patch.object(autonomy_maintenance, "_maintenance_guard_status_payload", return_value={"running": True, "status": "running"}):
+            result = autonomy_maintenance._execute_autonomy_recommendation(state, packet, policy)
+
+        self.assertEqual(result.get("result"), "success")
+        self.assertEqual(result.get("action_type"), "guard_start")
+        self.assertEqual((result.get("events") or [])[0].get("act"), "guard_start")
+        self.assertEqual((result.get("extra") or {}).get("guard"), {"running": True, "status": "running"})
+
+    def test_execute_autonomy_recommendation_dispatches_maintenance_start_runtime_control_action(self):
+        state: dict = {}
+        packet = {
+            "cycle_id": "cycle-test",
+            "decision_type": "RecommendAction",
+            "recommended_action": {
+                "action_type": "autonomy_maintenance_start",
+                "target_kind": "runtime",
+                "target_id": "autonomy_maintenance",
+                "reason_code": "maintenance_worker_not_running",
+                "requires_ack": False,
+                "cooldown_sec": 300,
+            },
+            "confidence": 0.82,
+            "refusal_reasons": [],
+        }
+        policy = {
+            "enabled": True,
+            "mode": "canary",
+            "execute_enabled": True,
+            "execute_allowed_actions": [],
+            "execute_allowed_action_groups": ["runtime_control"],
+            "execute_blocked_actions": [],
+            "requires_operator_ack_for": [],
+            "execute_min_confidence": 0.55,
+        }
+
+        with mock.patch.object(
+            autonomy_maintenance,
+            "_maintenance_start_autonomy_maintenance_worker",
+            return_value=(True, "autonomy_maintenance_start_requested"),
+        ), mock.patch.object(
+            autonomy_maintenance,
+            "_maintenance_autonomy_maintenance_summary",
+            return_value={"runtime_worker": {"last_cycle_status": "running"}},
+        ):
+            result = autonomy_maintenance._execute_autonomy_recommendation(state, packet, policy)
+
+        self.assertEqual(result.get("result"), "success")
+        self.assertEqual(result.get("action_type"), "autonomy_maintenance_start")
+        self.assertEqual((result.get("events") or [])[0].get("act"), "autonomy_maintenance_start")
+        self.assertEqual(
+            ((result.get("extra") or {}).get("autonomy_maintenance") or {}).get("runtime_worker"),
+            {"last_cycle_status": "running"},
+        )
+
     def test_execute_autonomy_recommendation_dispatches_patch_queue_conduit_action(self):
         state: dict = {}
         packet = {
@@ -799,6 +881,52 @@ class TestAutonomyMaintenance(unittest.TestCase):
         event_payload = (result.get("events") or [{}])[0].get("payload") or {}
         self.assertEqual(event_payload.get("max_steps"), 5)
         self.assertEqual(event_payload.get("max_trees"), 6)
+
+    def test_execute_autonomy_recommendation_honors_active_work_tree_target(self):
+        state: dict = {}
+        packet = {
+            "cycle_id": "cycle-test",
+            "decision_type": "RecommendAction",
+            "recommended_action": {
+                "action_type": "active_work_tree_run_next",
+                "target_kind": "lane",
+                "target_id": "branch_release",
+                "target_step_id": "task_release",
+                "reason_code": "active_work_tree_ready",
+                "requires_ack": False,
+                "cooldown_sec": 120,
+                "max_steps": 1,
+                "max_trees": 1,
+            },
+            "confidence": 0.72,
+            "refusal_reasons": [],
+        }
+        policy = {
+            "enabled": True,
+            "mode": "canary",
+            "execute_enabled": True,
+            "execute_allowed_actions": [],
+            "execute_allowed_action_groups": ["active_work_tree"],
+            "execute_blocked_actions": [],
+            "requires_operator_ack_for": [],
+            "execute_min_confidence": 0.55,
+        }
+
+        with mock.patch.object(
+            autonomy_maintenance,
+            "_run_active_work_tree_cycle",
+            return_value={"status": "ok", "executed_count": 1, "tree_count": 1},
+        ) as cycle_mock:
+            result = autonomy_maintenance._execute_autonomy_recommendation(state, packet, policy)
+
+        cycle_mock.assert_called_once_with(
+            state,
+            max_steps=1,
+            max_trees=1,
+            target_branch_id="branch_release",
+            target_task_id="task_release",
+        )
+        self.assertEqual(result.get("result"), "success")
 
     def test_run_worker_loops_for_bounded_cycles_and_records_status(self):
         with tempfile.TemporaryDirectory() as td:
@@ -2151,6 +2279,49 @@ class TestAutonomyMaintenance(unittest.TestCase):
         self.assertEqual(payload.get("executed_count"), 1)
         self.assertEqual(calls[0][0], "release_validation_run")
         self.assertEqual(calls[0][1], [root.branch_id])
+
+    def test_run_active_work_tree_cycle_honors_target_branch_and_task(self):
+        self._isolated_work_tree_db()
+        state = {}
+        tree = work_tree.initialize_tree(
+            "Signal Intake: Runtime Governance",
+            meta={"kind": "signal_ingestion", "source": "runtime_signals", "signal_ingestion": True},
+        )
+        root = work_tree._BRANCHES[tree.root_branch_id]
+        child = work_tree.add_branch_to_tree(tree.tree_id, "Target branch", "planned", root.branch_id)
+        work_tree.add_task_to_branch(
+            root.branch_id,
+            "Read wrong path",
+            meta={"expected_tool": "read", "allowed_tools": ["read"], "tool_args": ["wrong.txt"]},
+        )
+        target_task = work_tree.add_task_to_branch(
+            child.branch_id,
+            "Read target path",
+            meta={"expected_tool": "read", "allowed_tools": ["read"], "tool_args": ["target.txt"]},
+        )
+        work_tree.set_branch_tools(root.branch_id, allowed_tools=["read"], preferred_tool="read")
+        work_tree.set_branch_tools(child.branch_id, allowed_tools=["read"], preferred_tool="read")
+        calls = []
+
+        def _execute(tool_name, tool_args=None):
+            calls.append((tool_name, list(tool_args or [])))
+            return "target file contents"
+
+        with mock.patch.object(autonomy_maintenance.nova_core, "execute_planned_action", side_effect=_execute):
+            payload = autonomy_maintenance._run_active_work_tree_cycle(
+                state,
+                max_steps=1,
+                max_trees=1,
+                target_branch_id=child.branch_id,
+                target_task_id=target_task.task_id,
+                sync_core_thinning=False,
+            )
+
+        self.assertEqual(payload.get("status"), "ok")
+        self.assertEqual(payload.get("target_branch_id"), child.branch_id)
+        self.assertEqual(payload.get("target_task_id"), target_task.task_id)
+        self.assertEqual(calls, [("read", ["target.txt"])])
+        self.assertEqual(work_tree._TASKS[target_task.task_id].status, work_tree.TaskStatus.COMPLETE)
 
     def test_operator_continue_work_answer_feeds_next_active_work_tree_cycle(self):
         self._isolated_work_tree_db()

@@ -146,10 +146,12 @@ class TestPlannerContractService(unittest.TestCase):
             normalize_reply=lambda text: text,
         )
 
-        self.assertEqual(reply, "Nova Self Status")
-        self.assertEqual(meta.get("planner_decision"), "run_tool")
+        self.assertEqual(reply, "")
+        self.assertEqual(meta.get("planner_decision"), "tool_evidence_for_fallback")
         self.assertEqual(meta.get("tool"), "self_status")
         self.assertEqual(meta.get("reply_contract"), "self_status.current")
+        self.assertTrue(meta.get("defer_to_fallback"))
+        self.assertEqual(meta.get("tool_result"), "Nova Self Status")
         self.assertEqual(core.executed, [("self_status", [])])
 
     def test_maybe_handle_planner_sequence_allows_semantic_non_self_tool_with_empty_turn_acts(self):
@@ -274,7 +276,8 @@ class TestPlannerContractService(unittest.TestCase):
         self.assertIsNone(outcome)
         self.assertEqual(core.executed, [])
         self.assertEqual(observed[-1].get("status"), "weak_tool_route")
-        self.assertEqual((observed[-1].get("intent") or {}).get("tool"), "system_check")
+        self.assertEqual((observed[-1].get("intent") or {}).get("tool"), "none")
+        self.assertEqual((observed[-1].get("intent") or {}).get("answer_target"), "current_conversation")
 
     def test_maybe_handle_planner_sequence_does_not_run_no_confidence_status_route(self):
         observed = []
@@ -299,7 +302,8 @@ class TestPlannerContractService(unittest.TestCase):
         self.assertIsNone(outcome)
         self.assertEqual(core.executed, [])
         self.assertEqual(observed[-1].get("status"), "weak_tool_route")
-        self.assertEqual((observed[-1].get("intent") or {}).get("tool"), "self_status")
+        self.assertEqual((observed[-1].get("intent") or {}).get("tool"), "none")
+        self.assertEqual((observed[-1].get("intent") or {}).get("answer_target"), "current_conversation")
 
     def test_maybe_handle_planner_sequence_routes_live_status_from_structured_pair_without_numeric_confidence(self):
         core = _PlannerCoreStub(
@@ -325,9 +329,12 @@ class TestPlannerContractService(unittest.TestCase):
             normalize_reply=lambda text: text,
         )
 
-        self.assertEqual(reply, "Nova Self Status")
-        self.assertEqual(meta.get("planner_decision"), "run_tool")
+        self.assertEqual(reply, "")
+        self.assertEqual(meta.get("planner_decision"), "tool_evidence_for_fallback")
         self.assertEqual(meta.get("tool"), "self_status")
+        self.assertEqual(meta.get("reply_contract"), "self_status.current")
+        self.assertTrue(meta.get("defer_to_fallback"))
+        self.assertEqual(meta.get("tool_result"), "Nova Self Status")
         self.assertEqual(core.executed, [("self_status", [])])
 
     def test_maybe_handle_planner_sequence_blocks_status_tool_without_live_status_contract(self):
@@ -395,8 +402,8 @@ class TestPlannerContractService(unittest.TestCase):
 
         self.assertIsNone(outcome)
         self.assertEqual(core.executed, [])
-        self.assertTrue(any(args[:2] == ("action_planner", "tool_evidence_available") for args, _kwargs in traces))
-        self.assertEqual(observed[-1].get("status"), "tool_evidence_available")
+        self.assertTrue(any(args[:2] == ("action_planner", "prior_tool_evidence_present") for args, _kwargs in traces))
+        self.assertEqual(observed[-1].get("status"), "prior_tool_evidence_present")
         self.assertEqual((observed[-1].get("intent") or {}).get("answer_target"), "current_conversation")
         self.assertEqual((observed[-1].get("intent") or {}).get("evidence_need"), "conversation")
 

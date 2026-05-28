@@ -1342,6 +1342,61 @@ class TestWorkTreeSignalIngestionService(unittest.TestCase):
         self.assertEqual(open_tasks[0].title, "Synthesize source-root judgment from collected evidence")
         self.assertEqual((open_tasks[0].meta or {}).get("expected_tool"), "source_root_judgment")
 
+    def test_source_wiring_probe_gap_becomes_work_tree_pressure(self) -> None:
+        status_payload = {
+            "alerts": [],
+            "self_check_pass_ratio": 1.0,
+            "source_wiring_probe_ok": False,
+            "source_wiring_probe_gap_count": 1,
+            "source_wiring_probe": {
+                "ok": False,
+                "gap_count": 1,
+                "missing_required_judgment_paths": ["source_root_judgment"],
+            },
+        }
+
+        results = self.service.sync_status_snapshot(status_payload)
+
+        self.assertTrue(any(item.get("action") == "created" for item in results))
+        branch = self._signal_branches()[0]
+        self.assertEqual(str(branch.source_type or ""), "source_wiring_probe")
+        self.assertEqual(str(branch.work_class or ""), "governance_pressure")
+        self.assertEqual(str(branch.actionability or ""), "safe_now")
+        self.assertIn("source_wiring_probe_gap", str(branch.source_key or ""))
+        tasks = work_tree.list_branch_tasks(branch.branch_id)
+        self.assertEqual(tasks[0].meta.get("tool_args"), ["services/nova_wiring_inventory.py"])
+
+    def test_source_wiring_probe_gap_resolves_when_probe_is_clean(self) -> None:
+        failing = {
+            "alerts": [],
+            "self_check_pass_ratio": 1.0,
+            "source_wiring_probe_ok": False,
+            "source_wiring_probe_gap_count": 1,
+            "source_wiring_probe": {
+                "ok": False,
+                "gap_count": 1,
+                "missing_required_closure_paths": ["signal_branch_resolution"],
+            },
+        }
+        clear = {
+            "alerts": [],
+            "self_check_pass_ratio": 1.0,
+            "source_wiring_probe_ok": True,
+            "source_wiring_probe_gap_count": 0,
+            "source_wiring_probe": {"ok": True, "gap_count": 0},
+        }
+
+        self.service.sync_status_snapshot(failing)
+        branch = self._signal_branches()[0]
+        self.assertEqual(str(branch.source_type or ""), "source_wiring_probe")
+
+        results = self.service.sync_status_snapshot(clear)
+
+        self.assertTrue(any(item.get("action") == "resolved" for item in results))
+        branch = self._signal_branches()[0]
+        self.assertEqual(str(branch.resolution_state or ""), "resolved")
+        self.assertEqual(branch.status, work_tree.BranchStatus.COMPLETE)
+
     def test_status_snapshot_ingests_blocked_generated_queue_pressure(self) -> None:
         status_payload = {
             "alerts": [],

@@ -84,7 +84,24 @@ class NovaWiringInventoryServiceTests(unittest.TestCase):
     def test_source_probe_finds_owned_root_signal_route(self) -> None:
         payload = build_source_wiring_probe_payload()
 
+        self.assertTrue(payload["ok"], payload)
+        self.assertEqual(payload["gap_count"], 0)
+        self.assertIn("source_wiring_probe", payload["signal_sources"])
         self.assertIn("self_repair_closure_inventory", payload["owned_root_routes"])
+
+    def test_source_probe_reports_missing_path_sets(self) -> None:
+        payload = build_source_wiring_probe_payload()
+
+        self.assertEqual(payload["missing_signal_sources"], [])
+        self.assertEqual(payload["missing_planned_tools"], [])
+        self.assertEqual(payload["missing_advisory_actions"], [])
+        self.assertEqual(payload["planned_tools_without_execution"], [])
+        self.assertEqual(payload["advisory_actions_without_execution"], [])
+        self.assertEqual(payload["missing_required_evidence_paths"], [])
+        self.assertEqual(payload["missing_required_judgment_paths"], [])
+        self.assertEqual(payload["missing_required_closure_paths"], [])
+        self.assertEqual(payload["missing_required_operator_outbox_paths"], [])
+        self.assertEqual(payload["missing_required_owned_root_routes"], [])
 
     def test_source_probe_has_direct_signal_for_every_source_root(self) -> None:
         payload = build_source_wiring_probe_payload()

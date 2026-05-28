@@ -155,6 +155,163 @@ class TestNovaReplySequence(unittest.TestCase):
         self.assertEqual(meta.get("tool"), "")
         self.assertNotEqual((meta.get("reply_outcome") or {}).get("reply_contract"), "self_status.current")
 
+    def test_weak_status_route_does_not_feed_stale_tool_evidence_to_conversation(self):
+        captured = {}
+
+        def _chat(_text, retrieved_context="", language_mix_spanish_pct=0, reply_form=""):
+            captured["context"] = retrieved_context
+            captured["reply_form"] = reply_form
+            return "I missed the conversation intent there."
+
+        core = _core(
+            _llm_classify_routing_intent=lambda _text, **_kwargs: {
+                "tool": "self_status",
+                "args": [],
+                "confidence": 0.0,
+                "reason": "",
+                "answer_target": "current_conversation",
+                "evidence_need": "conversation",
+            },
+            build_fallback_context_details=lambda text, turns, **_kwargs: {
+                "chat_context": "Assistant returned a tool result.",
+                "state_context": "ACTIVE SESSION STATE: last_tool_evidence / self_status\nLast tool evidence:\nPrevious Nova Self Status",
+            },
+            execute_planned_action=lambda tool, args: "LIVE_STATUS" if tool == "self_status" else "",
+            ollama_chat=_chat,
+        )
+
+        reply, meta = self._call("are you feeling better?", core=core)
+
+        self.assertEqual(reply, "I missed the conversation intent there.")
+        self.assertEqual(meta.get("planner_decision"), "llm_fallback")
+        self.assertEqual(meta.get("tool"), "")
+        self.assertEqual(captured.get("reply_form"), "conversation_turn")
+        self.assertNotIn("Previous Nova Self Status", captured.get("context"))
+
+    def test_status_followup_does_not_reuse_prior_self_status_without_current_live_intent(self):
+        captured = {}
+        executed = []
+
+        def _intent(text, **_kwargs):
+            if text == "are you feeling better?":
+                return {
+                    "tool": "self_status",
+                    "args": [],
+                    "confidence": 0.92,
+                    "reason": "live state evidence",
+                    "answer_target": "nova_live_state",
+                    "evidence_need": "live_self_status",
+                }
+            return {
+                "tool": "self_status",
+                "args": [],
+                "confidence": 0.0,
+                "reason": "conversation follow-up",
+                "answer_target": "current_conversation",
+                "evidence_need": "conversation",
+            }
+
+        def _execute(tool, args):
+            executed.append((tool, list(args or [])))
+            return "Previous Nova Self Status"
+
+        def _chat(text, retrieved_context="", language_mix_spanish_pct=0, reply_form=""):
+            captured[text] = retrieved_context
+            return "conversation reply"
+
+        core = _core(
+            _llm_classify_routing_intent=_intent,
+            execute_planned_action=_execute,
+            build_fallback_context_details=lambda text, turns, **_kwargs: {
+                "chat_context": "Recent conversation only.",
+                "state_context": (
+                    "ACTIVE SESSION STATE: last_tool_evidence / self_status\n"
+                    "Prior tool evidence: context only\n"
+                    "Previous Nova Self Status"
+                ),
+            },
+            ollama_chat=_chat,
+        )
+
+        _first_reply, first_meta = self._call(
+            "are you feeling better?",
+            core=core,
+            stop_before_llm_fallback=True,
+        )
+
+        self.assertEqual(first_meta.get("tool"), "self_status")
+        self.assertEqual(first_meta.get("tool_result"), "Previous Nova Self Status")
+        self.assertEqual(executed, [("self_status", [])])
+
+        session = SimpleNamespace(
+            conversation_state={
+                "kind": "last_tool_evidence",
+                "tool": "self_status",
+                "tool_result": "Previous Nova Self Status",
+            }
+        )
+
+        second_reply, second_meta = self._call("what is done?", core=core, session=session)
+
+        self.assertEqual(second_reply, "conversation reply")
+        self.assertEqual(second_meta.get("planner_decision"), "llm_fallback")
+        self.assertEqual(second_meta.get("tool"), "")
+        self.assertEqual(executed, [("self_status", [])])
+        self.assertNotIn("Previous Nova Self Status", captured.get("what is done?", ""))
+        self.assertNotIn("SESSION EVIDENCE", captured.get("what is done?", ""))
+
+    def test_live_status_tool_evidence_is_synthesized_by_fallback(self):
+        captured = {}
+
+        def _chat(_text, retrieved_context="", language_mix_spanish_pct=0):
+            captured["context"] = retrieved_context
+            return "You can help by reviewing the current blocker."
+
+        core = _core(
+            _llm_classify_routing_intent=lambda _text, **_kwargs: {
+                "tool": "self_status",
+                "args": [],
+                "confidence": 0.92,
+                "reason": "live state evidence",
+                "answer_target": "nova_live_state",
+                "evidence_need": "live_self_status",
+            },
+            execute_planned_action=lambda tool, args: "LIVE_STATUS" if tool == "self_status" else "",
+            ollama_chat=_chat,
+        )
+
+        reply, meta = self._call("how can I help you get better?", core=core)
+
+        self.assertEqual(reply, "You can help by reviewing the current blocker.")
+        self.assertEqual(meta.get("planner_decision"), "llm_fallback")
+        self.assertEqual(meta.get("tool"), "self_status")
+        self.assertEqual(meta.get("tool_result"), "LIVE_STATUS")
+        self.assertTrue(meta.get("grounded"))
+        self.assertIn("LIVE_STATUS", captured.get("context"))
+        self.assertEqual(((meta.get("reply_outcome") or {}).get("deferred_tool") or {}).get("tool"), "self_status")
+
+    def test_stop_before_fallback_carries_deferred_status_evidence(self):
+        core = _core(
+            _llm_classify_routing_intent=lambda _text, **_kwargs: {
+                "tool": "self_status",
+                "args": [],
+                "confidence": 0.92,
+                "reason": "live state evidence",
+                "answer_target": "nova_live_state",
+                "evidence_need": "live_self_status",
+            },
+            execute_planned_action=lambda tool, args: "LIVE_STATUS" if tool == "self_status" else "",
+            ollama_chat=lambda *_args, **_kwargs: "MODEL_SHOULD_NOT_RUN",
+        )
+
+        reply, meta = self._call("what is troubling you today?", core=core, stop_before_llm_fallback=True)
+
+        self.assertEqual(reply, "")
+        self.assertEqual(meta.get("planner_decision"), "unhandled")
+        self.assertEqual(meta.get("tool"), "self_status")
+        self.assertEqual(meta.get("tool_result"), "LIVE_STATUS")
+        self.assertEqual((meta.get("semantic_tool_observation") or {}).get("status"), "tool_result_available")
+
     def test_semantic_none_flows_to_model_fallback_without_content_hooks(self):
         core = _core(
             _llm_classify_routing_intent=lambda _text, **_kwargs: {

@@ -560,6 +560,16 @@ def _autonomy_log_check(root: Path, *, max_age_sec: int = 3600) -> dict[str, Any
 def _source_wiring_inventory_checks(root: Path) -> list[dict[str, Any]]:
     checks: list[dict[str, Any]] = []
     source_probe = build_source_wiring_probe_payload(root=root)
+    checks.append(
+        _check(
+            "wiring-source:source-probe",
+            bool(source_probe.get("ok")),
+            "source wiring probe found all required source-derived paths"
+            if source_probe.get("ok")
+            else "source wiring probe gaps remain",
+            data=source_probe,
+        )
+    )
     source_set = set(source_probe.get("signal_sources") or [])
     tool_set = set(source_probe.get("planned_tools") or [])
     action_set = set(source_probe.get("advisory_actions") or [])

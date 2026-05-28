@@ -348,6 +348,9 @@ def run_loop(tts, *, core: object) -> None:
             action_ledger_add_step=lambda stage, outcome, detail="", **data: _trace(stage, outcome, detail, **data),
             pending_action=pending_action,
             semantic_tool_observation=sequence_meta.get("semantic_tool_observation") if isinstance(sequence_meta, dict) else {},
+            planner_decision=str((sequence_meta or {}).get("planner_decision") or ""),
+            tool=str((sequence_meta or {}).get("tool") or ""),
+            tool_result=str((sequence_meta or {}).get("tool_result") or ""),
         )
         retrieved_context = str(fallback_entry.get("retrieved_context") or "")
         intent_evidence_packet = fallback_entry.get("intent_evidence_packet") if isinstance(fallback_entry.get("intent_evidence_packet"), dict) else {}

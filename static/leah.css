@@ -28,17 +28,16 @@
 
 html,
 body {
-  color:black;
   min-height: 100%;
 }
 
 body {
   margin: 0;
+  background-color: var(--bg-deep);
   color: var(--ink);
   font-family: "Bahnschrift", "Aptos", "Segoe UI", sans-serif;
   position: relative;
   overflow-x: hidden;
-
 }
 
 body::before,
@@ -52,20 +51,20 @@ body::after {
 }
 
 body::before {
-
-
+  background:
+    radial-gradient(ellipse 55% 48% at 32% 48%, rgba(var(--mood-primary-rgb), 0.11) 0%, transparent 68%),
+    radial-gradient(ellipse 42% 38% at 72% 58%, rgba(var(--mood-secondary-rgb), 0.07) 0%, transparent 62%);
   filter: blur(calc(38px + var(--reply-pulse-strength) * 24px));
   transform: scale(calc(1 + var(--reply-pulse-strength) * 0.08));
   transition:
     filter 220ms ease,
     transform 220ms ease,
-    opacity 220ms ease,
-   
+    opacity 220ms ease;
   animation: ambientDrift 26s linear infinite;
 }
 
 body::after {
-
+  background: radial-gradient(ellipse 50% 45% at 65% 38%, rgba(var(--mood-tertiary-rgb), 0.05) 0%, transparent 65%);
   mix-blend-mode: screen;
   opacity: calc(0.22 + var(--reply-pulse-strength) * 0.16);
   animation: ambientSweep 18s ease-in-out infinite alternate;
@@ -95,16 +94,14 @@ body::after {
 }
 
 .leah-shell::before {
-  background:
-
+  background: radial-gradient(ellipse 58% 52% at 28% 52%, rgba(87, 211, 200, 0.05) 0%, transparent 70%);
   filter: blur(18px);
   opacity: 0.88;
 }
 
 .leah-shell::after {
   inset: 6% 2% 8% 2%;
-  background:
-
+  background: radial-gradient(ellipse 62% 50% at 76% 38%, rgba(255, 200, 106, 0.04) 0%, transparent 68%);
   opacity: 0.55;
 }
 
@@ -177,8 +174,7 @@ body::after {
   position: absolute;
   inset: auto -18% -42% -12%;
   height: 72%;
- 
-
+  background: radial-gradient(ellipse 80% 58% at 40% 82%, rgba(var(--mood-primary-rgb), 0.07) 0%, transparent 72%);
   filter: blur(10px);
   opacity: 0.72;
   z-index: -1;
@@ -213,14 +209,13 @@ body::after {
 .leah-main {
   min-width: 0;
   display: grid;
-  grid-template-rows: auto 1fr;
+  grid-template-rows: 1fr;
   gap: 18px;
 }
 
 .brand-card {
   padding: 18px;
   border-radius: 34px 14px 34px 14px;
-
   border: 1px solid var(--line-strong);
   transform: translateY(-8px);
 }
@@ -229,7 +224,7 @@ body::after {
   display: inline-flex;
   padding: 8px 12px;
   border-radius: 999px;
-
+  background: rgba(87, 211, 200, 0.10);
   color: var(--accent);
   font-size: 12px;
   font-weight: 800;
@@ -256,7 +251,7 @@ body::after {
   padding: 6px 10px;
   border-radius: 999px;
   border: 1px solid rgba(125, 190, 214, 0.22);
-
+  background: rgba(125, 190, 214, 0.07);
   color: var(--muted);
   font-size: 11px;
   font-weight: 700;
@@ -274,15 +269,15 @@ body::after {
   padding: 12px 14px;
   border-radius: 22px 10px 22px 10px;
   border: 1px solid var(--line);
+  background: rgba(125, 190, 214, 0.06);
   color: var(--ink);
   text-decoration: none;
-
 }
 
 .nav-pill.active,
 .nav-pill:hover {
   border-color: rgba(87, 211, 200, 0.4);
-
+  background: rgba(87, 211, 200, 0.08);
 }
 
 .rail-panel,
@@ -290,7 +285,6 @@ body::after {
   padding: 16px;
   border-radius: 28px 12px 28px 12px;
   border: 1px solid var(--line);
-
 }
 
 .panel-title {
@@ -311,7 +305,7 @@ body::after {
   padding: 8px 11px;
   border-radius: 999px;
   border: 1px solid var(--line);
-
+  background: rgba(125, 190, 214, 0.06);
   color: var(--muted);
   font-size: 12px;
   font-weight: 700;
@@ -320,25 +314,25 @@ body::after {
 .presence-chip.ok {
   color: var(--ok);
   border-color: rgba(127, 230, 163, 0.28);
-
+  background: rgba(127, 230, 163, 0.07);
 }
 
 .presence-chip.live {
   color: var(--accent);
   border-color: rgba(87, 211, 200, 0.28);
-
+  background: rgba(87, 211, 200, 0.07);
 }
 
 .presence-chip.warn {
   color: var(--accent-2);
   border-color: rgba(255, 200, 106, 0.3);
-
+  background: rgba(255, 200, 106, 0.07);
 }
 
 .presence-chip.danger {
   color: var(--danger);
   border-color: rgba(255, 130, 111, 0.32);
-
+  background: rgba(255, 130, 111, 0.07);
 }
 
 .mini-facts {
@@ -399,7 +393,7 @@ body::after {
   padding: 14px 16px;
   border-radius: 24px 10px 24px 10px;
   border: 1px solid var(--line);
-
+  background: rgba(10, 24, 36, 0.6);
 }
 
 .status-label {
@@ -423,12 +417,22 @@ body::after {
   display: flex;
   justify-content: space-between;
   gap: 12px;
-  align-items: start;
+  align-items: center;
+}
+
+.welcome-line {
+  font-size: 15px;
+  color: var(--muted);
+}
+
+.welcome-user {
+  color: var(--ink);
+  font-weight: 700;
 }
 
 .chat-stream {
   min-height: 420px;
-  max-height: calc(100vh - 360px);
+  max-height: calc(100vh - 320px);
   overflow: auto;
   display: grid;
   gap: 12px;
@@ -446,14 +450,14 @@ body::after {
 
 .chat-card.user {
   margin-left: auto;
-
+  background: rgba(87, 211, 200, 0.07);
   border-color: rgba(87, 211, 200, 0.28);
   border-radius: 30px 14px 30px 22px;
 }
 
 .chat-card.assistant {
   margin-right: auto;
-
+  background: rgba(255, 200, 106, 0.05);
   border-color: rgba(255, 200, 106, 0.24);
   border-radius: 30px 22px 30px 14px;
 }
@@ -465,7 +469,7 @@ body::after {
 
 .chat-card.system {
   max-width: 100%;
-
+  background: rgba(125, 190, 214, 0.04);
 }
 
 .composer-wrap {
@@ -474,27 +478,29 @@ body::after {
 }
 
 .drop-zone {
-  padding: 18px;
+  padding: 14px 18px;
   border-radius: 28px 12px 28px 12px;
-  border: 1px dashed rgba(125, 190, 214, 0.36);
-
+  border: 1px dashed rgba(125, 190, 214, 0.28);
+  background: rgba(125, 190, 214, 0.04);
   cursor: pointer;
 }
 
 .drop-zone.dragging {
   border-color: rgba(87, 211, 200, 0.72);
-
+  background: rgba(87, 211, 200, 0.07);
 }
 
 .drop-title {
-  font-size: 15px;
+  font-size: 14px;
   font-weight: 700;
+  color: var(--muted);
 }
 
 .drop-copy {
-  margin-top: 6px;
+  margin-top: 4px;
   color: var(--muted);
-  font-size: 13px;
+  font-size: 12px;
+  opacity: 0.75;
 }
 
 .composer-form {
@@ -509,9 +515,14 @@ body::after {
   padding: 14px 16px;
   border-radius: 28px 14px 28px 14px;
   border: 1px solid var(--line);
- 
+  background: rgba(6, 13, 24, 0.65);
   color: var(--ink);
   font: inherit;
+}
+
+.composer-form textarea::placeholder {
+  color: var(--muted);
+  opacity: 0.7;
 }
 
 .composer-form textarea:focus,
@@ -536,20 +547,22 @@ body::after {
 
 .action-button,
 .send-button {
-  border: 0;
+  border: 1px solid var(--line);
   border-radius: 18px 10px 18px 10px;
   padding: 11px 14px;
   font: inherit;
+  font-size: 13px;
   font-weight: 700;
   cursor: pointer;
   color: var(--ink);
-
+  background: rgba(125, 190, 214, 0.10);
   transition: transform 140ms ease, background 140ms ease, border-color 140ms ease;
 }
 
 .action-button:hover,
 .send-button:hover {
   transform: translateY(-1px);
+  background: rgba(125, 190, 214, 0.16);
 }
 
 .action-button:disabled,
@@ -560,20 +573,35 @@ body::after {
 }
 
 .action-button.ghost {
-
+  background: rgba(125, 190, 214, 0.06);
   border: 1px solid var(--line);
+}
+
+.action-button.ghost:hover {
+  background: rgba(125, 190, 214, 0.12);
 }
 
 .action-button.live {
   color: var(--accent);
+  background: rgba(87, 211, 200, 0.12);
+  border: 1px solid rgba(87, 211, 200, 0.28);
+}
 
-  border: 1px solid rgba(87, 211, 200, 0.26);
+.action-button.live:hover {
+  background: rgba(87, 211, 200, 0.18);
 }
 
 .send-button {
   min-width: 130px;
+  background: var(--accent);
+  border-color: var(--accent);
   color: #06242a;
+  font-weight: 800;
+}
 
+.send-button:hover {
+  background: #6ee8dc;
+  border-color: #6ee8dc;
 }
 
 .activity-feed,
@@ -590,7 +618,7 @@ body::after {
   padding: 12px 13px;
   border-radius: 14px;
   border: 1px solid var(--line);
-
+  background: rgba(125, 190, 214, 0.04);
   color: var(--muted);
   font-size: 13px;
 }
@@ -620,7 +648,7 @@ body::after {
   border-radius: 28px 14px 28px 14px;
   overflow: hidden;
   border: 1px solid var(--line);
-
+  background: rgba(6, 13, 24, 0.4);
 }
 
 .camera-preview {
@@ -654,7 +682,7 @@ body::after {
   padding: 12px;
   border-radius: 24px 10px 24px 10px;
   border: 1px solid var(--line);
-
+  background: rgba(6, 13, 24, 0.4);
   color: var(--muted);
   white-space: pre-wrap;
 }
@@ -662,7 +690,7 @@ body::after {
 .transcript-box.live {
   color: var(--ink);
   border-color: rgba(87, 211, 200, 0.28);
-
+  background: rgba(87, 211, 200, 0.05);
 }
 
 @keyframes sectionFlow {

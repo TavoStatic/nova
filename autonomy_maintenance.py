@@ -27,23 +27,29 @@ from services.core_thinning import build_core_thinning_brief as service_build_co
 from services.core_thinning import feed_core_thinning_brief_to_work_tree as service_feed_core_thinning_brief_to_work_tree
 from services.core_steward import build_core_steward_payload as service_build_core_steward_payload
 from services.nova_control_action_dispatcher import NOVA_CONTROL_ACTION_DISPATCHER, autonomy_advisory_action_types
+from services.runtime_control import RUNTIME_CONTROL_SERVICE
 from services.nova_runtime_context import AUTONOMY_ORCHESTRATOR_LEDGER_FILE
 from services.nova_runtime_context import OPERATOR_OUTBOX_FILE
 from services.nova_runtime_context import RUNTIME_DIR as CONTEXT_RUNTIME_DIR
 from services.nova_runtime_context import runtime_scope_name
 from services.operator_outbox import OPERATOR_OUTBOX_SERVICE
+from services.runtime_restart_provenance import RUNTIME_RESTART_PROVENANCE_SERVICE
+from services.runtime_status import RUNTIME_STATUS_SERVICE
 from services.subconscious_review_judgment import is_no_owner_root_repair_judgment
 from services.subconscious_review_judgment import latest_subconscious_review_judgment_for_branch
 from services.subconscious_work_tree_triage import SUBCONSCIOUS_WORK_TREE_TRIAGE_SERVICE
 from services.test_session_control import TEST_SESSION_CONTROL_SERVICE
 from services.validation_artifact_truth import VALIDATION_ARTIFACT_TRUTH_SERVICE
 from services.work_tree_signal_ingestion import WORK_TREE_SIGNAL_INGESTION_SERVICE
+import tools.runtime_processes as runtime_processes
 from work_tree_contracts import BranchStatus, TaskStatus
 
 
 ROOT = Path(__file__).resolve().parent
 RUNTIME_DIR = CONTEXT_RUNTIME_DIR
 VENV_PY = ROOT / ".venv" / "Scripts" / "python.exe"
+GUARD_PY = ROOT / "nova_guard.py"
+AUTONOMY_MAINTENANCE_PY = ROOT / "autonomy_maintenance.py"
 TEST_SESSIONS_ROOT = RUNTIME_DIR / "test_sessions"
 TEST_SESSION_RUNNER_PY = ROOT / "scripts" / "run_test_session.py"
 STATE_FILE = RUNTIME_DIR / "autonomy_maintenance_state.json"
@@ -52,6 +58,7 @@ REGRESSION_STATUS_FILE = RUNTIME_DIR / "regression_status.json"
 REGRESSION_RUNNER = ROOT / "scripts" / "run_regression.py"
 AUTONOMY_ORCHESTRATOR_LEDGER = AUTONOMY_ORCHESTRATOR_LEDGER_FILE
 OPERATOR_OUTBOX = OPERATOR_OUTBOX_FILE
+RESTART_INTENT_PATH = RUNTIME_DIR / "restart_intent.json"
 LATEST_SUBCONSCIOUS = RUNTIME_DIR / "subconscious_runs" / "latest.json"
 GENERATED_DEFS = TEST_SESSIONS_ROOT / "generated_definitions"
 UPDATES_DIR = RUNTIME_DIR / "updates" if runtime_scope_name() == "validation" else ROOT / "updates"
@@ -1483,6 +1490,112 @@ def _unsupported_control_action(payload: dict) -> tuple[bool, str, dict, str]:
     return False, msg, {}, msg
 
 
+def _maintenance_logical_service_processes(script_path: Path, root_pid: int | None = None) -> list[dict]:
+    del root_pid
+    return runtime_processes.logical_service_processes(script_path)
+
+
+def _maintenance_cached_logical_service_processes(
+    script_path: Path,
+    *,
+    cache_key: str = "",
+    max_age_seconds: float = 0.0,
+) -> list[dict]:
+    del cache_key, max_age_seconds
+    return _maintenance_logical_service_processes(script_path)
+
+
+def _maintenance_select_logical_process(
+    processes: list[dict],
+    *,
+    pid: int | None = None,
+    create_time: float | None = None,
+) -> dict | None:
+    return runtime_processes.select_logical_process(processes, pid=pid, create_time=create_time)
+
+
+def _maintenance_prune_orphaned_guard_artifacts(
+    _logical_processes: list[dict],
+    _pid: int | None,
+    _pid_live: bool,
+) -> None:
+    return None
+
+
+def _maintenance_guard_status_payload() -> dict:
+    try:
+        import psutil
+
+        return RUNTIME_STATUS_SERVICE.guard_status_payload(
+            runtime_dir=RUNTIME_DIR,
+            guard_py=GUARD_PY,
+            include_fallback_scan=True,
+            pid_exists_fn=psutil.pid_exists,
+            cached_logical_service_processes_fn=_maintenance_cached_logical_service_processes,
+            logical_service_processes_fn=_maintenance_logical_service_processes,
+            prune_orphaned_guard_artifacts_fn=_maintenance_prune_orphaned_guard_artifacts,
+            select_logical_process_fn=_maintenance_select_logical_process,
+            process_scan_cache_ttl_seconds=2.0,
+        )
+    except Exception as exc:
+        return {"running": False, "status": "unavailable", "error": str(exc)}
+
+
+def _maintenance_start_guard() -> tuple[bool, str]:
+    return RUNTIME_CONTROL_SERVICE.start_guard(
+        venv_python=Path(VENV_PY),
+        guard_py=GUARD_PY,
+        runtime_dir=RUNTIME_DIR,
+        base_dir=ROOT,
+        guard_status_fn=_maintenance_guard_status_payload,
+        restart_intent_path=RESTART_INTENT_PATH,
+        restart_provenance_service=RUNTIME_RESTART_PROVENANCE_SERVICE,
+        subprocess_module=subprocess,
+        os_name=os.name,
+    )
+
+
+def _maintenance_guard_control_action(payload: dict) -> tuple[bool, str, dict, str]:
+    action = str((payload or {}).get("_action") or (payload or {}).get("action") or "").strip().lower()
+    if action == "guard_status":
+        return RUNTIME_CONTROL_SERVICE.guard_status_action(
+            guard_status_payload_fn=_maintenance_guard_status_payload,
+        )
+    if action == "guard_start":
+        return RUNTIME_CONTROL_SERVICE.guard_start_action(
+            start_guard_fn=_maintenance_start_guard,
+            guard_status_payload_fn=_maintenance_guard_status_payload,
+        )
+    return _unsupported_control_action(payload)
+
+
+def _maintenance_autonomy_maintenance_summary() -> dict:
+    return _load_state()
+
+
+def _maintenance_start_autonomy_maintenance_worker() -> tuple[bool, str]:
+    return RUNTIME_CONTROL_SERVICE.start_autonomy_maintenance_worker(
+        venv_python=Path(VENV_PY),
+        maintenance_py=AUTONOMY_MAINTENANCE_PY,
+        state_path=STATE_FILE,
+        base_dir=ROOT,
+        interval_sec=300,
+        runtime_processes_module=runtime_processes,
+        subprocess_module=subprocess,
+        os_name=os.name,
+    )
+
+
+def _maintenance_autonomy_runtime_action(payload: dict) -> tuple[bool, str, dict, str]:
+    action = str((payload or {}).get("_action") or (payload or {}).get("action") or "").strip().lower()
+    if action == "autonomy_maintenance_start":
+        return RUNTIME_CONTROL_SERVICE.autonomy_maintenance_start_action(
+            start_autonomy_maintenance_worker_fn=_maintenance_start_autonomy_maintenance_worker,
+            autonomy_maintenance_summary_fn=_maintenance_autonomy_maintenance_summary,
+        )
+    return _unsupported_control_action(payload)
+
+
 def _maintenance_pulse_status_action(_payload: dict) -> tuple[bool, str, dict, str]:
     try:
         pulse = nova_core.build_pulse_payload()
@@ -1521,11 +1634,20 @@ def _maintenance_patch_queue_run_next_action(_payload: dict, state: dict) -> tup
 def _maintenance_active_work_tree_run_next_action(_payload: dict, state: dict) -> tuple[bool, str, dict, str]:
     max_steps = _safe_int((_payload or {}).get("max_steps"), ACTIVE_WORK_TREE_DEFAULT_DISPATCH_STEPS)
     max_trees = _safe_int((_payload or {}).get("max_trees"), ACTIVE_WORK_TREE_MAX_TREES)
+    raw_target_id = str((_payload or {}).get("target_id") or "").strip()
+    target_task_id = str((_payload or {}).get("target_step_id") or "").strip()
+    target_branch_id = raw_target_id if (raw_target_id.startswith("branch_") or target_task_id) else ""
     try:
+        cycle_kwargs = {
+            "max_steps": max(1, min(max_steps, ACTIVE_WORK_TREE_MAX_STEPS)),
+            "max_trees": max(1, min(max_trees, ACTIVE_WORK_TREE_MAX_TREES)),
+        }
+        if target_branch_id or target_task_id:
+            cycle_kwargs["target_branch_id"] = target_branch_id
+            cycle_kwargs["target_task_id"] = target_task_id
         cycle = _run_active_work_tree_cycle(
             state,
-            max_steps=max(1, min(max_steps, ACTIVE_WORK_TREE_MAX_STEPS)),
-            max_trees=max(1, min(max_trees, ACTIVE_WORK_TREE_MAX_TREES)),
+            **cycle_kwargs,
         )
     except Exception as exc:
         msg = f"active_work_tree_run_next_failed:{exc}"
@@ -1570,9 +1692,9 @@ def _dispatch_autonomy_control_action(action_type: str, payload: dict, events: l
         update_now_confirm_action_fn=_unsupported_control_action,
         update_now_cancel_action_fn=_unsupported_control_action,
         runtime_artifact_show_action_fn=_unsupported_control_action,
-        guard_control_action_fn=_unsupported_control_action,
+        guard_control_action_fn=_maintenance_guard_control_action,
         core_runtime_action_fn=_unsupported_control_action,
-        autonomy_runtime_action_fn=_unsupported_control_action,
+        autonomy_runtime_action_fn=_maintenance_autonomy_runtime_action,
         test_session_run_action_fn=_unsupported_control_action,
         generated_pack_run_action_fn=_unsupported_control_action,
         generated_queue_run_next_action_fn=_maintenance_generated_queue_run_next_action,
@@ -3253,6 +3375,34 @@ def _candidate_uses_tool(candidate: dict, tool_name: str) -> bool:
     return str(next_step.get("recommended_tool") or "").strip() == tool_name
 
 
+def _active_work_tree_target_decider(target_branch_id: str = "", target_task_id: str = ""):
+    branch_target = str(target_branch_id or "").strip()
+    task_target = str(target_task_id or "").strip()
+    if not branch_target and not task_target:
+        return None
+
+    def _decide(_tree_id: str, options: list[dict]) -> dict:
+        for option in options:
+            option_branch_id = str(option.get("branch_id") or "").strip()
+            option_task_id = str(option.get("task_id") or "").strip()
+            if branch_target and option_branch_id != branch_target:
+                continue
+            if task_target and option_task_id != task_target:
+                continue
+            return {
+                "branch_id": option_branch_id,
+                "task_id": option_task_id,
+                "recommended_tool": str(option.get("recommended_tool") or "").strip(),
+            }
+        return {
+            "branch_id": branch_target or "__target_branch_not_available__",
+            "task_id": task_target,
+            "recommended_tool": "",
+        }
+
+    return _decide
+
+
 def _sync_core_thinning_work_tree(state: dict) -> dict:
     try:
         brief = service_build_core_thinning_brief([ROOT / "nova_core.py", ROOT / "nova_http.py"])
@@ -3285,11 +3435,14 @@ def _run_active_work_tree_cycle(
     *,
     max_steps: int | None = None,
     max_trees: int | None = None,
+    target_branch_id: str = "",
+    target_task_id: str = "",
     sync_core_thinning: bool = True,
 ) -> dict:
     tree_limit = max(1, _safe_int(max_trees, ACTIVE_WORK_TREE_MAX_TREES)) if max_trees is not None else ACTIVE_WORK_TREE_MAX_TREES
     step_limit = max(1, _safe_int(max_steps, ACTIVE_WORK_TREE_MAX_STEPS)) if max_steps is not None else ACTIVE_WORK_TREE_MAX_STEPS
     candidates = _active_work_tree_candidates(tree_limit)
+    target_decider = _active_work_tree_target_decider(target_branch_id, target_task_id)
     core_thinning_sync: dict = {}
     if sync_core_thinning and any(_candidate_uses_tool(candidate, "core_thinning") for candidate in candidates):
         core_thinning_sync = _sync_core_thinning_work_tree(state)
@@ -3320,11 +3473,13 @@ def _run_active_work_tree_cycle(
                 }
             )
             continue
-        history = work_tree.run_autonomous_loop(
-            tree_id,
-            max_steps=1,
-            execute_planned_action_fn=nova_core.execute_planned_action,
-        )
+        loop_kwargs = {
+            "max_steps": 1,
+            "execute_planned_action_fn": nova_core.execute_planned_action,
+        }
+        if target_decider is not None:
+            loop_kwargs["decide_next_step_fn"] = target_decider
+        history = work_tree.run_autonomous_loop(tree_id, **loop_kwargs)
         attempted_total += 1
         full_history.extend(history)
         last_action = str((history[-1] if history else {}).get("action") or "").strip()
@@ -3350,6 +3505,8 @@ def _run_active_work_tree_cycle(
         "ts": _patch_queue_timestamp(),
         "status": status,
         "tree_count": len(candidates),
+        "target_branch_id": str(target_branch_id or ""),
+        "target_task_id": str(target_task_id or ""),
         "attempted_count": attempted_total,
         "executed_count": executed_total,
         "history_count": len(full_history),

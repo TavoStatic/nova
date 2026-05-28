@@ -194,14 +194,52 @@ def execute_reply_sequence(
     )
     timing_profile["planner_time"] = int((time.perf_counter() - planner_call_started) * 1000)
     trace("timing", "completed", "planner_call", duration_ms=timing_profile["planner_time"])
+    deferred_tool_meta: dict[str, object] = {}
     if planner_outcome is not None:
-        return _timed_return(*_break_fallback_loop(planner_outcome[0], planner_outcome[1]))
+        planner_reply, planner_meta = planner_outcome
+        planner_payload = dict(planner_meta or {})
+        if bool(planner_payload.get("defer_to_fallback")):
+            deferred_tool_meta = planner_payload
+            observed_intent = dict((semantic_tool_observation.get("intent") or {}) if isinstance(semantic_tool_observation.get("intent"), dict) else {})
+            if not observed_intent:
+                observed_intent = {
+                    "tool": str(planner_payload.get("tool") or ""),
+                    "args": list((planner_payload.get("tool_args") or {}).get("args") or [])
+                    if isinstance(planner_payload.get("tool_args"), dict)
+                    else [],
+                    "evidence_need": "tool_result",
+                    "answer_target": "current_conversation",
+                }
+            semantic_tool_observation.clear()
+            semantic_tool_observation.update(
+                {
+                    "status": "tool_result_available",
+                    "intent": observed_intent,
+                    "tool": str(planner_payload.get("tool") or ""),
+                    "tool_result_available": True,
+                }
+            )
+            trace(
+                "action_planner",
+                "tool_evidence_for_fallback",
+                tool=str(planner_payload.get("tool") or ""),
+            )
+        else:
+            return _timed_return(*_break_fallback_loop(planner_reply, planner_payload))
 
     if stop_before_llm_fallback:
-        return _timed_return("", {
+        meta = {
             "planner_decision": "unhandled",
             "semantic_tool_observation": dict(semantic_tool_observation),
-        })
+        }
+        if deferred_tool_meta:
+            meta["tool"] = str(deferred_tool_meta.get("tool") or "")
+            meta["tool_args"] = deferred_tool_meta.get("tool_args") if isinstance(deferred_tool_meta.get("tool_args"), dict) else {}
+            meta["tool_result"] = str(deferred_tool_meta.get("tool_result") or "")
+            meta["grounded"] = deferred_tool_meta.get("grounded") if isinstance(deferred_tool_meta.get("grounded"), bool) else None
+            meta["reply_contract"] = str(deferred_tool_meta.get("reply_contract") or "")
+            meta["deferred_tool"] = dict(deferred_tool_meta)
+        return _timed_return("", meta)
 
     fallback_entry = prepare_fallback_flow(
         text=text,
@@ -210,6 +248,9 @@ def execute_reply_sequence(
         action_ledger_add_step=lambda stage, outcome, detail="", **data: trace(stage, outcome, detail, **data),
         pending_action=pending_action,
         semantic_tool_observation=semantic_tool_observation,
+        planner_decision=str(deferred_tool_meta.get("planner_decision") or "") if deferred_tool_meta else "",
+        tool=str(deferred_tool_meta.get("tool") or "") if deferred_tool_meta else "",
+        tool_result=str(deferred_tool_meta.get("tool_result") or "") if deferred_tool_meta else "",
     )
 
     retrieved = str(fallback_entry.get("retrieved_context") or "")
@@ -240,12 +281,18 @@ def execute_reply_sequence(
     reply = str(llm_fallback_outcome.get("reply") or "")
     reply_contract = str(llm_fallback_outcome.get("reply_contract") or "")
     reply_outcome: dict[str, object] = dict(llm_fallback_outcome.get("reply_outcome") or {})
+    if deferred_tool_meta:
+        reply_outcome["deferred_tool"] = {
+            "tool": str(deferred_tool_meta.get("tool") or ""),
+            "reply_contract": str(deferred_tool_meta.get("reply_contract") or ""),
+            "grounded": bool(deferred_tool_meta.get("grounded")),
+        }
     reply, meta = _break_fallback_loop(reply, {
         "planner_decision": str(llm_fallback_outcome.get("planner_decision") or "llm_fallback"),
-        "tool": "",
+        "tool": str(deferred_tool_meta.get("tool") or "") if deferred_tool_meta else "",
         "tool_args": {},
-        "tool_result": "",
-        "grounded": llm_fallback_outcome.get("grounded"),
+        "tool_result": str(deferred_tool_meta.get("tool_result") or "") if deferred_tool_meta else "",
+        "grounded": True if deferred_tool_meta and llm_fallback_outcome.get("grounded") is None else llm_fallback_outcome.get("grounded"),
         "reply_contract": reply_contract,
         "reply_outcome": reply_outcome,
     })

@@ -241,7 +241,16 @@ def _classify_semantic_tool_actions(
     semantic_actions = _actions_from_semantic_tool_intent(semantic_intent)
     if semantic_actions:
         if not _semantic_tool_intent_has_authority(semantic_intent):
-            _observe("weak_tool_route", semantic_intent)
+            weak_payload = {
+                "tool": "none",
+                "args": [],
+                "confidence": _floatish((semantic_intent or {}).get("confidence"), 0.0),
+                "reason": "weak_tool_route",
+                "evidence_need": "conversation",
+                "answer_target": "current_conversation",
+                "source": "blocked_tool_route",
+            }
+            _observe("weak_tool_route", weak_payload)
             trace(
                 "action_planner",
                 "semantic_weak_tool_route",
@@ -378,13 +387,24 @@ def _pending_weather_action(core) -> dict:
     return {"kind": "weather_lookup", "status": "awaiting_location", "preferred_tool": "weather_location"}
 
 
-def _session_has_tool_evidence(session, tool: str) -> bool:
+def _intent_continues_same_tool_evidence(intent: dict | None, tool: str) -> bool:
+    payload = intent if isinstance(intent, dict) else {}
+    return (
+        str(payload.get("answer_target") or "").strip() == "nova_live_state"
+        and str(payload.get("evidence_need") or "").strip() == "live_self_status"
+        and str(payload.get("tool") or "").strip() == str(tool or "").strip()
+    )
+
+
+def _session_has_tool_evidence(session, tool: str, *, semantic_intent: dict | None = None) -> bool:
     state = getattr(session, "conversation_state", None)
     if not isinstance(state, dict):
         return False
     if str(state.get("kind") or "").strip() != "last_tool_evidence":
         return False
     if str(state.get("tool") or "").strip() != str(tool or "").strip():
+        return False
+    if not _intent_continues_same_tool_evidence(semantic_intent, tool):
         return False
     return bool(str(state.get("tool_result") or "").strip())
 
@@ -500,23 +520,24 @@ def maybe_handle_planner_sequence(
             args = act.get("args") or []
             trace("action_planner", "run_tool", tool=tool)
             normalized_args = [str(item).strip() for item in list(args or []) if str(item).strip()] if isinstance(args, list) else []
-            if not normalized_args and _session_has_tool_evidence(session, tool):
+            semantic_intent = act.get("semantic_intent") if isinstance(act.get("semantic_intent"), dict) else {}
+            if not normalized_args and _session_has_tool_evidence(session, tool, semantic_intent=semantic_intent):
                 if callable(semantic_tool_observer_fn):
                     semantic_tool_observer_fn(
                         {
-                            "status": "tool_evidence_available",
+                            "status": "prior_tool_evidence_present",
                             "intent": {
                                 "tool": "none",
                                 "args": [],
-                                "confidence": 1.0,
-                                "reason": "session_tool_evidence_available",
+                                "confidence": 0.0,
+                                "reason": "prior_tool_evidence_present",
                                 "evidence_need": "conversation",
                                 "answer_target": "current_conversation",
-                                "source": "session_evidence",
+                                "source": "prior_tool_evidence",
                             },
                         }
                     )
-                trace("action_planner", "tool_evidence_available", tool=tool)
+                trace("action_planner", "prior_tool_evidence_present", tool=tool)
                 return None
             if tool == "weather_current_location" and not _weather_location_available(core):
                 reply = "What location should I use for the weather lookup?"
@@ -598,6 +619,19 @@ def maybe_handle_planner_sequence(
                     "kind": "current",
                     "reply_contract": reply_contract,
                 }
+                trace("tool_execution", "ok", tool=tool, grounded=bool(rendered_out.strip()))
+                return _return_with_timing("", {
+                    "planner_decision": "tool_evidence_for_fallback",
+                    "tool": tool,
+                    "tool_args": {"args": list(args) if isinstance(args, (list, tuple)) else args},
+                    "tool_result": rendered_out,
+                    "grounded": bool(rendered_out.strip()),
+                    "pending_action": {},
+                    "route_evidence": route_evidence,
+                    "reply_contract": reply_contract,
+                    "reply_outcome": reply_outcome,
+                    "defer_to_fallback": True,
+                })
             elif tool == "system_check":
                 reply_contract = "system_check.current"
                 rendered_reply, evidence = _render_system_check_reply(rendered_out)

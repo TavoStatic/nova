@@ -13,10 +13,14 @@ class EndToEndWiringServiceTests(unittest.TestCase):
         self.assertIn("frontdoor:command_cases", names)
         self.assertIn("data-lanes:registry", names)
         self.assertIn("release-clean:frontdoor_wired", names)
+        self.assertIn("wiring-source:source-probe", names)
         self.assertIn("wiring-source:self-repair-closure", names)
         self.assertIn("runtime:live_checks", names)
         failed = {check["name"]: check for check in report["checks"] if not check.get("ok")}
+        self.assertNotIn("wiring-source:source-probe", failed)
         self.assertNotIn("wiring-source:self-repair-closure", failed)
+        source_probe = next(check for check in report["checks"] if check["name"] == "wiring-source:source-probe")
+        self.assertEqual((source_probe.get("data") or {}).get("gap_count"), 0)
         self_repair = next(check for check in report["checks"] if check["name"] == "wiring-source:self-repair-closure")
         data = self_repair.get("data") or {}
         self.assertTrue(self_repair["ok"], self_repair)

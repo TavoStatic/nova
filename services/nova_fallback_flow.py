@@ -9,42 +9,6 @@ from services.nova_turn_intent_trace import attach_turn_intent_evidence_packet
 from services.nova_turn_intent_trace import build_turn_intent_evidence_packet
 from services.nova_turn_intent_trace import CONVERSATION_CAN_COMPLETE_WITHOUT_TASK_KEY
 from services.nova_turn_intent_trace import CONVERSATION_REPLY_FORM
-from services.nova_turn_intent_trace import LAST_ASSISTANT_REPEATS_KEY
-
-
-def _semantic_conversation_evidence_need(packet: dict | None) -> bool:
-    payload = packet if isinstance(packet, dict) else {}
-    planner = payload.get("planner_frame") if isinstance(payload.get("planner_frame"), dict) else {}
-    semantic = planner.get("semantic_tool_observation") if isinstance(planner.get("semantic_tool_observation"), dict) else {}
-    if str(semantic.get("answer_target") or "").strip() != "current_conversation":
-        return False
-    if str(semantic.get("evidence_need") or "").strip() != "conversation":
-        return False
-    return str(semantic.get("tool") or "").strip() in {"", "none"}
-
-
-def _maybe_build_conversation_evidence_reply(packet: dict | None) -> dict:
-    payload = packet if isinstance(packet, dict) else {}
-    conversation = payload.get("conversation_frame") if isinstance(payload.get("conversation_frame"), dict) else {}
-    if not bool(conversation.get(LAST_ASSISTANT_REPEATS_KEY)):
-        return {}
-    if not _semantic_conversation_evidence_need(payload):
-        return {}
-    return {
-        "handled": True,
-        "reply": (
-            "The transcript shows my last reply repeated an earlier assistant reply instead of answering the current turn. "
-            "That repeat is verified by conversation evidence; this turn does not include enough evidence to claim a hidden internal cause."
-        ),
-        "planner_decision": "evidence_bound_reply",
-        "grounded": True,
-        "reply_contract": "conversation_evidence.assistant_repeat",
-        "reply_outcome": {
-            "kind": "conversation_evidence",
-            "evidence_need": "conversation",
-            "observation": LAST_ASSISTANT_REPEATS_KEY,
-        },
-    }
 
 
 def _conversation_can_be_complete_without_task(packet: dict | None) -> bool:
@@ -66,57 +30,12 @@ def _semantic_status(packet: dict | None) -> str:
     return str(semantic.get("status") or "").strip()
 
 
-def _last_tool_evidence_text(fallback_context: dict | None) -> str:
-    context = fallback_context if isinstance(fallback_context, dict) else {}
-    state_context = str(context.get("state_context") or "")
-    marker = "Last tool evidence:"
-    if marker not in state_context:
-        return ""
-    return state_context.split(marker, 1)[1].strip()
-
-
-def _line_after(label: str, evidence: str) -> str:
-    prefix = f"{label}:"
-    for raw in str(evidence or "").splitlines():
-        line = raw.strip()
-        if line.startswith(prefix):
-            return line.split(":", 1)[1].strip()
-    return ""
-
-
-def _maybe_build_session_evidence_reply(fallback_context: dict | None, packet: dict | None) -> dict:
-    if _semantic_status(packet) != "tool_evidence_available":
-        return {}
-    evidence = _last_tool_evidence_text(fallback_context)
+def _tool_evidence_context(tool: str, tool_result: str, *, limit: int = 2500) -> str:
+    evidence = str(tool_result or "").strip()
     if not evidence:
-        return {}
-    summary = _line_after("Summary", evidence)
-    level = _line_after("Level", evidence)
-    if summary:
-        reply = f"The available evidence says {summary}"
-        if level:
-            reply += f" Level: {level}."
-        elif not reply.endswith("."):
-            reply += "."
-    else:
-        first_line = next((line.strip() for line in evidence.splitlines() if line.strip()), "")
-        if not first_line:
-            return {}
-        reply = first_line if first_line.endswith(".") else f"{first_line}."
-    return {
-        "handled": True,
-        "reply": reply,
-        "planner_decision": "evidence_bound_reply",
-        "grounded": True,
-        "reply_contract": "session_evidence.last_tool_result",
-        "reply_outcome": {
-            "kind": "session_evidence",
-            "evidence_need": "conversation",
-            "observation": "last_tool_evidence",
-        },
-        "llm_time_ms": 0,
-        "post_time_ms": 0,
-    }
+        return ""
+    tool_name = str(tool or "tool").strip() or "tool"
+    return f"TOOL EVIDENCE ({tool_name}; evidence for this turn, not a draft reply):\n{evidence[:limit]}"
 
 
 def _conversation_generation_context(fallback_context: dict | None, packet: dict | None) -> str:
@@ -133,10 +52,14 @@ def _conversation_generation_context(fallback_context: dict | None, packet: dict
     rendered = "\n".join(lines)
     chat_context = str(context.get("chat_context") or "").strip()
     state_context = str(context.get("state_context") or "").strip()
+    tool_context = str(context.get("tool_evidence_context") or "").strip()
+    include_session_state = _semantic_status(packet) == "tool_evidence_available"
     blocks = [rendered] if rendered else []
     if chat_context:
         blocks.append(f"RECENT CHAT CONTEXT:\n{chat_context}")
-    if state_context:
+    if tool_context:
+        blocks.append(tool_context)
+    if state_context and include_session_state:
         blocks.append(f"SESSION EVIDENCE:\n{state_context}")
     return "\n\n".join(blocks)
 
@@ -199,7 +122,13 @@ def build_fallback_context(
 ) -> dict:
     raw_fallback_context = build_fallback_context_details_fn(text, turns)
     fallback_context = raw_fallback_context if isinstance(raw_fallback_context, dict) else {}
+    tool_evidence_context = _tool_evidence_context(tool, tool_result)
+    if tool_evidence_context:
+        fallback_context = dict(fallback_context)
+        fallback_context["tool_evidence_context"] = tool_evidence_context
     retrieved_context = str(fallback_context.get("context") or "")
+    if tool_evidence_context:
+        retrieved_context = "\n\n".join(part for part in [retrieved_context, tool_evidence_context] if part)
     intent_evidence_packet = build_turn_intent_evidence_packet(
         text=text,
         turns=turns if isinstance(turns, list) else [],
@@ -250,6 +179,9 @@ def prepare_fallback_flow(
     action_ledger_add_step: Callable[..., None],
     pending_action: dict | None = None,
     semantic_tool_observation: dict | None = None,
+    planner_decision: str = "",
+    tool: str = "",
+    tool_result: str = "",
 ) -> dict:
     fallback_bundle = build_fallback_context(
         text=text,
@@ -258,6 +190,9 @@ def prepare_fallback_flow(
         action_ledger_add_step=action_ledger_add_step,
         pending_action=pending_action,
         semantic_tool_observation=semantic_tool_observation,
+        planner_decision=planner_decision,
+        tool=tool,
+        tool_result=tool_result,
     )
     return {
         "handled": False,
@@ -297,28 +232,6 @@ def finalize_llm_fallback_reply(
             evidence_need=str((evidence_reply.get("reply_outcome") or {}).get("evidence_need") or ""),
         )
         out = dict(evidence_reply)
-        out["reply"] = ensure_reply_fn(str(out.get("reply") or ""))
-        return out
-
-    session_evidence_reply = _maybe_build_session_evidence_reply(fallback_context, intent_evidence_packet)
-    if session_evidence_reply:
-        action_ledger_add_step(
-            "session_evidence",
-            "answered",
-            observation=str((session_evidence_reply.get("reply_outcome") or {}).get("observation") or ""),
-        )
-        out = dict(session_evidence_reply)
-        out["reply"] = ensure_reply_fn(str(out.get("reply") or ""))
-        return out
-
-    conversation_reply = _maybe_build_conversation_evidence_reply(intent_evidence_packet)
-    if conversation_reply:
-        action_ledger_add_step(
-            "conversation_evidence",
-            "answered",
-            observation=str((conversation_reply.get("reply_outcome") or {}).get("observation") or ""),
-        )
-        out = dict(conversation_reply)
         out["reply"] = ensure_reply_fn(str(out.get("reply") or ""))
         return out
 

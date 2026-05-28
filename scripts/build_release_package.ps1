@@ -209,6 +209,10 @@ foreach ($relativePath in $forbiddenStagePaths) {
   Remove-StageRelativePath $stageDir $relativePath
 }
 
+$validationActionsScaffold = Join-Path $stageDir "runtime\validation\actions"
+New-Item -ItemType Directory -Force -Path $validationActionsScaffold | Out-Null
+Set-Content -Encoding UTF8 -Path (Join-Path $validationActionsScaffold ".keep") -Value "release package validation action scaffold"
+
 # Remove pipeline-local lane artifacts that can contain credentials or sensitive operator data.
 Get-ChildItem -Path (Join-Path $stageDir "data_sources") -Recurse -File -Force -ErrorAction SilentlyContinue |
   Where-Object {
@@ -276,7 +280,8 @@ $manifest = [ordered]@{
     "templates and static assets",
     "requirements.txt",
     "policy.json",
-    "piper runtime assets"
+    "piper runtime assets",
+    "runtime/validation/actions/.keep scaffold"
   )
   excludes = @(
     ".github",
@@ -290,7 +295,7 @@ $manifest = [ordered]@{
     "data_sources/*/operator_intake.jsonl",
     "data_sources/*/lane_control.json",
     "nova_memory.sqlite",
-    "runtime",
+    "runtime state except runtime/validation/actions/.keep scaffold",
     "logs",
     "memory",
     "updates",

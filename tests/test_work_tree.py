@@ -917,6 +917,27 @@ class TestWorkTree(unittest.TestCase):
         self.assertEqual(step["action"], "invalid_decision")
         self.assertEqual(step["reason"], "unknown_branch")
 
+    def test_next_autonomous_step_rejects_decision_task_mismatch(self) -> None:
+        tree = work_tree.initialize_tree("Invalid task decision")
+        root_branch = work_tree._BRANCHES[tree.root_branch_id]
+        task = work_tree.add_task_to_branch(root_branch.branch_id, "root task")
+        work_tree.set_branch_tools(root_branch.branch_id, allowed_tools=["web_search"], preferred_tool="web_search")
+
+        step = work_tree.next_autonomous_step(
+            tree.tree_id,
+            decide_next_step_fn=lambda tree_id, options: {
+                "branch_id": root_branch.branch_id,
+                "task_id": "task_missing",
+                "recommended_tool": "web_search",
+            },
+        )
+
+        self.assertEqual(step["action"], "invalid_decision")
+        self.assertEqual(step["reason"], "task_mismatch")
+        self.assertEqual(step["branch_id"], root_branch.branch_id)
+        self.assertEqual(step["task_id"], "task_missing")
+        self.assertEqual(step["available_task_id"], task.task_id)
+
     def test_sqlite_persistence_reloads_tree_branch_and_task_state(self) -> None:
         tree = work_tree.initialize_tree("Persistent tree")
         root_branch = work_tree._BRANCHES[tree.root_branch_id]

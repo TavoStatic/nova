@@ -17,6 +17,12 @@ def apply_cli_outcome_to_ledger(
         return
 
     pending_action_ledger["planner_decision"] = str(outcome.get("planner_decision") or default_planner_decision)
+    if "tool" in outcome:
+        pending_action_ledger["tool"] = str(outcome.get("tool") or "")
+    if isinstance(outcome.get("tool_args"), dict):
+        pending_action_ledger["tool_args"] = outcome.get("tool_args")
+    if "tool_result" in outcome:
+        pending_action_ledger["tool_result"] = str(outcome.get("tool_result") or "")
     grounded = outcome.get("grounded")
     if coerce_grounded and "grounded" in outcome:
         pending_action_ledger["grounded"] = bool(grounded)

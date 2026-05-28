@@ -856,6 +856,13 @@ class OperatorOutboxService:
             f"I am blocked on {label}. Current task: {task}. Reason: {reason_text}.",
         )
 
+    @staticmethod
+    def _is_operator_control_mirror_node(node: dict[str, Any]) -> bool:
+        return (
+            _safe_text(node.get("source_type"), 120) == "operator_control"
+            and _safe_text(node.get("work_class"), 120) in {"operator_requested", "maintenance_pressure"}
+        )
+
     def notices_from_work_tree_state(
         self,
         work_tree_state: Any,
@@ -1060,6 +1067,8 @@ class OperatorOutboxService:
                     if len(notices) >= max(1, int(limit or 1)):
                         break
                 if _safe_text(node.get("status"), 80).lower() != "blocked":
+                    continue
+                if self._is_operator_control_mirror_node(node):
                     continue
                 if not current_task:
                     continue

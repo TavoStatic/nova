@@ -1739,7 +1739,10 @@ def _render_session_state_context(
             header += f" / {subject}"
         lines.append(header)
         if str(state.get("tool_result") or "").strip():
-            lines.append("Last tool evidence:")
+            lines.append(
+                "Prior tool evidence: context only; not current answer authority unless "
+                "current structured intent asks for the same live tool evidence."
+            )
             lines.append(str(state.get("tool_result") or "").strip()[:1200])
         else:
             public_state = {

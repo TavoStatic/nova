@@ -1101,6 +1101,40 @@ class ControlStatusService:
         payload["source_root_inventory_unclassified_source_files"] = list(
             source_root_inventory.get("unclassified_source_files") or []
         )
+        source_wiring_probe = build_source_wiring_probe_payload()
+        payload["source_wiring_probe"] = source_wiring_probe
+        payload["source_wiring_probe_ok"] = bool(source_wiring_probe.get("ok", False))
+        payload["source_wiring_probe_gap_count"] = int(source_wiring_probe.get("gap_count", 0) or 0)
+        payload["source_wiring_probe_missing_signal_sources"] = list(
+            source_wiring_probe.get("missing_signal_sources") or []
+        )
+        payload["source_wiring_probe_missing_planned_tools"] = list(
+            source_wiring_probe.get("missing_planned_tools") or []
+        )
+        payload["source_wiring_probe_missing_advisory_actions"] = list(
+            source_wiring_probe.get("missing_advisory_actions") or []
+        )
+        payload["source_wiring_probe_planned_tools_without_execution"] = list(
+            source_wiring_probe.get("planned_tools_without_execution") or []
+        )
+        payload["source_wiring_probe_advisory_actions_without_execution"] = list(
+            source_wiring_probe.get("advisory_actions_without_execution") or []
+        )
+        payload["source_wiring_probe_missing_required_evidence_paths"] = list(
+            source_wiring_probe.get("missing_required_evidence_paths") or []
+        )
+        payload["source_wiring_probe_missing_required_judgment_paths"] = list(
+            source_wiring_probe.get("missing_required_judgment_paths") or []
+        )
+        payload["source_wiring_probe_missing_required_closure_paths"] = list(
+            source_wiring_probe.get("missing_required_closure_paths") or []
+        )
+        payload["source_wiring_probe_missing_required_operator_outbox_paths"] = list(
+            source_wiring_probe.get("missing_required_operator_outbox_paths") or []
+        )
+        payload["source_wiring_probe_missing_required_owned_root_routes"] = list(
+            source_wiring_probe.get("missing_required_owned_root_routes") or []
+        )
         root_closure_seed = {
             **payload,
             "root_closure_inventory": {},
@@ -1110,8 +1144,6 @@ class ControlStatusService:
             "self_repair_closure_inventory_ok": True,
             "self_repair_closure_inventory_gap_count": 0,
         }
-        source_wiring_probe = build_source_wiring_probe_payload()
-        payload["source_wiring_probe"] = source_wiring_probe
         root_closure_inventory = build_root_closure_inventory_payload(
             root_closure_seed,
             signal_sources=source_wiring_probe.get("signal_sources", []),

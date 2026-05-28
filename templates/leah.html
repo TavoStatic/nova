@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>L.A.E.H. | Living Autonomous Environment Hub</title>
+  <title>L.E.A.H. | Living Environment Autonomous Hub</title>
   <link rel="stylesheet" href="/static/leah.css?v={{LEAH_CSS_VERSION}}" />
 </head>
 <body>
@@ -11,8 +11,8 @@
   <div class="leah-shell">
     <aside class="leah-rail">
       <div class="brand-card">
-        <div class="brand-mark">L.A.E.H.</div>
-        <h1>Living Autonomous Environment Hub</h1>
+        <div class="brand-mark">L.E.A.H.</div>
+        <h1>Living Environment Autonomous Hub</h1>
         <p>Your local AI experience hub for conversation, sensing, and staged work.</p>
         <div class="build-badge">Build {{LEAH_BUILD_VERSION}}</div>
       </div>
@@ -42,36 +42,9 @@
     </aside>
 
     <main class="leah-main">
-      <header class="leah-header">
-        <div class="leah-header-top">
-          <div class="welcome-line">Welcome :<span id="welcomeUser" class="welcome-user">User</span></div>
-          <div class="leah-header-brand">
-            <div class="leah-wordmark">L.E.A.H.</div>
-            <p>The Living Autonomous Environment Hub for Nova</p>
-          </div>
-        </div>
-        <div class="presence-line" aria-label="Nova presence">
-          <span class="presence-line-label">Presence</span>
-          <span id="headerPresenceHealth" class="presence-line-item ok">Healthy | model ready</span>
-          <span class="presence-divider" aria-hidden="true">|</span>
-          <span id="headerPresenceThinking" class="presence-line-item">Idle</span>
-          <span class="presence-divider" aria-hidden="true">|</span>
-          <span id="headerPresenceListening" class="presence-line-item">Listen Off</span>
-          <span class="presence-divider" aria-hidden="true">|</span>
-          <span id="headerPresenceVoice" class="presence-line-item">Voice Off</span>
-          <span class="presence-divider" aria-hidden="true">|</span>
-          <span id="headerPresenceCamera" class="presence-line-item">Camera Off</span>
-          <span class="presence-divider" aria-hidden="true">|</span>
-          <span id="headerPresenceMood" class="presence-line-item">Calm Flow</span>
-        </div>
-      </header>
-
       <section class="conversation-stage">
         <div class="conversation-head">
-          <div>
-            <div class="panel-title">Conversation</div>
-            <p class="panel-copy">This is the lived session, not the caretaker dashboard.</p>
-          </div>
+          <div class="welcome-line">Hi, <span id="welcomeUser" class="welcome-user">there</span></div>
           <button id="btnNewSession" type="button" class="action-button ghost">New Session</button>
         </div>
 

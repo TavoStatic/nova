@@ -610,6 +610,40 @@ class TestOperatorOutboxService(unittest.TestCase):
         self.assertIn("operator information", notices[0].get("message", ""))
         self.assertIn("pending_operator_confirmation", notices[0].get("message", ""))
 
+    def test_work_tree_notice_does_not_mirror_operator_control_branch_back_to_outbox(self):
+        notices = OPERATOR_OUTBOX_SERVICE.notices_from_work_tree_state(
+            {
+                "trees": [
+                    {
+                        "tree_id": "tree_signal",
+                        "title": "Signal Intake",
+                        "status": "active",
+                        "next_step": None,
+                        "nodes": [
+                            {
+                                "id": "branch_operator_control",
+                                "title": "Operator outbox has open operator-control work",
+                                "status": "blocked",
+                                "source_type": "operator_control",
+                                "work_class": "operator_requested",
+                                "current_task": {
+                                    "task_id": "task_operator_control",
+                                    "title": "Wait for operator response or authority assignment on the open outbox item",
+                                    "status": "blocked",
+                                    "meta": {
+                                        "blocked_reason": "operator_response_required",
+                                    },
+                                },
+                            }
+                        ],
+                    }
+                ]
+            },
+            executable_tools=["read", "find"],
+        )
+
+        self.assertEqual(notices, [])
+
     def test_work_tree_notice_names_internal_repair_hold(self):
         notices = OPERATOR_OUTBOX_SERVICE.notices_from_work_tree_state(
             {
