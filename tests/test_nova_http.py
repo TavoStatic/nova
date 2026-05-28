@@ -77,6 +77,7 @@ class TestNovaHttpProfile(unittest.TestCase):
         self.assertEqual(calls, ["called"])
 
     def test_probe_searxng_status_path_is_bounded_and_non_mutating(self):
+        self.assertGreaterEqual(nova_http.SEARXNG_STATUS_TIMEOUT_SEC, 5.0)
         with mock.patch.object(
             nova_http.nova_core,
             "probe_search_endpoint",
