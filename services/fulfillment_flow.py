@@ -46,12 +46,14 @@ class FulfillmentFlowService:
         recent_turns: list[tuple[str, str]],
         *,
         pending_action: Optional[dict] = None,
+        semantic_observation: Optional[dict] = None,
     ) -> bool:
         probe = self._probe_turn_routes(
             user_text,
             session,
             recent_turns,
             pending_action=pending_action,
+            semantic_observation=semantic_observation,
         )
         routes = probe.get("routes") if isinstance(probe.get("routes"), dict) else {}
         supervisor_route = routes.get("supervisor_owned") if isinstance(routes.get("supervisor_owned"), dict) else {}
@@ -118,12 +120,14 @@ class FulfillmentFlowService:
         recent_turns: list[tuple[str, str]],
         *,
         pending_action: Optional[dict] = None,
+        semantic_observation: Optional[dict] = None,
     ) -> Optional[dict]:
         probe = self._probe_turn_routes(
             user_text,
             session,
             recent_turns,
             pending_action=pending_action,
+            semantic_observation=semantic_observation,
         )
         routes = probe.get("routes") if isinstance(probe.get("routes"), dict) else {}
         supervisor_route = routes.get("supervisor_owned") if isinstance(routes.get("supervisor_owned"), dict) else {}

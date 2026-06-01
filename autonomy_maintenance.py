@@ -1193,16 +1193,47 @@ def _run_autonomy_orchestrator_advisory(state: dict, kidney_summary: dict) -> di
     return packet
 
 
+_SUBCONSCIOUS_PACK_TIMEOUT_SEC = 900
+
+
+def _elapsed_sec(start: float) -> float:
+    try:
+        return round(max(0.0, time.monotonic() - float(start)), 2)
+    except Exception:
+        return 0.0
+
+
+def _subconscious_pack_timeout_sec() -> int:
+    try:
+        return max(1, int(_SUBCONSCIOUS_PACK_TIMEOUT_SEC))
+    except Exception:
+        return 1
+
+
 def _run_subconscious_pack() -> tuple[bool, str]:
     label = "phase1_auto"
     cmd = [str(VENV_PY), str(ROOT / "subconscious_runner.py"), "--label", label]
+    timeout = _subconscious_pack_timeout_sec()
+    t0 = time.monotonic()
     try:
-        proc = subprocess.run(cmd, cwd=str(ROOT), capture_output=True, text=True, timeout=900)
+        proc = subprocess.run(cmd, cwd=str(ROOT), capture_output=True, text=True, timeout=timeout)
+        elapsed = _elapsed_sec(t0)
+        _append_log(f"subconscious_pack_duration_sec={elapsed}")
         output = ((proc.stdout or "") + "\n" + (proc.stderr or "")).strip()
         if proc.returncode != 0:
             return False, output[-2000:]
         return True, output[-2000:]
+    except subprocess.TimeoutExpired as exc:
+        elapsed = _elapsed_sec(t0)
+        _append_log(f"subconscious_pack_duration_sec={elapsed} status=timeout timeout_sec={timeout}")
+        output = ((getattr(exc, "stdout", "") or "") + "\n" + (getattr(exc, "stderr", "") or "")).strip()
+        detail = f"subconscious_runner.py timed out after {timeout} seconds (elapsed_sec={elapsed})"
+        if output:
+            detail = f"{detail}\n{output[-2000:]}"
+        return False, detail[-2000:]
     except Exception as exc:
+        elapsed = _elapsed_sec(t0)
+        _append_log(f"subconscious_pack_duration_sec={elapsed} status=exception")
         return False, str(exc)
 
 
@@ -3707,6 +3738,12 @@ def _archive_stale_cli_active_trees(state: dict) -> dict:
 
 
 def run_once(*, worker_loop: bool = False) -> int:
+    cycle_start = time.monotonic()
+
+    def _finish_cycle(code: int, reason: str) -> int:
+        _append_log(f"cycle_complete cycle_elapsed_sec={_elapsed_sec(cycle_start)} code={code} reason={reason}")
+        return int(code)
+
     state = _load_state()
     if not worker_loop and _clear_non_loop_runtime_worker_state(state):
         _save_state(state)
@@ -3726,7 +3763,7 @@ def run_once(*, worker_loop: bool = False) -> int:
         state["last_error"] = pack_out
         _save_state(state)
         _append_log(pack_out)
-        return 1
+        return _finish_cycle(1, "subconscious_pack_failed")
     state["last_subconscious_run"] = {
         "ts": _patch_queue_timestamp(),
         "status": "ok",
@@ -3745,7 +3782,7 @@ def run_once(*, worker_loop: bool = False) -> int:
         state["last_error"] = "latest_subconscious_missing"
         _save_state(state)
         _append_log("latest_subconscious_missing")
-        return 1
+        return _finish_cycle(1, "latest_subconscious_missing")
 
     report = json.loads(LATEST_SUBCONSCIOUS.read_text(encoding="utf-8"))
     generated_at = str(report.get("generated_at") or "")
@@ -4107,7 +4144,7 @@ def run_once(*, worker_loop: bool = False) -> int:
         _append_log(f"signal_ingestion_failed {exc}")
 
     _save_state(state)
-    return 0
+    return _finish_cycle(0, "ok")
 
 
 def run_worker(

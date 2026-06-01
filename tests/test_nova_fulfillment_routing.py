@@ -56,5 +56,6 @@ class TestNovaFulfillmentRouting(unittest.TestCase):
         self.assertEqual(result.get("comparison_strength"), "clear")
 
 
+
 if __name__ == "__main__":
     unittest.main()

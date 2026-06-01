@@ -88,15 +88,19 @@ class TestMemoryScope(unittest.TestCase):
         self.assertIn("alpha private note", previews)
         self.assertIn("shared otter handbook", previews)
 
-    def test_shared_scope_only_reads_shared_records(self):
+    def test_shared_scope_reads_shared_and_hybrid_but_not_private_records(self):
         memory.add_memory("fact", "typed", "shared otter handbook", user="", scope="shared")
+        memory.add_memory("fact", "typed", "hybrid otter field guide", user="", scope="hybrid")
         memory.add_memory("fact", "typed", "otter alpha private note", user="userA", scope="private")
 
         out = memory.recall_explain("otter", user="userA", scope="shared")
         previews = [item["preview"].lower() for item in out["results"]]
 
-        self.assertEqual(len(previews), 1)
-        self.assertIn("shared otter handbook", previews[0])
+        self.assertEqual(len(previews), 2)
+        preview_text = " ".join(previews)
+        self.assertIn("shared otter handbook", preview_text)
+        self.assertIn("hybrid otter field guide", preview_text)
+        self.assertNotIn("otter alpha private note", preview_text)
 
 
 if __name__ == "__main__":

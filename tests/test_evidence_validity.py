@@ -22,6 +22,15 @@ class TestEvidenceValidity(unittest.TestCase):
         self.assertTrue(invalid)
         self.assertIn("[FAIL]", reason)
 
+    def test_no_allowlisted_web_results_is_valid_non_failure_evidence(self):
+        invalid, reason = invalid_tool_result(
+            "web_search",
+            "No allowlisted web results found for that query.\n\nWeb access for nova runtime search dependency probe is limited to these allowlisted sources:",
+        )
+
+        self.assertFalse(invalid)
+        self.assertEqual(reason, "")
+
     def test_structured_judgment_false_ok_is_valid_evidence(self):
         invalid, reason = invalid_tool_result(
             "source_root_judgment",

@@ -3969,6 +3969,66 @@ def _branch_has_source_root_failed_judgment(branch_id: str) -> bool:
     return False
 
 
+def _source_root_operator_reason_from_judgment_text(text: str) -> str:
+    for line in str(text or "").splitlines():
+        clean = line.strip()
+        prefix = "- operator_outbox: needed ("
+        if not clean.startswith(prefix) or not clean.endswith(")"):
+            continue
+        reason = clean[len(prefix):-1].strip()
+        if reason and reason != "failed_evidence":
+            return reason
+    return ""
+
+
+def _branch_source_root_operator_reason(branch_id: str) -> str:
+    try:
+        evidence_rows = work_tree.list_branch_evidence(branch_id, limit=200)
+    except Exception:
+        evidence_rows = []
+    for row in reversed(evidence_rows):
+        if not isinstance(row, dict):
+            continue
+        if str(row.get("tool_name") or "").strip() != SOURCE_ROOT_JUDGMENT_TOOL:
+            continue
+        reason = _source_root_operator_reason_from_judgment_text(str(row.get("result_text") or ""))
+        if reason:
+            return reason
+    return ""
+
+
+def _expected_source_root_operator_reason(normalized: dict[str, Any]) -> str:
+    source = str(normalized.get("source") or "").strip().lower()
+    work_class = str(normalized.get("work_class") or "").strip().lower()
+    if source != "runtime_control" or work_class != "governance_pressure":
+        return ""
+    payload = normalized.get("payload") if isinstance(normalized.get("payload"), dict) else {}
+    analytics = payload.get("runtime_restart_analytics") if isinstance(payload.get("runtime_restart_analytics"), dict) else {}
+    provenance_status = str(
+        analytics.get("restart_provenance_status") or payload.get("restart_provenance_status") or ""
+    ).strip().lower()
+    active_gap_count = _as_int(
+        analytics.get("restart_origin_active_gap_count_1h")
+        if "restart_origin_active_gap_count_1h" in analytics
+        else payload.get("restart_origin_active_gap_count_1h"),
+        0,
+    )
+    if provenance_status in {"incomplete", "gap", "missing"} or active_gap_count > 0:
+        return "restart_provenance_operator_attribution_required"
+    return ""
+
+
+def _source_root_judgment_prerequisites_satisfied(branch_id: str, normalized: dict[str, Any]) -> bool:
+    for item in list(normalized.get("task_sequence") or []):
+        if not isinstance(item, dict):
+            continue
+        if SOURCE_ROOT_JUDGMENT_TOOL in _task_tools(item):
+            return True
+        if not _sequence_item_satisfied(branch_id, item):
+            return False
+    return False
+
+
 def _sequence_item_expected_tools(item: dict[str, Any]) -> list[str]:
     allowed = [
         str(tool or "").strip()
@@ -5165,6 +5225,34 @@ class WorkTreeSignalIngestionService:
                 and _branch_has_failed_evidence(branch.branch_id)
             )
             source_root_failed_judged = failed_source_root_evidence and _branch_has_source_root_failed_judgment(branch.branch_id)
+            source_root_operator_reason = ""
+            if sequence_configured and _sequence_has_tool(normalized, SOURCE_ROOT_JUDGMENT_TOOL):
+                source_root_operator_reason = _branch_source_root_operator_reason(branch.branch_id)
+            expected_source_root_operator_reason = _expected_source_root_operator_reason(normalized)
+            if (
+                expected_source_root_operator_reason
+                and not source_root_operator_reason
+                and _source_root_judgment_prerequisites_satisfied(branch.branch_id, normalized)
+                and not any(
+                    str(getattr(task, "title", "") or "").strip() == SOURCE_ROOT_JUDGMENT_TASK_TITLE
+                    for task in open_tasks
+                )
+            ):
+                for task in open_tasks:
+                    work_tree.mark_task_dropped(
+                        task.task_id,
+                        reason=f"source_root_judgment_stale_for:{expected_source_root_operator_reason}",
+                    )
+                open_tasks = []
+                blocked_open_tasks = False
+                sequence_task = _source_root_judgment_task()
+                task_text = str(sequence_task.get("title") or "").strip()
+                task_allowed_tools = [
+                    str(tool or "").strip()
+                    for tool in list(sequence_task.get("allowed_tools") or [])
+                    if str(tool or "").strip()
+                ]
+                task_preferred_tool = str(sequence_task.get("preferred_tool") or "").strip()
             if source_root_failed_judged and not blocked_open_tasks:
                 for task in open_tasks:
                     work_tree.mark_task_dropped(
@@ -5187,6 +5275,32 @@ class WorkTreeSignalIngestionService:
                 task_allowed_tools = []
                 task_preferred_tool = ""
             elif source_root_failed_judged and blocked_open_tasks:
+                sequence_task = {}
+                task_text = ""
+                task_allowed_tools = []
+                task_preferred_tool = ""
+            elif source_root_operator_reason and not blocked_open_tasks:
+                for task in open_tasks:
+                    work_tree.mark_task_dropped(
+                        task.task_id,
+                        reason=f"source_root_operator_judgment:{source_root_operator_reason}",
+                    )
+                blocked = work_tree.add_task_to_branch(
+                    branch.branch_id,
+                    "Hold source-root branch for operator judgment",
+                    meta={"blocked_reason": source_root_operator_reason},
+                )
+                work_tree.mark_task_blocked(
+                    blocked.task_id,
+                    source_root_operator_reason,
+                )
+                open_tasks = [blocked]
+                blocked_open_tasks = True
+                sequence_task = {}
+                task_text = ""
+                task_allowed_tools = []
+                task_preferred_tool = ""
+            elif source_root_operator_reason and blocked_open_tasks:
                 sequence_task = {}
                 task_text = ""
                 task_allowed_tools = []

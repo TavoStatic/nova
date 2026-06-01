@@ -179,7 +179,7 @@ def _semantic_tool_intent_has_authority(intent: dict | None) -> bool:
     confidence = _floatish(payload.get("confidence"), 0.0)
     if not args and confidence < MIN_NO_ARG_TOOL_CONFIDENCE:
         return False
-    if tool in {"web_fetch", "web_gather", "read", "find", "location_coords", "patch_apply", "update_now_confirm"}:
+    if tool in {"web_fetch", "web_gather", "read", "find", "patch_apply", "update_now_confirm"}:
         return bool(args)
     return True
 

@@ -18,6 +18,9 @@ def _core(**overrides):
         "_web_allowlist_message": lambda resource: f"No access to {resource}",
         "behavior_set_flag": lambda *args, **kwargs: None,
         "action_ledger_add_step": lambda *args, **kwargs: None,
+        "mem_enabled": lambda: False,
+        "mem_should_store": lambda _text: False,
+        "mem_add": lambda *_args, **_kwargs: None,
     }
     base.update(overrides)
     return SimpleNamespace(**base)
@@ -97,6 +100,78 @@ class TestNovaReplySequence(unittest.TestCase):
         normalize_reply = execute_mock.call_args.kwargs.get("normalize_reply")
         self.assertEqual(normalize_reply("draft UI-TIP"), "ENSURE:draft")
         self.assertEqual(execute_mock.call_args.kwargs.get("turn_acts"), ["tool_probe"])
+        self.assertEqual(execute_mock.call_args.kwargs.get("input_source"), "http")
+
+
+    def test_fallback_uses_safe_memory_defaults_when_core_stub_is_minimal(self):
+        core = SimpleNamespace(
+            _llm_classify_routing_intent=lambda _text, **_kwargs: {"tool": "none", "args": [], "confidence": 0.9},
+            build_fallback_context_details=lambda _text, _turns, **_kwargs: {},
+            ollama_chat=lambda _text, retrieved_context="", language_mix_spanish_pct=0: "model reply",
+            execute_planned_action=lambda _tool, _args: "",
+            _web_allowlist_message=lambda resource: f"No access to {resource}",
+            behavior_set_flag=lambda *args, **kwargs: None,
+            action_ledger_add_step=lambda *args, **kwargs: None,
+        )
+
+        reply, meta = execute_reply_sequence(
+            turns=[("user", "hello")],
+            text="hello",
+            pending_action=None,
+            turn_acts=[],
+            prefer_web_for_data_queries=False,
+            language_mix_spanish_pct=0,
+            session=None,
+            trace=lambda *args, **kwargs: None,
+            normalize_reply=lambda reply: reply,
+            ensure_reply=lambda reply: reply,
+            core=core,
+        )
+
+        self.assertEqual(reply, "model reply")
+        self.assertEqual(meta.get("planner_decision"), "llm_fallback")
+
+    def test_fulfillment_handles_turn_before_llm_fallback(self):
+        captured = {}
+
+        def _fulfillment(text, session, turns, **kwargs):
+            captured["semantic_observation"] = dict(kwargs.get("semantic_observation") or {})
+            return {
+                "reply": "Fulfillment handled this turn.",
+                "planner_decision": "fulfillment_choice",
+                "grounded": True,
+            }
+
+        core = _core(
+            _llm_classify_routing_intent=lambda _text, **_kwargs: {
+                "tool": "none",
+                "args": [],
+                "confidence": 0.91,
+                "reason": "needs planning",
+                "answer_target": "tool_action",
+                "evidence_need": "conversation",
+            },
+            maybe_run_fulfillment_flow=_fulfillment,
+            ollama_chat=lambda *_args, **_kwargs: "MODEL_SHOULD_NOT_RUN",
+        )
+
+        reply, meta = self._call("help me choose", core=core)
+
+        self.assertEqual(reply, "Fulfillment handled this turn.")
+        self.assertEqual(meta.get("planner_decision"), "fulfillment_choice")
+        self.assertTrue(meta.get("grounded"))
+        self.assertEqual((captured.get("semantic_observation") or {}).get("status"), "none")
+
+    def test_fulfillment_typeerror_falls_back_without_crashing(self):
+        core = _core(
+            maybe_run_fulfillment_flow=lambda _text, _session, _turns, pending_action=None: None,
+            ollama_chat=lambda *_args, **_kwargs: "model reply",
+        )
+
+        reply, meta = self._call("plain conversation", core=core)
+
+        self.assertEqual(reply, "model reply")
+        self.assertEqual(meta.get("planner_decision"), "llm_fallback")
 
     def test_semantic_tool_result_returns_route_evidence_and_execution_profile(self):
         core = _core(

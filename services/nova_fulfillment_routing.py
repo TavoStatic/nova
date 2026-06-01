@@ -10,6 +10,7 @@ def evaluate_fulfillment_route_viability(
     *,
     pending_action: Optional[dict] = None,
     get_fulfillment_state_fn: Callable[[object], object | None],
+    semantic_observation: Optional[dict] = None,
 ) -> dict:
     state = get_fulfillment_state_fn(session)
     del user_text, recent_turns
@@ -34,8 +35,26 @@ def evaluate_fulfillment_route_viability(
             "fit_notes": [f"active conversation state is {state_kind}", "fulfillment should not take over another active thread"],
             "comparison_strength": "clear",
         }
+
+    # Fresh turn — use semantic observation to determine if fulfillment is worth attempting.
+    # Fulfillment applies when the routing model identified a meaningful outward or action intent
+    # but no specific tool was selected, meaning the request needs interpretation and planning.
+    observation = semantic_observation if isinstance(semantic_observation, dict) else {}
+    answer_target = str(observation.get("answer_target") or "").strip().lower()
+    tool = str(observation.get("tool") or "").strip().lower()
+    fulfillment_targets = {"tool_action", "external_world"}
+    if answer_target in fulfillment_targets and tool in {"", "none"}:
+        return {
+            "viable": True,
+            "fit_notes": [
+                f"fresh turn with answer_target={answer_target!r} and no tool selected",
+                "fulfillment may interpret and plan a response",
+            ],
+            "comparison_strength": "clear",
+        }
+
     return {
         "viable": False,
-        "fit_notes": ["no existing fulfillment state"],
+        "fit_notes": ["no existing fulfillment state", f"answer_target={answer_target!r} does not warrant fulfillment"],
         "comparison_strength": "weak",
     }

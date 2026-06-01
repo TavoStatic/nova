@@ -104,7 +104,7 @@ class NovaHttpChatRuntimeService:
                 text,
                 channel="http",
                 session_id=session_id,
-                input_source="typed",
+                input_source="http",
                 active_subject=session.active_subject(),
             )
             routing_decision: dict | None = None

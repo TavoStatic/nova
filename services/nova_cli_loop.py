@@ -39,6 +39,20 @@ def run_loop(tts, *, core: object) -> None:
     print("Commands: screen | camera <prompt> | web <url> | web search <query> | web research <query> | web gather <url> | weather in <location-or-lat,lon> | check weather for <location> | weather current location | location coords <lat,lon> | domains | policy allow <domain> | chat context | queue status | ls [folder] | read <file> | find <kw> [folder] | health | capabilities | inspect", flush=True)
     print("Press ENTER for voice. Or type a message/command and press ENTER. Type 'q' to quit.\n", flush=True)
 
+    def _background_warmup() -> None:
+        try:
+            warm_chat_fn = getattr(core, "warm_ollama_chat_model", None)
+            if callable(warm_chat_fn):
+                warm_chat_fn(reason="cli_startup")
+            warm_routing_fn = getattr(core, "warm_ollama_routing_model", None)
+            if callable(warm_routing_fn):
+                warm_routing_fn(reason="cli_startup")
+        except Exception:
+            pass
+
+    import threading as _threading
+    _threading.Thread(target=_background_warmup, daemon=True).start()
+
     recent_tool_context = ""
     recent_web_urls: list[str] = []
     session_turns: list[tuple[str, str]] = []
@@ -362,9 +376,9 @@ def run_loop(tts, *, core: object) -> None:
             retrieved_context=retrieved_context,
             language_mix_spanish_pct=language_mix_spanish_pct,
             ollama_chat_fn=core.ollama_chat,
-            mem_enabled_fn=lambda: False,
-            mem_should_store_fn=lambda _text: False,
-            mem_add_fn=lambda *_args, **_kwargs: None,
+            mem_enabled_fn=core.mem_enabled,
+            mem_should_store_fn=core.mem_should_store,
+            mem_add_fn=core.mem_add,
             strip_mem_leak_fn=lambda reply, _retrieved_context: reply,
             behavior_record_event_fn=core.behavior_record_event,
             action_ledger_add_step=lambda stage, outcome, detail="", **data: _trace(stage, outcome, detail, **data),
@@ -390,3 +404,4 @@ def run_loop(tts, *, core: object) -> None:
 
     _flush_pending_action_ledger()
 
+      

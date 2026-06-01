@@ -163,6 +163,47 @@ class TestAutonomyMaintenance(unittest.TestCase):
         self.assertEqual(state.get("last_regression_lanes"), ["unit", "behavior", "integration"])
         self.assertEqual(state.get("last_regression_source"), "scripts/run_regression.py")
 
+    def test_subconscious_pack_timeout_uses_positive_timeout_evidence(self):
+        with tempfile.TemporaryDirectory() as td:
+            log_path = Path(td) / "maintenance.log"
+
+            def _timeout(*_args, **_kwargs):
+                raise autonomy_maintenance.subprocess.TimeoutExpired(
+                    cmd=["subconscious_runner.py"],
+                    timeout=-19,
+                    output="partial stdout",
+                    stderr="partial stderr",
+                )
+
+            with mock.patch.object(autonomy_maintenance, "MAINT_LOG", log_path), \
+                 mock.patch.object(autonomy_maintenance.subprocess, "run", side_effect=_timeout), \
+                 mock.patch.object(autonomy_maintenance.time, "monotonic", side_effect=[100.0, 105.25]):
+                ok, output = autonomy_maintenance._run_subconscious_pack()
+
+            self.assertFalse(ok)
+            self.assertIn("timed out after 900 seconds", output)
+            self.assertIn("elapsed_sec=5.25", output)
+            self.assertNotIn("-19", output)
+            self.assertIn("partial stdout", output)
+            self.assertIn("partial stderr", output)
+            self.assertIn("subconscious_pack_duration_sec=5.25 status=timeout timeout_sec=900", log_path.read_text(encoding="utf-8"))
+
+    def test_run_once_logs_cycle_duration_on_subconscious_failure(self):
+        with tempfile.TemporaryDirectory() as td:
+            state_path = Path(td) / "state.json"
+            log_path = Path(td) / "maintenance.log"
+
+            with mock.patch.object(autonomy_maintenance, "STATE_FILE", state_path), \
+                 mock.patch.object(autonomy_maintenance, "MAINT_LOG", log_path), \
+                 mock.patch.object(autonomy_maintenance, "_run_subconscious_pack", return_value=(False, "subconscious boom")), \
+                 mock.patch.object(autonomy_maintenance.time, "monotonic", side_effect=[10.0, 12.5]):
+                code = autonomy_maintenance.run_once()
+
+            self.assertEqual(code, 1)
+            log_text = log_path.read_text(encoding="utf-8")
+            self.assertIn("subconscious boom", log_text)
+            self.assertIn("cycle_complete cycle_elapsed_sec=2.5 code=1 reason=subconscious_pack_failed", log_text)
+
     def test_archive_stale_complete_trees_keeps_recent_history_visible(self):
         self._isolated_work_tree_db()
         now = work_tree._now()

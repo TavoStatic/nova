@@ -98,6 +98,7 @@ ROUTING_INTENT_PROMPT = (
     "- system_check supplies current system check evidence. Use only when the user's goal asks to verify runtime checks.\n"
     "- weather_current_location supplies current weather for the available device/saved location, including rain, heat, cold, wind, and outdoor clothing decisions. Use when the user's goal requires current outdoor condition evidence and no different location was specified.\n"
     "- weather_location supplies weather for a named location. Use when the user's goal requires current outdoor condition evidence for a specified place.\n"
+    "- location_coords supplies the current device GPS coordinates and physical location fix. Use when the user's goal requires knowing the current location, coordinates, or physical position of the device.\n"
     "- web_fetch and web_gather supply contents of a specific URL from the user's turn.\n"
     "- web_search, web_research, wikipedia_lookup, and stackexchange_search supply outside information. Use only when the user's goal requires outside sources, not for proving Nova's own prior unsupported answer.\n"
     "- Work Tree tools supply active work-plan state or advance governed work. Use only when the user's goal requires Work Tree action or status.\n"
@@ -264,6 +265,7 @@ def llm_classify_routing_intent(
     return_none_payload: bool = False,
     live_ollama_calls_allowed_fn: Callable[[], bool],
     chat_model_fn: Callable[[], str],
+    routing_model_fn: Optional[Callable[[], str]] = None,
     ollama_base: str,
     get_saved_location_text_fn: Callable[[], str],
     requests_post_fn: Callable[..., object] | None = None,
@@ -298,7 +300,7 @@ def llm_classify_routing_intent(
         saved_location = ""
 
     payload = {
-        "model": chat_model_fn(),
+        "model": (routing_model_fn or chat_model_fn)(),
         "stream": False,
         "keep_alive": "10m",
         "options": {"temperature": 0.0, "top_p": 0.8},

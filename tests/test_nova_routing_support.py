@@ -325,6 +325,33 @@ class TestNovaRoutingSupport(unittest.TestCase):
         self.assertEqual(result.get("tool"), "self_status")
         self.assertEqual(result.get("args"), [])
 
+    def test_llm_classify_routing_intent_prefers_routing_model_when_provided(self):
+        captured = {}
+
+        class _Resp:
+            def raise_for_status(self):
+                pass
+
+            def json(self):
+                return {"message": {"content": '{"tool":"none","args":[],"confidence":0.9,"reason":"conversation"}'}}
+
+        def _post(_url, json=None, timeout=None):
+            captured["payload"] = json
+            return _Resp()
+
+        nova_routing_support.llm_classify_routing_intent(
+            "tell me what is happening",
+            return_none_payload=True,
+            live_ollama_calls_allowed_fn=lambda: True,
+            chat_model_fn=lambda: "chat-model",
+            routing_model_fn=lambda: "routing-model",
+            ollama_base="http://127.0.0.1:11434",
+            get_saved_location_text_fn=lambda: "",
+            requests_post_fn=_post,
+        )
+
+        self.assertEqual((captured.get("payload") or {}).get("model"), "routing-model")
+
     def test_coerce_tool_intent_rejects_removed_content_tools(self):
         for tool in ("runtime_identity", "capability_inventory", "operator_help", "grounded_self_report"):
             with self.subTest(tool=tool):

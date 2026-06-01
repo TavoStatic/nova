@@ -381,6 +381,7 @@ def _fulfillment_route_viability(
     recent_turns: list[tuple[str, str]],
     *,
     pending_action: Optional[dict] = None,
+    semantic_observation: Optional[dict] = None,
 ) -> dict:
     return evaluate_fulfillment_route_viability(
         user_text,
@@ -388,6 +389,7 @@ def _fulfillment_route_viability(
         recent_turns,
         pending_action=pending_action,
         get_fulfillment_state_fn=SessionStateService.get_fulfillment_state,
+        semantic_observation=semantic_observation,
     )
 
 
@@ -419,6 +421,7 @@ def _probe_turn_routes(
     session: object,
     recent_turns: list[tuple[str, str]],
     pending_action: Optional[dict] = None,
+    semantic_observation: Optional[dict] = None,
 ) -> dict:
     deterministic = _deterministic_route_viability(
         user_text,
@@ -434,6 +437,7 @@ def _probe_turn_routes(
         session,
         recent_turns,
         pending_action=pending_action,
+        semantic_observation=semantic_observation,
     )
     return build_probe_turn_routes(user_text, deterministic, fulfillment)
 
@@ -752,6 +756,7 @@ def _llm_classify_routing_intent(
         return_none_payload=return_none_payload,
         live_ollama_calls_allowed_fn=_live_ollama_calls_allowed,
         chat_model_fn=chat_model,
+        routing_model_fn=routing_model,
         ollama_base=OLLAMA_BASE,
         get_saved_location_text_fn=get_saved_location_text,
         requests_post_fn=requests.post,
@@ -1239,6 +1244,13 @@ def allowed_root() -> Path:
 def chat_model() -> str:
     m = policy_models()
     return m.get("chat", "llama3.2:3b")
+
+
+def routing_model() -> str:
+    """Return the model for intent/routing classification.
+    Falls back to chat_model() if no dedicated routing model is configured."""
+    m = policy_models()
+    return m.get("routing", chat_model())
 
 
 def whisper_size() -> str:
@@ -2103,6 +2115,61 @@ def warm_ollama_chat_model(reason: str = "startup") -> bool:
     except Exception as exc:
         warn(f"Ollama chat model warm failed: {str(exc)[:180]}")
         return False
+
+
+def warm_ollama_routing_model(reason: str = "startup") -> bool:
+    """Pre-load the routing model (Qwen) so the first user turn does not hit a cold-start timeout."""
+    if not _live_ollama_calls_allowed():
+        return False
+    if not ollama_server_up():
+        return False
+
+    model = str(routing_model() or "").strip()
+    if not model or model == str(chat_model() or "").strip():
+        return False  # routing model is same as chat model; already warmed
+
+    payload = {
+        "model": model,
+        "stream": False,
+        "keep_alive": "10m",
+        "options": {"temperature": 0.0, "num_predict": 1},
+        "messages": [
+            {"role": "system", "content": "Warm the routing model for the next intent classification turn."},
+            {"role": "user", "content": str(reason or "startup")[:120]},
+        ],
+    }
+    try:
+        response = requests.post(f"{OLLAMA_BASE}/api/chat", json=payload, timeout=OLLAMA_WARM_TIMEOUT)
+        response.raise_for_status()
+        ok(f"Ollama routing model warm: {model}")
+        return True
+    except Exception as exc:
+        warn(f"Ollama routing model warm failed: {str(exc)[:180]}")
+        return False
+
+def maybe_run_fulfillment_flow(
+    text: str,
+    session,
+    turns,
+    *,
+    pending_action=None,
+    semantic_observation: Optional[dict] = None,
+) -> Optional[dict]:
+    """Attempt to handle the turn through the fulfillment flow.
+    Returns a result dict with reply/planner_decision/grounded, or None if not applicable."""
+    try:
+        return _fulfillment_flow_service().maybe_run_fulfillment_flow(
+            text,
+            session,
+            turns,
+            pending_action=pending_action,
+            semantic_observation=semantic_observation,
+        )
+    except Exception as exc:
+        error_text = str(exc)[:180]
+        behavior_set_flag("fulfillment_flow_error", layer="fulfillment_flow", error=error_text)
+        warn(f"Fulfillment flow failed: {error_text}")
+        return None
 
 
 def ensure_ollama():

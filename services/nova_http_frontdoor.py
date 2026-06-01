@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import threading
 from pathlib import Path
 from typing import Callable
 
@@ -158,6 +159,12 @@ class NovaHttpFrontdoorService:
             warm_fn = getattr(core, "warm_ollama_chat_model", None)
             if callable(warm_fn):
                 warm_fn(reason="http_startup")
+            warm_routing_fn = getattr(core, "warm_ollama_routing_model", None)
+            if callable(warm_routing_fn):
+                threading.Thread(
+                    target=lambda: warm_routing_fn(reason="http_startup"),
+                    daemon=True,
+                ).start()
         except Exception:
             pass
 

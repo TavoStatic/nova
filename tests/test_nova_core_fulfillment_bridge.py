@@ -1,4 +1,6 @@
 import unittest
+from types import SimpleNamespace
+from unittest import mock
 
 import nova_core
 from conversation_manager import ConversationSession

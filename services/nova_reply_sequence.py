@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import time
 from typing import Callable
@@ -29,6 +29,7 @@ def execute_reply_sequence_from_runtime(
     ensure_active_work_tree_fn: Callable[[str], str] | None = None,
     work_tree_seed_source: str = "",
     work_tree_seed_mode: str = "",
+    input_source: str = "typed",
 ) -> tuple[str, dict]:
     del runtime_scope
 
@@ -47,6 +48,7 @@ def execute_reply_sequence_from_runtime(
         ensure_active_work_tree_fn=ensure_active_work_tree_fn,
         work_tree_seed_source=work_tree_seed_source,
         work_tree_seed_mode=work_tree_seed_mode,
+        input_source=input_source,
         stop_before_llm_fallback=stop_before_llm_fallback,
     )
 
@@ -91,6 +93,7 @@ def execute_http_reply_sequence_from_runtime(
         runtime_scope=runtime_scope,
         ensure_active_work_tree_fn=ensure_active_work_tree_fn,
         work_tree_seed_source="http",
+        input_source="http",
     )
 
 
@@ -110,6 +113,7 @@ def execute_reply_sequence(
     ensure_active_work_tree_fn: Callable[[str], str] | None = None,
     work_tree_seed_source: str = "",
     work_tree_seed_mode: str = "",
+    input_source: str = "typed",
     stop_before_llm_fallback: bool = False,
 ) -> tuple[str, dict]:
     sequence_started = time.perf_counter()
@@ -227,6 +231,44 @@ def execute_reply_sequence(
         else:
             return _timed_return(*_break_fallback_loop(planner_reply, planner_payload))
 
+    # Attempt fulfillment flow before falling to generic LLM.
+    # Only fires when planner found no tool action and no deferred tool result.
+    if not deferred_tool_meta:
+        fulfillment_fn = getattr(core, "maybe_run_fulfillment_flow", None)
+        if callable(fulfillment_fn):
+            try:
+                fulfillment_result = fulfillment_fn(
+                    text,
+                    session,
+                    list(turns),
+                    pending_action=pending_action,
+                    semantic_observation=dict(semantic_tool_observation),
+                )
+            except TypeError:
+                fulfillment_result = fulfillment_fn(
+                    text,
+                    session,
+                    list(turns),
+                    pending_action=pending_action,
+                )
+            except Exception:
+                fulfillment_result = None
+            if isinstance(fulfillment_result, dict) and str(fulfillment_result.get("reply") or "").strip():
+                trace("fulfillment", "handled", planner_decision=str(fulfillment_result.get("planner_decision") or "fulfillment"))
+                reply, meta = _break_fallback_loop(
+                    ensure_reply(str(fulfillment_result.get("reply") or "")),
+                    {
+                        "planner_decision": str(fulfillment_result.get("planner_decision") or "fulfillment"),
+                        "tool": "",
+                        "tool_args": {},
+                        "tool_result": "",
+                        "grounded": bool(fulfillment_result.get("grounded")),
+                        "reply_contract": "fulfillment.reply",
+                        "reply_outcome": {"kind": str(fulfillment_result.get("planner_decision") or "fulfillment")},
+                    },
+                )
+                return _timed_return(reply, meta)
+
     if stop_before_llm_fallback:
         meta = {
             "planner_decision": "unhandled",
@@ -259,14 +301,14 @@ def execute_reply_sequence(
     trace("llm_call", "started")
     llm_fallback_outcome = finalize_llm_fallback_reply(
         text=text,
-        raw_user_text="",
-        input_source="",
+        raw_user_text=text,
+        input_source=str(input_source or "typed"),
         retrieved_context=retrieved,
         language_mix_spanish_pct=int(language_mix_spanish_pct or 0),
         ollama_chat_fn=core.ollama_chat,
-        mem_enabled_fn=lambda: False,
-        mem_should_store_fn=lambda _text: False,
-        mem_add_fn=lambda *_args, **_kwargs: None,
+        mem_enabled_fn=getattr(core, "mem_enabled", lambda: False),
+        mem_should_store_fn=getattr(core, "mem_should_store", lambda _text: False),
+        mem_add_fn=getattr(core, "mem_add", lambda *_args, **_kwargs: None),
         strip_mem_leak_fn=lambda reply, _retrieved_context: reply,
         behavior_record_event_fn=lambda *_args, **_kwargs: None,
         action_ledger_add_step=lambda *_args, **_kwargs: None,
@@ -299,4 +341,3 @@ def execute_reply_sequence(
     timing_profile["post_time"] = int(llm_fallback_outcome.get("post_time_ms") or 0)
     trace("timing", "completed", "post_processing", duration_ms=timing_profile["post_time"])
     return _timed_return(reply, meta)
-

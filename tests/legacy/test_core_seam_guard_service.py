@@ -12,22 +12,18 @@ class TestCoreSeamGuardService(unittest.TestCase):
             (root / "nova_http.py").write_text(
                 "from services.control_actions import CONTROL_ACTIONS_SERVICE\n"
                 "from services.control_status import CONTROL_STATUS_SERVICE\n"
+                "from services.nova_control_action_dispatcher import NOVA_CONTROL_ACTION_DISPATCHER\n"
                 "\n"
                 "def demo():\n"
-                "    CONTROL_ACTIONS_SERVICE.build_action_handlers()\n"
-                "    CONTROL_ACTIONS_SERVICE.handle_control_action('refresh_status', {}, action_handlers={}, record_control_action_event_fn=lambda *args: None)\n"
-                "    return CONTROL_STATUS_SERVICE.control_status_payload()\n",
+                "    CONTROL_STATUS_SERVICE.runtime_status_payload()\n"
+                "    CONTROL_STATUS_SERVICE.runtime_supplier_fns_from_scope()\n"
+                "    NOVA_CONTROL_ACTION_DISPATCHER.dispatch_control_action_from_runtime()\n"
+                "    CONTROL_ACTIONS_SERVICE.refresh_status_action()\n"
+                "    CONTROL_ACTIONS_SERVICE.self_check_action()\n",
                 encoding="utf-8",
             )
             (root / "nova_core.py").write_text(
-                "from services.nova_routing_support import classify_supervisor_bypass as service_classify_supervisor_bypass\n"
-                "from services.nova_routing_support import looks_like_open_fallback_turn as service_looks_like_open_fallback_turn\n"
-                "\n"
-                "def a(text):\n"
-                "    return service_classify_supervisor_bypass(text=text)\n"
-                "\n"
-                "def b(text):\n"
-                "    return service_looks_like_open_fallback_turn(text=text)\n",
+                "# nova_core stub\n",
                 encoding="utf-8",
             )
 

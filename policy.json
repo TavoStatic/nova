@@ -45,6 +45,7 @@
   },
   "models": {
     "chat": "llama3.2:3b",
+    "routing": "qwen2.5vl:7b",
     "vision": "qwen2.5vl:7b",
     "stt_size": "base"
   },

@@ -153,6 +153,12 @@ def execute_planned_action(
 
     if tool_name == "location_coords":
         location_value = str(tool_args[0] if tool_args else "").strip()
+        if not location_value:
+            # No args — return the current device GPS fix
+            coords = resolve_current_device_coords_fn()
+            if coords:
+                return f"Current device location: {coords[0]},{coords[1]}"
+            return "Location fix is not available right now. No GPS fix or saved coordinates found."
         return set_location_coords_fn(location_value)
 
     fn = tool_map.get(tool_name)

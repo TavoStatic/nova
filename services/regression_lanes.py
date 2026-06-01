@@ -43,6 +43,7 @@ COMPACT_REGRESSION_LANES: dict[str, list[str]] = {
         "tests.test_policy_control_service",
         "tests.test_policy_manager_resolver",
         "tests.test_policy_manager_service",
+        "tests.test_nova_tool_policy_service",
         "tests.test_regression_contracts",
         "tests.test_release_status_service",
         "tests.test_release_clean_service",
@@ -206,6 +207,7 @@ SOURCE_PROFILE_LANES: dict[str, list[str]] = {
     ],
     "source_web_search": [
         "tests.test_nova_search_endpoint",
+        "tests.test_nova_tool_policy_service",
         "tests.test_nova_web_tools_service",
     ],
     "source_work_tree": [

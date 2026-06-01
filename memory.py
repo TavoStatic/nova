@@ -91,10 +91,10 @@ def _scope_where(scope: str, user: Optional[str]) -> tuple[str, tuple]:
             raise RuntimeError("private_scope_requires_user")
         return "(scope = 'private' AND user = ?)", (u,)
     if s == "shared":
-        return "(scope = 'shared')", tuple()
+        return "(scope = 'shared' OR scope = 'hybrid')", tuple()
     if u:
-        return "(scope = 'shared' OR (scope = 'private' AND user = ?))", (u,)
-    return "(scope = 'shared')", tuple()
+        return "(scope = 'shared' OR scope = 'hybrid' OR (scope = 'private' AND user = ?))", (u,)
+    return "(scope = 'shared' OR scope = 'hybrid')", tuple()
 
 def embed(text: str) -> List[float]:
     payload = {"model": EMBED_MODEL, "input": text}

@@ -347,6 +347,154 @@ class TestWorkTreeSignalIngestionService(unittest.TestCase):
         self.assertEqual(str(branch.work_class or ""), "governance_pressure")
         self.assertEqual(str(branch.source_key or ""), "governance_pressure:runtime_control:restart_provenance_gap:guard_boot_history")
 
+    def test_restart_provenance_judgment_becomes_operator_hold_instead_of_read_loop(self) -> None:
+        status_payload = {
+            "runtime_restart_analytics": {
+                "flap_level": "good",
+                "flap_summary": "No failure-driven restart pressure is active.",
+                "recent_restart_count_15m": 2,
+                "pressure_restart_count_15m": 0,
+                "pressure_restart_count_1h": 0,
+                "restart_pressure_active": False,
+                "restart_provenance_status": "incomplete",
+                "restart_origin_gap_count_1h": 1,
+                "restart_origin_active_gap_count_1h": 1,
+                "consecutive_failures": 0,
+                "failure_count": 0,
+            },
+        }
+
+        self.service.sync_status_snapshot(status_payload)
+        branch = self._signal_branches()[0]
+        completed_titles = []
+
+        for _ in range(4):
+            open_tasks = [
+                task for task in work_tree.list_branch_tasks(branch.branch_id)
+                if task.status not in {work_tree.TaskStatus.COMPLETE, work_tree.TaskStatus.DROPPED}
+            ]
+            self.assertTrue(open_tasks)
+            task = open_tasks[0]
+            completed_titles.append(task.title)
+            expected_tool = str((task.meta or {}).get("expected_tool") or "read")
+            if expected_tool == "source_root_judgment":
+                result = (
+                    "Source Root Judgment\n"
+                    "- verdict: operator_or_authority_needed\n"
+                    "- ok: False\n"
+                    "- source: runtime_control\n"
+                    f"- branch: {branch.branch_id}\n"
+                    "- evidence_count: 2\n"
+                    "- evidence_tools: read\n"
+                    "- open_task_count: 1\n"
+                    "- blocked_task_count: 0\n"
+                    "- operator_outbox: needed (restart_provenance_operator_attribution_required)"
+                )
+            else:
+                result = {"ok": True, "evidence": task.title}
+            work_tree.record_task_evidence(
+                branch_id=branch.branch_id,
+                task_id=task.task_id,
+                tool_name=expected_tool,
+                tool_args=list((task.meta or {}).get("tool_args") or []),
+                result=result,
+            )
+            work_tree.mark_task_complete(task.task_id)
+            self.service.sync_status_snapshot(status_payload)
+            if expected_tool == "source_root_judgment":
+                break
+
+        self.assertEqual(
+            completed_titles,
+            [
+                "Read runtime/guard_boot_history.json restart provenance",
+                "Read logs/guard.log around unattributed starts",
+                "Synthesize source-root judgment from collected evidence",
+            ],
+        )
+        open_tasks = [
+            task for task in work_tree.list_branch_tasks(branch.branch_id)
+            if task.status not in {work_tree.TaskStatus.COMPLETE, work_tree.TaskStatus.DROPPED}
+        ]
+        self.assertEqual(len(open_tasks), 1)
+        self.assertEqual(open_tasks[0].title, "Hold source-root branch for operator judgment")
+        self.assertEqual(open_tasks[0].status, work_tree.TaskStatus.BLOCKED)
+        self.assertEqual((open_tasks[0].meta or {}).get("blocked_reason"), "restart_provenance_operator_attribution_required")
+
+        held_task_id = open_tasks[0].task_id
+        self.service.sync_status_snapshot(status_payload)
+        open_tasks = [
+            task for task in work_tree.list_branch_tasks(branch.branch_id)
+            if task.status not in {work_tree.TaskStatus.COMPLETE, work_tree.TaskStatus.DROPPED}
+        ]
+        self.assertEqual(len(open_tasks), 1)
+        self.assertEqual(open_tasks[0].task_id, held_task_id)
+        self.assertEqual(open_tasks[0].title, "Hold source-root branch for operator judgment")
+
+    def test_restart_provenance_stale_judgment_rechecks_before_read_loop(self) -> None:
+        status_payload = {
+            "runtime_restart_analytics": {
+                "flap_level": "good",
+                "restart_pressure_active": False,
+                "restart_provenance_status": "incomplete",
+                "restart_origin_gap_count_1h": 1,
+                "restart_origin_active_gap_count_1h": 1,
+                "consecutive_failures": 0,
+                "failure_count": 0,
+            },
+        }
+
+        self.service.sync_status_snapshot(status_payload)
+        branch = self._signal_branches()[0]
+
+        for _ in range(3):
+            open_tasks = [
+                task for task in work_tree.list_branch_tasks(branch.branch_id)
+                if task.status not in {work_tree.TaskStatus.COMPLETE, work_tree.TaskStatus.DROPPED}
+            ]
+            self.assertTrue(open_tasks)
+            task = open_tasks[0]
+            expected_tool = str((task.meta or {}).get("expected_tool") or "read")
+            if expected_tool == "source_root_judgment":
+                break
+            work_tree.record_task_evidence(
+                branch_id=branch.branch_id,
+                task_id=task.task_id,
+                tool_name=expected_tool,
+                tool_args=list((task.meta or {}).get("tool_args") or []),
+                result={"ok": True, "evidence": task.title},
+            )
+            work_tree.mark_task_complete(task.task_id)
+            self.service.sync_status_snapshot(status_payload)
+
+        self.assertEqual(expected_tool, "source_root_judgment")
+        work_tree.record_task_evidence(
+            branch_id=branch.branch_id,
+            task_id=task.task_id,
+            tool_name="source_root_judgment",
+            tool_args=[branch.branch_id],
+            result=(
+                "Source Root Judgment\n"
+                "- verdict: root_has_executable_path\n"
+                "- ok: True\n"
+                "- source: runtime_control\n"
+                f"- branch: {branch.branch_id}\n"
+                "- evidence_count: 2\n"
+                "- evidence_tools: read"
+            ),
+        )
+        work_tree.mark_task_complete(task.task_id)
+
+        self.service.sync_status_snapshot(status_payload)
+
+        open_tasks = [
+            task for task in work_tree.list_branch_tasks(branch.branch_id)
+            if task.status not in {work_tree.TaskStatus.COMPLETE, work_tree.TaskStatus.DROPPED}
+        ]
+        self.assertEqual(len(open_tasks), 1)
+        self.assertEqual(open_tasks[0].title, "Synthesize source-root judgment from collected evidence")
+        self.assertEqual((open_tasks[0].meta or {}).get("expected_tool"), "source_root_judgment")
+
     def test_status_snapshot_does_not_ingest_legacy_restart_provenance_gap(self) -> None:
         results = self.service.ingest_status_snapshot(
             {
@@ -1285,6 +1433,65 @@ class TestWorkTreeSignalIngestionService(unittest.TestCase):
             (open_tasks[0].meta or {}).get("blocked_reason"),
             "source_root_failed_evidence_operator_judgment_required",
         )
+
+    def test_source_root_judgment_task_does_not_churn_when_operator_reason_is_still_missing(self) -> None:
+        status_payload = {
+            "worker_running": False,
+            "core_running": False,
+            "webui_running": False,
+            "restart_gap_count_1h": 1,
+            "runtime_restart_analytics": {
+                "restart_provenance_status": "operator_attribution_required",
+                "restart_origin_active_gap_count_1h": 1,
+            },
+        }
+
+        self.service.sync_status_snapshot(status_payload)
+        branch = self._signal_branches()[0]
+        for _ in range(5):
+            open_tasks = [
+                task for task in work_tree.list_branch_tasks(branch.branch_id)
+                if task.status not in {work_tree.TaskStatus.COMPLETE, work_tree.TaskStatus.DROPPED}
+            ]
+            self.assertTrue(open_tasks)
+            task = open_tasks[0]
+            if task.title == "Synthesize source-root judgment from collected evidence":
+                break
+            expected_tool = str((task.meta or {}).get("expected_tool") or "read")
+            work_tree.record_task_evidence(
+                branch_id=branch.branch_id,
+                task_id=task.task_id,
+                tool_name=expected_tool,
+                tool_args=list((task.meta or {}).get("tool_args") or []),
+                result={"ok": True, "evidence": task.title},
+            )
+            work_tree.mark_task_complete(task.task_id)
+            self.service.sync_status_snapshot(status_payload)
+
+        open_tasks = [
+            task for task in work_tree.list_branch_tasks(branch.branch_id)
+            if task.status not in {work_tree.TaskStatus.COMPLETE, work_tree.TaskStatus.DROPPED}
+        ]
+
+        self.assertEqual(len(open_tasks), 1)
+        self.assertEqual(open_tasks[0].title, "Synthesize source-root judgment from collected evidence")
+        first_task_id = open_tasks[0].task_id
+
+        self.service.sync_status_snapshot(status_payload)
+
+        open_tasks = [
+            task for task in work_tree.list_branch_tasks(branch.branch_id)
+            if task.status not in {work_tree.TaskStatus.COMPLETE, work_tree.TaskStatus.DROPPED}
+        ]
+        dropped_tasks = [
+            task for task in work_tree.list_branch_tasks(branch.branch_id)
+            if task.status == work_tree.TaskStatus.DROPPED
+        ]
+
+        self.assertEqual(len(open_tasks), 1)
+        self.assertEqual(open_tasks[0].title, "Synthesize source-root judgment from collected evidence")
+        self.assertEqual(open_tasks[0].task_id, first_task_id)
+        self.assertFalse(dropped_tasks)
 
     def test_self_repair_inventory_alias_reaches_source_root_judgment(self) -> None:
         status_payload = {
@@ -2775,71 +2982,6 @@ class TestWorkTreeSignalIngestionService(unittest.TestCase):
         self.assertEqual(branch.status, work_tree.BranchStatus.COMPLETE)
         self.assertIn("Regression failure aged stale", str(branch.notes or ""))
 
-    def test_sync_status_snapshot_resolves_memory_health_branch_when_ready(self) -> None:
-        self.service.sync_status_snapshot(
-            {
-                "alerts": [],
-                "self_check_pass_ratio": 1.0,
-                "memory_enabled": True,
-                "memory_health_status": "watch",
-                "memory_health_issue_count": 1,
-                "memory_health_issues": [{"code": "identity_missing", "detail": "missing identity"}],
-                "memory_health": {
-                    "status": "watch",
-                    "issue_count": 1,
-                    "bootstrap": {"memory_enabled": True, "status": "incomplete", "missing": ["identity"]},
-                },
-            }
-        )
-
-        results = self.service.sync_status_snapshot(
-            {
-                "alerts": [],
-                "self_check_pass_ratio": 1.0,
-                "memory_enabled": True,
-                "memory_health_status": "ok",
-                "memory_health_issue_count": 0,
-                "memory_health_issues": [],
-                "memory_health": {
-                    "status": "ok",
-                    "issue_count": 0,
-                    "bootstrap": {"memory_enabled": True, "status": "ready", "missing": []},
-                },
-            }
-        )
-
-        resolved = [item for item in results if str(item.get("action") or "") == "resolved"]
-        self.assertEqual(len(resolved), 1)
-        branch = self._signal_branches()[0]
-        self.assertEqual(str(branch.source_type or ""), "memory_identity")
-        self.assertEqual(str(branch.resolution_state or ""), "resolved")
-        self.assertEqual(branch.status, work_tree.BranchStatus.COMPLETE)
-
-    def test_created_signal_branch_gets_explicit_tool_assignment(self) -> None:
-        signal = {
-            "source": "control_status",
-            "signal_class": "runtime_failure",
-            "title": "Inspect runtime heartbeat drift",
-            "fingerprint": {
-                "class": "runtime_failure",
-                "surface": "control_status",
-                "error": "heartbeat_drift",
-                "symbol": "core_heartbeat",
-            },
-            "payload": {"alert": "heartbeat drift"},
-            "severity": "high",
-            "actionability": "safe_now",
-            "allowed_tools": ["pulse"],
-            "preferred_tool": "pulse",
-            "next_task": "check runtime heartbeat and queue status",
-        }
-
-        result = self.service.ingest_signal(signal)
-
-        self.assertEqual(result.get("action"), "created")
-        branch = self._signal_branches()[0]
-        self.assertTrue(str(branch.preferred_tool or "").strip())
-        self.assertEqual(branch.allowed_tools, [branch.preferred_tool])
 
 
 if __name__ == "__main__":

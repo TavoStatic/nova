@@ -16,6 +16,12 @@ class TestNovaRoutingHelpers(unittest.TestCase):
             "nova project status",
         )
 
+    def test_strip_invocation_prefix_removes_space_separated_direct_address(self):
+        self.assertEqual(
+            nova_routing_helpers.strip_invocation_prefix("nova tell me the weather"),
+            "tell me the weather",
+        )
+
     def test_resolve_research_provider_prefers_priority_match(self):
         result = nova_routing_helpers.resolve_research_provider(
             ["general_web", "wikipedia"],

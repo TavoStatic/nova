@@ -75,6 +75,32 @@ class SourceRootJudgmentServiceTests(unittest.TestCase):
         self.assertTrue(judgment["operator_outbox"])
         self.assertEqual(judgment["operator_reason"], "failed_evidence")
 
+    def test_restart_provenance_gap_requires_operator_attribution(self) -> None:
+        branch, task = self._branch_with_task()
+        branch.source_type = "runtime_control"
+        branch.work_class = "governance_pressure"
+        branch.source_payload = {
+            "runtime_restart_analytics": {
+                "restart_provenance_status": "incomplete",
+                "restart_origin_active_gap_count_1h": 1,
+            }
+        }
+        work_tree.record_task_evidence(
+            branch_id=branch.branch_id,
+            task_id=task.task_id,
+            tool_name="read",
+            tool_args=["runtime/guard_boot_history.json"],
+            result='[{"restart_origin":"unattributed_guard_start","provenance_complete":false}]',
+        )
+        work_tree.mark_task_complete(task.task_id)
+
+        judgment = build_source_root_judgment(branch.branch_id, work_tree_module=work_tree)
+
+        self.assertEqual(judgment["verdict"], "operator_or_authority_needed")
+        self.assertFalse(judgment["ok"])
+        self.assertTrue(judgment["operator_outbox"])
+        self.assertEqual(judgment["operator_reason"], "restart_provenance_operator_attribution_required")
+
     def test_blocked_source_root_judgment_publishes_operator_notice(self) -> None:
         branch, task = self._branch_with_task()
         work_tree.mark_task_blocked(task.task_id, "operator_authority_required")

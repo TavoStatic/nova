@@ -29,6 +29,13 @@ def _safe_list(value: Any) -> list[Any]:
     return list(value) if isinstance(value, list) else []
 
 
+def _safe_int(value: Any, default: int = 0) -> int:
+    try:
+        return int(value)
+    except Exception:
+        return default
+
+
 def _compact(value: Any, *, depth: int = 0) -> Any:
     if depth >= 4:
         return _safe_text(value, 200)
@@ -86,6 +93,25 @@ def _has_specialized_judgment(evidence_rows: list[dict[str, Any]]) -> bool:
     return bool(set(_evidence_tools(evidence_rows)) & SPECIALIZED_JUDGMENT_TOOLS)
 
 
+def _restart_provenance_operator_reason(source_type: str, work_class: str, source_payload: dict[str, Any]) -> str:
+    if source_type != "runtime_control" or work_class != "governance_pressure":
+        return ""
+    analytics = _safe_dict(source_payload.get("runtime_restart_analytics"))
+    provenance_status = _safe_text(
+        analytics.get("restart_provenance_status") or source_payload.get("restart_provenance_status"),
+        80,
+    ).lower()
+    active_gap_count = _safe_int(
+        analytics.get("restart_origin_active_gap_count_1h")
+        if "restart_origin_active_gap_count_1h" in analytics
+        else source_payload.get("restart_origin_active_gap_count_1h"),
+        0,
+    )
+    if provenance_status in {"incomplete", "gap", "missing"} or active_gap_count > 0:
+        return "restart_provenance_operator_attribution_required"
+    return ""
+
+
 def build_source_root_judgment(
     branch_id: str,
     *,
@@ -130,6 +156,7 @@ def build_source_root_judgment(
     branch_status = _branch_status(branch)
     preferred_tool = _safe_text(getattr(branch, "preferred_tool", ""), 120)
     allowed_tools = [_safe_text(tool, 120) for tool in _safe_list(getattr(branch, "allowed_tools", [])) if _safe_text(tool, 120)]
+    restart_provenance_operator_reason = _restart_provenance_operator_reason(source_type, work_class, source_payload)
 
     operator_reason = ""
     verdict = "continue_with_evidence"
@@ -150,6 +177,11 @@ def build_source_root_judgment(
         operator_reason = "failed_evidence"
         ok = False
         next_work.append("Inspect failed tool evidence and repair the execution path before closure.")
+    elif restart_provenance_operator_reason:
+        verdict = "operator_or_authority_needed"
+        operator_reason = restart_provenance_operator_reason
+        ok = False
+        next_work.append("Ask the operator to attribute the recent restart or restart through runtime control.")
     elif _has_specialized_judgment(evidence_rows):
         verdict = "specialized_judgment_recorded"
         next_work.append("Let the specialized judgment own closure for this root.")
