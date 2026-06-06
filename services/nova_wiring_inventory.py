@@ -420,6 +420,15 @@ WIRING_SURFACES: tuple[WiringSurface, ...] = (
         ("doctor.py", "health.py", "scripts/repo_hygiene_check.py"),
     ),
     WiringSurface(
+        "hardware_profile",
+        "SOCK — System Optimization and Compatibility Check: hardware scan, tier mapping, model recommendation",
+        ("sock_hardware_profile", "sock_recommendation", "sock_policy_diff", "source_root_inventory"),
+        ("source_root_inventory",),
+        ("system_check", "read", "find"),
+        ("active_work_tree_run_next",),
+        ("services/sock_service.py", "scripts/run_sock.py"),
+    ),
+    WiringSurface(
         "safety_envelope",
         shared_inventory_label("safety_envelope"),
         ("subconscious_summary", "generated_work_queue", "source_root_inventory"),

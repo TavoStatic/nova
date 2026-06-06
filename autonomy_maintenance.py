@@ -1642,8 +1642,21 @@ def _maintenance_generated_queue_run_next_action(_payload: dict) -> tuple[bool, 
     )
 
 
-def _maintenance_generated_queue_investigate_action(_payload: dict) -> tuple[bool, str, dict, str]:
-    return False, "generated_queue_investigate_requires_http_session_scope", {}, "generated_queue_investigate_requires_http_session_scope"
+def _maintenance_generated_queue_investigate_action(_payload: dict, state: dict) -> tuple[bool, str, dict, str]:
+    max_steps = _safe_int((_payload or {}).get("max_steps"), 1)
+    max_trees = _safe_int((_payload or {}).get("max_trees"), 1)
+    try:
+        cycle = _run_active_work_tree_cycle(
+            state,
+            max_steps=max(1, min(max_steps, ACTIVE_WORK_TREE_MAX_STEPS)),
+            max_trees=max(1, min(max_trees, ACTIVE_WORK_TREE_MAX_TREES)),
+        )
+    except Exception as exc:
+        msg = f"generated_queue_investigate_failed:{exc}"
+        return False, msg, {}, msg
+    status = str((cycle or {}).get("status") or "unknown").strip() or "unknown"
+    msg = f"generated_queue_investigate_{status}"
+    return _work_tree_cycle_dispatch_ok(status), msg, {"cycle": cycle if isinstance(cycle, dict) else {}}, msg
 
 
 def _work_tree_cycle_dispatch_ok(status: str) -> bool:
@@ -1729,7 +1742,7 @@ def _dispatch_autonomy_control_action(action_type: str, payload: dict, events: l
         test_session_run_action_fn=_unsupported_control_action,
         generated_pack_run_action_fn=_unsupported_control_action,
         generated_queue_run_next_action_fn=_maintenance_generated_queue_run_next_action,
-        generated_queue_investigate_action_fn=_maintenance_generated_queue_investigate_action,
+        generated_queue_investigate_action_fn=lambda event_payload: _maintenance_generated_queue_investigate_action(event_payload, runtime_state),
         patch_queue_run_next_action_fn=lambda event_payload: _maintenance_patch_queue_run_next_action(event_payload, runtime_state),
         active_work_tree_run_next_action_fn=lambda event_payload: _maintenance_active_work_tree_run_next_action(event_payload, runtime_state),
         real_world_task_create_action_fn=_unsupported_control_action,

@@ -44,10 +44,10 @@
     "web": true
   },
   "models": {
-    "chat": "llama3.2:3b",
-    "routing": "qwen2.5vl:7b",
+    "chat": "qwen2.5:7b",
+    "routing": "qwen2.5:7b",
     "vision": "qwen2.5vl:7b",
-    "stt_size": "base"
+    "stt_size": "medium"
   },
   "memory": {
     "enabled": true,
@@ -124,6 +124,7 @@
     ],
     "execute_allowed_actions": [
       "generated_queue_run_next",
+      "generated_queue_investigate",
       "pulse_status"
     ],
     "execute_allowed_action_groups": [
@@ -135,13 +136,11 @@
     "execute_blocked_actions": [
       "guard_start",
       "autonomy_maintenance_start",
-      "generated_queue_investigate",
       "update_now_dry_run"
     ],
     "requires_operator_ack_for": [
       "guard_start",
       "autonomy_maintenance_start",
-      "generated_queue_investigate",
       "update_now_dry_run"
     ],
     "confidence_threshold": 0.55,

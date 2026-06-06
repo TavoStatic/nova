@@ -80,7 +80,8 @@ class TestOllamaTestGuard(unittest.TestCase):
         with mock.patch.object(nova_core.sys, "argv", ["python", "-m", "unittest", "discover"]), \
              mock.patch.dict(os.environ, {"NOVA_ALLOW_LIVE_OLLAMA_TESTS": "1"}, clear=False), \
              mock.patch("nova_core.requests.get", side_effect=fake_get) as get_mock, \
-             mock.patch("nova_core.requests.post", return_value=_Resp(400)) as post_mock:
+             mock.patch("nova_core.requests.post", return_value=_Resp(400)) as post_mock, \
+             mock.patch.object(nova_core, "chat_model", return_value="llama3.2:3b"):
             self.assertTrue(nova_core.ollama_api_up())
             self.assertEqual(get_mock.call_count, 2)
             self.assertEqual(get_mock.call_args_list[0].args[0], f"{nova_core.OLLAMA_BASE}/api/version")

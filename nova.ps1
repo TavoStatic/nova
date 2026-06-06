@@ -53,6 +53,7 @@ $LOG_DIR   = Join-Path $ROOT "logs"
 # --- Optional future scripts (commented until you create them) ---
 $GUARDPY   = Join-Path $ROOT "nova_guard.py"  # FUTURE: supervisor/auto-restart
 $DIAGPY    = Join-Path $ROOT "diag.py"        # FUTURE: full diagnostics report
+$SOCKPY    = Join-Path $ROOT "scripts\run_sock.py"  # SOCK: System Optimization and Compatibility Check
 $CONFIG    = Join-Path $ROOT "config\nova.json" # FUTURE: unified config
 $MEM_DIR   = Join-Path $ROOT "memory"         # FUTURE: hardened memory folder
 $STOPPY = Join-Path $ROOT "stop_guard.py"
@@ -876,6 +877,7 @@ function Show-Help {
   Write-Host "  nova installer-readiness       # ship-gate summary for latest Windows installer"
   Write-Host "  nova package-promote --result pass [--version 2026.03.30.2] [--note text]  # record RC validation outcome"
   Write-Host "  nova installer-promote --result pass [--version 2026.03.30.2] [--note text]  # record installer validation outcome"
+  Write-Host "  nova sock [--apply]            # SOCK: System Optimization and Compatibility Check — profile hardware, recommend models"
   Write-Host "  nova doctor [--fix]            # startup preflight validator"
   Write-Host "  nova run [--fix]               # Nova core (voice + tools)"
   Write-Host "  nova webui [--host 0.0.0.0 --port 8080]  # network web interface"
@@ -1290,6 +1292,19 @@ switch ($cmd.ToLower()) {
       # New-Item -ItemType Directory -Force -Path (Split-Path $CONFIG) | Out-Null
       # '{}' | Out-File -Encoding utf8 $CONFIG
       # notepad $CONFIG
+    }
+    break
+  }
+
+  "sock" {
+    if (Test-Path $SOCKPY) {
+      if ($remainingTokens -and $remainingTokens.Count -gt 0) {
+        Run-Py $SOCKPY $remainingTokens
+      } else {
+        Run-Py $SOCKPY
+      }
+    } else {
+      Write-Host "[WARN] run_sock.py not found at $SOCKPY"
     }
     break
   }

@@ -301,7 +301,7 @@ class TestTestSessionControlService(unittest.TestCase):
 
             queue = TEST_SESSION_CONTROL_SERVICE.generated_work_queue(definitions, reports, limit=10, runtime_dir=runtime_dir)
 
-        self.assertEqual(queue.get("open_count"), 2)
+        self.assertEqual(queue.get("open_count"), 1)
         self.assertEqual(queue.get("actionable_count"), 1)
         self.assertEqual((queue.get("next_item") or {}).get("file"), "medium_new.json")
 

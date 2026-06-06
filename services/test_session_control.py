@@ -490,7 +490,7 @@ class TestSessionControlService:
                 "highest_priority": dict(highest_priority) if isinstance(highest_priority, dict) else {},
                 "latest_status": latest_status,
                 "opportunity_reason": opportunity_reason,
-                "open": latest_status != "green",
+                "open": latest_status != "green" and not (latest_status == "drift" and already_reviewed_current),
                 "actionable": latest_status != "green" and not (latest_status == "drift" and already_reviewed_current),
                 "reviewed_current_fingerprint": already_reviewed_current,
                 "latest_run_id": str(latest_report.get("run_id") or ""),

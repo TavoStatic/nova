@@ -225,6 +225,7 @@ SOURCE_ROOTS: tuple[SourceRoot, ...] = (
         shared_inventory_label("diagnostics_hygiene"),
         ("doctor.py", "health.py", "diag.py", "scripts/repo_hygiene_check.py"),
     ),
+
     SourceRoot(
         "safety_envelope",
         shared_inventory_label("safety_envelope"),
@@ -477,6 +478,7 @@ def _coverage_root_for_path(path: str) -> str:
         or "health_check" in low
         or "hygiene" in low
         or "prepush" in low
+        or "sock" in low
     ):
         return "diagnostics_hygiene"
     if "control_" in low:

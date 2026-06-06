@@ -8,6 +8,7 @@ LAST_SESSION.json
 RESUME_HERE.txt
 nova_memory.sqlite
 work_tree.db
+*.sock_backup
 *.sqlite-shm
 *.sqlite-wal
 *.pyc

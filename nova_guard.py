@@ -760,6 +760,32 @@ def should_stop() -> bool:
     return STOP_FILE.exists()
 
 
+def _is_maintenance_already_running() -> bool:
+    """Cross-process check: is autonomy_maintenance.py already running as a Python script?
+    Requires python as the executable and the script as a direct argument — avoids
+    false-positives from launcher processes that have the script name in their args."""
+    script_name = MAINTENANCE_SCRIPT.name
+    script_str = str(MAINTENANCE_SCRIPT)
+    my_pid = os.getpid()
+    try:
+        for proc in psutil.process_iter(["pid", "cmdline"]):
+            try:
+                cmdline = proc.info.get("cmdline") or []
+                if proc.pid == my_pid or len(cmdline) < 2:
+                    continue
+                # Executable must be python, and maintenance script must be a direct arg
+                exe = str(cmdline[0]).lower()
+                if "python" not in exe:
+                    continue
+                if any(script_name in str(arg) or script_str in str(arg) for arg in cmdline[1:]):
+                    return True
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                pass
+    except Exception:
+        pass
+    return False
+
+
 def _maintenance_tick() -> None:
     global _LAST_MAINTENANCE_LAUNCH, _MAINTENANCE_PROC
 
@@ -772,6 +798,11 @@ def _maintenance_tick() -> None:
             return
         log(f"[GUARD] Maintenance cycle exited with code={code}")
         _MAINTENANCE_PROC = None
+
+    # Cross-process guard: don't launch if another guard instance already started a cycle.
+    if _is_maintenance_already_running():
+        log("[GUARD] Maintenance already running in sibling process — skipping launch")
+        return
 
     now = time.time()
     if (now - _LAST_MAINTENANCE_LAUNCH) < MAINTENANCE_INTERVAL_SECONDS:

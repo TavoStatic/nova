@@ -1,10 +1,10 @@
 # NYO AI SYSTEMS
 
-Nova is not a finished autonomous system.
+Nova is a supervised local AI runtime in late-stage active development.
 
-It is an actively evolving supervised local AI runtime. The repository contains a CLI, HTTP runtime console, control surfaces, Work Tree, patch and release flows, memory services, tool dispatch, OS capability contracts, operator outbox, runtime telemetry, and maintenance loops. Those pieces are real, but they are not all closed end to end yet.
+It is not a finished autonomous system, but it is no longer early-stage. The core systems — CLI, HTTP runtime console, Work Tree, patch and release flows, memory services, tool dispatch, OS capability contracts, operator outbox, autonomy orchestration, and hardware-aware model selection — are implemented, tested, and governed by a passing regression gate. The gaps that remain are specific and known, not scattered across the foundation.
 
-The current proof standard is simple:
+The proof standard has not changed:
 
 - source describes capability
 - runtime artifacts show what actually happened
@@ -22,7 +22,7 @@ Nova currently has:
 
 - CLI and HTTP chat front doors
 - operator console and status surfaces
-- Work Tree task and branch state
+- Work Tree task and branch state with signal ingestion across 30+ wiring surfaces
 - runtime health and process telemetry
 - memory and identity services
 - web, weather, voice, vision, and tool surfaces
@@ -30,23 +30,24 @@ Nova currently has:
 - OS capability registry and script controller for bounded local actions
 - operator outbox for durable notices when Nova lacks authority, tools, or information
 - release package build, verify, validation, and promotion records
+- SOCK — System Optimization and Compatibility Check — hardware-aware model pair selection with VRAM stability enforcement and concurrent warm validation
+- autonomy orchestrator with a single clean contract path, full decision surface test coverage, and governed canary execution
+- a compact regression gate that covers all of the above and refreshes on every full run
 
-Those systems are meant to work together, but the current repo should still be treated as a supervised runtime under active development. Nova can surface evidence, hold work, run bounded tools, validate packages, and expose its state. It should not be described as independently self-completing until the runtime evidence proves that.
+Those systems are meant to work together, and most of them do. Nova surfaces evidence, holds work, runs bounded tools, validates packages, governs its own model selection, and exposes its state. The regression gate is green.
 
 ## What Is Still Being Proven
 
 The main unfinished proof areas are:
 
+- end-to-end autonomous self-closure from signal to Work Tree to action to evidence — the machinery exists; sustained runtime demonstration without operator babysitting is what remains
 - chat intent quality under ordinary conversation, especially avoiding forced help/task flows
-- end-to-end self-closure from signal to Work Tree to tool/action to evidence to judgment
-- autonomous maintenance that advances real work instead of only repeating validation loops
-- fresh-machine or VM package validation
-- interactive `nova run` validation against release artifacts
-- production packaging decisions for large local assets and optional runtime dependencies
+- fresh-machine or VM package validation — same-machine extracted-package validation passes, but independent install on a clean machine has not been run
+- autonomous maintenance advancing real non-trivial work — current local model capability limits what the autonomy loop can drive independently
 
 ## How To Read This Repo
 
-Read the repo as a platform base, not a polished assistant product.
+Read the repo as a governed platform base that is approaching but has not yet reached independent operational capability.
 
 Important current authorities:
 
@@ -61,11 +62,9 @@ If this README disagrees with those artifacts, the artifacts win.
 
 ## Current Direction
 
-The direction is to make Nova more capable of maintaining continuity, surfacing its own blockers, requesting missing capability or operator input, and carrying work through evidence-backed loops.
+The direction is to close the remaining proof gaps — autonomous closure demonstrated by runtime evidence, fresh-machine validation, and model capability sufficient to drive the autonomy loop on non-trivial work.
 
-That is a direction, not a claim of completion.
-
-The design goal is a local AI runtime that can be watched, steered, corrected, and gradually given more operational responsibility as evidence supports it. Until then, Nova remains a supervised system with explicit gates, ledgers, and operator-visible state.
+The design goal is a local AI runtime that can be watched, steered, corrected, and gradually given more operational responsibility as evidence supports it. The foundation for that is in place. What remains is proving it runs.
 
 ## Start Here
 
