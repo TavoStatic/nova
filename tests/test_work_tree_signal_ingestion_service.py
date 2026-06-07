@@ -301,6 +301,36 @@ class TestWorkTreeSignalIngestionService(unittest.TestCase):
         self.assertEqual(str(branch.work_class or ""), "runtime_failure")
         self.assertEqual(str(branch.source_key or ""), "runtime_failure:runtime_control:restart_pressure:guard_boot_history")
 
+    def test_status_snapshot_ingests_temporal_pressure(self) -> None:
+        results = self.service.ingest_status_snapshot(
+            {
+                "temporal_pressure": {
+                    "source": "calendar",
+                    "title": "PEIMS deadline",
+                    "event": {
+                        "source": "calendar",
+                        "title": "PEIMS deadline",
+                        "start": "2026-06-10T09:00:00+00:00",
+                        "metadata": {"uid": "peims-weekly-uid"},
+                        "confidence": "confirmed",
+                        "importance": 1.0,
+                        "dependency_risk": 0.8,
+                        "stale_evidence": 0.5,
+                        "operator_context": 0.3,
+                    },
+                    "final_score": 87.5,
+                    "output_path": "work_tree",
+                },
+            }
+        )
+
+        self.assertTrue(any(item.get("action") == "created" for item in results))
+        branch = self._signal_branches()[0]
+        self.assertEqual(str(branch.source_type or ""), "calendar")
+        self.assertEqual(str(branch.work_class or ""), "temporal_pressure")
+        self.assertEqual(str(branch.preferred_tool or ""), "temporal_review")
+        self.assertIn("peims-weekly-uid", str(branch.source_key or ""))
+
     def test_status_snapshot_does_not_treat_planned_restarts_as_pressure(self) -> None:
         results = self.service.ingest_status_snapshot(
             {

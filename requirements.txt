@@ -8,3 +8,6 @@ winsdk
 mss
 Pillow
 opencv-python
+APScheduler>=3.10,<4
+icalendar>=5.0
+SQLAlchemy>=2.0

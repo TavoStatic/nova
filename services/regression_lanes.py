@@ -21,6 +21,8 @@ COMPACT_REGRESSION_LANES: dict[str, list[str]] = {
         "tests.test_control_telemetry_service",
         "tests.test_core_steward_service",
         "tests.test_end_to_end_wiring_service",
+        "tests.test_nova_temporal_service",
+        "tests.test_temporal_review_tool",
         "tests.test_sock_service",
         "tests.test_evidence_validity",
         "tests.test_fulfillment_flow_service",

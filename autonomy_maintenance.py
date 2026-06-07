@@ -35,6 +35,8 @@ from services.nova_runtime_context import runtime_scope_name
 from services.operator_outbox import OPERATOR_OUTBOX_SERVICE
 from services.runtime_restart_provenance import RUNTIME_RESTART_PROVENANCE_SERVICE
 from services.runtime_status import RUNTIME_STATUS_SERVICE
+from services.nova_calendar_ingestion import parse_ics_file
+from services.nova_temporal_service import NovaTemporalService
 from services.subconscious_review_judgment import is_no_owner_root_repair_judgment
 from services.subconscious_review_judgment import latest_subconscious_review_judgment_for_branch
 from services.subconscious_work_tree_triage import SUBCONSCIOUS_WORK_TREE_TRIAGE_SERVICE
@@ -593,6 +595,53 @@ def _autonomy_policy_settings() -> dict:
         policy = {}
     settings = dict((policy or {}).get("autonomy") or {}) if isinstance((policy or {}).get("autonomy"), dict) else {}
     return settings
+
+
+def _temporal_policy_settings() -> dict:
+    try:
+        policy = nova_core.load_policy()
+    except Exception:
+        policy = {}
+    settings = dict((policy or {}).get("temporal") or {}) if isinstance((policy or {}).get("temporal"), dict) else {}
+    return settings
+
+
+def _temporal_feed_paths(settings: dict | None = None) -> list[str]:
+    temporal = dict(settings or _temporal_policy_settings())
+    raw_paths = temporal.get("ics_paths") if isinstance(temporal.get("ics_paths"), list) else []
+    if not raw_paths:
+        single = str(temporal.get("ics_path") or "").strip()
+        if single:
+            raw_paths = [single]
+    out: list[str] = []
+    for item in raw_paths:
+        text = str(item or "").strip()
+        if not text:
+            continue
+        path = Path(text)
+        if not path.is_absolute():
+            path = ROOT / path
+        out.append(str(path.resolve()))
+    return out
+
+
+def _temporal_feed_for_signal_ingestion(state: dict) -> dict:
+    feed = dict(state.get("last_temporal_feed") or {}) if isinstance(state.get("last_temporal_feed"), dict) else {}
+    surfaced = [
+        dict(item)
+        for item in list(feed.get("surfaced_pressures") or [])
+        if isinstance(item, dict)
+    ]
+    return {
+        "temporal_enabled": bool(feed.get("enabled", False)),
+        "temporal_feed_status": str(feed.get("status") or ""),
+        "temporal_feed_last_run_at": str(feed.get("ran_at") or ""),
+        "temporal_feed_source_count": int(feed.get("source_count", 0) or 0),
+        "temporal_feed_event_count": int(feed.get("event_count", 0) or 0),
+        "temporal_feed_surfaced_count": int(feed.get("surfaced_count", len(surfaced)) or 0),
+        "temporal_feed_error_count": int(feed.get("error_count", 0) or 0),
+        "temporal_pressure": surfaced,
+    }
 
 
 def _autonomy_policy_bool(settings: dict, *names: str, default: bool = False) -> bool:
@@ -1194,6 +1243,10 @@ def _run_autonomy_orchestrator_advisory(state: dict, kidney_summary: dict) -> di
 
 
 _SUBCONSCIOUS_PACK_TIMEOUT_SEC = 900
+_TEMPORAL_DEFAULT_POLL_INTERVAL_SEC = 900
+_TEMPORAL_MIN_POLL_INTERVAL_SEC = 60
+_TEMPORAL_DEFAULT_SURFACE_MIN_SCORE = 45.0
+_TEMPORAL_DEFAULT_MAX_SURFACE_EVENTS = 8
 
 
 def _elapsed_sec(start: float) -> float:
@@ -1235,6 +1288,147 @@ def _run_subconscious_pack() -> tuple[bool, str]:
         elapsed = _elapsed_sec(t0)
         _append_log(f"subconscious_pack_duration_sec={elapsed} status=exception")
         return False, str(exc)
+
+
+def _run_temporal_feed_pass(state: dict) -> dict:
+    temporal_settings = _temporal_policy_settings()
+    enabled = bool(temporal_settings.get("enabled", False))
+    source_paths = _temporal_feed_paths(temporal_settings)
+    interval_sec = max(
+        _TEMPORAL_MIN_POLL_INTERVAL_SEC,
+        _safe_int(temporal_settings.get("poll_interval_sec"), _TEMPORAL_DEFAULT_POLL_INTERVAL_SEC),
+    )
+    surface_min_score = max(
+        0.0,
+        min(100.0, _safe_float(temporal_settings.get("surface_min_score"), _TEMPORAL_DEFAULT_SURFACE_MIN_SCORE)),
+    )
+    max_surface_events = max(
+        1,
+        _safe_int(temporal_settings.get("max_surface_events"), _TEMPORAL_DEFAULT_MAX_SURFACE_EVENTS),
+    )
+    previous = dict(state.get("last_temporal_feed") or {}) if isinstance(state.get("last_temporal_feed"), dict) else {}
+    previous_epoch = _safe_float(previous.get("ran_epoch"), 0.0)
+    now_epoch = time.time()
+
+    if enabled and previous_epoch > 0 and (now_epoch - previous_epoch) < float(interval_sec):
+        payload = {
+            "ts": _patch_queue_timestamp(),
+            "status": "skipped_cadence",
+            "enabled": True,
+            "source_paths": source_paths,
+            "source_count": len(source_paths),
+            "interval_sec": int(interval_sec),
+            "surface_min_score": float(surface_min_score),
+            "max_surface_events": int(max_surface_events),
+            "ran_at": str(previous.get("ran_at") or ""),
+            "ran_epoch": float(previous_epoch),
+            "next_run_sec": max(0, int(float(interval_sec) - (now_epoch - previous_epoch))),
+            "event_count": int(previous.get("event_count", 0) or 0),
+            "surfaced_count": int(previous.get("surfaced_count", 0) or 0),
+            "error_count": int(previous.get("error_count", 0) or 0),
+            "surfaced_pressures": [
+                dict(item)
+                for item in list(previous.get("surfaced_pressures") or [])
+                if isinstance(item, dict)
+            ][:max_surface_events],
+            "errors": [
+                dict(item)
+                for item in list(previous.get("errors") or [])
+                if isinstance(item, dict)
+            ][:5],
+        }
+        state["last_temporal_feed"] = payload
+        return payload
+
+    if not enabled:
+        payload = {
+            "ts": _patch_queue_timestamp(),
+            "status": "disabled",
+            "enabled": False,
+            "source_paths": source_paths,
+            "source_count": len(source_paths),
+            "interval_sec": int(interval_sec),
+            "surface_min_score": float(surface_min_score),
+            "max_surface_events": int(max_surface_events),
+            "event_count": 0,
+            "surfaced_count": 0,
+            "error_count": 0,
+            "surfaced_pressures": [],
+            "errors": [],
+            "ran_at": _patch_queue_timestamp(),
+            "ran_epoch": float(now_epoch),
+        }
+        state["last_temporal_feed"] = payload
+        return payload
+
+    if not source_paths:
+        payload = {
+            "ts": _patch_queue_timestamp(),
+            "status": "misconfigured_no_source_paths",
+            "enabled": True,
+            "source_paths": [],
+            "source_count": 0,
+            "interval_sec": int(interval_sec),
+            "surface_min_score": float(surface_min_score),
+            "max_surface_events": int(max_surface_events),
+            "event_count": 0,
+            "surfaced_count": 0,
+            "error_count": 1,
+            "surfaced_pressures": [],
+            "errors": [{"path": "", "error": "temporal_missing_ics_paths"}],
+            "ran_at": _patch_queue_timestamp(),
+            "ran_epoch": float(now_epoch),
+        }
+        state["last_temporal_feed"] = payload
+        return payload
+
+    service = NovaTemporalService()
+    event_count = 0
+    surfaced_pressures: list[dict] = []
+    errors: list[dict] = []
+    for source_path in source_paths:
+        try:
+            events = parse_ics_file(source_path, source="calendar")
+        except Exception as exc:
+            errors.append({"path": source_path, "error": str(exc)})
+            continue
+
+        event_count += len(events)
+        for pressure in service.assess_many(events):
+            if _safe_float(pressure.final_score, 0.0) < float(surface_min_score):
+                continue
+            row = pressure.to_dict()
+            row["source_path"] = source_path
+            surfaced_pressures.append(row)
+
+    surfaced_pressures.sort(
+        key=lambda row: (
+            -_safe_float(row.get("final_score"), 0.0),
+            str(((row.get("event") if isinstance(row.get("event"), dict) else {}).get("start") or "")),
+            str(((row.get("event") if isinstance(row.get("event"), dict) else {}).get("title") or "")),
+        )
+    )
+    surfaced_pressures = surfaced_pressures[:max_surface_events]
+
+    payload = {
+        "ts": _patch_queue_timestamp(),
+        "status": "ok" if not errors else ("partial" if surfaced_pressures or event_count else "failed"),
+        "enabled": True,
+        "source_paths": source_paths,
+        "source_count": len(source_paths),
+        "interval_sec": int(interval_sec),
+        "surface_min_score": float(surface_min_score),
+        "max_surface_events": int(max_surface_events),
+        "event_count": int(event_count),
+        "surfaced_count": len(surfaced_pressures),
+        "error_count": len(errors),
+        "surfaced_pressures": surfaced_pressures,
+        "errors": errors[:5],
+        "ran_at": _patch_queue_timestamp(),
+        "ran_epoch": float(now_epoch),
+    }
+    state["last_temporal_feed"] = payload
+    return payload
 
 
 def _available_test_session_definitions(limit: int = 80) -> list[dict]:
@@ -2126,7 +2320,7 @@ def _sync_regression_status_from_file(state: dict, *, status_path: Path = REGRES
     return True
 
 
-def _sync_signal_intake_work_tree(state: dict, kidney_summary: dict | None = None) -> dict:
+def _sync_signal_intake_work_tree(state: dict, kidney_summary: dict | None = None, temporal_feed: dict | None = None) -> dict:
     maintenance_payload = {
         "last_regression_status": str(state.get("last_regression_status") or ""),
         "last_regression_stale": bool(state.get("last_regression_stale", False)),
@@ -2148,6 +2342,9 @@ def _sync_signal_intake_work_tree(state: dict, kidney_summary: dict | None = Non
         "memory_db_total": int(pulse_payload.get("memory_db_total", 0) or 0),
         "memory_events_log_status": str(pulse_payload.get("memory_events_log_status") or ""),
     }
+    if isinstance(temporal_feed, dict):
+        state["last_temporal_feed"] = dict(temporal_feed)
+    status_payload.update(_temporal_feed_for_signal_ingestion(state))
     status_payload.update(_validation_artifact_truth_payload_for_signal_ingestion())
     status_payload = _live_control_status_payload_for_signal_ingestion(status_payload)
     results = WORK_TREE_SIGNAL_INGESTION_SERVICE.sync_status_snapshot(status_payload)
@@ -3953,7 +4150,36 @@ def run_once(*, worker_loop: bool = False) -> int:
         _append_log(f"generated_queue_sync_failed {exc}")
 
     try:
-        pre_execution_signal_ingestion = _sync_signal_intake_work_tree(state, kidney_summary=kidney_summary)
+        temporal_feed = _run_temporal_feed_pass(state)
+        _append_log(
+            "temporal_feed"
+            f" status={temporal_feed.get('status')}"
+            f" sources={int(temporal_feed.get('source_count', 0) or 0)}"
+            f" events={int(temporal_feed.get('event_count', 0) or 0)}"
+            f" surfaced={int(temporal_feed.get('surfaced_count', 0) or 0)}"
+            f" errors={int(temporal_feed.get('error_count', 0) or 0)}"
+        )
+    except Exception as exc:
+        temporal_feed = {
+            "ts": _patch_queue_timestamp(),
+            "status": "failed",
+            "enabled": False,
+            "source_count": 0,
+            "event_count": 0,
+            "surfaced_count": 0,
+            "error_count": 1,
+            "surfaced_pressures": [],
+            "errors": [{"path": "", "error": str(exc)}],
+        }
+        state["last_temporal_feed"] = temporal_feed
+        _append_log(f"temporal_feed_failed {exc}")
+
+    try:
+        pre_execution_signal_ingestion = _sync_signal_intake_work_tree(
+            state,
+            kidney_summary=kidney_summary,
+            temporal_feed=temporal_feed,
+        )
         state["last_pre_execution_signal_ingestion"] = pre_execution_signal_ingestion
         _append_log(
             "pre_execution_signal_ingestion"
@@ -4136,7 +4362,11 @@ def run_once(*, worker_loop: bool = False) -> int:
     _append_log(f"{regression_status}{'_synced_status_file' if regression_status_synced else ''}")
 
     try:
-        signal_ingestion = _sync_signal_intake_work_tree(state, kidney_summary=kidney_summary)
+        signal_ingestion = _sync_signal_intake_work_tree(
+            state,
+            kidney_summary=kidney_summary,
+            temporal_feed=temporal_feed,
+        )
         _append_log(
             "signal_ingestion"
             f" status={signal_ingestion.get('status')}"

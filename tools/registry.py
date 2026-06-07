@@ -9,6 +9,7 @@ from .filesystem_tool import FileSystemTool
 from .os_capability_tool import OsCapabilityTool
 from .patch_tool import PatchTool
 from .research_tool import ResearchTool
+from .temporal_review_tool import TemporalReviewTool
 from .system_tool import SystemTool
 from .vision_tool import VisionTool
 from services.nova_runtime_context import BASE_DIR
@@ -149,4 +150,5 @@ def build_default_registry() -> ToolRegistry:
         ResearchTool(),
         SystemTool(),
         OsCapabilityTool(),
+        TemporalReviewTool(),
     ])

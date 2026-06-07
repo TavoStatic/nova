@@ -3057,6 +3057,18 @@ def tool_queue_status():
     return execute_registered_tool("system", {"action": "queue_status"})
 
 
+def tool_temporal_review(payload: str = ""):
+    args: dict[str, object] = {"action": "review"}
+    text = str(payload or "").strip()
+    if text:
+        path = Path(text)
+        if path.exists() and path.is_file():
+            args["path"] = str(path.resolve())
+        else:
+            args["input"] = text
+    return execute_registered_tool("temporal_review", args)
+
+
 def tool_pipeline(command_text: str = "pipeline help"):
     return service_handle_pipeline_command(
         command_text,

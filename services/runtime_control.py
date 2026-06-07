@@ -62,6 +62,7 @@ class RuntimeControlService:
         last_autonomy_orchestrator = dict(payload.get("last_autonomy_orchestrator") or {}) if isinstance(payload.get("last_autonomy_orchestrator"), dict) else {}
         last_signal_ingestion = dict(payload.get("last_signal_ingestion") or {}) if isinstance(payload.get("last_signal_ingestion"), dict) else {}
         last_subconscious_triage = dict(payload.get("last_subconscious_triage") or {}) if isinstance(payload.get("last_subconscious_triage"), dict) else {}
+        last_temporal_feed = dict(payload.get("last_temporal_feed") or {}) if isinstance(payload.get("last_temporal_feed"), dict) else {}
         pid = runtime_worker.get("pid")
         create_time = runtime_worker.get("create_time")
         logical_processes = runtime_processes_module.logical_service_processes(maintenance_py)
@@ -212,6 +213,7 @@ class RuntimeControlService:
             "last_kidney_status": last_kidney_status,
             "last_signal_ingestion": last_signal_ingestion,
             "last_subconscious_triage": last_subconscious_triage,
+            "last_temporal_feed": last_temporal_feed,
             "last_autonomy_orchestrator": {
                 "ts": str(last_autonomy_orchestrator.get("ts") or ""),
                 "created_at_utc": str(last_autonomy_orchestrator.get("created_at_utc") or ""),

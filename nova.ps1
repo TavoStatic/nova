@@ -47,6 +47,7 @@ $PACKAGEREADINESSPS1 = Join-Path $ROOT "scripts\show_release_readiness.ps1"
 $PACKAGEVALIDATEPY = Join-Path $ROOT "scripts\validate_release_package.py"
 $RELEASECLEANPY = Join-Path $ROOT "scripts\release_clean_check.py"
 $WIRINGCHECKPY = Join-Path $ROOT "scripts\end_to_end_wiring_check.py"
+$TIMEPY    = Join-Path $ROOT "scripts\run_time.py"  # Temporal review surface
 $POLICY    = Join-Path $ROOT "policy.json"    # optional
 $LOG_DIR   = Join-Path $ROOT "logs"
 
@@ -890,6 +891,7 @@ function Show-Help {
   Write-Host "  nova operator --list-macros      # list saved operator macros"
   Write-Host "  nova smoke-base [--fix]        # base package smoke without Ollama requirement"
   Write-Host "  nova smoke [--fix]             # doctor -> guard -> smoke_test -> stop"
+  Write-Host "  nova time                     # temporal review — assess calendar pressure"
   Write-Host "  nova smoke-runtime [--fix]     # explicit Ollama-backed runtime smoke"
   Write-Host "  nova test                      # compact regression checks"
   Write-Host "  nova subconscious [--family <id>] [--label overnight]  # unattended subconscious batch report"
@@ -1305,6 +1307,19 @@ switch ($cmd.ToLower()) {
       }
     } else {
       Write-Host "[WARN] run_sock.py not found at $SOCKPY"
+    }
+    break
+  }
+
+  "time" {
+    if (Test-Path $TIMEPY) {
+      if ($remainingTokens -and $remainingTokens.Count -gt 0) {
+        Run-Py $TIMEPY $remainingTokens
+      } else {
+        Run-Py $TIMEPY
+      }
+    } else {
+      Write-Host "[WARN] run_time.py not found at $TIMEPY"
     }
     break
   }

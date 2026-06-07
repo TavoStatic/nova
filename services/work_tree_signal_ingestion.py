@@ -7,6 +7,7 @@ from typing import Any
 
 import work_tree
 from services.evidence_validity import evidence_result_valid
+from services.nova_temporal_service import build_temporal_pressure
 from services.nova_wiring_inventory import build_root_closure_inventory_payload
 from services.nova_wiring_inventory import build_self_repair_closure_inventory_payload
 from services.nova_wiring_inventory import build_wiring_inventory_payload
@@ -21,6 +22,7 @@ _VALID_SIGNAL_CLASSES = {
     "code_defect",
     "governance_pressure",
     "maintenance_pressure",
+    "temporal_pressure",
     "operator_requested",
     "regression_failure",
     "subconscious_candidate",
@@ -34,6 +36,7 @@ _SIGNAL_TO_WORK_CLASS = {
     "code_defect": "code_defect",
     "governance_pressure": "governance_pressure",
     "maintenance_pressure": "maintenance_pressure",
+    "temporal_pressure": "temporal_pressure",
     "operator_requested": "operator_requested",
     "regression_failure": "regression_failure",
     "subconscious_candidate": "candidate_review",
@@ -75,6 +78,7 @@ _BUCKET_BY_WORK_CLASS = {
     "dependency_unreachable": "dependency",
     "governance_pressure": "governance",
     "maintenance_pressure": "maintenance",
+    "temporal_pressure": "temporal",
     "operator_requested": "operator",
     "regression_failure": "regression",
     "candidate_review": "candidate_review",
@@ -87,6 +91,7 @@ _DEFAULT_ACTIONABILITY_BY_CLASS = {
     "dependency_unreachable": "dead_end",
     "governance_pressure": "blocked",
     "maintenance_pressure": "safe_now",
+    "temporal_pressure": "safe_now",
     "operator_requested": "safe_now",
     "regression_failure": "safe_now",
     "candidate_review": "safe_now",
@@ -1031,6 +1036,84 @@ def _storage_watch_signal_from_status(status_payload: dict[str, Any]) -> dict[st
         "allowed_tools": ["read", "find", "system_check"],
         "preferred_tool": "system_check",
         "next_task": "Inspect storage watch snapshot and runtime archive growth",
+    }
+
+
+def _temporal_pressure_signal_from_status(status_payload: dict[str, Any]) -> dict[str, Any] | None:
+    raw = status_payload.get("temporal_pressure")
+    if raw is None:
+        raw = status_payload.get("temporal_event") or status_payload.get("temporal_events")
+
+    candidates: list[dict[str, Any]] = []
+    if isinstance(raw, list):
+        candidates = [dict(item) for item in raw if isinstance(item, dict)]
+    elif isinstance(raw, dict):
+        nested = raw.get("items") if isinstance(raw.get("items"), list) else None
+        if nested:
+            candidates = [dict(item) for item in nested if isinstance(item, dict)]
+        else:
+            candidates = [dict(raw)]
+    if not candidates:
+        return None
+
+    strongest: dict[str, Any] | None = None
+    strongest_score = float("-inf")
+    for candidate in candidates:
+        event_input = candidate.get("event") if isinstance(candidate.get("event"), dict) else candidate
+        pressure_source = event_input if isinstance(event_input, dict) else candidate
+        pressure = build_temporal_pressure(pressure_source).to_dict()
+        score = float(pressure.get("final_score") or 0.0)
+        if score > strongest_score:
+            strongest = {"input": candidate, "pressure": pressure}
+            strongest_score = score
+
+    if strongest is None:
+        return None
+
+    pressure = dict(strongest["pressure"])
+    event = pressure.get("event") if isinstance(pressure.get("event"), dict) else {}
+    title = str(event.get("title") or strongest["input"].get("title") or "Temporal pressure review").strip()
+    score = float(pressure.get("final_score") or 0.0)
+    output_path = str(pressure.get("output_path") or "").strip()
+    severity = "high" if score >= 75.0 or output_path == "work_tree" else "medium" if score >= 45.0 else "low"
+    actionability = "safe_now" if score >= 45.0 else "dead_end"
+    start_text = str(event.get("start") or strongest["input"].get("start") or strongest["input"].get("due_at") or "").strip()
+    metadata = event.get("metadata") if isinstance(event.get("metadata"), dict) else {}
+    uid_text = str(metadata.get("uid") or strongest["input"].get("uid") or "").strip()
+    source = str(strongest["input"].get("source") or event.get("source") or "temporal").strip() or "temporal"
+    symbol = f"{title}:{start_text or output_path or 'temporal'}"
+    if uid_text:
+        symbol = f"{symbol}:{uid_text}"
+    return {
+        "source": source,
+        "signal_class": "temporal_pressure",
+        "title": title,
+        "fingerprint": {
+            "class": "temporal_pressure",
+            "surface": source,
+            "error": "temporal_pressure",
+            "symbol": symbol,
+        },
+        "payload": pressure,
+        "severity": severity,
+        "actionability": actionability,
+        "allowed_tools": ["temporal_review", "read", "find", "queue_status"],
+        "preferred_tool": "temporal_review",
+        "next_task": f"Review temporal pressure for {title}",
+        "task_sequence": [
+            {
+                "title": f"Review temporal pressure for {title}",
+                "allowed_tools": ["temporal_review"],
+                "preferred_tool": "temporal_review",
+                "tool_args": [json.dumps({"payload": pressure}, ensure_ascii=True)],
+            },
+            {
+                "title": "Read temporal scoring service and calendar ingestion",
+                "allowed_tools": ["read"],
+                "preferred_tool": "read",
+                "tool_args": ["services/nova_temporal_service.py"],
+            },
+        ],
     }
 
 
@@ -4242,6 +4325,9 @@ class WorkTreeSignalIngestionService:
         storage_watch_signal = _storage_watch_signal_from_status(status_payload)
         if storage_watch_signal is not None:
             signals.append(storage_watch_signal)
+        temporal_pressure_signal = _temporal_pressure_signal_from_status(status_payload)
+        if temporal_pressure_signal is not None:
+            signals.append(temporal_pressure_signal)
         patch_pipeline_signal = _patch_pipeline_signal_from_status(status_payload)
         if patch_pipeline_signal is not None:
             signals.append(patch_pipeline_signal)
@@ -4792,6 +4878,30 @@ class WorkTreeSignalIngestionService:
                     reason="Tool telemetry no longer reports a current unsuperseded tool error.",
                 )
             )
+        temporal_surface_present = any(
+            key in status_payload
+            for key in ("temporal_enabled", "temporal_pressure", "temporal_event", "temporal_events")
+        )
+        if temporal_surface_present:
+            temporal_signal = _temporal_pressure_signal_from_status(status_payload)
+            if temporal_signal is None:
+                results.extend(
+                    self.resolve_signal_branches(
+                        signal_class="temporal_pressure",
+                        source="",
+                        reason="Temporal feed reports no active surfaced calendar pressure.",
+                    )
+                )
+            else:
+                active_key = self.source_key_for_signal(temporal_signal)
+                results.extend(
+                    self.resolve_inactive_signal_branches(
+                        signal_class="temporal_pressure",
+                        source="",
+                        active_source_keys={active_key} if active_key else set(),
+                        reason="Temporal feed moved to a newer active source signal.",
+                    )
+                )
         maintenance = status_payload.get("autonomy_maintenance") if isinstance(status_payload.get("autonomy_maintenance"), dict) else {}
         last_regression = str(maintenance.get("last_regression_status") or "").strip()
         last_regression_stale = bool(maintenance.get("last_regression_stale", False))

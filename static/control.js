@@ -139,6 +139,7 @@ const ctx = metricsCanvas ? metricsCanvas.getContext('2d') : null;
 const telemetryGraphToolbar = document.getElementById('telemetryGraphToolbar');
 const telemetryGraphFootnote = document.getElementById('telemetryGraphFootnote');
 const telemetryGraphButtons = Array.from(document.querySelectorAll('[data-telemetry-graph]'));
+const temporalNavLink = document.getElementById('temporalNavLink');
 const navButtons = Array.from(document.querySelectorAll('[data-view-target]'));
 const mainViews = Array.from(document.querySelectorAll('.main-view'));
 const centerTabBar = document.querySelector('.center-tab-bar');
@@ -923,6 +924,25 @@ function setActiveView(name) {
         const visible = (view.getAttribute('data-view') || '') === name;
         view.classList.toggle('d-none', !visible);
     });
+    syncTemporalNavLinkActive();
+}
+
+function syncTemporalNavLinkActive() {
+    if (!temporalNavLink) {
+        return;
+    }
+    const hash = String(window.location.hash || '').trim();
+    const operationsVisible = mainViews.some((view) => (view.getAttribute('data-view') || '') === 'operations' && !view.classList.contains('d-none'));
+    const operationsShell = document.querySelector('.layer-tab-shell[data-layer-tabs="operations"]');
+    const governanceButton = operationsShell ? operationsShell.querySelector('[data-layer-tab="governance"]') : null;
+    const governanceActive = Boolean(governanceButton && governanceButton.getAttribute('aria-selected') === 'true');
+    const active = hash === '#temporalPolicyControls' && operationsVisible && governanceActive;
+    temporalNavLink.classList.toggle('active', active);
+    if (active) {
+        temporalNavLink.setAttribute('aria-current', 'page');
+    } else {
+        temporalNavLink.removeAttribute('aria-current');
+    }
 }
 
 function visibleViewName(name) {
@@ -1093,6 +1113,7 @@ function setLayerTab(shell, name) {
     context.panels.forEach((panel) => {
         panel.hidden = (panel.getAttribute('data-layer-panel') || '') !== target;
     });
+    syncTemporalNavLinkActive();
 }
 
 function focusLayerTabByOffset(shell, currentButton, offset) {
@@ -4967,8 +4988,33 @@ function initialControlView() {
     return 'overview';
 }
 
+function focusTemporalPolicyAnchor() {
+    const hash = String(window.location.hash || '').trim();
+    if (hash !== '#temporalPolicyControls') {
+        syncTemporalNavLinkActive();
+        return;
+    }
+    setActiveView('operations');
+    const operationsShell = document.querySelector('.layer-tab-shell[data-layer-tabs="operations"]');
+    if (operationsShell) {
+        setLayerTab(operationsShell, 'governance');
+    }
+    const temporalAnchor = document.getElementById('temporalPolicyControls');
+    if (temporalAnchor) {
+        window.requestAnimationFrame(() => {
+            temporalAnchor.scrollIntoView({behavior: 'smooth', block: 'start'});
+        });
+    }
+    syncTemporalNavLinkActive();
+}
+
+window.addEventListener('hashchange', () => {
+    focusTemporalPolicyAnchor();
+});
+
 setFeedback('NYO System control linked. Fetching live status...', 'muted');
 setActiveView(initialControlView());
+focusTemporalPolicyAnchor();
 setInspectorTab('planner');
 renderLiveTracking(null);
 refresh();

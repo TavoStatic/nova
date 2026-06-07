@@ -27,6 +27,7 @@ class TestToolRegistry(unittest.TestCase):
         self.assertIn("research", names)
         self.assertIn("system", names)
         self.assertIn("os_capability", names)
+        self.assertIn("temporal_review", names)
         filesystem = next(item for item in metadata if item["name"] == "filesystem")
         self.assertEqual(filesystem["locality"], "local")
         self.assertEqual(filesystem["scope"], "user")
@@ -37,6 +38,40 @@ class TestToolRegistry(unittest.TestCase):
         self.assertFalse(patch_meta["read_only"])
         os_meta = next(item for item in metadata if item["name"] == "os_capability")
         self.assertEqual(os_meta["scope"], "system")
+        temporal_meta = next(item for item in metadata if item["name"] == "temporal_review")
+        self.assertTrue(temporal_meta["safe"])
+        self.assertFalse(temporal_meta["mutating"])
+
+    def test_temporal_review_tool_assesses_payload(self):
+        registry = build_default_registry()
+        ctx = ToolContext(
+            user_id="tester",
+            session_id="sess-temporal",
+            policy={"tools_enabled": {"temporal_review": True}},
+            allowed_root=".",
+        )
+
+        out = registry.run_tool(
+            "temporal_review",
+            {
+                "action": "review",
+                "payload": {
+                    "title": "PEIMS deadline",
+                    "start": "2026-06-10T09:00:00+00:00",
+                    "importance": 1.0,
+                    "dependency_risk": 0.7,
+                    "stale_evidence": 0.4,
+                    "operator_context": 0.2,
+                },
+            },
+            ctx,
+        )
+
+        payload = json.loads(out)
+        self.assertEqual(payload["tool"], "temporal_review")
+        self.assertEqual(payload["status"], "ok")
+        self.assertIn("pressure", payload)
+        self.assertIn("decision", payload)
 
     def test_filesystem_ls_uses_allowed_root(self):
         registry = build_default_registry()

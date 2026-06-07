@@ -57,6 +57,7 @@
                 <button class="nav-pill" data-view-target="pipelines" type="button"><span class="nav-pill-icon-stack" aria-hidden="true"><i class="bi bi-database nav-pill-icon nav-pill-icon-outline"></i><i class="bi bi-database-fill nav-pill-icon nav-pill-icon-fill"></i></span><span class="nav-pill-copy"><span class="nav-pill-label">Data lanes</span><span class="nav-pill-meta">Pipelines</span></span></button>
                 <button class="nav-pill" data-view-target="logs" type="button"><span class="nav-pill-icon-stack" aria-hidden="true"><i class="bi bi-file-earmark-medical nav-pill-icon nav-pill-icon-outline"></i><i class="bi bi-file-earmark-medical-fill nav-pill-icon nav-pill-icon-fill"></i></span><span class="nav-pill-copy"><span class="nav-pill-label">Logs</span><span class="nav-pill-meta">Trace ledger</span></span></button>
                 <button class="nav-pill" data-view-target="health" type="button"><span class="nav-pill-icon-stack" aria-hidden="true"><i class="bi bi-heart-pulse nav-pill-icon nav-pill-icon-outline"></i><i class="bi bi-heart-pulse-fill nav-pill-icon nav-pill-icon-fill"></i></span><span class="nav-pill-copy"><span class="nav-pill-label">Health</span><span class="nav-pill-meta">Runtime status</span></span></button>
+                <a id="temporalNavLink" class="nav-pill nav-link-pill" href="?view=operations#temporalPolicyControls"><span class="nav-pill-icon-stack" aria-hidden="true"><i class="bi bi-calendar3 nav-pill-icon nav-pill-icon-outline"></i><i class="bi bi-calendar3-fill nav-pill-icon nav-pill-icon-fill"></i></span><span class="nav-pill-copy"><span class="nav-pill-label">Temporal</span><span class="nav-pill-meta">Calendar policy</span></span></a>
                 <a class="nav-pill nav-link-pill" href="/" target="_blank" rel="noopener noreferrer"><span class="nav-pill-icon-stack" aria-hidden="true"><i class="bi bi-chat-dots nav-pill-icon nav-pill-icon-outline"></i><i class="bi bi-chat-dots-fill nav-pill-icon nav-pill-icon-fill"></i></span><span class="nav-pill-copy"><span class="nav-pill-label">Ui Chat</span><span class="nav-pill-meta">External</span></span></a>
             </nav>
 
@@ -532,7 +533,7 @@
 
                         <section class="layer-tab-panel" role="tabpanel" data-layer-panel="governance" hidden>
                             <div class="ops-grid layer-panel-grid">
-                                <div class="panel-card main-card">
+                                <div id="temporalPolicyControls" class="panel-card main-card">
                                     <div class="section-title"><span class="section-title-wrap"><i class="bi bi-sliders section-title-icon" aria-hidden="true"></i><span>Policy Controls</span></span></div>
                                     <div class="button-row mb-2">
                                         <input id="domainInput" class="form-control form-control-sm" placeholder="example.com" />

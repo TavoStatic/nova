@@ -163,6 +163,88 @@ class TestAutonomyMaintenance(unittest.TestCase):
         self.assertEqual(state.get("last_regression_lanes"), ["unit", "behavior", "integration"])
         self.assertEqual(state.get("last_regression_source"), "scripts/run_regression.py")
 
+    def test_run_temporal_feed_pass_reads_ics_and_surfaces_pressure(self):
+        state: dict = {}
+        with tempfile.TemporaryDirectory() as td:
+            ics_path = Path(td) / "calendar.ics"
+            ics_path.write_text(
+                "\n".join(
+                    [
+                        "BEGIN:VCALENDAR",
+                        "BEGIN:VEVENT",
+                        "SUMMARY:PEIMS deadline",
+                        "DTSTART:20260610T090000Z",
+                        "STATUS:CONFIRMED",
+                        "END:VEVENT",
+                        "END:VCALENDAR",
+                        "",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            with mock.patch.object(
+                autonomy_maintenance,
+                "_temporal_policy_settings",
+                return_value={
+                    "enabled": True,
+                    "ics_paths": [str(ics_path)],
+                    "poll_interval_sec": 900,
+                    "surface_min_score": 0.0,
+                    "max_surface_events": 8,
+                },
+            ):
+                payload = autonomy_maintenance._run_temporal_feed_pass(state)
+
+        self.assertEqual(payload.get("status"), "ok")
+        self.assertEqual(int(payload.get("event_count", 0) or 0), 1)
+        self.assertGreaterEqual(int(payload.get("surfaced_count", 0) or 0), 1)
+        self.assertTrue(isinstance(state.get("last_temporal_feed"), dict))
+
+    def test_sync_signal_intake_work_tree_includes_temporal_feed_payload(self):
+        captured: dict = {}
+
+        def _capture_status_payload(status_payload):
+            captured.update(dict(status_payload or {}))
+            return []
+
+        state = {
+            "last_regression_status": "OK",
+            "last_regression_stale": False,
+        }
+        temporal_feed = {
+            "enabled": True,
+            "status": "ok",
+            "ran_at": "2026-06-06 12:00:00",
+            "source_count": 1,
+            "event_count": 1,
+            "surfaced_count": 1,
+            "error_count": 0,
+            "surfaced_pressures": [
+                {
+                    "event": {
+                        "title": "PEIMS deadline",
+                        "start": "2026-06-10T09:00:00+00:00",
+                    },
+                    "final_score": 88.0,
+                    "output_path": "work_tree",
+                }
+            ],
+        }
+
+        with mock.patch.object(autonomy_maintenance.nova_core, "build_pulse_payload", return_value={}), \
+             mock.patch.object(autonomy_maintenance.nova_core, "mem_enabled", return_value=True), \
+             mock.patch.object(autonomy_maintenance, "_validation_artifact_truth_payload_for_signal_ingestion", return_value={}), \
+             mock.patch.object(autonomy_maintenance, "_live_control_status_payload_for_signal_ingestion", side_effect=lambda payload: payload), \
+             mock.patch.object(autonomy_maintenance, "_generated_work_queue", return_value={}), \
+             mock.patch.object(autonomy_maintenance, "_latest_subconscious_report_for_triage", return_value={}), \
+             mock.patch.object(autonomy_maintenance, "_subconscious_triage_signals_for_work_tree", return_value=[]), \
+             mock.patch.object(autonomy_maintenance.WORK_TREE_SIGNAL_INGESTION_SERVICE, "sync_status_snapshot", side_effect=_capture_status_payload):
+            autonomy_maintenance._sync_signal_intake_work_tree(state, temporal_feed=temporal_feed)
+
+        self.assertTrue(bool(captured.get("temporal_enabled")))
+        self.assertEqual(int(captured.get("temporal_feed_surfaced_count", 0) or 0), 1)
+        self.assertEqual(len(list(captured.get("temporal_pressure") or [])), 1)
+
     def test_subconscious_pack_timeout_uses_positive_timeout_evidence(self):
         with tempfile.TemporaryDirectory() as td:
             log_path = Path(td) / "maintenance.log"
@@ -525,7 +607,7 @@ class TestAutonomyMaintenance(unittest.TestCase):
             log_path = runtime_dir / "autonomy_maintenance.log"
             order: list[str] = []
 
-            def _sync_signal(state, kidney_summary=None):
+            def _sync_signal(state, kidney_summary=None, temporal_feed=None):
                 order.append("signal")
                 payload = {
                     "ts": "2026-05-14 18:00:00",

@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import os
 import time
@@ -1179,6 +1179,17 @@ class ControlStatusService:
             self_repair_closure_inventory.get("source_contract_ready_count", 0) or 0
         )
         payload["self_repair_closure_depth_counts"] = dict(self_repair_closure_inventory.get("depth_counts") or {})
+        last_temporal_feed = (
+            autonomy_payload.get("last_temporal_feed")
+            if isinstance(autonomy_payload.get("last_temporal_feed"), dict)
+            else {}
+        )
+        payload["temporal_enabled"] = bool(last_temporal_feed.get("enabled", False))
+        payload["temporal_feed_status"] = str(last_temporal_feed.get("status") or "")
+        payload["temporal_feed_last_run_at"] = str(last_temporal_feed.get("ran_at") or "")
+        payload["temporal_feed_event_count"] = int(last_temporal_feed.get("event_count", 0) or 0)
+        payload["temporal_feed_surfaced_count"] = int(last_temporal_feed.get("surfaced_count", 0) or 0)
+        payload["temporal_pressure_count"] = int(last_temporal_feed.get("pressure_count", 0) or 0)
         wiring_inventory = build_wiring_inventory_payload(payload)
         payload["wiring_inventory"] = wiring_inventory
         payload["wiring_inventory_ok"] = bool(wiring_inventory.get("ok", False))

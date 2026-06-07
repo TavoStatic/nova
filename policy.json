@@ -41,7 +41,8 @@
     "camera": true,
     "files": true,
     "health": true,
-    "web": true
+    "web": true,
+    "temporal_review": true
   },
   "models": {
     "chat": "qwen2.5:7b",
@@ -71,6 +72,15 @@
     "exclude_sources": [
       "voice"
     ]
+  },
+  "temporal": {
+    "enabled": true,
+    "ics_paths": [
+      "c:\\NOVA\\runtime\\temporal\\operator_calendar.ics"
+    ],
+    "poll_interval_sec": 900,
+    "surface_min_score": 38.0,
+    "max_surface_events": 8
   },
   "patch": {
     "strict_manifest": true,

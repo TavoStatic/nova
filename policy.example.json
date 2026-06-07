@@ -21,6 +21,13 @@
     "context_top_k": 3,
     "store_min_chars": 12
   },
+  "temporal": {
+    "enabled": false,
+    "ics_paths": [],
+    "poll_interval_sec": 900,
+    "surface_min_score": 45.0,
+    "max_surface_events": 8
+  },
   "patch": {
     "strict_manifest": true,
     "behavioral_check": true,
