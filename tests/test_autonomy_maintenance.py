@@ -20,6 +20,10 @@ def _validation_tmp_root() -> Path:
 class TestAutonomyMaintenance(unittest.TestCase):
     def _isolated_work_tree_db(self):
         original_path = Path(work_tree._DB_REQUESTED_PATH)
+        original_connect_target = work_tree._DB_CONNECT_TARGET
+        original_connect_use_uri = work_tree._DB_CONNECT_USE_URI
+        original_guard_log = work_tree._DB_GUARD_LOG
+        original_access_log = work_tree._DB_ACCESS_LOG
         base_tmp = _validation_tmp_root()
         base_tmp.mkdir(parents=True, exist_ok=True)
         db_path = base_tmp / f"autonomy_maintenance_{uuid.uuid4().hex}.sqlite3"
@@ -27,7 +31,17 @@ class TestAutonomyMaintenance(unittest.TestCase):
 
         def _cleanup() -> None:
             try:
-                work_tree._set_db_path(original_path)
+                # Restore path globals directly -- avoids opening the production DB
+                # (which may be inaccessible when Nova is running on the host OS).
+                work_tree._DB_REQUESTED_PATH = original_path
+                work_tree._DB_PATH = original_path
+                work_tree._DB_CONNECT_TARGET = original_connect_target
+                work_tree._DB_CONNECT_USE_URI = original_connect_use_uri
+                work_tree._DB_GUARD_LOG = original_guard_log
+                work_tree._DB_ACCESS_LOG = original_access_log
+                work_tree._TREES.clear()
+                work_tree._BRANCHES.clear()
+                work_tree._TASKS.clear()
             finally:
                 for candidate in (
                     db_path,
@@ -461,118 +475,125 @@ class TestAutonomyMaintenance(unittest.TestCase):
                 state["last_generated_queue_tree_cycle"] = payload
                 return payload
 
-            with mock.patch.object(autonomy_maintenance, "LATEST_SUBCONSCIOUS", latest_path), \
-                 mock.patch.object(autonomy_maintenance, "STATE_FILE", state_path), \
-                 mock.patch.object(autonomy_maintenance, "MAINT_LOG", log_path), \
-                 mock.patch.object(autonomy_maintenance, "_run_subconscious_pack", return_value=(True, "ok")), \
-                 mock.patch.object(
-                     autonomy_maintenance,
-                     "_sync_generated_queue_work_tree",
-                     return_value={
-                         "ts": "2026-04-04 02:00:01",
-                         "status": "ok",
-                         "tree_id": "tree_generated_demo",
-                         "tree_title": autonomy_maintenance.GENERATED_QUEUE_TREE_TITLE,
-                         "queue_status": "actionable",
-                         "queue_count": 5,
-                         "open_count": 3,
-                         "actionable_count": 2,
-                         "blocked_count": 1,
-                         "created_count": 1,
-                         "updated_count": 0,
-                         "reopened_count": 0,
-                         "retired_count": 0,
-                         "next_file": "demo.json",
-                     },
-                 ), \
-                 mock.patch.object(
-                     autonomy_maintenance,
-                     "_run_generated_queue_work_tree_cycle",
-                     side_effect=_generated_queue_cycle,
-                 ), \
-                 mock.patch.object(
-                     autonomy_maintenance.kidney,
-                     "run_kidney",
-                     return_value={
-                         "ts": "2026-04-04 02:00:01",
-                         "mode": "enforce",
-                         "candidate_count": 2,
-                         "archive_count": 1,
-                         "delete_count": 1,
-                         "snapshot_path": "snapshot.zip",
-                     },
-                 ), \
-                 mock.patch.object(
-                     autonomy_maintenance,
-                     "_run_patch_queue_cleanup",
-                     return_value={
-                         "ts": "2026-04-04 02:00:01",
-                         "status": "ok",
-                         "orphan_rejected_count": 0,
-                         "orphan_failed_count": 0,
-                         "superseded_archived_count": 0,
-                         "superseded_failed_count": 0,
-                         "review_total_before": 0,
-                         "review_total_after": 0,
-                     },
-                 ), \
-                 mock.patch.object(
-                     autonomy_maintenance,
-                     "_sync_patch_queue_work_tree",
-                     return_value={
-                         "ts": "2026-04-04 02:00:01",
-                         "status": "ok",
-                         "tree_id": "tree_demo",
-                         "tree_title": "Patch Queue",
-                         "apply_ready_count": 0,
-                         "created_count": 0,
-                         "updated_count": 0,
-                     },
-                 ), \
-                 mock.patch.object(
-                     autonomy_maintenance,
-                     "_run_patch_queue_work_tree_cycle",
-                     return_value={
-                         "ts": "2026-04-04 02:00:01",
-                         "status": "idle",
-                         "tree_count": 1,
-                         "executed_count": 0,
-                     },
-                 ), \
-                 mock.patch.object(
-                     autonomy_maintenance,
-                     "_run_active_work_tree_cycle",
-                     return_value={
-                         "ts": "2026-04-04 02:00:01",
-                         "status": "idle",
-                         "tree_count": 0,
-                         "executed_count": 0,
-                     },
-                 ), \
-                 mock.patch.object(autonomy_maintenance, "_legacy_maintenance_execution_enabled", return_value=True), \
-                 mock.patch.object(
-                     autonomy_maintenance,
-                     "_retire_legacy_patch_update_trees",
-                     return_value={
-                         "ts": "2026-04-04 02:00:01",
-                         "status": "idle",
-                         "retired_count": 0,
-                     },
-                 ), \
-                 mock.patch.object(autonomy_maintenance, "_run_daily_regression_if_due", return_value="daily_regression_ok"), \
-                 mock.patch.object(
-                     autonomy_maintenance,
-                     "_run_autonomy_orchestrator_advisory",
-                     side_effect=lambda state, _kidney: state.setdefault(
-                         "last_autonomy_orchestrator",
-                         {
-                             "decision": "defer_with_reason",
-                             "action": {},
-                             "reason": "test advisory",
-                             "ledger_status": "recorded",
-                         },
-                     ),
-                 ):
+            with ExitStack() as stack:
+                stack.enter_context(mock.patch.object(autonomy_maintenance, "LATEST_SUBCONSCIOUS", latest_path))
+                stack.enter_context(mock.patch.object(autonomy_maintenance, "STATE_FILE", state_path))
+                stack.enter_context(mock.patch.object(autonomy_maintenance, "MAINT_LOG", log_path))
+                stack.enter_context(mock.patch.object(autonomy_maintenance, "_run_subconscious_pack", return_value=(True, "ok")))
+                stack.enter_context(mock.patch.object(
+                    autonomy_maintenance,
+                    "_sync_generated_queue_work_tree",
+                    return_value={
+                        "ts": "2026-04-04 02:00:01",
+                        "status": "ok",
+                        "tree_id": "tree_generated_demo",
+                        "tree_title": autonomy_maintenance.GENERATED_QUEUE_TREE_TITLE,
+                        "queue_status": "actionable",
+                        "queue_count": 5,
+                        "open_count": 3,
+                        "actionable_count": 2,
+                        "blocked_count": 1,
+                        "created_count": 1,
+                        "updated_count": 0,
+                        "reopened_count": 0,
+                        "retired_count": 0,
+                        "next_file": "demo.json",
+                    },
+                ))
+                stack.enter_context(mock.patch.object(
+                    autonomy_maintenance,
+                    "_run_generated_queue_work_tree_cycle",
+                    side_effect=_generated_queue_cycle,
+                ))
+                stack.enter_context(mock.patch.object(
+                    autonomy_maintenance.kidney,
+                    "run_kidney",
+                    return_value={
+                        "ts": "2026-04-04 02:00:01",
+                        "mode": "enforce",
+                        "candidate_count": 2,
+                        "archive_count": 1,
+                        "delete_count": 1,
+                        "snapshot_path": "snapshot.zip",
+                    },
+                ))
+                stack.enter_context(mock.patch.object(
+                    autonomy_maintenance,
+                    "_run_patch_queue_cleanup",
+                    return_value={
+                        "ts": "2026-04-04 02:00:01",
+                        "status": "ok",
+                        "orphan_rejected_count": 0,
+                        "orphan_failed_count": 0,
+                        "superseded_archived_count": 0,
+                        "superseded_failed_count": 0,
+                        "review_total_before": 0,
+                        "review_total_after": 0,
+                    },
+                ))
+                stack.enter_context(mock.patch.object(
+                    autonomy_maintenance,
+                    "_sync_patch_queue_work_tree",
+                    return_value={
+                        "ts": "2026-04-04 02:00:01",
+                        "status": "ok",
+                        "tree_id": "tree_demo",
+                        "tree_title": "Patch Queue",
+                        "apply_ready_count": 0,
+                        "created_count": 0,
+                        "updated_count": 0,
+                    },
+                ))
+                stack.enter_context(mock.patch.object(
+                    autonomy_maintenance,
+                    "_run_patch_queue_work_tree_cycle",
+                    return_value={
+                        "ts": "2026-04-04 02:00:01",
+                        "status": "idle",
+                        "tree_count": 1,
+                        "executed_count": 0,
+                    },
+                ))
+                stack.enter_context(mock.patch.object(
+                    autonomy_maintenance,
+                    "_run_active_work_tree_cycle",
+                    return_value={
+                        "ts": "2026-04-04 02:00:01",
+                        "status": "idle",
+                        "tree_count": 0,
+                        "executed_count": 0,
+                    },
+                ))
+                stack.enter_context(mock.patch.object(autonomy_maintenance, "_legacy_maintenance_execution_enabled", return_value=True))
+                stack.enter_context(mock.patch.object(
+                    autonomy_maintenance,
+                    "_retire_legacy_patch_update_trees",
+                    return_value={
+                        "ts": "2026-04-04 02:00:01",
+                        "status": "idle",
+                        "retired_count": 0,
+                    },
+                ))
+                stack.enter_context(mock.patch.object(autonomy_maintenance, "_run_daily_regression_if_due", return_value="daily_regression_ok"))
+                stack.enter_context(mock.patch.object(autonomy_maintenance, "_reevaluate_pending_review_queue", return_value={"status": "ok", "reevaluated_count": 0, "moved_promoted_count": 0, "moved_quarantined_count": 0}))
+                stack.enter_context(mock.patch.object(autonomy_maintenance, "_sync_signal_intake_work_tree", return_value={"status": "ok", "result_count": 0, "resolved_count": 0, "subconscious_signal_count": 0, "active_regression_failure": False}))
+                stack.enter_context(mock.patch.object(autonomy_maintenance, "_archive_stale_complete_trees", return_value={"status": "idle", "archived_count": 0, "retained_count": 0}))
+                stack.enter_context(mock.patch.object(autonomy_maintenance, "_archive_empty_active_trees", return_value={"status": "idle", "archived_count": 0, "skipped_recent_count": 0}))
+                stack.enter_context(mock.patch.object(autonomy_maintenance, "_archive_stale_cli_active_trees", return_value={"status": "idle", "archived_count": 0, "skipped_recent_count": 0, "skipped_complex_count": 0}))
+                stack.enter_context(mock.patch.object(autonomy_maintenance, "_sync_regression_status_from_file", return_value=False))
+                stack.enter_context(mock.patch.object(
+                    autonomy_maintenance,
+                    "_run_autonomy_orchestrator_advisory",
+                    side_effect=lambda state, _kidney: state.setdefault(
+                        "last_autonomy_orchestrator",
+                        {
+                            "decision": "defer_with_reason",
+                            "action": {},
+                            "reason": "test advisory",
+                            "ledger_status": "recorded",
+                        },
+                    ),
+                ))
                 code = autonomy_maintenance.run_once()
 
             self.assertEqual(code, 0)
@@ -1522,33 +1543,49 @@ class TestAutonomyMaintenance(unittest.TestCase):
                 state["last_generated_queue_tree_cycle"] = payload
                 return payload
 
-            with mock.patch.object(autonomy_maintenance, "LATEST_SUBCONSCIOUS", latest_path), \
-                 mock.patch.object(autonomy_maintenance, "STATE_FILE", state_path), \
-                 mock.patch.object(autonomy_maintenance, "MAINT_LOG", log_path), \
-                 mock.patch.object(autonomy_maintenance, "_run_subconscious_pack", return_value=(True, "ok")), \
-                 mock.patch.object(autonomy_maintenance, "_sync_generated_queue_work_tree", return_value={"ts": "2026-04-23 08:00:01", "status": "ok", "tree_id": "tree_generated_demo", "tree_title": autonomy_maintenance.GENERATED_QUEUE_TREE_TITLE, "queue_status": "clear", "queue_count": 7, "open_count": 0, "actionable_count": 0, "blocked_count": 0, "created_count": 0, "updated_count": 0, "reopened_count": 0, "retired_count": 0}), \
-                 mock.patch.object(autonomy_maintenance, "_run_generated_queue_work_tree_cycle", side_effect=_generated_queue_cycle), \
-                 mock.patch.object(autonomy_maintenance.kidney, "run_kidney", return_value={"ts": "2026-04-23 08:00:01", "mode": "enforce", "candidate_count": 0, "archive_count": 0, "delete_count": 0, "snapshot_path": ""}), \
-                 mock.patch.object(autonomy_maintenance, "_run_patch_queue_cleanup", return_value={"ts": "2026-04-23 08:00:01", "status": "ok"}), \
-                 mock.patch.object(autonomy_maintenance, "_sync_patch_queue_work_tree", return_value={"ts": "2026-04-23 08:00:01", "status": "ok", "tree_id": "tree_demo", "tree_title": "Patch Queue", "apply_ready_count": 0, "created_count": 0, "updated_count": 0}), \
-                 mock.patch.object(autonomy_maintenance, "_run_patch_queue_work_tree_cycle", return_value={"ts": "2026-04-23 08:00:01", "status": "idle", "tree_count": 1, "executed_count": 0}), \
-                 mock.patch.object(autonomy_maintenance, "_run_active_work_tree_cycle", return_value={"ts": "2026-04-23 08:00:01", "status": "idle", "tree_count": 0, "executed_count": 0}), \
-                 mock.patch.object(autonomy_maintenance, "_legacy_maintenance_execution_enabled", return_value=True), \
-                 mock.patch.object(autonomy_maintenance, "_retire_legacy_patch_update_trees", return_value={"ts": "2026-04-23 08:00:01", "status": "idle", "retired_count": 0}), \
-                 mock.patch.object(autonomy_maintenance, "_run_daily_regression_if_due", return_value="daily_regression_skipped_already_ran"), \
-                 mock.patch.object(
-                     autonomy_maintenance,
-                     "_run_autonomy_orchestrator_advisory",
-                     side_effect=lambda state, _kidney: state.setdefault(
-                         "last_autonomy_orchestrator",
-                         {
-                             "decision": "defer_with_reason",
-                             "action": {},
-                             "reason": "test advisory",
-                             "ledger_status": "recorded",
-                         },
-                     ),
-                 ):
+            with ExitStack() as stack:
+                stack.enter_context(mock.patch.object(autonomy_maintenance, "LATEST_SUBCONSCIOUS", latest_path))
+                stack.enter_context(mock.patch.object(autonomy_maintenance, "STATE_FILE", state_path))
+                stack.enter_context(mock.patch.object(autonomy_maintenance, "MAINT_LOG", log_path))
+                stack.enter_context(mock.patch.object(autonomy_maintenance, "_run_subconscious_pack", return_value=(True, "ok")))
+                stack.enter_context(mock.patch.object(autonomy_maintenance, "_sync_generated_queue_work_tree", return_value={"ts": "2026-04-23 08:00:01", "status": "ok", "tree_id": "tree_generated_demo", "tree_title": autonomy_maintenance.GENERATED_QUEUE_TREE_TITLE, "queue_status": "clear", "queue_count": 7, "open_count": 0, "actionable_count": 0, "blocked_count": 0, "created_count": 0, "updated_count": 0, "reopened_count": 0, "retired_count": 0}))
+                stack.enter_context(mock.patch.object(autonomy_maintenance, "_run_generated_queue_work_tree_cycle", side_effect=_generated_queue_cycle))
+                stack.enter_context(mock.patch.object(autonomy_maintenance.kidney, "run_kidney", return_value={"ts": "2026-04-23 08:00:01", "mode": "enforce", "candidate_count": 0, "archive_count": 0, "delete_count": 0, "snapshot_path": ""}))
+                stack.enter_context(mock.patch.object(autonomy_maintenance, "_run_patch_queue_cleanup", return_value={"ts": "2026-04-23 08:00:01", "status": "ok"}))
+                stack.enter_context(mock.patch.object(autonomy_maintenance, "_sync_patch_queue_work_tree", return_value={"ts": "2026-04-23 08:00:01", "status": "ok", "tree_id": "tree_demo", "tree_title": "Patch Queue", "apply_ready_count": 0, "created_count": 0, "updated_count": 0}))
+                stack.enter_context(mock.patch.object(autonomy_maintenance, "_run_patch_queue_work_tree_cycle", return_value={"ts": "2026-04-23 08:00:01", "status": "idle", "tree_count": 1, "executed_count": 0}))
+                stack.enter_context(mock.patch.object(autonomy_maintenance, "_run_active_work_tree_cycle", return_value={"ts": "2026-04-23 08:00:01", "status": "idle", "tree_count": 0, "executed_count": 0}))
+                stack.enter_context(mock.patch.object(autonomy_maintenance, "_legacy_maintenance_execution_enabled", return_value=True))
+                stack.enter_context(mock.patch.object(autonomy_maintenance, "_retire_legacy_patch_update_trees", return_value={"ts": "2026-04-23 08:00:01", "status": "idle", "retired_count": 0}))
+                stack.enter_context(mock.patch.object(autonomy_maintenance, "_run_daily_regression_if_due", return_value="daily_regression_skipped_already_ran"))
+                stack.enter_context(mock.patch.object(autonomy_maintenance, "_reevaluate_pending_review_queue", return_value={"status": "ok", "reevaluated_count": 0, "moved_promoted_count": 0, "moved_quarantined_count": 0}))
+                def _mock_sync_signal(state, kidney_summary=None, temporal_feed=None):
+                    payload = {
+                        "status": "ok", "result_count": 0, "resolved_count": 0,
+                        "subconscious_signal_count": 0, "active_regression_failure": False,
+                        "last_regression_stale": bool(state.get("last_regression_stale")),
+                        "last_regression_status": str(state.get("last_regression_status") or ""),
+                    }
+                    state["last_signal_ingestion"] = payload
+                    return payload
+                stack.enter_context(mock.patch.object(autonomy_maintenance, "_sync_signal_intake_work_tree", side_effect=_mock_sync_signal))
+                stack.enter_context(mock.patch.object(autonomy_maintenance, "_archive_stale_complete_trees", return_value={"status": "idle", "archived_count": 0, "retained_count": 0}))
+                stack.enter_context(mock.patch.object(autonomy_maintenance, "_archive_empty_active_trees", return_value={"status": "idle", "archived_count": 0, "skipped_recent_count": 0}))
+                stack.enter_context(mock.patch.object(autonomy_maintenance, "_archive_stale_cli_active_trees", return_value={"status": "idle", "archived_count": 0, "skipped_recent_count": 0, "skipped_complex_count": 0}))
+                stack.enter_context(mock.patch.object(autonomy_maintenance, "_sync_regression_status_from_file", return_value=False))
+                stack.enter_context(mock.patch.object(
+                    autonomy_maintenance,
+                    "_run_autonomy_orchestrator_advisory",
+                    side_effect=lambda state, _kidney: state.setdefault(
+                        "last_autonomy_orchestrator",
+                        {
+                            "decision": "defer_with_reason",
+                            "action": {},
+                            "reason": "test advisory",
+                            "ledger_status": "recorded",
+                        },
+                    ),
+                ))
                 code = autonomy_maintenance.run_once()
 
             self.assertEqual(code, 0)
