@@ -276,6 +276,55 @@ class TestRuntimeControlService(unittest.TestCase):
         self.assertEqual((payload.get("last_patch_cleanup") or {}).get("superseded_archived_count"), 347)
         self.assertEqual((payload.get("last_kidney_status") or {}).get("candidate_count"), 19)
 
+
+    def test_autonomy_maintenance_summary_passes_through_temporal_feed(self):
+        runtime_processes = SimpleNamespace(
+            logical_service_processes=lambda _script: [],
+            select_logical_process=lambda logical, pid=None, create_time=None: None,
+        )
+        state = {
+            "runtime_worker": {"last_cycle_status": "ok"},
+            "last_temporal_feed": {
+                "status": "ok",
+                "enabled": True,
+                "event_count": 3,
+                "surfaced_count": 1,
+                "pressure_count": 2,
+                "ran_at": "2026-06-08T00:00:00+00:00",
+            },
+        }
+
+        payload = RUNTIME_CONTROL_SERVICE.autonomy_maintenance_summary(
+            state_payload=state,
+            maintenance_py=Path("c:/Nova/autonomy_maintenance.py"),
+            runtime_processes_module=runtime_processes,
+            strftime_fn=lambda _fmt: "2026-06-08",
+        )
+
+        feed = payload.get("last_temporal_feed") or {}
+        self.assertEqual(feed.get("status"), "ok")
+        self.assertTrue(feed.get("enabled"))
+        self.assertEqual(feed.get("event_count"), 3)
+        self.assertEqual(feed.get("surfaced_count"), 1)
+        self.assertEqual(feed.get("pressure_count"), 2)
+
+    def test_autonomy_maintenance_summary_temporal_feed_absent_yields_empty_dict(self):
+        runtime_processes = SimpleNamespace(
+            logical_service_processes=lambda _script: [],
+            select_logical_process=lambda logical, pid=None, create_time=None: None,
+        )
+        state = {"runtime_worker": {"last_cycle_status": "ok"}}
+
+        payload = RUNTIME_CONTROL_SERVICE.autonomy_maintenance_summary(
+            state_payload=state,
+            maintenance_py=Path("c:/Nova/autonomy_maintenance.py"),
+            runtime_processes_module=runtime_processes,
+            strftime_fn=lambda _fmt: "2026-06-08",
+        )
+
+        self.assertIsInstance(payload.get("last_temporal_feed"), dict)
+        self.assertEqual(payload.get("last_temporal_feed"), {})
+
     def test_runtime_artifact_show_action_preserves_message_and_detail(self):
         ok, msg, extra, detail = RUNTIME_CONTROL_SERVICE.runtime_artifact_show_action(
             {"artifact": "guard.log", "lines": 20},
