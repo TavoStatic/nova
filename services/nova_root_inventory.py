@@ -399,7 +399,7 @@ def _coverage_root_for_path(path: str) -> str:
         return "autonomy_orchestrator"
     if "autonomy_maintenance" in low:
         return "autonomy_maintenance"
-    if "autonomy_" in low or "schedule_registry" in low:
+    if "autonomy_" in low or "schedule_registry" in low or "nova_scheduler" in low or "nova_temporal" in low or "nova_calendar" in low or name == "run_time.py":
         return "scheduler_registry"
     if low.startswith("pipelines/") or low.startswith("data_sources/") or "pipeline" in low:
         return "data_pipelines"

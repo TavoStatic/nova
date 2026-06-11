@@ -1,6 +1,6 @@
 # Documentation Ownership
 
-Last verified: 2026-05-18
+Last verified: 2026-06-11
 
 Use this page when deciding where a change should be documented.
 
@@ -13,11 +13,21 @@ Use this page when deciding where a change should be documented.
 
 ## Architecture And Runtime Ownership
 
-- `ARCHITECTURE.md`: system shape, decision spine, routing map, OS capability chain, operator-outbox shape, and major component boundaries.
-- `SERVICES_INDEX.md`: services-by-domain map for the extracted service layer.
+- `ARCHITECTURE.md`: system shape, decision spine, routing map, OS capability chain, operator-outbox shape, major component boundaries, Leah frontend, temporal stack, autonomy orchestrator, regression governance, and wiring inventory.
+- `SERVICES_INDEX.md`: services-by-domain map for the extracted service layer. **Update this file whenever a new `services/*.py` file is added.**
 - `SUPERVISOR_CONTRACT.md`: deterministic ownership, supervisor routing, and no-trigger-word routing principles.
-- `SEARCH_PROVIDER_ARCHITECTURE.md`: web/search provider roles and routing expectations.
+- `SEARCH_PROVIDER_ARCHITECTURE.md`: web/search provider roles and routing expectations. Whoogle and Brave are not active; do not add them as current providers without a code change.
 - `DATA_PIPELINES.md`: governed data-lane structure, operator controls, and SIS test lane posture.
+
+## New Surfaces
+
+These surfaces were added after the initial doc pass and require ongoing maintenance:
+
+- **Leah frontend** (`services/leah_frontdoor.py`, `/leah` route, `static/leah.*`): owned by `ARCHITECTURE.md` and `SERVICES_INDEX.md`.
+- **Temporal stack** (`services/nova_temporal_service.py`, `services/nova_calendar_ingestion.py`, `services/nova_scheduler.py`, `tools/temporal_review_tool.py`, `scripts/run_time.py`): owned by `ARCHITECTURE.md`, `SERVICES_INDEX.md`, and `OPERATIONS.md`.
+- **Autonomy orchestrator** (`services/autonomy_orchestrator.py`, `services/autonomy_execution_gate.py`, `services/autonomy_orchestrator_ledger.py`): owned by `ARCHITECTURE.md` and `SERVICES_INDEX.md`.
+- **Regression governance** (`services/regression_lanes.py`, `services/regression_profile_inventory.py`, `services/validation_artifact_truth.py`): owned by `SERVICES_INDEX.md`.
+- **Wiring inventory** (`services/nova_wiring_inventory.py`, `services/nova_root_inventory.py`): owned by `ARCHITECTURE.md` and `SERVICES_INDEX.md`.
 
 ## Packaging And Install
 

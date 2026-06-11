@@ -1,10 +1,10 @@
 # Search Provider Architecture
 
-Date: 2026-04-02
+Date: 2026-06-11
 
 ## Purpose
 
-This document defines the target search-provider architecture for Nova as the runtime core of NYO System.
+This document defines the search-provider architecture for Nova as the runtime core of NYO System.
 
 It describes:
 
@@ -78,57 +78,44 @@ Responsibilities:
 - return accepted or high-signal answers when the turn is clearly troubleshooting-oriented
 - reduce noisy general-web search for developer debugging prompts
 
-Target Nova behavior:
+Current Nova state:
 
-- route technical question and debugging requests here before or alongside broad web search when the request looks like a Q&A retrieval problem rather than a generic research task
+- implemented; active in the `stackexchange` provider family
+- decision spine routes technical Q&A turns here before broad web search when the request looks like a retrieval problem rather than a generic research task
 
-### 4. Whoogle
-
-Role:
-
-- optional fallback provider
-- secondary broad-search escape hatch when SearXNG is degraded, misconfigured, or operator-disabled
-
-Responsibilities:
-
-- provide an additional operator-managed web-search path
-- remain optional and off by default unless the operator explicitly enables it
-
-Architectural rule:
-
-- Whoogle should not be a core dependency if SearXNG is already the primary broker. It is a fallback and resilience tool, not the main search identity for Nova.
-
-### 5. HTML Fallback
+### 4. HTML Fallback
 
 Role:
 
 - legacy low-contract fallback path
 - emergency-only retrieval lane when richer providers are unavailable
 
-Responsibilities:
+Current Nova state:
 
-- keep Nova from losing all search capability when configured providers are absent
-- remain visibly second-class in routing and diagnostics
+- active as the `html` fallback in policy; remains as a resilience path when no structured provider is available
 
-Architectural rule:
-
-- Nova should keep this path for resilience, but it should not be the preferred outcome when a structured or operator-managed provider is available.
-
-### 6. Brave
+### 5. Whoogle (not currently active)
 
 Role:
 
-- direct hosted-provider alternative to SearXNG
-- useful when the operator wants a simple API-backed web provider instead of a local broker
-
-Responsibilities:
-
-- provide direct web search when the operator selects it
-- rely on operator-provided API credentials
+- optional secondary broad-search fallback
+- previously considered as an operator-managed escape hatch when SearXNG is degraded
 
 Current Nova state:
 
-- direct provider support exists in the runtime and command-center provider selection
+- **not an active provider in the current codebase**
+- appears in earlier design notes; do not treat as a current option unless explicitly added
+
+### 6. Brave (not currently active)
+
+Role:
+
+- direct hosted-provider alternative requiring API credentials
+
+Current Nova state:
+
+- **not an active provider in the current codebase**
+- appears in earlier design notes; do not treat as a current option unless explicitly added
 
 ## Target Routing Model
 
@@ -145,9 +132,9 @@ Nova should separate search into provider families instead of sending everything
 
 | Turn shape | Preferred provider | Secondary provider | Notes |
 | --- | --- | --- | --- |
-| general web lookup | SearXNG | Brave, Whoogle, HTML fallback | broad search and recent web content |
-| factual topic overview | Wikipedia API | SearXNG | use structured summary first |
-| technical troubleshooting | StackExchange API | SearXNG | prefer accepted Q&A over noisy web search |
+| general web lookup | SearXNG (`general_web`) | HTML fallback | broad search and recent web content |
+| factual topic overview | Wikipedia API (`wikipedia`) | SearXNG | use structured summary first |
+| technical troubleshooting | StackExchange API (`stackexchange`) | SearXNG | prefer accepted Q&A over noisy web search |
 | repo or code discovery | SearXNG | StackExchange API, HTML fallback | broad research path for public code and repo discovery |
 | deep research | SearXNG + web gather | provider-specific supplements | orchestration may mix providers |
 
@@ -209,13 +196,14 @@ This is appropriate only for local operator-managed endpoints such as localhost 
 
 ### Fallback Precedence
 
-Suggested fallback order for broad web retrieval:
+Current fallback order for broad web retrieval:
 
-1. configured broad-search primary provider
+1. configured broad-search primary provider (SearXNG)
 2. confirmed local self-repair candidate if allowed
-3. optional secondary broad-search provider such as Whoogle
-4. HTML fallback
-5. explicit operator-visible failure
+3. HTML fallback
+4. explicit operator-visible failure
+
+Whoogle and Brave are not active; do not include them in current fallback logic.
 
 Suggested fallback order for structured providers:
 
@@ -249,50 +237,18 @@ The command center should own the operator-facing search governance surface.
 
 ## Current Implementation Versus Target Architecture
 
-### Current
+### Current (2026-06-11)
 
-- `searxng` supported as a direct provider
-- `html` fallback supported
-- `brave` supported as a direct provider
+- `searxng` implemented as primary broad web broker; local endpoint self-repair active
+- `wikipedia` implemented and active in the `wikipedia` provider family
+- `stackexchange` implemented and active in the `stackexchange` provider family
+- `html` fallback active
+- active search-provider priority in policy: `wikipedia`, `stackexchange`, `general_web`
 - command center supports provider and endpoint control
-- local SearXNG endpoint self-repair exists for common localhost drift
+- `Whoogle` and `Brave` are **not active** in the current codebase
 
 ### Target Next
 
-1. formal provider-family routing in the decision spine
-2. native Wikipedia adapter
-3. native StackExchange adapter
-4. optional Whoogle adapter
-5. provider-level ledger and telemetry fields
-6. command-center visibility for provider health and fallback order
-
-## Recommended Implementation Order
-
-1. keep SearXNG as the default broad-search broker
-2. finish operator-visible self-repair and failover controls
-3. add Wikipedia as the first structured provider
-4. add StackExchange as the structured troubleshooting provider
-5. add provider-family routing rules before adding more backends
-6. keep Whoogle optional until there is a proven resilience need
-
-## Design Decision
-
-Nova should be built around a provider architecture, not a single search box.
-
-The recommended long-term stack is:
-
-- SearXNG for broad web search
-- Wikipedia API for structured knowledge
-- StackExchange API for structured troubleshooting
-- optional Whoogle for fallback broad search
-- optional Brave as a direct hosted-provider alternative
-
-That gives Nova three clearly separated search capabilities:
-
-- web search
-- knowledge lookup
-- troubleshooting search
-
-The architectural rule is simple:
-
-Nova should route to the best provider family first, then degrade visibly and safely when a provider is unavailable.
+1. provider-level ledger and telemetry fields per provider family
+2. command-center visibility for per-provider health and fallback order
+3. formal provider-family routing rules as the decision spine matures

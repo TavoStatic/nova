@@ -76,13 +76,34 @@ C:\Nova\nova.cmd package-promote --record runtime\exports\release_packages\valid
 ```powershell
 C:\Nova\nova.cmd help
 C:\Nova\nova.cmd install
-C:\Nova\nova.cmd package-build --label rc1
 C:\Nova\nova.cmd doctor --fix
-C:\Nova\nova.cmd smoke-base --fix
-C:\Nova\nova.cmd test
+C:\Nova\nova.cmd run
 C:\Nova\nova.cmd webui-start --host 127.0.0.1 --port 8080
 C:\Nova\nova.cmd webui-status --port 8080
 C:\Nova\nova.cmd webui-stop
+C:\Nova\nova.cmd runtime-status
+C:\Nova\nova.cmd smoke-base --fix
+C:\Nova\nova.cmd smoke --fix
+C:\Nova\nova.cmd smoke-runtime
+C:\Nova\nova.cmd test
+C:\Nova\nova.cmd wiring-check [--offline]
+C:\Nova\nova.cmd time                    # temporal review: assess calendar pressure
+C:\Nova\nova.cmd package-build --label rc1
+C:\Nova\nova.cmd package-verify
+C:\Nova\nova.cmd package-readiness
+C:\Nova\nova.cmd package-status
+C:\Nova\nova.cmd package-ledger --count 5
+C:\Nova\nova.cmd package-promote --result pass-with-notes --version <version> --note "..."
+C:\Nova\nova.cmd installer-build
+C:\Nova\nova.cmd installer-verify
+C:\Nova\nova.cmd installer-status
+C:\Nova\nova.cmd installer-ledger --count 5
+C:\Nova\nova.cmd installer-readiness
+C:\Nova\nova.cmd installer-promote --result pass-with-notes --note "..."
+C:\Nova\nova.cmd release-clean
+C:\Nova\nova.cmd subconscious
+C:\Nova\nova.cmd operator
+C:\Nova\nova.cmd guard
 ```
 
 ## Bootstrap Notes
@@ -102,7 +123,37 @@ It does not install optional external services such as Ollama or SearXNG.
 
 `nova smoke --fix` remains the model-backed runtime smoke gate.
 
-## Central Backend Command Console
+## Control And Leah Surfaces
+
+Once the web UI is running:
+
+- Operator control room: `http://127.0.0.1:8080/control`
+- Leah assistant frontend: `http://127.0.0.1:8080/leah`
+
+Key API routes:
+
+| Route | Method | Purpose |
+| --- | --- | --- |
+| `/api/control/status` | GET | Full live status payload |
+| `/api/control/policy` | GET | Current policy payload |
+| `/api/control/metrics` | GET | Metrics payload |
+| `/api/control/work-trees` | GET | Work-tree state |
+| `/api/control/sessions` | GET | Session list |
+| `/api/control/test-sessions` | GET | Test session list |
+| `/api/control/action` | POST | Control actions (self_check, webui_restart, etc.) |
+| `/api/health` | GET | Basic health probe |
+
+## Temporal Review
+
+Nova includes a temporal pressure feed that scores operator calendar (ICS) events and surfaces them as work-tree pressure.
+
+Review temporal pressure from the CLI:
+
+```powershell
+C:\Nova\nova.cmd time
+```
+
+Calendar files live under `runtime/temporal/`. Add or update ICS files there to feed events into the maintenance cycle. The temporal feed runs on a configurable cadence (default 15 minutes) and is reflected in `GET /api/control/status` as `temporal_enabled`, `temporal_feed_status`, `temporal_feed_surfaced_count`, and `temporal_pressure`.
 
 Any new backend operation should be wired through the control console instead of ad hoc manual shell steps.
 

@@ -2382,7 +2382,7 @@ def _root_closure_inventory_signals_from_status(status_payload: dict[str, Any]) 
                         "title": f"Find status, signal, tool, and action references for {root_id}",
                         "allowed_tools": ["find"],
                         "preferred_tool": "find",
-                        "tool_args": [root_id, "services nova_core.py work_tree.py autonomy_maintenance.py"],
+                        "tool_args": [root_id, "."],
                     },
                 ],
             }

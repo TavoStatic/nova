@@ -1,23 +1,23 @@
 # Nova Status
 
-Date: 2026-05-20
+Date: 2026-06-11
 
 ## Current Read
 
-Nova is in an active source-refactor posture with a current validated release artifact.
-It is not a final production declaration because independent fresh-machine or VM proof remains open.
+Nova is at full operational health with a current validated release artifact and an active temporal feed.
+Self-check is 22/22 passing, health score 100, and no active alerts.
 
 Current evidence:
 
-- current source state: large uncommitted routing/reply/tooling refactor in the working tree
+- current source state: codex/push-prep branch; temporal stack, Leah frontend, regression governance, and autonomy orchestrator all committed
+- runtime health: self_check 22/22, health_score 100, no alerts, work-tree truth clear
 - latest full regression evidence lives in `runtime/regression_status.json`
 - release build, verify, validation, and promotion evidence live in `runtime/exports/release_packages/release_ledger.jsonl`
 - latest observed release validation evidence lives in `runtime/validation/release/latest_release_validation.json`
 - release validation result for a candidate is not valid unless the full-regression gate passes first
-- latest release-clean pass produced a promoted `ready-with-notes` artifact; read the ledger for the exact artifact name
-- installed runtime after validation: guard, core, and web UI are running
+- installed runtime after validation: guard, core, web UI, and temporal feed are running
 
-Release validation now treats a missing, stale, or red `runtime/regression_status.json` as a blocking issue. Use the runtime ledger and validation record for the exact current artifact name instead of treating this document as a release tag.
+Release validation treats a missing, stale, or red `runtime/regression_status.json` as a blocking issue. Use the runtime ledger and validation record for the exact current artifact name.
 
 ## Implemented Lanes
 
@@ -30,6 +30,11 @@ The current codebase contains these source-backed lanes:
 - Release validation gate: extracted-package validation now requires fresh full regression truth before the release result can pass.
 - Release front-door proof: extracted-package validation exercises `nova run` launch/exit for the base target, and exercises a scripted turn when the runtime/Ollama target is included.
 - OS capability evidence visibility: OS capability ledger evidence is surfaced through control status, Work Tree ingestion, root inventory, and wiring closure without treating old stale probes as live pressure.
+- Temporal feed: operator ICS calendar files are parsed, scored by proximity/confidence/importance, and surfaced as work-tree pressure via the maintenance feed; `nova time` exposes review at the CLI.
+- Leah frontend: a separate Leah assistant chat UI is served at `/leah` alongside the operator control room.
+- Autonomy orchestrator: `services/autonomy_orchestrator.py` drives work-tree execution cycles and maintenance action selection; orchestrator decisions are persisted in the autonomy orchestrator ledger.
+- Regression governance: `services/regression_lanes.py` owns lane membership; `services/regression_profile_inventory.py` detects profile drift, gaps, and unclassified tests; the `test_profile_inventory_clear` self-check surfaces violations.
+- Wiring inventory: `services/nova_wiring_inventory.py` performs end-to-end closure analysis and feeds the wiring-check CLI gate and control-room wiring panel.
 
 Current source-backed files include:
 
@@ -51,8 +56,23 @@ Current source-backed files include:
 - `services/work_tree_signal_ingestion.py`
 - `services/nova_wiring_inventory.py`
 - `services/nova_root_inventory.py`
+- `services/autonomy_orchestrator.py`
+- `services/autonomy_execution_gate.py`
+- `services/regression_lanes.py`
+- `services/regression_profile_inventory.py`
+- `services/validation_artifact_truth.py`
+- `services/nova_temporal_service.py`
+- `services/nova_calendar_ingestion.py`
+- `services/nova_scheduler.py`
+- `services/leah_frontdoor.py`
+- `services/runtime_control.py`
+- `services/runtime_restart_provenance.py`
+- `services/port_ownership.py`
+- `services/storage_watch.py`
 - `tools/os_capabilities/os_capabilities.json`
 - `tools/os_capability_tool.py`
+- `tools/temporal_review_tool.py`
+- `scripts/run_time.py`
 
 ## Current Validation
 
@@ -102,12 +122,15 @@ Nonblocking notes from release validation:
 
 Nova is no longer only a chat runtime. It is a local AI runtime with:
 
-- CLI and HTTP chat front doors
+- CLI and HTTP chat front doors (`run.py`, `nova_http.py`)
+- Leah assistant frontend at `/leah`
 - a planner/intent spine
-- Work Tree task pressure
-- operator-visible status and outbox surfaces
+- Work Tree task pressure with autonomous orchestration
+- operator-visible status, outbox, and temporal feed surfaces
 - OS capability contracts
-- release and validation evidence
+- release and installer validation evidence
+- temporal calendar pressure scoring and maintenance feed
+- regression governance with lane membership and profile drift detection
 - memory, runtime, web, voice, and control surfaces
 
 The current root rule for chat behavior is:

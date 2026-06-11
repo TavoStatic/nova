@@ -46,12 +46,43 @@ Architecturally, that means Nova should be treated as a supervised local runtime
 - `tools/os_capabilities/`
   - registered PowerShell capabilities for bounded OS inspection and evidence collection
   - JSON registry with version, authority level, hash, argument schema, locality, and evidence contract metadata
-  - current active capabilities: `inspect_processes`, `inspect_ports`, `scan_large_files`, `collect_diagnostics_bundle`, and `verify_ollama_model`
+  - current active capabilities: `inspect_processes`, `inspect_ports`, `scan_large_files`, `collect_diagnostics_bundle`, `verify_ollama_model`, and `inspect_runtime_health`
 
 - `services/operator_outbox.py`
   - durable Nova-to-operator notice lane
   - records missing authority, missing capability, stale contracts, invalid arguments, and unresolved runtime or Work Tree pressure
   - feeds control status and runtime console surfaces
+
+- `services/leah_frontdoor.py`
+  - separate Leah assistant frontend served at `/leah`
+  - independent chat UI with upload support and its own JS/CSS assets
+  - runs alongside the operator control room without replacing it
+
+- `services/nova_temporal_service.py`, `services/nova_calendar_ingestion.py`, `services/nova_scheduler.py`
+  - temporal pressure scoring from operator calendar (ICS) files
+  - converts events into scored pressure signals with proximity, confidence, importance, and dependency-risk dimensions
+  - the maintenance feed runs this on a cadence via the APScheduler wrapper and surfaces results in `autonomy_maintenance` state and control status
+  - `nova time` CLI command exposes temporal review to the operator
+
+- `services/autonomy_orchestrator.py`
+  - central autonomous decision-making service (1331 lines)
+  - selects maintenance actions, manages orchestrator ledger, drives work-tree execution cycles
+  - works with `autonomy_execution_gate.py` to enforce policy before autonomous actions run
+
+- `services/regression_lanes.py`, `services/regression_profile_inventory.py`
+  - regression lane membership (unit / behavior / integration) and test-profile state
+  - detects profile drift, profile gaps, and unclassified tests
+  - feeds the `test_profile_inventory_clear` self-check
+
+- `services/nova_wiring_inventory.py`
+  - end-to-end wiring closure analysis (1158 lines)
+  - detects which surfaces, signals, tools, and advisory actions are connected from signal source to operator-visible output
+  - feeds the wiring inventory panel and the `nova wiring-check` CLI gate
+
+- `services/work_tree_signal_ingestion.py`
+  - central signal bus (5679 lines)
+  - converts status payloads, autonomy events, OS capability evidence, and temporal pressure into work-tree branches and signals
+  - the primary integration point between all signal sources and the work-tree pressure model
 
 ## Current Identity and Privacy Model
 
@@ -64,9 +95,9 @@ Architecturally, that means Nova should be treated as a supervised local runtime
   - env JSON fallback: `NOVA_CHAT_USERS_JSON`
   - single env pair fallback: `NOVA_CHAT_USER` and `NOVA_CHAT_PASS`
 
-## Control Room
+## Control Room And Leah
 
-The control room now exposes:
+The control room at `/control` exposes:
 
 - runtime health and telemetry
 - session manager
@@ -76,6 +107,15 @@ The control room now exposes:
 - memory totals in live status telemetry
 - managed chat-user administration
 - diagnostics export and log tail actions
+- work-tree status and branch detail
+- data-pipeline controls
+- temporal pressure feed status
+
+The Leah assistant frontend at `/leah` is a separate chat UI:
+
+- independent session and upload flow
+- own JS/CSS assets (`static/leah.js`, `static/leah.css`, `static/leah_fx.js`)
+- served by `services/leah_frontdoor.py` through `nova_http.py`
 
 ## Important Runtime Paths
 
@@ -89,6 +129,11 @@ The control room now exposes:
 - `runtime/os_capability_evidence/`: bounded evidence output for evidence-writing OS capabilities
 - `runtime/memory_events.jsonl`: structured memory operation events
 - `runtime/actions/*.json`: per-turn action ledger records including route trace and final planner decision
+- `runtime/autonomy_maintenance_state.json`: persisted maintenance cycle state including last work-tree cycle, signal ingestion, temporal feed, and orchestrator records
+- `runtime/temporal/`: operator ICS calendar files consumed by the temporal feed
+- `runtime/regression_status.json`: latest full regression result
+- `runtime/validation/release/latest_release_validation.json`: latest release validation outcome
+- `runtime/exports/release_packages/`: release build artifacts, ledger, and validation records
 - `runtime/exports`: exported diagnostics and snapshots
 
 ## Request Flow Diagram
@@ -159,13 +204,15 @@ The target provider design is documented in [SEARCH_PROVIDER_ARCHITECTURE.md](SE
 
 The short version is:
 
-- `SearXNG` is the default broad web broker
-- `Wikipedia` should become the structured knowledge provider
-- `StackExchange` should become the structured troubleshooting provider
-- `GitHub` should become the code and repository discovery provider
-- `Whoogle` should remain an optional fallback, not a primary dependency
+- `SearXNG` is the current default broad web broker (operator-managed, localhost)
+- `Wikipedia` is the structured knowledge provider (implemented)
+- `StackExchange` is the structured troubleshooting provider (implemented)
+- `general_web` is the fallback broad search family
+- `Whoogle` and `Brave` are not active providers in the current codebase; they appear only as legacy design notes
 
-The decision spine should route between those providers intentionally based on turn type and research goal rather than flattening everything into one generic search lane.
+Active search-provider priority is: `wikipedia`, `stackexchange`, `general_web`.
+
+The decision spine routes between those provider families based on turn type rather than sending everything to one generic search lane.
 
 ## Routing Module Map
 
