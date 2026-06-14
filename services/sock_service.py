@@ -686,3 +686,46 @@ def run_sock(
     elif apply and not report.validation_ok:
         report.errors.append("apply skipped: warm validation failed")
     return report
+
+
+# ── cached status-payload accessor ────────────────────────────────────────────
+
+import dataclasses
+import threading
+import time as _time
+
+_SOCK_STATUS_CACHE: dict = {}
+_SOCK_STATUS_LOCK = threading.Lock()
+_SOCK_STATUS_TTL = 300  # seconds — hardware doesn't change frequently
+
+
+def get_sock_status_keys() -> dict:
+    """Return sock_hardware_profile / sock_recommendation / sock_policy_diff dicts.
+
+    Runs scan_hardware() + recommend_models() + build_diff() at most once per
+    TTL window so status polling doesn't pay PowerShell subprocess cost every tick.
+    Returns empty dicts on any error so the caller is never blocked.
+    """
+    with _SOCK_STATUS_LOCK:
+        now = _time.monotonic()
+        if _SOCK_STATUS_CACHE and now - _SOCK_STATUS_CACHE.get("_ts", 0.0) < _SOCK_STATUS_TTL:
+            return {k: v for k, v in _SOCK_STATUS_CACHE.items() if not k.startswith("_")}
+        try:
+            hw = scan_hardware()
+            rec = recommend_models(hw)
+            diff = build_diff(rec, POLICY_PATH)
+            payload = {
+                "sock_hardware_profile": dataclasses.asdict(hw),
+                "sock_recommendation": dataclasses.asdict(rec),
+                "sock_policy_diff": dataclasses.asdict(diff),
+            }
+        except Exception:
+            payload = {
+                "sock_hardware_profile": {},
+                "sock_recommendation": {},
+                "sock_policy_diff": {},
+            }
+        _SOCK_STATUS_CACHE.clear()
+        _SOCK_STATUS_CACHE.update(payload)
+        _SOCK_STATUS_CACHE["_ts"] = now
+        return {k: v for k, v in _SOCK_STATUS_CACHE.items() if not k.startswith("_")}

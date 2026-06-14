@@ -13,6 +13,7 @@ from services.nova_wiring_inventory import build_self_repair_closure_inventory_p
 from services.nova_wiring_inventory import build_source_wiring_probe_payload
 from services.nova_wiring_inventory import build_wiring_inventory_payload
 from services.nova_wiring_inventory import wiring_surface_ids
+from services.sock_service import get_sock_status_keys
 
 
 class ControlStatusService:
@@ -1190,6 +1191,12 @@ class ControlStatusService:
         payload["temporal_feed_event_count"] = int(last_temporal_feed.get("event_count", 0) or 0)
         payload["temporal_feed_surfaced_count"] = int(last_temporal_feed.get("surfaced_count", 0) or 0)
         payload["temporal_pressure_count"] = int(last_temporal_feed.get("pressure_count", 0) or 0)
+        try:
+            payload.update(get_sock_status_keys())
+        except Exception:
+            payload.setdefault("sock_hardware_profile", {})
+            payload.setdefault("sock_recommendation", {})
+            payload.setdefault("sock_policy_diff", {})
         wiring_inventory = build_wiring_inventory_payload(payload)
         payload["wiring_inventory"] = wiring_inventory
         payload["wiring_inventory_ok"] = bool(wiring_inventory.get("ok", False))
