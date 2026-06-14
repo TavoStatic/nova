@@ -407,6 +407,7 @@ def _coverage_root_for_path(path: str) -> str:
         low.startswith("routing/")
         or "routing" in low
         or "route_" in low
+        or "intent_understanding" in low
         or "planner" in low
         or "turn_" in low
         or name in {
