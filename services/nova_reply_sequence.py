@@ -173,6 +173,35 @@ def execute_reply_sequence(
         except TypeError:
             return build_fn(user_text, session_turns)
 
+    # --- Intent understanding: classify the turn BEFORE the planner runs ---
+    # This runs in parallel with planner prep — it classifies the intent LEVEL
+    # (sharing/requesting/commanding/casual) so the response strategy can be
+    # determined independently of tool routing.
+    turn_intent: dict = {}
+    response_strategy: dict = {}
+    _classify_intent_fn = getattr(core, "classify_turn_intent", None)
+    _select_strategy_fn = getattr(core, "select_response_strategy", None)
+    if callable(_classify_intent_fn):
+        try:
+            turn_intent = _classify_intent_fn(text, turns) or {}
+        except Exception:
+            turn_intent = {}
+    if callable(_select_strategy_fn) and turn_intent:
+        try:
+            response_strategy = _select_strategy_fn(turn_intent) or {}
+        except Exception:
+            response_strategy = {}
+    if turn_intent:
+        trace(
+            "intent_understanding",
+            "classified",
+            str(turn_intent.get("subject") or ""),
+            level=str(turn_intent.get("level") or ""),
+            domain=str(turn_intent.get("domain") or ""),
+            confidence=float(turn_intent.get("confidence") or 0.0),
+            strategy=str(response_strategy.get("strategy") or ""),
+        )
+
     planner_call_started = time.perf_counter()
     semantic_tool_observation: dict[str, object] = {}
 
@@ -293,6 +322,8 @@ def execute_reply_sequence(
         planner_decision=str(deferred_tool_meta.get("planner_decision") or "") if deferred_tool_meta else "",
         tool=str(deferred_tool_meta.get("tool") or "") if deferred_tool_meta else "",
         tool_result=str(deferred_tool_meta.get("tool_result") or "") if deferred_tool_meta else "",
+        turn_intent=turn_intent,
+        response_strategy=response_strategy,
     )
 
     retrieved = str(fallback_entry.get("retrieved_context") or "")

@@ -118,6 +118,10 @@ from services.nova_patching import teach_autoapply_proposal as service_teach_aut
 from services.nova_patching import teach_propose_patch as service_teach_propose_patch
 from services.nova_routing_support import finalize_routing_decision as service_finalize_routing_decision
 from services.nova_routing_support import llm_classify_routing_intent as service_llm_classify_routing_intent
+from services.nova_intent_understanding import classify_turn_intent as service_classify_turn_intent
+from services.nova_intent_understanding import select_response_strategy as service_select_response_strategy
+from services.nova_intent_understanding import record_intent_outcome as service_record_intent_outcome
+from services.work_tree_signal_ingestion import WorkTreeSignalIngestionService as _WorkTreeSignalIngestionService
 from services.nova_routing_helpers import strip_invocation_prefix as service_strip_invocation_prefix
 from services.nova_tool_policy import web_fetch as service_web_fetch
 from services.nova_tool_policy import web_allowlist_message as service_web_allowlist_message
@@ -760,6 +764,54 @@ def _llm_classify_routing_intent(
         ollama_base=OLLAMA_BASE,
         get_saved_location_text_fn=get_saved_location_text,
         requests_post_fn=requests.post,
+    )
+
+
+def classify_turn_intent(
+    text: str,
+    turns: Optional[list[tuple[str, str]]] = None,
+) -> dict:
+    return service_classify_turn_intent(
+        text,
+        turns,
+        live_ollama_calls_allowed_fn=_live_ollama_calls_allowed,
+        chat_model_fn=chat_model,
+        ollama_base=OLLAMA_BASE,
+        requests_post_fn=requests.post,
+    )
+
+
+def select_response_strategy(
+    intent: dict,
+    *,
+    tool_data_available: bool = False,
+    data_confirms_claim: Optional[bool] = None,
+) -> dict:
+    return service_select_response_strategy(
+        intent,
+        tool_data_available=tool_data_available,
+        data_confirms_claim=data_confirms_claim,
+    )
+
+
+def record_intent_outcome(
+    text: str,
+    intent: dict,
+    strategy: dict,
+    *,
+    outcome: str = "completed",
+) -> None:
+    try:
+        _ingest_signal_fn = _WorkTreeSignalIngestionService().ingest_signal
+    except Exception:
+        _ingest_signal_fn = None
+    service_record_intent_outcome(
+        text,
+        intent,
+        strategy,
+        outcome=outcome,
+        mem_add_fn=mem_add if mem_enabled() else None,
+        ingest_signal_fn=_ingest_signal_fn,
     )
 
 

@@ -146,6 +146,7 @@ SOURCE_PROFILE_LANES: dict[str, list[str]] = {
         "tests.test_release_validation_service",
     ],
     "source_reply_quality_contracts": [
+        "tests.test_intent_understanding",
         "tests.test_nova_fallback_flow",
     ],
     "source_runtime_core": [

@@ -11,40 +11,42 @@ from services.nova_turn_intent_trace import CONVERSATION_CAN_COMPLETE_WITHOUT_TA
 from services.nova_turn_intent_trace import CONVERSATION_REPLY_FORM
 
 
-def _conversation_can_be_complete_without_task(packet: dict | None) -> bool:
+def _conversation_can_be_complete_without_task(packet):
     payload = packet if isinstance(packet, dict) else {}
     contract = payload.get("answer_contract") if isinstance(payload.get("answer_contract"), dict) else {}
     return bool(contract.get(CONVERSATION_CAN_COMPLETE_WITHOUT_TASK_KEY))
 
 
-def _reply_form(packet: dict | None) -> str:
+def _reply_form(packet):
     payload = packet if isinstance(packet, dict) else {}
     contract = payload.get("answer_contract") if isinstance(payload.get("answer_contract"), dict) else {}
     return str(contract.get("reply_form") or "").strip()
 
 
-def _semantic_status(packet: dict | None) -> str:
+def _semantic_status(packet):
     payload = packet if isinstance(packet, dict) else {}
     planner = payload.get("planner_frame") if isinstance(payload.get("planner_frame"), dict) else {}
     semantic = planner.get("semantic_tool_observation") if isinstance(planner.get("semantic_tool_observation"), dict) else {}
     return str(semantic.get("status") or "").strip()
 
 
-def _tool_evidence_context(tool: str, tool_result: str, *, limit: int = 2500) -> str:
+def _tool_evidence_context(tool, tool_result, *, limit=2500):
     evidence = str(tool_result or "").strip()
     if not evidence:
         return ""
     tool_name = str(tool or "tool").strip() or "tool"
-    return f"TOOL EVIDENCE ({tool_name}; evidence for this turn, not a draft reply):\n{evidence[:limit]}"
+    return "TOOL EVIDENCE ({tool_name}; evidence for this turn, not a draft reply):\n{evidence}".format(
+        tool_name=tool_name, evidence=evidence[:limit]
+    )
 
 
-def _conversation_generation_context(fallback_context: dict | None, packet: dict | None) -> str:
+def _conversation_generation_context(fallback_context, packet):
     context = fallback_context if isinstance(fallback_context, dict) else {}
     payload = packet if isinstance(packet, dict) else {}
     conversation = payload.get("conversation_frame") if isinstance(payload.get("conversation_frame"), dict) else {}
     lines = [
         "NOVA INTERNAL REPLY FORM:",
-        f"- reply_form: {CONVERSATION_REPLY_FORM}",
+        "- reply_form: {}".format(CONVERSATION_REPLY_FORM),
         "- evidence_scope: current_conversation",
     ]
     if str(conversation.get("previous_assistant_turn") or "").strip():
@@ -56,15 +58,15 @@ def _conversation_generation_context(fallback_context: dict | None, packet: dict
     include_session_state = _semantic_status(packet) == "tool_evidence_available"
     blocks = [rendered] if rendered else []
     if chat_context:
-        blocks.append(f"RECENT CHAT CONTEXT:\n{chat_context}")
+        blocks.append("RECENT CHAT CONTEXT:\n{}".format(chat_context))
     if tool_context:
         blocks.append(tool_context)
     if state_context and include_session_state:
-        blocks.append(f"SESSION EVIDENCE:\n{state_context}")
+        blocks.append("SESSION EVIDENCE:\n{}".format(state_context))
     return "\n\n".join(blocks)
 
 
-def _remove_trailing_question(reply: str) -> str:
+def _remove_trailing_question(reply):
     text = str(reply or "").strip()
     if not text.endswith("?"):
         return text
@@ -72,14 +74,15 @@ def _remove_trailing_question(reply: str) -> str:
     return cleaned or text
 
 
-def _complete_thoughts(text: str) -> list[str]:
+def _complete_thoughts(text):
     value = str(text or "").strip()
     if not value:
         return []
-    thoughts: list[str] = []
+    thoughts = []
     start = 0
-    for match in re.finditer(r"[.!?][\"')\]]*(?=\s|$)", value):
-        thought = value[start : match.end()].strip()
+    _pat = re.compile('[.!?][\\"\')\\]]*(?=\\s|$)')
+    for match in _pat.finditer(value):
+        thought = value[start: match.end()].strip()
         if thought:
             thoughts.append(thought)
         start = match.end()
@@ -89,12 +92,12 @@ def _complete_thoughts(text: str) -> list[str]:
     return thoughts
 
 
-def _is_question_thought(text: str) -> bool:
+def _is_question_thought(text):
     value = str(text or "").strip().rstrip("\"')]")
     return value.endswith("?")
 
 
-def _shape_conversation_scoped_reply(reply: str) -> str:
+def _shape_conversation_scoped_reply(reply):
     text = _remove_trailing_question(reply)
     paragraphs = [part.strip() for part in re.split(r"\n\s*\n", text) if part.strip()]
     if paragraphs:
@@ -108,18 +111,51 @@ def _shape_conversation_scoped_reply(reply: str) -> str:
     return _remove_trailing_question(text)
 
 
+def _render_intent_strategy_context(turn_intent, response_strategy):
+    intent = turn_intent if isinstance(turn_intent, dict) else {}
+    strategy = response_strategy if isinstance(response_strategy, dict) else {}
+    level = str(intent.get("level") or "").strip()
+    domain = str(intent.get("domain") or "").strip()
+    strat = str(strategy.get("strategy") or "").strip()
+    claim = str(intent.get("user_claim") or "").strip()
+    confidence = float(intent.get("confidence") or 0.0)
+    if not level or not strat or confidence < 0.4:
+        return ""
+    lines = [
+        "INTENT UNDERSTANDING:",
+        "  User intent level: {level} (domain: {domain}, confidence: {conf:.2f})".format(
+            level=level, domain=domain, conf=confidence
+        ),
+    ]
+    if claim:
+        lines.append("  User's claim: {}".format(claim))
+    strategy_guidance = {
+        "accept_and_engage": "User is sharing or making a casual remark. Engage naturally -- do not run a tool unless asked.",
+        "confirm_with_data": "User shared something. Your data confirms it. Affirm what they said with the actual data.",
+        "correct_with_data": "User shared something. Your data tells a different story. Gently correct with accurate data.",
+        "enrich_with_data":  "User shared something. Add relevant data to enrich the conversation.",
+        "fulfill":           "User is requesting or commanding. Fulfill the request using available tool data.",
+        "clarify":           "Intent is unclear. Ask a single focused question to clarify what the user needs.",
+    }.get(strat, "")
+    if strategy_guidance:
+        lines.append("  Response strategy: {} -- {}".format(strat, strategy_guidance))
+    return "\n".join(lines)
+
+
 def build_fallback_context(
     *,
-    text: str,
+    text,
     turns,
-    build_fallback_context_details_fn: Callable[..., dict],
-    action_ledger_add_step: Callable[..., None],
-    pending_action: dict | None = None,
-    semantic_tool_observation: dict | None = None,
-    planner_decision: str = "",
-    tool: str = "",
-    tool_result: str = "",
-) -> dict:
+    build_fallback_context_details_fn,
+    action_ledger_add_step,
+    pending_action=None,
+    semantic_tool_observation=None,
+    planner_decision="",
+    tool="",
+    tool_result="",
+    turn_intent=None,
+    response_strategy=None,
+):
     raw_fallback_context = build_fallback_context_details_fn(text, turns)
     fallback_context = raw_fallback_context if isinstance(raw_fallback_context, dict) else {}
     tool_evidence_context = _tool_evidence_context(tool, tool_result)
@@ -140,6 +176,9 @@ def build_fallback_context(
         tool_result=tool_result,
     )
     retrieved_context = attach_turn_intent_evidence_packet(retrieved_context, intent_evidence_packet)
+    intent_strategy_ctx = _render_intent_strategy_context(turn_intent, response_strategy)
+    if intent_strategy_ctx:
+        retrieved_context = "\n\n".join(part for part in [retrieved_context, intent_strategy_ctx] if part)
     action_ledger_add_step(
         "memory_context",
         "used" if str(fallback_context.get("learning_context") or "") else "empty",
@@ -173,16 +212,18 @@ def build_fallback_context(
 
 def prepare_fallback_flow(
     *,
-    text: str,
+    text,
     turns,
-    build_fallback_context_details_fn: Callable[..., dict],
-    action_ledger_add_step: Callable[..., None],
-    pending_action: dict | None = None,
-    semantic_tool_observation: dict | None = None,
-    planner_decision: str = "",
-    tool: str = "",
-    tool_result: str = "",
-) -> dict:
+    build_fallback_context_details_fn,
+    action_ledger_add_step,
+    pending_action=None,
+    semantic_tool_observation=None,
+    planner_decision="",
+    tool="",
+    tool_result="",
+    turn_intent=None,
+    response_strategy=None,
+):
     fallback_bundle = build_fallback_context(
         text=text,
         turns=turns,
@@ -193,6 +234,8 @@ def prepare_fallback_flow(
         planner_decision=planner_decision,
         tool=tool,
         tool_result=tool_result,
+        turn_intent=turn_intent,
+        response_strategy=response_strategy,
     )
     return {
         "handled": False,
@@ -204,23 +247,23 @@ def prepare_fallback_flow(
 
 def finalize_llm_fallback_reply(
     *,
-    text: str,
-    raw_user_text: str,
-    input_source: str,
-    retrieved_context: str,
-    language_mix_spanish_pct: int,
-    ollama_chat_fn: Callable[..., str],
-    mem_enabled_fn: Callable[[], bool],
-    mem_should_store_fn: Callable[[str], bool],
-    mem_add_fn: Callable[[str, str, str], None],
-    strip_mem_leak_fn: Callable[[str, str], str],
-    behavior_record_event_fn: Callable[[str], None],
-    action_ledger_add_step: Callable[..., None],
-    preprocess_reply_fn: Callable[[str], str] | None = None,
-    ensure_reply_fn: Callable[[str], str],
-    intent_evidence_packet: dict | None = None,
-    fallback_context: dict | None = None,
-) -> dict:
+    text,
+    raw_user_text,
+    input_source,
+    retrieved_context,
+    language_mix_spanish_pct,
+    ollama_chat_fn,
+    mem_enabled_fn,
+    mem_should_store_fn,
+    mem_add_fn,
+    strip_mem_leak_fn,
+    behavior_record_event_fn,
+    action_ledger_add_step,
+    preprocess_reply_fn=None,
+    ensure_reply_fn,
+    intent_evidence_packet=None,
+    fallback_context=None,
+):
     evidence_reply = maybe_build_self_evidence_reply(
         fallback_context=fallback_context,
         intent_evidence_packet=intent_evidence_packet,
