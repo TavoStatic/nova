@@ -21,6 +21,7 @@ class TestToolRegistry(unittest.TestCase):
         registry = build_default_registry()
         metadata = registry.list_metadata()
         names = {item["name"] for item in metadata}
+        self.assertIn("codegen", names)
         self.assertIn("filesystem", names)
         self.assertIn("patch", names)
         self.assertIn("vision", names)
@@ -420,5 +421,4 @@ class TestToolRegistry(unittest.TestCase):
                 nova_core.set_active_user(previous_user)
 
 
-if __name__ == "__main__":
-    unittest.main()
+if __na

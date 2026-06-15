@@ -585,7 +585,7 @@ class AutonomyOrchestratorService:
         executable_count = _as_int(work_tree.get("active_executable_count"), -1)
         if executable_count >= 0:
             return executable_count
-        managed_owners = {"patch_queue", "generated_queue", "signal_ingestion"}
+        managed_owners = {"patch_queue", "generated_queue", "signal_ingestion", "capability_gap"}
         branches = [_as_dict(branch) for branch in _as_list(work_tree.get("branches")) if isinstance(branch, dict)]
         active_count = 0
         for payload in branches:
@@ -757,6 +757,36 @@ class AutonomyOrchestratorService:
             candidates.append(
                 {
                     "action": action,
+                    "source": "work_tree_snapshot",
+                    "triage_focus": {},
+                }
+            )
+
+
+        capability_gap_branches = [
+            _as_dict(branch)
+            for branch in _as_list(work_tree.get("branches"))
+            if isinstance(branch, dict)
+            and str(branch.get("kind") or "").strip().lower() == "capability_gap"
+            and str(branch.get("status") or "").strip().lower() in {"ready", "open", "pending"}
+        ]
+        if capability_gap_branches:
+            gap_branch = capability_gap_branches[0]
+            gap_branch_id = _safe_text(gap_branch.get("branch_id"), 160)
+            gap_branch_title = _safe_text(gap_branch.get("title"), 180)
+            gap_capability = str(gap_branch.get("metadata", {}).get("capability_name") or "").strip()
+            if gap_capability:
+                effect = f"Generate code to close capability gap: {gap_capability}. Branch: {gap_branch_title}."
+            else:
+                effect = f"Synthesize capability gap specification and generate implementation. Branch: {gap_branch_title}."
+            candidates.append(
+                {
+                    "action": self._contract_action(
+                        "codegen_run",
+                        reason_code="capability_gap_ready",
+                        target_id=gap_branch_id or None,
+                        expected_effect=effect,
+                    ),
                     "source": "work_tree_snapshot",
                     "triage_focus": {},
                 }

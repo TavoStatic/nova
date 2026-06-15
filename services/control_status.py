@@ -14,6 +14,7 @@ from services.nova_wiring_inventory import build_source_wiring_probe_payload
 from services.nova_wiring_inventory import build_wiring_inventory_payload
 from services.nova_wiring_inventory import wiring_surface_ids
 from services.sock_service import get_sock_status_keys
+from services.capabilities_gap_detector import enhance_status_with_capability_gaps
 
 
 class ControlStatusService:
@@ -1197,11 +1198,10 @@ class ControlStatusService:
             payload.setdefault("sock_hardware_profile", {})
             payload.setdefault("sock_recommendation", {})
             payload.setdefault("sock_policy_diff", {})
-        wiring_inventory = build_wiring_inventory_payload(payload)
-        payload["wiring_inventory"] = wiring_inventory
-        payload["wiring_inventory_ok"] = bool(wiring_inventory.get("ok", False))
-        payload["wiring_inventory_gap_count"] = int(wiring_inventory.get("gap_count", 0) or 0)
-        return payload
-
-
-CONTROL_STATUS_SERVICE = ControlStatusService()
+        try:
+            payload = enhance_status_with_capability_gaps(payload)
+        except Exception:
+            payload.setdefault("capability_gap_count", 0)
+            payload.setdefault("capability_gaps", [])
+            payload.setdefault("capabilities_gap_summary", {})
+       

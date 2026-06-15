@@ -37,15 +37,20 @@ Implemented and active capabilities include:
 
 Current posture is late-stage proving with strong operational health.
 
-As of the latest status record:
+As of 2026-06-14:
 
 - self-check: 22/22 passing
 - health score: 100
 - temporal feed: active
-- release artifact validation: passing in current lane
+- wiring check: 76 checks, 0 failed
+- source-root gap: 0 unclassified source files
+- intent understanding: wired — multi-level classifier active on every turn
+- SOCK hardware profiling: wired — hardware profile, model recommendation, and policy diff in status payload
+- latest promoted artifact: 2026-06-13 (source advanced 3 commits since; next `nova package-build` clears lifecycle gate)
 
 Remaining proof work is specific, not foundational:
 
+- rebuild and promote artifact from 2026-06-14 source
 - sustained autonomous self-closure from signal to action to evidence without operator babysitting
 - independent fresh-machine/VM validation of package install and operation
 - continued intent quality under ordinary conversation

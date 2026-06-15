@@ -1,6 +1,6 @@
 # NYO System Release Artifact
 
-Date: 2026-05-20
+Date: 2026-06-14
 
 ## Purpose
 
@@ -150,7 +150,7 @@ The current artifact strategy is backed by same-machine extracted-package valida
 - extracted `nova doctor` passed
 - extracted `nova runtime-status` passed
 - extracted `nova run` launch/exit passed for the base target
-- extracted `nova wiring-check --offline` passed with `72` checks and `0` failures
+- extracted `nova wiring-check --offline` passed with `76` checks and `0` failures
 - extracted `nova smoke-base --fix` passed
 - extracted `nova test` passed
 - temporary extracted web UI start/stop passed
@@ -200,3 +200,18 @@ For machine-local validation without installing into `Program Files`, the instal
 ```
 
 For now, the release truth is simpler: ship the source-bootstrap zip and keep the boundary honest.
+
+## 2026-06-14 Artifact State
+
+Source advanced three commits past the last promoted artifact (2026-06-13):
+
+- `123960c` — Classify intent understanding service in source root inventory (source-root gap → 0)
+- `bb620bf` — Wire SOCK hardware profile keys into status payload (wiring gap → 0, gap_count 0)
+- `10ad49a` — Fix work tree stuck tasks, classify temporal files, wire intent understanding
+
+Current package-readiness: `ready-with-notes` pending new build from 2026-06-14 source.
+Lifecycle gate: `source-changed-after-build` (not a validation failure — cleared by next `nova package-build`).
+Wiring check on current source: 76 checks, 0 failed.
+Source-root gap: 0 unclassified source files.
+
+Next step: run `nova package-build` on `codex/push-prep` source, verify, validate, and promote.

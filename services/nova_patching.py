@@ -1055,6 +1055,29 @@ def patch_apply(
     if next_revision is not None:
         write_patch_revision_fn(next_revision, zip_file.name)
 
+    if isinstance(manifest, dict):
+        try:
+            source = str(manifest.get("source") or "").strip().lower()
+            spec_source = manifest.get("spec_source") if isinstance(manifest.get("spec_source"), dict) else {}
+            spec_type = str(spec_source.get("type") or "").strip().lower()
+            if source == "codegen_bridge" or spec_type == "codegen":
+                from services.patch_promotion_memory import PATCH_PROMOTION_MEMORY_SERVICE
+
+                pattern_id = PATCH_PROMOTION_MEMORY_SERVICE.record_promotion(
+                    {
+                        "manifest": manifest,
+                        "spec_source": spec_source,
+                        "provenance": manifest.get("provenance") if isinstance(manifest.get("provenance"), dict) else {},
+                    },
+                    zip_file,
+                )
+                if pattern_id:
+                    log_patch_fn(f"PROMOTION_MEMORY_OK pattern_id={pattern_id} spec={str(spec_source.get('spec_name') or '').strip()}")
+                else:
+                    log_patch_fn("PROMOTION_MEMORY_SKIP record_unavailable")
+        except Exception as exc:
+            log_patch_fn(f"PROMOTION_MEMORY_ERR {exc}")
+
     log_patch_fn(f"APPLY_OK files={count}")
     rev_msg = f" Revision: {next_revision}." if next_revision is not None else ""
     behavior_msg = (
@@ -1525,35 +1548,4 @@ def teach_autoapply_proposal(
         behavior_result = behavioral_check_fn(base_dir=staging)
         if not bool(behavior_result.get("ok")):
             try:
-                shutil.rmtree(staging)
-            except Exception:
-                pass
-            output = str(behavior_result.get("output") or "")
-            summary = str(behavior_result.get("summary") or "behavioral check failed")
-            return f"Behavioral check failed in staging:\n{summary}\n\n{output}"
-
-        if apply_live:
-            apply_out = patch_apply_fn(str(proposal_zip))
-            try:
-                shutil.rmtree(staging)
-            except Exception:
-                pass
-            return f"Staging tests passed. patch_apply result:\n{apply_out}"
-
-        try:
-            shutil.rmtree(staging)
-        except Exception:
-            pass
-
-        return (
-            f"Staging behavioral check passed ({str(behavior_result.get('summary') or 'passed')}). To apply this proposal to the live repo run:\n"
-            f"  teach autoapply apply {zip_path}\n"
-            "Or run the suggested patch apply command directly: patch apply <zip_path>"
-        )
-    except Exception as exc:
-        return f"Autoapply failed: {exc}"
-
-
-def interactive_patch_review_enabled() -> bool:
-    raw = str(os.environ.get("NOVA_INTERACTIVE_PATCH_REVIEW") or "").strip().lower()
-    return raw in {"1", "true", "yes", "on"}
+                shutil.rmtr

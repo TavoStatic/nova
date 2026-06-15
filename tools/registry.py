@@ -5,6 +5,7 @@ import time
 from typing import Any
 
 from .base_tool import NovaTool, ToolContext, ToolInvocationError
+from .codegen_tool import CodegenTool
 from .filesystem_tool import FileSystemTool
 from .os_capability_tool import OsCapabilityTool
 from .patch_tool import PatchTool
@@ -145,6 +146,7 @@ class ToolRegistry:
 def build_default_registry() -> ToolRegistry:
     return ToolRegistry([
         FileSystemTool(),
+        CodegenTool(),
         PatchTool(),
         VisionTool(),
         ResearchTool(),

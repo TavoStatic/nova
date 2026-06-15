@@ -102,6 +102,19 @@ AUTONOMY_ADVISORY_ACTION_CATALOG: dict[str, dict[str, object]] = {
         "impact": 0.58,
         "safety_risk": 0.08,
     },
+    "codegen_run": {
+        "target_kind": "lane",
+        "target_id": "capability_gap",
+        "execution_group": "generated_code",
+        "expected_effect": "Synthesize code specification and generate implementation to close declared capability gap.",
+        "preconditions": ["capability_gap_detected", "policy_allows_codegen_run"],
+        "requires_ack": False,
+        "cooldown_sec": 180,
+        "ttl_sec": 180,
+        "max_steps": 1,
+        "impact": 0.65,
+        "safety_risk": 0.14,
+    },
 }
 
 

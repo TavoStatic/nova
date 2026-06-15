@@ -27,6 +27,7 @@ _VALID_SIGNAL_CLASSES = {
     "regression_failure",
     "subconscious_candidate",
     "release_readiness_gap",
+    "declared_capability_absent",
 }
 
 _SIGNAL_TO_WORK_CLASS = {
@@ -41,6 +42,7 @@ _SIGNAL_TO_WORK_CLASS = {
     "regression_failure": "regression_failure",
     "subconscious_candidate": "candidate_review",
     "release_readiness_gap": "release_readiness_gap",
+    "declared_capability_absent": "capability_gap",
 }
 
 MEMORY_BOOTSTRAP_PULSE_TASK_TITLE = "Pulse current memory bootstrap evidence without writing memory files"
@@ -83,6 +85,7 @@ _BUCKET_BY_WORK_CLASS = {
     "regression_failure": "regression",
     "candidate_review": "candidate_review",
     "release_readiness_gap": "release",
+    "capability_gap": "capability",
 }
 
 _DEFAULT_ACTIONABILITY_BY_CLASS = {
@@ -96,6 +99,7 @@ _DEFAULT_ACTIONABILITY_BY_CLASS = {
     "regression_failure": "safe_now",
     "candidate_review": "safe_now",
     "release_readiness_gap": "blocked",
+    "capability_gap": "safe_now",
 }
 
 _BRANCH_STATUS_BY_ACTIONABILITY = {
@@ -4162,6 +4166,79 @@ def _sequence_evidence_result_valid(row: dict[str, Any]) -> bool:
     return evidence_result_valid(row)
 
 
+
+
+def _has_capability_manifest_surface(status_payload: dict) -> bool:
+    return any(
+        key in status_payload
+        for key in (
+            "capabilities_registered",
+            "capabilities_roadmap",
+            "capability_gap_count",
+            "capability_gaps",
+        )
+    )
+
+
+def _capability_gap_signal_from_status(status_payload: dict) -> dict | None:
+    """Generate signal when desired capabilities are not yet implemented."""
+    if not _has_capability_manifest_surface(status_payload):
+        return None
+
+    gap_count = int(status_payload.get("capability_gap_count", 0) or 0)
+    gaps = status_payload.get("capability_gaps")
+    gap_list = [str(item or "").strip() for item in list(gaps or []) if str(item or "").strip()] if isinstance(gaps, list) else []
+
+    if gap_count <= 0 and not gap_list:
+        return None
+
+    error_symbol = "declared_capability_gap"
+    title = f"Declared capability gap: {gap_count} capabilities not yet implemented"
+    if gap_count == 1 and gap_list:
+        title = f"Declared capability gap: {gap_list[0]}"
+
+    task_sequence = [
+        {
+            "title": "Read capabilities roadmap manifest",
+            "allowed_tools": ["read"],
+            "preferred_tool": "read",
+            "tool_args": ["capabilities_roadmap.json"],
+        },
+        {
+            "title": "Read registered capabilities",
+            "allowed_tools": ["read"],
+            "preferred_tool": "read",
+            "tool_args": ["capabilities.json"],
+        },
+        {
+            "title": "Analyze capability gap and propose codegen specification",
+            "allowed_tools": ["read", "find", "pulse"],
+            "preferred_tool": "pulse",
+        },
+    ]
+
+    return {
+        "source": "capability_manifest",
+        "signal_class": "declared_capability_absent",
+        "title": title,
+        "fingerprint": {
+            "class": "capability_gap",
+            "surface": "capability_manifest",
+            "error": "capability_absent",
+            "symbol": error_symbol,
+        },
+        "payload": {
+            "gap_count": gap_count,
+            "gaps": gap_list[:5],
+        },
+        "severity": "medium",
+        "actionability": "safe_now",
+        "allowed_tools": ["read", "find", "pulse"],
+        "preferred_tool": "pulse",
+        "next_task": "Review capabilities roadmap and prioritize next codegen work",
+        "task_sequence": task_sequence,
+    }
+
 class WorkTreeSignalIngestionService:
     """Normalize runtime/control pressure into governed Work Tree branches only."""
 
@@ -4397,6 +4474,10 @@ class WorkTreeSignalIngestionService:
         release_signal = _release_readiness_signal_from_status(status_payload)
         if release_signal is not None:
             signals.append(release_signal)
+
+        capability_gap_signal = _capability_gap_signal_from_status(status_payload)
+        if capability_gap_signal is not None:
+            signals.append(capability_gap_signal)
 
         self_check_signal = _self_check_signal_from_status(status_payload, signals)
         if self_check_signal is not None:

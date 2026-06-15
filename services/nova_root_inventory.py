@@ -431,6 +431,8 @@ def _coverage_root_for_path(path: str) -> str:
         return "tts_audio_output"
     if "vision" in low or name in {"camera.py", "look.py", "look_crop.py"}:
         return "vision"
+    if "codegen" in low:
+        return "codegen_pipeline"
     if "memory" in low or low.startswith("memory/"):
         return "memory_identity"
     if "release" in low or "package" in low or "installer" in low or low.startswith("installer/"):

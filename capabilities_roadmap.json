@@ -1,0 +1,57 @@
+{
+  "declared_capabilities": {
+    "codegen_tool": "Nova can generate code from specifications with preview-only safety constraints",
+    "codegen_patch_bridge": "Nova can convert codegen previews into formal patch artifacts compatible with patch queue",
+    "capability_gap_detection": "Nova can detect gaps between desired capabilities (roadmap) and registered capabilities",
+    "autonomous_code_generation": "Nova can autonomously generate code to close capability gaps when orchestrator prioritizes",
+    "generated_code_tests": "Nova automatically generates behavioral tests for all generated code",
+    "code_generation_memory": "Nova records generated code patterns and can reuse them for similar future specs",
+    "dependency_resolution": "Nova can analyze and resolve missing external package dependencies",
+    "type_checking": "Nova can perform static type checking and linting on generated code",
+    "api_gateway": "Nova can expose generated code through HTTP API endpoints",
+    "database_schema_generation": "Nova can generate database schema and migration code",
+    "configuration_management": "Nova can generate configuration schemas and validation",
+    "documentation_generation": "Nova can generate API documentation from generated code",
+    "integration_testing": "Nova can generate and run integration tests for generated features",
+    "performance_profiling": "Nova can profile and optimize generated code performance",
+    "security_scanning": "Nova can scan generated code for security vulnerabilities",
+    "deployment_automation": "Nova can generate deployment and infrastructure-as-code artifacts",
+    "rollback_management": "Nova can generate safe rollback procedures for generated changes"
+  },
+  "roadmap_phases": {
+    "phase_1_complete": {
+      "label": "Phase 1: Codegen + Bridge Complete",
+      "completed_date": "2026-06-14",
+      "capabilities": ["codegen_tool", "codegen_patch_bridge"]
+    },
+    "phase_2_active": {
+      "label": "Phase 2: Autonomy Integration",
+      "target_completion": "2026-06-30",
+      "capabilities": ["capability_gap_detection", "autonomous_code_generation", "generated_code_tests", "code_generation_memory"]
+    },
+    "phase_3_future": {
+      "label": "Phase 3: Extended Ecosystems",
+      "target_completion": "2026-07-31",
+      "capabilities": ["dependency_resolution", "type_checking", "api_gateway", "database_schema_generation"]
+    },
+    "phase_4_advanced": {
+      "label": "Phase 4: Intelligence & Optimization",
+      "target_completion": "2026-08-31",
+      "capabilities": ["configuration_management", "documentation_generation", "integration_testing", "performance_profiling"]
+    },
+    "phase_5_resilience": {
+      "label": "Phase 5: Safety & Resilience",
+      "target_completion": "2026-09-30",
+      "capabilities": ["security_scanning", "deployment_automation", "rollback_management"]
+    }
+  },
+  "gap_detection_config": {
+    "enabled": true,
+    "check_frequency": "every_health_pulse",
+    "signal_on_gap": true,
+    "signal_class": "declared_capability_absent",
+    "prioritize_phases": ["phase_2_active", "phase_3_future"],
+    "max_gaps_per_signal": 5,
+    "min_gaps_to_fire_signal": 1
+  }
+}
