@@ -48,6 +48,22 @@ class TestCodegenActionCatalog(unittest.TestCase):
         self.assertGreater(safety_risk, 0.1)
         self.assertLess(safety_risk, 0.3)
 
+    def test_leah_build_run_next_in_catalog(self):
+        """leah_build_run_next action is registered in catalog."""
+        catalog = autonomy_advisory_action_catalog()
+        self.assertIn("leah_build_run_next", catalog)
+
+    def test_leah_build_run_next_metadata(self):
+        """leah_build_run_next has the Leah build metadata."""
+        catalog = autonomy_advisory_action_catalog()
+        leah = catalog.get("leah_build_run_next", {})
+
+        self.assertEqual(leah.get("target_kind"), "lane")
+        self.assertEqual(leah.get("target_id"), "leah_build")
+        self.assertEqual(leah.get("execution_group"), "leah_build")
+        self.assertTrue(leah.get("requires_ack", False))
+        self.assertIn("policy_allows_leah_build_run_next", leah.get("preconditions", []))
+
 
 class TestOrchestratorCodegenDetection(unittest.TestCase):
     """Test orchestrator detection of capability_gap branches."""
@@ -272,6 +288,45 @@ class TestOrchestratorCodegenPriority(unittest.TestCase):
 
         action_types = [c.get("action", {}).get("action_type") for c in candidates]
         self.assertIn("codegen_run", action_types)
+
+
+class TestOrchestratorLeahBuildRouting(unittest.TestCase):
+    """Test Leah build routing from capability gap branches."""
+
+    def test_orchestrator_routes_leah_capabilities_to_leah_build(self):
+        orchestrator = AutonomyOrchestratorService()
+
+        evidence = {
+            "work_tree_snapshot": {
+                "branches": [
+                    {
+                        "branch_id": "leah-gap-001",
+                        "kind": "capability_gap",
+                        "status": "ready",
+                        "title": "Implement leah_voice_persona_engine",
+                        "source_payload": {
+                            "primary_capability": "leah_voice_persona_engine",
+                            "execution_group": "leah_build",
+                        },
+                        "metadata": {"capability_name": "leah_voice_persona_engine"},
+                    }
+                ],
+            },
+            "queue_pressure": {},
+            "runtime_guard_status": {"guard_running": True},
+            "triage_hints": {},
+            "autonomy_maintenance": {},
+        }
+
+        candidates = orchestrator._contract_candidate_actions(evidence)
+        leah_candidates = [
+            c for c in candidates
+            if c.get("action", {}).get("action_type") == "leah_build_run_next"
+        ]
+        self.assertEqual(len(leah_candidates), 1)
+        action = leah_candidates[0]["action"]
+        self.assertEqual(action.get("target_id"), "leah-gap-001")
+        self.assertIn("leah_voice_persona_engine", action.get("expected_effect", ""))
 
 
 if __name__ == "__main__":

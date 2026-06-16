@@ -421,4 +421,5 @@ class TestToolRegistry(unittest.TestCase):
                 nova_core.set_active_user(previous_user)
 
 
-if __na
+if __name__ == "__main__":
+    unittest.main()

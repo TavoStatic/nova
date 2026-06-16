@@ -4192,10 +4192,18 @@ def _capability_gap_signal_from_status(status_payload: dict) -> dict | None:
     if gap_count <= 0 and not gap_list:
         return None
 
+    leah_gaps = [gap for gap in gap_list if gap.startswith("leah_")]
+    execution_group = "leah_build" if leah_gaps else "generated_code"
+    primary_capability = gap_list[0] if gap_list else "declared_capability_absent"
+
     error_symbol = "declared_capability_gap"
     title = f"Declared capability gap: {gap_count} capabilities not yet implemented"
     if gap_count == 1 and gap_list:
         title = f"Declared capability gap: {gap_list[0]}"
+    if leah_gaps:
+        title = f"Leah capability gap: {gap_count} capabilities not yet implemented"
+        if gap_count == 1:
+            title = f"Leah capability gap: {gap_list[0]}"
 
     task_sequence = [
         {
@@ -4216,20 +4224,31 @@ def _capability_gap_signal_from_status(status_payload: dict) -> dict | None:
             "preferred_tool": "pulse",
         },
     ]
+    if leah_gaps:
+        task_sequence.insert(1, {
+            "title": "Read Leah roadmap capabilities before generating Leah work",
+            "allowed_tools": ["read"],
+            "preferred_tool": "read",
+            "tool_args": ["capabilities_roadmap.json"],
+        })
 
     return {
-        "source": "capability_manifest",
+        "source": "codegen_pipeline",
         "signal_class": "declared_capability_absent",
         "title": title,
         "fingerprint": {
             "class": "capability_gap",
-            "surface": "capability_manifest",
+            "surface": "codegen_pipeline",
             "error": "capability_absent",
             "symbol": error_symbol,
         },
         "payload": {
             "gap_count": gap_count,
             "gaps": gap_list[:5],
+            "primary_capability": primary_capability,
+            "execution_group": execution_group,
+            "capability_prefixes": sorted({gap.split("_", 1)[0] for gap in gap_list if gap}),
+            "leah_gap_count": len(leah_gaps),
         },
         "severity": "medium",
         "actionability": "safe_now",
@@ -5515,12 +5534,16 @@ class WorkTreeSignalIngestionService:
                     if str(tool or "").strip()
                 ]
                 task_preferred_tool = str(sequence_task.get("preferred_tool") or "").strip()
+            judgment_already_complete = _sequence_has_tool(normalized, SOURCE_ROOT_JUDGMENT_TOOL) and _sequence_item_satisfied(
+                branch.branch_id, _source_root_judgment_task()
+            )
             if (
                 not open_tasks
                 and sequence_configured
                 and not sequence_task
                 and str(branch.resolution_state or "").strip().lower() == "open"
                 and _sequence_has_tool(normalized, SOURCE_ROOT_JUDGMENT_TOOL)
+                and not judgment_already_complete
             ):
                 sequence_task = _first_sequence_task(normalized)
                 if sequence_task:
@@ -5750,11 +5773,4 @@ def _branch_why_summary(normalized: dict[str, Any]) -> str:
         parts.append(f"route_hint={route_hint}")
     summary = "Signal evidence: " + " | ".join(parts)
     extra_lines = [summary]
-    if rationale:
-        extra_lines.append(f"Rationale: {rationale}")
-    if branch_note:
-        extra_lines.append(f"Review focus: {branch_note}")
-    return "\n".join(extra_lines)
-
-
-WORK_TREE_SIGNAL_INGESTION_SERVICE = WorkTreeSignalIngestionService()
+  

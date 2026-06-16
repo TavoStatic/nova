@@ -115,6 +115,19 @@ AUTONOMY_ADVISORY_ACTION_CATALOG: dict[str, dict[str, object]] = {
         "impact": 0.65,
         "safety_risk": 0.14,
     },
+    "leah_build_run_next": {
+        "target_kind": "lane",
+        "target_id": "leah_build",
+        "execution_group": "leah_build",
+        "expected_effect": "Generate and advance Leah-specific capability work under the Leah build lane.",
+        "preconditions": ["capability_gap_detected", "policy_allows_leah_build_run_next"],
+        "requires_ack": True,
+        "cooldown_sec": 240,
+        "ttl_sec": 180,
+        "max_steps": 1,
+        "impact": 0.7,
+        "safety_risk": 0.2,
+    },
 }
 
 

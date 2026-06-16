@@ -123,3 +123,4 @@ PROMOTION_AUDIT_LOG = TEST_SESSIONS_DIR / "promotion_audit.jsonl"
 PROMOTED_DEFINITIONS_DIR = TEST_SESSIONS_DIR / "promoted"
 POLICY_PATH = BASE_DIR / "policy.json"
 PYTHON = resolve_python_executable(BASE_DIR)
+WORK_TREE_RUN_TRIGGER_FILE = RUNTIME_DIR / "work_tree_run_trigger.json"

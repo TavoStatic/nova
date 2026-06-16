@@ -64,6 +64,7 @@ from services.autonomy_orchestrator_ledger import AUTONOMY_ORCHESTRATOR_LEDGER_S
 from services.nova_runtime_context import AUTONOMY_ORCHESTRATOR_LEDGER_FILE
 from services.nova_runtime_context import OS_CAPABILITY_LEDGER_FILE
 from services.nova_runtime_context import OPERATOR_OUTBOX_FILE
+from services.nova_runtime_context import WORK_TREE_RUN_TRIGGER_FILE
 from services.nova_runtime_context import resolve_runtime_dir
 from services.operator_outbox import OPERATOR_OUTBOX_SERVICE
 from services.session_admin import SESSION_ADMIN_SERVICE
@@ -812,8 +813,18 @@ def _patch_queue_run_next_action(payload: dict) -> tuple[bool, str, dict, str]:
 
 
 def _active_work_tree_run_next_action(payload: dict) -> tuple[bool, str, dict, str]:
-    msg = "active_work_tree_run_next_requires_autonomy_maintenance_scope"
-    return False, msg, {}, msg
+    try:
+        import json as _json
+        import time as _time
+        trigger = dict(payload or {})
+        trigger["_requested_at"] = _time.time()
+        WORK_TREE_RUN_TRIGGER_FILE.parent.mkdir(parents=True, exist_ok=True)
+        WORK_TREE_RUN_TRIGGER_FILE.write_text(_json.dumps(trigger), encoding="utf-8")
+        msg = "active_work_tree_run_next_triggered"
+        return True, msg, {"triggered": True}, msg
+    except Exception as exc:
+        msg = f"active_work_tree_run_next_trigger_failed:{exc}"
+        return False, msg, {}, msg
 
 
 def _update_now_dry_run_action(payload: dict) -> tuple[bool, str, dict, str]:

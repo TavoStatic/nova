@@ -6,6 +6,10 @@
     "autonomous_code_generation": "Nova can autonomously generate code to close capability gaps when orchestrator prioritizes",
     "generated_code_tests": "Nova automatically generates behavioral tests for all generated code",
     "code_generation_memory": "Nova records generated code patterns and can reuse them for similar future specs",
+    "leah_voice_persona_engine": "Leah can speak with a stable voice persona and response style",
+    "leah_memory_recall": "Leah can retrieve prior conversation and pattern memory for continuity",
+    "leah_emotional_state_model": "Leah can track a simple emotional state model for replies",
+    "leah_conversation_continuity": "Leah can maintain continuity across turns and sessions",
     "dependency_resolution": "Nova can analyze and resolve missing external package dependencies",
     "type_checking": "Nova can perform static type checking and linting on generated code",
     "api_gateway": "Nova can expose generated code through HTTP API endpoints",
@@ -29,6 +33,12 @@
       "target_completion": "2026-06-30",
       "capabilities": ["capability_gap_detection", "autonomous_code_generation", "generated_code_tests", "code_generation_memory"]
     },
+    "phase_2_leah_build": {
+      "label": "Phase 2: Leah Build Foundation",
+      "target_completion": "2026-07-08",
+      "execution_group": "leah_build",
+      "capabilities": ["leah_voice_persona_engine", "leah_memory_recall", "leah_emotional_state_model", "leah_conversation_continuity"]
+    },
     "phase_3_future": {
       "label": "Phase 3: Extended Ecosystems",
       "target_completion": "2026-07-31",
@@ -50,7 +60,7 @@
     "check_frequency": "every_health_pulse",
     "signal_on_gap": true,
     "signal_class": "declared_capability_absent",
-    "prioritize_phases": ["phase_2_active", "phase_3_future"],
+    "prioritize_phases": ["phase_2_leah_build", "phase_2_active", "phase_3_future"],
     "max_gaps_per_signal": 5,
     "min_gaps_to_fire_signal": 1
   }

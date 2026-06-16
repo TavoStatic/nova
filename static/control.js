@@ -28,6 +28,9 @@ const workTreeSelectedSummary = document.getElementById('workTreeSelectedSummary
 const workTreeEmptyState = document.getElementById('workTreeEmptyState');
 const workTreeSvg = document.getElementById('workTreeSvg');
 const workTreeBranchInfo = document.getElementById('workTreeBranchInfoBody') || document.getElementById('workTreeBranchInfo');
+const workTreeBranchActions = document.getElementById('workTreeBranchActions');
+const workTreeActionFeedback = document.getElementById('workTreeActionFeedback');
+const btnWorkTreeRunNext = document.getElementById('btnWorkTreeRunNext');
 const pipelineSelect = document.getElementById('pipelineSelect');
 const pipelineListSummary = document.getElementById('pipelineListSummary');
 const pipelineCards = document.getElementById('pipelineCards');
@@ -3659,10 +3662,17 @@ function renderSelectedWorkTreeSummary(tree) {
     }
 }
 
+let _inspectorBranchId = null;
+let _inspectorBranchStatus = null;
+
 function renderWorkTreeInspector(tree, node) {
     if (!workTreeBranchInfo) return;
+    if (workTreeActionFeedback) workTreeActionFeedback.textContent = '';
     if (!tree) {
         workTreeBranchInfo.textContent = 'Branch inspection pending.';
+        _inspectorBranchId = null;
+        _inspectorBranchStatus = null;
+        if (workTreeBranchActions) workTreeBranchActions.style.display = 'none';
         return;
     }
     const nextStep = tree && tree.next_step && typeof tree.next_step === 'object' ? tree.next_step : {};
@@ -3675,9 +3685,14 @@ function renderWorkTreeInspector(tree, node) {
             '',
             'This tree has no persisted branch history to inspect.',
         ].join('\n');
+        _inspectorBranchId = null;
+        _inspectorBranchStatus = null;
+        if (workTreeBranchActions) workTreeBranchActions.style.display = 'none';
         return;
     }
     const currentTask = node && node.current_task && typeof node.current_task === 'object' ? node.current_task : {};
+    _inspectorBranchId = String(node.id || node.branch_id || '');
+    _inspectorBranchStatus = String(node.status || '').toLowerCase();
     workTreeBranchInfo.textContent = [
         `Tree: ${tree.title || tree.tree_id || 'tree'}`,
         `Branch: ${node.title || node.id || 'branch'}`,
@@ -3691,6 +3706,11 @@ function renderWorkTreeInspector(tree, node) {
         'Notes:',
         String(node.notes || '').trim() || 'No branch notes recorded.',
     ].join('\n');
+    if (workTreeBranchActions) {
+        const actionable = ['ready', 'open', 'pending'].includes(_inspectorBranchStatus);
+        workTreeBranchActions.style.display = actionable ? '' : 'none';
+        if (btnWorkTreeRunNext) btnWorkTreeRunNext.style.display = actionable ? '' : 'none';
+    }
 }
 
 function renderTreeSvg(tree) {
@@ -4614,6 +4634,16 @@ bindClick('btnGeneratedPriorityRun', async () => {
     const results = Array.isArray(payload.results) ? payload.results : [];
     const summary = `${payload.message || 'generated priority run completed'}\n` + results.map((item) => `- ${item.file}: ${item.ok ? 'OK' : 'FAIL'}${item.message ? ' (' + item.message + ')' : ''}`).join('\n');
     setAction(summary.trim());
+});
+bindClick('btnWorkTreeRunNext', async () => {
+    if (workTreeActionFeedback) workTreeActionFeedback.textContent = 'Advancing branch…';
+    try {
+        const body = _inspectorBranchId ? {branch_id: _inspectorBranchId} : {};
+        const payload = await postAction('active_work_tree_run_next', body);
+        if (workTreeActionFeedback) workTreeActionFeedback.textContent = payload.message || 'Step dispatched.';
+    } catch (err) {
+        if (workTreeActionFeedback) workTreeActionFeedback.textContent = 'Error: ' + (err.message || 'unknown');
+    }
 });
 bindClick('btnGeneratedQueueRunNext', async () => {
     await runNextGeneratedQueueItem();

@@ -113,6 +113,9 @@ class NovaWiringInventoryServiceTests(unittest.TestCase):
         self.assertIn("identity_profile_answers", source_root_ids())
         self.assertIn("identity_profile_answers", wiring_surface_ids())
 
+    def test_codegen_pipeline_is_declared_as_a_root(self) -> None:
+        self.assertIn("codegen_pipeline", source_root_ids())
+
     def test_model_runtime_declares_owned_signal_and_os_capability_route(self) -> None:
         surface = next(item for item in WIRING_SURFACES if item.surface_id == "model_runtime")
 

@@ -774,16 +774,34 @@ class AutonomyOrchestratorService:
             gap_branch = capability_gap_branches[0]
             gap_branch_id = _safe_text(gap_branch.get("branch_id"), 160)
             gap_branch_title = _safe_text(gap_branch.get("title"), 180)
-            gap_capability = str(gap_branch.get("metadata", {}).get("capability_name") or "").strip()
-            if gap_capability:
-                effect = f"Generate code to close capability gap: {gap_capability}. Branch: {gap_branch_title}."
+            gap_metadata = _as_dict(gap_branch.get("metadata"))
+            gap_payload = _as_dict(gap_branch.get("source_payload"))
+            gap_capability = str(
+                gap_metadata.get("capability_name")
+                or gap_payload.get("primary_capability")
+                or gap_payload.get("capability_name")
+                or ""
+            ).strip()
+            gap_execution_group = str(gap_payload.get("execution_group") or "").strip().lower()
+            if gap_execution_group == "leah_build" or gap_capability.startswith("leah_"):
+                action_type = "leah_build_run_next"
+                reason_code = "leah_capability_gap_ready"
+                if gap_capability:
+                    effect = f"Generate Leah-specific capability work for {gap_capability}. Branch: {gap_branch_title}."
+                else:
+                    effect = f"Generate Leah-specific capability work. Branch: {gap_branch_title}."
             else:
-                effect = f"Synthesize capability gap specification and generate implementation. Branch: {gap_branch_title}."
+                action_type = "codegen_run"
+                reason_code = "capability_gap_ready"
+                if gap_capability:
+                    effect = f"Generate code to close capability gap: {gap_capability}. Branch: {gap_branch_title}."
+                else:
+                    effect = f"Synthesize capability gap specification and generate implementation. Branch: {gap_branch_title}."
             candidates.append(
                 {
                     "action": self._contract_action(
-                        "codegen_run",
-                        reason_code="capability_gap_ready",
+                        action_type,
+                        reason_code=reason_code,
                         target_id=gap_branch_id or None,
                         expected_effect=effect,
                     ),

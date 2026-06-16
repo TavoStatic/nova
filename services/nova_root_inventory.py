@@ -163,6 +163,17 @@ SOURCE_ROOTS: tuple[SourceRoot, ...] = (
         ("services/nova_patching.py", "services/patch_control.py", "services/nova_update_now.py"),
     ),
     SourceRoot(
+        "codegen_pipeline",
+        "Code generation previews, patch bridging, memory promotion, and Leah build scaffolding",
+        (
+            "tools/codegen_tool.py",
+            "services/codegen_patch_bridge.py",
+            "services/codegen_memory_recorder.py",
+            "services/patch_promotion_memory.py",
+            "services/capabilities_gap_detector.py",
+        ),
+    ),
+    SourceRoot(
         "release",
         "Release package readiness, verification, promotion judgment, and release-clean flow",
         (

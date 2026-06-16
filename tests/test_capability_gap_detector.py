@@ -216,6 +216,7 @@ class TestCapabilityGapSignalGeneration(unittest.TestCase):
         self.assertEqual(signal["signal_class"], "declared_capability_absent")
         self.assertEqual(signal["severity"], "medium")
         self.assertIn("autonomous_generation", signal["payload"]["gaps"])
+        self.assertEqual(signal["payload"]["execution_group"], "generated_code")
 
     def test_signal_not_generated_when_no_gaps(self):
         """Signal is not generated when no capability gaps."""
@@ -267,6 +268,21 @@ class TestCapabilityGapSignalGeneration(unittest.TestCase):
 
         self.assertTrue(any("roadmap" in title.lower() for title in task_titles))
         self.assertTrue(any("gap" in title.lower() or "codegen" in title.lower() for title in task_titles))
+
+    def test_leah_gap_uses_leah_build_execution_group(self):
+        """Leah-prefixed gaps should route into the Leah build lane."""
+        from services.work_tree_signal_ingestion import _capability_gap_signal_from_status
+
+        status = {
+            "capability_gap_count": 2,
+            "capability_gaps": ["leah_voice_persona_engine", "leah_memory_recall"],
+        }
+
+        signal = _capability_gap_signal_from_status(status)
+        self.assertIsNotNone(signal)
+        self.assertEqual(signal["title"].startswith("Leah capability gap"), True)
+        self.assertEqual(signal["payload"]["execution_group"], "leah_build")
+        self.assertEqual(signal["payload"]["leah_gap_count"], 2)
 
 
 if __name__ == "__main__":

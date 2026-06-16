@@ -1548,4 +1548,35 @@ def teach_autoapply_proposal(
         behavior_result = behavioral_check_fn(base_dir=staging)
         if not bool(behavior_result.get("ok")):
             try:
-                shutil.rmtr
+                shutil.rmtree(staging)
+            except Exception:
+                pass
+            output = str(behavior_result.get("output") or "")
+            summary = str(behavior_result.get("summary") or "behavioral check failed")
+            return f"Behavioral check failed in staging:\n{summary}\n\n{output}"
+
+        if apply_live:
+            apply_out = patch_apply_fn(str(proposal_zip))
+            try:
+                shutil.rmtree(staging)
+            except Exception:
+                pass
+            return f"Staging tests passed. patch_apply result:\n{apply_out}"
+
+        try:
+            shutil.rmtree(staging)
+        except Exception:
+            pass
+
+        return (
+            f"Staging behavioral check passed ({str(behavior_result.get('summary') or 'passed')}). To apply this proposal to the live repo run:\n"
+            f"  teach autoapply apply {zip_path}\n"
+            "Or run the suggested patch apply command directly: patch apply <zip_path>"
+        )
+    except Exception as exc:
+        return f"Autoapply failed: {exc}"
+
+
+def interactive_patch_review_enabled() -> bool:
+    raw = str(os.environ.get("NOVA_INTERACTIVE_PATCH_REVIEW") or "").strip().lower()
+    return raw in {"1", "true", "yes", "on"}

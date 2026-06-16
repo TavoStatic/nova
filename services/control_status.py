@@ -1204,4 +1204,11 @@ class ControlStatusService:
             payload.setdefault("capability_gap_count", 0)
             payload.setdefault("capability_gaps", [])
             payload.setdefault("capabilities_gap_summary", {})
-       
+        wiring_inventory = build_wiring_inventory_payload(payload)
+        payload["wiring_inventory"] = wiring_inventory
+        payload["wiring_inventory_ok"] = bool(wiring_inventory.get("ok", False))
+        payload["wiring_inventory_gap_count"] = int(wiring_inventory.get("gap_count", 0) or 0)
+        return payload
+
+
+CONTROL_STATUS_SERVICE = ControlStatusService()
