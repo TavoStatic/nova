@@ -176,6 +176,8 @@ _CONTROL_ACTION_RUNTIME_HOOKS = {
     "generated_queue_investigate_action_fn": "_generated_queue_investigate_action",
     "patch_queue_run_next_action_fn": "_patch_queue_run_next_action",
     "active_work_tree_run_next_action_fn": "_active_work_tree_run_next_action",
+    "codegen_run_action_fn": "_codegen_run_action",
+    "leah_build_run_next_action_fn": "_leah_build_run_next_action",
     "real_world_task_create_action_fn": "_real_world_task_create_action",
     "backend_command_list_action_fn": "_backend_command_list_action",
     "backend_command_run_action_fn": "_backend_command_run_action",
@@ -300,6 +302,8 @@ class NovaControlActionDispatcher:
         generated_queue_investigate_action_fn,
         patch_queue_run_next_action_fn,
         active_work_tree_run_next_action_fn,
+        codegen_run_action_fn,
+        leah_build_run_next_action_fn,
         real_world_task_create_action_fn,
         backend_command_list_action_fn,
         backend_command_run_action_fn,
@@ -495,6 +499,16 @@ class NovaControlActionDispatcher:
             record_control_action_event_fn(act, "ok" if ok else "fail", detail, payload)
             return ok, msg, extra
 
+        if act == "codegen_run":
+            ok, msg, extra, detail = codegen_run_action_fn(payload)
+            record_control_action_event_fn(act, "ok" if ok else "fail", detail, payload)
+            return ok, msg, extra
+
+        if act == "leah_build_run_next":
+            ok, msg, extra, detail = leah_build_run_next_action_fn(payload)
+            record_control_action_event_fn(act, "ok" if ok else "fail", detail, payload)
+            return ok, msg, extra
+
         if act == "real_world_task_create":
             ok, msg, extra, detail = real_world_task_create_action_fn(payload)
             record_control_action_event_fn(act, "ok" if ok else "fail", detail, payload)
@@ -656,21 +670,4 @@ class NovaControlActionDispatcher:
         if act == "self_check":
             ok, msg, extra, detail = self_check_action_fn(payload)
             record_control_action_event_fn(act, "ok" if ok else "fail", detail, payload)
-            return ok, msg, extra
-
-        if act == "export_capabilities":
-            ok, msg, extra = export_capabilities_snapshot_fn()
-            record_control_action_event_fn(act, "ok" if ok else "fail", msg, payload)
-            return ok, msg, extra
-
-        if act == "export_ledger_summary":
-            return export_ledger_summary_action_fn(payload)
-
-        if act == "export_diagnostics_bundle":
-            return export_diagnostics_bundle_action_fn(payload)
-
-        record_control_action_event_fn(act, "fail", "unknown_action", payload)
-        return False, "unknown_action", {}
-
-
-NOVA_CONTROL_ACTION_DISPATCHER = NovaControlActionDispatcher()
+       

@@ -827,6 +827,16 @@ def _active_work_tree_run_next_action(payload: dict) -> tuple[bool, str, dict, s
         return False, msg, {}, msg
 
 
+def _codegen_run_action(payload: dict) -> tuple[bool, str, dict, str]:
+    msg = "codegen_run_requires_autonomy_maintenance_scope"
+    return False, msg, {}, msg
+
+
+def _leah_build_run_next_action(payload: dict) -> tuple[bool, str, dict, str]:
+    msg = "leah_build_run_next_requires_autonomy_maintenance_scope"
+    return False, msg, {}, msg
+
+
 def _update_now_dry_run_action(payload: dict) -> tuple[bool, str, dict, str]:
     return PATCH_CONTROL_SERVICE.update_now_dry_run_action(
         tool_update_now_fn=nova_core.tool_update_now,
