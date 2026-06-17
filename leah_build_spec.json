@@ -1,0 +1,96 @@
+{
+  "leah_build_version": "1.0",
+  "description": "Blueprint for Nova autonomous Leah capability build. Nova reads this file when a leah_ capability gap is dispatched and uses it to generate the correct implementation.",
+  "context": {
+    "leah_html": "templates/leah.html",
+    "leah_js": "static/leah.js",
+    "leah_css": "static/leah.css",
+    "leah_fx_js": "static/leah_fx.js",
+    "leah_frontdoor_service": "services/leah_frontdoor.py",
+    "tts_tool": "tools/tts_say.py",
+    "memory_dir": "memory/",
+    "upload_endpoint_status": "POST /api/chat/upload is called by leah.js but has no handler in nova_http.py",
+    "upload_handler_available": "LEAH_FRONTDOOR_SERVICE.ingest_items(session_id, user_id, items) returns list of stored item dicts",
+    "compose_chat_status": "LEAH_FRONTDOOR_SERVICE.compose_chat_message(message, attachments) exists but is never called in /api/chat POST path",
+    "session_context_status": "LEAH_FRONTDOOR_SERVICE.remember_session_context() and recent_session_context() exist but are unwired",
+    "leah_js_mood_keys": ["calm", "sensing", "focus", "synthesis", "strain"],
+    "leah_js_state_keys": ["userId", "sessionId", "voiceEnabled", "listenMode", "cameraLive", "thinking", "uploading", "stagedItems", "moodMode", "moodReason"]
+  },
+  "capabilities": {
+    "leah_voice_persona_engine": {
+      "purpose": "Leah can speak with a stable voice persona and response style across turns",
+      "files": [
+        {
+          "path": "services/leah_voice_engine.py",
+          "kind": "service",
+          "intent": "Voice persona settings (name, tone, pacing, style), TTS dispatch coordination using tools/tts_say.py, and per-session voice preference storage. Expose a simple API: get_persona_config(session_id) -> dict, speak(text, session_id) -> ok bool."
+        },
+        {
+          "path": "services/leah_persona_config.py",
+          "kind": "config",
+          "intent": "Default persona profile: name=Leah, tone=warm-direct, pacing=measured, style=conversational. Support operator overrides via runtime/leah_persona.json if present."
+        }
+      ],
+      "integration_hint": "nova_http.py already imports LeahFrontdoorService. Add voice engine calls in the /api/chat POST response path after Nova replies."
+    },
+    "leah_memory_recall": {
+      "purpose": "Leah can retrieve prior conversation facts and user preferences for continuity",
+      "files": [
+        {
+          "path": "services/leah_memory_service.py",
+          "kind": "service",
+          "intent": "Session memory retrieval, fact recall, and user preference continuity. Read from memory/ dir (identity.json, learned_facts.json). Expose: recall_facts(user_id) -> list[str], recall_session_summary(session_id) -> str. Return empty gracefully if memory files absent."
+        }
+      ],
+      "integration_hint": "Memory files live under the MEMORY_DIR constant in nova_http.py. LeahFrontdoorService.recent_session_context() returns staged items from the current session — complement it with recalled facts from prior sessions."
+    },
+    "leah_emotional_state_model": {
+      "purpose": "Leah tracks a simple server-side emotional state that influences reply tone",
+      "files": [
+        {
+          "path": "services/leah_emotion_tracker.py",
+          "kind": "service",
+          "intent": "5-state model mirroring leah.js mood keys: calm/sensing/focus/synthesis/strain. Persist current state per session in runtime/leah_emotion_{session_id}.json. Expose: get_state(session_id) -> str, update_state(session_id, event: str) -> str. Events: user_upload, voice_active, thinking_start, thinking_done, error, idle."
+        }
+      ],
+      "integration_hint": "State should be included in /api/chat reply payload as leah_mood so leah.js can call setMood() to sync client state with server state."
+    },
+    "leah_conversation_continuity": {
+      "purpose": "Leah maintains context across turns and can stitch sessions together",
+      "files": [
+        {
+          "path": "services/leah_session_tracker.py",
+          "kind": "service",
+          "intent": "Cross-turn context retention and session stitching. On each /api/chat turn, record a brief turn summary. On session resume, build a handoff summary from the last N turns. Expose: record_turn(session_id, user_msg, nova_reply) -> None, handoff_summary(session_id, n=5) -> str. Store under runtime/leah_sessions/{session_id}.jsonl."
+        }
+      ],
+      "integration_hint": "nova_http.py /api/chat/resume already supports session resumption. The handoff_summary output should be injected as system context at the top of a resumed session so Nova remembers what was discussed."
+    }
+  },
+  "wiring_gaps": [
+    {
+      "id": "missing_upload_endpoint",
+      "priority": "high",
+      "description": "POST /api/chat/upload has no handler — leah.js calls it on every file drop/camera capture but gets a 404",
+      "fix": "In nova_http.py, handle POST /api/chat/upload by parsing JSON body {session_id, user_id, items:[{content_b64, name, mime, source}]}, calling LEAH_FRONTDOOR_SERVICE.ingest_items(session_id, user_id, items), and returning {ok: true, stored: [...]}"
+    },
+    {
+      "id": "missing_compose_chat",
+      "priority": "high",
+      "description": "Attachment context never reaches Nova — compose_chat_message() exists but is not called in /api/chat POST path",
+      "fix": "In the /api/chat POST handler, after parsing message and attachments, call LEAH_FRONTDOOR_SERVICE.compose_chat_message(message, attachments) and pass the result as the actual prompt to Nova instead of the raw message"
+    },
+    {
+      "id": "missing_leah_hub_css_route",
+      "priority": "medium",
+      "description": "static/leah_hub.css exists but is not in the static asset routes — hub styling is broken",
+      "fix": "Add /static/leah_hub.css to NovaHttpFrontdoorService.static_asset_routes() in services/nova_http_frontdoor.py"
+    },
+    {
+      "id": "missing_session_context_wire",
+      "priority": "medium",
+      "description": "remember_session_context() is never called after ingest, so recent_session_context() always returns empty",
+      "fix": "After LEAH_FRONTDOOR_SERVICE.ingest_items() returns stored items, call LEAH_FRONTDOOR_SERVICE.remember_session_context(session_id, stored, stage='staged')"
+    }
+  ]
+}

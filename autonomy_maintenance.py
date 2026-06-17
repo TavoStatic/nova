@@ -1981,6 +1981,119 @@ def _maintenance_codegen_run_action(_payload: dict, _state: dict) -> tuple[bool,
     return True, msg, {"patch_id": patch_id, "capability_name": safe_name, "codegen_id": codegen_id}, msg
 
 
+def _maintenance_leah_build_run_next_action(_payload: dict, _state: dict) -> tuple[bool, str, dict, str]:
+    """Build a Leah-specific capability from the leah_build_spec.json blueprint.
+
+    Reads the blueprint to find the correct files and intent for the requested
+    leah_ capability gap, then delegates to CodegenTool to generate the
+    implementation. Nova generates the code; we only supply the spec.
+    """
+    from services.codegen_patch_bridge import validate_codegen_preview, bridge_codegen_to_patch
+    from services.codegen_memory_recorder import CODEGEN_MEMORY_RECORDER_SERVICE
+    from tools.codegen_tool import CodegenTool
+    from tools.base_tool import ToolContext
+    import time as _time
+
+    payload = dict(_payload or {})
+    target_id = str(payload.get("target_id") or "").strip()
+
+    # Resolve the capability name from the branch or payload
+    gap_name = str(payload.get("capability_name") or "").strip()
+    if not gap_name and target_id:
+        try:
+            branch = work_tree.get_branch(target_id)
+            if branch is not None:
+                src = dict(branch.source_payload or {}) if isinstance(branch.source_payload, dict) else {}
+                gap_name = str(
+                    src.get("capability_name") or src.get("primary_capability") or ""
+                ).strip()
+        except Exception:
+            pass
+    if not gap_name:
+        gap_name = "leah_capability_extension"
+
+    # Load the Leah build blueprint
+    blueprint_path = BASE_DIR / "leah_build_spec.json"
+    blueprint: dict = {}
+    try:
+        blueprint = json.loads(blueprint_path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        _append_log(f"leah_build_blueprint_read_failed {exc}")
+
+    capabilities_map: dict = blueprint.get("capabilities", {})
+    cap_entry: dict = capabilities_map.get(gap_name, {})
+
+    # Build the codegen spec from the blueprint entry
+    files = list(cap_entry.get("files", []))
+    if not files:
+        # Fallback: single service module if capability not in blueprint
+        files = [
+            {
+                "path": f"services/{gap_name.replace(':', '_')[:60]}.py",
+                "kind": "service",
+                "intent": f"Service module implementing {gap_name} for Leah",
+            }
+        ]
+
+    purpose = str(cap_entry.get("purpose") or f"Implement Leah capability: {gap_name}").strip()
+    integration_hint = str(cap_entry.get("integration_hint") or "").strip()
+    if integration_hint:
+        purpose = f"{purpose}. Integration note: {integration_hint}"
+
+    # Include relevant wiring gaps so codegen understands what else needs fixing
+    wiring_gaps = [
+        g for g in blueprint.get("wiring_gaps", [])
+        if str(g.get("priority") or "") == "high"
+    ]
+    if wiring_gaps:
+        gap_notes = "; ".join(str(g.get("description") or "") for g in wiring_gaps)
+        purpose = f"{purpose}. Known wiring gaps to be aware of: {gap_notes}"
+
+    safe_name = gap_name.replace(":", "_").replace("/", "_")[:60]
+    spec = {
+        "name": safe_name,
+        "purpose": purpose,
+        "files": files,
+    }
+
+    try:
+        ctx = ToolContext(
+            policy={
+                "tools_enabled": {"codegen": True},
+                "codegen": {"enabled": True},
+            },
+            is_admin=True,
+        )
+        preview_json = CodegenTool().run({"action": "preview", "spec": spec}, ctx)
+        preview = json.loads(preview_json)
+    except Exception as exc:
+        msg = f"leah_build_codegen_failed:{exc}"
+        return False, msg, {}, msg
+
+    ok_val, reason, parsed = validate_codegen_preview(preview)
+    if not ok_val:
+        msg = f"leah_build_preview_invalid:{reason}"
+        return False, msg, {}, msg
+
+    codegen_id = f"leah_build_{int(_time.time())}"
+    patch_artifact = bridge_codegen_to_patch(parsed, codegen_id=codegen_id, operator_id="autonomy_maintenance")
+    patch_id = str(patch_artifact.get("patch_id") or "")
+
+    try:
+        CODEGEN_MEMORY_RECORDER_SERVICE.record_pattern(
+            capability_name=safe_name,
+            spec_string=json.dumps(spec, sort_keys=True),
+            generated_code=purpose,
+            test_code="",
+        )
+    except Exception:
+        pass
+
+    msg = f"leah_build_ok:{safe_name}"
+    _append_log(f"leah_build capability={safe_name} patch_id={patch_id} branch={target_id or 'unspecified'}")
+    return True, msg, {"patch_id": patch_id, "capability_name": safe_name, "codegen_id": codegen_id}, msg
+
+
 def _dispatch_autonomy_control_action(action_type: str, payload: dict, events: list[dict], state: dict | None = None) -> tuple[bool, str, dict]:
     runtime_state = state if isinstance(state, dict) else {}
 
@@ -2026,7 +2139,7 @@ def _dispatch_autonomy_control_action(action_type: str, payload: dict, events: l
         patch_queue_run_next_action_fn=lambda event_payload: _maintenance_patch_queue_run_next_action(event_payload, runtime_state),
         active_work_tree_run_next_action_fn=lambda event_payload: _maintenance_active_work_tree_run_next_action(event_payload, runtime_state),
         codegen_run_action_fn=lambda event_payload: _maintenance_codegen_run_action(event_payload, runtime_state),
-        leah_build_run_next_action_fn=lambda event_payload: _maintenance_codegen_run_action(event_payload, runtime_state),
+        leah_build_run_next_action_fn=lambda event_payload: _maintenance_leah_build_run_next_action(event_payload, runtime_state),
         real_world_task_create_action_fn=_unsupported_control_action,
         backend_command_list_action_fn=_unsupported_control_action,
         backend_command_run_action_fn=_unsupported_control_action,
@@ -4362,7 +4475,7 @@ def run_once(*, worker_loop: bool = False) -> int:
                 state,
                 "last_generated_queue_tree_cycle",
                 "orchestrator_owns_execution",
-                tree_count=1,
+                  tree_count=1,
             )
         _append_log(
             "generated_queue_cycle"
@@ -4471,4 +4584,110 @@ def run_once(*, worker_loop: bool = False) -> int:
         _append_log(f"stale_cli_tree_archive_failed {exc}")
 
     try:
-        legacy_tree_retire
+        legacy_tree_retirement = _retire_legacy_patch_update_trees(state)
+        _append_log(
+            "legacy_tree_retirement"
+            f" status={legacy_tree_retirement.get('status')}"
+            f" retired={int(legacy_tree_retirement.get('retired_count', 0) or 0)}"
+        )
+    except Exception as exc:
+        legacy_tree_retirement = {
+            "ts": _patch_queue_timestamp(),
+            "status": "failed",
+            "retired_count": 0,
+            "error": str(exc),
+        }
+        state["last_legacy_tree_retirement"] = legacy_tree_retirement
+        _append_log(f"legacy_tree_retirement_failed {exc}")
+
+    regression_status = _run_daily_regression_if_due(state)
+    regression_status_synced = _sync_regression_status_from_file(state)
+    if regression_status == "daily_regression_skipped_already_ran" and not regression_status_synced:
+        last_regression_status = str(state.get("last_regression_status") or "").strip()
+        state["last_regression_stale"] = bool(last_regression_status and "pass" not in last_regression_status.lower() and last_regression_status.lower() != "ok")
+    else:
+        state["last_regression_stale"] = False
+    _append_log(f"{regression_status}{'_synced_status_file' if regression_status_synced else ''}")
+
+    try:
+        signal_ingestion = _sync_signal_intake_work_tree(
+            state,
+            kidney_summary=kidney_summary,
+            temporal_feed=temporal_feed,
+        )
+        _append_log(
+            "signal_ingestion"
+            f" status={signal_ingestion.get('status')}"
+            f" results={int(signal_ingestion.get('result_count', 0) or 0)}"
+            f" subconscious={int(signal_ingestion.get('subconscious_signal_count', 0) or 0)}"
+            f" resolved={int(signal_ingestion.get('resolved_count', 0) or 0)}"
+            f" active_regression={bool(signal_ingestion.get('active_regression_failure'))}"
+        )
+    except Exception as exc:
+        signal_ingestion = {
+            "ts": _patch_queue_timestamp(),
+            "status": "failed",
+            "result_count": 0,
+            "resolved_count": 0,
+            "error": str(exc),
+        }
+        state["last_signal_ingestion"] = signal_ingestion
+        _append_log(f"signal_ingestion_failed {exc}")
+
+    _save_state(state)
+    return _finish_cycle(0, "ok")
+
+
+def run_worker(
+    *,
+    interval_sec: int = 300,
+    max_cycles: int = 0,
+    continue_on_error: bool = True,
+    run_once_fn: Callable[[], int] | None = None,
+    sleep_fn: Callable[[float], None] = time.sleep,
+) -> int:
+    normalized_interval = max(1, int(interval_sec or 300))
+    normalized_max_cycles = max(0, int(max_cycles or 0))
+    cycle = 0
+    last_code = 0
+
+    while True:
+        cycle += 1
+        _record_worker_cycle(cycle=cycle, interval_sec=normalized_interval, status="running")
+        _append_log(f"worker_cycle_start cycle={cycle}")
+        if run_once_fn is None:
+            last_code = int(run_once(worker_loop=True))
+        else:
+            last_code = int(run_once_fn())
+        cycle_status = "ok" if last_code == 0 else "failed"
+        _record_worker_cycle(cycle=cycle, interval_sec=normalized_interval, status=cycle_status, code=last_code)
+        _append_log(f"worker_cycle_end cycle={cycle} code={last_code}")
+
+        if last_code != 0 and not continue_on_error:
+            return last_code
+        if normalized_max_cycles and cycle >= normalized_max_cycles:
+            return last_code
+        sleep_fn(float(normalized_interval))
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="Nova Phase 1 autonomy maintenance")
+    parser.add_argument("--once", action="store_true", help="Run one maintenance cycle")
+    parser.add_argument("--loop", action="store_true", help="Run maintenance continuously")
+    parser.add_argument("--interval-sec", type=int, default=300, help="Seconds between maintenance cycles in loop mode")
+    parser.add_argument("--max-cycles", type=int, default=0, help="Optional cycle cap for loop mode; 0 means run continuously")
+    parser.add_argument("--stop-on-error", action="store_true", help="Exit loop mode after the first failed cycle")
+    args = parser.parse_args(argv)
+    if args.loop:
+        return run_worker(
+            interval_sec=args.interval_sec,
+            max_cycles=args.max_cycles,
+            continue_on_error=not bool(args.stop_on_error),
+        )
+    if args.once:
+        return run_once()
+    return run_once()
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
