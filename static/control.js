@@ -4026,10 +4026,17 @@ async function postAction(action, body = {}) {
 async function fetchWorkTrees() {
     try {
         return await getJson('/api/control/work-trees');
-    } catch (_) {
-        // Work-tree snapshots can race with active writes; retry once before surfacing failure.
+    } catch (_e1) {
+        // First retry with fixed 250ms delay
         await new Promise((resolve) => window.setTimeout(resolve, 250));
-        return getJson('/api/control/work-trees');
+        try {
+            return await getJson('/api/control/work-trees');
+        } catch (_e2) {
+            // Second retry with jitter (250-500ms random)
+            const jitterMs = 250 + Math.random() * 250;
+            await new Promise((resolve) => window.setTimeout(resolve, jitterMs));
+            return getJson('/api/control/work-trees');
+        }
     }
 }
 
@@ -5030,14 +5037,8 @@ function initialControlView() {
             return requested;
         }
     } catch (_) {
+
         return 'overview';
     }
     return 'overview';
 }
-
-function focusTemporalPolicyAnchor() {
-    const hash = String(window.location.hash || '').trim();
-    if (hash !== '#temporalPolicyControls') {
-        syncTemporalNavLinkActive();
-        return;
- 

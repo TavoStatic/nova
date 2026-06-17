@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import sys
+import traceback
+
 
 class NovaHttpGetRoutesService:
     """Own GET-side HTTP chat-history and control API route orchestration."""
@@ -189,7 +192,15 @@ class NovaHttpGetRoutesService:
         if path == "/api/control/metrics":
             return 200, metrics_payload_fn()
         if path == "/api/control/work-trees":
-            return 200, work_trees_payload_fn()
+            try:
+                return 200, work_trees_payload_fn()
+            except Exception as exc:
+                import time
+                timestamp = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
+                error_type = type(exc).__name__
+                print(f"[{timestamp}] WORK-TREES ENDPOINT FAILURE | type={error_type} | msg={str(exc)}", file=sys.stderr, flush=True)
+                traceback.print_exc(file=sys.stderr)
+                return 500, {"ok": False, "error": "work_trees_endpoint_failed", "error_type": error_type, "message": str(exc)}
         if path == "/api/control/pipelines":
             selected = str((qs.get("pipeline_id") or [""])[0]).strip()
             return 200, control_pipelines_payload_fn(selected) if control_pipelines_payload_fn else {"ok": True, "pipelines": []}
