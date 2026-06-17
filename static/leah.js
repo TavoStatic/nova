@@ -651,10 +651,25 @@
   }
 
   async function chatFetch(url, options = {}) {
+    const timeoutMs = Number(options._timeoutMs || 0) || 0;
     const attempt = async () => {
       const headers = Object.assign({}, options.headers || {});
       if (state.userId) headers["X-Nova-User-Id"] = state.userId;
-      return fetch(url, Object.assign({}, options, {headers}));
+      const fetchOptions = Object.assign({}, options, {headers});
+      delete fetchOptions._timeoutMs;
+      if (timeoutMs > 0) {
+        const controller = new AbortController();
+        const timer = window.setTimeout(() => controller.abort(), timeoutMs);
+        try {
+          const r = await fetch(url, Object.assign({}, fetchOptions, {signal: controller.signal}));
+          window.clearTimeout(timer);
+          return r;
+        } catch (err) {
+          window.clearTimeout(timer);
+          throw err;
+        }
+      }
+      return fetch(url, fetchOptions);
     };
 
     let response = await attempt();
@@ -810,6 +825,14 @@
     pushActivity("Turn sent", hasStaged ? `${state.stagedItems.length} staged item(s) included.` : "Conversation only.");
     syncPresence();
 
+    // Show "still working" after 8s so the user knows Nova is alive, not frozen.
+    const stillWorkingTimer = window.setTimeout(() => {
+      if (state.thinking) {
+        setActivityHeadline("Nova is still working — this one is taking a bit longer than usual.");
+        setMood("synthesis", "deep processing");
+      }
+    }, 8000);
+
     try {
       const response = await chatFetch(config.chatUrl, {
         method: "POST",
@@ -820,6 +843,7 @@
           session_id: state.sessionId,
           user_id: state.userId,
         }),
+        _timeoutMs: 120000,
       });
       const payload = await response.json().catch(() => ({}));
       if (payload.session_id) {
@@ -854,10 +878,16 @@
         setMood("strain", "reply problem");
       }
     } catch (error) {
-      addMessage("assistant", `Network error: ${error.message}`);
-      setActivityHeadline("Nova hit a network problem. The front door stayed open.");
-      setMood("strain", "network problem");
+      const timedOut = error && error.name === "AbortError";
+      addMessage("assistant", timedOut
+        ? "Nova's reply took too long and the request was cancelled. You can try again."
+        : `Network error: ${error.message}`);
+      setActivityHeadline(timedOut
+        ? "Nova timed out on that turn. The front door is still open."
+        : "Nova hit a network problem. The front door stayed open.");
+      setMood("strain", timedOut ? "turn timed out" : "network problem");
     } finally {
+      window.clearTimeout(stillWorkingTimer);
       state.thinking = false;
       syncPresence();
     }
