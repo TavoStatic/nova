@@ -65,6 +65,7 @@ from services.nova_runtime_context import AUTONOMY_ORCHESTRATOR_LEDGER_FILE
 from services.nova_runtime_context import OS_CAPABILITY_LEDGER_FILE
 from services.nova_runtime_context import OPERATOR_OUTBOX_FILE
 from services.nova_runtime_context import WORK_TREE_RUN_TRIGGER_FILE
+from services.nova_runtime_context import PATCH_QUEUE_RUN_TRIGGER_FILE
 from services.nova_runtime_context import resolve_runtime_dir
 from services.operator_outbox import OPERATOR_OUTBOX_SERVICE
 from services.session_admin import SESSION_ADMIN_SERVICE
@@ -808,8 +809,18 @@ def _pulse_status_action(payload: dict) -> tuple[bool, str, dict, str]:
 
 
 def _patch_queue_run_next_action(payload: dict) -> tuple[bool, str, dict, str]:
-    msg = "patch_queue_run_next_requires_autonomy_maintenance_scope"
-    return False, msg, {}, msg
+    try:
+        import json as _json
+        import time as _time
+        trigger = dict(payload or {})
+        trigger["_requested_at"] = _time.time()
+        PATCH_QUEUE_RUN_TRIGGER_FILE.parent.mkdir(parents=True, exist_ok=True)
+        PATCH_QUEUE_RUN_TRIGGER_FILE.write_text(_json.dumps(trigger), encoding="utf-8")
+        msg = "patch_queue_run_next_triggered"
+        return True, msg, {"triggered": True}, msg
+    except Exception as exc:
+        msg = f"patch_queue_run_next_trigger_failed:{exc}"
+        return False, msg, {}, msg
 
 
 def _active_work_tree_run_next_action(payload: dict) -> tuple[bool, str, dict, str]:
@@ -1741,27 +1752,4 @@ class NovaHttpHandler(BaseHTTPRequestHandler):
         HTTP_TRANSPORT_SERVICE.handle_post_request(
             self,
             parse_request_path_fn=_parse_request_path,
-            dispatch_post_request_fn=lambda handler, path, qs: HTTP_POST_DISPATCH_SERVICE.handle_post_request_from_runtime(
-                handler=handler,
-                path=path,
-                qs=qs,
-                runtime_scope=globals(),
-            ),
-            response_service=HTTP_RESPONSE_SERVICE,
-            record_http_response_fn=_record_http_response,
-        )
-
-    def log_message(self, fmt: str, *args) -> None:
-        return
-
-
-
-def main() -> None:
-    NOVA_HTTP_FRONTDOOR_SERVICE.serve_from_runtime(
-        globals(),
-        handler_class=NovaHttpHandler,
-    )
-
-
-if __name__ == "__main__":
-    main()
+            dispatch_post_request_fn=lambda handler, path, qs: HTTP_POST_DISPATCH_SERVICE.handle_post_request_from_runt

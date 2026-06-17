@@ -31,6 +31,8 @@ const workTreeBranchInfo = document.getElementById('workTreeBranchInfoBody') || 
 const workTreeBranchActions = document.getElementById('workTreeBranchActions');
 const workTreeActionFeedback = document.getElementById('workTreeActionFeedback');
 const btnWorkTreeRunNext = document.getElementById('btnWorkTreeRunNext');
+const btnPatchQueueRunNext = document.getElementById('btnPatchQueueRunNext');
+const btnPulseStatus = document.getElementById('btnPulseStatus');
 const pipelineSelect = document.getElementById('pipelineSelect');
 const pipelineListSummary = document.getElementById('pipelineListSummary');
 const pipelineCards = document.getElementById('pipelineCards');
@@ -3707,7 +3709,7 @@ function renderWorkTreeInspector(tree, node) {
         String(node.notes || '').trim() || 'No branch notes recorded.',
     ].join('\n');
     if (workTreeBranchActions) {
-        const actionable = ['ready', 'open', 'pending'].includes(_inspectorBranchStatus);
+        const actionable = ['ready', 'open', 'pending', 'active'].includes(_inspectorBranchStatus);
         workTreeBranchActions.style.display = actionable ? '' : 'none';
         if (btnWorkTreeRunNext) btnWorkTreeRunNext.style.display = actionable ? '' : 'none';
     }
@@ -4645,6 +4647,16 @@ bindClick('btnWorkTreeRunNext', async () => {
         if (workTreeActionFeedback) workTreeActionFeedback.textContent = 'Error: ' + (err.message || 'unknown');
     }
 });
+bindClick('btnPatchQueueRunNext', async () => {
+    setAction('Triggering patch queue step…');
+    const payload = await postAction('patch_queue_run_next', {});
+    setAction(payload.message || 'patch_queue_step_dispatched');
+});
+bindClick('btnPulseStatus', async () => {
+    setAction('Refreshing pulse status…');
+    const payload = await postAction('pulse_status', {});
+    setAction(payload.message || 'pulse_status_refreshed');
+});
 bindClick('btnGeneratedQueueRunNext', async () => {
     await runNextGeneratedQueueItem();
 });
@@ -5029,23 +5041,4 @@ function focusTemporalPolicyAnchor() {
     if (operationsShell) {
         setLayerTab(operationsShell, 'governance');
     }
-    const temporalAnchor = document.getElementById('temporalPolicyControls');
-    if (temporalAnchor) {
-        window.requestAnimationFrame(() => {
-            temporalAnchor.scrollIntoView({behavior: 'smooth', block: 'start'});
-        });
-    }
-    syncTemporalNavLinkActive();
-}
-
-window.addEventListener('hashchange', () => {
-    focusTemporalPolicyAnchor();
-});
-
-setFeedback('NYO System control linked. Fetching live status...', 'muted');
-setActiveView(initialControlView());
-focusTemporalPolicyAnchor();
-setInspectorTab('planner');
-renderLiveTracking(null);
-refresh();
-setInterval(refresh, 15000);
+    const tempora

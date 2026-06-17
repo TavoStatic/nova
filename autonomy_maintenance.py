@@ -32,6 +32,7 @@ from services.nova_runtime_context import AUTONOMY_ORCHESTRATOR_LEDGER_FILE
 from services.nova_runtime_context import OPERATOR_OUTBOX_FILE
 from services.nova_runtime_context import RUNTIME_DIR as CONTEXT_RUNTIME_DIR
 from services.nova_runtime_context import WORK_TREE_RUN_TRIGGER_FILE
+from services.nova_runtime_context import PATCH_QUEUE_RUN_TRIGGER_FILE
 from services.nova_runtime_context import runtime_scope_name
 from services.operator_outbox import OPERATOR_OUTBOX_SERVICE
 from services.runtime_restart_provenance import RUNTIME_RESTART_PROVENANCE_SERVICE
@@ -66,6 +67,7 @@ LATEST_SUBCONSCIOUS = RUNTIME_DIR / "subconscious_runs" / "latest.json"
 GENERATED_DEFS = TEST_SESSIONS_ROOT / "generated_definitions"
 UPDATES_DIR = RUNTIME_DIR / "updates" if runtime_scope_name() == "validation" else ROOT / "updates"
 WORK_TREE_RUN_TRIGGER = WORK_TREE_RUN_TRIGGER_FILE
+PATCH_QUEUE_RUN_TRIGGER = PATCH_QUEUE_RUN_TRIGGER_FILE
 CONTROL_STATUS_URL = os.environ.get("NOVA_CONTROL_STATUS_URL", "http://127.0.0.1:8080/api/control/status")
 try:
     CONTROL_STATUS_TIMEOUT_SEC = max(2.0, float(os.environ.get("NOVA_CONTROL_STATUS_TIMEOUT_SEC", "10")))
@@ -4065,6 +4067,29 @@ def run_once(*, worker_loop: bool = False) -> int:
         _save_state(state)
         return _finish_cycle(0, "work_tree_run_trigger_handled")
 
+    # Check for an HTTP-side trigger requesting an immediate patch-queue run.
+    if PATCH_QUEUE_RUN_TRIGGER.exists():
+        try:
+            trigger_payload = json.loads(PATCH_QUEUE_RUN_TRIGGER.read_text(encoding="utf-8"))
+        except Exception:
+            trigger_payload = {}
+        try:
+            PATCH_QUEUE_RUN_TRIGGER.unlink(missing_ok=True)
+        except Exception:
+            pass
+        _append_log("patch_queue_run_trigger_consumed")
+        try:
+            trigger_cycle = _run_patch_queue_work_tree_cycle(state, **{
+                k: trigger_payload[k]
+                for k in ("max_steps",)
+                if k in trigger_payload
+            })
+            _append_log(f"patch_queue_run_trigger_cycle status={trigger_cycle.get('status')}")
+        except Exception as exc:
+            _append_log(f"patch_queue_run_trigger_cycle_failed {exc}")
+        _save_state(state)
+        return _finish_cycle(0, "patch_queue_run_trigger_handled")
+
     if not worker_loop and _clear_non_loop_runtime_worker_state(state):
         _save_state(state)
         _append_log("runtime_worker_state_cleared one_shot_cycle_not_worker_loop")
@@ -4446,25 +4471,4 @@ def run_once(*, worker_loop: bool = False) -> int:
         _append_log(f"stale_cli_tree_archive_failed {exc}")
 
     try:
-        legacy_tree_retirement = _retire_legacy_patch_update_trees(state)
-        _append_log(
-            "legacy_tree_retirement"
-            f" status={legacy_tree_retirement.get('status')}"
-            f" retired={int(legacy_tree_retirement.get('retired_count', 0) or 0)}"
-        )
-    except Exception as exc:
-        legacy_tree_retirement = {
-            "ts": _patch_queue_timestamp(),
-            "status": "failed",
-            "retired_count": 0,
-            "error": str(exc),
-        }
-        state["last_legacy_tree_retirement"] = legacy_tree_retirement
-        _append_log(f"legacy_tree_retirement_failed {exc}")
-
-    regression_status = _run_daily_regression_if_due(state)
-    regression_status_synced = _sync_regression_status_from_file(state)
-    if regression_status == "daily_regression_skipped_already_ran" and not regression_status_synced:
-        last_regression_status = str(state.get("last_regression_status") or "").strip()
-        state["last_regression_stale"] = bool(last_regression_status and "pass" not in last_regression_status.lower() and last_regression_status.lower() != "ok")
-    els
+        legacy_tree_retire
