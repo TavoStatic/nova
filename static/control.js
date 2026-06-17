@@ -294,9 +294,8 @@ async function resolveOperatorMacroValues(macro) {
         if (!name) continue;
         const label = String(placeholder.label || name).trim();
         const current = String(values[name] || placeholder.default || '').trim();
-        const entered = window.prompt(label, current);
-        if (entered === null) return null;
-        const resolved = String(entered || '').trim() || String(placeholder.default || '').trim();
+        // Some embedded browser runtimes disallow prompt dialogs; prefer cached/default values.
+        const resolved = current || String(placeholder.default || '').trim();
         if (Boolean(placeholder.required) && !resolved) {
             setAction(`Macro placeholder required: ${label}`);
             return null;
@@ -4025,7 +4024,13 @@ async function postAction(action, body = {}) {
 }
 
 async function fetchWorkTrees() {
-    return getJson('/api/control/work-trees');
+    try {
+        return await getJson('/api/control/work-trees');
+    } catch (_) {
+        // Work-tree snapshots can race with active writes; retry once before surfacing failure.
+        await new Promise((resolve) => window.setTimeout(resolve, 250));
+        return getJson('/api/control/work-trees');
+    }
 }
 
 async function fetchPipelines() {
@@ -5035,10 +5040,4 @@ function focusTemporalPolicyAnchor() {
     if (hash !== '#temporalPolicyControls') {
         syncTemporalNavLinkActive();
         return;
-    }
-    setActiveView('operations');
-    const operationsShell = document.querySelector('.layer-tab-shell[data-layer-tabs="operations"]');
-    if (operationsShell) {
-        setLayerTab(operationsShell, 'governance');
-    }
-    const tempora
+ 
