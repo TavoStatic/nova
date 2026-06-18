@@ -1752,4 +1752,27 @@ class NovaHttpHandler(BaseHTTPRequestHandler):
         HTTP_TRANSPORT_SERVICE.handle_post_request(
             self,
             parse_request_path_fn=_parse_request_path,
-            dispatch_post_request_fn=lambda handler, path, qs: HTTP_POST_DISPATCH_SERVICE.handle_post_request_from_runt
+            dispatch_post_request_fn=lambda handler, path, qs: HTTP_POST_DISPATCH_SERVICE.handle_post_request_from_runtime(
+                handler=handler,
+                path=path,
+                qs=qs,
+                runtime_scope=globals(),
+            ),
+            response_service=HTTP_RESPONSE_SERVICE,
+            record_http_response_fn=_record_http_response,
+        )
+
+    def log_message(self, fmt: str, *args) -> None:
+        return
+
+
+
+def main() -> None:
+    NOVA_HTTP_FRONTDOOR_SERVICE.serve_from_runtime(
+        globals(),
+        handler_class=NovaHttpHandler,
+    )
+
+
+if __name__ == "__main__":
+    main()

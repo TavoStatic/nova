@@ -5042,3 +5042,9 @@ function initialControlView() {
     }
     return 'overview';
 }
+setFeedback('NYO System control linked. Fetching live status...', 'muted');
+setActiveView(initialControlView());
+setInspectorTab('planner');
+renderLiveTracking(null);
+refresh();
+setInterval(refresh, 15000);

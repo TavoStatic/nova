@@ -850,6 +850,9 @@
                     <div class="button-row mb-2 wrap-buttons">
                         <select id="workTreeSelect" class="form-select form-select-sm"></select>
                         <button id="btnWorkTreeRefresh" class="btn btn-sm btn-operator-alt" type="button">Refresh Tree Map</button>
+                        <button id="btnWorkTreeViewAll" class="btn btn-sm btn-operator-primary" type="button">All Branches</button>
+                        <button id="btnWorkTreeViewActive" class="btn btn-sm btn-operator-alt" type="button">Active Tasks Only</button>
+                        <button id="btnWorkTreeViewBlocked" class="btn btn-sm btn-operator-alt" type="button">Blocked Only</button>
                     </div>
 
                     <div id="workTreeGlobalCounts" class="scheduled-tree-count-strip mb-2">All Trees: awaiting live tree signal.</div>
@@ -1180,4 +1183,13 @@
 
                     <section class="inspector-tab-panel" role="tabpanel" data-inspector-panel="session" hidden>
                         <div class="section-title"><span class="section-title-wrap"><i class="bi bi-chat-left-text section-title-icon" aria-hidden="true"></i><span>Session State</span></span></div>
-         
+                        <div id="sessionStateInspector" class="inspector-stack">Session focus pending.</div>
+                    </section>
+                </div>
+            </div>
+        </aside>
+    </div>
+
+    <script src="/static/control.js?v={{CONTROL_JS_VERSION}}"></script>
+</body>
+</html>
