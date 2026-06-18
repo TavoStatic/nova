@@ -4471,4 +4471,110 @@ def run_once(*, worker_loop: bool = False) -> int:
         _append_log(f"stale_cli_tree_archive_failed {exc}")
 
     try:
-        legacy_tree_retire
+        legacy_tree_retirement = _retire_legacy_patch_update_trees(state)
+        _append_log(
+            "legacy_tree_retirement"
+            f" status={legacy_tree_retirement.get('status')}"
+            f" retired={int(legacy_tree_retirement.get('retired_count', 0) or 0)}"
+        )
+    except Exception as exc:
+        legacy_tree_retirement = {
+            "ts": _patch_queue_timestamp(),
+            "status": "failed",
+            "retired_count": 0,
+            "error": str(exc),
+        }
+        state["last_legacy_tree_retirement"] = legacy_tree_retirement
+        _append_log(f"legacy_tree_retirement_failed {exc}")
+
+    regression_status = _run_daily_regression_if_due(state)
+    regression_status_synced = _sync_regression_status_from_file(state)
+    if regression_status == "daily_regression_skipped_already_ran" and not regression_status_synced:
+        last_regression_status = str(state.get("last_regression_status") or "").strip()
+        state["last_regression_stale"] = bool(last_regression_status and "pass" not in last_regression_status.lower() and last_regression_status.lower() != "ok")
+    else:
+        state["last_regression_stale"] = False
+    _append_log(f"{regression_status}{'_synced_status_file' if regression_status_synced else ''}")
+
+    try:
+        signal_ingestion = _sync_signal_intake_work_tree(
+            state,
+            kidney_summary=kidney_summary,
+            temporal_feed=temporal_feed,
+        )
+        _append_log(
+            "signal_ingestion"
+            f" status={signal_ingestion.get('status')}"
+            f" results={int(signal_ingestion.get('result_count', 0) or 0)}"
+            f" subconscious={int(signal_ingestion.get('subconscious_signal_count', 0) or 0)}"
+            f" resolved={int(signal_ingestion.get('resolved_count', 0) or 0)}"
+            f" active_regression={bool(signal_ingestion.get('active_regression_failure'))}"
+        )
+    except Exception as exc:
+        signal_ingestion = {
+            "ts": _patch_queue_timestamp(),
+            "status": "failed",
+            "result_count": 0,
+            "resolved_count": 0,
+            "error": str(exc),
+        }
+        state["last_signal_ingestion"] = signal_ingestion
+        _append_log(f"signal_ingestion_failed {exc}")
+
+    _save_state(state)
+    return _finish_cycle(0, "ok")
+
+
+def run_worker(
+    *,
+    interval_sec: int = 300,
+    max_cycles: int = 0,
+    continue_on_error: bool = True,
+    run_once_fn: Callable[[], int] | None = None,
+    sleep_fn: Callable[[float], None] = time.sleep,
+) -> int:
+    normalized_interval = max(1, int(interval_sec or 300))
+    normalized_max_cycles = max(0, int(max_cycles or 0))
+    cycle = 0
+    last_code = 0
+
+    while True:
+        cycle += 1
+        _record_worker_cycle(cycle=cycle, interval_sec=normalized_interval, status="running")
+        _append_log(f"worker_cycle_start cycle={cycle}")
+        if run_once_fn is None:
+            last_code = int(run_once(worker_loop=True))
+        else:
+            last_code = int(run_once_fn())
+        cycle_status = "ok" if last_code == 0 else "failed"
+        _record_worker_cycle(cycle=cycle, interval_sec=normalized_interval, status=cycle_status, code=last_code)
+        _append_log(f"worker_cycle_end cycle={cycle} code={last_code}")
+
+        if last_code != 0 and not continue_on_error:
+            return last_code
+        if normalized_max_cycles and cycle >= normalized_max_cycles:
+            return last_code
+        sleep_fn(float(normalized_interval))
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="Nova Phase 1 autonomy maintenance")
+    parser.add_argument("--once", action="store_true", help="Run one maintenance cycle")
+    parser.add_argument("--loop", action="store_true", help="Run maintenance continuously")
+    parser.add_argument("--interval-sec", type=int, default=300, help="Seconds between maintenance cycles in loop mode")
+    parser.add_argument("--max-cycles", type=int, default=0, help="Optional cycle cap for loop mode; 0 means run continuously")
+    parser.add_argument("--stop-on-error", action="store_true", help="Exit loop mode after the first failed cycle")
+    args = parser.parse_args(argv)
+    if args.loop:
+        return run_worker(
+            interval_sec=args.interval_sec,
+            max_cycles=args.max_cycles,
+            continue_on_error=not bool(args.stop_on_error),
+        )
+    if args.once:
+        return run_once()
+    return run_once()
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
