@@ -66,6 +66,12 @@ from services.nova_runtime_context import OS_CAPABILITY_LEDGER_FILE
 from services.nova_runtime_context import OPERATOR_OUTBOX_FILE
 from services.nova_runtime_context import WORK_TREE_RUN_TRIGGER_FILE
 from services.nova_runtime_context import PATCH_QUEUE_RUN_TRIGGER_FILE
+from services.nova_runtime_context import TEMPORAL_CALENDAR_FILE
+from services.nova_calendar_ingestion import (
+    read_calendar_events,
+    write_calendar_event,
+    delete_calendar_event,
+)
 from services.nova_runtime_context import resolve_runtime_dir
 from services.operator_outbox import OPERATOR_OUTBOX_SERVICE
 from services.session_admin import SESSION_ADMIN_SERVICE
@@ -848,6 +854,46 @@ def _leah_build_run_next_action(payload: dict) -> tuple[bool, str, dict, str]:
     return False, msg, {}, msg
 
 
+# ---------------------------------------------------------------------------
+# Temporal calendar event management actions
+# ---------------------------------------------------------------------------
+
+def _temporal_events_list_action(payload: dict) -> tuple[bool, str, dict, str]:
+    """GET-style action: return all calendar events with enrichment data."""
+    try:
+        events = read_calendar_events(TEMPORAL_CALENDAR_FILE)
+        return True, "ok", {"events": events, "count": len(events)}, "ok"
+    except Exception as exc:
+        msg = f"temporal_events_list_failed:{exc}"
+        return False, msg, {}, msg
+
+
+def _temporal_event_save_action(payload: dict) -> tuple[bool, str, dict, str]:
+    """Create or update a single calendar event (upsert by UID)."""
+    try:
+        event = dict(payload.get("event") or payload or {})
+        if not event.get("title"):
+            return False, "temporal_event_missing_title", {}, "temporal_event_missing_title"
+        uid = write_calendar_event(TEMPORAL_CALENDAR_FILE, event)
+        return True, "ok", {"uid": uid, "saved": True}, "ok"
+    except Exception as exc:
+        msg = f"temporal_event_save_failed:{exc}"
+        return False, msg, {}, msg
+
+
+def _temporal_event_delete_action(payload: dict) -> tuple[bool, str, dict, str]:
+    """Delete a calendar event by UID."""
+    try:
+        uid = str(payload.get("uid") or "").strip()
+        if not uid:
+            return False, "temporal_event_delete_missing_uid", {}, "temporal_event_delete_missing_uid"
+        removed = delete_calendar_event(TEMPORAL_CALENDAR_FILE, uid)
+        return True, "ok", {"uid": uid, "removed": removed}, "ok"
+    except Exception as exc:
+        msg = f"temporal_event_delete_failed:{exc}"
+        return False, msg, {}, msg
+
+
 def _update_now_dry_run_action(payload: dict) -> tuple[bool, str, dict, str]:
     return PATCH_CONTROL_SERVICE.update_now_dry_run_action(
         tool_update_now_fn=nova_core.tool_update_now,
@@ -1598,6 +1644,18 @@ def _control_status_suppliers() -> dict[str, object]:
 
 
 def _control_action(action: str, payload: dict) -> tuple[bool, str, dict]:
+    # Temporal calendar actions are handled here directly — they do not go
+    # through the dispatcher ladder (which requires a signature change).
+    if action == "temporal_events_list":
+        ok, msg, extra, _ = _temporal_events_list_action(payload)
+        return ok, msg, extra
+    if action == "temporal_event_save":
+        ok, msg, extra, _ = _temporal_event_save_action(payload)
+        return ok, msg, extra
+    if action == "temporal_event_delete":
+        ok, msg, extra, _ = _temporal_event_delete_action(payload)
+        return ok, msg, extra
+
     control_hooks = {
         **HTTP_PIPELINE_CONTROL_SERVICE.action_hooks_from_runtime(globals()),
         **HTTP_GENERATED_WORK_SERVICE.action_hooks_from_runtime(globals()),

@@ -125,3 +125,4 @@ POLICY_PATH = BASE_DIR / "policy.json"
 PYTHON = resolve_python_executable(BASE_DIR)
 WORK_TREE_RUN_TRIGGER_FILE = RUNTIME_DIR / "work_tree_run_trigger.json"
 PATCH_QUEUE_RUN_TRIGGER_FILE = RUNTIME_DIR / "patch_queue_run_trigger.json"
+TEMPORAL_CALENDAR_FILE = BASE_DIR / "runtime" / "temporal" / "operator_calendar.ics"

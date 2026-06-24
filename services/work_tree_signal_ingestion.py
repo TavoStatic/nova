@@ -1043,7 +1043,12 @@ def _storage_watch_signal_from_status(status_payload: dict[str, Any]) -> dict[st
     }
 
 
-def _temporal_pressure_signal_from_status(status_payload: dict[str, Any]) -> dict[str, Any] | None:
+def _temporal_pressure_signal_from_status(status_payload: dict[str, Any]) -> list[dict[str, Any]]:
+    """
+    Return one signal per surfaced temporal pressure event.
+    Each surfaced calendar event gets its own work tree branch so that
+    multiple deadlines are tracked independently.
+    """
     raw = status_payload.get("temporal_pressure")
     if raw is None:
         raw = status_payload.get("temporal_event") or status_payload.get("temporal_events")
@@ -1058,67 +1063,74 @@ def _temporal_pressure_signal_from_status(status_payload: dict[str, Any]) -> dic
         else:
             candidates = [dict(raw)]
     if not candidates:
-        return None
+        return []
 
-    strongest: dict[str, Any] | None = None
-    strongest_score = float("-inf")
+    signals: list[dict[str, Any]] = []
+
     for candidate in candidates:
         event_input = candidate.get("event") if isinstance(candidate.get("event"), dict) else candidate
         pressure_source = event_input if isinstance(event_input, dict) else candidate
         pressure = build_temporal_pressure(pressure_source).to_dict()
         score = float(pressure.get("final_score") or 0.0)
-        if score > strongest_score:
-            strongest = {"input": candidate, "pressure": pressure}
-            strongest_score = score
 
-    if strongest is None:
-        return None
+        event = pressure.get("event") if isinstance(pressure.get("event"), dict) else {}
+        title = str(event.get("title") or candidate.get("title") or "Temporal pressure review").strip()
+        output_path = str(pressure.get("output_path") or "").strip()
 
-    pressure = dict(strongest["pressure"])
-    event = pressure.get("event") if isinstance(pressure.get("event"), dict) else {}
-    title = str(event.get("title") or strongest["input"].get("title") or "Temporal pressure review").strip()
-    score = float(pressure.get("final_score") or 0.0)
-    output_path = str(pressure.get("output_path") or "").strip()
-    severity = "high" if score >= 75.0 or output_path == "work_tree" else "medium" if score >= 45.0 else "low"
-    actionability = "safe_now" if score >= 45.0 else "dead_end"
-    start_text = str(event.get("start") or strongest["input"].get("start") or strongest["input"].get("due_at") or "").strip()
-    metadata = event.get("metadata") if isinstance(event.get("metadata"), dict) else {}
-    uid_text = str(metadata.get("uid") or strongest["input"].get("uid") or "").strip()
-    source = str(strongest["input"].get("source") or event.get("source") or "temporal").strip() or "temporal"
-    symbol = f"{title}:{start_text or output_path or 'temporal'}"
-    if uid_text:
-        symbol = f"{symbol}:{uid_text}"
-    return {
-        "source": source,
-        "signal_class": "temporal_pressure",
-        "title": title,
-        "fingerprint": {
-            "class": "temporal_pressure",
-            "surface": source,
-            "error": "temporal_pressure",
-            "symbol": symbol,
-        },
-        "payload": pressure,
-        "severity": severity,
-        "actionability": actionability,
-        "allowed_tools": ["temporal_review", "read", "find", "queue_status"],
-        "preferred_tool": "temporal_review",
-        "next_task": f"Review temporal pressure for {title}",
-        "task_sequence": [
-            {
-                "title": f"Review temporal pressure for {title}",
-                "allowed_tools": ["temporal_review"],
-                "preferred_tool": "temporal_review",
-                "tool_args": [json.dumps({"payload": pressure}, ensure_ascii=True)],
+        # Both work_tree and outbox-routed events deserve a branch.
+        # work_tree → high priority; outbox → medium priority (lowest-priority branch).
+        # Background-only events (scheduled_job with score < 25) are skipped.
+        if output_path == "scheduled_job" and score < 25.0:
+            continue
+
+        severity = "high" if score >= 75.0 or output_path == "work_tree" else "medium"
+        actionability = "safe_now"
+
+        start_text = str(
+            event.get("start") or candidate.get("start") or candidate.get("due_at") or ""
+        ).strip()
+        metadata = event.get("metadata") if isinstance(event.get("metadata"), dict) else {}
+        uid_text = str(metadata.get("uid") or candidate.get("uid") or "").strip()
+        source = str(candidate.get("source") or event.get("source") or "temporal").strip() or "temporal"
+
+        # Symbol must be stable across cycles for the same event instance
+        symbol = f"{title}:{start_text or output_path or 'temporal'}"
+        if uid_text:
+            symbol = f"{symbol}:{uid_text}"
+
+        signals.append({
+            "source": source,
+            "signal_class": "temporal_pressure",
+            "title": title,
+            "fingerprint": {
+                "class": "temporal_pressure",
+                "surface": source,
+                "error": "temporal_pressure",
+                "symbol": symbol,
             },
-            {
-                "title": "Read temporal scoring service and calendar ingestion",
-                "allowed_tools": ["read"],
-                "preferred_tool": "read",
-                "tool_args": ["services/nova_temporal_service.py"],
-            },
-        ],
-    }
+            "payload": pressure,
+            "severity": severity,
+            "actionability": actionability,
+            "allowed_tools": ["temporal_review", "read", "find", "queue_status"],
+            "preferred_tool": "temporal_review",
+            "next_task": f"Review temporal pressure for {title}",
+            "task_sequence": [
+                {
+                    "title": f"Review temporal pressure for {title}",
+                    "allowed_tools": ["temporal_review"],
+                    "preferred_tool": "temporal_review",
+                    "tool_args": [json.dumps({"payload": pressure}, ensure_ascii=True)],
+                },
+                {
+                    "title": "Read temporal scoring service and calendar ingestion",
+                    "allowed_tools": ["read"],
+                    "preferred_tool": "read",
+                    "tool_args": ["services/nova_temporal_service.py"],
+                },
+            ],
+        })
+
+    return signals
 
 
 def _patch_pipeline_signal_from_status(status_payload: dict[str, Any]) -> dict[str, Any] | None:
@@ -4421,9 +4433,8 @@ class WorkTreeSignalIngestionService:
         storage_watch_signal = _storage_watch_signal_from_status(status_payload)
         if storage_watch_signal is not None:
             signals.append(storage_watch_signal)
-        temporal_pressure_signal = _temporal_pressure_signal_from_status(status_payload)
-        if temporal_pressure_signal is not None:
-            signals.append(temporal_pressure_signal)
+        temporal_pressure_signals = _temporal_pressure_signal_from_status(status_payload)
+        signals.extend(temporal_pressure_signals)
         patch_pipeline_signal = _patch_pipeline_signal_from_status(status_payload)
         if patch_pipeline_signal is not None:
             signals.append(patch_pipeline_signal)
@@ -4983,8 +4994,8 @@ class WorkTreeSignalIngestionService:
             for key in ("temporal_enabled", "temporal_pressure", "temporal_event", "temporal_events")
         )
         if temporal_surface_present:
-            temporal_signal = _temporal_pressure_signal_from_status(status_payload)
-            if temporal_signal is None:
+            temporal_signals = _temporal_pressure_signal_from_status(status_payload)
+            if not temporal_signals:
                 results.extend(
                     self.resolve_signal_branches(
                         signal_class="temporal_pressure",
@@ -4993,13 +5004,17 @@ class WorkTreeSignalIngestionService:
                     )
                 )
             else:
-                active_key = self.source_key_for_signal(temporal_signal)
+                active_keys = {
+                    self.source_key_for_signal(sig)
+                    for sig in temporal_signals
+                    if self.source_key_for_signal(sig)
+                }
                 results.extend(
                     self.resolve_inactive_signal_branches(
                         signal_class="temporal_pressure",
                         source="",
-                        active_source_keys={active_key} if active_key else set(),
-                        reason="Temporal feed moved to a newer active source signal.",
+                        active_source_keys=active_keys,
+                        reason="Temporal feed: calendar event resolved or no longer surfaced.",
                     )
                 )
         maintenance = status_payload.get("autonomy_maintenance") if isinstance(status_payload.get("autonomy_maintenance"), dict) else {}
@@ -5773,4 +5788,11 @@ def _branch_why_summary(normalized: dict[str, Any]) -> str:
         parts.append(f"route_hint={route_hint}")
     summary = "Signal evidence: " + " | ".join(parts)
     extra_lines = [summary]
-  
+    if rationale:
+        extra_lines.append(f"Rationale: {rationale}")
+    if branch_note:
+        extra_lines.append(f"Review focus: {branch_note}")
+    return "\n".join(extra_lines)
+
+
+WORK_TREE_SIGNAL_INGESTION_SERVICE = WorkTreeSignalIngestionService()

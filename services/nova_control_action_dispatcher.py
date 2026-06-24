@@ -670,4 +670,21 @@ class NovaControlActionDispatcher:
         if act == "self_check":
             ok, msg, extra, detail = self_check_action_fn(payload)
             record_control_action_event_fn(act, "ok" if ok else "fail", detail, payload)
-       
+            return ok, msg, extra
+
+        if act == "export_capabilities":
+            ok, msg, extra = export_capabilities_snapshot_fn()
+            record_control_action_event_fn(act, "ok" if ok else "fail", msg, payload)
+            return ok, msg, extra
+
+        if act == "export_ledger_summary":
+            return export_ledger_summary_action_fn(payload)
+
+        if act == "export_diagnostics_bundle":
+            return export_diagnostics_bundle_action_fn(payload)
+
+        record_control_action_event_fn(act, "fail", "unknown_action", payload)
+        return False, "unknown_action", {}
+
+
+NOVA_CONTROL_ACTION_DISPATCHER = NovaControlActionDispatcher()

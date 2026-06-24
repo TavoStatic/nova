@@ -128,6 +128,7 @@ ACTIVE_WORK_TREE_EXECUTE_TOOLS = [
     "location_coords",
     "screen",
     "camera",
+    "temporal_review",
 ]
 ACTIVE_WORK_TREE_MAX_TREES = 8
 ACTIVE_WORK_TREE_MAX_STEPS = 8
