@@ -1750,6 +1750,10 @@ def _tool_args_for_task(tool_name: str, task: Task) -> list[str]:
         session_file = _extract_generated_session_file(task)
         if session_file:
             return [session_file]
+    if tool_name == "temporal_review":
+        explicit_args = task_meta.get("tool_args")
+        if isinstance(explicit_args, list):
+            return [str(item) for item in explicit_args]
     no_arg_tools = {
         "core_health",
         "core_thinning",
