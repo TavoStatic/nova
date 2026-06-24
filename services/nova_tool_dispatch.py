@@ -53,6 +53,7 @@ _PLANNED_TOOL_NAMES = (
     "tool_health",
     "tool_screen",
     "tool_camera",
+    "tool_temporal_review",
 )
 
 _PLANNED_TOOL_ALIASES = {
@@ -94,6 +95,7 @@ _PLANNED_TOOL_ALIASES = {
     "tool_health": "health",
     "tool_screen": "screen",
     "tool_camera": "camera",
+    "tool_temporal_review": "temporal_review",
 }
 
 _OPTIONAL_PLANNED_TOOL_DEFAULTS = {
