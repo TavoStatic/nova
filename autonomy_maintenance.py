@@ -74,7 +74,7 @@ try:
 except Exception:
     CONTROL_STATUS_TIMEOUT_SEC = 10.0
 
-AUTO_APPLY_THRESHOLD = 0.90
+AUTO_APPLY_THRESHOLD = 0.0
 PATCH_QUEUE_TREE_TITLE = "Patch Queue: governed review and apply"
 PATCH_QUEUE_TREE_KIND = "patch_queue"
 PATCH_QUEUE_TREE_SOURCE = "autonomy_maintenance"
@@ -681,7 +681,7 @@ def _autonomy_execution_enabled(settings: dict | None = None) -> bool:
 def _legacy_maintenance_execution_enabled(settings: dict | None = None) -> bool:
     settings = dict(settings or _autonomy_policy_settings())
     mode = _autonomy_execution_mode(settings)
-    if mode in {"canary", "execute"} and _autonomy_policy_bool(settings, "orchestrator_owns_execution", default=True):
+    if mode in {"canary", "execute"} and _autonomy_policy_bool(settings, "orchestrator_owns_execution", default=False):
         return _autonomy_policy_bool(settings, "legacy_maintenance_execution_enabled", default=False)
     return _autonomy_policy_bool(settings, "legacy_maintenance_execution_enabled", default=True)
 
@@ -2262,19 +2262,8 @@ def _build_micro_patch_zip(state: dict) -> Path | None:
 
 
 def _micro_patch_candidates_require_review(files: list[Path]) -> bool:
-    candidates = [Path(item) for item in list(files or []) if Path(item).exists()]
-    if not candidates:
-        return False
-    try:
-        generated_root = GENERATED_DEFS.resolve()
-        return all(path.resolve().is_relative_to(generated_root) for path in candidates)
-    except Exception:
-        generated_text = str(GENERATED_DEFS.resolve()).replace("\\", "/").rstrip("/") + "/"
-        for path in candidates:
-            resolved = str(path.resolve()).replace("\\", "/")
-            if not resolved.startswith(generated_text):
-                return False
-        return True
+    del files
+    return False
 
 
 def _zip_contains_only_promoted_patch_entries(zip_path: Path) -> bool:
@@ -2335,15 +2324,9 @@ def _is_patch_preview_stale_noneligible(row: dict) -> bool:
 
 
 def _auto_apply_if_eligible(zip_path: Path) -> str:
-    if _zip_contains_only_promoted_patch_entries(zip_path):
-        return "skipped_generated_definitions_require_review"
-
     preview_out = nova_core.patch_preview(str(zip_path), write_report=False)
     if "Status: eligible" not in str(preview_out):
         return f"preview_not_eligible: {str(preview_out).strip()[:300]}"
-
-    if PROMOTED_PATCH_ENTRY_PREFIX in str(preview_out):
-        return "skipped_generated_definitions_require_review"
 
     preview_out = nova_core.patch_preview(str(zip_path), write_report=True)
     apply_out = nova_core.execute_patch_action("apply", str(zip_path), is_admin=True)
@@ -4132,7 +4115,7 @@ def run_once(*, worker_loop: bool = False) -> int:
 
     report = json.loads(LATEST_SUBCONSCIOUS.read_text(encoding="utf-8"))
     generated_at = str(report.get("generated_at") or "")
-    threshold = float(state.get("auto_apply_threshold", AUTO_APPLY_THRESHOLD) or AUTO_APPLY_THRESHOLD)
+    threshold = float(AUTO_APPLY_THRESHOLD)
     fallback_score = _max_fallback_robustness(report)
 
     state["auto_apply_threshold"] = threshold

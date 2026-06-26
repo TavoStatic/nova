@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>NYO AI SYSTEMS</title>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+body{background:#0d0f14;color:#e2e8f0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;line-height:1.6;font-size:16px}
+a{color:inherit;text-decoration:none}
+nav{display:flex;align-items:center;justify-content:space-between;padding:1rem 2rem;border-bottom:1px solid #1e2330;background:#0d0f14;position:sticky;top:0;z-index:50}
+.brand{font-size:.75rem;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:#e2e8f0}
+.nav-links{display:flex;gap:1.5rem}
+.nav-links a{color:#64748b;font-size:.8rem;transition:color .15s}
+.nav-links a:hover{color:#e2e8f0}
+.hero{padding:5rem 2rem 3rem;text-align:center;max-width:800px;margin:0 auto}
+.badge{display:inline-block;padding:.25rem .9rem;background:rgba(59,130,246,.1);border:1px solid rgba(59,130,246,.25);border-radius:999px;font-size:.7rem;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:#60a5fa;margin-bottom:1.75rem}
+h1{font-size:clamp(2rem,5vw,3.2rem);font-weight:800;line-height:1.15;letter-spacing:-.025em;margin-bottom:1.1rem}
+h1 em{font-style:normal;color:#60a5fa}
+.lead{color:#64748b;font-size:1.05rem;max-width:560px;margin:0 auto 2.25rem}
+.btns{display:flex;gap:.75rem;justify-content:center;flex-wrap:wrap}
+.btn{padding:.65rem 1.5rem;border-radius:8px;font-size:.875rem;font-weight:600;cursor:pointer;transition:all .15s;border:none}
+.btn-solid{background:#3b82f6;color:#fff}
+.btn-solid:hover{background:#2563eb}
+.btn-outline{background:transparent;color:#cbd5e1;border:1px solid #1e2330}
+.btn-outline:hover{border-color:#475569}
+.strip{background:#0f1219;border-top:1px solid #1a1f2e;border-bottom:1px solid #1a1f2e;padding:.9rem 2rem;display:flex;align-items:center;justify-content:center;gap:2.5rem;flex-wrap:wrap}
+.stat{display:flex;align-items:center;gap:.5rem;font-size:.78rem;color:#64748b}
+.dot{width:6px;height:6px;border-radius:50%;background:#22c55e;animation:blink 2.4s ease-in-out infinite}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:.25}}
+.stat strong{color:#e2e8f0;font-weight:600}
+section{max-width:960px;margin:0 auto;padding:4rem 2rem}
+.eyebrow{font-size:.68rem;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:#3b82f6;margin-bottom:.6rem}
+h2{font-size:clamp(1.4rem,3vw,1.9rem);font-weight:700;letter-spacing:-.015em;margin-bottom:.75rem}
+.desc{color:#64748b;font-size:.975rem;max-width:600px;margin-bottom:2.5rem;line-height:1.65}
+hr{border:none;border-top:1px solid #1a1f2e}
+.grid{display:grid;gap:1px;background:#1a1f2e;border:1px solid #1a1f2e;border-radius:12px;overflow:hidden}
+.g2{grid-template-columns:repeat(auto-fit,minmax(280px,1fr))}
+.g3{grid-template-columns:repeat(auto-fit,minmax(220px,1fr))}
+.card{background:#0f1219;padding:1.6rem}
+.card-tag{font-size:.65rem;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:#475569;margin-bottom:.6rem}
+.card h3{font-size:.975rem;font-weight:700;margin-bottom:.45rem;color:#e2e8f0}
+.card p{font-size:.825rem;color:#64748b;line-height:1.6}
+.cycle{display:flex;align-items:stretch;flex-wrap:wrap;gap:0;margin-top:2rem}
+.cnode{background:#0f1219;border:1px solid #1a1f2e;border-radius:10px;padding:1.1rem 1.25rem;flex:1;min-width:140px;margin:.2rem}
+.cnode .step{font-size:.65rem;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:#3b82f6;margin-bottom:.35rem}
+.cnode .name{font-size:.9rem;font-weight:700;color:#e2e8f0;margin-bottom:.25rem}
+.cnode .note{font-size:.75rem;color:#64748b}
+table{width:100%;border-collapse:collapse;margin-top:1.5rem;font-size:.85rem}
+th{text-align:left;font-size:.7rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#475569;padding:.75rem 1rem;border-bottom:1px solid #1a1f2e}
+td{padding:.75rem 1rem;border-bottom:1px solid #111520;color:#94a3b8}
+td:first-child{color:#cbd5e1;font-weight:500}
+tr:last-child td{border-bottom:none}
+.code{background:#080b10;border:1px solid #1a1f2e;border-radius:10px;padding:1.4rem 1.5rem;font-family:'SF Mono','Cascadia Code','Fira Code',monospace;font-size:.8rem;color:#7d8fa8;margin-top:1.75rem;line-height:1.8}
+.cmd{color:#60a5fa}
+.cmt{color:#2d3a4a}
+footer{text-align:center;padding:3rem 2rem;border-top:1px solid #1a1f2e;font-size:.78rem;color:#475569}
+footer a:hover{color:#94a3b8}
+</style>
+</head>
+<body>
+
+<h2 style="position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0)">NYO AI Systems — local autonomous AI runtime</h2>
+
+<nav>
+  <span class="brand">NYO AI Systems</span>
+  <div class="nav-links">
+    <a href="https://github.com/TavoStatic/nova">GitHub</a>
+    <a href="https://github.com/TavoStatic/nova/blob/codex/push-prep/docs/ARCHITECTURE.md">Architecture</a>
+    <a href="https://github.com/TavoStatic/nova/blob/codex/push-prep/docs/OPERATIONS.md">Operations</a>
+  </div>
+</nav>
+
+<div class="hero">
+  <div class="badge">Local · Autonomous · Windows + Ollama</div>
+  <h1>The AI runtime that works<br><em>while you sleep</em></h1>
+  <p class="lead">Nova runs on your machine, uses your local models, and operates a continuous maintenance loop — reading its own signals, deciding what to work on, and executing that work every 5 minutes without being asked.</p>
+  <div class="btns">
+    <a href="https://github.com/TavoStatic/nova" class="btn btn-solid">View on GitHub</a>
+    <a href="https://github.com/TavoStatic/nova/blob/codex/push-prep/docs/ARCHITECTURE.md" class="btn btn-outline">Architecture</a>
+  </div>
+</div>
+
+<div class="strip">
+  <div class="stat"><div class="dot"></div><strong>5-min cycles</strong><span>maintenance runs every 300 seconds</span></div>
+  <div class="stat"><div class="dot"></div><strong>All local</strong><span>Ollama · Faster-Whisper · Piper TTS</span></div>
+  <div class="stat"><div class="dot"></div><strong>Windows native</strong><span>guard, TTS, and process management</span></div>
+  <div class="stat"><div class="dot"></div><strong>Operator control room</strong><span>live state at /control</span></div>
+</div>
+
+<section>
+  <div class="eyebrow">How it works</div>
+  <h2>A cycle every 5 minutes — whether or not you're there</h2>
+  <p class="desc">Each maintenance cycle reads signals from the runtime, converts them into trackable problems, decides what to work on next, and executes one step. The result becomes evidence for the next cycle.</p>
+  <div class="cycle">
+    <div class="cnode">
+      <div class="step">Step 1</div>
+      <div class="name">Read signals</div>
+      <div class="note">Errors, health checks, calendar deadlines, regression results</div>
+    </div>
+    <div class="cnode">
+      <div class="step">Step 2</div>
+      <div class="name">Score and track</div>
+      <div class="note">Signals become branches in the task tracker, ranked by pressure</div>
+    </div>
+    <div class="cnode">
+      <div class="step">Step 3</div>
+      <div class="name">Decide</div>
+      <div class="note">The orchestrator picks the highest-pressure branch and the right tool</div>
+    </div>
+    <div class="cnode">
+      <div class="step">Step 4</div>
+      <div class="name">Execute and record</div>
+      <div class="note">Tool runs, result is recorded as evidence, next cycle continues</div>
+    </div>
+  </div>
+</section>
+
+<hr/>
+
+<section>
+  <div class="eyebrow">What's inside</div>
+  <h2>Each component has one job</h2>
+  <p class="desc">Nothing is hidden. Every part of Nova is inspectable from the operator control room.</p>
+  <div class="grid g2">
+    <div class="card">
+      <div class="card-tag">Process management</div>
+      <h3>The process keeper</h3>
+      <p>Starts the runtime, watches it, restarts it on failure with exponential backoff, and triggers the maintenance cycle every 5 minutes. Enforces a single-instance lock so only one keeper runs at a time.</p>
+    </div>
+    <div class="card">
+      <div class="card-tag">Work tracking</div>
+      <h3>The task tracker</h3>
+      <p>A SQLite database of open problems organized into branches and steps. Each step is a tool call. The orchestrator advances branches one step at a time and records the result as evidence.</p>
+    </div>
+    <div class="card">
+      <div class="card-tag">Autonomous decisions</div>
+      <h3>The decision engine</h3>
+      <p>Scores each work category by pressure and picks the next action. Respects confidence thresholds and policy allow-lists. Can defer, block, or proceed based on what the runtime evidence shows.</p>
+    </div>
+    <div class="card">
+      <div class="card-tag">Storage hygiene</div>
+      <h3>The storage keeper</h3>
+      <p>Scans every cycle for stale patch previews, outdated snapshots, bloated temp directories, and low-quality generated test files. Archives or deletes them based on age, size, and quality scores.</p>
+    </div>
+    <div class="card">
+      <div class="card-tag">Calendar awareness</div>
+      <h3>Deadline tracking</h3>
+      <p>Reads your calendar (ICS files) every 15 minutes, scores upcoming events by deadline pressure, and routes anything above the threshold into the task tracker as a branch to work through.</p>
+    </div>
+    <div class="card">
+      <div class="card-tag">Test generation</div>
+      <h3>The background simulator</h3>
+      <p>Runs unattended to generate test scenarios, simulate them, and produce candidates for review and promotion into the live system. Runs as a standalone batch job.</p>
+    </div>
+    <div class="card">
+      <div class="card-tag">Operator communication</div>
+      <h3>The notice board</h3>
+      <p>Where Nova writes things it wants the operator to know about — without waiting for a chat turn. Notices move through statuses: new, seen, answered, resolved. Visible in the control room.</p>
+    </div>
+    <div class="card">
+      <div class="card-tag">Patch management</div>
+      <h3>The patch system</h3>
+      <p>Stages patches as previews, snapshots the current state before applying, runs a behavioral check afterward, and rolls back automatically if the check fails.</p>
+    </div>
+  </div>
+</section>
+
+<hr/>
+
+<section>
+  <div class="eyebrow">Platform</div>
+  <h2>Everything runs on your hardware</h2>
+  <p class="desc">No cloud calls. No external APIs. All AI inference goes through Ollama running locally.</p>
+  <table>
+    <tr><th>Component</th><th>What it uses</th></tr>
+    <tr><td>Chat and routing</td><td>qwen2.5:7b via Ollama</td></tr>
+    <tr><td>Vision</td><td>qwen2.5vl:7b via Ollama</td></tr>
+    <tr><td>Memory search</td><td>nomic-embed-text via Ollama (cosine similarity)</td></tr>
+    <tr><td>Speech to text</td><td>Faster-Whisper, medium model, CPU</td></tr>
+    <tr><td>Text to speech</td><td>Piper TTS, en_US-lessac-medium</td></tr>
+    <tr><td>Web search</td><td>SearXNG, self-hosted at 127.0.0.1:8081</td></tr>
+    <tr><td>OS</td><td>Windows (required)</td></tr>
+  </table>
+</section>
+
+<hr/>
+
+<section>
+  <div class="eyebrow">Get running</div>
+  <h2>Quick start</h2>
+  <p class="desc">Requires Windows, Python 3.11+, and <a href="https://ollama.com" style="color:#60a5fa">Ollama</a> running locally with the models pulled.</p>
+  <div class="code"><span class="cmt"># Clone and set up</span>
+git clone https://github.com/TavoStatic/nova.git
+cd nova
+<span class="cmd">.\nova.cmd install</span>
+<span class="cmd">.\nova.cmd doctor</span>
+
+<span class="cmt"># Start the runtime and web UI</span>
+<span class="cmd">.\nova.cmd run</span>
+<span class="cmd">.\nova.cmd webui-start --host 127.0.0.1 --port 8080</span>
+
+<span class="cmt"># Operator control room → http://127.0.0.1:8080/control</span></div>
+</section>
+
+<hr/>
+
+<section>
+  <div class="eyebrow">Ground truth</div>
+  <h2>The runtime is always right</h2>
+  <p class="desc">Documentation falls behind. Runtime artifacts don't. If this page says one thing and the runtime shows another, trust the runtime.</p>
+  <div class="grid g2">
+    <div class="card">
+      <div class="card-tag">Maintenance log</div>
+      <h3>runtime/autonomy_maintenance.log</h3>
+      <p>What every maintenance cycle did — each action taken, each lane scored, each result recorded.</p>
+    </div>
+    <div class="card">
+      <div class="card-tag">Health</div>
+      <h3>runtime/core_health_brief.json</h3>
+      <p>Current health score and the signals that produced it.</p>
+    </div>
+    <div class="card">
+      <div class="card-tag">Open notices</div>
+      <h3>runtime/operator_outbox.jsonl</h3>
+      <p>Everything Nova wants the operator to know about — open, answered, and resolved.</p>
+    </div>
+    <div class="card">
+      <div class="card-tag">Active work</div>
+      <h3>runtime/_internal/work_tree.db</h3>
+      <p>Every open branch and step in the task tracker, with status and evidence.</p>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <p>NYO AI Systems · <a href="https://github.com/TavoStatic/nova">github.com/TavoStatic/nova</a></p>
+  <p style="margin-top:.4rem">Runs local · Windows + Ollama · Built in the open</p>
+</footer>
+
+</body>
+</html>

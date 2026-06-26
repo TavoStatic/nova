@@ -1635,6 +1635,7 @@ def _control_policy_payload() -> dict:
         "models": p.get("models") or {},
         "memory": p.get("memory") or {},
         "web": p.get("web") or {},
+        "server_side": p.get("server_side") or {},
         "chat_auth": _chat_auth_payload(),
     }
 

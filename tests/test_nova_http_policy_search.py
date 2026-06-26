@@ -25,6 +25,10 @@ class _Core:
         self.calls.append(("memory_scope", scope))
         return f"memory:{scope}"
 
+    def set_server_side_settings(self, **kwargs):
+        self.calls.append(("server_side_settings", kwargs))
+        return "server-side:updated"
+
     def set_search_provider(self, provider):
         self.calls.append(("provider", provider))
         return f"provider:{provider}"
@@ -99,6 +103,25 @@ class TestNovaHttpPolicySearchService(unittest.TestCase):
         self.assertEqual((extra.get("policy") or {}).get("web", {}).get("search_provider"), "html")
         self.assertEqual(invalidations, ["status"])
         self.assertEqual(core.calls, [("memory_scope", "hybrid")])
+
+    def test_server_side_hook_returns_policy_snapshot_and_invalidates_cache(self):
+        core = _Core()
+        invalidations = []
+        hooks = HTTP_POLICY_SEARCH_SERVICE.action_hooks_from_runtime(self._scope(core, invalidations))
+
+        ok, msg, extra, detail = hooks["server_side_settings_action_fn"]({
+            "mode": "proxy",
+            "frontdoor": "uniserver",
+            "frontdoor_base_url": "http://127.0.0.1:8080",
+            "docker_enabled": False,
+        })
+
+        self.assertTrue(ok)
+        self.assertEqual(msg, "server-side:updated")
+        self.assertEqual(detail, msg)
+        self.assertEqual((extra.get("policy") or {}).get("web", {}).get("search_provider"), "html")
+        self.assertEqual(invalidations, ["status"])
+        self.assertEqual(core.calls[0][0], "server_side_settings")
 
     def test_probe_hook_uses_current_endpoint_when_payload_is_empty(self):
         core = _Core()

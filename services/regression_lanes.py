@@ -140,6 +140,14 @@ SOURCE_PROFILE_LANES: dict[str, list[str]] = {
         "tests.test_nova_patching_service",
         "tests.test_nova_tool_dispatch",
     ],
+    "source_generated_code": [
+        "tests.test_capability_gap_detector",
+        "tests.test_codegen_memory_recorder",
+        "tests.test_codegen_patch_bridge",
+        "tests.test_codegen_tool",
+        "tests.test_orchestrator_codegen",
+        "tests.test_patch_promotion_memory",
+    ],
     "source_release": [
         "tests.test_installer_validation_service",
         "tests.test_release_promotion_judgment_service",

@@ -38,6 +38,43 @@ class PolicyControlService:
         return ok, msg, {"policy": control_policy_payload_fn()}, msg
 
     @staticmethod
+    def server_side_settings_action(
+        payload: dict,
+        *,
+        set_server_side_settings_fn,
+        control_policy_payload_fn,
+        invalidate_control_status_cache_fn,
+    ) -> tuple[bool, str, dict, str]:
+        mode = str(payload.get("mode") or "").strip()
+        frontdoor = str(payload.get("frontdoor") or "").strip()
+        frontdoor_base_url = payload.get("frontdoor_base_url")
+        if frontdoor_base_url is None:
+            normalized_base_url = None
+        else:
+            normalized_base_url = str(frontdoor_base_url).strip()
+        docker_enabled_value = payload.get("docker_enabled")
+        docker_enabled = None
+        if isinstance(docker_enabled_value, bool):
+            docker_enabled = docker_enabled_value
+        elif isinstance(docker_enabled_value, str):
+            token = docker_enabled_value.strip().lower()
+            if token in {"true", "1", "yes", "on"}:
+                docker_enabled = True
+            elif token in {"false", "0", "no", "off"}:
+                docker_enabled = False
+
+        msg = set_server_side_settings_fn(
+            mode=mode,
+            frontdoor=frontdoor,
+            frontdoor_base_url=normalized_base_url,
+            docker_enabled=docker_enabled,
+        )
+        ok = not msg.lower().startswith("usage:")
+        if ok:
+            invalidate_control_status_cache_fn()
+        return ok, msg, {"policy": control_policy_payload_fn()}, msg
+
+    @staticmethod
     def search_provider_action(
         payload: dict,
         *,

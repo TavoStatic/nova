@@ -533,7 +533,63 @@
 
                         <section class="layer-tab-panel" role="tabpanel" data-layer-panel="governance" hidden>
                             <div class="ops-grid layer-panel-grid">
-                                <div id="temporalPolicyControls" class="panel-card main-card">
+                                <div id="temporalPolicyControls" class="panel-card main-card span-2">
+                                    <div class="section-title"><span class="section-title-wrap"><i class="bi bi-calendar3 section-title-icon" aria-hidden="true"></i><span>Temporal Calendar Surface</span></span></div>
+                                    <div class="section-subtitle">Live temporal feed state, surfaced pressures, and cadence telemetry from the calendar ingestion lane.</div>
+                                    <div id="temporalStatusGrid" class="inspector-stack">Temporal status pending.</div>
+                                    <pre id="temporalStatusBox" class="console-box compact-console">Temporal telemetry pending.</pre>
+
+                                    <!-- Event list -->
+                                    <div class="section-title mt-3"><span class="section-title-wrap"><i class="bi bi-calendar-plus section-title-icon" aria-hidden="true"></i><span>Calendar Events</span></span></div>
+                                    <div id="temporalEventList" class="inspector-stack mb-2">Loading events…</div>
+
+                                    <!-- Add / Edit form -->
+                                    <div class="panel-card" style="background:var(--surface-raised,#1e1e2e);border:1px solid var(--border-subtle,#333);border-radius:6px;padding:12px;margin-top:8px;">
+                                        <div class="section-title" style="font-size:.8rem;margin-bottom:8px;">
+                                            <span id="temporalFormHeading">Add Event</span>
+                                        </div>
+                                        <input type="hidden" id="temporalEventUid" value="" />
+                                        <div class="button-row mb-2" style="gap:8px;flex-wrap:wrap;">
+                                            <input id="temporalEventTitle" class="form-control form-control-sm" placeholder="Event title *" style="flex:2;min-width:160px;" />
+                                            <input id="temporalEventStart" class="form-control form-control-sm" type="datetime-local" title="Start date/time" style="flex:1;min-width:140px;" />
+                                            <input id="temporalEventEnd" class="form-control form-control-sm" type="datetime-local" title="End date/time" style="flex:1;min-width:140px;" />
+                                        </div>
+                                        <div class="button-row mb-2" style="gap:8px;flex-wrap:wrap;">
+                                            <select id="temporalEventConfidence" class="form-control form-control-sm" style="flex:1;min-width:120px;">
+                                                <option value="CONFIRMED">Confirmed</option>
+                                                <option value="TENTATIVE">Tentative</option>
+                                                <option value="CANCELLED">Cancelled</option>
+                                            </select>
+                                            <input id="temporalEventRrule" class="form-control form-control-sm" placeholder="RRULE (e.g. FREQ=WEEKLY;COUNT=10)" style="flex:2;min-width:180px;" />
+                                        </div>
+                                        <div class="section-title" style="font-size:.75rem;margin-top:8px;margin-bottom:4px;">Pressure signals (0.0 – 1.0)</div>
+                                        <div class="button-row mb-2" style="gap:8px;flex-wrap:wrap;">
+                                            <label style="display:flex;flex-direction:column;gap:2px;font-size:.75rem;flex:1;min-width:100px;">
+                                                Importance
+                                                <input id="temporalEventImportance" class="form-control form-control-sm" type="number" min="0" max="1" step="0.05" value="0" />
+                                            </label>
+                                            <label style="display:flex;flex-direction:column;gap:2px;font-size:.75rem;flex:1;min-width:100px;">
+                                                Dependency Risk
+                                                <input id="temporalEventDepRisk" class="form-control form-control-sm" type="number" min="0" max="1" step="0.05" value="0" />
+                                            </label>
+                                            <label style="display:flex;flex-direction:column;gap:2px;font-size:.75rem;flex:1;min-width:100px;">
+                                                Stale Evidence
+                                                <input id="temporalEventStale" class="form-control form-control-sm" type="number" min="0" max="1" step="0.05" value="0" />
+                                            </label>
+                                            <label style="display:flex;flex-direction:column;gap:2px;font-size:.75rem;flex:1;min-width:100px;">
+                                                Operator Context
+                                                <input id="temporalEventOpCtx" class="form-control form-control-sm" type="number" min="0" max="1" step="0.05" value="0" />
+                                            </label>
+                                        </div>
+                                        <div class="button-row" style="gap:8px;">
+                                            <button id="btnTemporalSave" class="btn btn-sm btn-operator-primary" type="button">Save Event</button>
+                                            <button id="btnTemporalClear" class="btn btn-sm btn-operator-alt" type="button">Clear</button>
+                                            <span id="temporalFormFeedback" class="feedback-text" style="font-size:.75rem;"></span>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div id="policyControls" class="panel-card main-card">
                                     <div class="section-title"><span class="section-title-wrap"><i class="bi bi-sliders section-title-icon" aria-hidden="true"></i><span>Policy Controls</span></span></div>
                                     <div class="button-row mb-2">
                                         <input id="domainInput" class="form-control form-control-sm" placeholder="example.com" />
@@ -561,6 +617,30 @@
                                         <button id="btnMemoryScope" class="btn btn-sm btn-operator-primary" type="button">Apply Memory Scope</button>
                                     </div>
                                     <pre id="memoryScopeBox" class="console-box compact-console">Memory scope pending.</pre>
+                                </div>
+
+                                <div class="panel-card main-card">
+                                    <div class="section-title"><span class="section-title-wrap"><i class="bi bi-hdd-network section-title-icon" aria-hidden="true"></i><span>Nova-server-side</span></span></div>
+                                    <div class="button-row mb-2">
+                                        <select id="serverSideMode" class="form-select form-select-sm">
+                                            <option value="native">mode native</option>
+                                            <option value="proxy">mode proxy</option>
+                                        </select>
+                                        <select id="serverSideFrontdoor" class="form-select form-select-sm">
+                                            <option value="direct">frontdoor direct</option>
+                                            <option value="apache">frontdoor apache</option>
+                                            <option value="uniserver">frontdoor uniserver</option>
+                                        </select>
+                                    </div>
+                                    <div class="button-row mb-2">
+                                        <input id="serverSideBaseUrl" class="form-control form-control-sm" placeholder="http://127.0.0.1:8080" />
+                                        <select id="serverSideDockerEnabled" class="form-select form-select-sm">
+                                            <option value="false">docker disabled</option>
+                                            <option value="true">docker enabled</option>
+                                        </select>
+                                        <button id="btnServerSideApply" class="btn btn-sm btn-operator-primary" type="button">Apply Server-side</button>
+                                    </div>
+                                    <pre id="serverSideBox" class="console-box compact-console">Server-side settings pending.</pre>
                                 </div>
 
                                 <div class="panel-card main-card">

@@ -23,6 +23,7 @@ class TestPolicyManager(unittest.TestCase):
             self.assertIn("models", policy)
             self.assertIn("memory", policy)
             self.assertIn("web", policy)
+            self.assertIn("server_side", policy)
             self.assertIn("patch", policy)
             self.assertEqual(policy["memory"].get("scope"), "private")
 
@@ -167,6 +168,27 @@ class TestPolicyManager(unittest.TestCase):
             web = saved.get("web", {})
             self.assertEqual(web.get("research_max_depth"), 2)
             self.assertEqual(web.get("research_pages_per_domain"), 25)
+
+    def test_set_server_side_settings_updates_policy(self):
+        with tempfile.TemporaryDirectory() as td:
+            base = Path(td)
+            manager = self._make_manager(base)
+
+            msg = manager.set_server_side_settings(
+                mode="proxy",
+                frontdoor="uniserver",
+                frontdoor_base_url="127.0.0.1:8080",
+                docker_enabled=False,
+                user="tester",
+            )
+            self.assertIn("Server-side settings updated:", msg)
+
+            saved = json.loads((base / "policy.json").read_text(encoding="utf-8"))
+            server_side = saved.get("server_side", {})
+            self.assertEqual(server_side.get("mode"), "proxy")
+            self.assertEqual(server_side.get("frontdoor"), "uniserver")
+            self.assertEqual(server_side.get("frontdoor_base_url"), "http://127.0.0.1:8080")
+            self.assertFalse(bool(server_side.get("docker_enabled")))
 
 
 if __name__ == "__main__":

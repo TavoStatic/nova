@@ -78,6 +78,11 @@ const operatorOutboxBox = document.getElementById('operatorOutboxBox');
 const operatorOutboxBadge = document.getElementById('operatorOutboxBadge');
 const memoryScopeSelect = document.getElementById('memoryScope');
 const memoryScopeBox = document.getElementById('memoryScopeBox');
+const serverSideModeSelect = document.getElementById('serverSideMode');
+const serverSideFrontdoorSelect = document.getElementById('serverSideFrontdoor');
+const serverSideBaseUrlInput = document.getElementById('serverSideBaseUrl');
+const serverSideDockerSelect = document.getElementById('serverSideDockerEnabled');
+const serverSideBox = document.getElementById('serverSideBox');
 const searchEndpointInput = document.getElementById('searchEndpoint');
 const searchProviderPriorityInput = document.getElementById('searchProviderPriority');
 const searchEndpointBox = document.getElementById('searchEndpointBox');
@@ -85,6 +90,8 @@ const chatUserSelect = document.getElementById('chatUserSelect');
 const chatUserNameInput = document.getElementById('chatUserName');
 const chatUserPassInput = document.getElementById('chatUserPass');
 const chatAuthBox = document.getElementById('chatAuthBox');
+const temporalStatusGrid = document.getElementById('temporalStatusGrid');
+const temporalStatusBox = document.getElementById('temporalStatusBox');
 const plannerInspector = document.getElementById('plannerInspector');
 const ledgerInspector = document.getElementById('ledgerInspector');
 const supervisorInspector = document.getElementById('supervisorInspector');
@@ -167,6 +174,7 @@ let selectedPipelineId = '';
 let pipelineDetailCache = null;
 let selectedWorkTreeId = '';
 let selectedWorkTreeNodeId = '';
+let workTreeViewMode = 'all';
 let refreshInFlight = null;
 let refreshQueued = false;
 const runtimeInspectCache = new Map();
@@ -1239,16 +1247,20 @@ function renderOperatorOutbox(status) {
     const summary = status && status.operator_outbox && typeof status.operator_outbox === 'object'
         ? status.operator_outbox
         : {};
-    const events = Array.isArray(summary.events)
+    const allEvents = Array.isArray(summary.events)
         ? summary.events.filter((event) => event && typeof event === 'object')
         : [];
-    const openEvents = events.filter((event) => !['resolved', 'dismissed', 'stale'].includes(String(event.status || '').trim().toLowerCase()));
-    const selectable = openEvents.length ? openEvents : events;
+    const serverOpenEvents = Array.isArray(summary.open_events)
+        ? summary.open_events.filter((event) => event && typeof event === 'object')
+        : [];
+    const openEvents = (serverOpenEvents.length ? serverOpenEvents : allEvents)
+        .filter((event) => !['resolved', 'dismissed', 'stale'].includes(String(event.status || '').trim().toLowerCase()));
+    const selectable = openEvents.length ? openEvents : (serverOpenEvents.length ? serverOpenEvents : allEvents);
     const previous = operatorOutboxSelect ? String(operatorOutboxSelect.value || '').trim() : '';
     operatorOutboxEvents = selectable;
 
     const openCount = Number(summary.open_count || 0);
-    const totalCount = Number(summary.total_count || events.length || 0);
+    const totalCount = Number(summary.total_count || allEvents.length || 0);
     if (operatorOutboxBadge) {
         operatorOutboxBadge.className = openCount > 0 ? 'status-pill status-pill-warn' : 'status-pill status-pill-good';
         operatorOutboxBadge.textContent = `${Number.isFinite(openCount) ? openCount : 0} open / ${Number.isFinite(totalCount) ? totalCount : 0} total`;
@@ -3601,6 +3613,39 @@ function renderWorkTreeSelect() {
     workTreeSelect.value = selectedWorkTreeId;
 }
 
+function renderWorkTreeViewButtons() {
+    const buttons = [
+        {id: 'btnWorkTreeViewAll', mode: 'all'},
+        {id: 'btnWorkTreeViewActive', mode: 'active'},
+        {id: 'btnWorkTreeViewBlocked', mode: 'blocked'},
+    ];
+    buttons.forEach((item) => {
+        const button = document.getElementById(item.id);
+        if (!button) return;
+        const active = workTreeViewMode === item.mode;
+        button.classList.toggle('active', active);
+        button.setAttribute('aria-pressed', active ? 'true' : 'false');
+    });
+}
+
+function setWorkTreeViewMode(mode) {
+    const normalized = String(mode || '').trim().toLowerCase();
+    workTreeViewMode = ['all', 'active', 'blocked'].includes(normalized) ? normalized : 'all';
+    renderWorkTreeViewButtons();
+    renderSelectedWorkTreeView();
+}
+
+function workTreeNodeVisibleInMode(node) {
+    const status = String(node && node.status ? node.status : '').trim().toLowerCase();
+    if (workTreeViewMode === 'active') {
+        return ['active', 'open', 'pending', 'ready'].includes(status);
+    }
+    if (workTreeViewMode === 'blocked') {
+        return ['blocked', 'observing'].includes(status);
+    }
+    return true;
+}
+
 function renderWorkTreeAggregateSummary(payload) {
     const counts = payload && payload.counts && typeof payload.counts === 'object' ? payload.counts : {};
     const total = Number(counts.total || workTreesCache.length || 0);
@@ -3716,11 +3761,15 @@ function renderWorkTreeInspector(tree, node) {
 
 function renderTreeSvg(tree) {
     if (!workTreeSvg || !workTreeEmptyState) return;
-    const nodes = Array.isArray(tree && tree.nodes) ? tree.nodes.filter((node) => node && typeof node === 'object') : [];
+    const visibleNodes = Array.isArray(tree && tree.nodes)
+        ? tree.nodes.filter((node) => node && typeof node === 'object' && workTreeNodeVisibleInMode(node))
+        : [];
+    const fallbackNodes = Array.isArray(tree && tree.nodes) ? tree.nodes.filter((node) => node && typeof node === 'object') : [];
+    const nodes = visibleNodes.length ? visibleNodes : fallbackNodes;
     if (!tree || !nodes.length) {
         workTreeSvg.innerHTML = '';
         workTreeSvg.setAttribute('viewBox', '0 0 960 560');
-        workTreeEmptyState.textContent = tree ? 'No branches are available for this tree.' : 'Work Tree map pending.';
+        workTreeEmptyState.textContent = tree ? `No branches match the ${workTreeViewMode} view for this tree.` : 'Work Tree map pending.';
         workTreeEmptyState.classList.remove('is-hidden');
         return;
     }
@@ -3823,6 +3872,7 @@ function renderTreeSvg(tree) {
 
 function renderSelectedWorkTreeView() {
     const tree = selectedWorkTree();
+    renderWorkTreeViewButtons();
     renderSelectedWorkTreeSummary(tree);
     if (!tree || !Array.isArray(tree.nodes) || !tree.nodes.length) {
         selectedWorkTreeNodeId = '';
@@ -3830,10 +3880,12 @@ function renderSelectedWorkTreeView() {
         renderWorkTreeInspector(tree, null);
         return;
     }
-    const node = selectedWorkTreeNode(tree);
+    const visibleNodes = tree.nodes.filter((node) => node && typeof node === 'object' && workTreeNodeVisibleInMode(node));
+    const treeForSelection = visibleNodes.length ? {...tree, nodes: visibleNodes} : tree;
+    const node = selectedWorkTreeNode(treeForSelection);
     selectedWorkTreeNodeId = node ? String(node.id || '') : '';
-    renderTreeSvg(tree);
-    renderWorkTreeInspector(tree, node);
+    renderTreeSvg(treeForSelection);
+    renderWorkTreeInspector(treeForSelection, node);
 }
 
 function renderWorkTrees(payload) {
@@ -3907,15 +3959,24 @@ function selectedOperatorMacro() {
 function renderGovernance(policy, status) {
     const memory = policy && policy.memory && typeof policy.memory === 'object' ? policy.memory : {};
     const web = policy && policy.web && typeof policy.web === 'object' ? policy.web : {};
+    const serverSide = policy && policy.server_side && typeof policy.server_side === 'object' ? policy.server_side : {};
     const chatAuth = policy && policy.chat_auth && typeof policy.chat_auth === 'object' ? policy.chat_auth : {};
     const users = Array.isArray(chatAuth.users) ? chatAuth.users : [];
     const scope = String(memory.scope || (status && status.memory_scope) || 'private').trim().toLowerCase();
     const provider = String(web.search_provider || (status && status.search_provider) || 'html').trim().toLowerCase();
     const endpoint = String(web.search_api_endpoint || (status && status.search_api_endpoint) || '').trim();
+    const serverSideMode = String(serverSide.mode || 'native').trim().toLowerCase();
+    const serverSideFrontdoor = String(serverSide.frontdoor || 'direct').trim().toLowerCase();
+    const serverSideBaseUrl = String(serverSide.frontdoor_base_url || '').trim();
+    const serverSideDockerEnabled = Boolean(serverSide.docker_enabled);
     const providerTelemetry = status && status.provider_telemetry && typeof status.provider_telemetry === 'object' ? status.provider_telemetry : {};
     const priority = Array.isArray(web.search_provider_priority) ? web.search_provider_priority : (Array.isArray(status && status.search_provider_priority) ? status.search_provider_priority : []);
 
     if (memoryScopeSelect && ['private', 'shared', 'hybrid'].includes(scope)) memoryScopeSelect.value = scope;
+    if (serverSideModeSelect && ['native', 'proxy'].includes(serverSideMode)) serverSideModeSelect.value = serverSideMode;
+    if (serverSideFrontdoorSelect && ['direct', 'apache', 'uniserver'].includes(serverSideFrontdoor)) serverSideFrontdoorSelect.value = serverSideFrontdoor;
+    if (serverSideBaseUrlInput) serverSideBaseUrlInput.value = serverSideBaseUrl;
+    if (serverSideDockerSelect) serverSideDockerSelect.value = serverSideDockerEnabled ? 'true' : 'false';
     const providerSelect = document.getElementById('searchProvider');
     if (providerSelect && ['html', 'searxng', 'brave'].includes(provider)) providerSelect.value = provider;
     if (searchEndpointInput) searchEndpointInput.value = endpoint;
@@ -3951,6 +4012,14 @@ function renderGovernance(policy, status) {
             `Hits last window: ${hitLines.length ? hitLines.join(', ') : 'n/a'}`,
         ].join('\n');
     }
+    if (serverSideBox) {
+        serverSideBox.textContent = [
+            `Mode: ${serverSideMode}`,
+            `Frontdoor: ${serverSideFrontdoor}`,
+            `Frontdoor base URL: ${serverSideBaseUrl || '(not set)'}`,
+            `Docker enabled: ${serverSideDockerEnabled}`,
+        ].join('\n');
+    }
     if (chatUserSelect) {
         const current = (chatUserSelect.value || '').trim();
         chatUserSelect.innerHTML = '';
@@ -3976,6 +4045,261 @@ function renderGovernance(policy, status) {
             'Usernames:',
             users.length ? users.join('\n') : '(none)',
         ].join('\n');
+    }
+}
+
+function renderTemporalGovernance(status) {
+    if (!temporalStatusGrid && !temporalStatusBox) return;
+    if (!status || typeof status !== 'object') {
+        if (temporalStatusGrid) temporalStatusGrid.textContent = 'Temporal status pending.';
+        if (temporalStatusBox) temporalStatusBox.textContent = 'Temporal telemetry pending.';
+        return;
+    }
+    const maintenance = status.autonomy_maintenance && typeof status.autonomy_maintenance === 'object'
+        ? status.autonomy_maintenance
+        : {};
+    const feed = maintenance.last_temporal_feed && typeof maintenance.last_temporal_feed === 'object'
+        ? maintenance.last_temporal_feed
+        : {};
+    const surfacedPressures = Array.isArray(feed.surfaced_pressures) ? feed.surfaced_pressures : [];
+    const feedErrors = Array.isArray(feed.errors) ? feed.errors : [];
+    const eventCount = Number(status.temporal_feed_event_count != null ? status.temporal_feed_event_count : feed.event_count || 0);
+    const surfacedCount = Number(status.temporal_feed_surfaced_count != null ? status.temporal_feed_surfaced_count : feed.surfaced_count || 0);
+    const pressureCount = Number(status.temporal_pressure_count != null ? status.temporal_pressure_count : 0);
+    const sourcePaths = Array.isArray(feed.source_paths) ? feed.source_paths : [];
+    const samplePressure = surfacedPressures[0] && typeof surfacedPressures[0] === 'object' ? surfacedPressures[0] : null;
+    const sampleEvent = samplePressure && samplePressure.event && typeof samplePressure.event === 'object' ? samplePressure.event : {};
+    const sampleTitle = String(sampleEvent.title || '').trim();
+    const sampleAction = String(samplePressure && samplePressure.recommended_action ? samplePressure.recommended_action : '').trim();
+    const sampleScore = Number(samplePressure && samplePressure.final_score != null ? samplePressure.final_score : NaN);
+    const feedStatus = String(status.temporal_feed_status || feed.status || 'unknown').trim();
+    const enabledText = String(status.temporal_enabled === true ? 'enabled' : 'disabled');
+    const lastRunAt = String(status.temporal_feed_last_run_at || feed.ran_at || '').trim();
+
+    renderInspectorList(temporalStatusGrid, [
+        {label: 'Temporal', value: `${enabledText} | feed ${feedStatus}`},
+        {label: 'Cadence', value: `${Number(feed.interval_sec || 0)}s | next cap ${Number(feed.max_surface_events || 0)} events`},
+        {label: 'Feed Counts', value: `events ${Number.isFinite(eventCount) ? eventCount : 0} | surfaced ${Number.isFinite(surfacedCount) ? surfacedCount : 0} | pressure ${Number.isFinite(pressureCount) ? pressureCount : 0}`},
+        {label: 'Last Run', value: lastRunAt || 'n/a'},
+        {label: 'Source Paths', value: sourcePaths.length ? sourcePaths.join('\n') : '(none)'},
+        {label: 'Top Surfaced Event', value: sampleTitle ? `${sampleTitle}${sampleAction ? ` | action=${sampleAction}` : ''}${Number.isFinite(sampleScore) ? ` | score=${sampleScore.toFixed(1)}` : ''}` : 'No surfaced temporal events'},
+        {label: 'Feed Errors', value: feedErrors.length ? feedErrors.map((entry) => JSON.stringify(entry)).join('\n') : 'No feed errors'},
+    ]);
+
+    if (temporalStatusBox) {
+        const sampleLines = surfacedPressures.slice(0, 3).map((entry, index) => {
+            const event = entry && entry.event && typeof entry.event === 'object' ? entry.event : {};
+            const title = String(event.title || `event_${index + 1}`).trim();
+            const explanation = String(entry && entry.explanation ? entry.explanation : '').trim();
+            const action = String(entry && entry.recommended_action ? entry.recommended_action : '').trim();
+            const path = String(entry && entry.source_path ? entry.source_path : '').trim();
+            const score = Number(entry && entry.final_score != null ? entry.final_score : NaN);
+            return [
+                `${index + 1}. ${title}`,
+                explanation ? `   explain: ${explanation}` : '',
+                action ? `   action: ${action}` : '',
+                Number.isFinite(score) ? `   score: ${score.toFixed(1)}` : '',
+                path ? `   source: ${path}` : '',
+            ].filter(Boolean).join('\n');
+        });
+        temporalStatusBox.textContent = [
+            `Temporal enabled: ${status.temporal_enabled === true}`,
+            `Feed status: ${feedStatus}`,
+            `Last run: ${lastRunAt || 'n/a'}`,
+            `Errors: ${feedErrors.length}`,
+            '',
+            'Surfaced events:',
+            sampleLines.length ? sampleLines.join('\n\n') : '(none)',
+        ].join('\n');
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Temporal event management
+// ---------------------------------------------------------------------------
+
+let _temporalEvents = [];
+
+function _temporalFmt(isoStr) {
+    if (!isoStr) return '';
+    // Convert ICS compact form or ISO to datetime-local value (YYYY-MM-DDTHH:mm)
+    const s = String(isoStr).trim();
+    // Compact ICS: YYYYMMDDTHHmmssZ
+    const compactMatch = s.match(/^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})/);
+    if (compactMatch) {
+        return `${compactMatch[1]}-${compactMatch[2]}-${compactMatch[3]}T${compactMatch[4]}:${compactMatch[5]}`;
+    }
+    // ISO: return first 16 chars
+    return s.substring(0, 16);
+}
+
+function renderTemporalEventList(events) {
+    const list = document.getElementById('temporalEventList');
+    if (!list) return;
+    if (!Array.isArray(events) || !events.length) {
+        list.textContent = 'No calendar events. Add one below.';
+        return;
+    }
+    list.innerHTML = '';
+    events.forEach((ev) => {
+        const uid = String(ev.uid || ev.metadata && ev.metadata.uid || '').trim();
+        const title = String(ev.title || 'Untitled').trim();
+        const start = String(ev.start || '').trim();
+        const confidence = String(ev.confidence || '').trim();
+        const importance = Number(ev.importance || 0).toFixed(2);
+        const depRisk = Number(ev.dependency_risk || 0).toFixed(2);
+
+        const row = document.createElement('div');
+        row.className = 'inspector-row';
+        row.style.cssText = 'display:flex;align-items:center;gap:8px;padding:4px 0;border-bottom:1px solid var(--border-subtle,#333);';
+        row.innerHTML = `
+            <span style="flex:2;font-size:.8rem;font-weight:500;">${escapeHtml(title)}</span>
+            <span style="flex:1;font-size:.75rem;color:var(--text-muted);">${escapeHtml(start.substring(0, 16))}</span>
+            <span style="flex:1;font-size:.75rem;color:var(--text-muted);">${escapeHtml(confidence)}</span>
+            <span style="flex:1;font-size:.75rem;color:var(--text-muted);">imp:${importance} risk:${depRisk}</span>
+            <button class="btn btn-sm btn-operator-alt" data-uid="${escapeHtml(uid)}" data-action="edit-temporal-event" style="padding:1px 8px;font-size:.75rem;">Edit</button>
+            <button class="btn btn-sm" data-uid="${escapeHtml(uid)}" data-action="delete-temporal-event" style="padding:1px 8px;font-size:.75rem;background:var(--danger-muted,#5a1a1a);color:var(--danger,#f38ba8);">Delete</button>
+        `;
+        list.appendChild(row);
+    });
+}
+
+async function loadTemporalEvents() {
+    try {
+        const data = await postAction('temporal_events_list', {});
+        if (data && Array.isArray(data.events)) {
+            _temporalEvents = data.events;
+            renderTemporalEventList(_temporalEvents);
+        }
+    } catch (_) {
+        // silently fail — non-critical
+    }
+}
+
+function clearTemporalForm() {
+    const uid = document.getElementById('temporalEventUid');
+    const title = document.getElementById('temporalEventTitle');
+    const start = document.getElementById('temporalEventStart');
+    const end = document.getElementById('temporalEventEnd');
+    const conf = document.getElementById('temporalEventConfidence');
+    const rrule = document.getElementById('temporalEventRrule');
+    const imp = document.getElementById('temporalEventImportance');
+    const dep = document.getElementById('temporalEventDepRisk');
+    const stale = document.getElementById('temporalEventStale');
+    const opctx = document.getElementById('temporalEventOpCtx');
+    const heading = document.getElementById('temporalFormHeading');
+    const fb = document.getElementById('temporalFormFeedback');
+    if (uid) uid.value = '';
+    if (title) title.value = '';
+    if (start) start.value = '';
+    if (end) end.value = '';
+    if (conf) conf.value = 'CONFIRMED';
+    if (rrule) rrule.value = '';
+    if (imp) imp.value = '0';
+    if (dep) dep.value = '0';
+    if (stale) stale.value = '0';
+    if (opctx) opctx.value = '0';
+    if (heading) heading.textContent = 'Add Event';
+    if (fb) fb.textContent = '';
+}
+
+function populateTemporalForm(ev) {
+    const uid = document.getElementById('temporalEventUid');
+    const title = document.getElementById('temporalEventTitle');
+    const start = document.getElementById('temporalEventStart');
+    const end = document.getElementById('temporalEventEnd');
+    const conf = document.getElementById('temporalEventConfidence');
+    const rrule = document.getElementById('temporalEventRrule');
+    const imp = document.getElementById('temporalEventImportance');
+    const dep = document.getElementById('temporalEventDepRisk');
+    const stale = document.getElementById('temporalEventStale');
+    const opctx = document.getElementById('temporalEventOpCtx');
+    const heading = document.getElementById('temporalFormHeading');
+    if (uid) uid.value = String(ev.uid || ev.metadata && ev.metadata.uid || '');
+    if (title) title.value = String(ev.title || '');
+    if (start) start.value = _temporalFmt(ev.start);
+    if (end) end.value = _temporalFmt(ev.end);
+    if (conf) conf.value = String(ev.confidence || 'CONFIRMED').toUpperCase();
+    if (rrule) rrule.value = String(ev.metadata && ev.metadata.rrule || '');
+    if (imp) imp.value = Number(ev.importance || 0).toFixed(2);
+    if (dep) dep.value = Number(ev.dependency_risk || 0).toFixed(2);
+    if (stale) stale.value = Number(ev.stale_evidence || 0).toFixed(2);
+    if (opctx) opctx.value = Number(ev.operator_context || 0).toFixed(2);
+    if (heading) heading.textContent = 'Edit Event';
+}
+
+function wireTemporalEventManagement() {
+    const saveBtn = document.getElementById('btnTemporalSave');
+    const clearBtn = document.getElementById('btnTemporalClear');
+    const list = document.getElementById('temporalEventList');
+
+    if (saveBtn) {
+        saveBtn.addEventListener('click', () => {
+            const uid = String(document.getElementById('temporalEventUid').value || '').trim();
+            const title = String(document.getElementById('temporalEventTitle').value || '').trim();
+            const start = String(document.getElementById('temporalEventStart').value || '').trim();
+            const end = String(document.getElementById('temporalEventEnd').value || '').trim();
+            const confidence = String(document.getElementById('temporalEventConfidence').value || 'CONFIRMED');
+            const rrule = String(document.getElementById('temporalEventRrule').value || '').trim();
+            const importance = parseFloat(document.getElementById('temporalEventImportance').value || '0') || 0;
+            const dependency_risk = parseFloat(document.getElementById('temporalEventDepRisk').value || '0') || 0;
+            const stale_evidence = parseFloat(document.getElementById('temporalEventStale').value || '0') || 0;
+            const operator_context = parseFloat(document.getElementById('temporalEventOpCtx').value || '0') || 0;
+            const fb = document.getElementById('temporalFormFeedback');
+
+            if (!title) {
+                if (fb) fb.textContent = 'Title is required.';
+                return;
+            }
+
+            const event = {
+                uid: uid || undefined,
+                title,
+                start,
+                end,
+                confidence,
+                importance,
+                dependency_risk,
+                stale_evidence,
+                operator_context,
+                metadata: rrule ? {rrule} : {},
+            };
+
+            if (fb) fb.textContent = 'Saving…';
+            postAction('temporal_event_save', {event}).then((data) => {
+                if (fb) fb.textContent = `Saved (uid: ${data && data.uid || 'ok'})`;
+                clearTemporalForm();
+                loadTemporalEvents();
+            }).catch(() => {
+                if (fb) fb.textContent = 'Save failed.';
+            });
+        });
+    }
+
+    if (clearBtn) {
+        clearBtn.addEventListener('click', clearTemporalForm);
+    }
+
+    if (list) {
+        list.addEventListener('click', (e) => {
+            const btn = e.target.closest('[data-action]');
+            if (!btn) return;
+            const uid = String(btn.dataset.uid || '').trim();
+            const action = String(btn.dataset.action || '').trim();
+
+            if (action === 'edit-temporal-event') {
+                const ev = _temporalEvents.find((x) => String(x.uid || x.metadata && x.metadata.uid || '') === uid);
+                if (ev) populateTemporalForm(ev);
+                return;
+            }
+
+            if (action === 'delete-temporal-event') {
+                if (!uid) return;
+                postAction('temporal_event_delete', {uid}).then(() => {
+                    loadTemporalEvents();
+                }).catch(() => {});
+            }
+        });
     }
 }
 
@@ -4070,6 +4394,7 @@ async function performRefresh() {
             renderOperatorMacros(latestStatus);
             renderBackendCommands(latestStatus);
             renderOperatorOutbox(latestStatus);
+            renderTemporalGovernance(latestStatus);
             renderPlannerInspector(latestStatus);
             renderLedgerInspector(latestStatus);
             renderPatchReadiness(latestStatus);
@@ -4091,6 +4416,7 @@ async function performRefresh() {
             renderSubconscious(null);
             renderOperatorOutbox(null);
             renderLiveTracking(null);
+            renderTemporalGovernance(null);
         }
         if (latestPolicy) {
             if (policyBox) policyBox.textContent = JSON.stringify(latestPolicy, null, 2);
@@ -4176,6 +4502,9 @@ if (workTreeSelect) {
         renderSelectedWorkTreeView();
     });
 }
+bindClick('btnWorkTreeViewAll', () => setWorkTreeViewMode('all'));
+bindClick('btnWorkTreeViewActive', () => setWorkTreeViewMode('active'));
+bindClick('btnWorkTreeViewBlocked', () => setWorkTreeViewMode('blocked'));
 if (operatorOutboxSelect) operatorOutboxSelect.addEventListener('change', () => renderOperatorOutbox(latestStatus));
 if (patchPreviewSelect) patchPreviewSelect.addEventListener('change', () => renderPatchActionReadiness(latestStatus));
 if (chatUserSelect && chatUserNameInput) {
@@ -4979,6 +5308,7 @@ bindClick('btnAllow', async () => { const payload = await postAction('policy_all
 bindClick('btnRemove', async () => { const payload = await postAction('policy_remove', {domain: (document.getElementById('domainInput').value || '').trim()}); setAction(payload.message || 'policy_remove done'); await refresh(); });
 bindClick('btnMode', async () => { const payload = await postAction('web_mode', {mode: document.getElementById('webMode').value}); setAction(payload.message || 'web_mode done'); await refresh(); });
 bindClick('btnMemoryScope', async () => { const payload = await postAction('memory_scope_set', {scope: memoryScopeSelect ? memoryScopeSelect.value : 'private'}); setAction(payload.message || 'memory_scope_set done'); await refresh(); });
+bindClick('btnServerSideApply', async () => { const payload = await postAction('server_side_settings', {mode: serverSideModeSelect ? serverSideModeSelect.value : '', frontdoor: serverSideFrontdoorSelect ? serverSideFrontdoorSelect.value : '', frontdoor_base_url: serverSideBaseUrlInput ? serverSideBaseUrlInput.value.trim() : '', docker_enabled: serverSideDockerSelect ? serverSideDockerSelect.value === 'true' : false}); setAction(payload.message || 'server_side_settings done'); await refresh(); });
 bindClick('btnSearchProvider', async () => { const payload = await postAction('search_provider', {provider: document.getElementById('searchProvider').value}); setAction(payload.message || 'search_provider done'); await refresh(); });
 bindClick('btnSearchToggle', async () => { const payload = await postAction('search_provider_toggle'); setAction(payload.message || 'search_provider_toggle done'); await refresh(); });
 bindClick('btnSearchEndpoint', async () => { const payload = await postAction('search_endpoint_set', {endpoint: searchEndpointInput ? searchEndpointInput.value.trim() : ''}); setAction(payload.message || 'search_endpoint_set done'); await refresh(); });
@@ -5042,9 +5372,37 @@ function initialControlView() {
     }
     return 'overview';
 }
+
+function focusTemporalPolicyAnchor() {
+    const hash = String(window.location.hash || '').trim();
+    if (hash !== '#temporalPolicyControls') {
+        syncTemporalNavLinkActive();
+        return;
+    }
+    setActiveView('operations');
+    const operationsShell = document.querySelector('.layer-tab-shell[data-layer-tabs="operations"]');
+    if (operationsShell) {
+        setLayerTab(operationsShell, 'governance');
+    }
+    const temporalAnchor = document.getElementById('temporalPolicyControls');
+    if (temporalAnchor) {
+        window.requestAnimationFrame(() => {
+            temporalAnchor.scrollIntoView({behavior: 'smooth', block: 'start'});
+        });
+    }
+    syncTemporalNavLinkActive();
+}
+
+window.addEventListener('hashchange', () => {
+    focusTemporalPolicyAnchor();
+});
+
 setFeedback('NYO System control linked. Fetching live status...', 'muted');
 setActiveView(initialControlView());
+focusTemporalPolicyAnchor();
 setInspectorTab('planner');
 renderLiveTracking(null);
+wireTemporalEventManagement();
+loadTemporalEvents();
 refresh();
 setInterval(refresh, 15000);

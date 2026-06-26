@@ -189,6 +189,7 @@ _CONTROL_ACTION_RUNTIME_HOOKS = {
     "policy_remove_action_fn": "_policy_remove_action",
     "web_mode_action_fn": "_web_mode_action",
     "memory_scope_set_action_fn": "_memory_scope_set_action",
+    "server_side_settings_action_fn": "_server_side_settings_action",
     "search_provider_action_fn": "_search_provider_action",
     "search_provider_toggle_action_fn": "_search_provider_toggle_action",
     "search_endpoint_set_action_fn": "_search_endpoint_set_action",
@@ -315,6 +316,7 @@ class NovaControlActionDispatcher:
         policy_remove_action_fn,
         web_mode_action_fn,
         memory_scope_set_action_fn,
+        server_side_settings_action_fn,
         search_provider_action_fn,
         search_provider_toggle_action_fn,
         search_endpoint_set_action_fn,
@@ -564,6 +566,11 @@ class NovaControlActionDispatcher:
 
         if act == "memory_scope_set":
             ok, msg, extra, detail = memory_scope_set_action_fn(payload)
+            record_control_action_event_fn(act, "ok" if ok else "fail", detail, payload)
+            return ok, msg, extra
+
+        if act == "server_side_settings":
+            ok, msg, extra, detail = server_side_settings_action_fn(payload)
             record_control_action_event_fn(act, "ok" if ok else "fail", detail, payload)
             return ok, msg, extra
 

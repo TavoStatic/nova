@@ -7,6 +7,7 @@ Nova should be read here as a supervised local AI runtime with an operator contr
 ## Start Here
 
 - [ARCHITECTURE.md](ARCHITECTURE.md): runtime shape, component map, and request flow
+- [NOVA_SERVER_SIDE.md](NOVA_SERVER_SIDE.md): front-door infrastructure layer that supports Nova without replacing core runtime
 - [SERVICES_INDEX.md](SERVICES_INDEX.md): services-by-domain map for the extracted service layer
 - [OPERATIONS.md](OPERATIONS.md): how to run, test, and operate the system
 - [SUPERVISOR_CONTRACT.md](SUPERVISOR_CONTRACT.md): deterministic ownership and routing contract

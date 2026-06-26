@@ -280,6 +280,7 @@ def record_seconds(seconds: int = 3):
         runtime_scope=globals(),
         sample_rate=SAMPLE_RATE,
         channels=CHANNELS,
+        preferred_input_device=VOICE_INPUT_DEVICE,
     )
 
 
@@ -302,9 +303,10 @@ OLLAMA_BASE = "http://127.0.0.1:11434"
 
 SAMPLE_RATE = 16000
 CHANNELS = 1
+VOICE_INPUT_DEVICE = str(os.environ.get("NOVA_VOICE_INPUT_DEVICE", "auto") or "auto").strip()
 
 # UX tuning
-RECORD_SECONDS = 3
+RECORD_SECONDS = int(os.environ.get("NOVA_VOICE_MAX_SECONDS", "10") or 10)
 OLLAMA_BOOT_RETRIES = 15
 OLLAMA_REQ_TIMEOUT = 1800
 OLLAMA_WARM_TIMEOUT = 45.0
@@ -1947,6 +1949,26 @@ def set_web_mode(mode: str) -> str:
 
 def set_memory_scope(scope: str) -> str:
     return _policy_manager().set_memory_scope(scope, get_active_user())
+
+
+def get_server_side_settings() -> dict:
+    return _policy_manager().get_server_side()
+
+
+def set_server_side_settings(
+    *,
+    mode: str = "",
+    frontdoor: str = "",
+    frontdoor_base_url: str | None = None,
+    docker_enabled: bool | None = None,
+) -> str:
+    return _policy_manager().set_server_side_settings(
+        mode=mode,
+        frontdoor=frontdoor,
+        frontdoor_base_url=frontdoor_base_url,
+        docker_enabled=docker_enabled,
+        user=get_active_user(),
+    )
 
 
 def get_search_provider() -> str:

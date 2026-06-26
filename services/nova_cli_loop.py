@@ -298,9 +298,17 @@ def run_loop(tts, *, core: object) -> None:
                 core.warn(f"Voice mode disabled; typed chat still works. (Reason: {core.VOICE_IMPORT_ERR})")
                 print("Nova: voice is disabled on this machine right now. Type your message instead.\n", flush=True)
                 continue
-            audio = core.record_seconds(core.RECORD_SECONDS)
+            try:
+                audio = core.record_seconds(core.RECORD_SECONDS)
+            except RuntimeError as exc:
+                print(f"Nova: {str(exc).strip() or 'Microphone capture failed.'}\n", flush=True)
+                continue
             print("Nova: transcribing...", flush=True)
-            user_text = core.transcribe(whisper, audio)
+            try:
+                user_text = core.transcribe(whisper, audio)
+            except RuntimeError as exc:
+                print(f"Nova: {str(exc).strip() or 'Microphone transcription failed.'}\n", flush=True)
+                continue
             if not user_text:
                 print("Nova: (heard nothing)\n", flush=True)
                 continue

@@ -148,6 +148,13 @@ class PolicyManager:
         web.setdefault("research_min_score", 3.0)
         data["web"] = web
 
+        server_side = data.get("server_side") if isinstance(data.get("server_side"), dict) else {}
+        server_side.setdefault("mode", "native")
+        server_side.setdefault("frontdoor", "direct")
+        server_side.setdefault("frontdoor_base_url", "")
+        server_side.setdefault("docker_enabled", False)
+        data["server_side"] = server_side
+
         patch = data.get("patch") if isinstance(data.get("patch"), dict) else {}
         patch.setdefault("enabled", True)
         patch.setdefault("allow_force", False)
@@ -245,6 +252,23 @@ class PolicyManager:
         """Get patch policy section."""
         p = self.load_policy()
         return p.get("patch") or {}
+
+    def get_server_side(self) -> dict:
+        """Get normalized Nova server-side settings."""
+        raw = self.load_policy().get("server_side")
+        server_side = raw if isinstance(raw, dict) else {}
+        mode = str(server_side.get("mode") or "native").strip().lower()
+        if mode not in {"native", "proxy"}:
+            mode = "native"
+        frontdoor = str(server_side.get("frontdoor") or "direct").strip().lower()
+        if frontdoor not in {"direct", "apache", "uniserver"}:
+            frontdoor = "direct"
+        return {
+            "mode": mode,
+            "frontdoor": frontdoor,
+            "frontdoor_base_url": str(server_side.get("frontdoor_base_url") or "").strip(),
+            "docker_enabled": bool(server_side.get("docker_enabled", False)),
+        }
 
     def is_web_enabled(self) -> bool:
         """Check if web tool is enabled by policy."""
@@ -393,6 +417,59 @@ class PolicyManager:
         self._save_raw(data)
         self.record_change("memory_scope", value, "success", f"from={prev}", user)
         return f"Memory scope set to {value}."
+
+    def set_server_side_settings(
+        self,
+        *,
+        mode: str = "",
+        frontdoor: str = "",
+        frontdoor_base_url: str | None = None,
+        docker_enabled: bool | None = None,
+        user: str | None = None,
+    ) -> str:
+        next_mode = str(mode or "").strip().lower()
+        next_frontdoor = str(frontdoor or "").strip().lower()
+        next_base_url = str(frontdoor_base_url or "").strip()
+        has_base_url_update = frontdoor_base_url is not None
+        has_update = bool(next_mode or next_frontdoor or has_base_url_update or docker_enabled is not None)
+        if not has_update:
+            return "Usage: server side settings <mode=native|proxy> <frontdoor=direct|apache|uniserver> [frontdoor_base_url=http://host:port] [docker_enabled=true|false]"
+        if next_mode and next_mode not in {"native", "proxy"}:
+            return "Usage: server side mode <native|proxy>"
+        if next_frontdoor and next_frontdoor not in {"direct", "apache", "uniserver"}:
+            return "Usage: server side frontdoor <direct|apache|uniserver>"
+        if has_base_url_update and next_base_url:
+            if " " in next_base_url:
+                return "Usage: server side frontdoor_base_url <http://host:port>"
+            parsed = urlparse(next_base_url if "://" in next_base_url else "http://" + next_base_url)
+            scheme = str(parsed.scheme or "").strip().lower()
+            if scheme not in {"http", "https"} or not str(parsed.hostname or "").strip():
+                return "Usage: server side frontdoor_base_url <http://host:port>"
+            next_base_url = parsed._replace(params="", query="", fragment="").geturl().rstrip("/")
+
+        data = self._load_raw()
+        current = self.get_server_side()
+        server_side = data.get("server_side") if isinstance(data.get("server_side"), dict) else {}
+        if next_mode:
+            server_side["mode"] = next_mode
+        if next_frontdoor:
+            server_side["frontdoor"] = next_frontdoor
+        if has_base_url_update:
+            server_side["frontdoor_base_url"] = next_base_url
+        if docker_enabled is not None:
+            server_side["docker_enabled"] = bool(docker_enabled)
+        data["server_side"] = server_side
+        self._save_raw(data)
+        updated = self.get_server_side()
+        detail = f"from={current.get('mode')}/{current.get('frontdoor')} to={updated.get('mode')}/{updated.get('frontdoor')} docker={updated.get('docker_enabled')}"
+        self.record_change("server_side_settings", str(updated), "success", detail, user)
+        return (
+            "Server-side settings updated: "
+            f"mode={updated.get('mode')}, "
+            f"frontdoor={updated.get('frontdoor')}, "
+            f"frontdoor_base_url={updated.get('frontdoor_base_url') or '(none)'}, "
+            f"docker_enabled={updated.get('docker_enabled')}."
+        )
 
     def get_search_provider(self) -> str:
         provider = str((self.get_web().get("search_provider") or "html")).strip().lower()

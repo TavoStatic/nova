@@ -34,6 +34,38 @@ class TestPolicyControlService(unittest.TestCase):
         self.assertEqual((extra.get("policy") or {}).get("web", {}).get("search_provider"), "html")
         self.assertEqual(invalidations, [])
 
+    def test_server_side_settings_action_returns_policy_snapshot(self):
+        invalidations = []
+        ok, msg, extra, detail = POLICY_CONTROL_SERVICE.server_side_settings_action(
+            {
+                "mode": "proxy",
+                "frontdoor": "uniserver",
+                "frontdoor_base_url": "http://127.0.0.1:8080",
+                "docker_enabled": False,
+            },
+            set_server_side_settings_fn=lambda **kwargs: (
+                "Server-side settings updated: "
+                f"mode={kwargs.get('mode')}, "
+                f"frontdoor={kwargs.get('frontdoor')}, "
+                f"frontdoor_base_url={kwargs.get('frontdoor_base_url')}, "
+                f"docker_enabled={kwargs.get('docker_enabled')}."
+            ),
+            control_policy_payload_fn=lambda: {
+                "server_side": {
+                    "mode": "proxy",
+                    "frontdoor": "uniserver",
+                    "frontdoor_base_url": "http://127.0.0.1:8080",
+                    "docker_enabled": False,
+                }
+            },
+            invalidate_control_status_cache_fn=lambda: invalidations.append("server_side"),
+        )
+
+        self.assertTrue(ok)
+        self.assertEqual(detail, msg)
+        self.assertEqual((extra.get("policy") or {}).get("server_side", {}).get("mode"), "proxy")
+        self.assertEqual(invalidations, ["server_side"])
+
     def test_search_endpoint_set_action_returns_policy_snapshot(self):
         invalidations = []
         ok, msg, extra, detail = POLICY_CONTROL_SERVICE.search_endpoint_set_action(

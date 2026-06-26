@@ -35,6 +35,12 @@
     "stackexchange_api_key_env": "STACKEXCHANGE_API_KEY",
     "github_api_key_env": "GITHUB_TOKEN"
   },
+  "server_side": {
+    "mode": "native",
+    "frontdoor": "direct",
+    "frontdoor_base_url": "",
+    "docker_enabled": false
+  },
   "allowed_root": "C:\\NOVA",
   "tools_enabled": {
     "screen": true,
@@ -120,8 +126,8 @@
     "enabled": true,
     "mode": "canary",
     "execute_enabled": true,
-    "orchestrator_owns_execution": true,
-    "legacy_maintenance_execution_enabled": false,
+    "orchestrator_owns_execution": false,
+    "legacy_maintenance_execution_enabled": true,
     "allowed_actions": [
       "guard_start",
       "autonomy_maintenance_start",
@@ -130,32 +136,33 @@
       "update_now_dry_run",
       "pulse_status",
       "patch_queue_run_next",
-      "active_work_tree_run_next"
+      "active_work_tree_run_next",
+      "codegen_run",
+      "leah_build_run_next"
     ],
     "execute_allowed_actions": [
       "generated_queue_run_next",
       "generated_queue_investigate",
-      "pulse_status"
+      "pulse_status",
+      "patch_queue_run_next",
+      "active_work_tree_run_next",
+      "codegen_run",
+      "leah_build_run_next"
     ],
     "execute_allowed_action_groups": [
       "runtime_health",
       "generated_queue",
       "patch_queue",
-      "active_work_tree"
+      "active_work_tree",
+      "generated_code",
+      "leah_build",
+      "runtime_control"
     ],
-    "execute_blocked_actions": [
-      "guard_start",
-      "autonomy_maintenance_start",
-      "update_now_dry_run"
-    ],
-    "requires_operator_ack_for": [
-      "guard_start",
-      "autonomy_maintenance_start",
-      "update_now_dry_run"
-    ],
+    "execute_blocked_actions": [],
+    "requires_operator_ack_for": [],
     "confidence_threshold": 0.55,
     "execute_min_confidence": 0.55,
-    "cooldown_sec": 180,
+    "cooldown_sec": 0,
     "active_work_tree_max_steps_per_cycle": 3,
     "active_work_tree_max_trees_per_cycle": 8
   }

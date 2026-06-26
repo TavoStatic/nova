@@ -90,6 +90,7 @@ def _runtime_scope(events):
         "_policy_remove_action": _ok_action,
         "_web_mode_action": _ok_action,
         "_memory_scope_set_action": _ok_action,
+        "_server_side_settings_action": _ok_action,
         "_search_provider_action": _ok_action,
         "_search_provider_toggle_action": _ok_action,
         "_search_endpoint_set_action": _ok_action,
