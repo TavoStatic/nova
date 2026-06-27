@@ -360,12 +360,15 @@ def execute_reply_sequence(
             "reply_contract": str(deferred_tool_meta.get("reply_contract") or ""),
             "grounded": bool(deferred_tool_meta.get("grounded")),
         }
+    g = llm_fallback_outcome.get("grounded")
+    if g is None and deferred_tool_meta:
+        g = True
     reply, meta = _break_fallback_loop(reply, {
         "planner_decision": str(llm_fallback_outcome.get("planner_decision") or "llm_fallback"),
         "tool": str(deferred_tool_meta.get("tool") or "") if deferred_tool_meta else "",
         "tool_args": {},
         "tool_result": str(deferred_tool_meta.get("tool_result") or "") if deferred_tool_meta else "",
-        "grounded": True if deferred_tool_meta and llm_fallback_outcome.get("grounded") is None else llm_fallback_outcome.get("grounded"),
+        "grounded": g,
         "reply_contract": reply_contract,
         "reply_outcome": reply_outcome,
     })

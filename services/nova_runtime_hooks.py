@@ -22,6 +22,11 @@ def resolve_runtime_hooks(
                 value = factory(runtime_scope)
             else:
                 value = runtime_scope.get(runtime_name)
+        if value is None:
+            # Provide a safe no-op for tests and incomplete scopes (e.g. new actions)
+            def _noop(*a, **k):
+                return (False, f"{hook_name}_unavailable", {}, f"{hook_name}_unavailable")
+            value = _noop
         if not callable(value):
             raise TypeError(f"{hook_name} must be callable")
         resolved[hook_name] = value
