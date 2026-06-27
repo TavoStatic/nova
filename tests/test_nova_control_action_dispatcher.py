@@ -107,6 +107,8 @@ def _runtime_scope(events):
         "_pipeline_population_upsert_action": _ok_action,
         "_pipeline_archive_action": _ok_action,
         "_self_check_action": _ok_action,
+        "_codegen_run_action": _ok_action,
+        "_leah_build_run_next_action": _ok_action,
         "_export_capabilities_snapshot": lambda: (True, "export_ok", {}),
         "_export_ledger_summary_action": lambda payload: (True, "ledger_ok", {}),
         "_export_diagnostics_bundle_action": lambda payload: (True, "bundle_ok", {}),

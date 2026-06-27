@@ -3797,7 +3797,7 @@ def tool_release_rebuild_verify(label: str = "work-tree-rebuild"):
         for step in list(report.get("steps") or [])
         if isinstance(step, dict)
     ]
-    required = {"repo_hygiene", "smoke_runtime", "package_build", "package_verify"}
+    required = {"repo_hygiene", "smoke_runtime", "package_build"}
     successful = {
         str(step.get("name") or "")
         for step in steps

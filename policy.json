@@ -113,14 +113,18 @@
   "kidney": {
     "enabled": true,
     "mode": "enforce",
-    "definition_max_age_days": 7,
-    "definition_novelty_min": 0.4,
-    "quarantine_max_age_hours": 48,
-    "preview_max_age_days": 3,
-    "snapshot_max_age_days": 30,
-    "temp_max_age_days": 14,
-    "temp_max_total_mb": 500,
-    "protect_patterns": []
+    "definition_max_age_days": 2,
+    "definition_novelty_min": 0.5,
+    "quarantine_max_age_hours": 12,
+    "preview_max_age_days": 1,
+    "snapshot_max_age_days": 5,
+    "snapshot_max_count": 2,
+    "snapshot_max_total_gb": 1,
+    "temp_max_age_days": 2,
+    "temp_max_total_mb": 50,
+    "protect_patterns": ["core_health_brief.json", "work_tree.db"],
+    "exports_max_age_days": 3,
+    "ledger_max_mb": 20
   },
   "autonomy": {
     "enabled": true,

@@ -2808,6 +2808,7 @@ class TestAutonomyMaintenance(unittest.TestCase):
             "tree-core",
             max_steps=1,
             execute_planned_action_fn=autonomy_maintenance.nova_core.execute_planned_action,
+            decide_next_step_fn=autonomy_maintenance._active_work_tree_failure_aware_decider,
         )
         self.assertEqual((payload.get("core_thinning_sync") or {}).get("resolved_count"), 1)
         self.assertEqual(payload.get("attempted_count"), 1)

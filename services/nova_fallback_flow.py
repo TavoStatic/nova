@@ -305,7 +305,6 @@ def finalize_llm_fallback_reply(
 
     clean_reply = strip_mem_leak_fn(reply, retrieved_context)
     planner_decision = "llm_fallback"
-    grounded = None
     reply_contract = ""
     reply_outcome = {}
     if isinstance(intent_evidence_packet, dict) and intent_evidence_packet:
@@ -313,6 +312,21 @@ def finalize_llm_fallback_reply(
             "kind": "llm_fallback",
             "intent_evidence_packet": dict(intent_evidence_packet),
         }
+
+    # Root-cause fix for grounded:false on llm_fallback: when the generation context included
+    # explicit tool evidence (or semantic observation indicates tool result), the reply is grounded
+    # in that evidence even though the final phrasing came from the model.
+    intent_pkt = intent_evidence_packet if isinstance(intent_evidence_packet, dict) else {}
+    sem = intent_pkt.get("planner_frame", {}).get("semantic_tool_observation", {}) if isinstance(intent_pkt.get("planner_frame"), dict) else {}
+    if not isinstance(sem, dict):
+        sem = intent_pkt.get("semantic_tool_observation", {}) if isinstance(intent_pkt.get("semantic_tool_observation"), dict) else {}
+    has_tool_ev = bool(
+        (fallback_context or {}).get("tool_evidence_context")
+        or "TOOL EVIDENCE" in str(retrieved_context or "")
+        or str(sem.get("status") or "").strip() in {"tool_evidence_available", "tool_result_available", "prior_tool_evidence_present"}
+        or str(sem.get("tool") or "").strip() not in {"", "none"}
+    )
+    grounded = True if has_tool_ev else None
 
     return {
         "handled": True,

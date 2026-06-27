@@ -166,6 +166,68 @@ def _floatish(value, default: float = 0.0) -> float:
         return default
 
 
+def _heuristic_semantic_tool_intent(text: str) -> dict | None:
+    """Conservative deterministic heuristic used only as reliability fallback when the LLM
+    routing classifier is unavailable or returns no/ weak tool. This reduces unnecessary
+    llm_fallback entries for common actionable patterns without relying on keyword spam.
+    """
+    t = str(text or "").lower().strip()
+    if not t:
+        return None
+    # Status / health / self: safe no-arg route to live state. Use phrase/word checks to avoid
+    # false positive on unrelated "... status" or "patch status" mentions.
+    status_phrases = ("self status", "nova status", "live status", "runtime status", "system status", "health", "how are you", "are you ok", "runtime state", "system check", "internals")
+    if any(p in t for p in status_phrases):
+        if "system check" in t or "verify" in t:
+            return {
+                "tool": "system_check",
+                "args": [],
+                "confidence": 0.82,
+                "reason": "heuristic_system_check",
+                "evidence_need": "tool_result",
+                "answer_target": "nova_live_state",
+            }
+        return {
+            "tool": "self_status",
+            "args": [],
+            "confidence": 0.85,
+            "reason": "heuristic_live_status",
+            "evidence_need": "live_self_status",
+            "answer_target": "nova_live_state",
+        }
+    # Weather queries
+    if "weather" in t or any(k in t for k in ("jacket", "umbrella", "rain", "temperature outside")):
+        return {
+            "tool": "weather_current_location",
+            "args": [],
+            "confidence": 0.78,
+            "reason": "heuristic_weather",
+            "evidence_need": "external_source",
+            "answer_target": "external_world",
+        }
+    # Work tree / autonomous next / tasks
+    if any(k in t for k in ("work tree", "next task", "continue work", "active work", "work status", "next step")):
+        return {
+            "tool": "work_tree_next",
+            "args": [],
+            "confidence": 0.80,
+            "reason": "heuristic_work_tree",
+            "evidence_need": "tool_result",
+            "answer_target": "tool_action",
+        }
+    # Explicit web / research requests (but only clear ones)
+    if any(k in t for k in ("research ", "search for ", "look up ", "what is the latest", "web ")):
+        return {
+            "tool": "web_research",
+            "args": [text.strip()],
+            "confidence": 0.70,
+            "reason": "heuristic_web",
+            "evidence_need": "external_source",
+            "answer_target": "external_world",
+        }
+    return None
+
+
 def _semantic_tool_intent_has_authority(intent: dict | None) -> bool:
     payload = intent if isinstance(intent, dict) else {}
     tool = str(payload.get("tool") or "").strip()
@@ -228,6 +290,13 @@ def _classify_semantic_tool_actions(
             )
         except Exception:
             return
+
+    # Reliability improvement: if LLM classifier unavailable or returned no/weak tool signal,
+    # try conservative heuristic so common tool queries do not always degrade to llm_fallback.
+    if not isinstance(semantic_intent, dict) or str(semantic_intent.get("tool") or "").strip() in {"", "none"}:
+        h = _heuristic_semantic_tool_intent(text)
+        if h:
+            semantic_intent = h
 
     if isinstance(semantic_intent, dict) and str(semantic_intent.get("tool") or "").strip() == "none":
         _observe("none", semantic_intent)

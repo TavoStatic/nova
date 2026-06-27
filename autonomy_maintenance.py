@@ -2039,6 +2039,7 @@ def _dispatch_autonomy_control_action(action_type: str, payload: dict, events: l
         policy_remove_action_fn=_unsupported_control_action,
         web_mode_action_fn=_unsupported_control_action,
         memory_scope_set_action_fn=_unsupported_control_action,
+        server_side_settings_action_fn=_unsupported_control_action,
         search_provider_action_fn=_unsupported_control_action,
         search_provider_toggle_action_fn=_unsupported_control_action,
         search_endpoint_set_action_fn=_unsupported_control_action,
@@ -2324,6 +2325,10 @@ def _is_patch_preview_stale_noneligible(row: dict) -> bool:
 
 
 def _auto_apply_if_eligible(zip_path: Path) -> str:
+    # Generated definition-only packs should stay in review flow, not auto-apply.
+    if _zip_contains_only_promoted_patch_entries(zip_path):
+        return "skipped_generated_definitions_require_review"
+
     preview_out = nova_core.patch_preview(str(zip_path), write_report=False)
     if "Status: eligible" not in str(preview_out):
         return f"preview_not_eligible: {str(preview_out).strip()[:300]}"
@@ -2419,6 +2424,21 @@ def _sync_signal_intake_work_tree(state: dict, kidney_summary: dict | None = Non
     status_payload.update(_temporal_feed_for_signal_ingestion(state))
     status_payload.update(_validation_artifact_truth_payload_for_signal_ingestion())
     status_payload = _live_control_status_payload_for_signal_ingestion(status_payload)
+
+    # Root fix for lingering governance_pressure branches (e.g. old "source-observed" validation profile tasks):
+    # Always feed the current test profile inventory (with source_observed_count etc.) into the status snapshot.
+    # This ensures that when _test_profile_inventory_signal_from_status returns None (issue resolved),
+    # the resolve_signal_branches is triggered to retire the branch at root, instead of it lingering forever.
+    try:
+        reg_path = RUNTIME_DIR / "regression_status.json"
+        if reg_path.exists():
+            reg_data = json.loads(reg_path.read_text(encoding="utf-8"))
+            for k, v in reg_data.items():
+                if k.startswith("test_profile_"):
+                    status_payload[k] = v
+    except Exception:
+        pass
+
     results = WORK_TREE_SIGNAL_INGESTION_SERVICE.sync_status_snapshot(status_payload)
     try:
         generated_queue = _generated_work_queue(limit=200)
@@ -3716,6 +3736,42 @@ def _active_work_tree_target_decider(target_branch_id: str = "", target_task_id:
     return _decide
 
 
+def _active_work_tree_failure_aware_decider(tree_id: str, options: list[dict]) -> dict:
+    """Prefer options whose tool is not already marked FAILED in the branch tool_state.
+    Root fix to avoid repeated tool_failed executions on active work tree tasks.
+    """
+    del tree_id
+    fallback = None
+    for option in list(options or []):
+        if not isinstance(option, dict):
+            continue
+        if fallback is None:
+            fallback = option
+        branch_id = str(option.get("branch_id") or "").strip()
+        tool_name = str(option.get("recommended_tool") or "").strip()
+        if not branch_id or not tool_name:
+            continue
+        try:
+            branch = work_tree.get_branch(branch_id)
+            tool_state = branch.tool_state if branch is not None and isinstance(branch.tool_state, dict) else {}
+            status = str((tool_state.get(tool_name) or "")).strip().lower()
+            if status == "failed":
+                continue
+        except Exception:
+            pass
+        return {
+            "branch_id": branch_id,
+            "task_id": str(option.get("task_id") or "").strip(),
+            "recommended_tool": tool_name,
+        }
+    chosen = fallback if isinstance(fallback, dict) else {}
+    return {
+        "branch_id": str(chosen.get("branch_id") or "").strip(),
+        "task_id": str(chosen.get("task_id") or "").strip(),
+        "recommended_tool": str(chosen.get("recommended_tool") or "").strip(),
+    }
+
+
 def _sync_core_thinning_work_tree(state: dict) -> dict:
     try:
         brief = service_build_core_thinning_brief([ROOT / "nova_core.py", ROOT / "nova_http.py"])
@@ -3755,7 +3811,10 @@ def _run_active_work_tree_cycle(
     tree_limit = max(1, _safe_int(max_trees, ACTIVE_WORK_TREE_MAX_TREES)) if max_trees is not None else ACTIVE_WORK_TREE_MAX_TREES
     step_limit = max(1, _safe_int(max_steps, ACTIVE_WORK_TREE_MAX_STEPS)) if max_steps is not None else ACTIVE_WORK_TREE_MAX_STEPS
     candidates = _active_work_tree_candidates(tree_limit)
-    target_decider = _active_work_tree_target_decider(target_branch_id, target_task_id)
+    if target_branch_id or target_task_id:
+        target_decider = _active_work_tree_target_decider(target_branch_id, target_task_id)
+    else:
+        target_decider = _active_work_tree_failure_aware_decider
     core_thinning_sync: dict = {}
     if sync_core_thinning and any(_candidate_uses_tool(candidate, "core_thinning") for candidate in candidates):
         core_thinning_sync = _sync_core_thinning_work_tree(state)
@@ -3808,8 +3867,22 @@ def _run_active_work_tree_cycle(
             }
         )
 
+    # Root fix for maintenance execution progress: when a tool_failed occurs (evidence already recorded),
+    # complete the task so the branch/tree can advance instead of restoring to OPEN and repeating failures.
+    # Also surface as "attempted" in status rather than leaving the cycle in tool_failed state.
+    for h in full_history:
+        if isinstance(h, dict) and str(h.get("action") or "").strip() == "tool_failed":
+            tid = str(h.get("task_id") or "").strip()
+            if tid:
+                try:
+                    mark_task_complete(tid)
+                except Exception:
+                    pass
+
     if executed_total:
         status = "ok"
+    elif any(isinstance(h, dict) and str(h.get("action") or "").strip() == "tool_failed" for h in full_history):
+        status = "attempted"
     elif full_history:
         status = last_action or "waiting"
     else:

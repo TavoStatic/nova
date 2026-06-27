@@ -77,6 +77,7 @@ COMPACT_REGRESSION_LANES: dict[str, list[str]] = {
         "tests.test_regression_profile_inventory_service",
         "tests.test_test_profile_inventory_signal_service",
         "tests.test_web_research_session_service",
+        "tests.test_server_side_runtime_service",
     ],
     "behavior": [
         "tests.test_http_chat_flow",
@@ -171,6 +172,7 @@ SOURCE_PROFILE_LANES: dict[str, list[str]] = {
         "tests.test_runtime_heartbeat_service",
         "tests.test_runtime_restart_provenance_service",
         "tests.test_supervisor_runtime",
+        "tests.test_server_side_runtime_service",
     ],
     "source_subconscious": [
         "tests.test_subconscious_review_authority_service",

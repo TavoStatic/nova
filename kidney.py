@@ -54,18 +54,18 @@ def policy_kidney() -> dict[str, Any]:
     cfg = dict(raw if isinstance(raw, dict) else {})
     cfg.setdefault("enabled", True)
     cfg.setdefault("mode", "observe")
-    cfg.setdefault("definition_max_age_days", 7)
-    cfg.setdefault("definition_novelty_min", 0.4)
-    cfg.setdefault("quarantine_max_age_hours", 48)
-    cfg.setdefault("preview_max_age_days", 3)
-    cfg.setdefault("snapshot_max_age_days", 30)
-    cfg.setdefault("snapshot_max_count", 3)
-    cfg.setdefault("snapshot_max_total_gb", 8)
-    cfg.setdefault("cleanup_snapshot_max_age_days", 7)
-    cfg.setdefault("cleanup_snapshot_max_count", 24)
-    cfg.setdefault("cleanup_snapshot_max_total_mb", 128)
-    cfg.setdefault("temp_max_age_days", 14)
-    cfg.setdefault("temp_max_total_mb", 500)
+    cfg.setdefault("definition_max_age_days", 2)
+    cfg.setdefault("definition_novelty_min", 0.5)
+    cfg.setdefault("quarantine_max_age_hours", 12)
+    cfg.setdefault("preview_max_age_days", 1)
+    cfg.setdefault("snapshot_max_age_days", 5)
+    cfg.setdefault("snapshot_max_count", 2)
+    cfg.setdefault("snapshot_max_total_gb", 1)
+    cfg.setdefault("cleanup_snapshot_max_age_days", 2)
+    cfg.setdefault("cleanup_snapshot_max_count", 8)
+    cfg.setdefault("cleanup_snapshot_max_total_mb", 32)
+    cfg.setdefault("temp_max_age_days", 2)
+    cfg.setdefault("temp_max_total_mb", 50)
     cfg.setdefault("protect_patterns", [])
     cfg.setdefault("generated_definition_retire_cooldown_hours", 24)
     return cfg
@@ -397,6 +397,28 @@ def scan_candidates() -> list[dict[str, Any]]:
             if running >= deficit:
                 break
     out.extend(temp_candidates)
+
+    # Additional bloat sources for 3GB+ runtime: old exports, large action/ops journals, validation artifacts
+    export_max_age = float(cfg.get("exports_max_age_days", 3) or 3) * 86400.0
+    for pdir in [RUNTIME_DIR / "validation" / "exports", RUNTIME_DIR / "exports"]:
+        if pdir.exists():
+            for path in sorted(pdir.glob("**/*")):
+                if path.is_dir() or _is_protected(path, protect_patterns):
+                    continue
+                if _age_seconds(path, now) > export_max_age:
+                    out.append(_build_candidate(path, "export_bloat", "delete", "export_age_limit"))
+
+    ledger_max = int(float(cfg.get("ledger_max_mb", 20) or 20) * 1024 * 1024)
+    for ledger_name in ("ops_journal.jsonl", "operator_outbox.jsonl", "control_action_audit.jsonl", "tool_events.jsonl"):
+        p = RUNTIME_DIR / "validation" / ledger_name
+        if not p.exists():
+            p = RUNTIME_DIR / ledger_name
+        if p.exists() and not _is_protected(p, protect_patterns):
+            try:
+                if p.stat().st_size > ledger_max:
+                    out.append(_build_candidate(p, "ledger_bloat", "delete", "ledger_size_limit"))
+            except Exception:
+                pass
     return out
 
 

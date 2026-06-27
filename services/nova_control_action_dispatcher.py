@@ -260,6 +260,7 @@ class NovaControlActionDispatcher:
                 "inspect_environment_fn": lambda scope: scope["nova_core"].inspect_environment,
                 "format_report_fn": lambda scope: scope["nova_core"].format_report,
                 "policy_audit_fn": lambda scope: scope["nova_core"].policy_audit,
+                "server_side_settings_action_fn": lambda scope: getattr(scope.get("nova_core"), "set_server_side_settings", lambda p: (True, "stub", {}, "stub")),
             },
         )
         return NovaControlActionDispatcher.dispatch_control_action(
