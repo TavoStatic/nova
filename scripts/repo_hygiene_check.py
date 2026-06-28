@@ -71,9 +71,30 @@ def is_lfs_pointer(path: Path) -> bool:
 def is_lfs_tracked(rel_path: str, repo_root: Path | None = None) -> bool:
     try:
         output = _run(["git", "check-attr", "filter", "--", rel_path], cwd=repo_root)
+        if output.strip().endswith(": lfs"):
+            return True
     except Exception:
-        return False
-    return output.strip().endswith(": lfs")
+        pass
+    # Fallback: parse .gitattributes directly (handles cases where check-attr is unset, e.g. LFS not initialized in env)
+    try:
+        import fnmatch
+        root = Path(repo_root) if repo_root is not None else Path(__file__).resolve().parents[1]
+        attr_file = root / ".gitattributes"
+        if attr_file.exists():
+            norm = rel_path.replace("\\", "/")
+            for line in attr_file.read_text(encoding="utf-8", errors="ignore").splitlines():
+                line = line.strip()
+                if not line or line.startswith("#"):
+                    continue
+                parts = line.split()
+                if len(parts) >= 2:
+                    pattern = parts[0].strip()
+                    attrs = " ".join(parts[1:]).lower()
+                    if "lfs" in attrs and (fnmatch.fnmatch(norm, pattern) or fnmatch.fnmatch(norm, f"**/{pattern}") or pattern == norm):
+                        return True
+    except Exception:
+        pass
+    return False
 
 
 def _git_blob_head(spec: str, repo_root: Path | None = None, *, max_bytes: int = 512) -> bytes:
