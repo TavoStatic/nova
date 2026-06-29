@@ -60,6 +60,8 @@
     "check_frequency": "every_health_pulse",
     "signal_on_gap": true,
     "signal_class": "declared_capability_absent",
+    "layer_policy_gate": true,
+    "observe_until_core_gate_passes": true,
     "prioritize_phases": ["phase_2_leah_build", "phase_2_active", "phase_3_future"],
     "max_gaps_per_signal": 5,
     "min_gaps_to_fire_signal": 1

@@ -56,6 +56,30 @@ class SourceRootJudgmentServiceTests(unittest.TestCase):
         self.assertIn("Source Root Judgment", render_source_root_judgment(judgment))
         self.assertTrue(evidence_id)
 
+    def test_build_source_root_judgment_ignores_ok_false_literals_in_read_source(self) -> None:
+        branch, task = self._branch_with_task()
+        work_tree.record_task_evidence(
+            branch_id=branch.branch_id,
+            task_id=task.task_id,
+            tool_name="read",
+            tool_args=["services/ollama_health.py"],
+            result=(
+                'from __future__ import annotations\n\n'
+                'def build_ollama_health_payload(...):\n'
+                '    return {\n'
+                '        "ok": False,\n'
+                '        "status": "blocked_by_test_guard",\n'
+                '    }\n'
+            ),
+        )
+        work_tree.mark_task_complete(task.task_id)
+
+        judgment = build_source_root_judgment(branch.branch_id, work_tree_module=work_tree)
+
+        self.assertEqual(judgment["verdict"], "evidence_review_needed")
+        self.assertEqual(judgment["failed_evidence_count"], 0)
+        self.assertFalse(judgment["operator_outbox"])
+
     def test_build_source_root_judgment_treats_fail_marker_as_failed_evidence(self) -> None:
         branch, task = self._branch_with_task()
         work_tree.record_task_evidence(

@@ -471,6 +471,189 @@ class TestOperatorOutboxService(unittest.TestCase):
             "new",
         )
 
+    def test_reconcile_source_root_judgment_notices_stales_missing_branch_pressure(self):
+        with TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "operator_outbox.jsonl"
+            orphaned = OPERATOR_OUTBOX_SERVICE.append_notice(
+                path,
+                source="source_root_judgment",
+                severity="attention",
+                title="Source root needs operator judgment: source_root_inventory",
+                message="Branch evidence failed.",
+                dedupe_key="source_root_judgment|source_root_inventory|failed_evidence|orphan",
+                payload={
+                    "request_kind": "source_root_judgment",
+                    "tree": {
+                        "branch_id": "branch_missing",
+                        "branch_title": "Source root inventory has uncovered unwired roots or files",
+                    },
+                },
+                now_fn=lambda: 1000.0,
+                uuid_fn=lambda: "orphansrc",
+            )
+            active = OPERATOR_OUTBOX_SERVICE.append_notice(
+                path,
+                source="source_root_judgment",
+                severity="attention",
+                title="Source root needs operator judgment: web_search",
+                message="Search evidence failed.",
+                dedupe_key="source_root_judgment|web_search|failed_evidence|active",
+                payload={
+                    "request_kind": "source_root_judgment",
+                    "tree": {
+                        "branch_id": "branch_search",
+                        "branch_title": "SearXNG search dependency",
+                    },
+                },
+                now_fn=lambda: 1001.0,
+                uuid_fn=lambda: "activesrc",
+            )
+
+            class _WorkTreeStub:
+                @staticmethod
+                def get_branch(branch_id: str):
+                    if branch_id == "branch_search":
+                        return object()
+                    return None
+
+            result = OPERATOR_OUTBOX_SERVICE.reconcile_source_root_judgment_notices(
+                path,
+                work_tree_state={
+                    "trees": [
+                        {
+                            "tree_id": "tree_signal",
+                            "nodes": [
+                                {
+                                    "id": "branch_search",
+                                    "status": "blocked",
+                                    "resolution_state": "open",
+                                }
+                            ],
+                        }
+                    ]
+                },
+                work_tree_module=_WorkTreeStub,
+                now_fn=lambda: 1010.0,
+            )
+            events = OPERATOR_OUTBOX_SERVICE.read_events(path, limit=10)
+
+        self.assertTrue(orphaned.get("ok"))
+        self.assertTrue(active.get("ok"))
+        self.assertEqual(result.get("staled_count"), 1)
+        by_key = {event.get("dedupe_key"): event for event in events}
+        self.assertEqual(
+            by_key["source_root_judgment|source_root_inventory|failed_evidence|orphan"].get("status"),
+            "stale",
+        )
+        self.assertEqual(
+            by_key["source_root_judgment|source_root_inventory|failed_evidence|orphan"].get("status_note"),
+            "source_root_branch_missing",
+        )
+        self.assertEqual(
+            by_key["source_root_judgment|web_search|failed_evidence|active"].get("status"),
+            "new",
+        )
+
+    def test_reconcile_stale_open_notices_stales_aged_new_and_seen_notices(self):
+        with TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "operator_outbox.jsonl"
+            fresh = OPERATOR_OUTBOX_SERVICE.append_notice(
+                path,
+                source="work_tree",
+                severity="attention",
+                title="Fresh notice",
+                message="Still current.",
+                dedupe_key="work_tree|blocked_task|branch-fresh|task-fresh|reason",
+                payload={"request_kind": "blocked_task"},
+                now_fn=lambda: 1_000_000.0,
+                uuid_fn=lambda: "fresh1",
+            )
+            aged = OPERATOR_OUTBOX_SERVICE.append_notice(
+                path,
+                source="source_root_judgment",
+                severity="attention",
+                title="Aged notice",
+                message="Should stale.",
+                dedupe_key="source_root_judgment|source_root_inventory|failed_evidence|aged",
+                payload={"request_kind": "source_root_judgment"},
+                now_fn=lambda: 1000.0,
+                uuid_fn=lambda: "aged1",
+            )
+            aged_event = aged.get("event") or {}
+            aged_event["status"] = "seen"
+            rows = OPERATOR_OUTBOX_SERVICE._load_events(path)
+            rows[-1] = aged_event
+            OPERATOR_OUTBOX_SERVICE._write_events(path, rows)
+
+            result = OPERATOR_OUTBOX_SERVICE.reconcile_stale_open_notices(
+                path,
+                max_age_days=7,
+                now_fn=lambda: 1_000_000.0,
+            )
+            events = OPERATOR_OUTBOX_SERVICE.read_events(path, limit=10)
+
+        self.assertTrue(fresh.get("ok"))
+        self.assertTrue(result.get("ok"))
+        self.assertEqual(result.get("staled_count"), 1)
+        by_key = {event.get("dedupe_key"): event for event in events}
+        self.assertEqual(by_key["work_tree|blocked_task|branch-fresh|task-fresh|reason"].get("status"), "new")
+        self.assertEqual(
+            by_key["source_root_judgment|source_root_inventory|failed_evidence|aged"].get("status"),
+            "stale",
+        )
+        self.assertEqual(
+            by_key["source_root_judgment|source_root_inventory|failed_evidence|aged"].get("status_note"),
+            "notice_aged_out",
+        )
+
+    def test_reconcile_duplicate_source_notices_keeps_latest_open_notice(self):
+        with TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "operator_outbox.jsonl"
+            older = OPERATOR_OUTBOX_SERVICE.append_notice(
+                path,
+                source="source_root_judgment",
+                severity="attention",
+                title="Older judgment notice",
+                message="Older pressure.",
+                dedupe_key="source_root_judgment|source_root_inventory|failed_evidence|older",
+                payload={"request_kind": "source_root_judgment"},
+                now_fn=lambda: 1000.0,
+                uuid_fn=lambda: "older1",
+            )
+            newer = OPERATOR_OUTBOX_SERVICE.append_notice(
+                path,
+                source="source_root_judgment",
+                severity="attention",
+                title="Newer judgment notice",
+                message="Newer pressure.",
+                dedupe_key="source_root_judgment|source_root_inventory|failed_evidence|newer",
+                payload={"request_kind": "source_root_judgment"},
+                now_fn=lambda: 2000.0,
+                uuid_fn=lambda: "newer1",
+            )
+            result = OPERATOR_OUTBOX_SERVICE.reconcile_duplicate_source_notices(
+                path,
+                now_fn=lambda: 2001.0,
+            )
+            events = OPERATOR_OUTBOX_SERVICE.read_events(path, limit=10)
+
+        self.assertTrue(older.get("ok"))
+        self.assertTrue(newer.get("ok"))
+        self.assertEqual(result.get("staled_count"), 1)
+        by_key = {event.get("dedupe_key"): event for event in events}
+        self.assertEqual(
+            by_key["source_root_judgment|source_root_inventory|failed_evidence|older"].get("status"),
+            "stale",
+        )
+        self.assertEqual(
+            by_key["source_root_judgment|source_root_inventory|failed_evidence|older"].get("status_note"),
+            "duplicate_source_notice_superseded",
+        )
+        self.assertEqual(
+            by_key["source_root_judgment|source_root_inventory|failed_evidence|newer"].get("status"),
+            "new",
+        )
+
     def test_reconcile_autonomy_notices_stales_cleared_pressure(self):
         with TemporaryDirectory() as temp_dir:
             path = Path(temp_dir) / "operator_outbox.jsonl"

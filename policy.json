@@ -126,6 +126,16 @@
     "exports_max_age_days": 3,
     "ledger_max_mb": 20
   },
+  "layers": {
+    "leah": {
+      "mode": "observe",
+      "promoted_capabilities": []
+    },
+    "codegen": {
+      "mode": "observe",
+      "promoted_capabilities": []
+    }
+  },
   "autonomy": {
     "enabled": true,
     "mode": "canary",

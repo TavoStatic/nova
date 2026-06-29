@@ -11,6 +11,7 @@ from services.nova_control_action_dispatcher import (
     is_autonomy_advisory_action,
 )
 from services.core_steward_contracts import AUTONOMY_MAINTENANCE_NOT_RUNNING_REASON
+from services.layer_maturity_policy import orchestrator_codegen_action_allowed
 
 
 DECISION_RECOMMEND_ACTION = "recommend_action"
@@ -300,6 +301,7 @@ class AutonomyOrchestratorService:
         triage_raw = _as_dict(input_envelope.get("triage_hints"))
         last_action_raw = _as_dict(input_envelope.get("last_action_context"))
         maintenance_raw = _as_dict(input_envelope.get("autonomy_maintenance"))
+        layer_maturity_raw = _as_dict(input_envelope.get("layer_maturity_snapshot"))
 
         branches: list[dict[str, Any]] = []
         for item in _as_list(work_tree_raw.get("branches"))[:40]:
@@ -450,8 +452,10 @@ class AutonomyOrchestratorService:
                 "operator_ack_present": bool(policy_raw.get("operator_ack_present", False)),
                 "active_work_tree_max_steps_per_cycle": _as_int(policy_raw.get("active_work_tree_max_steps_per_cycle")),
                 "active_work_tree_max_trees_per_cycle": _as_int(policy_raw.get("active_work_tree_max_trees_per_cycle")),
+                "layers": _compact_value(_as_dict(policy_raw.get("layers"))),
                 "source_freshness_sec": freshness["policy_snapshot"],
             },
+            "layer_maturity_snapshot": _compact_value(layer_maturity_raw),
             "triage_hints": {
                 "likely_owner_by_branch": _compact_value(_as_dict(triage_raw.get("likely_owner_by_branch"))),
                 "seam_pressure_scores": _compact_value(seam_scores),
@@ -797,18 +801,33 @@ class AutonomyOrchestratorService:
                     effect = f"Generate code to close capability gap: {gap_capability}. Branch: {gap_branch_title}."
                 else:
                     effect = f"Synthesize capability gap specification and generate implementation. Branch: {gap_branch_title}."
-            candidates.append(
-                {
-                    "action": self._contract_action(
-                        action_type,
-                        reason_code=reason_code,
-                        target_id=gap_branch_id or None,
-                        expected_effect=effect,
-                    ),
-                    "source": "work_tree_snapshot",
-                    "triage_focus": {},
-                }
-            )
+            policy_snapshot = _as_dict(evidence.get("policy_snapshot"))
+            layer_maturity = _as_dict(evidence.get("layer_maturity_snapshot"))
+            status_context = {
+                "capability_gaps": list(gap_payload.get("gaps") or []),
+                "root_closure_inventory": layer_maturity.get("root_closure_inventory"),
+                "release_runtime_truth": layer_maturity.get("release_runtime_truth"),
+                "release_status": layer_maturity.get("release_status"),
+                "capabilities_registered": layer_maturity.get("capabilities_registered"),
+            }
+            if orchestrator_codegen_action_allowed(
+                action_type,
+                policy=policy_snapshot,
+                status_payload=status_context,
+                capability_name=gap_capability,
+            ):
+                candidates.append(
+                    {
+                        "action": self._contract_action(
+                            action_type,
+                            reason_code=reason_code,
+                            target_id=gap_branch_id or None,
+                            expected_effect=effect,
+                        ),
+                        "source": "work_tree_snapshot",
+                        "triage_focus": {},
+                    }
+                )
 
         if _as_int(queue.get("approved_eligible_previews")) > 0:
             candidates.append(

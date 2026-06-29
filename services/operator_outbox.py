@@ -596,11 +596,31 @@ class OperatorOutboxService:
             self._write_events(path, rows)
         return {"ok": True, "staled_count": staled, "active_notice_count": len(active_keys)}
 
+    @staticmethod
+    def _branch_exists(work_tree_module: Any, branch_id: str) -> bool | None:
+        clean_branch_id = _safe_text(branch_id, 120)
+        if not clean_branch_id:
+            return None
+        module = work_tree_module
+        if module is None:
+            try:
+                import work_tree as module
+            except Exception:
+                return None
+        get_branch = getattr(module, "get_branch", None)
+        if not callable(get_branch):
+            return None
+        try:
+            return get_branch(clean_branch_id) is not None
+        except Exception:
+            return None
+
     def reconcile_source_root_judgment_notices(
         self,
         path: Path,
         *,
         work_tree_state: dict[str, Any] | None = None,
+        work_tree_module: Any = None,
         now_fn: Callable[[], float] | None = None,
     ) -> dict[str, Any]:
         """Close source-root notices once their owning Work Tree branch is closed."""
@@ -636,10 +656,19 @@ class OperatorOutboxService:
             branch_id = self.work_tree_target_from_event(event).get("branch_id", "")
             if not branch_id:
                 continue
-            if branch_closed.get(branch_id) is not True:
+            should_stale = False
+            status_note = "source_root_pressure_cleared"
+            if branch_closed.get(branch_id) is True:
+                should_stale = True
+            elif branch_id not in branch_closed:
+                branch_exists = self._branch_exists(work_tree_module, branch_id)
+                if branch_exists is False:
+                    should_stale = True
+                    status_note = "source_root_branch_missing"
+            if not should_stale:
                 continue
             event["status"] = "stale"
-            event["status_note"] = "source_root_pressure_cleared"
+            event["status_note"] = status_note
             event["updated_ts_epoch"] = now_value
             event["updated_ts"] = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(now_value))
             staled += 1
@@ -647,6 +676,90 @@ class OperatorOutboxService:
         if staled:
             self._write_events(path, rows)
         return {"ok": True, "staled_count": staled, "known_branch_count": len(branch_closed)}
+
+    def reconcile_stale_open_notices(
+        self,
+        path: Path,
+        *,
+        max_age_days: int = 7,
+        now_fn: Callable[[], float] | None = None,
+    ) -> dict[str, Any]:
+        """Close open notices that aged out without operator interaction."""
+        rows = self._load_events(path)
+        if not rows:
+            return {"ok": True, "staled_count": 0, "max_age_days": max(1, int(max_age_days or 1))}
+
+        now_value = float((now_fn or time.time)())
+        max_age_sec = max(1, int(max_age_days or 1)) * 86400
+        staled = 0
+        for event in rows:
+            if _safe_status(event.get("status")) not in {"new", "seen"}:
+                continue
+            ts = float(event.get("updated_ts_epoch") or event.get("ts_epoch") or 0)
+            if ts <= 0 or (now_value - ts) < max_age_sec:
+                continue
+            event["status"] = "stale"
+            event["status_note"] = "notice_aged_out"
+            event["updated_ts_epoch"] = now_value
+            event["updated_ts"] = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(now_value))
+            staled += 1
+
+        if staled:
+            self._write_events(path, rows)
+        return {"ok": True, "staled_count": staled, "max_age_days": max(1, int(max_age_days or 1))}
+
+    def reconcile_duplicate_source_notices(
+        self,
+        path: Path,
+        *,
+        now_fn: Callable[[], float] | None = None,
+    ) -> dict[str, Any]:
+        """Keep only the newest open notice per source and request_kind."""
+        rows = self._load_events(path)
+        if not rows:
+            return {"ok": True, "staled_count": 0}
+
+        now_value = float((now_fn or time.time)())
+        latest_open_index_by_key: dict[tuple[str, str], int] = {}
+        for index, event in enumerate(rows):
+            if _safe_status(event.get("status")) in CLOSED_NOTICE_STATUSES:
+                continue
+            source = _safe_text(event.get("source"), 120)
+            if not source:
+                continue
+            payload = _safe_dict(event.get("payload"))
+            request_kind = _safe_text(payload.get("request_kind"), 120) or "unspecified"
+            ts = float(event.get("updated_ts_epoch") or event.get("ts_epoch") or 0)
+            key = (source, request_kind)
+            previous_index = latest_open_index_by_key.get(key)
+            if previous_index is None:
+                latest_open_index_by_key[key] = index
+                continue
+            previous_ts = float(
+                rows[previous_index].get("updated_ts_epoch") or rows[previous_index].get("ts_epoch") or 0
+            )
+            if ts >= previous_ts:
+                latest_open_index_by_key[key] = index
+
+        staled = 0
+        for index, event in enumerate(rows):
+            if _safe_status(event.get("status")) in CLOSED_NOTICE_STATUSES:
+                continue
+            source = _safe_text(event.get("source"), 120)
+            if not source:
+                continue
+            payload = _safe_dict(event.get("payload"))
+            request_kind = _safe_text(payload.get("request_kind"), 120) or "unspecified"
+            if latest_open_index_by_key.get((source, request_kind)) != index:
+                event["status"] = "stale"
+                event["status_note"] = "duplicate_source_notice_superseded"
+                event["updated_ts_epoch"] = now_value
+                event["updated_ts"] = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(now_value))
+                staled += 1
+
+        if staled:
+            self._write_events(path, rows)
+        return {"ok": True, "staled_count": staled}
 
     def reconcile_autonomy_notices(
         self,

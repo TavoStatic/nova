@@ -159,6 +159,7 @@ class NovaHttpGetRoutesService:
         qs: dict,
         control_auth_fn,
         cached_control_status_payload_fn,
+        cached_control_status_surfaces_payload_fn=None,
         control_policy_payload_fn,
         metrics_payload_fn,
         work_trees_payload_fn,
@@ -169,6 +170,7 @@ class NovaHttpGetRoutesService:
     ) -> tuple[int, dict] | None:
         if path not in {
             "/api/control/status",
+            "/api/control/status/surfaces",
             "/api/control/policy",
             "/api/control/metrics",
             "/api/control/work-trees",
@@ -187,6 +189,9 @@ class NovaHttpGetRoutesService:
 
         if path == "/api/control/status":
             return 200, cached_control_status_payload_fn()
+        if path == "/api/control/status/surfaces":
+            surfaces_fn = cached_control_status_surfaces_payload_fn or cached_control_status_payload_fn
+            return 200, surfaces_fn()
         if path == "/api/control/policy":
             return 200, control_policy_payload_fn()
         if path == "/api/control/metrics":
@@ -229,12 +234,14 @@ class NovaHttpGetRoutesService:
                     runtime_scope,
                     selected_pipeline_id=selected,
                 )
+        cached_control_status_surfaces_payload_fn = runtime_scope.get("_cached_control_status_surfaces_payload")
         return NovaHttpGetRoutesService.handle_control_api_request(
             path,
             handler=handler,
             qs=qs,
             control_auth_fn=runtime_fn(runtime_scope, "_control_auth"),
             cached_control_status_payload_fn=runtime_fn(runtime_scope, "_cached_control_status_payload"),
+            cached_control_status_surfaces_payload_fn=cached_control_status_surfaces_payload_fn,
             control_policy_payload_fn=runtime_fn(runtime_scope, "_control_policy_payload"),
             metrics_payload_fn=runtime_fn(runtime_scope, "_metrics_payload"),
             work_trees_payload_fn=runtime_fn(runtime_scope, "_work_trees_payload"),

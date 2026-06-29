@@ -78,6 +78,7 @@ class NovaHttpFrontdoorService:
             "chat_api_get": ("/api/chat/history",),
             "control_api_get": (
                 "/api/control/status",
+                "/api/control/status/surfaces",
                 "/api/control/policy",
                 "/api/control/metrics",
                 "/api/control/sessions",

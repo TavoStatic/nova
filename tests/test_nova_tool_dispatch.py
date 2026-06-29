@@ -49,6 +49,7 @@ def _runtime_scope():
         "tool_health": lambda *args: ("health", args),
         "tool_screen": lambda *args: ("screen", args),
         "tool_camera": lambda *args: ("camera", args),
+        "tool_temporal_review": lambda *args: ("temporal_review", args),
     }
 
 

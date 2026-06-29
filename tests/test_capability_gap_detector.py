@@ -204,12 +204,36 @@ class TestCapabilityGapSignalGeneration(unittest.TestCase):
 
     def test_signal_generated_when_gaps_present(self):
         """Signal is generated when capability gaps are detected."""
+        from services.layer_maturity_policy import enrich_status_with_layer_maturity
         from services.work_tree_signal_ingestion import _capability_gap_signal_from_status
 
-        status = {
-            "capability_gap_count": 2,
-            "capability_gaps": ["autonomous_generation", "type_checking"],
-        }
+        status = enrich_status_with_layer_maturity(
+            {
+                "capability_gap_count": 2,
+                "capability_gaps": ["autonomous_generation", "type_checking"],
+                "root_closure_inventory": {
+                    "roots": [
+                        {"root_id": root_id, "ok": True}
+                        for root_id in (
+                            "model_runtime",
+                            "conversation_routing",
+                            "frontdoor_cli",
+                            "operator_control",
+                            "http_api_control",
+                        )
+                    ]
+                },
+            },
+            policy={
+                "layers": {
+                    "codegen": {
+                        "mode": "active",
+                        "promoted_capabilities": ["autonomous_generation", "type_checking"],
+                    },
+                    "leah": {"mode": "observe", "promoted_capabilities": []},
+                }
+            },
+        )
 
         signal = _capability_gap_signal_from_status(status)
         self.assertIsNotNone(signal)
@@ -243,24 +267,72 @@ class TestCapabilityGapSignalGeneration(unittest.TestCase):
 
     def test_signal_title_reflects_gap_count(self):
         """Signal title reflects number of gaps."""
+        from services.layer_maturity_policy import enrich_status_with_layer_maturity
         from services.work_tree_signal_ingestion import _capability_gap_signal_from_status
 
-        status = {
-            "capability_gap_count": 3,
-            "capability_gaps": ["cap1", "cap2", "cap3"],
-        }
+        status = enrich_status_with_layer_maturity(
+            {
+                "capability_gap_count": 3,
+                "capability_gaps": ["cap1", "cap2", "cap3"],
+                "root_closure_inventory": {
+                    "roots": [
+                        {"root_id": root_id, "ok": True}
+                        for root_id in (
+                            "model_runtime",
+                            "conversation_routing",
+                            "frontdoor_cli",
+                            "operator_control",
+                            "http_api_control",
+                        )
+                    ]
+                },
+            },
+            policy={
+                "layers": {
+                    "codegen": {
+                        "mode": "active",
+                        "promoted_capabilities": ["cap1", "cap2", "cap3"],
+                    },
+                    "leah": {"mode": "observe", "promoted_capabilities": []},
+                }
+            },
+        )
 
         signal = _capability_gap_signal_from_status(status)
         self.assertIn("3 capabilities", signal["title"])
 
     def test_signal_task_sequence_includes_roadmap_review(self):
         """Signal task sequence includes roadmap review."""
+        from services.layer_maturity_policy import enrich_status_with_layer_maturity
         from services.work_tree_signal_ingestion import _capability_gap_signal_from_status
 
-        status = {
-            "capability_gap_count": 1,
-            "capability_gaps": ["test_capability"],
-        }
+        status = enrich_status_with_layer_maturity(
+            {
+                "capability_gap_count": 1,
+                "capability_gaps": ["test_capability"],
+                "root_closure_inventory": {
+                    "roots": [
+                        {"root_id": root_id, "ok": True}
+                        for root_id in (
+                            "model_runtime",
+                            "conversation_routing",
+                            "frontdoor_cli",
+                            "operator_control",
+                            "http_api_control",
+                        )
+                    ]
+                },
+            },
+            policy={
+                "layers": {
+                    "codegen": {
+                        "mode": "active",
+                        "promoted_capabilities": ["test_capability"],
+                    },
+                    "leah": {"mode": "observe", "promoted_capabilities": []},
+                }
+            },
+        )
 
         signal = _capability_gap_signal_from_status(status)
         task_sequence = signal.get("task_sequence") or []
@@ -271,18 +343,45 @@ class TestCapabilityGapSignalGeneration(unittest.TestCase):
 
     def test_leah_gap_uses_leah_build_execution_group(self):
         """Leah-prefixed gaps should route into the Leah build lane."""
+        from services.layer_maturity_policy import enrich_status_with_layer_maturity
         from services.work_tree_signal_ingestion import _capability_gap_signal_from_status
 
-        status = {
-            "capability_gap_count": 2,
-            "capability_gaps": ["leah_voice_persona_engine", "leah_memory_recall"],
-        }
+        status = enrich_status_with_layer_maturity(
+            {
+                "capability_gap_count": 2,
+                "capability_gaps": ["leah_voice_persona_engine", "leah_memory_recall", "leah_conversation_continuity"],
+                "root_closure_inventory": {
+                    "roots": [
+                        {"root_id": root_id, "ok": True}
+                        for root_id in (
+                            "model_runtime",
+                            "conversation_routing",
+                            "frontdoor_cli",
+                            "operator_control",
+                            "http_api_control",
+                            "http_continuity",
+                            "session_identity_auth",
+                        )
+                    ]
+                },
+            },
+            policy={
+                "layers": {
+                    "leah": {
+                        "mode": "active",
+                        "promoted_capabilities": ["leah_conversation_continuity"],
+                    },
+                    "codegen": {"mode": "observe", "promoted_capabilities": []},
+                }
+            },
+        )
 
         signal = _capability_gap_signal_from_status(status)
         self.assertIsNotNone(signal)
-        self.assertEqual(signal["title"].startswith("Leah capability gap"), True)
+        self.assertTrue(signal["title"].startswith("Leah capability gap"))
         self.assertEqual(signal["payload"]["execution_group"], "leah_build")
-        self.assertEqual(signal["payload"]["leah_gap_count"], 2)
+        self.assertEqual(signal["payload"]["leah_gap_count"], 1)
+        self.assertEqual(signal["payload"]["primary_capability"], "leah_conversation_continuity")
 
 
 if __name__ == "__main__":

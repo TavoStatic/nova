@@ -22,11 +22,27 @@ from services.nova_patching import bulk_reject_orphaned_previews as service_bulk
 from services.nova_patching import patch_preview_summaries as service_patch_preview_summaries
 from services.autonomy_orchestrator import AUTONOMY_ORCHESTRATOR_SERVICE
 from services.autonomy_execution_gate import AUTONOMY_EXECUTION_GATE_SERVICE
+from services.control_status_surfaces import (
+    derive_surfaces_url,
+    merge_http_supplement_into_local,
+    release_drift_detected,
+)
+from services.frontdoor_cli_parity import FRONTDOOR_CLI_PARITY_SERVICE
+from services.layer_maturity_policy import enrich_status_with_layer_maturity
+from services.operator_control import OPERATOR_CONTROL_SERVICE
+from services.release_runtime_truth import (
+    RELEASE_RUNTIME_TRUTH_SERVICE,
+    build_release_runtime_truth_summary,
+    enrich_release_status,
+    evaluate_http_model_runtime_probe,
+)
+from services.release_status import RELEASE_STATUS_SERVICE
 from services.control_work_trees import CONTROL_WORK_TREES_SERVICE
 from services.core_thinning import build_core_thinning_brief as service_build_core_thinning_brief
 from services.core_thinning import feed_core_thinning_brief_to_work_tree as service_feed_core_thinning_brief_to_work_tree
 from services.core_steward import build_core_steward_payload as service_build_core_steward_payload
 from services.nova_control_action_dispatcher import NOVA_CONTROL_ACTION_DISPATCHER, autonomy_advisory_action_types
+from services.nova_root_inventory import build_source_root_inventory_payload
 from services.runtime_control import RUNTIME_CONTROL_SERVICE
 from services.nova_runtime_context import AUTONOMY_ORCHESTRATOR_LEDGER_FILE
 from services.nova_runtime_context import OPERATOR_OUTBOX_FILE
@@ -34,6 +50,9 @@ from services.nova_runtime_context import RUNTIME_DIR as CONTEXT_RUNTIME_DIR
 from services.nova_runtime_context import WORK_TREE_RUN_TRIGGER_FILE
 from services.nova_runtime_context import PATCH_QUEUE_RUN_TRIGGER_FILE
 from services.nova_runtime_context import runtime_scope_name
+from services.nova_wiring_inventory import WIRING_SURFACES
+from services.nova_wiring_inventory import build_root_closure_inventory_payload
+from services.port_ownership import PORT_OWNERSHIP_SERVICE
 from services.operator_outbox import OPERATOR_OUTBOX_SERVICE
 from services.runtime_restart_provenance import RUNTIME_RESTART_PROVENANCE_SERVICE
 from services.runtime_status import RUNTIME_STATUS_SERVICE
@@ -63,16 +82,33 @@ REGRESSION_RUNNER = ROOT / "scripts" / "run_regression.py"
 AUTONOMY_ORCHESTRATOR_LEDGER = AUTONOMY_ORCHESTRATOR_LEDGER_FILE
 OPERATOR_OUTBOX = OPERATOR_OUTBOX_FILE
 RESTART_INTENT_PATH = RUNTIME_DIR / "restart_intent.json"
+RELEASE_LEDGER_PATH = RUNTIME_DIR / "exports" / "release_packages" / "release_ledger.jsonl"
 LATEST_SUBCONSCIOUS = RUNTIME_DIR / "subconscious_runs" / "latest.json"
 GENERATED_DEFS = TEST_SESSIONS_ROOT / "generated_definitions"
 UPDATES_DIR = RUNTIME_DIR / "updates" if runtime_scope_name() == "validation" else ROOT / "updates"
 WORK_TREE_RUN_TRIGGER = WORK_TREE_RUN_TRIGGER_FILE
 PATCH_QUEUE_RUN_TRIGGER = PATCH_QUEUE_RUN_TRIGGER_FILE
 CONTROL_STATUS_URL = os.environ.get("NOVA_CONTROL_STATUS_URL", "http://127.0.0.1:8080/api/control/status")
+CONTROL_STATUS_SURFACES_URL = os.environ.get(
+    "NOVA_CONTROL_STATUS_SURFACES_URL",
+    derive_surfaces_url(CONTROL_STATUS_URL),
+)
+SIGNAL_INGESTION_STATUS_MODE = str(
+    os.environ.get("NOVA_SIGNAL_INGESTION_STATUS_MODE", "local_first")
+).strip().lower()
 try:
     CONTROL_STATUS_TIMEOUT_SEC = max(2.0, float(os.environ.get("NOVA_CONTROL_STATUS_TIMEOUT_SEC", "10")))
 except Exception:
     CONTROL_STATUS_TIMEOUT_SEC = 10.0
+try:
+    CONTROL_STATUS_SURFACES_TIMEOUT_SEC = max(
+        1.0,
+        float(os.environ.get("NOVA_CONTROL_STATUS_SURFACES_TIMEOUT_SEC", "3")),
+    )
+except Exception:
+    CONTROL_STATUS_SURFACES_TIMEOUT_SEC = 3.0
+
+_LAST_KNOWN_RELEASE_DRIFT_STATE = ""
 
 AUTO_APPLY_THRESHOLD = 0.0
 PATCH_QUEUE_TREE_TITLE = "Patch Queue: governed review and apply"
@@ -241,13 +277,24 @@ def _publish_operator_notices_from_work_tree(work_tree_state: dict) -> dict:
     source_root_reconcile_result = OPERATOR_OUTBOX_SERVICE.reconcile_source_root_judgment_notices(
         OPERATOR_OUTBOX,
         work_tree_state=work_tree_state,
+        work_tree_module=work_tree,
     )
-    staled_count = int(reconcile_result.get("staled_count", 0) or 0) + int(
-        source_root_reconcile_result.get("staled_count", 0) or 0
+    stale_open_reconcile_result = OPERATOR_OUTBOX_SERVICE.reconcile_stale_open_notices(OPERATOR_OUTBOX)
+    duplicate_source_reconcile_result = OPERATOR_OUTBOX_SERVICE.reconcile_duplicate_source_notices(OPERATOR_OUTBOX)
+    staled_count = (
+        int(reconcile_result.get("staled_count", 0) or 0)
+        + int(source_root_reconcile_result.get("staled_count", 0) or 0)
+        + int(stale_open_reconcile_result.get("staled_count", 0) or 0)
+        + int(duplicate_source_reconcile_result.get("staled_count", 0) or 0)
     )
     if not notices:
         return {
-            "ok": bool(reconcile_result.get("ok", True)) and bool(source_root_reconcile_result.get("ok", True)),
+            "ok": (
+                bool(reconcile_result.get("ok", True))
+                and bool(source_root_reconcile_result.get("ok", True))
+                and bool(stale_open_reconcile_result.get("ok", True))
+                and bool(duplicate_source_reconcile_result.get("ok", True))
+            ),
             "published_count": 0,
             "deduped_count": 0,
             "notice_count": 0,
@@ -275,7 +322,13 @@ def _publish_operator_notices_from_work_tree(work_tree_state: dict) -> dict:
                 event_ids.append(event_id)
 
     return {
-        "ok": not errors and bool(reconcile_result.get("ok", True)) and bool(source_root_reconcile_result.get("ok", True)),
+        "ok": (
+            not errors
+            and bool(reconcile_result.get("ok", True))
+            and bool(source_root_reconcile_result.get("ok", True))
+            and bool(stale_open_reconcile_result.get("ok", True))
+            and bool(duplicate_source_reconcile_result.get("ok", True))
+        ),
         "published_count": published,
         "deduped_count": deduped,
         "notice_count": len(notices),
@@ -692,6 +745,11 @@ def _policy_snapshot_for_orchestrator() -> dict:
     requires_ack_default = ["update_now_dry_run"]
     mode = _autonomy_execution_mode(settings)
     execute_enabled = _autonomy_execution_enabled(settings)
+    try:
+        full_policy = nova_core.load_policy()
+    except Exception:
+        full_policy = {}
+    layers = full_policy.get("layers") if isinstance(full_policy.get("layers"), dict) else {}
     return {
         "autonomy_enabled": _autonomy_policy_bool(settings, "enabled", "autonomy_enabled", default=True),
         "mode": mode,
@@ -710,6 +768,7 @@ def _policy_snapshot_for_orchestrator() -> dict:
         "confidence_threshold": _safe_float(settings.get("confidence_threshold"), 0.55),
         "execute_min_confidence": _safe_float(settings.get("execute_min_confidence", settings.get("confidence_threshold")), 0.55),
         "cooldown_sec": _safe_int(settings.get("cooldown_sec"), 180),
+        "layers": layers,
         "active_work_tree_max_steps_per_cycle": _safe_int(
             settings.get("active_work_tree_max_steps_per_cycle"),
             ACTIVE_WORK_TREE_DEFAULT_DISPATCH_STEPS,
@@ -1014,31 +1073,14 @@ def _subconscious_triage_signals_for_work_tree(
     return [signal for _rank, signal in signals[: max(0, int(limit or 0))]]
 
 
-def _live_control_status_payload_for_signal_ingestion(fallback_payload: dict) -> dict:
-    fallback = dict(fallback_payload or {})
-    url = str(CONTROL_STATUS_URL or "").strip()
-    if not url:
-        return fallback
-    try:
-        request = urllib.request.Request(url, headers={"Accept": "application/json"})
-        with urllib.request.urlopen(request, timeout=CONTROL_STATUS_TIMEOUT_SEC) as response:
-            raw = response.read(2_000_000)
-        live = json.loads(raw.decode("utf-8", errors="replace"))
-    except Exception:
-        return _local_dependency_payload_for_signal_ingestion(fallback)
-    if not isinstance(live, dict):
-        return _local_dependency_payload_for_signal_ingestion(fallback)
-    merged = {**fallback, **live}
-    fallback_maintenance = fallback.get("autonomy_maintenance") if isinstance(fallback.get("autonomy_maintenance"), dict) else {}
-    live_maintenance = live.get("autonomy_maintenance") if isinstance(live.get("autonomy_maintenance"), dict) else {}
-    if fallback_maintenance:
-        merged["autonomy_maintenance"] = {**dict(live_maintenance or {}), **dict(fallback_maintenance or {})}
-    merged["signal_ingestion_status_source"] = "control_status_http"
-    return merged
+def _wiring_surface_status_keys(surface_id: str) -> tuple[str, ...]:
+    for surface in WIRING_SURFACES:
+        if str(surface.surface_id or "").strip() == surface_id:
+            return tuple(surface.status_keys)
+    return ()
 
 
-def _local_dependency_payload_for_signal_ingestion(fallback_payload: dict) -> dict:
-    payload = dict(fallback_payload or {})
+def _probe_local_ollama_health() -> dict:
     try:
         ollama_health = nova_core.ollama_health_payload(timeout=1.0)
     except Exception as exc:
@@ -1052,29 +1094,327 @@ def _local_dependency_payload_for_signal_ingestion(fallback_payload: dict) -> di
             "model_available": False,
             "api_contract_status": "local_probe_failed",
         }
-    if not isinstance(ollama_health, dict):
-        return payload
+    return dict(ollama_health) if isinstance(ollama_health, dict) else {}
 
-    payload.update({
-        "ollama_api_up": bool(ollama_health.get("server_ok", ollama_health.get("ok", False))),
-        "ollama_server_ok": bool(ollama_health.get("server_ok", ollama_health.get("ok", False))),
-        "ollama_chat_ready": bool(ollama_health.get("ok", False)),
-        "ollama_health": dict(ollama_health),
-        "ollama_health_status": str(ollama_health.get("status") or ""),
-        "ollama_health_info": str(ollama_health.get("info") or ""),
-        "ollama_tags_ok": bool(ollama_health.get("tags_ok", False)),
-        "ollama_chat_route_ok": bool(ollama_health.get("chat_route_ok", False)),
-        "ollama_version": str(ollama_health.get("version") or ""),
-        "ollama_version_ok": bool(ollama_health.get("version_ok", False)),
-        "ollama_version_status": int(ollama_health.get("version_status", 0) or 0),
-        "ollama_api_contract_status": str(ollama_health.get("api_contract_status") or ""),
-        "ollama_configured_model": str(ollama_health.get("chat_model") or ""),
-        "ollama_model_available": bool(ollama_health.get("model_available", False)),
-        "ollama_model_status": str(ollama_health.get("model_status") or ""),
-        "ollama_available_models": list(ollama_health.get("available_models") or []),
-        "signal_ingestion_status_source": "local_dependency_probe",
-    })
-    return payload
+
+def _ollama_status_fields_from_health(ollama_health: dict) -> dict:
+    health = dict(ollama_health or {})
+    server_ok = bool(health.get("server_ok", health.get("ok", False)))
+    return {
+        "ollama_api_up": server_ok,
+        "ollama_server_ok": server_ok,
+        "ollama_chat_ready": bool(health.get("ok", False)),
+        "ollama_health": dict(health),
+        "ollama_health_status": str(health.get("status") or ""),
+        "ollama_health_info": str(health.get("info") or ""),
+        "ollama_tags_ok": bool(health.get("tags_ok", False)),
+        "ollama_chat_route_ok": bool(health.get("chat_route_ok", False)),
+        "ollama_version": str(health.get("version") or ""),
+        "ollama_version_ok": bool(health.get("version_ok", False)),
+        "ollama_version_status": int(health.get("version_status", 0) or 0),
+        "ollama_api_contract_status": str(health.get("api_contract_status") or ""),
+        "ollama_configured_model": str(health.get("chat_model") or ""),
+        "ollama_model_available": bool(health.get("model_available", False)),
+        "ollama_model_status": str(health.get("model_status") or ""),
+        "ollama_available_models": list(health.get("available_models") or []),
+    }
+
+
+def _probe_local_port_ownership() -> dict:
+    try:
+        import psutil
+
+        payload = PORT_OWNERSHIP_SERVICE.payload(psutil_module=psutil)
+        return dict(payload) if isinstance(payload, dict) else {"status": "local_probe_failed"}
+    except Exception as exc:
+        return {"status": "local_probe_failed", "error": str(exc)}
+
+
+def _apply_local_model_runtime_status(payload: dict, *, only_missing: bool = True) -> dict:
+    result = dict(payload or {})
+    required_keys = _wiring_surface_status_keys("model_runtime")
+    missing_keys = [key for key in required_keys if key not in result]
+    if only_missing and not missing_keys:
+        return result
+
+    ollama_fields = (
+        "ollama_health",
+        "ollama_api_up",
+        "ollama_version",
+        "ollama_api_contract_status",
+        "ollama_chat_route_ok",
+    )
+    if not only_missing or any(key in missing_keys for key in ollama_fields):
+        updates = _ollama_status_fields_from_health(_probe_local_ollama_health())
+        for key, value in updates.items():
+            if not only_missing or key not in result:
+                result[key] = value
+
+    if not only_missing or "port_ownership" in missing_keys:
+        if not only_missing or "port_ownership" not in result:
+            result["port_ownership"] = _probe_local_port_ownership()
+    return result
+
+
+def _apply_local_frontdoor_cli_surfaces(payload: dict, *, only_missing: bool = True) -> dict:
+    result = dict(payload or {})
+    surface_keys = (
+        "backend_commands",
+        "backend_command_count",
+        "frontdoor_cli_status",
+        "cli_http_parity",
+    )
+    missing_keys = [key for key in surface_keys if key not in result]
+    if only_missing and not missing_keys:
+        return result
+    surfaces = FRONTDOOR_CLI_PARITY_SERVICE.build_surfaces(
+        root=ROOT,
+        load_backend_commands_fn=lambda limit: OPERATOR_CONTROL_SERVICE.load_backend_commands(
+            OPERATOR_CONTROL_SERVICE.backend_command_deck_path(ROOT),
+            limit=limit,
+        ),
+    )
+    for key in surface_keys:
+        if not only_missing or key not in result:
+            result[key] = surfaces.get(key)
+    return result
+
+
+def _apply_local_source_root_status_surfaces(payload: dict, *, only_missing: bool = True) -> dict:
+    result = dict(payload or {})
+    if not only_missing or "source_root_inventory" not in result:
+        result["source_root_inventory"] = result.get("source_root_inventory") or {}
+    for key in ("last_intent", "last_planner_decision", "last_route_summary"):
+        if not only_missing or key not in result:
+            result[key] = str(result.get(key) or "")
+    try:
+        if (
+            not only_missing
+            or not isinstance(result.get("source_root_inventory"), dict)
+            or int((result.get("source_root_inventory") or {}).get("root_count", 0) or 0) == 0
+        ):
+            src = build_source_root_inventory_payload()
+            if isinstance(src, dict):
+                result["source_root_inventory"] = src
+    except Exception:
+        pass
+    return result
+
+
+def _refresh_root_closure_inventory_surfaces(payload: dict) -> dict:
+    result = dict(payload or {})
+    try:
+        root_closure = build_root_closure_inventory_payload(result)
+        result["root_closure_inventory"] = root_closure
+        result["root_closure_inventory_ok"] = bool(root_closure.get("ok", False))
+        result["root_closure_inventory_gap_count"] = int(root_closure.get("gap_count", 0) or 0)
+        result["root_closure_inventory_gap_roots"] = list(root_closure.get("gap_roots") or [])
+    except Exception:
+        result["root_closure_inventory"] = {"ok": True, "gap_count": 0, "gap_roots": [], "roots": []}
+        result["root_closure_inventory_ok"] = True
+        result["root_closure_inventory_gap_count"] = 0
+        result["root_closure_inventory_gap_roots"] = []
+    if "self_repair_closure_inventory" not in result:
+        result["self_repair_closure_inventory"] = {"ok": True, "gap_count": 0, "gap_roots": [], "roots": []}
+        result["self_repair_closure_inventory_ok"] = True
+        result["self_repair_closure_inventory_gap_count"] = 0
+    return result
+
+
+def _apply_layer_maturity_to_status_payload(payload: dict) -> dict:
+    try:
+        policy = nova_core.load_policy()
+    except Exception:
+        policy = {}
+    enriched = enrich_status_with_layer_maturity(dict(payload or {}), policy=policy)
+    return enriched
+
+
+def _enrich_signal_ingestion_status_payload(payload: dict, *, only_missing: bool = True) -> dict:
+    enriched = _apply_local_model_runtime_status(payload, only_missing=only_missing)
+    enriched = _apply_local_frontdoor_cli_surfaces(enriched, only_missing=only_missing)
+    enriched = _apply_local_source_root_status_surfaces(enriched, only_missing=only_missing)
+    enriched = _refresh_root_closure_inventory_surfaces(enriched)
+    return _apply_layer_maturity_to_status_payload(enriched)
+
+
+def _fetch_control_status_json(url: str, *, timeout_sec: float, read_limit: int) -> dict | None:
+    clean_url = str(url or "").strip()
+    if not clean_url:
+        return None
+    try:
+        request = urllib.request.Request(clean_url, headers={"Accept": "application/json"})
+        with urllib.request.urlopen(request, timeout=float(timeout_sec)) as response:
+            raw = response.read(max(1, int(read_limit)))
+        live = json.loads(raw.decode("utf-8", errors="replace"))
+    except Exception:
+        return None
+    return dict(live) if isinstance(live, dict) else None
+
+
+def _invalidate_control_status_caches_lazy() -> None:
+    try:
+        import nova_http
+
+        nova_http._invalidate_control_status_cache()
+    except Exception:
+        pass
+
+
+def _maybe_invalidate_control_status_cache_for_release_drift(release_status: dict | None) -> None:
+    global _LAST_KNOWN_RELEASE_DRIFT_STATE
+    payload = dict(release_status or {}) if isinstance(release_status, dict) else {}
+    state = str(payload.get("latest_readiness_state") or payload.get("status") or "").strip()
+    if not state or state == _LAST_KNOWN_RELEASE_DRIFT_STATE:
+        return
+    _LAST_KNOWN_RELEASE_DRIFT_STATE = state
+    if release_drift_detected(payload):
+        _invalidate_control_status_caches_lazy()
+
+
+def _live_control_status_payload_http_full(fallback_payload: dict) -> dict:
+    fallback = dict(fallback_payload or {})
+    live = _fetch_control_status_json(
+        CONTROL_STATUS_URL,
+        timeout_sec=CONTROL_STATUS_TIMEOUT_SEC,
+        read_limit=2_000_000,
+    )
+    if live is None:
+        return _local_dependency_payload_for_signal_ingestion(fallback)
+    merged = {**fallback, **live}
+    fallback_maintenance = fallback.get("autonomy_maintenance") if isinstance(fallback.get("autonomy_maintenance"), dict) else {}
+    live_maintenance = live.get("autonomy_maintenance") if isinstance(live.get("autonomy_maintenance"), dict) else {}
+    if fallback_maintenance:
+        merged["autonomy_maintenance"] = {**dict(live_maintenance or {}), **dict(fallback_maintenance or {})}
+    _maybe_invalidate_control_status_cache_for_release_drift(
+        live.get("release_status") if isinstance(live.get("release_status"), dict) else {}
+    )
+    merged["signal_ingestion_status_source"] = "control_status_http"
+    return _enrich_signal_ingestion_status_payload(merged, only_missing=True)
+
+
+def _live_control_status_payload_http_surfaces(fallback_payload: dict) -> dict:
+    fallback = dict(fallback_payload or {})
+    live = _fetch_control_status_json(
+        CONTROL_STATUS_SURFACES_URL,
+        timeout_sec=CONTROL_STATUS_SURFACES_TIMEOUT_SEC,
+        read_limit=512_000,
+    )
+    if live is None:
+        return _local_dependency_payload_for_signal_ingestion(fallback)
+    merged = {**fallback, **live}
+    fallback_maintenance = fallback.get("autonomy_maintenance") if isinstance(fallback.get("autonomy_maintenance"), dict) else {}
+    live_maintenance = live.get("autonomy_maintenance") if isinstance(live.get("autonomy_maintenance"), dict) else {}
+    if fallback_maintenance:
+        merged["autonomy_maintenance"] = {**dict(live_maintenance or {}), **dict(fallback_maintenance or {})}
+    _maybe_invalidate_control_status_cache_for_release_drift(
+        live.get("release_status") if isinstance(live.get("release_status"), dict) else {}
+    )
+    merged["signal_ingestion_status_source"] = "control_status_http_surfaces"
+    return _enrich_signal_ingestion_status_payload(merged, only_missing=True)
+
+
+def _live_control_status_payload_local_first(fallback_payload: dict) -> dict:
+    fallback = dict(fallback_payload or {})
+    local = _local_dependency_payload_for_signal_ingestion(fallback)
+    live = _fetch_control_status_json(
+        CONTROL_STATUS_SURFACES_URL,
+        timeout_sec=CONTROL_STATUS_SURFACES_TIMEOUT_SEC,
+        read_limit=512_000,
+    )
+    if live is None:
+        local["signal_ingestion_status_source"] = "local_dependency_probe"
+        return local
+    merged = merge_http_supplement_into_local(local, live)
+    fallback_maintenance = fallback.get("autonomy_maintenance") if isinstance(fallback.get("autonomy_maintenance"), dict) else {}
+    live_maintenance = live.get("autonomy_maintenance") if isinstance(live.get("autonomy_maintenance"), dict) else {}
+    if fallback_maintenance:
+        merged["autonomy_maintenance"] = {**dict(live_maintenance or {}), **dict(fallback_maintenance or {})}
+    _maybe_invalidate_control_status_cache_for_release_drift(
+        live.get("release_status") if isinstance(live.get("release_status"), dict) else {}
+    )
+    merged["signal_ingestion_status_source"] = "local_first_with_http_surfaces"
+    return _enrich_signal_ingestion_status_payload(merged, only_missing=True)
+
+
+def _live_control_status_payload_for_signal_ingestion(fallback_payload: dict) -> dict:
+    mode = SIGNAL_INGESTION_STATUS_MODE
+    if mode in {"http", "http_full", "full"}:
+        return _live_control_status_payload_http_full(fallback_payload)
+    if mode in {"http_surfaces", "surfaces"}:
+        return _live_control_status_payload_http_surfaces(fallback_payload)
+    if mode in {"local", "local_only"}:
+        return _local_dependency_payload_for_signal_ingestion(fallback_payload)
+    return _live_control_status_payload_local_first(fallback_payload)
+
+
+def _local_dependency_payload_for_signal_ingestion(fallback_payload: dict) -> dict:
+    payload = dict(fallback_payload or {})
+    payload["signal_ingestion_status_source"] = "local_dependency_probe"
+    return _enrich_signal_ingestion_status_payload(payload, only_missing=False)
+
+
+def _local_release_status_for_signal_ingestion() -> dict:
+    try:
+        source_root = ROOT
+        try:
+            RELEASE_LEDGER_PATH.resolve().relative_to((RUNTIME_DIR / "exports" / "release_packages").resolve())
+        except Exception:
+            source_root = None
+        return RELEASE_STATUS_SERVICE.status_payload(
+            RELEASE_LEDGER_PATH,
+            limit=8,
+            source_root=source_root,
+            artifact_kind="package-zip",
+        )
+    except Exception:
+        return {}
+
+
+def _probe_http_model_runtime_surfaces() -> dict:
+    http_payload = _fetch_control_status_json(
+        CONTROL_STATUS_SURFACES_URL,
+        timeout_sec=CONTROL_STATUS_SURFACES_TIMEOUT_SEC,
+        read_limit=512_000,
+    )
+    if http_payload is None:
+        return {
+            "ok": False,
+            "required_key_count": 0,
+            "present_key_count": 0,
+            "missing_keys": [],
+            "present_keys": [],
+            "source": "http_surfaces",
+            "skipped": True,
+            "reason": "http_surfaces_unreachable",
+        }
+    probe = evaluate_http_model_runtime_probe(http_payload)
+    probe["skipped"] = False
+    return probe
+
+
+def _apply_release_runtime_truth_to_status_payload(
+    status_payload: dict,
+    *,
+    state: dict | None = None,
+) -> dict:
+    result = dict(status_payload or {})
+    release = result.get("release_status") if isinstance(result.get("release_status"), dict) else {}
+    if not release:
+        release = _local_release_status_for_signal_ingestion()
+    else:
+        release = enrich_release_status(release)
+    result["release_status"] = release
+    truth = build_release_runtime_truth_summary(release)
+    result["release_runtime_truth"] = truth
+    probe = _probe_http_model_runtime_surfaces()
+    result["http_model_runtime_probe"] = probe
+    result["http_model_runtime_probe_ok"] = bool(probe.get("ok"))
+    result["http_model_runtime_missing_keys"] = list(probe.get("missing_keys") or [])
+    if state is not None:
+        state["last_http_model_runtime_probe"] = dict(probe)
+        state["last_release_runtime_truth"] = dict(truth)
+    return result
 
 
 def _validation_artifact_truth_payload_for_signal_ingestion() -> dict:
@@ -1146,6 +1486,18 @@ def _last_action_context_for_orchestrator(state: dict) -> dict:
     }
 
 
+def _layer_maturity_snapshot_for_orchestrator(state: dict) -> dict:
+    snapshot = dict(state.get("last_layer_maturity_snapshot") or {})
+    if snapshot:
+        return snapshot
+    return {
+        "release_runtime_truth": dict(state.get("last_release_runtime_truth") or {}),
+        "release_status": {},
+        "root_closure_inventory": {},
+        "capabilities_registered": {},
+    }
+
+
 def _autonomy_orchestrator_input_envelope(
     *,
     state: dict,
@@ -1167,6 +1519,7 @@ def _autonomy_orchestrator_input_envelope(
         "runtime_guard_status": _runtime_guard_status_for_orchestrator(core_steward, guard_health),
         "autonomy_maintenance": _autonomy_maintenance_for_orchestrator(core_steward),
         "policy_snapshot": dict(policy_snapshot or _policy_snapshot_for_orchestrator()),
+        "layer_maturity_snapshot": _layer_maturity_snapshot_for_orchestrator(state),
         "triage_hints": _triage_hints_for_orchestrator(
             core_steward,
             generated_queue,
@@ -2424,6 +2777,18 @@ def _sync_signal_intake_work_tree(state: dict, kidney_summary: dict | None = Non
     status_payload.update(_temporal_feed_for_signal_ingestion(state))
     status_payload.update(_validation_artifact_truth_payload_for_signal_ingestion())
     status_payload = _live_control_status_payload_for_signal_ingestion(status_payload)
+    status_payload = _apply_release_runtime_truth_to_status_payload(status_payload, state=state)
+    status_payload = _apply_layer_maturity_to_status_payload(status_payload)
+    state["last_layer_maturity_snapshot"] = {
+        "layer_maturity": dict(status_payload.get("layer_maturity") or {}),
+        "release_runtime_truth": dict(status_payload.get("release_runtime_truth") or {}),
+        "release_status": dict(status_payload.get("release_status") or {}),
+        "root_closure_inventory": dict(status_payload.get("root_closure_inventory") or {}),
+        "capabilities_registered": dict(status_payload.get("capabilities_registered") or {}),
+        "capability_gaps": list(status_payload.get("capability_gaps") or []),
+        "capability_gaps_actionable": list(status_payload.get("capability_gaps_actionable") or []),
+        "suppress_capability_gap_signals": bool(status_payload.get("suppress_capability_gap_signals")),
+    }
 
     # Root fix for lingering governance_pressure branches (e.g. old "source-observed" validation profile tasks):
     # Always feed the current test profile inventory (with source_observed_count etc.) into the status snapshot.

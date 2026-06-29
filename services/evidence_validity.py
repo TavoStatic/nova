@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from services.tool_execution_contracts import ADMIN_APPROVED_EXECUTION_SUFFIX
@@ -52,6 +53,21 @@ def _is_structured_judgment_result(tool_name: str, result: dict[str, Any]) -> bo
     return bool(str(result.get("schema") or "").strip() and str(result.get("verdict") or "").strip())
 
 
+def _parse_structured_tool_result(text_raw: str) -> dict[str, Any] | None:
+    stripped = str(text_raw or "").strip()
+    if not stripped.startswith("{") or not stripped.endswith("}"):
+        return None
+    if len(stripped) > 4000:
+        return None
+    try:
+        payload = json.loads(stripped)
+    except Exception:
+        return None
+    if not isinstance(payload, dict) or "ok" not in payload:
+        return None
+    return payload
+
+
 def invalid_tool_result(tool_name: str, result: Any) -> tuple[bool, str]:
     """Return whether a tool result is blocked/failed evidence, not usable evidence."""
     if isinstance(result, dict):
@@ -65,6 +81,9 @@ def invalid_tool_result(tool_name: str, result: Any) -> tuple[bool, str]:
         return False, ""
 
     text_raw = str(result or "").strip()
+    parsed = _parse_structured_tool_result(text_raw)
+    if parsed is not None:
+        return invalid_tool_result(tool_name, parsed)
     text = text_raw.lower()
     if not text:
         return True, "empty_result"

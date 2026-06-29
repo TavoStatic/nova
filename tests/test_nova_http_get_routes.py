@@ -137,6 +137,30 @@ class TestNovaHttpGetRoutesService(unittest.TestCase):
 
         self.assertEqual(result, {"kind": "json", "code": 200, "body": {"ok": True, "source": "runtime"}})
 
+    def test_handle_control_status_surfaces_request_returns_slim_payload(self):
+        surfaces_payload = {
+            "ok": True,
+            "status_kind": "signal_ingestion_surfaces",
+            "operator_outbox_open_count": 0,
+            "root_closure_inventory": {"ok": True, "gap_count": 0},
+        }
+
+        result = HTTP_GET_ROUTES_SERVICE.handle_control_api_request(
+            "/api/control/status/surfaces",
+            qs={},
+            control_auth_fn=lambda _qs: (True, ""),
+            cached_control_status_payload_fn=lambda: {"ok": True, "huge": "full"},
+            cached_control_status_surfaces_payload_fn=lambda: surfaces_payload,
+            control_policy_payload_fn=lambda: {"ok": True},
+            metrics_payload_fn=lambda: {"ok": True},
+            work_trees_payload_fn=lambda: {"ok": True, "trees": []},
+            session_summaries_fn=lambda _limit: [],
+            test_session_report_summaries_fn=lambda _limit: [],
+            available_test_session_definitions_fn=lambda _limit: [],
+        )
+
+        self.assertEqual(result, (200, surfaces_payload))
+
     def test_handle_control_status_request_preserves_richer_maintenance_truth(self):
         status_payload = {
             "ok": True,

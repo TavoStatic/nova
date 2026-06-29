@@ -18,6 +18,9 @@ COMPACT_REGRESSION_LANES: dict[str, list[str]] = {
         "tests.test_control_auth_service",
         "tests.test_control_status_cache_service",
         "tests.test_control_status_service",
+        "tests.test_control_status_surfaces_service",
+        "tests.test_frontdoor_cli_parity_service",
+        "tests.test_layer_maturity_policy_service",
         "tests.test_control_telemetry_service",
         "tests.test_core_steward_service",
         "tests.test_end_to_end_wiring_service",
@@ -49,6 +52,7 @@ COMPACT_REGRESSION_LANES: dict[str, list[str]] = {
         "tests.test_nova_tool_policy_service",
         "tests.test_regression_contracts",
         "tests.test_release_status_service",
+        "tests.test_release_runtime_truth_service",
         "tests.test_release_clean_service",
         "tests.test_run_regression",
         "tests.test_run_tools",
@@ -115,6 +119,8 @@ SOURCE_PROFILE_LANES: dict[str, list[str]] = {
         "tests.test_pipeline_query_guard",
     ],
     "source_http_api_control": [
+        "tests.test_control_status_surfaces_service",
+        "tests.test_frontdoor_cli_parity_service",
         "tests.test_nova_http_autonomy_summary",
         "tests.test_nova_http_frontdoor",
         "tests.test_nova_http_generated_work",
@@ -143,6 +149,7 @@ SOURCE_PROFILE_LANES: dict[str, list[str]] = {
     ],
     "source_generated_code": [
         "tests.test_capability_gap_detector",
+        "tests.test_layer_maturity_policy_service",
         "tests.test_codegen_memory_recorder",
         "tests.test_codegen_patch_bridge",
         "tests.test_codegen_tool",
@@ -152,6 +159,7 @@ SOURCE_PROFILE_LANES: dict[str, list[str]] = {
     "source_release": [
         "tests.test_installer_validation_service",
         "tests.test_release_promotion_judgment_service",
+        "tests.test_release_runtime_truth_service",
         "tests.test_release_validation_service",
     ],
     "source_reply_quality_contracts": [

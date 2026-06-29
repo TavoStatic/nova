@@ -9,6 +9,7 @@ from datetime import datetime
 from pathlib import Path
 
 from services.release_promotion_judgment import release_validation_record_payload
+from services.release_runtime_truth import enrich_release_status
 
 
 _SOURCE_EXCLUDED_DIRS = {
@@ -322,7 +323,7 @@ class ReleaseStatusService:
             if _entry_artifact_kind(entry) == selected_kind
         ]
         if not entries:
-            return out
+            return enrich_release_status(out)
 
         recent_entries: list[dict] = []
         for entry in entries[: max(1, int(limit))]:
@@ -347,7 +348,7 @@ class ReleaseStatusService:
         build_entries = [entry for entry in entries if str(entry.get("event") or "") == "build"]
         if not build_entries:
             out["latest_state"] = "ledger-without-builds"
-            return out
+            return enrich_release_status(out)
 
         latest_build = build_entries[0]
         matching_verifications = [
@@ -438,7 +439,7 @@ class ReleaseStatusService:
                 out["latest_readiness_state"] = "source-changed-after-build"
                 out["latest_ready_to_ship"] = False
                 out["latest_readiness_note"] = "Live source changed after the latest release build; rebuild and verify before promotion."
-        return out
+        return enrich_release_status(out)
 
 
 RELEASE_STATUS_SERVICE = ReleaseStatusService()

@@ -10,6 +10,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Callable, Iterator
 import uuid
+from services.evidence_validity import evidence_result_valid
 from services.evidence_validity import invalid_tool_result
 from work_tree_contracts import WorkTree, Branch, Task, TreeStatus, BranchStatus, TaskStatus, ToolStatus
 
@@ -1051,6 +1052,77 @@ def record_task_evidence(
         )
         _save_branch_record(connection, branch)
     return evidence_id
+
+
+def delete_branch_evidence(
+    branch_id: str,
+    *,
+    evidence_ids: list[str] | None = None,
+    task_id: str | None = None,
+    only_invalid: bool = False,
+) -> int:
+    branch_key = str(branch_id or "").strip()
+    if not branch_key:
+        return 0
+    branch = _BRANCHES.get(branch_key)
+    if branch is None:
+        raise ValueError(f"Branch {branch_id} not found")
+
+    selected_ids = {str(item or "").strip() for item in list(evidence_ids or []) if str(item or "").strip()}
+    task_key = str(task_id or "").strip()
+    rows = list_branch_evidence(branch_key, limit=500)
+    delete_ids: list[str] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        evidence_id = str(row.get("evidence_id") or "").strip()
+        if not evidence_id:
+            continue
+        if selected_ids and evidence_id not in selected_ids:
+            continue
+        if task_key and str(row.get("task_id") or "").strip() != task_key:
+            continue
+        if only_invalid and evidence_result_valid(row):
+            continue
+        delete_ids.append(evidence_id)
+
+    if not delete_ids:
+        return 0
+
+    _ensure_db()
+    now = _now()
+    with _db_transaction() as connection:
+        for evidence_id in delete_ids:
+            connection.execute(
+                "DELETE FROM work_tree_evidence WHERE evidence_id = ? AND branch_id = ?",
+                (evidence_id, branch_key),
+            )
+        branch.evidence_count = max(0, int(branch.evidence_count or 0) - len(delete_ids))
+        branch.updated_at = now
+        _save_branch_record(connection, branch)
+    return len(delete_ids)
+
+
+def reopen_task(task_id: str, *, meta_updates: dict[str, object] | None = None) -> None:
+    task = _TASKS.get(task_id)
+    if task is None:
+        raise ValueError(f"Task {task_id} not found")
+    if task.status not in (TaskStatus.COMPLETE, TaskStatus.BLOCKED):
+        return
+
+    now = _now()
+    task.status = TaskStatus.OPEN
+    task.updated_at = now
+    if isinstance(meta_updates, dict) and meta_updates:
+        meta = dict(task.meta or {}) if isinstance(task.meta, dict) else {}
+        meta.update(meta_updates)
+        task.meta = meta
+
+    branch = _BRANCHES.get(task.branch_id)
+    if branch is None:
+        return
+    branch.updated_at = now
+    _refresh_tree_state(branch.tree_id, persist=True)
 
 
 def list_branch_evidence(branch_id: str, *, limit: int = 20) -> list[dict[str, object]]:

@@ -193,6 +193,15 @@ class PolicyManager:
         kidney.setdefault("protect_patterns", [])
         data["kidney"] = kidney
 
+        layers = data.get("layers") if isinstance(data.get("layers"), dict) else {}
+        leah_layer = layers.get("leah") if isinstance(layers.get("leah"), dict) else {}
+        codegen_layer = layers.get("codegen") if isinstance(layers.get("codegen"), dict) else {}
+        leah_layer.setdefault("mode", "observe")
+        leah_layer.setdefault("promoted_capabilities", [])
+        codegen_layer.setdefault("mode", "observe")
+        codegen_layer.setdefault("promoted_capabilities", [])
+        data["layers"] = {"leah": leah_layer, "codegen": codegen_layer}
+
         self._policy_cache = data
         return data
 

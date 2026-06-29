@@ -1640,13 +1640,204 @@ class TestAutonomyMaintenance(unittest.TestCase):
             def read(self, _limit):
                 return b'{"release_status":{"latest_readiness_state":"source-changed-after-build"}}'
 
-        with mock.patch.object(autonomy_maintenance, "CONTROL_STATUS_TIMEOUT_SEC", 10.0), \
+        with mock.patch.object(autonomy_maintenance, "SIGNAL_INGESTION_STATUS_MODE", "http_full"), \
+             mock.patch.object(autonomy_maintenance, "CONTROL_STATUS_TIMEOUT_SEC", 10.0), \
              mock.patch.object(autonomy_maintenance.urllib.request, "urlopen", return_value=_Response()) as mocked:
             payload = autonomy_maintenance._live_control_status_payload_for_signal_ingestion(fallback)
 
         self.assertEqual(payload.get("signal_ingestion_status_source"), "control_status_http")
         self.assertEqual((payload.get("release_status") or {}).get("latest_readiness_state"), "source-changed-after-build")
         self.assertEqual(mocked.call_args.kwargs.get("timeout"), 10.0)
+
+    def test_live_control_status_enriches_missing_model_runtime_keys_from_local_probe(self):
+        fallback = {"alerts": [], "autonomy_maintenance": {"last_regression_status": ""}}
+        slim_http = {
+            "ok": True,
+            "ollama_api_up": True,
+            "last_intent": "ping",
+            "last_planner_decision": "llm_fallback",
+            "last_route_summary": "input:received",
+        }
+        ollama_health = {
+            "ok": True,
+            "server_ok": True,
+            "status": "ready",
+            "info": "",
+            "tags_ok": True,
+            "chat_route_ok": True,
+            "version": "0.12.3",
+            "version_ok": True,
+            "version_status": 200,
+            "api_contract_status": "ok",
+            "chat_model": "llama3.2:3b",
+            "model_available": True,
+            "model_status": "available",
+            "available_models": ["llama3.2:3b"],
+        }
+        port_payload = {"ok": True, "status": "ok", "issue_count": 0, "ports": []}
+
+        class _Response:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+            def read(self, _limit):
+                return json.dumps(slim_http).encode("utf-8")
+
+        with mock.patch.object(autonomy_maintenance, "SIGNAL_INGESTION_STATUS_MODE", "http_full"), \
+             mock.patch.object(autonomy_maintenance.urllib.request, "urlopen", return_value=_Response()), \
+             mock.patch.object(autonomy_maintenance.nova_core, "ollama_health_payload", return_value=ollama_health), \
+             mock.patch.object(autonomy_maintenance, "_probe_local_port_ownership", return_value=port_payload):
+            payload = autonomy_maintenance._live_control_status_payload_for_signal_ingestion(fallback)
+
+        self.assertEqual(payload.get("signal_ingestion_status_source"), "control_status_http")
+        self.assertTrue(payload.get("ollama_api_up"))
+        self.assertEqual(payload.get("ollama_version"), "0.12.3")
+        self.assertEqual(payload.get("ollama_api_contract_status"), "ok")
+        self.assertTrue(payload.get("ollama_chat_route_ok"))
+        self.assertEqual((payload.get("ollama_health") or {}).get("version"), "0.12.3")
+        self.assertEqual((payload.get("port_ownership") or {}).get("status"), "ok")
+        model_runtime = next(
+            row for row in list((payload.get("root_closure_inventory") or {}).get("roots") or [])
+            if (row or {}).get("root_id") == "model_runtime"
+        )
+        self.assertTrue(model_runtime.get("ok"))
+
+    def test_local_first_status_uses_surfaces_timeout_and_merges_supplement_keys(self):
+        fallback = {"alerts": [], "autonomy_maintenance": {"last_regression_status": ""}}
+        slim_http = {
+            "status_kind": "signal_ingestion_surfaces",
+            "operator_outbox_open_count": 2,
+            "release_status": {"latest_readiness_state": "ready"},
+            "alerts": ["operator_outbox_open"],
+        }
+
+        class _Response:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+            def read(self, _limit):
+                return json.dumps(slim_http).encode("utf-8")
+
+        with mock.patch.object(autonomy_maintenance, "SIGNAL_INGESTION_STATUS_MODE", "local_first"), \
+             mock.patch.object(autonomy_maintenance, "CONTROL_STATUS_SURFACES_TIMEOUT_SEC", 3.0), \
+             mock.patch.object(autonomy_maintenance, "_probe_local_ollama_health", return_value={"ok": True, "server_ok": True}), \
+             mock.patch.object(autonomy_maintenance, "_probe_local_port_ownership", return_value={"status": "ok"}), \
+             mock.patch.object(autonomy_maintenance.urllib.request, "urlopen", return_value=_Response()) as mocked:
+            payload = autonomy_maintenance._live_control_status_payload_for_signal_ingestion(fallback)
+
+        self.assertEqual(payload.get("signal_ingestion_status_source"), "local_first_with_http_surfaces")
+        self.assertEqual(payload.get("operator_outbox_open_count"), 2)
+        self.assertEqual(payload.get("alerts"), ["operator_outbox_open"])
+        self.assertEqual(mocked.call_args.kwargs.get("timeout"), 3.0)
+
+    def test_local_first_status_falls_back_to_local_when_surfaces_fetch_fails(self):
+        fallback = {"alerts": [], "autonomy_maintenance": {"last_regression_status": ""}}
+        ollama_down = {
+            "ok": False,
+            "server_ok": False,
+            "status": "tags_unreachable",
+            "tags_ok": False,
+            "chat_route_ok": False,
+            "api_contract_status": "tags_unreachable",
+        }
+
+        with mock.patch.object(autonomy_maintenance, "SIGNAL_INGESTION_STATUS_MODE", "local_first"), \
+             mock.patch.object(autonomy_maintenance.urllib.request, "urlopen", side_effect=TimeoutError("slow surfaces")), \
+             mock.patch.object(autonomy_maintenance.nova_core, "ollama_health_payload", return_value=ollama_down):
+            payload = autonomy_maintenance._live_control_status_payload_for_signal_ingestion(fallback)
+
+        self.assertEqual(payload.get("signal_ingestion_status_source"), "local_dependency_probe")
+        self.assertEqual(payload.get("ollama_api_contract_status"), "tags_unreachable")
+
+    def test_local_dependency_probe_enriches_layer_maturity_observe_mode(self):
+        fallback = {"alerts": [], "autonomy_maintenance": {"last_regression_status": ""}}
+
+        with mock.patch.object(autonomy_maintenance, "SIGNAL_INGESTION_STATUS_MODE", "local_only"), \
+             mock.patch.object(autonomy_maintenance, "_probe_local_ollama_health", return_value={"ok": True, "server_ok": True}), \
+             mock.patch.object(autonomy_maintenance, "_probe_local_port_ownership", return_value={"status": "ok"}):
+            payload = autonomy_maintenance._live_control_status_payload_for_signal_ingestion(fallback)
+
+        self.assertTrue(payload.get("suppress_capability_gap_signals"))
+        self.assertEqual((payload.get("layer_maturity") or {}).get("leah_observe_mode"), True)
+        self.assertEqual((payload.get("layer_maturity") or {}).get("codegen_observe_mode"), True)
+
+    def test_local_dependency_probe_enriches_frontdoor_cli_surfaces(self):
+        fallback = {"alerts": [], "autonomy_maintenance": {"last_regression_status": ""}}
+
+        with mock.patch.object(autonomy_maintenance, "SIGNAL_INGESTION_STATUS_MODE", "local_only"), \
+             mock.patch.object(autonomy_maintenance, "_probe_local_ollama_health", return_value={"ok": True, "server_ok": True}), \
+             mock.patch.object(autonomy_maintenance, "_probe_local_port_ownership", return_value={"status": "ok"}):
+            payload = autonomy_maintenance._live_control_status_payload_for_signal_ingestion(fallback)
+
+        self.assertEqual(payload.get("frontdoor_cli_status"), "ok")
+        self.assertTrue((payload.get("cli_http_parity") or {}).get("ok"))
+        self.assertGreaterEqual(int(payload.get("backend_command_count") or 0), 4)
+        self.assertIsInstance(payload.get("backend_commands"), list)
+
+    def test_apply_release_runtime_truth_adds_drift_summary_and_http_probe(self):
+        fallback = {"alerts": [], "autonomy_maintenance": {"last_regression_status": ""}}
+        state: dict = {}
+        slim_http = {
+            "release_status": {
+                "latest_readiness_state": "source-changed-after-build",
+                "latest_source_changed_after_build": True,
+                "latest_version": "2026.06.29.1",
+            },
+            "ollama_api_up": True,
+            "ollama_health": {"ok": True},
+            "ollama_version": "0.12.3",
+            "ollama_api_contract_status": "ok",
+            "ollama_chat_route_ok": True,
+            "port_ownership": {"status": "ok"},
+        }
+
+        class _Response:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+            def read(self, _limit):
+                return json.dumps(slim_http).encode("utf-8")
+
+        with mock.patch.object(autonomy_maintenance, "SIGNAL_INGESTION_STATUS_MODE", "local_first"), \
+             mock.patch.object(autonomy_maintenance.urllib.request, "urlopen", return_value=_Response()), \
+             mock.patch.object(autonomy_maintenance, "_local_release_status_for_signal_ingestion", return_value={}):
+            payload = autonomy_maintenance._apply_release_runtime_truth_to_status_payload(
+                autonomy_maintenance._live_control_status_payload_for_signal_ingestion(fallback),
+                state=state,
+            )
+
+        self.assertTrue((payload.get("release_runtime_truth") or {}).get("suppress_closure_inventory_signals"))
+        self.assertTrue(payload.get("http_model_runtime_probe_ok"))
+        self.assertEqual(state.get("last_http_model_runtime_probe", {}).get("ok"), True)
+        self.assertTrue((state.get("last_release_runtime_truth") or {}).get("runtime_drift_expected"))
+
+    def test_release_drift_invalidates_control_status_cache_once(self):
+        calls: list[str] = []
+
+        class _FakeNovaHttp:
+            @staticmethod
+            def _invalidate_control_status_cache():
+                calls.append("invalidated")
+
+        with mock.patch.dict("sys.modules", {"nova_http": _FakeNovaHttp()}):
+            autonomy_maintenance._LAST_KNOWN_RELEASE_DRIFT_STATE = ""
+            autonomy_maintenance._maybe_invalidate_control_status_cache_for_release_drift(
+                {"latest_readiness_state": "source-changed-after-build"}
+            )
+            autonomy_maintenance._maybe_invalidate_control_status_cache_for_release_drift(
+                {"latest_readiness_state": "source-changed-after-build"}
+            )
+
+        self.assertEqual(calls, ["invalidated"])
 
     def test_live_control_status_timeout_preserves_local_ollama_failure_for_ingestion(self):
         fallback = {"alerts": [], "autonomy_maintenance": {"last_regression_status": ""}}
@@ -1662,7 +1853,8 @@ class TestAutonomyMaintenance(unittest.TestCase):
             "api_contract_status": "tags_unreachable",
         }
 
-        with mock.patch.object(autonomy_maintenance.urllib.request, "urlopen", side_effect=TimeoutError("slow status")), \
+        with mock.patch.object(autonomy_maintenance, "SIGNAL_INGESTION_STATUS_MODE", "http_full"), \
+             mock.patch.object(autonomy_maintenance.urllib.request, "urlopen", side_effect=TimeoutError("slow status")), \
              mock.patch.object(autonomy_maintenance.nova_core, "ollama_health_payload", return_value=ollama_down):
             payload = autonomy_maintenance._live_control_status_payload_for_signal_ingestion(fallback)
 

@@ -12,6 +12,11 @@ from services.nova_wiring_inventory import build_root_closure_inventory_payload
 from services.nova_wiring_inventory import build_self_repair_closure_inventory_payload
 from services.nova_wiring_inventory import build_wiring_inventory_payload
 from services.nova_wiring_inventory import WIRING_SURFACES
+from services.layer_maturity_policy import (
+    capability_gap_signal_suppressed,
+    filter_actionable_capability_gaps,
+)
+from services.release_runtime_truth import release_drift_suppresses_closure_signals
 from work_tree_contracts import BranchStatus
 
 
@@ -54,6 +59,8 @@ TOOL_EVENTS_READ_TASK_TITLE = "Read runtime/tool_events.jsonl recent tool execut
 OS_CAPABILITY_LEDGER_READ_TASK_TITLE = "Read runtime/os_capability_ledger.jsonl recent OS capability evidence"
 SOURCE_ROOT_JUDGMENT_TASK_TITLE = "Synthesize source-root judgment from collected evidence"
 SOURCE_ROOT_JUDGMENT_TOOL = "source_root_judgment"
+SOURCE_ROOT_FAILED_EVIDENCE_HOLD_TITLE = "Hold source-root branch for operator/tool failure judgment"
+SOURCE_ROOT_FAILED_EVIDENCE_HOLD_REASON = "source_root_failed_evidence_operator_judgment_required"
 
 _SOURCE_ROOT_SIGNAL_SOURCES = frozenset(
     source
@@ -1257,12 +1264,7 @@ def _data_pipeline_signal_from_status(status_payload: dict[str, Any]) -> dict[st
                 "preferred_tool": "pipeline",
                 "tool_args": ["pipeline list"],
             },
-            {
-                "title": "Read pipeline registry and data source manifests",
-                "allowed_tools": ["find"],
-                "preferred_tool": "find",
-                "tool_args": ["pipeline.json", "data_sources"],
-            },
+            _data_pipeline_evidence_task(blocked_rows),
         ],
     }
 
@@ -2157,6 +2159,96 @@ def _wiring_inventory_signal_from_status(status_payload: dict[str, Any]) -> dict
     }
 
 
+_SOURCE_ROOT_GAP_FILE_SUFFIXES = (
+    ".py",
+    ".ps1",
+    ".jsonl",
+    ".json",
+    ".md",
+    ".txt",
+    ".cmd",
+    ".js",
+    ".html",
+    ".css",
+    ".ini",
+)
+
+
+def _looks_like_source_root_file_gap(gap: str) -> bool:
+    normalized = str(gap or "").replace("\\", "/").strip()
+    if not normalized:
+        return False
+    if "/" in normalized:
+        return True
+    lower = normalized.lower()
+    return any(lower.endswith(suffix) for suffix in _SOURCE_ROOT_GAP_FILE_SUFFIXES)
+
+
+def _gap_subject(gap: str) -> str:
+    normalized = str(gap or "").strip()
+    if ":" in normalized:
+        _, _, subject = normalized.partition(":")
+        return subject.strip() or normalized
+    return normalized
+
+
+def _gap_evidence_task(
+    gap: str,
+    *,
+    read_title: str = "Read gap evidence from the repository",
+    find_title: str = "Find missing wiring references for the gap",
+) -> dict[str, Any]:
+    subject = _gap_subject(gap)
+    if _looks_like_source_root_file_gap(subject):
+        return {
+            "title": read_title,
+            "allowed_tools": ["read"],
+            "preferred_tool": "read",
+            "tool_args": [subject],
+        }
+    return {
+        "title": find_title,
+        "allowed_tools": ["find"],
+        "preferred_tool": "find",
+        "tool_args": [subject, "."],
+    }
+
+
+def _source_root_gap_evidence_task(first_gap: str) -> dict[str, Any]:
+    return _gap_evidence_task(
+        first_gap,
+        read_title="Read unclassified source file for inventory review",
+        find_title="Find missing source root wiring references",
+    )
+
+
+def _source_wiring_probe_gap_evidence_task(first_gap: str) -> dict[str, Any]:
+    return _gap_evidence_task(
+        first_gap,
+        read_title="Read missing source-derived wiring path",
+        find_title="Find missing source-derived wiring references",
+    )
+
+
+def _data_pipeline_evidence_task(blocked_rows: list[dict[str, Any]]) -> dict[str, Any]:
+    pipeline_id = ""
+    if blocked_rows:
+        pipeline_id = str(blocked_rows[0].get("pipeline_id") or "").strip()
+    if pipeline_id:
+        return {
+            "title": "Read blocked data pipeline lane manifest",
+            "allowed_tools": ["read"],
+            "preferred_tool": "read",
+            "tool_args": [f"data_sources/{pipeline_id}/pipeline.json"],
+        }
+    return {
+        "title": "Read data pipeline registry",
+        "allowed_tools": ["read"],
+        "preferred_tool": "read",
+        "tool_args": ["services/data_pipeline_registry.py"],
+    }
+
+
 def _source_root_inventory_signal_from_status(status_payload: dict[str, Any]) -> dict[str, Any] | None:
     inventory = status_payload.get("source_root_inventory") if isinstance(status_payload.get("source_root_inventory"), dict) else {}
     if not inventory:
@@ -2194,11 +2286,12 @@ def _source_root_inventory_signal_from_status(status_payload: dict[str, Any]) ->
             "class": "governance_pressure",
             "surface": "source_root_inventory",
             "error": "source_root_inventory_gap",
-            "symbol": first_gap,
+            "symbol": "source_root_inventory_gap",
         },
         "payload": {
             "source_root_inventory": dict(inventory),
             "gap_count": gap_count,
+            "first_gap": first_gap,
             "unwired_roots": unwired_roots,
             "missing_evidence_roots": missing_evidence_roots,
             "unclassified_source_file_count": int(inventory.get("unclassified_source_file_count", len(unclassified_source_files)) or 0),
@@ -2223,12 +2316,7 @@ def _source_root_inventory_signal_from_status(status_payload: dict[str, Any]) ->
                 "preferred_tool": "read",
                 "tool_args": ["services/nova_wiring_inventory.py"],
             },
-            {
-                "title": "Find missing source root wiring references",
-                "allowed_tools": ["find"],
-                "preferred_tool": "find",
-                "tool_args": [first_gap, "."],
-            },
+            _source_root_gap_evidence_task(first_gap),
         ],
     }
 
@@ -2271,11 +2359,12 @@ def _source_wiring_probe_signal_from_status(status_payload: dict[str, Any]) -> d
             "class": "governance_pressure",
             "surface": "source_wiring_probe",
             "error": "source_wiring_probe_gap",
-            "symbol": first_gap,
+            "symbol": "source_wiring_probe_gap",
         },
         "payload": {
             "source_wiring_probe": dict(probe),
             "gap_count": gap_count,
+            "first_gap": first_gap,
             **gaps_by_field,
             "rationale": (
                 "The source-derived wiring probe must verify signal sources, planned tools, execution paths, "
@@ -2300,17 +2389,27 @@ def _source_wiring_probe_signal_from_status(status_payload: dict[str, Any]) -> d
                 "preferred_tool": "read",
                 "tool_args": ["services/work_tree_signal_ingestion.py"],
             },
-            {
-                "title": "Find missing source-derived wiring path",
-                "allowed_tools": ["find"],
-                "preferred_tool": "find",
-                "tool_args": [first_gap, "."],
-            },
+            _source_wiring_probe_gap_evidence_task(first_gap),
         ],
     }
 
 
+def _release_runtime_truth_from_status(status_payload: dict[str, Any]) -> dict[str, Any]:
+    truth = status_payload.get("release_runtime_truth")
+    return dict(truth) if isinstance(truth, dict) else {}
+
+
+def _release_drift_suppresses_closure_signals(status_payload: dict[str, Any]) -> bool:
+    release = status_payload.get("release_status") if isinstance(status_payload.get("release_status"), dict) else {}
+    return release_drift_suppresses_closure_signals(
+        release,
+        runtime_truth=_release_runtime_truth_from_status(status_payload),
+    )
+
+
 def _root_closure_inventory_signals_from_status(status_payload: dict[str, Any]) -> list[dict[str, Any]]:
+    if _release_drift_suppresses_closure_signals(status_payload):
+        return []
     inventory = (
         status_payload.get("root_closure_inventory")
         if isinstance(status_payload.get("root_closure_inventory"), dict)
@@ -2407,6 +2506,8 @@ def _root_closure_inventory_signals_from_status(status_payload: dict[str, Any]) 
 
 
 def _self_repair_closure_inventory_signals_from_status(status_payload: dict[str, Any]) -> list[dict[str, Any]]:
+    if _release_drift_suppresses_closure_signals(status_payload):
+        return []
     inventory = (
         status_payload.get("self_repair_closure_inventory")
         if isinstance(status_payload.get("self_repair_closure_inventory"), dict)
@@ -4030,20 +4131,7 @@ def _branch_has_failed_execution_evidence(branch_id: str) -> bool:
     for row in evidence_rows:
         if not isinstance(row, dict):
             continue
-        text = str(row.get("result_text") or "").strip().lower()
-        if not text:
-            continue
-        if (
-            text.startswith("[fail]")
-            or '"ok": false' in text
-            or "'ok': false" in text
-            or " tool failed:" in text
-            or "tool error:" in text
-            or "unknown planned tool" in text
-            or "llm service unavailable" in text
-            or "ollama chat api unavailable" in text
-            or "ollama chat failed" in text
-        ):
+        if not evidence_result_valid(row):
             return True
     return False
 
@@ -4058,14 +4146,137 @@ def _branch_has_source_root_failed_judgment(branch_id: str) -> bool:
     except Exception:
         evidence_rows = []
     for row in evidence_rows:
-        if not isinstance(row, dict):
-            continue
-        if str(row.get("tool_name") or "").strip() != SOURCE_ROOT_JUDGMENT_TOOL:
-            continue
-        text = str(row.get("result_text") or "").strip().lower()
-        if "evidence_failed" in text or "operator_outbox: needed (failed_evidence)" in text:
+        if _source_root_judgment_evidence_failed(row):
             return True
     return False
+
+
+def _source_root_judgment_evidence_failed(row: dict[str, Any]) -> bool:
+    if not isinstance(row, dict):
+        return False
+    if str(row.get("tool_name") or "").strip() != SOURCE_ROOT_JUDGMENT_TOOL:
+        return False
+    text = str(row.get("result_text") or "").strip().lower()
+    return "verdict: evidence_failed" in text or "operator_outbox: needed (failed_evidence)" in text
+
+
+def _is_source_root_failed_evidence_hold_task(task: Any) -> bool:
+    if str(getattr(task, "title", "") or "").strip() != SOURCE_ROOT_FAILED_EVIDENCE_HOLD_TITLE:
+        return False
+    meta = dict(getattr(task, "meta", {}) or {})
+    reason = str(meta.get("blocked_reason") or meta.get("block_reason") or "").strip()
+    return reason == SOURCE_ROOT_FAILED_EVIDENCE_HOLD_REASON
+
+
+def _drop_stale_source_root_judgment_tasks(branch_id: str) -> bool:
+    changed = False
+    for task in work_tree.list_branch_tasks(branch_id):
+        if str(getattr(task, "title", "") or "").strip() != SOURCE_ROOT_JUDGMENT_TASK_TITLE:
+            continue
+        status = str(getattr(getattr(task, "status", None), "value", getattr(task, "status", "")) or "").strip().lower()
+        if status != "complete":
+            continue
+        work_tree.delete_branch_evidence(branch_id, task_id=task.task_id)
+        work_tree.mark_task_dropped(task.task_id, reason="stale_source_root_judgment_recovered")
+        changed = True
+
+    try:
+        evidence_rows = work_tree.list_branch_evidence(branch_id, limit=200)
+    except Exception:
+        evidence_rows = []
+    orphan_ids = [
+        str(row.get("evidence_id") or "").strip()
+        for row in evidence_rows
+        if isinstance(row, dict) and _source_root_judgment_evidence_failed(row)
+    ]
+    if orphan_ids:
+        work_tree.delete_branch_evidence(branch_id, evidence_ids=orphan_ids)
+        changed = True
+    return changed
+
+
+def _repair_stale_source_root_read_task(branch_id: str, normalized: dict[str, Any]) -> bool:
+    sequence = [
+        dict(item)
+        for item in list(normalized.get("task_sequence") or [])
+        if isinstance(item, dict) and str(item.get("title") or "").strip()
+    ]
+    if not sequence:
+        return False
+    first_item = sequence[0]
+    if "read" not in _sequence_item_expected_tools(first_item):
+        return False
+    if _sequence_item_satisfied(branch_id, first_item):
+        return False
+
+    title = str(first_item.get("title") or "").strip()
+    expected_args = [str(arg) for arg in list(first_item.get("tool_args") or [])]
+    matching = [
+        task
+        for task in work_tree.list_branch_tasks(branch_id)
+        if str(getattr(task, "title", "") or "").strip() == title
+        and str(getattr(getattr(task, "status", None), "value", getattr(task, "status", "")) or "").strip().lower() == "complete"
+    ]
+    stale_tasks = []
+    for task in matching:
+        meta = dict(getattr(task, "meta", {}) or {})
+        current_args = [str(arg) for arg in list(meta.get("tool_args") or [])]
+        if current_args != expected_args:
+            stale_tasks.append(task)
+    if not stale_tasks:
+        return False
+
+    changed = False
+    preferred_tool = str(first_item.get("preferred_tool") or "read").strip() or "read"
+    allowed_tools = [
+        str(tool or "").strip()
+        for tool in list(first_item.get("allowed_tools") or [])
+        if str(tool or "").strip()
+    ] or [preferred_tool]
+    for task in stale_tasks:
+        work_tree.delete_branch_evidence(branch_id, task_id=task.task_id, only_invalid=True)
+        work_tree.reopen_task(
+            task.task_id,
+            meta_updates={
+                "expected_tool": preferred_tool,
+                "allowed_tools": allowed_tools,
+                "tool_args": expected_args,
+                "reopened_reason": "stale_source_root_read_path_recovered",
+            },
+        )
+        changed = True
+    return changed
+
+
+def _recover_source_root_failed_evidence_hold(branch: Any, normalized: dict[str, Any]) -> bool:
+    branch_id = str(getattr(branch, "branch_id", "") or "").strip()
+    if not branch_id:
+        return False
+
+    open_tasks = [
+        task
+        for task in work_tree.list_branch_tasks(branch_id)
+        if str(getattr(getattr(task, "status", None), "value", getattr(task, "status", "")) or "").strip().lower()
+        not in {"complete", "dropped"}
+    ]
+    hold_tasks = [task for task in open_tasks if _is_source_root_failed_evidence_hold_task(task)]
+    if not hold_tasks:
+        return False
+
+    changed = _repair_stale_source_root_read_task(branch_id, normalized)
+    if _branch_has_failed_execution_evidence(branch_id) and not changed:
+        return False
+
+    if _branch_has_source_root_failed_judgment(branch_id):
+        changed = _drop_stale_source_root_judgment_tasks(branch_id) or changed
+
+    if _branch_has_failed_execution_evidence(branch_id):
+        return changed
+
+    for task in hold_tasks:
+        work_tree.mark_task_dropped(task.task_id, reason="source_root_failed_evidence_hold_recovered")
+        changed = True
+    return changed
 
 
 def _source_root_operator_reason_from_judgment_text(text: str) -> str:
@@ -4197,11 +4408,25 @@ def _capability_gap_signal_from_status(status_payload: dict) -> dict | None:
     if not _has_capability_manifest_surface(status_payload):
         return None
 
-    gap_count = int(status_payload.get("capability_gap_count", 0) or 0)
+    if capability_gap_signal_suppressed(status_payload):
+        return None
+
     gaps = status_payload.get("capability_gaps")
     gap_list = [str(item or "").strip() for item in list(gaps or []) if str(item or "").strip()] if isinstance(gaps, list) else []
+    actionable_gaps = list(status_payload.get("capability_gaps_actionable") or [])
+    if actionable_gaps:
+        gap_list = [gap for gap in gap_list if gap in set(actionable_gaps)] or actionable_gaps
+    else:
+        layer_maturity = status_payload.get("layer_maturity") if isinstance(status_payload.get("layer_maturity"), dict) else {}
+        layers = layer_maturity.get("layers") if isinstance(layer_maturity.get("layers"), dict) else {}
+        gap_list = filter_actionable_capability_gaps(
+            gap_list,
+            policy={"layers": layers},
+            status_payload=status_payload,
+        )
 
-    if gap_count <= 0 and not gap_list:
+    gap_count = len(gap_list)
+    if gap_count <= 0:
         return None
 
     leah_gaps = [gap for gap in gap_list if gap.startswith("leah_")]
@@ -4830,23 +5055,66 @@ class WorkTreeSignalIngestionService:
                     reason="Subsystem wiring inventory reports full source/status/signal/tool/action coverage.",
                 )
             )
-        if _has_source_root_inventory_surface(status_payload) and _source_root_inventory_signal_from_status(status_payload) is None:
+        if _has_source_root_inventory_surface(status_payload):
+            source_root_signal = _source_root_inventory_signal_from_status(status_payload)
+            if source_root_signal is not None:
+                active_key = self.source_key_for_signal(source_root_signal)
+                if active_key:
+                    results.extend(
+                        self.resolve_inactive_signal_branches(
+                            signal_class="governance_pressure",
+                            source="source_root_inventory",
+                            active_source_keys={active_key},
+                            reason="Source root inventory pressure consolidated to the canonical source key.",
+                            resolution_mode="retire",
+                        )
+                    )
+            else:
+                results.extend(
+                    self.resolve_signal_branches(
+                        signal_class="governance_pressure",
+                        source="source_root_inventory",
+                        reason="Source root inventory reports every discovered root has a first-class wiring surface.",
+                    )
+                )
+        if _has_source_wiring_probe_surface(status_payload):
+            source_wiring_probe_signal = _source_wiring_probe_signal_from_status(status_payload)
+            if source_wiring_probe_signal is not None:
+                active_key = self.source_key_for_signal(source_wiring_probe_signal)
+                if active_key:
+                    results.extend(
+                        self.resolve_inactive_signal_branches(
+                            signal_class="governance_pressure",
+                            source="source_wiring_probe",
+                            active_source_keys={active_key},
+                            reason="Source wiring probe pressure consolidated to the canonical source key.",
+                            resolution_mode="retire",
+                        )
+                    )
+            else:
+                results.extend(
+                    self.resolve_signal_branches(
+                        signal_class="governance_pressure",
+                        source="source_wiring_probe",
+                        reason="Source wiring probe reports all required source-derived paths are present.",
+                    )
+                )
+        if _release_drift_suppresses_closure_signals(status_payload):
             results.extend(
                 self.resolve_signal_branches(
                     signal_class="governance_pressure",
-                    source="source_root_inventory",
-                    reason="Source root inventory reports every discovered root has a first-class wiring surface.",
+                    source="root_closure_inventory",
+                    reason="Release source drift is expected until rebuild and restart; deferring root closure inventory pressure.",
                 )
             )
-        if _has_source_wiring_probe_surface(status_payload) and _source_wiring_probe_signal_from_status(status_payload) is None:
             results.extend(
                 self.resolve_signal_branches(
                     signal_class="governance_pressure",
-                    source="source_wiring_probe",
-                    reason="Source wiring probe reports all required source-derived paths are present.",
+                    source="self_repair_closure_inventory",
+                    reason="Release source drift is expected until rebuild and restart; deferring self-repair closure inventory pressure.",
                 )
             )
-        if _has_root_closure_inventory_surface(status_payload):
+        elif _has_root_closure_inventory_surface(status_payload):
             root_closure_signals = _root_closure_inventory_signals_from_status(status_payload)
             if root_closure_signals:
                 active_keys = {
@@ -4870,7 +5138,7 @@ class WorkTreeSignalIngestionService:
                         reason="Root closure inventory reports every declared root has status, signal, tool, and action wiring.",
                     )
                 )
-        if _has_self_repair_closure_inventory_surface(status_payload):
+        if not _release_drift_suppresses_closure_signals(status_payload) and _has_self_repair_closure_inventory_surface(status_payload):
             self_repair_closure_signals = _self_repair_closure_inventory_signals_from_status(status_payload)
             if self_repair_closure_signals:
                 active_keys = {
@@ -5069,7 +5337,140 @@ class WorkTreeSignalIngestionService:
                     reason="Memory health no longer reports an active persistence bootstrap gap.",
                 )
             )
+        if _has_capability_manifest_surface(status_payload):
+            capability_gap_signal = _capability_gap_signal_from_status(status_payload)
+            if capability_gap_signal is None:
+                results.extend(
+                    self.resolve_signal_branches(
+                        signal_class="declared_capability_absent",
+                        source="codegen_pipeline",
+                        reason=(
+                            "Capability gaps remain observed under layer maturity policy; "
+                            "codegen/Leah build branches stay deferred until explicit promotion."
+                        ),
+                    )
+                )
+            else:
+                active_key = self.source_key_for_signal(capability_gap_signal)
+                if active_key:
+                    results.extend(
+                        self.resolve_inactive_signal_branches(
+                            signal_class="declared_capability_absent",
+                            source="codegen_pipeline",
+                            active_source_keys={active_key},
+                            reason="Capability gap pressure consolidated to the canonical promoted capability.",
+                        )
+                    )
+        results.extend(self.dedupe_signal_branches())
         return results
+
+    def dedupe_signal_branches(self) -> list[dict[str, Any]]:
+        tree = self._find_signal_tree()
+        if tree is None:
+            return []
+
+        groups: dict[tuple[str, str], list[Any]] = {}
+        for branch in work_tree.list_tree_branches(tree.tree_id):
+            if branch.branch_id == tree.root_branch_id:
+                continue
+            source_type = str(getattr(branch, "source_type", "") or "").strip().lower()
+            source_key = str(getattr(branch, "source_key", "") or "").strip()
+            if not source_type or not source_key:
+                continue
+            groups.setdefault((source_type, source_key), []).append(branch)
+
+        results: list[dict[str, Any]] = []
+        now = datetime.now()
+        retire_note = "Duplicate signal branch retired in favor of the newest canonical branch."
+        archive_note = "Duplicate resolved signal branch archived."
+
+        for branches in groups.values():
+            if len(branches) < 2:
+                continue
+
+            active_branches = [branch for branch in branches if self._is_live_signal_branch(branch)]
+            if len(active_branches) >= 2:
+                keeper = max(active_branches, key=self._branch_recency_key)
+                for branch in active_branches:
+                    if branch.branch_id == keeper.branch_id:
+                        continue
+                    results.append(self._retire_signal_branch(branch, note=retire_note, now=now))
+
+            complete_branches = [
+                branch
+                for branch in branches
+                if branch.status == BranchStatus.COMPLETE
+                and str(getattr(branch, "resolution_state", "") or "").strip().lower() in {"resolved", "retired"}
+            ]
+            if len(complete_branches) >= 2:
+                keeper = max(complete_branches, key=self._branch_recency_key)
+                for branch in complete_branches:
+                    if branch.branch_id == keeper.branch_id:
+                        continue
+                    results.append(self._archive_signal_branch(branch, note=archive_note, now=now))
+
+        return results
+
+    @staticmethod
+    def _branch_recency_key(branch: Any) -> datetime:
+        seen = getattr(branch, "last_seen_at", None)
+        return seen if isinstance(seen, datetime) else datetime.min
+
+    def _is_live_signal_branch(self, branch: Any) -> bool:
+        if branch.status == BranchStatus.ARCHIVED:
+            return False
+        resolution = str(getattr(branch, "resolution_state", "") or "").strip().lower()
+        if resolution in {"resolved", "retired", "archived"}:
+            return False
+        if branch.status in {BranchStatus.READY, BranchStatus.ACTIVE, BranchStatus.BLOCKED}:
+            return True
+        return resolution in {"open", "observing"}
+
+    def _retire_signal_branch(self, branch: Any, *, note: str, now: datetime) -> dict[str, Any]:
+        for task in work_tree.list_branch_tasks(branch.branch_id):
+            status = str(getattr(getattr(task, "status", None), "value", getattr(task, "status", "")) or "").strip().lower()
+            if status in {"complete", "dropped"}:
+                continue
+            work_tree.mark_task_complete(task.task_id)
+        branch.status = BranchStatus.COMPLETE
+        branch.resolution_state = "retired"
+        branch.priority = 0
+        branch.allowed_tools = []
+        branch.preferred_tool = None
+        branch.last_seen_at = now
+        existing_notes = str(branch.notes or "").strip()
+        if note and note not in existing_notes:
+            branch.notes = f"{existing_notes}\nRetired: {note}".strip() if existing_notes else f"Retired: {note}"
+        work_tree.touch_branch(branch.branch_id)
+        return {
+            "action": "retired",
+            "tree_id": branch.tree_id,
+            "branch_id": branch.branch_id,
+            "reason": note,
+        }
+
+    def _archive_signal_branch(self, branch: Any, *, note: str, now: datetime) -> dict[str, Any]:
+        for task in work_tree.list_branch_tasks(branch.branch_id):
+            status = str(getattr(getattr(task, "status", None), "value", getattr(task, "status", "")) or "").strip().lower()
+            if status in {"complete", "dropped"}:
+                continue
+            work_tree.mark_task_complete(task.task_id)
+        branch.status = BranchStatus.ARCHIVED
+        branch.resolution_state = "archived"
+        branch.priority = 0
+        branch.allowed_tools = []
+        branch.preferred_tool = None
+        branch.last_seen_at = now
+        existing_notes = str(branch.notes or "").strip()
+        if note and note not in existing_notes:
+            branch.notes = f"{existing_notes}\nArchived: {note}".strip() if existing_notes else f"Archived: {note}"
+        work_tree.touch_branch(branch.branch_id)
+        return {
+            "action": "archived",
+            "tree_id": branch.tree_id,
+            "branch_id": branch.branch_id,
+            "reason": note,
+        }
 
     def resolve_signal_branches(
         self,
@@ -5444,6 +5845,30 @@ class WorkTreeSignalIngestionService:
                 str(getattr(task.status, "value", task.status) or "").strip().lower() == "blocked"
                 for task in open_tasks
             )
+            if sequence_configured and _sequence_has_tool(normalized, SOURCE_ROOT_JUDGMENT_TOOL):
+                if _recover_source_root_failed_evidence_hold(branch, normalized):
+                    open_tasks = [
+                        task
+                        for task in work_tree.list_branch_tasks(branch.branch_id)
+                        if str(getattr(task.status, "value", task.status) or "").strip().lower() not in {"complete", "dropped"}
+                    ]
+                    blocked_open_tasks = bool(open_tasks) and all(
+                        str(getattr(task.status, "value", task.status) or "").strip().lower() == "blocked"
+                        for task in open_tasks
+                    )
+                    sequence_task = _next_sequence_task(branch.branch_id, normalized)
+                    if sequence_task:
+                        task_text = str(sequence_task.get("title") or "").strip()
+                        task_allowed_tools = [
+                            str(tool or "").strip()
+                            for tool in list(sequence_task.get("allowed_tools") or [])
+                            if str(tool or "").strip()
+                        ] or task_allowed_tools
+                        task_preferred_tool = str(sequence_task.get("preferred_tool") or "").strip() or task_preferred_tool
+                    elif sequence_configured:
+                        task_text = ""
+                        task_allowed_tools = []
+                        task_preferred_tool = ""
             failed_source_root_evidence = (
                 sequence_configured
                 and _sequence_has_tool(normalized, SOURCE_ROOT_JUDGMENT_TOOL)
@@ -5486,12 +5911,12 @@ class WorkTreeSignalIngestionService:
                     )
                 blocked = work_tree.add_task_to_branch(
                     branch.branch_id,
-                    "Hold source-root branch for operator/tool failure judgment",
-                    meta={"blocked_reason": "source_root_failed_evidence_operator_judgment_required"},
+                    SOURCE_ROOT_FAILED_EVIDENCE_HOLD_TITLE,
+                    meta={"blocked_reason": SOURCE_ROOT_FAILED_EVIDENCE_HOLD_REASON},
                 )
                 work_tree.mark_task_blocked(
                     blocked.task_id,
-                    "source_root_failed_evidence_operator_judgment_required",
+                    SOURCE_ROOT_FAILED_EVIDENCE_HOLD_REASON,
                 )
                 open_tasks = [blocked]
                 blocked_open_tasks = True
@@ -5530,7 +5955,8 @@ class WorkTreeSignalIngestionService:
                 task_text = ""
                 task_allowed_tools = []
                 task_preferred_tool = ""
-            if failed_source_root_evidence and not any(
+            source_name = str(normalized.get("source") or "").strip().lower()
+            if failed_source_root_evidence and source_name != "subconscious" and not any(
                 str(getattr(task, "title", "") or "").strip() == SOURCE_ROOT_JUDGMENT_TASK_TITLE
                 for task in open_tasks
             ) and not source_root_failed_judged:
@@ -5558,7 +5984,7 @@ class WorkTreeSignalIngestionService:
                 and not sequence_task
                 and str(branch.resolution_state or "").strip().lower() == "open"
                 and _sequence_has_tool(normalized, SOURCE_ROOT_JUDGMENT_TOOL)
-                and not judgment_already_complete
+                and judgment_already_complete
             ):
                 sequence_task = _first_sequence_task(normalized)
                 if sequence_task:
@@ -5569,7 +5995,6 @@ class WorkTreeSignalIngestionService:
                         if str(tool or "").strip()
                     ] or task_allowed_tools
                     task_preferred_tool = str(sequence_task.get("preferred_tool") or "").strip() or task_preferred_tool
-            source_name = str(normalized.get("source") or "").strip().lower()
             realign_blocked_sequence = source_name == "subconscious" or (
                 source_name == "memory_identity"
                 and str((normalized.get("payload") or {}).get("memory_bootstrap_origin", {}).get("status") or "").strip().lower() == "ready"

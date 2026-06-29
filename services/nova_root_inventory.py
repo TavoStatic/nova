@@ -298,6 +298,7 @@ _SOURCE_COVERAGE_IGNORED_DIRS = {
     "__pycache__",
     "logs",
     "runtime",
+    "terminals",
 }
 
 
@@ -373,6 +374,16 @@ def _coverage_root_for_path(path: str) -> str:
         return "diagnostics_hygiene"
     if name == "this_is_nova":
         return "source_root_inventory"
+    if name == "nyo-nova-autostart.ps1":
+        return "frontdoor_cli"
+    if low.startswith("updates/"):
+        return "patch_pipeline"
+    if "nova_server_side" in low:
+        return "http_api_control"
+    if "reverse_proxy_frontdoor" in low or "reverse_proxy" in low:
+        return "http_api_control"
+    if name.startswith("nova_grok."):
+        return "diagnostics_hygiene"
     if (
         "root_inventory" in low
         or "wiring_inventory" in low

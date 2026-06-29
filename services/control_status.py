@@ -2,8 +2,10 @@
 
 import os
 import time
+from pathlib import Path
 
 from services.data_pipeline_registry import list_pipeline_summaries
+from services.frontdoor_cli_parity import FRONTDOOR_CLI_PARITY_SERVICE
 from services.nova_grounded_self_report import GROUNDED_SELF_REPORT_SERVICE
 from services.regression_lanes import SOURCE_PROFILE_LANES
 from services.regression_profile_inventory import build_regression_profile_inventory_payload
@@ -15,6 +17,10 @@ from services.nova_wiring_inventory import build_wiring_inventory_payload
 from services.nova_wiring_inventory import wiring_surface_ids
 from services.sock_service import get_sock_status_keys
 from services.capabilities_gap_detector import enhance_status_with_capability_gaps
+from services.layer_maturity_policy import enrich_status_with_layer_maturity
+from services.control_status_surfaces import CONTROL_STATUS_SURFACES_SERVICE
+
+ROOT = Path(__file__).resolve().parents[1]
 
 
 class ControlStatusService:
@@ -171,6 +177,7 @@ class ControlStatusService:
         session_turns,
         metrics_totals: tuple[int, int],
         supplier_fns: dict[str, object] | None = None,
+        lightweight: bool = False,
     ) -> dict:
         supplier_fns = dict(supplier_fns or {})
         probe_searxng_fn = supplier_fns["probe_searxng"]
@@ -247,6 +254,11 @@ class ControlStatusService:
         operator_outbox_summary = operator_outbox_summary_fn(20)
         operator_macros = load_operator_macros_fn(24)
         backend_commands = load_backend_commands_fn(40)
+        frontdoor_surfaces = FRONTDOOR_CLI_PARITY_SERVICE.build_surfaces(
+            root=ROOT,
+            backend_commands=backend_commands,
+        )
+        backend_commands = list(frontdoor_surfaces.get("backend_commands") or backend_commands)
         memory_stats = core_module.mem_stats_payload(emit_event=False)
         memory_summary = memory_events_summary_fn(80)
         tool_summary = tool_events_summary_fn(80)
@@ -304,6 +316,12 @@ class ControlStatusService:
             operator_outbox=operator_outbox_summary,
             operator_macros=operator_macros,
             backend_commands=backend_commands,
+            frontdoor_cli_status=str(frontdoor_surfaces.get("frontdoor_cli_status") or ""),
+            cli_http_parity=(
+                dict(frontdoor_surfaces.get("cli_http_parity") or {})
+                if isinstance(frontdoor_surfaces.get("cli_http_parity"), dict)
+                else {}
+            ),
             memory_scope=str((policy.get("memory") or {}).get("scope") or "private"),
             web_enabled=bool((policy.get("tools_enabled") or {}).get("web")) and bool(web_cfg.get("enabled")),
             allow_domains_count=len(web_cfg.get("allow_domains") or []),
@@ -342,18 +360,37 @@ class ControlStatusService:
             errors_total=errors_total,
             storage_watch_summary=storage_watch_summary_fn(),
         )
-        append_metrics_snapshot_fn(payload)
+        if not lightweight:
+            append_metrics_snapshot_fn(payload)
         self_check = build_self_check_fn(payload, control_policy_payload_fn(), metrics_payload_fn())
         payload["health_score"] = int(self_check.get("health_score", 0))
         payload["self_check_pass_ratio"] = float(self_check.get("pass_ratio", 0.0))
         payload["alerts"] = list(self_check.get("alerts") or [])
-        report_payload = GROUNDED_SELF_REPORT_SERVICE.build_payload(payload, work_trees_payload)
-        operator_attention = GROUNDED_SELF_REPORT_SERVICE.build_operator_attention(report_payload)
-        payload["operator_attention"] = operator_attention
-        payload["operator_attention_active"] = bool(operator_attention.get("active"))
-        payload["operator_attention_level"] = str(operator_attention.get("level") or "")
-        payload["operator_attention_message"] = str(operator_attention.get("message") or "")
+        if not lightweight:
+            report_payload = GROUNDED_SELF_REPORT_SERVICE.build_payload(payload, work_trees_payload)
+            operator_attention = GROUNDED_SELF_REPORT_SERVICE.build_operator_attention(report_payload)
+            payload["operator_attention"] = operator_attention
+            payload["operator_attention_active"] = bool(operator_attention.get("active"))
+            payload["operator_attention_level"] = str(operator_attention.get("level") or "")
+            payload["operator_attention_message"] = str(operator_attention.get("message") or "")
         return payload
+
+    def runtime_signal_ingestion_surfaces_payload(
+        self,
+        *,
+        core_module,
+        session_turns,
+        metrics_totals: tuple[int, int],
+        supplier_fns: dict[str, object] | None = None,
+    ) -> dict:
+        full_payload = self.runtime_status_payload(
+            core_module=core_module,
+            session_turns=session_turns,
+            metrics_totals=metrics_totals,
+            supplier_fns=supplier_fns,
+            lightweight=True,
+        )
+        return CONTROL_STATUS_SURFACES_SERVICE.build_surfaces_payload(full_payload)
 
     @staticmethod
     def status_payload(
@@ -374,6 +411,8 @@ class ControlStatusService:
         autonomy_maintenance: dict,
         operator_macros: list,
         backend_commands: list,
+        frontdoor_cli_status: str = "",
+        cli_http_parity: dict | None = None,
         memory_scope: str,
         web_enabled: bool,
         allow_domains_count: int,
@@ -515,6 +554,10 @@ class ControlStatusService:
             "operator_macros": operator_macros,
             "backend_commands": backend_commands,
             "backend_command_count": len(backend_commands),
+            "frontdoor_cli_status": str(frontdoor_cli_status or ""),
+            "cli_http_parity": (
+                dict(cli_http_parity or {}) if isinstance(cli_http_parity, dict) else {}
+            ),
             "memory_scope": memory_scope,
             "web_enabled": bool(web_enabled),
             "search_provider": provider,
@@ -1137,6 +1180,15 @@ class ControlStatusService:
         payload["source_wiring_probe_missing_required_owned_root_routes"] = list(
             source_wiring_probe.get("missing_required_owned_root_routes") or []
         )
+        try:
+            payload = enhance_status_with_capability_gaps(payload)
+            payload = enrich_status_with_layer_maturity(payload, policy=policy)
+        except Exception:
+            payload.setdefault("capability_gap_count", 0)
+            payload.setdefault("capability_gaps", [])
+            payload.setdefault("capabilities_gap_summary", {})
+            payload.setdefault("layer_maturity", {})
+            payload.setdefault("suppress_capability_gap_signals", True)
         root_closure_seed = {
             **payload,
             "root_closure_inventory": {},
@@ -1198,12 +1250,6 @@ class ControlStatusService:
             payload.setdefault("sock_hardware_profile", {})
             payload.setdefault("sock_recommendation", {})
             payload.setdefault("sock_policy_diff", {})
-        try:
-            payload = enhance_status_with_capability_gaps(payload)
-        except Exception:
-            payload.setdefault("capability_gap_count", 0)
-            payload.setdefault("capability_gaps", [])
-            payload.setdefault("capabilities_gap_summary", {})
         wiring_inventory = build_wiring_inventory_payload(payload)
         payload["wiring_inventory"] = wiring_inventory
         payload["wiring_inventory_ok"] = bool(wiring_inventory.get("ok", False))

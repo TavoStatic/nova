@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+from services.evidence_validity import evidence_result_valid
 from services.nova_runtime_context import OPERATOR_OUTBOX_FILE
 from services.operator_outbox import OPERATOR_OUTBOX_SERVICE
 
@@ -77,16 +78,7 @@ def _evidence_tools(evidence_rows: list[dict[str, Any]]) -> list[str]:
 
 
 def _looks_like_failed_evidence(row: dict[str, Any]) -> bool:
-    text = _safe_text(row.get("result_text"), 4000).lower()
-    if not text:
-        return True
-    return (
-        text.startswith("[fail]")
-        or '"ok": false' in text
-        or "'ok': false" in text
-        or "tool error:" in text
-        or "unknown planned tool" in text
-    )
+    return not evidence_result_valid(row)
 
 
 def _has_specialized_judgment(evidence_rows: list[dict[str, Any]]) -> bool:

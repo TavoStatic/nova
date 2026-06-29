@@ -45,6 +45,24 @@ class TestEvidenceValidity(unittest.TestCase):
         self.assertFalse(invalid)
         self.assertEqual(reason, "")
 
+    def test_read_source_with_ok_false_literal_is_valid_evidence(self):
+        invalid, reason = invalid_tool_result(
+            "read",
+            'from __future__ import annotations\n\n    return {\n        "ok": False,\n        "status": "blocked_by_test_guard",\n    }\n',
+        )
+
+        self.assertFalse(invalid)
+        self.assertEqual(reason, "")
+
+    def test_structured_json_tool_failure_is_not_valid_evidence(self):
+        invalid, reason = invalid_tool_result(
+            "read",
+            '{"ok": false, "reason": "Not a file: routing/context_router.py", "tool_result": "Not a file"}',
+        )
+
+        self.assertTrue(invalid)
+        self.assertIn("Not a file", reason)
+
 
 if __name__ == "__main__":
     unittest.main()

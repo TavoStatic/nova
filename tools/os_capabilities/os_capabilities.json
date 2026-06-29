@@ -19,7 +19,7 @@
       "script": {
         "kind": "powershell",
         "path": "tools/os_capabilities/collect_diagnostics_bundle.ps1",
-        "sha256": "ebb1acee01b0bd890818fe1a1afa199ef19678a088d48cd6cfedd52614167a46",
+        "sha256": "da050bae398e2dcb974bf8f153fcc1253b384f61dc273aa2675821d4710a0b1f",
         "timeout_ms": 20000,
         "working_directory": "."
       },
@@ -40,7 +40,7 @@
       },
       "evidence_schema_version": "1.0.0",
       "notes": "mutating=false means this capability does not change process/service/runtime state; evidence_write still requires the controller to verify writes_only_to after execution.",
-      "sha256": "ebb1acee01b0bd890818fe1a1afa199ef19678a088d48cd6cfedd52614167a46"
+      "sha256": "da050bae398e2dcb974bf8f153fcc1253b384f61dc273aa2675821d4710a0b1f"
     },
     {
       "name": "inspect_ports",
@@ -52,7 +52,7 @@
       "script": {
         "kind": "powershell",
         "path": "tools/os_capabilities/inspect_ports.ps1",
-        "sha256": "48848cd52aa6d1fb44235198ad822e21ec6b8acba4576317eca01889009b2d7d",
+        "sha256": "496a136073d2e3e8456b2a79d4cc3cbaa540bd8e11d594999db75e48ac347068",
         "timeout_ms": 8000,
         "working_directory": "."
       },
@@ -77,7 +77,7 @@
         "required": []
       },
       "evidence_schema_version": "1.0.0",
-      "sha256": "48848cd52aa6d1fb44235198ad822e21ec6b8acba4576317eca01889009b2d7d"
+      "sha256": "496a136073d2e3e8456b2a79d4cc3cbaa540bd8e11d594999db75e48ac347068"
     },
     {
       "name": "inspect_processes",
@@ -89,7 +89,7 @@
       "script": {
         "kind": "powershell",
         "path": "tools/os_capabilities/inspect_processes.ps1",
-        "sha256": "1667d84f8ab22c0e86b83f076ebbd97f68d0256d041b45a2362830d3350b7154",
+        "sha256": "ae5286a1ff08adac69bd4ec529d5f958f2f7d5530a036709a0bea0733bc0ef8f",
         "timeout_ms": 8000,
         "working_directory": "."
       },
@@ -100,7 +100,7 @@
         "required": []
       },
       "evidence_schema_version": "1.0.0",
-      "sha256": "1667d84f8ab22c0e86b83f076ebbd97f68d0256d041b45a2362830d3350b7154"
+      "sha256": "ae5286a1ff08adac69bd4ec529d5f958f2f7d5530a036709a0bea0733bc0ef8f"
     },
     {
       "name": "inspect_runtime_health",
@@ -112,7 +112,7 @@
       "script": {
         "kind": "powershell",
         "path": "tools/os_capabilities/inspect_runtime_health.ps1",
-        "sha256": "e3be8fbab6aeeb4c24d8cb24d544e9a4cceab07910055c5119dab6cc64b2d9be",
+        "sha256": "9e7a98e3268cd2aa66b7537a89e8c46b230eee53d1d949203391ce4d99ee1d31",
         "timeout_ms": 12000,
         "working_directory": "."
       },
@@ -136,7 +136,7 @@
         "required": []
       },
       "evidence_schema_version": "1.0.0",
-      "sha256": "e3be8fbab6aeeb4c24d8cb24d544e9a4cceab07910055c5119dab6cc64b2d9be"
+      "sha256": "9e7a98e3268cd2aa66b7537a89e8c46b230eee53d1d949203391ce4d99ee1d31"
     },
     {
       "name": "scan_large_files",
@@ -154,7 +154,7 @@
       "script": {
         "kind": "powershell",
         "path": "tools/os_capabilities/scan_large_files.ps1",
-        "sha256": "643f998e370746292d7e94d050dc6ddf8e9300e292c87e63672ab12f0eff584d",
+        "sha256": "100584ac38c8dfd4a55b45e83f149f86f7dbb492dd1877e574221c6683a98b9d",
         "timeout_ms": 30000,
         "working_directory": "."
       },
@@ -177,7 +177,7 @@
         ]
       },
       "evidence_schema_version": "1.0.0",
-      "sha256": "643f998e370746292d7e94d050dc6ddf8e9300e292c87e63672ab12f0eff584d"
+      "sha256": "100584ac38c8dfd4a55b45e83f149f86f7dbb492dd1877e574221c6683a98b9d"
     },
     {
       "name": "verify_ollama_model",
@@ -190,7 +190,7 @@
       "script": {
         "kind": "powershell",
         "path": "tools/os_capabilities/verify_ollama_model.ps1",
-        "sha256": "787a939355b8198df757cc2d4cfa08d5933aac7fa30ccf810e7ac23b6b6e461b",
+        "sha256": "4ace559960b741c2f043e6260af07b3c5b2ce25b0a41b7a51d5f025bfc5f1de8",
         "timeout_ms": 12000,
         "working_directory": "."
       },
@@ -214,7 +214,7 @@
         "required": []
       },
       "evidence_schema_version": "1.0.0",
-      "sha256": "787a939355b8198df757cc2d4cfa08d5933aac7fa30ccf810e7ac23b6b6e461b"
+      "sha256": "4ace559960b741c2f043e6260af07b3c5b2ce25b0a41b7a51d5f025bfc5f1de8"
     }
   ]
 }

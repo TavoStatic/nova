@@ -155,8 +155,10 @@ CHAT_PASSWORD_HASH_ITERATIONS = 120000
 PROCESS_SCAN_CACHE_TTL_SECONDS = 5.0
 _PROCESS_SCAN_CACHE: Dict[str, tuple[float, list[dict]]] = {}
 CONTROL_STATUS_CACHE_TTL_SECONDS = 2.0
+CONTROL_STATUS_SURFACES_CACHE_TTL_SECONDS = 2.0
 _CONTROL_STATUS_CACHE_LOCK = threading.Lock()
 _CONTROL_STATUS_CACHE: Dict[str, Any] = {"computed_at": 0.0, "payload": None}
+_CONTROL_STATUS_SURFACES_CACHE: Dict[str, Any] = {"computed_at": 0.0, "payload": None}
 AUTONOMY_MAINTENANCE_STATE_PATH = RUNTIME_DIR / "autonomy_maintenance_state.json"
 try:
     SEARXNG_STATUS_TIMEOUT_SEC = max(5.0, float(os.environ.get("NOVA_SEARXNG_STATUS_TIMEOUT_SEC", "5.0")))
@@ -170,6 +172,7 @@ _STORAGE_WATCH_CACHE: Dict[str, Any] = {"computed_at": 0.0, "payload": None}
 
 def _invalidate_control_status_cache() -> None:
     CONTROL_STATUS_CACHE_SERVICE.invalidate(_CONTROL_STATUS_CACHE, lock=_CONTROL_STATUS_CACHE_LOCK)
+    CONTROL_STATUS_CACHE_SERVICE.invalidate(_CONTROL_STATUS_SURFACES_CACHE, lock=_CONTROL_STATUS_CACHE_LOCK)
 
 
 def _load_autonomy_maintenance_state() -> dict:
@@ -1613,6 +1616,30 @@ def _cached_control_status_payload(max_age_seconds: float = CONTROL_STATUS_CACHE
         max_age_seconds=max_age_seconds,
         monotonic_fn=time.monotonic,
         compute_payload_fn=_control_status_payload,
+    )
+
+
+def _control_status_surfaces_payload() -> dict:
+    with _METRICS_LOCK:
+        requests_total = _HTTP_REQUESTS_TOTAL
+        errors_total = _HTTP_ERRORS_TOTAL
+    return CONTROL_STATUS_SERVICE.runtime_signal_ingestion_surfaces_payload(
+        core_module=nova_core,
+        session_turns=SESSION_TURNS,
+        metrics_totals=(requests_total, errors_total),
+        supplier_fns=_control_status_suppliers(),
+    )
+
+
+def _cached_control_status_surfaces_payload(
+    max_age_seconds: float = CONTROL_STATUS_SURFACES_CACHE_TTL_SECONDS,
+) -> dict:
+    return CONTROL_STATUS_CACHE_SERVICE.cached_payload(
+        _CONTROL_STATUS_SURFACES_CACHE,
+        lock=_CONTROL_STATUS_CACHE_LOCK,
+        max_age_seconds=max_age_seconds,
+        monotonic_fn=time.monotonic,
+        compute_payload_fn=_control_status_surfaces_payload,
     )
 
 

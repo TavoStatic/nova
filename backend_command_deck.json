@@ -21,6 +21,28 @@
       "allow_dynamic_args": true,
       "enabled": true,
       "timeout_sec": 2400
+    },
+    {
+      "command_id": "nova_server_side",
+      "label": "Nova Server-Side Status",
+      "description": "Probe configured server-side/frontdoor endpoint.",
+      "kind": "python_script",
+      "entry": "scripts/nova_server_side.py",
+      "args": ["status", "--json"],
+      "allow_dynamic_args": false,
+      "enabled": true,
+      "timeout_sec": 120
+    },
+    {
+      "command_id": "reverse_proxy_frontdoor",
+      "label": "Reverse Proxy Frontdoor Render",
+      "description": "Render Apache reverse-proxy vhost for the Nova HTTP frontdoor.",
+      "kind": "python_script",
+      "entry": "scripts/reverse_proxy_frontdoor.py",
+      "args": ["--json"],
+      "allow_dynamic_args": false,
+      "enabled": true,
+      "timeout_sec": 120
     }
   ]
 }
