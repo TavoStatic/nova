@@ -6,6 +6,7 @@ from services.layer_maturity_policy import (
     capability_action_allowed,
     capability_gap_signal_suppressed,
     enrich_status_with_layer_maturity,
+    evaluate_core_gate,
     filter_actionable_capability_gaps,
     next_leah_capability_in_sequence,
     normalize_layer_policy,
@@ -88,6 +89,29 @@ class TestLayerMaturityPolicyService(unittest.TestCase):
             "leah_conversation_continuity",
         )
         self.assertEqual(LEAH_BUILD_SEQUENCE[0], "leah_conversation_continuity")
+
+    def test_core_gate_passes_when_required_roots_close_and_drift_clear(self):
+        status = {
+            "release_runtime_truth": {"suppress_closure_inventory_signals": False},
+            "root_closure_inventory": {
+                "roots": [
+                    {"root_id": root_id, "ok": True}
+                    for root_id in (
+                        "model_runtime",
+                        "conversation_routing",
+                        "frontdoor_cli",
+                        "operator_control",
+                        "http_api_control",
+                    )
+                ]
+            },
+        }
+
+        core_gate = evaluate_core_gate(status)
+
+        self.assertTrue(core_gate.get("ok"))
+        self.assertFalse(core_gate.get("drift_blocked"))
+        self.assertEqual(core_gate.get("missing_roots"), [])
 
     def test_leah_capability_blocked_until_core_gate_passes(self):
         policy = {

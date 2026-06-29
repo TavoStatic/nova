@@ -1208,6 +1208,10 @@ class ControlStatusService:
         payload["root_closure_inventory_ok"] = bool(root_closure_inventory.get("ok", False))
         payload["root_closure_inventory_gap_count"] = int(root_closure_inventory.get("gap_count", 0) or 0)
         payload["root_closure_inventory_gap_roots"] = list(root_closure_inventory.get("gap_roots") or [])
+        try:
+            payload = enrich_status_with_layer_maturity(payload, policy=policy)
+        except Exception:
+            payload.setdefault("layer_maturity", {})
         self_repair_closure_inventory = build_self_repair_closure_inventory_payload(
             root_closure_seed,
             signal_sources=source_wiring_probe.get("signal_sources", []),

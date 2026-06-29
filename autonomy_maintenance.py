@@ -27,6 +27,7 @@ from services.control_status_surfaces import (
     merge_http_supplement_into_local,
     release_drift_detected,
 )
+from services.chat_identity import CHAT_IDENTITY_SERVICE
 from services.frontdoor_cli_parity import FRONTDOOR_CLI_PARITY_SERVICE
 from services.layer_maturity_policy import enrich_status_with_layer_maturity
 from services.operator_control import OPERATOR_CONTROL_SERVICE
@@ -1180,6 +1181,83 @@ def _apply_local_frontdoor_cli_surfaces(payload: dict, *, only_missing: bool = T
     return result
 
 
+def _probe_local_http_api_metrics() -> tuple[int, int]:
+    try:
+        import nova_http
+
+        return (
+            int(getattr(nova_http, "_HTTP_REQUESTS_TOTAL", 0) or 0),
+            int(getattr(nova_http, "_HTTP_ERRORS_TOTAL", 0) or 0),
+        )
+    except Exception:
+        return 0, 0
+
+
+def _probe_local_chat_login_enabled() -> bool:
+    try:
+        chat_users_path = CHAT_IDENTITY_SERVICE.chat_users_path(RUNTIME_DIR)
+        users = CHAT_IDENTITY_SERVICE.chat_users(
+            chat_users_path=chat_users_path,
+            environ=os.environ,
+        )
+        return bool(CHAT_IDENTITY_SERVICE.chat_login_enabled(chat_users_fn=lambda: users))
+    except Exception:
+        return False
+
+
+def _apply_local_operator_control_surfaces(payload: dict, *, only_missing: bool = True) -> dict:
+    result = dict(payload or {})
+    required_keys = _wiring_surface_status_keys("operator_control")
+    missing_keys = [key for key in required_keys if key not in result]
+    if only_missing and not missing_keys:
+        return result
+
+    if not only_missing or "operator_macros" in missing_keys:
+        if not only_missing or "operator_macros" not in result:
+            result["operator_macros"] = OPERATOR_CONTROL_SERVICE.load_operator_macros(
+                OPERATOR_CONTROL_SERVICE.operator_macros_path(ROOT),
+                limit=24,
+            )
+
+    if not only_missing or "backend_commands" in missing_keys:
+        if not only_missing or "backend_commands" not in result:
+            commands = OPERATOR_CONTROL_SERVICE.load_backend_commands(
+                OPERATOR_CONTROL_SERVICE.backend_command_deck_path(ROOT),
+                limit=80,
+            )
+            result["backend_commands"] = commands
+            if not only_missing or "backend_command_count" not in result:
+                result["backend_command_count"] = len(commands)
+
+    if not only_missing or any(key in missing_keys for key in ("operator_outbox", "operator_outbox_open_count")):
+        outbox = OPERATOR_OUTBOX_SERVICE.summary(OPERATOR_OUTBOX, limit=20)
+        if not only_missing or "operator_outbox" not in result:
+            result["operator_outbox"] = outbox
+        if not only_missing or "operator_outbox_open_count" not in result:
+            result["operator_outbox_open_count"] = int(outbox.get("open_count", 0) or 0)
+    return result
+
+
+def _apply_local_http_api_control_surfaces(payload: dict, *, only_missing: bool = True) -> dict:
+    result = dict(payload or {})
+    required_keys = _wiring_surface_status_keys("http_api_control")
+    missing_keys = [key for key in required_keys if key not in result]
+    if only_missing and not missing_keys:
+        return result
+
+    if not only_missing or any(key in missing_keys for key in ("requests_total", "errors_total")):
+        requests_total, errors_total = _probe_local_http_api_metrics()
+        if not only_missing or "requests_total" not in result:
+            result["requests_total"] = requests_total
+        if not only_missing or "errors_total" not in result:
+            result["errors_total"] = errors_total
+
+    if not only_missing or "chat_login_enabled" in missing_keys:
+        if not only_missing or "chat_login_enabled" not in result:
+            result["chat_login_enabled"] = _probe_local_chat_login_enabled()
+    return result
+
+
 def _apply_local_source_root_status_surfaces(payload: dict, *, only_missing: bool = True) -> dict:
     result = dict(payload or {})
     if not only_missing or "source_root_inventory" not in result:
@@ -1233,6 +1311,8 @@ def _apply_layer_maturity_to_status_payload(payload: dict) -> dict:
 def _enrich_signal_ingestion_status_payload(payload: dict, *, only_missing: bool = True) -> dict:
     enriched = _apply_local_model_runtime_status(payload, only_missing=only_missing)
     enriched = _apply_local_frontdoor_cli_surfaces(enriched, only_missing=only_missing)
+    enriched = _apply_local_operator_control_surfaces(enriched, only_missing=only_missing)
+    enriched = _apply_local_http_api_control_surfaces(enriched, only_missing=only_missing)
     enriched = _apply_local_source_root_status_surfaces(enriched, only_missing=only_missing)
     enriched = _refresh_root_closure_inventory_surfaces(enriched)
     return _apply_layer_maturity_to_status_payload(enriched)

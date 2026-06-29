@@ -19,9 +19,11 @@ _SOURCE_EXCLUDED_DIRS = {
     ".venv",
     ".pytest_cache",
     "__pycache__",
+    "agent-tools",
     "logs",
     "memory",
     "runtime",
+    "terminals",
     "updates",
 }
 
@@ -40,6 +42,7 @@ _SOURCE_EXCLUDED_FILES = {
     "runtime_full_suite_out.txt",
     "discovery_results_phase_i.txt",
     "nova_memory.sqlite",
+    "nova_grok.md",
 }
 
 

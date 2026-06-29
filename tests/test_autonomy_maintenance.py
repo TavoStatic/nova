@@ -1780,6 +1780,42 @@ class TestAutonomyMaintenance(unittest.TestCase):
         self.assertGreaterEqual(int(payload.get("backend_command_count") or 0), 4)
         self.assertIsInstance(payload.get("backend_commands"), list)
 
+    def test_local_dependency_probe_closes_core_gate_roots_without_http(self):
+        from services.layer_maturity_policy import CORE_GATE_ROOT_IDS, evaluate_core_gate
+
+        fallback = {"alerts": [], "autonomy_maintenance": {"last_regression_status": ""}}
+        release_status = {
+            "latest_readiness_state": "ready",
+            "latest_source_changed_after_build": False,
+            "runtime_drift_expected": False,
+        }
+
+        with mock.patch.object(autonomy_maintenance, "SIGNAL_INGESTION_STATUS_MODE", "local_only"), \
+             mock.patch.object(autonomy_maintenance, "_probe_local_ollama_health", return_value={"ok": True, "server_ok": True, "version": "0.12.3", "api_contract_status": "ok", "chat_route_ok": True}), \
+             mock.patch.object(autonomy_maintenance, "_probe_local_port_ownership", return_value={"status": "ok"}), \
+             mock.patch.object(autonomy_maintenance, "_local_release_status_for_signal_ingestion", return_value=release_status):
+            payload = autonomy_maintenance._apply_release_runtime_truth_to_status_payload(
+                autonomy_maintenance._live_control_status_payload_for_signal_ingestion(fallback),
+                state={},
+            )
+
+        inventory = payload.get("root_closure_inventory") or {}
+        roots_by_id = {
+            str(row.get("root_id") or ""): row
+            for row in list(inventory.get("roots") or [])
+            if isinstance(row, dict)
+        }
+        for root_id in CORE_GATE_ROOT_IDS:
+            self.assertTrue((roots_by_id.get(root_id) or {}).get("ok"), root_id)
+        core_gate = evaluate_core_gate(payload)
+        self.assertFalse(core_gate.get("drift_blocked"))
+        self.assertEqual(core_gate.get("missing_roots"), [])
+        self.assertTrue(core_gate.get("ok"))
+        self.assertIn("operator_macros", payload)
+        self.assertIn("operator_outbox", payload)
+        self.assertIn("requests_total", payload)
+        self.assertIn("chat_login_enabled", payload)
+
     def test_apply_release_runtime_truth_adds_drift_summary_and_http_probe(self):
         fallback = {"alerts": [], "autonomy_maintenance": {"last_regression_status": ""}}
         state: dict = {}

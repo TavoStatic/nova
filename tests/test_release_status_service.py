@@ -279,6 +279,62 @@ class TestReleaseStatusService(unittest.TestCase):
         self.assertEqual(payload.get("latest_source_touched_after_build_count"), 1)
         self.assertEqual(payload.get("latest_source_content_unchanged_after_build_count"), 1)
 
+    def test_status_payload_ignores_local_handoff_dirs_after_build(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            ledger_path = root / "runtime" / "exports" / "release_packages" / "release_ledger.jsonl"
+            ledger_path.parent.mkdir(parents=True)
+            ledger_path.write_text(
+                "\n".join([
+                    json.dumps({
+                        "recorded_at": "2026-03-30T16:09:45.0928881-05:00",
+                        "event": "build",
+                        "artifact_name": "artifact-a.zip",
+                        "artifact_path": str(ledger_path.parent / "artifact-a.zip"),
+                        "artifact_version": "2026.03.30.1",
+                        "release_channel": "rc",
+                        "release_label": "auto-version-check",
+                    }),
+                    json.dumps({
+                        "recorded_at": "2026-03-30T16:12:10.0000000-05:00",
+                        "event": "verify",
+                        "artifact_name": "artifact-a.zip",
+                        "artifact_path": str(ledger_path.parent / "artifact-a.zip"),
+                        "artifact_version": "2026.03.30.1",
+                        "release_channel": "rc",
+                        "release_label": "auto-version-check",
+                        "verification_result": "pass",
+                    }),
+                ]),
+                encoding="utf-8",
+            )
+            source_file = root / "nova_core.py"
+            source_file.write_text("print('stable')\n", encoding="utf-8")
+            os.utime(source_file, (1700000000, 1700000000))
+
+            terminals_file = root / "terminals" / "3.txt"
+            terminals_file.parent.mkdir(parents=True)
+            terminals_file.write_text("pid: 1\n", encoding="utf-8")
+            os.utime(terminals_file, (1900000000, 1900000000))
+
+            agent_tools_file = root / "agent-tools" / "probe.json"
+            agent_tools_file.parent.mkdir(parents=True)
+            agent_tools_file.write_text("{}", encoding="utf-8")
+            os.utime(agent_tools_file, (1900000000, 1900000000))
+
+            handoff_file = root / "nova_grok.md"
+            handoff_file.write_text("# handoff\n", encoding="utf-8")
+            os.utime(handoff_file, (1900000000, 1900000000))
+
+            payload = RELEASE_STATUS_SERVICE.status_payload(ledger_path, limit=5, source_root=root)
+
+        self.assertNotEqual(payload.get("latest_readiness_state"), "source-changed-after-build")
+        self.assertFalse(payload.get("latest_source_changed_after_build"))
+        self.assertFalse(payload.get("latest_artifact_stale"))
+        self.assertNotIn("terminals/3.txt", payload.get("latest_source_changed_after_build_sample") or [])
+        self.assertNotIn("agent-tools/probe.json", payload.get("latest_source_changed_after_build_sample") or [])
+        self.assertNotIn("nova_grok.md", payload.get("latest_source_changed_after_build_sample") or [])
+
 
 if __name__ == "__main__":
     unittest.main()
