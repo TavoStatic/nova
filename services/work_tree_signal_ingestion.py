@@ -2448,6 +2448,38 @@ def _root_closure_inventory_signals_from_status(status_payload: dict[str, Any]) 
             for item in list(row.get("missing_advisory_actions") or [])
             if str(item or "").strip()
         ]
+        task_sequence: list[dict[str, Any]] = []
+        if missing_status:
+            task_sequence.append(
+                {
+                    "title": f"Run pulse and verify required status keys for {root_id}",
+                    "allowed_tools": ["pulse"],
+                    "preferred_tool": "pulse",
+                }
+            )
+        task_sequence.extend(
+            [
+                {
+                    "title": f"Read source root evidence for {root_id}",
+                    "allowed_tools": ["read"],
+                    "preferred_tool": "read",
+                    "tool_args": [first_source_file],
+                },
+                {
+                    "title": f"Read wiring inventory row for {root_id}",
+                    "allowed_tools": ["read"],
+                    "preferred_tool": "read",
+                    "tool_args": ["services/nova_wiring_inventory.py"],
+                },
+                {
+                    "title": f"Find status, signal, tool, and action references for {root_id}",
+                    "allowed_tools": ["find"],
+                    "preferred_tool": "find",
+                    "tool_args": [root_id, "."],
+                },
+            ]
+        )
+        next_task = str(task_sequence[0].get("title") or "").strip() or f"Read source root evidence for {root_id}"
         signals.append(
             {
                 "source": "root_closure_inventory",
@@ -2478,28 +2510,9 @@ def _root_closure_inventory_signals_from_status(status_payload: dict[str, Any]) 
                 "severity": "high",
                 "actionability": "safe_now",
                 "allowed_tools": ["read", "find", "pulse", "system_check"],
-                "preferred_tool": "read",
-                "next_task": f"Read source root evidence for {root_id}",
-                "task_sequence": [
-                    {
-                        "title": f"Read source root evidence for {root_id}",
-                        "allowed_tools": ["read"],
-                        "preferred_tool": "read",
-                        "tool_args": [first_source_file],
-                    },
-                    {
-                        "title": f"Read wiring inventory row for {root_id}",
-                        "allowed_tools": ["read"],
-                        "preferred_tool": "read",
-                        "tool_args": ["services/nova_wiring_inventory.py"],
-                    },
-                    {
-                        "title": f"Find status, signal, tool, and action references for {root_id}",
-                        "allowed_tools": ["find"],
-                        "preferred_tool": "find",
-                        "tool_args": [root_id, "."],
-                    },
-                ],
+                "preferred_tool": str(task_sequence[0].get("preferred_tool") or "read"),
+                "next_task": next_task,
+                "task_sequence": task_sequence,
             }
         )
     return signals
