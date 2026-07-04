@@ -148,6 +148,7 @@
   "layers": {
     "leah": {
       "mode": "active",
+      "fast_chat": true,
       "promoted_capabilities": [
         "leah_conversation_continuity"
       ]

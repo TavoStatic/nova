@@ -263,6 +263,7 @@ def finalize_llm_fallback_reply(
     ensure_reply_fn,
     intent_evidence_packet=None,
     fallback_context=None,
+    leah_fast_chat: bool = False,
 ):
     evidence_reply = maybe_build_self_evidence_reply(
         fallback_context=fallback_context,
@@ -282,7 +283,7 @@ def finalize_llm_fallback_reply(
     action_ledger_add_step("llm_fallback", "invoked", retrieved_chars=len(retrieved_context))
 
     llm_started = time.perf_counter()
-    reply_form = _reply_form(intent_evidence_packet)
+    reply_form = CONVERSATION_REPLY_FORM if leah_fast_chat else _reply_form(intent_evidence_packet)
     generation_context = retrieved_context
     if reply_form == CONVERSATION_REPLY_FORM:
         generation_context = _conversation_generation_context(fallback_context, intent_evidence_packet)

@@ -831,7 +831,7 @@
         setActivityHeadline("Nova is still working — this one is taking a bit longer than usual.");
         setMood("synthesis", "deep processing");
       }
-    }, 8000);
+    }, 3000);
 
     try {
       const response = await chatFetch(config.chatUrl, {
@@ -1247,11 +1247,9 @@
       addMessage("system", "LEAH is live. Upload, speak, capture, or start typing when you are ready.");
       setActivityHeadline("Nova is here. Bring it your next file, thought, or signal.");
     }
-    await checkHealth();
-    await refreshRuntimePulse();
+    void checkHealth();
     state.healthTimer = window.setInterval(() => {
       void checkHealth();
-      void refreshRuntimePulse();
     }, 25000);
   }
 

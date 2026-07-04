@@ -4,6 +4,7 @@ import time
 from typing import Callable
 
 from services import nova_planner_contract
+from services.leah_fast_chat import load_leah_fast_chat_from_core
 from services.nova_fallback_flow import finalize_llm_fallback_reply, prepare_fallback_flow
 
 
@@ -173,34 +174,36 @@ def execute_reply_sequence(
         except TypeError:
             return build_fn(user_text, session_turns)
 
+    leah_fast_chat = load_leah_fast_chat_from_core(core) and str(input_source or "").strip().lower() == "http"
+
     # --- Intent understanding: classify the turn BEFORE the planner runs ---
-    # This runs in parallel with planner prep — it classifies the intent LEVEL
-    # (sharing/requesting/commanding/casual) so the response strategy can be
-    # determined independently of tool routing.
     turn_intent: dict = {}
     response_strategy: dict = {}
-    _classify_intent_fn = getattr(core, "classify_turn_intent", None)
-    _select_strategy_fn = getattr(core, "select_response_strategy", None)
-    if callable(_classify_intent_fn):
-        try:
-            turn_intent = _classify_intent_fn(text, turns) or {}
-        except Exception:
-            turn_intent = {}
-    if callable(_select_strategy_fn) and turn_intent:
-        try:
-            response_strategy = _select_strategy_fn(turn_intent) or {}
-        except Exception:
-            response_strategy = {}
-    if turn_intent:
-        trace(
-            "intent_understanding",
-            "classified",
-            str(turn_intent.get("subject") or ""),
-            level=str(turn_intent.get("level") or ""),
-            domain=str(turn_intent.get("domain") or ""),
-            confidence=float(turn_intent.get("confidence") or 0.0),
-            strategy=str(response_strategy.get("strategy") or ""),
-        )
+    if leah_fast_chat:
+        trace("leah_fast_chat", "skipped_intent", "conversation_turn")
+    else:
+        _classify_intent_fn = getattr(core, "classify_turn_intent", None)
+        _select_strategy_fn = getattr(core, "select_response_strategy", None)
+        if callable(_classify_intent_fn):
+            try:
+                turn_intent = _classify_intent_fn(text, turns) or {}
+            except Exception:
+                turn_intent = {}
+        if callable(_select_strategy_fn) and turn_intent:
+            try:
+                response_strategy = _select_strategy_fn(turn_intent) or {}
+            except Exception:
+                response_strategy = {}
+        if turn_intent:
+            trace(
+                "intent_understanding",
+                "classified",
+                str(turn_intent.get("subject") or ""),
+                level=str(turn_intent.get("level") or ""),
+                domain=str(turn_intent.get("domain") or ""),
+                confidence=float(turn_intent.get("confidence") or 0.0),
+                strategy=str(response_strategy.get("strategy") or ""),
+            )
 
     planner_call_started = time.perf_counter()
     semantic_tool_observation: dict[str, object] = {}
@@ -210,21 +213,25 @@ def execute_reply_sequence(
         if isinstance(payload, dict):
             semantic_tool_observation.update(payload)
 
-    planner_outcome = nova_planner_contract.maybe_handle_planner_sequence(
-        text=text,
-        turns=turns,
-        pending_action=pending_action,
-        turn_acts=turn_acts,
-        prefer_web_for_data_queries=prefer_web_for_data_queries,
-        session=session,
-        core=core,
-        trace=trace,
-        normalize_reply=normalize_reply,
-        ensure_active_work_tree_fn=ensure_active_work_tree_fn,
-        work_tree_seed_source=work_tree_seed_source,
-        work_tree_seed_mode=work_tree_seed_mode,
-        semantic_tool_observer_fn=_observe_semantic_tool,
-    )
+    if leah_fast_chat:
+        planner_outcome = None
+        trace("leah_fast_chat", "skipped_planner", "conversation_turn")
+    else:
+        planner_outcome = nova_planner_contract.maybe_handle_planner_sequence(
+            text=text,
+            turns=turns,
+            pending_action=pending_action,
+            turn_acts=turn_acts,
+            prefer_web_for_data_queries=prefer_web_for_data_queries,
+            session=session,
+            core=core,
+            trace=trace,
+            normalize_reply=normalize_reply,
+            ensure_active_work_tree_fn=ensure_active_work_tree_fn,
+            work_tree_seed_source=work_tree_seed_source,
+            work_tree_seed_mode=work_tree_seed_mode,
+            semantic_tool_observer_fn=_observe_semantic_tool,
+        )
     timing_profile["planner_time"] = int((time.perf_counter() - planner_call_started) * 1000)
     trace("timing", "completed", "planner_call", duration_ms=timing_profile["planner_time"])
     deferred_tool_meta: dict[str, object] = {}
@@ -262,7 +269,7 @@ def execute_reply_sequence(
 
     # Attempt fulfillment flow before falling to generic LLM.
     # Only fires when planner found no tool action and no deferred tool result.
-    if not deferred_tool_meta:
+    if not deferred_tool_meta and not leah_fast_chat:
         fulfillment_fn = getattr(core, "maybe_run_fulfillment_flow", None)
         if callable(fulfillment_fn):
             try:
@@ -345,6 +352,7 @@ def execute_reply_sequence(
         action_ledger_add_step=lambda *_args, **_kwargs: None,
         ensure_reply_fn=lambda reply: reply,
         intent_evidence_packet=intent_evidence_packet,
+        leah_fast_chat=leah_fast_chat,
         fallback_context=fallback_entry.get("fallback_context") if isinstance(fallback_entry.get("fallback_context"), dict) else {},
     )
     timing_profile["llm_time"] = int(llm_fallback_outcome.get("llm_time_ms") or 0)
