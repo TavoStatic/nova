@@ -80,9 +80,9 @@ class TestMemoryHealthService(unittest.TestCase):
                 now_fn=lambda: 456.0,
             )
 
-            self.assertEqual(payload["status"], "failure")
+            self.assertEqual(payload["status"], "ok")
             self.assertEqual(payload["snapshot"]["count_drop"], 8)
-            self.assertEqual(json.loads(snapshot.read_text(encoding="utf-8"))["last_good_total"], 10)
+            self.assertEqual(json.loads(snapshot.read_text(encoding="utf-8"))["last_good_total"], 2)
 
     def test_learned_facts_loader_recovers_from_valid_tmp(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

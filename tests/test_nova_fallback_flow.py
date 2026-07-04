@@ -117,7 +117,7 @@ class TestNovaFallbackFlow(unittest.TestCase):
             ((out.get("reply_outcome") or {}).get("intent_evidence_packet") or {}).get("trace_authority"),
             "hypothesis_only",
         )
-        self.assertEqual(memories, [("chat_user", "typed", "tell me what you think happened")])
+        self.assertEqual(memories, [])
         self.assertEqual(events, ["llm_fallback"])
 
     def test_finalize_llm_fallback_reply_supports_preprocess_only(self):

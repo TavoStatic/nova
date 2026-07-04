@@ -182,10 +182,12 @@ def add_memory(kind: str, source: str, text: str, user: str = "", scope: str = "
 
 def recall(query: str, top_k: int = 5, min_score: float = 0.25,
            exclude_sources: Optional[Iterable[str]] = None,
+           exclude_kinds: Optional[Iterable[str]] = None,
            user: Optional[str] = None,
            scope: str = "shared",
            debug: bool = False) -> List[Tuple[float, int, str, str, str, str]]:
     ex = set(s.lower() for s in (exclude_sources or []))
+    ex_kinds = set(s.lower() for s in (exclude_kinds or []))
 
     con = connect()
     try:
@@ -212,6 +214,8 @@ def recall(query: str, top_k: int = 5, min_score: float = 0.25,
         q_words = query_tokens(query)
         for ts, kind, source, user_row, text, vecblob in rows:
             if source.lower() in ex:
+                continue
+            if str(kind or "").strip().lower() in ex_kinds:
                 continue
             v = blob_to_vec(vecblob)
             vn = vec_norm(v)
@@ -270,9 +274,11 @@ def recall(query: str, top_k: int = 5, min_score: float = 0.25,
 
 def recall_explain(query: str, top_k: int = 5, min_score: float = 0.25,
                    exclude_sources: Optional[Iterable[str]] = None,
+                   exclude_kinds: Optional[Iterable[str]] = None,
                    user: Optional[str] = None,
                    scope: str = "shared") -> dict:
     ex = set(s.lower() for s in (exclude_sources or []))
+    ex_kinds = set(s.lower() for s in (exclude_kinds or []))
 
     con = connect()
     try:
@@ -292,6 +298,8 @@ def recall_explain(query: str, top_k: int = 5, min_score: float = 0.25,
 
     for ts, kind, source, user_row, text, vecblob in rows:
         if source.lower() in ex:
+            continue
+        if str(kind or "").strip().lower() in ex_kinds:
             continue
 
         v = blob_to_vec(vecblob)

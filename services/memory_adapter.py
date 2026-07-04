@@ -5,6 +5,8 @@ import json
 import re
 from typing import Callable, Optional
 
+from services.memory_retention import parse_retention_policy
+
 
 class MemoryAdapterService:
     """Encapsulates memory policy config and write/keep heuristics."""
@@ -73,6 +75,23 @@ class MemoryAdapterService:
             if s:
                 out.append(s)
         return out
+
+    def mem_retention_policy(self) -> dict:
+        return parse_retention_policy(self._policy_memory_getter())
+
+    def mem_recall_exclude_kinds(self) -> list[str]:
+        return list(self.mem_retention_policy().get("recall_exclude_kinds") or [])
+
+    def memory_kind_store_allowed(self, kind: str) -> tuple[bool, str]:
+        blocked = {
+            str(item or "").strip().lower()
+            for item in list(self.mem_retention_policy().get("store_blocked_kinds") or [])
+            if str(item or "").strip()
+        }
+        normalized = str(kind or "").strip().lower()
+        if normalized in blocked:
+            return False, "policy_blocked_kind"
+        return True, "allowed"
 
     @staticmethod
     def default_local_user_id() -> str:
@@ -155,7 +174,14 @@ class MemoryAdapterService:
         bullets = []
         seen = set()
         norm = lambda s: re.sub(r"\W+", " ", (s or "").lower()).strip()
+        excluded_kinds = {
+            str(item or "").strip().lower()
+            for item in self.mem_recall_exclude_kinds()
+            if str(item or "").strip()
+        }
         for _score, _ts, kind, _source, _user_row, text in (hits or []):
+            if str(kind or "").strip().lower() in excluded_kinds:
+                continue
             p = self._format_recall_text(kind, text)
             if not p:
                 continue

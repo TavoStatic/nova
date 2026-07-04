@@ -77,7 +77,26 @@
     ],
     "exclude_sources": [
       "voice"
-    ]
+    ],
+    "retention": {
+      "durable_kinds": [
+        "identity",
+        "fact",
+        "user_correction",
+        "profile",
+        "user_fact"
+      ],
+      "ephemeral_kinds": [
+        "chat_user"
+      ],
+      "recall_exclude_kinds": [
+        "chat_user"
+      ],
+      "store_blocked_kinds": [
+        "chat_user"
+      ],
+      "contamination_min_ephemeral_rows": 1
+    }
   },
   "temporal": {
     "enabled": true,
@@ -128,8 +147,10 @@
   },
   "layers": {
     "leah": {
-      "mode": "observe",
-      "promoted_capabilities": []
+      "mode": "active",
+      "promoted_capabilities": [
+        "leah_conversation_continuity"
+      ]
     },
     "codegen": {
       "mode": "observe",

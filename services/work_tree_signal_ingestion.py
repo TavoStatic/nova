@@ -277,14 +277,25 @@ def _memory_health_signal_from_status(status_payload: dict[str, Any]) -> dict[st
         blocked_task = ""
         blocked_reason = ""
 
+    contamination_present = "memory_ephemeral_contamination" in issue_codes
     allowed_tools = ["pulse", "read", "find", "memory_bootstrap_judgment"]
-    preferred_tool = "pulse"
-    next_task = MEMORY_BOOTSTRAP_PULSE_TASK_TITLE
+    if contamination_present:
+        allowed_tools = ["memory_hygiene", "pulse", "read", "find"]
+    preferred_tool = "memory_hygiene" if contamination_present else "pulse"
+    next_task = (
+        "Evaluate memory hygiene contamination with dry_run=true"
+        if contamination_present
+        else MEMORY_BOOTSTRAP_PULSE_TASK_TITLE
+    )
     task_sequence = [
         {
-            "title": MEMORY_BOOTSTRAP_PULSE_TASK_TITLE,
-            "allowed_tools": ["pulse"],
-            "preferred_tool": "pulse",
+            "title": (
+                "Evaluate memory hygiene contamination with dry_run=true"
+                if contamination_present
+                else MEMORY_BOOTSTRAP_PULSE_TASK_TITLE
+            ),
+            "allowed_tools": ["memory_hygiene"] if contamination_present else ["pulse"],
+            "preferred_tool": "memory_hygiene" if contamination_present else "pulse",
         },
         {
             "title": "Find memory_health_payload identity learned_facts bootstrap persistence path",

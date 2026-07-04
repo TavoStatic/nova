@@ -159,6 +159,7 @@ ACTIVE_WORK_TREE_EXECUTE_TOOLS = [
     "memory_bootstrap_judgment",
     "memory_bootstrap_confirm",
     "memory_identity_bootstrap",
+    "memory_hygiene",
     "subconscious_review_judgment",
     "source_root_judgment",
     "weather_current_location",

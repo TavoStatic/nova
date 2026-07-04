@@ -566,11 +566,17 @@ class RuntimeControlService:
         if not Path(venv_python).exists():
             return False, f"venv_python_missing:{venv_python}"
         work_dir = str(cwd or base_dir)
+        log_dir = Path(base_dir) / "logs"
+        log_dir.mkdir(parents=True, exist_ok=True)
+        out_log = str(log_dir / "nova_http.out.log")
+        err_log = str(log_dir / "nova_http.err.log")
         flags = self.detached_creation_flags(os_name=os_name, subprocess_module=subprocess_module)
         launcher_code = (
             "import subprocess,time;"
             f"time.sleep({max(0.0, float(delay_seconds))});"
-            f"subprocess.Popen({list(command)!r}, cwd={work_dir!r}, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, creationflags={int(flags)})"
+            f"out=open({out_log!r}, 'a', encoding='utf-8');"
+            f"err=open({err_log!r}, 'a', encoding='utf-8');"
+            f"subprocess.Popen({list(command)!r}, cwd={work_dir!r}, stdout=out, stderr=err, creationflags={int(flags)})"
         )
         try:
             subprocess_module.Popen(

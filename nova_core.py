@@ -61,6 +61,8 @@ from services.nova_operational_identity import operational_identity_context_for_
 from services.nova_memory_learning import load_json_dict_with_tmp_fallback as service_load_json_dict_with_tmp_fallback
 from services.nova_memory_learning import mem_stats_payload as service_mem_stats_payload
 from services.memory_health import build_memory_health_payload as service_build_memory_health_payload
+from services.memory_retention import apply_memory_hygiene as service_apply_memory_hygiene
+from services.memory_retention import render_memory_hygiene_result as service_render_memory_hygiene_result
 from services.nova_pipeline_tools import handle_pipeline_command as service_handle_pipeline_command
 from services.nova_pulse import render_nova_pulse as service_render_nova_pulse
 from services.nova_pulse import tool_nova_pulse as service_tool_nova_pulse
@@ -1448,6 +1450,14 @@ def _memory_should_keep_text(text: str) -> tuple[bool, str]:
     return _memory_adapter_service().memory_should_keep_text(text)
 
 
+def _memory_kind_store_allowed(kind: str) -> tuple[bool, str]:
+    return _memory_adapter_service().memory_kind_store_allowed(kind)
+
+
+def _mem_recall_exclude_kinds() -> list[str]:
+    return _memory_adapter_service().mem_recall_exclude_kinds()
+
+
 def mem_should_store(text: str) -> bool:
     return _memory_adapter_service().mem_should_store(text)
 
@@ -1487,6 +1497,7 @@ def memory_health_payload(update_snapshot: bool = True) -> dict:
         snapshot_file=RUNTIME_DIR / "memory_health_snapshot.json",
         update_snapshot=update_snapshot,
         memory_enabled=mem_enabled(),
+        memory_retention_policy=_memory_adapter_service().mem_retention_policy(),
     )
 
 
@@ -1501,6 +1512,7 @@ def mem_add(kind: str, source: str, text: str):
         record_memory_event_fn=_record_memory_event,
         mem_scope_fn=mem_scope,
         memory_should_keep_text_fn=_memory_should_keep_text,
+        memory_kind_store_allowed_fn=_memory_kind_store_allowed,
         memory_write_user_fn=_memory_write_user,
         memory_mod=memory_mod,
         mem_min_score_fn=mem_min_score,
@@ -1519,6 +1531,7 @@ def mem_recall(query: str) -> str:
         mem_context_top_k_fn=mem_context_top_k,
         mem_min_score_fn=mem_min_score,
         mem_exclude_sources_fn=mem_exclude_sources,
+        mem_recall_exclude_kinds_fn=_mem_recall_exclude_kinds,
         mem_scope_fn=mem_scope,
         format_memory_recall_hits_fn=_format_memory_recall_hits,
         record_memory_event_fn=_record_memory_event,
@@ -1600,6 +1613,7 @@ def mem_audit(query: str) -> str:
         mem_context_top_k_fn=mem_context_top_k,
         mem_min_score_fn=mem_min_score,
         mem_exclude_sources_fn=mem_exclude_sources,
+        mem_recall_exclude_kinds_fn=_mem_recall_exclude_kinds,
         mem_scope_fn=mem_scope,
         record_memory_event_fn=_record_memory_event,
         python_path=str(PYTHON),
@@ -3421,6 +3435,33 @@ def tool_memory_identity_bootstrap():
         record_memory_event_fn=_record_memory_event,
     )
     return service_render_identity_bootstrap_result(result)
+
+
+def tool_memory_hygiene(dry_run: bool = True):
+    db_path = (
+        Path(getattr(memory_mod, "DB_PATH", BASE_DIR / "nova_memory.sqlite"))
+        if memory_mod is not None
+        else BASE_DIR / "nova_memory.sqlite"
+    )
+    retention_policy = _memory_adapter_service().mem_retention_policy()
+    result = service_apply_memory_hygiene(
+        db_path,
+        retention_policy=retention_policy,
+        dry_run=bool(dry_run),
+        audit_log_path=RUNTIME_DIR / "memory_hygiene_audit.jsonl",
+    )
+    _record_memory_event(
+        "hygiene",
+        "ok" if result.get("ok") else "error",
+        lane="memory_retention",
+        mode="dry_run" if bool(result.get("dry_run")) else "apply",
+        result_count=int(result.get("deleted_rows", 0) or 0),
+        reason=(
+            f"{result.get('status') or result.get('error') or ''}; "
+            f"remaining_total={int(result.get('remaining_total', 0) or 0)}"
+        ).strip("; "),
+    )
+    return service_render_memory_hygiene_result(result)
 
 
 def tool_subconscious_review_judgment(branch_id: str = ""):

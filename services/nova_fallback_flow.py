@@ -300,8 +300,7 @@ def finalize_llm_fallback_reply(
     if _conversation_can_be_complete_without_task(intent_evidence_packet):
         reply = _shape_conversation_scoped_reply(reply)
 
-    if mem_enabled_fn() and mem_should_store_fn(raw_user_text):
-        mem_add_fn("chat_user", input_source, raw_user_text)
+    # Ephemeral chat turns are not durable memory; policy blocks chat_user storage.
 
     clean_reply = strip_mem_leak_fn(reply, retrieved_context)
     planner_decision = "llm_fallback"

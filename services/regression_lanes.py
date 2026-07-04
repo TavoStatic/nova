@@ -137,6 +137,9 @@ SOURCE_PROFILE_LANES: dict[str, list[str]] = {
     "source_memory_identity": [
         "tests.test_memory_identity_bootstrap_service",
         "tests.test_memory_routing_service",
+        "tests.test_memory_retention_service",
+        "tests.test_edfi_core",
+        "tests.test_leah_conversation_continuity",
         "tests.test_nova_memory_learning_service",
     ],
     "source_model_runtime": [

@@ -4369,6 +4369,15 @@ async function fetchPipelines() {
     return getJson(`/api/control/pipelines${query}`);
 }
 
+async function fetchBackendCommandsDeck() {
+    try {
+        const payload = await postAction('backend_command_list');
+        return Array.isArray(payload.commands) ? payload.commands : [];
+    } catch (_error) {
+        return null;
+    }
+}
+
 async function performRefresh() {
     try {
         const results = await Promise.allSettled([
@@ -4378,7 +4387,8 @@ async function performRefresh() {
             getJson('/api/control/sessions'),
             getJson('/api/control/test-sessions'),
             fetchWorkTrees(),
-            fetchPipelines()
+            fetchPipelines(),
+            fetchBackendCommandsDeck()
         ]);
         latestStatus = results[0].status === 'fulfilled' ? results[0].value : null;
         latestPolicy = results[1].status === 'fulfilled' ? results[1].value : null;
@@ -4387,12 +4397,13 @@ async function performRefresh() {
         const testRuns = results[4].status === 'fulfilled' ? results[4].value : null;
         const workTrees = results[5].status === 'fulfilled' ? results[5].value : null;
         const pipelines = results[6].status === 'fulfilled' ? results[6].value : null;
+        const backendCommands = results[7].status === 'fulfilled' ? results[7].value : null;
         latestMetrics = metrics;
         if (latestStatus) {
             renderMetricGrid(latestStatus);
             renderSubconscious(latestStatus);
             renderOperatorMacros(latestStatus);
-            renderBackendCommands(latestStatus);
+            renderBackendCommands(latestStatus, backendCommands);
             renderOperatorOutbox(latestStatus);
             renderTemporalGovernance(latestStatus);
             renderPlannerInspector(latestStatus);
@@ -4417,6 +4428,7 @@ async function performRefresh() {
             renderOperatorOutbox(null);
             renderLiveTracking(null);
             renderTemporalGovernance(null);
+            if (backendCommands) renderBackendCommands(null, backendCommands);
         }
         if (latestPolicy) {
             if (policyBox) policyBox.textContent = JSON.stringify(latestPolicy, null, 2);
@@ -4455,8 +4467,8 @@ async function performRefresh() {
         renderCenterMissionBrief(latestStatus);
         decorateActionButtons(document);
             maybeAutoArmLiveTracking();
-        const failed = results.map((result, index) => ({result, index})).filter((entry) => entry.result.status !== 'fulfilled').map((entry) => ['status', 'policy', 'metrics', 'sessions', 'test-sessions', 'work-trees', 'pipelines'][entry.index]);
-        if (!latestStatus && !latestPolicy && !metrics && !sessions && !testRuns && !workTrees && !pipelines) throw new Error('All control endpoints failed');
+        const failed = results.map((result, index) => ({result, index})).filter((entry) => entry.result.status !== 'fulfilled').map((entry) => ['status', 'policy', 'metrics', 'sessions', 'test-sessions', 'work-trees', 'pipelines', 'backend-commands'][entry.index]);
+        if (!latestStatus && !latestPolicy && !metrics && !sessions && !testRuns && !workTrees && !pipelines && !backendCommands) throw new Error('All control endpoints failed');
         setFeedback(failed.length ? 'Partial refresh (' + failed.join(', ') + ' failed) at ' + new Date().toLocaleTimeString() : 'Live status refreshed at ' + new Date().toLocaleTimeString(), failed.length ? 'warn' : 'muted');
     } catch (error) {
         setAction('Refresh failed: ' + error.message);

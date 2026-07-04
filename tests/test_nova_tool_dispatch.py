@@ -19,6 +19,7 @@ def _runtime_scope():
         "tool_memory_bootstrap_judgment": lambda *args: ("memory_bootstrap_judgment", args),
         "tool_memory_bootstrap_confirm": lambda *args: ("memory_bootstrap_confirm", args),
         "tool_memory_identity_bootstrap": lambda *args: ("memory_identity_bootstrap", args),
+        "tool_memory_hygiene": lambda *args: ("memory_hygiene", args),
         "tool_subconscious_review_judgment": lambda *args: ("subconscious_review_judgment", args),
         "tool_source_root_judgment": lambda *args: ("source_root_judgment", args),
         "tool_pipeline": lambda *args: ("pipeline", args),

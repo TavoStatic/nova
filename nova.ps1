@@ -94,7 +94,9 @@ function Test-NovaCommandLineHasPath([object]$process, [string]$expectedPath) {
 
   $normalizedExpected = Get-NovaNormalizedPath $expectedPath
   $normalizedCommand = $commandLine.Replace('/', '\').ToLowerInvariant()
-  return $normalizedCommand.Contains($normalizedExpected)
+  if ($normalizedCommand.Contains($normalizedExpected)) { return $true }
+  $scriptName = [System.IO.Path]::GetFileName($normalizedExpected)
+  return [bool]$scriptName -and $normalizedCommand.Contains($scriptName)
 }
 
 function Get-BootstrapPythonDescription {
@@ -1156,12 +1158,12 @@ switch ($cmd.ToLower()) {
       }
     }
 
-    $url = "http://127.0.0.1:" + $port + "/api/control/status"
+    $healthUrl = "http://127.0.0.1:" + $port + "/api/health"
     try {
-      $r = Invoke-WebRequest -UseBasicParsing $url -TimeoutSec 8
-      Write-Host ("[OK]   " + $url + " => " + $r.StatusCode)
+      $r = Invoke-WebRequest -UseBasicParsing $healthUrl -TimeoutSec 8
+      Write-Host ("[OK]   " + $healthUrl + " => " + $r.StatusCode)
     } catch {
-      Write-Host ("[WARN] " + $url + " unreachable")
+      Write-Host ("[WARN] " + $healthUrl + " unreachable")
     }
     break
   }

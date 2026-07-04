@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from services.memory_bootstrap_origin import load_origin_contract
+from services.memory_retention import evaluate_contamination
 
 
 def _compact(value: Any, max_chars: int = 220) -> str:
@@ -262,6 +263,7 @@ def build_memory_health_payload(
     snapshot_file: Path | None = None,
     update_snapshot: bool = False,
     memory_enabled: bool | None = None,
+    memory_retention_policy: dict[str, object] | None = None,
     now_fn: Callable[[], float] = time.time,
 ) -> dict[str, object]:
     db = _sqlite_memory_health(Path(memory_db_path))
@@ -321,11 +323,32 @@ def build_memory_health_payload(
                 row["source"] = source_name
                 issues.append(row)
 
+    contamination = evaluate_contamination(
+        Path(memory_db_path),
+        retention_policy=memory_retention_policy if isinstance(memory_retention_policy, dict) else {},
+    )
+    if bool(contamination.get("contaminated")):
+        ephemeral_rows = int(contamination.get("ephemeral_rows", 0) or 0)
+        kinds = ", ".join(
+            str(item.get("kind") or "")
+            for item in list(contamination.get("purge_candidates") or [])
+            if isinstance(item, dict) and str(item.get("kind") or "").strip()
+        ) or "ephemeral"
+        issues.append(
+            _issue(
+                "warning",
+                "memory_ephemeral_contamination",
+                f"Memory has {ephemeral_rows} ephemeral row(s) ({kinds}); run memory_hygiene before recall.",
+                path=Path(memory_db_path),
+            )
+        )
+
     snapshot = _load_snapshot(snapshot_file) if snapshot_file is not None else {}
     prior_total = int(snapshot.get("last_good_total", 0) or 0)
     current_total = int(db.get("total", 0) or 0)
     count_drop = max(0, prior_total - current_total) if prior_total else 0
-    if bool(db.get("ok")) and prior_total and count_drop > 0:
+    retention_clean = not bool(contamination.get("contaminated"))
+    if bool(db.get("ok")) and prior_total and count_drop > 0 and not retention_clean:
         severity = "failure" if current_total == 0 or count_drop >= max(1, int(prior_total * 0.25)) else "warning"
         issues.append(
             _issue(
@@ -359,7 +382,7 @@ def build_memory_health_payload(
             bootstrap_status = "incomplete" if bootstrap_missing else "ready"
 
     if snapshot_file is not None and update_snapshot and bool(db.get("ok")):
-        should_update = not prior_total or current_total >= prior_total
+        should_update = not prior_total or current_total >= prior_total or retention_clean
         if should_update:
             _write_snapshot(
                 snapshot_file,
@@ -395,6 +418,7 @@ def build_memory_health_payload(
             "last_good_total": prior_total,
             "count_drop": count_drop,
         },
+        "retention": contamination,
         "issue_count": len(issues),
         "issues": issues[:12],
     }

@@ -75,6 +75,7 @@ def mem_add(
     record_memory_event_fn: Callable[..., None],
     mem_scope_fn: Callable[[], str],
     memory_should_keep_text_fn: Callable[[str], tuple[bool, str]],
+    memory_kind_store_allowed_fn: Callable[[str], tuple[bool, str]] | None = None,
     memory_write_user_fn: Callable[[], Optional[str]],
     memory_mod: Any,
     mem_min_score_fn: Callable[[], float],
@@ -96,6 +97,19 @@ def mem_add(
                 duration_ms=int((time.time() - started) * 1000),
             )
             return
+        if callable(memory_kind_store_allowed_fn):
+            kind_allowed, kind_reason = memory_kind_store_allowed_fn(kind)
+            if not kind_allowed:
+                record_memory_event_fn(
+                    "add",
+                    "skipped",
+                    scope=mem_scope_fn(),
+                    kind=kind,
+                    source=source,
+                    reason=kind_reason or "policy_blocked_kind",
+                    duration_ms=int((time.time() - started) * 1000),
+                )
+                return
         if source and str(source).lower() in {"assistant", "nova"}:
             record_memory_event_fn(
                 "add",
@@ -222,6 +236,7 @@ def mem_recall(
     mem_context_top_k_fn: Callable[[], int],
     mem_min_score_fn: Callable[[], float],
     mem_exclude_sources_fn: Callable[[], list[str]],
+    mem_recall_exclude_kinds_fn: Callable[[], list[str]] | None = None,
     mem_scope_fn: Callable[[], str],
     format_memory_recall_hits_fn: Callable[[Any], str],
     record_memory_event_fn: Callable[..., None],
@@ -265,14 +280,16 @@ def mem_recall(
     try:
         user = memory_runtime_user_fn()
         if memory_mod is not None:
-            hits = memory_mod.recall(
-                query,
-                top_k=mem_context_top_k_fn(),
-                min_score=mem_min_score_fn(),
-                exclude_sources=mem_exclude_sources_fn(),
-                user=user,
-                scope=mem_scope_fn(),
-            )
+            recall_kwargs = {
+                "top_k": mem_context_top_k_fn(),
+                "min_score": mem_min_score_fn(),
+                "exclude_sources": mem_exclude_sources_fn(),
+                "user": user,
+                "scope": mem_scope_fn(),
+            }
+            if callable(mem_recall_exclude_kinds_fn):
+                recall_kwargs["exclude_kinds"] = mem_recall_exclude_kinds_fn()
+            hits = memory_mod.recall(query, **recall_kwargs)
             out = format_memory_recall_hits_fn(hits)
             record_memory_event_fn(
                 "recall",
@@ -529,6 +546,7 @@ def mem_audit(
     mem_context_top_k_fn: Callable[[], int],
     mem_min_score_fn: Callable[[], float],
     mem_exclude_sources_fn: Callable[[], list[str]],
+    mem_recall_exclude_kinds_fn: Callable[[], list[str]] | None = None,
     mem_scope_fn: Callable[[], str],
     record_memory_event_fn: Callable[..., None],
     python_path: str,
@@ -541,14 +559,16 @@ def mem_audit(
     try:
         user = memory_runtime_user_fn()
         if memory_mod is not None:
-            out = memory_mod.recall_explain(
-                q,
-                top_k=mem_context_top_k_fn(),
-                min_score=mem_min_score_fn(),
-                exclude_sources=mem_exclude_sources_fn(),
-                user=user,
-                scope=mem_scope_fn(),
-            )
+            audit_kwargs = {
+                "top_k": mem_context_top_k_fn(),
+                "min_score": mem_min_score_fn(),
+                "exclude_sources": mem_exclude_sources_fn(),
+                "user": user,
+                "scope": mem_scope_fn(),
+            }
+            if callable(mem_recall_exclude_kinds_fn):
+                audit_kwargs["exclude_kinds"] = mem_recall_exclude_kinds_fn()
+            out = memory_mod.recall_explain(q, **audit_kwargs)
             result_count = len((out or {}).get("results") or []) if isinstance(out, dict) else 0
             record_memory_event_fn(
                 "audit",
