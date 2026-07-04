@@ -47,6 +47,21 @@ Deferred to later milestones: `resources.py` (CRUD paging), `change_tracking.py`
 | `runtime/edfi/profiles/<id>.json` | Learned `nova.edfi_capability.v1` profile |
 | `runtime/edfi/edfi_audit.jsonl` | Structured probe/auth/discovery events |
 
+## Single gateway rule
+
+**Every Ed-Fi HTTP interaction must go through `EdFiClient`.** No other Nova module should call `requests.get(...)` against an Ed-Fi ODS.
+
+```python
+from services.edfi import EdFiClient, connection_config_from_dict
+
+config = connection_config_from_dict({...})
+client = EdFiClient(config)
+schools = client.get("schools")      # relative resource name
+metadata = client.get(config.metadata_url())  # absolute URL also works
+```
+
+`auth.py` owns token exchange; `client.py` owns authenticated API calls. Retries, caching, throttling, and version upgrades land in one place.
+
 ## Usage (library)
 
 ```python
@@ -61,6 +76,27 @@ result = run_self_profile(
 # result["health"] — diagnostics payload
 # result["profile_path"] — saved capability profile
 ```
+
+## Usage (Monday probe CLI)
+
+```bash
+python scripts/run_edfi_profile.py \
+  --connection-id district-main \
+  --base-url https://district.ed-fi.org \
+  --client-id ... \
+  --client-secret ...
+```
+
+Exit code `0` means auth + metadata discovery succeeded. `watch` (sample GET failed) exits `1` but still saves a partial capability profile with per-stage results under `discovery.stages`.
+
+## Hardening (pre-integration)
+
+| Area | Behavior |
+|------|----------|
+| Config | Specific codes for missing URL/id/secret, invalid JSON, bad SSL options |
+| Auth | Classified 401/403, timeout, DNS, SSL, connection errors |
+| Discovery | `discovery.stages.metadata` and `discovery.stages.sample_get` show partial success |
+| Audit | `runtime/edfi/edfi_audit.jsonl` — one JSON object per line, sorted keys |
 
 ## Ed-Fi SOCKS (planned)
 

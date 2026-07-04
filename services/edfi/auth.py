@@ -7,6 +7,7 @@ from typing import Any, Callable
 import requests
 
 from services.edfi.config import ConnectionConfig, TokenCacheEntry
+from services.edfi.errors import classify_http_status, classify_request_exception
 
 
 @dataclass(frozen=True)
@@ -19,6 +20,7 @@ class AuthResult:
     latency_ms: int = 0
     status_code: int = 0
     error: str = ""
+    error_code: str = ""
     token_endpoint: str = ""
 
 
@@ -48,15 +50,18 @@ class EdFiAuthService:
                 data=payload,
                 timeout=config.timeout_sec,
                 headers={"Accept": "application/json"},
+                verify=config.ssl_verify(),
             )
             latency_ms = int((time.perf_counter() - started) * 1000)
             status_code = int(response.status_code)
             if status_code >= 400:
+                error_code = classify_http_status(status_code) or "edfi_auth_failed"
                 return AuthResult(
                     ok=False,
                     latency_ms=latency_ms,
                     status_code=status_code,
                     error=_compact_error(response.text),
+                    error_code=error_code,
                     token_endpoint=token_endpoint,
                 )
             body = response.json() if response.content else {}
@@ -66,6 +71,7 @@ class EdFiAuthService:
                     latency_ms=latency_ms,
                     status_code=status_code,
                     error="token_response_not_object",
+                    error_code="edfi_token_response_not_object",
                     token_endpoint=token_endpoint,
                 )
             access_token = str(body.get("access_token") or "").strip()
@@ -75,6 +81,7 @@ class EdFiAuthService:
                     latency_ms=latency_ms,
                     status_code=status_code,
                     error="token_missing_access_token",
+                    error_code="edfi_token_missing_access_token",
                     token_endpoint=token_endpoint,
                 )
             expires_in = int(body.get("expires_in", 3600) or 3600)
@@ -102,6 +109,7 @@ class EdFiAuthService:
                 ok=False,
                 latency_ms=latency_ms,
                 error=str(exc),
+                error_code=classify_request_exception(exc),
                 token_endpoint=token_endpoint,
             )
 
@@ -113,13 +121,15 @@ class EdFiAuthService:
         now_fn: Callable[[], float] = time.time,
     ) -> tuple[str, AuthResult]:
         cached = self._cache.get(config.connection_id)
-        if not force_refresh and cached is not None and cached.valid(now=now_fn()):
-            return f"{cached.token_type} {cached.access_token}", AuthResult(
-                ok=True,
-                access_token=cached.access_token,
-                token_type=cached.token_type,
-                scope=cached.scope,
-            )
+        if not force_refresh and cached is not None:
+            if cached.valid(now=now_fn()):
+                return f"{cached.token_type} {cached.access_token}", AuthResult(
+                    ok=True,
+                    access_token=cached.access_token,
+                    token_type=cached.token_type,
+                    scope=cached.scope,
+                )
+            self._cache.pop(config.connection_id, None)
         result = self.fetch_token(config, now_fn=now_fn)
         if not result.ok:
             return "", result

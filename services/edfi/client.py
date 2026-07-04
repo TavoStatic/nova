@@ -8,6 +8,7 @@ import requests
 
 from services.edfi.auth import AuthResult, EdFiAuthService
 from services.edfi.config import ConnectionConfig
+from services.edfi.errors import classify_http_status, classify_request_exception
 
 
 @dataclass(frozen=True)
@@ -19,6 +20,7 @@ class EdFiResponse:
     method: str = "GET"
     body: Any = None
     error: str = ""
+    error_code: str = ""
     auth: AuthResult | None = None
 
 
@@ -57,6 +59,7 @@ class EdFiClient:
                 url=url,
                 method=method,
                 error=auth_result.error or "authentication_failed",
+                error_code=auth_result.error_code or "edfi_auth_failed",
                 auth=auth_result,
             )
         headers = {
@@ -71,6 +74,7 @@ class EdFiClient:
                 json=json_body,
                 headers=headers,
                 timeout=self.config.timeout_sec,
+                verify=self.config.ssl_verify(),
             )
             if retry_auth and response.status_code in {401, 403}:
                 auth_header, auth_result = self.auth.get_authorization_header(self.config, force_refresh=True)
@@ -83,18 +87,22 @@ class EdFiClient:
                         json=json_body,
                         headers=headers,
                         timeout=self.config.timeout_sec,
+                        verify=self.config.ssl_verify(),
                     )
             latency_ms = int((time.perf_counter() - started) * 1000)
             parsed = _parse_json(response)
-            ok = 200 <= int(response.status_code) < 300
+            status_code = int(response.status_code)
+            ok = 200 <= status_code < 300
+            error_code = "" if ok else (classify_http_status(status_code) or "edfi_request_failed")
             return EdFiResponse(
                 ok=ok,
-                status_code=int(response.status_code),
+                status_code=status_code,
                 latency_ms=latency_ms,
                 url=url,
                 method=method.upper(),
                 body=parsed,
                 error="" if ok else _compact_text(response.text),
+                error_code=error_code,
                 auth=auth_result,
             )
         except requests.RequestException as exc:
@@ -105,10 +113,12 @@ class EdFiClient:
                 method=method.upper(),
                 latency_ms=latency_ms,
                 error=str(exc),
+                error_code=classify_request_exception(exc),
                 auth=auth_result,
             )
 
-    def get(self, url: str, *, params: dict[str, Any] | None = None) -> EdFiResponse:
+    def get(self, url_or_resource: str, *, params: dict[str, Any] | None = None) -> EdFiResponse:
+        url = _resolve_url(self.config, url_or_resource)
         return self.request("GET", url, params=params)
 
     def test_connection(self) -> EdFiResponse:
@@ -119,11 +129,19 @@ class EdFiClient:
                 url=self.config.token_url(),
                 method="POST",
                 error=auth_result.error or "authentication_failed",
+                error_code=auth_result.error_code or "edfi_auth_failed",
                 auth=auth_result,
                 latency_ms=auth_result.latency_ms,
                 status_code=auth_result.status_code,
             )
         return self.get(self.config.metadata_url())
+
+
+def _resolve_url(config: ConnectionConfig, url_or_resource: str) -> str:
+    text = str(url_or_resource or "").strip()
+    if text.startswith("http://") or text.startswith("https://"):
+        return text
+    return config.resource_url(text)
 
 
 def _parse_json(response: requests.Response) -> Any:

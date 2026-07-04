@@ -15,8 +15,9 @@ from services.edfi.config import (
     profile_path,
     runtime_roots,
     save_connection_config,
+    validate_connection_payload,
 )
-from services.edfi.diagnostics import append_audit_event, build_health_payload
+from services.edfi.diagnostics import append_audit_event, build_config_error_health, build_health_payload
 from services.edfi.config import save_capability_profile
 from services.edfi.discovery import build_capability_profile, discover_metadata
 
@@ -33,6 +34,7 @@ __all__ = [
     "run_self_profile",
     "runtime_roots",
     "save_connection_config",
+    "validate_connection_payload",
 ]
 
 
@@ -52,12 +54,50 @@ def run_self_profile(
     """
     ensure_runtime_dirs()
 
-    config = _resolve_config(
-        connection_id=connection_id,
-        base_url=base_url,
-        client_id=client_id,
-        client_secret=client_secret,
-    )
+    try:
+        config = _resolve_config(
+            connection_id=connection_id,
+            base_url=base_url,
+            client_id=client_id,
+            client_secret=client_secret,
+        )
+    except ValueError as exc:
+        error_code = str(exc)
+        validation_errors = []
+        if base_url or client_id or client_secret:
+            validation_errors = validate_connection_payload(
+                {
+                    "connection_id": connection_id,
+                    "base_url": base_url,
+                    "client_id": client_id,
+                    "client_secret": client_secret,
+                },
+                connection_id=connection_id,
+            )
+        health = build_config_error_health(
+            connection_id=connection_id,
+            error_code=error_code,
+            validation_errors=validation_errors or None,
+            now_fn=now_fn,
+        )
+        append_audit_event(
+            {
+                "action": "self_profile",
+                "milestone": MILESTONE_ID,
+                "connection_id": connection_id,
+                "status": health["status"],
+                "ok": False,
+                "error_code": error_code,
+            }
+        )
+        return {
+            "ok": False,
+            "milestone": MILESTONE_ID,
+            "connection_id": connection_id,
+            "error_code": error_code,
+            "health": health,
+        }
+
     if save_config:
         save_connection_config(config)
 
@@ -71,6 +111,7 @@ def run_self_profile(
         "token_endpoint": auth.token_endpoint or config.token_url(),
         "scope": auth.scope,
         "error": auth.error,
+        "error_code": auth.error_code,
     }
     provisional_health = build_health_payload(
         config,
@@ -97,6 +138,7 @@ def run_self_profile(
     profile["health"] = health["status"]
     profile["issues"] = health["issues"]
 
+    issue_codes = [str(item.get("code") or "") for item in health.get("issues") or []]
     append_audit_event(
         {
             "action": "self_profile",
@@ -106,6 +148,12 @@ def run_self_profile(
             "ok": health["ok"],
             "resource_count": discovery.resource_count,
             "profile_path": saved_profile_path,
+            "auth_ok": bool(auth.ok),
+            "discovery_ok": bool(discovery.ok),
+            "metadata_ok": bool(discovery.metadata_ok),
+            "sample_ok": bool(discovery.sample_ok),
+            "issue_codes": issue_codes[:8],
+            "error_code": issue_codes[0] if issue_codes else "",
         }
     )
 
@@ -132,7 +180,7 @@ def _resolve_config(
     client_id: str,
     client_secret: str,
 ) -> ConnectionConfig:
-    if base_url and client_id and client_secret:
+    if base_url or client_id or client_secret:
         return connection_config_from_dict(
             {
                 "connection_id": connection_id,

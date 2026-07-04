@@ -26,6 +26,9 @@ class DiscoveryResult:
     latency_ms: int = 0
     status_code: int = 0
     error: str = ""
+    error_code: str = ""
+    metadata_ok: bool = False
+    sample_ok: bool = False
     metadata_response: EdFiResponse | None = None
     sample_response: EdFiResponse | None = None
 
@@ -41,11 +44,14 @@ def discover_metadata(client: EdFiClient) -> DiscoveryResult:
             latency_ms=metadata.latency_ms,
             status_code=metadata.status_code,
             error=metadata.error or "metadata_request_failed",
+            error_code=metadata.error_code or "edfi_metadata_failed",
+            metadata_ok=False,
+            sample_ok=False,
             metadata_response=metadata,
         )
 
     resources, namespaces, api_version, data_model_version = _parse_metadata_body(metadata.body)
-    sample = client.get(config.sample_resource_url(), params={"limit": 1})
+    sample = client.get(config.sample_resource, params={"limit": 1})
     return DiscoveryResult(
         ok=True,
         api_root=config.api_root,
@@ -57,6 +63,8 @@ def discover_metadata(client: EdFiClient) -> DiscoveryResult:
         data_model_version=data_model_version,
         latency_ms=metadata.latency_ms,
         status_code=metadata.status_code,
+        metadata_ok=True,
+        sample_ok=bool(sample.ok),
         metadata_response=metadata,
         sample_response=sample,
     )
@@ -90,6 +98,7 @@ def build_capability_profile(
             "sample_resource": config.sample_resource,
             "sample_ok": bool(sample.ok) if sample is not None else False,
             "sample_status_code": int(sample.status_code) if sample is not None else 0,
+            "stages": _discovery_stages(discovery, config),
         },
         "latency_ms": dict(health.get("latency_ms") or {}),
         "health": str(health.get("status") or "unknown"),
@@ -114,6 +123,32 @@ def discover_and_save_profile(
     )
     path = save_capability_profile(client.config.connection_id, profile)
     return discovery, profile, str(path)
+
+
+def _discovery_stages(discovery: DiscoveryResult, config: ConnectionConfig) -> dict[str, Any]:
+    metadata = discovery.metadata_response
+    sample = discovery.sample_response
+    stages: dict[str, Any] = {
+        "metadata": {
+            "ok": bool(discovery.metadata_ok),
+            "url": discovery.metadata_url,
+            "status_code": int(metadata.status_code) if metadata is not None else int(discovery.status_code or 0),
+            "latency_ms": int(metadata.latency_ms) if metadata is not None else int(discovery.latency_ms or 0),
+            "error": metadata.error if metadata is not None else discovery.error,
+            "error_code": metadata.error_code if metadata is not None else discovery.error_code,
+        }
+    }
+    if discovery.metadata_ok:
+        stages["sample_get"] = {
+            "ok": bool(discovery.sample_ok),
+            "resource": config.sample_resource,
+            "url": config.sample_resource_url(),
+            "status_code": int(sample.status_code) if sample is not None else 0,
+            "latency_ms": int(sample.latency_ms) if sample is not None else 0,
+            "error": sample.error if sample is not None else "",
+            "error_code": sample.error_code if sample is not None else "",
+        }
+    return stages
 
 
 def _parse_metadata_body(body: Any) -> tuple[list[str], list[str], str, str]:
