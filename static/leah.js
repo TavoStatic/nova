@@ -1260,6 +1260,3 @@
     setActivityHeadline("LEAH hit a startup error, but the front door is still open.");
   });
 })();
-oor is still open.");
-  });
-})();
