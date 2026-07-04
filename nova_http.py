@@ -33,6 +33,7 @@ from services.chat_identity import CHAT_IDENTITY_SERVICE
 from services.control_login_frontdoor import CONTROL_LOGIN_FRONTDOOR_SERVICE
 from services.control_work_trees import CONTROL_WORK_TREES_SERVICE
 from services.leah_frontdoor import LeahFrontdoorService
+from services.leah_conversation_continuity import LeahConversationContinuityStore
 from services.nova_control_action_dispatcher import NOVA_CONTROL_ACTION_DISPATCHER
 from services.nova_http_get_routes import HTTP_GET_ROUTES_SERVICE
 from services.nova_http_frontdoor import NOVA_HTTP_FRONTDOOR_SERVICE
@@ -116,6 +117,7 @@ LEAH_FRONTDOOR_SERVICE = LeahFrontdoorService(
     js_path_provider=lambda: LEAH_JS_PATH,
     fx_js_path_provider=lambda: LEAH_FX_JS_PATH,
     upload_root_provider=lambda: LEAH_UPLOADS_DIR,
+    continuity_store=LeahConversationContinuityStore(),
 )
 
 

@@ -43,6 +43,7 @@ class LeahFrontdoorService:
         upload_max_items: int = 6,
         upload_max_bytes: int = 8 * 1024 * 1024,
         context_ttl_seconds: int = 30 * 60,
+        continuity_store: Any | None = None,
     ) -> None:
         self._asset_service = asset_service
         self._template_path_provider = template_path_provider
@@ -53,6 +54,7 @@ class LeahFrontdoorService:
         self._upload_max_items = int(upload_max_items)
         self._upload_max_bytes = int(upload_max_bytes)
         self._context_ttl_seconds = int(context_ttl_seconds)
+        self._continuity_store = continuity_store
         self._session_context: dict[str, dict[str, Any]] = {}
 
     def render_html(self) -> str:
@@ -171,11 +173,17 @@ class LeahFrontdoorService:
         if not safe_session or not usable:
             return
         self._prune_session_context()
-        self._session_context[safe_session] = {
+        payload = {
             "ts": time.time(),
             "stage": str(stage or "").strip().lower() or "staged",
             "items": usable[: self._upload_max_items],
         }
+        self._session_context[safe_session] = payload
+        if self._continuity_store is not None and hasattr(self._continuity_store, "save"):
+            try:
+                self._continuity_store.save(safe_session, payload)
+            except Exception:
+                pass
 
     def recent_session_context(self, session_id: str) -> tuple[list[dict], str]:
         safe_session = str(session_id or "").strip()
@@ -183,6 +191,16 @@ class LeahFrontdoorService:
             return [], ""
         self._prune_session_context()
         payload = self._session_context.get(safe_session)
+        if not isinstance(payload, dict) and self._continuity_store is not None and hasattr(
+            self._continuity_store, "load"
+        ):
+            try:
+                loaded = self._continuity_store.load(safe_session)
+                if isinstance(loaded, dict):
+                    payload = loaded
+                    self._session_context[safe_session] = loaded
+            except Exception:
+                payload = None
         if not isinstance(payload, dict):
             return [], ""
         items = [dict(item or {}) for item in list(payload.get("items") or []) if isinstance(item, dict)]
