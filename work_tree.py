@@ -4,6 +4,7 @@ from contextlib import contextmanager
 import json
 import os
 import sqlite3
+import threading
 import time
 import traceback
 from datetime import datetime
@@ -19,6 +20,7 @@ _TREES: dict[str, WorkTree] = {}
 _BRANCHES: dict[str, Branch] = {}
 _TASKS: dict[str, Task] = {}
 _SCORES: dict[str, float] = {}
+_STATE_LOCK = threading.RLock()
 
 
 _BASE_DIR = Path(__file__).resolve().parent
@@ -596,7 +598,8 @@ def _load_persisted_state() -> None:
 
 def reload_persisted_state() -> bool:
     try:
-        _load_persisted_state()
+        with _STATE_LOCK:
+            _load_persisted_state()
         return True
     except Exception as exc:
         _append_db_guard("reload_failed", str(exc))
@@ -712,19 +715,23 @@ def _save_task_record(connection: sqlite3.Connection, task: Task) -> None:
 
 
 def _persist_tree_state(tree_id: str) -> None:
-    tree = _TREES.get(tree_id)
-    if tree is None:
-        return
-    branches = _tree_branches(tree_id)
-    branch_ids = [branch.branch_id for branch in branches]
-    with _db_transaction() as connection:
-        connection.execute("DELETE FROM work_tree_tasks WHERE branch_id IN (SELECT branch_id FROM work_tree_branches WHERE tree_id = ?)", (tree_id,))
-        connection.execute("DELETE FROM work_tree_branches WHERE tree_id = ?", (tree_id,))
-        _save_tree_record(connection, tree)
-        for branch in branches:
-            _save_branch_record(connection, branch)
-        for task in sorted(_TASKS.values(), key=lambda item: (item.created_at, item.task_id)):
-            if task.branch_id in branch_ids:
+    with _STATE_LOCK:
+        tree = _TREES.get(tree_id)
+        if tree is None:
+            return
+        branches = _tree_branches(tree_id)
+        branch_ids = [branch.branch_id for branch in branches]
+        task_rows = sorted(
+            (task for task in _TASKS.values() if task.branch_id in branch_ids),
+            key=lambda item: (item.created_at, item.task_id),
+        )
+        with _db_transaction() as connection:
+            connection.execute("DELETE FROM work_tree_tasks WHERE branch_id IN (SELECT branch_id FROM work_tree_branches WHERE tree_id = ?)", (tree_id,))
+            connection.execute("DELETE FROM work_tree_branches WHERE tree_id = ?", (tree_id,))
+            _save_tree_record(connection, tree)
+            for branch in branches:
+                _save_branch_record(connection, branch)
+            for task in task_rows:
                 _save_task_record(connection, task)
 
 
@@ -1160,10 +1167,15 @@ def list_branch_evidence(branch_id: str, *, limit: int = 20) -> list[dict[str, o
 
 
 def list_visual_trees(limit: int | None = None) -> list[dict]:
-    reload_persisted_state()
+    with _STATE_LOCK:
+        return _list_visual_trees_locked(limit)
+
+
+def _list_visual_trees_locked(limit: int | None = None) -> list[dict]:
+    _load_persisted_state()
     max_items = None if limit is None else max(1, int(limit))
     ranked_payloads: list[tuple[tuple[object, ...], dict]] = []
-    for tree in _TREES.values():
+    for tree in list(_TREES.values()):
         if tree.status == TreeStatus.ARCHIVED:
             continue
         payload = get_visual_tree_data(tree.tree_id)
@@ -2377,16 +2389,22 @@ def run_autonomous_loop(
 
 def get_visual_tree_data(tree_id: str) -> dict | None:
     """Return a lightweight node/edge structure suitable for GUI tree rendering."""
+    with _STATE_LOCK:
+        return _get_visual_tree_data_locked(tree_id)
+
+
+def _get_visual_tree_data_locked(tree_id: str) -> dict | None:
     tree = get_tree(tree_id)
     if tree is None:
         return None
     _refresh_tree_state(tree_id, persist=False)
     branches = _tree_branches(tree_id)
+    tasks_snapshot = list(_TASKS.values())
     dependency_edges: list[dict] = []
     nodes: list[dict] = []
     task_counts: dict[str, int] = {status.value: 0 for status in TaskStatus}
     for branch in branches:
-        branch_tasks = [t for t in _TASKS.values() if t.branch_id == branch.branch_id]
+        branch_tasks = [t for t in tasks_snapshot if t.branch_id == branch.branch_id]
         tasks_open = sum(1 for t in branch_tasks if t.status not in (TaskStatus.COMPLETE, TaskStatus.DROPPED))
         for task in branch_tasks:
             task_counts[task.status.value] = task_counts.get(task.status.value, 0) + 1
@@ -2451,7 +2469,7 @@ def get_visual_tree_data(tree_id: str) -> dict | None:
             "branches": branch_counts,
             "tasks": task_counts,
             "open_tasks": sum(
-                1 for task in _TASKS.values()
+                1 for task in tasks_snapshot
                 if _BRANCHES.get(task.branch_id) is not None
                 and _BRANCHES[task.branch_id].tree_id == tree_id
                 and task.status not in (TaskStatus.COMPLETE, TaskStatus.DROPPED)

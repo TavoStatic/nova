@@ -194,6 +194,14 @@ HTTP_SUPPLEMENT_KEYS = frozenset(
         "validation_artifact_truth_status",
         "test_profile_inventory",
         "test_profile_inventory_ok",
+        "root_closure_inventory",
+        "root_closure_inventory_ok",
+        "root_closure_inventory_gap_count",
+        "root_closure_inventory_gap_roots",
+        "self_repair_closure_inventory",
+        "self_repair_closure_inventory_ok",
+        "self_repair_closure_inventory_gap_count",
+        "self_repair_closure_inventory_gap_roots",
         "installer_release_status",
         "installer_status",
         "installer_packaging_status",
@@ -243,14 +251,6 @@ HTTP_SUPPLEMENT_KEYS = frozenset(
 
 LOCAL_AUTHORITATIVE_KEYS = frozenset(
     {
-        "root_closure_inventory",
-        "root_closure_inventory_ok",
-        "root_closure_inventory_gap_count",
-        "root_closure_inventory_gap_roots",
-        "self_repair_closure_inventory",
-        "self_repair_closure_inventory_ok",
-        "self_repair_closure_inventory_gap_count",
-        "self_repair_closure_inventory_gap_roots",
         "source_root_inventory",
         "source_root_inventory_ok",
         "source_root_inventory_gap_count",
@@ -340,13 +340,44 @@ def extract_signal_ingestion_surfaces(payload: dict[str, Any]) -> dict[str, Any]
     return surfaces
 
 
+def _local_closure_inventory_authoritative(
+    merged: dict[str, Any],
+    *,
+    inventory_key: str,
+    ok_key: str,
+    gap_count_key: str,
+) -> bool:
+    inventory = merged.get(inventory_key)
+    if not isinstance(inventory, dict):
+        return False
+    gap_count = int(merged.get(gap_count_key, inventory.get("gap_count", 0)) or 0)
+    ok = bool(merged.get(ok_key, inventory.get("ok", False)))
+    return ok and gap_count <= 0
+
+
 def merge_http_supplement_into_local(local_payload: dict[str, Any], http_payload: dict[str, Any]) -> dict[str, Any]:
     merged = dict(local_payload or {})
     http = dict(http_payload or {})
+    preserve_root_closure = _local_closure_inventory_authoritative(
+        merged,
+        inventory_key="root_closure_inventory",
+        ok_key="root_closure_inventory_ok",
+        gap_count_key="root_closure_inventory_gap_count",
+    )
+    preserve_self_repair = _local_closure_inventory_authoritative(
+        merged,
+        inventory_key="self_repair_closure_inventory",
+        ok_key="self_repair_closure_inventory_ok",
+        gap_count_key="self_repair_closure_inventory_gap_count",
+    )
     for key in HTTP_SUPPLEMENT_KEYS:
         if key not in http:
             continue
         if key in LOCAL_AUTHORITATIVE_KEYS and key in merged:
+            continue
+        if preserve_root_closure and key.startswith("root_closure_inventory"):
+            continue
+        if preserve_self_repair and key.startswith("self_repair_closure_inventory"):
             continue
         merged[key] = http[key]
     maintenance = http.get("autonomy_maintenance") if isinstance(http.get("autonomy_maintenance"), dict) else {}

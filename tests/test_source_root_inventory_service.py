@@ -16,7 +16,7 @@ class TestSourceRootInventoryService(unittest.TestCase):
             (root / "services" / "nova_root_inventory.py").write_text("# inventory\n", encoding="utf-8")
             (root / "nova.cmd").write_text("@echo off\n", encoding="utf-8")
             (root / "NOVA_HEALTH_REVIEW.md").write_text("# Review\n", encoding="utf-8")
-            for ignored in (".venv", "runtime", ".pytest_cache", "__pycache__", "logs", "terminals"):
+            for ignored in (".venv", "runtime", ".pytest_cache", "__pycache__", "logs", "terminals", ".vscode"):
                 ignored_dir = root / ignored
                 ignored_dir.mkdir()
                 (ignored_dir / "test_shadow.py").write_text("def test_shadow(): pass\n", encoding="utf-8")
@@ -62,6 +62,20 @@ class TestSourceRootInventoryService(unittest.TestCase):
         self.assertIn("NYO-Nova-Autostart.ps1", covered)
         self.assertIn("updates/approvals.jsonl", covered)
         self.assertIn("nova_grok.jsonl", covered)
+
+    def test_source_inventory_ignores_vscode_tasks_json(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            vscode = root / ".vscode"
+            vscode.mkdir()
+            (vscode / "tasks.json").write_text("{}", encoding="utf-8")
+            (root / "nova.cmd").write_text("@echo off\n", encoding="utf-8")
+
+            payload = build_source_root_inventory_payload(root=root, wiring_surface_ids=source_root_ids())
+
+        self.assertEqual(payload.get("unclassified_source_file_count"), 0)
+        self.assertEqual(payload.get("unclassified_source_files"), [])
+        self.assertNotIn(".vscode/tasks.json", list(payload.get("unclassified_source_files") or []))
 
 
 if __name__ == "__main__":

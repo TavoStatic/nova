@@ -79,6 +79,34 @@ class TestControlStatusSurfacesService(unittest.TestCase):
         self.assertEqual(merged.get("backend_command_count"), 1)
         self.assertEqual(merged.get("operator_outbox_open_count"), 1)
 
+    def test_merge_http_supplement_prefers_http_root_closure_inventory(self):
+        local = {
+            "root_closure_inventory": {
+                "ok": False,
+                "gap_count": 36,
+                "gap_roots": ["runtime_core"],
+                "roots": [{"root_id": "runtime_core", "ok": False}],
+            },
+            "root_closure_inventory_ok": False,
+            "root_closure_inventory_gap_count": 36,
+        }
+        http = {
+            "root_closure_inventory": {
+                "ok": True,
+                "gap_count": 0,
+                "gap_roots": [],
+                "roots": [{"root_id": "runtime_core", "ok": True}],
+            },
+            "root_closure_inventory_ok": True,
+            "root_closure_inventory_gap_count": 0,
+        }
+
+        merged = merge_http_supplement_into_local(local, http)
+
+        self.assertTrue(merged.get("root_closure_inventory_ok"))
+        self.assertEqual(merged.get("root_closure_inventory_gap_count"), 0)
+        self.assertTrue((merged.get("root_closure_inventory") or {}).get("ok"))
+
 
 if __name__ == "__main__":
     unittest.main()

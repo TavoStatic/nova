@@ -1780,6 +1780,74 @@ class TestAutonomyMaintenance(unittest.TestCase):
         self.assertGreaterEqual(int(payload.get("backend_command_count") or 0), 4)
         self.assertIsInstance(payload.get("backend_commands"), list)
 
+    def test_local_first_preserves_http_root_closure_inventory(self):
+        fallback = {"alerts": [], "autonomy_maintenance": {"last_regression_status": ""}}
+        slim_http = {
+            "status_kind": "signal_ingestion_surfaces",
+            "root_closure_inventory": {
+                "ok": True,
+                "gap_count": 0,
+                "gap_roots": [],
+                "roots": [
+                    {"root_id": "runtime_core", "ok": True},
+                    {"root_id": "model_runtime", "ok": True},
+                ],
+            },
+            "root_closure_inventory_ok": True,
+            "root_closure_inventory_gap_count": 0,
+            "release_status": {"latest_readiness_state": "ready"},
+        }
+
+        class _Response:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+            def read(self, _limit):
+                return json.dumps(slim_http).encode("utf-8")
+
+        with mock.patch.object(autonomy_maintenance, "SIGNAL_INGESTION_STATUS_MODE", "local_first"), \
+             mock.patch.object(autonomy_maintenance.urllib.request, "urlopen", return_value=_Response()), \
+             mock.patch.object(autonomy_maintenance, "_probe_local_ollama_health", return_value={"ok": True, "server_ok": True}), \
+             mock.patch.object(autonomy_maintenance, "_probe_local_port_ownership", return_value={"status": "ok"}):
+            payload = autonomy_maintenance._live_control_status_payload_for_signal_ingestion(fallback)
+
+        self.assertEqual(payload.get("root_closure_inventory_gap_count"), 0)
+        self.assertTrue(payload.get("root_closure_inventory_ok"))
+        from services.work_tree_signal_ingestion import _root_closure_inventory_signals_from_status
+
+        self.assertEqual(_root_closure_inventory_signals_from_status(payload), [])
+
+    def test_merge_authoritative_wiring_status_keys_pulls_web_enabled_from_http(self):
+        fallback = {"alerts": []}
+        http_payload = {
+            "web_enabled": True,
+            "guard": {"ok": True},
+            "core": {"ok": True},
+            "webui": {"ok": True},
+            "runtime_summary": {"ok": True},
+            "memory_health": {"ok": True},
+            "work_tree_open_task_count": 0,
+        }
+
+        class _Response:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+            def read(self, _limit):
+                return json.dumps(http_payload).encode("utf-8")
+
+        with mock.patch.object(autonomy_maintenance.urllib.request, "urlopen", return_value=_Response()):
+            merged = autonomy_maintenance._merge_authoritative_wiring_status_keys(fallback)
+
+        self.assertTrue(merged.get("web_enabled"))
+        self.assertFalse(autonomy_maintenance._status_payload_missing_root_closure_truth_markers(merged))
+
     def test_local_dependency_probe_closes_core_gate_roots_without_http(self):
         from services.layer_maturity_policy import CORE_GATE_ROOT_IDS, evaluate_core_gate
 

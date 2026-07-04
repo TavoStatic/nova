@@ -26,6 +26,7 @@ from services.control_status_surfaces import (
     derive_surfaces_url,
     merge_http_supplement_into_local,
     release_drift_detected,
+    signal_ingestion_top_level_keys,
 )
 from services.chat_identity import CHAT_IDENTITY_SERVICE
 from services.frontdoor_cli_parity import FRONTDOOR_CLI_PARITY_SERVICE
@@ -1273,25 +1274,112 @@ def _apply_local_source_root_status_surfaces(payload: dict, *, only_missing: boo
         ):
             src = build_source_root_inventory_payload()
             if isinstance(src, dict):
-                result["source_root_inventory"] = src
+                result = _apply_source_root_inventory_surfaces(result, src)
     except Exception:
         pass
     return result
 
 
-def _refresh_root_closure_inventory_surfaces(payload: dict) -> dict:
+def _apply_root_closure_inventory_surfaces(payload: dict, inventory: dict[str, object]) -> dict:
     result = dict(payload or {})
+    root_closure = dict(inventory or {})
+    result["root_closure_inventory"] = root_closure
+    result["root_closure_inventory_ok"] = bool(root_closure.get("ok", False))
+    result["root_closure_inventory_gap_count"] = int(root_closure.get("gap_count", 0) or 0)
+    result["root_closure_inventory_gap_roots"] = list(root_closure.get("gap_roots") or [])
+    return result
+
+
+def _apply_source_root_inventory_surfaces(payload: dict, inventory: dict[str, object]) -> dict:
+    result = dict(payload or {})
+    source_root = dict(inventory or {})
+    result["source_root_inventory"] = source_root
+    result["source_root_inventory_ok"] = bool(source_root.get("ok", False))
+    result["source_root_inventory_gap_count"] = int(source_root.get("gap_count", 0) or 0)
+    result["source_root_inventory_unwired_roots"] = list(source_root.get("unwired_roots") or [])
+    result["source_root_inventory_missing_evidence_roots"] = list(source_root.get("missing_evidence_roots") or [])
+    result["source_root_inventory_unclassified_source_file_count"] = int(
+        source_root.get("unclassified_source_file_count", 0) or 0
+    )
+    result["source_root_inventory_unclassified_source_files"] = list(source_root.get("unclassified_source_files") or [])
+    return result
+
+
+_ROOT_CLOSURE_TRUTH_MARKERS = (
+    "guard",
+    "core",
+    "webui",
+    "runtime_summary",
+    "memory_health",
+    "work_tree_open_task_count",
+    "web_enabled",
+)
+
+
+def _status_payload_missing_root_closure_truth_markers(payload: dict) -> bool:
+    source = dict(payload or {})
+    return sum(1 for key in _ROOT_CLOSURE_TRUTH_MARKERS if key not in source) >= 4
+
+
+def _merge_authoritative_wiring_status_keys(payload: dict) -> dict:
+    result = dict(payload or {})
+    allowed = signal_ingestion_top_level_keys()
+    for url, timeout_sec, read_limit in (
+        (CONTROL_STATUS_SURFACES_URL, CONTROL_STATUS_SURFACES_TIMEOUT_SEC, 512_000),
+        (CONTROL_STATUS_URL, CONTROL_STATUS_TIMEOUT_SEC, 2_000_000),
+    ):
+        live = _fetch_control_status_json(url, timeout_sec=timeout_sec, read_limit=read_limit)
+        if not isinstance(live, dict):
+            continue
+        for key in allowed:
+            if key not in live:
+                continue
+            value = live.get(key)
+            if value is None:
+                continue
+            result[key] = value
+        if not _status_payload_missing_root_closure_truth_markers(result):
+            break
+    return result
+
+
+def _last_known_root_closure_inventory_from_state() -> dict:
+    try:
+        state_path = RUNTIME_DIR / "autonomy_maintenance_state.json"
+        if not state_path.exists():
+            return {}
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+        snapshot = state.get("last_layer_maturity_snapshot") if isinstance(state.get("last_layer_maturity_snapshot"), dict) else {}
+        inventory = snapshot.get("root_closure_inventory")
+        if not isinstance(inventory, dict) or not list(inventory.get("roots") or []):
+            return {}
+        return dict(inventory)
+    except Exception:
+        return {}
+
+
+def _refresh_root_closure_inventory_surfaces(payload: dict, *, preserve_existing: bool = False) -> dict:
+    result = dict(payload or {})
+    existing = result.get("root_closure_inventory")
+    if (
+        preserve_existing
+        and isinstance(existing, dict)
+        and list(existing.get("roots") or [])
+    ):
+        return _apply_root_closure_inventory_surfaces(result, existing)
+    result = _merge_authoritative_wiring_status_keys(result)
+    if _status_payload_missing_root_closure_truth_markers(result):
+        cached = _last_known_root_closure_inventory_from_state()
+        if cached:
+            return _apply_root_closure_inventory_surfaces(result, cached)
     try:
         root_closure = build_root_closure_inventory_payload(result)
-        result["root_closure_inventory"] = root_closure
-        result["root_closure_inventory_ok"] = bool(root_closure.get("ok", False))
-        result["root_closure_inventory_gap_count"] = int(root_closure.get("gap_count", 0) or 0)
-        result["root_closure_inventory_gap_roots"] = list(root_closure.get("gap_roots") or [])
+        result = _apply_root_closure_inventory_surfaces(result, root_closure)
     except Exception:
-        result["root_closure_inventory"] = {"ok": True, "gap_count": 0, "gap_roots": [], "roots": []}
-        result["root_closure_inventory_ok"] = True
-        result["root_closure_inventory_gap_count"] = 0
-        result["root_closure_inventory_gap_roots"] = []
+        result = _apply_root_closure_inventory_surfaces(
+            result,
+            {"ok": True, "gap_count": 0, "gap_roots": [], "roots": []},
+        )
     if "self_repair_closure_inventory" not in result:
         result["self_repair_closure_inventory"] = {"ok": True, "gap_count": 0, "gap_roots": [], "roots": []}
         result["self_repair_closure_inventory_ok"] = True
@@ -1314,7 +1402,13 @@ def _enrich_signal_ingestion_status_payload(payload: dict, *, only_missing: bool
     enriched = _apply_local_operator_control_surfaces(enriched, only_missing=only_missing)
     enriched = _apply_local_http_api_control_surfaces(enriched, only_missing=only_missing)
     enriched = _apply_local_source_root_status_surfaces(enriched, only_missing=only_missing)
-    enriched = _refresh_root_closure_inventory_surfaces(enriched)
+    has_upstream_inventory = isinstance(enriched.get("root_closure_inventory"), dict) and bool(
+        list((enriched.get("root_closure_inventory") or {}).get("roots") or [])
+    )
+    enriched = _refresh_root_closure_inventory_surfaces(
+        enriched,
+        preserve_existing=bool(only_missing and has_upstream_inventory),
+    )
     return _apply_layer_maturity_to_status_payload(enriched)
 
 
@@ -1396,16 +1490,16 @@ def _live_control_status_payload_http_surfaces(fallback_payload: dict) -> dict:
 
 def _live_control_status_payload_local_first(fallback_payload: dict) -> dict:
     fallback = dict(fallback_payload or {})
-    local = _local_dependency_payload_for_signal_ingestion(fallback)
     live = _fetch_control_status_json(
         CONTROL_STATUS_SURFACES_URL,
         timeout_sec=CONTROL_STATUS_SURFACES_TIMEOUT_SEC,
         read_limit=512_000,
     )
     if live is None:
+        local = _local_dependency_payload_for_signal_ingestion(fallback)
         local["signal_ingestion_status_source"] = "local_dependency_probe"
         return local
-    merged = merge_http_supplement_into_local(local, live)
+    merged = merge_http_supplement_into_local(fallback, live)
     fallback_maintenance = fallback.get("autonomy_maintenance") if isinstance(fallback.get("autonomy_maintenance"), dict) else {}
     live_maintenance = live.get("autonomy_maintenance") if isinstance(live.get("autonomy_maintenance"), dict) else {}
     if fallback_maintenance:

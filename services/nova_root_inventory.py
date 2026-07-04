@@ -295,6 +295,7 @@ _SOURCE_COVERAGE_IGNORED_DIRS = {
     ".git",
     ".pytest_cache",
     ".venv",
+    ".vscode",
     "__pycache__",
     "logs",
     "runtime",

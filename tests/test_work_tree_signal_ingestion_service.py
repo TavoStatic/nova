@@ -10,6 +10,7 @@ from pathlib import Path
 
 import work_tree
 from services.work_tree_signal_ingestion import (
+    SOURCE_ROOT_SEQUENCE_EXHAUSTED_HOLD_REASON,
     WorkTreeSignalIngestionService,
     _branch_why_summary,
     _data_pipeline_evidence_task,
@@ -1405,6 +1406,76 @@ class TestWorkTreeSignalIngestionService(unittest.TestCase):
         self.assertEqual(open_tasks[0].title, "Probe configured web search route through web_search tool")
         self.assertEqual((open_tasks[0].meta or {}).get("expected_tool"), "web_search")
         self.assertEqual(work_tree.get_branch(branch.branch_id).status, work_tree.BranchStatus.READY)
+
+    def test_source_root_inventory_exhausted_sequence_becomes_operator_hold(self) -> None:
+        status_payload = {
+            "source_root_inventory": {
+                "gap_count": 1,
+                "ok": False,
+                "unclassified_source_files": [".vscode/tasks.json"],
+                "unwired_roots": [],
+                "missing_evidence_roots": [],
+            },
+            "source_root_inventory_ok": False,
+            "source_root_inventory_gap_count": 1,
+        }
+
+        self.service.sync_status_snapshot(status_payload)
+        branch = next(
+            item for item in self._signal_branches()
+            if str(item.source_type or "") == "source_root_inventory"
+        )
+
+        for _ in range(8):
+            open_tasks = [
+                task for task in work_tree.list_branch_tasks(branch.branch_id)
+                if task.status not in {work_tree.TaskStatus.COMPLETE, work_tree.TaskStatus.DROPPED}
+            ]
+            self.assertTrue(open_tasks)
+            task = open_tasks[0]
+            expected_tool = str((task.meta or {}).get("expected_tool") or "read")
+            if expected_tool == "source_root_judgment":
+                result = (
+                    "Source Root Judgment\n"
+                    "- verdict: gap_confirmed\n"
+                    "- ok: True\n"
+                    f"- branch: {branch.branch_id}\n"
+                )
+            else:
+                result = {"ok": True, "evidence": task.title}
+            work_tree.record_task_evidence(
+                branch_id=branch.branch_id,
+                task_id=task.task_id,
+                tool_name=expected_tool,
+                tool_args=list((task.meta or {}).get("tool_args") or []),
+                result=result,
+            )
+            work_tree.mark_task_complete(task.task_id)
+            self.service.sync_status_snapshot(status_payload)
+            if expected_tool == "source_root_judgment":
+                break
+
+        open_tasks = [
+            task for task in work_tree.list_branch_tasks(branch.branch_id)
+            if task.status not in {work_tree.TaskStatus.COMPLETE, work_tree.TaskStatus.DROPPED}
+        ]
+        self.assertEqual(len(open_tasks), 1)
+        self.assertEqual(open_tasks[0].title, "Hold source-root branch for operator judgment")
+        self.assertEqual(open_tasks[0].status, work_tree.TaskStatus.BLOCKED)
+        self.assertEqual(
+            (open_tasks[0].meta or {}).get("blocked_reason"),
+            SOURCE_ROOT_SEQUENCE_EXHAUSTED_HOLD_REASON,
+        )
+
+        held_task_id = open_tasks[0].task_id
+        self.service.sync_status_snapshot(status_payload)
+        open_tasks = [
+            task for task in work_tree.list_branch_tasks(branch.branch_id)
+            if task.status not in {work_tree.TaskStatus.COMPLETE, work_tree.TaskStatus.DROPPED}
+        ]
+        self.assertEqual(len(open_tasks), 1)
+        self.assertEqual(open_tasks[0].task_id, held_task_id)
+        self.assertEqual(open_tasks[0].title, "Hold source-root branch for operator judgment")
 
     def test_source_root_sequence_routes_failed_evidence_to_judgment(self) -> None:
         status_payload = {

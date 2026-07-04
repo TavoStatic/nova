@@ -61,6 +61,7 @@ SOURCE_ROOT_JUDGMENT_TASK_TITLE = "Synthesize source-root judgment from collecte
 SOURCE_ROOT_JUDGMENT_TOOL = "source_root_judgment"
 SOURCE_ROOT_FAILED_EVIDENCE_HOLD_TITLE = "Hold source-root branch for operator/tool failure judgment"
 SOURCE_ROOT_FAILED_EVIDENCE_HOLD_REASON = "source_root_failed_evidence_operator_judgment_required"
+SOURCE_ROOT_SEQUENCE_EXHAUSTED_HOLD_REASON = "source_root_sequence_exhausted_gap_persists"
 
 _SOURCE_ROOT_SIGNAL_SOURCES = frozenset(
     source
@@ -3997,6 +3998,12 @@ def _release_readiness_signal_from_status(status_payload: dict[str, Any]) -> dic
             "preferred_tool": "read",
             "tool_args": [validation_seed_path],
         })
+    if readiness_state == "needs-verification":
+        task_sequence.append({
+            "title": "Run release validation profile from current artifact",
+            "allowed_tools": ["release_validation_run"],
+            "preferred_tool": "release_validation_run",
+        })
     if readiness_state == "needs-promotion":
         if not bool(release.get("latest_validation_record_complete", False)):
             task_sequence.append({
@@ -4096,7 +4103,7 @@ def _release_readiness_signal_from_status(status_payload: dict[str, Any]) -> dic
         else ["read", "find", "system_check", "release_validation_run", "release_promotion_judgment", "release_record_validation_outcome"],
         "preferred_tool": "release_rebuild_verify"
         if readiness_state == "source-changed-after-build"
-        else ("release_validation_run" if readiness_state == "needs-promotion" else "read"),
+        else ("release_validation_run" if readiness_state in {"needs-promotion", "needs-verification"} else "read"),
         "next_task": next_task,
         "task_sequence": task_sequence,
         "blocked_task": blocked_task,
@@ -5858,6 +5865,52 @@ class WorkTreeSignalIngestionService:
                 str(getattr(task.status, "value", task.status) or "").strip().lower() == "blocked"
                 for task in open_tasks
             )
+            if open_tasks and sequence_configured:
+                open_title = str(getattr(open_tasks[0], "title", "") or "").strip()
+                stale_satisfied_item: dict[str, Any] | None = None
+                if open_title:
+                    for item in list(normalized.get("task_sequence") or []):
+                        if not isinstance(item, dict):
+                            continue
+                        if str(item.get("title") or "").strip() != open_title:
+                            continue
+                        if _sequence_item_satisfied(branch.branch_id, item):
+                            stale_satisfied_item = item
+                        break
+                if stale_satisfied_item is not None:
+                    for task in open_tasks:
+                        task_title = str(getattr(task, "title", "") or "").strip()
+                        task_state = str(getattr(task.status, "value", task.status) or "").strip().lower()
+                        if task_state in {"blocked"}:
+                            continue
+                        if task_title != open_title:
+                            continue
+                        work_tree.mark_task_dropped(
+                            task.task_id,
+                            reason=f"duplicate_satisfied_sequence_task:{open_title}",
+                        )
+                    open_tasks = [
+                        task
+                        for task in work_tree.list_branch_tasks(branch.branch_id)
+                        if str(getattr(task.status, "value", task.status) or "").strip().lower() not in {"complete", "dropped"}
+                    ]
+                    blocked_open_tasks = bool(open_tasks) and all(
+                        str(getattr(task.status, "value", task.status) or "").strip().lower() == "blocked"
+                        for task in open_tasks
+                    )
+                    sequence_task = _next_sequence_task(branch.branch_id, normalized)
+                    if sequence_task:
+                        task_text = str(sequence_task.get("title") or "").strip()
+                        task_allowed_tools = [
+                            str(tool or "").strip()
+                            for tool in list(sequence_task.get("allowed_tools") or [])
+                            if str(tool or "").strip()
+                        ] or task_allowed_tools
+                        task_preferred_tool = str(sequence_task.get("preferred_tool") or "").strip() or task_preferred_tool
+                    else:
+                        task_text = ""
+                        task_allowed_tools = []
+                        task_preferred_tool = ""
             if sequence_configured and _sequence_has_tool(normalized, SOURCE_ROOT_JUDGMENT_TOOL):
                 if _recover_source_root_failed_evidence_hold(branch, normalized):
                     open_tasks = [
@@ -5998,16 +6051,25 @@ class WorkTreeSignalIngestionService:
                 and str(branch.resolution_state or "").strip().lower() == "open"
                 and _sequence_has_tool(normalized, SOURCE_ROOT_JUDGMENT_TOOL)
                 and judgment_already_complete
+                and not any(
+                    _is_source_root_failed_evidence_hold_task(task)
+                    for task in work_tree.list_branch_tasks(branch.branch_id)
+                    if str(getattr(getattr(task, "status", None), "value", getattr(task, "status", "")) or "").strip().lower()
+                    not in {"complete", "dropped"}
+                )
             ):
-                sequence_task = _first_sequence_task(normalized)
-                if sequence_task:
-                    task_text = str(sequence_task.get("title") or "").strip()
-                    task_allowed_tools = [
-                        str(tool or "").strip()
-                        for tool in list(sequence_task.get("allowed_tools") or [])
-                        if str(tool or "").strip()
-                    ] or task_allowed_tools
-                    task_preferred_tool = str(sequence_task.get("preferred_tool") or "").strip() or task_preferred_tool
+                blocked = work_tree.add_task_to_branch(
+                    branch.branch_id,
+                    "Hold source-root branch for operator judgment",
+                    meta={"blocked_reason": SOURCE_ROOT_SEQUENCE_EXHAUSTED_HOLD_REASON},
+                )
+                work_tree.mark_task_blocked(blocked.task_id, SOURCE_ROOT_SEQUENCE_EXHAUSTED_HOLD_REASON)
+                open_tasks = [blocked]
+                blocked_open_tasks = True
+                sequence_task = {}
+                task_text = ""
+                task_allowed_tools = []
+                task_preferred_tool = ""
             realign_blocked_sequence = source_name == "subconscious" or (
                 source_name == "memory_identity"
                 and str((normalized.get("payload") or {}).get("memory_bootstrap_origin", {}).get("status") or "").strip().lower() == "ready"
