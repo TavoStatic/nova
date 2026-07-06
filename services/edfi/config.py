@@ -33,6 +33,7 @@ class ConnectionConfig:
     verify_ssl: bool = True
     ca_bundle_path: str = ""
     token_auth_mode: str = "auto"
+    district_lea_id: str = ""
 
     def normalized_base_url(self) -> str:
         return str(self.base_url or "").strip().rstrip("/")
@@ -186,6 +187,7 @@ def connection_config_from_dict(data: dict[str, Any], *, connection_id: str = ""
         verify_ssl=bool(payload.get("verify_ssl", True)),
         ca_bundle_path=str(payload.get("ca_bundle_path") or "").strip(),
         token_auth_mode=str(payload.get("token_auth_mode") or "auto").strip().lower() or "auto",
+        district_lea_id=str(payload.get("district_lea_id") or "").strip(),
     )
 
 

@@ -39,6 +39,19 @@ def _build_parser() -> argparse.ArgumentParser:
     get_cmd.add_argument("resource", help="Resource path, e.g. ed-fi/schools or schools.")
     get_cmd.add_argument("--limit", type=int, default=25)
     get_cmd.add_argument("--offset", type=int, default=0)
+    get_cmd.add_argument(
+        "--no-district-scope",
+        action="store_true",
+        help="Do not apply district_lea_id filter from connection config.",
+    )
+
+    for preset in ("schools", "students", "student_school_associations"):
+        preset_cmd = sub.choices[preset]
+        preset_cmd.add_argument(
+            "--no-district-scope",
+            action="store_true",
+            help="Do not apply district_lea_id filter from connection config.",
+        )
     return parser
 
 
@@ -62,6 +75,7 @@ def main(argv: list[str] | None = None) -> int:
             args.resource,
             limit=args.limit,
             offset=args.offset,
+            apply_district_scope=not bool(getattr(args, "no_district_scope", False)),
         )
     else:
         result = read_preset(
@@ -69,6 +83,7 @@ def main(argv: list[str] | None = None) -> int:
             args.command,
             limit=args.limit,
             offset=args.offset,
+            apply_district_scope=not bool(getattr(args, "no_district_scope", False)),
         )
 
     if args.json:

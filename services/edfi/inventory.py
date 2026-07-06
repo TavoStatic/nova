@@ -9,6 +9,7 @@ from services.edfi.config import (
     save_capability_profile,
 )
 from services.edfi.discovery import _resource_names_from_dependencies
+from services.edfi.district_scope import district_lea_filter_clause, merge_filter_params
 from services.edfi.resources import DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE, get_page
 
 MILESTONE_ID = "NOVA-EDFI-002"
@@ -40,12 +41,15 @@ def profile_summary(connection_id: str) -> dict[str, Any]:
             "error": "No capability profile found. Run run_edfi_profile.py first.",
         }
 
+    config = load_connection_config(connection_id)
     discovery = profile.get("discovery") if isinstance(profile.get("discovery"), dict) else {}
     resources = _resource_names(discovery)
     resource_count = int(discovery.get("resource_count") or len(resources) or 0)
     return {
         "ok": True,
         "connection_id": connection_id,
+        "district_lea_id": str(config.district_lea_id if config else ""),
+        "district_scope_enabled": bool(config and config.district_lea_id),
         "base_url": str(profile.get("base_url") or ""),
         "health": str(profile.get("health") or "unknown"),
         "api_version": str(profile.get("api_version") or "unknown"),
@@ -172,6 +176,8 @@ def read_resource(
     *,
     limit: int = DEFAULT_PAGE_SIZE,
     offset: int = 0,
+    filter_params: dict[str, Any] | None = None,
+    apply_district_scope: bool = True,
 ) -> dict[str, Any]:
     name = str(resource or "").strip()
     if not name:
@@ -182,12 +188,35 @@ def read_resource(
         }
 
     effective_limit = min(max(1, int(limit or DEFAULT_PAGE_SIZE)), MAX_PAGE_SIZE)
-    client = build_client(connection_id)
+    config = load_connection_config(connection_id)
+    if config is None:
+        return {
+            "ok": False,
+            "error_code": "connection_credentials_required",
+            "error": "Connection config not found.",
+        }
+    client = EdFiClient(config)
     resolved = _resolve_resource_name(name)
-    page = get_page(client, resolved, limit=effective_limit, offset=max(0, int(offset or 0)), audit=True)
+    params = dict(filter_params or {})
+    district_lea_id = ""
+    if apply_district_scope and config.district_lea_id:
+        district_lea_id = str(config.district_lea_id).strip()
+        clause = district_lea_filter_clause(resolved, district_lea_id)
+        params = merge_filter_params(params, clause)
+    page = get_page(
+        client,
+        resolved,
+        limit=effective_limit,
+        offset=max(0, int(offset or 0)),
+        filter_params=params or None,
+        audit=True,
+    )
     return {
         "ok": page.ok,
         "connection_id": connection_id,
+        "district_lea_id": district_lea_id,
+        "district_scope_applied": bool(district_lea_id),
+        "filter": str(params.get("$filter") or ""),
         "resource": resolved,
         "url": page.url,
         "offset": page.offset,
@@ -208,6 +237,7 @@ def read_preset(
     *,
     limit: int = DEFAULT_PAGE_SIZE,
     offset: int = 0,
+    apply_district_scope: bool = True,
 ) -> dict[str, Any]:
     key = str(preset or "").strip().lower()
     candidates = EXPLORE_PRESETS.get(key)
@@ -221,7 +251,13 @@ def read_preset(
 
     last_result: dict[str, Any] | None = None
     for candidate in candidates:
-        result = read_resource(connection_id, candidate, limit=limit, offset=offset)
+        result = read_resource(
+            connection_id,
+            candidate,
+            limit=limit,
+            offset=offset,
+            apply_district_scope=apply_district_scope,
+        )
         last_result = result
         if result.get("ok"):
             result["preset"] = key

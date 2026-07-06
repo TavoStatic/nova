@@ -92,6 +92,11 @@ python scripts/run_edfi_explore.py get ed-fi/students --limit 5 --json
 
 Nova tool surface: `tool_edfi_explore(action="schools", limit=10)` via registered `edfi_explore` tool.
 
+TEA statewide IODS returns **all Texas districts** unless scoped. Set `district_lea_id` in
+`runtime/edfi/connections/<id>/local_config.json` (BISD: `31901`, same as PEIMS `031901` without
+the leading zero). Reads then apply
+`localEducationAgencyReference/localEducationAgencyId eq <id>` automatically.
+
 ## Usage (Monday probe CLI)
 
 ```bash
