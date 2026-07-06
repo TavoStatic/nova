@@ -13,6 +13,8 @@ def classify_http_status(status_code: int) -> str:
         return "edfi_auth_forbidden"
     if code == 404:
         return "edfi_not_found"
+    if code == 429:
+        return "edfi_rate_limited"
     if code >= 500:
         return "edfi_server_error"
     if code >= 400:

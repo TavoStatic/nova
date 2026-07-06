@@ -36,37 +36,41 @@ class DiscoveryResult:
 def discover_metadata(client: EdFiClient) -> DiscoveryResult:
     config = client.config
     metadata = client.get(config.metadata_url())
-    if not metadata.ok:
+    if metadata.ok:
+        resources, namespaces, api_version, data_model_version = _parse_metadata_body(metadata.body)
+        sample = client.get(config.sample_resource, params={"limit": 1})
         return DiscoveryResult(
-            ok=False,
+            ok=True,
             api_root=config.api_root,
             metadata_url=config.metadata_url(),
+            resource_count=len(resources),
+            resources=resources,
+            namespaces=namespaces,
+            api_version=api_version,
+            data_model_version=data_model_version,
             latency_ms=metadata.latency_ms,
             status_code=metadata.status_code,
-            error=metadata.error or "metadata_request_failed",
-            error_code=metadata.error_code or "edfi_metadata_failed",
-            metadata_ok=False,
-            sample_ok=False,
+            metadata_ok=True,
+            sample_ok=bool(sample.ok),
             metadata_response=metadata,
+            sample_response=sample,
         )
 
-    resources, namespaces, api_version, data_model_version = _parse_metadata_body(metadata.body)
-    sample = client.get(config.sample_resource, params={"limit": 1})
+    fallback = _discover_from_root_manifest(client, metadata)
+    if fallback is not None:
+        return fallback
+
     return DiscoveryResult(
-        ok=True,
+        ok=False,
         api_root=config.api_root,
         metadata_url=config.metadata_url(),
-        resource_count=len(resources),
-        resources=resources,
-        namespaces=namespaces,
-        api_version=api_version,
-        data_model_version=data_model_version,
         latency_ms=metadata.latency_ms,
         status_code=metadata.status_code,
-        metadata_ok=True,
-        sample_ok=bool(sample.ok),
+        error=metadata.error or "metadata_request_failed",
+        error_code=metadata.error_code or "edfi_metadata_failed",
+        metadata_ok=False,
+        sample_ok=False,
         metadata_response=metadata,
-        sample_response=sample,
     )
 
 
@@ -149,6 +153,114 @@ def _discovery_stages(discovery: DiscoveryResult, config: ConnectionConfig) -> d
             "error_code": sample.error_code if sample is not None else "",
         }
     return stages
+
+
+def _discover_from_root_manifest(
+    client: EdFiClient,
+    primary_metadata: EdFiResponse,
+) -> DiscoveryResult | None:
+    config = client.config
+    root = client.get(config.normalized_base_url())
+    if not root.ok or not isinstance(root.body, dict):
+        return None
+
+    manifest = root.body
+    urls = manifest.get("urls") if isinstance(manifest.get("urls"), dict) else {}
+    dependencies_url = str((urls or {}).get("dependencies") or "").strip()
+    data_api = str((urls or {}).get("dataManagementApi") or "").strip()
+    if not dependencies_url:
+        return None
+
+    dependencies = client.get(dependencies_url)
+    if not dependencies.ok:
+        return None
+
+    resources = _resource_names_from_dependencies(dependencies.body)
+    namespaces = _namespaces_from_resource_paths(resources)
+    api_version = str(manifest.get("version") or manifest.get("informationalVersion") or "").strip()
+    data_model_version = _data_model_version_from_manifest(manifest)
+    sample_path = _pick_sample_resource_path(resources, config.sample_resource)
+    sample = (
+        client.get(_join_data_api_url(data_api, sample_path), params={"limit": 1})
+        if sample_path and data_api
+        else EdFiResponse(ok=False, error="sample_resource_unavailable", error_code="edfi_sample_unavailable")
+    )
+    latency_ms = int(primary_metadata.latency_ms or 0) + int(root.latency_ms or 0) + int(dependencies.latency_ms or 0)
+    return DiscoveryResult(
+        ok=True,
+        api_root=config.api_root,
+        metadata_url=dependencies_url,
+        resource_count=len(resources),
+        resources=resources,
+        namespaces=namespaces,
+        api_version=api_version,
+        data_model_version=data_model_version,
+        latency_ms=latency_ms,
+        status_code=int(dependencies.status_code or 0),
+        metadata_ok=True,
+        sample_ok=bool(sample.ok),
+        metadata_response=dependencies,
+        sample_response=sample,
+    )
+
+
+def _resource_names_from_dependencies(body: Any) -> list[str]:
+    names: list[str] = []
+    seen: set[str] = set()
+    if not isinstance(body, list):
+        return names
+    for item in body:
+        if not isinstance(item, dict):
+            continue
+        path = str(item.get("resource") or "").strip().strip("/")
+        if not path or path in seen:
+            continue
+        seen.add(path)
+        names.append(path)
+    return names
+
+
+def _namespaces_from_resource_paths(resources: list[str]) -> list[str]:
+    namespaces: list[str] = []
+    seen: set[str] = set()
+    for resource in resources:
+        head = str(resource or "").split("/", 1)[0].strip()
+        if not head or head in seen:
+            continue
+        seen.add(head)
+        namespaces.append(head)
+    return namespaces
+
+
+def _data_model_version_from_manifest(manifest: dict[str, Any]) -> str:
+    models = manifest.get("dataModels")
+    if not isinstance(models, list):
+        return ""
+    for item in models:
+        if not isinstance(item, dict):
+            continue
+        if str(item.get("name") or "").strip().lower() == "ed-fi":
+            return str(item.get("version") or "").strip()
+    return ""
+
+
+def _pick_sample_resource_path(resources: list[str], preferred: str) -> str:
+    want = str(preferred or "schools").strip().strip("/").lower()
+    for resource in resources:
+        tail = str(resource or "").strip("/").split("/")[-1].lower()
+        if tail == want:
+            return str(resource).strip("/")
+    for resource in resources:
+        tail = str(resource or "").strip("/").split("/")[-1].lower()
+        if tail.endswith("schools"):
+            return str(resource).strip("/")
+    return str(resources[0]).strip("/") if resources else ""
+
+
+def _join_data_api_url(data_api: str, resource_path: str) -> str:
+    base = str(data_api or "").strip().rstrip("/")
+    path = str(resource_path or "").strip().strip("/")
+    return f"{base}/{path}" if base and path else ""
 
 
 def _parse_metadata_body(body: Any) -> tuple[list[str], list[str], str, str]:

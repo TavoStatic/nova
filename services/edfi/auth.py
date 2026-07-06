@@ -39,19 +39,19 @@ class EdFiAuthService:
     ) -> AuthResult:
         started = time.perf_counter()
         token_endpoint = config.token_url()
-        payload = {
-            "grant_type": "client_credentials",
-            "client_id": config.client_id,
-            "client_secret": config.client_secret,
-        }
         try:
-            response = self._session.post(
-                token_endpoint,
-                data=payload,
-                timeout=config.timeout_sec,
-                headers={"Accept": "application/json"},
-                verify=config.ssl_verify(),
-            )
+            response = self._request_token(config, token_endpoint)
+            if (
+                not response.ok
+                and response.status_code == 400
+                and config.token_auth_mode in {"", "auto"}
+                and _looks_like_invalid_client_auth(response.text)
+            ):
+                response = self._request_token(
+                    config,
+                    token_endpoint,
+                    use_basic_auth=True,
+                )
             latency_ms = int((time.perf_counter() - started) * 1000)
             status_code = int(response.status_code)
             if status_code >= 400:
@@ -113,6 +113,29 @@ class EdFiAuthService:
                 token_endpoint=token_endpoint,
             )
 
+    def _request_token(
+        self,
+        config: ConnectionConfig,
+        token_endpoint: str,
+        *,
+        use_basic_auth: bool | None = None,
+    ) -> requests.Response:
+        mode = str(config.token_auth_mode or "auto").strip().lower()
+        basic = use_basic_auth if use_basic_auth is not None else mode == "basic"
+        payload: dict[str, str] = {"grant_type": "client_credentials"}
+        if not basic:
+            payload["client_id"] = config.client_id
+            payload["client_secret"] = config.client_secret
+        kwargs: dict[str, Any] = {
+            "data": payload,
+            "timeout": config.timeout_sec,
+            "headers": {"Accept": "application/json"},
+            "verify": config.ssl_verify(),
+        }
+        if basic:
+            kwargs["auth"] = (config.client_id, config.client_secret)
+        return self._session.post(token_endpoint, **kwargs)
+
     def get_authorization_header(
         self,
         config: ConnectionConfig,
@@ -140,3 +163,8 @@ class EdFiAuthService:
 def _compact_error(text: str, *, limit: int = 220) -> str:
     compact = " ".join(str(text or "").split())
     return compact[:limit]
+
+
+def _looks_like_invalid_client_auth(text: str) -> bool:
+    lowered = str(text or "").lower()
+    return "invalid_request" in lowered or "invalid_client" in lowered

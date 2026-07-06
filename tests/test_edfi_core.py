@@ -30,6 +30,10 @@ class _FakeResponse:
         self.text = text or json.dumps(payload or {})
 
     @property
+    def ok(self) -> bool:
+        return int(self.status_code) < 400
+
+    @property
     def content(self) -> bytes:
         return self.text.encode("utf-8")
 
@@ -261,6 +265,77 @@ class TestEdFiCore(unittest.TestCase):
             self.assertTrue(stages["metadata"]["ok"])
             self.assertFalse(stages["sample_get"]["ok"])
             self.assertEqual(stages["sample_get"]["error_code"], "edfi_auth_forbidden")
+
+    def test_discover_metadata_falls_back_to_root_dependencies(self) -> None:
+        config = ConnectionConfig(
+            connection_id="district-main",
+            base_url="https://district.ed-fi.org",
+            client_id="client",
+            client_secret="secret",
+        )
+        client = EdFiClient(config, auth_service=mock.Mock(), session=mock.Mock())
+        client.auth.get_authorization_header.return_value = ("Bearer token", mock.Mock(ok=True))
+
+        metadata_404 = mock.Mock(
+            ok=False,
+            status_code=404,
+            latency_ms=10,
+            error="not found",
+            error_code="edfi_not_found",
+            body=None,
+        )
+        root_200 = mock.Mock(
+            ok=True,
+            status_code=200,
+            latency_ms=12,
+            body={
+                "version": "7.1",
+                "dataModels": [{"name": "Ed-Fi", "version": "4.0.0"}],
+                "urls": {
+                    "dependencies": "https://district.ed-fi.org/metadata/data/v3/dependencies",
+                    "dataManagementApi": "https://district.ed-fi.org/data/v3/",
+                },
+            },
+        )
+        deps_200 = mock.Mock(
+            ok=True,
+            status_code=200,
+            latency_ms=15,
+            body=[{"resource": "/ed-fi/schools"}, {"resource": "/ed-fi/students"}],
+        )
+        sample_200 = mock.Mock(ok=True, status_code=200, latency_ms=20, body=[])
+
+        with mock.patch.object(client, "get", side_effect=[metadata_404, root_200, deps_200, sample_200]) as get_mock:
+            from services.edfi.discovery import discover_metadata
+
+            result = discover_metadata(client)
+
+        self.assertTrue(result.ok)
+        self.assertEqual(result.resource_count, 2)
+        self.assertEqual(result.api_version, "7.1")
+        self.assertEqual(result.data_model_version, "4.0.0")
+        self.assertIn("ed-fi/schools", result.resources)
+        self.assertTrue(result.sample_ok)
+        self.assertEqual(get_mock.call_args_list[-1].args[0], "https://district.ed-fi.org/data/v3/ed-fi/schools")
+
+    def test_fetch_token_retries_with_basic_auth_on_invalid_request(self) -> None:
+        config = ConnectionConfig(
+            connection_id="district-main",
+            base_url="https://odsprod.tea.texas.gov/odsedfiapi2026",
+            client_id="client",
+            client_secret="secret",
+        )
+        service = EdFiAuthService(session=mock.Mock())
+        bad = _FakeResponse(400, text='{"error":"invalid_request"}')
+        good = _FakeResponse(200, {"access_token": "token-abc", "expires_in": 1800})
+        service._session.post.side_effect = [bad, good]
+        result = service.fetch_token(config)
+        self.assertTrue(result.ok)
+        self.assertEqual(result.access_token, "token-abc")
+        self.assertEqual(service._session.post.call_count, 2)
+        second_call = service._session.post.call_args_list[1]
+        self.assertEqual(second_call.kwargs.get("auth"), ("client", "secret"))
+        self.assertEqual(second_call.kwargs["data"], {"grant_type": "client_credentials"})
 
     def test_auth_transport_error_classification(self) -> None:
         service = EdFiAuthService(session=mock.Mock())
