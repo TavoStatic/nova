@@ -57,6 +57,11 @@ VOICE_RUNTIME_READ_TASK_TITLE = "Read voice runtime dependency loader and entryp
 AUTONOMY_MAINTENANCE_LOG_TASK_TITLE = "Read runtime/autonomy_maintenance.log around the latest maintenance error"
 TOOL_EVENTS_READ_TASK_TITLE = "Read runtime/tool_events.jsonl recent tool execution events"
 OS_CAPABILITY_LEDGER_READ_TASK_TITLE = "Read runtime/os_capability_ledger.jsonl recent OS capability evidence"
+EDFI_CAPABILITY_PROFILE_READ_TASK_TITLE = "Read saved Ed-Fi capability profile evidence"
+EDFI_CAPABILITY_PROFILE_READ_HOLD_TITLE = (
+    "Hold Ed-Fi profile branch until saved capability profile read evidence is verified"
+)
+EDFI_CAPABILITY_PROFILE_READ_HOLD_REASON = "edfi_profile_read_evidence_required"
 SOURCE_ROOT_JUDGMENT_TASK_TITLE = "Synthesize source-root judgment from collected evidence"
 SOURCE_ROOT_JUDGMENT_TOOL = "source_root_judgment"
 SOURCE_ROOT_FAILED_EVIDENCE_HOLD_TITLE = "Hold source-root branch for operator/tool failure judgment"
@@ -2242,6 +2247,256 @@ def _source_wiring_probe_gap_evidence_task(first_gap: str) -> dict[str, Any]:
     )
 
 
+def _edfi_capability_profile_evidence_task(profile_path: str) -> dict[str, Any]:
+    path = str(profile_path or "runtime/edfi/profiles/district-main.json").strip()
+    return {
+        "title": EDFI_CAPABILITY_PROFILE_READ_TASK_TITLE,
+        "allowed_tools": ["read"],
+        "preferred_tool": "read",
+        "tool_args": [path],
+    }
+
+
+def _edfi_capability_profile_primary_read_item() -> dict[str, Any]:
+    return {
+        "title": EDFI_CAPABILITY_PROFILE_READ_TASK_TITLE,
+        "allowed_tools": ["read"],
+        "preferred_tool": "read",
+    }
+
+
+def _edfi_capability_profile_read_evidence_satisfied(
+    branch_id: str,
+    *,
+    expected_path: str = "",
+) -> bool:
+    from services.edfi.profile_evidence import DEFAULT_PROFILE_EVIDENCE_PATH, profile_read_evidence_valid
+
+    item = _edfi_capability_profile_primary_read_item()
+    title = str(item.get("title") or "").strip()
+    if not title:
+        return False
+    profile_path = str(expected_path or DEFAULT_PROFILE_EVIDENCE_PATH).strip() or DEFAULT_PROFILE_EVIDENCE_PATH
+    matching_tasks = [
+        task
+        for task in work_tree.list_branch_tasks(branch_id)
+        if str(getattr(task, "title", "") or "").strip() == title
+    ]
+    if not matching_tasks:
+        return False
+    complete_task_ids = {
+        str(getattr(task, "task_id", "") or "").strip()
+        for task in matching_tasks
+        if str(getattr(getattr(task, "status", ""), "value", getattr(task, "status", "")) or "").strip().lower() == "complete"
+    }
+    if not complete_task_ids:
+        return False
+    try:
+        evidence_rows = work_tree.list_branch_evidence(branch_id, limit=200)
+    except Exception:
+        evidence_rows = []
+    return any(
+        str(row.get("task_id") or "").strip() in complete_task_ids
+        and profile_read_evidence_valid(row, expected_path=profile_path)
+        for row in evidence_rows
+        if isinstance(row, dict)
+    )
+
+
+def _hold_edfi_capability_profile_branch_until_read_evidence(*, branch: Any, note: str, now: datetime) -> bool:
+    hold_reason = EDFI_CAPABILITY_PROFILE_READ_HOLD_REASON
+    hold_title = EDFI_CAPABILITY_PROFILE_READ_HOLD_TITLE
+    changed = False
+
+    open_tasks = []
+    for task in work_tree.list_branch_tasks(branch.branch_id):
+        status = str(getattr(getattr(task, "status", None), "value", getattr(task, "status", "")) or "").strip().lower()
+        if status in {"complete", "dropped"}:
+            continue
+        open_tasks.append(task)
+
+    if not open_tasks:
+        task = work_tree.add_task_to_branch(
+            branch.branch_id,
+            hold_title,
+            meta={
+                "inactive_signal_observation": True,
+                "blocked_reason": hold_reason,
+                "block_reason": hold_reason,
+                "inactive_signal_reason": note,
+            },
+        )
+        open_tasks.append(task)
+        changed = True
+
+    for task in open_tasks:
+        status = str(getattr(getattr(task, "status", None), "value", getattr(task, "status", "")) or "").strip().lower()
+        meta = dict(getattr(task, "meta", {}) or {})
+        if meta.get("inactive_signal_observation") and str(getattr(task, "title", "") or "") != hold_title:
+            work_tree.update_blocked_task(task.task_id, title=hold_title, reason=hold_reason)
+            changed = True
+            continue
+        if status != "blocked" or meta.get("blocked_reason") != hold_reason or meta.get("block_reason") != hold_reason:
+            work_tree.update_blocked_task(task.task_id, reason=hold_reason)
+            changed = True
+
+    if branch.status != BranchStatus.BLOCKED:
+        branch.status = BranchStatus.BLOCKED
+        changed = True
+    if str(getattr(branch, "resolution_state", "") or "").strip().lower() != "observing":
+        branch.resolution_state = "observing"
+        changed = True
+    if int(getattr(branch, "priority", 0) or 0) < 55:
+        branch.priority = 55
+        changed = True
+    if list(getattr(branch, "allowed_tools", []) or []):
+        branch.allowed_tools = []
+        changed = True
+    if getattr(branch, "preferred_tool", None):
+        branch.preferred_tool = None
+        changed = True
+
+    observation = (
+        f"Observation: {note} "
+        "Ed-Fi profile closure remains open until verified read evidence confirms the saved capability profile."
+    )
+    existing_notes = str(getattr(branch, "notes", "") or "").strip()
+    if observation and observation not in existing_notes:
+        branch.notes = f"{existing_notes}\n{observation}".strip() if existing_notes else observation
+        changed = True
+
+    if changed:
+        branch.last_seen_at = now
+        work_tree.touch_branch(branch.branch_id)
+    return changed
+
+
+def _edfi_capability_profile_signal_from_status(status_payload: dict[str, Any]) -> dict[str, Any] | None:
+    if not _has_edfi_capability_profile_surface(status_payload):
+        return None
+    profile = (
+        status_payload.get("edfi_capability_profile")
+        if isinstance(status_payload.get("edfi_capability_profile"), dict)
+        else {}
+    )
+    profile_ok = bool(status_payload.get("edfi_capability_profile_ok", profile.get("ok", False)))
+    profile_status = str(
+        status_payload.get("edfi_capability_profile_status") or profile.get("status") or ""
+    ).strip().lower()
+    profile_present = bool(status_payload.get("edfi_capability_profile_present", profile.get("present", False)))
+    auth_ok = bool(status_payload.get("edfi_capability_profile_auth_ok", profile.get("auth_ok", False)))
+    resource_count = _as_int(
+        status_payload.get("edfi_capability_profile_resource_count", profile.get("resource_count", 0)),
+        0,
+    )
+    issue_count = _as_int(
+        status_payload.get("edfi_capability_profile_issue_count", profile.get("issue_count", 0)),
+        0,
+    )
+    issues = [
+        dict(item)
+        for item in list(profile.get("issues") or [])
+        if isinstance(item, dict)
+    ]
+    issue_codes = [
+        str(item.get("code") or "").strip()
+        for item in issues
+        if str(item.get("code") or "").strip()
+    ]
+    if profile_ok and profile_present and auth_ok and resource_count > 0 and issue_count <= 0:
+        return None
+
+    if not profile_present:
+        error_symbol = "edfi_profile_missing"
+        title = "Saved Ed-Fi capability profile is missing"
+        severity = "high"
+    elif not auth_ok:
+        error_symbol = "edfi_profile_auth_not_ok"
+        title = "Saved Ed-Fi capability profile reports auth failure"
+        severity = "high"
+    elif resource_count <= 0:
+        error_symbol = "edfi_profile_resources_empty"
+        title = "Saved Ed-Fi capability profile has no resources"
+        severity = "high"
+    elif profile_status in {"failure", "watch", "missing"}:
+        error_symbol = f"edfi_profile_{profile_status or 'unhealthy'}"
+        title = "Saved Ed-Fi capability profile is not healthy"
+        severity = "high" if profile_status == "failure" else "medium"
+    else:
+        error_symbol = "edfi_profile_evidence_gap"
+        title = "Ed-Fi capability profile evidence is incomplete"
+        severity = "medium"
+
+    profile_path = str(
+        status_payload.get("edfi_capability_profile_path")
+        or profile.get("profile_evidence_path")
+        or profile.get("profile_path")
+        or "runtime/edfi/profiles/district-main.json"
+    ).strip()
+    connection_id = str(
+        status_payload.get("edfi_capability_profile_connection_id")
+        or profile.get("connection_id")
+        or "district-main"
+    ).strip()
+
+    return {
+        "source": "edfi_capability_profile",
+        "signal_class": "governance_pressure",
+        "title": title,
+        "fingerprint": {
+            "class": "governance_pressure",
+            "surface": "edfi_capability_profile",
+            "error": error_symbol,
+            "symbol": connection_id or "district-main",
+        },
+        "payload": {
+            "edfi_capability_profile": dict(profile),
+            "edfi_capability_profile_ok": profile_ok,
+            "edfi_capability_profile_status": profile_status or "unknown",
+            "edfi_capability_profile_present": profile_present,
+            "edfi_capability_profile_connection_id": connection_id,
+            "edfi_capability_profile_resource_count": resource_count,
+            "edfi_capability_profile_discovered_at": _as_int(
+                status_payload.get("edfi_capability_profile_discovered_at", profile.get("discovered_at", 0)),
+                0,
+            ),
+            "edfi_capability_profile_auth_ok": auth_ok,
+            "edfi_capability_profile_issue_count": issue_count,
+            "edfi_capability_profile_issue_codes": issue_codes[:8],
+            "edfi_capability_profile_path": profile_path,
+            "edfi_capability_profile_namespaces": list(profile.get("namespaces") or [])[:12],
+            "edfi_capability_profile_sample_resources": list(profile.get("sample_resources") or [])[:24],
+            "evidence_source": "saved_capability_profile",
+            "live_api_required": False,
+            "profile_evidence_closure_required": True,
+            "rationale": (
+                "Nova's district data layer must be grounded in the saved Ed-Fi capability profile "
+                "before autonomy opens or closes Ed-Fi wiring work."
+            ),
+        },
+        "severity": severity,
+        "actionability": "safe_now",
+        "allowed_tools": ["read", "pipeline"],
+        "preferred_tool": "read",
+        "next_task": EDFI_CAPABILITY_PROFILE_READ_TASK_TITLE,
+        "task_sequence": [
+            _edfi_capability_profile_evidence_task(profile_path),
+            {
+                "title": "Read Ed-Fi profile evidence builder",
+                "allowed_tools": ["read"],
+                "preferred_tool": "read",
+                "tool_args": ["services/edfi/profile_evidence.py"],
+            },
+            {
+                "title": "Read BISD governed data lane manifest",
+                "allowed_tools": ["read"],
+                "preferred_tool": "read",
+                "tool_args": ["data_sources/edfi_bisd/pipeline.json"],
+            },
+        ],
+    }
+
+
 def _data_pipeline_evidence_task(blocked_rows: list[dict[str, Any]]) -> dict[str, Any]:
     pipeline_id = ""
     if blocked_rows:
@@ -3400,6 +3655,19 @@ def _has_data_pipeline_surface(status_payload: dict[str, Any]) -> bool:
             "data_pipeline_registry_ok",
             "data_pipeline_count",
             "data_pipeline_ids",
+        )
+    )
+
+
+def _has_edfi_capability_profile_surface(status_payload: dict[str, Any]) -> bool:
+    return any(
+        key in status_payload
+        for key in (
+            "edfi_capability_profile",
+            "edfi_capability_profile_ok",
+            "edfi_capability_profile_present",
+            "edfi_capability_profile_resource_count",
+            "edfi_capability_profile_path",
         )
     )
 
@@ -4697,6 +4965,9 @@ class WorkTreeSignalIngestionService:
         data_pipeline_signal = _data_pipeline_signal_from_status(status_payload)
         if data_pipeline_signal is not None:
             signals.append(data_pipeline_signal)
+        edfi_profile_signal = _edfi_capability_profile_signal_from_status(status_payload)
+        if edfi_profile_signal is not None:
+            signals.append(edfi_profile_signal)
         for signal in (
             _frontdoor_cli_signal_from_status(status_payload),
             _operator_control_signal_from_status(status_payload),
@@ -4938,6 +5209,8 @@ class WorkTreeSignalIngestionService:
                     reason="Data pipeline registry and active lanes report no current wiring blocker.",
                 )
             )
+        if _has_edfi_capability_profile_surface(status_payload) and _edfi_capability_profile_signal_from_status(status_payload) is None:
+            results.extend(self.resolve_edfi_capability_profile_branches())
         if _has_frontdoor_cli_surface(status_payload) and _frontdoor_cli_signal_from_status(status_payload) is None:
             results.extend(
                 self.resolve_signal_branches(
@@ -5502,6 +5775,82 @@ class WorkTreeSignalIngestionService:
             "branch_id": branch.branch_id,
             "reason": note,
         }
+
+    def resolve_edfi_capability_profile_branches(
+        self,
+        *,
+        reason: str = "Saved Ed-Fi capability profile evidence reports a healthy district data layer.",
+    ) -> list[dict[str, Any]]:
+        tree = self._find_signal_tree()
+        if tree is None:
+            return []
+
+        note = str(reason or "").strip() or "Saved Ed-Fi capability profile evidence reports a healthy district data layer."
+        hold_note = (
+            "Saved Ed-Fi capability profile status is healthy, but verified read evidence "
+            "on the profile path is still required before closure."
+        )
+        results: list[dict[str, Any]] = []
+        now = datetime.now()
+
+        for branch in work_tree.list_tree_branches(tree.tree_id):
+            if branch.branch_id == tree.root_branch_id:
+                continue
+            if str(getattr(branch, "work_class", "") or "").strip().lower() != "governance_pressure":
+                continue
+            if str(getattr(branch, "source_type", "") or "").strip().lower() != "edfi_capability_profile":
+                continue
+            resolution = str(getattr(branch, "resolution_state", "") or "").strip().lower()
+            if resolution in {"resolved", "retired"} and branch.status == BranchStatus.COMPLETE:
+                continue
+
+            branch_payload = dict(getattr(branch, "source_payload", {}) or {})
+            expected_profile_path = str(
+                branch_payload.get("edfi_capability_profile_path")
+                or branch_payload.get("profile_evidence_path")
+                or ""
+            ).strip()
+            if _edfi_capability_profile_read_evidence_satisfied(
+                branch.branch_id,
+                expected_path=expected_profile_path,
+            ):
+                for task in work_tree.list_branch_tasks(branch.branch_id):
+                    status = str(
+                        getattr(getattr(task, "status", None), "value", getattr(task, "status", "")) or ""
+                    ).strip().lower()
+                    if status in {"complete", "dropped"}:
+                        continue
+                    work_tree.mark_task_complete(task.task_id)
+                branch.status = BranchStatus.COMPLETE
+                branch.resolution_state = "resolved"
+                branch.priority = 0
+                branch.allowed_tools = []
+                branch.preferred_tool = None
+                branch.last_seen_at = now
+                existing_notes = str(branch.notes or "").strip()
+                if note and note not in existing_notes:
+                    branch.notes = f"{existing_notes}\nResolution: {note}".strip() if existing_notes else f"Resolution: {note}"
+                work_tree.touch_branch(branch.branch_id)
+                results.append(
+                    {
+                        "action": "resolved",
+                        "tree_id": tree.tree_id,
+                        "branch_id": branch.branch_id,
+                        "reason": note,
+                    }
+                )
+                continue
+
+            if _hold_edfi_capability_profile_branch_until_read_evidence(branch=branch, note=hold_note, now=now):
+                results.append(
+                    {
+                        "action": "observing",
+                        "tree_id": tree.tree_id,
+                        "branch_id": branch.branch_id,
+                        "reason": hold_note,
+                    }
+                )
+        return results
 
     def resolve_signal_branches(
         self,

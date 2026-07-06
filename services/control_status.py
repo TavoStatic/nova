@@ -5,6 +5,7 @@ import time
 from pathlib import Path
 
 from services.data_pipeline_registry import list_pipeline_summaries
+from services.edfi.profile_evidence import build_capability_profile_evidence
 from services.frontdoor_cli_parity import FRONTDOOR_CLI_PARITY_SERVICE
 from services.nova_grounded_self_report import GROUNDED_SELF_REPORT_SERVICE
 from services.regression_lanes import SOURCE_PROFILE_LANES
@@ -279,6 +280,21 @@ class ControlStatusService:
                 "pipelines": [],
                 "error": str(exc),
             }
+        try:
+            edfi_capability_profile = build_capability_profile_evidence()
+        except Exception as exc:
+            edfi_capability_profile = {
+                "ok": False,
+                "status": "failure",
+                "present": False,
+                "issue_count": 1,
+                "issues": [{
+                    "code": "edfi_profile_evidence_unreadable",
+                    "severity": "failure",
+                    "detail": str(exc),
+                }],
+                "profile_evidence_path": "runtime/edfi/profiles/district-main.json",
+            }
         requests_total, errors_total = metrics_totals
         if hasattr(core_module, "ollama_health_payload"):
             ollama_health = core_module.ollama_health_payload()
@@ -356,6 +372,7 @@ class ControlStatusService:
             pulse_payload=pulse_payload,
             update_now_pending=update_now_pending,
             data_pipelines=data_pipelines,
+            edfi_capability_profile=edfi_capability_profile,
             requests_total=requests_total,
             errors_total=errors_total,
             storage_watch_summary=storage_watch_summary_fn(),
@@ -454,6 +471,7 @@ class ControlStatusService:
         vision_status: dict | None = None,
         port_ownership: dict | None = None,
         data_pipelines: dict | None = None,
+        edfi_capability_profile: dict | None = None,
         installer_status: dict | None = None,
     ) -> dict:
         autonomy_payload = autonomy_maintenance.copy() if isinstance(autonomy_maintenance, dict) else {}
@@ -468,6 +486,11 @@ class ControlStatusService:
         voice_status_payload = dict(voice_status or {}) if isinstance(voice_status, dict) else {}
         vision_status_payload = dict(vision_status or {}) if isinstance(vision_status, dict) else {}
         data_pipeline_payload = dict(data_pipelines or {}) if isinstance(data_pipelines, dict) else {"ok": True, "pipelines": []}
+        edfi_profile_payload = (
+            dict(edfi_capability_profile or {})
+            if isinstance(edfi_capability_profile, dict)
+            else {"ok": False, "status": "missing", "present": False, "issue_count": 0, "issues": []}
+        )
         installer_status_payload = dict(installer_status or {}) if isinstance(installer_status, dict) else {}
         os_capability_payload = ControlStatusService._os_capability_control_payload(
             os_capability_summary,
@@ -629,6 +652,20 @@ class ControlStatusService:
                 for item in data_pipeline_rows
                 if str(item.get("pipeline_id") or "").strip()
             ],
+            "edfi_capability_profile": edfi_profile_payload,
+            "edfi_capability_profile_ok": bool(edfi_profile_payload.get("ok")),
+            "edfi_capability_profile_status": str(edfi_profile_payload.get("status") or ""),
+            "edfi_capability_profile_present": bool(edfi_profile_payload.get("present")),
+            "edfi_capability_profile_connection_id": str(edfi_profile_payload.get("connection_id") or ""),
+            "edfi_capability_profile_resource_count": int(edfi_profile_payload.get("resource_count") or 0),
+            "edfi_capability_profile_discovered_at": int(edfi_profile_payload.get("discovered_at") or 0),
+            "edfi_capability_profile_auth_ok": bool(edfi_profile_payload.get("auth_ok")),
+            "edfi_capability_profile_issue_count": int(edfi_profile_payload.get("issue_count") or 0),
+            "edfi_capability_profile_path": str(
+                edfi_profile_payload.get("profile_evidence_path")
+                or edfi_profile_payload.get("profile_path")
+                or ""
+            ),
         }
 
         runtime_worker = autonomy_payload.get("runtime_worker") if isinstance(autonomy_payload.get("runtime_worker"), dict) else {}
