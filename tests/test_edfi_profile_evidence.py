@@ -14,6 +14,7 @@ from services.edfi.profile_evidence import (
     audit_runtime_profile_contract,
     build_capability_profile_evidence,
     capability_profile_payload_valid,
+    get_district_layer_facts,
     profile_read_evidence_valid,
 )
 
@@ -137,6 +138,80 @@ class TestEdFiProfileEvidence(unittest.TestCase):
         self.assertEqual(schools.get("last_sync_at"), 1700000190)
         self.assertEqual(schools.get("last_pull_mechanism"), "data_api_min_change_version")
         self.assertEqual(schools.get("last_item_count"), 3)
+
+    def test_get_district_layer_facts_returns_only_safe_profile_fields(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            runtime = Path(td) / "runtime" / "edfi"
+            profiles = runtime / "profiles"
+            connections = runtime / "connections" / "district-main"
+            profiles.mkdir(parents=True)
+            connections.mkdir(parents=True)
+            profile = _healthy_profile_payload()
+            (profiles / "district-main.json").write_text(json.dumps(profile), encoding="utf-8")
+            (connections / "local_config.json").write_text(
+                json.dumps({"connection_id": "district-main", "district_lea_id": EXPECTED_BISD_LEA_ID}),
+                encoding="utf-8",
+            )
+            conn = mock.Mock(district_lea_id=EXPECTED_BISD_LEA_ID)
+            with mock.patch("services.edfi.profile_evidence.profile_path", return_value=profiles / "district-main.json"), mock.patch(
+                "services.edfi.profile_evidence.load_capability_profile",
+                return_value=profile,
+            ), mock.patch("services.edfi.profile_evidence.load_connection_config", return_value=conn), mock.patch(
+                "services.edfi.profile_evidence.load_sync_state",
+                return_value={},
+            ):
+                facts = get_district_layer_facts("district-main")
+
+        self.assertEqual(
+            set(facts.keys()),
+            {
+                "ok",
+                "connection_id",
+                "lea_id",
+                "resource_count",
+                "auth_ok",
+                "profile_path",
+                "discovered_at",
+                "schema",
+                "evidence_source",
+                "issues",
+            },
+        )
+        self.assertTrue(facts["ok"])
+        self.assertEqual(facts["connection_id"], "district-main")
+        self.assertEqual(facts["lea_id"], EXPECTED_BISD_LEA_ID)
+        self.assertEqual(facts["resource_count"], EXPECTED_BISD_RESOURCE_COUNT)
+        self.assertTrue(facts["auth_ok"])
+        self.assertEqual(facts["profile_path"], "runtime/edfi/profiles/district-main.json")
+        self.assertEqual(facts["discovered_at"], 1700000000)
+        self.assertEqual(facts["schema"], CAPABILITY_SCHEMA)
+        self.assertEqual(facts["evidence_source"], "saved_capability_profile")
+        self.assertEqual(facts["issues"], [])
+
+    def test_get_district_layer_facts_includes_optional_sync_status(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            runtime = Path(td) / "runtime" / "edfi"
+            profiles = runtime / "profiles"
+            profiles.mkdir(parents=True)
+            profile = _healthy_profile_payload()
+            (profiles / "district-main.json").write_text(json.dumps(profile), encoding="utf-8")
+            sync_state = {
+                "connection_id": "district-main",
+                "updated_at": 1700000200,
+                "resources": {"ed-fi/schools": {"last_change_version": 44}},
+            }
+            with mock.patch("services.edfi.profile_evidence.profile_path", return_value=profiles / "district-main.json"), mock.patch(
+                "services.edfi.profile_evidence.load_capability_profile",
+                return_value=profile,
+            ), mock.patch("services.edfi.profile_evidence.load_connection_config", return_value=None), mock.patch(
+                "services.edfi.profile_evidence.load_sync_state",
+                return_value=sync_state,
+            ):
+                facts = get_district_layer_facts("district-main")
+
+        self.assertIn("sync_status", facts)
+        self.assertTrue(facts["sync_status"]["present"])
+        self.assertEqual(facts["lea_id"], "")
 
     def test_capability_profile_payload_valid_requires_auth_resources_and_timestamp(self) -> None:
         ok, reason = capability_profile_payload_valid(_healthy_profile_payload())

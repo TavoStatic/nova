@@ -360,3 +360,28 @@ def build_capability_profile_evidence(
     if sync_status is not None:
         payload["sync_status"] = sync_status
     return payload
+
+
+def get_district_layer_facts(connection_id: str = DEFAULT_CONNECTION_ID) -> dict[str, Any]:
+    """Read-only district facts from saved profile and connection config (no live API)."""
+    resolved_id = str(connection_id or DEFAULT_CONNECTION_ID).strip() or DEFAULT_CONNECTION_ID
+    evidence = build_capability_profile_evidence(resolved_id)
+    conn = load_connection_config(resolved_id)
+    lea_id = str(getattr(conn, "district_lea_id", "") or "").strip()
+
+    facts: dict[str, Any] = {
+        "ok": bool(evidence.get("ok")),
+        "connection_id": resolved_id,
+        "lea_id": lea_id,
+        "resource_count": int(evidence.get("resource_count") or 0),
+        "auth_ok": bool(evidence.get("auth_ok")),
+        "profile_path": str(evidence.get("profile_evidence_path") or _relative_profile_path(resolved_id)),
+        "discovered_at": int(evidence.get("discovered_at") or 0),
+        "schema": str(evidence.get("schema") or ""),
+        "evidence_source": str(evidence.get("evidence_source") or ""),
+        "issues": list(evidence.get("issues") or [])[:8],
+    }
+    sync_status = evidence.get("sync_status")
+    if isinstance(sync_status, dict) and sync_status:
+        facts["sync_status"] = dict(sync_status)
+    return facts

@@ -29,6 +29,7 @@ from services.edfi.inventory import (
     refresh_resource_catalog,
 )
 from services.edfi.change_tracking import load_sync_state, pull_changes_since, sync_status
+from services.edfi.profile_evidence import get_district_layer_facts
 from services.edfi.resources import get_all, get_page
 
 __all__ = [
@@ -41,6 +42,7 @@ __all__ = [
     "build_client",
     "discover_metadata",
     "get_all",
+    "get_district_layer_facts",
     "get_page",
     "load_sync_state",
     "pull_changes_since",
