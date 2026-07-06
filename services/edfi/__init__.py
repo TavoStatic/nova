@@ -29,6 +29,7 @@ from services.edfi.inventory import (
     refresh_resource_catalog,
 )
 from services.edfi.change_tracking import load_sync_state, pull_changes_since, sync_status
+from services.edfi.core_readiness import read_edfi_core_readiness
 from services.edfi.profile_evidence import get_district_layer_facts
 from services.edfi.resources import get_all, get_page
 
@@ -50,6 +51,7 @@ __all__ = [
     "list_resources",
     "load_connection_config",
     "profile_summary",
+    "read_edfi_core_readiness",
     "read_preset",
     "read_resource",
     "refresh_resource_catalog",
