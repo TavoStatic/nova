@@ -97,7 +97,7 @@ def build_capability_profile(
             "ok": discovery.ok,
             "metadata_url": discovery.metadata_url,
             "resource_count": discovery.resource_count,
-            "resources": discovery.resources[:40],
+            "resources": discovery.resources[:500],
             "namespaces": discovery.namespaces[:20],
             "sample_resource": config.sample_resource,
             "sample_ok": bool(sample.ok) if sample is not None else False,

@@ -21,5 +21,6 @@
   "vision": "Nova can analyze screenshots or camera input",
   "speech_to_text": "Nova can transcribe voice input",
   "text_to_speech": "Nova can speak responses",
-  "leah_conversation_continuity": "Leah can maintain continuity across turns and sessions"
+  "leah_conversation_continuity": "Leah can maintain continuity across turns and sessions",
+  "edfi_explore": "Nova can browse a profiled Ed-Fi ODS inventory and read schools, students, and other discovered resources"
 }

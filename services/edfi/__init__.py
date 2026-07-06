@@ -20,6 +20,15 @@ from services.edfi.config import (
 from services.edfi.diagnostics import append_audit_event, build_config_error_health, build_health_payload
 from services.edfi.config import save_capability_profile
 from services.edfi.discovery import build_capability_profile, discover_metadata
+from services.edfi.inventory import (
+    build_client,
+    list_resources,
+    profile_summary,
+    read_preset,
+    read_resource,
+    refresh_resource_catalog,
+)
+from services.edfi.resources import get_all, get_page
 
 __all__ = [
     "CAPABILITY_SCHEMA",
@@ -28,8 +37,16 @@ __all__ = [
     "EdFiAuthService",
     "EdFiClient",
     "connection_config_from_dict",
+    "build_client",
     "discover_metadata",
+    "get_all",
+    "get_page",
+    "list_resources",
     "load_connection_config",
+    "profile_summary",
+    "read_preset",
+    "read_resource",
+    "refresh_resource_catalog",
     "profile_path",
     "run_self_profile",
     "runtime_roots",

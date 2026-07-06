@@ -51,6 +51,7 @@ def _runtime_scope():
         "tool_screen": lambda *args: ("screen", args),
         "tool_camera": lambda *args: ("camera", args),
         "tool_temporal_review": lambda *args: ("temporal_review", args),
+        "tool_edfi_explore": lambda *args: ("edfi_explore", args),
     }
 
 

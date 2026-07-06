@@ -3157,6 +3157,29 @@ def tool_temporal_review(payload: str = ""):
     return execute_registered_tool("temporal_review", args)
 
 
+def tool_edfi_explore(
+    action: str = "health",
+    connection_id: str = "district-main",
+    resource: str = "",
+    limit: int = 25,
+    offset: int = 0,
+    query: str = "",
+    namespace: str = "",
+):
+    return execute_registered_tool(
+        "edfi_explore",
+        {
+            "action": str(action or "health").strip().lower(),
+            "connection_id": str(connection_id or "district-main").strip() or "district-main",
+            "resource": str(resource or "").strip(),
+            "limit": int(limit or 25),
+            "offset": int(offset or 0),
+            "query": str(query or "").strip(),
+            "namespace": str(namespace or "").strip(),
+        },
+    )
+
+
 def tool_pipeline(command_text: str = "pipeline help"):
     return service_handle_pipeline_command(
         command_text,

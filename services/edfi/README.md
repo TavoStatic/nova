@@ -35,9 +35,11 @@ services/edfi/
   client.py          ← HTTP transport
   discovery.py       ← metadata + capability profile
   diagnostics.py     ← latency, errors, health payload
+  resources.py       ← governed paging reads (NOVA-EDFI-002)
+  inventory.py       ← profile browse + explore presets (Case A)
 ```
 
-Deferred to later milestones: `resources.py` (CRUD paging), `change_tracking.py` (delta sync), compatibility probe tooling.
+Deferred to later milestones: `change_tracking.py` (delta sync), governed data lane scaffold, compatibility probe tooling.
 
 ## Runtime artifacts
 
@@ -76,6 +78,19 @@ result = run_self_profile(
 # result["health"] — diagnostics payload
 # result["profile_path"] — saved capability profile
 ```
+
+## Milestone: NOVA-EDFI-002 (Case A — Explore / Inventory)
+
+Read-only browse of a profiled ODS:
+
+```bash
+python scripts/run_edfi_explore.py health --connection-id district-main --json
+python scripts/run_edfi_explore.py resources --query school --json
+python scripts/run_edfi_explore.py schools --limit 10 --json
+python scripts/run_edfi_explore.py get ed-fi/students --limit 5 --json
+```
+
+Nova tool surface: `tool_edfi_explore(action="schools", limit=10)` via registered `edfi_explore` tool.
 
 ## Usage (Monday probe CLI)
 
