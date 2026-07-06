@@ -126,6 +126,19 @@ class NovaWiringInventoryServiceTests(unittest.TestCase):
         self.assertIn("model_runtime", payload["signal_sources"])
         self.assertIn("os_capability", payload["planned_tools"])
 
+    def test_edfi_capability_profile_is_declared_as_a_wiring_surface(self) -> None:
+        surface = next(item for item in WIRING_SURFACES if item.surface_id == "edfi_capability_profile")
+
+        self.assertEqual(surface.signal_sources, ("edfi_capability_profile",))
+        self.assertIn("read", surface.planned_tools)
+        self.assertIn("edfi_capability_profile", surface.status_keys)
+        self.assertIn("edfi_capability_profile_ok", surface.status_keys)
+        self.assertIn("edfi_capability_profile_path", surface.status_keys)
+
+        payload = build_source_wiring_probe_payload()
+        self.assertIn("edfi_capability_profile", payload["signal_sources"])
+        self.assertIn("edfi_capability_profile", wiring_surface_ids())
+
     def test_runtime_search_and_scheduler_roots_do_not_borrow_control_status_signal_routes(self) -> None:
         by_id = {item.surface_id: item for item in WIRING_SURFACES}
 
