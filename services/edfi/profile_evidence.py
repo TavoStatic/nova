@@ -5,6 +5,7 @@ import time
 from pathlib import Path
 from typing import Any, Callable
 
+from services.edfi.change_tracking import load_sync_state
 from services.edfi.config import CAPABILITY_SCHEMA, load_capability_profile, load_connection_config, profile_path
 from services.evidence_validity import evidence_result_valid
 
@@ -18,6 +19,49 @@ EXPECTED_BISD_RESOURCE_COUNT = 445
 def _relative_profile_path(connection_id: str) -> str:
     safe_id = str(connection_id or DEFAULT_CONNECTION_ID).strip() or DEFAULT_CONNECTION_ID
     return f"runtime/edfi/profiles/{safe_id}.json"
+
+
+def _relative_change_cursor_path(connection_id: str) -> str:
+    safe_id = str(connection_id or DEFAULT_CONNECTION_ID).strip() or DEFAULT_CONNECTION_ID
+    return f"runtime/edfi/change_cursors/{safe_id}.json"
+
+
+def _safe_int(value: Any, default: int = 0) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _summarize_saved_sync_state(state: dict[str, Any], *, connection_id: str) -> dict[str, Any] | None:
+    """Build optional sync/cursor evidence from saved change-cursor state only."""
+    payload = dict(state or {})
+    resources = payload.get("resources") if isinstance(payload.get("resources"), dict) else {}
+    resource_cursors: dict[str, dict[str, Any]] = {}
+    for resource, entry in resources.items():
+        resource_name = str(resource or "").strip()
+        if not resource_name or not isinstance(entry, dict):
+            continue
+        resource_cursors[resource_name] = {
+            "last_change_version": _safe_int(entry.get("last_change_version")),
+            "last_sync_at": _safe_int(entry.get("last_sync_at")),
+            "last_pull_mechanism": str(entry.get("last_pull_mechanism") or "").strip(),
+            "last_item_count": _safe_int(entry.get("last_item_count")),
+        }
+
+    updated_at = _safe_int(payload.get("updated_at"))
+    if not resource_cursors and updated_at <= 0:
+        return None
+
+    return {
+        "present": True,
+        "connection_id": str(payload.get("connection_id") or connection_id or "").strip() or connection_id,
+        "evidence_source": "saved_change_cursors",
+        "cursor_evidence_path": _relative_change_cursor_path(connection_id),
+        "updated_at": updated_at,
+        "resource_cursor_count": len(resource_cursors),
+        "resource_cursors": resource_cursors,
+    }
 
 
 def _normalize_evidence_path(value: Any) -> str:
@@ -211,6 +255,7 @@ def build_capability_profile_evidence(
     now_fn: Callable[[], float] = time.time,
     profile_override: dict[str, Any] | None = None,
     path_override: Path | str | None = None,
+    sync_state_override: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build work-tree/status evidence from a saved profile only (no live API calls)."""
     resolved_id = str(connection_id or DEFAULT_CONNECTION_ID).strip() or DEFAULT_CONNECTION_ID
@@ -280,8 +325,14 @@ def build_capability_profile_evidence(
 
     ok = present and auth_ok and discovery_ok and resource_count > 0 and status == "ok"
     age_sec = max(0, int(now_fn()) - discovered_at) if discovered_at else None
+    sync_state = (
+        dict(sync_state_override)
+        if isinstance(sync_state_override, dict)
+        else load_sync_state(resolved_id)
+    )
+    sync_status = _summarize_saved_sync_state(sync_state, connection_id=resolved_id)
 
-    return {
+    payload = {
         "ok": ok,
         "status": status,
         "present": present,
@@ -306,3 +357,6 @@ def build_capability_profile_evidence(
         "evidence_source": "saved_capability_profile",
         "live_api_required": False,
     }
+    if sync_status is not None:
+        payload["sync_status"] = sync_status
+    return payload

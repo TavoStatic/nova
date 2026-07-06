@@ -74,6 +74,69 @@ class TestEdFiProfileEvidence(unittest.TestCase):
         self.assertFalse(evidence["present"])
         self.assertEqual(evidence["issue_count"], 1)
         self.assertEqual(evidence["issues"][0]["code"], "edfi_profile_missing")
+        self.assertNotIn("sync_status", evidence)
+
+    def test_healthy_profile_without_cursor_state_omits_sync_status(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            runtime = Path(td) / "runtime" / "edfi"
+            profiles = runtime / "profiles"
+            profiles.mkdir(parents=True)
+            profile = _healthy_profile_payload()
+            (profiles / "district-main.json").write_text(json.dumps(profile), encoding="utf-8")
+            with mock.patch("services.edfi.profile_evidence.profile_path", return_value=profiles / "district-main.json"), mock.patch(
+                "services.edfi.profile_evidence.load_capability_profile",
+                return_value=profile,
+            ), mock.patch(
+                "services.edfi.profile_evidence.load_sync_state",
+                return_value={},
+            ):
+                evidence = build_capability_profile_evidence("district-main", now_fn=lambda: 1700000100)
+
+        self.assertTrue(evidence["ok"])
+        self.assertNotIn("sync_status", evidence)
+
+    def test_saved_change_cursors_attach_optional_sync_status_without_affecting_ok(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            runtime = Path(td) / "runtime" / "edfi"
+            profiles = runtime / "profiles"
+            profiles.mkdir(parents=True)
+            profile = _healthy_profile_payload()
+            (profiles / "district-main.json").write_text(json.dumps(profile), encoding="utf-8")
+            sync_state = {
+                "connection_id": "district-main",
+                "updated_at": 1700000200,
+                "resources": {
+                    "ed-fi/schools": {
+                        "last_change_version": 44,
+                        "last_sync_at": 1700000190,
+                        "last_pull_mechanism": "data_api_min_change_version",
+                        "last_item_count": 3,
+                    }
+                },
+            }
+            with mock.patch("services.edfi.profile_evidence.profile_path", return_value=profiles / "district-main.json"), mock.patch(
+                "services.edfi.profile_evidence.load_capability_profile",
+                return_value=profile,
+            ):
+                evidence = build_capability_profile_evidence(
+                    "district-main",
+                    now_fn=lambda: 1700000300,
+                    sync_state_override=sync_state,
+                )
+
+        self.assertTrue(evidence["ok"])
+        sync_status = evidence.get("sync_status")
+        self.assertIsInstance(sync_status, dict)
+        self.assertTrue(sync_status.get("present"))
+        self.assertEqual(sync_status.get("evidence_source"), "saved_change_cursors")
+        self.assertEqual(sync_status.get("cursor_evidence_path"), "runtime/edfi/change_cursors/district-main.json")
+        self.assertEqual(sync_status.get("updated_at"), 1700000200)
+        self.assertEqual(sync_status.get("resource_cursor_count"), 1)
+        schools = sync_status.get("resource_cursors", {}).get("ed-fi/schools", {})
+        self.assertEqual(schools.get("last_change_version"), 44)
+        self.assertEqual(schools.get("last_sync_at"), 1700000190)
+        self.assertEqual(schools.get("last_pull_mechanism"), "data_api_min_change_version")
+        self.assertEqual(schools.get("last_item_count"), 3)
 
     def test_capability_profile_payload_valid_requires_auth_resources_and_timestamp(self) -> None:
         ok, reason = capability_profile_payload_valid(_healthy_profile_payload())
@@ -183,6 +246,11 @@ class TestEdFiRuntimeProfileOnDisk(unittest.TestCase):
         self.assertEqual(audit["resource_count"], EXPECTED_BISD_RESOURCE_COUNT)
         self.assertGreater(int(audit["discovered_at"] or 0), 0)
         self.assertEqual(audit["evidence_source"], "saved_capability_profile")
+
+        evidence = build_capability_profile_evidence("district-main", path_override=live_profile)
+        if (live_runtime_root / "edfi" / "change_cursors" / "district-main.json").exists():
+            self.assertIn("sync_status", evidence)
+            self.assertTrue(evidence["sync_status"].get("present"))
 
 
 if __name__ == "__main__":
