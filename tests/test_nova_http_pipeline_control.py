@@ -38,6 +38,14 @@ class _PipelineService:
         self.calls.append(("archive_lane", payload, kwargs))
         return True, "pipeline_archived", {"pipeline_id": payload.get("pipeline_id")}, "archive"
 
+    def run_query_preview(self, payload, **kwargs):
+        self.calls.append(("run_query_preview", payload, kwargs))
+        return True, "pipeline_query_preview_ok", {"pipeline_id": payload.get("pipeline_id"), "result": {"ok": True}}, "preview"
+
+    def run_query_live(self, payload, **kwargs):
+        self.calls.append(("run_query_live", payload, kwargs))
+        return True, "pipeline_query_live_ok", {"pipeline_id": payload.get("pipeline_id"), "result": {"ok": True}}, "live"
+
 
 class TestNovaHttpPipelineControlService(unittest.TestCase):
     def _scope(self, root: Path, service: _PipelineService):
@@ -47,6 +55,8 @@ class TestNovaHttpPipelineControlService(unittest.TestCase):
             "pipeline_list_summaries": lambda _root: [{"pipeline_id": "sis_test"}],
             "pipeline_get_status": lambda pipeline_id, **_kwargs: {"pipeline_id": pipeline_id},
             "pipeline_get_schema_probe": lambda pipeline_id, **_kwargs: {"pipeline_id": pipeline_id, "schema": True},
+            "preview_pipeline_query": lambda *_args, **_kwargs: {"ok": True},
+            "run_pipeline_query": lambda *_args, **_kwargs: {"ok": True},
         }
 
     def test_payload_from_runtime_binds_data_lane_dependencies(self):
@@ -78,6 +88,19 @@ class TestNovaHttpPipelineControlService(unittest.TestCase):
         self.assertEqual(call_name, "set_enabled")
         self.assertFalse(kwargs["enabled"])
         self.assertTrue(callable(kwargs["list_pipeline_summaries_fn"]))
+
+    def test_action_hooks_bind_pipeline_query_actions(self):
+        with tempfile.TemporaryDirectory() as td:
+            service = _PipelineService()
+            hooks = HTTP_PIPELINE_CONTROL_SERVICE.action_hooks_from_runtime(self._scope(Path(td), service))
+            ok, msg, extra, detail = hooks["pipeline_query_preview_action_fn"](
+                {"pipeline_id": "sis_test", "operation": "list_schools"}
+            )
+
+        self.assertTrue(ok)
+        self.assertEqual(msg, "pipeline_query_preview_ok")
+        self.assertEqual(extra["pipeline_id"], "sis_test")
+        self.assertEqual(detail, "preview")
 
 
 if __name__ == "__main__":

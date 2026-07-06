@@ -16,6 +16,7 @@ MILESTONE_ID = "NOVA-EDFI-001"
 EDFI_RUNTIME_ROOT = RUNTIME_DIR / "edfi"
 EDFI_CONNECTIONS_ROOT = EDFI_RUNTIME_ROOT / "connections"
 EDFI_PROFILES_ROOT = EDFI_RUNTIME_ROOT / "profiles"
+EDFI_CHANGE_CURSORS_ROOT = EDFI_RUNTIME_ROOT / "change_cursors"
 EDFI_AUDIT_LOG = EDFI_RUNTIME_ROOT / "edfi_audit.jsonl"
 
 
@@ -104,7 +105,12 @@ def profile_path(connection_id: str) -> Path:
 def ensure_runtime_dirs() -> None:
     EDFI_CONNECTIONS_ROOT.mkdir(parents=True, exist_ok=True)
     EDFI_PROFILES_ROOT.mkdir(parents=True, exist_ok=True)
+    EDFI_CHANGE_CURSORS_ROOT.mkdir(parents=True, exist_ok=True)
     EDFI_RUNTIME_ROOT.mkdir(parents=True, exist_ok=True)
+
+
+def change_cursor_path(connection_id: str) -> Path:
+    return EDFI_CHANGE_CURSORS_ROOT / f"{_safe_connection_id(connection_id)}.json"
 
 
 def _load_json_dict(path: Path) -> dict[str, Any]:

@@ -28,6 +28,7 @@ from services.edfi.inventory import (
     read_resource,
     refresh_resource_catalog,
 )
+from services.edfi.change_tracking import load_sync_state, pull_changes_since, sync_status
 from services.edfi.resources import get_all, get_page
 
 __all__ = [
@@ -41,6 +42,9 @@ __all__ = [
     "discover_metadata",
     "get_all",
     "get_page",
+    "load_sync_state",
+    "pull_changes_since",
+    "sync_status",
     "list_resources",
     "load_connection_config",
     "profile_summary",

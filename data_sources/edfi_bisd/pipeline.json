@@ -14,7 +14,9 @@
     "list_schools",
     "list_students",
     "student_school_associations",
-    "list_resources"
+    "list_resources",
+    "sync_status",
+    "changes_since"
   ],
   "connector_module": "data_sources.edfi_bisd.connector",
   "connector_class": "EdFiBisdPipeline",

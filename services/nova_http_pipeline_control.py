@@ -33,6 +33,8 @@ class NovaHttpPipelineControlService:
         service = cls._runtime_value(runtime_scope, "CONTROL_PIPELINES_SERVICE")
         data_sources_root = Path(cls._runtime_value(runtime_scope, "DATA_SOURCES_DIR"))
         list_pipeline_summaries_fn = cls._runtime_value(runtime_scope, "pipeline_list_summaries")
+        preview_pipeline_query_fn = cls._runtime_value(runtime_scope, "preview_pipeline_query")
+        run_pipeline_query_fn = cls._runtime_value(runtime_scope, "run_pipeline_query")
 
         return {
             "pipeline_note_append_action_fn": lambda payload: service.append_note(
@@ -71,6 +73,18 @@ class NovaHttpPipelineControlService:
                 payload,
                 data_sources_root=data_sources_root,
                 list_pipeline_summaries_fn=list_pipeline_summaries_fn,
+            ),
+            "pipeline_query_preview_action_fn": lambda payload: service.run_query_preview(
+                payload,
+                data_sources_root=data_sources_root,
+                list_pipeline_summaries_fn=list_pipeline_summaries_fn,
+                preview_pipeline_query_fn=preview_pipeline_query_fn,
+            ),
+            "pipeline_query_run_action_fn": lambda payload: service.run_query_live(
+                payload,
+                data_sources_root=data_sources_root,
+                list_pipeline_summaries_fn=list_pipeline_summaries_fn,
+                run_pipeline_query_fn=run_pipeline_query_fn,
             ),
         }
 

@@ -2583,6 +2583,8 @@ def _dispatch_autonomy_control_action(action_type: str, payload: dict, events: l
         pipeline_update_action_fn=_unsupported_control_action,
         pipeline_population_upsert_action_fn=_unsupported_control_action,
         pipeline_archive_action_fn=_unsupported_control_action,
+        pipeline_query_preview_action_fn=_unsupported_control_action,
+        pipeline_query_run_action_fn=_unsupported_control_action,
         self_check_action_fn=_unsupported_control_action,
         export_capabilities_snapshot_fn=lambda: (False, "export_capabilities_unavailable_in_maintenance", {}),
         export_ledger_summary_action_fn=lambda _payload: (False, "export_ledger_summary_unavailable_in_maintenance", {}),

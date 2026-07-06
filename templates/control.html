@@ -1000,6 +1000,19 @@
 
                         <div class="pipeline-detail-panel">
                             <div id="pipelineStatusGrid" class="inspector-stack mb-3">Select a pipeline to inspect readiness.</div>
+                            <div id="pipelineQuerySection" class="mb-3 d-none">
+                                <div class="section-title"><span class="section-title-wrap"><i class="bi bi-play-circle section-title-icon" aria-hidden="true"></i><span>Governed query runner</span></span></div>
+                                <div class="section-subtitle">Preview a dry-run plan first. Live runs use the governed pipeline path and row caps.</div>
+                                <label class="field-label" for="pipelineQueryOperation">Operation</label>
+                                <select id="pipelineQueryOperation" class="form-select form-select-sm mb-2"></select>
+                                <label class="field-label" for="pipelineQueryRowLimit">Row limit</label>
+                                <input id="pipelineQueryRowLimit" class="form-control form-control-sm mb-2" type="number" min="1" max="50" value="10">
+                                <div class="button-row wrap-buttons mb-2">
+                                    <button id="btnPipelineQueryPreview" class="btn btn-sm btn-operator-alt" type="button">Preview</button>
+                                    <button id="btnPipelineQueryRun" class="btn btn-sm btn-operator-primary" type="button">Run live</button>
+                                </div>
+                                <pre id="pipelineQueryResult" class="console-box compact-console">Query results will appear here.</pre>
+                            </div>
                             <div class="section-title"><span class="section-title-wrap"><i class="bi bi-sliders section-title-icon" aria-hidden="true"></i><span>Lane settings</span></span></div>
                             <label class="field-label" for="pipelineEditName">Display name</label>
                             <input id="pipelineEditName" class="form-control form-control-sm mb-2" type="text" placeholder="Display name">
@@ -1012,6 +1025,7 @@
                             </div>
                             <div class="section-title"><span class="section-title-wrap"><i class="bi bi-signpost-split section-title-icon" aria-hidden="true"></i><span>Seeded schema and populations</span></span></div>
                             <div id="pipelineSchemaSummary" class="inspector-stack mb-3">Schema probe pending.</div>
+                            <div id="pipelinePopulationSection">
                             <div class="section-title"><span class="section-title-wrap"><i class="bi bi-person-lines-fill section-title-icon" aria-hidden="true"></i><span>Population definition</span></span></div>
                             <div class="control-grid-2 mb-2">
                                 <div>
@@ -1035,6 +1049,7 @@
                             <textarea id="pipelinePopulationNotes" class="form-control form-control-sm mb-2" rows="2" placeholder="Optional lane-specific notes"></textarea>
                             <div class="button-row wrap-buttons mb-3">
                                 <button id="btnPipelinePopulationSave" class="btn btn-sm btn-operator-primary" type="button">Save Population</button>
+                            </div>
                             </div>
                             <div class="section-title"><span class="section-title-wrap"><i class="bi bi-pencil-square section-title-icon" aria-hidden="true"></i><span>Scoped intake</span></span></div>
                             <div class="section-subtitle">Notes saved here stay attached to the selected pipeline only.</div>

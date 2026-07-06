@@ -60,6 +60,8 @@ class TestEdFiBisdPipeline(unittest.TestCase):
         ):
             probe = get_pipeline_schema_probe("edfi_bisd", data_sources_root=self.data_sources_root)
         self.assertIn("list_schools", probe["query_templates"])
+        self.assertIn("sync_status", probe["query_templates"])
+        self.assertIn("changes_since", probe["query_templates"])
         entities = probe["schema"]["entities"]
         self.assertTrue(any(item["name"] == "schools" for item in entities))
 
@@ -117,6 +119,29 @@ class TestEdFiBisdPipeline(unittest.TestCase):
         self.assertEqual(result["execution_mode"], "live")
         self.assertEqual(result["row_count"], 1)
         self.assertEqual(result["rows"][0]["schoolId"], 31901001)
+
+    def test_preview_sync_status_dry_run(self) -> None:
+        with mock.patch(
+            "data_sources.edfi_bisd.connector.load_connection_config",
+            return_value=mock.Mock(district_lea_id="31901"),
+        ), mock.patch(
+            "data_sources.edfi_bisd.connector.load_capability_profile",
+            return_value={"auth": {"ok": True}},
+        ), mock.patch(
+            "data_sources.edfi_bisd.connector.load_sync_state",
+            return_value={"resources": {}},
+        ), mock.patch(
+            "data_sources.edfi_bisd.connector.profile_summary",
+            return_value={"ok": True, "health": "ok", "resource_count": 10},
+        ):
+            result = preview_pipeline_query(
+                "edfi_bisd",
+                "sync_status",
+                {},
+                data_sources_root=self.data_sources_root,
+            )
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["execution_mode"], "dry_run")
 
     def test_list_summaries_includes_lane_state(self) -> None:
         summaries = list_pipeline_summaries(self.data_sources_root)

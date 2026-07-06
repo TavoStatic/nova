@@ -8,6 +8,7 @@ from pipelines.audit import PipelineAuditLogger
 from pipelines.base import BaseDataPipeline, PipelineManifest
 from pipelines.query_guard import PipelineQueryGuard, QueryGuardError
 from services.edfi.config import load_capability_profile, load_connection_config
+from services.edfi.change_tracking import load_sync_state, pull_changes_since, sync_status
 from services.edfi.inventory import list_resources, profile_summary, read_preset, read_resource
 
 
@@ -60,6 +61,7 @@ class EdFiBisdPipeline(BaseDataPipeline):
         profile_ok = bool(profile)
         auth_ok = bool((profile.get("auth") or {}).get("ok")) if profile_ok else False
         district_lea_id = str(conn.district_lea_id if conn else "")
+        change_state = load_sync_state(connection_id) if profile_ok and auth_ok else {}
         blockers: list[str] = []
         if conn is None:
             blockers.append("edfi_connection_config_missing")
@@ -76,6 +78,8 @@ class EdFiBisdPipeline(BaseDataPipeline):
             "profile_ok": profile_ok,
             "auth_ok": auth_ok,
             "district_lea_id": district_lea_id,
+            "change_sync_ok": bool(change_state),
+            "change_sync": change_state,
             "ready": ready,
             "blockers": blockers,
         }
@@ -96,6 +100,10 @@ class EdFiBisdPipeline(BaseDataPipeline):
             "district_lea_id": readiness["district_lea_id"],
             "profile_health": str(profile.get("health") or "unknown"),
             "resource_count": int(profile.get("resource_count") or 0),
+            "change_sync_ok": bool(readiness.get("change_sync_ok")),
+            "newest_change_version": int(
+                ((readiness.get("change_sync") or {}).get("available") or {}).get("newest_change_version") or 0
+            ),
             "query_template_count": len(self.load_query_templates()),
             "entity_count": len(self.load_schema_manifest().get("entities") or []),
             "live_query_ready": readiness["ready"],
@@ -154,6 +162,21 @@ class EdFiBisdPipeline(BaseDataPipeline):
                 namespace=str(params.get("namespace") or ""),
                 limit=row_limit,
                 offset=offset,
+            )
+
+        if operation == "sync_status":
+            return sync_status(connection_id)
+
+        if operation == "changes_since":
+            min_raw = params.get("min_change_version")
+            min_change_version = int(min_raw) if min_raw not in (None, "") else None
+            return pull_changes_since(
+                connection_id,
+                resource=str(params.get("resource") or "ed-fi/schools"),
+                min_change_version=min_change_version,
+                limit=row_limit,
+                offset=offset,
+                advance_cursor=bool(params.get("advance_cursor")),
             )
 
         raise QueryGuardError(f"Live query builder not implemented for operation: {operation}")
@@ -253,13 +276,15 @@ class EdFiBisdPipeline(BaseDataPipeline):
                     "row_count": len(raw.get("resources") or []),
                     "items": raw.get("resources") or [],
                 }
-            elif validated["operation"] == "connection_health":
+            elif validated["operation"] in {"connection_health", "sync_status"}:
                 shaped = {
                     "columns": sorted(raw.keys()),
                     "rows": [raw],
                     "row_count": 1,
                     "items": [raw],
                 }
+            elif validated["operation"] == "changes_since":
+                shaped = _shape_rows(list(raw.get("items") or []))
             else:
                 shaped = _shape_rows(list(raw.get("items") or []))
 

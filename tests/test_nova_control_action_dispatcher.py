@@ -106,6 +106,8 @@ def _runtime_scope(events):
         "_pipeline_update_action": _ok_action,
         "_pipeline_population_upsert_action": _ok_action,
         "_pipeline_archive_action": _ok_action,
+        "_pipeline_query_preview_action": _ok_action,
+        "_pipeline_query_run_action": _ok_action,
         "_self_check_action": _ok_action,
         "_codegen_run_action": _ok_action,
         "_leah_build_run_next_action": _ok_action,

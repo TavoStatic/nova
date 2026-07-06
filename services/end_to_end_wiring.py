@@ -57,6 +57,8 @@ PIPELINE_ACTION_HOOKS = (
     "pipeline_update_action_fn",
     "pipeline_population_upsert_action_fn",
     "pipeline_archive_action_fn",
+    "pipeline_query_preview_action_fn",
+    "pipeline_query_run_action_fn",
 )
 
 DISPATCHER_PIPELINE_ACTIONS = (
@@ -67,6 +69,8 @@ DISPATCHER_PIPELINE_ACTIONS = (
     "pipeline_update",
     "pipeline_population_upsert",
     "pipeline_archive",
+    "pipeline_query_preview",
+    "pipeline_query_run",
 )
 
 

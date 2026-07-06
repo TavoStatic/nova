@@ -205,6 +205,8 @@ _CONTROL_ACTION_RUNTIME_HOOKS = {
     "pipeline_update_action_fn": "_pipeline_update_action",
     "pipeline_population_upsert_action_fn": "_pipeline_population_upsert_action",
     "pipeline_archive_action_fn": "_pipeline_archive_action",
+    "pipeline_query_preview_action_fn": "_pipeline_query_preview_action",
+    "pipeline_query_run_action_fn": "_pipeline_query_run_action",
     "self_check_action_fn": "_self_check_action",
     "export_capabilities_snapshot_fn": "_export_capabilities_snapshot",
     "export_ledger_summary_action_fn": "_export_ledger_summary_action",
@@ -333,6 +335,8 @@ class NovaControlActionDispatcher:
         pipeline_update_action_fn,
         pipeline_population_upsert_action_fn,
         pipeline_archive_action_fn,
+        pipeline_query_preview_action_fn,
+        pipeline_query_run_action_fn,
         self_check_action_fn,
         export_capabilities_snapshot_fn,
         export_ledger_summary_action_fn,
@@ -647,6 +651,16 @@ class NovaControlActionDispatcher:
 
         if act == "pipeline_archive":
             ok, msg, extra, detail = pipeline_archive_action_fn(payload)
+            record_control_action_event_fn(act, "ok" if ok else "fail", detail, payload)
+            return ok, msg, extra
+
+        if act == "pipeline_query_preview":
+            ok, msg, extra, detail = pipeline_query_preview_action_fn(payload)
+            record_control_action_event_fn(act, "ok" if ok else "fail", detail, payload)
+            return ok, msg, extra
+
+        if act == "pipeline_query_run":
+            ok, msg, extra, detail = pipeline_query_run_action_fn(payload)
             record_control_action_event_fn(act, "ok" if ok else "fail", detail, payload)
             return ok, msg, extra
 

@@ -421,6 +421,107 @@ class ControlPipelinesService:
         )
 
     @staticmethod
+    def _query_params(payload: Mapping[str, Any]) -> dict[str, Any]:
+        raw = payload.get("params")
+        return dict(raw) if isinstance(raw, dict) else {}
+
+    @staticmethod
+    def run_query_preview(
+        payload: Mapping[str, Any],
+        *,
+        data_sources_root: Path,
+        list_pipeline_summaries_fn: Callable[..., list[dict[str, Any]]],
+        preview_pipeline_query_fn: Callable[..., dict[str, Any]],
+    ) -> tuple[bool, str, dict[str, Any], str]:
+        return ControlPipelinesService._run_query(
+            payload,
+            data_sources_root=data_sources_root,
+            list_pipeline_summaries_fn=list_pipeline_summaries_fn,
+            execute_fn=lambda pipeline_id, operation, params, row_limit: preview_pipeline_query_fn(
+                pipeline_id,
+                operation,
+                params,
+                row_limit=row_limit,
+                dry_run=True,
+                data_sources_root=data_sources_root,
+            ),
+            live=False,
+        )
+
+    @staticmethod
+    def run_query_live(
+        payload: Mapping[str, Any],
+        *,
+        data_sources_root: Path,
+        list_pipeline_summaries_fn: Callable[..., list[dict[str, Any]]],
+        run_pipeline_query_fn: Callable[..., dict[str, Any]],
+    ) -> tuple[bool, str, dict[str, Any], str]:
+        return ControlPipelinesService._run_query(
+            payload,
+            data_sources_root=data_sources_root,
+            list_pipeline_summaries_fn=list_pipeline_summaries_fn,
+            execute_fn=lambda pipeline_id, operation, params, row_limit: run_pipeline_query_fn(
+                pipeline_id,
+                operation,
+                params,
+                row_limit=row_limit,
+                data_sources_root=data_sources_root,
+            ),
+            live=True,
+        )
+
+    @staticmethod
+    def _run_query(
+        payload: Mapping[str, Any],
+        *,
+        data_sources_root: Path,
+        list_pipeline_summaries_fn: Callable[..., list[dict[str, Any]]],
+        execute_fn: Callable[[str, str, dict[str, Any], Optional[int]], dict[str, Any]],
+        live: bool,
+    ) -> tuple[bool, str, dict[str, Any], str]:
+        pipeline_id = str(payload.get("pipeline_id") or "").strip()
+        operation = str(payload.get("operation") or "").strip()
+        if not pipeline_id:
+            return False, "pipeline_id_required", {}, "pipeline_query_missing_pipeline"
+        if not operation:
+            return False, "pipeline_operation_required", {}, "pipeline_query_missing_operation"
+
+        known = {str(item.get("pipeline_id") or "").strip() for item in list_pipeline_summaries_fn(data_sources_root)}
+        if pipeline_id not in known:
+            return False, f"unknown_pipeline:{pipeline_id}", {}, "pipeline_query_unknown_pipeline"
+
+        params = ControlPipelinesService._query_params(payload)
+        row_limit_raw = payload.get("row_limit")
+        row_limit: Optional[int]
+        try:
+            row_limit = None if row_limit_raw in (None, "") else max(1, int(row_limit_raw))
+        except (TypeError, ValueError):
+            return False, "pipeline_row_limit_invalid", {}, "pipeline_query_row_limit_invalid"
+
+        result = execute_fn(pipeline_id, operation, params, row_limit)
+        ok = bool(result.get("ok"))
+        msg = (
+            "pipeline_query_live_ok"
+            if live and ok
+            else "pipeline_query_live_failed"
+            if live
+            else "pipeline_query_preview_ok"
+            if ok
+            else "pipeline_query_preview_failed"
+        )
+        return (
+            ok,
+            msg,
+            {
+                "pipeline_id": pipeline_id,
+                "operation": operation,
+                "live": live,
+                "result": result,
+            },
+            f"{msg}:{pipeline_id}:{operation}",
+        )
+
+    @staticmethod
     def archive_lane(
         payload: Mapping[str, Any],
         *,

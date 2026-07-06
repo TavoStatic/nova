@@ -51,6 +51,11 @@ const pipelinePopulationLabel = document.getElementById('pipelinePopulationLabel
 const pipelinePopulationProgram = document.getElementById('pipelinePopulationProgram');
 const pipelinePopulationField = document.getElementById('pipelinePopulationField');
 const pipelinePopulationNotes = document.getElementById('pipelinePopulationNotes');
+const pipelinePopulationSection = document.getElementById('pipelinePopulationSection');
+const pipelineQuerySection = document.getElementById('pipelineQuerySection');
+const pipelineQueryOperation = document.getElementById('pipelineQueryOperation');
+const pipelineQueryRowLimit = document.getElementById('pipelineQueryRowLimit');
+const pipelineQueryResult = document.getElementById('pipelineQueryResult');
 const taskManagerSelect = document.getElementById('taskManagerSelect');
 const taskManagerPreview = document.getElementById('taskManagerPreview');
 const taskManagerName = document.getElementById('taskManagerName');
@@ -1902,6 +1907,71 @@ function renderPipelineSelect() {
     }
 }
 
+function formatPipelineQueryResult(result) {
+    if (!result || typeof result !== 'object') return 'No query result returned.';
+    const lines = [
+        `ok: ${Boolean(result.ok)}`,
+        `execution_mode: ${String(result.execution_mode || 'unknown')}`,
+        `operation: ${String(result.operation || '')}`,
+        `effective_row_limit: ${result.effective_row_limit != null ? result.effective_row_limit : 'n/a'}`,
+    ];
+    if (result.description) lines.push(`description: ${String(result.description)}`);
+    if (result.error) lines.push(`error: ${String(result.error)}`);
+    if (result.next_step) lines.push(`next_step: ${String(result.next_step)}`);
+    if (result.row_count != null) lines.push(`row_count: ${result.row_count}`);
+    if (result.edfi && typeof result.edfi === 'object') {
+        const edfi = result.edfi;
+        if (edfi.records_scanned != null) lines.push(`records_scanned: ${edfi.records_scanned}`);
+        if (edfi.district_filter_strategy) lines.push(`district_filter_strategy: ${edfi.district_filter_strategy}`);
+        if (edfi.resource) lines.push(`resource: ${edfi.resource}`);
+    }
+    if (Array.isArray(result.rows) && result.rows.length) {
+        lines.push('', 'rows:');
+        result.rows.slice(0, 10).forEach((row, index) => {
+            lines.push(`${index + 1}. ${JSON.stringify(row)}`);
+        });
+        if (result.rows.length > 10) {
+            lines.push(`... ${result.rows.length - 10} more row(s)`);
+        }
+    } else if (result.items && typeof result.items === 'object' && !Array.isArray(result.items)) {
+        lines.push('', 'summary:');
+        lines.push(JSON.stringify(result.items, null, 2));
+    }
+    return lines.join('\n');
+}
+
+function renderPipelineQueryControls(status, probe) {
+    const kind = String(status.kind || selectedPipeline()?.kind || '').trim().toLowerCase();
+    const operations = Array.isArray(probe.query_templates) ? probe.query_templates.filter(Boolean) : [];
+    const showRunner = operations.length > 0;
+    if (pipelineQuerySection) {
+        pipelineQuerySection.classList.toggle('d-none', !showRunner);
+    }
+    if (pipelinePopulationSection) {
+        pipelinePopulationSection.classList.toggle('d-none', kind === 'edfi');
+    }
+    if (!pipelineQueryOperation) return;
+    const previous = String(pipelineQueryOperation.value || '').trim();
+    pipelineQueryOperation.innerHTML = '';
+    if (!showRunner) {
+        const option = document.createElement('option');
+        option.value = '';
+        option.textContent = '(no governed operations)';
+        pipelineQueryOperation.appendChild(option);
+        if (pipelineQueryResult) pipelineQueryResult.textContent = 'Query results will appear here.';
+        return;
+    }
+    operations.forEach((operation) => {
+        const option = document.createElement('option');
+        option.value = String(operation);
+        option.textContent = String(operation);
+        pipelineQueryOperation.appendChild(option);
+    });
+    if (previous && operations.includes(previous)) {
+        pipelineQueryOperation.value = previous;
+    }
+}
+
 function renderPipelineDetail(payload) {
     const detail = payload && payload.detail && typeof payload.detail === 'object' ? payload.detail : {};
     pipelineDetailCache = detail;
@@ -1924,32 +1994,57 @@ function renderPipelineDetail(payload) {
         ? status.readiness_blockers
         : (Array.isArray(readiness.blockers) ? readiness.blockers : []);
     const selectedSummary = selectedPipeline() || {};
+    const pipelineKind = String(status.kind || selectedSummary.kind || '').trim().toLowerCase();
+    const isEdfi = pipelineKind === 'edfi';
 
     if (pipelineEditName) pipelineEditName.value = String(status.display_name || selectedPipelineId || '');
     if (pipelineEditDescription) pipelineEditDescription.value = String(status.description || selectedSummary.description || '');
     if (pipelineEditScope) pipelineEditScope.value = String(status.network_scope || selectedSummary.network_scope || '');
 
-    renderInspectorList(pipelineStatusGrid, [
+    const statusRows = [
         {label: 'Pipeline', value: selectedPipelineId || 'none'},
+        {label: 'Kind', value: pipelineKind || 'unknown'},
         {label: 'Lane state', value: String(laneState.state || (laneState.enabled === false ? 'paused' : 'running'))},
         {label: 'Read only', value: String(Boolean(status.read_only))},
         {label: 'Configured', value: String(Boolean(status.configured))},
-        {label: 'Network', value: String(network.reason || 'unknown')},
-        {label: 'Auth', value: String(auth.reason || 'unknown')},
         {label: 'Live ready', value: String(Boolean(status.live_query_ready))},
         {label: 'Readiness', value: `${String(readiness.state || (status.live_query_ready ? 'ready' : 'blocked'))}${readinessBlockers.length ? ' | ' + readinessBlockers.join(', ') : ''}`},
-        {label: 'Identity', value: status.current_windows_identity || status.intended_windows_identity ? `${String(status.current_windows_identity || 'unknown')} -> ${String(status.intended_windows_identity || 'not set')}` : 'n/a'},
-        {label: 'Driver', value: String(status.driver_selected || 'none')},
         {label: 'Next step', value: String(status.next_step || readiness.next_step || 'n/a')},
-    ]);
-    renderInspectorList(pipelineSchemaSummary, [
-        {label: 'Schema status', value: String(schemaSource.verification_status || 'unknown')},
-        {label: 'Vendor dictionary', value: vendorDictionary.table_count ? `${vendorDictionary.table_count} tables | ${vendorSource.grounding_status || 'vendor_grounded'}` : 'not loaded'},
+    ];
+    if (isEdfi) {
+        statusRows.splice(4, 0,
+            {label: 'Connection', value: String(status.connection_id || 'not set')},
+            {label: 'District LEA', value: String(status.district_lea_id || 'not set')},
+            {label: 'Profile health', value: String(status.profile_health || 'unknown')},
+            {label: 'Resources', value: String(status.resource_count != null ? status.resource_count : 'unknown')},
+            {label: 'Change version', value: String(status.newest_change_version != null ? status.newest_change_version : 'n/a')},
+        );
+    } else {
+        statusRows.splice(5, 0,
+            {label: 'Network', value: String(network.reason || 'unknown')},
+            {label: 'Auth', value: String(auth.reason || 'unknown')},
+            {label: 'Identity', value: status.current_windows_identity || status.intended_windows_identity ? `${String(status.current_windows_identity || 'unknown')} -> ${String(status.intended_windows_identity || 'not set')}` : 'n/a'},
+            {label: 'Driver', value: String(status.driver_selected || 'none')},
+        );
+    }
+    renderInspectorList(pipelineStatusGrid, statusRows);
+
+    const schemaRows = [
+        {label: 'Schema status', value: String(schemaSource.verification_status || (isEdfi ? 'edfi_manifest' : 'unknown'))},
         {label: 'Seeded groups', value: entities.map((entity) => `${entity.name}${entity.verification_status ? ' [' + entity.verification_status + ']' : ''}`).filter(Boolean).join(', ') || 'none'},
         {label: 'Governed operations', value: (Array.isArray(probe.query_templates) ? probe.query_templates : []).join(', ') || 'none'},
-        {label: 'Population definitions', value: populations.map((item) => item.key).filter(Boolean).join(', ') || 'none'},
         {label: 'Intake log', value: String(intake.path || 'not created yet')},
-    ]);
+    ];
+    if (isEdfi) {
+        schemaRows.splice(1, 0, {label: 'Ed-Fi entities', value: String(entities.length || 0)});
+    } else {
+        schemaRows.splice(1, 0,
+            {label: 'Vendor dictionary', value: vendorDictionary.table_count ? `${vendorDictionary.table_count} tables | ${vendorSource.grounding_status || 'vendor_grounded'}` : 'not loaded'},
+            {label: 'Population definitions', value: populations.map((item) => item.key).filter(Boolean).join(', ') || 'none'},
+        );
+    }
+    renderInspectorList(pipelineSchemaSummary, schemaRows);
+    renderPipelineQueryControls(status, probe);
     if (pipelineIntakeBox) {
         const recent = Array.isArray(intake.recent) ? intake.recent : [];
         pipelineIntakeBox.textContent = recent.length
@@ -4924,6 +5019,40 @@ bindClick('btnPipelineArchive', async () => {
     selectedPipelineId = '';
     await loadPipelines();
     setAction(payload.message || 'pipeline_archived');
+});
+bindClick('btnPipelineQueryPreview', async () => {
+    const pipelineId = pipelineSelect ? String(pipelineSelect.value || '').trim() : selectedPipelineId;
+    const operation = pipelineQueryOperation ? String(pipelineQueryOperation.value || '').trim() : '';
+    const rowLimit = pipelineQueryRowLimit ? Number(pipelineQueryRowLimit.value || 10) : 10;
+    if (!pipelineId) return setAction('Select a data lane before previewing a query.');
+    if (!operation) return setAction('Select a governed operation before previewing.');
+    const payload = await postAction('pipeline_query_preview', {
+        pipeline_id: pipelineId,
+        operation,
+        row_limit: rowLimit,
+        params: {},
+    });
+    const result = payload.result && typeof payload.result === 'object' ? payload.result : payload;
+    if (pipelineQueryResult) pipelineQueryResult.textContent = formatPipelineQueryResult(result);
+    setAction(payload.message || 'pipeline_query_preview_ok');
+});
+bindClick('btnPipelineQueryRun', async () => {
+    const pipelineId = pipelineSelect ? String(pipelineSelect.value || '').trim() : selectedPipelineId;
+    const operation = pipelineQueryOperation ? String(pipelineQueryOperation.value || '').trim() : '';
+    const rowLimit = pipelineQueryRowLimit ? Number(pipelineQueryRowLimit.value || 10) : 10;
+    if (!pipelineId) return setAction('Select a data lane before running a live query.');
+    if (!operation) return setAction('Select a governed operation before running live.');
+    const confirmed = window.confirm(`Run live governed query ${operation} on ${pipelineId}? This may read district data from the configured source.`);
+    if (!confirmed) return setAction(`Live query canceled for ${operation}.`);
+    const payload = await postAction('pipeline_query_run', {
+        pipeline_id: pipelineId,
+        operation,
+        row_limit: rowLimit,
+        params: {},
+    });
+    const result = payload.result && typeof payload.result === 'object' ? payload.result : payload;
+    if (pipelineQueryResult) pipelineQueryResult.textContent = formatPipelineQueryResult(result);
+    setAction(payload.message || 'pipeline_query_live_ok');
 });
 bindClick('btnPipelineNoteSave', async () => {
     const pipelineId = pipelineSelect ? String(pipelineSelect.value || '').trim() : selectedPipelineId;
