@@ -1,0 +1,26 @@
+{
+  "pipeline_id": "edfi_bisd",
+  "display_name": "BISD Ed-Fi (TEA IODS)",
+  "kind": "edfi",
+  "version": "0.1.0",
+  "description": "Read-only governed Ed-Fi lane for Brownsville ISD via Nova Ed-Fi Core and TEA IODS.",
+  "read_only": true,
+  "network_scope": "district_only",
+  "safe_operations": [
+    "status",
+    "schema_probe",
+    "safe_query",
+    "connection_health",
+    "list_schools",
+    "list_students",
+    "student_school_associations",
+    "list_resources"
+  ],
+  "connector_module": "data_sources.edfi_bisd.connector",
+  "connector_class": "EdFiBisdPipeline",
+  "schema_manifest": "schema_manifest.json",
+  "query_templates": "query_templates.json",
+  "config_example": "local_config.example.json",
+  "local_config": "local_config.json",
+  "audit_log": "..\\..\\runtime\\pipelines\\edfi_bisd_audit.jsonl"
+}

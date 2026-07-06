@@ -1,0 +1,27 @@
+{
+  "source": "tea_iods_edfi",
+  "connection_id": "district-main",
+  "district_lea_id": "31901",
+  "district_name": "Brownsville ISD",
+  "api_root": "/data/v3",
+  "entities": [
+    {
+      "name": "schools",
+      "resource": "ed-fi/schools",
+      "description": "BISD campus / school organizations",
+      "key_fields": ["schoolId", "nameOfInstitution", "localEducationAgencyReference"]
+    },
+    {
+      "name": "students",
+      "resource": "ed-fi/students",
+      "description": "Student demographics and identifiers",
+      "key_fields": ["studentUniqueId", "firstName", "lastSurname"]
+    },
+    {
+      "name": "student_school_associations",
+      "resource": "ed-fi/studentSchoolAssociations",
+      "description": "Student enrollment by school",
+      "key_fields": ["studentUniqueId", "schoolReference", "schoolYearTypeReference"]
+    }
+  ]
+}

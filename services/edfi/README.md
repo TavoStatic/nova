@@ -92,6 +92,21 @@ python scripts/run_edfi_explore.py get ed-fi/students --limit 5 --json
 
 Nova tool surface: `tool_edfi_explore(action="schools", limit=10)` via registered `edfi_explore` tool.
 
+## Milestone: NOVA-EDFI-004 — Governed data lane
+
+Active lane: `data_sources/edfi_bisd/` (BISD / TEA IODS, read-only).
+
+```bash
+# Via pipeline registry (dry-run preview)
+python -c "from services.data_pipeline_registry import preview_pipeline_query; print(preview_pipeline_query('edfi_bisd','list_schools',{},dry_run=False))"
+
+# Or Nova pipeline tool
+# tool_pipeline("pipeline preview edfi_bisd list_schools")
+```
+
+Allowlisted operations: `connection_health`, `list_schools`, `list_students`,
+`student_school_associations`, `list_resources`.
+
 TEA statewide IODS returns **all Texas districts** on every page. BISD is **Brownsville ISD**
 (`localEducationAgencyId` / `district_lea_id`: `31901`, PEIMS `031901`). TEA currently **ignores
 OData `$filter`**, so Nova scans statewide pages and keeps only rows matching the configured LEA
