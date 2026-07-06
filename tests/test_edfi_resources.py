@@ -14,6 +14,7 @@ from services.edfi.resources import (
     ResourceReadResult,
     _extract_items,
     get_all,
+    get_district_scoped_page,
     get_page,
 )
 
@@ -193,6 +194,35 @@ class TestGetPage(unittest.TestCase):
             get_page(client, "ed-fi/schools")
 
         mock_audit.assert_not_called()
+
+
+class TestGetDistrictScopedPage(unittest.TestCase):
+    def _page_result(self, items: list) -> PageResult:
+        return PageResult(
+            ok=True,
+            status_code=200,
+            count=len(items),
+            items=items,
+            latency_ms=5,
+        )
+
+    def test_collects_only_matching_rows(self) -> None:
+        client = _mock_client()
+        page1 = self._page_result(
+            [
+                {"schoolId": 1902001, "localEducationAgencyReference": {"localEducationAgencyId": 1902}},
+                {"schoolId": 31901001, "localEducationAgencyReference": {"localEducationAgencyId": 31901}},
+                {"schoolId": 31901002, "localEducationAgencyReference": {"localEducationAgencyId": 31901}},
+            ]
+        )
+        with patch("services.edfi.resources.get_page", return_value=page1) as get_page_mock:
+            result = get_district_scoped_page(client, "ed-fi/schools", district_lea_id=31901, limit=2)
+
+        self.assertTrue(result.ok)
+        self.assertEqual(result.count, 2)
+        self.assertEqual(result.items[0]["schoolId"], 31901001)
+        self.assertEqual(result.district_filter_strategy, "client_side")
+        get_page_mock.assert_called_once()
 
 
 class TestGetAll(unittest.TestCase):

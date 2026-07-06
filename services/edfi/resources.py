@@ -6,6 +6,11 @@ from typing import Any
 
 from services.edfi.client import EdFiClient
 from services.edfi.diagnostics import append_audit_event
+from services.edfi.district_scope import (
+    MAX_DISTRICT_SCAN_RECORDS,
+    item_matches_district,
+    normalize_district_lea_id,
+)
 
 MILESTONE_ID = "NOVA-EDFI-002"
 
@@ -30,6 +35,8 @@ class PageResult:
     error: str = ""
     error_code: str = ""
     rate_limited: bool = False
+    district_filter_strategy: str = ""
+    records_scanned: int = 0
 
 
 @dataclass
@@ -109,6 +116,115 @@ def get_page(
             "count": result.count,
             "status_code": result.status_code,
             "error_code": result.error_code,
+        })
+
+    return result
+
+
+def get_district_scoped_page(
+    client: EdFiClient,
+    resource: str,
+    *,
+    district_lea_id: Any,
+    limit: int = DEFAULT_PAGE_SIZE,
+    offset: int = 0,
+    backoff_sec: float = _DEFAULT_BACKOFF_SEC,
+    audit: bool = False,
+    max_scan_records: int = MAX_DISTRICT_SCAN_RECORDS,
+) -> PageResult:
+    """Collect one page of district-owned records from a statewide ODS.
+
+    TEA IODS ignores OData district filters, so this scans statewide pages and
+    keeps only rows that match the configured LEA id (or Texas id prefix).
+    The ``offset`` is relative to district-matched rows, not statewide rows.
+    """
+    lea = normalize_district_lea_id(district_lea_id)
+    if lea is None:
+        return PageResult(
+            ok=False,
+            resource=str(resource or "").strip(),
+            error="district_lea_id_invalid",
+            error_code="district_lea_id_invalid",
+        )
+
+    effective_limit = min(max(1, int(limit or DEFAULT_PAGE_SIZE)), MAX_PAGE_SIZE)
+    district_offset = max(0, int(offset or 0))
+    scan_cap = max(effective_limit, int(max_scan_records or MAX_DISTRICT_SCAN_RECORDS))
+    fetch_size = min(MAX_PAGE_SIZE, max(effective_limit * 4, 100))
+
+    collected: list[Any] = []
+    skipped = 0
+    statewide_offset = 0
+    records_scanned = 0
+    total_latency_ms = 0
+    last_status = 0
+    last_url = ""
+    last_error = ""
+    last_error_code = ""
+
+    while len(collected) < effective_limit and records_scanned < scan_cap:
+        page = get_page(
+            client,
+            resource,
+            limit=fetch_size,
+            offset=statewide_offset,
+            backoff_sec=backoff_sec,
+        )
+        total_latency_ms += page.latency_ms
+        last_status = int(page.status_code or 0)
+        last_url = str(page.url or "")
+        if not page.ok:
+            last_error = page.error
+            last_error_code = page.error_code
+            break
+
+        records_scanned += page.count
+        for item in page.items:
+            if not item_matches_district(item, lea):
+                continue
+            if skipped < district_offset:
+                skipped += 1
+                continue
+            collected.append(item)
+            if len(collected) >= effective_limit:
+                break
+
+        if page.count < fetch_size:
+            break
+        statewide_offset += page.count
+
+    ok = not last_error_code and (bool(collected) or records_scanned > 0)
+    result = PageResult(
+        ok=ok,
+        resource=str(resource or "").strip(),
+        url=last_url,
+        offset=district_offset,
+        limit=effective_limit,
+        count=len(collected),
+        items=collected,
+        latency_ms=total_latency_ms,
+        status_code=last_status,
+        error=last_error,
+        error_code=last_error_code,
+        district_filter_strategy="client_side",
+        records_scanned=records_scanned,
+    )
+
+    if audit:
+        append_audit_event({
+            "action": "resource_page_district",
+            "milestone": MILESTONE_ID,
+            "connection_id": str(client.config.connection_id),
+            "resource": result.resource,
+            "ok": result.ok,
+            "district_lea_id": lea,
+            "offset": result.offset,
+            "limit": result.limit,
+            "count": result.count,
+            "records_scanned": result.records_scanned,
+            "status_code": result.status_code,
+            "error_code": result.error_code,
+            "district_filter_strategy": result.district_filter_strategy,
         })
 
     return result

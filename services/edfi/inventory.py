@@ -9,8 +9,18 @@ from services.edfi.config import (
     save_capability_profile,
 )
 from services.edfi.discovery import _resource_names_from_dependencies
-from services.edfi.district_scope import district_lea_filter_clause, merge_filter_params
-from services.edfi.resources import DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE, get_page
+from services.edfi.district_scope import (
+    district_filter_strategy,
+    district_lea_filter_clause,
+    merge_filter_params,
+    uses_client_side_district_filter,
+)
+from services.edfi.resources import (
+    DEFAULT_PAGE_SIZE,
+    MAX_PAGE_SIZE,
+    get_district_scoped_page,
+    get_page,
+)
 
 MILESTONE_ID = "NOVA-EDFI-002"
 
@@ -199,23 +209,47 @@ def read_resource(
     resolved = _resolve_resource_name(name)
     params = dict(filter_params or {})
     district_lea_id = ""
+    strategy = ""
     if apply_district_scope and config.district_lea_id:
         district_lea_id = str(config.district_lea_id).strip()
-        clause = district_lea_filter_clause(resolved, district_lea_id)
-        params = merge_filter_params(params, clause)
-    page = get_page(
-        client,
-        resolved,
-        limit=effective_limit,
-        offset=max(0, int(offset or 0)),
-        filter_params=params or None,
-        audit=True,
-    )
+        strategy = district_filter_strategy(config.normalized_base_url())
+        if strategy == "client_side":
+            page = get_district_scoped_page(
+                client,
+                resolved,
+                district_lea_id=district_lea_id,
+                limit=effective_limit,
+                offset=max(0, int(offset or 0)),
+                audit=True,
+            )
+        else:
+            clause = district_lea_filter_clause(resolved, district_lea_id)
+            params = merge_filter_params(params, clause)
+            page = get_page(
+                client,
+                resolved,
+                limit=effective_limit,
+                offset=max(0, int(offset or 0)),
+                filter_params=params or None,
+                audit=True,
+            )
+    else:
+        page = get_page(
+            client,
+            resolved,
+            limit=effective_limit,
+            offset=max(0, int(offset or 0)),
+            filter_params=params or None,
+            audit=True,
+        )
     return {
         "ok": page.ok,
         "connection_id": connection_id,
         "district_lea_id": district_lea_id,
         "district_scope_applied": bool(district_lea_id),
+        "district_filter_strategy": strategy or page.district_filter_strategy,
+        "records_scanned": _safe_int(getattr(page, "records_scanned", 0)),
+        "odata_filter_honored": not uses_client_side_district_filter(config.normalized_base_url()),
         "filter": str(params.get("$filter") or ""),
         "resource": resolved,
         "url": page.url,
@@ -271,6 +305,13 @@ def read_preset(
         "error_code": "edfi_preset_failed",
         "error": f"Preset '{preset}' could not be read.",
     }
+
+
+def _safe_int(value: Any) -> int:
+    try:
+        return int(value or 0)
+    except (TypeError, ValueError):
+        return 0
 
 
 def _resolve_resource_name(resource: str) -> str:
