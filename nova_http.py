@@ -1653,6 +1653,18 @@ def _cached_control_status_surfaces_payload(
     )
 
 
+def _generated_work_queue(limit: int = 24) -> dict:
+    try:
+        payload = service_generated_work_queue_payload(
+            int(limit or 24),
+            base_dir=BASE_DIR,
+            runtime_dir=RUNTIME_DIR,
+        )
+        return payload if isinstance(payload, dict) else {}
+    except Exception:
+        return {}
+
+
 def _work_trees_payload(limit: int = 32) -> dict:
     return CONTROL_WORK_TREES_SERVICE.payload(
         list_visual_trees_fn=work_tree.list_visual_trees,

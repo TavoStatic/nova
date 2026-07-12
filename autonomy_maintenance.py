@@ -4988,6 +4988,110 @@ def _run_generated_queue_work_tree_cycle(state: dict) -> dict:
     return payload
 
 
+def _resolve_targeted_work_pin(
+    payload: dict,
+    *,
+    branch_target: str = "",
+    task_target: str = "",
+) -> dict:
+    tree_id = str(payload.get("tree_id") or "").strip()
+    if not tree_id:
+        return {}
+    branch_target = str(branch_target or "").strip()
+    task_target = str(task_target or "").strip()
+    next_step = payload.get("next_step") if isinstance(payload.get("next_step"), dict) else {}
+    next_branch_id = str(next_step.get("branch_id") or "").strip()
+    next_task_id = str(next_step.get("task_id") or "").strip()
+    if branch_target and next_branch_id == branch_target and (not task_target or next_task_id == task_target):
+        return _active_work_candidate_context(payload)
+    if task_target and next_task_id == task_target:
+        return _active_work_candidate_context(payload)
+
+    resolved_branch_id = branch_target
+    resolved_task = None
+
+    if task_target and not resolved_branch_id:
+        for branch in work_tree.list_tree_branches(tree_id):
+            for task in work_tree.list_branch_tasks(branch.branch_id):
+                if str(task.task_id) == task_target:
+                    resolved_branch_id = branch.branch_id
+                    resolved_task = task
+                    break
+            if resolved_branch_id:
+                break
+    elif resolved_branch_id:
+        branch = work_tree.get_branch(resolved_branch_id)
+        if branch is None or str(branch.tree_id) != tree_id:
+            return {}
+        if task_target:
+            resolved_task = next(
+                (task for task in work_tree.list_branch_tasks(resolved_branch_id) if str(task.task_id) == task_target),
+                None,
+            )
+            if resolved_task is None or resolved_task.status in (work_tree.TaskStatus.COMPLETE, work_tree.TaskStatus.DROPPED):
+                return {}
+        else:
+            open_tasks = [
+                task
+                for task in work_tree.list_branch_tasks(resolved_branch_id)
+                if task.status not in (work_tree.TaskStatus.COMPLETE, work_tree.TaskStatus.DROPPED)
+            ]
+            resolved_task = open_tasks[0] if open_tasks else None
+    else:
+        return {}
+
+    branch = work_tree.get_branch(resolved_branch_id)
+    if branch is None:
+        return {}
+
+    recommended_tool = str(branch.preferred_tool or "").strip()
+    if resolved_task is not None:
+        meta = dict(resolved_task.meta or {})
+        recommended_tool = str(meta.get("expected_tool") or recommended_tool).strip()
+
+    return {
+        "branch_id": resolved_branch_id,
+        "title": str(branch.title or ""),
+        "task_id": str(resolved_task.task_id) if resolved_task is not None else "",
+        "task_title": str(resolved_task.title) if resolved_task is not None else "",
+        "status": str(payload.get("status") or ""),
+        "owner": str(payload.get("kind") or ""),
+        "age_min": _safe_int(payload.get("age_min") or 0, 0),
+        "recommended_tool": recommended_tool,
+        "tree_id": tree_id,
+        "tree_title": str(payload.get("title") or ""),
+        "executable": recommended_tool in ACTIVE_WORK_TREE_EXECUTE_TOOLS,
+    }
+
+
+def _targeted_work_pin_matches_payload(
+    payload: dict,
+    *,
+    branch_target: str = "",
+    task_target: str = "",
+    tool_target: str = "",
+) -> bool:
+    branch_target = str(branch_target or "").strip()
+    task_target = str(task_target or "").strip()
+    tool_target = str(tool_target or "").strip()
+    if not branch_target and not task_target:
+        if not tool_target:
+            return True
+        context = _active_work_candidate_context(payload)
+        return str(context.get("recommended_tool") or "").strip() == tool_target
+
+    context = _resolve_targeted_work_pin(payload, branch_target=branch_target, task_target=task_target)
+    if not context:
+        return False
+    if branch_target and str(context.get("branch_id") or "").strip() != branch_target:
+        return False
+    if task_target and str(context.get("task_id") or "").strip() != task_target:
+        return False
+    if tool_target and str(context.get("recommended_tool") or "").strip() != tool_target:
+        return False
+    return True
+
+
 def _active_work_tree_payload_eligible(payload: dict) -> bool:
     if not isinstance(payload, dict):
         return False
@@ -5011,11 +5115,14 @@ def _active_work_tree_payload_matches_target(
     tool_target = str(tool_target or "").strip()
     if not branch_target and not task_target and not tool_target:
         return True
+    if branch_target or task_target:
+        return _targeted_work_pin_matches_payload(
+            payload,
+            branch_target=branch_target,
+            task_target=task_target,
+            tool_target=tool_target,
+        )
     context = _active_work_candidate_context(payload)
-    if branch_target and str(context.get("branch_id") or "").strip() != branch_target:
-        return False
-    if task_target and str(context.get("task_id") or "").strip() != task_target:
-        return False
     if tool_target and str(context.get("recommended_tool") or "").strip() != tool_target:
         return False
     return True
@@ -5132,7 +5239,13 @@ def _active_work_context_for_target(
     if not branch_target and not task_target:
         return _active_work_candidate_context(candidates[0]) if candidates else {}
     for candidate in candidates:
-        context = _active_work_candidate_context(candidate)
+        context = _resolve_targeted_work_pin(
+            candidate,
+            branch_target=branch_target,
+            task_target=task_target,
+        )
+        if not context:
+            continue
         if branch_target and str(context.get("branch_id") or "").strip() == branch_target:
             return context
         if task_target and str(context.get("task_id") or "").strip() == task_target:
