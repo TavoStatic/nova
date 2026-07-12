@@ -3169,6 +3169,10 @@ def build_pulse_payload() -> dict:
     )
 
 
+def render_nova_pulse(payload: dict | None = None) -> str:
+    return service_render_nova_pulse(payload, build_pulse_payload_fn=build_pulse_payload)
+
+
 
 
 
