@@ -1000,17 +1000,32 @@
 
                         <div class="pipeline-detail-panel">
                             <div id="pipelineStatusGrid" class="inspector-stack mb-3">Select a pipeline to inspect readiness.</div>
+                            <div id="pipelineEdfiSection" class="mb-3 d-none">
+                                <div class="section-title"><span class="section-title-wrap"><i class="bi bi-hdd-network section-title-icon" aria-hidden="true"></i><span>Ed-Fi operator console</span></span></div>
+                                <div class="section-subtitle">Quick reads against the configured connection. Credentials stay in local runtime config only.</div>
+                                <div class="button-row wrap-buttons mb-2">
+                                    <button id="btnEdfiQuickHealth" class="btn btn-sm btn-operator-alt" type="button">Connection health</button>
+                                    <button id="btnEdfiQuickSchools" class="btn btn-sm btn-operator-alt" type="button">List schools</button>
+                                    <button id="btnEdfiQuickStudents" class="btn btn-sm btn-operator-alt" type="button">List students</button>
+                                    <button id="btnEdfiQuickSync" class="btn btn-sm btn-operator-alt" type="button">Sync status</button>
+                                    <button id="btnEdfiQuickChanges" class="btn btn-sm btn-operator-primary" type="button">Pull changes</button>
+                                </div>
+                                <div id="pipelineEdfiSyncGrid" class="inspector-stack mb-2">Change sync summary pending.</div>
+                            </div>
                             <div id="pipelineQuerySection" class="mb-3 d-none">
                                 <div class="section-title"><span class="section-title-wrap"><i class="bi bi-play-circle section-title-icon" aria-hidden="true"></i><span>Governed query runner</span></span></div>
                                 <div class="section-subtitle">Preview a dry-run plan first. Live runs use the governed pipeline path and row caps.</div>
                                 <label class="field-label" for="pipelineQueryOperation">Operation</label>
                                 <select id="pipelineQueryOperation" class="form-select form-select-sm mb-2"></select>
+                                <div id="pipelineQueryDescription" class="section-footnote mb-2">Select an operation to see its governed description and parameters.</div>
+                                <div id="pipelineQueryParams" class="control-grid-2 mb-2"></div>
                                 <label class="field-label" for="pipelineQueryRowLimit">Row limit</label>
                                 <input id="pipelineQueryRowLimit" class="form-control form-control-sm mb-2" type="number" min="1" max="50" value="10">
                                 <div class="button-row wrap-buttons mb-2">
                                     <button id="btnPipelineQueryPreview" class="btn btn-sm btn-operator-alt" type="button">Preview</button>
                                     <button id="btnPipelineQueryRun" class="btn btn-sm btn-operator-primary" type="button">Run live</button>
                                 </div>
+                                <div id="pipelineQueryTable" class="pipeline-query-table-wrap mb-2 d-none"></div>
                                 <pre id="pipelineQueryResult" class="console-box compact-console">Query results will appear here.</pre>
                             </div>
                             <div class="section-title"><span class="section-title-wrap"><i class="bi bi-sliders section-title-icon" aria-hidden="true"></i><span>Lane settings</span></span></div>

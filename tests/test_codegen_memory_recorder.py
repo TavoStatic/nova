@@ -15,6 +15,8 @@ import tempfile
 from pathlib import Path
 from unittest.mock import patch, mock_open
 
+import pytest
+
 from services.codegen_memory_recorder import (
     record_generated_pattern,
     lookup_patterns_by_capability,
@@ -527,7 +529,7 @@ class TestErrorHandling:
             # Note: This may not raise if Path doesn't verify parent exists
             # So we use mock to force the error
             with patch("builtins.open", side_effect=IOError("Permission denied")):
-                with self.assertRaises(IOError):
+                with pytest.raises(IOError):
                     record_generated_pattern(
                         "capability",
                         "spec",

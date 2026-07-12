@@ -104,6 +104,7 @@ class EdFiBisdPipeline(BaseDataPipeline):
             "newest_change_version": int(
                 ((readiness.get("change_sync") or {}).get("available") or {}).get("newest_change_version") or 0
             ),
+            "change_sync": readiness.get("change_sync") or {},
             "query_template_count": len(self.load_query_templates()),
             "entity_count": len(self.load_schema_manifest().get("entities") or []),
             "live_query_ready": readiness["ready"],
@@ -119,7 +120,10 @@ class EdFiBisdPipeline(BaseDataPipeline):
 
     def _next_step(self, readiness: Mapping[str, Any]) -> str:
         if readiness.get("ready"):
-            return "Live execution is ready; rerun with dry_run=False via pipeline preview or tool_pipeline."
+            return (
+                "Live execution is ready. Use the control panel query runner or Ed-Fi quick actions "
+                "for governed preview/live reads."
+            )
         blockers = list(readiness.get("blockers") or [])
         if "edfi_connection_config_missing" in blockers:
             return "Run scripts/run_edfi_profile.py to save runtime/edfi/connections/district-main/local_config.json."
@@ -298,7 +302,7 @@ class EdFiBisdPipeline(BaseDataPipeline):
                     "records_scanned": int(raw.get("records_scanned") or 0),
                 },
             )
-            return {
+            response = {
                 "ok": True,
                 **base_payload,
                 "execution_mode": "live",
@@ -310,6 +314,16 @@ class EdFiBisdPipeline(BaseDataPipeline):
                     "filter": raw.get("filter"),
                 },
             }
+            if validated["operation"] == "changes_since":
+                response.update({
+                    "mechanism": raw.get("mechanism"),
+                    "min_change_version": raw.get("min_change_version"),
+                    "next_change_version": raw.get("next_change_version"),
+                    "note": raw.get("note"),
+                })
+            if validated["operation"] == "sync_status":
+                response["items"] = raw
+            return response
 
         if not dry_run and not ready:
             reason = str(status.get("next_step") or "pipeline_not_ready")

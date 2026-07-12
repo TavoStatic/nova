@@ -43,6 +43,8 @@ _ROUTE_NOISE_PREFIXES = (
     "session_fact_sheet:",
     "llm_fallback:",
     "llm_call:",
+    "leah_fast_chat:",
+    "turn_intent_evidence:",
 )
 _RUNTIME_ERROR_MARKERS = (
     "llm service unavailable",

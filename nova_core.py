@@ -38,6 +38,7 @@ from env_inspector import inspect_environment, format_report
 import requests
 import psutil
 from tools import ToolContext, ToolInvocationError, build_default_registry
+from tools.registry import build_core_tool_exports as service_build_core_tool_exports
 from services.behavior_metrics import BehaviorMetricsStore
 from services.policy_manager import PolicyManager
 from services.web_research_session import WebResearchSessionStore
@@ -72,6 +73,7 @@ from services.nova_self_status import build_repo_change_snapshot as service_buil
 from services.nova_self_status import read_recent_ops_events as service_read_recent_ops_events
 from services.nova_self_status import render_self_status as service_render_self_status
 from services.control_work_trees import CONTROL_WORK_TREES_SERVICE
+from services.work_tree_pressure_snapshot import build_work_tree_pressure_snapshot
 from services.release_status import RELEASE_STATUS_SERVICE
 from services.core_health_brief import build_core_health_brief as service_build_core_health_brief
 from services.core_health_brief import feed_core_health_brief_to_work_tree as service_feed_core_health_brief_to_work_tree
@@ -264,15 +266,12 @@ def _ensure_voice_deps() -> bool:
     return service_ensure_voice_deps(globals())
 
 
-def voice_status_payload() -> dict:
-    return service_voice_status_payload(globals())
+voice_status_payload = lambda: service_voice_status_payload(globals())
 
-
-def vision_status_payload(*, policy: dict | None = None, ollama_health: dict | None = None) -> dict:
-    return service_vision_status_payload(
-        policy=policy if isinstance(policy, dict) else load_policy(),
-        ollama_health=ollama_health if isinstance(ollama_health, dict) else ollama_health_payload(),
-    )
+vision_status_payload = lambda *, policy=None, ollama_health=None: service_vision_status_payload(
+    policy=policy if isinstance(policy, dict) else load_policy(),
+    ollama_health=ollama_health if isinstance(ollama_health, dict) else ollama_health_payload(),
+)
 
 
 def record_seconds(seconds: int = 3):
@@ -751,51 +750,35 @@ def _finalize_routing_decision(
 _ROUTING_INTENT_PROMPT = ""
 
 
-def _llm_classify_routing_intent(
-    text: str,
-    turns: Optional[list[tuple[str, str]]] = None,
-    pending_action: Optional[dict] = None,
-    return_none_payload: bool = False,
-) -> Optional[dict[str, object]]:
-    return service_llm_classify_routing_intent(
-        text,
-        turns,
-        pending_action=pending_action,
-        return_none_payload=return_none_payload,
-        live_ollama_calls_allowed_fn=_live_ollama_calls_allowed,
-        chat_model_fn=chat_model,
-        routing_model_fn=routing_model,
-        ollama_base=OLLAMA_BASE,
-        get_saved_location_text_fn=get_saved_location_text,
-        requests_post_fn=requests.post,
-    )
+_llm_classify_routing_intent = lambda text, turns=None, pending_action=None, return_none_payload=False: service_llm_classify_routing_intent(
+    text,
+    turns,
+    pending_action=pending_action,
+    return_none_payload=return_none_payload,
+    live_ollama_calls_allowed_fn=_live_ollama_calls_allowed,
+    chat_model_fn=chat_model,
+    routing_model_fn=routing_model,
+    ollama_base=OLLAMA_BASE,
+    get_saved_location_text_fn=get_saved_location_text,
+    requests_post_fn=requests.post,
+)
 
 
-def classify_turn_intent(
-    text: str,
-    turns: Optional[list[tuple[str, str]]] = None,
-) -> dict:
-    return service_classify_turn_intent(
-        text,
-        turns,
-        live_ollama_calls_allowed_fn=_live_ollama_calls_allowed,
-        chat_model_fn=chat_model,
-        ollama_base=OLLAMA_BASE,
-        requests_post_fn=requests.post,
-    )
+classify_turn_intent = lambda text, turns=None: service_classify_turn_intent(
+    text,
+    turns,
+    live_ollama_calls_allowed_fn=_live_ollama_calls_allowed,
+    chat_model_fn=chat_model,
+    ollama_base=OLLAMA_BASE,
+    requests_post_fn=requests.post,
+)
 
 
-def select_response_strategy(
-    intent: dict,
-    *,
-    tool_data_available: bool = False,
-    data_confirms_claim: Optional[bool] = None,
-) -> dict:
-    return service_select_response_strategy(
-        intent,
-        tool_data_available=tool_data_available,
-        data_confirms_claim=data_confirms_claim,
-    )
+select_response_strategy = lambda intent, *, tool_data_available=False, data_confirms_claim=None: service_select_response_strategy(
+    intent,
+    tool_data_available=tool_data_available,
+    data_confirms_claim=data_confirms_claim,
+)
 
 
 def record_intent_outcome(
@@ -1204,8 +1187,7 @@ _LOCATION_HINT_LABELS = {
 }
 
 
-def _parse_lat_lon(text: str) -> Optional[tuple[float, float]]:
-    return service_parse_lat_lon(text)
+_parse_lat_lon = service_parse_lat_lon
 
 
 def _coords_for_location_hint(location: str) -> Optional[tuple[float, float]]:
@@ -1574,17 +1556,16 @@ def _normalize_recent_learning_item(kind: str, text: str) -> str:
     return ""
 
 
-def mem_get_recent_learned(limit: int = 5) -> list[str]:
-    return service_mem_get_recent_learned(
-        limit,
-        mem_enabled_fn=mem_enabled,
-        memory_mod=memory_mod,
-        memory_runtime_user_fn=_memory_runtime_user,
-        mem_scope_fn=mem_scope,
-        normalize_recent_learning_item_fn=_normalize_recent_learning_item,
-        load_learned_facts_fn=load_learned_facts,
-        record_memory_event_fn=_record_memory_event,
-    )
+mem_get_recent_learned = lambda limit=5: service_mem_get_recent_learned(
+    limit,
+    mem_enabled_fn=mem_enabled,
+    memory_mod=memory_mod,
+    memory_runtime_user_fn=_memory_runtime_user,
+    mem_scope_fn=mem_scope,
+    normalize_recent_learning_item_fn=_normalize_recent_learning_item,
+    load_learned_facts_fn=load_learned_facts,
+    record_memory_event_fn=_record_memory_event,
+)
 
 
 
@@ -1605,20 +1586,19 @@ def mem_stats() -> str:
         return f"Memory stats failed: {e}"
 
 
-def mem_audit(query: str) -> str:
-    return service_mem_audit(
-        query,
-        memory_runtime_user_fn=_memory_runtime_user,
-        memory_mod=memory_mod,
-        mem_context_top_k_fn=mem_context_top_k,
-        mem_min_score_fn=mem_min_score,
-        mem_exclude_sources_fn=mem_exclude_sources,
-        mem_recall_exclude_kinds_fn=_mem_recall_exclude_kinds,
-        mem_scope_fn=mem_scope,
-        record_memory_event_fn=_record_memory_event,
-        python_path=str(PYTHON),
-        base_dir=BASE_DIR,
-    )
+mem_audit = lambda query: service_mem_audit(
+    query,
+    memory_runtime_user_fn=_memory_runtime_user,
+    memory_mod=memory_mod,
+    mem_context_top_k_fn=mem_context_top_k,
+    mem_min_score_fn=mem_min_score,
+    mem_exclude_sources_fn=mem_exclude_sources,
+    mem_recall_exclude_kinds_fn=_mem_recall_exclude_kinds,
+    mem_scope_fn=mem_scope,
+    record_memory_event_fn=_record_memory_event,
+    python_path=str(PYTHON),
+    base_dir=BASE_DIR,
+)
 
 
 
@@ -1981,6 +1961,26 @@ def set_server_side_settings(
         frontdoor=frontdoor,
         frontdoor_base_url=frontdoor_base_url,
         docker_enabled=docker_enabled,
+        user=get_active_user(),
+    )
+
+
+def set_mission_settings(
+    *,
+    enabled: bool | None = None,
+    mode: str = "",
+    objective: str = "",
+    release_stale_ready_is_pressure: bool | None = None,
+    subconscious_triage_is_pressure: bool | None = None,
+    generated_queue_backlog_is_pressure: bool | None = None,
+) -> str:
+    return _policy_manager().set_mission_settings(
+        enabled=enabled,
+        mode=mode,
+        objective=objective,
+        release_stale_ready_is_pressure=release_stale_ready_is_pressure,
+        subconscious_triage_is_pressure=subconscious_triage_is_pressure,
+        generated_queue_backlog_is_pressure=generated_queue_backlog_is_pressure,
         user=get_active_user(),
     )
 
@@ -2437,18 +2437,17 @@ def _extract_matching_lines(text: str, tokens: list[str], max_lines: int = 3) ->
     return _extract_key_lines(text, max_lines=max_lines)
 
 
-def _build_local_topic_digest_answer(query_text: str, max_files: int = 4, max_points: int = 10) -> str:
-    return service_build_local_topic_digest_answer(
-        query_text,
-        packs_dir=PACKS_DIR,
-        base_dir=BASE_DIR,
-        active_knowledge_root_fn=_active_knowledge_root,
-        topic_tokens_fn=_topic_tokens,
-        read_text_safely_fn=_read_text_safely,
-        extract_matching_lines_fn=_extract_matching_lines,
-        max_files=max_files,
-        max_points=max_points,
-    )
+_build_local_topic_digest_answer = lambda query_text, max_files=4, max_points=10: service_build_local_topic_digest_answer(
+    query_text,
+    packs_dir=PACKS_DIR,
+    base_dir=BASE_DIR,
+    active_knowledge_root_fn=_active_knowledge_root,
+    topic_tokens_fn=_topic_tokens,
+    read_text_safely_fn=_read_text_safely,
+    extract_matching_lines_fn=_extract_matching_lines,
+    max_files=max_files,
+    max_points=max_points,
+)
 
 
 
@@ -2813,59 +2812,6 @@ def show_preview(path_or_name: str) -> str:
         return f"Failed to read preview: {e}"
 
 
-def tool_patch_preview_apply(preview: str) -> dict:
-    preview_name = str(preview or "").strip()
-    patch_summary = patch_status_payload()
-    preview_limit = max(200, int(patch_summary.get("previews_total", 0) or 0))
-    preview_rows = list(patch_preview_summaries(preview_limit) or [])
-    ok, msg, extra, detail = PATCH_CONTROL_SERVICE.patch_preview_apply(
-        {"preview": preview_name},
-        preview_target_fn=lambda payload: PATCH_CONTROL_SERVICE.patch_preview_target(payload, preview_rows),
-        preview_entry_fn=lambda target: PATCH_CONTROL_SERVICE.patch_preview_entry(target, preview_rows),
-        patch_control_state_fn=_patch_control_state,
-        show_preview_fn=show_preview,
-        updates_dir=UPDATES_DIR,
-        patch_apply_fn=patch_apply,
-    )
-    result = {
-        "ok": bool(ok),
-        "message": str(msg or ""),
-        "detail": str(detail or ""),
-    }
-    if isinstance(extra, dict):
-        result.update(extra)
-    if not ok:
-        result["error"] = str((extra or {}).get("text") or detail or msg or "patch_preview_apply_failed")
-    return result
-
-
-def tool_patch_preview_approve(preview: str) -> dict:
-    preview_name = str(preview or "").strip()
-    patch_summary = patch_status_payload()
-    preview_limit = max(200, int(patch_summary.get("previews_total", 0) or 0))
-    preview_rows = list(patch_preview_summaries(preview_limit) or [])
-    ok, msg, extra, detail = PATCH_CONTROL_SERVICE.patch_preview_decision(
-        "approve",
-        {
-            "preview": preview_name,
-            "note": "autonomy maintenance: governed work tree approval for base-compatible patch preview",
-        },
-        preview_target_fn=lambda payload: PATCH_CONTROL_SERVICE.patch_preview_target(payload, preview_rows),
-        patch_control_state_fn=_patch_control_state,
-        decision_fn=lambda target, note: approve_preview(target, note or "autonomy maintenance approved preview"),
-    )
-    result = {
-        "ok": bool(ok),
-        "message": str(msg or ""),
-        "detail": str(detail or ""),
-    }
-    if isinstance(extra, dict):
-        result.update(extra)
-    if not ok:
-        result["error"] = str((extra or {}).get("text") or detail or msg or "patch_preview_approve_failed")
-    return result
-
-
 def approve_preview(path_or_name: str, note: str = "") -> str:
     previews = UPDATES_DIR / "previews"
     p = Path(path_or_name)
@@ -3057,28 +3003,26 @@ def _teach_list_examples() -> str:
         return f"Failed to read teach examples: {e}"
 
 
-def _teach_propose_patch(description: str) -> str:
-    return service_teach_propose_patch(
-        description,
-        updates_dir=UPDATES_DIR,
-        read_patch_revision_fn=_read_patch_revision,
-        patch_manifest_name=PATCH_MANIFEST_NAME,
-        patch_preview_fn=patch_preview,
-        interactive_patch_review_enabled_fn=_interactive_patch_review_enabled,
-        interactive_preview_review_fn=interactive_preview_review,
-    )
+_teach_propose_patch = lambda description: service_teach_propose_patch(
+    description,
+    updates_dir=UPDATES_DIR,
+    read_patch_revision_fn=_read_patch_revision,
+    patch_manifest_name=PATCH_MANIFEST_NAME,
+    patch_preview_fn=patch_preview,
+    interactive_patch_review_enabled_fn=_interactive_patch_review_enabled,
+    interactive_preview_review_fn=interactive_preview_review,
+)
 
 
-def _teach_autoapply_proposal(zip_path: str, apply_live: bool = False) -> str:
-    return service_teach_autoapply_proposal(
-        zip_path,
-        apply_live=apply_live,
-        updates_dir=UPDATES_DIR,
-        base_dir=BASE_DIR,
-        patch_preview_fn=patch_preview,
-        behavioral_check_fn=_behavioral_check,
-        patch_apply_fn=patch_apply,
-    )
+_teach_autoapply_proposal = lambda zip_path, apply_live=False: service_teach_autoapply_proposal(
+    zip_path,
+    apply_live=apply_live,
+    updates_dir=UPDATES_DIR,
+    base_dir=BASE_DIR,
+    patch_preview_fn=patch_preview,
+    behavioral_check_fn=_behavioral_check,
+    patch_apply_fn=patch_apply,
+)
 
 
 # =========================
@@ -3102,96 +3046,6 @@ def run_tool_py(script: str, args=None) -> str:
     if p.stderr:
         out += ("\n" + p.stderr)
     return out.strip()
-
-
-def tool_screen():
-    return execute_registered_tool("vision", {"action": "screen"})
-
-
-def tool_camera(prompt: str):
-    return execute_registered_tool("vision", {"action": "camera", "prompt": prompt})
-
-
-def tool_ls(subfolder=""):
-    payload = {"action": "ls"}
-    if subfolder:
-        payload["path"] = subfolder
-    return execute_registered_tool("filesystem", payload)
-
-
-def tool_read(path: str):
-    return execute_registered_tool("filesystem", {"action": "read", "path": path})
-
-
-def tool_find(keyword: str, subfolder=""):
-    payload = {"action": "find", "keyword": keyword}
-    if subfolder:
-        payload["path"] = subfolder
-    out = execute_registered_tool("filesystem", payload)
-    if not out or out == "No matches found.":
-        return out or "No matches found."
-    return "Matches:\n" + out
-
-
-def tool_health():
-    return execute_registered_tool("system", {"action": "health_check"})
-
-
-def tool_system_check():
-    return execute_registered_tool("system", {"action": "system_check"})
-
-
-def tool_queue_status():
-    return execute_registered_tool("system", {"action": "queue_status"})
-
-
-def tool_temporal_review(payload: str = ""):
-    args: dict[str, object] = {"action": "review"}
-    text = str(payload or "").strip()
-    if text:
-        path = Path(text)
-        if path.exists() and path.is_file():
-            args["path"] = str(path.resolve())
-        else:
-            args["input"] = text
-    return execute_registered_tool("temporal_review", args)
-
-
-def tool_edfi_explore(
-    action: str = "health",
-    connection_id: str = "district-main",
-    resource: str = "",
-    limit: int = 25,
-    offset: int = 0,
-    query: str = "",
-    namespace: str = "",
-):
-    return execute_registered_tool(
-        "edfi_explore",
-        {
-            "action": str(action or "health").strip().lower(),
-            "connection_id": str(connection_id or "district-main").strip() or "district-main",
-            "resource": str(resource or "").strip(),
-            "limit": int(limit or 25),
-            "offset": int(offset or 0),
-            "query": str(query or "").strip(),
-            "namespace": str(namespace or "").strip(),
-        },
-    )
-
-
-def tool_pipeline(command_text: str = "pipeline help"):
-    return service_handle_pipeline_command(
-        command_text,
-        data_sources_root=DATA_SOURCES_ROOT,
-        list_pipeline_summaries_fn=service_list_pipeline_summaries,
-        get_pipeline_status_fn=service_get_pipeline_status,
-        get_pipeline_schema_probe_fn=service_get_pipeline_schema_probe,
-        preview_pipeline_query_fn=service_preview_pipeline_query,
-        run_privileged_pipeline_query_fn=service_run_privileged_pipeline_query,
-        search_pipeline_vendor_dictionary_fn=service_search_pipeline_vendor_dictionary,
-        plan_pipeline_report_fn=service_plan_pipeline_report,
-    )
 
 
 def tool_os_capability(request: str = "", capability: str = "", args: Optional[dict] = None):
@@ -3314,26 +3168,8 @@ def build_pulse_payload() -> dict:
         memory_health_payload_fn=memory_health_payload,
     )
 
-def render_nova_pulse(payload: Optional[dict] = None) -> str:
-    return service_render_nova_pulse(
-        payload,
-        build_pulse_payload_fn=build_pulse_payload,
-    )
 
 
-def write_pulse_snapshot(payload: dict) -> None:
-    return service_write_pulse_snapshot(
-        payload,
-        pulse_snapshot_file=PULSE_SNAPSHOT_FILE,
-    )
-
-
-def tool_nova_pulse():
-    return service_tool_nova_pulse(
-        build_pulse_payload_fn=build_pulse_payload,
-        write_pulse_snapshot_fn=write_pulse_snapshot,
-        render_nova_pulse_fn=render_nova_pulse,
-    )
 
 
 def _latest_memory_health_branch() -> tuple[object | None, list[dict]]:
@@ -3615,70 +3451,15 @@ def _self_report_work_trees_payload(limit: int = 32) -> dict:
 
 
 def _self_report_work_tree_truth(work_trees_payload: dict) -> dict:
-    work_trees = dict(work_trees_payload or {}) if isinstance(work_trees_payload, dict) else {}
-    counts = work_trees.get("counts") if isinstance(work_trees.get("counts"), dict) else {}
-    open_task_count = int(counts.get("open_tasks", 0) or 0)
-    pending_count = int(counts.get("pending", 0) or 0)
-    working_count = int(counts.get("working", 0) or 0)
-    blocked_count = int(counts.get("blocked", 0) or 0)
-    operator_hold_count = 0
-    self_repair_blocked_count = 0
-    self_repair_observing_count = 0
-    observing_count = 0
-    for tree_payload in list(work_trees.get("trees") or []):
-        if not isinstance(tree_payload, dict):
-            continue
-        for node in list(tree_payload.get("nodes") or []):
-            if not isinstance(node, dict):
-                continue
-            status_text = str(node.get("status") or "").strip().lower()
-            resolution_text = str(node.get("resolution_state") or "").strip().lower()
-            source_type = str(node.get("source_type") or "").strip().lower()
-            work_class = str(node.get("work_class") or "").strip().lower()
-            actionability = str(node.get("actionability") or "").strip().lower()
-            source_payload = node.get("source_payload") if isinstance(node.get("source_payload"), dict) else {}
-            memory_origin = (
-                source_payload.get("memory_bootstrap_origin")
-                if isinstance(source_payload.get("memory_bootstrap_origin"), dict)
-                else {}
-            )
-            memory_bootstrap = (
-                source_payload.get("memory_bootstrap")
-                if isinstance(source_payload.get("memory_bootstrap"), dict)
-                else {}
-            )
-            memory_operator_hold = bool(
-                status_text == "blocked"
-                and source_type == "memory_health"
-                and work_class == "governance_pressure"
-                and str(memory_origin.get("status") or memory_bootstrap.get("origin_status") or "").strip().lower()
-                == "pending_operator_confirmation"
-            )
-            operator_hold = memory_operator_hold
-            if operator_hold:
-                operator_hold_count += 1
-            elif status_text == "blocked":
-                self_repair_blocked_count += 1
-            if resolution_text == "observing" and status_text not in {"complete", "archived"}:
-                observing_count += 1
-                if not operator_hold:
-                    self_repair_observing_count += 1
-    if self_repair_blocked_count > 0 or self_repair_observing_count > 0:
-        status = "blocked_observing"
-    elif operator_hold_count > 0:
-        status = "operator_hold"
-    elif open_task_count > 0 or pending_count > 0 or working_count > 0:
-        status = "open"
-    else:
-        status = "clear"
+    snapshot = build_work_tree_pressure_snapshot(work_trees_payload)
     return {
-        "status": status,
-        "open_task_count": open_task_count,
-        "blocked_branch_count": blocked_count,
-        "operator_hold_branch_count": operator_hold_count,
-        "self_repair_blocked_branch_count": self_repair_blocked_count,
-        "self_repair_observing_branch_count": self_repair_observing_count,
-        "observing_branch_count": observing_count,
+        "status": snapshot.get("status"),
+        "open_task_count": snapshot.get("open_task_count"),
+        "blocked_branch_count": snapshot.get("blocked_branch_count"),
+        "operator_hold_branch_count": snapshot.get("operator_hold_branch_count"),
+        "self_repair_blocked_branch_count": snapshot.get("self_repair_blocked_branch_count"),
+        "self_repair_observing_branch_count": snapshot.get("self_repair_observing_branch_count"),
+        "observing_branch_count": snapshot.get("observing_branch_count"),
     }
 
 
@@ -3720,16 +3501,6 @@ def _self_report_local_status_payload(work_trees_payload: dict) -> dict:
         "guard": {"status": "unknown"},
         "webui": {"status": "unknown"},
     }
-
-
-def tool_nova_self_status():
-    pulse_payload = _apply_latest_regression_validation(build_pulse_payload())
-    payload = service_build_self_status_payload(
-        pulse_payload=pulse_payload,
-        recent_ops_events=service_read_recent_ops_events(RUNTIME_DIR / "ops_journal.jsonl", limit=60),
-        repo_change_snapshot=service_build_repo_change_snapshot(BASE_DIR),
-    )
-    return service_render_self_status(payload)
 
 
 def _core_health_runtime_health() -> dict:
@@ -3812,33 +3583,6 @@ def build_core_health_brief_payload() -> dict:
     )
 
 
-def tool_core_health_brief(feed: str = ""):
-    brief = build_core_health_brief_payload()
-    service_write_core_health_brief(RUNTIME_DIR / "core_health_brief.json", brief)
-
-    feed_result = None
-    if str(feed or "").strip().lower() in {"feed", "work_tree", "worktree", "seed"}:
-        import work_tree
-
-        feed_result = service_feed_core_health_brief_to_work_tree(brief, work_tree_module=work_tree)
-    return service_render_core_health_brief(brief, feed_result=feed_result)
-
-
-def tool_core_thinning(feed: str = ""):
-    raw = str(feed or "").strip()
-    if raw.startswith("{"):
-        return service_execute_core_thinning_order(raw)
-
-    core_path = Path(__file__).resolve()
-    brief = service_build_core_thinning_brief([core_path, core_path.with_name("nova_http.py")])
-    feed_result = None
-    if raw.lower() in {"feed", "work_tree", "worktree", "seed"}:
-        import work_tree
-
-        feed_result = service_feed_core_thinning_brief_to_work_tree(brief, work_tree_module=work_tree)
-    return service_render_core_thinning_brief(brief, feed_result=feed_result)
-
-
 def tool_release_rebuild_verify(label: str = "work-tree-rebuild"):
     from services.release_clean import run_release_clean
 
@@ -3894,53 +3638,27 @@ def update_now_pending_payload() -> dict:
     )
 
 
-def _write_update_now_pending(payload: dict) -> None:
-    return service_write_update_now_pending(UPDATE_NOW_PENDING_FILE, payload)
-
-
-def _clear_update_now_pending() -> None:
-    return service_clear_update_now_pending(UPDATE_NOW_PENDING_FILE)
 
 
 
 
 
 
-def _build_update_now_token(zip_path: Path) -> str:
-    return service_build_update_now_token(zip_path)
-
-
-def tool_update_now():
-    return service_tool_update_now(
-        patch_status_payload_fn=patch_status_payload,
-        latest_approved_update_zip_fn=_latest_approved_update_zip,
-        patch_preview_fn=patch_preview,
-        clear_pending_fn=_clear_update_now_pending,
-        write_pending_fn=_write_update_now_pending,
-        build_token_fn=_build_update_now_token,
-    )
-
-
-def tool_update_now_confirm(token: str = ""):
-    return service_tool_update_now_confirm(
-        token,
-        read_pending_fn=_read_update_now_pending,
-        clear_pending_fn=_clear_update_now_pending,
-        patch_status_payload_fn=patch_status_payload,
-        latest_approved_update_zip_fn=_latest_approved_update_zip,
-        execute_patch_action_fn=execute_patch_action,
-    )
 
 
 
 
 
 
-def tool_update_now_cancel():
-    return service_tool_update_now_cancel(
-        read_pending_fn=_read_update_now_pending,
-        clear_pending_fn=_clear_update_now_pending,
-    )
+
+
+
+
+
+
+
+
+
 
 
 def execute_planned_action(tool: str, args=None):
@@ -3973,76 +3691,26 @@ def _weather_current_location_available() -> bool:
 
 
 
-def _decode_search_href(href: str) -> str:
-    return service_decode_search_href(href)
-
-
-def _extract_text_from_path(path: Path, max_chars: int = 2000) -> str:
-    return service_extract_text_from_path(path, max_chars)
-
-
-def _extract_text_from_html_content(raw_html: str, max_chars: int = 2000) -> str:
-    return service_extract_text_from_html_content(raw_html, max_chars)
-
-
-def _extract_same_host_links(raw_html: str, base_url: str, host: str) -> list[str]:
-    return service_extract_same_host_links(raw_html, base_url, host)
-
-
-def _expand_research_terms(tokens: list[str]) -> list[str]:
-    return service_expand_research_terms(tokens)
-
-
-def _score_research_hit(url: str, text: str, terms: list[str], primary_tokens: Optional[list[str]] = None) -> float:
-    return service_score_research_hit(url, text, terms, primary_tokens=primary_tokens)
-
-
-def _crawl_domain_for_query(start_url: str, query_tokens: list[str], max_pages: int, max_depth: int) -> list[tuple[float, str, str]]:
-    return service_crawl_domain_for_query(
-        start_url,
-        query_tokens,
-        max_pages,
-        max_depth,
-        requests_get_fn=requests.get,
-        expand_research_terms_fn=_expand_research_terms,
-        extract_text_from_html_content_fn=_extract_text_from_html_content,
-        score_research_hit_fn=_score_research_hit,
-        extract_same_host_links_fn=_extract_same_host_links,
-    )
-
-
-def _scan_candidate_urls_for_query(urls: list[str], query_tokens: list[str], max_pages: int, min_score: float = 3.0) -> list[tuple[float, str, str]]:
-    return service_scan_candidate_urls_for_query(
-        urls,
-        query_tokens,
-        max_pages,
-        min_score=min_score,
-        requests_get_fn=requests.get,
-        expand_research_terms_fn=_expand_research_terms,
-        extract_text_from_html_content_fn=_extract_text_from_html_content,
-        score_research_hit_fn=_score_research_hit,
-    )
 
 
 
-def _fetch_sitemap_urls(domain: str, limit: int = 80) -> list[str]:
-    return service_fetch_sitemap_urls(
-        domain,
-        limit=limit,
-        requests_get_fn=requests.get,
-        host_allowed_fn=_host_allowed,
-    )
 
 
 
-def _seed_urls_for_domain(domain: str, query_tokens: list[str], max_seed: int = 30) -> list[str]:
-    return service_seed_urls_for_domain(
-        domain,
-        query_tokens,
-        max_seed=max_seed,
-        fetch_sitemap_urls_fn=_fetch_sitemap_urls,
-        expand_research_terms_fn=_expand_research_terms,
-    )
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -4050,24 +3718,7 @@ def web_search(query: str, save_dir: Path = WEB_CACHE_DIR, max_results: int = 5)
     return service_web_search(query, save_dir, requests_post_fn=requests.post, max_results=max_results)
 
 
-def tool_search(query: str):
-    return service_tool_search(
-        query,
-        explain_missing_fn=explain_missing,
-        policy_tools_enabled_fn=policy_tools_enabled,
-        web_search_fn=web_search,
-        web_cache_dir=WEB_CACHE_DIR,
-    )
-
-
-def tool_web_fetch(url: str):
-    return service_tool_web_fetch(
-        url,
-        explain_missing_fn=explain_missing,
-        policy_tools_enabled_fn=policy_tools_enabled,
-        web_fetch_fn=lambda target_url: web_fetch(target_url, WEB_CACHE_DIR),
-        web_allowlist_message_fn=_web_allowlist_message,
-    )
+globals().update(service_build_core_tool_exports(globals()))
 
 
 
@@ -4076,72 +3727,28 @@ def tool_web_fetch(url: str):
 
 
 
-def tool_wikipedia_lookup(query: str):
-    return service_tool_wikipedia_lookup(
-        query,
-        explain_missing_fn=explain_missing,
-        policy_tools_enabled_fn=policy_tools_enabled,
-        web_enabled_fn=web_enabled,
-        requests_get_fn=requests.get,
-    )
 
 
 
-def tool_stackexchange_search(query: str):
-    return service_tool_stackexchange_search(
-        query,
-        explain_missing_fn=explain_missing,
-        policy_tools_enabled_fn=policy_tools_enabled,
-        web_enabled_fn=web_enabled,
-        policy_web_fn=policy_web,
-        requests_get_fn=requests.get,
-        env=os.environ,
-    )
-
-
-def tool_web_search(query: str):
-    return service_tool_web_search(
-        query,
-        explain_missing_fn=explain_missing,
-        policy_tools_enabled_fn=policy_tools_enabled,
-        web_enabled_fn=web_enabled,
-        policy_web_fn=policy_web,
-        host_allowed_fn=_host_allowed,
-        decode_search_href_fn=_decode_search_href,
-        probe_search_endpoint_fn=probe_search_endpoint,
-        web_allowlist_message_fn=_web_allowlist_message,
-        requests_get_fn=requests.get,
-    )
 
 
 
-def tool_web_gather(url: str):
-    return service_tool_web_gather(
-        url,
-        explain_missing_fn=explain_missing,
-        policy_tools_enabled_fn=policy_tools_enabled,
-        web_fetch_fn=lambda target_url: web_fetch(target_url, WEB_CACHE_DIR),
-        web_allowlist_message_fn=_web_allowlist_message,
-        extract_text_from_path_fn=_extract_text_from_path,
-    )
 
 
 
-def tool_web_research(query: str, continue_mode: bool = False):
-    return service_tool_web_research(
-        query,
-        continue_mode=continue_mode,
-        explain_missing_fn=explain_missing,
-        policy_tools_enabled_fn=policy_tools_enabled,
-        web_enabled_fn=web_enabled,
-        policy_web_fn=policy_web,
-        tokenize_fn=_tokenize,
-        fetch_sitemap_urls_fn=_fetch_sitemap_urls,
-        scan_candidate_urls_for_query_fn=_scan_candidate_urls_for_query,
-        seed_urls_for_domain_fn=_seed_urls_for_domain,
-        crawl_domain_for_query_fn=_crawl_domain_for_query,
-        session_store=WEB_RESEARCH_SESSION,
-    )
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

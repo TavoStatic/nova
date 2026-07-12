@@ -147,11 +147,9 @@
   },
   "layers": {
     "leah": {
-      "mode": "active",
+      "mode": "observe",
       "fast_chat": true,
-      "promoted_capabilities": [
-        "leah_conversation_continuity"
-      ]
+      "promoted_capabilities": []
     },
     "codegen": {
       "mode": "observe",
@@ -199,6 +197,30 @@
     "confidence_threshold": 0.55,
     "execute_min_confidence": 0.55,
     "cooldown_sec": 0,
+    "mission": {
+      "enabled": true,
+      "mode": "steady_state_guard",
+      "objective": "hold_steady_and_surface_fresh_gaps",
+      "release_stale_ready_is_pressure": false,
+      "subconscious_triage_is_pressure": false,
+      "generated_queue_backlog_is_pressure": false,
+      "require_core_gate_for_green": true,
+      "ingestion_suppress_ambient_on_hold": true,
+      "sustained_watch_cycles": 6,
+      "hold_block_actions": [
+        "active_work_tree_run_next",
+        "generated_queue_run_next",
+        "generated_queue_investigate",
+        "pulse_status",
+        "codegen_run",
+        "leah_build_run_next"
+      ],
+      "hold_allow_actions": [
+        "patch_queue_run_next",
+        "guard_start",
+        "autonomy_maintenance_start"
+      ]
+    },
     "active_work_tree_max_steps_per_cycle": 3,
     "active_work_tree_max_trees_per_cycle": 8
   }

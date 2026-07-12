@@ -497,12 +497,20 @@ function Run-DoctorPreflight([bool]$useFix=$false) {
   return $true
 }
 
+function Test-NovaHttpDirectProcess([object]$process) {
+  if ($null -eq $process) { return $false }
+  $commandLine = [string]$process.CommandLine
+  if ([string]::IsNullOrWhiteSpace($commandLine)) { return $false }
+  $normalized = $commandLine.Replace('/', '\').ToLowerInvariant()
+  if ($normalized -match 'python(\.exe)?\s+-c\s') { return $false }
+  return Test-NovaCommandLineHasPath $process (Get-NovaNormalizedPath $WEBUIPY)
+}
+
 function Get-NovaHttpProcesses {
-  $expectedWebuiPath = Get-NovaNormalizedPath $WEBUIPY
   return @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
     Where-Object {
       $_.Name -match '^python(\.exe)?$' -and
-      (Test-NovaCommandLineHasPath $_ $expectedWebuiPath)
+      (Test-NovaHttpDirectProcess $_)
     })
 }
 
@@ -776,6 +784,28 @@ function Get-NovaHttpLogicalProcesses {
   return $all
 }
 
+function Test-NovaHttpProcessUsesPort([object]$process, [int]$bindPort) {
+  if ($null -eq $process -or $bindPort -le 0) { return $false }
+  $commandLine = [string]$process.CommandLine
+  if ($commandLine -match ("--port\s+" + [regex]::Escape([string]$bindPort) + "(\s|$)")) {
+    return $true
+  }
+  $family = @(Get-NovaProcessFamilyIds ([int]$process.ProcessId))
+  $listeners = @(Get-NetTCPConnection -LocalPort $bindPort -State Listen -ErrorAction SilentlyContinue)
+  foreach ($listener in $listeners) {
+    if ($family -contains [int]$listener.OwningProcess) { return $true }
+  }
+  return $false
+}
+
+function Get-NovaHttpLogicalProcessesOnPort([int]$bindPort) {
+  if ($bindPort -le 0) { return @(Get-NovaHttpLogicalProcesses) }
+  return @(
+    Get-NovaHttpLogicalProcesses |
+    Where-Object { Test-NovaHttpProcessUsesPort $_ $bindPort }
+  )
+}
+
 function Stop-NovaHttpProcesses {
   $procs = Get-NovaHttpProcesses
   if (-not $procs -or $procs.Count -eq 0) {
@@ -793,15 +823,75 @@ function Stop-NovaHttpProcesses {
   return $procs.Count
 }
 
-function Stop-NovaHttpExcept([int]$keepPid) {
-  $procs = Get-NovaHttpProcesses | Where-Object { $_.ProcessId -ne $keepPid }
-  $keepFamilyIds = @(Get-NovaProcessFamilyIds $keepPid)
-  $procs = Get-NovaHttpProcesses | Where-Object { $keepFamilyIds -notcontains [int]$_.ProcessId }
-  foreach ($p in $procs) {
+function Stop-NovaHttpOnPort([int]$bindPort) {
+  if ($bindPort -le 0) {
+    return (Stop-NovaHttpProcesses)
+  }
+
+  $stopIds = New-Object System.Collections.Generic.HashSet[int]
+  foreach ($proc in @(Get-NovaHttpProcesses)) {
+    if (-not (Test-NovaHttpProcessUsesPort $proc $bindPort)) { continue }
+    foreach ($familyId in @(Get-NovaProcessFamilyIds ([int]$proc.ProcessId))) {
+      [void]$stopIds.Add([int]$familyId)
+    }
+  }
+
+  if ($stopIds.Count -eq 0) {
+    Write-Host ("[INFO] No nova_http.py listeners on port " + $bindPort + ".")
+    return 0
+  }
+
+  foreach ($targetPid in $stopIds) {
     try {
-      Stop-Process -Id $p.ProcessId -Force -ErrorAction SilentlyContinue
-      Write-Host ("[OK]   Stopped extra nova_http pid=" + $p.ProcessId)
-    } catch {}
+      Stop-Process -Id $targetPid -Force -ErrorAction SilentlyContinue
+      Write-Host ("[OK]   Stopped nova_http pid=" + $targetPid)
+    } catch {
+      Write-Host ("[WARN] Failed to stop pid=" + $targetPid)
+    }
+  }
+  return $stopIds.Count
+}
+
+function Test-NovaProcessFamiliesOverlap([int[]]$leftFamilyIds, [int[]]$rightFamilyIds) {
+  foreach ($familyId in $leftFamilyIds) {
+    if ($rightFamilyIds -contains $familyId) { return $true }
+  }
+  return $false
+}
+
+function Stop-NovaHttpExcept([int]$keepPid) {
+  $keepFamilyIds = @(Get-NovaProcessFamilyIds $keepPid)
+  foreach ($p in @(Get-NovaHttpProcesses)) {
+    $procPid = [int]$p.ProcessId
+    if ($keepFamilyIds -contains $procPid) { continue }
+    $otherFamilyIds = @(Get-NovaProcessFamilyIds $procPid)
+    if (Test-NovaProcessFamiliesOverlap $keepFamilyIds $otherFamilyIds) { continue }
+    foreach ($familyId in $otherFamilyIds) {
+      try {
+        Stop-Process -Id $familyId -Force -ErrorAction SilentlyContinue
+        Write-Host ("[OK]   Stopped extra nova_http pid=" + $familyId)
+      } catch {}
+    }
+  }
+}
+
+function Stop-NovaHttpExceptOnPort([int]$keepPid, [int]$bindPort) {
+  if ($bindPort -le 0) {
+    Stop-NovaHttpExcept $keepPid
+    return
+  }
+  $keepFamilyIds = @(Get-NovaProcessFamilyIds $keepPid)
+  foreach ($p in @(Get-NovaHttpLogicalProcessesOnPort $bindPort)) {
+    $procPid = [int]$p.ProcessId
+    if ($keepFamilyIds -contains $procPid) { continue }
+    $otherFamilyIds = @(Get-NovaProcessFamilyIds $procPid)
+    if (Test-NovaProcessFamiliesOverlap $keepFamilyIds $otherFamilyIds) { continue }
+    foreach ($familyId in $otherFamilyIds) {
+      try {
+        Stop-Process -Id $familyId -Force -ErrorAction SilentlyContinue
+        Write-Host ("[OK]   Stopped extra nova_http pid=" + $familyId)
+      } catch {}
+    }
   }
 }
 
@@ -1090,7 +1180,18 @@ switch ($cmd.ToLower()) {
       }
     }
 
-    Stop-NovaHttpProcesses | Out-Null
+    if (-not $useFix) {
+      if (Wait-NovaHttpReady $bindHost $bindPort 2) {
+        $logical = @(Get-NovaHttpLogicalProcessesOnPort ([int]$bindPort))
+        if ($logical.Count -gt 0) {
+          Write-Host ("[OK]   webui already running pid=" + $logical[0].ProcessId)
+          Write-Host ("[INFO] URL: http://" + $bindHost + ":" + $bindPort + "/control")
+          break
+        }
+      }
+    }
+
+    Stop-NovaHttpOnPort ([int]$bindPort) | Out-Null
     if (-not (Wait-NovaHttpStopped ([int]$bindPort) 8)) {
       Write-Host ("[WARN] Existing nova_http listeners did not clear from port " + $bindPort + " before restart.")
     }
@@ -1115,27 +1216,45 @@ switch ($cmd.ToLower()) {
     Ensure-Logs
     $outLog = Join-Path $LOG_DIR "nova_http.out.log"
     $errLog = Join-Path $LOG_DIR "nova_http.err.log"
-    $proc = Start-Process -FilePath $venvPython -ArgumentList @($WEBUIPY, "--host", $bindHost, "--port", $bindPort) -PassThru -WindowStyle Hidden -RedirectStandardOutput $outLog -RedirectStandardError $errLog
-    Start-Sleep -Milliseconds 700
-    Stop-NovaHttpExcept $proc.Id
-    if ($proc.HasExited) {
-      Write-Host ("[FAIL] webui process exited early (pid=" + $proc.Id + ").")
-      Write-Host ("[INFO] Check logs: " + $errLog)
+    try {
+      Start-Process `
+        -FilePath $venvPython `
+        -ArgumentList @($WEBUIPY, "--host", $bindHost, "--port", $bindPort) `
+        -WorkingDirectory $ROOT `
+        -WindowStyle Hidden `
+        -RedirectStandardOutput $outLog `
+        -RedirectStandardError $errLog | Out-Null
+    } catch {
+      Write-Host ("[FAIL] Detached webui start failed: " + $_.Exception.Message)
       exit 1
+    }
+    Start-Sleep -Seconds 3
+    $logical = @(Get-NovaHttpLogicalProcessesOnPort ([int]$bindPort))
+    if ($logical.Count -gt 1) {
+      $keepPid = [int]$logical[0].ProcessId
+      Stop-NovaHttpExceptOnPort $keepPid ([int]$bindPort)
     }
     if (-not (Wait-NovaHttpReady $bindHost $bindPort 18)) {
       Write-Host ("[FAIL] webui process did not become ready on http://" + $bindHost + ":" + $bindPort + "/api/health")
       Write-Host ("[INFO] Check logs: " + $errLog)
       exit 1
     }
-    Write-Host ("[OK]   Started webui pid=" + $proc.Id)
+    $logical = @(Get-NovaHttpLogicalProcessesOnPort ([int]$bindPort))
+    $reportPid = if ($logical.Count -gt 0) { [int]$logical[0].ProcessId } else { 0 }
+    Write-Host ("[OK]   Started webui pid=" + $reportPid)
     Write-Host ("[INFO] URL: http://" + $bindHost + ":" + $bindPort + "/control")
     break
   }
 
   "webui-stop" {
-    Stop-NovaHttpProcesses | Out-Null
-    if (-not (Wait-NovaHttpStopped 0 8)) {
+    $bindPort = 0
+    for ($i = 0; $i -lt $remainingTokens.Count; $i++) {
+      if ($remainingTokens[$i] -ieq "--port" -and $i + 1 -lt $remainingTokens.Count) {
+        $bindPort = [int]$remainingTokens[$i + 1]
+      }
+    }
+    Stop-NovaHttpOnPort $bindPort | Out-Null
+    if (-not (Wait-NovaHttpStopped $bindPort 8)) {
       Write-Host "[WARN] Some nova_http processes or listeners may still be shutting down."
     }
     break

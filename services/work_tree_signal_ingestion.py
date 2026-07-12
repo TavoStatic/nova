@@ -16,6 +16,7 @@ from services.layer_maturity_policy import (
     capability_gap_signal_suppressed,
     filter_actionable_capability_gaps,
 )
+from services.nova_mission import NOVA_MISSION_SERVICE
 from services.release_runtime_truth import release_drift_suppresses_closure_signals
 from work_tree_contracts import BranchStatus
 
@@ -67,6 +68,7 @@ SOURCE_ROOT_JUDGMENT_TOOL = "source_root_judgment"
 SOURCE_ROOT_FAILED_EVIDENCE_HOLD_TITLE = "Hold source-root branch for operator/tool failure judgment"
 SOURCE_ROOT_FAILED_EVIDENCE_HOLD_REASON = "source_root_failed_evidence_operator_judgment_required"
 SOURCE_ROOT_SEQUENCE_EXHAUSTED_HOLD_REASON = "source_root_sequence_exhausted_gap_persists"
+SOURCE_ROOT_OPERATOR_HOLD_TITLE = "Hold source-root branch for operator judgment"
 
 _SOURCE_ROOT_SIGNAL_SOURCES = frozenset(
     source
@@ -397,6 +399,7 @@ def _control_status_dependency_signals(status_payload: dict[str, Any]) -> list[d
             "allowed_tools": ["web_search", "system_check", "read", "find"],
             "preferred_tool": "web_search",
             "next_task": "Probe configured web search route through web_search tool",
+            "repeat_sequence_on_active_signal": True,
             "task_sequence": [
                 {
                     "title": "Probe configured web search route through web_search tool",
@@ -1467,16 +1470,34 @@ def _frontdoor_cli_signal_from_status(status_payload: dict[str, Any]) -> dict[st
     }
 
 
+def _operator_outbox_actionable_open_count(status_payload: dict[str, Any]) -> int | None:
+    payload = dict(status_payload or {})
+    if "operator_outbox_actionable_open_count" in payload:
+        return _as_int(payload.get("operator_outbox_actionable_open_count"), 0)
+    outbox = payload.get("operator_outbox") if isinstance(payload.get("operator_outbox"), dict) else {}
+    if "operator_actionable_open_count" in outbox:
+        return _as_int(outbox.get("operator_actionable_open_count"), 0)
+    return None
+
+
 def _operator_control_signal_from_status(status_payload: dict[str, Any]) -> dict[str, Any] | None:
     if not _has_operator_control_surface(status_payload):
         return None
     outbox = status_payload.get("operator_outbox") if isinstance(status_payload.get("operator_outbox"), dict) else {}
-    open_count = _as_int(status_payload.get("operator_outbox_open_count", outbox.get("open_count", 0)), 0)
+    actionable_open_count = _operator_outbox_actionable_open_count(status_payload)
+    raw_open_count = _as_int(status_payload.get("operator_outbox_open_count", outbox.get("open_count", 0)), 0)
+    open_count = raw_open_count if actionable_open_count is None else actionable_open_count
     outbox_ok = bool(outbox.get("ok", True))
     if outbox_ok and open_count <= 0:
         return None
     error_symbol = "operator_outbox_open" if open_count > 0 else "operator_outbox_unreadable"
     has_open_work = open_count > 0
+    latest_open_id = str(
+        status_payload.get("operator_outbox_actionable_latest_open_id")
+        or outbox.get("operator_actionable_latest_open_id")
+        or status_payload.get("operator_outbox_latest_open_id")
+        or ""
+    )
     return {
         "source": "operator_control",
         "signal_class": "operator_requested" if has_open_work else "maintenance_pressure",
@@ -1489,7 +1510,8 @@ def _operator_control_signal_from_status(status_payload: dict[str, Any]) -> dict
         },
         "payload": {
             "operator_outbox_open_count": open_count,
-            "operator_outbox_latest_open_id": str(status_payload.get("operator_outbox_latest_open_id") or ""),
+            "operator_outbox_raw_open_count": raw_open_count,
+            "operator_outbox_latest_open_id": latest_open_id,
             "operator_outbox_status_counts": dict(status_payload.get("operator_outbox_status_counts") or {}),
             "operator_outbox": dict(outbox),
             "rationale": "Operator-control pressure is visible and should stay attached to the Work Tree instead of sitting only in the outbox.",
@@ -1512,7 +1534,11 @@ def _policy_gates_signal_from_status(status_payload: dict[str, Any]) -> dict[str
     if not _has_policy_gates_surface(status_payload):
         return None
     reasons: list[str] = []
-    if bool(status_payload.get("web_enabled", False)) and _as_int(status_payload.get("allow_domains_count"), 0) <= 0:
+    if (
+        bool(status_payload.get("web_enabled", False))
+        and "allow_domains_count" in status_payload
+        and _as_int(status_payload.get("allow_domains_count"), 0) <= 0
+    ):
         reasons.append("web_enabled_without_allow_domains")
     if bool(status_payload.get("patch_enabled", False)) and not bool(status_payload.get("patch_strict_manifest", True)):
         reasons.append("patch_strict_manifest_disabled")
@@ -2497,6 +2523,103 @@ def _edfi_capability_profile_signal_from_status(status_payload: dict[str, Any]) 
     }
 
 
+def _has_edfi_core_surface(status_payload: dict[str, Any]) -> bool:
+    return any(
+        key in status_payload
+        for key in (
+            "edfi_core_readiness",
+            "edfi_core_ready",
+            "edfi_core_milestone",
+        )
+    )
+
+
+def _edfi_core_signal_from_status(status_payload: dict[str, Any]) -> dict[str, Any] | None:
+    if not _has_edfi_core_surface(status_payload):
+        return None
+    readiness = (
+        status_payload.get("edfi_core_readiness")
+        if isinstance(status_payload.get("edfi_core_readiness"), dict)
+        else {}
+    )
+    ready = bool(status_payload.get("edfi_core_ready", readiness.get("ready", False)))
+    if ready:
+        return None
+    milestone = str(status_payload.get("edfi_core_milestone") or readiness.get("milestone") or "").strip()
+    return {
+        "source": "edfi_core",
+        "signal_class": "governance_pressure",
+        "title": "Ed-Fi core readiness is not satisfied",
+        "fingerprint": {
+            "class": "governance_pressure",
+            "surface": "edfi_core",
+            "error": "edfi_core_not_ready",
+            "symbol": milestone or "edfi_core_not_ready",
+        },
+        "payload": {
+            "edfi_core_readiness": dict(readiness),
+            "edfi_core_ready": ready,
+            "edfi_core_milestone": milestone,
+            "rationale": "Vendor-neutral Ed-Fi core must report ready before district lanes can be trusted for closure.",
+        },
+        "severity": "high",
+        "actionability": "safe_now",
+        "allowed_tools": ["edfi_explore", "read", "find", "pipeline"],
+        "preferred_tool": "read",
+        "next_task": "Read Ed-Fi core readiness and verify district-main connection state",
+    }
+
+
+def _has_data_lane_edfi_bisd_surface(status_payload: dict[str, Any]) -> bool:
+    pipeline_ids = [
+        str(item or "").strip().lower()
+        for item in list(status_payload.get("data_pipeline_ids") or [])
+        if str(item or "").strip()
+    ]
+    return "edfi_bisd" in pipeline_ids or bool(status_payload.get("data_lane_edfi_bisd_ok") is False)
+
+
+def _data_lane_edfi_bisd_signal_from_status(status_payload: dict[str, Any]) -> dict[str, Any] | None:
+    if not _has_data_lane_edfi_bisd_surface(status_payload):
+        return None
+    data_pipelines = status_payload.get("data_pipelines") if isinstance(status_payload.get("data_pipelines"), dict) else {}
+    pipeline_rows = [
+        dict(item)
+        for item in list(data_pipelines.get("pipelines") or [])
+        if isinstance(item, dict) and str(item.get("pipeline_id") or "").strip().lower() == "edfi_bisd"
+    ]
+    blocked = False
+    for item in pipeline_rows:
+        lane_state = item.get("lane_state") if isinstance(item.get("lane_state"), dict) else {}
+        status_text = str(item.get("status") or item.get("state") or "").strip().lower()
+        if (lane_state and not bool(lane_state.get("enabled", True))) or status_text in {"failed", "error", "blocked"}:
+            blocked = True
+            break
+    if pipeline_rows and not blocked:
+        return None
+    return {
+        "source": "data_lane_edfi_bisd",
+        "signal_class": "governance_pressure",
+        "title": "BISD Ed-Fi data lane needs inspection",
+        "fingerprint": {
+            "class": "governance_pressure",
+            "surface": "data_lane_edfi_bisd",
+            "error": "edfi_bisd_lane_blocked",
+            "symbol": "edfi_bisd",
+        },
+        "payload": {
+            "data_lane_edfi_bisd_ok": not blocked,
+            "pipeline_rows": pipeline_rows[:2],
+            "rationale": "District Ed-Fi lane health must be visible before BISD-specific repair work is routed.",
+        },
+        "severity": "medium",
+        "actionability": "safe_now",
+        "allowed_tools": ["pipeline", "read", "find"],
+        "preferred_tool": "pipeline",
+        "next_task": "Inspect edfi_bisd lane status through the pipeline tool",
+    }
+
+
 def _data_pipeline_evidence_task(blocked_rows: list[dict[str, Any]]) -> dict[str, Any]:
     pipeline_id = ""
     if blocked_rows:
@@ -2672,6 +2795,17 @@ def _release_drift_suppresses_closure_signals(status_payload: dict[str, Any]) ->
         release,
         runtime_truth=_release_runtime_truth_from_status(status_payload),
     )
+
+
+def _mission_suppresses_ambient_governance_ingest(status_payload: dict[str, Any]) -> bool:
+    mission = (
+        status_payload.get("nova_mission")
+        if isinstance(status_payload.get("nova_mission"), dict)
+        else {}
+    )
+    if not mission:
+        return False
+    return NOVA_MISSION_SERVICE.ingestion_suppresses_ambient_governance(mission)
 
 
 def _root_closure_inventory_signals_from_status(status_payload: dict[str, Any]) -> list[dict[str, Any]]:
@@ -2885,10 +3019,17 @@ def _autonomy_orchestrator_signal_from_status(status_payload: dict[str, Any]) ->
     ]
     summary = status_payload.get("autonomy_orchestrator_summary") if isinstance(status_payload.get("autonomy_orchestrator_summary"), dict) else {}
     reason_counts = dict(summary.get("rejection_reason_counts") or {}) if isinstance(summary.get("rejection_reason_counts"), dict) else {}
+    execution_result = str(status_payload.get("autonomy_orchestrator_execution_result") or "").strip().lower()
+    execution_message = str(status_payload.get("autonomy_orchestrator_execution_message") or "").strip()
+    execution_cycle_status = str(status_payload.get("autonomy_orchestrator_execution_cycle_status") or "").strip().lower()
 
     if "orchestrator_cycle_failed" in rejection_reasons or ledger_status.startswith("record_failed"):
         error_symbol = "orchestrator_cycle_failed"
         title = "Autonomy orchestrator cycle failed"
+        severity = "high"
+    elif execution_result == "failed" or execution_cycle_status in {"invalid_decision", "stale_execution_contract"}:
+        error_symbol = execution_cycle_status or "execution_failed"
+        title = "Autonomy orchestrator execution failed"
         severity = "high"
     elif "operator_ack_required" in rejection_reasons:
         error_symbol = "operator_ack_required"
@@ -2918,6 +3059,13 @@ def _autonomy_orchestrator_signal_from_status(status_payload: dict[str, Any]) ->
             "reason": reason,
             "rejection_reasons": rejection_reasons,
             "ledger_status": ledger_status,
+            "execution_result": execution_result,
+            "execution_message": execution_message,
+            "execution_cycle_status": execution_cycle_status,
+            "target_id": str(status_payload.get("autonomy_orchestrator_target_id") or ""),
+            "target_step_id": str(status_payload.get("autonomy_orchestrator_target_step_id") or ""),
+            "target_tree_id": str(status_payload.get("autonomy_orchestrator_target_tree_id") or ""),
+            "recommended_tool": str(status_payload.get("autonomy_orchestrator_recommended_tool") or ""),
             "recommendation_stale": stale,
             "stale_reasons": stale_reasons,
             "rejection_reason_counts": reason_counts,
@@ -2934,6 +3082,12 @@ def _autonomy_orchestrator_signal_from_status(status_payload: dict[str, Any]) ->
                 "allowed_tools": ["read"],
                 "preferred_tool": "read",
                 "tool_args": ["runtime/autonomy_orchestrator_ledger.jsonl"],
+            },
+            {
+                "title": "Read runtime/autonomy_maintenance_state.json latest autonomy execution",
+                "allowed_tools": ["read"],
+                "preferred_tool": "read",
+                "tool_args": ["runtime/autonomy_maintenance_state.json"],
             },
             {
                 "title": "Read policy.json autonomy execution policy",
@@ -3682,6 +3836,8 @@ def _has_operator_control_surface(status_payload: dict[str, Any]) -> bool:
         for key in (
             "operator_outbox",
             "operator_outbox_open_count",
+            "operator_outbox_actionable_open_count",
+            "operator_outbox_actionable_latest_open_id",
             "operator_outbox_latest_open_id",
             "operator_macros",
             "backend_commands",
@@ -4467,6 +4623,29 @@ def _is_source_root_failed_evidence_hold_task(task: Any) -> bool:
     return reason == SOURCE_ROOT_FAILED_EVIDENCE_HOLD_REASON
 
 
+def _source_root_sequence_operator_hold_satisfied(branch_id: str) -> bool:
+    complete_hold_ids = {
+        str(getattr(task, "task_id", "") or "").strip()
+        for task in work_tree.list_branch_tasks(branch_id)
+        if str(getattr(getattr(task, "status", None), "value", getattr(task, "status", "")) or "").strip().lower()
+        == "complete"
+        and str(getattr(task, "title", "") or "").strip() == SOURCE_ROOT_OPERATOR_HOLD_TITLE
+    }
+    if not complete_hold_ids:
+        return False
+    try:
+        evidence_rows = work_tree.list_branch_evidence(branch_id, limit=200)
+    except Exception:
+        return False
+    return any(
+        str(row.get("task_id") or "").strip() in complete_hold_ids
+        and str(row.get("tool_name") or "").strip() == "operator_response"
+        and evidence_result_valid(row)
+        for row in evidence_rows
+        if isinstance(row, dict)
+    )
+
+
 def _drop_stale_source_root_judgment_tasks(branch_id: str) -> bool:
     changed = False
     for task in work_tree.list_branch_tasks(branch_id):
@@ -4636,6 +4815,30 @@ def _source_root_judgment_prerequisites_satisfied(branch_id: str, normalized: di
         if not _sequence_item_satisfied(branch_id, item):
             return False
     return False
+
+
+def _source_root_sequence_repeats_when_active(normalized: dict[str, Any]) -> bool:
+    return bool(normalized.get("repeat_sequence_on_active_signal"))
+
+
+def _restart_completed_source_root_sequence_pass(branch_id: str, normalized: dict[str, Any]) -> bool:
+    sequence_titles = {
+        str(item.get("title") or "").strip()
+        for item in list(normalized.get("task_sequence") or [])
+        if isinstance(item, dict) and str(item.get("title") or "").strip()
+    }
+    if not sequence_titles:
+        return False
+
+    changed = False
+    for task in work_tree.list_branch_tasks(branch_id):
+        title = str(getattr(task, "title", "") or "").strip()
+        status = str(getattr(getattr(task, "status", ""), "value", getattr(task, "status", "")) or "").strip().lower()
+        if title not in sequence_titles or status != "complete":
+            continue
+        work_tree.mark_task_dropped(task.task_id, reason="source_root_sequence_restarted_for_active_signal")
+        changed = True
+    return changed
 
 
 def _sequence_item_expected_tools(item: dict[str, Any]) -> list[str]:
@@ -4887,6 +5090,7 @@ class WorkTreeSignalIngestionService:
 
     def ingest_status_snapshot(self, status_payload: dict[str, Any]) -> list[dict[str, Any]]:
         signals: list[dict[str, Any]] = []
+        suppress_ambient = _mission_suppresses_ambient_governance_ingest(status_payload)
         alerts = [str(item or "").strip() for item in list(status_payload.get("alerts") or []) if str(item or "").strip()]
         for alert in alerts:
             low = alert.lower()
@@ -4968,6 +5172,12 @@ class WorkTreeSignalIngestionService:
         edfi_profile_signal = _edfi_capability_profile_signal_from_status(status_payload)
         if edfi_profile_signal is not None:
             signals.append(edfi_profile_signal)
+        edfi_core_signal = _edfi_core_signal_from_status(status_payload)
+        if edfi_core_signal is not None:
+            signals.append(edfi_core_signal)
+        edfi_bisd_lane_signal = _data_lane_edfi_bisd_signal_from_status(status_payload)
+        if edfi_bisd_lane_signal is not None:
+            signals.append(edfi_bisd_lane_signal)
         for signal in (
             _frontdoor_cli_signal_from_status(status_payload),
             _operator_control_signal_from_status(status_payload),
@@ -4992,14 +5202,14 @@ class WorkTreeSignalIngestionService:
             if wiring_inventory_signal is not None:
                 signals.append(wiring_inventory_signal)
         source_root_inventory_signal = _source_root_inventory_signal_from_status(status_payload)
-        if source_root_inventory_signal is not None:
+        if source_root_inventory_signal is not None and not suppress_ambient:
             signals.append(source_root_inventory_signal)
         source_wiring_probe_signal = _source_wiring_probe_signal_from_status(status_payload)
         if source_wiring_probe_signal is not None:
             signals.append(source_wiring_probe_signal)
-        if _has_root_closure_inventory_surface(status_payload):
+        if _has_root_closure_inventory_surface(status_payload) and not suppress_ambient:
             signals.extend(_root_closure_inventory_signals_from_status(status_payload))
-        if _has_self_repair_closure_inventory_surface(status_payload):
+        if _has_self_repair_closure_inventory_surface(status_payload) and not suppress_ambient:
             signals.extend(_self_repair_closure_inventory_signals_from_status(status_payload))
         orchestrator_signal = _autonomy_orchestrator_signal_from_status(status_payload)
         if orchestrator_signal is not None:
@@ -5220,22 +5430,7 @@ class WorkTreeSignalIngestionService:
                 )
             )
         operator_control_signal = _operator_control_signal_from_status(status_payload) if _has_operator_control_surface(status_payload) else None
-        if _has_operator_control_surface(status_payload) and operator_control_signal is None:
-            results.extend(
-                self.resolve_signal_branches(
-                    signal_class="operator_requested",
-                    source="operator_control",
-                    reason="Operator control outbox no longer has open operator work.",
-                )
-            )
-            results.extend(
-                self.resolve_signal_branches(
-                    signal_class="maintenance_pressure",
-                    source="operator_control",
-                    reason="Operator control outbox reports readable state.",
-                )
-            )
-        elif operator_control_signal is not None:
+        if operator_control_signal is not None:
             normalized_operator_signal = self._normalize_signal(dict(operator_control_signal))
             active_key = str(normalized_operator_signal.get("source_key") or "").strip()
             if active_key:
@@ -5665,8 +5860,53 @@ class WorkTreeSignalIngestionService:
                             reason="Capability gap pressure consolidated to the canonical promoted capability.",
                         )
                     )
+        results.extend(self._resolve_operator_control_from_outbox_truth(status_payload))
         results.extend(self.dedupe_signal_branches())
         return results
+
+    def _resolve_operator_control_from_outbox_truth(self, status_payload: dict[str, Any]) -> list[dict[str, Any]]:
+        open_count: int | None = None
+        if _has_operator_control_surface(status_payload):
+            actionable_open_count = _operator_outbox_actionable_open_count(status_payload)
+            if actionable_open_count is not None:
+                open_count = actionable_open_count
+            else:
+                outbox = (
+                    status_payload.get("operator_outbox")
+                    if isinstance(status_payload.get("operator_outbox"), dict)
+                    else {}
+                )
+                open_count = _as_int(
+                    status_payload.get("operator_outbox_open_count", outbox.get("open_count", 0)),
+                    0,
+                )
+        else:
+            try:
+                from services.nova_runtime_context import OPERATOR_OUTBOX_FILE
+                from services.operator_outbox import OPERATOR_OUTBOX_SERVICE
+
+                summary = OPERATOR_OUTBOX_SERVICE.summary(OPERATOR_OUTBOX_FILE, limit=5)
+                if isinstance(summary, dict) and bool(summary.get("ok", True)):
+                    if "operator_actionable_open_count" in summary:
+                        open_count = _as_int(summary.get("operator_actionable_open_count"), 0)
+                    else:
+                        open_count = _as_int(summary.get("open_count", 0), 0)
+            except Exception:
+                open_count = None
+        if open_count is None or open_count > 0:
+            return []
+        return [
+            *self.resolve_signal_branches(
+                signal_class="operator_requested",
+                source="operator_control",
+                reason="Operator outbox truth reports no open operator work.",
+            ),
+            *self.resolve_signal_branches(
+                signal_class="maintenance_pressure",
+                source="operator_control",
+                reason="Operator outbox truth reports readable state.",
+            ),
+        ]
 
     def dedupe_signal_branches(self) -> list[dict[str, Any]]:
         tree = self._find_signal_tree()
@@ -6168,9 +6408,14 @@ class WorkTreeSignalIngestionService:
 
         branch.status = _BRANCH_STATUS_BY_ACTIONABILITY.get(actionability, BranchStatus.READY)
         if reopen:
-            branch.resolution_state = _RESOLUTION_BY_ACTIONABILITY.get(actionability, "open")
-            if branch.status == BranchStatus.COMPLETE:
-                branch.status = _BRANCH_STATUS_BY_ACTIONABILITY.get(actionability, BranchStatus.READY)
+            if _source_root_sequence_operator_hold_satisfied(branch.branch_id):
+                branch.resolution_state = "observing"
+                if branch.status == BranchStatus.COMPLETE:
+                    branch.status = BranchStatus.READY
+            else:
+                branch.resolution_state = _RESOLUTION_BY_ACTIONABILITY.get(actionability, "open")
+                if branch.status == BranchStatus.COMPLETE:
+                    branch.status = _BRANCH_STATUS_BY_ACTIONABILITY.get(actionability, BranchStatus.READY)
 
         explicit_tools = [
             str(tool or "").strip()
@@ -6195,6 +6440,9 @@ class WorkTreeSignalIngestionService:
             branch.notes = f"{existing_notes}\n{summary}".strip() if existing_notes else summary
 
         work_tree.touch_branch(branch.branch_id)
+
+        if reopen and _source_root_sequence_operator_hold_satisfied(branch.branch_id):
+            return
 
         next_task = str(normalized.get("next_task") or "").strip()
         blocked_task = str(normalized.get("blocked_task") or "").strip()
@@ -6418,18 +6666,40 @@ class WorkTreeSignalIngestionService:
                     not in {"complete", "dropped"}
                 )
             ):
-                blocked = work_tree.add_task_to_branch(
-                    branch.branch_id,
-                    "Hold source-root branch for operator judgment",
-                    meta={"blocked_reason": SOURCE_ROOT_SEQUENCE_EXHAUSTED_HOLD_REASON},
-                )
-                work_tree.mark_task_blocked(blocked.task_id, SOURCE_ROOT_SEQUENCE_EXHAUSTED_HOLD_REASON)
-                open_tasks = [blocked]
-                blocked_open_tasks = True
-                sequence_task = {}
-                task_text = ""
-                task_allowed_tools = []
-                task_preferred_tool = ""
+                if _source_root_sequence_operator_hold_satisfied(branch.branch_id):
+                    branch.resolution_state = "observing"
+                    branch.status = BranchStatus.READY
+                    work_tree.touch_branch(branch.branch_id)
+                elif (
+                    _source_root_sequence_repeats_when_active(normalized)
+                    and _restart_completed_source_root_sequence_pass(branch.branch_id, normalized)
+                ):
+                    sequence_task = _next_sequence_task(branch.branch_id, normalized)
+                    if sequence_task:
+                        task_text = str(sequence_task.get("title") or "").strip()
+                        task_allowed_tools = [
+                            str(tool or "").strip()
+                            for tool in list(sequence_task.get("allowed_tools") or [])
+                            if str(tool or "").strip()
+                        ]
+                        task_preferred_tool = str(sequence_task.get("preferred_tool") or "").strip()
+                    blocked_open_tasks = False
+                    open_tasks = []
+                    branch.status = BranchStatus.READY
+                    work_tree.touch_branch(branch.branch_id)
+                else:
+                    blocked = work_tree.add_task_to_branch(
+                        branch.branch_id,
+                        SOURCE_ROOT_OPERATOR_HOLD_TITLE,
+                        meta={"blocked_reason": SOURCE_ROOT_SEQUENCE_EXHAUSTED_HOLD_REASON},
+                    )
+                    work_tree.mark_task_blocked(blocked.task_id, SOURCE_ROOT_SEQUENCE_EXHAUSTED_HOLD_REASON)
+                    open_tasks = [blocked]
+                    blocked_open_tasks = True
+                    sequence_task = {}
+                    task_text = ""
+                    task_allowed_tools = []
+                    task_preferred_tool = ""
             realign_blocked_sequence = source_name == "subconscious" or (
                 source_name == "memory_identity"
                 and str((normalized.get("payload") or {}).get("memory_bootstrap_origin", {}).get("status") or "").strip().lower() == "ready"
@@ -6563,6 +6833,7 @@ class WorkTreeSignalIngestionService:
             "next_task": str(signal.get("next_task") or "").strip(),
             "blocked_task": str(signal.get("blocked_task") or "").strip(),
             "blocked_reason": str(signal.get("blocked_reason") or "").strip(),
+            "repeat_sequence_on_active_signal": bool(signal.get("repeat_sequence_on_active_signal")),
         }
         return _append_source_root_judgment_task(source, normalized)
 

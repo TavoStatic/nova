@@ -47,6 +47,12 @@ class NovaHttpPolicySearchService:
                 control_policy_payload_fn=control_policy_payload_fn,
                 invalidate_control_status_cache_fn=invalidate_control_status_cache_fn,
             ),
+            "mission_settings_action_fn": lambda payload: service.mission_settings_action(
+                payload,
+                set_mission_settings_fn=core.set_mission_settings,
+                control_policy_payload_fn=control_policy_payload_fn,
+                invalidate_control_status_cache_fn=invalidate_control_status_cache_fn,
+            ),
             "search_provider_action_fn": lambda payload: service.search_provider_action(
                 payload,
                 set_search_provider_fn=core.set_search_provider,

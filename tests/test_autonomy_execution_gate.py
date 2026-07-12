@@ -123,6 +123,8 @@ class TestAutonomyExecutionGateService(unittest.TestCase):
                 "target_kind": "lane",
                 "target_id": "branch-release",
                 "target_step_id": "task-promotion",
+                "target_tree_id": "tree-release",
+                "recommended_tool": "release_promotion_judgment",
             }
         )
 
@@ -140,6 +142,8 @@ class TestAutonomyExecutionGateService(unittest.TestCase):
         self.assertTrue(result["allow_execute"])
         self.assertEqual(result["target_step_id"], "task-promotion")
         self.assertEqual(result["dispatch_payload"]["target_step_id"], "task-promotion")
+        self.assertEqual(result["dispatch_payload"]["target_tree_id"], "tree-release")
+        self.assertEqual(result["dispatch_payload"]["recommended_tool"], "release_promotion_judgment")
 
 
 if __name__ == "__main__":

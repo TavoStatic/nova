@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from services.work_tree_pressure_snapshot import build_work_tree_pressure_snapshot_from_module
+
 
 class ControlWorkTreesService:
     """Own HTTP work-tree payload shaping outside the HTTP transport shell."""
@@ -77,6 +79,63 @@ class ControlWorkTreesService:
             kept.append(item)
         return kept
 
+    @staticmethod
+    def _compact_value(value, *, depth: int = 0, max_depth: int = 3):
+        if depth >= max_depth:
+            if isinstance(value, str):
+                return value[:300]
+            if isinstance(value, (int, float, bool)) or value is None:
+                return value
+            return str(value)[:300]
+        if isinstance(value, dict):
+            compacted: dict = {}
+            for idx, (key, item) in enumerate(value.items()):
+                if idx >= 40:
+                    break
+                compacted[key] = ControlWorkTreesService._compact_value(
+                    item,
+                    depth=depth + 1,
+                    max_depth=max_depth,
+                )
+            return compacted
+        if isinstance(value, list):
+            return [
+                ControlWorkTreesService._compact_value(item, depth=depth + 1, max_depth=max_depth)
+                for item in value[:40]
+            ]
+        if isinstance(value, str):
+            return value[:300]
+        return value
+
+    def _compact_tree_payload(self, tree_payload: dict) -> dict:
+        if not isinstance(tree_payload, dict):
+            return tree_payload
+        compacted = dict(tree_payload)
+        nodes = compacted.get("nodes")
+        if isinstance(nodes, list):
+            compacted_nodes: list[dict] = []
+            for node in nodes:
+                if not isinstance(node, dict):
+                    compacted_nodes.append(node)
+                    continue
+                compacted_node = dict(node)
+                for heavy_key in (
+                    "source_payload",
+                    "meta",
+                    "payload",
+                    "task",
+                    "tasks",
+                    "evidence",
+                    "details",
+                ):
+                    if heavy_key in compacted_node:
+                        compacted_node[heavy_key] = self._compact_value(compacted_node.get(heavy_key))
+                compacted_nodes.append(compacted_node)
+            compacted["nodes"] = compacted_nodes
+        if "source_payload" in compacted:
+            compacted["source_payload"] = self._compact_value(compacted.get("source_payload"))
+        return compacted
+
     def payload(self, *, list_visual_trees_fn, limit: int = 32) -> dict:
         try:
             all_trees = list_visual_trees_fn(None)
@@ -104,6 +163,7 @@ class ControlWorkTreesService:
             safe_trees = full_tree_list
 
         safe_trees = self._dedupe_visible_trees(safe_trees)
+        safe_trees = [self._compact_tree_payload(tree_payload) for tree_payload in safe_trees]
 
         total = len(safe_trees)
         active = 0
@@ -144,6 +204,28 @@ class ControlWorkTreesService:
             },
             "trees": safe_trees,
         }
+
+    def pressure_payload(self, *, work_tree_module) -> dict:
+        try:
+            snapshot = build_work_tree_pressure_snapshot_from_module(work_tree_module)
+        except Exception as exc:
+            return {
+                "ok": False,
+                "error": f"work_tree_pressure_payload_failed:{exc}",
+                "status": "unknown",
+                "tree_count": 0,
+                "active_tree_count": 0,
+                "branch_count": 0,
+                "open_task_count": 0,
+                "blocked_branch_count": 0,
+                "operator_hold_branch_count": 0,
+                "self_repair_blocked_branch_count": 0,
+                "self_repair_observing_branch_count": 0,
+                "observing_branch_count": 0,
+                "latent_root_signal_count": 0,
+                "release_stale_ready_count": 0,
+            }
+        return {"ok": True, **snapshot}
 
 
 CONTROL_WORK_TREES_SERVICE = ControlWorkTreesService()

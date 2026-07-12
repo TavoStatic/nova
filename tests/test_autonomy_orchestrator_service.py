@@ -77,6 +77,37 @@ def _guard(**overrides):
     return payload
 
 
+def _safe_action_type(candidate):
+    action = candidate.get("action") if isinstance(candidate, dict) else {}
+    return (action or {}).get("action_type") if isinstance(action, dict) else None
+
+
+def _green_mission_snapshot(**overrides):
+    payload = {
+        "enabled": True,
+        "mode": "steady_state_guard",
+        "objective": "hold_steady_and_surface_fresh_gaps",
+        "status": "green",
+        "action": "hold",
+        "green_cycle": True,
+        "headline": "steady governance cycle; no fresh gap pressure",
+        "truth_ready": True,
+        "truth_blockers": [],
+        "owner_blockers": [],
+        "owner_verdicts": [],
+        "blocking_owner_count": 0,
+        "validation_fresh": True,
+        "regression_current": True,
+        "release_truth_current": True,
+        "fresh_gap_signal_count": 0,
+        "release_stale_ready_count": 0,
+        "source": "services.nova_mission",
+        "source_freshness_sec": 0,
+    }
+    payload.update(overrides)
+    return payload
+
+
 def _spec_envelope(
     *,
     policy=None,
@@ -87,6 +118,7 @@ def _spec_envelope(
     triage=None,
     last_action=None,
     autonomy=None,
+    mission=None,
 ):
     return {
         "cycle_id": "cycle-test-001",
@@ -162,6 +194,11 @@ def _spec_envelope(
             "source_freshness_sec": 0,
             **(last_action or {}),
         },
+        **(
+            {"mission_snapshot": _green_mission_snapshot(**(mission or {}))}
+            if mission is not None
+            else {}
+        ),
     }
 
 
@@ -707,6 +744,371 @@ class TestAutonomyOrchestratorService(unittest.TestCase):
         self.assertIn("no_legal_action", packet["refusal_reasons"])
         self.assertEqual(packet["policy_checks"]["candidate_available"], "fail")
         self.assertEqual(packet["policy_checks"]["primary_sources_present"], "pass")
+
+    def test_evaluate_next_action_holds_green_mission_over_seam_pressure_probe(self):
+        service = AutonomyOrchestratorService()
+
+        packet = service.evaluate_next_action(
+            _spec_envelope(
+                triage={
+                    "seam_pressure_scores": {"fallback_overuse": 0.97},
+                    "confidence": 0.97,
+                    "source": "subconscious_work_tree_triage",
+                },
+                mission={},
+            )
+        )
+
+        self.assertEqual(packet["decision_type"], SPEC_DECISION_DEFER)
+        self.assertIn("mission_green_cycle_hold", packet["refusal_reasons"])
+        self.assertEqual(packet["policy_checks"]["candidate_available"], "mission_hold")
+        action_types = [
+            _safe_action_type(item)
+            for item in packet.get("candidates_considered") or []
+        ]
+        self.assertNotIn("pulse_status", action_types)
+        self.assertTrue(bool((packet.get("evidence") or {}).get("mission_snapshot")))
+
+    def test_evaluate_next_action_holds_green_mission_over_investigate_candidate(self):
+        service = AutonomyOrchestratorService()
+
+        packet = service.evaluate_next_action(
+            _spec_envelope(
+                work_tree={"stale_count": 2},
+                mission={},
+            )
+        )
+
+        self.assertEqual(packet["decision_type"], SPEC_DECISION_DEFER)
+        self.assertIn("mission_green_cycle_hold", packet["refusal_reasons"])
+        action_types = [
+            _safe_action_type(item)
+            for item in packet.get("candidates_considered") or []
+        ]
+        self.assertNotIn("generated_queue_investigate", action_types)
+
+    def test_evaluate_next_action_holds_green_mission_over_generated_queue_run_next(self):
+        service = AutonomyOrchestratorService()
+
+        packet = service.evaluate_next_action(
+            _spec_envelope(
+                queue={
+                    "pending_count": 4,
+                    "high_priority_count": 4,
+                    "generated_pending_count": 4,
+                    "generated_actionable_count": 4,
+                    "pressure_band": "high",
+                },
+                triage={
+                    "seam_pressure_scores": {"fallback_overuse": 0.97},
+                    "confidence": 0.97,
+                },
+                mission={},
+            )
+        )
+
+        self.assertEqual(packet["decision_type"], SPEC_DECISION_DEFER)
+        self.assertIn("mission_green_cycle_hold", packet["refusal_reasons"])
+        action_types = [
+            _safe_action_type(item)
+            for item in packet.get("candidates_considered") or []
+        ]
+        self.assertNotIn("generated_queue_run_next", action_types)
+        self.assertNotIn("pulse_status", action_types)
+
+    def test_evaluate_next_action_holds_green_mission_over_active_work_tree_run_next(self):
+        service = AutonomyOrchestratorService()
+
+        packet = service.evaluate_next_action(
+            _spec_envelope(
+                work_tree={
+                    "active_executable_count": 1,
+                    "branches": [
+                        {
+                            "branch_id": "branch_5e7dc5b7",
+                            "title": "Release package is verified but validation outcome is missing",
+                            "status": "ready",
+                            "executable": True,
+                            "recommended_tool": "read",
+                            "task_id": "task_b9b95578",
+                        }
+                    ],
+                },
+                mission={},
+            )
+        )
+
+        self.assertEqual(packet["decision_type"], SPEC_DECISION_DEFER)
+        self.assertIn("mission_green_cycle_hold", packet["refusal_reasons"])
+        action_types = [
+            _safe_action_type(item)
+            for item in packet.get("candidates_considered") or []
+        ]
+        self.assertNotIn("active_work_tree_run_next", action_types)
+
+    def test_evaluate_next_action_allows_core_thinning_under_green_mission_hold(self):
+        service = AutonomyOrchestratorService()
+
+        packet = service.evaluate_next_action(
+            _spec_envelope(
+                work_tree={
+                    "open_count": 1,
+                    "active_executable_count": 1,
+                    "branches": [
+                        {
+                            "branch_id": "branch-core-thin",
+                            "title": "Core thinning follow-up",
+                            "status": "active",
+                            "owner": "core_thinning",
+                            "age_min": 4,
+                            "recommended_tool": "core_thinning",
+                            "tree_id": "tree-core",
+                            "executable": True,
+                        }
+                    ],
+                },
+                mission={},
+            )
+        )
+
+        self.assertEqual(packet["decision_type"], SPEC_DECISION_RECOMMEND_ACTION)
+        self.assertEqual(packet["recommended_action"]["action_type"], "active_work_tree_run_next")
+        self.assertEqual(packet["recommended_action"]["target_id"], "branch-core-thin")
+        self.assertEqual(packet["recommended_action"]["recommended_tool"], "core_thinning")
+        self.assertEqual(packet["recommended_action"]["target_tree_id"], "tree-core")
+        self.assertEqual(packet["action"]["payload"]["target_tree_id"], "tree-core")
+        self.assertEqual(packet["action"]["payload"]["recommended_tool"], "core_thinning")
+
+    def test_evaluate_next_action_allows_core_thinning_when_release_drift_blocks_green(self):
+        service = AutonomyOrchestratorService()
+
+        packet = service.evaluate_next_action(
+            _spec_envelope(
+                work_tree={
+                    "open_count": 1,
+                    "active_executable_count": 1,
+                    "operator_hold_count": 0,
+                    "branches": [
+                        {
+                            "branch_id": "branch-core-thin",
+                            "title": "Core thinning follow-up",
+                            "status": "active",
+                            "owner": "core_thinning",
+                            "age_min": 4,
+                            "recommended_tool": "core_thinning",
+                            "tree_id": "tree-core",
+                            "executable": True,
+                        }
+                    ],
+                },
+                mission={
+                    "enabled": True,
+                    "mode": "steady_state_guard",
+                    "status": "validation_required",
+                    "action": "hold",
+                    "green_cycle": False,
+                    "truth_ready": False,
+                    "truth_blockers": ["core_gate_release_drift"],
+                    "green_blockers": [
+                        {"owner": "layer_maturity", "code": "core_gate_release_drift"},
+                    ],
+                    "owner_verdicts": [
+                        {
+                            "owner": "release",
+                            "ready": True,
+                            "evidence": {
+                                "runtime_drift_expected": True,
+                                "runtime_drift_tolerated": True,
+                            },
+                        }
+                    ],
+                    "validation_fresh": True,
+                    "regression_current": True,
+                    "release_truth_current": True,
+                    "core_gate": {"ok": False, "drift_blocked": True, "missing_roots": []},
+                    "generated_queue_untested_count": 0,
+                },
+            )
+        )
+
+        self.assertEqual(packet["decision_type"], SPEC_DECISION_RECOMMEND_ACTION)
+        self.assertEqual(packet["recommended_action"]["action_type"], "active_work_tree_run_next")
+        self.assertEqual(packet["recommended_action"]["target_id"], "branch-core-thin")
+        self.assertEqual(packet["recommended_action"]["recommended_tool"], "core_thinning")
+        self.assertEqual(packet["recommended_action"]["target_tree_id"], "tree-core")
+        self.assertEqual(packet["action"]["payload"]["target_tree_id"], "tree-core")
+        self.assertEqual(packet["action"]["payload"]["recommended_tool"], "core_thinning")
+
+    def test_evaluate_next_action_holds_green_mission_over_codegen_run(self):
+        service = AutonomyOrchestratorService()
+
+        packet = service.evaluate_next_action(
+            _spec_envelope(
+                policy={
+                    "layers": {
+                        "codegen": {
+                            "mode": "active",
+                            "promoted_capabilities": ["autonomous_code_generation"],
+                        },
+                        "leah": {"mode": "observe", "promoted_capabilities": []},
+                    }
+                },
+                work_tree={
+                    "branches": [
+                        {
+                            "branch_id": "branch_codegen_gap",
+                            "title": "Close capability gap: autonomous_code_generation",
+                            "status": "ready",
+                            "kind": "capability_gap",
+                            "metadata": {"capability_name": "autonomous_code_generation"},
+                            "source_payload": {
+                                "primary_capability": "autonomous_code_generation",
+                                "execution_group": "codegen",
+                                "gaps": ["autonomous_code_generation"],
+                            },
+                        }
+                    ],
+                },
+                mission={},
+            )
+        )
+
+        self.assertEqual(packet["decision_type"], SPEC_DECISION_DEFER)
+        action_types = [
+            _safe_action_type(item)
+            for item in packet.get("candidates_considered") or []
+        ]
+        self.assertNotIn("codegen_run", action_types)
+
+    def test_evaluate_next_action_holds_validation_required_mission_without_green_cycle(self):
+        service = AutonomyOrchestratorService()
+
+        packet = service.evaluate_next_action(
+            _spec_envelope(
+                queue={
+                    "pending_count": 4,
+                    "high_priority_count": 4,
+                    "generated_pending_count": 4,
+                    "generated_actionable_count": 4,
+                    "pressure_band": "high",
+                },
+                mission={
+                    "green_cycle": False,
+                    "status": "validation_required",
+                    "action": "hold",
+                    "truth_ready": False,
+                    "truth_blockers": ["validation_truth_missing", "generated_queue_untested"],
+                    "owner_blockers": [
+                        {
+                            "owner": "validation",
+                            "code": "validation_truth_missing",
+                            "source": "validation_artifact_truth",
+                        },
+                        {
+                            "owner": "generated_queue",
+                            "code": "generated_queue_untested",
+                            "source": "generated_work_queue",
+                        }
+                    ],
+                    "green_blockers": [
+                        {
+                            "owner": "validation",
+                            "code": "validation_truth_missing",
+                            "source": "validation_artifact_truth",
+                        },
+                        {
+                            "owner": "generated_queue",
+                            "code": "generated_queue_untested",
+                            "source": "generated_work_queue",
+                        },
+                    ],
+                    "validation_fresh": False,
+                    "regression_current": True,
+                    "release_truth_current": True,
+                    "generated_queue_untested_count": 4,
+                    "blocking_owner_count": 2,
+                },
+            )
+        )
+
+        self.assertEqual(packet["decision_type"], SPEC_DECISION_DEFER)
+        self.assertIn("mission_steady_state_hold", packet["refusal_reasons"])
+        self.assertIn("mission_validation_required_hold", packet["refusal_reasons"])
+        self.assertIn("mission_truth_blocker:validation_truth_missing", packet["refusal_reasons"])
+        self.assertIn("mission_truth_blocker:generated_queue_untested", packet["refusal_reasons"])
+        self.assertIn(
+            "mission_owner_blocker:validation:validation_truth_missing",
+            packet["refusal_reasons"],
+        )
+        self.assertIn(
+            "mission_owner_blocker:generated_queue:generated_queue_untested",
+            packet["refusal_reasons"],
+        )
+        self.assertNotIn("mission_green_cycle_hold", packet["refusal_reasons"])
+        action_types = [
+            _safe_action_type(item)
+            for item in packet.get("candidates_considered") or []
+        ]
+        self.assertNotIn("generated_queue_run_next", action_types)
+
+    def test_evaluate_next_action_runs_generated_queue_to_clear_own_truth_blocker(self):
+        service = AutonomyOrchestratorService()
+
+        packet = service.evaluate_next_action(
+            _spec_envelope(
+                queue={
+                    "pending_count": 2,
+                    "high_priority_count": 2,
+                    "generated_pending_count": 2,
+                    "generated_actionable_count": 2,
+                    "generated_blocked_count": 0,
+                    "pressure_band": "high",
+                },
+                work_tree={
+                    "operator_hold_count": 2,
+                    "blocked_count": 2,
+                },
+                mission={
+                    "green_cycle": False,
+                    "status": "validation_required",
+                    "action": "hold",
+                    "truth_ready": False,
+                    "truth_blockers": ["generated_queue_untested", "core_gate_release_drift"],
+                    "green_blockers": [
+                        {
+                            "owner": "generated_queue",
+                            "code": "generated_queue_untested",
+                            "source": "generated_work_queue",
+                        },
+                        {
+                            "owner": "layer_maturity",
+                            "code": "core_gate_release_drift",
+                            "source": "layer_maturity.core_gate",
+                        },
+                    ],
+                    "owner_verdicts": [
+                        {
+                            "owner": "release",
+                            "ready": True,
+                            "evidence": {
+                                "runtime_drift_expected": True,
+                                "runtime_drift_tolerated": True,
+                            },
+                        }
+                    ],
+                    "validation_fresh": True,
+                    "regression_current": True,
+                    "release_truth_current": True,
+                    "generated_queue_untested_count": 2,
+                    "core_gate": {"ok": False, "drift_blocked": True, "missing_roots": []},
+                },
+            )
+        )
+
+        self.assertEqual(packet["decision_type"], SPEC_DECISION_RECOMMEND_ACTION)
+        self.assertEqual(packet["recommended_action"]["action_type"], "generated_queue_run_next")
+        self.assertEqual(packet["recommended_action"]["target_id"], "generated_work_queue")
+        self.assertNotIn("operator_hold_pending", packet["refusal_reasons"])
 
     def test_evaluate_next_action_defers_below_recommendation_threshold(self):
         service = AutonomyOrchestratorService()

@@ -39,7 +39,12 @@ SOURCE_ROOTS: tuple[SourceRoot, ...] = (
     SourceRoot(
         "autonomy_orchestrator",
         "Autonomy orchestrator decisions, advisory actions, ledger evidence, and blockage pressure",
-        ("services/autonomy_orchestrator.py", "autonomy_maintenance.py", "services/work_tree_signal_ingestion.py"),
+        (
+            "services/autonomy_orchestrator.py",
+            "services/nova_mission.py",
+            "autonomy_maintenance.py",
+            "services/work_tree_signal_ingestion.py",
+        ),
     ),
     SourceRoot(
         "model_runtime",
@@ -201,6 +206,29 @@ SOURCE_ROOTS: tuple[SourceRoot, ...] = (
         ("pipelines/registry.py", "pipelines/privileged_worker.py", "services/control_pipelines.py"),
     ),
     SourceRoot(
+        "edfi_core",
+        "Vendor-neutral Ed-Fi core: auth, client, discovery, resources, district scope, profile evidence, readiness, and diagnostics",
+        (
+            "services/edfi/__init__.py",
+            "services/edfi/auth.py",
+            "services/edfi/client.py",
+            "services/edfi/core_readiness.py",
+            "services/edfi/profile_evidence.py",
+            "services/edfi/discovery.py",
+            "tools/edfi_tool.py",
+        ),
+    ),
+    SourceRoot(
+        "data_lane_edfi_bisd",
+        "BISD Ed-Fi data lane connector, lane config, and operator scripts",
+        (
+            "data_sources/edfi_bisd/connector.py",
+            "data_sources/edfi_bisd/pipeline.json",
+            "scripts/run_edfi_profile.py",
+            "scripts/run_edfi_explore.py",
+        ),
+    ),
+    SourceRoot(
         "voice",
         "Voice runtime dependency loading, recording, transcription, and voice entrypoints",
         ("services/nova_voice_runtime.py", "services/voice_interaction.py", "voice.py"),
@@ -261,6 +289,36 @@ SOURCE_ROOTS: tuple[SourceRoot, ...] = (
         "source_root_inventory",
         "Source-root discovery, root coverage comparison, and wiring inventory completeness",
         ("services/nova_root_inventory.py", "services/nova_wiring_inventory.py", "services/end_to_end_wiring.py"),
+    ),
+    SourceRoot(
+        "edfi_core",
+        "Ed-Fi ODS HTTP client, OAuth auth, discovery, paging, district scoping, profile evidence, and change tracking — vendor-neutral, no Texas/PEIMS logic",
+        (
+            "services/edfi/__init__.py",
+            "services/edfi/auth.py",
+            "services/edfi/client.py",
+            "services/edfi/config.py",
+            "services/edfi/diagnostics.py",
+            "services/edfi/discovery.py",
+            "services/edfi/district_scope.py",
+            "services/edfi/errors.py",
+            "services/edfi/inventory.py",
+            "services/edfi/resources.py",
+            "services/edfi/profile_evidence.py",
+            "services/edfi/core_readiness.py",
+            "services/edfi/change_tracking.py",
+        ),
+    ),
+    SourceRoot(
+        "data_lane_edfi_bisd",
+        "BISD Ed-Fi data lane — connector, allowlisted query templates, schema manifest, and operator probe scripts",
+        (
+            "data_sources/edfi_bisd/connector.py",
+            "data_sources/edfi_bisd/pipeline.json",
+            "data_sources/edfi_bisd/query_templates.json",
+            "scripts/run_edfi_profile.py",
+            "scripts/run_edfi_explore.py",
+        ),
     ),
 )
 
@@ -367,6 +425,16 @@ def _coverage_root_for_path(path: str) -> str:
         or "smoke" in low
     ):
         return "test_ecosystem"
+    if low.startswith("services/edfi/"):
+        return "edfi_core"
+    if low.startswith("data_sources/edfi_bisd/"):
+        return "data_lane_edfi_bisd"
+    if name in {"run_edfi_profile.py", "run_edfi_explore.py"}:
+        return "data_lane_edfi_bisd"
+    if name in {"demo_edfi_core_lifecycle.py"} or low == "tools/edfi_tool.py":
+        return "edfi_core"
+    if low.startswith("docs/") and "edfi" in low:
+        return "edfi_core"
     if name in {"readme.md", "requirements.txt"}:
         return "frontdoor_cli"
     if name in {".gitattributes", ".gitignore", "pytest.ini"}:
@@ -418,7 +486,7 @@ def _coverage_root_for_path(path: str) -> str:
         return "memory_identity"
     if low.startswith("piper/") or low.endswith(".onnx") or low.endswith(".dll") or low.endswith(".exe"):
         return "tts_audio_output"
-    if "autonomy_orchestrator" in low:
+    if "autonomy_orchestrator" in low or "nova_mission" in low:
         return "autonomy_orchestrator"
     if "autonomy_maintenance" in low:
         return "autonomy_maintenance"

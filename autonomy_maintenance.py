@@ -41,9 +41,11 @@ from services.release_runtime_truth import (
 from services.release_status import RELEASE_STATUS_SERVICE
 from services.control_work_trees import CONTROL_WORK_TREES_SERVICE
 from services.core_thinning import build_core_thinning_brief as service_build_core_thinning_brief
+from services.core_thinning import build_core_thinning_owner_verdict as service_build_core_thinning_owner_verdict
 from services.core_thinning import feed_core_thinning_brief_to_work_tree as service_feed_core_thinning_brief_to_work_tree
 from services.core_steward import build_core_steward_payload as service_build_core_steward_payload
 from services.nova_control_action_dispatcher import NOVA_CONTROL_ACTION_DISPATCHER, autonomy_advisory_action_types
+from services.nova_mission import NOVA_MISSION_SERVICE, NovaMissionService
 from services.nova_root_inventory import build_source_root_inventory_payload
 from services.runtime_control import RUNTIME_CONTROL_SERVICE
 from services.nova_runtime_context import AUTONOMY_ORCHESTRATOR_LEDGER_FILE
@@ -65,6 +67,10 @@ from services.subconscious_review_judgment import latest_subconscious_review_jud
 from services.subconscious_work_tree_triage import SUBCONSCIOUS_WORK_TREE_TRIAGE_SERVICE
 from services.test_session_control import TEST_SESSION_CONTROL_SERVICE
 from services.validation_artifact_truth import VALIDATION_ARTIFACT_TRUTH_SERVICE
+from services.work_tree_pressure_snapshot import (
+    build_work_tree_pressure_snapshot,
+    build_work_tree_pressure_snapshot_from_module,
+)
 from services.work_tree_signal_ingestion import WORK_TREE_SIGNAL_INGESTION_SERVICE
 import tools.runtime_processes as runtime_processes
 from work_tree_contracts import BranchStatus, TaskStatus
@@ -74,6 +80,7 @@ ROOT = Path(__file__).resolve().parent
 RUNTIME_DIR = CONTEXT_RUNTIME_DIR
 VENV_PY = ROOT / ".venv" / "Scripts" / "python.exe"
 GUARD_PY = ROOT / "nova_guard.py"
+CORE_PY = ROOT / "nova_core.py"
 AUTONOMY_MAINTENANCE_PY = ROOT / "autonomy_maintenance.py"
 TEST_SESSIONS_ROOT = RUNTIME_DIR / "test_sessions"
 TEST_SESSION_RUNNER_PY = ROOT / "scripts" / "run_test_session.py"
@@ -148,6 +155,7 @@ ACTIVE_WORK_TREE_EXECUTE_TOOLS = [
     "ls",
     "find",
     "pipeline",
+    "edfi_explore",
     "core_health",
     "core_thinning",
     "release_promotion_judgment",
@@ -183,6 +191,7 @@ WORK_TREE_CYCLE_ATTENTION_STATUSES = {
     "no_open_task",
     "no_tool_selected",
     "scope_blocked",
+    "stale_execution_contract",
     "tool_failed",
     "verification_failed",
     "wait_for_tools",
@@ -457,28 +466,38 @@ def _active_work_candidate_branch(candidate: dict) -> dict:
     }
 
 
-def _work_tree_node_is_operator_hold(node: dict) -> bool:
-    status_text = str(node.get("status") or "").strip().lower()
-    if status_text != "blocked":
-        return False
-    source_type = str(node.get("source_type") or "").strip().lower()
-    work_class = str(node.get("work_class") or "").strip().lower()
-    payload = node.get("source_payload") if isinstance(node.get("source_payload"), dict) else {}
-    if source_type == "memory_health" and work_class == "governance_pressure":
-        origin = payload.get("memory_bootstrap_origin") if isinstance(payload.get("memory_bootstrap_origin"), dict) else {}
-        bootstrap = payload.get("memory_bootstrap") if isinstance(payload.get("memory_bootstrap"), dict) else {}
-        origin_status = str(origin.get("status") or bootstrap.get("origin_status") or "").strip().lower()
-        return origin_status == "pending_operator_confirmation"
-    return False
+def _work_tree_pressure_truth(work_tree_state: dict) -> dict:
+    payload = dict(work_tree_state or {}) if isinstance(work_tree_state, dict) else {}
+    pressure = build_work_tree_pressure_snapshot(payload)
+    try:
+        module_pressure = build_work_tree_pressure_snapshot_from_module(work_tree)
+    except Exception:
+        return pressure
+    for field, module_key in (
+        ("open_task_count", "open_task_count"),
+        ("working_count", "working_count"),
+        ("blocked_branch_count", "blocked_count"),
+        ("blocked_count", "blocked_count"),
+        ("operator_hold_branch_count", "operator_hold_count"),
+        ("operator_hold_count", "operator_hold_count"),
+        ("self_repair_blocked_branch_count", "self_repair_blocked_count"),
+        ("self_repair_observing_branch_count", "self_repair_observing_count"),
+        ("observing_branch_count", "observing_count"),
+        ("blocked_observing_count", "blocked_observing_count"),
+        ("latent_root_signal_count", "latent_root_signal_count"),
+        ("release_stale_ready_count", "release_stale_ready_count"),
+        ("pending_count", "pending_count"),
+        ("status", "status"),
+    ):
+        if module_key in module_pressure:
+            pressure[field] = module_pressure[module_key]
+    return pressure
 
 
 def _work_tree_snapshot_for_orchestrator(work_tree_state: dict, active_work_candidates: list[dict] | None = None) -> dict:
     payload = dict(work_tree_state or {}) if isinstance(work_tree_state, dict) else {}
-    counts = dict(payload.get("counts") or {}) if isinstance(payload.get("counts"), dict) else {}
     branches: list[dict] = []
-    observing_count = 0
-    latent_root_signal_count = 0
-    operator_hold_count = 0
+    pressure = _work_tree_pressure_truth(payload)
     active_candidates_provided = active_work_candidates is not None
     active_candidates = [dict(item) for item in list(active_work_candidates or []) if isinstance(item, dict)]
     if active_candidates:
@@ -501,33 +520,23 @@ def _work_tree_snapshot_for_orchestrator(work_tree_state: dict, active_work_cand
                     "executable": False,
                 }
             )
-            for node in list(tree.get("nodes") or []):
-                if not isinstance(node, dict):
-                    continue
-                status_text = str(node.get("status") or "").strip().lower()
-                resolution_text = str(node.get("resolution_state") or "").strip().lower()
-                operator_hold = _work_tree_node_is_operator_hold(node)
-                if operator_hold:
-                    operator_hold_count += 1
-                if status_text == "blocked" and resolution_text == "observing":
-                    observing_count += 1
-                    if (
-                        not operator_hold
-                        and
-                        str(node.get("source_type") or "").strip().lower() == "subconscious"
-                        and str(node.get("work_class") or "").strip().lower() == "candidate_review"
-                    ):
-                        latent_root_signal_count += 1
     active_executable_count = sum(1 for branch in branches if bool(branch.get("executable")))
     return {
-        "open_count": _safe_int(counts.get("open_tasks") or counts.get("pending") or counts.get("active"), 0),
-        "working_count": _safe_int(counts.get("working"), 0),
-        "blocked_count": _safe_int(counts.get("blocked"), 0),
-        "observing_count": observing_count,
-        "latent_root_signal_count": latent_root_signal_count,
-        "operator_hold_count": operator_hold_count,
-        "stale_count": _safe_int(counts.get("stale"), 0),
-        "oldest_open_age_min": _safe_int(counts.get("oldest_open_age_min"), 0),
+        "open_count": _safe_int(
+            pressure.get("open_task_count")
+            or pressure.get("pending_count")
+            or pressure.get("active_tree_count"),
+            0,
+        ),
+        "working_count": _safe_int(pressure.get("working_count"), 0),
+        "blocked_count": _safe_int(pressure.get("blocked_branch_count"), 0),
+        "observing_count": _safe_int(pressure.get("blocked_observing_count"), 0),
+        "total_observing_count": _safe_int(pressure.get("observing_branch_count"), 0),
+        "latent_root_signal_count": _safe_int(pressure.get("latent_root_signal_count"), 0),
+        "operator_hold_count": _safe_int(pressure.get("operator_hold_branch_count"), 0),
+        "release_stale_ready_count": _safe_int(pressure.get("release_stale_ready_count"), 0),
+        "stale_count": _safe_int(pressure.get("stale_count"), 0),
+        "oldest_open_age_min": _safe_int(pressure.get("oldest_open_age_min"), 0),
         "active_candidate_count": len(active_candidates) if active_candidates_provided else -1,
         "active_executable_count": active_executable_count if active_candidates_provided else -1,
         "active_unsafe_count": max(0, len(active_candidates) - active_executable_count) if active_candidates_provided else -1,
@@ -607,6 +616,307 @@ def _queue_pressure_for_orchestrator(generated_queue: dict, state: dict | None =
     }
 
 
+def _nova_http_direct_process_alive(process: dict) -> bool:
+    pid = int((process or {}).get("pid") or 0)
+    if pid <= 0:
+        return False
+    cmdline = [str(token or "") for token in list((process or {}).get("cmdline") or [])]
+    normalized = " ".join(cmdline).lower()
+    if " -c " in f" {normalized} " or normalized.startswith("-c "):
+        return False
+    try:
+        import psutil
+
+        return bool(psutil.pid_exists(pid))
+    except Exception:
+        return False
+
+
+def _webui_health_for_orchestrator(*, bind_port: int = 8080) -> dict:
+    try:
+        import urllib.error
+        import urllib.request
+
+        processes = [
+            dict(item)
+            for item in runtime_processes.logical_service_processes(ROOT / "nova_http.py")
+            if _nova_http_direct_process_alive(item)
+        ]
+        process = dict(processes[0]) if processes else {}
+        pid = int(process.get("pid") or 0)
+        port_open = _operator_webui_port_open(bind_port)
+        http_ok = False
+        if port_open:
+            try:
+                with urllib.request.urlopen(
+                    f"http://127.0.0.1:{int(bind_port)}/api/health",
+                    timeout=5,
+                ) as response:
+                    http_ok = int(getattr(response, "status", 0) or 0) == 200
+            except (urllib.error.URLError, TimeoutError, OSError, ValueError):
+                http_ok = False
+        running = pid > 0 and port_open and http_ok
+        if running:
+            status = "running"
+        elif port_open or pid > 0:
+            status = "degraded"
+        else:
+            status = "stopped"
+        return {
+            "running": running,
+            "status": status,
+            "pid": pid or None,
+            "create_time": process.get("create_time"),
+            "process_count": len(processes),
+            "http_ok": http_ok,
+            "port_open": port_open,
+        }
+    except Exception:
+        return {"running": False, "status": "unknown", "process_count": 0, "http_ok": False, "port_open": False}
+
+
+def _operator_webui_port_open(bind_port: int = 8080) -> bool:
+    import socket
+
+    try:
+        with socket.create_connection(("127.0.0.1", int(bind_port)), timeout=1.5):
+            return True
+    except OSError:
+        return False
+
+
+def _probe_operator_webui_health(*, attempts: int = 3, delay_sec: float = 1.5) -> dict:
+    last: dict = {}
+    tries = max(1, int(attempts))
+    for attempt in range(tries):
+        last = _webui_health_for_orchestrator()
+        if bool(last.get("running")):
+            return last
+        if attempt + 1 < tries:
+            time.sleep(max(0.0, float(delay_sec)))
+    return last
+
+
+def _ensure_operator_webui_running(state: dict) -> dict:
+    bind_port = 8080
+    health = _probe_operator_webui_health()
+    if bool(health.get("running")):
+        state["operator_webui_degraded_count"] = 0
+        return {
+            "status": "running",
+            "action": "none",
+            "pid": health.get("pid"),
+            "http_ok": True,
+            "port_open": bool(health.get("port_open")),
+        }
+
+    port_open = bool(health.get("port_open")) or _operator_webui_port_open(bind_port)
+    pid = int(health.get("pid") or 0)
+    pid_alive = pid > 0 and _nova_http_direct_process_alive({"pid": pid})
+    if not port_open and not pid_alive:
+        restart_reason = "down"
+    else:
+        restart_reason = "degraded"
+
+    last = dict(state.get("last_operator_webui_ensure") or {}) if isinstance(state.get("last_operator_webui_ensure"), dict) else {}
+    cooldown_until = _safe_float(last.get("cooldown_until_epoch"), 0.0)
+    now_epoch = time.time()
+    if cooldown_until > now_epoch:
+        return {
+            "status": "skipped",
+            "action": "cooldown",
+            "cooldown_remaining_sec": max(0, int(cooldown_until - now_epoch)),
+            "restart_reason": restart_reason,
+            "port_open": port_open,
+            "pid_alive": pid_alive,
+        }
+
+    if restart_reason == "degraded":
+        degraded_count = _safe_int(state.get("operator_webui_degraded_count"), 0) + 1
+        state["operator_webui_degraded_count"] = degraded_count
+        if degraded_count < 3:
+            return {
+                "status": "degraded",
+                "action": "wait",
+                "pid": health.get("pid"),
+                "http_ok": bool(health.get("http_ok")),
+                "port_open": port_open,
+                "pid_alive": pid_alive,
+                "degraded_count": degraded_count,
+                "restart_reason": restart_reason,
+            }
+
+    launcher = ROOT / "scripts" / "start_webui_detached.py"
+    python_exe = ROOT / ".venv" / "Scripts" / "python.exe"
+    if not launcher.exists() or not python_exe.exists():
+        return {"status": "failed", "action": "launcher_missing", "restart_reason": restart_reason}
+
+    if port_open:
+        return {
+            "status": "degraded",
+            "action": "port_busy",
+            "pid": health.get("pid"),
+            "http_ok": bool(health.get("http_ok")),
+            "port_open": True,
+            "pid_alive": pid_alive,
+            "restart_reason": restart_reason,
+            "ts": _patch_queue_timestamp(),
+        }
+
+    try:
+        proc = subprocess.run(
+            [str(python_exe), str(launcher), "--host", "127.0.0.1", "--port", str(bind_port)],
+            cwd=str(ROOT),
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        time.sleep(2)
+        health = _probe_operator_webui_health(attempts=3, delay_sec=1.5)
+        result = {
+            "status": "running" if bool(health.get("running")) else "failed",
+            "action": "started",
+            "pid": health.get("pid"),
+            "http_ok": bool(health.get("http_ok")),
+            "port_open": bool(health.get("port_open")),
+            "launcher_exit_code": int(proc.returncode or 0),
+            "restart_reason": restart_reason,
+            "ts": _patch_queue_timestamp(),
+            "cooldown_until_epoch": now_epoch + 120.0,
+        }
+        if bool(health.get("running")):
+            state["operator_webui_degraded_count"] = 0
+        return result
+    except Exception as exc:
+        return {
+            "status": "failed",
+            "action": "start_error",
+            "error": str(exc),
+            "restart_reason": restart_reason,
+            "ts": _patch_queue_timestamp(),
+            "cooldown_until_epoch": now_epoch + 120.0,
+        }
+
+
+def _mission_hold_blocks_legacy_execution(mission_snapshot: dict | None) -> bool:
+    return NOVA_MISSION_SERVICE.hold_blocks_legacy_execution(mission_snapshot)
+
+
+def _mission_hold_blocks_generated_queue(
+    mission_snapshot: dict | None,
+    *,
+    policy_snapshot: dict | None = None,
+) -> bool:
+    return _mission_hold_blocks_action(
+        "generated_queue_run_next",
+        mission_snapshot,
+        policy_snapshot=policy_snapshot,
+    )
+
+
+def _mission_hold_blocks_action(
+    action_type: str,
+    mission_snapshot: dict | None,
+    *,
+    policy_snapshot: dict | None = None,
+    action_context: dict | None = None,
+) -> bool:
+    return NOVA_MISSION_SERVICE.hold_blocks_action(
+        action_type,
+        mission_snapshot=mission_snapshot,
+        policy_snapshot=policy_snapshot,
+        action_context=action_context,
+    )
+
+
+def _mission_snapshot_for_ingestion(state: dict | None, *, policy_snapshot: dict | None = None) -> dict:
+    current_state = dict(state or {}) if isinstance(state, dict) else {}
+    cached = (
+        dict(current_state.get("last_nova_mission") or {})
+        if isinstance(current_state.get("last_nova_mission"), dict)
+        else {}
+    )
+    if cached:
+        return cached
+    try:
+        work_tree_state = CONTROL_WORK_TREES_SERVICE.payload(
+            list_visual_trees_fn=work_tree.list_visual_trees,
+            limit=64,
+        )
+        generated_queue = _generated_work_queue(limit=200)
+        guard_health = _guard_health_for_orchestrator()
+        core_steward = _core_steward_for_orchestrator(current_state, {}, guard_health=guard_health)
+        return NOVA_MISSION_SERVICE.build_snapshot(
+            work_tree_snapshot=_work_tree_snapshot_for_orchestrator(work_tree_state, None),
+            steward_posture=_steward_posture_for_orchestrator(core_steward),
+            queue_pressure=_queue_pressure_for_orchestrator(generated_queue, current_state),
+            runtime_guard_status=_runtime_guard_status_for_orchestrator(core_steward, guard_health),
+            triage_hints={"approved_review_count": 0},
+            policy_snapshot=dict(policy_snapshot or _policy_snapshot_for_orchestrator()),
+            truth_evidence=_truth_evidence_for_mission(current_state),
+        )
+    except Exception:
+        return {}
+
+
+def _truth_evidence_for_mission(state: dict | None) -> dict:
+    current_state = dict(state or {}) if isinstance(state, dict) else {}
+    validation_payload = _validation_artifact_truth_payload_for_signal_ingestion()
+    layer_snapshot = (
+        dict(current_state.get("last_layer_maturity_snapshot") or {})
+        if isinstance(current_state.get("last_layer_maturity_snapshot"), dict)
+        else {}
+    )
+    release_truth = (
+        dict(layer_snapshot.get("release_runtime_truth") or {})
+        if isinstance(layer_snapshot.get("release_runtime_truth"), dict)
+        else dict(current_state.get("last_release_runtime_truth") or {})
+    )
+    release_status = (
+        dict(layer_snapshot.get("release_status") or {})
+        if isinstance(layer_snapshot.get("release_status"), dict)
+        else {}
+    )
+    root_closure_inventory = (
+        dict(layer_snapshot.get("root_closure_inventory") or {})
+        if isinstance(layer_snapshot.get("root_closure_inventory"), dict)
+        else {}
+    )
+    layer_maturity = (
+        dict(layer_snapshot.get("layer_maturity") or {})
+        if isinstance(layer_snapshot.get("layer_maturity"), dict)
+        else {}
+    )
+    owner_verdicts: list[dict] = []
+    core_thinning_sync = (
+        dict(current_state.get("last_core_thinning_sync") or {})
+        if isinstance(current_state.get("last_core_thinning_sync"), dict)
+        else {}
+    )
+    core_thinning_verdict = (
+        dict(core_thinning_sync.get("owner_verdict") or {})
+        if isinstance(core_thinning_sync.get("owner_verdict"), dict)
+        else {}
+    )
+    if core_thinning_verdict:
+        owner_verdicts.append(core_thinning_verdict)
+    return {
+        "validation_artifact_truth": dict(validation_payload.get("validation_artifact_truth") or {}),
+        "validation_artifact_truth_ok": validation_payload.get("validation_artifact_truth_ok"),
+        "validation_artifact_truth_status": str(validation_payload.get("validation_artifact_truth_status") or ""),
+        "validation_artifact_hidden_by_green_regression": bool(
+            validation_payload.get("validation_artifact_hidden_by_green_regression", False)
+        ),
+        "last_regression_status": str(current_state.get("last_regression_status") or ""),
+        "last_regression_stale": bool(current_state.get("last_regression_stale", False)),
+        "release_runtime_truth": release_truth,
+        "release_status": release_status,
+        "root_closure_inventory": root_closure_inventory,
+        "layer_maturity": layer_maturity,
+        "owner_verdicts": owner_verdicts,
+    }
+
+
 def _runtime_guard_status_for_orchestrator(core_steward: dict, guard_health: dict) -> dict:
     runtime = dict((core_steward or {}).get("runtime") or {}) if isinstance((core_steward or {}).get("runtime"), dict) else {}
     core_state = dict(runtime.get("core_state") or {}) if isinstance(runtime.get("core_state"), dict) else {}
@@ -622,10 +932,12 @@ def _runtime_guard_status_for_orchestrator(core_steward: dict, guard_health: dic
             guard_running = True
         elif status in {"stopped", "inactive", "not_running", "failed", "error", "degraded", "boot_timeout"}:
             guard_running = False
+    webui = _webui_health_for_orchestrator()
+    webui_running = bool(webui.get("running", False))
     return {
         "guard_running": guard_running,
         "core_running": core_running,
-        "webui_running": True,
+        "webui_running": webui_running,
         "restart_in_progress": False,
         "stop_flag": bool(guard.get("stop_flag", False)),
         "source_freshness_sec": 0,
@@ -748,6 +1060,35 @@ def _policy_snapshot_for_orchestrator() -> dict:
     requires_ack_default = ["update_now_dry_run"]
     mode = _autonomy_execution_mode(settings)
     execute_enabled = _autonomy_execution_enabled(settings)
+    mission_settings = dict(settings.get("mission") or {}) if isinstance(settings.get("mission"), dict) else {}
+    mission_policy = {
+        "enabled": bool(mission_settings.get("enabled", True)),
+        "mode": str(mission_settings.get("mode") or "steady_state_guard").strip().lower(),
+        "objective": str(
+            mission_settings.get("objective") or "hold_steady_and_surface_fresh_gaps"
+        ).strip(),
+        "release_stale_ready_is_pressure": bool(mission_settings.get("release_stale_ready_is_pressure", False)),
+        "subconscious_triage_is_pressure": bool(mission_settings.get("subconscious_triage_is_pressure", False)),
+        "generated_queue_backlog_is_pressure": bool(mission_settings.get("generated_queue_backlog_is_pressure", False)),
+        "require_core_gate_for_green": bool(mission_settings.get("require_core_gate_for_green", True)),
+        "ingestion_suppress_ambient_on_hold": bool(mission_settings.get("ingestion_suppress_ambient_on_hold", True)),
+        "sustained_watch_cycles": _safe_int(mission_settings.get("sustained_watch_cycles"), 6),
+        "hold_block_actions": _autonomy_policy_list(
+            mission_settings,
+            "hold_block_actions",
+            list(NovaMissionService.DEFAULT_POLICY.get("hold_block_actions") or []),
+        ),
+        "hold_allow_actions": _autonomy_policy_list(
+            mission_settings,
+            "hold_allow_actions",
+            list(NovaMissionService.DEFAULT_POLICY.get("hold_allow_actions") or []),
+        ),
+        "hold_allow_active_work_tools": _autonomy_policy_list(
+            mission_settings,
+            "hold_allow_active_work_tools",
+            list(NovaMissionService.DEFAULT_POLICY.get("hold_allow_active_work_tools") or []),
+        ),
+    }
     try:
         full_policy = nova_core.load_policy()
     except Exception:
@@ -772,6 +1113,7 @@ def _policy_snapshot_for_orchestrator() -> dict:
         "execute_min_confidence": _safe_float(settings.get("execute_min_confidence", settings.get("confidence_threshold")), 0.55),
         "cooldown_sec": _safe_int(settings.get("cooldown_sec"), 180),
         "layers": layers,
+        "mission": mission_policy,
         "active_work_tree_max_steps_per_cycle": _safe_int(
             settings.get("active_work_tree_max_steps_per_cycle"),
             ACTIVE_WORK_TREE_DEFAULT_DISPATCH_STEPS,
@@ -926,6 +1268,7 @@ def _triage_hints_for_orchestrator(
     latest_report: dict | None = None,
     state: dict | None = None,
     kidney_summary: dict | None = None,
+    mission_snapshot: dict | None = None,
 ) -> dict:
     pulse = dict((core_steward or {}).get("pulse") or {}) if isinstance((core_steward or {}).get("pulse"), dict) else {}
     queue = dict(generated_queue or {}) if isinstance(generated_queue, dict) else {}
@@ -1028,6 +1371,7 @@ def _triage_hints_for_orchestrator(
         "confidence": confidence,
         "source": "subconscious_work_tree_triage" if top_candidates else "core_steward_pulse",
         "source_freshness_sec": source_freshness_sec,
+        "mission_snapshot": dict(mission_snapshot or {}),
     }
 
 
@@ -1133,6 +1477,75 @@ def _probe_local_port_ownership() -> dict:
         return {"status": "local_probe_failed", "error": str(exc)}
 
 
+def _apply_local_runtime_control_surfaces(payload: dict, *, only_missing: bool = True) -> dict:
+    result = dict(payload or {})
+    runtime_keys = _wiring_surface_status_keys("runtime_core")
+    supplemental_keys = (
+        "core_heartbeat_age_sec",
+        "maintenance_scheduler_active",
+        "maintenance_scheduler_mode",
+        "maintenance_scheduler_status",
+    )
+    tracked_keys = tuple(dict.fromkeys((*runtime_keys, *supplemental_keys)))
+    missing_keys = [key for key in tracked_keys if key not in result]
+    if only_missing and not missing_keys:
+        return result
+
+    guard = result.get("guard") if isinstance(result.get("guard"), dict) else {}
+    core = result.get("core") if isinstance(result.get("core"), dict) else {}
+    webui = result.get("webui") if isinstance(result.get("webui"), dict) else {}
+
+    if not only_missing or "guard" in missing_keys or not guard:
+        guard = _maintenance_guard_status_payload()
+        result["guard"] = guard
+    if not only_missing or "core" in missing_keys or not core:
+        core = _maintenance_core_status_payload()
+        result["core"] = core
+    if not only_missing or "webui" in missing_keys or not webui:
+        webui = _maintenance_webui_status_payload()
+        result["webui"] = webui
+
+    if not only_missing or "runtime_summary" in missing_keys:
+        result["runtime_summary"] = RUNTIME_STATUS_SERVICE.runtime_summary_payload(
+            result.get("guard") if isinstance(result.get("guard"), dict) else {},
+            result.get("core") if isinstance(result.get("core"), dict) else {},
+            result.get("webui") if isinstance(result.get("webui"), dict) else {},
+        )
+    if not only_missing or "runtime_failures" in missing_keys:
+        result["runtime_failures"] = RUNTIME_STATUS_SERVICE.runtime_failure_reasons_payload(
+            result.get("guard") if isinstance(result.get("guard"), dict) else {},
+            result.get("core") if isinstance(result.get("core"), dict) else {},
+            result.get("webui") if isinstance(result.get("webui"), dict) else {},
+        )
+
+    if not only_missing or "core_heartbeat_age_sec" in missing_keys:
+        core_payload = result.get("core") if isinstance(result.get("core"), dict) else {}
+        heartbeat_age = core_payload.get("heartbeat_age_sec")
+        if heartbeat_age is None:
+            heartbeat_age = _maintenance_heartbeat_age_seconds()
+        if heartbeat_age is not None:
+            result["core_heartbeat_age_sec"] = int(heartbeat_age)
+
+    if not only_missing or any(
+        key in missing_keys
+        for key in ("maintenance_scheduler_active", "maintenance_scheduler_mode", "maintenance_scheduler_status")
+    ):
+        guard_running = bool((result.get("guard") or {}).get("running"))
+        if guard_running:
+            scheduler_mode = "guard_tick"
+            scheduler_status = "guard_scheduled"
+        else:
+            scheduler_mode = "inactive"
+            scheduler_status = "inactive"
+        if not only_missing or "maintenance_scheduler_active" not in result:
+            result["maintenance_scheduler_active"] = guard_running
+        if not only_missing or "maintenance_scheduler_mode" not in result:
+            result["maintenance_scheduler_mode"] = scheduler_mode
+        if not only_missing or "maintenance_scheduler_status" not in result:
+            result["maintenance_scheduler_status"] = scheduler_status
+    return result
+
+
 def _apply_local_model_runtime_status(payload: dict, *, only_missing: bool = True) -> dict:
     result = dict(payload or {})
     required_keys = _wiring_surface_status_keys("model_runtime")
@@ -1231,12 +1644,28 @@ def _apply_local_operator_control_surfaces(payload: dict, *, only_missing: bool 
             if not only_missing or "backend_command_count" not in result:
                 result["backend_command_count"] = len(commands)
 
-    if not only_missing or any(key in missing_keys for key in ("operator_outbox", "operator_outbox_open_count")):
+    if not only_missing or any(
+        key in missing_keys
+        for key in (
+            "operator_outbox",
+            "operator_outbox_open_count",
+            "operator_outbox_actionable_open_count",
+            "operator_outbox_actionable_latest_open_id",
+        )
+    ):
         outbox = OPERATOR_OUTBOX_SERVICE.summary(OPERATOR_OUTBOX, limit=20)
         if not only_missing or "operator_outbox" not in result:
             result["operator_outbox"] = outbox
         if not only_missing or "operator_outbox_open_count" not in result:
             result["operator_outbox_open_count"] = int(outbox.get("open_count", 0) or 0)
+        if not only_missing or "operator_outbox_actionable_open_count" not in result:
+            result["operator_outbox_actionable_open_count"] = int(
+                outbox.get("operator_actionable_open_count", outbox.get("open_count", 0)) or 0
+            )
+        if not only_missing or "operator_outbox_actionable_latest_open_id" not in result:
+            result["operator_outbox_actionable_latest_open_id"] = str(
+                outbox.get("operator_actionable_latest_open_id") or ""
+            )
     return result
 
 
@@ -1322,8 +1751,17 @@ def _status_payload_missing_root_closure_truth_markers(payload: dict) -> bool:
     return sum(1 for key in _ROOT_CLOSURE_TRUTH_MARKERS if key not in source) >= 4
 
 
+def _status_payload_uses_thin_local_inventory_probe(payload: dict) -> bool:
+    source = dict(payload or {})
+    if str(source.get("signal_ingestion_status_source") or "").strip() == "local_dependency_probe":
+        return True
+    return _status_payload_missing_root_closure_truth_markers(source)
+
+
 def _merge_authoritative_wiring_status_keys(payload: dict) -> dict:
     result = dict(payload or {})
+    if SIGNAL_INGESTION_STATUS_MODE in {"local", "local_only"}:
+        return result
     allowed = signal_ingestion_top_level_keys()
     for url, timeout_sec, read_limit in (
         (CONTROL_STATUS_SURFACES_URL, CONTROL_STATUS_SURFACES_TIMEOUT_SEC, 512_000),
@@ -1369,10 +1807,6 @@ def _refresh_root_closure_inventory_surfaces(payload: dict, *, preserve_existing
     ):
         return _apply_root_closure_inventory_surfaces(result, existing)
     result = _merge_authoritative_wiring_status_keys(result)
-    if _status_payload_missing_root_closure_truth_markers(result):
-        cached = _last_known_root_closure_inventory_from_state()
-        if cached:
-            return _apply_root_closure_inventory_surfaces(result, cached)
     try:
         root_closure = build_root_closure_inventory_payload(result)
         result = _apply_root_closure_inventory_surfaces(result, root_closure)
@@ -1398,7 +1832,8 @@ def _apply_layer_maturity_to_status_payload(payload: dict) -> dict:
 
 
 def _enrich_signal_ingestion_status_payload(payload: dict, *, only_missing: bool = True) -> dict:
-    enriched = _apply_local_model_runtime_status(payload, only_missing=only_missing)
+    enriched = _apply_local_runtime_control_surfaces(payload, only_missing=only_missing)
+    enriched = _apply_local_model_runtime_status(enriched, only_missing=only_missing)
     enriched = _apply_local_frontdoor_cli_surfaces(enriched, only_missing=only_missing)
     enriched = _apply_local_operator_control_surfaces(enriched, only_missing=only_missing)
     enriched = _apply_local_http_api_control_surfaces(enriched, only_missing=only_missing)
@@ -1574,15 +2009,30 @@ def _apply_release_runtime_truth_to_status_payload(
     state: dict | None = None,
 ) -> dict:
     result = dict(status_payload or {})
-    release = result.get("release_status") if isinstance(result.get("release_status"), dict) else {}
-    if not release:
+    if SIGNAL_INGESTION_STATUS_MODE in {"local", "local_only"}:
         release = _local_release_status_for_signal_ingestion()
     else:
-        release = enrich_release_status(release)
+        release = result.get("release_status") if isinstance(result.get("release_status"), dict) else {}
+        if not release:
+            release = _local_release_status_for_signal_ingestion()
+        else:
+            release = enrich_release_status(release)
     result["release_status"] = release
     truth = build_release_runtime_truth_summary(release)
     result["release_runtime_truth"] = truth
-    probe = _probe_http_model_runtime_surfaces()
+    if SIGNAL_INGESTION_STATUS_MODE in {"local", "local_only"}:
+        probe = {
+            "ok": True,
+            "required_key_count": 0,
+            "present_key_count": 0,
+            "missing_keys": [],
+            "present_keys": [],
+            "source": "local_dependency_probe",
+            "skipped": True,
+            "reason": "local_only_http_probe_skipped",
+        }
+    else:
+        probe = _probe_http_model_runtime_surfaces()
     result["http_model_runtime_probe"] = probe
     result["http_model_runtime_probe_ok"] = bool(probe.get("ok"))
     result["http_model_runtime_missing_keys"] = list(probe.get("missing_keys") or [])
@@ -1661,6 +2111,67 @@ def _last_action_context_for_orchestrator(state: dict) -> dict:
     }
 
 
+def _autonomy_orchestrator_status_for_signal_ingestion(state: dict | None) -> dict:
+    current_state = dict(state or {}) if isinstance(state, dict) else {}
+    orchestrator = (
+        dict(current_state.get("last_autonomy_orchestrator") or {})
+        if isinstance(current_state.get("last_autonomy_orchestrator"), dict)
+        else {}
+    )
+    execution = (
+        dict(current_state.get("last_autonomy_execution") or {})
+        if isinstance(current_state.get("last_autonomy_execution"), dict)
+        else {}
+    )
+    recommended_action = (
+        dict(orchestrator.get("recommended_action") or {})
+        if isinstance(orchestrator.get("recommended_action"), dict)
+        else {}
+    )
+    action = dict(orchestrator.get("action") or {}) if isinstance(orchestrator.get("action"), dict) else {}
+    execution_extra = dict(execution.get("extra") or {}) if isinstance(execution.get("extra"), dict) else {}
+    execution_cycle = (
+        dict(execution_extra.get("cycle") or {})
+        if isinstance(execution_extra.get("cycle"), dict)
+        else {}
+    )
+    action_type = str(
+        execution.get("action_type")
+        or action.get("act")
+        or recommended_action.get("action_type")
+        or ""
+    ).strip()
+    return {
+        "autonomy_orchestrator": orchestrator,
+        "autonomy_orchestrator_ts": str(orchestrator.get("ts") or ""),
+        "autonomy_orchestrator_mode": str(orchestrator.get("mode") or ""),
+        "autonomy_orchestrator_decision": str(orchestrator.get("decision") or ""),
+        "autonomy_orchestrator_decision_type": str(orchestrator.get("decision_type") or ""),
+        "autonomy_orchestrator_action": action_type,
+        "autonomy_orchestrator_action_type": action_type,
+        "autonomy_orchestrator_reason": str(orchestrator.get("reason") or ""),
+        "autonomy_orchestrator_ledger_status": str(orchestrator.get("ledger_status") or ""),
+        "autonomy_orchestrator_rejection_reasons": (
+            list(orchestrator.get("rejection_reasons") or [])
+            if isinstance(orchestrator.get("rejection_reasons"), list)
+            else []
+        ),
+        "autonomy_orchestrator_recommended_action": recommended_action,
+        "autonomy_orchestrator_target_id": str(
+            execution.get("target_id") or recommended_action.get("target_id") or ""
+        ),
+        "autonomy_orchestrator_target_step_id": str(
+            execution.get("target_step_id") or recommended_action.get("target_step_id") or ""
+        ),
+        "autonomy_orchestrator_target_tree_id": str(recommended_action.get("target_tree_id") or ""),
+        "autonomy_orchestrator_recommended_tool": str(recommended_action.get("recommended_tool") or ""),
+        "autonomy_orchestrator_execution_result": str(execution.get("result") or ""),
+        "autonomy_orchestrator_execution_message": str(execution.get("message") or ""),
+        "autonomy_orchestrator_execution_cycle_status": str(execution_cycle.get("status") or ""),
+        "autonomy_orchestrator_execution_cycle": execution_cycle,
+    }
+
+
 def _layer_maturity_snapshot_for_orchestrator(state: dict) -> dict:
     snapshot = dict(state.get("last_layer_maturity_snapshot") or {})
     if snapshot:
@@ -1685,25 +2196,100 @@ def _autonomy_orchestrator_input_envelope(
     kidney_summary: dict | None = None,
     policy_snapshot: dict | None = None,
 ) -> dict:
+    work_tree_snapshot = _work_tree_snapshot_for_orchestrator(work_tree_state, active_work_candidates)
+    steward_posture = _steward_posture_for_orchestrator(core_steward)
+    queue_pressure = _queue_pressure_for_orchestrator(generated_queue, state)
+    runtime_guard_status = _runtime_guard_status_for_orchestrator(core_steward, guard_health)
+    policy_payload = dict(policy_snapshot or _policy_snapshot_for_orchestrator())
+    truth_evidence = _truth_evidence_for_mission(state)
+    mission_snapshot = NOVA_MISSION_SERVICE.build_snapshot(
+        work_tree_snapshot=work_tree_snapshot,
+        steward_posture=steward_posture,
+        queue_pressure=queue_pressure,
+        runtime_guard_status=runtime_guard_status,
+        triage_hints=None,
+        policy_snapshot=policy_payload,
+        truth_evidence=truth_evidence,
+    )
+    triage_hints = _triage_hints_for_orchestrator(
+        core_steward,
+        generated_queue,
+        latest_report=latest_report,
+        state=state,
+        kidney_summary=kidney_summary,
+        mission_snapshot=mission_snapshot,
+    )
+    mission_snapshot = NOVA_MISSION_SERVICE.build_snapshot(
+        work_tree_snapshot=work_tree_snapshot,
+        steward_posture=steward_posture,
+        queue_pressure=queue_pressure,
+        runtime_guard_status=runtime_guard_status,
+        triage_hints=triage_hints,
+        policy_snapshot=policy_payload,
+        truth_evidence=truth_evidence,
+    )
+    triage_hints["mission_snapshot"] = dict(mission_snapshot)
     return {
         "cycle_id": f"autonomy-maintenance-{time.strftime('%Y%m%d%H%M%S')}",
         "timestamp_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-        "work_tree_snapshot": _work_tree_snapshot_for_orchestrator(work_tree_state, active_work_candidates),
-        "steward_posture": _steward_posture_for_orchestrator(core_steward),
-        "queue_pressure": _queue_pressure_for_orchestrator(generated_queue, state),
-        "runtime_guard_status": _runtime_guard_status_for_orchestrator(core_steward, guard_health),
+        "work_tree_snapshot": work_tree_snapshot,
+        "steward_posture": steward_posture,
+        "queue_pressure": queue_pressure,
+        "runtime_guard_status": runtime_guard_status,
         "autonomy_maintenance": _autonomy_maintenance_for_orchestrator(core_steward),
-        "policy_snapshot": dict(policy_snapshot or _policy_snapshot_for_orchestrator()),
+        "policy_snapshot": policy_payload,
         "layer_maturity_snapshot": _layer_maturity_snapshot_for_orchestrator(state),
-        "triage_hints": _triage_hints_for_orchestrator(
-            core_steward,
-            generated_queue,
-            latest_report=latest_report,
-            state=state,
-            kidney_summary=kidney_summary,
-        ),
+        "triage_hints": triage_hints,
+        "mission_snapshot": mission_snapshot,
         "last_action_context": _last_action_context_for_orchestrator(state),
     }
+
+
+def _refresh_nova_mission_after_signal_ingestion(state: dict, *, kidney_summary: dict | None = None) -> dict:
+    """Reconcile mission work-tree truth after signal ingestion mutates branches."""
+    try:
+        work_tree_state = CONTROL_WORK_TREES_SERVICE.payload(
+            list_visual_trees_fn=work_tree.list_visual_trees,
+            limit=64,
+        )
+        generated_queue = _generated_work_queue(limit=200)
+        guard_health = _guard_health_for_orchestrator()
+        core_steward = _core_steward_for_orchestrator(state, kidney_summary or {}, guard_health=guard_health)
+        active_work_candidates = _active_work_tree_candidates(ACTIVE_WORK_TREE_MAX_TREES)
+        input_envelope = _autonomy_orchestrator_input_envelope(
+            state=state,
+            core_steward=core_steward,
+            work_tree_state=work_tree_state,
+            generated_queue=generated_queue,
+            guard_health=guard_health,
+            active_work_candidates=active_work_candidates,
+            latest_report=_latest_subconscious_report_for_triage(),
+            kidney_summary=kidney_summary or {},
+            policy_snapshot=_policy_snapshot_for_orchestrator(),
+        )
+        mission_snapshot = (
+            dict(input_envelope.get("mission_snapshot") or {})
+            if isinstance(input_envelope.get("mission_snapshot"), dict)
+            else {}
+        )
+        if mission_snapshot:
+            state["last_nova_mission"] = mission_snapshot
+            NOVA_MISSION_SERVICE.append_history(state, mission_snapshot)
+            orchestrator_state = (
+                dict(state.get("last_autonomy_orchestrator") or {})
+                if isinstance(state.get("last_autonomy_orchestrator"), dict)
+                else {}
+            )
+            if orchestrator_state:
+                orchestrator_state["mission_snapshot"] = dict(mission_snapshot)
+                state["last_autonomy_orchestrator"] = orchestrator_state
+        return mission_snapshot
+    except Exception:
+        return (
+            dict(state.get("last_nova_mission") or {})
+            if isinstance(state.get("last_nova_mission"), dict)
+            else {}
+        )
 
 
 def _run_autonomy_orchestrator_advisory(state: dict, kidney_summary: dict) -> dict:
@@ -1719,19 +2305,23 @@ def _run_autonomy_orchestrator_advisory(state: dict, kidney_summary: dict) -> di
     active_work_candidates = _active_work_tree_candidates(ACTIVE_WORK_TREE_MAX_TREES)
     requested_mode = "execute" if bool(policy_snapshot.get("execute_enabled")) else "advisory"
     AUTONOMY_ORCHESTRATOR_SERVICE.set_mode(requested_mode, policy_snapshot)
-    packet = AUTONOMY_ORCHESTRATOR_SERVICE.evaluate_next_action(
-        _autonomy_orchestrator_input_envelope(
-            state=state,
-            core_steward=core_steward,
-            work_tree_state=work_tree_state,
-            generated_queue=generated_queue,
-            guard_health=guard_health,
-            active_work_candidates=active_work_candidates,
-            latest_report=latest_report,
-            kidney_summary=kidney_summary,
-            policy_snapshot=policy_snapshot,
-        ),
+    input_envelope = _autonomy_orchestrator_input_envelope(
+        state=state,
+        core_steward=core_steward,
+        work_tree_state=work_tree_state,
+        generated_queue=generated_queue,
+        guard_health=guard_health,
+        active_work_candidates=active_work_candidates,
+        latest_report=latest_report,
+        kidney_summary=kidney_summary,
+        policy_snapshot=policy_snapshot,
     )
+    mission_snapshot = (
+        dict(input_envelope.get("mission_snapshot") or {})
+        if isinstance(input_envelope.get("mission_snapshot"), dict)
+        else {}
+    )
+    packet = AUTONOMY_ORCHESTRATOR_SERVICE.evaluate_next_action(input_envelope)
     execution = _execute_autonomy_recommendation(state, packet, policy_snapshot)
     ledger = dict(packet.get("ledger") or {}) if isinstance(packet.get("ledger"), dict) else {}
     ledger_row = dict(ledger.get("row") or {}) if isinstance(ledger.get("row"), dict) else {}
@@ -1750,6 +2340,8 @@ def _run_autonomy_orchestrator_advisory(state: dict, kidney_summary: dict) -> di
         "row": ledger_row,
     }
     recommended_action = dict(packet.get("recommended_action") or {}) if isinstance(packet.get("recommended_action"), dict) else {}
+    state["last_nova_mission"] = dict(mission_snapshot)
+    NOVA_MISSION_SERVICE.append_history(state, mission_snapshot)
     state["last_autonomy_orchestrator"] = {
         "ts": str(((packet.get("ledger") or {}).get("row") or {}).get("ts") or ""),
         "created_at_utc": str(packet.get("created_at_utc") or ""),
@@ -1763,6 +2355,7 @@ def _run_autonomy_orchestrator_advisory(state: dict, kidney_summary: dict) -> di
         "explain_text": str(packet.get("explain_text") or ""),
         "rejection_reasons": list(packet.get("rejection_reasons") or []),
         "ledger_status": str((packet.get("ledger") or {}).get("status") or ""),
+        "mission_snapshot": dict(mission_snapshot),
         "execution": execution,
     }
     packet["execution"] = execution
@@ -2280,6 +2873,25 @@ def _maintenance_prune_orphaned_guard_artifacts(
     return None
 
 
+def _maintenance_heartbeat_age_seconds() -> int | None:
+    hb = RUNTIME_DIR / "core.heartbeat"
+    if not hb.exists():
+        return None
+    try:
+        return max(0, int(time.time() - hb.stat().st_mtime))
+    except Exception:
+        return None
+
+
+def _maintenance_prune_orphaned_core_artifacts(
+    _logical_processes: list[dict],
+    _pid: int | None,
+    _pid_live: bool,
+    _heartbeat_age: int | None,
+) -> None:
+    return None
+
+
 def _maintenance_guard_status_payload() -> dict:
     try:
         import psutil
@@ -2297,6 +2909,27 @@ def _maintenance_guard_status_payload() -> dict:
         )
     except Exception as exc:
         return {"running": False, "status": "unavailable", "error": str(exc)}
+
+
+def _maintenance_core_status_payload() -> dict:
+    try:
+        import psutil
+
+        return RUNTIME_STATUS_SERVICE.core_status_payload(
+            runtime_dir=RUNTIME_DIR,
+            core_py=CORE_PY,
+            pid_exists_fn=psutil.pid_exists,
+            heartbeat_age_seconds_fn=_maintenance_heartbeat_age_seconds,
+            logical_service_processes_fn=_maintenance_logical_service_processes,
+            prune_orphaned_core_artifacts_fn=_maintenance_prune_orphaned_core_artifacts,
+            select_logical_process_fn=_maintenance_select_logical_process,
+        )
+    except Exception as exc:
+        return {"running": False, "status": "unavailable", "error": str(exc)}
+
+
+def _maintenance_webui_status_payload() -> dict:
+    return _webui_health_for_orchestrator()
 
 
 def _maintenance_start_guard() -> tuple[bool, str]:
@@ -2370,6 +3003,19 @@ def _maintenance_generated_queue_run_next_action(_payload: dict) -> tuple[bool, 
 
 
 def _maintenance_generated_queue_investigate_action(_payload: dict, state: dict) -> tuple[bool, str, dict, str]:
+    mission_snapshot = _mission_snapshot_for_ingestion(state)
+    if _mission_hold_blocks_action(
+        "generated_queue_investigate",
+        mission_snapshot,
+        policy_snapshot=_policy_snapshot_for_orchestrator(),
+    ):
+        skipped = _skipped_maintenance_execution_payload(
+            state,
+            "last_active_work_tree_cycle",
+            "mission_steady_state_hold",
+            tree_count=0,
+        )
+        return True, "generated_queue_investigate_skipped_mission_hold", {"cycle": skipped}, "mission_steady_state_hold"
     max_steps = _safe_int((_payload or {}).get("max_steps"), 1)
     max_trees = _safe_int((_payload or {}).get("max_trees"), 1)
     try:
@@ -2403,11 +3049,39 @@ def _maintenance_patch_queue_run_next_action(_payload: dict, state: dict) -> tup
 
 
 def _maintenance_active_work_tree_run_next_action(_payload: dict, state: dict) -> tuple[bool, str, dict, str]:
-    max_steps = _safe_int((_payload or {}).get("max_steps"), ACTIVE_WORK_TREE_DEFAULT_DISPATCH_STEPS)
-    max_trees = _safe_int((_payload or {}).get("max_trees"), ACTIVE_WORK_TREE_MAX_TREES)
+    mission_snapshot = _mission_snapshot_for_ingestion(state)
+    mission_hold_active = _mission_hold_blocks_legacy_execution(mission_snapshot)
+    active_candidates = _active_work_tree_candidates(ACTIVE_WORK_TREE_MAX_TREES)
     raw_target_id = str((_payload or {}).get("target_id") or "").strip()
     target_task_id = str((_payload or {}).get("target_step_id") or "").strip()
+    target_tree_id = str((_payload or {}).get("target_tree_id") or "").strip()
+    target_tool = str((_payload or {}).get("recommended_tool") or "").strip()
     target_branch_id = raw_target_id if (raw_target_id.startswith("branch_") or target_task_id) else ""
+    action_context = _active_work_context_for_target(
+        candidates=active_candidates,
+        target_branch_id=target_branch_id,
+        target_task_id=target_task_id,
+    )
+    if _mission_hold_blocks_action(
+        "active_work_tree_run_next",
+        mission_snapshot,
+        policy_snapshot=_policy_snapshot_for_orchestrator(),
+        action_context=action_context,
+    ) and not bool((_payload or {}).get("operator_override", False)):
+        skipped = _skipped_maintenance_execution_payload(
+            state,
+            "last_active_work_tree_cycle",
+            "mission_steady_state_hold",
+            tree_count=0,
+        )
+        return True, "active_work_tree_run_next_skipped_mission_hold", {"cycle": skipped}, "mission_steady_state_hold"
+    max_steps = _safe_int((_payload or {}).get("max_steps"), ACTIVE_WORK_TREE_DEFAULT_DISPATCH_STEPS)
+    max_trees = _safe_int((_payload or {}).get("max_trees"), ACTIVE_WORK_TREE_MAX_TREES)
+    if mission_hold_active and action_context and not target_branch_id and not target_task_id:
+        target_branch_id = str(action_context.get("branch_id") or "").strip()
+        target_task_id = str(action_context.get("task_id") or "").strip()
+        max_steps = 1
+        max_trees = 1
     try:
         cycle_kwargs = {
             "max_steps": max(1, min(max_steps, ACTIVE_WORK_TREE_MAX_STEPS)),
@@ -2416,6 +3090,10 @@ def _maintenance_active_work_tree_run_next_action(_payload: dict, state: dict) -
         if target_branch_id or target_task_id:
             cycle_kwargs["target_branch_id"] = target_branch_id
             cycle_kwargs["target_task_id"] = target_task_id
+        if target_tree_id:
+            cycle_kwargs["target_tree_id"] = target_tree_id
+        if target_tool:
+            cycle_kwargs["target_tool"] = target_tool
         cycle = _run_active_work_tree_cycle(
             state,
             **cycle_kwargs,
@@ -2568,6 +3246,7 @@ def _dispatch_autonomy_control_action(action_type: str, payload: dict, events: l
         web_mode_action_fn=_unsupported_control_action,
         memory_scope_set_action_fn=_unsupported_control_action,
         server_side_settings_action_fn=_unsupported_control_action,
+        mission_settings_action_fn=_unsupported_control_action,
         search_provider_action_fn=_unsupported_control_action,
         search_provider_toggle_action_fn=_unsupported_control_action,
         search_endpoint_set_action_fn=_unsupported_control_action,
@@ -2670,6 +3349,83 @@ def _orchestrator_executed_lane_cycle(packet: dict, action_type: str) -> dict:
     cycle.setdefault("orchestrator_owned", True)
     cycle.setdefault("orchestrator_action_type", str(action_type or "").strip())
     return cycle
+
+
+def _patch_queue_work_tree_cycle_for_execution_mode(
+    state: dict,
+    *,
+    mission_snapshot: dict | None,
+    policy_snapshot: dict | None,
+    legacy_execution_enabled: bool,
+) -> dict:
+    if not legacy_execution_enabled:
+        return _skipped_maintenance_execution_payload(
+            state,
+            "last_work_tree_cycle",
+            "orchestrator_owns_execution",
+            tree_count=1,
+        )
+    if _mission_hold_blocks_action(
+        "patch_queue_run_next",
+        mission_snapshot,
+        policy_snapshot=policy_snapshot,
+    ):
+        return _skipped_maintenance_execution_payload(
+            state,
+            "last_work_tree_cycle",
+            "mission_steady_state_hold",
+            tree_count=1,
+        )
+    return _run_patch_queue_work_tree_cycle(state)
+
+
+def _active_work_tree_cycle_for_execution_mode(
+    state: dict,
+    *,
+    mission_snapshot: dict | None,
+    autonomy_orchestrator: dict | None,
+    legacy_execution_enabled: bool,
+) -> dict:
+    if legacy_execution_enabled and _mission_hold_blocks_legacy_execution(mission_snapshot):
+        policy_snapshot = _policy_snapshot_for_orchestrator()
+        candidates = _active_work_tree_candidates(ACTIVE_WORK_TREE_MAX_TREES)
+        allowed_context = _mission_allowed_active_work_context(
+            mission_snapshot,
+            policy_snapshot=policy_snapshot,
+            candidates=candidates,
+        )
+        if allowed_context:
+            return _run_active_work_tree_cycle(
+                state,
+                max_steps=1,
+                max_trees=1,
+                target_tree_id=str(allowed_context.get("tree_id") or "").strip(),
+                target_branch_id=str(allowed_context.get("branch_id") or "").strip(),
+                target_task_id=str(allowed_context.get("task_id") or "").strip(),
+                target_tool=str(allowed_context.get("recommended_tool") or "").strip(),
+            )
+        return _skipped_maintenance_execution_payload(
+            state,
+            "last_active_work_tree_cycle",
+            "mission_steady_state_hold",
+            tree_count=0,
+        )
+    if legacy_execution_enabled:
+        return _run_active_work_tree_cycle(state)
+
+    active_work_tree_cycle = _orchestrator_executed_lane_cycle(
+        autonomy_orchestrator if isinstance(autonomy_orchestrator, dict) else {},
+        "active_work_tree_run_next",
+    )
+    if active_work_tree_cycle:
+        state["last_active_work_tree_cycle"] = active_work_tree_cycle
+        return active_work_tree_cycle
+    return _skipped_maintenance_execution_payload(
+        state,
+        "last_active_work_tree_cycle",
+        "orchestrator_owns_execution",
+        tree_count=0,
+    )
 
 
 def _runtime_worker_loop_identity_live(worker_state: dict) -> bool:
@@ -2949,13 +3705,18 @@ def _sync_signal_intake_work_tree(state: dict, kidney_summary: dict | None = Non
         "memory_db_total": int(pulse_payload.get("memory_db_total", 0) or 0),
         "memory_events_log_status": str(pulse_payload.get("memory_events_log_status") or ""),
     }
+    status_payload.update(_autonomy_orchestrator_status_for_signal_ingestion(state))
     if isinstance(temporal_feed, dict):
         state["last_temporal_feed"] = dict(temporal_feed)
     status_payload.update(_temporal_feed_for_signal_ingestion(state))
     status_payload.update(_validation_artifact_truth_payload_for_signal_ingestion())
     status_payload = _live_control_status_payload_for_signal_ingestion(status_payload)
+    status_payload.update(_autonomy_orchestrator_status_for_signal_ingestion(state))
     status_payload = _apply_release_runtime_truth_to_status_payload(status_payload, state=state)
     status_payload = _apply_layer_maturity_to_status_payload(status_payload)
+    mission_snapshot = _mission_snapshot_for_ingestion(state)
+    if mission_snapshot:
+        status_payload["nova_mission"] = dict(mission_snapshot)
     state["last_layer_maturity_snapshot"] = {
         "layer_maturity": dict(status_payload.get("layer_maturity") or {}),
         "release_runtime_truth": dict(status_payload.get("release_runtime_truth") or {}),
@@ -4250,29 +5011,85 @@ def _candidate_uses_tool(candidate: dict, tool_name: str) -> bool:
     return str(next_step.get("recommended_tool") or "").strip() == tool_name
 
 
-def _active_work_tree_target_decider(target_branch_id: str = "", target_task_id: str = ""):
+def _active_work_candidate_context(candidate: dict) -> dict:
+    if not isinstance(candidate, dict):
+        return {}
+    branch = _active_work_candidate_branch(candidate)
+    next_step = candidate.get("next_step") if isinstance(candidate.get("next_step"), dict) else {}
+    return {
+        **branch,
+        "recommended_tool": str(next_step.get("recommended_tool") or branch.get("recommended_tool") or "").strip(),
+    }
+
+
+def _active_work_context_for_target(
+    *,
+    candidates: list[dict],
+    target_branch_id: str = "",
+    target_task_id: str = "",
+) -> dict:
     branch_target = str(target_branch_id or "").strip()
     task_target = str(target_task_id or "").strip()
     if not branch_target and not task_target:
+        return _active_work_candidate_context(candidates[0]) if candidates else {}
+    for candidate in candidates:
+        context = _active_work_candidate_context(candidate)
+        if branch_target and str(context.get("branch_id") or "").strip() == branch_target:
+            return context
+        if task_target and str(context.get("task_id") or "").strip() == task_target:
+            return context
+    return {}
+
+
+def _mission_allowed_active_work_context(
+    mission_snapshot: dict | None,
+    *,
+    policy_snapshot: dict | None,
+    candidates: list[dict],
+) -> dict:
+    for candidate in candidates:
+        context = _active_work_candidate_context(candidate)
+        if context and not _mission_hold_blocks_action(
+            "active_work_tree_run_next",
+            mission_snapshot,
+            policy_snapshot=policy_snapshot,
+            action_context=context,
+        ):
+            return context
+    return {}
+
+
+def _active_work_tree_target_decider(
+    target_branch_id: str = "",
+    target_task_id: str = "",
+    target_tool: str = "",
+):
+    branch_target = str(target_branch_id or "").strip()
+    task_target = str(target_task_id or "").strip()
+    tool_target = str(target_tool or "").strip()
+    if not branch_target and not task_target and not tool_target:
         return None
 
     def _decide(_tree_id: str, options: list[dict]) -> dict:
         for option in options:
             option_branch_id = str(option.get("branch_id") or "").strip()
             option_task_id = str(option.get("task_id") or "").strip()
+            option_tool = str(option.get("recommended_tool") or "").strip()
             if branch_target and option_branch_id != branch_target:
                 continue
             if task_target and option_task_id != task_target:
                 continue
+            if tool_target and option_tool != tool_target:
+                continue
             return {
                 "branch_id": option_branch_id,
                 "task_id": option_task_id,
-                "recommended_tool": str(option.get("recommended_tool") or "").strip(),
+                "recommended_tool": option_tool,
             }
         return {
             "branch_id": branch_target or "__target_branch_not_available__",
             "task_id": task_target,
-            "recommended_tool": "",
+            "recommended_tool": tool_target,
         }
 
     return _decide
@@ -4318,6 +5135,7 @@ def _sync_core_thinning_work_tree(state: dict) -> dict:
     try:
         brief = service_build_core_thinning_brief([ROOT / "nova_core.py", ROOT / "nova_http.py"])
         feed = service_feed_core_thinning_brief_to_work_tree(brief, work_tree_module=work_tree)
+        owner_verdict = service_build_core_thinning_owner_verdict(brief, feed_result=feed)
         payload = {
             "ts": _patch_queue_timestamp(),
             "status": "ok" if bool(feed.get("ok", False)) and bool(brief.get("ok", False)) else "failed",
@@ -4329,6 +5147,7 @@ def _sync_core_thinning_work_tree(state: dict) -> dict:
             "updated_count": int(feed.get("updated_count", 0) or 0),
             "resolved_count": int(feed.get("resolved_count", 0) or 0),
             "error": str(brief.get("error") or feed.get("error") or ""),
+            "owner_verdict": owner_verdict,
         }
     except Exception as exc:
         payload = {
@@ -4337,6 +5156,10 @@ def _sync_core_thinning_work_tree(state: dict) -> dict:
             "reason": "core_thinning_sync_failed",
             "error": str(exc),
         }
+        payload["owner_verdict"] = service_build_core_thinning_owner_verdict(
+            {"ok": False, "error": str(exc)},
+            feed_result={"ok": False, "status": "failed", "error": str(exc)},
+        )
     state["last_core_thinning_sync"] = payload
     return payload
 
@@ -4348,19 +5171,114 @@ def _run_active_work_tree_cycle(
     max_trees: int | None = None,
     target_branch_id: str = "",
     target_task_id: str = "",
+    target_tree_id: str = "",
+    target_tool: str = "",
     sync_core_thinning: bool = True,
 ) -> dict:
     tree_limit = max(1, _safe_int(max_trees, ACTIVE_WORK_TREE_MAX_TREES)) if max_trees is not None else ACTIVE_WORK_TREE_MAX_TREES
     step_limit = max(1, _safe_int(max_steps, ACTIVE_WORK_TREE_MAX_STEPS)) if max_steps is not None else ACTIVE_WORK_TREE_MAX_STEPS
-    candidates = _active_work_tree_candidates(tree_limit)
-    if target_branch_id or target_task_id:
-        target_decider = _active_work_tree_target_decider(target_branch_id, target_task_id)
+    branch_target = str(target_branch_id or "").strip()
+    task_target = str(target_task_id or "").strip()
+    tree_target = str(target_tree_id or "").strip()
+    tool_target = str(target_tool or "").strip()
+    if not tree_target and branch_target:
+        try:
+            branch = work_tree.get_branch(branch_target)
+            tree_target = str(getattr(branch, "tree_id", "") or "").strip() if branch is not None else ""
+        except Exception:
+            tree_target = ""
+    targeted = bool(tree_target or branch_target or task_target or tool_target)
+    candidate_limit = max(tree_limit, ACTIVE_WORK_TREE_MAX_TREES) if targeted else tree_limit
+    candidates = _active_work_tree_candidates(candidate_limit)
+    if tree_target:
+        candidates = [
+            candidate
+            for candidate in candidates
+            if str(candidate.get("tree_id") or "").strip() == tree_target
+        ][:1]
+    elif targeted:
+        matched_candidates = []
+        for candidate in candidates:
+            context = _active_work_candidate_context(candidate)
+            if branch_target and str(context.get("branch_id") or "").strip() != branch_target:
+                continue
+            if task_target and str(context.get("task_id") or "").strip() != task_target:
+                continue
+            if tool_target and str(context.get("recommended_tool") or "").strip() != tool_target:
+                continue
+            matched_candidates.append(candidate)
+        candidates = matched_candidates[:1]
+    else:
+        candidates = candidates[:tree_limit]
+    if targeted and not candidates:
+        payload = {
+            "ts": _patch_queue_timestamp(),
+            "status": "stale_execution_contract",
+            "tree_count": 0,
+            "target_tree_id": tree_target,
+            "target_branch_id": branch_target,
+            "target_task_id": task_target,
+            "target_tool": tool_target,
+            "attempted_count": 0,
+            "executed_count": 0,
+            "history_count": 0,
+            "processed_tree_count": 0,
+            "skipped_tree_count": 0,
+            "last_action": "stale_execution_contract",
+            "processed": [],
+            "skipped": [],
+        }
+        state["last_active_work_tree_cycle"] = payload
+        return payload
+    if targeted:
+        target_decider = _active_work_tree_target_decider(branch_target, task_target, tool_target)
     else:
         target_decider = _active_work_tree_failure_aware_decider
     core_thinning_sync: dict = {}
     if sync_core_thinning and any(_candidate_uses_tool(candidate, "core_thinning") for candidate in candidates):
         core_thinning_sync = _sync_core_thinning_work_tree(state)
-        candidates = _active_work_tree_candidates(tree_limit)
+        candidates = _active_work_tree_candidates(candidate_limit)
+        if tree_target:
+            candidates = [
+                candidate
+                for candidate in candidates
+                if str(candidate.get("tree_id") or "").strip() == tree_target
+            ][:1]
+        elif targeted:
+            matched_candidates = []
+            for candidate in candidates:
+                context = _active_work_candidate_context(candidate)
+                if branch_target and str(context.get("branch_id") or "").strip() != branch_target:
+                    continue
+                if task_target and str(context.get("task_id") or "").strip() != task_target:
+                    continue
+                if tool_target and str(context.get("recommended_tool") or "").strip() != tool_target:
+                    continue
+                matched_candidates.append(candidate)
+            candidates = matched_candidates[:1]
+        else:
+            candidates = candidates[:tree_limit]
+        if targeted and not candidates:
+            payload = {
+                "ts": _patch_queue_timestamp(),
+                "status": "stale_execution_contract",
+                "tree_count": 0,
+                "target_tree_id": tree_target,
+                "target_branch_id": branch_target,
+                "target_task_id": task_target,
+                "target_tool": tool_target,
+                "attempted_count": 0,
+                "executed_count": 0,
+                "history_count": 0,
+                "processed_tree_count": 0,
+                "skipped_tree_count": 0,
+                "last_action": "stale_execution_contract",
+                "processed": [],
+                "skipped": [],
+                "core_thinning_sync": core_thinning_sync,
+            }
+            state["last_active_work_tree_cycle"] = payload
+            return payload
     executed_total = 0
     attempted_total = 0
     full_history: list[dict] = []
@@ -4433,8 +5351,10 @@ def _run_active_work_tree_cycle(
         "ts": _patch_queue_timestamp(),
         "status": status,
         "tree_count": len(candidates),
+        "target_tree_id": tree_target,
         "target_branch_id": str(target_branch_id or ""),
         "target_task_id": str(target_task_id or ""),
+        "target_tool": tool_target,
         "attempted_count": attempted_total,
         "executed_count": executed_total,
         "history_count": len(full_history),
@@ -4643,6 +5563,18 @@ def run_once(*, worker_loop: bool = False) -> int:
 
     state = _load_state()
 
+    try:
+        webui_ensure = _ensure_operator_webui_running(state)
+        state["last_operator_webui_ensure"] = webui_ensure
+        _append_log(
+            "operator_webui_ensure "
+            + f"status={webui_ensure.get('status')} action={webui_ensure.get('action')} "
+            + f"pid={webui_ensure.get('pid')} http_ok={webui_ensure.get('http_ok')} "
+            + f"port_open={webui_ensure.get('port_open')}"
+        )
+    except Exception as exc:
+        _append_log(f"operator_webui_ensure_failed {exc}")
+
     # Check for an HTTP-side trigger requesting an immediate active-work-tree run.
     if WORK_TREE_RUN_TRIGGER.exists():
         try:
@@ -4654,15 +5586,54 @@ def run_once(*, worker_loop: bool = False) -> int:
         except Exception:
             pass
         _append_log("work_tree_run_trigger_consumed")
-        try:
-            trigger_cycle = _run_active_work_tree_cycle(state, **{
-                k: trigger_payload[k]
-                for k in ("max_steps", "max_trees", "target_branch_id", "target_task_id")
-                if k in trigger_payload
-            })
-            _append_log(f"work_tree_run_trigger_cycle status={trigger_cycle.get('status')}")
-        except Exception as exc:
-            _append_log(f"work_tree_run_trigger_cycle_failed {exc}")
+        mission_snapshot = _mission_snapshot_for_ingestion(state)
+        policy_snapshot = _policy_snapshot_for_orchestrator()
+        operator_override = bool(trigger_payload.get("operator_override", False))
+        target_branch_id = str(trigger_payload.get("target_branch_id") or "").strip()
+        target_task_id = str(trigger_payload.get("target_task_id") or "").strip()
+        active_candidates = _active_work_tree_candidates(ACTIVE_WORK_TREE_MAX_TREES)
+        action_context = _active_work_context_for_target(
+            candidates=active_candidates,
+            target_branch_id=target_branch_id,
+            target_task_id=target_task_id,
+        )
+        if (
+            not operator_override
+            and _mission_hold_blocks_action(
+                "active_work_tree_run_next",
+                mission_snapshot,
+                policy_snapshot=policy_snapshot,
+                action_context=action_context,
+            )
+        ):
+            skipped = _skipped_maintenance_execution_payload(
+                state,
+                "last_active_work_tree_cycle",
+                "mission_steady_state_hold",
+                tree_count=0,
+            )
+            _append_log(f"work_tree_run_trigger_cycle status={skipped.get('status')} reason={skipped.get('reason')}")
+        else:
+            try:
+                if (
+                    not operator_override
+                    and _mission_hold_blocks_legacy_execution(mission_snapshot)
+                    and action_context
+                    and not target_branch_id
+                    and not target_task_id
+                ):
+                    trigger_payload["target_branch_id"] = str(action_context.get("branch_id") or "").strip()
+                    trigger_payload["target_task_id"] = str(action_context.get("task_id") or "").strip()
+                    trigger_payload["max_steps"] = 1
+                    trigger_payload["max_trees"] = 1
+                trigger_cycle = _run_active_work_tree_cycle(state, **{
+                    k: trigger_payload[k]
+                    for k in ("max_steps", "max_trees", "target_branch_id", "target_task_id")
+                    if k in trigger_payload
+                })
+                _append_log(f"work_tree_run_trigger_cycle status={trigger_cycle.get('status')}")
+            except Exception as exc:
+                _append_log(f"work_tree_run_trigger_cycle_failed {exc}")
         _save_state(state)
         return _finish_cycle(0, "work_tree_run_trigger_handled")
 
@@ -4839,15 +5810,36 @@ def run_once(*, worker_loop: bool = False) -> int:
         _append_log(f"patch_queue_sync_failed {exc}")
 
     try:
-        if legacy_execution_enabled:
-            work_tree_cycle = _run_patch_queue_work_tree_cycle(state)
-        else:
-            work_tree_cycle = _skipped_maintenance_execution_payload(
-                state,
-                "last_work_tree_cycle",
-                "orchestrator_owns_execution",
-                tree_count=1,
-            )
+        core_thinning_sync = _sync_core_thinning_work_tree(state)
+        _append_log(
+            "core_thinning_sync"
+            f" status={core_thinning_sync.get('status')}"
+            f" orders={int(core_thinning_sync.get('order_count', 0) or 0)}"
+            f" added={int(core_thinning_sync.get('added_count', 0) or 0)}"
+            f" resolved={int(core_thinning_sync.get('resolved_count', 0) or 0)}"
+        )
+    except Exception as exc:
+        core_thinning_sync = {
+            "ts": _patch_queue_timestamp(),
+            "status": "failed",
+            "reason": "core_thinning_sync_failed",
+            "error": str(exc),
+        }
+        state["last_core_thinning_sync"] = core_thinning_sync
+        _append_log(f"core_thinning_sync_failed {exc}")
+
+    try:
+        mission_snapshot = (
+            dict(state.get("last_nova_mission") or {})
+            if isinstance(state.get("last_nova_mission"), dict)
+            else _mission_snapshot_for_ingestion(state)
+        )
+        work_tree_cycle = _patch_queue_work_tree_cycle_for_execution_mode(
+            state,
+            mission_snapshot=mission_snapshot,
+            policy_snapshot=_policy_snapshot_for_orchestrator(),
+            legacy_execution_enabled=legacy_execution_enabled,
+        )
         _append_log(
             "work_tree_cycle"
             f" status={work_tree_cycle.get('status')}"
@@ -4954,7 +5946,19 @@ def run_once(*, worker_loop: bool = False) -> int:
         _append_log(f"autonomy_orchestrator_failed {exc}")
 
     try:
-        if legacy_execution_enabled:
+        mission_snapshot = (
+            dict(state.get("last_nova_mission") or {})
+            if isinstance(state.get("last_nova_mission"), dict)
+            else {}
+        )
+        if legacy_execution_enabled and _mission_hold_blocks_generated_queue(mission_snapshot):
+            generated_queue_cycle = _skipped_maintenance_execution_payload(
+                state,
+                "last_generated_queue_tree_cycle",
+                "mission_steady_state_hold",
+                tree_count=1,
+            )
+        elif legacy_execution_enabled:
             generated_queue_cycle = _run_generated_queue_work_tree_cycle(state)
         else:
             generated_queue_cycle = _skipped_maintenance_execution_payload(
@@ -4981,22 +5985,12 @@ def run_once(*, worker_loop: bool = False) -> int:
         _append_log(f"generated_queue_cycle_failed {exc}")
 
     try:
-        if legacy_execution_enabled:
-            active_work_tree_cycle = _run_active_work_tree_cycle(state)
-        else:
-            active_work_tree_cycle = _orchestrator_executed_lane_cycle(
-                autonomy_orchestrator if isinstance(autonomy_orchestrator, dict) else {},
-                "active_work_tree_run_next",
-            )
-            if active_work_tree_cycle:
-                state["last_active_work_tree_cycle"] = active_work_tree_cycle
-            else:
-                active_work_tree_cycle = _skipped_maintenance_execution_payload(
-                    state,
-                    "last_active_work_tree_cycle",
-                    "orchestrator_owns_execution",
-                    tree_count=0,
-                )
+        active_work_tree_cycle = _active_work_tree_cycle_for_execution_mode(
+            state,
+            mission_snapshot=mission_snapshot,
+            autonomy_orchestrator=autonomy_orchestrator if isinstance(autonomy_orchestrator, dict) else {},
+            legacy_execution_enabled=legacy_execution_enabled,
+        )
         _append_log(
             "active_work_tree_cycle"
             f" status={active_work_tree_cycle.get('status')}"
@@ -5119,6 +6113,20 @@ def run_once(*, worker_loop: bool = False) -> int:
         }
         state["last_signal_ingestion"] = signal_ingestion
         _append_log(f"signal_ingestion_failed {exc}")
+
+    try:
+        refreshed_mission = _refresh_nova_mission_after_signal_ingestion(
+            state,
+            kidney_summary=kidney_summary,
+        )
+        _append_log(
+            "mission_refresh_after_signal_ingestion"
+            f" blocked={int(refreshed_mission.get('blocked_count', 0) or 0)}"
+            f" operator_hold={int(refreshed_mission.get('operator_hold_count', 0) or 0)}"
+            f" action={str(refreshed_mission.get('action') or '')}"
+        )
+    except Exception as exc:
+        _append_log(f"mission_refresh_after_signal_ingestion_failed {exc}")
 
     _save_state(state)
     return _finish_cycle(0, "ok")

@@ -63,6 +63,28 @@ class TestSourceRootInventoryService(unittest.TestCase):
         self.assertIn("updates/approvals.jsonl", covered)
         self.assertIn("nova_grok.jsonl", covered)
 
+    def test_source_inventory_keeps_edfi_core_and_bisd_lane_separate(self) -> None:
+        payload = build_source_root_inventory_payload()
+        roots = {row["root_id"]: set(row.get("covered_source_files") or []) for row in payload.get("roots") or []}
+
+        core_paths = {path for path in roots.get("edfi_core", set()) if "edfi" in path.lower()}
+        lane_paths = {path for path in roots.get("data_lane_edfi_bisd", set()) if "edfi" in path.lower()}
+
+        self.assertTrue(any(path.startswith("services/edfi/") for path in core_paths))
+        self.assertIn("tools/edfi_tool.py", core_paths)
+        self.assertIn("data_sources/edfi_bisd/connector.py", lane_paths)
+        self.assertIn("scripts/run_edfi_profile.py", lane_paths)
+        self.assertIn("scripts/run_edfi_explore.py", lane_paths)
+        self.assertFalse(any(path.startswith("services/edfi/") for path in lane_paths))
+        self.assertFalse(any(path.startswith("data_sources/edfi_bisd/") for path in core_paths))
+
+        unclassified_edfi = [
+            path
+            for path in payload.get("unclassified_source_files") or []
+            if "edfi" in path.lower()
+        ]
+        self.assertEqual(unclassified_edfi, [])
+
     def test_source_inventory_ignores_vscode_tasks_json(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

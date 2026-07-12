@@ -5,6 +5,7 @@ import time
 from pathlib import Path
 
 from services.data_pipeline_registry import list_pipeline_summaries
+from services.edfi.core_readiness import read_edfi_core_readiness
 from services.edfi.profile_evidence import build_capability_profile_evidence
 from services.frontdoor_cli_parity import FRONTDOOR_CLI_PARITY_SERVICE
 from services.nova_grounded_self_report import GROUNDED_SELF_REPORT_SERVICE
@@ -20,6 +21,7 @@ from services.sock_service import get_sock_status_keys
 from services.capabilities_gap_detector import enhance_status_with_capability_gaps
 from services.layer_maturity_policy import enrich_status_with_layer_maturity
 from services.control_status_surfaces import CONTROL_STATUS_SURFACES_SERVICE
+from services.work_tree_pressure_snapshot import build_work_tree_pressure_snapshot
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -137,6 +139,7 @@ class ControlStatusService:
             "generated_work_queue",
             "autonomy_maintenance_summary",
             "work_trees_payload",
+            "work_tree_pressure_payload",
             "operator_outbox_summary",
             "load_operator_macros",
             "load_backend_commands",
@@ -295,6 +298,15 @@ class ControlStatusService:
                 }],
                 "profile_evidence_path": "runtime/edfi/profiles/district-main.json",
             }
+        try:
+            edfi_core_readiness = read_edfi_core_readiness("district-main")
+        except Exception as exc:
+            edfi_core_readiness = {
+                "ready": False,
+                "milestone": "",
+                "connection_id": "district-main",
+                "issues": [{"code": "edfi_core_readiness_unreadable", "detail": str(exc)}],
+            }
         requests_total, errors_total = metrics_totals
         if hasattr(core_module, "ollama_health_payload"):
             ollama_health = core_module.ollama_health_payload()
@@ -373,6 +385,7 @@ class ControlStatusService:
             update_now_pending=update_now_pending,
             data_pipelines=data_pipelines,
             edfi_capability_profile=edfi_capability_profile,
+            edfi_core_readiness=edfi_core_readiness,
             requests_total=requests_total,
             errors_total=errors_total,
             storage_watch_summary=storage_watch_summary_fn(),
@@ -400,14 +413,280 @@ class ControlStatusService:
         metrics_totals: tuple[int, int],
         supplier_fns: dict[str, object] | None = None,
     ) -> dict:
-        full_payload = self.runtime_status_payload(
-            core_module=core_module,
-            session_turns=session_turns,
-            metrics_totals=metrics_totals,
-            supplier_fns=supplier_fns,
-            lightweight=True,
+        supplier_fns = dict(supplier_fns or {})
+        guard_status_payload_fn = supplier_fns["guard_status_payload"]
+        core_status_payload_fn = supplier_fns["core_status_payload"]
+        http_status_payload_fn = supplier_fns["http_status_payload"]
+        generated_work_queue_fn = supplier_fns["generated_work_queue"]
+        autonomy_maintenance_summary_fn = supplier_fns["autonomy_maintenance_summary"]
+        work_tree_pressure_payload_fn = supplier_fns.get("work_tree_pressure_payload", lambda: {})
+        operator_outbox_summary_fn = supplier_fns["operator_outbox_summary"]
+        validation_artifact_truth_payload_fn = supplier_fns["validation_artifact_truth_payload"]
+        release_status_payload_fn = supplier_fns["release_status_payload"]
+        runtime_summary_payload_fn = supplier_fns["runtime_summary_payload"]
+        heartbeat_age_seconds_fn = supplier_fns["heartbeat_age_seconds"]
+
+        policy = core_module.load_policy()
+        web_cfg = policy.get("web") if isinstance(policy.get("web"), dict) else {}
+        generated_work_queue = generated_work_queue_fn(8)
+        autonomy_maintenance = autonomy_maintenance_summary_fn()
+        autonomy_payload = dict(autonomy_maintenance or {}) if isinstance(autonomy_maintenance, dict) else {}
+        operator_outbox = operator_outbox_summary_fn(8)
+        validation_truth = validation_artifact_truth_payload_fn()
+        release_status = release_status_payload_fn()
+        guard_status = guard_status_payload_fn()
+        core_status = core_status_payload_fn()
+        webui_status = http_status_payload_fn()
+        runtime_summary = runtime_summary_payload_fn(guard=guard_status, core=core_status, webui=webui_status)
+        work_tree_pressure = work_tree_pressure_payload_fn()
+        pulse_payload = core_module.build_pulse_payload()
+        memory_health = pulse_payload.get("memory_health") if isinstance(pulse_payload.get("memory_health"), dict) else {}
+        requests_total, errors_total = metrics_totals
+
+        generated_queue_snapshot_has_truth = any(
+            key in generated_work_queue
+            for key in ("status", "open_count", "actionable_count", "blocked_count")
         )
-        return CONTROL_STATUS_SURFACES_SERVICE.build_surfaces_payload(full_payload)
+        last_generated_queue_run = (
+            autonomy_payload.get("last_generated_queue_run")
+            if isinstance(autonomy_payload.get("last_generated_queue_run"), dict)
+            else {}
+        )
+        queue_status = str(
+            generated_work_queue.get("status")
+            or autonomy_payload.get("generated_queue_status")
+            or last_generated_queue_run.get("status")
+            or ""
+        ).strip()
+        queue_open_count = int(
+            (
+                generated_work_queue.get("open_count")
+                if generated_queue_snapshot_has_truth
+                else autonomy_payload.get("queue_open_count", last_generated_queue_run.get("queue_open_count", 0))
+            )
+            or 0
+        )
+        queue_actionable_count = int(
+            (
+                generated_work_queue.get("actionable_count")
+                if generated_queue_snapshot_has_truth
+                else autonomy_payload.get("queue_actionable_count", last_generated_queue_run.get("queue_actionable_count", 0))
+            )
+            or 0
+        )
+        queue_blocked_count = int(
+            (
+                generated_work_queue.get("blocked_count")
+                if generated_queue_snapshot_has_truth
+                else autonomy_payload.get("queue_blocked_count", last_generated_queue_run.get("queue_blocked_count", 0))
+            )
+            or 0
+        )
+        if queue_open_count > 0 and queue_blocked_count <= 0 and queue_actionable_count <= 0:
+            queue_blocked_count = queue_open_count
+        queue_blocked_reason_counts = (
+            dict(generated_work_queue.get("blocked_reason_counts") or {})
+            if generated_queue_snapshot_has_truth and isinstance(generated_work_queue.get("blocked_reason_counts"), dict)
+            else (
+                dict(autonomy_payload.get("queue_blocked_reason_counts") or {})
+                if isinstance(autonomy_payload.get("queue_blocked_reason_counts"), dict)
+                else {}
+            )
+        )
+        queue_blocked_files = (
+            list(generated_work_queue.get("blocked_files") or [])
+            if generated_queue_snapshot_has_truth and isinstance(generated_work_queue.get("blocked_files"), list)
+            else (
+                list(autonomy_payload.get("queue_blocked_files") or [])
+                if isinstance(autonomy_payload.get("queue_blocked_files"), list)
+                else []
+            )
+        )
+
+        last_autonomy_orchestrator = (
+            autonomy_payload.get("last_autonomy_orchestrator")
+            if isinstance(autonomy_payload.get("last_autonomy_orchestrator"), dict)
+            else {}
+        )
+        last_nova_mission = (
+            autonomy_payload.get("last_nova_mission")
+            if isinstance(autonomy_payload.get("last_nova_mission"), dict)
+            else (
+                last_autonomy_orchestrator.get("mission_snapshot")
+                if isinstance(last_autonomy_orchestrator.get("mission_snapshot"), dict)
+                else {}
+            )
+        )
+        core_thinning_sync = (
+            dict(autonomy_payload.get("last_core_thinning_sync") or {})
+            if isinstance(autonomy_payload.get("last_core_thinning_sync"), dict)
+            else {}
+        )
+        runtime_worker = autonomy_payload.get("runtime_worker") if isinstance(autonomy_payload.get("runtime_worker"), dict) else {}
+        guard_running = bool((guard_status or {}).get("running"))
+        if bool(runtime_worker.get("active", False)):
+            maintenance_scheduler_mode = "worker_loop"
+            maintenance_scheduler_status = "running"
+        elif guard_running:
+            maintenance_scheduler_mode = "guard_tick"
+            maintenance_scheduler_status = "guard_scheduled"
+        else:
+            maintenance_scheduler_mode = "inactive"
+            maintenance_scheduler_status = "inactive"
+
+        validation_truth_payload = dict(validation_truth or {}) if isinstance(validation_truth, dict) else {}
+        operator_outbox_payload = dict(operator_outbox or {}) if isinstance(operator_outbox, dict) else {}
+        work_tree_payload = dict(work_tree_pressure or {}) if isinstance(work_tree_pressure, dict) else {}
+        payload = {
+            "ok": True,
+            "status_kind": "signal_ingestion_surfaces",
+            "guard": guard_status,
+            "core": core_status,
+            "webui": webui_status,
+            "guard_status": guard_status,
+            "core_status": core_status,
+            "webui_status": webui_status,
+            "runtime_summary": runtime_summary,
+            "heartbeat_age_sec": heartbeat_age_seconds_fn(),
+            "web_enabled": bool((policy.get("tools_enabled") or {}).get("web")) and bool(web_cfg.get("enabled")),
+            "search_provider": str(web_cfg.get("search_provider") or "html"),
+            "search_api_endpoint": str(web_cfg.get("search_api_endpoint") or ""),
+            "search_provider_priority": list(core_module.get_search_provider_priority()),
+            "active_http_sessions": len(session_turns),
+            "requests_total": int(requests_total),
+            "errors_total": int(errors_total),
+            "generated_work_queue": generated_work_queue,
+            "generated_queue_status": queue_status,
+            "queue_open_count": queue_open_count,
+            "queue_actionable_count": queue_actionable_count,
+            "queue_blocked_count": queue_blocked_count,
+            "queue_blocked_reason_counts": queue_blocked_reason_counts,
+            "queue_blocked_files": queue_blocked_files,
+            "autonomy_maintenance": autonomy_payload,
+            "operator_outbox": operator_outbox_payload,
+            "operator_outbox_open_count": int(operator_outbox_payload.get("open_count", 0) or 0),
+            "operator_outbox_actionable_open_count": int(
+                operator_outbox_payload.get("operator_actionable_open_count", operator_outbox_payload.get("open_count", 0))
+                or 0
+            ),
+            "operator_outbox_actionable_latest_open_id": str(
+                operator_outbox_payload.get("operator_actionable_latest_open_id") or ""
+            ),
+            "operator_outbox_latest_open_id": str((operator_outbox_payload.get("latest_open") or {}).get("id") or ""),
+            "runtime_worker_status": str(runtime_worker.get("last_cycle_status") or ""),
+            "runtime_worker_active": bool(runtime_worker.get("active", False)),
+            "runtime_worker_stale_identity": bool(runtime_worker.get("stale_identity", False)),
+            "maintenance_scheduler_active": bool(runtime_worker.get("active", False) or guard_running),
+            "maintenance_scheduler_mode": maintenance_scheduler_mode,
+            "maintenance_scheduler_status": maintenance_scheduler_status,
+            "autonomy_orchestrator": last_autonomy_orchestrator,
+            "autonomy_orchestrator_summary": (
+                autonomy_payload.get("autonomy_orchestrator_summary")
+                if isinstance(autonomy_payload.get("autonomy_orchestrator_summary"), dict)
+                else {}
+            ),
+            "nova_mission": dict(last_nova_mission),
+            "nova_mission_status": str(last_nova_mission.get("status") or ""),
+            "nova_mission_action": str(last_nova_mission.get("action") or ""),
+            "nova_mission_green_cycle": bool(last_nova_mission.get("green_cycle", False)),
+            "nova_mission_headline": str(last_nova_mission.get("headline") or ""),
+            "nova_mission_truth_ready": bool(last_nova_mission.get("truth_ready", False)),
+            "nova_mission_truth_blockers": (
+                list(last_nova_mission.get("truth_blockers") or [])
+                if isinstance(last_nova_mission.get("truth_blockers"), list)
+                else []
+            ),
+            "nova_mission_owner_verdicts": (
+                list(last_nova_mission.get("owner_verdicts") or [])
+                if isinstance(last_nova_mission.get("owner_verdicts"), list)
+                else []
+            ),
+            "nova_mission_owner_blockers": (
+                list(last_nova_mission.get("owner_blockers") or [])
+                if isinstance(last_nova_mission.get("owner_blockers"), list)
+                else []
+            ),
+            "nova_mission_green_blockers": (
+                list(last_nova_mission.get("green_blockers") or [])
+                if isinstance(last_nova_mission.get("green_blockers"), list)
+                else []
+            ),
+            "nova_mission_blocking_owner_count": int(last_nova_mission.get("blocking_owner_count", 0) or 0),
+            "nova_mission_core_gate_source": str(last_nova_mission.get("core_gate_source") or ""),
+            "nova_mission_history": (
+                list(autonomy_payload.get("nova_mission_history") or [])
+                if isinstance(autonomy_payload.get("nova_mission_history"), list)
+                else []
+            ),
+            "nova_mission_sustained_watch": bool(autonomy_payload.get("nova_mission_sustained_watch", False)),
+            "nova_mission_watch_streak": int(autonomy_payload.get("nova_mission_watch_streak", 0) or 0),
+            "core_thinning_sync": core_thinning_sync,
+            "core_thinning_sync_status": str(core_thinning_sync.get("status") or ""),
+            "core_thinning_sync_at": str(core_thinning_sync.get("ts") or ""),
+            "core_thinning_order_count": int(core_thinning_sync.get("order_count", 0) or 0),
+            "core_thinning_added_count": int(core_thinning_sync.get("added_count", 0) or 0),
+            "core_thinning_resolved_count": int(core_thinning_sync.get("resolved_count", 0) or 0),
+            "core_thinning_tree_id": str(core_thinning_sync.get("tree_id") or ""),
+            "last_regression_status": str(autonomy_payload.get("last_regression_status") or ""),
+            "last_regression_stale": bool(autonomy_payload.get("last_regression_stale", False)),
+            "validation_artifact_truth": validation_truth_payload,
+            "validation_artifact_truth_ok": bool(validation_truth_payload.get("ok", True)),
+            "validation_artifact_truth_status": str(validation_truth_payload.get("status") or ""),
+            "validation_artifact_failure_count": int(
+                validation_truth_payload.get("current_window_failure_count", validation_truth_payload.get("failure_count", 0))
+                or 0
+            ),
+            "validation_artifact_llm_unavailable_count": int(
+                validation_truth_payload.get(
+                    "current_window_llm_unavailable_count",
+                    validation_truth_payload.get("llm_unavailable_count", 0),
+                )
+                or 0
+            ),
+            "validation_artifact_hidden_by_green_regression": bool(
+                validation_truth_payload.get("hidden_by_green_regression", False)
+            ),
+            "validation_artifact_latest_failure": (
+                dict(validation_truth_payload.get("latest_failure") or {})
+                if isinstance(validation_truth_payload.get("latest_failure"), dict)
+                else {}
+            ),
+            "release_status": release_status,
+            "memory_health": memory_health,
+            "memory_health_status": str(
+                pulse_payload.get("memory_health_status")
+                or memory_health.get("status")
+                or ("ok" if pulse_payload.get("memory_ok") else "")
+            ),
+            "pulse": pulse_payload,
+            "pulse_summary": {
+                "generated_at": str(pulse_payload.get("generated_at") or ""),
+                "autonomy_level": str(pulse_payload.get("autonomy_level") or "unknown"),
+                "ready_for_validated_apply": bool(pulse_payload.get("ready_for_validated_apply", False)),
+            },
+            "work_tree_truth": work_tree_payload,
+            "work_tree_truth_status": str(work_tree_payload.get("status") or ""),
+            "work_tree_tree_count": int(work_tree_payload.get("tree_count", 0) or 0),
+            "work_tree_active_tree_count": int(work_tree_payload.get("active_tree_count", 0) or 0),
+            "work_tree_branch_count": int(work_tree_payload.get("branch_count", 0) or 0),
+            "work_tree_open_task_count": int(work_tree_payload.get("open_task_count", 0) or 0),
+            "work_tree_blocked_branch_count": int(work_tree_payload.get("blocked_branch_count", 0) or 0),
+            "work_tree_operator_hold_branch_count": int(work_tree_payload.get("operator_hold_branch_count", 0) or 0),
+            "work_tree_self_repair_blocked_branch_count": int(
+                work_tree_payload.get("self_repair_blocked_branch_count", 0) or 0
+            ),
+            "work_tree_self_repair_observing_branch_count": int(
+                work_tree_payload.get("self_repair_observing_branch_count", 0) or 0
+            ),
+            "work_tree_pending_branch_count": int(work_tree_payload.get("pending_count", 0) or 0),
+            "work_tree_working_branch_count": int(work_tree_payload.get("working_count", 0) or 0),
+            "work_tree_complete_branch_count": int(work_tree_payload.get("complete_count", 0) or 0),
+            "work_tree_observing_branch_count": int(work_tree_payload.get("observing_branch_count", 0) or 0),
+            "work_tree_blocked_observing_branch_count": int(work_tree_payload.get("blocked_observing_count", 0) or 0),
+            "work_tree_latent_root_signal_count": int(work_tree_payload.get("latent_root_signal_count", 0) or 0),
+            "work_tree_release_stale_ready_count": int(work_tree_payload.get("release_stale_ready_count", 0) or 0),
+        }
+        return CONTROL_STATUS_SURFACES_SERVICE.build_surfaces_payload(payload)
 
     @staticmethod
     def status_payload(
@@ -472,6 +751,7 @@ class ControlStatusService:
         port_ownership: dict | None = None,
         data_pipelines: dict | None = None,
         edfi_capability_profile: dict | None = None,
+        edfi_core_readiness: dict | None = None,
         installer_status: dict | None = None,
     ) -> dict:
         autonomy_payload = autonomy_maintenance.copy() if isinstance(autonomy_maintenance, dict) else {}
@@ -490,6 +770,11 @@ class ControlStatusService:
             dict(edfi_capability_profile or {})
             if isinstance(edfi_capability_profile, dict)
             else {"ok": False, "status": "missing", "present": False, "issue_count": 0, "issues": []}
+        )
+        edfi_core_readiness_payload = (
+            dict(edfi_core_readiness or {})
+            if isinstance(edfi_core_readiness, dict)
+            else {"ready": False, "milestone": "", "connection_id": "district-main", "issues": []}
         )
         installer_status_payload = dict(installer_status or {}) if isinstance(installer_status, dict) else {}
         os_capability_payload = ControlStatusService._os_capability_control_payload(
@@ -567,6 +852,13 @@ class ControlStatusService:
             "autonomy_maintenance": autonomy_payload,
             "operator_outbox": operator_outbox_payload,
             "operator_outbox_open_count": int(operator_outbox_payload.get("open_count", 0) or 0),
+            "operator_outbox_actionable_open_count": int(
+                operator_outbox_payload.get("operator_actionable_open_count", operator_outbox_payload.get("open_count", 0))
+                or 0
+            ),
+            "operator_outbox_actionable_latest_open_id": str(
+                operator_outbox_payload.get("operator_actionable_latest_open_id") or ""
+            ),
             "operator_outbox_latest_id": str(operator_outbox_payload.get("latest_id") or ""),
             "operator_outbox_latest_open_id": str((operator_outbox_payload.get("latest_open") or {}).get("id") or ""),
             "operator_outbox_status_counts": (
@@ -666,6 +958,9 @@ class ControlStatusService:
                 or edfi_profile_payload.get("profile_path")
                 or ""
             ),
+            "edfi_core_readiness": dict(edfi_core_readiness_payload),
+            "edfi_core_ready": bool(edfi_core_readiness_payload.get("ready", False)),
+            "edfi_core_milestone": str(edfi_core_readiness_payload.get("milestone") or ""),
         }
 
         runtime_worker = autonomy_payload.get("runtime_worker") if isinstance(autonomy_payload.get("runtime_worker"), dict) else {}
@@ -846,6 +1141,62 @@ class ControlStatusService:
         payload["autonomy_orchestrator_change_rate"] = float(autonomy_orchestrator_summary.get("recommendation_change_rate", 0.0) or 0.0)
         payload["autonomy_orchestrator_stable"] = bool(autonomy_orchestrator_summary.get("stable_recommendation", True))
         payload["autonomy_orchestrator_weak_refusal_rate"] = float(autonomy_orchestrator_summary.get("weak_posture_refusal_rate", 0.0) or 0.0)
+        last_nova_mission = (
+            autonomy_maintenance.get("last_nova_mission")
+            if isinstance(autonomy_maintenance.get("last_nova_mission"), dict)
+            else (
+                last_autonomy_orchestrator.get("mission_snapshot")
+                if isinstance(last_autonomy_orchestrator.get("mission_snapshot"), dict)
+                else {}
+            )
+        )
+        payload["nova_mission"] = dict(last_nova_mission)
+        payload["nova_mission_status"] = str(last_nova_mission.get("status") or "")
+        payload["nova_mission_action"] = str(last_nova_mission.get("action") or "")
+        payload["nova_mission_green_cycle"] = bool(last_nova_mission.get("green_cycle", False))
+        payload["nova_mission_headline"] = str(last_nova_mission.get("headline") or "")
+        payload["nova_mission_truth_ready"] = bool(last_nova_mission.get("truth_ready", False))
+        payload["nova_mission_truth_blockers"] = (
+            list(last_nova_mission.get("truth_blockers") or [])
+            if isinstance(last_nova_mission.get("truth_blockers"), list)
+            else []
+        )
+        payload["nova_mission_owner_verdicts"] = (
+            list(last_nova_mission.get("owner_verdicts") or [])
+            if isinstance(last_nova_mission.get("owner_verdicts"), list)
+            else []
+        )
+        payload["nova_mission_owner_blockers"] = (
+            list(last_nova_mission.get("owner_blockers") or [])
+            if isinstance(last_nova_mission.get("owner_blockers"), list)
+            else []
+        )
+        payload["nova_mission_green_blockers"] = (
+            list(last_nova_mission.get("green_blockers") or [])
+            if isinstance(last_nova_mission.get("green_blockers"), list)
+            else []
+        )
+        payload["nova_mission_blocking_owner_count"] = int(last_nova_mission.get("blocking_owner_count", 0) or 0)
+        payload["nova_mission_core_gate_source"] = str(last_nova_mission.get("core_gate_source") or "")
+        payload["nova_mission_history"] = (
+            list(autonomy_maintenance.get("nova_mission_history") or [])
+            if isinstance(autonomy_maintenance.get("nova_mission_history"), list)
+            else []
+        )
+        payload["nova_mission_sustained_watch"] = bool(autonomy_maintenance.get("nova_mission_sustained_watch", False))
+        payload["nova_mission_watch_streak"] = int(autonomy_maintenance.get("nova_mission_watch_streak", 0) or 0)
+        core_thinning_sync = (
+            dict(autonomy_maintenance.get("last_core_thinning_sync") or {})
+            if isinstance(autonomy_maintenance.get("last_core_thinning_sync"), dict)
+            else {}
+        )
+        payload["core_thinning_sync"] = core_thinning_sync
+        payload["core_thinning_sync_status"] = str(core_thinning_sync.get("status") or "")
+        payload["core_thinning_sync_at"] = str(core_thinning_sync.get("ts") or "")
+        payload["core_thinning_order_count"] = int(core_thinning_sync.get("order_count", 0) or 0)
+        payload["core_thinning_added_count"] = int(core_thinning_sync.get("added_count", 0) or 0)
+        payload["core_thinning_resolved_count"] = int(core_thinning_sync.get("resolved_count", 0) or 0)
+        payload["core_thinning_tree_id"] = str(core_thinning_sync.get("tree_id") or "")
         payload["last_regression_status"] = str(autonomy_maintenance.get("last_regression_status") or "")
         payload["last_regression_stale"] = bool(autonomy_maintenance.get("last_regression_stale", False))
         payload["last_generated_queue_run_status"] = str(last_generated_queue_run.get("status") or "")
@@ -861,73 +1212,22 @@ class ControlStatusService:
         payload["queue_blocked_files"] = queue_blocked_files
         payload["work_tree_status"] = str(last_work_tree_cycle.get("status") or "")
         work_trees = work_trees_payload if isinstance(work_trees_payload, dict) else {}
-        work_tree_counts = work_trees.get("counts") if isinstance(work_trees.get("counts"), dict) else {}
-        work_tree_branch_count = int(work_tree_counts.get("branches", 0) or 0)
-        work_tree_open_task_count = int(work_tree_counts.get("open_tasks", 0) or 0)
-        work_tree_blocked_count = int(work_tree_counts.get("blocked", 0) or 0)
-        work_tree_pending_count = int(work_tree_counts.get("pending", 0) or 0)
-        work_tree_working_count = int(work_tree_counts.get("working", 0) or 0)
-        work_tree_complete_count = int(work_tree_counts.get("complete", 0) or 0)
-        observing_count = 0
-        latent_root_signal_count = 0
-        operator_hold_count = 0
-        self_repair_blocked_count = 0
-        self_repair_observing_count = 0
-        for tree_payload in list(work_trees.get("trees") or []):
-            if not isinstance(tree_payload, dict):
-                continue
-            for node in list(tree_payload.get("nodes") or []):
-                if not isinstance(node, dict):
-                    continue
-                status_text = str(node.get("status") or "").strip().lower()
-                resolution_text = str(node.get("resolution_state") or "").strip().lower()
-                source_type = str(node.get("source_type") or "").strip().lower()
-                work_class = str(node.get("work_class") or "").strip().lower()
-                actionability = str(node.get("actionability") or "").strip().lower()
-                source_payload = node.get("source_payload") if isinstance(node.get("source_payload"), dict) else {}
-                memory_origin = (
-                    source_payload.get("memory_bootstrap_origin")
-                    if isinstance(source_payload.get("memory_bootstrap_origin"), dict)
-                    else {}
-                )
-                memory_bootstrap = (
-                    source_payload.get("memory_bootstrap")
-                    if isinstance(source_payload.get("memory_bootstrap"), dict)
-                    else {}
-                )
-                memory_operator_hold = bool(
-                    status_text == "blocked"
-                    and source_type == "memory_health"
-                    and work_class == "governance_pressure"
-                    and str(memory_origin.get("status") or memory_bootstrap.get("origin_status") or "").strip().lower()
-                    == "pending_operator_confirmation"
-                )
-                operator_hold = memory_operator_hold
-                if operator_hold:
-                    operator_hold_count += 1
-                elif status_text == "blocked":
-                    self_repair_blocked_count += 1
-                if resolution_text == "observing" and status_text not in {"complete", "archived"}:
-                    observing_count += 1
-                    if operator_hold:
-                        continue
-                    self_repair_observing_count += 1
-                    if (
-                        str(node.get("source_type") or "").strip().lower() == "subconscious"
-                        and str(node.get("work_class") or "").strip().lower() == "candidate_review"
-                    ):
-                        latent_root_signal_count += 1
-        if self_repair_blocked_count > 0 or self_repair_observing_count > 0:
-            work_tree_truth_status = "blocked_observing"
-        elif operator_hold_count > 0:
-            work_tree_truth_status = "operator_hold"
-        elif work_tree_open_task_count > 0 or work_tree_pending_count > 0 or work_tree_working_count > 0:
-            work_tree_truth_status = "open"
-        else:
-            work_tree_truth_status = "clear"
+        work_tree_pressure = build_work_tree_pressure_snapshot(work_trees)
+        work_tree_truth_status = str(work_tree_pressure.get("status") or "")
+        work_tree_branch_count = int(work_tree_pressure.get("branch_count", 0) or 0)
+        work_tree_open_task_count = int(work_tree_pressure.get("open_task_count", 0) or 0)
+        work_tree_blocked_count = int(work_tree_pressure.get("blocked_branch_count", 0) or 0)
+        work_tree_pending_count = int(work_tree_pressure.get("pending_count", 0) or 0)
+        work_tree_working_count = int(work_tree_pressure.get("working_count", 0) or 0)
+        work_tree_complete_count = int(work_tree_pressure.get("complete_count", 0) or 0)
+        observing_count = int(work_tree_pressure.get("observing_branch_count", 0) or 0)
+        latent_root_signal_count = int(work_tree_pressure.get("latent_root_signal_count", 0) or 0)
+        operator_hold_count = int(work_tree_pressure.get("operator_hold_branch_count", 0) or 0)
+        self_repair_blocked_count = int(work_tree_pressure.get("self_repair_blocked_branch_count", 0) or 0)
+        self_repair_observing_count = int(work_tree_pressure.get("self_repair_observing_branch_count", 0) or 0)
         payload["work_tree_truth_status"] = work_tree_truth_status
-        payload["work_tree_tree_count"] = int(work_tree_counts.get("total", 0) or 0)
-        payload["work_tree_active_tree_count"] = int(work_tree_counts.get("active", 0) or 0)
+        payload["work_tree_tree_count"] = int(work_tree_pressure.get("tree_count", 0) or 0)
+        payload["work_tree_active_tree_count"] = int(work_tree_pressure.get("active_tree_count", 0) or 0)
         payload["work_tree_branch_count"] = work_tree_branch_count
         payload["work_tree_open_task_count"] = work_tree_open_task_count
         payload["work_tree_blocked_branch_count"] = work_tree_blocked_count

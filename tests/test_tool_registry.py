@@ -11,9 +11,45 @@ import tools.registry as registry_module
 from services.nova_runtime_context import TOOL_EVENTS_FILE
 from tools import ToolContext, build_default_registry
 from tools.base_tool import ToolInvocationError
+from tools.registry import build_core_tool_exports
 
 
 class TestToolRegistry(unittest.TestCase):
+    def test_build_core_tool_exports_returns_expected_runtime_tools(self):
+        exports = build_core_tool_exports({"execute_registered_tool": lambda *_args, **_kwargs: "ok"})
+        self.assertEqual(
+            set(exports.keys()),
+            {
+                "tool_ls",
+                "tool_read",
+                "tool_find",
+                "tool_health",
+                "tool_system_check",
+                "tool_queue_status",
+                "tool_temporal_review",
+                "tool_edfi_explore",
+                "tool_pipeline",
+                "tool_patch_preview_apply",
+                "tool_patch_preview_approve",
+                "tool_update_now",
+                "tool_update_now_confirm",
+                "tool_update_now_cancel",
+                "tool_nova_pulse",
+                "tool_nova_self_status",
+                "tool_core_health_brief",
+                "tool_core_thinning",
+                "tool_search",
+                "tool_web_fetch",
+                "tool_wikipedia_lookup",
+                "tool_stackexchange_search",
+                "tool_web_search",
+                "tool_web_gather",
+                "tool_web_research",
+                "tool_screen",
+                "tool_camera",
+            },
+        )
+
     def test_default_tool_events_path_uses_runtime_context(self):
         self.assertEqual(registry_module.TOOL_EVENTS_PATH, TOOL_EVENTS_FILE)
 

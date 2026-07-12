@@ -38,6 +38,50 @@ class PolicyControlService:
         return ok, msg, {"policy": control_policy_payload_fn()}, msg
 
     @staticmethod
+    def mission_settings_action(
+        payload: dict,
+        *,
+        set_mission_settings_fn,
+        control_policy_payload_fn,
+        invalidate_control_status_cache_fn,
+    ) -> tuple[bool, str, dict, str]:
+        enabled_value = payload.get("enabled")
+        enabled = None
+        if isinstance(enabled_value, bool):
+            enabled = enabled_value
+        elif isinstance(enabled_value, str):
+            token = enabled_value.strip().lower()
+            if token in {"true", "1", "yes", "on"}:
+                enabled = True
+            elif token in {"false", "0", "no", "off"}:
+                enabled = False
+
+        def _bool_field(name: str) -> bool | None:
+            value = payload.get(name)
+            if isinstance(value, bool):
+                return value
+            if isinstance(value, str):
+                token = value.strip().lower()
+                if token in {"true", "1", "yes", "on"}:
+                    return True
+                if token in {"false", "0", "no", "off"}:
+                    return False
+            return None
+
+        msg = set_mission_settings_fn(
+            enabled=enabled,
+            mode=str(payload.get("mode") or "").strip(),
+            objective=str(payload.get("objective") or "").strip(),
+            release_stale_ready_is_pressure=_bool_field("release_stale_ready_is_pressure"),
+            subconscious_triage_is_pressure=_bool_field("subconscious_triage_is_pressure"),
+            generated_queue_backlog_is_pressure=_bool_field("generated_queue_backlog_is_pressure"),
+        )
+        ok = not msg.lower().startswith("usage:")
+        if ok:
+            invalidate_control_status_cache_fn()
+        return ok, msg, {"policy": control_policy_payload_fn()}, msg
+
+    @staticmethod
     def server_side_settings_action(
         payload: dict,
         *,

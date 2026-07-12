@@ -9,6 +9,7 @@ import work_tree
 from services.core_thinning import (
     CORE_THINNING_WORK_IDENTITY,
     build_core_thinning_brief,
+    build_core_thinning_owner_verdict,
     execute_core_thinning_order,
     feed_core_thinning_brief_to_work_tree,
 )
@@ -107,6 +108,35 @@ class TestCoreThinningService(unittest.TestCase):
         self.assertEqual(brief.get("http_surface_candidate_count"), 1)
         order = next(item for item in list(brief.get("orders") or []) if item.get("kind") == "http_surface_candidate")
         self.assertEqual((order.get("target") or {}).get("theme"), "pipeline_control")
+
+    def test_owner_verdict_marks_thinning_orders_as_non_green_blocking_pressure(self):
+        verdict = build_core_thinning_owner_verdict(
+            {
+                "ok": True,
+                "order_count": 3,
+                "line_count": 1200,
+                "function_count": 80,
+                "large_function_count": 2,
+                "http_surface_candidate_count": 1,
+                "wrapper_candidate_count": 0,
+            },
+            feed_result={"ok": True, "status": "seeded"},
+        )
+
+        self.assertEqual(verdict.get("owner"), "core_thinning")
+        self.assertFalse(verdict.get("ready"))
+        self.assertFalse(verdict.get("blocks_green"))
+        self.assertEqual((verdict.get("blockers") or [])[0].get("code"), "core_http_thinning_pressure")
+
+    def test_owner_verdict_blocks_green_when_thinning_evidence_is_unavailable(self):
+        verdict = build_core_thinning_owner_verdict(
+            {"ok": False, "error": "parse failed"},
+            feed_result={"ok": False, "status": "failed"},
+        )
+
+        self.assertFalse(verdict.get("ready"))
+        self.assertTrue(verdict.get("blocks_green"))
+        self.assertEqual((verdict.get("blockers") or [])[0].get("code"), "core_thinning_unavailable")
 
     def test_feed_brief_creates_deduped_core_thinning_tree(self):
         sample = _validation_tmp_root() / f"core_thinning_feed_{uuid.uuid4().hex}.py"

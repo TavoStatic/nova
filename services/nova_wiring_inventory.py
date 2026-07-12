@@ -210,6 +210,39 @@ WIRING_SURFACES: tuple[WiringSurface, ...] = (
         ),
     ),
     WiringSurface(
+        "edfi_core",
+        "Vendor-neutral Ed-Fi core services, explore tool, and core readiness lifecycle",
+        (
+            "edfi_core_readiness",
+            "edfi_core_ready",
+            "edfi_capability_profile",
+        ),
+        ("edfi_core",),
+        ("edfi_explore", "read", "find", "pipeline"),
+        ("active_work_tree_run_next",),
+        (
+            "services/edfi/core_readiness.py",
+            "services/edfi/client.py",
+            "services/edfi/discovery.py",
+            "tools/edfi_tool.py",
+            "scripts/demo_edfi_core_lifecycle.py",
+        ),
+    ),
+    WiringSurface(
+        "data_lane_edfi_bisd",
+        "BISD Ed-Fi data lane connector, pipeline registry entry, and operator scripts",
+        ("data_pipelines", "data_pipeline_count"),
+        ("data_lane_edfi_bisd",),
+        ("pipeline", "read", "find"),
+        ("active_work_tree_run_next",),
+        (
+            "data_sources/edfi_bisd/connector.py",
+            "data_sources/edfi_bisd/pipeline.json",
+            "scripts/run_edfi_profile.py",
+            "scripts/run_edfi_explore.py",
+        ),
+    ),
+    WiringSurface(
         "voice",
         "Voice runtime dependency loading and entrypoint wrappers",
         ("voice_status", "voice_runtime_status", "voice_runtime_requested"),
@@ -315,7 +348,12 @@ WIRING_SURFACES: tuple[WiringSurface, ...] = (
         ("autonomy_orchestrator",),
         ("read", "find", "pulse", "source_root_judgment"),
         ("active_work_tree_run_next",),
-        ("services/autonomy_orchestrator.py", "autonomy_maintenance.py", "services/work_tree_signal_ingestion.py"),
+        (
+            "services/autonomy_orchestrator.py",
+            "services/nova_mission.py",
+            "autonomy_maintenance.py",
+            "services/work_tree_signal_ingestion.py",
+        ),
     ),
     WiringSurface(
         "frontdoor_cli",

@@ -16,6 +16,7 @@ class TestControlStatusService(unittest.TestCase):
             "_generated_work_queue": object(),
             "_autonomy_maintenance_summary": object(),
             "_work_trees_payload": object(),
+            "_work_tree_pressure_payload": object(),
             "_operator_outbox_summary": object(),
             "_load_operator_macros": object(),
             "_load_backend_commands": object(),
@@ -51,12 +52,13 @@ class TestControlStatusService(unittest.TestCase):
         self.assertIs(payload["probe_searxng"], scope["_probe_searxng"])
         self.assertIs(payload["provider_telemetry_payload"], scope["_provider_telemetry_payload"])
         self.assertIs(payload["work_trees_payload"], scope["_work_trees_payload"])
+        self.assertIs(payload["work_tree_pressure_payload"], scope["_work_tree_pressure_payload"])
         self.assertIs(payload["operator_outbox_summary"], scope["_operator_outbox_summary"])
         self.assertIs(payload["validation_artifact_truth_payload"], scope["_validation_artifact_truth_payload"])
         self.assertIs(payload["os_capability_ledger_summary"], scope["_os_capability_ledger_summary"])
         self.assertIs(payload["installer_status_payload"], scope["_installer_status_payload"])
         self.assertIs(payload["metrics_payload"], scope["_metrics_payload"])
-        self.assertEqual(len(payload), 38)
+        self.assertEqual(len(payload), 39)
 
     def test_runtime_status_payload_collects_supplier_outputs(self):
         class _Core:
@@ -158,7 +160,39 @@ class TestControlStatusService(unittest.TestCase):
                 "subconscious_status_summary": lambda: {"ok": True},
                 "subconscious_live_summary": lambda: {},
                 "generated_work_queue": lambda limit: {"status": "clear", "open_count": 0, "actionable_count": 0, "next_item": {}},
-                "autonomy_maintenance_summary": lambda: {},
+                "autonomy_maintenance_summary": lambda: {
+                    "last_nova_mission": {
+                        "status": "quiet_hold",
+                        "action": "hold",
+                        "green_cycle": True,
+                        "headline": "steady governance cycle",
+                        "truth_ready": True,
+                        "truth_blockers": [],
+                        "owner_verdicts": [
+                            {
+                                "owner": "core_thinning",
+                                "ready": False,
+                                "blocks_green": False,
+                                "summary": "3 core/http thinning work orders ready",
+                                "blockers": [{"owner": "core_thinning", "code": "core_http_thinning_pressure"}],
+                            }
+                        ],
+                        "owner_blockers": [{"owner": "core_thinning", "code": "core_http_thinning_pressure"}],
+                        "green_blockers": [],
+                        "blocking_owner_count": 0,
+                        "core_gate_source": "layer_maturity.core_gate",
+                    },
+                    "nova_mission_sustained_watch": True,
+                    "nova_mission_watch_streak": 3,
+                    "last_core_thinning_sync": {
+                        "ts": "2026-07-10T12:00:00Z",
+                        "status": "ok",
+                        "tree_id": "tree-core",
+                        "order_count": 3,
+                        "added_count": 1,
+                        "resolved_count": 2,
+                    },
+                },
                 "work_trees_payload": lambda limit: {"ok": True, "counts": {"total": 0, "active": 0, "branches": 0, "open_tasks": 0, "blocked": 0, "pending": 0, "working": 0, "complete": 0}, "trees": []},
                 "operator_outbox_summary": lambda limit: {
                     "ok": True,
@@ -276,11 +310,106 @@ class TestControlStatusService(unittest.TestCase):
         self.assertEqual(payload.get("source_wiring_probe_missing_required_judgment_paths"), [])
         self.assertEqual(payload.get("operator_outbox_open_count"), 1)
         self.assertEqual(payload.get("operator_outbox_latest_open_id"), "notice-1")
+        self.assertEqual(payload.get("nova_mission_status"), "quiet_hold")
+        self.assertTrue(payload.get("nova_mission_green_cycle"))
+        self.assertEqual(payload.get("nova_mission_owner_verdicts")[0].get("owner"), "core_thinning")
+        self.assertEqual(payload.get("nova_mission_owner_blockers")[0].get("code"), "core_http_thinning_pressure")
+        self.assertEqual(payload.get("nova_mission_green_blockers"), [])
+        self.assertEqual(payload.get("nova_mission_blocking_owner_count"), 0)
+        self.assertEqual(payload.get("nova_mission_core_gate_source"), "layer_maturity.core_gate")
+        self.assertTrue(payload.get("nova_mission_sustained_watch"))
+        self.assertEqual(payload.get("nova_mission_watch_streak"), 3)
+        self.assertEqual(payload.get("core_thinning_sync_status"), "ok")
+        self.assertEqual(payload.get("core_thinning_order_count"), 3)
+        self.assertEqual(payload.get("core_thinning_added_count"), 1)
+        self.assertEqual(payload.get("core_thinning_resolved_count"), 2)
+        self.assertEqual(payload.get("core_thinning_tree_id"), "tree-core")
         self.assertFalse(payload.get("os_capability_ledger_ok"))
         self.assertEqual(payload.get("os_capability_ledger_total"), 2)
         self.assertEqual(payload.get("os_capability_ledger_current_issue_count"), 1)
         self.assertEqual(payload.get("last_os_capability_issue_name"), "verify_ollama_model")
         self.assertEqual(payload.get("last_os_capability_issue_reason"), "contract_stale")
+
+    def test_runtime_signal_ingestion_surfaces_payload_uses_thin_work_tree_pressure(self):
+        class _Core:
+            @staticmethod
+            def load_policy():
+                return {
+                    "tools_enabled": {"web": True},
+                    "web": {"enabled": True, "search_provider": "html", "search_api_endpoint": ""},
+                }
+
+            @staticmethod
+            def get_search_provider_priority():
+                return ["general_web"]
+
+            @staticmethod
+            def build_pulse_payload():
+                return {
+                    "memory_ok": True,
+                    "memory_health_status": "ok",
+                    "memory_health": {"status": "ok"},
+                }
+
+        payload = CONTROL_STATUS_SERVICE.runtime_signal_ingestion_surfaces_payload(
+            core_module=_Core(),
+            session_turns={"s1": []},
+            metrics_totals=(7, 1),
+            supplier_fns={
+                "guard_status_payload": lambda: {"running": True, "status": "running"},
+                "core_status_payload": lambda: {"running": True, "status": "running"},
+                "http_status_payload": lambda: {"running": True, "status": "running"},
+                "runtime_summary_payload": lambda **kwargs: {"guard": kwargs.get("guard")},
+                "generated_work_queue": lambda limit: {"status": "clear", "open_count": 0, "actionable_count": 0, "blocked_count": 0},
+                "autonomy_maintenance_summary": lambda: {
+                    "last_nova_mission": {
+                        "status": "quiet_hold",
+                        "action": "hold",
+                        "green_cycle": True,
+                        "truth_ready": True,
+                        "owner_verdicts": [{"owner": "core_thinning", "ready": False, "blocks_green": False}],
+                        "owner_blockers": [{"owner": "core_thinning", "code": "core_http_thinning_pressure"}],
+                        "green_blockers": [],
+                        "blocking_owner_count": 0,
+                    },
+                    "last_core_thinning_sync": {"status": "ok", "order_count": 2, "added_count": 1, "resolved_count": 0},
+                },
+                "work_tree_pressure_payload": lambda: {
+                    "status": "blocked_observing",
+                    "tree_count": 3,
+                    "active_tree_count": 2,
+                    "branch_count": 5,
+                    "open_task_count": 4,
+                    "blocked_branch_count": 1,
+                    "operator_hold_branch_count": 0,
+                    "self_repair_blocked_branch_count": 1,
+                    "self_repair_observing_branch_count": 1,
+                    "pending_count": 2,
+                    "working_count": 1,
+                    "complete_count": 1,
+                    "observing_branch_count": 1,
+                    "blocked_observing_count": 1,
+                    "latent_root_signal_count": 1,
+                    "release_stale_ready_count": 0,
+                },
+                "operator_outbox_summary": lambda limit: {"open_count": 0, "latest_open": {}},
+                "validation_artifact_truth_payload": lambda: {"ok": True, "status": "fresh"},
+                "release_status_payload": lambda: {"ok": True, "status": "ready"},
+                "heartbeat_age_seconds": lambda: 0,
+            },
+        )
+
+        self.assertEqual(payload.get("status_kind"), "signal_ingestion_surfaces")
+        self.assertEqual(payload.get("work_tree_truth_status"), "blocked_observing")
+        self.assertEqual(payload.get("work_tree_open_task_count"), 4)
+        self.assertEqual((payload.get("work_tree_truth") or {}).get("branch_count"), 5)
+        self.assertEqual(payload.get("nova_mission_status"), "quiet_hold")
+        self.assertEqual((payload.get("nova_mission_owner_blockers") or [])[0].get("code"), "core_http_thinning_pressure")
+        self.assertEqual(payload.get("core_thinning_order_count"), 2)
+        self.assertEqual(payload.get("memory_health_status"), "ok")
+        self.assertIn("guard", payload)
+        self.assertIn("core", payload)
+        self.assertIn("webui", payload)
 
     def test_status_payload_includes_voice_runtime_fields_when_provided(self):
         payload = CONTROL_STATUS_SERVICE.status_payload(

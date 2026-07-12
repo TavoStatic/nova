@@ -121,6 +121,35 @@ class TestOperatorOutboxService(unittest.TestCase):
         self.assertEqual(events[0].get("status"), "resolved")
         self.assertEqual(events[1].get("status"), "new")
 
+    def test_summary_splits_actionable_open_count_from_autonomy_internal_notices(self):
+        with TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "operator_outbox.jsonl"
+            OPERATOR_OUTBOX_SERVICE.append_notice(
+                path,
+                source="autonomy_maintenance",
+                severity="attention",
+                title="Nova needs operator attention: defer_with_reason",
+                message="Mission hold.",
+                dedupe_key="defer|hold",
+                now_fn=lambda: 1000.0,
+                uuid_fn=lambda: "auto111",
+            )
+            OPERATOR_OUTBOX_SERVICE.append_notice(
+                path,
+                source="work_tree",
+                severity="attention",
+                title="Nova needs help with blocked Work Tree work",
+                message="Blocked on policy gates.",
+                dedupe_key="work_tree|blocked_task|tree|branch|reason",
+                now_fn=lambda: 1005.0,
+                uuid_fn=lambda: "work222",
+            )
+            summary = OPERATOR_OUTBOX_SERVICE.summary(path, limit=5)
+
+        self.assertEqual(summary.get("open_count"), 2)
+        self.assertEqual(summary.get("operator_actionable_open_count"), 1)
+        self.assertEqual(summary.get("operator_actionable_latest_open_id"), "0000001005000-work222")
+
     def test_notice_from_autonomy_uses_state_not_content_triggers(self):
         notice = OPERATOR_OUTBOX_SERVICE.notice_from_autonomy(
             {
@@ -155,6 +184,77 @@ class TestOperatorOutboxService(unittest.TestCase):
                 "result": "blocked",
                 "gate_reason": "decision_not_recommend_action",
                 "refusal_reasons": ["cooldown_active"],
+            },
+        )
+
+        self.assertEqual(notice, {})
+
+    def test_notice_from_autonomy_ignores_mission_hold_wait(self):
+        notice = OPERATOR_OUTBOX_SERVICE.notice_from_autonomy(
+            {
+                "decision": "defer_with_reason",
+                "recommended_action": {},
+                "reason": "Mission steady-state guard: hold without autonomous execution.",
+                "rejection_reasons": [
+                    "mission_steady_state_hold",
+                    "mission_validation_required_hold",
+                    "mission_truth_blocker:generated_queue_untested",
+                ],
+            },
+            {
+                "result": "blocked",
+                "gate_reason": "decision_not_recommend_action",
+                "refusal_reasons": [
+                    "mission_steady_state_hold",
+                    "mission_validation_required_hold",
+                    "mission_truth_blocker:generated_queue_untested",
+                ],
+            },
+        )
+
+        self.assertEqual(notice, {})
+
+    def test_notice_from_autonomy_ignores_mission_owner_blocker_wait(self):
+        notice = OPERATOR_OUTBOX_SERVICE.notice_from_autonomy(
+            {
+                "decision": "defer_with_reason",
+                "recommended_action": {},
+                "reason": "Mission steady-state guard: hold without autonomous execution.",
+                "rejection_reasons": [
+                    "mission_steady_state_hold",
+                    "mission_validation_required_hold",
+                    "mission_truth_blocker:core_gate_release_drift",
+                    "mission_owner_blocker:layer_maturity:core_gate_release_drift",
+                    "mission_owner_blocker:core_thinning:core_http_thinning_pressure",
+                ],
+            },
+            {
+                "result": "blocked",
+                "gate_reason": "decision_not_recommend_action",
+                "refusal_reasons": [
+                    "mission_steady_state_hold",
+                    "mission_validation_required_hold",
+                    "mission_truth_blocker:core_gate_release_drift",
+                    "mission_owner_blocker:layer_maturity:core_gate_release_drift",
+                    "mission_owner_blocker:core_thinning:core_http_thinning_pressure",
+                ],
+            },
+        )
+
+        self.assertEqual(notice, {})
+
+    def test_notice_from_autonomy_ignores_operator_hold_wait(self):
+        notice = OPERATOR_OUTBOX_SERVICE.notice_from_autonomy(
+            {
+                "decision": "defer_with_reason",
+                "recommended_action": {},
+                "reason": "Work Tree has operator-held branch(es); no autonomous repair action is available for that hold.",
+                "rejection_reasons": ["operator_hold_pending"],
+            },
+            {
+                "result": "blocked",
+                "gate_reason": "decision_not_recommend_action",
+                "refusal_reasons": ["operator_hold_pending"],
             },
         )
 
@@ -793,6 +893,58 @@ class TestOperatorOutboxService(unittest.TestCase):
         self.assertIn("operator information", notices[0].get("message", ""))
         self.assertIn("pending_operator_confirmation", notices[0].get("message", ""))
 
+    def test_blocked_work_notice_dedupes_on_branch_reason_not_task_id(self):
+        with TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "operator_outbox.jsonl"
+            dedupe = OPERATOR_OUTBOX_SERVICE.blocked_work_dedupe_key(
+                tree_id="tree_a",
+                branch_id="branch_a",
+                blocked_reason="source_root_sequence_exhausted_gap_persists",
+            )
+            first = OPERATOR_OUTBOX_SERVICE.append_notice(
+                path,
+                source="work_tree",
+                severity="attention",
+                title="Blocked work first hold",
+                message="First hold task.",
+                dedupe_key=dedupe,
+                payload={
+                    "tree_id": "tree_a",
+                    "branch_id": "branch_a",
+                    "task_id": "task_old",
+                    "task_title": "Hold source-root branch for operator judgment",
+                    "blocked_reason": "source_root_sequence_exhausted_gap_persists",
+                },
+                now_fn=lambda: 1000.0,
+                uuid_fn=lambda: "holdold1",
+            )
+            second = OPERATOR_OUTBOX_SERVICE.append_notice(
+                path,
+                source="work_tree",
+                severity="attention",
+                title="Blocked work new hold",
+                message="New hold task after churn.",
+                dedupe_key=dedupe,
+                payload={
+                    "tree_id": "tree_a",
+                    "branch_id": "branch_a",
+                    "task_id": "task_new",
+                    "task_title": "Hold source-root branch for operator judgment",
+                    "blocked_reason": "source_root_sequence_exhausted_gap_persists",
+                },
+                now_fn=lambda: 2000.0,
+                uuid_fn=lambda: "holdnew2",
+            )
+            events = OPERATOR_OUTBOX_SERVICE.read_events(path, limit=10)
+
+        self.assertTrue(first.get("ok"))
+        self.assertTrue(second.get("ok"))
+        self.assertTrue(second.get("deduped"))
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0].get("id"), (first.get("event") or {}).get("id"))
+        self.assertEqual(events[0].get("payload", {}).get("task_id"), "task_new")
+        self.assertEqual(int(events[0].get("repeat_count", 0) or 0), 1)
+
     def test_work_tree_notice_does_not_mirror_operator_control_branch_back_to_outbox(self):
         notices = OPERATOR_OUTBOX_SERVICE.notices_from_work_tree_state(
             {
@@ -1170,6 +1322,42 @@ class TestOperatorOutboxService(unittest.TestCase):
                         "result": "success",
                         "gate_reason": "execution_allowed",
                         "refusal_reasons": [],
+                    },
+                )
+                events = OPERATOR_OUTBOX_SERVICE.read_events(path, limit=10)
+
+        self.assertTrue(result.get("ok"))
+        self.assertFalse(result.get("published"))
+        self.assertEqual(result.get("staled_count"), 1)
+        self.assertEqual(events[0].get("status"), "stale")
+        self.assertEqual(events[0].get("status_note"), "autonomy_pressure_cleared")
+
+    def test_autonomy_publish_stales_operator_hold_wait_notice(self):
+        with TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "operator_outbox.jsonl"
+            OPERATOR_OUTBOX_SERVICE.append_notice(
+                path,
+                source="autonomy_maintenance",
+                severity="attention",
+                title="Nova needs operator attention: defer_with_reason",
+                message="I am stuck on defer_with_reason. decision_not_recommend_action; rejections: operator_hold_pending",
+                dedupe_key="defer_with_reason|defer_with_reason|blocked|decision_not_recommend_action|operator_hold_pending",
+                now_fn=lambda: 3000.0,
+                uuid_fn=lambda: "oldhold",
+            )
+
+            with mock.patch.object(autonomy_maintenance, "OPERATOR_OUTBOX", path):
+                result = autonomy_maintenance._publish_operator_notice_from_autonomy(
+                    {
+                        "decision": "defer_with_reason",
+                        "recommended_action": {},
+                        "reason": "Work Tree has operator-held branch(es); no autonomous repair action is available for that hold.",
+                        "rejection_reasons": ["operator_hold_pending"],
+                    },
+                    {
+                        "result": "blocked",
+                        "gate_reason": "decision_not_recommend_action",
+                        "refusal_reasons": ["operator_hold_pending"],
                     },
                 )
                 events = OPERATOR_OUTBOX_SERVICE.read_events(path, limit=10)

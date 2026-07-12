@@ -40,7 +40,9 @@ class TestRunRegressionScript(unittest.TestCase):
     def test_main_runs_selected_lane(self):
         lane_calls = []
 
-        with patch.object(RUN_REGRESSION, "run_step", return_value=0), \
+        with patch.object(RUN_REGRESSION, "_acquire_regression_lock", return_value=(True, "")), \
+             patch.object(RUN_REGRESSION, "_release_regression_lock"), \
+             patch.object(RUN_REGRESSION, "run_step", return_value=0), \
              patch.object(RUN_REGRESSION, "audit_validation_artifacts_after_green_run", return_value={"ok": True, "status": "ok"}), \
              patch.object(RUN_REGRESSION, "write_regression_status") as status_mock, \
              patch.object(
@@ -52,10 +54,12 @@ class TestRunRegressionScript(unittest.TestCase):
 
         self.assertEqual(code, 0)
         self.assertEqual(lane_calls, [("behavior", 2)])
-        status_mock.assert_called_once()
+        status_mock.assert_not_called()
 
     def test_main_fails_when_validation_artifacts_disagree_after_green_lanes(self):
-        with patch.object(RUN_REGRESSION, "run_step", return_value=0), \
+        with patch.object(RUN_REGRESSION, "_acquire_regression_lock", return_value=(True, "")), \
+             patch.object(RUN_REGRESSION, "_release_regression_lock"), \
+             patch.object(RUN_REGRESSION, "run_step", return_value=0), \
              patch.object(RUN_REGRESSION, "run_test_lane", return_value=0), \
              patch.object(
                  RUN_REGRESSION,

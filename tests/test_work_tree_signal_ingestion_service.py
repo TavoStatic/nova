@@ -16,12 +16,14 @@ from services.work_tree_signal_ingestion import (
     EDFI_CAPABILITY_PROFILE_READ_TASK_TITLE,
     SOURCE_ROOT_SEQUENCE_EXHAUSTED_HOLD_REASON,
     WorkTreeSignalIngestionService,
+    _autonomy_orchestrator_signal_from_status,
     _branch_why_summary,
     _data_pipeline_evidence_task,
     _edfi_capability_profile_read_evidence_satisfied,
     _edfi_capability_profile_signal_from_status,
     _gap_evidence_task,
     _looks_like_source_root_file_gap,
+    _policy_gates_signal_from_status,
     _root_closure_inventory_signals_from_status,
     _self_repair_closure_inventory_signals_from_status,
     _source_root_gap_evidence_task,
@@ -86,6 +88,34 @@ _HEALTHY_EDFI_PROFILE_STATUS = {
         "live_api_required": False,
     },
 }
+
+
+class TestAutonomyOrchestratorSignal(unittest.TestCase):
+    def test_execution_failure_surfaces_as_autonomy_orchestrator_signal(self):
+        signal = _autonomy_orchestrator_signal_from_status(
+            {
+                "autonomy_orchestrator_decision": "recommend_action",
+                "autonomy_orchestrator_decision_type": "RecommendAction",
+                "autonomy_orchestrator_action_type": "active_work_tree_run_next",
+                "autonomy_orchestrator_ledger_status": "recorded",
+                "autonomy_orchestrator_rejection_reasons": [],
+                "autonomy_orchestrator_execution_result": "failed",
+                "autonomy_orchestrator_execution_message": "active_work_tree_run_next_invalid_decision",
+                "autonomy_orchestrator_execution_cycle_status": "invalid_decision",
+                "autonomy_orchestrator_target_id": "branch-core",
+                "autonomy_orchestrator_target_step_id": "task-core",
+                "autonomy_orchestrator_target_tree_id": "tree-core",
+                "autonomy_orchestrator_recommended_tool": "core_thinning",
+            }
+        )
+
+        self.assertIsNotNone(signal)
+        self.assertEqual(signal.get("source"), "autonomy_orchestrator")
+        self.assertEqual((signal.get("fingerprint") or {}).get("error"), "invalid_decision")
+        payload = signal.get("payload") or {}
+        self.assertEqual(payload.get("execution_result"), "failed")
+        self.assertEqual(payload.get("target_tree_id"), "tree-core")
+        self.assertEqual(payload.get("recommended_tool"), "core_thinning")
 
 
 def _workspace_case_dir(prefix: str) -> Path:
@@ -1472,15 +1502,57 @@ class TestWorkTreeSignalIngestionService(unittest.TestCase):
             "C:\\NOVA\\runtime\\exports\\release_packages\\nova-rc-old.zip",
         )
 
-    def test_operator_outbox_open_work_uses_stable_blocked_branch(self) -> None:
-        first = {
+    def test_operator_control_resolves_from_outbox_truth_when_surface_missing(self) -> None:
+        open_payload = {
             "operator_outbox": {"ok": True, "open_count": 1},
             "operator_outbox_open_count": 1,
             "operator_outbox_latest_open_id": "outbox-1",
         }
+        self.service.sync_status_snapshot(open_payload)
+        branch = self._signal_branches()[0]
+        self.assertEqual(str(branch.source_type or ""), "operator_control")
+
+        with mock.patch(
+            "services.operator_outbox.OPERATOR_OUTBOX_SERVICE.summary",
+            return_value={"ok": True, "open_count": 0},
+        ):
+            self.service.sync_status_snapshot({"alerts": [], "self_check_pass_ratio": 1.0})
+
+        branch = work_tree.get_branch(branch.branch_id)
+        open_tasks = [
+            task for task in work_tree.list_branch_tasks(branch.branch_id)
+            if task.status not in {work_tree.TaskStatus.COMPLETE, work_tree.TaskStatus.DROPPED}
+        ]
+        self.assertEqual(open_tasks, [])
+        self.assertEqual(branch.resolution_state, "resolved")
+        self.assertEqual(branch.status, work_tree.BranchStatus.COMPLETE)
+
+    def test_operator_control_ignores_autonomy_internal_outbox_notices(self) -> None:
+        payload = {
+            "operator_outbox": {
+                "ok": True,
+                "open_count": 1,
+                "operator_actionable_open_count": 0,
+            },
+            "operator_outbox_open_count": 1,
+            "operator_outbox_actionable_open_count": 0,
+        }
+        results = self.service.sync_status_snapshot(payload)
+        self.assertFalse(any(item.get("action") == "created" for item in results))
+        self.assertFalse(any(item.get("action") == "reopened" for item in results))
+        self.assertEqual(self._signal_branches(), [])
+
+    def test_operator_outbox_open_work_uses_stable_blocked_branch(self) -> None:
+        first = {
+            "operator_outbox": {"ok": True, "open_count": 1, "operator_actionable_open_count": 1},
+            "operator_outbox_open_count": 1,
+            "operator_outbox_actionable_open_count": 1,
+            "operator_outbox_latest_open_id": "outbox-1",
+        }
         second = {
-            "operator_outbox": {"ok": True, "open_count": 2},
+            "operator_outbox": {"ok": True, "open_count": 2, "operator_actionable_open_count": 2},
             "operator_outbox_open_count": 2,
+            "operator_outbox_actionable_open_count": 2,
             "operator_outbox_latest_open_id": "outbox-2",
         }
 
@@ -1669,6 +1741,77 @@ class TestWorkTreeSignalIngestionService(unittest.TestCase):
         self.assertEqual(len(open_tasks), 1)
         self.assertEqual(open_tasks[0].task_id, held_task_id)
         self.assertEqual(open_tasks[0].title, "Hold source-root branch for operator judgment")
+
+    def test_source_root_sequence_operator_response_prevents_hold_churn(self) -> None:
+        status_payload = {
+            "source_root_inventory": {
+                "gap_count": 1,
+                "ok": False,
+                "unclassified_source_files": [".vscode/tasks.json"],
+                "unwired_roots": [],
+                "missing_evidence_roots": [],
+            },
+            "source_root_inventory_ok": False,
+            "source_root_inventory_gap_count": 1,
+        }
+
+        self.service.sync_status_snapshot(status_payload)
+        branch = next(
+            item for item in self._signal_branches()
+            if str(item.source_type or "") == "source_root_inventory"
+        )
+
+        for _ in range(8):
+            open_tasks = [
+                task for task in work_tree.list_branch_tasks(branch.branch_id)
+                if task.status not in {work_tree.TaskStatus.COMPLETE, work_tree.TaskStatus.DROPPED}
+            ]
+            self.assertTrue(open_tasks)
+            task = open_tasks[0]
+            expected_tool = str((task.meta or {}).get("expected_tool") or "read")
+            if expected_tool == "source_root_judgment":
+                result = (
+                    "Source Root Judgment\n"
+                    "- verdict: gap_confirmed\n"
+                    "- ok: True\n"
+                    f"- branch: {branch.branch_id}\n"
+                )
+            else:
+                result = {"ok": True, "evidence": task.title}
+            work_tree.record_task_evidence(
+                branch_id=branch.branch_id,
+                task_id=task.task_id,
+                tool_name=expected_tool,
+                tool_args=list((task.meta or {}).get("tool_args") or []),
+                result=result,
+            )
+            work_tree.mark_task_complete(task.task_id)
+            self.service.sync_status_snapshot(status_payload)
+            if expected_tool == "source_root_judgment":
+                break
+
+        hold_task = next(
+            task for task in work_tree.list_branch_tasks(branch.branch_id)
+            if task.status == work_tree.TaskStatus.BLOCKED
+            and task.title == "Hold source-root branch for operator judgment"
+        )
+        work_tree.record_task_evidence(
+            branch_id=branch.branch_id,
+            task_id=hold_task.task_id,
+            tool_name="operator_response",
+            tool_args=["operator-accepted-gap"],
+            result={"operator_response": "Operator accepted the remaining gap for co-build unblock."},
+        )
+        work_tree.mark_task_complete(hold_task.task_id)
+
+        self.service.sync_status_snapshot(status_payload)
+
+        open_tasks = [
+            task for task in work_tree.list_branch_tasks(branch.branch_id)
+            if task.status not in {work_tree.TaskStatus.COMPLETE, work_tree.TaskStatus.DROPPED}
+        ]
+        self.assertEqual(open_tasks, [])
+        self.assertEqual(work_tree.get_branch(branch.branch_id).resolution_state, "observing")
 
     def test_source_root_sequence_routes_failed_evidence_to_judgment(self) -> None:
         status_payload = {
@@ -3350,6 +3493,13 @@ class TestWorkTreeSignalIngestionService(unittest.TestCase):
 
 
 class TestSourceRootInventorySignalHelpers(unittest.TestCase):
+    def test_policy_gates_does_not_treat_missing_allow_domain_count_as_zero(self) -> None:
+        self.assertIsNone(_policy_gates_signal_from_status({"web_enabled": True}))
+
+        signal = _policy_gates_signal_from_status({"web_enabled": True, "allow_domains_count": 0})
+        self.assertIsNotNone(signal)
+        self.assertIn("web_enabled_without_allow_domains", signal["payload"]["reasons"])
+
     def test_looks_like_source_root_file_gap_detects_paths_and_suffixes(self) -> None:
         self.assertTrue(_looks_like_source_root_file_gap("updates/approvals.jsonl"))
         self.assertTrue(_looks_like_source_root_file_gap("NYO-Nova-Autostart.ps1"))
@@ -3436,6 +3586,42 @@ class TestSourceRootInventorySignalHelpers(unittest.TestCase):
             }
         )
         self.assertIsNone(signal)
+
+class TestMissionAmbientGovernanceSuppression(unittest.TestCase):
+    def test_quiet_hold_suppresses_ambient_root_closure_signals(self) -> None:
+        status_payload = {
+            "alerts": [],
+            "nova_mission": {
+                "enabled": True,
+                "mode": "steady_state_guard",
+                "action": "hold",
+                "actionable_fresh_gap_signal_count": 0,
+            },
+            "root_closure_inventory": {
+                "ok": False,
+                "gap_count": 1,
+                "roots": [{"root_id": "model_runtime", "ok": False, "gaps": ["missing_status"]}],
+            },
+            "self_repair_closure_inventory": {
+                "ok": False,
+                "gap_count": 1,
+                "roots": [{"root_id": "release", "ok": False, "gaps": ["missing_tool"]}],
+            },
+            "source_root_inventory": {
+                "ok": False,
+                "gap_count": 1,
+                "files": [{"path": "services/example.py", "classification": "unclassified"}],
+            },
+        }
+
+        service = WorkTreeSignalIngestionService()
+        signals = service.ingest_status_snapshot(status_payload)
+        sources = {str(item.get("source") or "") for item in signals}
+
+        self.assertNotIn("root_closure_inventory", sources)
+        self.assertNotIn("self_repair_closure_inventory", sources)
+        self.assertNotIn("source_root_inventory", sources)
+
 
 class TestReleaseDriftClosureSuppression(unittest.TestCase):
     def test_root_closure_signals_suppressed_during_release_drift(self) -> None:

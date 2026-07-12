@@ -325,6 +325,55 @@ class TestRuntimeControlService(unittest.TestCase):
         self.assertIsInstance(payload.get("last_temporal_feed"), dict)
         self.assertEqual(payload.get("last_temporal_feed"), {})
 
+    def test_autonomy_maintenance_summary_preserves_mission_and_owner_pressure(self):
+        runtime_processes = SimpleNamespace(
+            logical_service_processes=lambda _script: [],
+            select_logical_process=lambda logical, pid=None, create_time=None: None,
+        )
+        mission = {
+            "status": "validation_required",
+            "action": "hold",
+            "green_cycle": False,
+            "truth_ready": False,
+            "truth_blockers": ["core_gate_release_drift"],
+            "owner_verdicts": [
+                {
+                    "owner": "core_thinning",
+                    "ready": False,
+                    "blocks_green": False,
+                    "blockers": [{"owner": "core_thinning", "code": "core_http_thinning_pressure"}],
+                }
+            ],
+            "owner_blockers": [
+                {"owner": "core_thinning", "code": "core_http_thinning_pressure"},
+            ],
+            "green_blockers": [
+                {"owner": "layer_maturity", "code": "core_gate_release_drift"},
+            ],
+            "blocking_owner_count": 1,
+        }
+        state = {
+            "runtime_worker": {"last_cycle_status": "ok"},
+            "last_nova_mission": mission,
+            "nova_mission_history": [{"status": "validation_required"}],
+            "nova_mission_sustained_watch": True,
+            "nova_mission_watch_streak": 6,
+            "last_core_thinning_sync": {"status": "ok", "order_count": 19},
+        }
+
+        payload = RUNTIME_CONTROL_SERVICE.autonomy_maintenance_summary(
+            state_payload=state,
+            maintenance_py=Path("c:/Nova/autonomy_maintenance.py"),
+            runtime_processes_module=runtime_processes,
+            strftime_fn=lambda _fmt: "2026-07-11",
+        )
+
+        self.assertEqual(payload.get("last_nova_mission"), mission)
+        self.assertEqual(payload.get("nova_mission_history"), [{"status": "validation_required"}])
+        self.assertTrue(payload.get("nova_mission_sustained_watch"))
+        self.assertEqual(payload.get("nova_mission_watch_streak"), 6)
+        self.assertEqual(payload.get("last_core_thinning_sync"), {"status": "ok", "order_count": 19})
+
     def test_runtime_artifact_show_action_preserves_message_and_detail(self):
         ok, msg, extra, detail = RUNTIME_CONTROL_SERVICE.runtime_artifact_show_action(
             {"artifact": "guard.log", "lines": 20},
@@ -443,6 +492,40 @@ class TestRuntimeControlService(unittest.TestCase):
         self.assertTrue(ok)
         self.assertEqual(msg, "webui_start_requested")
         self.assertEqual(calls[0][1], 1.5)
+
+    def test_restart_guard_clears_stop_flag_before_delayed_start(self):
+        calls = []
+        intents = []
+
+        class _IntentService:
+            @staticmethod
+            def write_pending_intent(path, **kwargs):
+                intents.append((path, kwargs))
+                return {"ok": True}
+
+        ok, msg = RUNTIME_CONTROL_SERVICE.restart_guard(
+            venv_python=Path("c:/Nova/.venv/Scripts/python.exe"),
+            guard_py=Path("c:/Nova/nova_guard.py"),
+            base_dir=Path("c:/Nova"),
+            guard_status_fn=lambda include_fallback_scan=True: {"running": True},
+            core_status_fn=lambda: {"running": True},
+            stop_guard_fn=lambda: (True, "guard_stop_requested"),
+            schedule_detached_start_fn=(
+                lambda command, delay_seconds=0.0, cwd=None, remove_before_start=None:
+                calls.append((command, delay_seconds, cwd, remove_before_start))
+                or (True, "delayed_start_scheduled")
+            ),
+            start_guard_fn=lambda: (True, "guard_start_requested"),
+            restart_intent_path=Path("c:/Nova/runtime/restart_intent.json"),
+            restart_provenance_service=_IntentService(),
+        )
+
+        self.assertTrue(ok)
+        self.assertEqual(msg, "guard_restart_requested:guard_stop_requested")
+        self.assertEqual(calls[0][1], 2.0)
+        self.assertEqual(calls[0][2], Path("c:/Nova"))
+        self.assertEqual(calls[0][3], [Path("c:/Nova/runtime/guard.stop")])
+        self.assertEqual(intents[0][1]["action"], "guard_restart")
 
     def test_start_autonomy_maintenance_worker_starts_detached_loop(self):
         calls = []

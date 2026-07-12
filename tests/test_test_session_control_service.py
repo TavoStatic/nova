@@ -380,6 +380,44 @@ class TestTestSessionControlService(unittest.TestCase):
         self.assertEqual(msg, "generated_work_queue_clear")
         self.assertEqual(extra.get("selected"), {})
 
+    def test_run_next_generated_work_queue_item_treats_reported_drift_as_evidence(self):
+        queue_calls = []
+
+        def queue(limit):
+            queue_calls.append(limit)
+            if len(queue_calls) == 1:
+                return {
+                    "next_item": {"file": "drift.json"},
+                    "open_count": 1,
+                    "actionable_count": 1,
+                }
+            return {
+                "next_item": {},
+                "open_count": 0,
+                "actionable_count": 0,
+            }
+
+        ok, msg, extra = TEST_SESSION_CONTROL_SERVICE.run_next_generated_work_queue_item(
+            generated_work_queue_fn=queue,
+            run_test_session_definition_fn=lambda session_file: (
+                False,
+                f"test_session_run_failed:{session_file}:exit:1",
+                {
+                    "latest_report": {
+                        "run_id": "drift-run",
+                        "status": "drift",
+                        "report_path": "runtime/test_sessions/drift-run/result.json",
+                    }
+                },
+            ),
+        )
+
+        self.assertTrue(ok)
+        self.assertEqual(msg, "generated_work_queue_next_ok:drift.json")
+        self.assertFalse(extra.get("runner_ok"))
+        self.assertEqual((extra.get("latest_report") or {}).get("status"), "drift")
+        self.assertEqual((extra.get("work_queue") or {}).get("actionable_count"), 0)
+
     def test_generated_pack_run_action_uses_payload_limit_and_mode(self):
         captured = {}
 

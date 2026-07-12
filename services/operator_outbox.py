@@ -30,7 +30,36 @@ def _safe_set(value: Any) -> set[str]:
 NOTICE_STATUSES = {"new", "seen", "answered", "resolved", "dismissed", "stale"}
 CLOSED_NOTICE_STATUSES = {"resolved", "dismissed", "stale"}
 RESPONSE_RESOLUTIONS = {"evidence_only", "continue_work", "task_resolved", "dismissed", "stale"}
-AUTONOMY_INTERNAL_WAIT_REASONS = {"cooldown_active"}
+AUTONOMY_INTERNAL_WAIT_REASONS = {
+    "cooldown_active",
+    "mission_steady_state_hold",
+    "mission_green_cycle_hold",
+    "mission_validation_required_hold",
+    "operator_hold_pending",
+}
+INTERNAL_OUTBOX_SOURCES = frozenset({"autonomy_maintenance"})
+
+
+def _autonomy_internal_wait_reason(reason: str) -> bool:
+    text = _safe_text(reason, 120)
+    return (
+        text in AUTONOMY_INTERNAL_WAIT_REASONS
+        or text.startswith("mission_truth_blocker:")
+        or text.startswith("mission_owner_blocker:")
+    )
+
+
+def _operator_actionable_open_events(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    actionable: list[dict[str, Any]] = []
+    for event in _safe_list(events):
+        if not isinstance(event, dict):
+            continue
+        if _safe_status(event.get("status")) in CLOSED_NOTICE_STATUSES:
+            continue
+        if _safe_text(event.get("source"), 120) in INTERNAL_OUTBOX_SOURCES:
+            continue
+        actionable.append(event)
+    return actionable
 SUMMARY_PAYLOAD_KEYS = {
     "action",
     "action_type",
@@ -323,20 +352,30 @@ class OperatorOutboxService:
             event for event in all_events
             if _safe_status(event.get("status")) not in CLOSED_NOTICE_STATUSES
         ]
+        actionable_open_events = _operator_actionable_open_events(all_events)
         raw_visible_open_events = open_events[-result_limit:]
         visible_open_events = [self._summary_event(event) for event in raw_visible_open_events]
         latest_open_raw = open_events[-1] if open_events else {}
         latest_open = self._summary_event(latest_open_raw) if latest_open_raw else {}
+        latest_actionable_raw = actionable_open_events[-1] if actionable_open_events else {}
+        latest_actionable = (
+            self._summary_event(latest_actionable_raw) if latest_actionable_raw else {}
+        )
         return {
             "ok": True,
             "count": len(events),
             "total_count": len(all_events),
             "open_count": len(open_events),
+            "operator_actionable_open_count": len(actionable_open_events),
             "status_counts": status_counts,
             "latest_id": str(latest_raw.get("id") or latest.get("id") or ""),
             "latest": latest,
             "latest_open_id": str(latest_open_raw.get("id") or latest_open.get("id") or ""),
             "latest_open": latest_open,
+            "operator_actionable_latest_open_id": str(
+                latest_actionable_raw.get("id") or latest_actionable.get("id") or ""
+            ),
+            "operator_actionable_latest_open": latest_actionable,
             "open_events": visible_open_events,
             "events": events,
         }
@@ -409,6 +448,13 @@ class OperatorOutboxService:
         rows = existing[-max(0, int(max_events or 1) - 1) :] + [event]
         self._write_events(path, rows)
         return {"ok": True, "deduped": False, "event": event}
+
+    @staticmethod
+    def blocked_work_dedupe_key(*, tree_id: str, branch_id: str, blocked_reason: str) -> str:
+        return (
+            f"work_tree|blocked_task|{_safe_text(tree_id, 120)}|"
+            f"{_safe_text(branch_id, 120)}|{_safe_text(blocked_reason, 220) or 'blocked'}"
+        )
 
     @staticmethod
     def work_tree_target_from_event(event: dict[str, Any]) -> dict[str, str]:
@@ -1212,7 +1258,11 @@ class OperatorOutboxService:
                         "severity": "attention",
                         "title": title,
                         "message": message,
-                        "dedupe_key": f"work_tree|blocked_task|{tree_id}|{node_branch_id}|{node_task_id}|{reason}",
+                        "dedupe_key": self.blocked_work_dedupe_key(
+                            tree_id=tree_id,
+                            branch_id=node_branch_id,
+                            blocked_reason=reason,
+                        ),
                         "payload": self._work_tree_notice_payload(
                             tree_id=tree_id,
                             tree_title=tree_title,
@@ -1263,7 +1313,7 @@ class OperatorOutboxService:
             decision in {"defer_with_reason", "defer"}
             and result in {"", "blocked"}
             and rejection_reasons
-            and set(rejection_reasons).issubset(AUTONOMY_INTERNAL_WAIT_REASONS)
+            and all(_autonomy_internal_wait_reason(reason) for reason in rejection_reasons)
             and not requires_ack
         ):
             return {}

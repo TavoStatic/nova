@@ -27,6 +27,7 @@ from services.regression_lanes import COMPACT_REGRESSION_LANES
 from services.regression_lanes import SOURCE_PROFILE_LANES
 
 REGRESSION_STATUS_FILE = BASE / "runtime" / "regression_status.json"
+REGRESSION_LOCK_FILE = BASE / "runtime" / "regression.lock"
 
 COMPILE_TARGETS = [
     "nova_core.py",
@@ -41,6 +42,8 @@ TEST_LANES: dict[str, list[str]] = {
     lane: list(targets)
     for lane, targets in COMPACT_REGRESSION_LANES.items()
 }
+CANONICAL_REGRESSION_LANES = list(TEST_LANES.keys())
+_REGRESSION_LOCK_DEPTH = 0
 
 
 def run_step(name: str, cmd: list[str]) -> int:
@@ -175,6 +178,18 @@ def run_test_lane(lane: str, *, verbosity: int = 1) -> int:
     return 1
 
 
+def _is_canonical_regression_lane_set(lanes: list[str]) -> bool:
+    return set(str(lane) for lane in lanes) == set(CANONICAL_REGRESSION_LANES)
+
+
+def _should_publish_regression_status(*, lanes: list[str], status: str, returncode: int) -> bool:
+    if int(returncode or 0) != 0:
+        return True
+    if str(status or "").strip().upper() != "OK":
+        return True
+    return _is_canonical_regression_lane_set(lanes)
+
+
 def write_regression_status(
     *,
     status: str,
@@ -243,6 +258,70 @@ def _regression_profile_status_extra(payload: dict) -> dict:
     }
 
 
+def _pid_alive(pid: int) -> bool:
+    if int(pid or 0) <= 0:
+        return False
+    if os.name == "nt":
+        import ctypes
+
+        handle = ctypes.windll.kernel32.OpenProcess(0x1000, False, int(pid))
+        if handle:
+            ctypes.windll.kernel32.CloseHandle(handle)
+            return True
+        return False
+    try:
+        os.kill(int(pid), 0)
+        return True
+    except OSError:
+        return False
+
+
+def _read_regression_lock() -> dict:
+    try:
+        payload = json.loads(REGRESSION_LOCK_FILE.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _acquire_regression_lock(*, lanes: list[str]) -> tuple[bool, str]:
+    global _REGRESSION_LOCK_DEPTH
+    REGRESSION_LOCK_FILE.parent.mkdir(parents=True, exist_ok=True)
+    existing = _read_regression_lock()
+    existing_pid = int(existing.get("pid", 0) or 0)
+    if existing_pid == int(os.getpid()) and _REGRESSION_LOCK_DEPTH > 0:
+        _REGRESSION_LOCK_DEPTH += 1
+        return True, ""
+    if existing_pid and _pid_alive(existing_pid):
+        owner_lanes = ", ".join(str(item) for item in list(existing.get("lanes") or []))
+        started_at = str(existing.get("started_at") or "").strip()
+        return False, f"regression already running (pid={existing_pid}, lanes={owner_lanes or 'unknown'}, started_at={started_at or 'unknown'})"
+    payload = {
+        "pid": os.getpid(),
+        "started_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "started_at_epoch": time.time(),
+        "lanes": [str(lane) for lane in lanes],
+    }
+    REGRESSION_LOCK_FILE.write_text(json.dumps(payload, ensure_ascii=True, indent=2), encoding="utf-8")
+    _REGRESSION_LOCK_DEPTH = 1
+    return True, ""
+
+
+def _release_regression_lock() -> None:
+    global _REGRESSION_LOCK_DEPTH
+    if _REGRESSION_LOCK_DEPTH > 1:
+        _REGRESSION_LOCK_DEPTH -= 1
+        return
+    _REGRESSION_LOCK_DEPTH = 0
+    existing = _read_regression_lock()
+    if int(existing.get("pid", 0) or 0) != int(os.getpid()):
+        return
+    try:
+        REGRESSION_LOCK_FILE.unlink(missing_ok=True)
+    except Exception:
+        pass
+
+
 def audit_validation_artifacts_after_green_run(*, window_start_epoch: float, window_end_epoch: float) -> dict:
     return VALIDATION_ARTIFACT_TRUTH_SERVICE.payload(
         runtime_dir=BASE / "runtime",
@@ -257,13 +336,25 @@ def audit_validation_artifacts_after_green_run(*, window_start_epoch: float, win
 
 
 def main(argv: list[str] | None = None) -> int:
-    run_started_epoch = time.time()
     args = parse_args(argv)
     if args.list_lanes:
         print_available_lanes()
         return 0
 
     selected_lanes = resolve_requested_lanes(args)
+    acquired, lock_reason = _acquire_regression_lock(lanes=selected_lanes)
+    if not acquired:
+        print(f"[FAIL] {lock_reason}")
+        return 2
+
+    try:
+        return _run_regression_main(selected_lanes, args)
+    finally:
+        _release_regression_lock()
+
+
+def _run_regression_main(selected_lanes: list[str], args: argparse.Namespace) -> int:
+    run_started_epoch = time.time()
     profile_inventory = build_regression_profile_inventory_payload(root=BASE, test_lanes=SOURCE_PROFILE_LANES)
     profile_status_extra = _regression_profile_status_extra(profile_inventory)
     steps = [
@@ -301,21 +392,25 @@ def main(argv: list[str] | None = None) -> int:
         llm_count = int(validation_truth.get("current_window_llm_unavailable_count", 0) or 0)
         detail = f"validation_artifact_truth:{status};failures={failure_count};llm_unavailable={llm_count}"
         print(f"[FAIL] {detail}")
-        write_regression_status(
-            status="FAILED",
-            lanes=selected_lanes,
-            returncode=1,
-            detail=detail,
-            extra={**profile_status_extra, **_validation_artifact_status_extra(validation_truth)},
-        )
+        if _should_publish_regression_status(lanes=selected_lanes, status="FAILED", returncode=1):
+            write_regression_status(
+                status="FAILED",
+                lanes=selected_lanes,
+                returncode=1,
+                detail=detail,
+                extra={**profile_status_extra, **_validation_artifact_status_extra(validation_truth)},
+            )
         return 1
 
-    write_regression_status(
-        status="OK",
-        lanes=selected_lanes,
-        returncode=0,
-        extra={**profile_status_extra, **_validation_artifact_status_extra(validation_truth)},
-    )
+    if _should_publish_regression_status(lanes=selected_lanes, status="OK", returncode=0):
+        write_regression_status(
+            status="OK",
+            lanes=selected_lanes,
+            returncode=0,
+            extra={**profile_status_extra, **_validation_artifact_status_extra(validation_truth)},
+        )
+    else:
+        print("[INFO] Partial regression lane pass did not overwrite canonical regression_status.json")
     return 0
 
 

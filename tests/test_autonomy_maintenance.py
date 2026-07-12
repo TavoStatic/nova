@@ -1289,6 +1289,12 @@ class TestAutonomyMaintenance(unittest.TestCase):
                      "_guard_health_for_orchestrator",
                      return_value={"running": True, "status": "running"},
                  ), \
+                 mock.patch.object(
+                     autonomy_maintenance,
+                     "_webui_health_for_orchestrator",
+                     return_value={"running": False, "status": "stopped", "http_ok": False, "port_open": False},
+                 ), \
+                 mock.patch.object(autonomy_maintenance, "_active_work_tree_candidates", return_value=[]), \
                  mock.patch.object(autonomy_maintenance, "_autonomy_policy_settings", return_value={"enabled": True, "mode": "advisory"}):
                 packet = autonomy_maintenance._run_autonomy_orchestrator_advisory(state, {"mode": "enforce"})
 
@@ -1330,6 +1336,377 @@ class TestAutonomyMaintenance(unittest.TestCase):
         self.assertEqual(maintenance.get("worker_status"), "stopped")
         self.assertTrue(maintenance.get("worker_stale_identity"))
         self.assertFalse(maintenance.get("scheduler_active"))
+
+    def test_orchestrator_input_envelope_green_cycle_includes_mission_snapshot(self):
+        from services.layer_maturity_policy import CORE_GATE_ROOT_IDS
+
+        truth_evidence = {
+            "validation_artifact_truth": {"ok": True, "status": "ok", "hidden_by_green_regression": False},
+            "last_regression_status": "OK",
+            "last_regression_stale": False,
+            "release_runtime_truth": {
+                "running_build_identity": "nyo-base:rc:work-tree",
+                "latest_source_changed_after_build": False,
+                "runtime_drift_tolerated": False,
+            },
+            "release_status": {
+                "latest_artifact_name": "nyo-base:rc:work-tree",
+                "latest_source_changed_after_build": False,
+            },
+            "root_closure_inventory": {
+                "ok": True,
+                "gap_count": 0,
+                "roots": [
+                    {"root_id": root_id, "ok": True, "gaps": []}
+                    for root_id in CORE_GATE_ROOT_IDS
+                ],
+            },
+        }
+        with mock.patch.object(
+            autonomy_maintenance,
+            "_truth_evidence_for_mission",
+            return_value=truth_evidence,
+        ), mock.patch.object(
+            autonomy_maintenance,
+            "_triage_hints_for_orchestrator",
+            return_value={
+                "approved_review_count": 0,
+                "source": "core_steward_pulse",
+                "source_freshness_sec": 0,
+            },
+        ):
+            envelope = autonomy_maintenance._autonomy_orchestrator_input_envelope(
+                state={},
+                core_steward={
+                    "score": 100,
+                    "level": "strong",
+                    "runtime": {
+                        "heartbeat": {"ok": True},
+                        "core_state": {"ok": True},
+                    },
+                    "autonomy_maintenance": {
+                        "worker_status": "running",
+                        "worker_active": True,
+                    },
+                    "pulse": {"fallback_overuse_score": 0.0},
+                },
+                work_tree_state={"ok": True, "counts": {}, "trees": []},
+                generated_queue={
+                    "status": "clear",
+                    "open_count": 0,
+                    "actionable_count": 0,
+                    "blocked_count": 0,
+                    "drift_count": 0,
+                },
+                guard_health={"running": True, "status": "running"},
+                policy_snapshot={
+                    "autonomy_enabled": True,
+                    "execute_enabled": True,
+                    "mission": {
+                        "enabled": True,
+                        "mode": "steady_state_guard",
+                        "objective": "hold_steady_and_surface_fresh_gaps",
+                        "release_stale_ready_is_pressure": False,
+                    },
+                },
+            )
+
+        mission = envelope.get("mission_snapshot") or {}
+        self.assertTrue(bool(mission))
+        self.assertEqual(mission.get("status"), "green")
+        self.assertTrue(bool(mission.get("green_cycle")))
+        self.assertEqual((envelope.get("triage_hints") or {}).get("mission_snapshot"), mission)
+
+    def test_mission_hold_blocks_legacy_generated_queue_execution(self):
+        self.assertTrue(
+            autonomy_maintenance._mission_hold_blocks_generated_queue(
+                {
+                    "enabled": True,
+                    "mode": "steady_state_guard",
+                    "green_cycle": True,
+                    "action": "hold",
+                }
+            )
+        )
+        self.assertTrue(
+            autonomy_maintenance._mission_hold_blocks_generated_queue(
+                {
+                    "enabled": True,
+                    "mode": "steady_state_guard",
+                    "green_cycle": False,
+                    "status": "validation_required",
+                    "action": "hold",
+                }
+            )
+        )
+        self.assertFalse(
+            autonomy_maintenance._mission_hold_blocks_generated_queue(
+                {
+                    "enabled": True,
+                    "mode": "steady_state_guard",
+                    "green_cycle": False,
+                    "status": "validation_required",
+                    "action": "hold",
+                    "truth_ready": False,
+                    "truth_blockers": ["generated_queue_untested"],
+                    "green_blockers": [
+                        {
+                            "owner": "generated_queue",
+                            "code": "generated_queue_untested",
+                            "source": "generated_work_queue",
+                        }
+                    ],
+                    "validation_fresh": True,
+                    "regression_current": True,
+                    "release_truth_current": True,
+                    "generated_queue_untested_count": 2,
+                }
+            )
+        )
+        self.assertTrue(
+            autonomy_maintenance._mission_hold_blocks_generated_queue(
+                {
+                    "enabled": True,
+                    "mode": "steady_state_guard",
+                    "green_cycle": False,
+                    "status": "validation_required",
+                    "action": "hold",
+                    "truth_ready": False,
+                    "truth_blockers": ["validation_truth_missing", "generated_queue_untested"],
+                    "green_blockers": [
+                        {"owner": "validation", "code": "validation_truth_missing"},
+                        {"owner": "generated_queue", "code": "generated_queue_untested"},
+                    ],
+                    "validation_fresh": False,
+                    "regression_current": True,
+                    "release_truth_current": True,
+                    "generated_queue_untested_count": 2,
+                }
+            )
+        )
+        self.assertFalse(
+            autonomy_maintenance._mission_hold_blocks_generated_queue(
+                {
+                    "enabled": True,
+                    "mode": "steady_state_guard",
+                    "green_cycle": False,
+                    "action": "investigate",
+                }
+            )
+        )
+
+    def test_mission_hold_blocks_legacy_active_work_tree_execution(self):
+        state = {}
+        mission = {
+            "enabled": True,
+            "mode": "steady_state_guard",
+            "green_cycle": False,
+            "status": "validation_required",
+            "action": "hold",
+        }
+
+        with mock.patch.object(autonomy_maintenance, "_run_active_work_tree_cycle") as mocked_run:
+            payload = autonomy_maintenance._active_work_tree_cycle_for_execution_mode(
+                state,
+                mission_snapshot=mission,
+                autonomy_orchestrator={},
+                legacy_execution_enabled=True,
+            )
+
+        mocked_run.assert_not_called()
+        self.assertEqual(payload.get("status"), "skipped")
+        self.assertEqual(payload.get("reason"), "mission_steady_state_hold")
+        self.assertEqual(state.get("last_active_work_tree_cycle"), payload)
+
+    def test_mission_green_hold_allows_targeted_core_thinning_execution(self):
+        state = {}
+        mission = {
+            "enabled": True,
+            "mode": "steady_state_guard",
+            "green_cycle": True,
+            "truth_ready": True,
+            "status": "green",
+            "action": "hold",
+        }
+        candidate = {
+            "tree_id": "tree-core",
+            "title": "Core Thinning",
+            "status": "active",
+            "kind": "core_thinning",
+            "next_step": {
+                "branch_id": "branch-core",
+                "task_id": "task-core",
+                "branch_title": "Review wrapper shim",
+                "recommended_tool": "core_thinning",
+            },
+        }
+
+        with mock.patch.object(autonomy_maintenance, "_active_work_tree_candidates", return_value=[candidate]), \
+             mock.patch.object(autonomy_maintenance, "_run_active_work_tree_cycle", return_value={"status": "ok"}) as mocked_run:
+            payload = autonomy_maintenance._active_work_tree_cycle_for_execution_mode(
+                state,
+                mission_snapshot=mission,
+                autonomy_orchestrator={},
+                legacy_execution_enabled=True,
+            )
+
+        mocked_run.assert_called_once_with(
+            state,
+            max_steps=1,
+            max_trees=1,
+            target_tree_id="tree-core",
+            target_branch_id="branch-core",
+            target_task_id="task-core",
+            target_tool="core_thinning",
+        )
+        self.assertEqual(payload.get("status"), "ok")
+
+    def test_release_drift_hold_allows_targeted_core_thinning_execution(self):
+        state = {}
+        mission = {
+            "enabled": True,
+            "mode": "steady_state_guard",
+            "green_cycle": False,
+            "truth_ready": False,
+            "status": "validation_required",
+            "action": "hold",
+            "truth_blockers": ["core_gate_release_drift"],
+            "green_blockers": [{"owner": "layer_maturity", "code": "core_gate_release_drift"}],
+            "owner_verdicts": [
+                {
+                    "owner": "release",
+                    "ready": True,
+                    "evidence": {
+                        "runtime_drift_expected": True,
+                        "runtime_drift_tolerated": True,
+                    },
+                }
+            ],
+            "validation_fresh": True,
+            "regression_current": True,
+            "release_truth_current": True,
+            "core_gate": {"ok": False, "drift_blocked": True, "missing_roots": []},
+            "generated_queue_untested_count": 0,
+        }
+        candidate = {
+            "tree_id": "tree-core",
+            "title": "Core Thinning",
+            "status": "active",
+            "kind": "core_thinning",
+            "next_step": {
+                "branch_id": "branch-core",
+                "task_id": "task-core",
+                "branch_title": "Review wrapper shim",
+                "recommended_tool": "core_thinning",
+            },
+        }
+
+        with mock.patch.object(autonomy_maintenance, "_active_work_tree_candidates", return_value=[candidate]), \
+             mock.patch.object(autonomy_maintenance, "_run_active_work_tree_cycle", return_value={"status": "ok"}) as mocked_run:
+            payload = autonomy_maintenance._active_work_tree_cycle_for_execution_mode(
+                state,
+                mission_snapshot=mission,
+                autonomy_orchestrator={},
+                legacy_execution_enabled=True,
+            )
+
+        mocked_run.assert_called_once_with(
+            state,
+            max_steps=1,
+            max_trees=1,
+            target_tree_id="tree-core",
+            target_branch_id="branch-core",
+            target_task_id="task-core",
+            target_tool="core_thinning",
+        )
+        self.assertEqual(payload.get("status"), "ok")
+
+    def test_autonomy_orchestrator_status_for_signal_ingestion_includes_execution_failure(self):
+        payload = autonomy_maintenance._autonomy_orchestrator_status_for_signal_ingestion(
+            {
+                "last_autonomy_orchestrator": {
+                    "decision": "recommend_action",
+                    "decision_type": "RecommendAction",
+                    "recommended_action": {
+                        "action_type": "active_work_tree_run_next",
+                        "target_id": "branch-core",
+                        "target_step_id": "task-core",
+                        "target_tree_id": "tree-core",
+                        "recommended_tool": "core_thinning",
+                    },
+                    "ledger_status": "recorded",
+                },
+                "last_autonomy_execution": {
+                    "action_type": "active_work_tree_run_next",
+                    "target_id": "branch-core",
+                    "target_step_id": "task-core",
+                    "result": "failed",
+                    "message": "active_work_tree_run_next_invalid_decision",
+                    "extra": {"cycle": {"status": "invalid_decision"}},
+                },
+            }
+        )
+
+        self.assertEqual(payload.get("autonomy_orchestrator_action_type"), "active_work_tree_run_next")
+        self.assertEqual(payload.get("autonomy_orchestrator_execution_result"), "failed")
+        self.assertEqual(payload.get("autonomy_orchestrator_execution_cycle_status"), "invalid_decision")
+        self.assertEqual(payload.get("autonomy_orchestrator_target_tree_id"), "tree-core")
+        self.assertEqual(payload.get("autonomy_orchestrator_recommended_tool"), "core_thinning")
+
+    def test_run_autonomy_orchestrator_persists_mission_snapshot(self):
+        state = {}
+        defer_packet = {
+            "created_at_utc": "2026-07-08T12:00:00Z",
+            "mode": "advisory",
+            "decision_type": "Defer",
+            "decision": "defer_with_reason",
+            "confidence": 0.0,
+            "action": {},
+            "reason": "Mission steady-state guard: green cycle hold.",
+            "explain_text": "Mission steady-state guard: green cycle hold.",
+            "rejection_reasons": ["mission_green_cycle_hold"],
+            "ledger": {"status": "not_requested", "row": {}},
+        }
+        green_mission = {
+            "enabled": True,
+            "mode": "steady_state_guard",
+            "objective": "hold_steady_and_surface_fresh_gaps",
+            "status": "green",
+            "action": "hold",
+            "green_cycle": True,
+            "headline": "steady governance cycle; no fresh gap pressure",
+            "fresh_gap_signal_count": 0,
+            "source": "services.nova_mission",
+        }
+        with mock.patch.object(
+            autonomy_maintenance,
+            "_autonomy_orchestrator_input_envelope",
+            return_value={
+                "cycle_id": "autonomy-maintenance-test",
+                "mission_snapshot": green_mission,
+                "triage_hints": {"mission_snapshot": green_mission},
+            },
+        ), mock.patch.object(
+            autonomy_maintenance.AUTONOMY_ORCHESTRATOR_SERVICE,
+            "evaluate_next_action",
+            return_value=defer_packet,
+        ), mock.patch.object(
+            autonomy_maintenance,
+            "_execute_autonomy_recommendation",
+            return_value={"result": "skipped"},
+        ), mock.patch.object(
+            autonomy_maintenance,
+            "_publish_operator_notice_from_autonomy",
+            return_value={},
+        ), mock.patch.object(
+            autonomy_maintenance,
+            "_publish_operator_notices_from_work_tree",
+            return_value=[],
+        ):
+            autonomy_maintenance._run_autonomy_orchestrator_advisory(state, {"mode": "enforce"})
+
+        self.assertEqual(state.get("last_nova_mission"), green_mission)
+        self.assertEqual((state.get("last_autonomy_orchestrator") or {}).get("mission_snapshot"), green_mission)
 
     def test_triage_hints_for_orchestrator_use_live_subconscious_triage(self):
         report = {
@@ -1647,7 +2024,7 @@ class TestAutonomyMaintenance(unittest.TestCase):
 
         self.assertEqual(payload.get("signal_ingestion_status_source"), "control_status_http")
         self.assertEqual((payload.get("release_status") or {}).get("latest_readiness_state"), "source-changed-after-build")
-        self.assertEqual(mocked.call_args.kwargs.get("timeout"), 10.0)
+        self.assertEqual(mocked.call_args_list[0].kwargs.get("timeout"), 10.0)
 
     def test_live_control_status_enriches_missing_model_runtime_keys_from_local_probe(self):
         fallback = {"alerts": [], "autonomy_maintenance": {"last_regression_status": ""}}
@@ -1724,17 +2101,30 @@ class TestAutonomyMaintenance(unittest.TestCase):
             def read(self, _limit):
                 return json.dumps(slim_http).encode("utf-8")
 
+        observe_policy = {
+            "layers": {
+                "leah": {"mode": "observe", "promoted_capabilities": []},
+                "codegen": {"mode": "observe", "promoted_capabilities": []},
+            }
+        }
         with mock.patch.object(autonomy_maintenance, "SIGNAL_INGESTION_STATUS_MODE", "local_first"), \
              mock.patch.object(autonomy_maintenance, "CONTROL_STATUS_SURFACES_TIMEOUT_SEC", 3.0), \
+             mock.patch.object(autonomy_maintenance, "CONTROL_STATUS_TIMEOUT_SEC", 3.0), \
+             mock.patch.object(autonomy_maintenance.nova_core, "load_policy", return_value=observe_policy), \
              mock.patch.object(autonomy_maintenance, "_probe_local_ollama_health", return_value={"ok": True, "server_ok": True}), \
              mock.patch.object(autonomy_maintenance, "_probe_local_port_ownership", return_value={"status": "ok"}), \
-             mock.patch.object(autonomy_maintenance.urllib.request, "urlopen", return_value=_Response()) as mocked:
+             mock.patch.object(autonomy_maintenance.urllib.request, "urlopen", return_value=_Response(), create=True) as mocked:
             payload = autonomy_maintenance._live_control_status_payload_for_signal_ingestion(fallback)
 
         self.assertEqual(payload.get("signal_ingestion_status_source"), "local_first_with_http_surfaces")
         self.assertEqual(payload.get("operator_outbox_open_count"), 2)
         self.assertEqual(payload.get("alerts"), ["operator_outbox_open"])
-        self.assertEqual(mocked.call_args.kwargs.get("timeout"), 3.0)
+        timeouts = [
+            float(call.kwargs.get("timeout"))
+            for call in mocked.call_args_list
+            if call.kwargs.get("timeout") is not None
+        ]
+        self.assertIn(3.0, timeouts)
 
     def test_local_first_status_falls_back_to_local_when_surfaces_fetch_fails(self):
         fallback = {"alerts": [], "autonomy_maintenance": {"last_regression_status": ""}}
@@ -1758,7 +2148,14 @@ class TestAutonomyMaintenance(unittest.TestCase):
     def test_local_dependency_probe_enriches_layer_maturity_observe_mode(self):
         fallback = {"alerts": [], "autonomy_maintenance": {"last_regression_status": ""}}
 
+        observe_policy = {
+            "layers": {
+                "leah": {"mode": "observe", "promoted_capabilities": []},
+                "codegen": {"mode": "observe", "promoted_capabilities": []},
+            }
+        }
         with mock.patch.object(autonomy_maintenance, "SIGNAL_INGESTION_STATUS_MODE", "local_only"), \
+             mock.patch.object(autonomy_maintenance.nova_core, "load_policy", return_value=observe_policy), \
              mock.patch.object(autonomy_maintenance, "_probe_local_ollama_health", return_value={"ok": True, "server_ok": True}), \
              mock.patch.object(autonomy_maintenance, "_probe_local_port_ownership", return_value={"status": "ok"}):
             payload = autonomy_maintenance._live_control_status_payload_for_signal_ingestion(fallback)
@@ -1779,6 +2176,29 @@ class TestAutonomyMaintenance(unittest.TestCase):
         self.assertTrue((payload.get("cli_http_parity") or {}).get("ok"))
         self.assertGreaterEqual(int(payload.get("backend_command_count") or 0), 4)
         self.assertIsInstance(payload.get("backend_commands"), list)
+
+    def test_local_dependency_probe_enriches_runtime_control_surfaces(self):
+        from services.work_tree_signal_ingestion import _control_status_runtime_signals
+
+        fallback = {"alerts": [], "autonomy_maintenance": {"last_regression_status": ""}}
+        guard_status = {"running": True, "status": "running", "pid": 101}
+        core_status = {"running": True, "status": "running", "pid": 202, "heartbeat_age_sec": 2}
+        webui_status = {"running": True, "status": "running", "pid": 303}
+
+        with mock.patch.object(autonomy_maintenance, "SIGNAL_INGESTION_STATUS_MODE", "local_only"), \
+             mock.patch.object(autonomy_maintenance, "_probe_local_ollama_health", return_value={"ok": True, "server_ok": True}), \
+             mock.patch.object(autonomy_maintenance, "_probe_local_port_ownership", return_value={"status": "ok"}), \
+             mock.patch.object(autonomy_maintenance, "_maintenance_guard_status_payload", return_value=guard_status), \
+             mock.patch.object(autonomy_maintenance, "_maintenance_core_status_payload", return_value=core_status), \
+             mock.patch.object(autonomy_maintenance, "_maintenance_webui_status_payload", return_value=webui_status):
+            payload = autonomy_maintenance._live_control_status_payload_for_signal_ingestion(fallback)
+
+        self.assertEqual(payload.get("guard"), guard_status)
+        self.assertEqual(payload.get("core"), core_status)
+        self.assertEqual(payload.get("webui"), webui_status)
+        self.assertTrue(payload.get("maintenance_scheduler_active"))
+        self.assertEqual(int(payload.get("core_heartbeat_age_sec") or 0), 2)
+        self.assertEqual(_control_status_runtime_signals(payload), [])
 
     def test_local_first_preserves_http_root_closure_inventory(self):
         fallback = {"alerts": [], "autonomy_maintenance": {"last_regression_status": ""}}
@@ -1858,10 +2278,18 @@ class TestAutonomyMaintenance(unittest.TestCase):
             "runtime_drift_expected": False,
         }
 
+        release_truth = {
+            "suppress_closure_inventory_signals": False,
+            "latest_readiness_state": "ready",
+            "runtime_drift_expected": False,
+        }
         with mock.patch.object(autonomy_maintenance, "SIGNAL_INGESTION_STATUS_MODE", "local_only"), \
              mock.patch.object(autonomy_maintenance, "_probe_local_ollama_health", return_value={"ok": True, "server_ok": True, "version": "0.12.3", "api_contract_status": "ok", "chat_route_ok": True}), \
              mock.patch.object(autonomy_maintenance, "_probe_local_port_ownership", return_value={"status": "ok"}), \
-             mock.patch.object(autonomy_maintenance, "_local_release_status_for_signal_ingestion", return_value=release_status):
+             mock.patch.object(autonomy_maintenance, "_local_release_status_for_signal_ingestion", return_value=release_status), \
+             mock.patch.object(autonomy_maintenance, "enrich_release_status", side_effect=lambda payload: dict(payload or {})), \
+             mock.patch.object(autonomy_maintenance, "build_release_runtime_truth_summary", return_value=release_truth), \
+             mock.patch("services.layer_maturity_policy.release_drift_suppresses_closure_signals", return_value=False):
             payload = autonomy_maintenance._apply_release_runtime_truth_to_status_payload(
                 autonomy_maintenance._live_control_status_payload_for_signal_ingestion(fallback),
                 state={},
@@ -2818,6 +3246,55 @@ class TestAutonomyMaintenance(unittest.TestCase):
         self.assertEqual(calls, [("read", ["target.txt"])])
         self.assertEqual(work_tree._TASKS[target_task.task_id].status, work_tree.TaskStatus.COMPLETE)
 
+    def test_run_active_work_tree_cycle_uses_target_tree_for_pinned_branch(self):
+        self._isolated_work_tree_db()
+        state = {}
+        signal_tree = work_tree.initialize_tree(
+            "Signal Intake: Runtime Governance",
+            meta={"kind": "signal_ingestion", "source": "runtime_signals", "signal_ingestion": True},
+        )
+        signal_root = work_tree._BRANCHES[signal_tree.root_branch_id]
+        work_tree.add_task_to_branch(
+            signal_root.branch_id,
+            "Read signal path",
+            meta={"expected_tool": "read", "allowed_tools": ["read"], "tool_args": ["signal.txt"]},
+        )
+        work_tree.set_branch_tools(signal_root.branch_id, allowed_tools=["read"], preferred_tool="read")
+
+        core_tree = work_tree.initialize_tree(
+            "Core Thinning",
+            meta={"source": "core_thinning"},
+        )
+        core_root = work_tree._BRANCHES[core_tree.root_branch_id]
+        target_task = work_tree.add_task_to_branch(
+            core_root.branch_id,
+            "Review wrapper shim",
+            meta={"expected_tool": "core_thinning", "allowed_tools": ["core_thinning"], "tool_args": ["core"]},
+        )
+        work_tree.set_branch_tools(core_root.branch_id, allowed_tools=["core_thinning"], preferred_tool="core_thinning")
+        calls = []
+
+        def _execute(tool_name, tool_args=None):
+            calls.append((tool_name, list(tool_args or [])))
+            return {"ok": True}
+
+        with mock.patch.object(autonomy_maintenance.nova_core, "execute_planned_action", side_effect=_execute):
+            payload = autonomy_maintenance._run_active_work_tree_cycle(
+                state,
+                max_steps=1,
+                max_trees=1,
+                target_tree_id=core_tree.tree_id,
+                target_branch_id=core_root.branch_id,
+                target_task_id=target_task.task_id,
+                target_tool="core_thinning",
+                sync_core_thinning=False,
+            )
+
+        self.assertEqual(payload.get("status"), "ok")
+        self.assertEqual(payload.get("target_tree_id"), core_tree.tree_id)
+        self.assertEqual(payload.get("processed")[0].get("tree_id"), core_tree.tree_id)
+        self.assertEqual(calls, [("core_thinning", ["core"])])
+
     def test_operator_continue_work_answer_feeds_next_active_work_tree_cycle(self):
         self._isolated_work_tree_db()
         state = {}
@@ -2905,6 +3382,33 @@ class TestAutonomyMaintenance(unittest.TestCase):
         self.assertIn("operator_response", evidence_tools)
         self.assertIn("memory_bootstrap_judgment", evidence_tools)
         self.assertEqual((inspect or {}).get("counts", {}).get("open_tasks"), 0)
+
+    def test_work_tree_pressure_truth_prefers_module_counts_over_stale_payload(self):
+        with mock.patch(
+            "autonomy_maintenance.build_work_tree_pressure_snapshot_from_module",
+            return_value={
+                "open_task_count": 1,
+                "working_count": 0,
+                "blocked_count": 0,
+                "operator_hold_count": 0,
+                "pending_count": 1,
+                "status": "open",
+            },
+        ):
+            pressure = autonomy_maintenance._work_tree_pressure_truth(
+                {
+                    "counts": {
+                        "open_tasks": 9,
+                        "blocked": 4,
+                        "pending": 3,
+                    },
+                    "trees": [],
+                }
+            )
+
+        self.assertEqual(pressure.get("open_task_count"), 1)
+        self.assertEqual(pressure.get("blocked_branch_count"), 0)
+        self.assertEqual(pressure.get("operator_hold_branch_count"), 0)
 
     def test_work_tree_snapshot_uses_active_candidate_execution_truth(self):
         snapshot = autonomy_maintenance._work_tree_snapshot_for_orchestrator(
@@ -3289,6 +3793,62 @@ class TestAutonomyMaintenance(unittest.TestCase):
         cycle_payload = autonomy_maintenance._run_patch_queue_work_tree_cycle(state)
         self.assertEqual(cycle_payload.get("status"), "idle")
         self.assertEqual(cycle_payload.get("reason"), "no_apply_ready_preview")
+
+    def test_webui_health_requires_live_pid_port_and_http(self):
+        process = {"pid": 4242, "create_time": 1.0, "cmdline": ["python", "nova_http.py"]}
+        with mock.patch.object(autonomy_maintenance.runtime_processes, "logical_service_processes", return_value=[process]), \
+             mock.patch.object(autonomy_maintenance, "_nova_http_direct_process_alive", return_value=True), \
+             mock.patch.object(autonomy_maintenance, "_operator_webui_port_open", return_value=True), \
+             mock.patch.object(autonomy_maintenance.urllib.request, "urlopen", side_effect=TimeoutError("slow")):
+            payload = autonomy_maintenance._webui_health_for_orchestrator()
+
+        self.assertFalse(payload.get("running"))
+        self.assertEqual(payload.get("status"), "degraded")
+        self.assertFalse(payload.get("http_ok"))
+        self.assertTrue(payload.get("port_open"))
+
+    def test_ensure_operator_webui_running_waits_on_transient_degraded_health(self):
+        state = {}
+        health = {"running": False, "pid": 5150, "http_ok": False, "port_open": True}
+        with mock.patch.object(autonomy_maintenance, "_probe_operator_webui_health", return_value=health), \
+             mock.patch.object(autonomy_maintenance, "_nova_http_direct_process_alive", return_value=True), \
+             mock.patch.object(autonomy_maintenance, "_operator_webui_port_open", return_value=True):
+            payload = autonomy_maintenance._ensure_operator_webui_running(state)
+
+        self.assertEqual(payload.get("status"), "degraded")
+        self.assertEqual(payload.get("action"), "wait")
+        self.assertEqual(state.get("operator_webui_degraded_count"), 1)
+
+    def test_ensure_operator_webui_running_uses_launcher_when_port_is_down(self):
+        state = {}
+        health = {"running": False, "pid": None, "http_ok": False, "port_open": False}
+        launcher = autonomy_maintenance.ROOT / "scripts" / "start_webui_detached.py"
+        python_exe = autonomy_maintenance.ROOT / ".venv" / "Scripts" / "python.exe"
+        if not launcher.exists() or not python_exe.exists():
+            self.skipTest("webui launcher prerequisites missing")
+        with mock.patch.object(autonomy_maintenance, "_probe_operator_webui_health", side_effect=[health, {"running": True, "pid": 9001, "http_ok": True, "port_open": True}]), \
+             mock.patch.object(autonomy_maintenance, "_operator_webui_port_open", return_value=False), \
+             mock.patch.object(autonomy_maintenance.subprocess, "run", return_value=mock.Mock(returncode=0)) as mocked_run, \
+             mock.patch.object(autonomy_maintenance.time, "sleep", return_value=None):
+            payload = autonomy_maintenance._ensure_operator_webui_running(state)
+
+        self.assertEqual(payload.get("action"), "started")
+        self.assertEqual(payload.get("status"), "running")
+        command = [str(token) for token in list(mocked_run.call_args.args[0])]
+        self.assertTrue(any("start_webui_detached.py" in token for token in command))
+        self.assertFalse(any("webui-start" in token for token in command))
+
+    def test_ensure_operator_webui_running_never_restarts_over_open_port(self):
+        state = {"operator_webui_degraded_count": 3}
+        health = {"running": False, "pid": 5150, "http_ok": False, "port_open": True}
+        with mock.patch.object(autonomy_maintenance, "_probe_operator_webui_health", return_value=health), \
+             mock.patch.object(autonomy_maintenance, "_nova_http_direct_process_alive", return_value=True), \
+             mock.patch.object(autonomy_maintenance, "_operator_webui_port_open", return_value=True), \
+             mock.patch.object(autonomy_maintenance.subprocess, "run") as mocked_run:
+            payload = autonomy_maintenance._ensure_operator_webui_running(state)
+
+        self.assertEqual(payload.get("action"), "port_busy")
+        mocked_run.assert_not_called()
 
 
 if __name__ == "__main__":

@@ -21,6 +21,23 @@ class TestControlStatusSurfacesService(unittest.TestCase):
             "health_score": 95,
             "operator_outbox_open_count": 1,
             "root_closure_inventory": {"ok": True, "gap_count": 0, "roots": []},
+            "nova_mission_status": "quiet_hold",
+            "nova_mission_owner_verdicts": [
+                {"owner": "core_thinning", "ready": False, "blocks_green": False}
+            ],
+            "nova_mission_owner_blockers": [
+                {"owner": "core_thinning", "code": "core_http_thinning_pressure"}
+            ],
+            "core_thinning_sync": {"status": "ok", "order_count": 3},
+            "core_thinning_order_count": 3,
+            "guard": {"status": "running"},
+            "core": {"status": "running"},
+            "webui": {"status": "running"},
+            "runtime_summary": {"core": {"status": "running"}},
+            "memory_health": {"status": "ok"},
+            "work_tree_truth": {"status": "blocked_observing", "open_task_count": 4},
+            "work_tree_truth_status": "blocked_observing",
+            "work_tree_open_task_count": 4,
             "grounded_self_report": {"huge": "payload"},
             "operator_attention_message": "ignore me",
         }
@@ -31,6 +48,15 @@ class TestControlStatusSurfacesService(unittest.TestCase):
         self.assertEqual(surfaces.get("health_score"), 95)
         self.assertEqual(surfaces.get("operator_outbox_open_count"), 1)
         self.assertEqual((surfaces.get("root_closure_inventory") or {}).get("gap_count"), 0)
+        self.assertEqual(surfaces.get("nova_mission_status"), "quiet_hold")
+        self.assertEqual((surfaces.get("nova_mission_owner_verdicts") or [])[0].get("owner"), "core_thinning")
+        self.assertEqual((surfaces.get("nova_mission_owner_blockers") or [])[0].get("code"), "core_http_thinning_pressure")
+        self.assertEqual((surfaces.get("core_thinning_sync") or {}).get("order_count"), 3)
+        self.assertEqual(surfaces.get("core_thinning_order_count"), 3)
+        self.assertEqual((surfaces.get("guard") or {}).get("status"), "running")
+        self.assertEqual((surfaces.get("work_tree_truth") or {}).get("open_task_count"), 4)
+        self.assertEqual(surfaces.get("work_tree_truth_status"), "blocked_observing")
+        self.assertEqual(surfaces.get("work_tree_open_task_count"), 4)
         self.assertNotIn("grounded_self_report", surfaces)
         self.assertNotIn("operator_attention_message", surfaces)
 
@@ -43,6 +69,11 @@ class TestControlStatusSurfacesService(unittest.TestCase):
             "root_closure_inventory": {"ok": False, "gap_count": 9, "roots": [{"root_id": "stale"}]},
             "operator_outbox_open_count": 2,
             "alerts": ["operator_outbox_open"],
+            "nova_mission_status": "validation_required",
+            "nova_mission_owner_blockers": [{"owner": "validation", "code": "validation_truth_missing"}],
+            "core_thinning_order_count": 4,
+            "work_tree_truth_status": "open",
+            "work_tree_open_task_count": 2,
         }
 
         merged = merge_http_supplement_into_local(local, http)
@@ -50,6 +81,11 @@ class TestControlStatusSurfacesService(unittest.TestCase):
         self.assertEqual((merged.get("root_closure_inventory") or {}).get("gap_count"), 0)
         self.assertEqual(merged.get("operator_outbox_open_count"), 2)
         self.assertEqual(merged.get("alerts"), ["operator_outbox_open"])
+        self.assertEqual(merged.get("nova_mission_status"), "validation_required")
+        self.assertEqual((merged.get("nova_mission_owner_blockers") or [])[0].get("owner"), "validation")
+        self.assertEqual(merged.get("core_thinning_order_count"), 4)
+        self.assertEqual(merged.get("work_tree_truth_status"), "open")
+        self.assertEqual(merged.get("work_tree_open_task_count"), 2)
 
     def test_release_drift_detected_matches_source_changed_after_build(self):
         self.assertTrue(

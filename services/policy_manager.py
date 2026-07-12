@@ -480,6 +480,74 @@ class PolicyManager:
             f"docker_enabled={updated.get('docker_enabled')}."
         )
 
+    def set_mission_settings(
+        self,
+        *,
+        enabled: bool | None = None,
+        mode: str = "",
+        objective: str = "",
+        release_stale_ready_is_pressure: bool | None = None,
+        subconscious_triage_is_pressure: bool | None = None,
+        generated_queue_backlog_is_pressure: bool | None = None,
+        user: str | None = None,
+    ) -> str:
+        next_mode = str(mode or "").strip().lower()
+        next_objective = str(objective or "").strip()
+        allowed_modes = {
+            "steady_state_guard",
+            "observe_only",
+            "recovery",
+            "promote_layer",
+            "operator_focus",
+        }
+        has_update = any(
+            value is not None
+            for value in (
+                enabled,
+                next_mode,
+                next_objective,
+                release_stale_ready_is_pressure,
+                subconscious_triage_is_pressure,
+                generated_queue_backlog_is_pressure,
+            )
+        )
+        if not has_update:
+            return (
+                "Usage: mission settings "
+                "[enabled=true|false] [mode=steady_state_guard|observe_only|recovery|promote_layer|operator_focus] "
+                "[objective=text] "
+                "[release_stale_ready_is_pressure=true|false] "
+                "[subconscious_triage_is_pressure=true|false] "
+                "[generated_queue_backlog_is_pressure=true|false]"
+            )
+        if next_mode and next_mode not in allowed_modes:
+            return "Usage: mission mode must be one of steady_state_guard, observe_only, recovery, promote_layer, operator_focus"
+        data = self._load_raw()
+        autonomy = data.get("autonomy") if isinstance(data.get("autonomy"), dict) else {}
+        mission = autonomy.get("mission") if isinstance(autonomy.get("mission"), dict) else {}
+        if enabled is not None:
+            mission["enabled"] = bool(enabled)
+        if next_mode:
+            mission["mode"] = next_mode
+        if next_objective:
+            mission["objective"] = next_objective
+        if release_stale_ready_is_pressure is not None:
+            mission["release_stale_ready_is_pressure"] = bool(release_stale_ready_is_pressure)
+        if subconscious_triage_is_pressure is not None:
+            mission["subconscious_triage_is_pressure"] = bool(subconscious_triage_is_pressure)
+        if generated_queue_backlog_is_pressure is not None:
+            mission["generated_queue_backlog_is_pressure"] = bool(generated_queue_backlog_is_pressure)
+        autonomy["mission"] = mission
+        data["autonomy"] = autonomy
+        self._save_raw(data)
+        self.record_change("mission_settings", str(mission), "success", "", user)
+        return (
+            "Mission settings updated: "
+            f"enabled={mission.get('enabled')}, "
+            f"mode={mission.get('mode')}, "
+            f"objective={mission.get('objective')}."
+        )
+
     def get_search_provider(self) -> str:
         provider = str((self.get_web().get("search_provider") or "html")).strip().lower()
         if provider not in {"html", "searxng", "brave"}:

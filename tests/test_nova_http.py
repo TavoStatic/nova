@@ -10,7 +10,10 @@ class TestNovaHttpProfile(unittest.TestCase):
         nova_http.SESSION_STATE_MANAGER.clear()
 
     def test_generate_chat_reply_routes_semantic_web_fetch(self):
-        with mock.patch.object(
+        with mock.patch(
+            "services.nova_reply_sequence.load_leah_fast_chat_from_core",
+            return_value=False,
+        ), mock.patch.object(
             nova_http.nova_core,
             "_llm_classify_routing_intent",
             return_value={
@@ -19,7 +22,11 @@ class TestNovaHttpProfile(unittest.TestCase):
                 "confidence": 0.93,
                 "reason": "inspect requested URL",
             },
-        ), mock.patch.object(nova_http.nova_core, "tool_web_fetch", return_value="FETCHED"):
+        ), mock.patch.object(
+            nova_http.nova_core,
+            "execute_planned_action",
+            return_value="FETCHED",
+        ):
             reply, meta = nova_http._generate_chat_reply(
                 [("user", "can you access http://127.0.0.1:8080/control")],
                 "can you access http://127.0.0.1:8080/control",
@@ -74,6 +81,25 @@ class TestNovaHttpProfile(unittest.TestCase):
 
         self.assertEqual(first, {"health_score": 100})
         self.assertEqual(second, {"health_score": 100})
+        self.assertEqual(calls, ["called"])
+
+    def test_status_and_surfaces_caches_use_separate_locks(self):
+        self.assertIsNot(nova_http._CONTROL_STATUS_CACHE_LOCK, nova_http._CONTROL_STATUS_SURFACES_CACHE_LOCK)
+
+    def test_cached_control_status_surfaces_payload_reuses_recent_value(self):
+        nova_http._CONTROL_STATUS_SURFACES_CACHE.clear()
+        calls = []
+
+        with mock.patch.object(
+            nova_http,
+            "_control_status_surfaces_payload",
+            side_effect=lambda: calls.append("called") or {"status_kind": "signal_ingestion_surfaces"},
+        ):
+            first = nova_http._cached_control_status_surfaces_payload()
+            second = nova_http._cached_control_status_surfaces_payload()
+
+        self.assertEqual(first, {"status_kind": "signal_ingestion_surfaces"})
+        self.assertEqual(second, {"status_kind": "signal_ingestion_surfaces"})
         self.assertEqual(calls, ["called"])
 
     def test_probe_searxng_status_path_is_bounded_and_non_mutating(self):

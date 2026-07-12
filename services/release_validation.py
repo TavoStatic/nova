@@ -485,6 +485,7 @@ def run_release_validation(
     extract_root_removed = False
     extract_cleanup_error = ""
     webui_attempted = False
+    port = 0
 
     try:
         package_root, extract_root = _prepare_package_root(artifact, validation_root)
@@ -531,7 +532,12 @@ def run_release_validation(
         if webui_attempted and package_root is not None and "nova webui-stop" not in step_by_label:
             try:
                 nova_cmd = package_root / "nova.cmd"
-                stop_step = runner("nova webui-stop", [str(nova_cmd), "webui-stop"], package_root, 90)
+                stop_step = runner(
+                    "nova webui-stop",
+                    [str(nova_cmd), "webui-stop", "--port", str(port)],
+                    package_root,
+                    90,
+                )
                 steps.append(stop_step)
                 step_by_label["nova webui-stop"] = stop_step
             except Exception as exc:

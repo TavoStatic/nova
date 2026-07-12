@@ -63,6 +63,9 @@ class RuntimeControlService:
         last_signal_ingestion = dict(payload.get("last_signal_ingestion") or {}) if isinstance(payload.get("last_signal_ingestion"), dict) else {}
         last_subconscious_triage = dict(payload.get("last_subconscious_triage") or {}) if isinstance(payload.get("last_subconscious_triage"), dict) else {}
         last_temporal_feed = dict(payload.get("last_temporal_feed") or {}) if isinstance(payload.get("last_temporal_feed"), dict) else {}
+        last_nova_mission = dict(payload.get("last_nova_mission") or {}) if isinstance(payload.get("last_nova_mission"), dict) else {}
+        nova_mission_history = list(payload.get("nova_mission_history") or []) if isinstance(payload.get("nova_mission_history"), list) else []
+        last_core_thinning_sync = dict(payload.get("last_core_thinning_sync") or {}) if isinstance(payload.get("last_core_thinning_sync"), dict) else {}
         pid = runtime_worker.get("pid")
         create_time = runtime_worker.get("create_time")
         logical_processes = runtime_processes_module.logical_service_processes(maintenance_py)
@@ -214,6 +217,11 @@ class RuntimeControlService:
             "last_signal_ingestion": last_signal_ingestion,
             "last_subconscious_triage": last_subconscious_triage,
             "last_temporal_feed": last_temporal_feed,
+            "last_nova_mission": last_nova_mission,
+            "nova_mission_history": nova_mission_history,
+            "nova_mission_sustained_watch": bool(payload.get("nova_mission_sustained_watch", False)),
+            "nova_mission_watch_streak": int(payload.get("nova_mission_watch_streak", 0) or 0),
+            "last_core_thinning_sync": last_core_thinning_sync,
             "last_autonomy_orchestrator": {
                 "ts": str(last_autonomy_orchestrator.get("ts") or ""),
                 "created_at_utc": str(last_autonomy_orchestrator.get("created_at_utc") or ""),
@@ -560,6 +568,7 @@ class RuntimeControlService:
         base_dir: Path,
         delay_seconds: float = 1.5,
         cwd: Path | None = None,
+        remove_before_start: list[Path] | None = None,
         subprocess_module=subprocess,
         os_name: str = os.name,
     ) -> tuple[bool, str]:
@@ -571,9 +580,14 @@ class RuntimeControlService:
         out_log = str(log_dir / "nova_http.out.log")
         err_log = str(log_dir / "nova_http.err.log")
         flags = self.detached_creation_flags(os_name=os_name, subprocess_module=subprocess_module)
+        cleanup_code = "".join(
+            f"Path({str(Path(path))!r}).unlink(missing_ok=True);"
+            for path in (remove_before_start or [])
+        )
         launcher_code = (
-            "import subprocess,time;"
+            "import subprocess,time;from pathlib import Path;"
             f"time.sleep({max(0.0, float(delay_seconds))});"
+            f"{cleanup_code}"
             f"out=open({out_log!r}, 'a', encoding='utf-8');"
             f"err=open({err_log!r}, 'a', encoding='utf-8');"
             f"subprocess.Popen({list(command)!r}, cwd={work_dir!r}, stdout=out, stderr=err, creationflags={int(flags)})"
@@ -691,10 +705,12 @@ class RuntimeControlService:
             ok, msg = stop_guard_fn()
             if not ok:
                 return False, msg
+            stop_file = Path(base_dir) / "runtime" / "guard.stop"
             scheduled, scheduled_msg = schedule_detached_start_fn(
                 [str(venv_python), str(guard_py)],
                 delay_seconds=2.0,
                 cwd=base_dir,
+                remove_before_start=[stop_file],
             )
             if not scheduled:
                 return False, scheduled_msg

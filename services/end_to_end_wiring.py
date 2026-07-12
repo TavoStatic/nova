@@ -231,6 +231,10 @@ def _pipeline_checks(root: Path) -> list[dict[str, Any]]:
             "CONTROL_PIPELINES_SERVICE": object(),
             "DATA_SOURCES_DIR": root / "data_sources",
             "pipeline_list_summaries": lambda *_args, **_kwargs: [],
+            "pipeline_get_status": lambda *_args, **_kwargs: {},
+            "pipeline_get_schema_probe": lambda *_args, **_kwargs: {},
+            "preview_pipeline_query": lambda *_args, **_kwargs: {},
+            "run_pipeline_query": lambda *_args, **_kwargs: {},
         }
         hooks = HTTP_PIPELINE_CONTROL_SERVICE.action_hooks_from_runtime(runtime_scope)
         missing_hooks = [hook for hook in PIPELINE_ACTION_HOOKS if hook not in hooks]

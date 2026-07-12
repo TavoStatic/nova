@@ -158,9 +158,10 @@ CHAT_SESSION_TTL_SECONDS = 8 * 60 * 60
 CHAT_PASSWORD_HASH_ITERATIONS = 120000
 PROCESS_SCAN_CACHE_TTL_SECONDS = 5.0
 _PROCESS_SCAN_CACHE: Dict[str, tuple[float, list[dict]]] = {}
-CONTROL_STATUS_CACHE_TTL_SECONDS = 2.0
-CONTROL_STATUS_SURFACES_CACHE_TTL_SECONDS = 2.0
+CONTROL_STATUS_CACHE_TTL_SECONDS = 8.0
+CONTROL_STATUS_SURFACES_CACHE_TTL_SECONDS = 8.0
 _CONTROL_STATUS_CACHE_LOCK = threading.Lock()
+_CONTROL_STATUS_SURFACES_CACHE_LOCK = threading.Lock()
 _CONTROL_STATUS_CACHE: Dict[str, Any] = {"computed_at": 0.0, "payload": None}
 _CONTROL_STATUS_SURFACES_CACHE: Dict[str, Any] = {"computed_at": 0.0, "payload": None}
 AUTONOMY_MAINTENANCE_STATE_PATH = RUNTIME_DIR / "autonomy_maintenance_state.json"
@@ -176,7 +177,7 @@ _STORAGE_WATCH_CACHE: Dict[str, Any] = {"computed_at": 0.0, "payload": None}
 
 def _invalidate_control_status_cache() -> None:
     CONTROL_STATUS_CACHE_SERVICE.invalidate(_CONTROL_STATUS_CACHE, lock=_CONTROL_STATUS_CACHE_LOCK)
-    CONTROL_STATUS_CACHE_SERVICE.invalidate(_CONTROL_STATUS_SURFACES_CACHE, lock=_CONTROL_STATUS_CACHE_LOCK)
+    CONTROL_STATUS_CACHE_SERVICE.invalidate(_CONTROL_STATUS_SURFACES_CACHE, lock=_CONTROL_STATUS_SURFACES_CACHE_LOCK)
 
 
 def _load_autonomy_maintenance_state() -> dict:
@@ -535,8 +536,6 @@ def _subconscious_live_summary(limit: int = 6) -> dict:
     )
 
 
-def _generated_work_queue(limit: int = 24) -> dict:
-    return service_generated_work_queue_payload(limit=limit, base_dir=BASE_DIR, runtime_dir=RUNTIME_DIR)
 
 
 def _report_status_label(diff_count: int, flagged_probe_count: int) -> str:
@@ -1112,13 +1111,20 @@ def _detached_creation_flags() -> int:
     return RUNTIME_CONTROL_SERVICE.detached_creation_flags(os_name=os.name, subprocess_module=subprocess)
 
 
-def _schedule_detached_start(command: list[str], *, delay_seconds: float = 1.5, cwd: Path | None = None) -> tuple[bool, str]:
+def _schedule_detached_start(
+    command: list[str],
+    *,
+    delay_seconds: float = 1.5,
+    cwd: Path | None = None,
+    remove_before_start: list[Path] | None = None,
+) -> tuple[bool, str]:
     return RUNTIME_CONTROL_SERVICE.schedule_detached_start(
         command,
         venv_python=VENV_PY,
         base_dir=BASE_DIR,
         delay_seconds=delay_seconds,
         cwd=cwd,
+        remove_before_start=remove_before_start,
         subprocess_module=subprocess,
         os_name=os.name,
     )
@@ -1640,7 +1646,7 @@ def _cached_control_status_surfaces_payload(
 ) -> dict:
     return CONTROL_STATUS_CACHE_SERVICE.cached_payload(
         _CONTROL_STATUS_SURFACES_CACHE,
-        lock=_CONTROL_STATUS_CACHE_LOCK,
+        lock=_CONTROL_STATUS_SURFACES_CACHE_LOCK,
         max_age_seconds=max_age_seconds,
         monotonic_fn=time.monotonic,
         compute_payload_fn=_control_status_surfaces_payload,
@@ -1652,6 +1658,10 @@ def _work_trees_payload(limit: int = 32) -> dict:
         list_visual_trees_fn=work_tree.list_visual_trees,
         limit=limit,
     )
+
+
+def _work_tree_pressure_payload() -> dict:
+    return CONTROL_WORK_TREES_SERVICE.pressure_payload(work_tree_module=work_tree)
 
 
 def _operator_outbox_summary(limit: int = 20) -> dict:

@@ -13,11 +13,8 @@ EXPECTED_SERVICE_DELEGATES = {
     "_record_memory_event": "service_record_memory_event",
     "execute_planned_action": "service_execute_planned_action_from_runtime",
     "web_search": "service_web_search",
-    "tool_search": "service_tool_search",
     "patch_preview": "service_patch_preview",
     "ollama_chat": "service_ollama_chat",
-    "tool_web_search": "service_tool_web_search",
-    "tool_web_research": "service_tool_web_research",
 }
 
 

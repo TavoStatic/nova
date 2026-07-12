@@ -52,10 +52,17 @@ const pipelinePopulationProgram = document.getElementById('pipelinePopulationPro
 const pipelinePopulationField = document.getElementById('pipelinePopulationField');
 const pipelinePopulationNotes = document.getElementById('pipelinePopulationNotes');
 const pipelinePopulationSection = document.getElementById('pipelinePopulationSection');
+const pipelineEdfiSection = document.getElementById('pipelineEdfiSection');
+const pipelineEdfiSyncGrid = document.getElementById('pipelineEdfiSyncGrid');
 const pipelineQuerySection = document.getElementById('pipelineQuerySection');
 const pipelineQueryOperation = document.getElementById('pipelineQueryOperation');
+const pipelineQueryDescription = document.getElementById('pipelineQueryDescription');
+const pipelineQueryParams = document.getElementById('pipelineQueryParams');
 const pipelineQueryRowLimit = document.getElementById('pipelineQueryRowLimit');
+const pipelineQueryTable = document.getElementById('pipelineQueryTable');
 const pipelineQueryResult = document.getElementById('pipelineQueryResult');
+let pipelineQueryCatalogCache = {};
+let pipelineQueryParamValuesCache = {};
 const taskManagerSelect = document.getElementById('taskManagerSelect');
 const taskManagerPreview = document.getElementById('taskManagerPreview');
 const taskManagerName = document.getElementById('taskManagerName');
@@ -1907,6 +1914,133 @@ function renderPipelineSelect() {
     }
 }
 
+const PIPELINE_QUERY_PARAM_SPECS = {
+    offset: {label: 'Offset', type: 'number', placeholder: '0', defaultValue: '0'},
+    query: {label: 'Query', type: 'text', placeholder: 'school'},
+    namespace: {label: 'Namespace', type: 'text', placeholder: 'ed-fi'},
+    resource: {
+        label: 'Resource',
+        type: 'select',
+        options: ['ed-fi/schools', 'ed-fi/students', 'ed-fi/studentSchoolAssociations'],
+        defaultValue: 'ed-fi/schools',
+    },
+    min_change_version: {label: 'Min change version', type: 'number', placeholder: 'saved cursor'},
+    advance_cursor: {label: 'Advance cursor after pull', type: 'checkbox', defaultValue: false},
+};
+
+function pipelineQueryTemplateCatalog(probe) {
+    const catalog = probe && probe.query_template_catalog && typeof probe.query_template_catalog === 'object'
+        ? probe.query_template_catalog
+        : {};
+    return catalog;
+}
+
+function collectPipelineQueryParams(operation) {
+    const template = pipelineQueryCatalogCache[operation] || {};
+    const allowed = Array.isArray(template.params) ? template.params.map((item) => String(item)) : [];
+    const params = {};
+    allowed.forEach((name) => {
+        const field = document.getElementById(`pipelineQueryParam_${name}`);
+        if (!field) return;
+        if (field.type === 'checkbox') {
+            if (field.checked) params[name] = true;
+            return;
+        }
+        const raw = String(field.value || '').trim();
+        if (!raw) return;
+        if (field.type === 'number') {
+            const parsed = Number(raw);
+            if (!Number.isNaN(parsed)) params[name] = parsed;
+            return;
+        }
+        params[name] = raw;
+    });
+    pipelineQueryParamValuesCache[operation] = {...params};
+    return params;
+}
+
+function renderPipelineQueryParamFields(operation) {
+    if (!pipelineQueryParams) return;
+    const template = pipelineQueryCatalogCache[operation] || {};
+    const allowed = Array.isArray(template.params) ? template.params.map((item) => String(item)) : [];
+    if (!allowed.length) {
+        pipelineQueryParams.innerHTML = '<div class="section-footnote">This operation has no extra parameters.</div>';
+        return;
+    }
+    const cached = pipelineQueryParamValuesCache[operation] || {};
+    pipelineQueryParams.innerHTML = allowed.map((name) => {
+        const spec = PIPELINE_QUERY_PARAM_SPECS[name] || {label: name, type: 'text', placeholder: name};
+        const fieldId = `pipelineQueryParam_${name}`;
+        const cachedValue = cached[name];
+        if (spec.type === 'checkbox') {
+            const checked = cachedValue === true || cachedValue === 'true' || Boolean(spec.defaultValue);
+            return [
+                '<div class="pipeline-query-param-field">',
+                `<label class="field-label d-flex align-items-center gap-2" for="${fieldId}">`,
+                `<input id="${fieldId}" type="checkbox"${checked ? ' checked' : ''}>`,
+                `<span>${escapeHtml(spec.label || name)}</span>`,
+                '</label>',
+                '</div>',
+            ].join('');
+        }
+        if (spec.type === 'select') {
+            const options = Array.isArray(spec.options) ? spec.options : [];
+            const selected = String(cachedValue != null ? cachedValue : (spec.defaultValue || options[0] || ''));
+            return [
+                '<div class="pipeline-query-param-field">',
+                `<label class="field-label" for="${fieldId}">${escapeHtml(spec.label || name)}</label>`,
+                `<select id="${fieldId}" class="form-select form-select-sm">`,
+                options.map((option) => {
+                    const value = String(option);
+                    return `<option value="${escapeHtml(value)}"${value === selected ? ' selected' : ''}>${escapeHtml(value)}</option>`;
+                }).join(''),
+                '</select>',
+                '</div>',
+            ].join('');
+        }
+        const value = cachedValue != null ? String(cachedValue) : String(spec.defaultValue || '');
+        return [
+            '<div class="pipeline-query-param-field">',
+            `<label class="field-label" for="${fieldId}">${escapeHtml(spec.label || name)}</label>`,
+            `<input id="${fieldId}" class="form-control form-control-sm" type="${escapeHtml(spec.type || 'text')}"`,
+            ` placeholder="${escapeHtml(spec.placeholder || '')}" value="${escapeHtml(value)}">`,
+            '</div>',
+        ].join('');
+    }).join('');
+}
+
+function renderPipelineQueryTable(result) {
+    if (!pipelineQueryTable) return;
+    const rows = Array.isArray(result && result.rows) ? result.rows : [];
+    const columns = Array.isArray(result && result.columns) && result.columns.length
+        ? result.columns
+        : (rows[0] && typeof rows[0] === 'object' ? Object.keys(rows[0]).slice(0, 8) : []);
+    if (!rows.length || !columns.length) {
+        pipelineQueryTable.classList.add('d-none');
+        pipelineQueryTable.innerHTML = '';
+        return;
+    }
+    pipelineQueryTable.classList.remove('d-none');
+    pipelineQueryTable.innerHTML = [
+        '<table class="pipeline-query-table">',
+        '<thead><tr>',
+        columns.map((column) => `<th scope="col">${escapeHtml(String(column))}</th>`).join(''),
+        '</tr></thead>',
+        '<tbody>',
+        rows.slice(0, 25).map((row) => [
+            '<tr>',
+            columns.map((column) => {
+                const value = row && Object.prototype.hasOwnProperty.call(row, column) ? row[column] : '';
+                const text = typeof value === 'object' ? JSON.stringify(value) : String(value == null ? '' : value);
+                return `<td>${escapeHtml(text)}</td>`;
+            }).join(''),
+            '</tr>',
+        ].join('')).join(''),
+        '</tbody>',
+        '</table>',
+    ].join('');
+}
+
 function formatPipelineQueryResult(result) {
     if (!result || typeof result !== 'object') return 'No query result returned.';
     const lines = [
@@ -1919,6 +2053,10 @@ function formatPipelineQueryResult(result) {
     if (result.error) lines.push(`error: ${String(result.error)}`);
     if (result.next_step) lines.push(`next_step: ${String(result.next_step)}`);
     if (result.row_count != null) lines.push(`row_count: ${result.row_count}`);
+    if (result.note) lines.push(`note: ${String(result.note)}`);
+    if (result.mechanism) lines.push(`mechanism: ${String(result.mechanism)}`);
+    if (result.min_change_version != null) lines.push(`min_change_version: ${result.min_change_version}`);
+    if (result.next_change_version != null) lines.push(`next_change_version: ${result.next_change_version}`);
     if (result.edfi && typeof result.edfi === 'object') {
         const edfi = result.edfi;
         if (edfi.records_scanned != null) lines.push(`records_scanned: ${edfi.records_scanned}`);
@@ -1926,29 +2064,61 @@ function formatPipelineQueryResult(result) {
         if (edfi.resource) lines.push(`resource: ${edfi.resource}`);
     }
     if (Array.isArray(result.rows) && result.rows.length) {
-        lines.push('', 'rows:');
-        result.rows.slice(0, 10).forEach((row, index) => {
-            lines.push(`${index + 1}. ${JSON.stringify(row)}`);
-        });
-        if (result.rows.length > 10) {
-            lines.push(`... ${result.rows.length - 10} more row(s)`);
-        }
+        lines.push('', `rows: showing up to 25 in table (${result.rows.length} total returned)`);
+    } else if (Array.isArray(result.items) && result.items.length && typeof result.items[0] !== 'object') {
+        lines.push('', 'items:');
+        result.items.slice(0, 20).forEach((item, index) => lines.push(`${index + 1}. ${String(item)}`));
     } else if (result.items && typeof result.items === 'object' && !Array.isArray(result.items)) {
         lines.push('', 'summary:');
         lines.push(JSON.stringify(result.items, null, 2));
+    } else if (Array.isArray(result.rows) && result.rows.length === 1 && typeof result.rows[0] === 'object') {
+        lines.push('', 'summary:');
+        lines.push(JSON.stringify(result.rows[0], null, 2));
     }
     return lines.join('\n');
 }
 
+function renderEdfiSyncSummary(status) {
+    if (!pipelineEdfiSyncGrid) return;
+    const sync = status.change_sync && typeof status.change_sync === 'object' ? status.change_sync : {};
+    const resources = sync.resources && typeof sync.resources === 'object' ? sync.resources : {};
+    const rows = Object.keys(resources).sort().map((resource) => {
+        const entry = resources[resource] || {};
+        return {
+            label: 'Cursor',
+            value: `${resource} | last=${String(entry.last_change_version || 0)} | items=${String(entry.last_item_count || 0)} | mechanism=${String(entry.last_pull_mechanism || 'none')}`,
+        };
+    });
+    const available = sync.available && typeof sync.available === 'object' ? sync.available : {};
+    const summary = [
+        {label: 'Cached newest version', value: String(available.newest_change_version != null ? available.newest_change_version : (status.newest_change_version || 0))},
+        {label: 'Cached oldest version', value: String(available.oldest_change_version != null ? available.oldest_change_version : 'n/a')},
+        {label: 'Cursor file', value: String(sync.cursor_path || status.change_sync_path || 'not created yet')},
+        ...rows,
+    ];
+    if (!rows.length) {
+        summary.push({label: 'Cursors', value: 'No saved cursors yet. Run sync status or pull changes with advance cursor.'});
+    }
+    renderInspectorList(pipelineEdfiSyncGrid, summary);
+}
+
 function renderPipelineQueryControls(status, probe) {
     const kind = String(status.kind || selectedPipeline()?.kind || '').trim().toLowerCase();
+    const isEdfi = kind === 'edfi';
     const operations = Array.isArray(probe.query_templates) ? probe.query_templates.filter(Boolean) : [];
     const showRunner = operations.length > 0;
+    pipelineQueryCatalogCache = pipelineQueryTemplateCatalog(probe);
+    if (pipelineEdfiSection) {
+        pipelineEdfiSection.classList.toggle('d-none', !isEdfi || !showRunner);
+    }
     if (pipelineQuerySection) {
         pipelineQuerySection.classList.toggle('d-none', !showRunner);
     }
     if (pipelinePopulationSection) {
-        pipelinePopulationSection.classList.toggle('d-none', kind === 'edfi');
+        pipelinePopulationSection.classList.toggle('d-none', isEdfi);
+    }
+    if (isEdfi) {
+        renderEdfiSyncSummary(status);
     }
     if (!pipelineQueryOperation) return;
     const previous = String(pipelineQueryOperation.value || '').trim();
@@ -1959,6 +2129,10 @@ function renderPipelineQueryControls(status, probe) {
         option.textContent = '(no governed operations)';
         pipelineQueryOperation.appendChild(option);
         if (pipelineQueryResult) pipelineQueryResult.textContent = 'Query results will appear here.';
+        if (pipelineQueryTable) {
+            pipelineQueryTable.classList.add('d-none');
+            pipelineQueryTable.innerHTML = '';
+        }
         return;
     }
     operations.forEach((operation) => {
@@ -1970,6 +2144,55 @@ function renderPipelineQueryControls(status, probe) {
     if (previous && operations.includes(previous)) {
         pipelineQueryOperation.value = previous;
     }
+    renderPipelineQueryParamFields(String(pipelineQueryOperation.value || operations[0] || ''));
+    const active = String(pipelineQueryOperation.value || operations[0] || '');
+    const template = pipelineQueryCatalogCache[active] || {};
+    if (pipelineQueryDescription) {
+        pipelineQueryDescription.textContent = String(template.description || 'Select an operation to see its governed description and parameters.');
+    }
+    if (pipelineQueryRowLimit && template.max_rows != null) {
+        pipelineQueryRowLimit.max = String(Math.max(1, Number(template.max_rows) || 50));
+    }
+}
+
+async function executePipelineQuery({live = false, operation = '', rowLimit = null, params = null, confirmLive = true} = {}) {
+    const pipelineId = pipelineSelect ? String(pipelineSelect.value || '').trim() : selectedPipelineId;
+    const selectedOperation = String(operation || (pipelineQueryOperation ? pipelineQueryOperation.value : '') || '').trim();
+    const limit = rowLimit != null
+        ? Number(rowLimit)
+        : Number(pipelineQueryRowLimit ? pipelineQueryRowLimit.value || 10 : 10);
+    if (!pipelineId) {
+        setAction('Select a data lane before running a query.');
+        return null;
+    }
+    if (!selectedOperation) {
+        setAction('Select a governed operation before running a query.');
+        return null;
+    }
+    if (live && confirmLive) {
+        const confirmed = window.confirm(`Run live governed query ${selectedOperation} on ${pipelineId}? This may read district data from the configured source.`);
+        if (!confirmed) {
+            setAction(`Live query canceled for ${selectedOperation}.`);
+            return null;
+        }
+    }
+    const queryParams = params && typeof params === 'object' ? params : collectPipelineQueryParams(selectedOperation);
+    const action = live ? 'pipeline_query_run' : 'pipeline_query_preview';
+    const payload = await postAction(action, {
+        pipeline_id: pipelineId,
+        operation: selectedOperation,
+        row_limit: limit,
+        params: queryParams,
+    });
+    const result = payload.result && typeof payload.result === 'object' ? payload.result : payload;
+    if (pipelineQueryOperation && selectedOperation) pipelineQueryOperation.value = selectedOperation;
+    renderPipelineQueryTable(result);
+    if (pipelineQueryResult) pipelineQueryResult.textContent = formatPipelineQueryResult(result);
+    if (live && selectedPipelineId === pipelineId) {
+        await loadPipelines(pipelineId);
+    }
+    setAction(payload.message || (live ? 'pipeline_query_live_ok' : 'pipeline_query_preview_ok'));
+    return result;
 }
 
 function renderPipelineDetail(payload) {
@@ -2017,7 +2240,10 @@ function renderPipelineDetail(payload) {
             {label: 'District LEA', value: String(status.district_lea_id || 'not set')},
             {label: 'Profile health', value: String(status.profile_health || 'unknown')},
             {label: 'Resources', value: String(status.resource_count != null ? status.resource_count : 'unknown')},
-            {label: 'Change version', value: String(status.newest_change_version != null ? status.newest_change_version : 'n/a')},
+            {label: 'Cached change version', value: String(status.newest_change_version != null ? status.newest_change_version : 'n/a')},
+            {label: 'Sync cursors', value: String(
+                Object.keys((status.change_sync && status.change_sync.resources) || {}).length || 0
+            )},
         );
     } else {
         statusRows.splice(5, 0,
@@ -3068,6 +3294,58 @@ function renderOverviewFocus(status) {
     ].join('')).join('');
 }
 
+function missionArray(primary, fallback) {
+    if (Array.isArray(primary)) return primary;
+    if (Array.isArray(fallback)) return fallback;
+    return [];
+}
+
+function missionBlockerLine(item) {
+    if (!item || typeof item !== 'object') return String(item || '').trim();
+    const owner = String(item.owner || '').trim();
+    const code = String(item.code || '').trim();
+    const detail = String(item.detail || '').trim();
+    const prefix = owner && code ? `${owner}:${code}` : (code || owner || 'unknown');
+    return detail ? `${prefix} - ${detail}` : prefix;
+}
+
+function missionVerdictLine(item) {
+    if (!item || typeof item !== 'object') return '';
+    const owner = String(item.owner || 'unknown').trim();
+    const ready = Boolean(item.ready);
+    const blocksGreen = item.blocks_green !== false;
+    const summary = String(item.summary || '').trim();
+    const status = ready ? 'ready' : 'blocked';
+    const gate = blocksGreen ? 'blocks green' : 'pressure only';
+    return summary ? `${owner}: ${status} / ${gate}\n${summary}` : `${owner}: ${status} / ${gate}`;
+}
+
+function missionOwnerPressureText(ownerBlockers, ownerVerdicts) {
+    const verdictByOwner = new Map();
+    ownerVerdicts.forEach((item) => {
+        if (!item || typeof item !== 'object') return;
+        const owner = String(item.owner || '').trim();
+        if (owner) verdictByOwner.set(owner, item);
+    });
+    const blocking = [];
+    const pressureOnly = [];
+    ownerBlockers.forEach((item) => {
+        const line = missionBlockerLine(item);
+        if (!line) return;
+        const owner = item && typeof item === 'object' ? String(item.owner || '').trim() : '';
+        const verdict = verdictByOwner.get(owner) || {};
+        if (verdict.blocks_green === false) {
+            pressureOnly.push(line);
+        } else {
+            blocking.push(line);
+        }
+    });
+    const parts = [];
+    if (pressureOnly.length) parts.push(`pressure only\n${pressureOnly.slice(0, 4).join('\n')}`);
+    if (blocking.length) parts.push(`green blockers\n${blocking.slice(0, 4).join('\n')}`);
+    return parts.join('\n') || 'no owner pressure';
+}
+
 function renderCenterMissionBrief(status) {
     if (!centerMissionBrief) return;
     if (!status) {
@@ -3085,7 +3363,59 @@ function renderCenterMissionBrief(status) {
     const tool = String(status.last_action_tool || 'no tool');
     const routeSummary = compactRouteSummary(status.last_route_summary || 'route lane not available', 5);
     const memory = memoryHealthDetails(status);
+    const mission = status.nova_mission && typeof status.nova_mission === 'object' ? status.nova_mission : {};
+    const missionStatus = String(mission.status || status.nova_mission_status || 'unknown');
+    const missionAction = String(mission.action || status.nova_mission_action || 'n/a');
+    const missionHeadline = String(mission.headline || status.nova_mission_headline || 'mission brief pending');
+    const truthBlockers = missionArray(mission.truth_blockers, status.nova_mission_truth_blockers);
+    const ownerVerdicts = missionArray(mission.owner_verdicts, status.nova_mission_owner_verdicts).filter((item) => item && typeof item === 'object');
+    const ownerBlockers = missionArray(mission.owner_blockers, status.nova_mission_owner_blockers);
+    const greenBlockers = missionArray(mission.green_blockers, status.nova_mission_green_blockers);
+    const ownerVerdictLines = ownerVerdicts.map(missionVerdictLine).filter(Boolean);
+    const greenBlockerLines = greenBlockers.map(missionBlockerLine).filter(Boolean);
+    const coreThinningSync = status.core_thinning_sync && typeof status.core_thinning_sync === 'object' ? status.core_thinning_sync : {};
+    const coreThinningStatus = String(status.core_thinning_sync_status || coreThinningSync.status || 'unknown');
+    const coreThinningOrders = Number(status.core_thinning_order_count != null ? status.core_thinning_order_count : (coreThinningSync.order_count || 0));
+    const coreThinningAdded = Number(status.core_thinning_added_count != null ? status.core_thinning_added_count : (coreThinningSync.added_count || 0));
+    const coreThinningResolved = Number(status.core_thinning_resolved_count != null ? status.core_thinning_resolved_count : (coreThinningSync.resolved_count || 0));
+    const coreThinningAt = String(status.core_thinning_sync_at || coreThinningSync.ts || 'n/a');
+    const sustainedWatch = Boolean(status.nova_mission_sustained_watch);
+    const watchStreak = Number(status.nova_mission_watch_streak != null ? status.nova_mission_watch_streak : 0);
+    const truthGateValue = truthBlockers.length || greenBlockerLines.length
+        ? [
+            truthBlockers.length ? `truth: ${truthBlockers.join(', ')}` : 'truth blockers: none',
+            greenBlockerLines.length ? `green blockers\n${greenBlockerLines.slice(0, 4).join('\n')}` : '',
+        ].filter(Boolean).join('\n')
+        : `ready\ngreen=${Boolean(mission.green_cycle || status.nova_mission_green_cycle)}`;
     const briefCards = [
+        {
+            key: 'Mission',
+            value: `${missionStatus} / ${missionAction}\n${missionHeadline}`,
+            wide: true,
+        },
+        {
+            key: 'Truth Gate',
+            value: truthGateValue,
+        },
+        {
+            key: 'Owner Pressure',
+            value: missionOwnerPressureText(ownerBlockers, ownerVerdicts),
+        },
+        {
+            key: 'Core Thinning Sync',
+            value: `${coreThinningStatus}\norders=${coreThinningOrders} added=${coreThinningAdded} resolved=${coreThinningResolved}\n${coreThinningAt}`,
+        },
+        {
+            key: 'Owner Verdicts',
+            value: ownerVerdictLines.length ? ownerVerdictLines.slice(0, 5).join('\n') : 'owner verdicts pending',
+            wide: true,
+        },
+        {
+            key: 'Mission Watch',
+            value: sustainedWatch
+                ? `sustained watch\nstreak=${watchStreak}`
+                : (watchStreak > 0 ? `watch streak=${watchStreak}` : 'no sustained watch'),
+        },
         {
             key: 'Risk Posture',
             value: alerts.length
@@ -4473,69 +4803,148 @@ async function fetchBackendCommandsDeck() {
     }
 }
 
+const REFRESH_INTERVAL_MS = 30000;
+const REFRESH_BACKOFF_MAX_MS = 120000;
+const FULL_STATUS_BACKGROUND_REFRESH_MS = 180000;
+let refreshBackoffMs = REFRESH_INTERVAL_MS;
+let refreshTimerHandle = null;
+let lastFullStatusHydratedAt = Date.now();
+
+function currentMainViewName() {
+    const visible = mainViews.find((view) => !view.classList.contains('d-none'));
+    return visibleViewName(visible ? visible.getAttribute('data-view') : 'overview');
+}
+
+function shouldHydrateFullStatus(viewName) {
+    const view = visibleViewName(viewName);
+    if (view === 'operations' || view === 'logs' || view === 'health') return true;
+    return Date.now() - lastFullStatusHydratedAt > FULL_STATUS_BACKGROUND_REFRESH_MS;
+}
+
+function shouldHydrateSessions(viewName) {
+    return visibleViewName(viewName) === 'sessions';
+}
+
+function shouldHydrateWorkTrees(viewName) {
+    return visibleViewName(viewName) === 'scheduled-tree';
+}
+
+function shouldHydratePipelines(viewName) {
+    return visibleViewName(viewName) === 'pipelines';
+}
+
+function mergeStatusPayload(base, update) {
+    if (!update || typeof update !== 'object') return base || null;
+    return {...(base && typeof base === 'object' ? base : {}), ...update};
+}
+
+function renderStatusSpine(status, metrics) {
+    if (!status) {
+        renderSubconscious(null);
+        renderOperatorOutbox(null);
+        renderLiveTracking(null);
+        renderTemporalGovernance(null);
+        return;
+    }
+    renderOperatorOutbox(status);
+    renderReleaseStatus(status);
+    renderRuntimeSummary(status);
+    renderGuardRuntime(status);
+    renderHealthSummary(status);
+    renderHeroDeck(status);
+    renderLiveTracking(status);
+    renderOverviewFocus(status);
+    renderCenterMissionBrief(status);
+    renderTelemetrySummary(metrics, status);
+    renderTelemetryPressure(metrics, status);
+    if (runtimeNoteBar && status.runtime_process_note != null) {
+        runtimeNoteBar.textContent = String(latestStatus.runtime_process_note || '');
+    }
+    if (status.health_score != null || status.self_check_pass_ratio != null || Array.isArray(status.alerts)) {
+        setHealthBadge(status.health_score, status.self_check_pass_ratio, status.alerts || []);
+    }
+}
+
+function renderFullStatusSections(status, backendCommands) {
+    if (!status) return;
+    renderMetricGrid(status);
+    renderSubconscious(status);
+    renderOperatorMacros(status);
+    renderBackendCommands(status, backendCommands);
+    renderTemporalGovernance(status);
+    renderPlannerInspector(status);
+    renderLedgerInspector(status);
+    renderPatchReadiness(status);
+    renderActionReadiness(status);
+    renderRuntimeTimeline(status);
+    renderRuntimeFailures(status);
+    renderRuntimeArtifacts(status);
+    renderArtifactDetail(currentArtifactDetail);
+    renderRestartAnalytics(status);
+}
+
+function scheduleLiveRefresh() {
+    if (refreshTimerHandle) {
+        clearTimeout(refreshTimerHandle);
+    }
+    refreshTimerHandle = setTimeout(async () => {
+        await refresh();
+        scheduleLiveRefresh();
+    }, refreshBackoffMs);
+}
+
 async function performRefresh() {
     try {
+        const activeView = currentMainViewName();
+        const fetchFullStatus = shouldHydrateFullStatus(activeView);
+        const fetchSessions = shouldHydrateSessions(activeView);
+        const fetchWorkTreeVisuals = shouldHydrateWorkTrees(activeView);
+        const fetchPipelinesDeck = shouldHydratePipelines(activeView);
         const results = await Promise.allSettled([
-            getJson('/api/control/status'),
+            getJson('/api/control/status/surfaces'),
             getJson('/api/control/policy'),
             getJson('/api/control/metrics'),
-            getJson('/api/control/sessions'),
-            getJson('/api/control/test-sessions'),
-            fetchWorkTrees(),
-            fetchPipelines(),
+            fetchFullStatus ? getJson('/api/control/status') : Promise.resolve(null),
+            fetchSessions ? getJson('/api/control/sessions') : Promise.resolve(null),
+            fetchSessions ? getJson('/api/control/test-sessions') : Promise.resolve(null),
+            fetchWorkTreeVisuals ? fetchWorkTrees() : Promise.resolve(null),
+            fetchPipelinesDeck ? fetchPipelines() : Promise.resolve(null),
             fetchBackendCommandsDeck()
         ]);
-        latestStatus = results[0].status === 'fulfilled' ? results[0].value : null;
+        const surfacesStatus = results[0].status === 'fulfilled' ? results[0].value : null;
         latestPolicy = results[1].status === 'fulfilled' ? results[1].value : null;
         const metrics = results[2].status === 'fulfilled' ? results[2].value : null;
-        const sessions = results[3].status === 'fulfilled' ? results[3].value : null;
-        const testRuns = results[4].status === 'fulfilled' ? results[4].value : null;
-        const workTrees = results[5].status === 'fulfilled' ? results[5].value : null;
-        const pipelines = results[6].status === 'fulfilled' ? results[6].value : null;
-        const backendCommands = results[7].status === 'fulfilled' ? results[7].value : null;
+        const fullStatus = results[3].status === 'fulfilled' ? results[3].value : null;
+        const sessions = results[4].status === 'fulfilled' ? results[4].value : null;
+        const testRuns = results[5].status === 'fulfilled' ? results[5].value : null;
+        const workTrees = results[6].status === 'fulfilled' ? results[6].value : null;
+        const pipelines = results[7].status === 'fulfilled' ? results[7].value : null;
+        const backendCommands = results[8].status === 'fulfilled' ? results[8].value : null;
         latestMetrics = metrics;
+        latestStatus = mergeStatusPayload(latestStatus, surfacesStatus);
+        if (fullStatus) {
+            latestStatus = mergeStatusPayload(latestStatus, fullStatus);
+            lastFullStatusHydratedAt = Date.now();
+        }
+        renderStatusSpine(latestStatus, latestMetrics);
         if (latestStatus) {
-            renderMetricGrid(latestStatus);
-            renderSubconscious(latestStatus);
-            renderOperatorMacros(latestStatus);
-            renderBackendCommands(latestStatus, backendCommands);
-            renderOperatorOutbox(latestStatus);
-            renderTemporalGovernance(latestStatus);
-            renderPlannerInspector(latestStatus);
-            renderLedgerInspector(latestStatus);
-            renderPatchReadiness(latestStatus);
-            renderHealthSummary(latestStatus);
-            renderActionReadiness(latestStatus);
-            renderRuntimeSummary(latestStatus);
-            renderRuntimeTimeline(latestStatus);
-            renderRuntimeFailures(latestStatus);
-            renderRuntimeArtifacts(latestStatus);
-            renderArtifactDetail(currentArtifactDetail);
-            renderReleaseStatus(latestStatus);
-            renderRestartAnalytics(latestStatus);
-            renderHeroDeck(latestStatus);
-            renderLiveTracking(latestStatus);
-            runtimeNoteBar.textContent = String(latestStatus.runtime_process_note || '');
-            renderGuardRuntime(latestStatus);
-            setHealthBadge(latestStatus.health_score, latestStatus.self_check_pass_ratio, latestStatus.alerts || []);
+            if (fullStatus || fetchFullStatus) {
+                renderFullStatusSections(latestStatus, backendCommands);
+            } else if (backendCommands) {
+                renderBackendCommands(latestStatus, backendCommands);
+            }
         } else {
-            renderSubconscious(null);
-            renderOperatorOutbox(null);
-            renderLiveTracking(null);
-            renderTemporalGovernance(null);
             if (backendCommands) renderBackendCommands(null, backendCommands);
         }
         if (latestPolicy) {
             if (policyBox) policyBox.textContent = JSON.stringify(latestPolicy, null, 2);
             renderGovernance(latestPolicy, latestStatus);
         }
-        renderTelemetrySummary(latestMetrics, latestStatus);
-        renderTelemetryPressure(latestMetrics, latestStatus);
         if (metrics) drawMetrics(metrics.points || []);
         if (sessions) {
             sessionsCache = Array.isArray(sessions.sessions) ? sessions.sessions : [];
             renderSessions();
-        } else {
+        } else if (fetchSessions) {
             renderSessionPreview();
         }
         if (testRuns) {
@@ -4544,28 +4953,33 @@ async function performRefresh() {
             renderTestRuns();
             renderTestSessionDefinitions();
             renderRealWorldTasks();
-        } else {
+        } else if (fetchSessions) {
             renderTestRunPreview();
             renderRealWorldTaskPreview();
         }
         if (workTrees) {
             renderWorkTrees(workTrees);
-        } else {
+        } else if (fetchWorkTreeVisuals) {
             renderWorkTrees({ok: false, trees: [], counts: {total: 0, active: 0}});
         }
         if (pipelines) {
             renderPipelines(pipelines);
-        } else {
+        } else if (fetchPipelinesDeck) {
             renderPipelines({ok: false, pipelines: [], detail: {}});
         }
-        renderOverviewFocus(latestStatus);
-        renderCenterMissionBrief(latestStatus);
         decorateActionButtons(document);
             maybeAutoArmLiveTracking();
-        const failed = results.map((result, index) => ({result, index})).filter((entry) => entry.result.status !== 'fulfilled').map((entry) => ['status', 'policy', 'metrics', 'sessions', 'test-sessions', 'work-trees', 'pipelines', 'backend-commands'][entry.index]);
+        const labels = ['surfaces', 'policy', 'metrics', 'status-full', 'sessions', 'test-sessions', 'work-trees', 'pipelines', 'backend-commands'];
+        const requested = [true, true, true, fetchFullStatus, fetchSessions, fetchSessions, fetchWorkTreeVisuals, fetchPipelinesDeck, true];
+        const failed = results
+            .map((result, index) => ({result, index}))
+            .filter((entry) => requested[entry.index] && entry.result.status !== 'fulfilled')
+            .map((entry) => labels[entry.index]);
         if (!latestStatus && !latestPolicy && !metrics && !sessions && !testRuns && !workTrees && !pipelines && !backendCommands) throw new Error('All control endpoints failed');
+        refreshBackoffMs = REFRESH_INTERVAL_MS;
         setFeedback(failed.length ? 'Partial refresh (' + failed.join(', ') + ' failed) at ' + new Date().toLocaleTimeString() : 'Live status refreshed at ' + new Date().toLocaleTimeString(), failed.length ? 'warn' : 'muted');
     } catch (error) {
+        refreshBackoffMs = Math.min(Math.max(refreshBackoffMs, REFRESH_INTERVAL_MS) * 2, REFRESH_BACKOFF_MAX_MS);
         setAction('Refresh failed: ' + error.message);
     }
 }
@@ -4621,7 +5035,10 @@ if (chatUserSelect && chatUserNameInput) {
     });
 }
 navButtons.forEach((button) => {
-    button.addEventListener('click', () => setActiveView(button.getAttribute('data-view-target') || 'overview'));
+    button.addEventListener('click', () => {
+        setActiveView(button.getAttribute('data-view-target') || 'overview');
+        refresh();
+    });
 });
 if (centerTabBar) {
     centerTabBar.addEventListener('click', (event) => {
@@ -5021,38 +5438,31 @@ bindClick('btnPipelineArchive', async () => {
     setAction(payload.message || 'pipeline_archived');
 });
 bindClick('btnPipelineQueryPreview', async () => {
-    const pipelineId = pipelineSelect ? String(pipelineSelect.value || '').trim() : selectedPipelineId;
-    const operation = pipelineQueryOperation ? String(pipelineQueryOperation.value || '').trim() : '';
-    const rowLimit = pipelineQueryRowLimit ? Number(pipelineQueryRowLimit.value || 10) : 10;
-    if (!pipelineId) return setAction('Select a data lane before previewing a query.');
-    if (!operation) return setAction('Select a governed operation before previewing.');
-    const payload = await postAction('pipeline_query_preview', {
-        pipeline_id: pipelineId,
-        operation,
-        row_limit: rowLimit,
-        params: {},
-    });
-    const result = payload.result && typeof payload.result === 'object' ? payload.result : payload;
-    if (pipelineQueryResult) pipelineQueryResult.textContent = formatPipelineQueryResult(result);
-    setAction(payload.message || 'pipeline_query_preview_ok');
+    await executePipelineQuery({live: false});
 });
 bindClick('btnPipelineQueryRun', async () => {
-    const pipelineId = pipelineSelect ? String(pipelineSelect.value || '').trim() : selectedPipelineId;
-    const operation = pipelineQueryOperation ? String(pipelineQueryOperation.value || '').trim() : '';
-    const rowLimit = pipelineQueryRowLimit ? Number(pipelineQueryRowLimit.value || 10) : 10;
-    if (!pipelineId) return setAction('Select a data lane before running a live query.');
-    if (!operation) return setAction('Select a governed operation before running live.');
-    const confirmed = window.confirm(`Run live governed query ${operation} on ${pipelineId}? This may read district data from the configured source.`);
-    if (!confirmed) return setAction(`Live query canceled for ${operation}.`);
-    const payload = await postAction('pipeline_query_run', {
-        pipeline_id: pipelineId,
-        operation,
-        row_limit: rowLimit,
-        params: {},
+    await executePipelineQuery({live: true});
+});
+bindClick('btnEdfiQuickHealth', async () => {
+    await executePipelineQuery({live: true, operation: 'connection_health', rowLimit: 1, params: {}, confirmLive: false});
+});
+bindClick('btnEdfiQuickSchools', async () => {
+    await executePipelineQuery({live: true, operation: 'list_schools', rowLimit: 10, params: {offset: 0}, confirmLive: false});
+});
+bindClick('btnEdfiQuickStudents', async () => {
+    await executePipelineQuery({live: true, operation: 'list_students', rowLimit: 10, params: {offset: 0}, confirmLive: false});
+});
+bindClick('btnEdfiQuickSync', async () => {
+    await executePipelineQuery({live: true, operation: 'sync_status', rowLimit: 1, params: {}, confirmLive: false});
+});
+bindClick('btnEdfiQuickChanges', async () => {
+    await executePipelineQuery({
+        live: true,
+        operation: 'changes_since',
+        rowLimit: 10,
+        params: {resource: 'ed-fi/schools', advance_cursor: true},
+        confirmLive: false,
     });
-    const result = payload.result && typeof payload.result === 'object' ? payload.result : payload;
-    if (pipelineQueryResult) pipelineQueryResult.textContent = formatPipelineQueryResult(result);
-    setAction(payload.message || 'pipeline_query_live_ok');
 });
 bindClick('btnPipelineNoteSave', async () => {
     const pipelineId = pipelineSelect ? String(pipelineSelect.value || '').trim() : selectedPipelineId;
@@ -5342,6 +5752,22 @@ if (pipelineCards) {
         setAction(`Pipeline selected: ${selectedPipelineId || 'none'}`);
     });
 }
+if (pipelineQueryOperation) {
+    pipelineQueryOperation.addEventListener('change', () => {
+        const operation = String(pipelineQueryOperation.value || '').trim();
+        renderPipelineQueryParamFields(operation);
+        const template = pipelineQueryCatalogCache[operation] || {};
+        if (pipelineQueryDescription) {
+            pipelineQueryDescription.textContent = String(template.description || 'Select an operation to see its governed description and parameters.');
+        }
+        if (pipelineQueryRowLimit && template.max_rows != null) {
+            pipelineQueryRowLimit.max = String(Math.max(1, Number(template.max_rows) || 50));
+            const current = Number(pipelineQueryRowLimit.value || 10);
+            const cap = Number(template.max_rows) || 50;
+            if (current > cap) pipelineQueryRowLimit.value = String(cap);
+        }
+    });
+}
 syncShellToggleState();
 decorateActionButtons(document);
 clearCenterTabs();
@@ -5546,4 +5972,4 @@ renderLiveTracking(null);
 wireTemporalEventManagement();
 loadTemporalEvents();
 refresh();
-setInterval(refresh, 15000);
+scheduleLiveRefresh();

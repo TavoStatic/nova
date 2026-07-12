@@ -664,11 +664,18 @@ class TestSessionControlService:
             }
 
         ok, msg, extra = run_test_session_definition_fn(session_file)
+        latest_report = dict(extra.get("latest_report") or {})
+        action_ok = bool(ok or latest_report)
         refreshed_queue = generated_work_queue_fn(24)
-        return ok, (f"generated_work_queue_next_ok:{session_file}" if ok else f"generated_work_queue_next_failed:{session_file}"), {
+        return action_ok, (
+            f"generated_work_queue_next_ok:{session_file}"
+            if action_ok
+            else f"generated_work_queue_next_failed:{session_file}"
+        ), {
             "selected": next_item,
+            "runner_ok": bool(ok),
             "runner_message": msg,
-            "latest_report": dict(extra.get("latest_report") or {}),
+            "latest_report": latest_report,
             "reports": list(extra.get("reports") or []),
             "definitions": list(extra.get("definitions") or []),
             "work_queue": refreshed_queue,

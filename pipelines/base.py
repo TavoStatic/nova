@@ -482,6 +482,7 @@ class BaseDataPipeline(ABC):
             "vendor_dictionary": self.vendor_dictionary_summary(),
             "predefined_reports": self.predefined_reports_summary(),
             "query_templates": sorted(self.load_query_templates().keys()),
+            "query_template_catalog": self.load_query_templates(),
         }
 
     @abstractmethod

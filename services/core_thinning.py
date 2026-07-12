@@ -412,6 +412,65 @@ def build_core_thinning_brief(core_path: Path | list[Path] | tuple[Path, ...], *
     }
 
 
+def build_core_thinning_owner_verdict(
+    brief: dict[str, object] | None,
+    *,
+    feed_result: dict[str, object] | None = None,
+) -> dict[str, object]:
+    """Return Mission-compatible owner pressure without making Mission own thinning."""
+
+    data = dict(brief or {})
+    feed = dict(feed_result or {}) if isinstance(feed_result, dict) else {}
+    ok = bool(data.get("ok", False)) and bool(feed.get("ok", True))
+    order_count = int(data.get("order_count", 0) or 0)
+    blocker_code = ""
+    detail = ""
+    blocks_green = False
+    if not ok:
+        blocker_code = "core_thinning_unavailable"
+        detail = str(data.get("error") or feed.get("error") or "core thinning evidence unavailable").strip()
+        blocks_green = True
+    elif order_count > 0:
+        blocker_code = "core_http_thinning_pressure"
+        detail = f"{order_count} core/http thinning work order(s) ready"
+    blockers = []
+    if blocker_code:
+        blockers.append(
+            {
+                "owner": "core_thinning",
+                "code": blocker_code,
+                "detail": detail,
+                "source": "core_thinning",
+            }
+        )
+    return {
+        "owner": "core_thinning",
+        "ready": not blockers,
+        "status": "ready" if not blockers else "pressure",
+        "source": "core_thinning",
+        "summary": (
+            "core/http thinning evidence unavailable"
+            if blocker_code == "core_thinning_unavailable"
+            else (
+                f"core/http thinning has {order_count} ready work order(s)"
+                if order_count > 0
+                else "core/http thinning has no ready work orders"
+            )
+        ),
+        "blocks_green": blocks_green,
+        "blockers": blockers,
+        "evidence": {
+            "order_count": order_count,
+            "line_count": int(data.get("line_count", 0) or 0),
+            "function_count": int(data.get("function_count", 0) or 0),
+            "large_function_count": int(data.get("large_function_count", 0) or 0),
+            "http_surface_candidate_count": int(data.get("http_surface_candidate_count", 0) or 0),
+            "wrapper_candidate_count": int(data.get("wrapper_candidate_count", 0) or 0),
+            "feed_status": str(feed.get("status") or ""),
+        },
+    }
+
+
 def render_core_thinning_brief(brief: dict | None = None, *, feed_result: dict | None = None) -> str:
     data = dict(brief or {})
     if not bool(data.get("ok", True)):
