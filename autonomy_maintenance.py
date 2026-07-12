@@ -4988,6 +4988,105 @@ def _run_generated_queue_work_tree_cycle(state: dict) -> dict:
     return payload
 
 
+def _active_work_tree_payload_eligible(payload: dict) -> bool:
+    if not isinstance(payload, dict):
+        return False
+    if str(payload.get("status") or "").strip().lower() != "active":
+        return False
+    if str(payload.get("kind") or "").strip().lower() in {PATCH_QUEUE_TREE_KIND, GENERATED_QUEUE_TREE_KIND}:
+        return False
+    next_step = payload.get("next_step") if isinstance(payload.get("next_step"), dict) else {}
+    return bool(next_step)
+
+
+def _active_work_tree_payload_matches_target(
+    payload: dict,
+    *,
+    branch_target: str = "",
+    task_target: str = "",
+    tool_target: str = "",
+) -> bool:
+    branch_target = str(branch_target or "").strip()
+    task_target = str(task_target or "").strip()
+    tool_target = str(tool_target or "").strip()
+    if not branch_target and not task_target and not tool_target:
+        return True
+    context = _active_work_candidate_context(payload)
+    if branch_target and str(context.get("branch_id") or "").strip() != branch_target:
+        return False
+    if task_target and str(context.get("task_id") or "").strip() != task_target:
+        return False
+    if tool_target and str(context.get("recommended_tool") or "").strip() != tool_target:
+        return False
+    return True
+
+
+def _resolve_targeted_active_work_candidates(
+    *,
+    target_tree_id: str = "",
+    target_branch_id: str = "",
+    target_task_id: str = "",
+    target_tool: str = "",
+) -> list[dict]:
+    tree_target = str(target_tree_id or "").strip()
+    branch_target = str(target_branch_id or "").strip()
+    task_target = str(target_task_id or "").strip()
+    tool_target = str(target_tool or "").strip()
+
+    if not tree_target and branch_target:
+        try:
+            branch = work_tree.get_branch(branch_target)
+            if branch is not None:
+                tree_target = str(getattr(branch, "tree_id", "") or "").strip()
+        except Exception:
+            tree_target = ""
+
+    if tree_target:
+        payload = work_tree.get_visual_tree_data(tree_target)
+        if not _active_work_tree_payload_eligible(payload):
+            return []
+        if not _active_work_tree_payload_matches_target(
+            payload,
+            branch_target=branch_target,
+            task_target=task_target,
+            tool_target=tool_target,
+        ):
+            return []
+        return [payload]
+
+    for payload in work_tree.list_visual_trees(limit=None):
+        if not _active_work_tree_payload_eligible(payload):
+            continue
+        if _active_work_tree_payload_matches_target(
+            payload,
+            branch_target=branch_target,
+            task_target=task_target,
+            tool_target=tool_target,
+        ):
+            return [payload]
+    return []
+
+
+def _active_work_candidates_for_cycle(
+    *,
+    targeted: bool,
+    tree_limit: int,
+    candidate_limit: int,
+    tree_target: str = "",
+    branch_target: str = "",
+    task_target: str = "",
+    tool_target: str = "",
+) -> list[dict]:
+    if targeted:
+        return _resolve_targeted_active_work_candidates(
+            target_tree_id=tree_target,
+            target_branch_id=branch_target,
+            target_task_id=task_target,
+            target_tool=tool_target,
+        )
+    return _active_work_tree_candidates(candidate_limit)[:tree_limit]
+
+
 def _active_work_tree_candidates(limit: int = ACTIVE_WORK_TREE_MAX_TREES) -> list[dict]:
     candidates: list[dict] = []
     for payload in work_tree.list_visual_trees(limit=max(int(limit or ACTIVE_WORK_TREE_MAX_TREES) * 4, 16)):
@@ -5189,27 +5288,15 @@ def _run_active_work_tree_cycle(
             tree_target = ""
     targeted = bool(tree_target or branch_target or task_target or tool_target)
     candidate_limit = max(tree_limit, ACTIVE_WORK_TREE_MAX_TREES) if targeted else tree_limit
-    candidates = _active_work_tree_candidates(candidate_limit)
-    if tree_target:
-        candidates = [
-            candidate
-            for candidate in candidates
-            if str(candidate.get("tree_id") or "").strip() == tree_target
-        ][:1]
-    elif targeted:
-        matched_candidates = []
-        for candidate in candidates:
-            context = _active_work_candidate_context(candidate)
-            if branch_target and str(context.get("branch_id") or "").strip() != branch_target:
-                continue
-            if task_target and str(context.get("task_id") or "").strip() != task_target:
-                continue
-            if tool_target and str(context.get("recommended_tool") or "").strip() != tool_target:
-                continue
-            matched_candidates.append(candidate)
-        candidates = matched_candidates[:1]
-    else:
-        candidates = candidates[:tree_limit]
+    candidates = _active_work_candidates_for_cycle(
+        targeted=targeted,
+        tree_limit=tree_limit,
+        candidate_limit=candidate_limit,
+        tree_target=tree_target,
+        branch_target=branch_target,
+        task_target=task_target,
+        tool_target=tool_target,
+    )
     if targeted and not candidates:
         payload = {
             "ts": _patch_queue_timestamp(),
@@ -5237,27 +5324,15 @@ def _run_active_work_tree_cycle(
     core_thinning_sync: dict = {}
     if sync_core_thinning and any(_candidate_uses_tool(candidate, "core_thinning") for candidate in candidates):
         core_thinning_sync = _sync_core_thinning_work_tree(state)
-        candidates = _active_work_tree_candidates(candidate_limit)
-        if tree_target:
-            candidates = [
-                candidate
-                for candidate in candidates
-                if str(candidate.get("tree_id") or "").strip() == tree_target
-            ][:1]
-        elif targeted:
-            matched_candidates = []
-            for candidate in candidates:
-                context = _active_work_candidate_context(candidate)
-                if branch_target and str(context.get("branch_id") or "").strip() != branch_target:
-                    continue
-                if task_target and str(context.get("task_id") or "").strip() != task_target:
-                    continue
-                if tool_target and str(context.get("recommended_tool") or "").strip() != tool_target:
-                    continue
-                matched_candidates.append(candidate)
-            candidates = matched_candidates[:1]
-        else:
-            candidates = candidates[:tree_limit]
+        candidates = _active_work_candidates_for_cycle(
+            targeted=targeted,
+            tree_limit=tree_limit,
+            candidate_limit=candidate_limit,
+            tree_target=tree_target,
+            branch_target=branch_target,
+            task_target=task_target,
+            tool_target=tool_target,
+        )
         if targeted and not candidates:
             payload = {
                 "ts": _patch_queue_timestamp(),
@@ -5327,22 +5402,10 @@ def _run_active_work_tree_cycle(
             }
         )
 
-    # Root fix for maintenance execution progress: when a tool_failed occurs (evidence already recorded),
-    # complete the task so the branch/tree can advance instead of restoring to OPEN and repeating failures.
-    # Also surface as "attempted" in status rather than leaving the cycle in tool_failed state.
-    for h in full_history:
-        if isinstance(h, dict) and str(h.get("action") or "").strip() == "tool_failed":
-            tid = str(h.get("task_id") or "").strip()
-            if tid:
-                try:
-                    mark_task_complete(tid)
-                except Exception:
-                    pass
-
     if executed_total:
         status = "ok"
     elif any(isinstance(h, dict) and str(h.get("action") or "").strip() == "tool_failed" for h in full_history):
-        status = "attempted"
+        status = "tool_failed"
     elif full_history:
         status = last_action or "waiting"
     else:

@@ -131,6 +131,15 @@ class TestOperatorOutboxService(unittest.TestCase):
                 title="Nova needs operator attention: defer_with_reason",
                 message="Mission hold.",
                 dedupe_key="defer|hold",
+                payload={
+                    "decision": "defer_with_reason",
+                    "execution_result": "blocked",
+                    "rejection_reasons": [
+                        "mission_steady_state_hold",
+                        "mission_truth_blocker:core_gate_release_drift",
+                    ],
+                    "recommended_action": {},
+                },
                 now_fn=lambda: 1000.0,
                 uuid_fn=lambda: "auto111",
             )
@@ -149,6 +158,32 @@ class TestOperatorOutboxService(unittest.TestCase):
         self.assertEqual(summary.get("open_count"), 2)
         self.assertEqual(summary.get("operator_actionable_open_count"), 1)
         self.assertEqual(summary.get("operator_actionable_latest_open_id"), "0000001005000-work222")
+
+    def test_summary_counts_autonomy_execution_failures_as_actionable(self):
+        with TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "operator_outbox.jsonl"
+            OPERATOR_OUTBOX_SERVICE.append_notice(
+                path,
+                source="autonomy_maintenance",
+                severity="error",
+                title="Nova needs operator attention: active_work_tree_run_next",
+                message="I am stuck on active_work_tree_run_next. execution_allowed",
+                dedupe_key="active_work_tree_run_next|failed",
+                payload={
+                    "decision": "recommend_action",
+                    "action_type": "active_work_tree_run_next",
+                    "execution_result": "failed",
+                    "reason": "execution_allowed",
+                    "rejection_reasons": [],
+                    "recommended_action": {"action_type": "active_work_tree_run_next"},
+                },
+                now_fn=lambda: 2000.0,
+                uuid_fn=lambda: "fail111",
+            )
+            summary = OPERATOR_OUTBOX_SERVICE.summary(path, limit=5)
+
+        self.assertEqual(summary.get("open_count"), 1)
+        self.assertEqual(summary.get("operator_actionable_open_count"), 1)
 
     def test_notice_from_autonomy_uses_state_not_content_triggers(self):
         notice = OPERATOR_OUTBOX_SERVICE.notice_from_autonomy(

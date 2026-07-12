@@ -3246,6 +3246,96 @@ class TestAutonomyMaintenance(unittest.TestCase):
         self.assertEqual(calls, [("read", ["target.txt"])])
         self.assertEqual(work_tree._TASKS[target_task.task_id].status, work_tree.TaskStatus.COMPLETE)
 
+    def test_run_active_work_tree_cycle_resolves_target_tree_outside_candidate_window(self):
+        state = {}
+        signal_candidate = {
+            "tree_id": "tree-signal",
+            "title": "Signal Intake: Runtime Governance",
+            "status": "active",
+            "kind": "signal_ingestion",
+            "next_step": {
+                "branch_id": "branch-signal",
+                "branch_title": "Read signal path",
+                "recommended_tool": "read",
+            },
+        }
+        core_payload = {
+            "tree_id": "tree-core",
+            "title": "Core Thinning",
+            "status": "active",
+            "kind": "core_thinning",
+            "next_step": {
+                "branch_id": "branch-core",
+                "branch_title": "Review wrapper shim",
+                "task_id": "task-core",
+                "recommended_tool": "core_thinning",
+            },
+        }
+
+        with mock.patch.object(
+            autonomy_maintenance,
+            "_active_work_tree_candidates",
+            return_value=[signal_candidate] * 8,
+        ) as candidates_mock, mock.patch.object(
+            autonomy_maintenance.work_tree,
+            "get_visual_tree_data",
+            return_value=core_payload,
+        ), mock.patch.object(
+            autonomy_maintenance.work_tree,
+            "run_autonomous_loop",
+            return_value=[{"action": "executed", "tool": "core_thinning"}],
+        ) as loop_mock:
+            payload = autonomy_maintenance._run_active_work_tree_cycle(
+                state,
+                max_steps=1,
+                max_trees=1,
+                target_tree_id="tree-core",
+                target_branch_id="branch-core",
+                target_task_id="task-core",
+                target_tool="core_thinning",
+                sync_core_thinning=False,
+            )
+
+        candidates_mock.assert_not_called()
+        loop_mock.assert_called_once()
+        self.assertEqual(payload.get("status"), "ok")
+        self.assertNotEqual(payload.get("status"), "stale_execution_contract")
+        self.assertEqual(payload.get("target_tree_id"), "tree-core")
+        self.assertEqual(loop_mock.call_args.args[0], "tree-core")
+
+    def test_run_active_work_tree_cycle_keeps_task_open_after_tool_failed(self):
+        self._isolated_work_tree_db()
+        state = {}
+        tree = work_tree.initialize_tree(
+            "Core Thinning",
+            meta={"source": "core_thinning"},
+        )
+        root = work_tree._BRANCHES[tree.root_branch_id]
+        target_task = work_tree.add_task_to_branch(
+            root.branch_id,
+            "Review wrapper shim",
+            meta={"expected_tool": "read", "allowed_tools": ["read"], "tool_args": ["target.txt"]},
+        )
+        work_tree.set_branch_tools(root.branch_id, allowed_tools=["read"], preferred_tool="read")
+
+        def _execute(tool_name, tool_args=None):
+            return {"ok": False, "reason": "repo_hygiene_failed"}
+
+        with mock.patch.object(autonomy_maintenance.nova_core, "execute_planned_action", side_effect=_execute):
+            payload = autonomy_maintenance._run_active_work_tree_cycle(
+                state,
+                max_steps=1,
+                max_trees=1,
+                target_tree_id=tree.tree_id,
+                target_branch_id=root.branch_id,
+                target_task_id=target_task.task_id,
+                target_tool="read",
+                sync_core_thinning=False,
+            )
+
+        self.assertEqual(payload.get("status"), "tool_failed")
+        self.assertEqual(work_tree._TASKS[target_task.task_id].status, work_tree.TaskStatus.OPEN)
+
     def test_run_active_work_tree_cycle_uses_target_tree_for_pinned_branch(self):
         self._isolated_work_tree_db()
         state = {}

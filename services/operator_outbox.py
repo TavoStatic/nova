@@ -37,15 +37,34 @@ AUTONOMY_INTERNAL_WAIT_REASONS = {
     "mission_validation_required_hold",
     "operator_hold_pending",
 }
-INTERNAL_OUTBOX_SOURCES = frozenset({"autonomy_maintenance"})
-
-
 def _autonomy_internal_wait_reason(reason: str) -> bool:
     text = _safe_text(reason, 120)
     return (
         text in AUTONOMY_INTERNAL_WAIT_REASONS
         or text.startswith("mission_truth_blocker:")
         or text.startswith("mission_owner_blocker:")
+    )
+
+
+def _operator_notice_is_internal_wait(event: dict[str, Any]) -> bool:
+    if _safe_text(event.get("source"), 120) != "autonomy_maintenance":
+        return False
+    payload = _safe_dict(event.get("payload"))
+    decision = _safe_text(payload.get("decision"), 80)
+    result = _safe_text(payload.get("execution_result"), 80)
+    rejection_reasons = [
+        _safe_text(item, 120)
+        for item in _safe_list(payload.get("rejection_reasons"))
+        if _safe_text(item, 120)
+    ]
+    recommended = _safe_dict(payload.get("recommended_action"))
+    requires_ack = bool(recommended.get("requires_ack"))
+    return bool(
+        decision in {"defer_with_reason", "defer"}
+        and result in {"", "blocked"}
+        and rejection_reasons
+        and all(_autonomy_internal_wait_reason(reason) for reason in rejection_reasons)
+        and not requires_ack
     )
 
 
@@ -56,7 +75,7 @@ def _operator_actionable_open_events(events: list[dict[str, Any]]) -> list[dict[
             continue
         if _safe_status(event.get("status")) in CLOSED_NOTICE_STATUSES:
             continue
-        if _safe_text(event.get("source"), 120) in INTERNAL_OUTBOX_SOURCES:
+        if _operator_notice_is_internal_wait(event):
             continue
         actionable.append(event)
     return actionable
