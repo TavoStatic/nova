@@ -1,5 +1,7 @@
 # NYO System Handoff
 
+Document class: operating handoff and historical build log. Verify current commands against `OPERATIONS.md` and current state against runtime artifacts.
+
 Date: 2026-05-18
 Last verified: 2026-05-20
 

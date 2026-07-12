@@ -1,5 +1,7 @@
 # Nova Package Product Roadmap
 
+Document class: roadmap. It describes intended sequencing, not current implementation or release truth.
+
 Date: 2026-05-18
 Last verified: 2026-05-18
 

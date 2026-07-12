@@ -1,5 +1,7 @@
 # Nova Project — Health Review
 
+Historical health review. It does not describe current runtime health; read the live artifacts listed in `docs/STATUS.md`.
+
 Reviewer: second set of eyes
 Date: 2026-05-20
 Branch reviewed: `codex/push-prep` (HEAD `3500866 Update Nova documentation for current release truth`)

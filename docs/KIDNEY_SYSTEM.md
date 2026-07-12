@@ -1,43 +1,70 @@
 # Kidney System
 
-Last verified: 2026-05-18
+Last verified from code: 2026-07-12
 
-Current policy posture: `kidney.mode` is `enforce` in `policy.json`.
+Kidney owns cleanup and retention. It does not decide whether Nova is healthy, whether a failed task is complete, or whether a release is valid.
 
-## Purpose
-The Kidney is the cleanup partner to the Phase 2 safety envelope.
+Current policy mode: `enforce`.
 
-- Safety envelope controls what can be promoted into future training and patch packaging.
-- Kidney controls what should be archived or flushed once it becomes stale, low-value, or clearly disposable.
+## Inputs
+
+Kidney reads:
+
+- generated session definitions and their metadata
+- pending-review and quarantine artifacts
+- promotion audit history
+- patch previews and snapshots
+- Kidney cleanup snapshots
+- temporary and test-session artifacts
+- runtime exports
+- ledger sizes
+- protected path patterns
+- retired generated-definition index
+- policy age, count, size, novelty, and protection limits
+
+## Candidate Classes
+
+- old or low-novelty generated definitions
+- expired quarantine or pending-review material
+- stale/ineligible patch previews
+- stale or excess snapshots
+- old temporary/test artifacts
+- export retention pressure
+- oversized ledgers
+
+Each candidate carries a category, action, reason, path, and supporting metadata.
 
 ## Modes
-- `observe`: scan and report only.
-- `enforce`: snapshot and apply archive/delete actions.
+
+- `observe`: scan and report candidates
+- `enforce`: snapshot the cleanup set, then archive/delete according to policy
+
+## Safety And Retention
+
+- protected patterns are excluded
+- cleanup intent is snapshotted before enforcement unless policy and candidate shape allow skipping it
+- cleanup snapshots are capped by age, count, and total bytes
+- generated definitions retired by Kidney are recorded with fingerprints and metadata
+- patch snapshots and Kidney snapshots have separate roots
+- status is written to `runtime/kidney/status.json`
+- maintenance logs Kidney output with a `[KIDNEY]` prefix
+
+## Paths
+
+- `runtime/kidney/status.json`
+- `runtime/kidney/archive/`
+- `runtime/kidney/snapshots/`
+- `runtime/kidney/protect_patterns.json`
+- `runtime/kidney/retired_generated_definitions.json`
+- patch preview and snapshot roots under the active runtime/update scope
 
 ## Commands
+
 - `kidney status`
 - `kidney now`
 - `kidney dry-run`
 - `kidney protect <pattern>`
 
-## Filters
-1. Old definitions
-- Generated definitions older than `definition_max_age_days` or with novelty below `definition_novelty_min` are marked for archive.
+## Feedback Loop
 
-2. Quarantined waste
-- Pending-review or quarantine definitions older than `quarantine_max_age_hours`, or carrying excessive fallback pressure, are marked for deletion.
-
-3. Preview junk
-- Patch preview reports older than `preview_max_age_days` and no longer marked `eligible` are marked for deletion.
-
-4. Stale snapshots
-- Patch snapshots and backup-style runtime state files older than `snapshot_max_age_days` are marked for deletion.
-
-5. Temp bloat
-- Old test-session run artifacts, runtime text dumps, and temp probe artifacts older than `temp_max_age_days` are marked for deletion.
-
-## Safety Rails
-- Enforce mode creates a pre-flush snapshot under `runtime/kidney/snapshots`.
-- Protected patterns are never touched.
-- Status is written to `runtime/kidney/status.json`.
-- Maintenance logs Kidney activity with a `[KIDNEY]` prefix.
+Maintenance runs Kidney before pre-execution Signal Intake and orchestrator evaluation. Kidney summary fields can contribute storage/release pressure and generated-definition truth, but Mission should receive those facts through their owning evidence paths rather than rebuilding cleanup logic.

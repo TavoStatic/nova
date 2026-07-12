@@ -28,7 +28,13 @@ Run preflight:
 C:\Nova\nova.cmd doctor
 ```
 
-Run the Nova runtime core:
+Run Nova under guard supervision:
+
+```powershell
+C:\Nova\nova.cmd guard
+```
+
+Run the core directly only when guard supervision and periodic guard-launched maintenance are intentionally not wanted:
 
 ```powershell
 C:\Nova\nova.cmd run
@@ -67,7 +73,7 @@ C:\Nova\nova.cmd package-promote --record runtime\exports\release_packages\valid
 
 1. `nova.cmd install`
 2. `nova.cmd doctor`
-3. `nova.cmd run`
+3. `nova.cmd guard`
 4. `nova.cmd webui-start --host 127.0.0.1 --port 8080`
 5. `C:\Nova\.venv\Scripts\python.exe C:\Nova\health.py check`
 
@@ -77,6 +83,7 @@ C:\Nova\nova.cmd package-promote --record runtime\exports\release_packages\valid
 C:\Nova\nova.cmd help
 C:\Nova\nova.cmd install
 C:\Nova\nova.cmd doctor --fix
+C:\Nova\nova.cmd guard
 C:\Nova\nova.cmd run
 C:\Nova\nova.cmd webui-start --host 127.0.0.1 --port 8080
 C:\Nova\nova.cmd webui-status --port 8080
@@ -135,9 +142,11 @@ Key API routes:
 | Route | Method | Purpose |
 | --- | --- | --- |
 | `/api/control/status` | GET | Full live status payload |
+| `/api/control/status/surfaces` | GET | Thin status spine used for frequent refresh and Mission/operator summaries |
 | `/api/control/policy` | GET | Current policy payload |
 | `/api/control/metrics` | GET | Metrics payload |
 | `/api/control/work-trees` | GET | Work-tree state |
+| `/api/control/pipelines` | GET | Pipeline registry, lane status, and selected pipeline detail |
 | `/api/control/sessions` | GET | Session list |
 | `/api/control/test-sessions` | GET | Test session list |
 | `/api/control/action` | POST | Control actions (self_check, webui_restart, etc.) |
@@ -182,7 +191,7 @@ When Nova core behavior changes, treat the operator console in `nova_http.py` as
 
 Run this checklist after changes to routing, session state, policy, telemetry, reflection, or runtime health:
 
-1. Verify `GET /api/control/status` still exposes the current truth for sessions, memory, tool activity, action-ledger state, guard/core state, and health score.
+1. Verify `GET /api/control/status/surfaces` carries the thin status contract and `GET /api/control/status` carries the heavier sections without changing owner truth.
 2. Verify `POST /api/control/action` still returns the expected payload shape for `refresh_status`, `self_check`, and any policy or runtime action you changed.
 3. Verify the operator console still points at the live control endpoints and still exposes the tabs operators use: Overview, Operations, Sessions, and Logs.
 4. If you changed session lifecycle behavior, verify session counts, session deletion, and any session-end telemetry still show up in the control surface.

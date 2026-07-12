@@ -1,389 +1,157 @@
 # Nova Architecture
 
-## System Direction
-
-Nova is becoming the runtime core of NYO AI SYSTEMS: a single decision spine with distributed execution, operator-visible telemetry, scoped memory, governed mutation paths, and optional domain extension points.
-
-Architecturally, that means Nova should be treated as a supervised local runtime and control surface, not just a conversational shell. The public runtime should remain generic while domain specialization is attached explicitly through policy, tools, and operator-loaded knowledge packs rather than bundled repo-local vertical content.
-
-## Main Components
-
-- `nova_core.py`
-  - policy loading and mutation
-  - deterministic command and truth-hierarchy handling
-  - in-process memory service wrappers over `memory.py`
-  - structured memory-event logging for writes, recalls, audits, skips, and stats
-  - per-turn action ledger with ordered route traces for decision-path observability
-  - tool orchestration and teach/patch logic
-
-- `nova_http.py`
-  - browser runtime console and operator console
-  - persistent HTTP sessions and owner binding
-  - optional control login and optional chat login
-  - thin transport wrappers over control, auth, telemetry, operator, session, subconscious, and asset services
-  - admin actions for guard, policy, memory scope, and managed chat users
-
-- `memory.py`
-  - SQLite-backed storage in `nova_memory.sqlite`
-  - semantic recall with lexical fallback
-  - explicit `private`, `shared`, and `hybrid` scope support
-  - direct callable service layer used by `nova_core.py` and CLI entrypoints
-
-- `nova_guard.py`
-  - process supervision
-  - heartbeat and runtime state tracking
-
-- `run.py` and `run_tools.py`
-  - voice chat and tool-runner entrypoints
-  - shared voice interaction service access
-  - tool-console dispatch for local tool-assisted flows
-
-- `tools/`
-  - shared tool contract via `NovaTool` and `ToolContext`
-  - registry-backed dispatch from `run_tools.py`
-  - manifest and structured tool-event logging
-
-- `tools/os_capabilities/`
-  - registered PowerShell capabilities for bounded OS inspection and evidence collection
-  - JSON registry with version, authority level, hash, argument schema, locality, and evidence contract metadata
-  - current active capabilities: `inspect_processes`, `inspect_ports`, `scan_large_files`, `collect_diagnostics_bundle`, `verify_ollama_model`, and `inspect_runtime_health`
-
-- `services/operator_outbox.py`
-  - durable Nova-to-operator notice lane
-  - records missing authority, missing capability, stale contracts, invalid arguments, and unresolved runtime or Work Tree pressure
-  - feeds control status and runtime console surfaces
-
-- `services/leah_frontdoor.py`
-  - separate Leah assistant frontend served at `/leah`
-  - independent chat UI with upload support and its own JS/CSS assets
-  - runs alongside the operator control room without replacing it
-
-- `services/nova_temporal_service.py`, `services/nova_calendar_ingestion.py`, `services/nova_scheduler.py`
-  - temporal pressure scoring from operator calendar (ICS) files
-  - converts events into scored pressure signals with proximity, confidence, importance, and dependency-risk dimensions
-  - the maintenance feed runs this on a cadence via the APScheduler wrapper and surfaces results in `autonomy_maintenance` state and control status
-  - `nova time` CLI command exposes temporal review to the operator
-
-- `services/autonomy_orchestrator.py`
-  - central autonomous decision-making service (1331 lines)
-  - selects maintenance actions, manages orchestrator ledger, drives work-tree execution cycles
-  - works with `autonomy_execution_gate.py` to enforce policy before autonomous actions run
-
-- `services/regression_lanes.py`, `services/regression_profile_inventory.py`
-  - regression lane membership (unit / behavior / integration) and test-profile state
-  - detects profile drift, profile gaps, and unclassified tests
-  - feeds the `test_profile_inventory_clear` self-check
-
-- `services/nova_wiring_inventory.py`
-  - end-to-end wiring closure analysis (1158 lines)
-  - detects which surfaces, signals, tools, and advisory actions are connected from signal source to operator-visible output
-  - feeds the wiring inventory panel and the `nova wiring-check` CLI gate
-
-- `services/work_tree_signal_ingestion.py`
-  - central signal bus (5679 lines)
-  - converts status payloads, autonomy events, OS capability evidence, and temporal pressure into work-tree branches and signals
-  - the primary integration point between all signal sources and the work-tree pressure model
-
-## Current Identity and Privacy Model
-
-- HTTP chat sessions are persisted and bound to a session owner.
-- Active users in `nova_core.py` are thread-local rather than global.
-- Memory reads and writes respect policy-driven scope behavior.
-- The browser and CLI both send stable `user_id` values.
-- Chat login may be backed by:
-  - managed local file: `runtime/chat_users.json`
-  - env JSON fallback: `NOVA_CHAT_USERS_JSON`
-  - single env pair fallback: `NOVA_CHAT_USER` and `NOVA_CHAT_PASS`
-
-## Control Room And Leah
-
-The control room at `/control` exposes:
-
-- runtime health and telemetry
-- session manager
-- guard control
-- domain and web mode policy changes
-- memory scope administration
-- memory totals in live status telemetry
-- managed chat-user administration
-- diagnostics export and log tail actions
-- work-tree status and branch detail
-- data-pipeline controls
-- temporal pressure feed status
-
-The Leah assistant frontend at `/leah` is a separate chat UI:
-
-- independent session and upload flow
-- own JS/CSS assets (`static/leah.js`, `static/leah.css`, `static/leah_fx.js`)
-- served by `services/leah_frontdoor.py` through `nova_http.py`
-
-## Important Runtime Paths
-
-- `runtime/http_chat_sessions.json`: persisted HTTP chat sessions
-- `runtime/chat_users.json`: managed chat-user store
-- `runtime/control_action_audit.jsonl`: control room audit events
-- `runtime/policy_changes.jsonl`: policy mutations
-- `runtime/tool_events.jsonl`: structured tool execution events
-- `runtime/operator_outbox.jsonl`: durable operator notices from Work Tree, autonomy, and OS capability gaps
-- `runtime/os_capability_ledger.jsonl`: OS capability execution and blocked-request evidence
-- `runtime/os_capability_evidence/`: bounded evidence output for evidence-writing OS capabilities
-- `runtime/memory_events.jsonl`: structured memory operation events
-- `runtime/actions/*.json`: per-turn action ledger records including route trace and final planner decision
-- `runtime/autonomy_maintenance_state.json`: persisted maintenance cycle state including last work-tree cycle, signal ingestion, temporal feed, and orchestrator records
-- `runtime/temporal/`: operator ICS calendar files consumed by the temporal feed
-- `runtime/regression_status.json`: latest full regression result
-- `runtime/validation/release/latest_release_validation.json`: latest release validation outcome
-- `runtime/exports/release_packages/`: release build artifacts, ledger, and validation records
-- `runtime/exports`: exported diagnostics and snapshots
-
-## Request Flow Diagram
-
-```text
-User Input
-  ↓
-HTTP UI / CLI / Tool Runner
-  ↓
-nova_http.py / run.py / run_tools.py
-  ↓
-nova_core.py
-  ↓
-policy + deterministic routing
-  ↓
-memory lookup
-  ↓
-tool invocation (optional)
-  ↓
-response assembly
-  ↓
-UI / CLI output
-```
-
-Current intent-centered request flow:
-
-```text
-user turn
-  -> CLI / HTTP / tool runner
-  -> turn parsing and conversation state
-  -> planner intent route
-  -> memory, runtime, or Work Tree context when needed
-  -> tool or OS capability only when the intent requires it
-  -> response synthesis from available evidence
-  -> action ledger and operator-visible status
-```
+Last verified from code: 2026-07-12
 
-## Architectural Shape
+For the exhaustive process and subsystem map, read `SYSTEM_MAP.md`. For every source function and service, read `FUNCTION_INDEX.md` and `SERVICES_INDEX.md`.
 
-Nova is currently closer to a consolidating `B` shape than a fully layered `A` shape.
-
-- `nova_core.py` is the de facto center of gravity and is absorbing more of the policy, memory, deterministic routing, and tool orchestration logic.
-- `nova_http.py`, `run.py`, and `run_tools.py` still interact with multiple cross-cutting concerns rather than through a strict interface boundary.
-- The project is entering the architecture consolidation phase, but it is not yet a clean interface-to-core-to-tools stack.
+## Architectural Intent
 
-The likely next turning point is to formalize clearer boundaries around:
+Nova is a local AI runtime organized around evidence-bearing feedback loops:
 
-- interface adapters
-- core orchestration
-- tool execution contracts
-- memory and persistence services
+- understand intent before choosing a route
+- keep execution distributed across specialized owners
+- keep mutation governed and reversible
+- make pressure, evidence, decisions, and outcomes inspectable
+- let runtime owners publish truth and let composition layers repeat it
+- route unresolved work into Work Tree instead of laundering it into health
+- keep core and HTTP as adapters and coordinators, not permanent homes for every new layer
 
-The first concrete step in that direction is now present: the tool boundary has a shared base contract, a registry, and manifest-backed inventory instead of only open-coded dispatch.
+This section states intent. The current implementation still contains heavy files and mixed ownership described below.
 
-That boundary is now also used by `nova_core.py` for local filesystem, vision, health-style operator actions, and patch-governed mutation flows, which moves Nova one step closer to a true interface-to-core-to-tools shape rather than parallel execution paths.
+## Current Boundaries
 
-Patch execution is still separately governed, but it is no longer outside the tool system. It now has an explicit contract, admin gate, and policy surface while remaining intentionally stricter than ordinary operator tools.
+### Front Doors
 
-## Decision Spine
+- `nova.cmd` and `nova.ps1`: command and lifecycle front door
+- `nova_core.py`: direct local core/voice/CLI runtime
+- `nova_http.py`: separate HTTP/control/Leah runtime on port 8080
+- `nova_guard.py`: core process supervisor and one-shot maintenance launcher
+- `autonomy_maintenance.py`: feedback-cycle coordinator and optional detached loop worker
 
-The current architectural direction should be understood as a single decision spine, not a single monolithic processor.
+These are separate process and ownership boundaries. Core does not contain the HTTP server.
 
-## Search Provider Architecture
+### Conversation Spine
 
-Nova's search stack should not be treated as one generic "web search" pipe.
+The conversation path uses intent evidence, planner contracts, route probing, fulfillment viability, tool policy, reply context, and finalization services.
 
-The target provider design is documented in [SEARCH_PROVIDER_ARCHITECTURE.md](SEARCH_PROVIDER_ARCHITECTURE.md).
+The target shape is one decision spine with distributed execution. The current Supervisor seam has no populated default rule specs or explicit ownership sets, so the active routing spine is primarily planner/service driven.
 
-The short version is:
+### Feedback Spine
 
-- `SearXNG` is the current default broad web broker (operator-managed, localhost)
-- `Wikipedia` is the structured knowledge provider (implemented)
-- `StackExchange` is the structured troubleshooting provider (implemented)
-- `general_web` is the fallback broad search family
-- `Whoogle` and `Brave` are not active providers in the current codebase; they appear only as legacy design notes
+Runtime owners publish evidence. Signal Intake converts actionable pressure into Work Tree. Work Tree owns durable task/evidence state. Mission composes the cycle verdict. The orchestrator selects an action. The execution gate checks policy. The dispatcher and Work Tree execute bounded actions.
 
-Active search-provider priority is: `wikipedia`, `stackexchange`, `general_web`.
+Mission is currently more than a passive verdict because it also applies hold contracts and narrow execution exceptions. See `AUTONOMY_AND_MISSION.md`.
 
-The decision spine routes between those provider families based on turn type rather than sending everything to one generic search lane.
+### Status Spine
 
-## Routing Module Map
+Status is composed from owner services and projected through two HTTP boundaries:
 
-The current routing surface is a concrete subsystem, not just helper code inside `nova_core.py`.
+- thin surfaces: `/api/control/status/surfaces`
+- full status: `/api/control/status`
 
-- `routing/turn_model.py`: shared turn data structures.
-- `routing/execution_plan.py`: execution-plan representation for downstream handlers.
-- `services/nova_turn_intent_trace.py`: turn evidence and route trace capture.
-- `services/nova_routing_support.py`: planner support for intent, context, and route decisions.
-- `services/nova_routing_helpers.py`: shared helpers for routing support.
-- `services/nova_reply_context_contract.py`: structural reply context contract for chat turns.
-- `services/nova_reply_runtime.py`: reply runtime execution helpers.
-- `services/nova_reply_sequence.py`: reply sequence assembly and final delivery shape.
-- `services/nova_fallback_flow.py`: fallback flow after structural routes have been considered.
-- `services/nova_fulfillment_routing.py`: maps planner intent into fulfillment paths.
-- `services/fulfillment_flow.py`: fulfillment flow orchestration.
-- `services/decision_pipeline.py`: pipeline-level decision coordination.
+Targeted endpoints hydrate Work Trees, pipelines, sessions, tests, policy, and metrics. The control panel is a consumer of those surfaces, not the owner of their truth.
 
-Related top-level routing modules:
+### Tool Spine
 
-- `planner_decision.py`: planner-owned turn classification and route choice.
-- `action_planner.py`: compatibility adapter over planner decisions.
-- `supervisor.py` and `services/supervisor_*.py`: deterministic rule arbitration and rule-family ownership.
+Tools have registry metadata, policy checks, execution events, and bounded context. OS capabilities add hash, version, argument, authority, and evidence contracts. Work Tree adds tree/branch/task tool declarations before autonomous execution.
 
-## Services Module Map
+### Mutation Spine
 
-The `services/` directory is now the main extraction surface for behavior that used to crowd `nova_core.py` and `nova_http.py`.
+Mutation paths are split by owner:
 
-See [SERVICES_INDEX.md](SERVICES_INDEX.md) for the maintained services-by-domain index. Keep that index concise and clustered; it should explain ownership without becoming a line-by-line inventory.
+- patch previews and apply/rollback
+- generated code and patch bridge
+- policy mutation
+- memory writes and retention
+- data-lane control
+- release and installer build/promotion
 
-## Supervisor Ownership Constitution
+Passing one mutation gate does not imply release readiness.
 
-Deterministic behavior ownership is governed by [SUPERVISOR_CONTRACT.md](SUPERVISOR_CONTRACT.md).
+## Major Ownership Domains
 
-The short version is:
+| Domain | Primary owners |
+|---|---|
+| Runtime lifecycle | guard, runtime control/process state/heartbeat/restart provenance |
+| HTTP and control | HTTP route/transport services, control status/actions/auth/assets |
+| Conversation | intent, planner, routing, fulfillment, reply, finalization, action ledger |
+| Memory and identity | memory adapter/routing/learning/health/bootstrap/retention |
+| Tools | direct registry, tool execution, tool policy, OS capability registry/controller |
+| Work and autonomy | Work Tree, Signal Intake, pressure snapshot, Mission, orchestrator, gate |
+| Reflection and maintenance | subconscious, Kidney, core steward, core health, core thinning |
+| Change governance | safety envelope, patch, codegen, layer maturity, release, installer |
+| Data | pipeline framework, privileged protocol, Ed-Fi core, BISD lane |
+| Validation | regression lanes, profile inventory, test sessions, validation artifact truth |
+| Host adaptation | SOCK, Ollama health, port ownership, voice, vision, TTS |
 
-- every deterministic behavior starts as a supervisor rule
-- core executes supervisor-selected actions only
-- HTTP mirrors core execution and may not fork deterministic routing
-- bypassing supervisor phases is a bug
+## Core And HTTP Thinning
 
-The rule is:
+`nova_core.py` and `nova_http.py` retain compatibility wrappers because tests and front doors patch them directly. New layers should still place ownership in services and leave wrappers thin.
 
-- one routing authority owns turn classification and dispatch decisions
-- execution remains distributed across specialized paths
-- tools are capabilities selected by the decision spine, not automatic keyword triggers
-- internal self-report answers must come from live control status and Work Tree evidence
+Core thinning is represented as an owner service and a Work Tree feed. Its current analysis targets both core and HTTP. Mission receives the owner verdict; it should not recreate the size analysis.
 
-That means Nova should prefer this shape:
+Thinning is not task deletion. A safe extraction must preserve:
 
-1. turn interpreter
-2. task dispatcher
-3. specialized execution path
-4. response synthesis
+- public wrapper names used by tests and callers
+- runtime dependency injection
+- action and evidence semantics
+- status keys and wiring inventory
+- failure behavior
+- source-root classification
 
-In practical terms, the decision spine should answer only a few questions:
+## Ingesting New Layers
 
-- what kind of turn is this
-- is a direct answer possible
-- is clarification required
-- should this dispatch to a tool path, research path, memory path, or heavier workflow
-
-For chat behavior, the current root rule is intent before routing:
-
-- understand the user's actual goal and conversation state first
-- do not decide from trigger words or phrase presence alone
-- route to a tool only when the intent and context require a tool
-- if Nova cannot verify an internal claim, answer from live evidence or say what is missing
-
-It should not become the heavy processor for every task. Large retrieval, multi-step workflows, document processing, research expansion, and tool execution should remain outside the routing core once the lane has been chosen.
-
-The design sentence for this phase is:
-
-Nova should have a single decision spine for understanding and dispatch, but execution should remain distributed across specialized paths so orchestration stays coherent without becoming a performance bottleneck.
-
-That shape now has an explicit planner boundary:
-
-- turn understanding lives in `planner_decision.py`
-- route classification lives in `planner_decision.py`
-- execution choice is mapped back into planner actions before `nova_core.py` and `nova_http.py` dispatch to specialized handlers
-- `action_planner.py` is now a thin adapter over that decision module rather than the primary home for mixed string heuristics
-- continuation handling now flows through the planner, routing support, reply context contract, and supervisor runtime rather than deleted standalone classifiers
-- active-task and pending-thread context now belongs to the planner/routing support path and Work Tree evidence surfaces rather than a separate root-level constraints file
-
-## Current Refactor Risk
-
-Nova no longer has the earlier CLI-only split-brain condition where planner routing and direct command/keyword routing both acted as independent authorities.
-
-The current shape is now:
-
-- one planner-owned routing spine in CLI and HTTP
-- legacy command and keyword handlers retained as execution targets
-- action-ledger traces proving planner ownership of delegated command and keyword routes
-
-The next cleanup priority is therefore not basic route ownership. It is keeping the decision module coherent as coverage grows so:
-
-- one layer owns classification
-- one layer owns dispatch choice
-- execution helpers remain specialized and reusable
-- planner heuristics do not collapse back into one large mixed file
-
-For the supervisor-owned continuation path, the current seam shape is now:
-
-- `services/nova_turn_intent_trace.py` records what evidence the turn actually carried
-- `services/nova_routing_support.py` owns shared routing support for continuation and context-sensitive decisions
-- `services/nova_reply_context_contract.py` owns the structural reply context the model receives
-- `services/nova_fulfillment_routing.py` maps the chosen intent into work or tool fulfillment
-- `supervisor.py` owns rule-family arbitration
-- domain families should decide execution only after turn evidence, conversation context, and Work Tree constraints have been applied
-
-## Request Flow Summary
-
-1. Client submits to `/api/chat`.
-2. `nova_http.py` resolves chat auth and request identity.
-3. Session ownership is enforced for persisted sessions.
-4. Deterministic paths run first.
-5. Memory/context is added when appropriate.
-6. LLM fallback is used only when deterministic paths do not answer.
-7. The final route is written to the action ledger so operators can inspect why that path was chosen.
-
-## HTTP Boundary Status
-
-`nova_http.py` is now intentionally narrower than earlier revisions. It still owns request parsing, cookie and session handling, response writing, and the stable wrapper functions that existing tests patch directly.
-
-Deterministic operator and control-room ownership has been pushed into services, including:
-
-- `services/control_auth.py`
-- `services/chat_identity.py`
-- `services/control_telemetry.py`
-- `services/control_assets.py`
-- `services/subconscious_control.py`
-- `services/test_session_control.py`
-- `services/operator_control.py`
-
-That leaves the HTTP layer primarily as transport glue instead of a mixed transport-plus-business-logic module.
-
-## OS Capability Chain
-
-The OS capability chain extends the same intent-to-evidence model into bounded local OS actions.
-
-Flow:
-
-```text
-intent
-  -> Work Tree or tool request
-  -> registered capability
-  -> registry contract
-  -> load-time hash check
-  -> argument schema validation
-  -> authority check
-  -> execution-time hash check
-  -> script execution
-  -> ledger evidence
-  -> result judgment
-  -> operator outbox when the contract cannot be satisfied
-```
-
-The registry is the contract and the script hash is the witness. If the script changes without the registry changing, the capability becomes `contract_stale` and routes to operator outbox instead of executing.
-
-Current registry path:
-
-- `tools/os_capabilities/os_capabilities.json`
-
-Current execution services:
-
-- `services/os_capability_registry.py`
-- `services/os_script_controller.py`
-- `services/os_capability_operator_outbox.py`
-- `tools/os_capability_tool.py`
-
-Current evidence paths:
-
-- `runtime/os_capability_ledger.jsonl`
-- `runtime/os_capability_evidence/`
+A new layer is complete only when its ownership path is explicit:
+
+1. owner module and contract
+2. policy and runtime configuration
+3. status/evidence output
+4. Signal Intake behavior, if it creates pressure
+5. Work Tree tools/tasks, if Nova can act on it
+6. orchestrator and execution policy, if autonomous action is allowed
+7. operator/control surface
+8. test-profile ownership
+9. source-root and wiring inventory
+10. documentation ownership
+
+Do not add a second truth calculator merely to make a new layer visible.
+
+## Current Heavy Hitters
+
+At this code baseline:
+
+- `services/work_tree_signal_ingestion.py`: 6,929 lines
+- `autonomy_maintenance.py`: 6,250 lines
+- `nova_core.py`: 3,798 lines
+- `work_tree.py`: 2,643 lines
+- `nova_http.py`: 1,878 lines
+- `services/control_status.py`: 1,601 lines
+- `services/nova_patching.py`: 1,582 lines
+- `services/autonomy_orchestrator.py`: 1,550 lines
+- `services/operator_outbox.py`: 1,382 lines
+- `services/nova_wiring_inventory.py`: 1,239 lines
+
+Line count is pressure evidence, not proof that extraction is safe or necessary. Function ownership and call contracts decide the work.
+
+## Truth Boundaries
+
+- process truth belongs to runtime process owners
+- task truth belongs to Work Tree
+- tool outcome truth belongs to execution/evidence owners
+- regression truth belongs to the regression artifact and profile inventory
+- release truth belongs to build identity, validation, and release ledger owners
+- data truth belongs to pipeline and Ed-Fi owners
+- Mission composes; it does not replace those owners
+- the control UI renders; it does not define those owners
+
+## Current Gaps That Architecture Documentation Must Carry
+
+- mixed legacy and orchestrator execution
+- Mission-owned execution exceptions and ambient suppression
+- broad outbox source suppression
+- failed tool tasks completed by maintenance
+- bounded active-work target discovery
+- empty Supervisor default ownership
+- duplicate Ed-Fi source-root IDs
+
+These are not design goals. They are current implementation facts requiring owner-level investigation.

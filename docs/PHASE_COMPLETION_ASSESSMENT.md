@@ -1,5 +1,7 @@
 # NYO System Phase Completion Assessment
 
+Document class: dated phase assessment. Current code and runtime evidence supersede its completion language.
+
 Date: 2026-05-18
 Last verified: 2026-05-20
 

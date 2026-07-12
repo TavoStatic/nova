@@ -1,4 +1,6 @@
 # Nova Project — Full Code Scan Report
+
+Historical scan. Superseded for current architecture and function inventory by `docs/CODE_TRUTH_AUDIT_2026-07-12.md`.
 **Date:** 2026-05-27
 **Scanned by:** Claude (Cowork)
 **Scope:** All active source files in C:\NOVA (excluding `.venv/`, `runtime/`, `__pycache__/`, `.git/`)

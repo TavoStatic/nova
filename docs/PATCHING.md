@@ -1,4 +1,6 @@
-# Nova Patching and Teach Flow
+# Nova Patching And Teach Flow
+
+Last verified from code: 2026-07-12
 
 ## Patch Packaging Rules
 
@@ -37,10 +39,10 @@ That keeps locally generated proposals preview-eligible instead of looking like 
 
 ## Patch Validation
 
-Live patch apply now has two acceptance gates:
+Live patch apply has two acceptance gates after preview eligibility and approval checks:
 
 1. compile validation
-2. behavioral validation via `python -m unittest discover -s tests -f`
+2. behavioral validation via `run_regression.py behavior` when the regression wrapper exists, with unittest discovery as fallback
 
 If compile validation fails, Nova rolls back immediately.
 If behavioral validation fails, Nova also rolls back immediately.
@@ -56,3 +58,22 @@ $env:NOVA_INTERACTIVE_PATCH_REVIEW='1'
 ```
 
 Without that environment variable, proposal generation remains non-blocking and test-safe.
+
+## Queue And Cleanup
+
+Patch previews are synchronized into a governed Work Tree lane. Maintenance can:
+
+- reject orphaned preview reports whose patch archive is missing
+- archive superseded eligible previews in the same family
+- keep approval decisions separate from preview eligibility
+- expose apply readiness through control status and the control-action dispatcher
+
+Kidney owns age/retention cleanup; patch maintenance owns patch-state reconciliation.
+
+## Codegen Bridge
+
+Generated code previews do not bypass patch governance. `services/codegen_patch_bridge.py` validates a codegen preview and builds a formal patch artifact. `services/codegen_memory_recorder.py` and `services/patch_promotion_memory.py` preserve reusable generated-code evidence and promoted patterns.
+
+## Truth Rule
+
+A successful behavior lane is not a full regression or release verdict. Patch apply, regression profile, validation artifact, build identity, and release promotion remain separate evidence owners.

@@ -1,6 +1,18 @@
 # Supervisor Ownership Constitution
 
-This file is the enforcement contract for deterministic behavior in Nova.
+Last checked against code: 2026-07-12
+
+This file is the intended enforcement contract for deterministic behavior in Nova.
+
+## Current Implementation Status
+
+The Supervisor seam exists, but the default registry and explicit ownership sets are currently empty:
+
+- `services/supervisor_registry.py`: `DEFAULT_SUPERVISOR_RULE_SPECS = []`
+- `services/supervisor_authority.py`: both explicit ownership sets are empty
+- `supervisor.py`: compatibility ownership sets are also empty
+
+Therefore the constitution below is a target contract, not proof that current turns are Supervisor-owned. Present-tense routing truth belongs to the planner/routing/reply path and its action-ledger evidence until rules are registered and exercised.
 
 ## Constitution
 

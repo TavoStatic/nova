@@ -1,96 +1,113 @@
 # Data Pipelines
 
-Last verified: 2026-05-18
+Last verified from code: 2026-07-12
 
-Nova can host multiple governed data pipelines without turning `nova_core.py` into a pile of one-off database logic.
+Nova has a governed pipeline framework, a vendor-neutral Ed-Fi core, and an active BISD Ed-Fi lane. Domain-specific logic belongs in the lane, not in core or HTTP.
 
-## Shape
+## Framework
 
 ```text
-C:\Nova\
-|-- pipelines\
-|   |-- base.py
-|   |-- registry.py
-|   |-- query_guard.py
-|   `-- audit.py
-|-- data_sources\
-|   `-- <pipeline_id>\
-|       |-- pipeline.json
-|       |-- schema_manifest.json
-|       |-- query_templates.json
-|       |-- field_dictionary.json
-|       |-- population_definitions.json
-|       |-- vendor_dictionary_index.json
-|       |-- predefined_reports_index.json
-|       |-- connector.py
-|       |-- lane_control.json
-|       |-- operator_intake.jsonl
-|       `-- local_config.example.json
-`-- services\
-    |-- data_pipeline_registry.py
-    |-- control_pipelines.py
-    `-- nova_http_pipeline_control.py
+pipelines/
+  base.py                  manifest and base pipeline contracts
+  registry.py              pipeline discovery and loading
+  query_guard.py           operation, parameter, and row-limit checks
+  audit.py                 pipeline audit records
+  privileged_protocol.py   request/claim/response artifact protocol
+  privileged_worker.py     trusted worker execution
+
+services/
+  data_pipeline_registry.py
+  control_pipelines.py
+  nova_http_pipeline_control.py
+  nova_pipeline_tools.py
+  pipeline_privileged_bridge.py
 ```
 
-## What Nova Owns
+The control room can list, inspect, create, start, pause, update, archive, and query lanes through the control-action dispatcher.
 
-- pipeline discovery and registration
-- governed operation names
-- query guard behavior
-- audit logging
-- schema and template introspection
-- control-panel lane management
-- scoped operator intake per lane
+## Pipeline Contract
 
-## What Each Pipeline Owns
+Each lane owns:
 
-- connector/runtime details
-- schema grounding
-- safe query templates
-- local config requirements
-- redaction defaults
-- population definitions and report notes that belong only to that lane
+- `pipeline.json`
+- schema manifest
+- allowlisted query templates
+- connector behavior
+- lane control state
+- local configuration contract
+- domain-specific population/report definitions when present
 
-## Current Lane Inventory
+The framework owns discovery, query governance, audit, privileged execution, control actions, and status projection.
 
-There are no active data lanes in the current source tree.
+## Active Inventory
 
-The previous `data_sources/sis_test` scaffold has been removed from the active package surface and archived under `data_sources/_archived/`. Do not treat SIS test docs or old collection failures as active Nova package truth.
+### Vendor-Neutral Ed-Fi Core
 
-Current source-owned pipeline pieces remain:
+`services/edfi/` owns:
 
-- `pipelines/base.py`
-- `pipelines/registry.py`
-- `pipelines/query_guard.py`
-- `pipelines/audit.py`
-- `services/data_pipeline_registry.py`
-- `services/control_pipelines.py`
-- `services/nova_http_pipeline_control.py`
+- connection configuration and runtime paths
+- OAuth token acquisition and cache behavior
+- HTTP client and error classification
+- metadata discovery and capability profiles
+- resource inventory and paging
+- district scoping strategies
+- diagnostics and readiness
+- saved profile evidence
+- change-version cursor and incremental change tracking
 
-The lane system is still available for future operator-provided pipelines, but active data content must be explicitly created or restored before it is considered part of runtime behavior.
+The core does not own Texas, PEIMS, BISD, or district-specific reporting semantics.
 
-## Data Lane Control
+### BISD Ed-Fi Lane
 
-The control panel exposes data lanes as operator-managed runtime extensions.
+`data_sources/edfi_bisd/` is active. It owns:
 
-Current lane controls are backed by `services/control_pipelines.py` and the HTTP action bridge in `services/nova_http_pipeline_control.py`.
+- `connector.py`
+- `pipeline.json`
+- `schema_manifest.json`
+- `query_templates.json`
+- `lane_control.json`
+- local configuration example and local operator configuration
 
-Supported management actions:
+Operator probes:
 
-- create a new lane scaffold under `data_sources/<pipeline_id>`
-- pause or start an existing lane with `lane_control.json`
-- update lane metadata such as display name and description
-- archive a lane directory instead of deleting it in place
-- save scoped operator notes to `operator_intake.jsonl`
-- save pipeline-specific population definitions to `population_definitions.json`
+- `scripts/run_edfi_profile.py`
+- `scripts/run_edfi_explore.py`
+- `scripts/demo_edfi_core_lifecycle.py`
 
-When a lane is paused, query execution returns a blocked result before connector code runs.
+The lane uses Ed-Fi core services and keeps district-specific scope and query contracts outside the vendor-neutral core.
 
-## Query Guard Posture
+### Archived SIS Test Lane
 
-Future lanes should remain read-only and query-template governed until their connector, credentials, and operator intent are explicit.
+The previous SIS test lane is under `data_sources/_archived/`. It is history, not an active pipeline.
 
-- Live execution should be allowed only for allowlisted operations in `pipeline.json`.
-- `safe_query` should route through the connector and query guard.
-- schema discovery should be structured and recorded instead of guessed from chat text.
-- default row limiting should remain in force while operators verify that a request is pulling the intended data shape.
+## Ed-Fi Tool
+
+`tools/edfi_tool.py` registers `EdFiExploreTool`. Core exports the `edfi_explore` action for health, discovery, profile, resource, and query-oriented inspection according to its tool contract.
+
+## Evidence And Readiness
+
+Ed-Fi evidence appears through:
+
+- saved connection and capability profile artifacts
+- core readiness status
+- profile evidence service
+- pipeline registry/status surfaces
+- Work Tree Signal Intake
+- wiring and source-root inventory
+- source-profile regression lanes
+
+Profile existence, authentication success, resource discovery, district scope, lane readiness, and change-cursor freshness are separate facts.
+
+## Query Safety
+
+- operations must be declared by the lane
+- parameters and row limits pass the query guard
+- lane pause blocks execution before connector work
+- privileged requests use the artifact protocol and trusted worker
+- audit records preserve the request and outcome
+- district scoping is explicit; it is not inferred from chat text
+- vendor API behavior that ignores server-side filters must be represented in the lane/client strategy
+
+## Current Inventory Defect
+
+The source-root inventory declares `edfi_core` twice and `data_lane_edfi_bisd` twice. The wiring inventory has unique surface IDs; the duplication is in source-root declarations and remains code work.

@@ -1,5 +1,7 @@
 # Phase 2 Safety Envelope
 
+Document class: phase contract and rollout history. Current implementation ownership is indexed in `SYSTEM_MAP.md` and `FUNCTION_INDEX.md`.
+
 Last verified: 2026-05-18
 
 Current policy posture: `safety_envelope.mode` is `enforce` in `policy.json`.

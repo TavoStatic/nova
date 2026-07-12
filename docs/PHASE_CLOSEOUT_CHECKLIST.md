@@ -1,5 +1,7 @@
 # NYO System Phase Closeout Checklist
 
+Document class: historical phase checklist. Unchecked or checked items are not a current health verdict.
+
 Date: 2026-04-01
 
 ## Purpose

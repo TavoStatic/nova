@@ -1,5 +1,7 @@
 # Leah Instance Promotion Plan
 
+Document class: promotion plan. Current policy keeps Leah in `observe` mode with no promoted capabilities.
+
 ## 1) Vision: Per-instance Leah
 
 Leah should not be a generic feature pack. Each Nova instance should construct its own Leah from observed operator use, runtime pressure, and validated capability promotion.

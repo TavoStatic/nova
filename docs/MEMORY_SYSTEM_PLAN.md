@@ -1,5 +1,9 @@
 # Nova Memory System Plan
 
+Document class: design plan and implementation history. Last code-truth cross-check: 2026-07-12.
+
+For current function ownership, read `SERVICES_INDEX.md` and `FUNCTION_INDEX.md`. Current memory includes retention, identity bootstrap origin/judgment, Leah continuity, action/memory event ledgers, and generated-code memory that may postdate sections of this plan.
+
 ## Purpose
 
 Nova already has several memory mechanisms, but they are not yet governed as one explicit system. This plan defines how Nova should set up, interact with, organize, and use all memory types efficiently.

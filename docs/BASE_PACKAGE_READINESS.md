@@ -1,5 +1,7 @@
 # NYO System Base Package Readiness
 
+Document class: historical release-readiness checkpoint. Do not use its gate result as current runtime or release truth.
+
 Date: 2026-05-20
 Last verified: 2026-05-20
 

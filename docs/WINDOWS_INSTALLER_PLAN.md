@@ -1,5 +1,7 @@
 # NYO System Windows Installer Plan
 
+Document class: installer plan and checkpoint history. Current artifact truth belongs to the installer/release ledgers and validation records.
+
 Date: 2026-05-18
 Last reviewed: 2026-05-20
 
