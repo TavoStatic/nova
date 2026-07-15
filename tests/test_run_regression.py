@@ -48,7 +48,7 @@ class TestRunRegressionScript(unittest.TestCase):
              patch.object(
                  RUN_REGRESSION,
                  "run_test_lane",
-                 side_effect=lambda lane, verbosity=1: lane_calls.append((lane, verbosity)) or 0,
+                 side_effect=lambda lane, verbosity=1: lane_calls.append((lane, verbosity)) or (0, []),
              ):
             code = RUN_REGRESSION.main(["behavior", "--verbosity", "2"])
 
@@ -56,11 +56,11 @@ class TestRunRegressionScript(unittest.TestCase):
         self.assertEqual(lane_calls, [("behavior", 2)])
         status_mock.assert_not_called()
 
-    def test_main_fails_when_validation_artifacts_disagree_after_green_lanes(self):
+    def test_main_passes_with_advisory_when_llm_unavailable_hidden_by_green_regression(self):
         with patch.object(RUN_REGRESSION, "_acquire_regression_lock", return_value=(True, "")), \
              patch.object(RUN_REGRESSION, "_release_regression_lock"), \
              patch.object(RUN_REGRESSION, "run_step", return_value=0), \
-             patch.object(RUN_REGRESSION, "run_test_lane", return_value=0), \
+             patch.object(RUN_REGRESSION, "run_test_lane", return_value=(0, [])), \
              patch.object(
                  RUN_REGRESSION,
                  "audit_validation_artifacts_after_green_run",
@@ -80,12 +80,38 @@ class TestRunRegressionScript(unittest.TestCase):
              patch.object(RUN_REGRESSION, "write_regression_status") as status_mock:
             code = RUN_REGRESSION.main(["unit"])
 
+        self.assertEqual(code, 0)
+        status_mock.assert_not_called()
+
+    def test_main_fails_when_validation_artifacts_disagree_with_non_llm_failures(self):
+        with patch.object(RUN_REGRESSION, "_acquire_regression_lock", return_value=(True, "")), \
+             patch.object(RUN_REGRESSION, "_release_regression_lock"), \
+             patch.object(RUN_REGRESSION, "run_step", return_value=0), \
+             patch.object(RUN_REGRESSION, "run_test_lane", return_value=(0, [])), \
+             patch.object(
+                 RUN_REGRESSION,
+                 "audit_validation_artifacts_after_green_run",
+                 return_value={
+                     "ok": False,
+                     "status": "validation_failure_in_green_regression",
+                     "current_window_failure_count": 1,
+                     "current_window_llm_unavailable_count": 0,
+                     "hidden_by_green_regression": True,
+                     "latest_failure": {
+                         "path": "runtime/validation/actions/bad.json",
+                         "failure_kind": "final_answer_error",
+                         "final_answer": "(error: planner route failed)",
+                     },
+                 },
+             ), \
+             patch.object(RUN_REGRESSION, "write_regression_status") as status_mock:
+            code = RUN_REGRESSION.main(["unit"])
+
         self.assertEqual(code, 1)
         status_mock.assert_called_once()
         kwargs = status_mock.call_args.kwargs
         self.assertEqual(kwargs.get("status"), "FAILED")
-        self.assertIn("validation_artifact_truth:llm_unavailable_in_green_regression", kwargs.get("detail"))
-        self.assertEqual((kwargs.get("extra") or {}).get("validation_artifact_failure_count"), 2)
+        self.assertIn("validation_artifact_truth:validation_failure_in_green_regression", kwargs.get("detail"))
 
     def test_main_lists_available_lanes(self):
         with patch("sys.stdout", new_callable=io.StringIO) as stdout:

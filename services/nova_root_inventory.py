@@ -421,7 +421,10 @@ def _coverage_root_for_path(path: str) -> str:
         or name in {"smoke_test.py", "http_test_session_helpers.py", "http_chat_flow.py", "run_regression.py"}
         or "run_regression" in low
         or "regression_lanes" in low
+        or "regression_evidence" in low
         or "validation_artifact" in low
+        or "thorough_audit" in low
+        or "probe_bootstrap" in low
         or "smoke" in low
     ):
         return "test_ecosystem"
@@ -459,8 +462,15 @@ def _coverage_root_for_path(path: str) -> str:
         or "source_root_judgment" in low
         or "inventory_labels" in low
         or "end_to_end_wiring" in low
+        or "live_closure" in low
     ):
         return "source_root_inventory"
+    if "governance_chain" in low:
+        return "patch_pipeline"
+    if "recurring_finding" in low:
+        return "work_tree"
+    if name == "codex_audit.txt":
+        return "diagnostics_hygiene"
     if "operator" in low or name in {"operator_macros.json"}:
         return "operator_control"
     if "developer_profile" in low or "identity_answers" in low or "identity_preferences" in low:

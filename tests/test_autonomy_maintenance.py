@@ -1,6 +1,7 @@
 import json
 import os
 import tempfile
+import time
 import unittest
 from contextlib import ExitStack
 from datetime import timedelta
@@ -57,6 +58,21 @@ class TestAutonomyMaintenance(unittest.TestCase):
 
         self.addCleanup(_cleanup)
         return db_path
+
+    def _patch_signal_intake_external_signals(self):
+        """Keep signal-intake unit tests from ingesting live release/maturity side signals."""
+        return (
+            mock.patch.object(
+                autonomy_maintenance,
+                "_apply_release_runtime_truth_to_status_payload",
+                side_effect=lambda payload, state=None: dict(payload or {}),
+            ),
+            mock.patch.object(
+                autonomy_maintenance,
+                "_apply_layer_maturity_to_status_payload",
+                side_effect=lambda payload: dict(payload or {}),
+            ),
+        )
 
     def test_queue_pressure_uses_open_count_zero_as_clear_truth(self):
         payload = autonomy_maintenance._queue_pressure_for_orchestrator(
@@ -135,6 +151,42 @@ class TestAutonomyMaintenance(unittest.TestCase):
         self.assertFalse(state.get("last_regression_stale"))
         self.assertEqual(state.get("last_regression_lanes"), ["integration"])
         self.assertEqual(state.get("last_regression_source"), "scripts/run_regression.py")
+
+    def test_sync_regression_status_from_file_supersedes_same_day_unit_failure_with_all_pass(self):
+        today = time.strftime("%Y-%m-%d")
+        with tempfile.TemporaryDirectory() as td:
+            status_path = Path(td) / "regression_status.json"
+            status_path.write_text(
+                json.dumps(
+                    {
+                        "generated_at": f"{today} 10:32:42",
+                        "date": today,
+                        "status": "OK",
+                        "lanes": ["unit", "behavior", "integration"],
+                        "returncode": 0,
+                        "source": "scripts/run_regression.py",
+                    },
+                    ensure_ascii=True,
+                ),
+                encoding="utf-8",
+            )
+            state = {
+                "last_regression_date": today,
+                "last_regression_at": f"{today} 00:03:32",
+                "last_regression_status": "FAILED",
+                "last_regression_stale": False,
+                "last_regression_failed_lane": "unit",
+                "last_regression_failed_tests": ["tests.test_example.TestCase.test_interrupted"],
+            }
+
+            synced = autonomy_maintenance._sync_regression_status_from_file(state, status_path=status_path)
+
+        self.assertTrue(synced)
+        self.assertEqual(state.get("last_regression_status"), "OK")
+        self.assertFalse(state.get("last_regression_stale"))
+        self.assertEqual(state.get("last_regression_lanes"), ["unit", "behavior", "integration"])
+        self.assertEqual(state.get("last_regression_failed_lane"), "")
+        self.assertEqual(state.get("last_regression_failed_tests"), [])
 
     def test_daily_regression_uses_canonical_regression_runner(self):
         with tempfile.TemporaryDirectory() as td:
@@ -217,7 +269,7 @@ class TestAutonomyMaintenance(unittest.TestCase):
     def test_sync_signal_intake_work_tree_includes_temporal_feed_payload(self):
         captured: dict = {}
 
-        def _capture_status_payload(status_payload):
+        def _capture_status_payload(status_payload, **kwargs):
             captured.update(dict(status_payload or {}))
             return []
 
@@ -283,6 +335,42 @@ class TestAutonomyMaintenance(unittest.TestCase):
             self.assertIn("partial stdout", output)
             self.assertIn("partial stderr", output)
             self.assertIn("subconscious_pack_duration_sec=5.25 status=timeout timeout_sec=900", log_path.read_text(encoding="utf-8"))
+
+    def test_sync_pipeline_workers_skipped_in_validation_scope(self):
+        state: dict = {}
+        fake_registry = mock.Mock()
+        fake_registry.discover.return_value = [mock.Mock(pipeline_id="edfi_bisd")]
+        with mock.patch.object(autonomy_maintenance, "build_pipeline_registry", return_value=fake_registry), \
+             mock.patch.object(autonomy_maintenance, "reconcile_pipeline_workers_for_ids") as reconcile_mock, \
+             mock.patch.object(autonomy_maintenance, "ensure_pipeline_workers_for_ids") as ensure_mock, \
+             mock.patch.object(autonomy_maintenance, "runtime_scope_name", return_value="validation"):
+            autonomy_maintenance._sync_pipeline_workers_for_maintenance(state)
+
+        reconcile_mock.assert_not_called()
+        ensure_mock.assert_not_called()
+        skipped = dict(state.get("last_pipeline_worker_ensure") or {})
+        self.assertEqual(skipped.get("status"), "skipped_validation_scope")
+        self.assertEqual(skipped.get("reason"), "pipeline_workers_disabled_in_validation_scope")
+        self.assertEqual(skipped.get("runtime_scope"), "validation")
+        self.assertEqual(int(skipped.get("pipeline_count", 0) or 0), 1)
+        self.assertEqual((state.get("last_pipeline_worker_reconcile") or {}).get("status"), "skipped_validation_scope")
+
+    def test_sync_pipeline_workers_runs_reconcile_and_ensure_in_live_scope(self):
+        state: dict = {}
+        fake_registry = mock.Mock()
+        fake_registry.discover.return_value = [mock.Mock(pipeline_id="edfi_bisd")]
+        reconcile_payload = {"status": "ok", "reclaimed_count": 0, "cleared_count": 0}
+        ensure_payload = {"status": "ok", "running_count": 1, "started_count": 0, "failed_count": 0}
+        with mock.patch.object(autonomy_maintenance, "build_pipeline_registry", return_value=fake_registry), \
+             mock.patch.object(autonomy_maintenance, "runtime_scope_name", return_value="live"), \
+             mock.patch.object(autonomy_maintenance, "reconcile_pipeline_workers_for_ids", return_value=reconcile_payload) as reconcile_mock, \
+             mock.patch.object(autonomy_maintenance, "ensure_pipeline_workers_for_ids", return_value=ensure_payload) as ensure_mock:
+            autonomy_maintenance._sync_pipeline_workers_for_maintenance(state)
+
+        reconcile_mock.assert_called_once()
+        ensure_mock.assert_called_once()
+        self.assertEqual((state.get("last_pipeline_worker_reconcile") or {}).get("status"), "ok")
+        self.assertEqual((state.get("last_pipeline_worker_ensure") or {}).get("running_count"), 1)
 
     def test_run_once_logs_cycle_duration_on_subconscious_failure(self):
         with tempfile.TemporaryDirectory() as td:
@@ -628,7 +716,10 @@ class TestAutonomyMaintenance(unittest.TestCase):
             log_path = runtime_dir / "autonomy_maintenance.log"
             order: list[str] = []
 
-            def _sync_signal(state, kidney_summary=None, temporal_feed=None):
+            sync_calls: list[dict[str, object]] = []
+
+            def _sync_signal(state, kidney_summary=None, temporal_feed=None, *, archive_superseded=True):
+                sync_calls.append({"archive_superseded": archive_superseded})
                 order.append("signal")
                 payload = {
                     "ts": "2026-05-14 18:00:00",
@@ -638,7 +729,10 @@ class TestAutonomyMaintenance(unittest.TestCase):
                     "subconscious_signal_count": 0,
                     "active_regression_failure": False,
                 }
-                state["last_signal_ingestion"] = payload
+                if len(sync_calls) == 1:
+                    state["last_pre_execution_signal_ingestion"] = payload
+                else:
+                    state["last_signal_ingestion"] = payload
                 return payload
 
             def _orchestrator(state, kidney_summary):
@@ -694,6 +788,9 @@ class TestAutonomyMaintenance(unittest.TestCase):
 
             self.assertLess(order.index("signal"), order.index("orchestrator"))
             self.assertLess(order.index("orchestrator"), order.index("active"))
+            self.assertEqual(len(sync_calls), 2)
+            self.assertFalse(sync_calls[0]["archive_superseded"])
+            self.assertTrue(sync_calls[1]["archive_superseded"])
             state = json.loads(state_path.read_text(encoding="utf-8"))
             self.assertEqual((state.get("last_pre_execution_signal_ingestion") or {}).get("status"), "ok")
 
@@ -765,6 +862,86 @@ class TestAutonomyMaintenance(unittest.TestCase):
         self.assertEqual((result.get("extra") or {}).get("definition_count"), 2)
         self.assertEqual((result.get("extra") or {}).get("definition_files"), ["demo.json", "next.json"])
         self.assertEqual(((result.get("extra") or {}).get("work_queue") or {}).get("next_file"), "next.json")
+
+    def test_autonomy_execution_owner_defaults_to_orchestrator_in_canary(self):
+        owner = autonomy_maintenance._autonomy_execution_owner(
+            {
+                "mode": "canary",
+                "execute_enabled": True,
+            }
+        )
+        self.assertEqual(owner, "orchestrator")
+        self.assertFalse(autonomy_maintenance._legacy_maintenance_execution_enabled({"mode": "canary", "execute_enabled": True}))
+
+    def test_autonomy_execution_owner_honors_explicit_legacy_opt_in(self):
+        settings = {
+            "mode": "canary",
+            "execute_enabled": True,
+            "orchestrator_owns_execution": False,
+            "legacy_maintenance_execution_enabled": True,
+        }
+        self.assertEqual(autonomy_maintenance._autonomy_execution_owner(settings), "legacy")
+        self.assertTrue(autonomy_maintenance._legacy_maintenance_execution_enabled(settings))
+
+    def test_orchestrator_owner_skips_dispatcher_when_legacy_opted_in(self):
+        state: dict = {}
+        packet = {
+            "cycle_id": "cycle-test",
+            "decision_type": "RecommendAction",
+            "recommended_action": {
+                "action_type": "generated_queue_run_next",
+                "target_kind": "queue",
+                "target_id": "generated_work_queue",
+            },
+            "confidence": 0.72,
+            "refusal_reasons": [],
+        }
+        policy = {
+            "mode": "canary",
+            "execute_enabled": True,
+            "orchestrator_owns_execution": False,
+            "legacy_maintenance_execution_enabled": True,
+        }
+
+        with mock.patch.object(autonomy_maintenance, "_autonomy_policy_settings", return_value=policy), \
+             mock.patch.object(autonomy_maintenance, "_execute_autonomy_recommendation") as execute_mock, \
+             mock.patch.object(autonomy_maintenance.AUTONOMY_ORCHESTRATOR_SERVICE, "evaluate_next_action", return_value=packet), \
+             mock.patch.object(autonomy_maintenance.AUTONOMY_ORCHESTRATOR_SERVICE, "set_mode"), \
+             mock.patch.object(autonomy_maintenance, "_autonomy_orchestrator_input_envelope", return_value={"mission_snapshot": {}}), \
+             mock.patch.object(autonomy_maintenance, "_append_autonomy_orchestrator_ledger"), \
+             mock.patch.object(autonomy_maintenance, "_publish_operator_notice_from_autonomy", return_value={}), \
+             mock.patch.object(autonomy_maintenance, "_publish_operator_notices_from_work_tree", return_value=[]):
+            result = autonomy_maintenance._run_autonomy_orchestrator_advisory(state, {"mode": "enforce"})
+
+        execute_mock.assert_not_called()
+        self.assertEqual((result.get("execution") or {}).get("result"), "skipped")
+        self.assertEqual((result.get("execution") or {}).get("gate_reason"), "legacy_owns_execution")
+
+    def test_orchestrator_owner_records_generated_queue_cycle_from_execution(self):
+        state = {
+            "last_generated_queue_sync": {
+                "tree_id": "tree_generated_demo",
+                "tree_title": "Generated Queue",
+                "actionable_count": 2,
+            }
+        }
+        packet = {
+            "execution": {
+                "action_type": "generated_queue_run_next",
+                "result": "success",
+                "message": "generated_work_queue_run_ok",
+                "extra": {
+                    "selected": {"file": "demo.json"},
+                    "work_queue": {"status": "actionable", "actionable_count": 2},
+                },
+            }
+        }
+        cycle = autonomy_maintenance._orchestrator_executed_generated_queue_cycle(packet, state=state)
+
+        self.assertTrue(cycle.get("orchestrator_owned"))
+        self.assertEqual(cycle.get("executed_count"), 1)
+        self.assertEqual(cycle.get("tree_id"), "tree_generated_demo")
+        self.assertEqual(cycle.get("actionable_count"), 2)
 
     def test_execute_autonomy_recommendation_dispatches_guard_start_runtime_control_action(self):
         state: dict = {}
@@ -1305,8 +1482,9 @@ class TestAutonomyMaintenance(unittest.TestCase):
             self.assertEqual(len(rows), 1)
             self.assertEqual(rows[0].get("decision"), "recommend_action")
             self.assertIn("candidate_actions", rows[0])
-            self.assertEqual(rows[0].get("execution_result"), "blocked")
-            self.assertEqual((rows[0].get("execution") or {}).get("result"), "blocked")
+            self.assertEqual(rows[0].get("execution_result"), "skipped")
+            self.assertEqual((rows[0].get("execution") or {}).get("result"), "skipped")
+            self.assertEqual((rows[0].get("execution") or {}).get("gate_reason"), "execution_disabled")
 
     def test_orchestrator_input_envelope_carries_maintenance_worker_surface(self):
         envelope = autonomy_maintenance._autonomy_orchestrator_input_envelope(
@@ -1362,10 +1540,30 @@ class TestAutonomyMaintenance(unittest.TestCase):
                 ],
             },
         }
+        clean_work_tree_pressure = {
+            "open_task_count": 0,
+            "working_count": 0,
+            "blocked_branch_count": 0,
+            "blocked_observing_count": 0,
+            "observing_branch_count": 0,
+            "latent_root_signal_count": 0,
+            "operator_hold_branch_count": 0,
+            "release_stale_ready_count": 0,
+            "stale_count": 0,
+            "oldest_open_age_min": 0,
+        }
         with mock.patch.object(
             autonomy_maintenance,
             "_truth_evidence_for_mission",
             return_value=truth_evidence,
+        ), mock.patch.object(
+            autonomy_maintenance,
+            "_work_tree_pressure_truth",
+            return_value=clean_work_tree_pressure,
+        ), mock.patch.object(
+            autonomy_maintenance,
+            "_webui_health_for_orchestrator",
+            return_value={"running": True, "http_ok": True, "port_open": True},
         ), mock.patch.object(
             autonomy_maintenance,
             "_triage_hints_for_orchestrator",
@@ -1454,6 +1652,7 @@ class TestAutonomyMaintenance(unittest.TestCase):
                             "owner": "generated_queue",
                             "code": "generated_queue_untested",
                             "source": "generated_work_queue",
+                            "remediation": {"action": "generated_queue_run_next"},
                         }
                     ],
                     "validation_fresh": True,
@@ -1509,6 +1708,7 @@ class TestAutonomyMaintenance(unittest.TestCase):
             payload = autonomy_maintenance._active_work_tree_cycle_for_execution_mode(
                 state,
                 mission_snapshot=mission,
+                policy_snapshot=autonomy_maintenance._policy_snapshot_for_orchestrator(),
                 autonomy_orchestrator={},
                 legacy_execution_enabled=True,
             )
@@ -1518,7 +1718,7 @@ class TestAutonomyMaintenance(unittest.TestCase):
         self.assertEqual(payload.get("reason"), "mission_steady_state_hold")
         self.assertEqual(state.get("last_active_work_tree_cycle"), payload)
 
-    def test_mission_green_hold_allows_targeted_core_thinning_execution(self):
+    def test_orchestrator_owner_records_core_thinning_active_work_tree_execution(self):
         state = {}
         mission = {
             "enabled": True,
@@ -1528,38 +1728,34 @@ class TestAutonomyMaintenance(unittest.TestCase):
             "status": "green",
             "action": "hold",
         }
-        candidate = {
-            "tree_id": "tree-core",
-            "title": "Core Thinning",
-            "status": "active",
-            "kind": "core_thinning",
-            "next_step": {
-                "branch_id": "branch-core",
-                "task_id": "task-core",
-                "branch_title": "Review wrapper shim",
-                "recommended_tool": "core_thinning",
-            },
+        orchestrator_packet = {
+            "execution": {
+                "action_type": "active_work_tree_run_next",
+                "result": "success",
+                "extra": {
+                    "cycle": {
+                        "status": "ok",
+                        "executed_count": 1,
+                        "tree_count": 1,
+                        "history": [{"tool": "core_thinning", "action": "executed"}],
+                    }
+                },
+            }
         }
 
-        with mock.patch.object(autonomy_maintenance, "_active_work_tree_candidates", return_value=[candidate]), \
-             mock.patch.object(autonomy_maintenance, "_run_active_work_tree_cycle", return_value={"status": "ok"}) as mocked_run:
+        with mock.patch.object(autonomy_maintenance, "_run_active_work_tree_cycle") as mocked_run:
             payload = autonomy_maintenance._active_work_tree_cycle_for_execution_mode(
                 state,
                 mission_snapshot=mission,
-                autonomy_orchestrator={},
-                legacy_execution_enabled=True,
+                policy_snapshot=autonomy_maintenance._policy_snapshot_for_orchestrator(),
+                autonomy_orchestrator=orchestrator_packet,
+                legacy_execution_enabled=False,
             )
 
-        mocked_run.assert_called_once_with(
-            state,
-            max_steps=1,
-            max_trees=1,
-            target_tree_id="tree-core",
-            target_branch_id="branch-core",
-            target_task_id="task-core",
-            target_tool="core_thinning",
-        )
+        mocked_run.assert_not_called()
         self.assertEqual(payload.get("status"), "ok")
+        self.assertTrue(payload.get("orchestrator_owned"))
+        self.assertEqual(payload.get("orchestrator_action_type"), "active_work_tree_run_next")
 
     def test_release_drift_hold_allows_targeted_core_thinning_execution(self):
         state = {}
@@ -1588,38 +1784,33 @@ class TestAutonomyMaintenance(unittest.TestCase):
             "core_gate": {"ok": False, "drift_blocked": True, "missing_roots": []},
             "generated_queue_untested_count": 0,
         }
-        candidate = {
-            "tree_id": "tree-core",
-            "title": "Core Thinning",
-            "status": "active",
-            "kind": "core_thinning",
-            "next_step": {
-                "branch_id": "branch-core",
-                "task_id": "task-core",
-                "branch_title": "Review wrapper shim",
-                "recommended_tool": "core_thinning",
-            },
+        orchestrator_packet = {
+            "execution": {
+                "action_type": "active_work_tree_run_next",
+                "result": "success",
+                "extra": {
+                    "cycle": {
+                        "status": "ok",
+                        "executed_count": 1,
+                        "tree_count": 1,
+                        "history": [{"tool": "core_thinning", "action": "executed"}],
+                    }
+                },
+            }
         }
 
-        with mock.patch.object(autonomy_maintenance, "_active_work_tree_candidates", return_value=[candidate]), \
-             mock.patch.object(autonomy_maintenance, "_run_active_work_tree_cycle", return_value={"status": "ok"}) as mocked_run:
+        with mock.patch.object(autonomy_maintenance, "_run_active_work_tree_cycle") as mocked_run:
             payload = autonomy_maintenance._active_work_tree_cycle_for_execution_mode(
                 state,
                 mission_snapshot=mission,
-                autonomy_orchestrator={},
-                legacy_execution_enabled=True,
+                policy_snapshot=autonomy_maintenance._policy_snapshot_for_orchestrator(),
+                autonomy_orchestrator=orchestrator_packet,
+                legacy_execution_enabled=False,
             )
 
-        mocked_run.assert_called_once_with(
-            state,
-            max_steps=1,
-            max_trees=1,
-            target_tree_id="tree-core",
-            target_branch_id="branch-core",
-            target_task_id="task-core",
-            target_tool="core_thinning",
-        )
+        mocked_run.assert_not_called()
         self.assertEqual(payload.get("status"), "ok")
+        self.assertTrue(payload.get("orchestrator_owned"))
 
     def test_autonomy_orchestrator_status_for_signal_ingestion_includes_execution_failure(self):
         payload = autonomy_maintenance._autonomy_orchestrator_status_for_signal_ingestion(
@@ -1869,19 +2060,20 @@ class TestAutonomyMaintenance(unittest.TestCase):
 
         self.assertEqual(signals, [])
 
-    def test_run_once_marks_failed_regression_stale_when_regression_is_skipped(self):
+    def test_run_once_keeps_same_day_failed_regression_current_when_regression_is_skipped(self):
+        today = time.strftime("%Y-%m-%d")
         with tempfile.TemporaryDirectory() as td:
             runtime_dir = Path(td) / "runtime"
             runtime_dir.mkdir(parents=True, exist_ok=True)
             latest_path = runtime_dir / "subconscious_runs" / "latest.json"
             latest_path.parent.mkdir(parents=True, exist_ok=True)
-            latest_path.write_text(json.dumps({"generated_at": "2026-04-23 08:00:00", "families": []}, ensure_ascii=True), encoding="utf-8")
+            latest_path.write_text(json.dumps({"generated_at": f"{today} 08:00:00", "families": []}, ensure_ascii=True), encoding="utf-8")
             state_path = runtime_dir / "autonomy_maintenance_state.json"
             log_path = runtime_dir / "autonomy_maintenance.log"
             state_path.write_text(
                 json.dumps(
                     {
-                        "last_regression_date": "2026-04-23",
+                        "last_regression_date": today,
                         "last_regression_status": "FAILED",
                         "last_regression_stale": False,
                     },
@@ -1936,7 +2128,7 @@ class TestAutonomyMaintenance(unittest.TestCase):
                 stack.enter_context(mock.patch.object(autonomy_maintenance, "_retire_legacy_patch_update_trees", return_value={"ts": "2026-04-23 08:00:01", "status": "idle", "retired_count": 0}))
                 stack.enter_context(mock.patch.object(autonomy_maintenance, "_run_daily_regression_if_due", return_value="daily_regression_skipped_already_ran"))
                 stack.enter_context(mock.patch.object(autonomy_maintenance, "_reevaluate_pending_review_queue", return_value={"status": "ok", "reevaluated_count": 0, "moved_promoted_count": 0, "moved_quarantined_count": 0}))
-                def _mock_sync_signal(state, kidney_summary=None, temporal_feed=None):
+                def _mock_sync_signal(state, kidney_summary=None, temporal_feed=None, **kwargs):
                     payload = {
                         "status": "ok", "result_count": 0, "resolved_count": 0,
                         "subconscious_signal_count": 0, "active_regression_failure": False,
@@ -1967,9 +2159,10 @@ class TestAutonomyMaintenance(unittest.TestCase):
 
             self.assertEqual(code, 0)
             state = json.loads(state_path.read_text(encoding="utf-8"))
-            self.assertTrue(state.get("last_regression_stale"))
+            self.assertFalse(state.get("last_regression_stale"))
+            self.assertEqual(state.get("last_regression_status"), "FAILED")
             self.assertEqual((state.get("last_generated_queue_run") or {}).get("status"), "clear")
-            self.assertTrue(bool((state.get("last_signal_ingestion") or {}).get("last_regression_stale")))
+            self.assertFalse(bool((state.get("last_signal_ingestion") or {}).get("last_regression_stale")))
 
     def test_sync_signal_intake_work_tree_creates_regression_branch_for_live_failure(self):
         self._isolated_work_tree_db()
@@ -1978,7 +2171,8 @@ class TestAutonomyMaintenance(unittest.TestCase):
             "last_regression_stale": False,
         }
 
-        with mock.patch.object(
+        release_patch, maturity_patch = self._patch_signal_intake_external_signals()
+        with release_patch, maturity_patch, mock.patch.object(
             autonomy_maintenance.nova_core,
             "build_pulse_payload",
             return_value={"memory_health_status": "ok", "memory_health_issue_count": 0, "memory_health_issues": [], "memory_health": {"status": "ok", "issue_count": 0}},
@@ -2126,8 +2320,20 @@ class TestAutonomyMaintenance(unittest.TestCase):
         ]
         self.assertIn(3.0, timeouts)
 
-    def test_local_first_status_falls_back_to_local_when_surfaces_fetch_fails(self):
-        fallback = {"alerts": [], "autonomy_maintenance": {"last_regression_status": ""}}
+    def test_local_first_status_restores_disk_maintenance_when_surfaces_fetch_fails(self):
+        disk_state = {
+            "last_regression_status": "OK",
+            "last_regression_stale": False,
+            "last_core_thinning_sync": {
+                "order_count": 8,
+                "executable_count": 0,
+                "satisfied_active_count": 8,
+                "owner_verdict": {
+                    "owner": "core_thinning",
+                    "evidence": {"order_count": 8, "executable_count": 0, "satisfied_active_count": 8},
+                },
+            },
+        }
         ollama_down = {
             "ok": False,
             "server_ok": False,
@@ -2138,12 +2344,44 @@ class TestAutonomyMaintenance(unittest.TestCase):
         }
 
         with mock.patch.object(autonomy_maintenance, "SIGNAL_INGESTION_STATUS_MODE", "local_first"), \
+             mock.patch.object(autonomy_maintenance, "_load_state", return_value=disk_state), \
              mock.patch.object(autonomy_maintenance.urllib.request, "urlopen", side_effect=TimeoutError("slow surfaces")), \
              mock.patch.object(autonomy_maintenance.nova_core, "ollama_health_payload", return_value=ollama_down):
-            payload = autonomy_maintenance._live_control_status_payload_for_signal_ingestion(fallback)
+            payload = autonomy_maintenance._live_control_status_payload_for_signal_ingestion({"alerts": []})
 
         self.assertEqual(payload.get("signal_ingestion_status_source"), "local_dependency_probe")
         self.assertEqual(payload.get("ollama_api_contract_status"), "tags_unreachable")
+        self.assertEqual(payload.get("last_regression_status"), "OK")
+        self.assertEqual(int(payload.get("core_thinning_order_count", 0) or 0), 8)
+        maintenance = dict(payload.get("autonomy_maintenance") or {})
+        self.assertEqual(maintenance.get("last_regression_status"), "OK")
+        self.assertEqual(int((maintenance.get("last_core_thinning_sync") or {}).get("order_count", 0) or 0), 8)
+
+    def test_local_first_status_restores_missing_thinning_from_disk_when_regression_preseeded(self):
+        disk_state = {
+            "last_regression_status": "OK",
+            "last_core_thinning_sync": {
+                "order_count": 8,
+                "executable_count": 0,
+                "satisfied_active_count": 8,
+            },
+        }
+        fallback = {
+            "alerts": [],
+            "autonomy_maintenance": {"last_regression_status": "OK"},
+            "last_regression_status": "OK",
+        }
+
+        with mock.patch.object(autonomy_maintenance, "SIGNAL_INGESTION_STATUS_MODE", "local_first"), \
+             mock.patch.object(autonomy_maintenance, "_load_state", return_value=disk_state), \
+             mock.patch.object(autonomy_maintenance.urllib.request, "urlopen", side_effect=TimeoutError("slow surfaces")), \
+             mock.patch.object(autonomy_maintenance.nova_core, "ollama_health_payload", return_value={"ok": True, "server_ok": True}):
+            payload = autonomy_maintenance._live_control_status_payload_for_signal_ingestion(fallback)
+
+        self.assertEqual(payload.get("last_regression_status"), "OK")
+        self.assertEqual(int(payload.get("core_thinning_order_count", 0) or 0), 8)
+        maintenance = dict(payload.get("autonomy_maintenance") or {})
+        self.assertEqual(int((maintenance.get("last_core_thinning_sync") or {}).get("order_count", 0) or 0), 8)
 
     def test_local_dependency_probe_enriches_layer_maturity_observe_mode(self):
         fallback = {"alerts": [], "autonomy_maintenance": {"last_regression_status": ""}}
@@ -2303,10 +2541,16 @@ class TestAutonomyMaintenance(unittest.TestCase):
         }
         for root_id in CORE_GATE_ROOT_IDS:
             self.assertTrue((roots_by_id.get(root_id) or {}).get("ok"), root_id)
+        live_closure = payload.get("live_closure_inventory") or {}
+        self.assertEqual(live_closure.get("proof_scope"), "live_closure")
         core_gate = evaluate_core_gate(payload)
         self.assertFalse(core_gate.get("drift_blocked"))
         self.assertEqual(core_gate.get("missing_roots"), [])
-        self.assertTrue(core_gate.get("ok"))
+        if int(live_closure.get("gap_count", 0) or 0) > 0:
+            self.assertFalse(core_gate.get("ok"))
+            self.assertTrue(core_gate.get("live_closure_gap_roots"))
+        else:
+            self.assertTrue(core_gate.get("ok"))
         self.assertIn("operator_macros", payload)
         self.assertIn("operator_outbox", payload)
         self.assertIn("requests_total", payload)
@@ -2423,7 +2667,8 @@ class TestAutonomyMaintenance(unittest.TestCase):
             },
         }
 
-        with mock.patch.object(autonomy_maintenance.nova_core, "build_pulse_payload", return_value=clean_memory_pulse), \
+        release_patch, maturity_patch = self._patch_signal_intake_external_signals()
+        with release_patch, maturity_patch, mock.patch.object(autonomy_maintenance.nova_core, "build_pulse_payload", return_value=clean_memory_pulse), \
              mock.patch.object(autonomy_maintenance.nova_core, "mem_enabled", return_value=True), \
              mock.patch.object(autonomy_maintenance.VALIDATION_ARTIFACT_TRUTH_SERVICE, "payload", return_value=validation_truth), \
              mock.patch.object(autonomy_maintenance, "_live_control_status_payload_for_signal_ingestion", side_effect=lambda payload: payload):
@@ -2451,7 +2696,8 @@ class TestAutonomyMaintenance(unittest.TestCase):
             "last_regression_stale": False,
         }
         clean_memory_pulse = {"memory_health_status": "ok", "memory_health_issue_count": 0, "memory_health_issues": [], "memory_health": {"status": "ok", "issue_count": 0}}
-        with mock.patch.object(autonomy_maintenance.nova_core, "build_pulse_payload", return_value=clean_memory_pulse), \
+        release_patch, maturity_patch = self._patch_signal_intake_external_signals()
+        with release_patch, maturity_patch, mock.patch.object(autonomy_maintenance.nova_core, "build_pulse_payload", return_value=clean_memory_pulse), \
              mock.patch.object(autonomy_maintenance.nova_core, "mem_enabled", return_value=True), \
              mock.patch.object(autonomy_maintenance.VALIDATION_ARTIFACT_TRUTH_SERVICE, "payload", return_value={"ok": True, "status": "ok"}), \
              mock.patch.object(autonomy_maintenance, "_live_control_status_payload_for_signal_ingestion", side_effect=lambda payload: payload):
@@ -2461,7 +2707,8 @@ class TestAutonomyMaintenance(unittest.TestCase):
             "last_regression_status": "FAILED",
             "last_regression_stale": True,
         }
-        with mock.patch.object(autonomy_maintenance.nova_core, "build_pulse_payload", return_value=clean_memory_pulse), \
+        stale_release_patch, stale_maturity_patch = self._patch_signal_intake_external_signals()
+        with stale_release_patch, stale_maturity_patch, mock.patch.object(autonomy_maintenance.nova_core, "build_pulse_payload", return_value=clean_memory_pulse), \
              mock.patch.object(autonomy_maintenance.nova_core, "mem_enabled", return_value=True), \
              mock.patch.object(autonomy_maintenance.VALIDATION_ARTIFACT_TRUTH_SERVICE, "payload", return_value={"ok": True, "status": "ok"}), \
              mock.patch.object(autonomy_maintenance, "_live_control_status_payload_for_signal_ingestion", side_effect=lambda payload: payload):
@@ -2508,7 +2755,8 @@ class TestAutonomyMaintenance(unittest.TestCase):
             "memory_events_log_status": "watch",
         }
 
-        with mock.patch.object(autonomy_maintenance.nova_core, "build_pulse_payload", return_value=memory_pulse), \
+        release_patch, maturity_patch = self._patch_signal_intake_external_signals()
+        with release_patch, maturity_patch, mock.patch.object(autonomy_maintenance.nova_core, "build_pulse_payload", return_value=memory_pulse), \
              mock.patch.object(autonomy_maintenance.nova_core, "mem_enabled", return_value=True), \
              mock.patch.object(autonomy_maintenance.VALIDATION_ARTIFACT_TRUTH_SERVICE, "payload", return_value={"ok": True, "status": "ok"}), \
              mock.patch.object(autonomy_maintenance, "_live_control_status_payload_for_signal_ingestion", side_effect=lambda payload: payload):
@@ -2596,6 +2844,58 @@ class TestAutonomyMaintenance(unittest.TestCase):
         self.assertEqual(tasks[0].meta.get("session_file"), "subconscious_demo_family_turn.json")
         self.assertEqual(tasks[0].meta.get("family_id"), "demo-family")
         self.assertEqual(tasks[0].meta.get("variation_id"), "turn-1")
+        self.assertTrue(tasks[0].meta.get("recurring_finding_key"))
+
+    def test_sync_generated_queue_work_tree_reopen_bumps_lifecycle_and_task_version(self):
+        from services.recurring_finding_lifecycle import KEY_VERSION, read_branch_lifecycle
+
+        self._isolated_work_tree_db()
+        state = {}
+        item = {
+            "file": "subconscious_reopen_turn.json",
+            "actionable": True,
+            "latest_status": "drift",
+            "family_id": "demo-family",
+            "variation_id": "turn-2",
+            "opportunity_reason": "parity_drift",
+        }
+        queue_payload = {
+            "status": "actionable",
+            "count": 1,
+            "open_count": 1,
+            "actionable_count": 1,
+            "blocked_count": 0,
+            "items": [item],
+            "next_item": item,
+        }
+
+        with mock.patch.object(autonomy_maintenance, "_generated_work_queue", return_value=queue_payload):
+            first = autonomy_maintenance._sync_generated_queue_work_tree(state)
+        tree = work_tree.get_tree(str(first.get("tree_id") or ""))
+        branch = next(
+            b
+            for b in work_tree.list_tree_branches(tree.tree_id)
+            if str(b.source_type or "") == autonomy_maintenance.GENERATED_QUEUE_SOURCE_TYPE
+        )
+        task = work_tree.list_branch_tasks(branch.branch_id)[0]
+        work_tree.complete_task_with_recurring_finding(task.task_id, completion_action="generated_queue_run", ok=True)
+        branch.status = work_tree.BranchStatus.COMPLETE
+        branch.resolution_state = "resolved"
+        work_tree.touch_branch(branch.branch_id)
+
+        with mock.patch.object(autonomy_maintenance, "_generated_work_queue", return_value=queue_payload):
+            second = autonomy_maintenance._sync_generated_queue_work_tree(state)
+
+        self.assertEqual(second.get("reopened_count"), 1)
+        branch = work_tree.get_branch(branch.branch_id)
+        lifecycle = read_branch_lifecycle(branch.source_payload)
+        self.assertGreaterEqual(int(lifecycle.get(KEY_VERSION, 0) or 0), 2)
+        reopened_task = work_tree.list_branch_tasks(branch.branch_id)[0]
+        self.assertEqual(
+            str(getattr(getattr(reopened_task, "status", None), "value", getattr(reopened_task, "status", ""))).lower(),
+            "open",
+        )
+        self.assertGreaterEqual(int((reopened_task.meta or {}).get(KEY_VERSION, 0) or 0), 2)
 
     def test_execute_generated_queue_planned_action_treats_reported_drift_as_completed_run(self):
         with mock.patch.object(
@@ -2873,8 +3173,53 @@ class TestAutonomyMaintenance(unittest.TestCase):
         tasks = work_tree.list_branch_tasks(branch.branch_id)
         self.assertEqual(len(tasks), 1)
         self.assertEqual(tasks[0].meta.get("patch_preview"), "preview_demo_patch.zip.txt")
+        self.assertTrue(tasks[0].meta.get("recurring_finding_key"))
 
-    def test_sync_patch_queue_work_tree_selects_single_auto_approval_branch(self):
+    def test_sync_patch_queue_work_tree_reopen_bumps_lifecycle_and_task_version(self):
+        from services.recurring_finding_lifecycle import KEY_VERSION, read_branch_lifecycle
+
+        self._isolated_work_tree_db()
+        state = {}
+        row = {
+            "name": "preview_reopen_patch.zip.txt",
+            "path": "C:/Nova/updates/previews/preview_reopen_patch.zip.txt",
+            "status": "eligible",
+            "decision": "approved",
+            "zip_name": "reopen_patch.zip",
+            "zip_exists": True,
+            "artifact_state": "ok",
+            "review_bucket": "approved",
+        }
+
+        with mock.patch.object(autonomy_maintenance.nova_core, "patch_status_payload", return_value={"review_previews": [row]}):
+            first = autonomy_maintenance._sync_patch_queue_work_tree(state)
+        tree = work_tree.get_tree(str(first.get("tree_id") or ""))
+        branch = next(
+            item
+            for item in work_tree.list_tree_branches(tree.tree_id)
+            if str(item.source_type or "") == autonomy_maintenance.PATCH_QUEUE_SOURCE_TYPE
+        )
+        task = work_tree.list_branch_tasks(branch.branch_id)[0]
+        work_tree.complete_task_with_recurring_finding(task.task_id, completion_action="patch_preview_apply", ok=True)
+        branch.status = work_tree.BranchStatus.COMPLETE
+        branch.resolution_state = "resolved"
+        work_tree.touch_branch(branch.branch_id)
+
+        with mock.patch.object(autonomy_maintenance.nova_core, "patch_status_payload", return_value={"review_previews": [row]}):
+            second = autonomy_maintenance._sync_patch_queue_work_tree(state)
+
+        self.assertEqual(second.get("reopened_count"), 1)
+        branch = work_tree.get_branch(branch.branch_id)
+        lifecycle = read_branch_lifecycle(branch.source_payload)
+        self.assertGreaterEqual(int(lifecycle.get(KEY_VERSION, 0) or 0), 2)
+        reopened_task = work_tree.list_branch_tasks(branch.branch_id)[0]
+        self.assertEqual(
+            str(getattr(getattr(reopened_task, "status", None), "value", getattr(reopened_task, "status", ""))).lower(),
+            "open",
+        )
+        self.assertGreaterEqual(int((reopened_task.meta or {}).get(KEY_VERSION, 0) or 0), 2)
+
+    def test_sync_patch_queue_work_tree_keeps_pending_previews_in_review_lane(self):
         self._isolated_work_tree_db()
         state = {}
         selected_row = {
@@ -2886,10 +3231,10 @@ class TestAutonomyMaintenance(unittest.TestCase):
             "zip_exists": True,
             "artifact_state": "ok",
             "review_bucket": "pending",
-            "preview_kind": "autonomy_micro_patch",
+            "preview_kind": "teach_proposal",
             "patch_revision": "4",
             "min_base_revision": "3",
-            "mtime": 5,
+            "mtime": 9,
         }
         other_row = {
             "name": "preview_other_patch.zip.txt",
@@ -2900,10 +3245,10 @@ class TestAutonomyMaintenance(unittest.TestCase):
             "zip_exists": True,
             "artifact_state": "ok",
             "review_bucket": "pending",
-            "preview_kind": "teach_proposal",
+            "preview_kind": "autonomy_micro_patch",
             "patch_revision": "4",
             "min_base_revision": "3",
-            "mtime": 9,
+            "mtime": 5,
         }
 
         with mock.patch.object(
@@ -2913,8 +3258,8 @@ class TestAutonomyMaintenance(unittest.TestCase):
         ):
             payload = autonomy_maintenance._sync_patch_queue_work_tree(state)
 
-        self.assertEqual(payload.get("approve_ready_count"), 1)
-        self.assertEqual(payload.get("pending_count"), 1)
+        self.assertEqual(payload.get("approve_ready_count"), 0)
+        self.assertEqual(payload.get("pending_count"), 2)
         tree = work_tree.get_tree(str(payload.get("tree_id") or ""))
         self.assertIsNotNone(tree)
         branches = [
@@ -2922,16 +3267,10 @@ class TestAutonomyMaintenance(unittest.TestCase):
             if branch.branch_id != tree.root_branch_id and str(branch.source_type or "") == autonomy_maintenance.PATCH_QUEUE_SOURCE_TYPE
         ]
         self.assertEqual(len(branches), 2)
-        approve_branch = next(branch for branch in branches if branch.title.startswith("Approve preview:"))
-        review_branch = next(branch for branch in branches if branch.title.startswith("Review preview:"))
-        self.assertEqual(approve_branch.title, "Approve preview: preview_selected_patch.zip.txt")
-        self.assertEqual(approve_branch.preferred_tool, "patch_preview_approve")
-        self.assertEqual(list(approve_branch.allowed_tools), autonomy_maintenance.PATCH_QUEUE_EXECUTE_TOOLS)
-        self.assertIn("auto-approval lane", str(approve_branch.notes or "").lower())
-        approve_tasks = work_tree.list_branch_tasks(approve_branch.branch_id)
-        self.assertEqual(len(approve_tasks), 1)
-        self.assertEqual(approve_tasks[0].meta.get("patch_preview"), "preview_selected_patch.zip.txt")
-        self.assertEqual(review_branch.preferred_tool, "find")
+        for branch in branches:
+            self.assertTrue(branch.title.startswith("Review preview:"))
+            self.assertEqual(branch.preferred_tool, "find")
+            self.assertNotIn("patch_preview_approve", list(branch.allowed_tools or []))
 
     def test_decide_patch_queue_next_step_prefers_apply_then_approve(self):
         self._isolated_work_tree_db()
@@ -2960,7 +3299,7 @@ class TestAutonomyMaintenance(unittest.TestCase):
                 {"branch_id": approve_branch.branch_id, "recommended_tool": "patch_preview_approve"},
             ],
         )
-        self.assertEqual(decision.get("branch_id"), approve_branch.branch_id)
+        self.assertIsNone(decision)
 
     def test_sync_patch_queue_work_tree_reuses_branch_when_preview_transitions(self):
         self._isolated_work_tree_db()
@@ -3697,7 +4036,7 @@ class TestAutonomyMaintenance(unittest.TestCase):
         loop_mock.assert_called_once_with(
             "tree-core",
             max_steps=1,
-            execute_planned_action_fn=autonomy_maintenance.nova_core.execute_planned_action,
+            execute_planned_action_fn=autonomy_maintenance._active_work_tree_execute_planned_action,
             decide_next_step_fn=autonomy_maintenance._active_work_tree_failure_aware_decider,
         )
         self.assertEqual((payload.get("core_thinning_sync") or {}).get("resolved_count"), 1)
@@ -3737,15 +4076,15 @@ class TestAutonomyMaintenance(unittest.TestCase):
         self.assertFalse(ready_branches)
         self.assertEqual((state.get("last_legacy_tree_retirement") or {}).get("retired_count"), 1)
 
-    def test_run_patch_queue_work_tree_cycle_resyncs_from_approve_into_apply(self):
+    def test_run_patch_queue_work_tree_cycle_executes_only_operator_approved_apply(self):
         state = {
             "last_patch_queue_sync": {
                 "ts": "2026-04-23 00:00:00",
                 "status": "ok",
                 "tree_id": "tree_demo",
                 "tree_title": "Patch Queue",
-                "apply_ready_count": 0,
-                "approve_ready_count": 1,
+                "apply_ready_count": 1,
+                "approve_ready_count": 0,
             }
         }
 
@@ -3753,7 +4092,6 @@ class TestAutonomyMaintenance(unittest.TestCase):
             autonomy_maintenance.work_tree,
             "run_autonomous_loop",
             side_effect=[
-                [{"action": "executed", "tool": "patch_preview_approve"}],
                 [{"action": "executed", "tool": "patch_preview_apply"}],
             ],
         ) as run_loop_mock, \
@@ -3761,14 +4099,6 @@ class TestAutonomyMaintenance(unittest.TestCase):
                 autonomy_maintenance,
                 "_sync_patch_queue_work_tree",
                 side_effect=[
-                    {
-                        "ts": "2026-04-23 00:00:01",
-                        "status": "ok",
-                        "tree_id": "tree_demo",
-                        "tree_title": "Patch Queue",
-                        "apply_ready_count": 1,
-                        "approve_ready_count": 0,
-                    },
                     {
                         "ts": "2026-04-23 00:00:02",
                         "status": "ok",
@@ -3781,12 +4111,12 @@ class TestAutonomyMaintenance(unittest.TestCase):
             ):
             cycle_payload = autonomy_maintenance._run_patch_queue_work_tree_cycle(state)
 
-        self.assertEqual(run_loop_mock.call_count, 2)
+        self.assertEqual(run_loop_mock.call_count, 1)
         self.assertEqual(cycle_payload.get("status"), "ok")
-        self.assertEqual(cycle_payload.get("executed_count"), 2)
+        self.assertEqual(cycle_payload.get("executed_count"), 1)
         self.assertEqual(cycle_payload.get("apply_ready_count"), 0)
         self.assertEqual(cycle_payload.get("approve_ready_count"), 0)
-        self.assertEqual(len(cycle_payload.get("history") or []), 2)
+        self.assertEqual(len(cycle_payload.get("history") or []), 1)
 
     def test_sync_patch_queue_work_tree_reuses_legacy_seeded_branch(self):
         self._isolated_work_tree_db()
@@ -3939,6 +4269,41 @@ class TestAutonomyMaintenance(unittest.TestCase):
 
         self.assertEqual(payload.get("action"), "port_busy")
         mocked_run.assert_not_called()
+
+    def test_webui_health_reconciles_duplicate_http_processes(self):
+        processes = [
+            {"pid": 7001, "create_time": 10.0, "cmdline": ["python", "nova_http.py"]},
+            {"pid": 7002, "create_time": 12.0, "cmdline": ["python", "nova_http.py"]},
+        ]
+        with mock.patch.object(
+            autonomy_maintenance.runtime_processes,
+            "logical_service_processes",
+            side_effect=[processes, [processes[1]]],
+        ), mock.patch.object(
+            autonomy_maintenance,
+            "_nova_http_direct_process_alive",
+            return_value=True,
+        ), mock.patch.object(
+            autonomy_maintenance,
+            "_terminate_operator_webui_pid",
+            return_value=True,
+        ) as terminate_mock, mock.patch.object(
+            autonomy_maintenance,
+            "_operator_webui_port_open",
+            return_value=True,
+        ), mock.patch("urllib.request.urlopen") as urlopen_mock:
+            response = mock.Mock()
+            response.__enter__ = mock.Mock(return_value=response)
+            response.__exit__ = mock.Mock(return_value=False)
+            response.status = 200
+            urlopen_mock.return_value = response
+
+            payload = autonomy_maintenance._webui_health_for_orchestrator()
+
+        terminate_mock.assert_called_once_with(7001)
+        self.assertEqual(payload.get("pid"), 7002)
+        self.assertEqual(payload.get("process_count"), 1)
+        self.assertEqual((payload.get("duplicate_reconcile") or {}).get("terminated_count"), 1)
 
 
 if __name__ == "__main__":

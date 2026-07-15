@@ -18,6 +18,22 @@ def normalize_identity_path(value: str | Path) -> str:
         return text.lower()
 
 
+def _cmdline_might_match_relative_script(
+    cmdline: list[str] | tuple[str, ...] | None,
+    script_path: str | Path,
+) -> bool:
+    basename = Path(script_path).name.lower()
+    if not basename:
+        return False
+    for token in list(cmdline or []):
+        text = str(token or "").strip().lower()
+        if not text:
+            continue
+        if text == basename or text.endswith(f"/{basename}") or text.endswith(f"\\{basename}"):
+            return True
+    return False
+
+
 def matches_script_process(
     cmdline: list[str] | tuple[str, ...] | None,
     script_path: str | Path,
@@ -44,7 +60,7 @@ def logical_service_processes(script_path: str | Path) -> list[dict[str, Any]]:
             info = process.info or {}
             cmdline = info.get("cmdline") or []
             matched = matches_script_process(cmdline, script_path)
-            if not matched:
+            if not matched and _cmdline_might_match_relative_script(cmdline, script_path):
                 try:
                     cwd = process.cwd()
                 except Exception:

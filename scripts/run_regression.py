@@ -147,21 +147,21 @@ def run_unittest_suite(test_names: list[str], *, verbosity: int = 1) -> tuple[bo
     return result.wasSuccessful(), failed_ids
 
 
-def run_test_lane(lane: str, *, verbosity: int = 1) -> int:
+def run_test_lane(lane: str, *, verbosity: int = 1) -> tuple[int, list[str]]:
     regression_tests = TEST_LANES[lane]
     print(f"\n=== {lane.title()} lane ===")
     print("$ " + " ".join([PY, "-m", "unittest", *regression_tests]))
     ok, failed_ids = run_unittest_suite(regression_tests, verbosity=verbosity)
     if ok:
         print(f"[OK] {lane.title()} lane")
-        return 0
+        return 0, []
 
     # CI can occasionally fail due transient state; retry once before escalating.
     print(f"\nRetrying {lane} lane once...")
     ok, failed_ids = run_unittest_suite(regression_tests, verbosity=verbosity)
     if ok:
         print(f"[OK] {lane.title()} lane (retry)")
-        return 0
+        return 0, []
 
     print(f"\n{lane.title()} lane still failing. Rerunning with verbosity for diagnostics...")
     ok, failed_ids = run_unittest_suite(regression_tests, verbosity=2)
@@ -175,7 +175,7 @@ def run_test_lane(lane: str, *, verbosity: int = 1) -> int:
     else:
         print("\n::error::regression_test_failed::unknown_test_failure")
 
-    return 1
+    return 1, list(failed_ids)
 
 
 def _is_canonical_regression_lane_set(lanes: list[str]) -> bool:
@@ -196,6 +196,8 @@ def write_regression_status(
     lanes: list[str],
     returncode: int,
     detail: str = "",
+    failed_lane: str = "",
+    failed_tests: list[str] | None = None,
     extra: dict | None = None,
 ) -> None:
     payload = {
@@ -205,6 +207,12 @@ def write_regression_status(
         "lanes": [str(lane) for lane in lanes],
         "returncode": int(returncode),
         "detail": str(detail or "").strip()[:500],
+        "failed_lane": str(failed_lane or "").strip(),
+        "failed_tests": [
+            str(item or "").strip()
+            for item in list(failed_tests or [])
+            if str(item or "").strip()
+        ][:24],
         "source": "scripts/run_regression.py",
     }
     if isinstance(extra, dict):
@@ -335,6 +343,19 @@ def audit_validation_artifacts_after_green_run(*, window_start_epoch: float, win
     )
 
 
+def _validation_artifact_blocks_regression_exit(payload: dict) -> bool:
+    if bool(payload.get("ok", True)):
+        return False
+    status = str(payload.get("status") or "").strip()
+    if not bool(payload.get("hidden_by_green_regression", False)):
+        return True
+    failure_count = int(payload.get("current_window_failure_count", 0) or 0)
+    llm_count = int(payload.get("current_window_llm_unavailable_count", 0) or 0)
+    if status == "llm_unavailable_in_green_regression" and failure_count > 0 and failure_count == llm_count:
+        return False
+    return True
+
+
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     if args.list_lanes:
@@ -376,9 +397,17 @@ def _run_regression_main(selected_lanes: list[str], args: argparse.Namespace) ->
             return code
 
     for lane in selected_lanes:
-        code = run_test_lane(lane, verbosity=max(1, int(args.verbosity or 1)))
+        code, failed_tests = run_test_lane(lane, verbosity=max(1, int(args.verbosity or 1)))
         if code != 0:
-            write_regression_status(status="FAILED", lanes=selected_lanes, returncode=code, detail=f"{lane} lane", extra=profile_status_extra)
+            write_regression_status(
+                status="FAILED",
+                lanes=selected_lanes,
+                returncode=code,
+                detail=f"{lane} lane",
+                failed_lane=lane,
+                failed_tests=failed_tests,
+                extra=profile_status_extra,
+            )
             return code
 
     print("\nAll selected regression checks passed.")
@@ -386,7 +415,7 @@ def _run_regression_main(selected_lanes: list[str], args: argparse.Namespace) ->
         window_start_epoch=run_started_epoch,
         window_end_epoch=time.time(),
     )
-    if not bool(validation_truth.get("ok", True)):
+    if _validation_artifact_blocks_regression_exit(validation_truth):
         status = str(validation_truth.get("status") or "validation_artifact_failure")
         failure_count = int(validation_truth.get("current_window_failure_count", 0) or 0)
         llm_count = int(validation_truth.get("current_window_llm_unavailable_count", 0) or 0)
@@ -401,6 +430,16 @@ def _run_regression_main(selected_lanes: list[str], args: argparse.Namespace) ->
                 extra={**profile_status_extra, **_validation_artifact_status_extra(validation_truth)},
             )
         return 1
+
+    if not bool(validation_truth.get("ok", True)):
+        status = str(validation_truth.get("status") or "validation_artifact_failure")
+        failure_count = int(validation_truth.get("current_window_failure_count", 0) or 0)
+        llm_count = int(validation_truth.get("current_window_llm_unavailable_count", 0) or 0)
+        detail = (
+            f"validation_artifact_truth:{status};failures={failure_count};"
+            f"llm_unavailable={llm_count};hidden_by_green_regression=True"
+        )
+        print(f"[WARN] {detail} (advisory; regression lanes passed)")
 
     if _should_publish_regression_status(lanes=selected_lanes, status="OK", returncode=0):
         write_regression_status(
