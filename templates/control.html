@@ -226,6 +226,23 @@
 
                 <div id="overviewFocusStrip" class="overview-focus-strip mb-3" aria-live="polite">Live focus pending.</div>
 
+                <div id="overviewStallRecovery" class="panel-card main-card mb-3" hidden>
+                    <div class="section-head">
+                        <div>
+                            <div class="section-title"><span class="section-title-wrap"><i class="bi bi-sign-stop section-title-icon" aria-hidden="true"></i><span>Stall Recovery</span></span></div>
+                            <div id="overviewStallRecoverySummary" class="section-subtitle">Autonomy is waiting on operator action before it can advance blocked work.</div>
+                        </div>
+                        <span id="overviewStallRecoveryBadge" class="status-pill status-pill-warn">Stalled</span>
+                    </div>
+                    <div class="button-row wrap-buttons">
+                        <button id="btnStallOpenOperatorDeck" class="btn btn-sm btn-operator-primary" type="button">Open Operator Deck</button>
+                        <button id="btnStallDismissOutbox" class="btn btn-sm btn-operator-danger" type="button">Dismiss Open Notice</button>
+                        <button id="btnStallRunQueueNext" class="btn btn-sm btn-operator-warn" type="button">Run Next Queue Item</button>
+                        <button id="btnStallOpenScheduledTree" class="btn btn-sm btn-operator-alt" type="button">Open Blocked Branches</button>
+                    </div>
+                    <pre id="overviewStallRecoveryBox" class="console-box compact-console">Stall recovery pending.</pre>
+                </div>
+
                 <div class="panel-card main-card live-tracking-panel mb-3">
                     <div class="section-head">
                         <div>
@@ -961,6 +978,9 @@
                             </div>
                             <div id="workTreeBranchActions" class="button-row wrap-buttons mt-2" style="display:none;">
                                 <button id="btnWorkTreeRunNext" class="btn btn-sm btn-operator-primary" type="button"><i class="bi bi-play-fill" aria-hidden="true"></i> Run Next Step</button>
+                                <button id="btnWorkTreeOpenOperatorDeck" class="btn btn-sm btn-operator-alt" type="button" style="display:none;">Open Operator Deck</button>
+                                <button id="btnWorkTreeDismissOutbox" class="btn btn-sm btn-operator-danger" type="button" style="display:none;">Dismiss Outbox Notice</button>
+                                <button id="btnWorkTreeRunQueueNext" class="btn btn-sm btn-operator-warn" type="button" style="display:none;">Run Next Queue Item</button>
                             </div>
                             <div id="workTreeActionFeedback" class="section-footnote mt-1"></div>
                         </div>

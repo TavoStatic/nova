@@ -9,6 +9,7 @@ from unittest import mock
 from services.edfi.change_tracking import (
     fetch_available_change_versions,
     load_sync_state,
+    maybe_advance_tracked_cursors,
     pull_changes_since,
     save_sync_state,
     sync_status,
@@ -117,6 +118,67 @@ class TestEdFiChangeTracking(unittest.TestCase):
         self.assertTrue(save_mock.called)
         saved_state = save_mock.call_args.args[1]
         self.assertEqual(saved_state["resources"]["ed-fi/schools"]["last_change_version"], 44)
+
+    def test_maybe_advance_tracked_cursors_skips_when_not_due(self) -> None:
+        with mock.patch(
+            "services.edfi.change_tracking.load_sync_state",
+            return_value={"last_maintenance_at": 2000},
+        ), mock.patch(
+            "services.edfi.change_tracking.pull_changes_since",
+        ) as pull_mock:
+            result = maybe_advance_tracked_cursors(
+                "district-main",
+                maintenance_ttl_sec=3600,
+                now_fn=lambda: 2500,
+            )
+
+        self.assertTrue(result["ok"])
+        self.assertFalse(result["advanced"])
+        pull_mock.assert_not_called()
+
+    def test_maybe_advance_tracked_cursors_does_not_stamp_maintenance_when_pull_fails(self) -> None:
+        with mock.patch(
+            "services.edfi.change_tracking.load_sync_state",
+            return_value={"last_maintenance_at": 1000},
+        ), mock.patch(
+            "services.edfi.change_tracking.pull_changes_since",
+            return_value={"ok": False, "error": "pull_failed"},
+        ) as pull_mock, mock.patch(
+            "services.edfi.change_tracking.save_sync_state",
+        ) as save_mock:
+            result = maybe_advance_tracked_cursors(
+                "district-main",
+                maintenance_ttl_sec=60,
+                now_fn=lambda: 5000,
+            )
+
+        self.assertFalse(result["ok"])
+        self.assertTrue(result["advanced"])
+        self.assertEqual(pull_mock.call_count, 3)
+        save_mock.assert_not_called()
+        self.assertEqual(result["last_maintenance_at"], 1000)
+
+    def test_maybe_advance_tracked_cursors_advances_all_tracked_resources(self) -> None:
+        with mock.patch(
+            "services.edfi.change_tracking.load_sync_state",
+            return_value={},
+        ), mock.patch(
+            "services.edfi.change_tracking.pull_changes_since",
+            return_value={"ok": True},
+        ) as pull_mock, mock.patch(
+            "services.edfi.change_tracking.save_sync_state",
+            return_value="/tmp/district-main.json",
+        ) as save_mock:
+            result = maybe_advance_tracked_cursors(
+                "district-main",
+                maintenance_ttl_sec=60,
+                now_fn=lambda: 5000,
+            )
+
+        self.assertTrue(result["ok"])
+        self.assertTrue(result["advanced"])
+        self.assertEqual(pull_mock.call_count, 3)
+        self.assertTrue(save_mock.called)
 
     def test_sync_status_reports_cursor_map(self) -> None:
         with mock.patch(

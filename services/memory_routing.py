@@ -33,6 +33,55 @@ class MemoryRoutingService:
         return raw or "general"
 
     def infer_purpose(self, query: str) -> str:
+        low = str(query or "").strip().lower()
+        if not low:
+            return "general"
+        if any(
+            cue in low
+            for cue in (
+                "what have you learned",
+                "learned from me",
+                "recent learning",
+            )
+        ):
+            return "recent_learning_summary"
+        if any(
+            cue in low
+            for cue in (
+                "favorite color",
+                "favourite color",
+                "fav color",
+                "preference",
+                "what colors",
+                "what colour",
+            )
+        ):
+            return "user_preferences"
+        if any(
+            cue in low
+            for cue in (
+                "developer",
+                "creator",
+                "who made you",
+                "who built you",
+                "gustavo",
+                " gus",
+            )
+        ):
+            return "developer_profile"
+        if any(
+            cue in low
+            for cue in (
+                "remember when",
+                "recall",
+                "earlier memory",
+                "what did i say",
+                "from memory",
+            )
+        ):
+            return "explicit_recall"
+        if any(cue in low for cue in ("who am i", "my name is", "identity")):
+            return "identity_fallback"
         return "general"
 
     def session_priority_active(
@@ -65,7 +114,7 @@ class MemoryRoutingService:
         if len(text) < 8:
             return MemoryRecallPlan(False, "durable_user", normalized_purpose, "too_short")
 
-        if normalized_purpose == "general":
+        if normalized_purpose in {"general", "general_context"}:
             normalized_purpose = self.infer_purpose(text)
 
         if self.session_priority_active(conversation_state=conversation_state, pending_action=pending_action):
@@ -77,3 +126,6 @@ class MemoryRoutingService:
             return MemoryRecallPlan(True, "durable_user", normalized_purpose, "purpose_match")
 
         return MemoryRecallPlan(False, "durable_user", normalized_purpose, "not_memory_seeking")
+
+
+MEMORY_ROUTING_SERVICE = MemoryRoutingService()

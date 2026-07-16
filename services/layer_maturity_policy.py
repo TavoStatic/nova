@@ -114,11 +114,22 @@ def evaluate_core_gate(status_payload: dict[str, Any]) -> dict[str, Any]:
         for root_id in CORE_GATE_ROOT_IDS
         if not bool((by_id.get(root_id) or {}).get("ok", False))
     ]
-    passed = not drift_blocked and not missing_roots
+    live_inventory = (
+        status_payload.get("live_closure_inventory")
+        if isinstance(status_payload.get("live_closure_inventory"), dict)
+        else {}
+    )
+    live_gap_roots = [
+        str(item or "").strip()
+        for item in list(live_inventory.get("gap_roots") or [])
+        if str(item or "").strip()
+    ]
+    passed = not drift_blocked and not missing_roots and not live_gap_roots
     return {
         "ok": passed,
         "drift_blocked": drift_blocked,
         "missing_roots": missing_roots,
+        "live_closure_gap_roots": live_gap_roots,
         "required_roots": list(CORE_GATE_ROOT_IDS),
     }
 

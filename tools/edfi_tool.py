@@ -4,16 +4,40 @@ import json
 from typing import Any
 
 from .base_tool import NovaTool, ToolContext, ToolInvocationError
-from services.edfi.inventory import (
-    list_resources,
-    profile_summary,
-    read_preset,
-    read_resource,
-)
+from services.pipeline_privileged_bridge import run_governed_pipeline_query
+
+PIPELINE_ID = "edfi_bisd"
+
+_ACTION_TO_OPERATION: dict[str, str] = {
+    "health": "connection_health",
+    "status": "connection_health",
+    "list_resources": "list_resources",
+    "resources": "list_resources",
+    "browse": "list_resources",
+    "schools": "list_schools",
+    "students": "list_students",
+    "student_school_associations": "student_school_associations",
+}
 
 
 def _render(payload: dict[str, Any]) -> str:
     return json.dumps(payload, ensure_ascii=True, indent=2)
+
+
+def _governed_query(
+    operation: str,
+    *,
+    params: dict[str, Any] | None = None,
+    row_limit: int | None = None,
+    requested_by: str = "edfi_explore",
+) -> dict[str, Any]:
+    return run_governed_pipeline_query(
+        PIPELINE_ID,
+        operation,
+        params,
+        row_limit=row_limit,
+        requested_by=requested_by,
+    )
 
 
 class EdFiExploreTool(NovaTool):
@@ -28,46 +52,33 @@ class EdFiExploreTool(NovaTool):
 
     def run(self, args: dict[str, Any], context: ToolContext) -> Any:
         action = str(args.get("action") or "health").strip().lower()
-        connection_id = str(args.get("connection_id") or "district-main").strip() or "district-main"
-
-        if action in {"health", "status"}:
-            return _render(profile_summary(connection_id))
-
-        if action in {"list_resources", "resources", "browse"}:
-            return _render(
-                list_resources(
-                    connection_id,
-                    query=str(args.get("query") or args.get("q") or ""),
-                    namespace=str(args.get("namespace") or args.get("ns") or ""),
-                    limit=int(args.get("limit") or 50),
-                    offset=int(args.get("offset") or 0),
+        operation = _ACTION_TO_OPERATION.get(action)
+        if not operation:
+            if action in {"get", "read"}:
+                raise ToolInvocationError(
+                    "edfi_governed_read_required:use pipeline preview/run for governed lane reads"
                 )
-            )
+            raise ToolInvocationError(f"unknown_edfi_action:{action}")
 
-        if action in {"schools", "students", "student_school_associations"}:
-            return _render(
-                read_preset(
-                    connection_id,
-                    action,
-                    limit=int(args.get("limit") or 25),
-                    offset=int(args.get("offset") or 0),
-                )
-            )
+        params: dict[str, Any] = {}
+        row_limit: int | None = None
+        if operation == "list_resources":
+            params = {
+                "query": str(args.get("query") or args.get("q") or ""),
+                "namespace": str(args.get("namespace") or args.get("ns") or ""),
+                "offset": int(args.get("offset") or 0),
+            }
+            row_limit = int(args.get("limit") or 50)
+        elif operation in {"list_schools", "list_students", "student_school_associations"}:
+            params = {"offset": int(args.get("offset") or 0)}
+            row_limit = int(args.get("limit") or 25)
 
-        if action in {"get", "read"}:
-            resource = str(args.get("resource") or args.get("name") or "").strip()
-            if not resource:
-                raise ToolInvocationError("edfi_resource_required")
-            limit = int(args.get("limit") or 25)
-            if limit <= 0:
-                raise ToolInvocationError("edfi_limit_required")
-            return _render(
-                read_resource(
-                    connection_id,
-                    resource,
-                    limit=limit,
-                    offset=int(args.get("offset") or 0),
-                )
-            )
-
-        raise ToolInvocationError(f"unknown_edfi_action:{action}")
+        result = _governed_query(
+            operation,
+            params=params or None,
+            row_limit=row_limit,
+            requested_by="edfi_explore",
+        )
+        if not bool(result.get("ok")):
+            raise ToolInvocationError(str(result.get("error") or "edfi_governed_query_failed"))
+        return _render(result)

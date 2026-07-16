@@ -48,7 +48,7 @@ The Ed-Fi work inside Nova demonstrates this direction. Ed-Fi is a standard used
 
 The same principle applies when Nova improves itself. It can inspect areas of code that are becoming too heavy, turn that pressure into organized work, use tools to make bounded changes, run validation, and preserve release evidence. It can preview and review patches, keep snapshots, roll back changes, and record what was promoted. These are working paths for growth, not a promise that every change will be correct. Nova's strength comes from making the work inspectable and making the result answer to evidence.
 
-Growth also includes learning how to remain understandable. Nova tracks where important responsibilities live and checks whether new layers are actually connected from beginning to end. This helps prevent a new capability from becoming an isolated feature that looks complete but never reaches the rest of the system. It also helps keep central files from absorbing every responsibility as Nova expands.
+Growth also includes learning how to remain understandable. Nova tracks where important responsibilities live and checks whether new layers are actually connected from beginning to end. Structural wiring inventories prove declared routes exist; semantic live-closure checks prove known feedback loops can diagnose pressure, produce executable work, and close with valid evidence. This helps prevent a new capability from becoming an isolated feature that looks complete but never reaches the rest of the system. It also helps keep central files from absorbing every responsibility as Nova expands.
 
 ## What Mission Means
 

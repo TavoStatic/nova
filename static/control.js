@@ -148,6 +148,13 @@ const subconsciousPriorityList = document.getElementById('subconsciousPriorityLi
 const generatedQueueBox = document.getElementById('generatedQueueBox');
 const generatedQueueCount = document.getElementById('generatedQueueCount');
 const overviewFocusStrip = document.getElementById('overviewFocusStrip');
+const overviewStallRecovery = document.getElementById('overviewStallRecovery');
+const overviewStallRecoverySummary = document.getElementById('overviewStallRecoverySummary');
+const overviewStallRecoveryBadge = document.getElementById('overviewStallRecoveryBadge');
+const overviewStallRecoveryBox = document.getElementById('overviewStallRecoveryBox');
+const btnWorkTreeOpenOperatorDeck = document.getElementById('btnWorkTreeOpenOperatorDeck');
+const btnWorkTreeDismissOutbox = document.getElementById('btnWorkTreeDismissOutbox');
+const btnWorkTreeRunQueueNext = document.getElementById('btnWorkTreeRunQueueNext');
 const centerMissionBrief = document.getElementById('centerMissionBrief');
 const liveTrackingSummary = document.getElementById('liveTrackingSummary');
 const liveTrackingSignal = document.getElementById('liveTrackingSignal');
@@ -3232,6 +3239,130 @@ function recommendedInspectorTab(status, session) {
     return {tab: 'ledger', label: 'Ledger', why: 'trace history is the next best signal'};
 }
 
+function openOperatorDeck() {
+    setActiveView('operations');
+    const operationsShell = document.querySelector('.layer-tab-shell[data-layer-tabs="operations"]');
+    if (operationsShell) {
+        setLayerTab(operationsShell, 'operator-deck');
+    }
+}
+
+function openScheduledTreeBlockedView() {
+    setActiveView('scheduled-tree');
+    setWorkTreeViewMode('blocked');
+}
+
+function operatorOutboxOpenCount(status) {
+    const summary = status && status.operator_outbox && typeof status.operator_outbox === 'object'
+        ? status.operator_outbox
+        : {};
+    const direct = Number(status && status.operator_outbox_open_count != null ? status.operator_outbox_open_count : NaN);
+    const actionable = Number(status && status.operator_outbox_actionable_open_count != null ? status.operator_outbox_actionable_open_count : NaN);
+    const summaryOpen = Number(summary.open_count != null ? summary.open_count : NaN);
+    const openEvents = Array.isArray(summary.open_events) ? summary.open_events.length : 0;
+    const counts = [direct, actionable, summaryOpen, openEvents].filter((value) => Number.isFinite(value));
+    return counts.length ? Math.max(...counts) : 0;
+}
+
+function latestOperatorOutboxEventId(status) {
+    const summary = status && status.operator_outbox && typeof status.operator_outbox === 'object'
+        ? status.operator_outbox
+        : {};
+    const candidates = [
+        String(status && status.operator_outbox_actionable_latest_open_id || '').trim(),
+        String(status && status.operator_outbox_latest_open_id || '').trim(),
+        String((summary.latest_open && summary.latest_open.id) || '').trim(),
+        String((summary.latest && summary.latest.id) || '').trim(),
+    ];
+    const openEvents = Array.isArray(summary.open_events) ? summary.open_events : [];
+    if (openEvents.length) {
+        candidates.unshift(String(openEvents[openEvents.length - 1].id || '').trim());
+    }
+    return candidates.find((value) => value) || '';
+}
+
+function workTreeBlockedCount(status) {
+    const counts = status && status.work_tree_truth && status.work_tree_truth.counts && typeof status.work_tree_truth.counts === 'object'
+        ? status.work_tree_truth.counts
+        : {};
+    const direct = Number(counts.blocked || 0);
+    if (direct > 0) return direct;
+    let blocked = 0;
+    workTreesCache.forEach((tree) => {
+        const nodes = Array.isArray(tree && tree.nodes) ? tree.nodes : [];
+        nodes.forEach((node) => {
+            const nodeStatus = String(node && node.status || '').trim().toLowerCase();
+            if (['blocked', 'observing'].includes(nodeStatus)) blocked += 1;
+        });
+    });
+    return blocked;
+}
+
+async function dismissOperatorOutboxNotice(eventId, message = 'Dismissed by operator from control panel.') {
+    const resolvedId = String(eventId || latestOperatorOutboxEventId(latestStatus) || '').trim();
+    if (!resolvedId) {
+        setAction('No open operator outbox notice is available to dismiss.');
+        return null;
+    }
+    const payload = await postAction('operator_outbox_respond', {
+        event_id: resolvedId,
+        message,
+        resolution: 'dismissed',
+        responder: 'operator',
+    });
+    setAction(payload.message || 'operator_outbox_response_ok');
+    await refresh();
+    return payload;
+}
+
+function renderOverviewStallRecovery(status) {
+    if (!overviewStallRecovery) return;
+    if (!status) {
+        overviewStallRecovery.hidden = true;
+        return;
+    }
+    const outboxOpen = operatorOutboxOpenCount(status);
+    const blockedBranches = workTreeBlockedCount(status);
+    const queueOpen = Number(status.generated_work_queue_open_count != null ? status.generated_work_queue_open_count : 0);
+    const stallActive = outboxOpen > 0 || blockedBranches > 0;
+    overviewStallRecovery.hidden = !stallActive;
+    if (!stallActive) return;
+
+    const lines = [];
+    if (outboxOpen > 0) {
+        lines.push(`${outboxOpen} open operator outbox notice${outboxOpen === 1 ? '' : 's'} need a response before autonomy can advance.`);
+        const latestId = latestOperatorOutboxEventId(status);
+        if (latestId) lines.push(`Latest notice: ${latestId}`);
+    }
+    if (blockedBranches > 0) {
+        lines.push(`${blockedBranches} blocked Work Tree branch${blockedBranches === 1 ? '' : 'es'} are holding execution.`);
+    }
+    if (queueOpen > 0) {
+        lines.push(`${queueOpen} generated queue item${queueOpen === 1 ? '' : 's'} waiting — use Run Next Queue Item after clearing operator holds.`);
+    }
+    if (overviewStallRecoverySummary) {
+        overviewStallRecoverySummary.textContent = lines[0] || 'Autonomy is waiting on operator action before it can advance blocked work.';
+    }
+    if (overviewStallRecoveryBadge) {
+        overviewStallRecoveryBadge.className = outboxOpen > 0 ? 'status-pill status-pill-warn' : 'status-pill status-pill-neutral';
+        overviewStallRecoveryBadge.textContent = outboxOpen > 0 ? `${outboxOpen} outbox open` : `${blockedBranches} blocked`;
+    }
+    if (overviewStallRecoveryBox) {
+        overviewStallRecoveryBox.textContent = [
+            'Use these controls to unblock autonomy without hunting through tabs.',
+            '',
+            ...lines,
+            '',
+            'Operator Deck path: Operations → Operator Deck → Operator Outbox.',
+            'Queue path: Sessions → Parity Runs → Run Next Queue Item.',
+        ].join('\n');
+    }
+    const dismissBtn = document.getElementById('btnStallDismissOutbox');
+    const queueBtn = document.getElementById('btnStallRunQueueNext');
+    if (dismissBtn) dismissBtn.style.display = outboxOpen > 0 ? '' : 'none';
+    if (queueBtn) queueBtn.style.display = queueOpen > 0 ? '' : 'none';
+}
+
 function renderOverviewFocus(status) {
     if (!overviewFocusStrip) return;
     if (!status) {
@@ -3274,11 +3405,18 @@ function renderOverviewFocus(status) {
             key: 'Operator Focus',
             value: attentionActive && attentionMessage
                 ? `Needs Help\n${attentionMessage}`
-                : `${centerTarget.label}\n${centerTarget.why}`,
-            actions: [
-                {label: centerTarget.label, center: centerTarget.tab},
-                {label: inspectorTarget.label, inspector: inspectorTarget.tab},
-            ],
+                : (operatorOutboxOpenCount(status) > 0
+                    ? `Outbox Hold\n${operatorOutboxOpenCount(status)} open notice${operatorOutboxOpenCount(status) === 1 ? '' : 's'}`
+                    : `${centerTarget.label}\n${centerTarget.why}`),
+            actions: operatorOutboxOpenCount(status) > 0
+                ? [
+                    {label: 'Operator Deck', view: 'operations', layerTab: 'operator-deck'},
+                    {label: 'Blocked Tree', view: 'scheduled-tree', workTreeMode: 'blocked'},
+                ]
+                : [
+                    {label: centerTarget.label, center: centerTarget.tab},
+                    {label: inspectorTarget.label, inspector: inspectorTarget.tab},
+                ],
         },
     ];
     overviewFocusStrip.innerHTML = focusCards.map((card) => [
@@ -3287,7 +3425,7 @@ function renderOverviewFocus(status) {
         `<div class="overview-focus-value">${escapeHtml(card.value)}</div>`,
         Array.isArray(card.actions) && card.actions.length ? [
             '<div class="overview-focus-actions">',
-            card.actions.map((action) => `<button type="button" class="focus-jump-button"${action.center ? ` data-focus-center-tab="${escapeHtml(action.center)}"` : ''}${action.inspector ? ` data-focus-inspector-tab="${escapeHtml(action.inspector)}"` : ''}>${escapeHtml(action.label)}</button>`).join(''),
+            card.actions.map((action) => `<button type="button" class="focus-jump-button"${action.center ? ` data-focus-center-tab="${escapeHtml(action.center)}"` : ''}${action.inspector ? ` data-focus-inspector-tab="${escapeHtml(action.inspector)}"` : ''}${action.view ? ` data-focus-view="${escapeHtml(action.view)}"` : ''}${action.layerTab ? ` data-focus-layer-tab="${escapeHtml(action.layerTab)}"` : ''}${action.workTreeMode ? ` data-focus-work-tree-mode="${escapeHtml(action.workTreeMode)}"` : ''}>${escapeHtml(action.label)}</button>`).join(''),
             '</div>'
         ].join('') : '',
         '</div>'
@@ -4179,8 +4317,21 @@ function renderWorkTreeInspector(tree, node) {
     ].join('\n');
     if (workTreeBranchActions) {
         const actionable = ['ready', 'open', 'pending', 'active'].includes(_inspectorBranchStatus);
-        workTreeBranchActions.style.display = actionable ? '' : 'none';
+        const blocked = ['blocked', 'observing'].includes(_inspectorBranchStatus);
+        const taskMeta = currentTask.meta && typeof currentTask.meta === 'object' ? currentTask.meta : {};
+        const blockedReason = String(taskMeta.blocked_reason || '').trim();
+        const sourceType = String(node.source_type || '').trim().toLowerCase();
+        const recommendedTool = String(nextStep.recommended_tool || node.preferred_tool || '').trim().toLowerCase();
+        const outboxOpen = operatorOutboxOpenCount(latestStatus || {});
+        const showRecovery = blocked || (sourceType === 'operator_control' && outboxOpen > 0);
+        workTreeBranchActions.style.display = (actionable || showRecovery) ? '' : 'none';
         if (btnWorkTreeRunNext) btnWorkTreeRunNext.style.display = actionable ? '' : 'none';
+        if (btnWorkTreeOpenOperatorDeck) btnWorkTreeOpenOperatorDeck.style.display = showRecovery ? '' : 'none';
+        if (btnWorkTreeDismissOutbox) btnWorkTreeDismissOutbox.style.display = (showRecovery && outboxOpen > 0) ? '' : 'none';
+        if (btnWorkTreeRunQueueNext) {
+            const queueRecovery = recommendedTool === 'generated_queue_run' || blockedReason.includes('generated_queue');
+            btnWorkTreeRunQueueNext.style.display = (showRecovery && queueRecovery) ? '' : 'none';
+        }
     }
 }
 
@@ -4847,6 +4998,7 @@ function renderStatusSpine(status, metrics) {
         return;
     }
     renderOperatorOutbox(status);
+    renderOverviewStallRecovery(status);
     renderReleaseStatus(status);
     renderRuntimeSummary(status);
     renderGuardRuntime(status);
@@ -5829,16 +5981,27 @@ document.addEventListener('click', async (event) => {
 
     const focusButton = target.closest('.focus-jump-button');
     if (focusButton instanceof HTMLElement) {
+        const viewTarget = String(focusButton.getAttribute('data-focus-view') || '').trim();
+        const layerTabTarget = String(focusButton.getAttribute('data-focus-layer-tab') || '').trim();
+        const workTreeModeTarget = String(focusButton.getAttribute('data-focus-work-tree-mode') || '').trim();
         const centerTarget = String(focusButton.getAttribute('data-focus-center-tab') || '').trim();
         const inspectorTarget = String(focusButton.getAttribute('data-focus-inspector-tab') || '').trim();
-        setActiveView('overview');
+        setActiveView(viewTarget || 'overview');
+        if (layerTabTarget) {
+            const operationsShell = document.querySelector('.layer-tab-shell[data-layer-tabs="operations"]');
+            if (operationsShell) setLayerTab(operationsShell, layerTabTarget);
+        }
+        if (workTreeModeTarget) {
+            setWorkTreeViewMode(workTreeModeTarget);
+            renderSelectedWorkTreeView();
+        }
         if (centerTarget) {
             setCenterTab(centerTarget);
         }
         if (inspectorTarget) {
             setInspectorTab(inspectorTarget);
         }
-        setAction(`Focus shifted${centerTarget ? ` to ${centerTarget}` : ''}${inspectorTarget ? ` with ${inspectorTarget} inspector` : ''}.`);
+        setAction(`Focus shifted${viewTarget ? ` to ${viewTarget}` : ''}${layerTabTarget ? ` / ${layerTabTarget}` : ''}${centerTarget ? ` with ${centerTarget}` : ''}${inspectorTarget ? ` and ${inspectorTarget} inspector` : ''}.`);
         return;
     }
 
@@ -5897,6 +6060,13 @@ bindClick('btnOperatorOutboxSeen', async () => { await setOperatorOutboxStatus('
 bindClick('btnOperatorOutboxAnswer', async () => { await respondOperatorOutbox(); });
 bindClick('btnOperatorOutboxResolve', async () => { await respondOperatorOutbox('task_resolved'); });
 bindClick('btnOperatorOutboxDismiss', async () => { await respondOperatorOutbox('dismissed'); });
+bindClick('btnStallOpenOperatorDeck', () => { openOperatorDeck(); setAction('Opened Operations → Operator Deck.'); });
+bindClick('btnStallDismissOutbox', async () => { await dismissOperatorOutboxNotice(); });
+bindClick('btnStallRunQueueNext', async () => { await runNextGeneratedQueueItem(); });
+bindClick('btnStallOpenScheduledTree', () => { openScheduledTreeBlockedView(); setAction('Opened Scheduled Tree blocked view.'); });
+bindClick('btnWorkTreeOpenOperatorDeck', () => { openOperatorDeck(); setAction('Opened Operations → Operator Deck.'); });
+bindClick('btnWorkTreeDismissOutbox', async () => { await dismissOperatorOutboxNotice(); });
+bindClick('btnWorkTreeRunQueueNext', async () => { await runNextGeneratedQueueItem(); });
 bindClick('btnLocationTrackStart', async () => { startLiveTracking(); });
 bindClick('btnLocationTrackAutoArm', async () => { toggleLiveTrackingAutoArm(); });
 bindClick('btnLocationTrackStop', async () => { stopLiveTracking(); });

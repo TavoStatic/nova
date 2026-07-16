@@ -6,6 +6,8 @@ from typing import Callable
 from services import nova_planner_contract
 from services.leah_fast_chat import load_leah_fast_chat_from_core
 from services.nova_fallback_flow import finalize_llm_fallback_reply, prepare_fallback_flow
+from services.memory_production import MEMORY_LEARNING_SHORT_CIRCUIT_ACTIONS
+from services.nova_turn_contract import bind_turn_request, maybe_run_attachment_vision_turn
 
 
 def _runtime_fn(runtime_scope: dict[str, object], name: str):
@@ -31,12 +33,24 @@ def execute_reply_sequence_from_runtime(
     work_tree_seed_source: str = "",
     work_tree_seed_mode: str = "",
     input_source: str = "typed",
+    channel: str = "http",
+    attachments: list[dict] | None = None,
 ) -> tuple[str, dict]:
     del runtime_scope
 
-    return execute_reply_sequence(
-        turns=turns,
+    from services.nova_turn_contract import bind_turn_request, execute_conversation_turn
+
+    turn = bind_turn_request(
         text=text,
+        channel=channel,
+        input_source=input_source,
+        attachments=list(attachments or []),
+        work_tree_seed_source=work_tree_seed_source,
+    )
+    return execute_conversation_turn(
+        execute_reply_sequence_fn=execute_reply_sequence,
+        turn=turn,
+        turns=turns,
         pending_action=pending_action,
         turn_acts=turn_acts,
         prefer_web_for_data_queries=prefer_web_for_data_queries,
@@ -49,7 +63,6 @@ def execute_reply_sequence_from_runtime(
         ensure_active_work_tree_fn=ensure_active_work_tree_fn,
         work_tree_seed_source=work_tree_seed_source,
         work_tree_seed_mode=work_tree_seed_mode,
-        input_source=input_source,
         stop_before_llm_fallback=stop_before_llm_fallback,
     )
 
@@ -67,6 +80,9 @@ def execute_http_reply_sequence_from_runtime(
     core,
     runtime_scope: dict[str, object],
     ensure_active_work_tree_fn: Callable[[str], str] | None = None,
+    input_source: str = "http",
+    channel: str = "http",
+    attachments: list[dict] | None = None,
 ) -> tuple[str, dict]:
     def _trace(stage: str, outcome: str, detail: str = "", **data) -> None:
         core.action_ledger_add_step(ledger_record, stage, outcome, detail, **data)
@@ -94,7 +110,9 @@ def execute_http_reply_sequence_from_runtime(
         runtime_scope=runtime_scope,
         ensure_active_work_tree_fn=ensure_active_work_tree_fn,
         work_tree_seed_source="http",
-        input_source="http",
+        input_source=input_source,
+        channel=channel,
+        attachments=attachments,
     )
 
 
@@ -115,6 +133,8 @@ def execute_reply_sequence(
     work_tree_seed_source: str = "",
     work_tree_seed_mode: str = "",
     input_source: str = "typed",
+    channel: str = "cli",
+    attachments: list[dict] | None = None,
     stop_before_llm_fallback: bool = False,
 ) -> tuple[str, dict]:
     sequence_started = time.perf_counter()
@@ -174,36 +194,68 @@ def execute_reply_sequence(
         except TypeError:
             return build_fn(user_text, session_turns)
 
-    leah_fast_chat = load_leah_fast_chat_from_core(core) and str(input_source or "").strip().lower() == "http"
+    turn = bind_turn_request(
+        text=text,
+        channel=channel,
+        input_source=input_source,
+        attachments=attachments,
+        work_tree_seed_source=work_tree_seed_source,
+    )
+    input_source = turn.input_source
+    work_tree_seed_source = turn.work_tree_seed_source
+
+    _apply_learning_fn = getattr(core, "apply_user_memory_learning", None)
+    if callable(_apply_learning_fn):
+        try:
+            learning_outcome = _apply_learning_fn(
+                text,
+                input_source=input_source,
+                session=session,
+                turns=turns,
+                pending_action=pending_action,
+            ) or {}
+        except Exception:
+            learning_outcome = {}
+        if isinstance(learning_outcome, dict) and learning_outcome.get("handled"):
+            action = str(learning_outcome.get("action") or "").strip()
+            trace("memory_learning", "handled", action or "learning")
+            early_reply = str(learning_outcome.get("early_reply") or "").strip()
+            if action in MEMORY_LEARNING_SHORT_CIRCUIT_ACTIONS and early_reply:
+                return _timed_return(
+                    early_reply,
+                    {
+                        "planner_decision": "memory_learning",
+                        "memory_learning_action": action,
+                    },
+                )
+
+    leah_fast_chat = load_leah_fast_chat_from_core(core) and input_source == "http"
 
     # --- Intent understanding: classify the turn BEFORE the planner runs ---
     turn_intent: dict = {}
     response_strategy: dict = {}
-    if leah_fast_chat:
-        trace("leah_fast_chat", "skipped_intent", "conversation_turn")
-    else:
-        _classify_intent_fn = getattr(core, "classify_turn_intent", None)
-        _select_strategy_fn = getattr(core, "select_response_strategy", None)
-        if callable(_classify_intent_fn):
-            try:
-                turn_intent = _classify_intent_fn(text, turns) or {}
-            except Exception:
-                turn_intent = {}
-        if callable(_select_strategy_fn) and turn_intent:
-            try:
-                response_strategy = _select_strategy_fn(turn_intent) or {}
-            except Exception:
-                response_strategy = {}
-        if turn_intent:
-            trace(
-                "intent_understanding",
-                "classified",
-                str(turn_intent.get("subject") or ""),
-                level=str(turn_intent.get("level") or ""),
-                domain=str(turn_intent.get("domain") or ""),
-                confidence=float(turn_intent.get("confidence") or 0.0),
-                strategy=str(response_strategy.get("strategy") or ""),
-            )
+    _classify_intent_fn = getattr(core, "classify_turn_intent", None)
+    _select_strategy_fn = getattr(core, "select_response_strategy", None)
+    if callable(_classify_intent_fn):
+        try:
+            turn_intent = _classify_intent_fn(text, turns) or {}
+        except Exception:
+            turn_intent = {}
+    if callable(_select_strategy_fn) and turn_intent:
+        try:
+            response_strategy = _select_strategy_fn(turn_intent) or {}
+        except Exception:
+            response_strategy = {}
+    if turn_intent:
+        trace(
+            "intent_understanding",
+            "classified",
+            str(turn_intent.get("subject") or ""),
+            level=str(turn_intent.get("level") or ""),
+            domain=str(turn_intent.get("domain") or ""),
+            confidence=float(turn_intent.get("confidence") or 0.0),
+            strategy=str(response_strategy.get("strategy") or ""),
+        )
 
     planner_call_started = time.perf_counter()
     semantic_tool_observation: dict[str, object] = {}
@@ -213,25 +265,31 @@ def execute_reply_sequence(
         if isinstance(payload, dict):
             semantic_tool_observation.update(payload)
 
-    if leah_fast_chat:
-        planner_outcome = None
-        trace("leah_fast_chat", "skipped_planner", "conversation_turn")
-    else:
-        planner_outcome = nova_planner_contract.maybe_handle_planner_sequence(
-            text=text,
-            turns=turns,
-            pending_action=pending_action,
-            turn_acts=turn_acts,
-            prefer_web_for_data_queries=prefer_web_for_data_queries,
-            session=session,
-            core=core,
-            trace=trace,
-            normalize_reply=normalize_reply,
-            ensure_active_work_tree_fn=ensure_active_work_tree_fn,
-            work_tree_seed_source=work_tree_seed_source,
-            work_tree_seed_mode=work_tree_seed_mode,
-            semantic_tool_observer_fn=_observe_semantic_tool,
-        )
+    attachment_vision_outcome = maybe_run_attachment_vision_turn(
+        text=text,
+        attachments=turn.attachments,
+        core=core,
+        trace=trace,
+        normalize_reply=normalize_reply,
+    )
+    if attachment_vision_outcome is not None:
+        return _timed_return(*_break_fallback_loop(*attachment_vision_outcome))
+
+    planner_outcome = nova_planner_contract.maybe_handle_planner_sequence(
+        text=text,
+        turns=turns,
+        pending_action=pending_action,
+        turn_acts=turn_acts,
+        prefer_web_for_data_queries=prefer_web_for_data_queries,
+        session=session,
+        core=core,
+        trace=trace,
+        normalize_reply=normalize_reply,
+        ensure_active_work_tree_fn=ensure_active_work_tree_fn,
+        work_tree_seed_source=work_tree_seed_source,
+        work_tree_seed_mode=work_tree_seed_mode,
+        semantic_tool_observer_fn=_observe_semantic_tool,
+    )
     timing_profile["planner_time"] = int((time.perf_counter() - planner_call_started) * 1000)
     trace("timing", "completed", "planner_call", duration_ms=timing_profile["planner_time"])
     deferred_tool_meta: dict[str, object] = {}
@@ -269,7 +327,7 @@ def execute_reply_sequence(
 
     # Attempt fulfillment flow before falling to generic LLM.
     # Only fires when planner found no tool action and no deferred tool result.
-    if not deferred_tool_meta and not leah_fast_chat:
+    if not deferred_tool_meta:
         fulfillment_fn = getattr(core, "maybe_run_fulfillment_flow", None)
         if callable(fulfillment_fn):
             try:
@@ -348,9 +406,9 @@ def execute_reply_sequence(
         mem_should_store_fn=getattr(core, "mem_should_store", lambda _text: False),
         mem_add_fn=getattr(core, "mem_add", lambda *_args, **_kwargs: None),
         strip_mem_leak_fn=lambda reply, _retrieved_context: reply,
-        behavior_record_event_fn=lambda *_args, **_kwargs: None,
-        action_ledger_add_step=lambda *_args, **_kwargs: None,
-        ensure_reply_fn=lambda reply: reply,
+        behavior_record_event_fn=getattr(core, "behavior_record_event", lambda *_args, **_kwargs: None),
+        action_ledger_add_step=lambda stage, outcome, detail="", **data: trace(stage, outcome, detail, **data),
+        ensure_reply_fn=ensure_reply,
         intent_evidence_packet=intent_evidence_packet,
         leah_fast_chat=leah_fast_chat,
         fallback_context=fallback_entry.get("fallback_context") if isinstance(fallback_entry.get("fallback_context"), dict) else {},

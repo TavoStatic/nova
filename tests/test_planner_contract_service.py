@@ -95,6 +95,26 @@ class TestPlannerContractService(unittest.TestCase):
         self.assertGreaterEqual((meta.get("timing") or {}).get("tool_selection_time", -1), 0)
         self.assertGreaterEqual((meta.get("timing") or {}).get("tool_time", -1), 0)
 
+    def test_maybe_handle_planner_sequence_rejects_failure_string_tool_results(self):
+        core = _PlannerCoreStub(
+            semantic_intent={"tool": "read", "args": ["README.md"], "confidence": 0.9, "reason": "read file"},
+            tool_result="filesystem tool failed: permission denied",
+        )
+
+        reply, meta = nova_planner_contract.maybe_handle_planner_sequence(
+            text="read README.md",
+            turns=[],
+            pending_action=None,
+            prefer_web_for_data_queries=False,
+            session=None,
+            core=core,
+            trace=lambda *args, **kwargs: None,
+            normalize_reply=lambda text: text,
+        )
+
+        self.assertIn("Tool read failed:", reply)
+        self.assertFalse(meta.get("grounded"))
+
     def test_maybe_handle_planner_sequence_uses_semantic_tool_intent(self):
         core = _PlannerCoreStub(
             actions=[],

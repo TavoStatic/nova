@@ -56,6 +56,10 @@ from services.nova_route_probing import evaluate_deterministic_route_viability
 from services.nova_service_builders import build_fulfillment_flow_service
 from services.nova_service_builders import build_identity_memory_service
 from services.nova_service_builders import build_policy_manager
+from services.memory_production import apply_user_memory_learning as service_apply_user_memory_learning
+from services.memory_production import build_memory_read_plan
+from services.memory_production import build_memory_recall_plan
+from services.nova_memory_learning import learn_from_user_correction as service_learn_from_user_correction
 from services.nova_memory_learning import mem_get_recent_learned as service_mem_get_recent_learned
 from services.nova_memory_learning import identity_context_for_prompt as service_identity_context_for_prompt
 from services.nova_operational_identity import operational_identity_context_for_prompt as service_operational_identity_context_for_prompt
@@ -1018,7 +1022,32 @@ def _patch_handlers() -> dict[str, object]:
     }
 
 
-def execute_patch_action(action: str, value: str = "", *, force: bool = False, is_admin: bool = True) -> str:
+def preview_is_approved(path_or_name: str) -> bool:
+    previews = UPDATES_DIR / "previews"
+    candidate = Path(path_or_name)
+    if not candidate.is_absolute():
+        candidate = previews / path_or_name
+    try:
+        resolved = str(candidate.resolve())
+    except Exception:
+        resolved = str(candidate)
+    for item in _read_approvals():
+        if str(item.get("decision") or "").strip().lower() != "approved":
+            continue
+        recorded = str(item.get("preview") or "").strip()
+        if not recorded:
+            continue
+        if recorded == resolved or recorded == str(candidate) or recorded == candidate.name:
+            return True
+        try:
+            if str(Path(recorded).resolve()) == resolved:
+                return True
+        except Exception:
+            continue
+    return False
+
+
+def execute_patch_action(action: str, value: str = "", *, force: bool = False, is_admin: bool = False) -> str:
     return execute_registered_tool(
         "patch",
         {"action": str(action or "").strip(), "value": str(value or "").strip(), "force": bool(force)},
@@ -1504,10 +1533,18 @@ def mem_add(kind: str, source: str, text: str):
 
 
 
-def mem_recall(query: str) -> str:
+def mem_recall(
+    query: str,
+    *,
+    purpose: str = "",
+    conversation_state: dict | None = None,
+    pending_action: dict | None = None,
+) -> str:
+    effective_purpose = str(purpose or "general").strip() or "general"
     return service_mem_recall(
         query,
         mem_enabled_fn=mem_enabled,
+        memory_recall_plan_fn=build_memory_recall_plan,
         memory_runtime_user_fn=_memory_runtime_user,
         memory_mod=memory_mod,
         mem_context_top_k_fn=mem_context_top_k,
@@ -1519,6 +1556,65 @@ def mem_recall(query: str) -> str:
         record_memory_event_fn=_record_memory_event,
         python_path=str(PYTHON),
         base_dir=BASE_DIR,
+        purpose=effective_purpose,
+        conversation_state=conversation_state,
+        pending_action=pending_action,
+    )
+
+
+def learn_from_user_correction(text: str) -> tuple[bool, str]:
+    return service_learn_from_user_correction(
+        text,
+        load_learned_facts_fn=load_learned_facts,
+        get_learned_fact_fn=get_learned_fact,
+        save_learned_facts_fn=save_learned_facts,
+        set_active_user_fn=set_active_user,
+        mem_enabled_fn=mem_enabled,
+        mem_add_fn=mem_add,
+    )
+
+
+def apply_user_memory_learning(
+    text: str,
+    *,
+    input_source: str = "typed",
+    session=None,
+    turns: list[tuple[str, str]] | None = None,
+    pending_action: dict | None = None,
+) -> dict:
+    last_assistant = ""
+    for role, content in reversed(list(turns or [])):
+        if str(role or "").strip().lower() == "assistant":
+            last_assistant = str(content or "")
+            break
+    pending_correction_target = ""
+    conversation_state = None
+    clear_pending_correction_target_fn = None
+    if session is not None:
+        pending_correction_target = str(getattr(session, "pending_correction_target", "") or "").strip()
+        conversation_state = getattr(session, "conversation_state", None)
+        if isinstance(conversation_state, dict):
+            conversation_state = dict(conversation_state)
+        if hasattr(session, "clear_pending_correction_target"):
+            clear_pending_correction_target_fn = session.clear_pending_correction_target
+    return service_apply_user_memory_learning(
+        text,
+        input_source=str(input_source or "typed").strip() or "typed",
+        conversation_state=conversation_state,
+        pending_correction_target=pending_correction_target,
+        last_assistant=last_assistant,
+        mem_enabled_fn=mem_enabled,
+        mem_add_fn=mem_add,
+        mem_remember_fact_fn=mem_remember_fact,
+        load_learned_facts_fn=load_learned_facts,
+        save_learned_facts_fn=save_learned_facts,
+        get_learned_fact_fn=get_learned_fact,
+        set_active_user_fn=set_active_user,
+        get_active_user_fn=get_active_user,
+        load_identity_profile_fn=load_identity_profile,
+        save_identity_profile_fn=save_identity_profile,
+        store_correction_record_fn=_store_supervisor_correction_record,
+        clear_pending_correction_target_fn=clear_pending_correction_target_fn,
     )
 
 
@@ -1556,16 +1652,18 @@ def _normalize_recent_learning_item(kind: str, text: str) -> str:
     return ""
 
 
-mem_get_recent_learned = lambda limit=5: service_mem_get_recent_learned(
-    limit,
-    mem_enabled_fn=mem_enabled,
-    memory_mod=memory_mod,
-    memory_runtime_user_fn=_memory_runtime_user,
-    mem_scope_fn=mem_scope,
-    normalize_recent_learning_item_fn=_normalize_recent_learning_item,
-    load_learned_facts_fn=load_learned_facts,
-    record_memory_event_fn=_record_memory_event,
-)
+def mem_get_recent_learned(limit: int = 5) -> list[str]:
+    return service_mem_get_recent_learned(
+        limit,
+        mem_enabled_fn=mem_enabled,
+        memory_mod=memory_mod,
+        memory_runtime_user_fn=_memory_runtime_user,
+        mem_scope_fn=mem_scope,
+        normalize_recent_learning_item_fn=_normalize_recent_learning_item,
+        load_learned_facts_fn=load_learned_facts,
+        memory_read_plan_fn=build_memory_read_plan,
+        record_memory_event_fn=_record_memory_event,
+    )
 
 
 
@@ -1702,7 +1800,12 @@ def get_learned_fact(key: str, default: str = "") -> str:
     return v or default
 
 
-def build_learning_context_details(query: str) -> dict:
+def build_learning_context_details(
+    query: str,
+    *,
+    conversation_state: dict | None = None,
+    pending_action: dict | None = None,
+) -> dict:
     blocks = []
     identity_block = service_identity_context_for_prompt(
         load_identity_profile_fn=load_identity_profile,
@@ -1712,7 +1815,26 @@ def build_learning_context_details(query: str) -> dict:
         load_capabilities_fn=load_capabilities,
     )
     kb_block = kb_search(query)
-    mem_block = mem_recall(query)
+    recall_plan = build_memory_recall_plan(
+        query,
+        purpose="general_context",
+        conversation_state=conversation_state,
+        pending_action=pending_action,
+    )
+    mem_block = ""
+    if bool(getattr(recall_plan, "allow", False)):
+        recall_purpose = str(getattr(recall_plan, "purpose", "") or "general").strip() or "general"
+        if recall_purpose == "recent_learning_summary":
+            recent_items = mem_get_recent_learned()
+            if recent_items:
+                mem_block = "Recent learning:\n" + "\n".join(f"- {item}" for item in recent_items)
+        else:
+            mem_block = mem_recall(
+                query,
+                purpose=recall_purpose,
+                conversation_state=conversation_state,
+                pending_action=pending_action,
+            )
 
     if identity_block:
         blocks.append(identity_block)
@@ -1828,7 +1950,11 @@ def build_fallback_context_details(
     include_chat_context: bool = True,
 ) -> dict[str, Any]:
     session_turns = turns if isinstance(turns, list) else []
-    learning_details = build_learning_context_details(query)
+    learning_details = build_learning_context_details(
+        query,
+        conversation_state=conversation_state,
+        pending_action=pending_action,
+    )
     learning_context = str(learning_details.get("context") or "")
     chat_context = _render_chat_context(session_turns, current_text=query) if bool(include_chat_context) else ""
     state_context = (
@@ -3176,6 +3302,8 @@ def render_nova_pulse(payload: dict | None = None) -> str:
 
 
 
+
+
 def _latest_memory_health_branch() -> tuple[object | None, list[dict]]:
     try:
         import work_tree as work_tree_module
@@ -3588,6 +3716,7 @@ def build_core_health_brief_payload() -> dict:
 
 
 def tool_release_rebuild_verify(label: str = "work-tree-rebuild"):
+    from services.governance_chain import release_rebuild_tool_payload
     from services.release_clean import run_release_clean
 
     safe_label = str(label or "work-tree-rebuild").strip() or "work-tree-rebuild"
@@ -3599,36 +3728,12 @@ def tool_release_rebuild_verify(label: str = "work-tree-rebuild"):
         promote=False,
         timeout_sec=1800,
     )
-    readiness = report.get("readiness") if isinstance(report.get("readiness"), dict) else {}
-    steps = [
-        {
-            "name": str(step.get("name") or ""),
-            "returncode": int(step.get("returncode", 1) or 0),
-            "duration_sec": step.get("duration_sec"),
-        }
-        for step in list(report.get("steps") or [])
-        if isinstance(step, dict)
-    ]
-    required = {"repo_hygiene", "smoke_runtime", "package_build"}
-    successful = {
-        str(step.get("name") or "")
-        for step in steps
-        if int(step.get("returncode", 1) or 0) == 0
-    }
-    rebuild_verified = bool(report.get("artifact")) and required.issubset(successful)
-    readiness_state = str(readiness.get("latest_readiness_state") or readiness.get("state") or "")
-    failure_reason = "" if rebuild_verified else str(report.get("failure_reason") or "release_rebuild_verify_failed")
-    return {
-        "ok": rebuild_verified,
-        "artifact": str(report.get("artifact") or ""),
-        "failure_reason": failure_reason,
-        "readiness_state": readiness_state,
-        "ready_to_ship": bool(readiness.get("latest_ready_to_ship", False)),
-        "report_path": str(report.get("report_path") or ""),
-        "promoted": False,
-        "run_regression": False,
-        "steps": steps,
-    }
+    return release_rebuild_tool_payload(
+        report if isinstance(report, dict) else {},
+        label=safe_label,
+        run_regression=False,
+        promote=False,
+    )
 
 
 def _read_update_now_pending() -> dict:

@@ -186,6 +186,61 @@ def _lock_belongs_to_live_guard(data: Optional[dict]) -> bool:
         return False
 
 
+def _live_guard_process_pids(*, exclude_pid: int | None = None) -> list[int]:
+    """Return PIDs for live nova_guard.py processes (direct script args only)."""
+    from tools.runtime_processes import matches_script_process
+
+    skip_pid = int(exclude_pid or 0)
+    pids: list[int] = []
+    try:
+        for proc in psutil.process_iter(["pid", "cmdline"]):
+            try:
+                pid = int(proc.pid or 0)
+                if pid <= 0 or pid == skip_pid:
+                    continue
+                cmdline = [str(arg or "") for arg in list(proc.info.get("cmdline") or [])]
+                if len(cmdline) < 2:
+                    continue
+                normalized = " ".join(cmdline).lower()
+                if " -c " in f" {normalized} " or normalized.strip().startswith("-c "):
+                    continue
+                try:
+                    cwd = proc.cwd()
+                except Exception:
+                    cwd = ROOT
+                if not matches_script_process(cmdline, GUARD_SCRIPT, cwd=cwd):
+                    continue
+                pids.append(pid)
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                pass
+    except Exception:
+        pass
+    return sorted(set(pids))
+
+
+def _another_live_guard_process(*, exclude_pid: int | None = None) -> int | None:
+    pids = _live_guard_process_pids(exclude_pid=exclude_pid)
+    return pids[0] if pids else None
+
+
+def _enforce_guard_singleton_or_exit() -> None:
+    from tools.runtime_processes import logical_service_processes
+
+    my_pid = os.getpid()
+    lock_data = read_json(LOCK_FILE) or {}
+    owner_pid = int(lock_data.get("pid", 0) or 0)
+    if owner_pid > 0 and owner_pid != my_pid and _lock_belongs_to_live_guard(lock_data):
+        log(f"[GUARD] Lock owned by pid={owner_pid}; exiting duplicate guard pid={my_pid}.")
+        sys.exit(0)
+    logical = logical_service_processes(GUARD_SCRIPT)
+    if len(logical) <= 1:
+        return
+    other_pid = _another_live_guard_process(exclude_pid=my_pid)
+    if other_pid is not None and owner_pid != my_pid:
+        log(f"[GUARD] Another guard process is already running (pid={other_pid}); exiting pid={my_pid}.")
+        sys.exit(0)
+
+
 def _write_guard_lock(path: Path, payload: dict) -> None:
     with open(path, "x", encoding="utf-8") as f:
         json.dump(payload, f, ensure_ascii=True)
@@ -777,8 +832,12 @@ def _is_maintenance_already_running() -> bool:
                 exe = str(cmdline[0]).lower()
                 if "python" not in exe:
                     continue
-                if any(script_name in str(arg) or script_str in str(arg) for arg in cmdline[1:]):
-                    return True
+                maintenance_args = [str(arg or "") for arg in cmdline[1:]]
+                if not any(script_name in arg or script_str in arg for arg in maintenance_args):
+                    continue
+                if not any(arg in {"--once", "--loop"} for arg in maintenance_args):
+                    continue
+                return True
             except (psutil.NoSuchProcess, psutil.AccessDenied):
                 pass
     except Exception:
@@ -842,6 +901,7 @@ def main():
             if attempt.state in {STATE_BOOTING, STATE_RUNNING, STATE_FAILED}:
                 _resolve_attempt(attempt)
             break
+        _enforce_guard_singleton_or_exit()
         supervisor_tick(attempt)
         _maintenance_tick()
         time.sleep(POLL_SECONDS)

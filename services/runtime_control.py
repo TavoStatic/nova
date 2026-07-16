@@ -9,6 +9,8 @@ from pathlib import Path
 
 import psutil
 
+from tools.runtime_processes import logical_service_processes
+
 
 class RuntimeControlService:
     """Own runtime lifecycle control helpers outside the HTTP layer."""
@@ -452,6 +454,10 @@ class RuntimeControlService:
             return False, f"venv_python_missing:{venv_python}"
         if not Path(guard_py).exists():
             return False, f"guard_script_missing:{guard_py}"
+
+        guard_processes = logical_service_processes(guard_py)
+        if guard_processes:
+            return True, "guard_already_running"
 
         stop_file = Path(runtime_dir) / "guard.stop"
         try:

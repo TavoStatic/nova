@@ -85,7 +85,7 @@ class TestPatchGuard(unittest.TestCase):
 
             with self._patch_env(tmp), patch.object(nova_core, "policy_patch", return_value={"strict_manifest": True}):
                 nova_core._write_patch_revision(2, source="test")
-                result = nova_core.patch_apply(str(patch_zip))
+                result = nova_core.patch_apply(str(patch_zip), force=True)
 
             self.assertIn("Patch rejected", result)
             self.assertIn("incoming revision: 5", result)
@@ -116,7 +116,7 @@ class TestPatchGuard(unittest.TestCase):
                 patch.object(nova_core, "_snapshot_current", return_value=snapshot_zip), \
                 patch.object(nova_core, "_py_compile_check", return_value=(True, "ok")):
                 nova_core._write_patch_revision(2, source="test")
-                result = nova_core.patch_apply(str(patch_zip))
+                result = nova_core.patch_apply(str(patch_zip), force=True)
 
                 rev = nova_core._read_patch_revision()
 
@@ -150,7 +150,7 @@ class TestPatchGuard(unittest.TestCase):
                 patch.object(nova_core, "_snapshot_current", return_value=snapshot_zip), \
                 patch.object(nova_core, "_py_compile_check", return_value=(True, "ok")), \
                 patch.object(nova_core, "_behavioral_check", return_value={"ok": False, "summary": "FAILED (failures=1)", "output": "failure"}):
-                result = nova_core.patch_apply(str(patch_zip))
+                result = nova_core.patch_apply(str(patch_zip), force=True)
                 rev_after_rollback = nova_core._read_patch_revision()
 
             self.assertIn("behavioral check failed", result.lower())

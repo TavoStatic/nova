@@ -1110,6 +1110,56 @@ class TestAutonomyOrchestratorService(unittest.TestCase):
         self.assertEqual(packet["recommended_action"]["target_id"], "generated_work_queue")
         self.assertNotIn("operator_hold_pending", packet["refusal_reasons"])
 
+    def test_evaluate_next_action_runs_generated_queue_when_release_truth_stale_and_operator_hold(self):
+        service = AutonomyOrchestratorService()
+
+        packet = service.evaluate_next_action(
+            _spec_envelope(
+                queue={
+                    "pending_count": 2,
+                    "high_priority_count": 2,
+                    "generated_pending_count": 2,
+                    "generated_actionable_count": 2,
+                    "generated_blocked_count": 0,
+                    "pressure_band": "high",
+                },
+                work_tree={
+                    "operator_hold_count": 1,
+                    "blocked_count": 1,
+                },
+                mission={
+                    "green_cycle": False,
+                    "status": "validation_required",
+                    "action": "hold",
+                    "truth_ready": False,
+                    "truth_blockers": ["release_truth_stale", "generated_queue_untested"],
+                    "green_blockers": [
+                        {
+                            "owner": "release",
+                            "code": "release_truth_stale",
+                            "remediation": {
+                                "action": "active_work_tree_run_next",
+                                "tools": ["release_rebuild_verify"],
+                            },
+                        },
+                        {
+                            "owner": "generated_queue",
+                            "code": "generated_queue_untested",
+                            "remediation": {"action": "generated_queue_run_next"},
+                        },
+                    ],
+                    "validation_fresh": True,
+                    "regression_current": True,
+                    "release_truth_current": False,
+                    "generated_queue_untested_count": 2,
+                },
+            )
+        )
+
+        self.assertEqual(packet["decision_type"], SPEC_DECISION_RECOMMEND_ACTION)
+        self.assertEqual(packet["recommended_action"]["action_type"], "generated_queue_run_next")
+        self.assertNotIn("operator_hold_pending", packet["refusal_reasons"])
+
     def test_evaluate_next_action_defers_below_recommendation_threshold(self):
         service = AutonomyOrchestratorService()
 

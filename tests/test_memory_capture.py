@@ -32,7 +32,7 @@ class TestMemoryCapture(unittest.TestCase):
             nova_core.set_active_user("ci-test-user")
             with mock.patch.object(nova_core, "memory_mod", fake):
                 nova_core.mem_add("test", "unittest", unique)
-                out = nova_core.mem_recall(unique)
+                out = nova_core.mem_recall(unique, purpose="explicit_recall")
         finally:
             nova_core.set_active_user(original_user)
 

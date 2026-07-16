@@ -357,7 +357,7 @@ def build_capability_profile_evidence(
         "evidence_source": "saved_capability_profile",
         "live_api_required": False,
     }
-    if sync_status is not None:
+    if present and sync_status is not None:
         payload["sync_status"] = sync_status
     return payload
 

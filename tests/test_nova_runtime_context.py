@@ -71,6 +71,23 @@ class TestNovaRuntimeContext(unittest.TestCase):
 
         self.assertEqual(runtime_dir, base_dir / "runtime" / "custom_validation")
 
+    def test_edfi_demo_runtime_override_wins_over_validation_scope(self):
+        base_dir = nova_runtime_context.BASE_DIR
+        demo_runtime = base_dir / "runtime" / "demo_isolated"
+
+        runtime_dir = nova_runtime_context.resolve_runtime_dir(
+            base_dir,
+            environ={
+                "NOVA_TEST_RUNNER": "1",
+                "NOVA_VALIDATION_RUNTIME_DIR": "runtime/validation",
+                "NOVA_EDFI_DEMO_ACTIVE": "1",
+                "NOVA_RUNTIME_DIR": str(demo_runtime),
+            },
+            argv=["python", "-m", "unittest", "tests.test_edfi_core_lifecycle_demo"],
+        )
+
+        self.assertEqual(runtime_dir, demo_runtime)
+
 
 if __name__ == "__main__":
     unittest.main()

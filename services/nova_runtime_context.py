@@ -59,6 +59,9 @@ def resolve_runtime_dir(base_dir: Path | None = None, environ=None, argv=None) -
     runtime_override = str(env.get("NOVA_RUNTIME_DIR") or "").strip()
     validation_override = str(env.get("NOVA_VALIDATION_RUNTIME_DIR") or "").strip()
 
+    if _truthy(env.get("NOVA_EDFI_DEMO_ACTIVE")) and runtime_override:
+        return _path_from_env(runtime_override, base_dir=base)
+
     if runtime_scope_name(env, argv) == "validation":
         if validation_override:
             return _path_from_env(validation_override, base_dir=base)

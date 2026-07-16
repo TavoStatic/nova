@@ -5,16 +5,14 @@ import sys
 from typing import Optional
 
 from services import nova_planner_contract
-from services.nova_cli_delivery import apply_cli_outcome_to_ledger
 from services.nova_cli_delivery import emit_cli_reply_outcome
 from services.nova_cli_sequence import execute_cli_sequence as service_execute_cli_sequence
 from services.nova_cli_sequence import apply_sequence_result as service_apply_sequence_result
 from services.nova_cli_sequence import normalize_sequence_reply as service_normalize_sequence_reply
-from services.nova_fallback_flow import prepare_fallback_flow
-from services.nova_fallback_flow import finalize_llm_fallback_reply
 from services.nova_reply_sequence import execute_reply_sequence
 from services.nova_reply_runtime import apply_reply_runtime_effects
 from services.nova_session_state import apply_reply_session_updates
+from services.nova_cli_session import load_cli_session_turns, persist_cli_session_turns
 from services.work_tree_seeding import WORK_TREE_SEEDING_SERVICE
 from services.work_tree_decision_adapter import WORK_TREE_DECISION_ADAPTER
 
@@ -55,7 +53,7 @@ def run_loop(tts, *, core: object) -> None:
 
     recent_tool_context = ""
     recent_web_urls: list[str] = []
-    session_turns: list[tuple[str, str]] = []
+    session_turns: list[tuple[str, str]] = list(load_cli_session_turns())
     session_state = core.ConversationSession()
     pending_action_ledger: Optional[dict] = None
     pending_action: Optional[dict] = session_state.pending_action
@@ -207,6 +205,10 @@ def run_loop(tts, *, core: object) -> None:
         recent_web_urls = list(outcome.get("recent_web_urls") or [])
         conversation_state = outcome.get("conversation_state") if isinstance(outcome.get("conversation_state"), dict) else session_state.conversation_state
         pending_action = outcome.get("pending_action") if isinstance(outcome.get("pending_action"), dict) else session_state.pending_action
+        persist_cli_session_turns(
+            session_turns,
+            owner=str(core.get_active_user() or ""),
+        )
 
     def _flush_pending_action_ledger() -> None:
         nonlocal pending_action_ledger
@@ -358,57 +360,12 @@ def run_loop(tts, *, core: object) -> None:
             ensure_active_work_tree_fn=_ensure_active_work_tree,
             work_tree_seed_source="cli",
             work_tree_seed_mode="",
+            input_source=input_source,
+            channel="cli",
         )
         if str((sequence_meta or {}).get("planner_decision") or "") not in {"", "unhandled"}:
             _apply_sequence_result(sequence_reply, sequence_meta)
             continue
-
-        fallback_entry = prepare_fallback_flow(
-            text=routed_user_text,
-            turns=session_turns,
-            build_fallback_context_details_fn=_build_fallback_context_details,
-            action_ledger_add_step=lambda stage, outcome, detail="", **data: _trace(stage, outcome, detail, **data),
-            pending_action=pending_action,
-            semantic_tool_observation=sequence_meta.get("semantic_tool_observation") if isinstance(sequence_meta, dict) else {},
-            planner_decision=str((sequence_meta or {}).get("planner_decision") or ""),
-            tool=str((sequence_meta or {}).get("tool") or ""),
-            tool_result=str((sequence_meta or {}).get("tool_result") or ""),
-        )
-        retrieved_context = str(fallback_entry.get("retrieved_context") or "")
-        intent_evidence_packet = fallback_entry.get("intent_evidence_packet") if isinstance(fallback_entry.get("intent_evidence_packet"), dict) else {}
-
-        llm_fallback_outcome = finalize_llm_fallback_reply(
-            text=routed_user_text,
-            raw_user_text=user_text,
-            input_source=input_source,
-            retrieved_context=retrieved_context,
-            language_mix_spanish_pct=language_mix_spanish_pct,
-            ollama_chat_fn=core.ollama_chat,
-            mem_enabled_fn=core.mem_enabled,
-            mem_should_store_fn=core.mem_should_store,
-            mem_add_fn=core.mem_add,
-            strip_mem_leak_fn=lambda reply, _retrieved_context: reply,
-            behavior_record_event_fn=core.behavior_record_event,
-            action_ledger_add_step=lambda stage, outcome, detail="", **data: _trace(stage, outcome, detail, **data),
-            ensure_reply_fn=core._ensure_reply,
-            intent_evidence_packet=intent_evidence_packet,
-            fallback_context=fallback_entry.get("fallback_context") if isinstance(fallback_entry.get("fallback_context"), dict) else {},
-        )
-        apply_cli_outcome_to_ledger(
-            pending_action_ledger=pending_action_ledger,
-            outcome=llm_fallback_outcome,
-            default_planner_decision="llm_fallback",
-            update_reply_fields=True,
-        )
-        final = str(llm_fallback_outcome.get("reply") or "")
-        emit_cli_reply_outcome(
-            reply_text=final,
-            planner_decision=str(llm_fallback_outcome.get("planner_decision") or "llm_fallback"),
-            session_turns=session_turns,
-            print_fn=print,
-            speak_chunked_fn=lambda reply: core.speak_chunked(tts, reply),
-            say_done_fn=tts.say,
-        )
 
     _flush_pending_action_ledger()
 

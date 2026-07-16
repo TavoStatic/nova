@@ -83,6 +83,31 @@ class TestCodegenPatchBridgeValidation(unittest.TestCase):
         self.assertFalse(ok)
         self.assertEqual(reason, "spec_missing")
 
+    def test_validate_rejects_placeholder_artifacts(self):
+        payload = {
+            "schema": "nova.codegen.preview.v1",
+            "status": "preview",
+            "preview_only": True,
+            "apply_allowed": False,
+            "spec": {"name": "stub", "purpose": "stub", "file_count": 1},
+            "artifacts": [
+                {
+                    "path": "services/stub.py",
+                    "kind": "module",
+                    "intent": "stub",
+                    "content": (
+                        '"""Preview-only artifact. Route through patch governance before apply."""\n'
+                        "def build_preview() -> dict[str, str]:\n"
+                        "    return {}\n"
+                    ),
+                }
+            ],
+            "provenance": {"generator": "codegen_tool"},
+        }
+        ok, reason, _ = validate_codegen_preview(payload)
+        self.assertFalse(ok)
+        self.assertEqual(reason, "artifact_0_placeholder")
+
     def test_validate_rejects_artifact_count_mismatch(self):
         """Artifact count must match spec count."""
         payload = {

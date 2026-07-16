@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import Callable, Optional
 
+from services.nova_turn_contract import bind_turn_request, execute_conversation_turn
+
 
 def execute_cli_sequence(
     *,
@@ -9,8 +11,20 @@ def execute_cli_sequence(
     **kwargs,
 ) -> tuple[str, dict]:
     options = dict(kwargs or {})
-    options["stop_before_llm_fallback"] = True
-    return execute_reply_sequence_fn(**options)
+    turn = bind_turn_request(
+        text=str(options.pop("text", "") or ""),
+        channel=str(options.get("channel") or "cli"),
+        input_source=str(options.get("input_source") or "typed"),
+        session_id=str(options.get("session_id") or ""),
+        user_id=str(options.get("user_id") or ""),
+        attachments=list(options.get("attachments") or []),
+        work_tree_seed_source=str(options.get("work_tree_seed_source") or ""),
+    )
+    return execute_conversation_turn(
+        execute_reply_sequence_fn=execute_reply_sequence_fn,
+        turn=turn,
+        **options,
+    )
 
 
 def normalize_sequence_reply(
@@ -102,7 +116,7 @@ def apply_sequence_result(
     emit_cli_reply_outcome_fn(
         reply_text=final,
         planner_decision=planner_decision,
-        session_turns=list(session_turns or []),
+        session_turns=session_turns if session_turns is not None else [],
     )
 
     return {

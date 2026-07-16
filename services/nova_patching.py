@@ -873,7 +873,7 @@ def patch_apply(
 
     try:
         preview_out = patch_preview_fn(str(zip_file), True)
-        if not force and "Status: eligible" not in preview_out:
+        if not force:
             strict_manifest = bool(policy_patch_fn().get("strict_manifest", True))
             current_revision = read_patch_revision_fn()
             manifest, manifest_err = read_patch_manifest_fn(zip_file)
@@ -886,13 +886,22 @@ def patch_apply(
                     incoming_revision=None,
                     required_base_revision=None,
                 )
+            if manifest is None and strict_manifest:
+                log_patch_fn(f"APPLY_REJECT missing_manifest {zip_file.name}")
+                return patch_reject_message_fn(
+                    f"missing {patch_manifest_name}. Include patch_revision > current revision.",
+                    strict_manifest=strict_manifest,
+                    current_revision=current_revision,
+                    incoming_revision=None,
+                    required_base_revision=None,
+                )
 
             try:
-                incoming_rev = int(manifest.get("patch_revision", 0) or 0)
+                incoming_rev = int((manifest or {}).get("patch_revision", 0) or 0)
             except Exception:
                 incoming_rev = None
             try:
-                min_base = int(manifest.get("min_base_revision", 0) or 0)
+                min_base = int((manifest or {}).get("min_base_revision", 0) or 0)
             except Exception:
                 min_base = None
 
@@ -916,24 +925,30 @@ def patch_apply(
                     required_base_revision=min_base,
                 )
 
-            match = re.search(r"Preview written:\s*(.+)$", preview_out, flags=re.M)
-            if match:
-                preview_path = match.group(1).strip()
-                approved = False
-                for approval in read_approvals_fn():
-                    if str(preview_path) == str(approval.get("preview")) and approval.get("decision") == "approved":
-                        approved = True
-                        break
-                if not approved:
-                    return (
-                        f"Patch rejected: preview check failed. A preview was generated at {preview_path} and requires local approval before applying.\n\nPreview output:\n{preview_out}\n\n"
-                        "Approve with: patch approve <preview_filename>\nOr re-run with --force to override."
-                    )
+            if "Status: eligible" not in preview_out:
+                return (
+                    f"Patch rejected: preview check failed.\n\nPreview output:\n{preview_out}\n\n"
+                    "If you really want to apply anyway, re-run with: patch apply <zip_path> --force"
+                )
 
-            return (
-                f"Patch rejected: preview check failed.\n\nPreview output:\n{preview_out}\n\n"
-                "If you really want to apply anyway, re-run with: patch apply <zip_path> --force"
-            )
+            match = re.search(r"Preview written:\s*(.+)$", preview_out, flags=re.M)
+            if not match:
+                return (
+                    "Patch rejected: eligible preview is missing a preview report path.\n\n"
+                    f"Preview output:\n{preview_out}"
+                )
+            preview_path = match.group(1).strip()
+            approved = False
+            for approval in read_approvals_fn():
+                if str(preview_path) == str(approval.get("preview")) and approval.get("decision") == "approved":
+                    approved = True
+                    break
+            if not approved:
+                return (
+                    f"Patch rejected: eligible preview requires local approval before apply ({preview_path}).\n\n"
+                    f"Preview output:\n{preview_out}\n\n"
+                    "Approve with: patch approve <preview_filename>\nOr re-run with --force to override."
+                )
     except Exception:
         if not force:
             return "Patch preview failed; aborting apply. Use --force to override."

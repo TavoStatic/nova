@@ -222,7 +222,32 @@ class TestGetDistrictScopedPage(unittest.TestCase):
         self.assertEqual(result.count, 2)
         self.assertEqual(result.items[0]["schoolId"], 31901001)
         self.assertEqual(result.district_filter_strategy, "client_side")
+        self.assertFalse(result.scan_cap_hit)
+        self.assertTrue(result.district_page_complete)
         get_page_mock.assert_called_once()
+
+    def test_scan_cap_hit_marks_page_incomplete(self) -> None:
+        client = _mock_client()
+        busy_page = PageResult(
+            ok=True,
+            status_code=200,
+            count=100,
+            items=[{"schoolId": 99999001, "localEducationAgencyReference": {"localEducationAgencyId": 99999}}] * 100,
+            latency_ms=5,
+        )
+        with patch("services.edfi.resources.get_page", return_value=busy_page) as get_page_mock:
+            result = get_district_scoped_page(
+                client,
+                "ed-fi/schools",
+                district_lea_id=31901,
+                limit=5,
+                max_scan_records=50,
+            )
+
+        self.assertTrue(get_page_mock.called)
+        self.assertTrue(result.scan_cap_hit)
+        self.assertFalse(result.district_page_complete)
+        self.assertFalse(result.ok)
 
 
 class TestGetAll(unittest.TestCase):

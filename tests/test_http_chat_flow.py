@@ -94,39 +94,20 @@ class TestHttpChatFlow(unittest.TestCase):
         self.assertEqual(active["value"], "old")
 
     def test_resume_success_from_runtime_scope(self):
-        added = []
-        active = {"value": "old"}
-        invalidations = []
+        with unittest.mock.patch(
+            "services.nova_http_chat_runtime.HTTP_CHAT_RUNTIME_SERVICE.complete_pending_turn_from_runtime",
+            return_value={"ok": True, "resumed": True, "session_id": "s1", "reply": "reply"},
+        ) as complete_mock:
+            out = http_chat_flow.resume_last_pending_turn_from_runtime(
+                "s1",
+                "gus",
+                runtime_scope={"nova_core": object()},
+            )
 
-        def _set(value):
-            active["value"] = value
-
-        out = http_chat_flow.resume_last_pending_turn_from_runtime(
-            "s1",
-            "gus",
-            runtime_scope={
-                "nova_core": type(
-                    "CoreStub",
-                    (),
-                    {
-                        "get_active_user": staticmethod(lambda: active["value"]),
-                        "set_active_user": staticmethod(_set),
-                    },
-                )(),
-                "_get_last_session_turn": lambda _sid: ("user", "hello"),
-                "_get_session_turns": lambda _sid: [("user", "hello")],
-                "_generate_chat_reply": lambda turns, text: ("reply", {}),
-                "_append_session_turn": lambda sid, role, text: added.append((sid, role, text)) or [],
-                "_invalidate_control_status_cache": lambda: invalidations.append("called"),
-            },
-        )
-
+        complete_mock.assert_called_once()
         self.assertTrue(out.get("ok"))
         self.assertTrue(out.get("resumed"))
         self.assertEqual(out.get("reply"), "reply")
-        self.assertEqual(added, [("s1", "assistant", "reply")])
-        self.assertEqual(invalidations, ["called"])
-        self.assertEqual(active["value"], "old")
 
 
 if __name__ == "__main__":

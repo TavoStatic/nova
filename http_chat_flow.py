@@ -61,14 +61,11 @@ def resume_last_pending_turn_from_runtime(
     *,
     runtime_scope: dict[str, object],
 ) -> dict:
-    return resume_last_pending_turn(
+    from services.nova_http_chat_runtime import HTTP_CHAT_RUNTIME_SERVICE
+
+    return HTTP_CHAT_RUNTIME_SERVICE.complete_pending_turn_from_runtime(
         session_id,
-        user_id,
-        get_active_user=runtime_scope["nova_core"].get_active_user,
-        set_active_user=runtime_scope["nova_core"].set_active_user,
-        get_last_session_turn=runtime_scope["_get_last_session_turn"],
-        get_session_turns=runtime_scope["_get_session_turns"],
-        generate_chat_reply=runtime_scope["_generate_chat_reply"],
-        append_session_turn=runtime_scope["_append_session_turn"],
-        invalidate_control_status_cache=runtime_scope.get("_invalidate_control_status_cache"),
+        user_id=user_id,
+        core_module=runtime_scope["nova_core"],
+        runtime_scope=runtime_scope,
     )

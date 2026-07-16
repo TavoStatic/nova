@@ -286,10 +286,7 @@ class LeahFrontdoorService:
                 f"I can read it directly. Preview: {preview}"
             )
         if mime.startswith("image/") or source == "camera":
-            return (
-                f"{header} I have the image {name} staged from {source}. "
-                "I can work from that local image next if you want a description or visible-text pass."
-            )
+            return None
         if path_text:
             return (
                 f"{header} I have {name} staged locally at {path_text}. "

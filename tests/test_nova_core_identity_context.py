@@ -82,6 +82,43 @@ class TestNovaCoreIdentityContext(unittest.TestCase):
         self.assertLess(context.index("CURRENT CHAT CONTEXT"), context.index("Confirmed Nova identity evidence"))
         self.assertLess(context.index("CURRENT CHAT CONTEXT"), context.index("Operational Nova self evidence"))
 
+    def test_learning_context_blocks_durable_recall_for_non_memory_queries(self):
+        recall_calls: list[str] = []
+
+        def _track_recall(query, **kwargs):
+            recall_calls.append(str(query))
+            return ""
+
+        with mock.patch.object(nova_core, "load_identity_profile", return_value={}), mock.patch.object(
+            nova_core, "load_learned_facts", return_value={}
+        ), mock.patch.object(nova_core, "load_capabilities", return_value={}), mock.patch.object(
+            nova_core, "kb_search", return_value=""
+        ), mock.patch.object(nova_core, "mem_recall", side_effect=_track_recall), mock.patch.object(
+            nova_core, "mem_get_recent_learned", return_value=["Correction: sky blue"]
+        ) as recent_mock:
+            details = nova_core.build_learning_context_details("tell me a joke about weather")
+
+        self.assertFalse(details.get("memory_used"))
+        self.assertEqual(recall_calls, [])
+        recent_mock.assert_not_called()
+
+    def test_learning_context_uses_recent_learned_summary_for_learning_queries(self):
+        with mock.patch.object(nova_core, "load_identity_profile", return_value={}), mock.patch.object(
+            nova_core, "load_learned_facts", return_value={}
+        ), mock.patch.object(nova_core, "load_capabilities", return_value={}), mock.patch.object(
+            nova_core, "kb_search", return_value=""
+        ), mock.patch.object(nova_core, "mem_recall", return_value="SHOULD_NOT_USE_RECALL") as recall_mock, mock.patch.object(
+            nova_core, "mem_get_recent_learned", return_value=["Correction: sky blue"]
+        ) as recent_mock:
+            details = nova_core.build_learning_context_details("what have you learned from me")
+
+        recall_mock.assert_not_called()
+        recent_mock.assert_called_once()
+        context = str(details.get("context") or "")
+        self.assertTrue(details.get("memory_used"))
+        self.assertIn("Recent learning:", context)
+        self.assertIn("Correction: sky blue", context)
+
     def test_fallback_context_keeps_current_turn_out_of_prior_transcript(self):
         details = nova_core.build_fallback_context_details(
             "current turn",

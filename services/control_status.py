@@ -5,6 +5,7 @@ import time
 from pathlib import Path
 
 from services.data_pipeline_registry import list_pipeline_summaries
+from services.data_pipeline_registry import pipeline_worker_summary
 from services.edfi.core_readiness import read_edfi_core_readiness
 from services.edfi.profile_evidence import build_capability_profile_evidence
 from services.frontdoor_cli_parity import FRONTDOOR_CLI_PARITY_SERVICE
@@ -15,6 +16,7 @@ from services.nova_root_inventory import build_source_root_inventory_payload
 from services.nova_wiring_inventory import build_root_closure_inventory_payload
 from services.nova_wiring_inventory import build_self_repair_closure_inventory_payload
 from services.nova_wiring_inventory import build_source_wiring_probe_payload
+from services.nova_live_closure import build_live_closure_inventory_payload
 from services.nova_wiring_inventory import build_wiring_inventory_payload
 from services.nova_wiring_inventory import wiring_surface_ids
 from services.sock_service import get_sock_status_keys
@@ -272,9 +274,13 @@ class ControlStatusService:
         pulse_payload = core_module.build_pulse_payload()
         update_now_pending = core_module.update_now_pending_payload()
         try:
+            worker_summary = pipeline_worker_summary()
             data_pipelines = {
                 "ok": True,
                 "pipelines": list_pipeline_summaries(),
+                "worker": worker_summary,
+                "worker_supervised_ok": bool(worker_summary.get("supervised_count", 0)) == int(worker_summary.get("worker_count", 0) or 0)
+                and int(worker_summary.get("worker_count", 0) or 0) > 0,
                 "error": "",
             }
         except Exception as exc:
@@ -1574,6 +1580,21 @@ class ControlStatusService:
             self_repair_closure_inventory.get("source_contract_ready_count", 0) or 0
         )
         payload["self_repair_closure_depth_counts"] = dict(self_repair_closure_inventory.get("depth_counts") or {})
+        live_closure_inventory = build_live_closure_inventory_payload(
+            payload,
+            self_repair_seed=self_repair_closure_inventory,
+        )
+        payload["live_closure_inventory"] = live_closure_inventory
+        payload["live_closure_inventory_ok"] = bool(live_closure_inventory.get("ok", False))
+        payload["live_closure_inventory_gap_count"] = int(live_closure_inventory.get("gap_count", 0) or 0)
+        payload["live_closure_inventory_gap_roots"] = list(live_closure_inventory.get("gap_roots") or [])
+        payload["live_closure_inventory_verified_root_count"] = int(
+            live_closure_inventory.get("verified_root_count", 0) or 0
+        )
+        payload["live_closure_inventory_unverified_root_count"] = int(
+            live_closure_inventory.get("unverified_root_count", 0) or 0
+        )
+        payload["live_closure_depth_counts"] = dict(live_closure_inventory.get("depth_counts") or {})
         last_temporal_feed = (
             autonomy_payload.get("last_temporal_feed")
             if isinstance(autonomy_payload.get("last_temporal_feed"), dict)

@@ -172,37 +172,62 @@ if (Test-Path $validationRecordPath) {
 
 New-Item -ItemType Directory -Force -Path $stageDir | Out-Null
 
-$robocopyArgs = @(
-  $repoRoot,
-  $stageDir,
-  "/E",
-  "/R:1",
-  "/W:1",
-  "/NFL",
-  "/NDL",
-  "/NJH",
-  "/NJS",
-  "/NP"
-)
-
-if ($excludeDirs.Count -gt 0) {
-  $robocopyArgs += "/XD"
+function Test-ExcludedRelativePath([string]$relativePath) {
+  $normalized = ($relativePath -replace '\\', '/').TrimStart('/')
+  if ([string]::IsNullOrWhiteSpace($normalized)) { return $true }
   foreach ($dir in $excludeDirs) {
-    $robocopyArgs += (Join-Path $repoRoot $dir)
+    $dirToken = ($dir -replace '\\', '/').Trim('/')
+    if ($normalized -eq $dirToken -or $normalized.StartsWith("$dirToken/")) {
+      return $true
+    }
   }
+  foreach ($fileName in $excludeFiles) {
+    if ($normalized -eq $fileName) {
+      return $true
+    }
+  }
+  return $false
 }
 
-if ($excludeFiles.Count -gt 0) {
-  $robocopyArgs += "/XF"
-  foreach ($file in $excludeFiles) {
-    $robocopyArgs += (Join-Path $repoRoot $file)
+function Get-StageSourceFiles([string]$rootPath) {
+  $files = New-Object System.Collections.Generic.List[string]
+  Get-ChildItem -Path $rootPath -Recurse -File -Force | ForEach-Object {
+    $relative = $_.FullName.Substring($rootPath.Length).TrimStart('\', '/')
+    if (Test-ExcludedRelativePath $relative) { return }
+    $files.Add(($relative -replace '\\', '/'))
   }
+  return ,$files.ToArray()
 }
 
-& robocopy @robocopyArgs | Out-Null
-$robocopyCode = $LASTEXITCODE
-if ($robocopyCode -ge 8) {
-  throw "robocopy failed with exit code $robocopyCode"
+$trackedFiles = @()
+$gitDir = Join-Path $repoRoot ".git"
+if (Test-Path $gitDir) {
+  $trackedRaw = & git -C $repoRoot ls-files -z
+  if ($LASTEXITCODE -ne 0) {
+    throw "git ls-files failed with exit code $LASTEXITCODE"
+  }
+  foreach ($entry in ($trackedRaw -split "`0")) {
+    if (-not [string]::IsNullOrWhiteSpace($entry)) {
+      $trackedFiles += $entry
+    }
+  }
+} else {
+  $trackedFiles = Get-StageSourceFiles $repoRoot
+}
+if ($trackedFiles.Count -eq 0) {
+  throw "No source files found for release packaging"
+}
+
+foreach ($relPath in $trackedFiles) {
+  $normalized = $relPath -replace '/', '\'
+  $src = Join-Path $repoRoot $normalized
+  if (-not (Test-Path $src)) { continue }
+  $dest = Join-Path $stageDir $normalized
+  $destParent = Split-Path $dest -Parent
+  if (-not (Test-Path $destParent)) {
+    New-Item -ItemType Directory -Force -Path $destParent | Out-Null
+  }
+  Copy-Item -Path $src -Destination $dest -Force
 }
 
 foreach ($relativePath in $forbiddenStagePaths) {
@@ -274,7 +299,7 @@ $manifest = [ordered]@{
     validation_record_template = "docs\\RC_VALIDATION_TEMPLATE.md"
   }
   includes = @(
-    "tracked source files",
+    "git-tracked source files only",
     "docs",
     "tests",
     "templates and static assets",

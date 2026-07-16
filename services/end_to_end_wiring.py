@@ -10,6 +10,7 @@ from typing import Any, Callable, Sequence
 
 from services.nova_wiring_inventory import WIRING_SURFACES
 from services.nova_wiring_inventory import build_root_closure_inventory_payload
+from services.nova_live_closure import build_live_closure_inventory_payload
 from services.nova_wiring_inventory import build_self_repair_closure_inventory_payload
 from services.nova_wiring_inventory import build_source_wiring_probe_payload
 from services.nova_wiring_inventory import build_wiring_inventory_payload
@@ -671,6 +672,23 @@ def _source_wiring_inventory_checks(root: Path) -> list[dict[str, Any]]:
                 else "source-level self-repair closure gaps remain"
             ),
             data=self_repair_closure,
+        )
+    )
+    live_closure = build_live_closure_inventory_payload(
+        synthetic_status_payload,
+        root=root,
+        self_repair_seed=self_repair_closure,
+    )
+    checks.append(
+        _check(
+            "wiring-source:live-closure",
+            bool(live_closure.get("ok")),
+            (
+                "semantic live closure checks report no feedback-loop gaps"
+                if live_closure.get("ok")
+                else "semantic live closure gaps remain"
+            ),
+            data=live_closure,
         )
     )
     return checks

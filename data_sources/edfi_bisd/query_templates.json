@@ -53,6 +53,6 @@
     "params": ["resource", "min_change_version", "offset", "advance_cursor"],
     "max_rows": 25,
     "result_shape": "edfi_records",
-    "redaction_profile": "education_org_default"
+    "redaction_profile": "resource_aware"
   }
 }

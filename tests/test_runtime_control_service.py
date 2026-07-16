@@ -429,6 +429,32 @@ class TestRuntimeControlService(unittest.TestCase):
         self.assertEqual((extra.get("autonomy_maintenance") or {}).get("generated_queue_status"), "clear")
         self.assertEqual(detail, "autonomy_maintenance_start_requested")
 
+    def test_start_guard_skips_spawn_when_guard_process_already_exists(self):
+        with tempfile.TemporaryDirectory() as td:
+            base = Path(td)
+            venv_py = base / ".venv" / "Scripts" / "python.exe"
+            guard_py = base / "nova_guard.py"
+            runtime_dir = base / "runtime"
+            venv_py.parent.mkdir(parents=True, exist_ok=True)
+            venv_py.write_text("", encoding="utf-8")
+            guard_py.write_text("print('guard')\n", encoding="utf-8")
+            runtime_dir.mkdir(parents=True, exist_ok=True)
+
+            with mock.patch(
+                "services.runtime_control.logical_service_processes",
+                return_value=[{"pid": 4242, "create_time": 42.0}],
+            ):
+                ok, msg = RUNTIME_CONTROL_SERVICE.start_guard(
+                    venv_python=venv_py,
+                    guard_py=guard_py,
+                    runtime_dir=runtime_dir,
+                    base_dir=base,
+                    guard_status_fn=lambda: {"running": False},
+                )
+
+            self.assertTrue(ok)
+            self.assertEqual(msg, "guard_already_running")
+
     def test_start_nova_core_routes_through_guard(self):
         import sys
         ok, msg = RUNTIME_CONTROL_SERVICE.start_nova_core(

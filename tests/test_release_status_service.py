@@ -1,6 +1,7 @@
 import json
 import os
 import tempfile
+import time
 import unittest
 import zipfile
 from pathlib import Path
@@ -220,6 +221,41 @@ class TestReleaseStatusService(unittest.TestCase):
         self.assertTrue(payload.get("latest_artifact_stale"))
         self.assertTrue(payload.get("latest_source_changed_after_build"))
         self.assertIn("nova_core.py", payload.get("latest_source_changed_after_build_sample") or [])
+
+    def test_status_payload_normalizes_corrupt_future_mtime(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            package_dir = root / "runtime" / "exports" / "release_packages"
+            ledger_path = package_dir / "release_ledger.jsonl"
+            package_dir.mkdir(parents=True)
+            artifact_path = package_dir / "artifact-a.zip"
+            source_file = root / "services" / "nova_intent_understanding.py"
+            source_file.parent.mkdir(parents=True)
+            source_file.write_bytes(b"print('intent')\n")
+            with zipfile.ZipFile(artifact_path, "w") as archive:
+                archive.writestr("artifact-a/package_manifest.json", "{}")
+                archive.writestr("artifact-a/services/nova_intent_understanding.py", b"print('intent')\n")
+            ledger_path.write_text(
+                json.dumps(
+                    {
+                        "recorded_at": "2026-03-30T16:09:45.0928881-05:00",
+                        "event": "build",
+                        "artifact_name": "artifact-a.zip",
+                        "artifact_path": str(artifact_path),
+                        "artifact_version": "2026.03.30.1",
+                        "release_channel": "rc",
+                        "release_label": "auto-version-check",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            future_epoch = 1893456000.0
+            os.utime(source_file, (future_epoch, future_epoch))
+
+            payload = RELEASE_STATUS_SERVICE.status_payload(ledger_path, limit=5, source_root=root)
+
+            self.assertFalse(payload.get("latest_source_changed_after_build"))
+            self.assertLessEqual(float(source_file.stat().st_mtime), time.time() + 5.0)
 
     def test_status_payload_ignores_mtime_only_touch_when_artifact_content_matches(self):
         with tempfile.TemporaryDirectory() as td:

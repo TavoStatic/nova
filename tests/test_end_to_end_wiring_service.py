@@ -15,6 +15,7 @@ class EndToEndWiringServiceTests(unittest.TestCase):
         self.assertIn("release-clean:frontdoor_wired", names)
         self.assertIn("wiring-source:source-probe", names)
         self.assertIn("wiring-source:self-repair-closure", names)
+        self.assertIn("wiring-source:live-closure", names)
         self.assertIn("runtime:live_checks", names)
         failed = {check["name"]: check for check in report["checks"] if not check.get("ok")}
         self.assertNotIn("wiring-source:source-probe", failed)
@@ -26,6 +27,10 @@ class EndToEndWiringServiceTests(unittest.TestCase):
         self.assertTrue(self_repair["ok"], self_repair)
         self.assertEqual(data.get("gap_count"), 0)
         self.assertEqual(data.get("gap_roots"), [])
+        live_closure = next(check for check in report["checks"] if check["name"] == "wiring-source:live-closure")
+        live_data = live_closure.get("data") or {}
+        self.assertEqual(live_data.get("proof_scope"), "live_closure")
+        self.assertIn("semantic_root_ids", live_data)
 
 
 if __name__ == "__main__":

@@ -13,6 +13,7 @@ from services.core_thinning import (
     execute_core_thinning_order,
     feed_core_thinning_brief_to_work_tree,
 )
+from services.recurring_finding_lifecycle import summarize_feed_pressure
 
 
 def _validation_tmp_root() -> Path:
@@ -109,6 +110,72 @@ class TestCoreThinningService(unittest.TestCase):
         order = next(item for item in list(brief.get("orders") or []) if item.get("kind") == "http_surface_candidate")
         self.assertEqual((order.get("target") or {}).get("theme"), "pipeline_control")
 
+    def test_owner_verdict_surfaces_lifecycle_gap_when_pressure_is_not_executable(self):
+        verdict = build_core_thinning_owner_verdict(
+            {
+                "ok": True,
+                "order_count": 8,
+                "line_count": 1200,
+                "function_count": 80,
+            },
+            feed_result={
+                "ok": True,
+                "status": "deduped",
+                "executable_count": 0,
+                "reopened_count": 0,
+                "satisfied_count": 0,
+                "satisfied_active_count": 0,
+            },
+        )
+
+        evidence = dict(verdict.get("evidence") or {})
+        self.assertEqual(evidence.get("lifecycle_gap"), "pressure_without_executable_work")
+        self.assertIn("0 executable", str((verdict.get("blockers") or [{}])[0].get("detail") or ""))
+
+    def test_owner_verdict_keeps_lifecycle_gap_when_only_witnessed_http_mapping(self):
+        verdict = build_core_thinning_owner_verdict(
+            {
+                "ok": True,
+                "order_count": 8,
+                "line_count": 1200,
+                "function_count": 80,
+            },
+            feed_result={
+                "ok": True,
+                "status": "reopened",
+                "executable_count": 0,
+                "reopened_count": 8,
+                "satisfied_count": 0,
+                "satisfied_active_count": 0,
+            },
+        )
+
+        evidence = dict(verdict.get("evidence") or {})
+        self.assertEqual(evidence.get("lifecycle_gap"), "pressure_without_executable_work")
+        self.assertEqual(int(evidence.get("unresolved_pressure_count", 0) or 0), 8)
+
+    def test_owner_verdict_clears_lifecycle_gap_after_productive_wrapper_removal(self):
+        verdict = build_core_thinning_owner_verdict(
+            {
+                "ok": True,
+                "order_count": 1,
+                "line_count": 40,
+                "function_count": 2,
+            },
+            feed_result={
+                "ok": True,
+                "status": "deduped",
+                "executable_count": 0,
+                "reopened_count": 0,
+                "satisfied_count": 1,
+                "satisfied_active_count": 1,
+            },
+        )
+
+        evidence = dict(verdict.get("evidence") or {})
+        self.assertFalse(evidence.get("lifecycle_gap"))
+        self.assertEqual(int(evidence.get("unresolved_pressure_count", -1)), 0)
+
     def test_owner_verdict_marks_thinning_orders_as_non_green_blocking_pressure(self):
         verdict = build_core_thinning_owner_verdict(
             {
@@ -137,6 +204,175 @@ class TestCoreThinningService(unittest.TestCase):
         self.assertFalse(verdict.get("ready"))
         self.assertTrue(verdict.get("blocks_green"))
         self.assertEqual((verdict.get("blockers") or [])[0].get("code"), "core_thinning_unavailable")
+
+    def test_feed_reopens_http_order_after_witness_without_productive_extraction(self):
+        sample_http = _validation_tmp_root() / "nova_http.py"
+        source = "\n".join(
+            [
+                "def _pipeline_create_action(payload):",
+                *["    value = 1" for _ in range(10)],
+                "    return True, '', {}, ''",
+                "",
+                "def _pipeline_start_action(payload):",
+                *["    value = 1" for _ in range(10)],
+                "    return True, '', {}, ''",
+                "",
+                "def _pipeline_pause_action(payload):",
+                *["    value = 1" for _ in range(10)],
+                "    return True, '', {}, ''",
+                "",
+                "def _pipeline_archive_action(payload):",
+                *["    value = 1" for _ in range(10)],
+                "    return True, '', {}, ''",
+                "",
+            ]
+        )
+        sample_http.write_text(source, encoding="utf-8")
+        try:
+            brief = build_core_thinning_brief(sample_http)
+            order = next(item for item in list(brief.get("orders") or []) if item.get("kind") == "http_surface_candidate")
+            from services.core_thinning import _order_satisfaction_key, stamp_core_thinning_task_satisfaction
+
+            feed_fingerprint = _order_satisfaction_key(order)
+            self.assertGreater(len(str(order.get("reason") or "")), 40)
+            first = feed_core_thinning_brief_to_work_tree(brief, work_tree_module=work_tree)
+            task = work_tree.list_tree_tasks(str(first.get("tree_id")))[0]
+            self.assertEqual(str((task.meta or {}).get("reason") or ""), str(order.get("reason") or ""))
+            result = execute_core_thinning_order({"target": order["target"]})
+            stamp_core_thinning_task_satisfaction(task, result)
+            stamped_fingerprint = str((task.meta or {}).get("recurring_finding_satisfaction_fingerprint") or "")
+            self.assertEqual(stamped_fingerprint, feed_fingerprint)
+            work_tree.mark_task_complete(task.task_id)
+            second = feed_core_thinning_brief_to_work_tree(brief, work_tree_module=work_tree)
+        finally:
+            sample_http.unlink(missing_ok=True)
+
+        self.assertEqual(second.get("reopened_count"), 1)
+        self.assertEqual(second.get("satisfied_active_count"), 0)
+        self.assertEqual(second.get("executable_count"), 1)
+        self.assertFalse((summarize_feed_pressure(pressure_count=1, feed_result=second) or {}).get("lifecycle_gap"))
+
+    def test_feed_repairs_legacy_task_missing_reason_before_productive_closure_check(self):
+        sample_http = _validation_tmp_root() / "nova_http.py"
+        source = "\n".join(
+            [
+                "def _pipeline_create_action(payload):",
+                *["    value = 1" for _ in range(10)],
+                "    return True, '', {}, ''",
+                "",
+                "def _pipeline_start_action(payload):",
+                *["    value = 1" for _ in range(10)],
+                "    return True, '', {}, ''",
+                "",
+                "def _pipeline_pause_action(payload):",
+                *["    value = 1" for _ in range(10)],
+                "    return True, '', {}, ''",
+                "",
+                "def _pipeline_archive_action(payload):",
+                *["    value = 1" for _ in range(10)],
+                "    return True, '', {}, ''",
+                "",
+            ]
+        )
+        sample_http.write_text(source, encoding="utf-8")
+        try:
+            from services.core_thinning import _order_satisfaction_key, stamp_core_thinning_task_satisfaction
+            from services.recurring_finding_lifecycle import stamp_satisfaction
+
+            brief = build_core_thinning_brief(sample_http)
+            order = next(item for item in list(brief.get("orders") or []) if item.get("kind") == "http_surface_candidate")
+            feed_fingerprint = _order_satisfaction_key(order)
+            first = feed_core_thinning_brief_to_work_tree(brief, work_tree_module=work_tree)
+            task = work_tree.list_tree_tasks(str(first.get("tree_id")))[0]
+            task.meta.pop("reason", None)
+            task.meta = stamp_satisfaction(
+                dict(task.meta or {}),
+                satisfaction_fingerprint="legacy-missing-reason",
+                completion_action="mapped_http_extraction_boundary",
+            )
+            work_tree.mark_task_complete(task.task_id)
+            second = feed_core_thinning_brief_to_work_tree(brief, work_tree_module=work_tree)
+            repaired = work_tree.list_tree_tasks(str(first.get("tree_id")))[0]
+        finally:
+            sample_http.unlink(missing_ok=True)
+
+        self.assertEqual(second.get("reopened_count"), 1)
+        self.assertEqual(second.get("satisfied_active_count"), 0)
+        self.assertEqual(str((repaired.meta or {}).get("reason") or ""), str(order.get("reason") or ""))
+        self.assertEqual(
+            str((repaired.meta or {}).get("recurring_finding_satisfaction_fingerprint") or ""),
+            feed_fingerprint,
+        )
+
+    def test_feed_reopens_completed_order_when_pressure_recurs(self):
+        sample = _validation_tmp_root() / f"core_thinning_reopen_{uuid.uuid4().hex}.py"
+        sample.write_text("def wrapper():\n    return service_demo()\n", encoding="utf-8")
+        try:
+            brief = build_core_thinning_brief(sample)
+            brief["generated_at"] = "2026-07-13 10:00:00"
+        finally:
+            sample.unlink(missing_ok=True)
+
+        first = feed_core_thinning_brief_to_work_tree(brief, work_tree_module=work_tree)
+        task = work_tree.list_tree_tasks(str(first.get("tree_id")))[0]
+        work_tree.mark_task_complete(task.task_id)
+
+        second = feed_core_thinning_brief_to_work_tree(brief, work_tree_module=work_tree)
+
+        self.assertEqual(second.get("reopened_count"), 1)
+        self.assertEqual(second.get("executable_count"), 1)
+        self.assertEqual(second.get("status"), "reopened")
+        reopened_task = work_tree.list_tree_tasks(str(first.get("tree_id")))[0]
+        self.assertEqual(str(getattr(getattr(reopened_task, "status", None), "value", getattr(reopened_task, "status", ""))).lower(), "open")
+        self.assertEqual(int((reopened_task.meta or {}).get("recurring_finding_version", 0)), 2)
+        self.assertEqual((reopened_task.meta or {}).get("recurring_finding_reopened_reason"), "recurring_pressure")
+
+    def test_feed_marks_completed_orders_satisfied_when_pressure_clears(self):
+        sample = _validation_tmp_root() / f"core_thinning_clear_{uuid.uuid4().hex}.py"
+        sample.write_text("def wrapper():\n    return service_demo()\n", encoding="utf-8")
+        try:
+            brief = build_core_thinning_brief(sample)
+        finally:
+            sample.unlink(missing_ok=True)
+
+        feed_core_thinning_brief_to_work_tree(brief, work_tree_module=work_tree)
+        tree = next(tree for tree in work_tree.list_trees() if (tree.meta or {}).get("work_identity_key") == CORE_THINNING_WORK_IDENTITY)
+        task = work_tree.list_tree_tasks(tree.tree_id)[0]
+        work_tree.mark_task_complete(task.task_id)
+
+        empty_brief = {
+            "ok": True,
+            "generated_at": "2026-07-13 11:00:00",
+            "orders": [],
+            "order_count": 0,
+            "line_count": 0,
+            "function_count": 0,
+            "wrapper_candidate_count": 0,
+            "large_function_count": 0,
+            "http_surface_candidate_count": 0,
+        }
+        result = feed_core_thinning_brief_to_work_tree(empty_brief, work_tree_module=work_tree)
+
+        self.assertEqual(result.get("satisfied_count"), 1)
+        self.assertEqual(result.get("resolved_count"), 1)
+        self.assertEqual(result.get("executable_count"), 0)
+
+    def test_stamp_core_thinning_task_satisfaction_records_completion_evidence(self):
+        from services.core_thinning import stamp_core_thinning_task_satisfaction
+
+        task = type("Task", (), {})()
+        task.meta = {
+            "kind": "wrapper_candidate",
+            "target": {"file": "nova_core.py", "name": "demo_wrapper", "wrapped_call": "service_demo"},
+        }
+
+        stamp_core_thinning_task_satisfaction(
+            task,
+            {"ok": True, "action": "removed_unused_wrapper"},
+        )
+        self.assertEqual(task.meta.get("recurring_finding_satisfaction_status"), "satisfied")
+        self.assertEqual(task.meta.get("recurring_finding_completion_action"), "removed_unused_wrapper")
+        self.assertTrue(task.meta.get("recurring_finding_satisfaction_fingerprint"))
 
     def test_feed_brief_creates_deduped_core_thinning_tree(self):
         sample = _validation_tmp_root() / f"core_thinning_feed_{uuid.uuid4().hex}.py"
@@ -376,6 +612,73 @@ class TestCoreThinningService(unittest.TestCase):
         self.assertEqual(brief.get("referenced_wrapper_count"), 1)
         self.assertFalse(any(item.get("kind") == "wrapper_candidate" for item in list(brief.get("orders") or [])))
 
+    def test_build_brief_protects_cross_module_nova_core_attribute_reference(self):
+        sample_dir = _validation_tmp_root() / f"core_thinning_http_ref_{uuid.uuid4().hex}"
+        sample_dir.mkdir(parents=True, exist_ok=True)
+        sample = sample_dir / "nova_core.py"
+        sample.write_text(
+            "\n".join(
+                [
+                    "def demo_http_adapter(payload=None):",
+                    "    return service_demo_http_adapter(payload)",
+                    "",
+                ]
+            ),
+            encoding="utf-8",
+        )
+        (sample_dir / "nova_http.py").write_text(
+            "def pulse():\n    return nova_core.demo_http_adapter\n",
+            encoding="utf-8",
+        )
+        try:
+            brief = build_core_thinning_brief(sample)
+        finally:
+            (sample_dir / "nova_http.py").unlink(missing_ok=True)
+            sample.unlink(missing_ok=True)
+            sample_dir.rmdir()
+
+        self.assertEqual(brief.get("wrapper_candidate_count"), 0)
+        self.assertEqual(brief.get("referenced_wrapper_count"), 1)
+        self.assertFalse(any(item.get("kind") == "wrapper_candidate" for item in list(brief.get("orders") or [])))
+
+    def test_execute_core_thinning_order_blocks_cross_module_attribute_reference(self):
+        sample_dir = _validation_tmp_root() / f"core_thinning_http_block_{uuid.uuid4().hex}"
+        sample_dir.mkdir(parents=True, exist_ok=True)
+        sample = sample_dir / "nova_core.py"
+        sample.write_text(
+            "\n".join(
+                [
+                    "def demo_http_adapter(payload=None):",
+                    "    return service_demo_http_adapter(payload)",
+                    "",
+                ]
+            ),
+            encoding="utf-8",
+        )
+        (sample_dir / "nova_http.py").write_text(
+            "def pulse():\n    return nova_core.demo_http_adapter\n",
+            encoding="utf-8",
+        )
+        target = {
+            "file": str(sample),
+            "name": "demo_http_adapter",
+            "start_line": 1,
+            "end_line": 2,
+            "wrapped_call": "service_demo_http_adapter",
+        }
+        try:
+            result = execute_core_thinning_order({"target": target})
+
+            self.assertFalse(result.get("ok"))
+            self.assertTrue(result.get("scope_ok"))
+            self.assertEqual(result.get("reason"), "callers_still_present")
+            self.assertGreaterEqual(int(result.get("reference_count", 0) or 0), 1)
+            self.assertIn("def demo_http_adapter", sample.read_text(encoding="utf-8"))
+        finally:
+            (sample_dir / "nova_http.py").unlink(missing_ok=True)
+            sample.unlink(missing_ok=True)
+            sample_dir.rmdir()
+
     def test_build_brief_protects_service_core_attribute_references(self):
         sample_dir = _validation_tmp_root() / f"core_thinning_attrs_{uuid.uuid4().hex}"
         services_dir = sample_dir / "services"
@@ -530,7 +833,7 @@ class TestCoreThinningService(unittest.TestCase):
         self.assertTrue(result.get("ok"))
         self.assertTrue(result.get("scope_ok"))
         self.assertTrue(result.get("verified"))
-        self.assertEqual(result.get("action"), "mapped_http_extraction_boundary")
+        self.assertEqual(result.get("action"), "witnessed_http_extraction_boundary")
         self.assertEqual(sample_http.read_text(encoding="utf-8"), source)
         sample_http.unlink(missing_ok=True)
 

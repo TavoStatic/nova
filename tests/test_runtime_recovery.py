@@ -378,6 +378,61 @@ class TestRuntimeRecovery(unittest.TestCase):
             retained_lock = json.loads(lock_file.read_text(encoding="utf-8"))
             self.assertEqual(retained_lock["pid"], 3333)
 
+    def test_live_guard_process_pids_ignores_python_c_probes(self):
+        probe = mock.Mock()
+        probe.pid = 4242
+        probe.info = {
+            "pid": 4242,
+            "cmdline": [
+                str(nova_guard.VENV_PY),
+                "-c",
+                "import nova_guard; print(nova_guard._live_guard_process_pids())",
+            ],
+        }
+        real_guard = mock.Mock()
+        real_guard.pid = 5151
+        real_guard.info = {
+            "pid": 5151,
+            "cmdline": [str(nova_guard.VENV_PY), "nova_guard.py"],
+        }
+        real_guard.cwd = mock.Mock(return_value=str(nova_guard.ROOT))
+
+        with mock.patch("nova_guard.psutil.process_iter", return_value=[probe, real_guard]):
+            pids = nova_guard._live_guard_process_pids()
+
+        self.assertEqual(pids, [5151])
+
+    def test_enforce_guard_singleton_or_exit_exits_when_lock_owned_by_other_guard(self):
+        with tempfile.TemporaryDirectory() as td:
+            runtime_dir = Path(td)
+            lock_file = runtime_dir / "guard.lock"
+            lock_file.write_text(
+                json.dumps(
+                    {
+                        "pid": 8888,
+                        "create_time": 88.0,
+                        "command": {
+                            "executable": str(nova_guard.VENV_PY),
+                            "script": str(nova_guard.GUARD_SCRIPT),
+                        },
+                        "ts": "owner",
+                    },
+                    ensure_ascii=True,
+                ),
+                encoding="utf-8",
+            )
+
+            with mock.patch.object(nova_guard, "RUNTIME_DIR", runtime_dir), \
+                mock.patch.object(nova_guard, "LOCK_FILE", lock_file), \
+                mock.patch.object(nova_guard, "log", lambda _msg: None), \
+                mock.patch.object(nova_guard.os, "getpid", return_value=9999), \
+                mock.patch.object(nova_guard, "_lock_belongs_to_live_guard", return_value=True), \
+                mock.patch.object(nova_guard, "_another_live_guard_process", return_value=None), \
+                self.assertRaises(SystemExit) as raised:
+                nova_guard._enforce_guard_singleton_or_exit()
+
+            self.assertEqual(raised.exception.code, 0)
+
     def test_lock_identity_rejects_pid_reuse_with_wrong_command(self):
         fake_process = mock.Mock()
         fake_process.create_time.return_value = 55.0

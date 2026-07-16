@@ -3,21 +3,64 @@ from __future__ import annotations
 import ast
 import hashlib
 import json
+import os
 import subprocess
 import sys
 import time
 from pathlib import Path
 from typing import Any
 
+from services.nova_runtime_context import RUNTIME_DIR
+from services.recurring_finding_lifecycle import (
+    DECISION_ACTIVE,
+    DECISION_ACTIVE_UPDATE,
+    DECISION_INACTIVE_RESOLVE,
+    DECISION_REOPEN,
+    DECISION_SATISFIED,
+    DECISION_SKIP,
+    KEY_COMPLETION_ACTION,
+    KEY_FINDING,
+    KEY_SATISFACTION_FINGERPRINT,
+    PRODUCTIVE_CLOSURE_ACTIONS,
+    REOPEN_RECURRING_PRESSURE,
+    classify_task_meta,
+    fingerprint_from_parts,
+    finding_key_from_meta,
+    initial_task_meta,
+    read_task_state,
+    reopen_task_meta,
+    stamp_satisfaction,
+    summarize_feed_pressure,
+    update_open_fingerprint,
+)
+
 
 CORE_THINNING_WORK_IDENTITY = "system:core-thinning"
 CORE_THINNING_ALLOWED_TOOLS = ["core_thinning", "read", "find", "patch_apply", "system_check", "health"]
 CORE_THINNING_PUBLIC_ADAPTER_NAMES = {
     "clear_runtime_device_location",
+    "render_nova_pulse",
     "speak_chunked",
     "update_now_pending_payload",
     "write_action_ledger_record",
 }
+
+_REPO_SCAN_EXCLUDED_DIRS = frozenset({
+    ".git",
+    ".github",
+    ".venv",
+    ".ci_venv",
+    ".pytest_cache",
+    "__pycache__",
+    "agent-tools",
+    "logs",
+    "memory",
+    "runtime",
+    "terminals",
+    "updates",
+})
+
+_CORE_ATTRIBUTE_BASE_NAMES = frozenset({"nova_core", "core", "core_module"})
 
 
 def _protected_public_wrapper_names() -> set[str]:
@@ -62,6 +105,129 @@ def _target_semantic_key(kind: Any, target: dict[str, object] | None) -> str:
     theme = str(data.get("theme") or "").strip().lower()
     cluster = str(data.get("cluster") or "").strip().lower()
     return "|".join([str(kind or "").strip().lower(), file_name, name, wrapped, theme, cluster])
+
+
+def _core_thinning_order_task_fields(
+    order: dict[str, object],
+    *,
+    brief: dict[str, object] | None = None,
+) -> dict[str, object]:
+    target = _normalize_core_thinning_target(order)
+    return {
+        "kind": str(order.get("kind") or ""),
+        "priority": str(order.get("priority") or ""),
+        "reason": str(order.get("reason") or ""),
+        "scope": "single_block_only",
+        "target": target,
+        "core_thinning_brief_generated_at": str((brief or {}).get("generated_at") or ""),
+    }
+
+
+def _order_satisfaction_key(order: dict[str, object] | None) -> str:
+    data = dict(order or {})
+    target = dict(data.get("target") or {}) if isinstance(data.get("target"), dict) else {}
+    return fingerprint_from_parts(
+        [
+            str(data.get("kind") or "").strip().lower(),
+            _target_semantic_key(data.get("kind"), target),
+            str(target.get("wrapped_call") or "").strip().lower(),
+            str(target.get("start_line") or ""),
+            str(target.get("end_line") or ""),
+            str(target.get("line_count") or ""),
+            str(target.get("function_count") or ""),
+            str(data.get("reason") or "").strip().lower()[:120],
+        ]
+    )
+
+
+def _repair_core_thinning_task_meta(
+    task: object,
+    meta: dict[str, object],
+    order: dict[str, object],
+    *,
+    brief: dict[str, object],
+    work_tree_module,
+) -> dict[str, object]:
+    if not order:
+        return dict(meta or {})
+    payload = dict(meta or {})
+    order_fields = _core_thinning_order_task_fields(order, brief=brief)
+    if any(payload.get(key) != value for key, value in order_fields.items()):
+        payload.update(order_fields)
+        setattr(task, "meta", payload)
+        if hasattr(work_tree_module, "touch_branch"):
+            work_tree_module.touch_branch(getattr(task, "branch_id"))
+    state = read_task_state(payload)
+    completion_action = str(state.get(KEY_COMPLETION_ACTION) or "").strip().lower()
+    if completion_action in PRODUCTIVE_CLOSURE_ACTIONS:
+        expected_fp = _order_satisfaction_key(order)
+        if str(state.get(KEY_SATISFACTION_FINGERPRINT) or "") != expected_fp:
+            payload = stamp_satisfaction(
+                payload,
+                satisfaction_fingerprint=expected_fp,
+                completion_action=completion_action,
+                ok=True,
+            )
+            setattr(task, "meta", payload)
+            if hasattr(work_tree_module, "touch_branch"):
+                work_tree_module.touch_branch(getattr(task, "branch_id"))
+    return payload
+
+
+def stamp_core_thinning_task_satisfaction(task: object, result: dict[str, object] | None) -> None:
+    """Record completion evidence on a core-thinning task before it is marked complete."""
+    payload = dict(result or {})
+    if not bool(payload.get("ok")):
+        return
+    meta = dict(getattr(task, "meta", {}) or {}) if isinstance(getattr(task, "meta", None), dict) else {}
+    order = {
+        "kind": str(meta.get("kind") or ""),
+        "reason": str(meta.get("reason") or ""),
+        "target": dict(meta.get("target") or {}) if isinstance(meta.get("target"), dict) else {},
+    }
+    setattr(
+        task,
+        "meta",
+        stamp_satisfaction(
+            meta,
+            satisfaction_fingerprint=_order_satisfaction_key(order),
+            completion_action=str(payload.get("action") or ""),
+            ok=True,
+        ),
+    )
+
+
+def _normalize_core_thinning_target(order: dict[str, object]) -> dict[str, object]:
+    target = dict(order.get("target") or {}) if isinstance(order.get("target"), dict) else {}
+    if target:
+        target.setdefault("function", str(target.get("name") or ""))
+        target.setdefault("block", str(order.get("kind") or "core_thinning"))
+    return target
+
+
+def _reopen_core_thinning_task(
+    work_tree_module,
+    task: object,
+    order: dict[str, object],
+    *,
+    brief: dict[str, object],
+) -> None:
+    target = _normalize_core_thinning_target(order)
+    prior_meta = dict(getattr(task, "meta", {}) or {}) if isinstance(getattr(task, "meta", None), dict) else {}
+    order_id = str(order.get("order_id") or finding_key_from_meta(prior_meta) or "")
+    meta_updates = reopen_task_meta(
+        prior_meta,
+        finding_key=order_id,
+        satisfaction_fingerprint=_order_satisfaction_key(order),
+        reason=REOPEN_RECURRING_PRESSURE,
+        extra=_core_thinning_order_task_fields(order, brief=brief),
+    )
+    if hasattr(work_tree_module, "reopen_task"):
+        work_tree_module.reopen_task(getattr(task, "task_id"), meta_updates=meta_updates)
+    branch = work_tree_module.get_branch(getattr(task, "branch_id")) if hasattr(work_tree_module, "get_branch") else None
+    if branch is not None:
+        branch.priority = _branch_priority(order.get("priority"))
+        work_tree_module.touch_branch(getattr(task, "branch_id"))
 
 
 def _function_span(node: ast.AST) -> int:
@@ -306,7 +472,10 @@ def _analyze_core_file(
             large.append(row)
 
     protected_names = set(protected_wrapper_names or set()) | _protected_public_wrapper_names()
-    wrapper_reference_counts = _name_reference_counts(tree, {str(item.get("name") or "") for item in wrappers})
+    wrapper_reference_counts = _repo_wide_reference_counts(
+        {str(item.get("name") or "") for item in wrappers},
+        declaring_path=path,
+    )
     actionable_wrappers: list[dict[str, object]] = []
     referenced_wrappers: list[dict[str, object]] = []
     for item in wrappers:
@@ -426,6 +595,7 @@ def build_core_thinning_owner_verdict(
     blocker_code = ""
     detail = ""
     blocks_green = False
+    lifecycle = summarize_feed_pressure(pressure_count=order_count, feed_result=feed)
     if not ok:
         blocker_code = "core_thinning_unavailable"
         detail = str(data.get("error") or feed.get("error") or "core thinning evidence unavailable").strip()
@@ -433,16 +603,25 @@ def build_core_thinning_owner_verdict(
     elif order_count > 0:
         blocker_code = "core_http_thinning_pressure"
         detail = f"{order_count} core/http thinning work order(s) ready"
+        if lifecycle.get("lifecycle_gap"):
+            detail = (
+                f"{order_count} core/http thinning work order(s) ready; "
+                f"{int(lifecycle.get('executable_count', 0) or 0)} executable"
+            )
     blockers = []
     if blocker_code:
-        blockers.append(
-            {
-                "owner": "core_thinning",
-                "code": blocker_code,
-                "detail": detail,
-                "source": "core_thinning",
+        blocker_payload = {
+            "owner": "core_thinning",
+            "code": blocker_code,
+            "detail": detail,
+            "source": "core_thinning",
+        }
+        if blocker_code == "core_http_thinning_pressure":
+            blocker_payload["remediation"] = {
+                "action": "active_work_tree_run_next",
+                "tools": ["core_thinning"],
             }
-        )
+        blockers.append(blocker_payload)
     return {
         "owner": "core_thinning",
         "ready": not blockers,
@@ -466,7 +645,7 @@ def build_core_thinning_owner_verdict(
             "large_function_count": int(data.get("large_function_count", 0) or 0),
             "http_surface_candidate_count": int(data.get("http_surface_candidate_count", 0) or 0),
             "wrapper_candidate_count": int(data.get("wrapper_candidate_count", 0) or 0),
-            "feed_status": str(feed.get("status") or ""),
+            **lifecycle,
         },
     }
 
@@ -504,6 +683,8 @@ def render_core_thinning_brief(brief: dict | None = None, *, feed_result: dict |
             f" | tree={feed_result.get('tree_id') or '-'}"
             f" | added={int(feed_result.get('added_count', 0) or 0)}"
             f" | deduped={int(feed_result.get('deduped_count', 0) or 0)}"
+            f" | reopened={int(feed_result.get('reopened_count', 0) or 0)}"
+            f" | executable={int(feed_result.get('executable_count', 0) or 0)}"
             f" | resolved={int(feed_result.get('resolved_count', 0) or 0)}"
         )
     for index, item in enumerate(list(data.get("orders") or [])[:12], start=1):
@@ -537,6 +718,215 @@ def _name_reference_counts(tree: ast.AST, names: set[str]) -> dict[str, int]:
         if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load) and node.id in counts:
             counts[node.id] += 1
     return counts
+
+
+def _module_import_name(path: Path, repo_root: Path) -> str:
+    try:
+        rel = Path(path).resolve().relative_to(Path(repo_root).resolve())
+    except ValueError:
+        return ""
+    if rel.suffix != ".py":
+        return ""
+    parts = list(rel.parts)
+    if parts[-1] == "__init__.py":
+        return ".".join(parts[:-1])
+    return ".".join(parts[:-1] + [rel.stem])
+
+
+def _import_aliases_for_module(tree: ast.AST, module_name: str) -> set[str]:
+    if not module_name:
+        return set()
+    aliases: set[str] = set()
+    module_tail = module_name.rsplit(".", 1)[-1]
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                full = str(alias.name or "").strip()
+                if not full or full != module_name:
+                    continue
+                aliases.add(str(alias.asname or module_tail))
+        elif isinstance(node, ast.ImportFrom):
+            mod = str(node.module or "").strip()
+            if mod != module_name:
+                continue
+            aliases.add(module_tail)
+    return {str(name or "").strip() for name in aliases if str(name or "").strip()}
+
+
+def _repo_root_for_path(path: Path) -> Path:
+    resolved = Path(path).resolve()
+    for parent in [resolved, *resolved.parents]:
+        if (parent / "policy.json").is_file() and (parent / "nova_core.py").is_file():
+            return parent
+    return resolved.parent
+
+
+def _iter_reference_scan_files(*, declaring_path: Path, repo_root: Path) -> list[Path]:
+    declaring = Path(declaring_path).resolve()
+    canonical_core = (repo_root / "nova_core.py").resolve()
+    files: list[Path] = []
+    if declaring == canonical_core:
+        for dirpath, dirnames, filenames in os.walk(repo_root):
+            dirnames[:] = [name for name in dirnames if name not in _REPO_SCAN_EXCLUDED_DIRS]
+            current = Path(dirpath)
+            try:
+                rel_parts = current.relative_to(repo_root).parts
+            except ValueError:
+                continue
+            if any(part in _REPO_SCAN_EXCLUDED_DIRS for part in rel_parts):
+                continue
+            for filename in filenames:
+                if filename.endswith(".py"):
+                    files.append(current / filename)
+        return files
+
+    local_root = declaring.parent
+    for candidate in local_root.rglob("*.py"):
+        try:
+            rel_parts = candidate.relative_to(local_root).parts
+        except ValueError:
+            continue
+        if any(part in _REPO_SCAN_EXCLUDED_DIRS for part in rel_parts):
+            continue
+        files.append(candidate)
+    return files
+
+
+def _symbol_reference_counts_in_tree(
+    tree: ast.AST,
+    names: set[str],
+    *,
+    attribute_base_names: set[str] | None = None,
+) -> dict[str, int]:
+    clean_names = {str(name or "").strip() for name in names if str(name or "").strip()}
+    counts = {name: 0 for name in clean_names}
+    if not counts:
+        return counts
+    base_names = {
+        str(name or "").strip()
+        for name in (attribute_base_names or set())
+        if str(name or "").strip()
+    }
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load) and node.id in counts:
+            counts[node.id] += 1
+        elif isinstance(node, ast.Attribute):
+            attr = str(node.attr or "").strip()
+            if attr not in counts:
+                continue
+            base = node.value
+            while isinstance(base, ast.Attribute):
+                base = base.value
+            if isinstance(base, ast.Name) and base.id in base_names:
+                counts[attr] += 1
+    return counts
+
+
+def _repo_wide_reference_counts(names: set[str], *, declaring_path: Path) -> dict[str, int]:
+    clean_names = {str(name or "").strip() for name in names if str(name or "").strip()}
+    counts = {name: 0 for name in clean_names}
+    if not counts:
+        return counts
+    repo_root = _repo_root_for_path(declaring_path)
+    declaring_module = _module_import_name(declaring_path, repo_root)
+    default_bases = set(_CORE_ATTRIBUTE_BASE_NAMES)
+    if declaring_module:
+        default_bases.add(declaring_module.rsplit(".", 1)[-1])
+    for file_path in _iter_reference_scan_files(declaring_path=declaring_path, repo_root=repo_root):
+        try:
+            tree = ast.parse(file_path.read_text(encoding="utf-8-sig", errors="ignore"))
+        except Exception:
+            continue
+        attribute_bases = set(default_bases)
+        attribute_bases.update(_import_aliases_for_module(tree, declaring_module))
+        file_counts = _symbol_reference_counts_in_tree(
+            tree,
+            clean_names,
+            attribute_base_names=attribute_bases,
+        )
+        for name, value in file_counts.items():
+            counts[name] += int(value or 0)
+    return counts
+
+
+def _refresh_release_source_identity(path: Path) -> None:
+    """Normalize corrupt future mtimes after a verified self-edit."""
+    try:
+        resolved = Path(path).resolve()
+        stat = resolved.stat()
+        now = time.time()
+        if float(stat.st_mtime) > now + 60.0 or float(stat.st_atime) > now + 60.0:
+            os.utime(resolved, (now, now))
+    except Exception:
+        pass
+
+
+def _behavioral_verify_core_edit(*, path: Path, repo_root: Path, python_executable: str) -> dict[str, object]:
+    import_name = _module_import_name(path, repo_root)
+    if not import_name:
+        return {"ok": True}
+
+    py = str(python_executable or sys.executable)
+    if import_name != "nova_core":
+        proc = subprocess.run(
+            [py, "-c", f"import importlib; importlib.import_module({import_name!r})"],
+            cwd=str(repo_root),
+            capture_output=True,
+            text=True,
+            timeout=90,
+        )
+        if proc.returncode != 0:
+            return {
+                "ok": False,
+                "reason": "import_failed",
+                "command": f"import {import_name}",
+                "stderr": (proc.stderr or proc.stdout or "")[-1000:],
+            }
+        return {"ok": True}
+    proc = subprocess.run(
+        [py, "-c", "import nova_core"],
+        cwd=str(repo_root),
+        capture_output=True,
+        text=True,
+        timeout=90,
+    )
+    if proc.returncode != 0:
+        return {
+            "ok": False,
+            "reason": "import_failed",
+            "command": "import nova_core",
+            "stderr": (proc.stderr or proc.stdout or "")[-1000:],
+        }
+
+    for command in (
+        "import nova_http",
+        "import importlib; importlib.import_module('tools.registry')",
+        "import nova_core; getattr(nova_core, 'build_pulse_payload'); getattr(nova_core, 'render_nova_pulse')",
+    ):
+        proc = subprocess.run(
+            [py, "-c", command],
+            cwd=str(repo_root),
+            capture_output=True,
+            text=True,
+            timeout=90,
+        )
+        if proc.returncode != 0:
+            return {
+                "ok": False,
+                "reason": "surface_import_failed",
+                "command": command,
+                "stderr": (proc.stderr or proc.stdout or "")[-1000:],
+            }
+    return {"ok": True}
+
+def _write_pre_mutation_snapshot(*, path: Path, source: str) -> str:
+    snapshot_dir = RUNTIME_DIR / "core_thinning" / "pre_mutation_snapshots"
+    snapshot_dir.mkdir(parents=True, exist_ok=True)
+    safe_name = "".join(ch if ch.isalnum() or ch in "._-" else "_" for ch in str(path))
+    snapshot_path = snapshot_dir / f"{safe_name}.{time.time_ns()}.py"
+    snapshot_path.write_text(source, encoding="utf-8")
+    return str(snapshot_path)
+
 
 def execute_core_thinning_order(payload: str | dict[str, object], *, python_executable: str | None = None) -> dict[str, object]:
     """Execute one tightly scoped core-thinning order.
@@ -582,7 +972,7 @@ def execute_core_thinning_order(payload: str | dict[str, object], *, python_exec
             "ok": True,
             "scope_ok": True,
             "verified": True,
-            "action": "mapped_http_extraction_boundary",
+            "action": "witnessed_http_extraction_boundary",
             "target": {
                 "file": str(path),
                 "name": name,
@@ -629,12 +1019,14 @@ def execute_core_thinning_order(payload: str | dict[str, object], *, python_exec
             "target": {"file": str(path), "name": name, "start_line": start_line, "end_line": end_line},
         }
 
-    if _name_reference_count(tree, name) > 0:
+    reference_count = int(_repo_wide_reference_counts({name}, declaring_path=path).get(name, 0) or 0)
+    if reference_count > 0:
         return {
             "ok": False,
             "scope_ok": True,
             "verified": False,
             "reason": "callers_still_present",
+            "reference_count": reference_count,
             "line_drift_resolved": line_drift_resolved,
             "target": {"file": str(path), "name": name, "start_line": start_line, "end_line": end_line},
         }
@@ -644,26 +1036,45 @@ def execute_core_thinning_order(payload: str | dict[str, object], *, python_exec
     next_source = "\n".join(next_lines) + ("\n" if source.endswith("\n") else "")
     try:
         ast.parse(next_source)
-        path.write_text(next_source, encoding="utf-8")
     except Exception as exc:
         return {"ok": False, "scope_ok": True, "verified": False, "reason": f"rewrite_failed:{exc}"}
 
+    repo_root = _repo_root_for_path(path)
     py = str(python_executable or sys.executable)
-    proc = subprocess.run([py, "-m", "py_compile", str(path)], cwd=str(path.parent), capture_output=True, text=True, timeout=60)
+    snapshot_path = _write_pre_mutation_snapshot(path=path, source=source)
+    path.write_text(next_source, encoding="utf-8")
+    proc = subprocess.run([py, "-m", "py_compile", str(path)], cwd=str(repo_root), capture_output=True, text=True, timeout=60)
     if proc.returncode != 0:
+        path.write_text(source, encoding="utf-8")
         return {
             "ok": False,
             "scope_ok": True,
             "verified": False,
             "reason": "py_compile_failed",
+            "rolled_back": True,
             "stderr": (proc.stderr or proc.stdout or "")[-1000:],
         }
+
+    behavioral = _behavioral_verify_core_edit(path=path, repo_root=repo_root, python_executable=py)
+    if not bool(behavioral.get("ok")):
+        path.write_text(source, encoding="utf-8")
+        return {
+            "ok": False,
+            "scope_ok": True,
+            "verified": False,
+            "reason": str(behavioral.get("reason") or "behavioral_verify_failed"),
+            "rolled_back": True,
+            "behavioral": behavioral,
+        }
+
+    _refresh_release_source_identity(path)
     return {
         "ok": True,
         "scope_ok": True,
         "verified": True,
         "action": "removed_unused_wrapper",
         "line_drift_resolved": line_drift_resolved,
+        "snapshot_path": snapshot_path,
         "target": {"file": str(path), "name": name, "start_line": start_line, "end_line": end_line},
     }
 
@@ -711,29 +1122,52 @@ def feed_core_thinning_brief_to_work_tree(brief: dict[str, object], *, work_tree
     existing_order_ids: set[str] = set()
     resolved_count = 0
     updated_count = 0
+    reopened_count = 0
+    satisfied_count = 0
+    satisfied_active_count = 0
     for task in list(work_tree_module.list_tree_tasks(tree.tree_id) or []):
         meta = dict(getattr(task, "meta", {}) or {})
-        order_id = str(meta.get("core_thinning_order_id") or "").strip()
+        order_id = finding_key_from_meta(meta)
         status = _status_value(getattr(task, "status", ""))
-        if not order_id:
+        order = dict(order_by_id.get(order_id) or {})
+        meta = _repair_core_thinning_task_meta(task, meta, order, brief=brief, work_tree_module=work_tree_module)
+        current_fingerprint = _order_satisfaction_key(order) if order else ""
+        decision = classify_task_meta(
+            meta=meta,
+            item_status=status,
+            active_finding_keys=active_order_ids,
+            current_fingerprint=current_fingerprint,
+        )
+        if decision == DECISION_SKIP:
             continue
-        if status == "complete" and order_id in active_order_ids:
+        if decision == DECISION_REOPEN:
+            _reopen_core_thinning_task(work_tree_module, task, order, brief=brief)
+            reopened_count += 1
             existing_order_ids.add(order_id)
             continue
-        if status == "dropped":
+        if decision == DECISION_SATISFIED:
+            satisfied_count += 1
+            if order_id and order_id in active_order_ids:
+                satisfied_active_count += 1
+                existing_order_ids.add(order_id)
+            resolved_count += 1
             continue
-        if order_id in active_order_ids:
-            order = dict(order_by_id.get(order_id) or {})
-            target = dict(order.get("target") or {}) if isinstance(order.get("target"), dict) else {}
-            if target:
-                target.setdefault("function", str(target.get("name") or ""))
-                target.setdefault("block", str(order.get("kind") or "core_thinning"))
-            if target and (meta.get("scope") != "single_block_only" or meta.get("target") != target):
-                meta["scope"] = "single_block_only"
-                meta["target"] = target
+        if decision in {DECISION_ACTIVE, DECISION_ACTIVE_UPDATE}:
+            target = _normalize_core_thinning_target(order)
+            next_fingerprint = _order_satisfaction_key(order)
+            if decision == DECISION_ACTIVE_UPDATE:
+                meta = update_open_fingerprint(meta, satisfaction_fingerprint=next_fingerprint)
                 task.meta = meta
                 work_tree_module.touch_branch(task.branch_id)
                 updated_count += 1
+            elif target:
+                order_fields = _core_thinning_order_task_fields(order, brief=brief)
+                if any(meta.get(key) != value for key, value in order_fields.items()):
+                    meta.update(order_fields)
+                    meta[KEY_SATISFACTION_FINGERPRINT] = next_fingerprint
+                    task.meta = meta
+                    work_tree_module.touch_branch(task.branch_id)
+                    updated_count += 1
             branch = work_tree_module.get_branch(task.branch_id) if hasattr(work_tree_module, "get_branch") else None
             expected_priority = _branch_priority(order.get("priority"))
             if branch is not None and int(getattr(branch, "priority", 0) or 0) != expected_priority:
@@ -746,15 +1180,8 @@ def feed_core_thinning_brief_to_work_tree(brief: dict[str, object], *, work_tree
         semantic_order = dict(order_by_semantic_key.get(semantic_key) or {}) if semantic_key else {}
         semantic_order_id = str(semantic_order.get("order_id") or "").strip()
         if semantic_order_id:
-            target = dict(semantic_order.get("target") or {}) if isinstance(semantic_order.get("target"), dict) else {}
-            if target:
-                target.setdefault("function", str(target.get("name") or ""))
-                target.setdefault("block", str(semantic_order.get("kind") or "core_thinning"))
-            meta["core_thinning_order_id"] = semantic_order_id
-            meta["kind"] = str(semantic_order.get("kind") or meta.get("kind") or "")
-            meta["priority"] = str(semantic_order.get("priority") or meta.get("priority") or "")
-            meta["scope"] = "single_block_only"
-            meta["target"] = target
+            meta.update(_core_thinning_order_task_fields(semantic_order, brief=brief))
+            meta[KEY_FINDING] = semantic_order_id
             task.meta = meta
             branch = work_tree_module.get_branch(task.branch_id) if hasattr(work_tree_module, "get_branch") else None
             if branch is not None:
@@ -777,34 +1204,57 @@ def feed_core_thinning_brief_to_work_tree(brief: dict[str, object], *, work_tree
         if not order_id or order_id in existing_order_ids:
             deduped_count += 1
             continue
-        target = dict(order.get("target") or {}) if isinstance(order.get("target"), dict) else {}
-        if target:
-            target.setdefault("function", str(target.get("name") or ""))
-            target.setdefault("block", str(order.get("kind") or "core_thinning"))
+        target = _normalize_core_thinning_target(order)
         branch = work_tree_module.add_branch_to_tree(tree.tree_id, str(order.get("title") or "Review core thinning target"), "core_thinning", getattr(root, "branch_id", None))
         branch.priority = _branch_priority(order.get("priority"))
         work_tree_module.add_task_to_branch(
             branch.branch_id,
             f"{order.get('title')}: {order.get('reason')}",
-            meta={
-                "core_thinning_order_id": order_id,
-                "kind": str(order.get("kind") or ""),
-                "priority": str(order.get("priority") or ""),
-                "scope": "single_block_only",
-                "target": target,
-            },
+            meta=initial_task_meta(
+                finding_key=order_id,
+                satisfaction_fingerprint=_order_satisfaction_key(order),
+                extra=_core_thinning_order_task_fields(order, brief=brief),
+            ),
         )
         work_tree_module.set_branch_tools(branch.branch_id, allowed_tools=[str(order.get("recommended_tool") or "patch_apply")], preferred_tool=str(order.get("recommended_tool") or "patch_apply"))
         existing_order_ids.add(order_id)
         added_count += 1
 
+    executable_count = 0
+    for task in list(work_tree_module.list_tree_tasks(tree.tree_id) or []):
+        meta = dict(getattr(task, "meta", {}) or {})
+        order_id = finding_key_from_meta(meta)
+        status = _status_value(getattr(task, "status", ""))
+        if not order_id or order_id not in active_order_ids:
+            continue
+        if status in {"complete", "dropped"}:
+            continue
+        executable_count += 1
+
+    status = "seeded"
+    if reopened_count:
+        status = "reopened"
+    elif added_count:
+        status = "seeded"
+    elif resolved_count:
+        status = "resolved"
+    elif updated_count:
+        status = "updated"
+    elif deduped_count:
+        status = "deduped"
+
     return {
         "ok": True,
-        "status": "seeded" if added_count else "deduped",
+        "status": status,
         "tree_id": str(getattr(tree, "tree_id", "") or ""),
         "created": created,
         "added_count": added_count,
         "deduped_count": deduped_count,
         "resolved_count": resolved_count,
         "updated_count": updated_count,
+        "reopened_count": reopened_count,
+        "satisfied_count": satisfied_count,
+        "satisfied_active_count": satisfied_active_count,
+        "executable_count": executable_count,
+        "order_count": len(orders),
     }

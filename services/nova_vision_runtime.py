@@ -48,6 +48,42 @@ def vision_model_from_policy_file(base_dir: str | Path | None = None) -> str:
     return vision_model_from_policy(payload if isinstance(payload, dict) else {})
 
 
+def describe_image_file(
+    path: str | Path,
+    prompt: str = "",
+    *,
+    policy: dict[str, Any] | None = None,
+    ollama_url: str = "http://localhost:11434/api/chat",
+    timeout_seconds: int = 1800,
+) -> str:
+    import base64
+
+    import requests
+
+    image_path = Path(path)
+    if not image_path.exists() or not image_path.is_file():
+        raise FileNotFoundError(f"image not found: {image_path}")
+
+    prompt_text = str(prompt or "Describe what you see in this image.").strip() or "Describe what you see in this image."
+    model = vision_model_from_policy(policy)
+    payload = {
+        "model": model,
+        "stream": False,
+        "messages": [
+            {
+                "role": "user",
+                "content": prompt_text,
+                "images": [base64.b64encode(image_path.read_bytes()).decode("utf-8")],
+            }
+        ],
+    }
+    response = requests.post(ollama_url, json=payload, timeout=timeout_seconds)
+    response.raise_for_status()
+    data = response.json()
+    message = data.get("message") if isinstance(data.get("message"), dict) else {}
+    return str(message.get("content") or "").strip()
+
+
 def vision_status_payload(
     *,
     policy: dict[str, Any] | None = None,

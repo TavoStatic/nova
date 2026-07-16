@@ -37,6 +37,8 @@ class PageResult:
     rate_limited: bool = False
     district_filter_strategy: str = ""
     records_scanned: int = 0
+    scan_cap_hit: bool = False
+    district_page_complete: bool = False
 
 
 @dataclass
@@ -193,7 +195,9 @@ def get_district_scoped_page(
             break
         statewide_offset += page.count
 
-    ok = not last_error_code and (bool(collected) or records_scanned > 0)
+    scan_cap_hit = records_scanned >= scan_cap
+    district_page_complete = not scan_cap_hit and not last_error_code
+    ok = not last_error_code and not scan_cap_hit and (bool(collected) or records_scanned > 0)
     result = PageResult(
         ok=ok,
         resource=str(resource or "").strip(),
@@ -208,6 +212,8 @@ def get_district_scoped_page(
         error_code=last_error_code,
         district_filter_strategy="client_side",
         records_scanned=records_scanned,
+        scan_cap_hit=scan_cap_hit,
+        district_page_complete=district_page_complete,
     )
 
     if audit:
@@ -222,6 +228,8 @@ def get_district_scoped_page(
             "limit": result.limit,
             "count": result.count,
             "records_scanned": result.records_scanned,
+            "scan_cap_hit": result.scan_cap_hit,
+            "district_page_complete": result.district_page_complete,
             "status_code": result.status_code,
             "error_code": result.error_code,
             "district_filter_strategy": result.district_filter_strategy,

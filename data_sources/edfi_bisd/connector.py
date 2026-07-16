@@ -7,6 +7,7 @@ from typing import Any, Mapping, Optional
 from pipelines.audit import PipelineAuditLogger
 from pipelines.base import BaseDataPipeline, PipelineManifest
 from pipelines.query_guard import PipelineQueryGuard, QueryGuardError
+from pipelines.redaction import apply_redaction_to_payload, resolve_redaction_profile
 from services.edfi.config import load_capability_profile, load_connection_config
 from services.edfi.change_tracking import load_sync_state, pull_changes_since, sync_status
 from services.edfi.inventory import list_resources, profile_summary, read_preset, read_resource
@@ -20,6 +21,29 @@ def _load_local_config(path: Optional[Path]) -> dict[str, Any]:
     except Exception:
         return {}
     return data if isinstance(data, dict) else {}
+
+
+def _effective_query_resource(
+    operation: str,
+    params: Mapping[str, Any],
+    raw: Mapping[str, Any] | None = None,
+) -> str | None:
+    resource = params.get("resource")
+    if resource not in (None, ""):
+        return str(resource)
+    if isinstance(raw, Mapping):
+        raw_resource = raw.get("resource")
+        if raw_resource not in (None, ""):
+            return str(raw_resource)
+    if operation == "changes_since":
+        return "ed-fi/schools"
+    if operation == "list_students":
+        return "ed-fi/students"
+    if operation == "student_school_associations":
+        return "ed-fi/studentSchoolAssociations"
+    if operation == "list_schools":
+        return "ed-fi/schools"
+    return None
 
 
 def _shape_rows(items: list[Any]) -> dict[str, Any]:
@@ -257,6 +281,17 @@ class EdFiBisdPipeline(BaseDataPipeline):
                     "error": str(exc),
                 }
 
+            effective_resource = _effective_query_resource(
+                validated["operation"],
+                validated["params"],
+                raw,
+            )
+            redaction_profile = resolve_redaction_profile(
+                operation=validated["operation"],
+                template_profile=validated.get("redaction_profile") or template.get("redaction_profile"),
+                resource=effective_resource,
+            )
+
             if not raw.get("ok"):
                 self.audit.append(
                     pipeline_id=self.manifest.pipeline_id,
@@ -265,13 +300,17 @@ class EdFiBisdPipeline(BaseDataPipeline):
                     detail=str(raw.get("error_code") or "edfi_query_failed"),
                     data={"error": str(raw.get("error") or "")},
                 )
-                return {
-                    "ok": False,
-                    **base_payload,
-                    "execution_mode": "live",
-                    "error": str(raw.get("error") or raw.get("error_code") or "edfi_query_failed"),
-                    "edfi": raw,
-                }
+                return apply_redaction_to_payload(
+                    {
+                        "ok": False,
+                        **base_payload,
+                        "execution_mode": "live",
+                        "error": str(raw.get("error") or raw.get("error_code") or "edfi_query_failed"),
+                        "edfi": raw,
+                    },
+                    redaction_profile,
+                    resource=effective_resource,
+                )
 
             if validated["operation"] == "list_resources":
                 shaped = {
@@ -302,18 +341,24 @@ class EdFiBisdPipeline(BaseDataPipeline):
                     "records_scanned": int(raw.get("records_scanned") or 0),
                 },
             )
-            response = {
-                "ok": True,
-                **base_payload,
-                "execution_mode": "live",
-                **shaped,
-                "edfi": {
-                    "resource": raw.get("resource"),
-                    "district_filter_strategy": raw.get("district_filter_strategy"),
-                    "records_scanned": raw.get("records_scanned"),
-                    "filter": raw.get("filter"),
+            response = apply_redaction_to_payload(
+                {
+                    "ok": True,
+                    **base_payload,
+                    "execution_mode": "live",
+                    **shaped,
+                    "edfi": {
+                        "resource": raw.get("resource"),
+                        "district_filter_strategy": raw.get("district_filter_strategy"),
+                        "records_scanned": raw.get("records_scanned"),
+                        "scan_cap_hit": raw.get("scan_cap_hit"),
+                        "district_page_complete": raw.get("district_page_complete"),
+                        "filter": raw.get("filter"),
+                    },
                 },
-            }
+                redaction_profile,
+                resource=effective_resource,
+            )
             if validated["operation"] == "changes_since":
                 response.update({
                     "mechanism": raw.get("mechanism"),
@@ -321,8 +366,6 @@ class EdFiBisdPipeline(BaseDataPipeline):
                     "next_change_version": raw.get("next_change_version"),
                     "note": raw.get("note"),
                 })
-            if validated["operation"] == "sync_status":
-                response["items"] = raw
             return response
 
         if not dry_run and not ready:
@@ -342,12 +385,22 @@ class EdFiBisdPipeline(BaseDataPipeline):
                 "next_step": reason,
             }
 
-        payload = {
-            "ok": True,
-            **base_payload,
-            "execution_mode": "dry_run",
-            "next_step": status.get("next_step"),
-        }
+        preview_resource = _effective_query_resource(validated["operation"], validated["params"])
+        preview_profile = resolve_redaction_profile(
+            operation=validated["operation"],
+            template_profile=validated.get("redaction_profile") or template.get("redaction_profile"),
+            resource=preview_resource,
+        )
+        payload = apply_redaction_to_payload(
+            {
+                "ok": True,
+                **base_payload,
+                "execution_mode": "dry_run",
+                "next_step": status.get("next_step"),
+            },
+            preview_profile,
+            resource=preview_resource,
+        )
         self.audit.append(
             pipeline_id=self.manifest.pipeline_id,
             action=validated["operation"],

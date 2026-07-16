@@ -48,6 +48,12 @@ class TestCodegenTool(unittest.TestCase):
         self.assertEqual(len(payload["artifacts"]), 2)
         self.assertEqual(payload["provenance"]["model"], "qwen2.5:7b")
         self.assertTrue(payload["provenance"]["prompt_hash"])
+        service_artifact = next(
+            item for item in payload["artifacts"] if item["path"].endswith(".py")
+        )
+        self.assertIn("def describe(self)", service_artifact["content"])
+        self.assertIn("def run(self", service_artifact["content"])
+        self.assertIn("preview_only", service_artifact["content"])
 
     def test_codegen_requires_policy_enablement(self):
         ctx = ToolContext(

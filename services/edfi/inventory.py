@@ -249,6 +249,8 @@ def read_resource(
         "district_scope_applied": bool(district_lea_id),
         "district_filter_strategy": strategy or page.district_filter_strategy,
         "records_scanned": _safe_int(getattr(page, "records_scanned", 0)),
+        "scan_cap_hit": bool(getattr(page, "scan_cap_hit", False)),
+        "district_page_complete": bool(getattr(page, "district_page_complete", False)),
         "odata_filter_honored": not uses_client_side_district_filter(config.normalized_base_url()),
         "filter": str(params.get("$filter") or ""),
         "resource": resolved,

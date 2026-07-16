@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 import re
+import time
 import zipfile
 from datetime import datetime
 from pathlib import Path
@@ -218,12 +219,19 @@ class ReleaseStatusService:
         newest_path = ""
         newest_mtime = 0.0
         changed: list[tuple[float, str]] = []
+        now_epoch = time.time()
         try:
             for path in _iter_source_candidates(root):
                 try:
                     mtime = float(path.stat().st_mtime)
                 except OSError:
                     continue
+                if mtime > now_epoch + 60.0:
+                    try:
+                        os.utime(path, (now_epoch, now_epoch))
+                    except OSError:
+                        pass
+                    mtime = now_epoch
                 rel = _source_rel(path, root)
                 if mtime > newest_mtime:
                     newest_mtime = mtime

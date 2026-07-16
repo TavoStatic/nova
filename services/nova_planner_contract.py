@@ -4,10 +4,12 @@ import json
 import time
 from typing import Callable
 
+from services.evidence_validity import invalid_tool_result
 from services.work_tree_seeding import WORK_TREE_SEEDING_SERVICE
 
 
 MIN_NO_ARG_TOOL_CONFIDENCE = 0.70
+_STRUCTURED_REPLY_TOOLS = frozenset({"system_check", "self_status"})
 
 
 def _active_work_tree_id(*, pending_action: dict | None, session) -> str:
@@ -659,6 +661,20 @@ def maybe_handle_planner_sequence(
                     "route_evidence": route_evidence,
                 })
             rendered_out = str(out or "")
+            if tool not in _STRUCTURED_REPLY_TOOLS and not isinstance(out, dict):
+                invalid, invalid_reason = invalid_tool_result(tool, rendered_out)
+                if invalid:
+                    trace("tool_execution", "invalid_result", tool=tool, error=invalid_reason)
+                    reply = f"Tool {tool} failed: {invalid_reason}"
+                    return _return_with_timing(normalize_reply(reply), {
+                        "planner_decision": "run_tool",
+                        "tool": tool,
+                        "tool_args": {"args": list(args) if isinstance(args, (list, tuple)) else args},
+                        "tool_result": rendered_out,
+                        "grounded": False,
+                        "pending_action": {},
+                        "route_evidence": route_evidence,
+                    })
             if tool == "web_research" and hasattr(core, "_ground_web_research_reply"):
                 grounded_out = core._ground_web_research_reply(text, rendered_out)
                 if grounded_out:

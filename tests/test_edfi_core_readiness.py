@@ -51,10 +51,11 @@ class TestEdFiCoreReadiness(unittest.TestCase):
                 "services.edfi.profile_evidence.load_sync_state",
                 return_value={},
             ):
-                readiness = read_edfi_core_readiness("district-main")
+                readiness = read_edfi_core_readiness("district-main", now_fn=lambda: 1700000100.0)
 
         self.assertTrue(readiness["ready"])
         self.assertTrue(readiness["profile_ok"])
+        self.assertTrue(readiness["profile_fresh"])
         self.assertTrue(readiness["inventory_declared"])
         self.assertTrue(readiness["evidence_loop_ready"])
         self.assertTrue(readiness["district_facts_ok"])
@@ -73,7 +74,7 @@ class TestEdFiCoreReadiness(unittest.TestCase):
                 "services.edfi.profile_evidence.load_sync_state",
                 return_value={},
             ):
-                readiness = read_edfi_core_readiness("district-main")
+                readiness = read_edfi_core_readiness("district-main", now_fn=lambda: 1700000100.0)
 
         self.assertFalse(readiness["ready"])
         self.assertFalse(readiness["profile_ok"])
@@ -97,13 +98,45 @@ class TestEdFiCoreReadiness(unittest.TestCase):
                 "services.edfi.profile_evidence.load_sync_state",
                 return_value={},
             ):
-                readiness = read_edfi_core_readiness("district-main")
+                readiness = read_edfi_core_readiness("district-main", now_fn=lambda: 1700000100.0)
 
         self.assertFalse(readiness["ready"])
         self.assertTrue(readiness["profile_ok"])
         self.assertFalse(readiness["district_facts_ok"])
         self.assertEqual(readiness["next_recommended_slice"], "edfi-connection-config")
         self.assertIn("edfi_district_lea_id_missing", readiness["blocking_issues"])
+
+    def test_readiness_reports_blocked_when_profile_is_stale(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            runtime = Path(td) / "runtime" / "edfi"
+            profiles = runtime / "profiles"
+            connections = runtime / "connections" / "district-main"
+            profiles.mkdir(parents=True)
+            connections.mkdir(parents=True)
+            profile = _healthy_profile_payload()
+            (profiles / "district-main.json").write_text(json.dumps(profile), encoding="utf-8")
+            (connections / "local_config.json").write_text(
+                json.dumps({"connection_id": "district-main", "district_lea_id": EXPECTED_BISD_LEA_ID}),
+                encoding="utf-8",
+            )
+            conn = mock.Mock(district_lea_id=EXPECTED_BISD_LEA_ID)
+            with mock.patch("services.edfi.profile_evidence.profile_path", return_value=profiles / "district-main.json"), mock.patch(
+                "services.edfi.profile_evidence.load_capability_profile",
+                return_value=profile,
+            ), mock.patch("services.edfi.profile_evidence.load_connection_config", return_value=conn), mock.patch(
+                "services.edfi.profile_evidence.load_sync_state",
+                return_value={},
+            ):
+                readiness = read_edfi_core_readiness(
+                    "district-main",
+                    now_fn=lambda: 1700000000.0 + (8 * 24 * 3600),
+                )
+
+        self.assertFalse(readiness["ready"])
+        self.assertTrue(readiness["profile_ok"])
+        self.assertFalse(readiness["profile_fresh"])
+        self.assertIn("edfi_profile_stale", readiness["blocking_issues"])
+        self.assertEqual(readiness["next_recommended_slice"], "edfi-profile-refresh")
 
     def test_readiness_marks_sync_status_present_without_requiring_it(self) -> None:
         with tempfile.TemporaryDirectory() as td:
@@ -131,7 +164,7 @@ class TestEdFiCoreReadiness(unittest.TestCase):
                 "services.edfi.profile_evidence.load_sync_state",
                 return_value=sync_state,
             ):
-                readiness = read_edfi_core_readiness("district-main")
+                readiness = read_edfi_core_readiness("district-main", now_fn=lambda: 1700000100.0)
 
         self.assertTrue(readiness["ready"])
         self.assertTrue(readiness["sync_status_present"])

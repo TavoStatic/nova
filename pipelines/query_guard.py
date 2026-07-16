@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import Any, Mapping, Optional
 
+from pipelines.redaction import resolve_redaction_profile
+
 
 class QueryGuardError(ValueError):
     pass
@@ -92,4 +94,9 @@ class PipelineQueryGuard:
             "effective_row_limit": effective_rows,
             "row_limit_clamped": requested_rows != effective_rows,
             "row_limit_hard_cap": self.max_rows_hard_cap,
+            "redaction_profile": resolve_redaction_profile(
+                operation=op,
+                template_profile=template.get("redaction_profile"),
+                resource=sanitized_params.get("resource"),
+            ),
         }

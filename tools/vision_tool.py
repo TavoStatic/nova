@@ -3,6 +3,8 @@
 import subprocess
 from pathlib import Path
 
+from services.nova_vision_runtime import describe_image_file
+
 from .base_tool import NovaTool, ToolContext, ToolInvocationError
 
 
@@ -50,6 +52,13 @@ class VisionTool(NovaTool):
         elif action == "camera":
             prompt = str(args.get("prompt") or "Describe what you see.").strip() or "Describe what you see."
             cmd = [python_exe, str((base_dir / "camera.py").resolve()), prompt]
+        elif action == "describe_file":
+            path = str(args.get("path") or "").strip()
+            if not path:
+                raise ToolInvocationError("missing_image_path")
+            prompt = str(args.get("prompt") or "Describe what you see in this image.").strip()
+            policy = context.policy if isinstance(getattr(context, "policy", None), dict) else {}
+            return describe_image_file(path, prompt, policy=policy)
         else:
             raise ToolInvocationError("unknown_vision_action")
         p = subprocess.run(cmd, capture_output=True, text=True)

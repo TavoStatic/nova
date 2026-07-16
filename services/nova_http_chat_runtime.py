@@ -165,6 +165,72 @@ class NovaHttpChatRuntimeService:
         finally:
             core_module.set_active_user(previous_user)
 
+    def complete_pending_turn(
+        self,
+        session_id: str,
+        *,
+        user_id: str = "",
+        core_module,
+        session_state_manager,
+        turn_finalization_service,
+        get_session_turns_fn,
+        generate_chat_reply_fn,
+        append_session_turn_fn,
+        invalidate_control_status_cache_fn,
+    ) -> dict:
+        previous_user = core_module.get_active_user()
+        core_module.set_active_user(user_id or previous_user)
+        try:
+            sid = (session_id or "").strip()
+            if not sid:
+                return {"ok": False, "error": "session_id_required"}
+
+            turns = list(get_session_turns_fn(sid) or [])
+            if not turns:
+                return {"ok": True, "resumed": False, "reason": "no_turns"}
+            role, text = turns[-1]
+            if role != "user":
+                return {"ok": True, "resumed": False, "reason": "no_pending_user_turn"}
+
+            session = session_state_manager.get(sid)
+            session.reset_turn_flags()
+            ledger = core_module.start_action_ledger_record(
+                text,
+                channel="http",
+                session_id=sid,
+                input_source="http",
+                active_subject=session.active_subject(),
+            )
+            routing_decision: dict | None = None
+            reply, meta = generate_chat_reply_fn(
+                turns,
+                text,
+                ledger_record=ledger,
+                pending_action=session.pending_action,
+                prefer_web_for_data_queries=session.prefer_web_for_data_queries,
+                language_mix_spanish_pct=int(session.language_mix_spanish_pct or 0),
+                session=session,
+            )
+            reply_text = turn_finalization_service.finalize_reply_sequence_result(
+                reply,
+                session=session,
+                session_id=sid,
+                user_input=text,
+                ledger=ledger,
+                routing_decision=routing_decision if isinstance(routing_decision, dict) else {},
+                meta=meta if isinstance(meta, dict) else {},
+                append_session_turn_fn=append_session_turn_fn,
+                behavior_record_event_fn=core_module.behavior_record_event,
+                build_turn_reflection_fn=core_module.build_turn_reflection,
+                finalize_action_ledger_record_fn=core_module.finalize_action_ledger_record,
+                finalize_routing_decision_fn=core_module._finalize_routing_decision,
+                action_ledger_route_summary_fn=core_module.action_ledger_route_summary,
+            )
+            invalidate_control_status_cache_fn()
+            return {"ok": True, "resumed": True, "session_id": sid, "reply": reply_text}
+        finally:
+            core_module.set_active_user(previous_user)
+
     def process_chat_from_runtime(
         self,
         session_id: str,
@@ -184,6 +250,26 @@ class NovaHttpChatRuntimeService:
             http_chat_flow_module=runtime_scope["http_chat_flow"],
             append_session_turn_fn=self._runtime_fn(runtime_scope, "_append_session_turn"),
             generate_chat_reply_fn=self._runtime_fn(runtime_scope, "_generate_chat_reply"),
+            invalidate_control_status_cache_fn=self._runtime_fn(runtime_scope, "_invalidate_control_status_cache"),
+        )
+
+    def complete_pending_turn_from_runtime(
+        self,
+        session_id: str,
+        *,
+        user_id: str = "",
+        core_module,
+        runtime_scope: dict[str, object],
+    ) -> dict:
+        return self.complete_pending_turn(
+            session_id,
+            user_id=user_id,
+            core_module=core_module,
+            session_state_manager=runtime_scope["SESSION_STATE_MANAGER"],
+            turn_finalization_service=runtime_scope["HTTP_TURN_FINALIZATION_SERVICE"],
+            get_session_turns_fn=self._runtime_fn(runtime_scope, "_get_session_turns"),
+            generate_chat_reply_fn=self._runtime_fn(runtime_scope, "_generate_chat_reply"),
+            append_session_turn_fn=self._runtime_fn(runtime_scope, "_append_session_turn"),
             invalidate_control_status_cache_fn=self._runtime_fn(runtime_scope, "_invalidate_control_status_cache"),
         )
 

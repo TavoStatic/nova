@@ -9,6 +9,7 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from pipelines.redaction import redact_edfi_result
 from services.edfi.inventory import list_resources, profile_summary, read_preset, read_resource
 
 
@@ -84,6 +85,14 @@ def main(argv: list[str] | None = None) -> int:
             limit=args.limit,
             offset=args.offset,
             apply_district_scope=not bool(getattr(args, "no_district_scope", False)),
+        )
+
+    if args.command in {"schools", "students", "student_school_associations", "get"}:
+        resource = args.resource if args.command == "get" else None
+        result = redact_edfi_result(
+            result,
+            operation=args.command,
+            resource=resource,
         )
 
     if args.json:

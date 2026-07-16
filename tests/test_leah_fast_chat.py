@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from services.leah_fast_chat import leah_fast_chat_enabled
+from services.leah_fast_chat import leah_fast_chat_enabled, leah_fast_chat_skips_spine
 
 
 class TestLeahFastChat(unittest.TestCase):
@@ -17,6 +17,14 @@ class TestLeahFastChat(unittest.TestCase):
     def test_disabled_when_flag_missing(self) -> None:
         policy = {"layers": {"leah": {"mode": "active"}}}
         self.assertFalse(leah_fast_chat_enabled(policy, input_source="http"))
+
+    def test_spine_bypass_disabled_by_default(self) -> None:
+        policy = {"layers": {"leah": {"fast_chat": True}}}
+        self.assertFalse(leah_fast_chat_skips_spine(policy, input_source="http"))
+
+    def test_spine_bypass_requires_explicit_flag(self) -> None:
+        policy = {"layers": {"leah": {"fast_chat": True, "fast_chat_skip_spine": True}}}
+        self.assertTrue(leah_fast_chat_skips_spine(policy, input_source="http"))
 
 
 if __name__ == "__main__":

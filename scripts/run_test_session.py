@@ -318,6 +318,7 @@ def _isolated_runner_state(mode_dir: Path):
     action_dir = mode_dir / "actions"
     action_dir.mkdir(parents=True, exist_ok=True)
     session_store = mode_dir / "http_chat_sessions.json"
+    cli_session_store = mode_dir / "cli_chat_sessions.json"
     health_log = mode_dir / "health.log"
     reflection_log = mode_dir / "self_reflection.jsonl"
     memory_events_log = mode_dir / "memory_events.jsonl"
@@ -359,6 +360,18 @@ def _isolated_runner_state(mode_dir: Path):
             nova_core.TOOL_REGISTRY_SERVICE.events_log_path = tool_events_log
         stack.enter_context(mock.patch.object(nova_http, "RUNTIME_DIR", mode_dir))
         stack.enter_context(mock.patch.object(nova_http, "SESSION_STORE_PATH", session_store))
+        stack.enter_context(
+            mock.patch(
+                "services.nova_cli_session.cli_session_store_path",
+                lambda runtime_root=None: cli_session_store,
+            )
+        )
+        stack.enter_context(
+            mock.patch(
+                "services.nova_cli_session.RUNTIME_DIR",
+                mode_dir,
+            )
+        )
         try:
             work_tree._set_db_path(work_tree_db)
             nova_core.set_active_user(None)

@@ -3,6 +3,12 @@ from __future__ import annotations
 from typing import Any
 
 from services.layer_maturity_policy import evaluate_core_gate
+from services.regression_evidence import (
+    regression_evidence_stale,
+    regression_failure_active,
+    regression_outcome_failed,
+    regression_outcome_passed,
+)
 
 
 def _as_dict(value: Any) -> dict:
@@ -37,13 +43,56 @@ def _text(value: Any, limit: int = 220) -> str:
     return str(value or "").strip()[:limit]
 
 
-def _regression_status_current(*, status_label: str, stale: bool) -> bool:
-    if stale:
-        return False
+def _regression_evidence_current(*, status_label: str, stale: bool) -> bool:
     label = _text(status_label, 80).lower()
     if not label:
         return False
-    return label == "ok" or "pass" in label
+    if regression_outcome_passed(status_label):
+        return True
+    return regression_failure_active(status_label=status_label, stale=stale)
+
+
+def _regression_passed(*, status_label: str) -> bool:
+    return regression_outcome_passed(status_label)
+
+
+def _regression_blocker(*, status_label: str, stale: bool, evidence: dict) -> dict[str, Any]:
+    failed_tests = [
+        _text(item, 240)
+        for item in list(evidence.get("last_regression_failed_tests") or [])
+        if _text(item, 240)
+    ]
+    failed_lane = _text(evidence.get("last_regression_failed_lane"), 80)
+    tail = _text(evidence.get("last_regression_tail"), 240)
+    if regression_failure_active(status_label=status_label, stale=stale):
+        detail_parts = [tail or _text(status_label, 160)]
+        if failed_lane:
+            detail_parts.append(f"lane={failed_lane}")
+        if failed_tests:
+            detail_parts.append("failed_tests=" + "; ".join(failed_tests[:8]))
+        return _blocker(
+            "regression",
+            "regression_failed",
+            detail=" | ".join(part for part in detail_parts if part),
+            source="runtime/regression_status.json",
+            remediation=_remediation(
+                "run_regression",
+                tools=["read", "system_check", "release_rebuild_verify", "core_thinning"],
+            ),
+        )
+    if regression_outcome_failed(status_label) and stale:
+        return _blocker(
+            "regression",
+            "regression_stale",
+            detail=tail or _text(status_label, 160),
+            source="runtime/regression_status.json",
+        )
+    return _blocker(
+        "regression",
+        "regression_stale",
+        detail=tail or _text(status_label, 160) or "regression status missing",
+        source="runtime/regression_status.json",
+    )
 
 
 def _validation_truth_fresh(validation: dict) -> bool:
@@ -85,13 +134,54 @@ def _release_truth_current(*, release_truth: dict, release_status: dict) -> bool
     return bool(identity and identity.lower() != "unknown")
 
 
-def _blocker(owner: str, code: str, *, detail: str = "", source: str = "") -> dict[str, Any]:
-    return {
+def _remediation(action: str, *, tools: list[str] | None = None) -> dict[str, Any]:
+    payload: dict[str, Any] = {"action": _text(action, 120)}
+    if tools:
+        payload["tools"] = [_text(tool, 120) for tool in tools if _text(tool, 120)]
+    return payload
+
+
+def _blocker(
+    owner: str,
+    code: str,
+    *,
+    detail: str = "",
+    source: str = "",
+    remediation: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    payload = {
         "owner": _text(owner, 80),
         "code": _text(code, 120),
         "detail": _text(detail, 240),
         "source": _text(source, 160),
     }
+    if remediation:
+        payload["remediation"] = dict(remediation)
+    return payload
+
+
+def _release_drift_remediation_eligible(
+    *,
+    core_gate: dict,
+    release_truth_current: bool,
+    release_evidence: dict,
+) -> bool:
+    if not _as_bool(core_gate.get("drift_blocked"), False):
+        return False
+    if _as_list(core_gate.get("missing_roots")):
+        return False
+    if not release_truth_current:
+        return False
+    if release_evidence:
+        if not _as_bool(release_evidence.get("runtime_drift_tolerated"), False):
+            return False
+        if not (
+            _as_bool(release_evidence.get("runtime_drift_expected"), False)
+            or _as_bool(release_evidence.get("latest_source_changed_after_build"), False)
+            or _as_bool(release_evidence.get("suppress_closure_inventory_signals"), False)
+        ):
+            return False
+    return True
 
 
 def _verdict(
@@ -133,12 +223,14 @@ def _normalize_owner_verdicts(values: Any) -> list[dict[str, Any]]:
             if isinstance(raw, dict):
                 code = _text(raw.get("code"), 120)
                 if code:
+                    remediation = _as_dict(raw.get("remediation"))
                     blockers.append(
                         _blocker(
                             owner,
                             code,
                             detail=_text(raw.get("detail"), 240),
                             source=_text(raw.get("source"), 160),
+                            remediation=remediation or None,
                         )
                     )
             else:
@@ -227,10 +319,13 @@ def build_mission_truth_gate(
         }
 
     validation_fresh = _validation_truth_fresh(validation)
-    regression_current = _regression_status_current(
-        status_label=_text(evidence.get("last_regression_status"), 80),
-        stale=_as_bool(evidence.get("last_regression_stale"), False),
+    regression_status_label = _text(evidence.get("last_regression_status"), 80)
+    regression_stale = _as_bool(evidence.get("last_regression_stale"), False)
+    regression_current = _regression_evidence_current(
+        status_label=regression_status_label,
+        stale=regression_stale,
     )
+    regression_passed = _regression_passed(status_label=regression_status_label)
     release_truth_current = _release_truth_current(
         release_truth=_as_dict(evidence.get("release_runtime_truth")),
         release_status=_as_dict(evidence.get("release_status")),
@@ -264,22 +359,31 @@ def build_mission_truth_gate(
         ),
         _verdict(
             "regression",
-            ready=regression_current,
+            ready=regression_passed,
             source="runtime/regression_status.json",
             blockers=[]
-            if regression_current
+            if regression_passed
             else [
-                _blocker(
-                    "regression",
-                    "regression_stale",
-                    detail=_text(evidence.get("last_regression_status"), 160),
-                    source="runtime/regression_status.json",
+                _regression_blocker(
+                    status_label=regression_status_label,
+                    stale=regression_stale,
+                    evidence=evidence,
                 )
             ],
-            summary=_text(evidence.get("last_regression_status"), 160) or "regression status missing",
+            summary=_text(evidence.get("last_regression_tail"), 240)
+            or _text(evidence.get("last_regression_status"), 160)
+            or "regression status missing",
             evidence={
-                "status": _text(evidence.get("last_regression_status"), 80),
-                "stale": _as_bool(evidence.get("last_regression_stale"), False),
+                "status": regression_status_label,
+                "evidence_current": regression_current,
+                "passed": regression_passed,
+                "stale": regression_stale,
+                "failed_lane": _text(evidence.get("last_regression_failed_lane"), 80),
+                "failed_tests": [
+                    _text(item, 160)
+                    for item in list(evidence.get("last_regression_failed_tests") or [])
+                    if _text(item, 160)
+                ][:8],
             },
         ),
         _verdict(
@@ -297,6 +401,10 @@ def build_mission_truth_gate(
                         160,
                     ),
                     source="release_runtime_truth",
+                    remediation=_remediation(
+                        "active_work_tree_run_next",
+                        tools=["release_rebuild_verify"],
+                    ),
                 )
             ],
             summary=_text(
@@ -319,6 +427,7 @@ def build_mission_truth_gate(
                     "generated_queue_untested",
                     detail=f"{generated_untested} untested generated queue item(s)",
                     source="generated_work_queue",
+                    remediation=_remediation("generated_queue_run_next"),
                 )
             ],
             summary="generated queue clear" if generated_untested <= 0 else "generated queue needs testing",
@@ -326,15 +435,27 @@ def build_mission_truth_gate(
         ),
     ]
 
+    release_evidence = dict(_as_dict(evidence.get("release_runtime_truth")))
     layer_blockers: list[dict[str, Any]] = []
     require_core_gate = _as_bool(policy.get("require_core_gate_for_green"), True)
     if require_core_gate and not core_gate_ok:
         if _as_bool(core_gate.get("drift_blocked"), False):
+            drift_remediation = None
+            if _release_drift_remediation_eligible(
+                core_gate=core_gate,
+                release_truth_current=release_truth_current,
+                release_evidence=release_evidence,
+            ):
+                drift_remediation = _remediation(
+                    "active_work_tree_run_next",
+                    tools=["release_rebuild_verify", "core_thinning"],
+                )
             layer_blockers.append(
                 _blocker(
                     "layer_maturity",
                     "core_gate_release_drift",
                     source=core_gate_source,
+                    remediation=drift_remediation,
                 )
             )
         elif list(core_gate.get("missing_roots") or []):
@@ -376,8 +497,31 @@ def build_mission_truth_gate(
         if _text(verdict.get("owner"), 80)
     }
     validation_fresh = ready_by_owner.get("validation", validation_fresh)
-    regression_current = ready_by_owner.get("regression", regression_current)
+    regression_passed = ready_by_owner.get("regression", regression_passed)
     release_truth_current = ready_by_owner.get("release", release_truth_current)
+    regression_verdict = next(
+        (
+            verdict
+            for verdict in owner_verdicts
+            if _text(_as_dict(verdict).get("owner"), 80) == "regression"
+        ),
+        None,
+    )
+    if isinstance(regression_verdict, dict):
+        regression_evidence = _as_dict(regression_verdict.get("evidence"))
+        if "evidence_current" in regression_evidence:
+            regression_current = _as_bool(
+                regression_evidence.get("evidence_current"),
+                regression_current,
+            )
+        else:
+            regression_blocker_codes = {
+                _text(_as_dict(item).get("code"), 120)
+                for item in _as_list(regression_verdict.get("blockers"))
+                if isinstance(item, dict) and _text(_as_dict(item).get("code"), 120)
+            }
+            if "regression_stale" in regression_blocker_codes:
+                regression_current = False
 
     blockers = _owner_blockers(owner_verdicts)
     truth_ready = all(
@@ -399,6 +543,7 @@ def build_mission_truth_gate(
         "green_blockers": green_blockers,
         "validation_fresh": validation_fresh,
         "regression_current": regression_current,
+        "regression_passed": regression_passed,
         "release_truth_current": release_truth_current,
         "generated_queue_untested_count": generated_untested,
         "core_gate_ok": core_gate_ok,

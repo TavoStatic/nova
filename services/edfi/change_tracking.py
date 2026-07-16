@@ -22,6 +22,8 @@ DEFAULT_TRACKED_RESOURCES: dict[str, str] = {
     "student_school_associations": "ed-fi/studentSchoolAssociations",
 }
 
+CHANGE_SYNC_MAINTENANCE_TTL_SEC = 3600
+
 
 def _safe_int(value: Any, default: int = 0) -> int:
     try:
@@ -268,6 +270,67 @@ def _district_filter_items(
         if item_matches_district(item, lea):
             kept.append(item)
     return kept, scanned
+
+
+def maybe_advance_tracked_cursors(
+    connection_id: str,
+    *,
+    maintenance_ttl_sec: int = CHANGE_SYNC_MAINTENANCE_TTL_SEC,
+    now_fn: Callable[[], float] = time.time,
+) -> dict[str, Any]:
+    """Advance saved change-version cursors when maintenance is due."""
+    resolved_id = str(connection_id or "").strip()
+    if not resolved_id:
+        return {
+            "ok": False,
+            "connection_id": connection_id,
+            "error_code": "edfi_connection_id_missing",
+            "error": "Connection id is required.",
+            "advanced": False,
+        }
+
+    state = load_sync_state(resolved_id)
+    last_maintenance_at = _safe_int(state.get("last_maintenance_at"))
+    now_epoch = int(now_fn())
+    due = last_maintenance_at <= 0 or (now_epoch - last_maintenance_at) >= max(60, int(maintenance_ttl_sec))
+    if not due:
+        return {
+            "ok": True,
+            "connection_id": resolved_id,
+            "advanced": False,
+            "reason": "maintenance_not_due",
+            "last_maintenance_at": last_maintenance_at,
+            "next_due_at": last_maintenance_at + max(60, int(maintenance_ttl_sec)),
+        }
+
+    results: list[dict[str, Any]] = []
+    for resource in DEFAULT_TRACKED_RESOURCES.values():
+        results.append(
+            pull_changes_since(
+                resolved_id,
+                resource=resource,
+                limit=1,
+                offset=0,
+                advance_cursor=True,
+                now_fn=now_fn,
+            )
+        )
+
+    ok = all(bool(item.get("ok")) for item in results) if results else False
+    state = load_sync_state(resolved_id)
+    last_maintenance_at = int(state.get("last_maintenance_at") or 0)
+    if ok:
+        state["last_maintenance_at"] = now_epoch
+        save_sync_state(resolved_id, state, now_fn=now_fn)
+        last_maintenance_at = now_epoch
+    return {
+        "ok": ok,
+        "connection_id": resolved_id,
+        "advanced": True,
+        "last_maintenance_at": last_maintenance_at,
+        "resource_results": results,
+        "tracked_resources": list(DEFAULT_TRACKED_RESOURCES.values()),
+    }
 
 
 def pull_changes_since(

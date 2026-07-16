@@ -715,6 +715,25 @@ def _save_task_record(connection: sqlite3.Connection, task: Task) -> None:
     )
 
 
+def persist_branches(branch_ids: list[str], *, batch_size: int = 0) -> None:
+    """Upsert only the requested branches without rewriting the full tree."""
+    with _STATE_LOCK:
+        normalized = [str(branch_id or "").strip() for branch_id in branch_ids if str(branch_id or "").strip()]
+        if not normalized:
+            return
+        chunk_size = max(0, int(batch_size or 0))
+        if chunk_size <= 0:
+            chunk_size = len(normalized)
+        for offset in range(0, len(normalized), chunk_size):
+            batch = normalized[offset : offset + chunk_size]
+            with _db_transaction() as connection:
+                for branch_id in batch:
+                    branch = _BRANCHES.get(branch_id)
+                    if branch is None:
+                        continue
+                    _save_branch_record(connection, branch)
+
+
 def _persist_tree_state(tree_id: str) -> None:
     with _STATE_LOCK:
         tree = _TREES.get(tree_id)
@@ -1290,6 +1309,47 @@ def add_branch_to_tree(tree_id: str, title: str, bucket: str, parent_branch_id: 
     save_tree(tree)
     _persist_tree_state(tree_id)
     return branch
+
+
+def stamp_recurring_finding_task_satisfaction(
+    task_id: str,
+    *,
+    completion_action: str = "",
+    ok: bool = True,
+) -> bool:
+    """Record recurring-finding completion evidence on a task before it is marked complete."""
+    task = _TASKS.get(task_id)
+    if task is None:
+        return False
+    from services.recurring_finding_lifecycle import (
+        KEY_SATISFACTION_FINGERPRINT,
+        finding_key_from_meta,
+        read_task_state,
+        stamp_satisfaction,
+    )
+
+    meta = dict(task.meta or {}) if isinstance(task.meta, dict) else {}
+    if not finding_key_from_meta(meta):
+        return False
+    state = read_task_state(meta)
+    fingerprint = str(state.get(KEY_SATISFACTION_FINGERPRINT) or finding_key_from_meta(meta) or "").strip()
+    task.meta = stamp_satisfaction(
+        meta,
+        satisfaction_fingerprint=fingerprint,
+        completion_action=str(completion_action or ""),
+        ok=bool(ok),
+    )
+    return bool(ok)
+
+
+def complete_task_with_recurring_finding(
+    task_id: str,
+    *,
+    completion_action: str = "",
+    ok: bool = True,
+) -> None:
+    stamp_recurring_finding_task_satisfaction(task_id, completion_action=completion_action, ok=ok)
+    mark_task_complete(task_id)
 
 
 def mark_task_complete(task_id: str) -> None:
@@ -2346,6 +2406,13 @@ def execute_autonomous_step(
             "tool_args": tool_args,
             "error": str(exc),
         }
+    if tool_name == "core_thinning" and isinstance(result, dict):
+        try:
+            from services.core_thinning import stamp_core_thinning_task_satisfaction
+
+            stamp_core_thinning_task_satisfaction(task, result)
+        except Exception:
+            pass
     mark_task_complete(task.task_id)
     return {
         "action": "executed",

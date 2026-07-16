@@ -5,6 +5,7 @@ import os
 import shutil
 import unittest
 import uuid
+from datetime import datetime
 from unittest import mock
 from pathlib import Path
 
@@ -180,8 +181,75 @@ class TestWorkTreeSignalIngestionService(unittest.TestCase):
         self.assertEqual(len(branches), 1)
         branch = branches[0]
         self.assertEqual(branch.source_key, "code_defect:control_status:NameError:PATCH_LOG")
-        self.assertEqual(branch.evidence_count, 2)
+        self.assertEqual(branch.evidence_count, 1)
         self.assertEqual(str(branch.actionability or ""), "safe_now")
+
+    def test_material_signal_change_increments_evidence_count(self) -> None:
+        base_signal = {
+            "source": "control_status",
+            "signal_class": "code_defect",
+            "title": "Fix NameError in control/status pulse path",
+            "fingerprint": {
+                "class": "code_defect",
+                "surface": "control_status",
+                "error": "NameError",
+                "symbol": "PATCH_LOG",
+            },
+            "payload": {
+                "error": "NameError",
+                "symbol": "PATCH_LOG",
+            },
+            "severity": "high",
+            "actionability": "safe_now",
+            "next_task": "Inspect stack and patch the missing symbol reference",
+        }
+        escalated = {
+            **base_signal,
+            "severity": "critical",
+            "payload": {
+                "error": "NameError",
+                "symbol": "PATCH_LOG",
+                "stack_hint": "control_status.py:42",
+            },
+        }
+
+        self.service.ingest_signal(base_signal)
+        self.service.ingest_signal(escalated)
+
+        branch = self._signal_branches()[0]
+        self.assertEqual(branch.evidence_count, 2)
+        self.assertEqual((branch.source_payload or {}).get("stack_hint"), "control_status.py:42")
+
+    def test_reconcile_signal_branch_hygiene_resets_stale_tool_state(self) -> None:
+        signal = {
+            "source": "control_status",
+            "signal_class": "code_defect",
+            "title": "Reset stale tool state on signal branch",
+            "fingerprint": {
+                "class": "code_defect",
+                "surface": "work_tree",
+                "error": "stale_tool_state",
+                "symbol": "signal_ingestion",
+            },
+            "payload": {"symbol": "signal_ingestion"},
+            "severity": "medium",
+            "actionability": "safe_now",
+            "next_task": "Inspect branch tool state hygiene",
+        }
+        self.service.ingest_signal(signal)
+        branch = self._signal_branches()[0]
+        branch.tool_state["read"] = work_tree.ToolStatus.RUNNING
+        branch.tool_state["patch"] = work_tree.ToolStatus.BLOCKED
+        branch.tool_state["codegen"] = work_tree.ToolStatus.FAILED
+
+        results = self.service.reconcile_signal_branch_hygiene()
+
+        refreshed = work_tree.get_branch(branch.branch_id)
+        self.assertIsNotNone(refreshed)
+        self.assertEqual(refreshed.tool_state.get("read"), work_tree.ToolStatus.READY)
+        self.assertEqual(refreshed.tool_state.get("patch"), work_tree.ToolStatus.READY)
+        self.assertEqual(refreshed.tool_state.get("codegen"), work_tree.ToolStatus.FAILED)
+        self.assertTrue(any(item.get("action") == "tool_state_reset" for item in results))
 
     def test_signal_tree_ingestion_archives_duplicate_signal_trees(self) -> None:
         canonical = work_tree.initialize_tree(
@@ -2865,6 +2933,37 @@ class TestWorkTreeSignalIngestionService(unittest.TestCase):
         self.assertEqual(str(branch.resolution_state or ""), "resolved")
         self.assertEqual(branch.status, work_tree.BranchStatus.COMPLETE)
 
+    def test_status_snapshot_ingests_release_no_builds_gap(self) -> None:
+        status_payload = {
+            "alerts": [],
+            "self_check_pass_ratio": 1.0,
+            "wiring_inventory": {"gap_count": 0},
+            "release_status": {
+                "ok": True,
+                "ledger_path": "C:\\NOVA\\runtime\\exports\\release_packages\\release_ledger.jsonl",
+                "latest_state": "no-builds",
+                "latest_readiness_state": "no-builds",
+                "latest_ready_to_ship": False,
+                "latest_readiness_note": "No release builds are recorded yet.",
+                "latest_artifact_name": "",
+                "latest_artifact_path": "",
+            },
+        }
+
+        results = self.service.sync_status_snapshot(status_payload)
+
+        self.assertTrue(any(item.get("action") == "created" for item in results))
+        branch = self._signal_branches()[0]
+        self.assertEqual(branch.title, "Release package has no recorded build")
+        self.assertEqual(str(branch.source_type or ""), "release")
+        self.assertEqual(str(branch.work_class or ""), "release_readiness_gap")
+        self.assertEqual(str(branch.actionability or ""), "safe_now")
+        tasks = work_tree.list_branch_tasks(branch.branch_id)
+        self.assertEqual(len(tasks), 1)
+        self.assertEqual(branch.preferred_tool, "release_rebuild_verify")
+        self.assertIn("Rebuild and verify initial release package", tasks[0].title)
+        self.assertEqual(tasks[0].meta.get("expected_tool"), "release_rebuild_verify")
+
     def test_status_snapshot_ingests_release_readiness_gap(self) -> None:
         status_payload = {
             "alerts": [],
@@ -3427,6 +3526,10 @@ class TestWorkTreeSignalIngestionService(unittest.TestCase):
         self.assertEqual(str(branch.actionability or ""), "safe_now")
         self.assertEqual(str(branch.resolution_state or ""), "open")
         self.assertNotIn("Resolution:", str(branch.notes or ""))
+        from services.recurring_finding_lifecycle import KEY_VERSION, read_branch_lifecycle
+
+        lifecycle = read_branch_lifecycle(branch.source_payload)
+        self.assertGreaterEqual(int(lifecycle.get(KEY_VERSION, 0) or 0), 2)
 
     def test_partial_status_snapshot_does_not_resolve_absent_surfaces(self) -> None:
         self.service.sync_status_snapshot(
@@ -3767,6 +3870,135 @@ class TestSignalBranchDedupe(unittest.TestCase):
             and str(branch.resolution_state or "").strip().lower() not in {"resolved", "retired", "archived"}
         ]
         self.assertEqual(len(live), 1)
+
+    def test_archive_superseded_complete_signal_branches_keeps_newest_per_group(self) -> None:
+        shared_prefix = "release_readiness_gap:release_status:release_validation_outcome_missing"
+        self.service.ingest_signal(
+            {
+                "source": "release_status",
+                "signal_class": "release_readiness_gap",
+                "title": "Seed signal tree",
+                "source_key": f"{shared_prefix}:seed-package.zip",
+                "payload": {"package": "seed-package.zip"},
+                "severity": "high",
+                "actionability": "safe_now",
+            }
+        )
+        tree = work_tree.list_trees()[0]
+        older = work_tree.add_branch_to_tree(tree.tree_id, "Older release validation gap", "signals", tree.root_branch_id)
+        older.source_type = "release_status"
+        older.source_key = f"{shared_prefix}:older-package.zip"
+        older.work_class = "release_readiness_gap"
+        older.status = work_tree.BranchStatus.COMPLETE
+        older.resolution_state = "resolved"
+        older.last_seen_at = datetime(2026, 5, 14, 10, 0, 0)
+        work_tree.touch_branch(older.branch_id)
+
+        newer = work_tree.add_branch_to_tree(tree.tree_id, "Newer release validation gap", "signals", tree.root_branch_id)
+        newer.source_type = "release_status"
+        newer.source_key = f"{shared_prefix}:newer-package.zip"
+        newer.work_class = "release_readiness_gap"
+        newer.status = work_tree.BranchStatus.COMPLETE
+        newer.resolution_state = "resolved"
+        newer.last_seen_at = datetime(2026, 5, 14, 12, 0, 0)
+        work_tree.touch_branch(newer.branch_id)
+
+        results = self.service.archive_superseded_complete_signal_branches()
+
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0].get("action"), "archived")
+        self.assertEqual(results[0].get("branch_id"), older.branch_id)
+        self.assertEqual(work_tree.get_branch(older.branch_id).status, work_tree.BranchStatus.ARCHIVED)
+        self.assertEqual(work_tree.get_branch(newer.branch_id).status, work_tree.BranchStatus.COMPLETE)
+
+    def test_resolve_signal_branches_skips_archived_branches(self) -> None:
+        signal = {
+            "source": "scheduler_registry",
+            "signal_class": "maintenance_pressure",
+            "title": "Maintenance scheduler inactive",
+            "fingerprint": {
+                "class": "maintenance_pressure",
+                "surface": "scheduler_registry",
+                "error": "scheduler_inactive",
+                "symbol": "maintenance_scheduler",
+            },
+            "payload": {"symbol": "maintenance_scheduler"},
+            "severity": "high",
+            "actionability": "safe_now",
+        }
+        self.service.ingest_signal(signal)
+        branch = self._signal_branches()[0]
+        branch.status = work_tree.BranchStatus.ARCHIVED
+        branch.resolution_state = "archived"
+        work_tree.touch_branch(branch.branch_id)
+
+        with mock.patch.object(work_tree, "touch_branch", wraps=work_tree.touch_branch) as touch_mock:
+            touch_mock.reset_mock()
+            results = self.service.resolve_signal_branches(
+                signal_class="maintenance_pressure",
+                source="scheduler_registry",
+                reason="Archived branch should stay untouched.",
+            )
+
+        self.assertEqual(results, [])
+        touch_mock.assert_not_called()
+        refreshed = work_tree.get_branch(branch.branch_id)
+        self.assertEqual(refreshed.status, work_tree.BranchStatus.ARCHIVED)
+        self.assertEqual(refreshed.resolution_state, "archived")
+
+    def test_reconcile_signal_branch_hygiene_can_skip_superseded_archival(self) -> None:
+        shared_prefix = "release_readiness_gap:release_status:release_validation_outcome_missing"
+        self.service.ingest_signal(
+            {
+                "source": "release_status",
+                "signal_class": "release_readiness_gap",
+                "title": "Seed signal tree",
+                "source_key": f"{shared_prefix}:seed-package.zip",
+                "payload": {"package": "seed-package.zip"},
+                "severity": "high",
+                "actionability": "safe_now",
+            }
+        )
+        tree = work_tree.list_trees()[0]
+        older = work_tree.add_branch_to_tree(tree.tree_id, "Older release validation gap", "signals", tree.root_branch_id)
+        older.source_type = "release_status"
+        older.source_key = f"{shared_prefix}:older-package.zip"
+        older.work_class = "release_readiness_gap"
+        older.status = work_tree.BranchStatus.COMPLETE
+        older.resolution_state = "resolved"
+        older.last_seen_at = datetime(2026, 5, 14, 10, 0, 0)
+        work_tree.touch_branch(older.branch_id)
+
+        newer = work_tree.add_branch_to_tree(tree.tree_id, "Newer release validation gap", "signals", tree.root_branch_id)
+        newer.source_type = "release_status"
+        newer.source_key = f"{shared_prefix}:newer-package.zip"
+        newer.work_class = "release_readiness_gap"
+        newer.status = work_tree.BranchStatus.COMPLETE
+        newer.resolution_state = "resolved"
+        newer.last_seen_at = datetime(2026, 5, 14, 12, 0, 0)
+        work_tree.touch_branch(newer.branch_id)
+
+        with mock.patch.object(
+            self.service,
+            "archive_superseded_complete_signal_branches",
+            wraps=self.service.archive_superseded_complete_signal_branches,
+        ) as archive_mock:
+            skipped = self.service.reconcile_signal_branch_hygiene(archive_superseded=False)
+            archive_mock.assert_not_called()
+
+        self.assertFalse(any(item.get("action") == "archived" for item in skipped))
+        self.assertEqual(work_tree.get_branch(older.branch_id).status, work_tree.BranchStatus.COMPLETE)
+
+        with mock.patch.object(
+            self.service,
+            "archive_superseded_complete_signal_branches",
+            wraps=self.service.archive_superseded_complete_signal_branches,
+        ) as archive_mock:
+            archived = self.service.reconcile_signal_branch_hygiene(archive_superseded=True)
+            archive_mock.assert_called_once()
+
+        self.assertTrue(any(item.get("action") == "archived" for item in archived))
+        self.assertEqual(work_tree.get_branch(older.branch_id).status, work_tree.BranchStatus.ARCHIVED)
 
     def test_sync_status_snapshot_retires_legacy_source_root_source_keys(self) -> None:
         legacy_key = "governance_pressure:source_root_inventory:source_root_inventory_gap:updates/old.jsonl"

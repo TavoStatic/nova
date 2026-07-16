@@ -5,10 +5,75 @@ import unittest
 from unittest.mock import MagicMock, patch
 
 from services.autonomy_orchestrator import AutonomyOrchestratorService
+from services.layer_maturity_policy import CORE_GATE_ROOT_IDS
 from services.nova_control_action_dispatcher import (
     autonomy_advisory_action_catalog,
     is_autonomy_advisory_action,
 )
+
+
+def _codegen_ready_evidence(
+    *,
+    branches: list[dict],
+    promoted_capabilities: list[str] | None = None,
+    leah_promoted: list[str] | None = None,
+) -> dict:
+    codegen_caps = list(promoted_capabilities or [])
+    leah_caps = list(leah_promoted or [])
+    for branch in branches:
+        metadata = dict(branch.get("metadata") or {})
+        payload = dict(branch.get("source_payload") or {})
+        cap = str(
+            metadata.get("capability_name")
+            or payload.get("primary_capability")
+            or payload.get("capability_name")
+            or ""
+        ).strip().lower()
+        if not cap:
+            continue
+        if cap.startswith("leah_"):
+            if cap not in leah_caps:
+                leah_caps.append(cap)
+        elif cap not in codegen_caps:
+            codegen_caps.append(cap)
+    return {
+        "work_tree_snapshot": {"branches": branches},
+        "queue_pressure": {},
+        "runtime_guard_status": {"guard_running": True},
+        "triage_hints": {},
+        "autonomy_maintenance": {},
+        "policy_snapshot": {
+            "layers": {
+                "codegen": {
+                    "mode": "active",
+                    "promoted_capabilities": codegen_caps,
+                },
+                "leah": {
+                    "mode": "active",
+                    "promoted_capabilities": leah_caps,
+                },
+            },
+        },
+        "layer_maturity_snapshot": {
+            "root_closure_inventory": {
+                "roots": [
+                    {"root_id": root_id, "ok": True}
+                    for root_id in (
+                        *CORE_GATE_ROOT_IDS,
+                        "voice",
+                        "tts_audio_output",
+                        "http_continuity",
+                        "session_identity_auth",
+                        "identity_profile_answers",
+                        "memory_identity",
+                    )
+                ],
+            },
+            "release_runtime_truth": {"suppress_closure_inventory_signals": False},
+            "release_status": {},
+            "capabilities_registered": {},
+        },
+    }
 
 
 class TestCodegenActionCatalog(unittest.TestCase):
@@ -72,25 +137,19 @@ class TestOrchestratorCodegenDetection(unittest.TestCase):
         """Orchestrator identifies capability_gap branches as candidates."""
         orchestrator = AutonomyOrchestratorService()
 
-        evidence = {
-            "work_tree_snapshot": {
-                "branches": [
-                    {
-                        "branch_id": "cap-gap-001",
-                        "kind": "capability_gap",
-                        "status": "ready",
-                        "title": "Implement autonomous_code_generation",
-                        "metadata": {
-                            "capability_name": "autonomous_code_generation",
-                        },
-                    }
-                ],
-            },
-            "queue_pressure": {},
-            "runtime_guard_status": {"guard_running": True},
-            "triage_hints": {},
-            "autonomy_maintenance": {},
-        }
+        evidence = _codegen_ready_evidence(
+            branches=[
+                {
+                    "branch_id": "cap-gap-001",
+                    "kind": "capability_gap",
+                    "status": "ready",
+                    "title": "Implement autonomous_code_generation",
+                    "metadata": {
+                        "capability_name": "autonomous_code_generation",
+                    },
+                }
+            ],
+        )
 
         candidates = orchestrator._contract_candidate_actions(evidence)
 
@@ -104,23 +163,17 @@ class TestOrchestratorCodegenDetection(unittest.TestCase):
         """Orchestrator codegen action targets the capability gap branch."""
         orchestrator = AutonomyOrchestratorService()
 
-        evidence = {
-            "work_tree_snapshot": {
-                "branches": [
-                    {
-                        "branch_id": "cap-gap-xyz",
-                        "kind": "capability_gap",
-                        "status": "ready",
-                        "title": "Add type_checking capability",
-                        "metadata": {"capability_name": "type_checking"},
-                    }
-                ],
-            },
-            "queue_pressure": {},
-            "runtime_guard_status": {"guard_running": True},
-            "triage_hints": {},
-            "autonomy_maintenance": {},
-        }
+        evidence = _codegen_ready_evidence(
+            branches=[
+                {
+                    "branch_id": "cap-gap-xyz",
+                    "kind": "capability_gap",
+                    "status": "ready",
+                    "title": "Add type_checking capability",
+                    "metadata": {"capability_name": "type_checking"},
+                }
+            ],
+        )
 
         candidates = orchestrator._contract_candidate_actions(evidence)
         codegen_action = None
@@ -166,30 +219,24 @@ class TestOrchestratorCodegenDetection(unittest.TestCase):
         """Orchestrator selects first ready capability gap branch."""
         orchestrator = AutonomyOrchestratorService()
 
-        evidence = {
-            "work_tree_snapshot": {
-                "branches": [
-                    {
-                        "branch_id": "cap-gap-first",
-                        "kind": "capability_gap",
-                        "status": "ready",
-                        "title": "First gap",
-                        "metadata": {"capability_name": "first_gap"},
-                    },
-                    {
-                        "branch_id": "cap-gap-second",
-                        "kind": "capability_gap",
-                        "status": "ready",
-                        "title": "Second gap",
-                        "metadata": {"capability_name": "second_gap"},
-                    },
-                ],
-            },
-            "queue_pressure": {},
-            "runtime_guard_status": {"guard_running": True},
-            "triage_hints": {},
-            "autonomy_maintenance": {},
-        }
+        evidence = _codegen_ready_evidence(
+            branches=[
+                {
+                    "branch_id": "cap-gap-first",
+                    "kind": "capability_gap",
+                    "status": "ready",
+                    "title": "First gap",
+                    "metadata": {"capability_name": "first_gap"},
+                },
+                {
+                    "branch_id": "cap-gap-second",
+                    "kind": "capability_gap",
+                    "status": "ready",
+                    "title": "Second gap",
+                    "metadata": {"capability_name": "second_gap"},
+                },
+            ],
+        )
 
         candidates = orchestrator._contract_candidate_actions(evidence)
         codegen_action = None
@@ -256,30 +303,27 @@ class TestOrchestratorCodegenPriority(unittest.TestCase):
         """Orchestrator includes codegen when capability gaps present."""
         orchestrator = AutonomyOrchestratorService()
 
-        evidence = {
-            "work_tree_snapshot": {
-                "branches": [
-                    {
-                        "branch_id": "cap-gap-priority",
-                        "kind": "capability_gap",
-                        "status": "ready",
-                        "title": "High-priority capability",
-                        "metadata": {"capability_name": "critical_feature"},
-                    }
-                ],
-                "active_executable_count": 0,
-                "open_count": 0,
-            },
-            "queue_pressure": {
-                "generated_pending_count": 0,
-                "generated_actionable_count": 0,
-                "patch_ready_count": 0,
-                "approved_eligible_previews": 0,
-            },
-            "runtime_guard_status": {"guard_running": True},
-            "triage_hints": {"max_seam_pressure": 0.0},
-            "autonomy_maintenance": {"worker_status": "running"},
+        evidence = _codegen_ready_evidence(
+            branches=[
+                {
+                    "branch_id": "cap-gap-priority",
+                    "kind": "capability_gap",
+                    "status": "ready",
+                    "title": "High-priority capability",
+                    "metadata": {"capability_name": "critical_feature"},
+                }
+            ],
+        )
+        evidence["work_tree_snapshot"]["active_executable_count"] = 0
+        evidence["work_tree_snapshot"]["open_count"] = 0
+        evidence["queue_pressure"] = {
+            "generated_pending_count": 0,
+            "generated_actionable_count": 0,
+            "patch_ready_count": 0,
+            "approved_eligible_previews": 0,
         }
+        evidence["triage_hints"] = {"max_seam_pressure": 0.0}
+        evidence["autonomy_maintenance"] = {"worker_status": "running"}
 
         candidates = orchestrator._contract_candidate_actions(evidence)
 
@@ -296,27 +340,22 @@ class TestOrchestratorLeahBuildRouting(unittest.TestCase):
     def test_orchestrator_routes_leah_capabilities_to_leah_build(self):
         orchestrator = AutonomyOrchestratorService()
 
-        evidence = {
-            "work_tree_snapshot": {
-                "branches": [
-                    {
-                        "branch_id": "leah-gap-001",
-                        "kind": "capability_gap",
-                        "status": "ready",
-                        "title": "Implement leah_voice_persona_engine",
-                        "source_payload": {
-                            "primary_capability": "leah_voice_persona_engine",
-                            "execution_group": "leah_build",
-                        },
-                        "metadata": {"capability_name": "leah_voice_persona_engine"},
-                    }
-                ],
-            },
-            "queue_pressure": {},
-            "runtime_guard_status": {"guard_running": True},
-            "triage_hints": {},
-            "autonomy_maintenance": {},
-        }
+        evidence = _codegen_ready_evidence(
+            branches=[
+                {
+                    "branch_id": "leah-gap-001",
+                    "kind": "capability_gap",
+                    "status": "ready",
+                    "title": "Implement leah_voice_persona_engine",
+                    "source_payload": {
+                        "primary_capability": "leah_voice_persona_engine",
+                        "execution_group": "leah_build",
+                        "gaps": ["leah_voice_persona_engine"],
+                    },
+                    "metadata": {"capability_name": "leah_voice_persona_engine"},
+                }
+            ],
+        )
 
         candidates = orchestrator._contract_candidate_actions(evidence)
         leah_candidates = [

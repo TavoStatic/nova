@@ -3,7 +3,10 @@ from __future__ import annotations
 import time
 from typing import Any
 
-from services.nova_mission_owner_verdicts import build_mission_truth_gate
+from services.nova_mission_owner_verdicts import (
+    _release_drift_remediation_eligible,
+    build_mission_truth_gate,
+)
 
 
 def _as_dict(value: Any) -> dict:
@@ -72,6 +75,7 @@ class NovaMissionService:
         ],
         "hold_allow_active_work_tools": [
             "core_thinning",
+            "release_rebuild_verify",
         ],
     }
 
@@ -130,15 +134,14 @@ class NovaMissionService:
         "generated_queue_untested": "generated_queue",
         "core_gate_release_drift": "layer_maturity",
     }
-    TOOL_HOLD_ALLOWANCE_BLOCKERS = {
-        "core_thinning": frozenset({("layer_maturity", "core_gate_release_drift")}),
+    BLOCKER_DEFAULT_REMEDIATION = {
+        "generated_queue_untested": {"action": "generated_queue_run_next", "tools": []},
+        "core_gate_release_drift": {"action": "generated_queue_run_next", "tools": []},
+        "release_truth_stale": {
+            "action": "active_work_tree_run_next",
+            "tools": ["release_rebuild_verify"],
+        },
     }
-    GENERATED_QUEUE_REFRESH_ALLOWED_BLOCKERS = frozenset(
-        {
-            ("generated_queue", "generated_queue_untested"),
-            ("layer_maturity", "core_gate_release_drift"),
-        }
-    )
 
     @staticmethod
     def _mission_policy(policy_snapshot: dict | None) -> dict:
@@ -254,94 +257,190 @@ class NovaMissionService:
         return cls._blocker_records(mission.get("truth_blockers"))
 
     @classmethod
-    def _mission_green_blocker_pairs(cls, mission_snapshot: dict | None) -> list[tuple[str, str]]:
-        pairs: list[tuple[str, str]] = []
-        for blocker in cls._mission_green_blocker_records(mission_snapshot):
-            code = _text(blocker.get("code"), 120)
+    def _mission_hold_blocker_records(cls, mission_snapshot: dict | None) -> list[dict[str, Any]]:
+        mission = _as_dict(mission_snapshot)
+        green_records = [
+            dict(item)
+            for item in _as_list(mission.get("green_blockers"))
+            if isinstance(item, dict) and _text(item.get("code"), 120)
+        ]
+        if green_records:
+            return green_records
+        records: list[dict[str, Any]] = []
+        for item in _as_list(mission.get("truth_blockers")):
+            if isinstance(item, dict):
+                code = _text(_as_dict(item).get("code"), 120)
+                if code:
+                    records.append(dict(item))
+                continue
+            code = _text(item, 120)
             if not code:
                 continue
-            owner = _text(blocker.get("owner"), 80) or cls.BLOCKER_DEFAULT_OWNERS.get(code, "")
-            pairs.append((owner, code))
-        return pairs
+            records.append(
+                {
+                    "owner": cls.BLOCKER_DEFAULT_OWNERS.get(code, ""),
+                    "code": code,
+                }
+            )
+        return records
 
     @classmethod
-    def _release_drift_is_core_gate_only(cls, mission_snapshot: dict | None) -> bool:
-        mission = _as_dict(mission_snapshot)
-        core_gate = _as_dict(mission.get("core_gate"))
-        if not core_gate:
-            return False
-        if not _as_bool(core_gate.get("drift_blocked"), False):
-            return False
-        if _as_list(core_gate.get("missing_roots")):
-            return False
-        if not _as_bool(mission.get("release_truth_current"), False):
-            return False
+    def _blocker_remediation(cls, blocker: dict[str, Any]) -> dict[str, Any]:
+        remediation = _as_dict(blocker.get("remediation"))
+        action = _text(remediation.get("action"), 120)
+        tools = [_text(tool, 120) for tool in _as_list(remediation.get("tools")) if _text(tool, 120)]
+        if action:
+            return {"action": action, "tools": tools}
+        code = _text(blocker.get("code"), 120)
+        default = _as_dict(cls.BLOCKER_DEFAULT_REMEDIATION.get(code))
+        return {
+            "action": _text(default.get("action"), 120),
+            "tools": [_text(tool, 120) for tool in _as_list(default.get("tools")) if _text(tool, 120)],
+        }
 
-        release_evidence: dict[str, Any] = {}
+    @classmethod
+    def _action_matches_remediation(cls, action: str, tool: str, remediation: dict[str, Any]) -> bool:
+        rem_action = _text(remediation.get("action"), 120)
+        tools = [
+            _text(item, 120)
+            for item in _as_list(remediation.get("tools"))
+            if _text(item, 120)
+        ]
+        clean_tool = _text(tool, 120)
+        if rem_action and rem_action == action:
+            if tools:
+                return clean_tool in tools if clean_tool else True
+            return True
+        if clean_tool and tools and clean_tool in tools:
+            return True
+        return False
+
+    @classmethod
+    def _blocker_code_set(cls, mission_snapshot: dict | None) -> set[str]:
+        mission = _as_dict(mission_snapshot)
+        return cls._blocker_codes(mission.get("truth_blockers")) | cls._blocker_codes(
+            mission.get("green_blockers")
+        )
+
+    @classmethod
+    def _release_truth_stale_remediation_window(cls, mission_snapshot: dict | None) -> bool:
+        """Allow release-repair and safe thinning when release truth is stale without stronger blockers."""
+        mission = _as_dict(mission_snapshot)
+        if not _as_bool(mission.get("validation_fresh"), False):
+            return False
+        if not _as_bool(mission.get("regression_current"), False):
+            return False
+        blockers = cls._blocker_code_set(mission)
+        if "core_gate_roots_blocked" in blockers:
+            return False
+        if "release_truth_stale" not in blockers and _as_bool(mission.get("release_truth_current"), False):
+            return False
+        blocking = blockers & (cls.BASE_EVIDENCE_BLOCKERS | cls.ACTIVE_WORK_EVIDENCE_BLOCKERS)
+        return blocking <= {"release_truth_stale", "generated_queue_untested"}
+
+    @classmethod
+    def _mission_release_drift_evidence(cls, mission_snapshot: dict | None) -> dict[str, Any]:
+        mission = _as_dict(mission_snapshot)
         for verdict in _as_list(mission.get("owner_verdicts")):
             payload = _as_dict(verdict)
             if _text(payload.get("owner"), 80) == "release":
-                release_evidence = _as_dict(payload.get("evidence"))
-                break
-        if release_evidence:
-            if not _as_bool(release_evidence.get("runtime_drift_tolerated"), False):
-                return False
-            if not (
-                _as_bool(release_evidence.get("runtime_drift_expected"), False)
-                or _as_bool(release_evidence.get("latest_source_changed_after_build"), False)
-                or _as_bool(release_evidence.get("suppress_closure_inventory_signals"), False)
-            ):
-                return False
-        return True
+                evidence = _as_dict(payload.get("evidence"))
+                if evidence:
+                    return evidence
+        return _as_dict(mission.get("release_runtime_truth"))
 
     @classmethod
-    def generated_queue_validation_allowed_during_hold(cls, mission_snapshot: dict | None) -> bool:
-        mission = _as_dict(mission_snapshot)
-        if not cls._base_evidence_pillars_current(mission):
+    def _hold_allows_active_work_tool(cls, mission_snapshot: dict | None, tool: str) -> bool:
+        clean_tool = _text(tool, 120)
+        if clean_tool not in {"core_thinning", "release_rebuild_verify"}:
             return False
-        blocker_codes = cls._blocker_codes(mission.get("truth_blockers")) | cls._blocker_codes(
+        mission = _as_dict(mission_snapshot)
+        blockers = cls._blocker_codes(mission.get("truth_blockers")) | cls._blocker_codes(
             mission.get("green_blockers")
         )
-        generated_queue_truth_missing = bool(
-            _as_int(mission.get("generated_queue_untested_count"), 0) > 0
-            or "generated_queue_untested" in blocker_codes
-        )
-        if not generated_queue_truth_missing:
+
+        if clean_tool == "release_rebuild_verify":
+            if cls._release_truth_stale_remediation_window(mission):
+                return True
+            if not cls._base_evidence_pillars_current(mission):
+                return False
+            for blocker in cls._mission_hold_blocker_records(mission):
+                remediation = cls._blocker_remediation(blocker)
+                tools = [
+                    _text(item, 120)
+                    for item in _as_list(remediation.get("tools"))
+                    if _text(item, 120)
+                ]
+                if clean_tool in tools:
+                    return True
             return False
-        blocker_pairs = cls._mission_green_blocker_pairs(mission)
-        if not blocker_pairs:
+
+        if "core_gate_roots_blocked" in blockers:
+            return False
+
+        core_gate = _as_dict(mission.get("core_gate"))
+        if _as_list(core_gate.get("missing_roots")):
+            return False
+
+        if cls._release_truth_stale_remediation_window(mission):
             return True
-        for pair in blocker_pairs:
-            if pair not in cls.GENERATED_QUEUE_REFRESH_ALLOWED_BLOCKERS:
-                return False
-            if pair == ("layer_maturity", "core_gate_release_drift") and not cls._release_drift_is_core_gate_only(
-                mission
-            ):
-                return False
+
+        if "core_gate_release_drift" in blockers:
+            return _release_drift_remediation_eligible(
+                core_gate=core_gate,
+                release_truth_current=_as_bool(mission.get("release_truth_current"), False),
+                release_evidence=cls._mission_release_drift_evidence(mission),
+            )
+        if not cls.active_work_evidence_current(mission):
+            return False
         return True
 
     @classmethod
-    def active_work_tool_allowed_during_hold(cls, tool: str, mission_snapshot: dict | None) -> bool:
-        clean_tool = _text(tool, 120)
-        if not clean_tool:
+    def _owner_remediation_allows_action(
+        cls,
+        action_type: str,
+        mission_snapshot: dict | None,
+        *,
+        action_context: dict | None = None,
+    ) -> bool:
+        action = _text(action_type, 120)
+        if action not in {"active_work_tree_run_next", "generated_queue_run_next"}:
             return False
-        allowed_blockers = cls.TOOL_HOLD_ALLOWANCE_BLOCKERS.get(clean_tool)
-        if not allowed_blockers:
-            return False
-        if not cls.active_work_evidence_current(mission_snapshot):
-            return False
-        blocker_records = cls._mission_green_blocker_records(mission_snapshot)
+        mission = _as_dict(mission_snapshot)
+        blocker_records = cls._mission_hold_blocker_records(mission)
         if not blocker_records:
-            return True
+            return False
+        context = _as_dict(action_context)
+        tool = _text(context.get("recommended_tool") or context.get("tool"), 120)
         for blocker in blocker_records:
-            pair = (_text(blocker.get("owner"), 80), _text(blocker.get("code"), 120))
-            if pair not in allowed_blockers:
-                return False
-            if pair == ("layer_maturity", "core_gate_release_drift") and not cls._release_drift_is_core_gate_only(
-                mission_snapshot
-            ):
-                return False
-        return True
+            remediation = cls._blocker_remediation(blocker)
+            if not remediation.get("action") and not remediation.get("tools"):
+                continue
+            if not cls._action_matches_remediation(action, tool, remediation):
+                continue
+            code = _text(blocker.get("code"), 120)
+            if action == "generated_queue_run_next":
+                if code == "generated_queue_untested":
+                    if (
+                        _as_bool(mission.get("validation_fresh"), False)
+                        and _as_bool(mission.get("regression_current"), False)
+                    ):
+                        return True
+                    continue
+                if cls._base_evidence_pillars_current(mission):
+                    return True
+                continue
+            if code == "regression_failed" or tool in {"release_rebuild_verify", "core_thinning"}:
+                if code == "release_truth_stale" and tool == "release_rebuild_verify":
+                    return True
+                if cls._base_evidence_pillars_current(mission):
+                    return True
+                if tool in {"release_rebuild_verify", "core_thinning"} and cls._release_truth_stale_remediation_window(mission):
+                    return True
+                continue
+            if cls.active_work_evidence_current(mission):
+                return True
+        return False
 
     @classmethod
     def hold_blocks_legacy_execution(cls, mission_snapshot: dict | None) -> bool:
@@ -372,16 +471,18 @@ class NovaMissionService:
         if not cls.hold_blocks_legacy_execution(mission_snapshot):
             return False
         block = set(contract.get("hold_block_actions") or [])
-        if action == "active_work_tree_run_next" and action in block:
+        allow_active_tools = set(contract.get("hold_allow_active_work_tools") or [])
+        if action in block and action == "active_work_tree_run_next":
             context = _as_dict(action_context)
             tool = _text(context.get("recommended_tool") or context.get("tool"), 120)
-            allow_tools = set(contract.get("hold_allow_active_work_tools") or [])
-            mission = _as_dict(mission_snapshot)
-            if tool in allow_tools and cls.active_work_tool_allowed_during_hold(tool, mission):
+            if tool in allow_active_tools and cls._hold_allows_active_work_tool(mission_snapshot, tool):
                 return False
-        if action == "generated_queue_run_next" and action in block:
-            if cls.generated_queue_validation_allowed_during_hold(mission_snapshot):
-                return False
+        if action in block and cls._owner_remediation_allows_action(
+            action,
+            mission_snapshot,
+            action_context=action_context,
+        ):
+            return False
         return action in block
 
     @classmethod
@@ -646,6 +747,7 @@ class NovaMissionService:
             ),
             "validation_fresh": _as_bool(truth_gate.get("validation_fresh"), False),
             "regression_current": _as_bool(truth_gate.get("regression_current"), False),
+            "regression_passed": _as_bool(truth_gate.get("regression_passed"), False),
             "release_truth_current": _as_bool(truth_gate.get("release_truth_current"), False),
             "core_gate_ok": _as_bool(truth_gate.get("core_gate_ok"), False),
             "core_gate": core_gate,

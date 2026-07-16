@@ -75,19 +75,51 @@ def test_apply_sequence_result_updates_ledger_and_context():
     assert turns[-1] == ("assistant", "reply")
 
 
-def test_execute_cli_sequence_enables_early_planner_and_stops_before_llm():
+def test_apply_sequence_result_mutates_shared_session_turns():
+    session = _FakeSession()
+    shared_turns = [("user", "nova")]
+
+    apply_sequence_result(
+        final="reply",
+        meta={"planner_decision": "deterministic"},
+        pending_action_ledger=None,
+        merge_route_evidence_fn=lambda routing_decision, meta: routing_decision or {},
+        set_pending_action_fn=lambda _value: None,
+        session_state=session,
+        apply_reply_runtime_effects_fn=lambda **_kwargs: {"context_updated": False},
+        apply_reply_session_updates_fn=lambda *_args, **_kwargs: None,
+        sync_pending_conversation_tracking_fn=lambda: None,
+        trace_fn=lambda *_args, **_kwargs: None,
+        emit_cli_reply_outcome_fn=lambda **kwargs: kwargs["session_turns"].append(
+            ("assistant", kwargs["reply_text"])
+        ),
+        behavior_record_event_fn=lambda *_args, **_kwargs: None,
+        extract_urls_fn=lambda _text: [],
+        session_turns=shared_turns,
+        recent_tool_context="",
+        recent_web_urls=[],
+    )
+
+    assert shared_turns == [("user", "nova"), ("assistant", "reply")]
+
+
+def test_execute_cli_sequence_uses_shared_reply_sequence_contract():
     captured = {}
 
     def _fake_execute_reply_sequence(**kwargs):
         captured.update(kwargs)
-        return "reply", {"planner_decision": "unhandled"}
+        return "reply", {"planner_decision": "llm_fallback"}
 
     reply, meta = execute_cli_sequence(
         execute_reply_sequence_fn=_fake_execute_reply_sequence,
         text="hello",
         turns=[],
+        input_source="typed",
+        channel="cli",
     )
 
     assert reply == "reply"
-    assert meta["planner_decision"] == "unhandled"
-    assert captured["stop_before_llm_fallback"] is True
+    assert meta["planner_decision"] == "llm_fallback"
+    assert captured["input_source"] == "typed"
+    assert captured["channel"] == "cli"
+    assert "stop_before_llm_fallback" not in captured

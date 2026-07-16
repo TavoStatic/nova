@@ -31,6 +31,13 @@ def _bootstrap_child_process(argv: list[str]) -> int:
     env = os.environ.copy()
     env["NOVA_RUNTIME_DIR"] = str(demo_runtime)
     env["NOVA_EDFI_DEMO_ACTIVE"] = "1"
+    for isolated_key in (
+        "NOVA_TEST_RUNNER",
+        "NOVA_VALIDATION_RUNTIME_DIR",
+        "NOVA_WORK_TREE_DB",
+        "NOVA_MEMORY_DB",
+    ):
+        env.pop(isolated_key, None)
     try:
         completed = subprocess.run(
             [sys.executable, str(Path(__file__).resolve()), *argv],

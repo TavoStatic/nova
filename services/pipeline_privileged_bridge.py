@@ -87,3 +87,49 @@ def run_privileged_pipeline_query(
             "error": "Timed out waiting for privileged pipeline response.",
         }
     return response
+
+
+def unwrap_privileged_pipeline_response(response: Mapping[str, Any]) -> dict[str, Any]:
+    payload = dict(response or {})
+    inner = payload.get("result")
+    if isinstance(inner, dict):
+        result = dict(inner)
+        result["governed_route"] = "privileged_worker"
+        result["privileged_request_id"] = str(payload.get("request_id") or "").strip()
+        if not bool(payload.get("ok")) and bool(result.get("ok")):
+            result["ok"] = False
+        if not bool(result.get("ok")) and not str(result.get("error") or "").strip():
+            result["error"] = str(payload.get("error") or "privileged_pipeline_failed")
+        return result
+    if not bool(payload.get("ok")):
+        return {
+            "ok": False,
+            "error": str(payload.get("error") or "privileged_pipeline_failed"),
+            "governed_route": "privileged_worker",
+            "privileged_request_id": str(payload.get("request_id") or "").strip(),
+        }
+    return dict(payload)
+
+
+def run_governed_pipeline_query(
+    pipeline_id: str,
+    operation: str,
+    params: Optional[Mapping[str, Any]] = None,
+    *,
+    row_limit: Optional[int] = None,
+    requested_by: str = "",
+    timeout_sec: int = 60,
+    poll_interval_sec: float = 0.5,
+    runtime_root: Optional[Path] = None,
+) -> dict[str, Any]:
+    response = run_privileged_pipeline_query(
+        pipeline_id,
+        operation,
+        params,
+        row_limit=row_limit,
+        requested_by=requested_by,
+        timeout_sec=timeout_sec,
+        poll_interval_sec=poll_interval_sec,
+        runtime_root=runtime_root,
+    )
+    return unwrap_privileged_pipeline_response(response)

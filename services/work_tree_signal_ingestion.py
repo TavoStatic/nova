@@ -8,6 +8,7 @@ from typing import Any
 import work_tree
 from services.evidence_validity import evidence_result_valid
 from services.nova_temporal_service import build_temporal_pressure
+from services.nova_live_closure import build_live_closure_inventory_payload
 from services.nova_wiring_inventory import build_root_closure_inventory_payload
 from services.nova_wiring_inventory import build_self_repair_closure_inventory_payload
 from services.nova_wiring_inventory import build_wiring_inventory_payload
@@ -17,8 +18,27 @@ from services.layer_maturity_policy import (
     filter_actionable_capability_gaps,
 )
 from services.nova_mission import NOVA_MISSION_SERVICE
+from services.recurring_finding_lifecycle import (
+    BRANCH_LIFECYCLE_KEY,
+    KEY_SATISFACTION_FINGERPRINT,
+    KEY_VERSION,
+    REOPEN_ACTIVE_SIGNAL,
+    REOPEN_SEQUENCE_RESTART,
+    attach_branch_lifecycle,
+    bump_branch_reopen,
+    finding_key_from_meta,
+    initial_branch_lifecycle,
+    initial_task_meta,
+    read_branch_lifecycle,
+    read_task_state,
+    reopen_task_meta,
+    stamp_branch_satisfied,
+    task_finding_key,
+    task_fingerprint,
+)
+from services.regression_evidence import regression_failure_active
 from services.release_runtime_truth import release_drift_suppresses_closure_signals
-from work_tree_contracts import BranchStatus
+from work_tree_contracts import BranchStatus, ToolStatus
 
 
 _VALID_SIGNAL_CLASSES = {
@@ -2345,12 +2365,15 @@ def _hold_edfi_capability_profile_branch_until_read_evidence(*, branch: Any, not
         task = work_tree.add_task_to_branch(
             branch.branch_id,
             hold_title,
-            meta={
-                "inactive_signal_observation": True,
-                "blocked_reason": hold_reason,
-                "block_reason": hold_reason,
-                "inactive_signal_reason": note,
-            },
+            meta=_recurring_blocked_task_meta(
+                branch,
+                task_title=hold_title,
+                blocked_reason=hold_reason,
+                extra={
+                    "inactive_signal_observation": True,
+                    "inactive_signal_reason": note,
+                },
+            ),
         )
         open_tasks.append(task)
         changed = True
@@ -2996,6 +3019,76 @@ def _self_repair_closure_inventory_signals_from_status(status_payload: dict[str,
                         "allowed_tools": ["find"],
                         "preferred_tool": "find",
                         "tool_args": [root_id, "."],
+                    },
+                ],
+            }
+        )
+    return signals
+
+
+def _live_closure_inventory_signals_from_status(status_payload: dict[str, Any]) -> list[dict[str, Any]]:
+    if _release_drift_suppresses_closure_signals(status_payload):
+        return []
+    inventory = (
+        status_payload.get("live_closure_inventory")
+        if isinstance(status_payload.get("live_closure_inventory"), dict)
+        else build_live_closure_inventory_payload(status_payload)
+    )
+    if int(inventory.get("gap_count", 0) or 0) <= 0:
+        return []
+
+    signals: list[dict[str, Any]] = []
+    for row in list(inventory.get("roots") or []):
+        if not isinstance(row, dict) or bool(row.get("ok", False)):
+            continue
+        root_id = str(row.get("root_id") or "").strip()
+        if not root_id:
+            continue
+        live_gaps = [str(item or "").strip() for item in list(row.get("live_gaps") or []) if str(item or "").strip()]
+        if not live_gaps:
+            continue
+        source_files = [str(item or "").strip() for item in list(row.get("source_files") or []) if str(item or "").strip()]
+        first_source_file = source_files[0] if source_files else "services/nova_live_closure.py"
+        signals.append(
+            {
+                "source": "live_closure_inventory",
+                "signal_class": "governance_pressure",
+                "title": f"Close live feedback loop for source root: {root_id}",
+                "fingerprint": {
+                    "class": "governance_pressure",
+                    "surface": "live_closure_inventory",
+                    "error": "live_closure_gap",
+                    "symbol": root_id,
+                },
+                "payload": {
+                    "root_id": root_id,
+                    "label": str(row.get("label") or ""),
+                    "live_closure_depth": str(row.get("live_closure_depth") or ""),
+                    "live_gaps": live_gaps,
+                    "source_files": source_files,
+                    "proof_scope": str(inventory.get("proof_scope") or "live_closure"),
+                    "rationale": (
+                        "A Nova source root is not live-closed until behavioral evidence shows the "
+                        "feedback loop can diagnose pressure, produce executable work, and close with valid evidence."
+                    ),
+                },
+                "severity": "high",
+                "actionability": "safe_now",
+                "allowed_tools": ["read", "find", "pulse", "system_check"],
+                "preferred_tool": "read",
+                "next_task": f"Read live closure evidence for {root_id}",
+                "task_sequence": [
+                    {
+                        "title": f"Read source root evidence for {root_id}",
+                        "allowed_tools": ["read"],
+                        "preferred_tool": "read",
+                        "tool_args": [first_source_file],
+                    },
+                    {
+                        "title": f"Read live closure inventory for {root_id}",
+                        "allowed_tools": ["read"],
+                        "preferred_tool": "read",
+                        "tool_args": ["services/nova_live_closure.py"],
                     },
                 ],
             }
@@ -4064,6 +4157,18 @@ def _has_self_repair_closure_inventory_surface(status_payload: dict[str, Any]) -
     )
 
 
+def _has_live_closure_inventory_surface(status_payload: dict[str, Any]) -> bool:
+    return any(
+        key in status_payload
+        for key in (
+            "live_closure_inventory",
+            "live_closure_inventory_ok",
+            "live_closure_inventory_gap_count",
+            "live_closure_inventory_gap_roots",
+        )
+    )
+
+
 def _has_autonomy_orchestrator_surface(status_payload: dict[str, Any]) -> bool:
     return any(
         key in status_payload
@@ -4378,8 +4483,13 @@ def _release_readiness_signal_from_status(status_payload: dict[str, Any]) -> dic
 
     if release_ok and ready_to_ship:
         return None
-    if release_ok and latest_state in {"", "no-builds"} and readiness_state in {"", "no-builds"} and not artifact_path:
-        return None
+
+    no_builds_recorded = (
+        release_ok
+        and latest_state in {"", "no-builds"}
+        and readiness_state in {"", "no-builds"}
+        and not artifact_path
+    )
 
     if not release_ok:
         error_symbol = "release_status_unreadable"
@@ -4387,6 +4497,12 @@ def _release_readiness_signal_from_status(status_payload: dict[str, Any]) -> dic
         severity = "high"
         actionability = "safe_now"
         next_task = "Read release status and ledger parse failure before changing package state"
+    elif no_builds_recorded:
+        error_symbol = "release_no_builds_recorded"
+        title = "Release package has no recorded build"
+        severity = "high"
+        actionability = "safe_now"
+        next_task = "Rebuild and verify initial release package from current source"
     elif readiness_state == "needs-verification":
         error_symbol = "release_needs_verification"
         title = "Release package exists without current verification"
@@ -4419,7 +4535,7 @@ def _release_readiness_signal_from_status(status_payload: dict[str, Any]) -> dic
         next_task = "Read release readiness state and ledger evidence"
 
     task_sequence: list[dict[str, Any]] = []
-    if ledger_path:
+    if ledger_path and not no_builds_recorded:
         task_sequence.append({
             "title": "Read release ledger for current package",
             "allowed_tools": ["read"],
@@ -4467,6 +4583,13 @@ def _release_readiness_signal_from_status(status_payload: dict[str, Any]) -> dic
     if readiness_state == "source-changed-after-build":
         task_sequence.append({
             "title": "Rebuild and verify release package from current source",
+            "allowed_tools": ["release_rebuild_verify"],
+            "preferred_tool": "release_rebuild_verify",
+            "tool_args": ["work-tree-rebuild"],
+        })
+    if no_builds_recorded:
+        task_sequence.append({
+            "title": "Rebuild and verify initial release package from current source",
             "allowed_tools": ["release_rebuild_verify"],
             "preferred_tool": "release_rebuild_verify",
             "tool_args": ["work-tree-rebuild"],
@@ -4830,15 +4953,142 @@ def _restart_completed_source_root_sequence_pass(branch_id: str, normalized: dic
     if not sequence_titles:
         return False
 
+    branch = work_tree.get_branch(branch_id)
+    branch_key = str(getattr(branch, "source_key", "") or "").strip()
     changed = False
     for task in work_tree.list_branch_tasks(branch_id):
         title = str(getattr(task, "title", "") or "").strip()
         status = str(getattr(getattr(task, "status", ""), "value", getattr(task, "status", "")) or "").strip().lower()
         if title not in sequence_titles or status != "complete":
             continue
-        work_tree.mark_task_dropped(task.task_id, reason="source_root_sequence_restarted_for_active_signal")
+        prior_meta = dict(getattr(task, "meta", {}) or {}) if isinstance(getattr(task, "meta", None), dict) else {}
+        finding_key = finding_key_from_meta(prior_meta) or task_finding_key(branch_finding_key=branch_key, task_title=title)
+        prior_state = read_task_state(prior_meta)
+        fingerprint = str(prior_state.get(KEY_SATISFACTION_FINGERPRINT) or "").strip() or task_fingerprint(task_title=title)
+        work_tree.reopen_task(
+            task.task_id,
+            meta_updates=reopen_task_meta(
+                prior_meta,
+                finding_key=finding_key,
+                satisfaction_fingerprint=fingerprint,
+                reason=REOPEN_SEQUENCE_RESTART,
+            ),
+        )
         changed = True
     return changed
+
+
+def _recurring_signal_task_meta(
+    branch,
+    *,
+    task_text: str,
+    task_preferred_tool: str = "",
+    task_allowed_tools: list[str] | None = None,
+    sequence_task: dict[str, Any] | None = None,
+    extra: dict[str, object] | None = None,
+) -> dict[str, object]:
+    branch_key = str(getattr(branch, "source_key", "") or "").strip()
+    fingerprint = task_fingerprint(task_title=task_text, preferred_tool=task_preferred_tool)
+    meta = initial_task_meta(
+        finding_key=task_finding_key(branch_finding_key=branch_key, task_title=task_text),
+        satisfaction_fingerprint=fingerprint,
+        extra=dict(extra or {}),
+    )
+    if task_preferred_tool:
+        meta["expected_tool"] = task_preferred_tool
+    if task_allowed_tools:
+        meta["allowed_tools"] = list(task_allowed_tools)
+    if isinstance((sequence_task or {}).get("tool_args"), list):
+        meta["tool_args"] = [str(arg) for arg in list((sequence_task or {}).get("tool_args") or [])]
+    if isinstance(extra, dict):
+        meta.update(extra)
+    return meta
+
+
+def _recurring_blocked_task_meta(
+    branch,
+    *,
+    task_title: str,
+    blocked_reason: str,
+    extra: dict[str, object] | None = None,
+) -> dict[str, object]:
+    payload = dict(extra or {})
+    payload.setdefault("blocked_reason", blocked_reason)
+    payload.setdefault("block_reason", blocked_reason)
+    return _recurring_signal_task_meta(
+        branch,
+        task_text=task_title,
+        extra=payload,
+    )
+
+
+def _reset_branch_tool_state(branch, *, preserve_failed: bool = True) -> bool:
+    changed = False
+    for tool_name, state in list(dict(getattr(branch, "tool_state", {}) or {}).items()):
+        if preserve_failed and state == ToolStatus.FAILED:
+            continue
+        if state in {ToolStatus.RUNNING, ToolStatus.BLOCKED}:
+            branch.tool_state[tool_name] = ToolStatus.READY
+            changed = True
+    return changed
+
+
+def _signal_payload_for_material_compare(payload: dict[str, Any] | None) -> dict[str, Any]:
+    cleaned = dict(payload or {})
+    cleaned.pop(BRANCH_LIFECYCLE_KEY, None)
+    return cleaned
+
+
+def _signal_materially_changed(branch, normalized: dict[str, Any]) -> bool:
+    prior_severity = str(getattr(branch, "work_class", "") or "").strip().lower()
+    next_severity = str(normalized.get("work_class") or "").strip().lower()
+    if prior_severity != next_severity:
+        return True
+    prior_actionability = str(getattr(branch, "actionability", "") or "").strip().lower()
+    next_actionability = str(normalized.get("actionability") or "").strip().lower()
+    if prior_actionability != next_actionability:
+        return True
+    prior_title = str(getattr(branch, "title", "") or "").strip()
+    next_title = str(normalized.get("title") or "").strip()
+    if prior_title != next_title:
+        return True
+    prior_payload = _signal_payload_for_material_compare(getattr(branch, "source_payload", {}) or {})
+    next_payload = _signal_payload_for_material_compare(normalized.get("payload") or {})
+    prior_fp = json.dumps(prior_payload, sort_keys=True, ensure_ascii=True)
+    next_fp = json.dumps(next_payload, sort_keys=True, ensure_ascii=True)
+    return prior_fp != next_fp
+
+
+def _is_archived_signal_branch(branch: Any) -> bool:
+    if branch.status == BranchStatus.ARCHIVED:
+        return True
+    resolution = str(getattr(branch, "resolution_state", "") or "").strip().lower()
+    return resolution == "archived"
+
+
+def _mark_branch_resolved_with_lifecycle(branch, *, note: str, completion_action: str) -> None:
+    _reset_branch_tool_state(branch, preserve_failed=True)
+    branch.source_payload = stamp_branch_satisfied(
+        dict(getattr(branch, "source_payload", {}) or {}),
+        completion_action=completion_action,
+    )
+    for task in work_tree.list_branch_tasks(branch.branch_id):
+        status = str(getattr(getattr(task, "status", None), "value", getattr(task, "status", "")) or "").strip().lower()
+        if status in {"complete", "dropped"}:
+            continue
+        work_tree.complete_task_with_recurring_finding(
+            task.task_id,
+            completion_action=completion_action,
+            ok=True,
+        )
+    branch.status = BranchStatus.COMPLETE
+    branch.resolution_state = "retired" if str(completion_action or "").strip() == "signal_retired" else "resolved"
+    branch.priority = 0
+    branch.allowed_tools = []
+    branch.preferred_tool = None
+    existing_notes = str(branch.notes or "").strip()
+    if note and note not in existing_notes:
+        branch.notes = f"{existing_notes}\nResolution: {note}".strip() if existing_notes else f"Resolution: {note}"
 
 
 def _sequence_item_expected_tools(item: dict[str, Any]) -> list[str]:
@@ -5057,6 +5307,11 @@ class WorkTreeSignalIngestionService:
 
         closed_branch = self._find_branch_by_source_key(tree.tree_id, source_key, open_only=False)
         if closed_branch is not None:
+            closed_branch.source_payload = bump_branch_reopen(
+                closed_branch.source_payload,
+                finding_key=source_key,
+                reason=REOPEN_ACTIVE_SIGNAL,
+            )
             self._apply_branch_update(closed_branch, normalized, reopen=True)
             return {
                 "action": "reopened",
@@ -5078,6 +5333,10 @@ class WorkTreeSignalIngestionService:
             title,
             _bucket_for_work_class(work_class),
             root_branch.branch_id,
+        )
+        branch.source_payload = initial_branch_lifecycle(
+            branch.source_payload,
+            finding_key=source_key,
         )
         self._apply_branch_update(branch, normalized, reopen=False, first_seen=True)
 
@@ -5211,6 +5470,8 @@ class WorkTreeSignalIngestionService:
             signals.extend(_root_closure_inventory_signals_from_status(status_payload))
         if _has_self_repair_closure_inventory_surface(status_payload) and not suppress_ambient:
             signals.extend(_self_repair_closure_inventory_signals_from_status(status_payload))
+        if _has_live_closure_inventory_surface(status_payload) and not suppress_ambient:
+            signals.extend(_live_closure_inventory_signals_from_status(status_payload))
         orchestrator_signal = _autonomy_orchestrator_signal_from_status(status_payload)
         if orchestrator_signal is not None:
             signals.append(orchestrator_signal)
@@ -5253,7 +5514,7 @@ class WorkTreeSignalIngestionService:
         maintenance = status_payload.get("autonomy_maintenance") if isinstance(status_payload.get("autonomy_maintenance"), dict) else {}
         last_regression = str(maintenance.get("last_regression_status") or "").strip()
         last_regression_stale = bool(maintenance.get("last_regression_stale", False))
-        if last_regression and "pass" not in last_regression.lower() and last_regression.lower() != "ok" and not last_regression_stale:
+        if regression_failure_active(status_label=last_regression, stale=last_regression_stale):
             signals.append({
                 "source": "test_ecosystem",
                 "signal_class": "regression_failure",
@@ -5304,7 +5565,12 @@ class WorkTreeSignalIngestionService:
             results.append(self.ingest_signal(signal))
         return results
 
-    def sync_status_snapshot(self, status_payload: dict[str, Any]) -> list[dict[str, Any]]:
+    def sync_status_snapshot(
+        self,
+        status_payload: dict[str, Any],
+        *,
+        archive_superseded: bool = True,
+    ) -> list[dict[str, Any]]:
         results = list(self.ingest_status_snapshot(status_payload))
         alerts = [str(item or "").strip().lower() for item in list(status_payload.get("alerts") or [])]
         if "alerts" in status_payload and not any("error_spike" in alert for alert in alerts):
@@ -5664,6 +5930,30 @@ class WorkTreeSignalIngestionService:
                         ),
                     )
                 )
+        if not _release_drift_suppresses_closure_signals(status_payload) and _has_live_closure_inventory_surface(status_payload):
+            live_closure_signals = _live_closure_inventory_signals_from_status(status_payload)
+            if live_closure_signals:
+                active_keys = {
+                    self.source_key_for_signal(signal)
+                    for signal in live_closure_signals
+                    if self.source_key_for_signal(signal)
+                }
+                results.extend(
+                    self.resolve_inactive_signal_branches(
+                        signal_class="governance_pressure",
+                        source="live_closure_inventory",
+                        active_source_keys=active_keys,
+                        reason="Live closure inventory moved to a newer active source signal.",
+                    )
+                )
+            else:
+                results.extend(
+                    self.resolve_signal_branches(
+                        signal_class="governance_pressure",
+                        source="live_closure_inventory",
+                        reason="Live closure inventory reports no semantic feedback-loop gaps for validator roots.",
+                    )
+                )
         if _has_autonomy_orchestrator_surface(status_payload) and _autonomy_orchestrator_signal_from_status(status_payload) is None:
             results.extend(
                 self.resolve_signal_branches(
@@ -5787,11 +6077,9 @@ class WorkTreeSignalIngestionService:
         maintenance = status_payload.get("autonomy_maintenance") if isinstance(status_payload.get("autonomy_maintenance"), dict) else {}
         last_regression = str(maintenance.get("last_regression_status") or "").strip()
         last_regression_stale = bool(maintenance.get("last_regression_stale", False))
-        regression_active = bool(
-            last_regression
-            and "pass" not in last_regression.lower()
-            and last_regression.lower() != "ok"
-            and not last_regression_stale
+        regression_active = regression_failure_active(
+            status_label=last_regression,
+            stale=last_regression_stale,
         )
         if _has_regression_surface(status_payload) and not regression_active:
             if last_regression_stale:
@@ -5861,7 +6149,84 @@ class WorkTreeSignalIngestionService:
                         )
                     )
         results.extend(self._resolve_operator_control_from_outbox_truth(status_payload))
+        results.extend(self.reconcile_signal_branch_hygiene(archive_superseded=archive_superseded))
+        return results
+
+    def reconcile_signal_branch_hygiene(self, *, archive_superseded: bool = True) -> list[dict[str, Any]]:
+        tree = self._find_signal_tree()
+        if tree is None:
+            return []
+
+        results: list[dict[str, Any]] = []
+        for branch in work_tree.list_tree_branches(tree.tree_id):
+            if branch.branch_id == tree.root_branch_id:
+                continue
+            if _is_archived_signal_branch(branch):
+                continue
+            if _reset_branch_tool_state(branch, preserve_failed=True):
+                work_tree.touch_branch(branch.branch_id)
+                results.append(
+                    {
+                        "action": "tool_state_reset",
+                        "tree_id": tree.tree_id,
+                        "branch_id": branch.branch_id,
+                        "reason": "cleared_stale_running_or_blocked_tool_state",
+                    }
+                )
         results.extend(self.dedupe_signal_branches())
+        if archive_superseded:
+            results.extend(self.archive_superseded_complete_signal_branches())
+        return results
+
+    @staticmethod
+    def _signal_branch_archive_group_key(branch: Any) -> tuple[str, str] | None:
+        source_type = str(getattr(branch, "source_type", "") or "").strip().lower()
+        source_key = str(getattr(branch, "source_key", "") or "").strip()
+        if not source_type or not source_key:
+            return None
+        parts = [part.strip() for part in source_key.split(":") if part.strip()]
+        if len(parts) < 3:
+            return None
+        return source_type, ":".join(parts[:3])
+
+    def archive_superseded_complete_signal_branches(self) -> list[dict[str, Any]]:
+        tree = self._find_signal_tree()
+        if tree is None:
+            return []
+
+        groups: dict[tuple[str, str], list[Any]] = {}
+        for branch in work_tree.list_tree_branches(tree.tree_id):
+            if branch.branch_id == tree.root_branch_id:
+                continue
+            if branch.status != BranchStatus.COMPLETE:
+                continue
+            resolution = str(getattr(branch, "resolution_state", "") or "").strip().lower()
+            if resolution not in {"resolved", "retired"}:
+                continue
+            group_key = self._signal_branch_archive_group_key(branch)
+            if group_key is None:
+                continue
+            groups.setdefault(group_key, []).append(branch)
+
+        results: list[dict[str, Any]] = []
+        now = datetime.now()
+        archive_note = "Superseded complete signal branch archived after canonical retention."
+        for branches in groups.values():
+            if len(branches) < 2:
+                continue
+            keeper = max(branches, key=self._branch_recency_key)
+            for branch in branches:
+                if branch.branch_id == keeper.branch_id:
+                    continue
+                if branch.status == BranchStatus.ARCHIVED:
+                    continue
+                results.append(self._archive_signal_branch(branch, note=archive_note, now=now, persist=False))
+        if results:
+            work_tree._refresh_tree_state(tree.tree_id, persist=False)
+            work_tree.persist_branches(
+                [str(item.get("branch_id") or "") for item in results],
+                batch_size=64,
+            )
         return results
 
     def _resolve_operator_control_from_outbox_truth(self, status_payload: dict[str, Any]) -> list[dict[str, Any]]:
@@ -5916,6 +6281,8 @@ class WorkTreeSignalIngestionService:
         groups: dict[tuple[str, str], list[Any]] = {}
         for branch in work_tree.list_tree_branches(tree.tree_id):
             if branch.branch_id == tree.root_branch_id:
+                continue
+            if _is_archived_signal_branch(branch):
                 continue
             source_type = str(getattr(branch, "source_type", "") or "").strip().lower()
             source_key = str(getattr(branch, "source_key", "") or "").strip()
@@ -5993,7 +6360,7 @@ class WorkTreeSignalIngestionService:
             "reason": note,
         }
 
-    def _archive_signal_branch(self, branch: Any, *, note: str, now: datetime) -> dict[str, Any]:
+    def _archive_signal_branch(self, branch: Any, *, note: str, now: datetime, persist: bool = True) -> dict[str, Any]:
         for task in work_tree.list_branch_tasks(branch.branch_id):
             status = str(getattr(getattr(task, "status", None), "value", getattr(task, "status", "")) or "").strip().lower()
             if status in {"complete", "dropped"}:
@@ -6005,10 +6372,12 @@ class WorkTreeSignalIngestionService:
         branch.allowed_tools = []
         branch.preferred_tool = None
         branch.last_seen_at = now
+        branch.updated_at = now
         existing_notes = str(branch.notes or "").strip()
         if note and note not in existing_notes:
             branch.notes = f"{existing_notes}\nArchived: {note}".strip() if existing_notes else f"Archived: {note}"
-        work_tree.touch_branch(branch.branch_id)
+        if persist:
+            work_tree.touch_branch(branch.branch_id)
         return {
             "action": "archived",
             "tree_id": branch.tree_id,
@@ -6036,6 +6405,8 @@ class WorkTreeSignalIngestionService:
         for branch in work_tree.list_tree_branches(tree.tree_id):
             if branch.branch_id == tree.root_branch_id:
                 continue
+            if _is_archived_signal_branch(branch):
+                continue
             if str(getattr(branch, "work_class", "") or "").strip().lower() != "governance_pressure":
                 continue
             if str(getattr(branch, "source_type", "") or "").strip().lower() != "edfi_capability_profile":
@@ -6054,22 +6425,12 @@ class WorkTreeSignalIngestionService:
                 branch.branch_id,
                 expected_path=expected_profile_path,
             ):
-                for task in work_tree.list_branch_tasks(branch.branch_id):
-                    status = str(
-                        getattr(getattr(task, "status", None), "value", getattr(task, "status", "")) or ""
-                    ).strip().lower()
-                    if status in {"complete", "dropped"}:
-                        continue
-                    work_tree.mark_task_complete(task.task_id)
-                branch.status = BranchStatus.COMPLETE
-                branch.resolution_state = "resolved"
-                branch.priority = 0
-                branch.allowed_tools = []
-                branch.preferred_tool = None
+                _mark_branch_resolved_with_lifecycle(
+                    branch,
+                    note=note,
+                    completion_action="edfi_capability_profile_resolved",
+                )
                 branch.last_seen_at = now
-                existing_notes = str(branch.notes or "").strip()
-                if note and note not in existing_notes:
-                    branch.notes = f"{existing_notes}\nResolution: {note}".strip() if existing_notes else f"Resolution: {note}"
                 work_tree.touch_branch(branch.branch_id)
                 results.append(
                     {
@@ -6118,6 +6479,8 @@ class WorkTreeSignalIngestionService:
         for branch in work_tree.list_tree_branches(tree.tree_id):
             if branch.branch_id == tree.root_branch_id:
                 continue
+            if _is_archived_signal_branch(branch):
+                continue
             if target_work_class and str(getattr(branch, "work_class", "") or "").strip().lower() != target_work_class:
                 continue
             if normalized_source and str(getattr(branch, "source_type", "") or "").strip().lower() != normalized_source:
@@ -6129,20 +6492,12 @@ class WorkTreeSignalIngestionService:
             resolution = str(getattr(branch, "resolution_state", "") or "").strip().lower()
             if resolution in {"resolved", "retired"} and branch.status == BranchStatus.COMPLETE:
                 continue
-            for task in work_tree.list_branch_tasks(branch.branch_id):
-                status = str(getattr(getattr(task, "status", None), "value", getattr(task, "status", "")) or "").strip().lower()
-                if status in {"complete", "dropped"}:
-                    continue
-                work_tree.mark_task_complete(task.task_id)
-            branch.status = BranchStatus.COMPLETE
-            branch.resolution_state = "resolved"
-            branch.priority = 0
-            branch.allowed_tools = []
-            branch.preferred_tool = None
+            _mark_branch_resolved_with_lifecycle(
+                branch,
+                note=note,
+                completion_action="signal_resolved",
+            )
             branch.last_seen_at = now
-            existing_notes = str(branch.notes or "").strip()
-            if note and note not in existing_notes:
-                branch.notes = f"{existing_notes}\nResolution: {note}".strip() if existing_notes else f"Resolution: {note}"
             work_tree.touch_branch(branch.branch_id)
             results.append(
                 {
@@ -6173,12 +6528,15 @@ class WorkTreeSignalIngestionService:
             task = work_tree.add_task_to_branch(
                 branch.branch_id,
                 hold_title,
-                meta={
-                    "inactive_signal_observation": True,
-                    "blocked_reason": hold_reason,
-                    "block_reason": hold_reason,
-                    "inactive_signal_reason": note,
-                },
+                meta=_recurring_blocked_task_meta(
+                    branch,
+                    task_title=hold_title,
+                    blocked_reason=hold_reason,
+                    extra={
+                        "inactive_signal_observation": True,
+                        "inactive_signal_reason": note,
+                    },
+                ),
             )
             open_tasks.append(task)
             changed = True
@@ -6250,6 +6608,8 @@ class WorkTreeSignalIngestionService:
         for branch in work_tree.list_tree_branches(tree.tree_id):
             if branch.branch_id == tree.root_branch_id:
                 continue
+            if _is_archived_signal_branch(branch):
+                continue
             if target_work_class and str(getattr(branch, "work_class", "") or "").strip().lower() != target_work_class:
                 continue
             if normalized_source and str(getattr(branch, "source_type", "") or "").strip().lower() != normalized_source:
@@ -6273,25 +6633,19 @@ class WorkTreeSignalIngestionService:
                 continue
             if resolution in {"resolved", "retired"} and branch.status == BranchStatus.COMPLETE:
                 continue
-            for task in work_tree.list_branch_tasks(branch.branch_id):
-                status = str(getattr(getattr(task, "status", None), "value", getattr(task, "status", "")) or "").strip().lower()
-                if status in {"complete", "dropped"}:
-                    continue
-                work_tree.mark_task_complete(task.task_id)
-            branch.status = BranchStatus.COMPLETE
-            branch.resolution_state = "retired" if retire_inactive else "resolved"
-            branch.priority = 0
-            branch.allowed_tools = []
-            branch.preferred_tool = None
+            if retire_inactive:
+                results.append(self._retire_signal_branch(branch, note=note, now=now))
+                continue
+            _mark_branch_resolved_with_lifecycle(
+                branch,
+                note=note,
+                completion_action="signal_inactive_resolved",
+            )
             branch.last_seen_at = now
-            existing_notes = str(branch.notes or "").strip()
-            if note and note not in existing_notes:
-                prefix = "Retired" if retire_inactive else "Resolution"
-                branch.notes = f"{existing_notes}\n{prefix}: {note}".strip() if existing_notes else f"{prefix}: {note}"
             work_tree.touch_branch(branch.branch_id)
             results.append(
                 {
-                    "action": "retired" if retire_inactive else "resolved",
+                    "action": "resolved",
                     "tree_id": tree.tree_id,
                     "branch_id": branch.branch_id,
                     "reason": note,
@@ -6360,6 +6714,8 @@ class WorkTreeSignalIngestionService:
 
     def _find_branch_by_source_key(self, tree_id: str, source_key: str, *, open_only: bool) -> Any | None:
         for branch in work_tree.list_tree_branches(tree_id):
+            if _is_archived_signal_branch(branch):
+                continue
             if str(getattr(branch, "source_key", "") or "").strip() != source_key:
                 continue
             resolution = str(getattr(branch, "resolution_state", "") or "").strip().lower()
@@ -6387,12 +6743,19 @@ class WorkTreeSignalIngestionService:
         actionability = str(normalized.get("actionability") or "safe_now").strip().lower()
         work_class = str(normalized.get("work_class") or "").strip().lower()
         severity = str(normalized.get("severity") or "medium").strip().lower()
+        materially_changed = (
+            not first_seen and not reopen and _signal_materially_changed(branch, normalized)
+        )
 
         branch.title = str(normalized.get("title") or branch.title)
         branch.bucket = _bucket_for_work_class(work_class)
         branch.source_type = str(normalized.get("source") or "") or None
         branch.source_key = str(normalized.get("source_key") or "") or None
-        branch.source_payload = dict(normalized.get("payload") or {})
+        incoming_payload = dict(normalized.get("payload") or {})
+        lifecycle = read_branch_lifecycle(branch.source_payload)
+        if lifecycle:
+            incoming_payload = attach_branch_lifecycle(incoming_payload, lifecycle)
+        branch.source_payload = incoming_payload
         branch.work_class = work_class
         branch.actionability = actionability
         branch.resolution_state = _RESOLUTION_BY_ACTIONABILITY.get(actionability, "open")
@@ -6403,10 +6766,12 @@ class WorkTreeSignalIngestionService:
 
         if first_seen:
             branch.evidence_count = 1
-        else:
+        elif reopen or materially_changed:
             branch.evidence_count = int(branch.evidence_count or 0) + 1
 
         branch.status = _BRANCH_STATUS_BY_ACTIONABILITY.get(actionability, BranchStatus.READY)
+        if reopen:
+            _reset_branch_tool_state(branch, preserve_failed=True)
         if reopen:
             if _source_root_sequence_operator_hold_satisfied(branch.branch_id):
                 branch.resolution_state = "observing"
@@ -6586,7 +6951,11 @@ class WorkTreeSignalIngestionService:
                 blocked = work_tree.add_task_to_branch(
                     branch.branch_id,
                     SOURCE_ROOT_FAILED_EVIDENCE_HOLD_TITLE,
-                    meta={"blocked_reason": SOURCE_ROOT_FAILED_EVIDENCE_HOLD_REASON},
+                    meta=_recurring_blocked_task_meta(
+                        branch,
+                        task_title=SOURCE_ROOT_FAILED_EVIDENCE_HOLD_TITLE,
+                        blocked_reason=SOURCE_ROOT_FAILED_EVIDENCE_HOLD_REASON,
+                    ),
                 )
                 work_tree.mark_task_blocked(
                     blocked.task_id,
@@ -6612,7 +6981,11 @@ class WorkTreeSignalIngestionService:
                 blocked = work_tree.add_task_to_branch(
                     branch.branch_id,
                     "Hold source-root branch for operator judgment",
-                    meta={"blocked_reason": source_root_operator_reason},
+                    meta=_recurring_blocked_task_meta(
+                        branch,
+                        task_title="Hold source-root branch for operator judgment",
+                        blocked_reason=source_root_operator_reason,
+                    ),
                 )
                 work_tree.mark_task_blocked(
                     blocked.task_id,
@@ -6691,7 +7064,11 @@ class WorkTreeSignalIngestionService:
                     blocked = work_tree.add_task_to_branch(
                         branch.branch_id,
                         SOURCE_ROOT_OPERATOR_HOLD_TITLE,
-                        meta={"blocked_reason": SOURCE_ROOT_SEQUENCE_EXHAUSTED_HOLD_REASON},
+                        meta=_recurring_blocked_task_meta(
+                            branch,
+                            task_title=SOURCE_ROOT_OPERATOR_HOLD_TITLE,
+                            blocked_reason=SOURCE_ROOT_SEQUENCE_EXHAUSTED_HOLD_REASON,
+                        ),
                     )
                     work_tree.mark_task_blocked(blocked.task_id, SOURCE_ROOT_SEQUENCE_EXHAUSTED_HOLD_REASON)
                     open_tasks = [blocked]
@@ -6738,20 +7115,27 @@ class WorkTreeSignalIngestionService:
                         work_tree.update_task_meta(open_tasks[0].task_id, meta_updates)
                     break
             if not open_tasks and task_text:
-                task_meta: dict[str, object] = {}
-                if task_preferred_tool:
-                    task_meta["expected_tool"] = task_preferred_tool
-                if task_allowed_tools:
-                    task_meta["allowed_tools"] = list(task_allowed_tools)
-                if isinstance(sequence_task.get("tool_args"), list):
-                    task_meta["tool_args"] = [str(arg) for arg in list(sequence_task.get("tool_args") or [])]
-                work_tree.add_task_to_branch(branch.branch_id, task_text, meta=task_meta)
+                work_tree.add_task_to_branch(
+                    branch.branch_id,
+                    task_text,
+                    meta=_recurring_signal_task_meta(
+                        branch,
+                        task_text=task_text,
+                        task_preferred_tool=task_preferred_tool,
+                        task_allowed_tools=task_allowed_tools,
+                        sequence_task=sequence_task,
+                    ),
+                )
             elif not open_tasks and blocked_task:
                 blocked_reason = str(normalized.get("blocked_reason") or "").strip() or MEMORY_BOOTSTRAP_ORIGIN_CONTRACT_REQUIRED
                 task = work_tree.add_task_to_branch(
                     branch.branch_id,
                     blocked_task,
-                    meta={"blocked_reason": blocked_reason},
+                    meta=_recurring_blocked_task_meta(
+                        branch,
+                        task_title=blocked_task,
+                        blocked_reason=blocked_reason,
+                    ),
                 )
                 work_tree.mark_task_blocked(task.task_id, blocked_reason)
                 blocked_open_tasks = True
@@ -6769,14 +7153,17 @@ class WorkTreeSignalIngestionService:
                     )
                 open_tasks = []
                 blocked_open_tasks = False
-                task_meta: dict[str, object] = {}
-                if task_preferred_tool:
-                    task_meta["expected_tool"] = task_preferred_tool
-                if task_allowed_tools:
-                    task_meta["allowed_tools"] = list(task_allowed_tools)
-                if isinstance(sequence_task.get("tool_args"), list):
-                    task_meta["tool_args"] = [str(arg) for arg in list(sequence_task.get("tool_args") or [])]
-                work_tree.add_task_to_branch(branch.branch_id, task_text, meta=task_meta)
+                work_tree.add_task_to_branch(
+                    branch.branch_id,
+                    task_text,
+                    meta=_recurring_signal_task_meta(
+                        branch,
+                        task_text=task_text,
+                        task_preferred_tool=task_preferred_tool,
+                        task_allowed_tools=task_allowed_tools,
+                        sequence_task=sequence_task,
+                    ),
+                )
             if blocked_open_tasks:
                 work_tree.set_branch_tools(branch.branch_id, allowed_tools=[], preferred_tool="")
             elif task_allowed_tools:

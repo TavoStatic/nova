@@ -80,7 +80,7 @@ from services.data_pipeline_registry import get_pipeline_schema_probe as pipelin
 from services.data_pipeline_registry import get_pipeline_status as pipeline_get_status
 from services.data_pipeline_registry import list_pipeline_summaries as pipeline_list_summaries
 from services.data_pipeline_registry import preview_pipeline_query
-from services.data_pipeline_registry import run_pipeline_query
+from services.data_pipeline_registry import run_governed_live_pipeline_query as run_pipeline_query
 from services.generated_work_queue_snapshot import generated_work_queue_payload as service_generated_work_queue_payload
 from services.subconscious_control import SUBCONSCIOUS_CONTROL_SERVICE
 from services.test_session_control import TEST_SESSION_CONTROL_SERVICE
@@ -840,6 +840,14 @@ def _active_work_tree_run_next_action(payload: dict) -> tuple[bool, str, dict, s
         import json as _json
         import time as _time
         trigger = dict(payload or {})
+        if not str(trigger.get("target_branch_id") or "").strip():
+            branch_id = str(trigger.get("branch_id") or "").strip()
+            if branch_id:
+                trigger["target_branch_id"] = branch_id
+        if not str(trigger.get("target_task_id") or "").strip():
+            task_id = str(trigger.get("task_id") or "").strip()
+            if task_id:
+                trigger["target_task_id"] = task_id
         trigger["_requested_at"] = _time.time()
         WORK_TREE_RUN_TRIGGER_FILE.parent.mkdir(parents=True, exist_ok=True)
         WORK_TREE_RUN_TRIGGER_FILE.write_text(_json.dumps(trigger), encoding="utf-8")

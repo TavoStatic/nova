@@ -323,6 +323,33 @@ class TestOperatorOutboxService(unittest.TestCase):
         self.assertIn("operator_only_probe", notices[0].get("message", ""))
         self.assertIn("autonomy maintenance", notices[0].get("message", ""))
 
+    def test_work_tree_notice_skips_generated_queue_run_when_tool_is_executable(self):
+        import autonomy_maintenance
+
+        notices = OPERATOR_OUTBOX_SERVICE.notices_from_work_tree_state(
+            {
+                "trees": [
+                    {
+                        "tree_id": "tree_queue",
+                        "title": "Generated Queue",
+                        "status": "active",
+                        "next_step": {
+                            "action": "execute",
+                            "branch_id": "branch_queue",
+                            "branch_title": "Run generated session",
+                            "task_id": "task_queue",
+                            "task_title": "run generated session demo.json",
+                            "recommended_tool": "generated_queue_run",
+                        },
+                        "nodes": [],
+                    }
+                ]
+            },
+            executable_tools=autonomy_maintenance.ACTIVE_WORK_TREE_EXECUTE_TOOLS,
+        )
+
+        self.assertEqual(notices, [])
+
     def test_work_tree_notice_payload_keeps_target_without_full_tree_snapshot(self):
         notices = OPERATOR_OUTBOX_SERVICE.notices_from_work_tree_state(
             {

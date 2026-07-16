@@ -149,6 +149,7 @@
     "leah": {
       "mode": "observe",
       "fast_chat": true,
+      "fast_chat_skip_spine": false,
       "promoted_capabilities": []
     },
     "codegen": {
@@ -160,8 +161,8 @@
     "enabled": true,
     "mode": "canary",
     "execute_enabled": true,
-    "orchestrator_owns_execution": false,
-    "legacy_maintenance_execution_enabled": true,
+    "orchestrator_owns_execution": true,
+    "legacy_maintenance_execution_enabled": false,
     "allowed_actions": [
       "guard_start",
       "autonomy_maintenance_start",
@@ -193,7 +194,12 @@
       "runtime_control"
     ],
     "execute_blocked_actions": [],
-    "requires_operator_ack_for": [],
+    "requires_operator_ack_for": [
+      "update_now_dry_run",
+      "patch_preview_approve",
+      "patch_apply",
+      "governed_patch_apply"
+    ],
     "confidence_threshold": 0.55,
     "execute_min_confidence": 0.55,
     "cooldown_sec": 0,

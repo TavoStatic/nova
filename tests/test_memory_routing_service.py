@@ -23,6 +23,15 @@ class TestMemoryRoutingService(unittest.TestCase):
         self.assertFalse(plan.allow)
         self.assertEqual(plan.reason, "not_memory_seeking")
 
+    def test_general_context_still_blocks_non_memory_queries(self):
+        plan = self.service.plan_durable_recall(
+            "tell me a joke about weather",
+            purpose="general_context",
+        )
+
+        self.assertFalse(plan.allow)
+        self.assertEqual(plan.reason, "not_memory_seeking")
+
     def test_session_priority_blocks_general_context(self):
         plan = self.service.plan_durable_recall(
             "what do you know about this",
@@ -42,6 +51,24 @@ class TestMemoryRoutingService(unittest.TestCase):
         self.assertTrue(plan.allow)
         self.assertEqual(plan.purpose, "identity_fallback")
         self.assertEqual(plan.reason, "purpose_override")
+
+    def test_infer_purpose_maps_query_cues(self):
+        self.assertEqual(
+            self.service.infer_purpose("what have you learned from me lately"),
+            "recent_learning_summary",
+        )
+        self.assertEqual(
+            self.service.infer_purpose("what is my favorite color"),
+            "user_preferences",
+        )
+        self.assertEqual(
+            self.service.infer_purpose("who built you"),
+            "developer_profile",
+        )
+        self.assertEqual(
+            self.service.infer_purpose("recall what I said earlier"),
+            "explicit_recall",
+        )
 
     def test_recent_learning_summary_overrides_session_priority(self):
         plan = self.service.plan_durable_recall(

@@ -4,6 +4,8 @@ from pathlib import Path
 from typing import Any, Mapping, Optional
 
 from pipelines.registry import PipelineRegistry
+from services.pipeline_privileged_bridge import run_governed_pipeline_query
+from services.pipeline_worker_supervision import summarize_pipeline_workers
 
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -45,9 +47,33 @@ def build_pipeline_registry(data_sources_root: Optional[Path] = None) -> Pipelin
 def list_pipeline_summaries(data_sources_root: Optional[Path] = None) -> list[dict[str, Any]]:
     root = data_sources_root or DATA_SOURCES_ROOT
     summaries = []
+    pipeline_ids: list[str] = []
     for item in build_pipeline_registry(root).list_summaries():
-        summaries.append({**item, "lane_state": _lane_control_state(str(item.get("pipeline_id") or ""), data_sources_root=root)})
+        pipeline_id = str(item.get("pipeline_id") or "").strip()
+        pipeline_ids.append(pipeline_id)
+        summaries.append({**item, "lane_state": _lane_control_state(pipeline_id, data_sources_root=root)})
+    worker_summary = summarize_pipeline_workers(pipeline_ids)
+    for item in summaries:
+        pipeline_id = str(item.get("pipeline_id") or "").strip()
+        worker = next(
+            (
+                entry
+                for entry in list(worker_summary.get("workers") or [])
+                if str(entry.get("pipeline_id") or "").strip() == pipeline_id
+            ),
+            None,
+        )
+        item["worker_supervision"] = dict(worker or {})
     return summaries
+
+
+def pipeline_worker_summary(data_sources_root: Optional[Path] = None) -> dict[str, Any]:
+    pipeline_ids = [
+        str(item.get("pipeline_id") or "").strip()
+        for item in build_pipeline_registry(data_sources_root).list_summaries()
+        if str(item.get("pipeline_id") or "").strip()
+    ]
+    return summarize_pipeline_workers(pipeline_ids)
 
 
 def get_pipeline_status(
@@ -124,3 +150,23 @@ def run_pipeline_query(
         return _lane_paused_result(pipeline_id, operation)
     pipeline = build_pipeline_registry(data_sources_root).instantiate(pipeline_id)
     return pipeline.safe_query(operation, params, row_limit=row_limit, dry_run=False)
+
+
+def run_governed_live_pipeline_query(
+    pipeline_id: str,
+    operation: str,
+    params: Optional[Mapping[str, Any]] = None,
+    *,
+    row_limit: Optional[int] = None,
+    requested_by: str = "governed_pipeline_query",
+    data_sources_root: Optional[Path] = None,
+) -> dict[str, Any]:
+    if not bool(_lane_control_state(pipeline_id, data_sources_root=data_sources_root).get("enabled", True)):
+        return _lane_paused_result(pipeline_id, operation)
+    return run_governed_pipeline_query(
+        pipeline_id,
+        operation,
+        params,
+        row_limit=row_limit,
+        requested_by=requested_by,
+    )

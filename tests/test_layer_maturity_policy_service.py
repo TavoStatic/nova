@@ -105,6 +105,7 @@ class TestLayerMaturityPolicyService(unittest.TestCase):
                     )
                 ]
             },
+            "live_closure_inventory": {"ok": True, "gap_roots": []},
         }
 
         core_gate = evaluate_core_gate(status)
@@ -112,6 +113,24 @@ class TestLayerMaturityPolicyService(unittest.TestCase):
         self.assertTrue(core_gate.get("ok"))
         self.assertFalse(core_gate.get("drift_blocked"))
         self.assertEqual(core_gate.get("missing_roots"), [])
+        self.assertEqual(core_gate.get("live_closure_gap_roots"), [])
+
+    def test_core_gate_fails_when_live_closure_reports_semantic_gaps(self):
+        status = {
+            "release_runtime_truth": {"suppress_closure_inventory_signals": False},
+            "root_closure_inventory": {
+                "roots": [{"root_id": "conversation_routing", "ok": True}]
+            },
+            "live_closure_inventory": {
+                "ok": False,
+                "gap_roots": ["conversation_routing"],
+            },
+        }
+
+        core_gate = evaluate_core_gate(status)
+
+        self.assertFalse(core_gate.get("ok"))
+        self.assertEqual(core_gate.get("live_closure_gap_roots"), ["conversation_routing"])
 
     def test_leah_capability_blocked_until_core_gate_passes(self):
         policy = {

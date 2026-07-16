@@ -370,8 +370,10 @@ class TestNovaPatchingService(unittest.TestCase):
                 read_patch_manifest_fn=lambda path: nova_patching.read_patch_manifest(path, patch_manifest_name="nova_patch.json"),
                 log_patch_fn=lambda _msg: None,
                 patch_reject_message_fn=lambda reason, **kwargs: reason,
-                read_approvals_fn=lambda: [],
-                patch_preview_fn=lambda _path, _write_report=False: "Status: eligible",
+                patch_preview_fn=lambda _path, _write_report=False: (
+                    "Patch Preview\nStatus: eligible\nPreview written: updates/previews/preview_a.txt\n"
+                ),
+                read_approvals_fn=lambda: [{"preview": "updates/previews/preview_a.txt", "decision": "approved"}],
                 snapshot_current_fn=snapshot_mock,
                 overlay_zip_fn=lambda _path: 99,
                 py_compile_check_fn=lambda: (True, "ok"),

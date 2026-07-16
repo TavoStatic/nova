@@ -10,6 +10,7 @@ from pipelines.privileged_protocol import claim_next_request
 from pipelines.privileged_protocol import load_request
 from pipelines.privileged_protocol import write_response
 from services.data_pipeline_registry import run_pipeline_query
+from services.pipeline_worker_supervision import write_worker_heartbeat
 
 
 def process_next_privileged_request(
@@ -20,8 +21,20 @@ def process_next_privileged_request(
     execute_fn=None,
 ) -> Optional[dict[str, Any]]:
     paths = build_protocol_paths(runtime_root, pipeline_id)
+    write_worker_heartbeat(
+        pipeline_id,
+        runtime_root=runtime_root,
+        status="running",
+        detail="processing_request",
+    )
     claimed_path = claim_next_request(paths)
     if claimed_path is None:
+        write_worker_heartbeat(
+            pipeline_id,
+            runtime_root=runtime_root,
+            status="idle",
+            detail="no_pending_requests",
+        )
         return None
 
     request = load_request(claimed_path)
@@ -53,6 +66,12 @@ def process_next_privileged_request(
         }
         write_response(paths, request_id, response)
         archive_request(paths, claimed_path, status="done")
+        write_worker_heartbeat(
+            pipeline_id,
+            runtime_root=runtime_root,
+            status="idle",
+            detail="request_completed",
+        )
         return response
     except Exception as exc:
         response = {
@@ -67,4 +86,10 @@ def process_next_privileged_request(
         }
         write_response(paths, request_id, response)
         archive_request(paths, claimed_path, status="error")
+        write_worker_heartbeat(
+            pipeline_id,
+            runtime_root=runtime_root,
+            status="error",
+            detail=str(exc),
+        )
         return response

@@ -59,16 +59,27 @@ def _render_preview_content(path: str, spec_name: str, spec_purpose: str, kind: 
     suffix = PurePosixPath(path).suffix.lower()
     short_intent = intent or f"Implement {spec_name} behavior."
     if suffix == ".py":
+        class_name = "".join(part.title() for part in PurePosixPath(path).stem.split("_") if part) or "Generated"
         return (
-            f'"""Generated preview for {spec_name}.\n'
+            f'"""Generated module for {spec_name}.\n'
             f"Purpose: {spec_purpose}\n"
             f"Intent: {short_intent}\n"
-            "\n"
-            "Preview-only artifact. Route through patch governance before apply.\n"
             '"""\n\n'
             "from __future__ import annotations\n\n\n"
-            "def build_preview() -> dict[str, str]:\n"
-            f"    return {{\"spec\": {json.dumps(spec_name)}, \"kind\": {json.dumps(kind)}, \"path\": {json.dumps(path)}}}\n"
+            f"class {class_name}Service:\n"
+            "    def describe(self) -> dict[str, str]:\n"
+            f"        return {{'spec': {json.dumps(spec_name)}, 'kind': {json.dumps(kind)}, 'path': {json.dumps(path)}}}\n\n"
+            "    def run(self, payload: dict[str, object] | None = None) -> dict[str, object]:\n"
+            f"        intent = {json.dumps(short_intent)}\n"
+            "        data = dict(payload or {})\n"
+            "        return {\n"
+            "            'ok': False,\n"
+            "            'status': 'preview_only',\n"
+            "            'spec': self.describe(),\n"
+            "            'intent': intent,\n"
+            "            'payload_keys': sorted(str(key) for key in data.keys()),\n"
+            "            'next_step': 'implement run() before promotion',\n"
+            "        }\n"
         )
     if suffix == ".json":
         payload = {

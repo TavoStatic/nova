@@ -44,6 +44,48 @@ class TestNovaReplySequence(unittest.TestCase):
         options.update(overrides)
         return execute_reply_sequence(**options)
 
+    def test_supervisor_correction_does_not_short_circuit_reply_sequence(self):
+        stored: list[dict] = []
+
+        def _learning(text, **kwargs):
+            from services.memory_production import apply_user_memory_learning
+
+            return apply_user_memory_learning(
+                text,
+                mem_enabled_fn=lambda: True,
+                mem_add_fn=lambda *_args, **_kwargs: None,
+                mem_remember_fact_fn=lambda _fact: "",
+                load_learned_facts_fn=lambda: {},
+                save_learned_facts_fn=lambda _data: None,
+                get_learned_fact_fn=lambda _key, default="": default,
+                set_active_user_fn=lambda _name: None,
+                get_active_user_fn=lambda: "gus",
+                load_identity_profile_fn=lambda: {},
+                save_identity_profile_fn=lambda _data: None,
+                store_correction_record_fn=lambda *args, **kw: stored.append(kw),
+            )
+
+        reply, meta = self._call("no, Gustavo built you", core=_core(apply_user_memory_learning=_learning))
+
+        self.assertEqual(reply, "model reply")
+        self.assertNotEqual(meta.get("planner_decision"), "memory_learning")
+        self.assertEqual(len(stored), 1)
+
+    def test_apply_user_memory_learning_returns_early_reply_before_planner(self):
+        core = _core(
+            apply_user_memory_learning=lambda text, **kwargs: {
+                "handled": True,
+                "early_reply": "Pinned memory saved: sky blue",
+                "action": "remember_fact",
+            },
+        )
+
+        reply, meta = self._call("remember: sky blue", core=core)
+
+        self.assertEqual(reply, "Pinned memory saved: sky blue")
+        self.assertEqual(meta.get("planner_decision"), "memory_learning")
+        self.assertEqual(meta.get("memory_learning_action"), "remember_fact")
+
     def test_execute_reply_sequence_from_runtime_delegates_to_current_sequence_shape(self):
         runtime_scope = {"deleted_phrase_callbacks": object()}
 

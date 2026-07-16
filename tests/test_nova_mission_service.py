@@ -184,6 +184,15 @@ class TestNovaMissionService(unittest.TestCase):
         self.assertFalse(bool(mission.get("truth_ready")))
         self.assertFalse(bool(mission.get("active_work_evidence_current")))
         self.assertIn("generated_queue_untested", mission.get("truth_blockers") or [])
+        generated_blockers = [
+            item
+            for item in list(mission.get("green_blockers") or [])
+            if isinstance(item, dict) and item.get("code") == "generated_queue_untested"
+        ]
+        self.assertEqual(
+            dict((generated_blockers[0] or {}).get("remediation") or {}).get("action"),
+            "generated_queue_run_next",
+        )
         self.assertFalse(
             NovaMissionService.hold_blocks_action(
                 "generated_queue_run_next",
@@ -225,7 +234,7 @@ class TestNovaMissionService(unittest.TestCase):
             )
         )
 
-    def test_stale_regression_never_returns_green_cycle(self):
+    def test_active_regression_failure_never_returns_green_cycle(self):
         mission = NOVA_MISSION_SERVICE.build_snapshot(
             **_base_inputs(
                 truth_evidence=_truth_evidence(
@@ -236,10 +245,11 @@ class TestNovaMissionService(unittest.TestCase):
         )
 
         self.assertFalse(bool(mission.get("green_cycle")))
-        self.assertIn("regression_stale", mission.get("truth_blockers") or [])
-        self.assertFalse(bool(mission.get("regression_current")))
+        self.assertIn("regression_failed", mission.get("truth_blockers") or [])
+        self.assertTrue(bool(mission.get("regression_current")))
+        self.assertFalse(bool(mission.get("regression_passed")))
         self.assertIn(
-            {"owner": "regression", "code": "regression_stale"},
+            {"owner": "regression", "code": "regression_failed"},
             [
                 {"owner": item.get("owner"), "code": item.get("code")}
                 for item in list(mission.get("owner_blockers") or [])
@@ -340,6 +350,53 @@ class TestNovaMissionService(unittest.TestCase):
         self.assertFalse(bool(mission.get("green_cycle")))
         self.assertIn("release_truth_stale", mission.get("truth_blockers") or [])
         self.assertFalse(bool(mission.get("release_truth_current")))
+
+    def test_release_truth_stale_allows_release_rebuild_verify_remediation(self):
+        mission = NOVA_MISSION_SERVICE.build_snapshot(
+            **_base_inputs(
+                truth_evidence=_truth_evidence(
+                    release_drift=True,
+                    release_drift_tolerated=False,
+                ),
+            )
+        )
+
+        green_blockers = list(mission.get("green_blockers") or [])
+        release_blocker = next(
+            (
+                item
+                for item in green_blockers
+                if isinstance(item, dict) and item.get("code") == "release_truth_stale"
+            ),
+            None,
+        )
+        if release_blocker is None:
+            release_blocker = next(
+                (
+                    item
+                    for item in list(mission.get("truth_blockers") or [])
+                    if isinstance(item, dict) and item.get("code") == "release_truth_stale"
+                ),
+                None,
+            )
+        if isinstance(release_blocker, dict):
+            remediation = dict(release_blocker.get("remediation") or {})
+            self.assertIn("release_rebuild_verify", list(remediation.get("tools") or []))
+        self.assertTrue(NovaMissionService._hold_allows_active_work_tool(mission, "release_rebuild_verify"))
+        self.assertFalse(
+            NovaMissionService.hold_blocks_action(
+                "active_work_tree_run_next",
+                mission_snapshot=mission,
+                action_context={"recommended_tool": "release_rebuild_verify"},
+            )
+        )
+        self.assertFalse(
+            NovaMissionService.hold_blocks_action(
+                "active_work_tree_run_next",
+                mission_snapshot=mission,
+                action_context={"recommended_tool": "core_thinning"},
+            )
+        )
 
     def test_core_gate_missing_roots_block_green_cycle(self):
         mission = NOVA_MISSION_SERVICE.build_snapshot(
@@ -446,11 +503,23 @@ class TestNovaMissionService(unittest.TestCase):
         self.assertFalse(bool(mission.get("truth_ready")))
         self.assertTrue(bool(mission.get("active_work_evidence_current")))
         self.assertEqual(mission.get("truth_blockers"), ["core_gate_release_drift"])
+        green_blockers = list(mission.get("green_blockers") or [])
+        self.assertEqual(len(green_blockers), 1)
+        remediation = dict(green_blockers[0].get("remediation") or {})
+        self.assertEqual(remediation.get("action"), "active_work_tree_run_next")
+        self.assertIn("release_rebuild_verify", list(remediation.get("tools") or []))
         self.assertFalse(
             NovaMissionService.hold_blocks_action(
                 "active_work_tree_run_next",
                 mission_snapshot=mission,
                 action_context={"recommended_tool": "core_thinning"},
+            )
+        )
+        self.assertFalse(
+            NovaMissionService.hold_blocks_action(
+                "active_work_tree_run_next",
+                mission_snapshot=mission,
+                action_context={"recommended_tool": "release_rebuild_verify"},
             )
         )
         self.assertTrue(
@@ -568,6 +637,161 @@ class TestNovaMissionService(unittest.TestCase):
 
         self.assertFalse(
             NovaMissionService.ingestion_suppresses_ambient_governance(mission, policy_snapshot=policy)
+        )
+
+    def test_hold_allows_remediation_when_any_blocker_prescribes_it(self):
+        mission = {
+            "enabled": True,
+            "mode": "steady_state_guard",
+            "green_cycle": False,
+            "truth_ready": False,
+            "status": "validation_required",
+            "action": "hold",
+            "validation_fresh": True,
+            "regression_current": True,
+            "release_truth_current": True,
+            "generated_queue_untested_count": 2,
+            "green_blockers": [
+                {
+                    "owner": "regression",
+                    "code": "regression_failed",
+                    "remediation": {
+                        "action": "run_regression",
+                        "tools": ["release_rebuild_verify", "core_thinning"],
+                    },
+                },
+                {
+                    "owner": "generated_queue",
+                    "code": "generated_queue_untested",
+                    "remediation": {"action": "generated_queue_run_next"},
+                },
+                {
+                    "owner": "layer_maturity",
+                    "code": "core_gate_release_drift",
+                    "remediation": {
+                        "action": "active_work_tree_run_next",
+                        "tools": ["release_rebuild_verify", "core_thinning"],
+                    },
+                },
+            ],
+            "truth_blockers": [
+                "regression_failed",
+                "generated_queue_untested",
+                "core_gate_release_drift",
+            ],
+            "core_gate": {"drift_blocked": True, "missing_roots": []},
+        }
+
+        self.assertFalse(
+            NovaMissionService.hold_blocks_action(
+                "generated_queue_run_next",
+                mission_snapshot=mission,
+            )
+        )
+        self.assertFalse(
+            NovaMissionService.hold_blocks_action(
+                "active_work_tree_run_next",
+                mission_snapshot=mission,
+                action_context={"recommended_tool": "release_rebuild_verify"},
+            )
+        )
+        self.assertFalse(
+            NovaMissionService.hold_blocks_action(
+                "active_work_tree_run_next",
+                mission_snapshot=mission,
+                action_context={"recommended_tool": "core_thinning"},
+            )
+        )
+
+    def test_release_truth_stale_remediation_allows_parallel_generated_queue_untested(self):
+        mission = {
+            "validation_fresh": True,
+            "regression_current": True,
+            "release_truth_current": False,
+            "generated_queue_untested_count": 2,
+            "truth_blockers": ["release_truth_stale", "generated_queue_untested"],
+            "green_blockers": [
+                {
+                    "owner": "release",
+                    "code": "release_truth_stale",
+                    "remediation": {
+                        "action": "active_work_tree_run_next",
+                        "tools": ["release_rebuild_verify"],
+                    },
+                },
+                {
+                    "owner": "generated_queue",
+                    "code": "generated_queue_untested",
+                    "remediation": {"action": "generated_queue_run_next"},
+                },
+            ],
+        }
+
+        self.assertTrue(NovaMissionService._release_truth_stale_remediation_window(mission))
+        self.assertTrue(NovaMissionService._hold_allows_active_work_tool(mission, "release_rebuild_verify"))
+        self.assertTrue(NovaMissionService._hold_allows_active_work_tool(mission, "core_thinning"))
+
+    def test_generated_queue_run_next_allowed_when_release_truth_stale_without_base_pillars(self):
+        mission = {
+            "enabled": True,
+            "mode": "steady_state_guard",
+            "action": "hold",
+            "status": "validation_required",
+            "validation_fresh": True,
+            "regression_current": True,
+            "release_truth_current": False,
+            "generated_queue_untested_count": 2,
+            "truth_blockers": ["release_truth_stale", "generated_queue_untested"],
+            "green_blockers": [
+                {
+                    "owner": "release",
+                    "code": "release_truth_stale",
+                    "remediation": {
+                        "action": "active_work_tree_run_next",
+                        "tools": ["release_rebuild_verify"],
+                    },
+                },
+                {
+                    "owner": "generated_queue",
+                    "code": "generated_queue_untested",
+                    "remediation": {"action": "generated_queue_run_next"},
+                },
+            ],
+        }
+
+        self.assertFalse(
+            NovaMissionService.hold_blocks_action(
+                "generated_queue_run_next",
+                mission_snapshot=mission,
+            )
+        )
+
+    def test_generated_queue_run_next_still_blocked_when_validation_not_fresh(self):
+        mission = {
+            "enabled": True,
+            "mode": "steady_state_guard",
+            "action": "hold",
+            "status": "validation_required",
+            "validation_fresh": False,
+            "regression_current": True,
+            "release_truth_current": False,
+            "generated_queue_untested_count": 2,
+            "truth_blockers": ["validation_truth_missing", "generated_queue_untested"],
+            "green_blockers": [
+                {"owner": "validation", "code": "validation_truth_missing"},
+                {
+                    "owner": "generated_queue",
+                    "code": "generated_queue_untested",
+                    "remediation": {"action": "generated_queue_run_next"},
+                },
+            ],
+        }
+
+        self.assertTrue(
+            NovaMissionService.hold_blocks_action(
+                "generated_queue_run_next",
+                mission_snapshot=mission,
+            )
         )
 
     def test_append_history_tracks_sustained_watch(self):

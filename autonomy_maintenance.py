@@ -32,6 +32,27 @@ from services.chat_identity import CHAT_IDENTITY_SERVICE
 from services.frontdoor_cli_parity import FRONTDOOR_CLI_PARITY_SERVICE
 from services.layer_maturity_policy import enrich_status_with_layer_maturity
 from services.operator_control import OPERATOR_CONTROL_SERVICE
+from services.recurring_finding_lifecycle import (
+    KEY_SATISFACTION_FINGERPRINT,
+    REOPEN_QUEUE_PRESSURE,
+    attach_branch_lifecycle,
+    bump_branch_reopen,
+    finding_key_from_meta,
+    initial_branch_lifecycle,
+    initial_task_meta,
+    read_branch_lifecycle,
+    read_task_state,
+    reopen_task_meta,
+    stamp_branch_satisfied,
+    task_finding_key,
+    task_fingerprint,
+)
+from services.regression_evidence import (
+    apply_regression_status_payload,
+    regression_evidence_stale,
+    regression_failure_active,
+    regression_outcome_failed,
+)
 from services.release_runtime_truth import (
     RELEASE_RUNTIME_TRUTH_SERVICE,
     build_release_runtime_truth_summary,
@@ -47,6 +68,8 @@ from services.core_steward import build_core_steward_payload as service_build_co
 from services.nova_control_action_dispatcher import NOVA_CONTROL_ACTION_DISPATCHER, autonomy_advisory_action_types
 from services.nova_mission import NOVA_MISSION_SERVICE, NovaMissionService
 from services.nova_root_inventory import build_source_root_inventory_payload
+from services.data_pipeline_registry import build_pipeline_registry
+from services.pipeline_worker_supervision import ensure_pipeline_workers_for_ids, reconcile_pipeline_workers_for_ids
 from services.runtime_control import RUNTIME_CONTROL_SERVICE
 from services.nova_runtime_context import AUTONOMY_ORCHESTRATOR_LEDGER_FILE
 from services.nova_runtime_context import OPERATOR_OUTBOX_FILE
@@ -55,7 +78,9 @@ from services.nova_runtime_context import WORK_TREE_RUN_TRIGGER_FILE
 from services.nova_runtime_context import PATCH_QUEUE_RUN_TRIGGER_FILE
 from services.nova_runtime_context import runtime_scope_name
 from services.nova_wiring_inventory import WIRING_SURFACES
+from services.nova_live_closure import build_live_closure_inventory_payload
 from services.nova_wiring_inventory import build_root_closure_inventory_payload
+from services.nova_wiring_inventory import build_self_repair_closure_inventory_payload
 from services.port_ownership import PORT_OWNERSHIP_SERVICE
 from services.operator_outbox import OPERATOR_OUTBOX_SERVICE
 from services.runtime_restart_provenance import RUNTIME_RESTART_PROVENANCE_SERVICE
@@ -82,6 +107,7 @@ VENV_PY = ROOT / ".venv" / "Scripts" / "python.exe"
 GUARD_PY = ROOT / "nova_guard.py"
 CORE_PY = ROOT / "nova_core.py"
 AUTONOMY_MAINTENANCE_PY = ROOT / "autonomy_maintenance.py"
+PIPELINE_WORKER_PY = ROOT / "scripts" / "pipeline_worker.py"
 TEST_SESSIONS_ROOT = RUNTIME_DIR / "test_sessions"
 TEST_SESSION_RUNNER_PY = ROOT / "scripts" / "run_test_session.py"
 STATE_FILE = RUNTIME_DIR / "autonomy_maintenance_state.json"
@@ -125,8 +151,9 @@ PATCH_QUEUE_TREE_KIND = "patch_queue"
 PATCH_QUEUE_TREE_SOURCE = "autonomy_maintenance"
 PATCH_QUEUE_SOURCE_TYPE = "patch_queue_preview"
 PATCH_QUEUE_BUCKET = "patch_queue"
-PATCH_QUEUE_ALLOWED_TOOLS = ["patch_preview_approve", "patch_preview_apply", "patch_rollback", "read", "find"]
-PATCH_QUEUE_EXECUTE_TOOLS = ["patch_preview_approve", "patch_preview_apply", "patch_rollback"]
+PATCH_QUEUE_ALLOWED_TOOLS = ["patch_preview_apply", "patch_rollback", "read", "find"]
+PATCH_QUEUE_EXECUTE_TOOLS = ["patch_preview_apply", "patch_rollback"]
+OPERATOR_GOVERNED_PATCH_EXECUTE_TOOLS = ["patch_preview_approve"]
 PATCH_QUEUE_REVIEW_TOOLS = ["read", "find"]
 PATCH_QUEUE_MAX_STEPS = 3
 GENERATED_QUEUE_TREE_TITLE = "Generated Queue: governed self-repair"
@@ -158,6 +185,7 @@ ACTIVE_WORK_TREE_EXECUTE_TOOLS = [
     "edfi_explore",
     "core_health",
     "core_thinning",
+    "generated_queue_run",
     "release_promotion_judgment",
     "release_validation_run",
     "release_record_validation_outcome",
@@ -632,6 +660,54 @@ def _nova_http_direct_process_alive(process: dict) -> bool:
         return False
 
 
+def _terminate_operator_webui_pid(pid: int) -> bool:
+    from services.pipeline_worker_supervision import _default_terminate_pid
+
+    return _default_terminate_pid(int(pid), os_name=os.name)
+
+
+def _select_operator_webui_keeper(processes: list[dict]) -> int:
+    if not processes:
+        return 0
+    if len(processes) == 1:
+        return int(processes[0].get("pid") or 0)
+    return int(
+        max(
+            processes,
+            key=lambda item: float(item.get("create_time") or 0.0),
+        ).get("pid")
+        or 0
+    )
+
+
+def _reconcile_duplicate_operator_webui_processes(
+    processes: list[dict],
+    *,
+    keeper_pid: int | None = None,
+) -> dict:
+    if len(processes) <= 1:
+        return {
+            "process_count": len(processes),
+            "keeper_pid": keeper_pid,
+            "terminated_pids": [],
+            "terminated_count": 0,
+        }
+    keeper = int(keeper_pid or 0) or _select_operator_webui_keeper(processes)
+    terminated: list[int] = []
+    for item in processes:
+        pid = int(item.get("pid") or 0)
+        if pid <= 0 or pid == keeper:
+            continue
+        if _terminate_operator_webui_pid(pid):
+            terminated.append(pid)
+    return {
+        "process_count": len(processes),
+        "keeper_pid": keeper or None,
+        "terminated_pids": terminated,
+        "terminated_count": len(terminated),
+    }
+
+
 def _webui_health_for_orchestrator(*, bind_port: int = 8080) -> dict:
     try:
         import urllib.error
@@ -642,7 +718,17 @@ def _webui_health_for_orchestrator(*, bind_port: int = 8080) -> dict:
             for item in runtime_processes.logical_service_processes(ROOT / "nova_http.py")
             if _nova_http_direct_process_alive(item)
         ]
-        process = dict(processes[0]) if processes else {}
+        duplicate_reconcile = _reconcile_duplicate_operator_webui_processes(processes)
+        if int(duplicate_reconcile.get("terminated_count") or 0) > 0:
+            processes = [
+                dict(item)
+                for item in runtime_processes.logical_service_processes(ROOT / "nova_http.py")
+                if _nova_http_direct_process_alive(item)
+            ]
+        keeper_pid = int(duplicate_reconcile.get("keeper_pid") or 0) or _select_operator_webui_keeper(processes)
+        process = next((dict(item) for item in processes if int(item.get("pid") or 0) == keeper_pid), {})
+        if not process and processes:
+            process = dict(processes[0])
         pid = int(process.get("pid") or 0)
         port_open = _operator_webui_port_open(bind_port)
         http_ok = False
@@ -668,6 +754,7 @@ def _webui_health_for_orchestrator(*, bind_port: int = 8080) -> dict:
             "pid": pid or None,
             "create_time": process.get("create_time"),
             "process_count": len(processes),
+            "duplicate_reconcile": duplicate_reconcile,
             "http_ok": http_ok,
             "port_open": port_open,
         }
@@ -1046,18 +1133,28 @@ def _autonomy_execution_enabled(settings: dict | None = None) -> bool:
     return _autonomy_policy_bool(settings, "execute_enabled", "execution_enabled", "autonomy_execute_enabled", default=False)
 
 
-def _legacy_maintenance_execution_enabled(settings: dict | None = None) -> bool:
+def _autonomy_execution_owner(settings: dict | None = None) -> str:
+    """Return the single autonomous execution owner for this cycle."""
     settings = dict(settings or _autonomy_policy_settings())
-    mode = _autonomy_execution_mode(settings)
-    if mode in {"canary", "execute"} and _autonomy_policy_bool(settings, "orchestrator_owns_execution", default=False):
-        return _autonomy_policy_bool(settings, "legacy_maintenance_execution_enabled", default=False)
-    return _autonomy_policy_bool(settings, "legacy_maintenance_execution_enabled", default=True)
+    if _autonomy_execution_mode(settings) not in {"canary", "execute"}:
+        return "none"
+    if not _autonomy_execution_enabled(settings):
+        return "none"
+    if _autonomy_policy_bool(settings, "orchestrator_owns_execution", default=True):
+        return "orchestrator"
+    if _autonomy_policy_bool(settings, "legacy_maintenance_execution_enabled", default=False):
+        return "legacy"
+    return "orchestrator"
+
+
+def _legacy_maintenance_execution_enabled(settings: dict | None = None) -> bool:
+    return _autonomy_execution_owner(settings) == "legacy"
 
 
 def _policy_snapshot_for_orchestrator() -> dict:
     settings = _autonomy_policy_settings()
     advisory_actions = list(autonomy_advisory_action_types())
-    requires_ack_default = ["update_now_dry_run"]
+    requires_ack_default = ["update_now_dry_run", "patch_apply", "governed_patch_apply"]
     mode = _autonomy_execution_mode(settings)
     execute_enabled = _autonomy_execution_enabled(settings)
     mission_settings = dict(settings.get("mission") or {}) if isinstance(settings.get("mission"), dict) else {}
@@ -1122,8 +1219,9 @@ def _policy_snapshot_for_orchestrator() -> dict:
             settings.get("active_work_tree_max_trees_per_cycle"),
             ACTIVE_WORK_TREE_MAX_TREES,
         ),
-        "orchestrator_owns_execution": _autonomy_policy_bool(settings, "orchestrator_owns_execution", default=False),
+        "orchestrator_owns_execution": _autonomy_policy_bool(settings, "orchestrator_owns_execution", default=True),
         "legacy_maintenance_execution_enabled": _legacy_maintenance_execution_enabled(settings),
+        "execution_owner": _autonomy_execution_owner(settings),
         "source_freshness_sec": 0,
     }
 
@@ -1720,6 +1818,37 @@ def _apply_root_closure_inventory_surfaces(payload: dict, inventory: dict[str, o
     return result
 
 
+def _apply_self_repair_closure_inventory_surfaces(payload: dict, inventory: dict[str, object]) -> dict:
+    result = dict(payload or {})
+    closure = dict(inventory or {})
+    result["self_repair_closure_inventory"] = closure
+    result["self_repair_closure_inventory_ok"] = bool(closure.get("ok", False))
+    result["self_repair_closure_inventory_gap_count"] = int(closure.get("gap_count", 0) or 0)
+    result["self_repair_closure_inventory_gap_roots"] = list(closure.get("gap_roots") or [])
+    result["self_repair_closure_source_contract_ready_count"] = int(
+        closure.get("source_contract_ready_count", 0) or 0
+    )
+    result["self_repair_closure_depth_counts"] = dict(closure.get("depth_counts") or {})
+    return result
+
+
+def _apply_live_closure_inventory_surfaces(payload: dict, inventory: dict[str, object]) -> dict:
+    result = dict(payload or {})
+    live_closure = dict(inventory or {})
+    result["live_closure_inventory"] = live_closure
+    result["live_closure_inventory_ok"] = bool(live_closure.get("ok", False))
+    result["live_closure_inventory_gap_count"] = int(live_closure.get("gap_count", 0) or 0)
+    result["live_closure_inventory_gap_roots"] = list(live_closure.get("gap_roots") or [])
+    result["live_closure_inventory_verified_root_count"] = int(
+        live_closure.get("verified_root_count", 0) or 0
+    )
+    result["live_closure_inventory_unverified_root_count"] = int(
+        live_closure.get("unverified_root_count", 0) or 0
+    )
+    result["live_closure_depth_counts"] = dict(live_closure.get("depth_counts") or {})
+    return result
+
+
 def _apply_source_root_inventory_surfaces(payload: dict, inventory: dict[str, object]) -> dict:
     result = dict(payload or {})
     source_root = dict(inventory or {})
@@ -1810,15 +1939,46 @@ def _refresh_root_closure_inventory_surfaces(payload: dict, *, preserve_existing
     try:
         root_closure = build_root_closure_inventory_payload(result)
         result = _apply_root_closure_inventory_surfaces(result, root_closure)
-    except Exception:
+        self_repair_closure = build_self_repair_closure_inventory_payload(result)
+        result = _apply_self_repair_closure_inventory_surfaces(result, self_repair_closure)
+        live_closure = build_live_closure_inventory_payload(
+            result,
+            self_repair_seed=self_repair_closure,
+        )
+        result = _apply_live_closure_inventory_surfaces(result, live_closure)
+    except Exception as exc:
         result = _apply_root_closure_inventory_surfaces(
             result,
-            {"ok": True, "gap_count": 0, "gap_roots": [], "roots": []},
+            {
+                "ok": False,
+                "gap_count": 0,
+                "gap_roots": [],
+                "roots": [],
+                "error": str(exc),
+            },
         )
-    if "self_repair_closure_inventory" not in result:
-        result["self_repair_closure_inventory"] = {"ok": True, "gap_count": 0, "gap_roots": [], "roots": []}
-        result["self_repair_closure_inventory_ok"] = True
-        result["self_repair_closure_inventory_gap_count"] = 0
+        result = _apply_self_repair_closure_inventory_surfaces(
+            result,
+            {
+                "ok": False,
+                "proof_scope": "source_contract",
+                "gap_count": 0,
+                "gap_roots": [],
+                "roots": [],
+                "error": str(exc),
+            },
+        )
+        result = _apply_live_closure_inventory_surfaces(
+            result,
+            {
+                "ok": False,
+                "proof_scope": "live_closure",
+                "gap_count": 0,
+                "gap_roots": [],
+                "roots": [],
+                "error": str(exc),
+            },
+        )
     return result
 
 
@@ -1890,7 +2050,11 @@ def _live_control_status_payload_http_full(fallback_payload: dict) -> dict:
         read_limit=2_000_000,
     )
     if live is None:
-        return _local_dependency_payload_for_signal_ingestion(fallback)
+        return _local_dependency_payload_for_signal_ingestion(
+            fallback,
+            preserve_disk_state=True,
+            status_source="local_dependency_probe",
+        )
     merged = {**fallback, **live}
     fallback_maintenance = fallback.get("autonomy_maintenance") if isinstance(fallback.get("autonomy_maintenance"), dict) else {}
     live_maintenance = live.get("autonomy_maintenance") if isinstance(live.get("autonomy_maintenance"), dict) else {}
@@ -1911,7 +2075,11 @@ def _live_control_status_payload_http_surfaces(fallback_payload: dict) -> dict:
         read_limit=512_000,
     )
     if live is None:
-        return _local_dependency_payload_for_signal_ingestion(fallback)
+        return _local_dependency_payload_for_signal_ingestion(
+            fallback,
+            preserve_disk_state=True,
+            status_source="local_dependency_probe",
+        )
     merged = {**fallback, **live}
     fallback_maintenance = fallback.get("autonomy_maintenance") if isinstance(fallback.get("autonomy_maintenance"), dict) else {}
     live_maintenance = live.get("autonomy_maintenance") if isinstance(live.get("autonomy_maintenance"), dict) else {}
@@ -1932,9 +2100,11 @@ def _live_control_status_payload_local_first(fallback_payload: dict) -> dict:
         read_limit=512_000,
     )
     if live is None:
-        local = _local_dependency_payload_for_signal_ingestion(fallback)
-        local["signal_ingestion_status_source"] = "local_dependency_probe"
-        return local
+        return _local_dependency_payload_for_signal_ingestion(
+            fallback,
+            preserve_disk_state=True,
+            status_source="local_dependency_probe",
+        )
     merged = merge_http_supplement_into_local(fallback, live)
     fallback_maintenance = fallback.get("autonomy_maintenance") if isinstance(fallback.get("autonomy_maintenance"), dict) else {}
     live_maintenance = live.get("autonomy_maintenance") if isinstance(live.get("autonomy_maintenance"), dict) else {}
@@ -1958,10 +2128,66 @@ def _live_control_status_payload_for_signal_ingestion(fallback_payload: dict) ->
     return _live_control_status_payload_local_first(fallback_payload)
 
 
-def _local_dependency_payload_for_signal_ingestion(fallback_payload: dict) -> dict:
+def _signal_ingestion_field_missing(value: object) -> bool:
+    if value is None:
+        return True
+    if isinstance(value, str) and not value.strip():
+        return True
+    if isinstance(value, dict) and not value:
+        return True
+    return False
+
+
+def _apply_disk_preserved_state_to_signal_ingestion_payload(payload: dict) -> dict:
+    """Restore maintenance surfaces from disk when HTTP status is unavailable."""
+    result = dict(payload or {})
+    disk_state = _load_state()
+    if not disk_state:
+        return result
+
+    maintenance = (
+        dict(result.get("autonomy_maintenance") or {})
+        if isinstance(result.get("autonomy_maintenance"), dict)
+        else {}
+    )
+    disk_maintenance = {
+        "last_regression_status": str(disk_state.get("last_regression_status") or ""),
+        "last_regression_stale": bool(disk_state.get("last_regression_stale", False)),
+        "last_core_thinning_sync": (
+            dict(disk_state.get("last_core_thinning_sync") or {})
+            if isinstance(disk_state.get("last_core_thinning_sync"), dict)
+            else {}
+        ),
+    }
+    for key, value in disk_maintenance.items():
+        if _signal_ingestion_field_missing(maintenance.get(key)):
+            maintenance[key] = value
+    result["autonomy_maintenance"] = maintenance
+
+    if _signal_ingestion_field_missing(result.get("last_regression_status")):
+        result["last_regression_status"] = disk_maintenance["last_regression_status"]
+    if _signal_ingestion_field_missing(result.get("last_regression_stale")):
+        result["last_regression_stale"] = disk_maintenance["last_regression_stale"]
+
+    core_sync = disk_maintenance["last_core_thinning_sync"]
+    if _signal_ingestion_field_missing(result.get("core_thinning_sync")):
+        result["core_thinning_sync"] = dict(core_sync)
+    if "core_thinning_order_count" not in result or result.get("core_thinning_order_count") is None:
+        result["core_thinning_order_count"] = int(core_sync.get("order_count", 0) or 0)
+    return result
+
+
+def _local_dependency_payload_for_signal_ingestion(
+    fallback_payload: dict,
+    *,
+    preserve_disk_state: bool = False,
+    status_source: str = "local_dependency_probe",
+) -> dict:
     payload = dict(fallback_payload or {})
-    payload["signal_ingestion_status_source"] = "local_dependency_probe"
-    return _enrich_signal_ingestion_status_payload(payload, only_missing=False)
+    if preserve_disk_state:
+        payload = _apply_disk_preserved_state_to_signal_ingestion_payload(payload)
+    payload["signal_ingestion_status_source"] = str(status_source or "local_dependency_probe").strip()
+    return _enrich_signal_ingestion_status_payload(payload, only_missing=bool(preserve_disk_state))
 
 
 def _local_release_status_for_signal_ingestion() -> dict:
@@ -2322,7 +2548,24 @@ def _run_autonomy_orchestrator_advisory(state: dict, kidney_summary: dict) -> di
         else {}
     )
     packet = AUTONOMY_ORCHESTRATOR_SERVICE.evaluate_next_action(input_envelope)
-    execution = _execute_autonomy_recommendation(state, packet, policy_snapshot)
+    execution_owner = _autonomy_execution_owner(settings=_autonomy_policy_settings())
+    if execution_owner == "orchestrator":
+        execution = _execute_autonomy_recommendation(state, packet, policy_snapshot)
+    else:
+        execution = {
+            "ts": _patch_queue_timestamp(),
+            "created_at_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            "mode": str(packet.get("mode") or ""),
+            "gate_status": "skipped",
+            "gate_reason": "legacy_owns_execution" if execution_owner == "legacy" else "execution_disabled",
+            "action_type": str(((packet.get("recommended_action") or {}).get("action_type") or "")),
+            "target_id": str(((packet.get("recommended_action") or {}).get("target_id") or "")),
+            "target_step_id": str(((packet.get("recommended_action") or {}).get("target_step_id") or "")),
+            "allowed": False,
+            "result": "skipped",
+            "refusal_reasons": [execution_owner or "execution_disabled"],
+            "execution_owner": execution_owner,
+        }
     ledger = dict(packet.get("ledger") or {}) if isinstance(packet.get("ledger"), dict) else {}
     ledger_row = dict(ledger.get("row") or {}) if isinstance(ledger.get("row"), dict) else {}
     ledger_status = "not_requested"
@@ -3002,6 +3245,37 @@ def _maintenance_generated_queue_run_next_action(_payload: dict) -> tuple[bool, 
     )
 
 
+def _maintenance_operator_outbox_respond_action(payload: dict) -> tuple[bool, str, dict, str]:
+    result = OPERATOR_OUTBOX_SERVICE.respond_to_notice(
+        OPERATOR_OUTBOX_FILE,
+        event_id=str(payload.get("event_id") or payload.get("id") or "").strip(),
+        message=str(payload.get("message") or payload.get("response") or "").strip(),
+        responder=str(payload.get("responder") or payload.get("user_id") or "operator").strip(),
+        resolution=str(payload.get("resolution") or "evidence_only").strip(),
+        response_payload=payload,
+        work_tree_module=work_tree,
+    )
+    ok = bool(result.get("ok", False))
+    msg = "operator_outbox_response_ok" if ok else str(result.get("reason") or "operator_outbox_response_failed")
+    detail = f"{msg}:{str(payload.get('event_id') or payload.get('id') or '').strip()}"
+    return ok, msg, result, detail
+
+
+def _maintenance_operator_outbox_status_action(payload: dict) -> tuple[bool, str, dict, str]:
+    event_id = str(payload.get("event_id") or payload.get("id") or "").strip()
+    status = str(payload.get("status") or "").strip()
+    result = OPERATOR_OUTBOX_SERVICE.set_notice_status(
+        OPERATOR_OUTBOX_FILE,
+        event_id=event_id,
+        status=status,
+        note=str(payload.get("note") or "").strip(),
+    )
+    ok = bool(result.get("ok", False))
+    msg = "operator_outbox_status_ok" if ok else str(result.get("reason") or "operator_outbox_status_failed")
+    detail = f"{msg}:{event_id}:{status}"
+    return ok, msg, result, detail
+
+
 def _maintenance_generated_queue_investigate_action(_payload: dict, state: dict) -> tuple[bool, str, dict, str]:
     mission_snapshot = _mission_snapshot_for_ingestion(state)
     if _mission_hold_blocks_action(
@@ -3108,8 +3382,8 @@ def _maintenance_active_work_tree_run_next_action(_payload: dict, state: dict) -
 
 def _maintenance_codegen_run_action(_payload: dict, _state: dict) -> tuple[bool, str, dict, str]:
     """Generate a preview code artifact for a declared capability gap branch."""
-    from services.codegen_patch_bridge import validate_codegen_preview, bridge_codegen_to_patch
     from services.codegen_memory_recorder import CODEGEN_MEMORY_RECORDER_SERVICE
+    from services.governance_chain import run_codegen_to_patch_chain
     from tools.codegen_tool import CodegenTool
     from tools.base_tool import ToolContext
     import time as _time
@@ -3164,28 +3438,49 @@ def _maintenance_codegen_run_action(_payload: dict, _state: dict) -> tuple[bool,
         msg = f"codegen_run_tool_failed:{exc}"
         return False, msg, {}, msg
 
-    ok_val, reason, parsed = validate_codegen_preview(preview)
-    if not ok_val:
-        msg = f"codegen_run_preview_invalid:{reason}"
+    codegen_id = f"codegen_run_{int(_time.time())}"
+    chain = run_codegen_to_patch_chain(
+        preview,
+        updates_dir=UPDATES_DIR,
+        current_revision=int(nova_core._read_patch_revision() or 0),
+        codegen_id=codegen_id,
+        operator_id="autonomy_maintenance",
+        patch_preview_fn=lambda path, write_report=False: nova_core.patch_preview(path, write_report=write_report),
+    )
+    if not bool(chain.get("ok")):
+        msg = f"codegen_run_chain_failed:{chain.get('reason') or chain.get('stage')}"
         return False, msg, {}, msg
 
-    codegen_id = f"codegen_run_{int(_time.time())}"
-    patch_artifact = bridge_codegen_to_patch(parsed, codegen_id=codegen_id, operator_id="autonomy_maintenance")
-    patch_id = str(patch_artifact.get("patch_id") or "")
+    patch_id = str(chain.get("patch_id") or "")
+    zip_path = str(chain.get("zip_path") or "")
+    generated_code = ""
+    for artifact in list(preview.get("artifacts") or []):
+        if isinstance(artifact, dict):
+            generated_code = str(artifact.get("content") or "")
+            if generated_code:
+                break
 
     try:
         CODEGEN_MEMORY_RECORDER_SERVICE.record_pattern(
             capability_name=safe_name,
             spec_string=json.dumps(spec, sort_keys=True),
-            generated_code=gap_purpose,
+            generated_code=generated_code or gap_purpose,
             test_code="",
         )
     except Exception:
         pass
 
     msg = f"codegen_run_ok:{safe_name}"
-    _append_log(f"codegen_run capability={safe_name} patch_id={patch_id} branch={target_id or 'unspecified'}")
-    return True, msg, {"patch_id": patch_id, "capability_name": safe_name, "codegen_id": codegen_id}, msg
+    _append_log(
+        f"codegen_run capability={safe_name} patch_id={patch_id} zip={zip_path} branch={target_id or 'unspecified'}"
+    )
+    return True, msg, {
+        "patch_id": patch_id,
+        "zip_path": zip_path,
+        "capability_name": safe_name,
+        "codegen_id": codegen_id,
+        "chain_status_path": chain.get("chain_status_path"),
+    }, msg
 
 
 def _dispatch_autonomy_control_action(action_type: str, payload: dict, events: list[dict], state: dict | None = None) -> tuple[bool, str, dict]:
@@ -3238,8 +3533,8 @@ def _dispatch_autonomy_control_action(action_type: str, payload: dict, events: l
         backend_command_list_action_fn=_unsupported_control_action,
         backend_command_run_action_fn=_unsupported_control_action,
         operator_prompt_action_fn=lambda event_payload: (False, "operator_prompt_unavailable_in_maintenance", {}, "operator_prompt_unavailable_in_maintenance", event_payload),
-        operator_outbox_respond_action_fn=_unsupported_control_action,
-        operator_outbox_status_action_fn=_unsupported_control_action,
+        operator_outbox_respond_action_fn=_maintenance_operator_outbox_respond_action,
+        operator_outbox_status_action_fn=_maintenance_operator_outbox_status_action,
         session_delete_action_fn=_unsupported_control_action,
         policy_allow_action_fn=_unsupported_control_action,
         policy_remove_action_fn=_unsupported_control_action,
@@ -3351,6 +3646,33 @@ def _orchestrator_executed_lane_cycle(packet: dict, action_type: str) -> dict:
     return cycle
 
 
+def _orchestrator_executed_generated_queue_cycle(packet: dict, *, state: dict) -> dict:
+    execution = dict((packet or {}).get("execution") or {}) if isinstance((packet or {}).get("execution"), dict) else {}
+    if str(execution.get("action_type") or "").strip() != "generated_queue_run_next":
+        return {}
+    result = str(execution.get("result") or "").strip().lower()
+    if result not in {"success", "failed"}:
+        return {}
+    extra = dict(execution.get("extra") or {}) if isinstance(execution.get("extra"), dict) else {}
+    sync_state = dict(state.get("last_generated_queue_sync") or {}) if isinstance(state.get("last_generated_queue_sync"), dict) else {}
+    work_queue = dict(extra.get("work_queue") or {}) if isinstance(extra.get("work_queue"), dict) else {}
+    selected = dict(extra.get("selected") or {}) if isinstance(extra.get("selected"), dict) else {}
+    executed_count = 1 if result == "success" and bool(selected.get("file") or selected.get("session_file")) else 0
+    return {
+        "ts": _patch_queue_timestamp(),
+        "status": "ok" if result == "success" else "failed",
+        "tree_count": 1 if str(sync_state.get("tree_id") or "").strip() else 0,
+        "executed_count": executed_count,
+        "reason": str(execution.get("message") or execution.get("gate_reason") or "orchestrator_generated_queue_run_next"),
+        "tree_id": str(sync_state.get("tree_id") or ""),
+        "tree_title": str(sync_state.get("tree_title") or ""),
+        "actionable_count": int(work_queue.get("actionable_count", sync_state.get("actionable_count", 0)) or 0),
+        "queue_status": str(work_queue.get("status") or ""),
+        "orchestrator_owned": True,
+        "orchestrator_action_type": "generated_queue_run_next",
+    }
+
+
 def _patch_queue_work_tree_cycle_for_execution_mode(
     state: dict,
     *,
@@ -3379,38 +3701,59 @@ def _patch_queue_work_tree_cycle_for_execution_mode(
     return _run_patch_queue_work_tree_cycle(state)
 
 
+def _generated_queue_cycle_for_execution_mode(
+    state: dict,
+    *,
+    mission_snapshot: dict | None,
+    policy_snapshot: dict | None,
+    autonomy_orchestrator: dict | None,
+    legacy_execution_enabled: bool,
+) -> dict:
+    if legacy_execution_enabled:
+        if _mission_hold_blocks_generated_queue(mission_snapshot, policy_snapshot=policy_snapshot):
+            return _skipped_maintenance_execution_payload(
+                state,
+                "last_generated_queue_tree_cycle",
+                "mission_steady_state_hold",
+                tree_count=1,
+            )
+        return _run_generated_queue_work_tree_cycle(state)
+
+    generated_queue_cycle = _orchestrator_executed_generated_queue_cycle(
+        autonomy_orchestrator if isinstance(autonomy_orchestrator, dict) else {},
+        state=state,
+    )
+    if generated_queue_cycle:
+        state["last_generated_queue_tree_cycle"] = generated_queue_cycle
+        return generated_queue_cycle
+    return _skipped_maintenance_execution_payload(
+        state,
+        "last_generated_queue_tree_cycle",
+        "orchestrator_owns_execution",
+        tree_count=1,
+    )
+
+
 def _active_work_tree_cycle_for_execution_mode(
     state: dict,
     *,
     mission_snapshot: dict | None,
+    policy_snapshot: dict | None,
     autonomy_orchestrator: dict | None,
     legacy_execution_enabled: bool,
 ) -> dict:
-    if legacy_execution_enabled and _mission_hold_blocks_legacy_execution(mission_snapshot):
-        policy_snapshot = _policy_snapshot_for_orchestrator()
-        candidates = _active_work_tree_candidates(ACTIVE_WORK_TREE_MAX_TREES)
-        allowed_context = _mission_allowed_active_work_context(
+    if legacy_execution_enabled:
+        if _mission_hold_blocks_action(
+            "active_work_tree_run_next",
             mission_snapshot,
             policy_snapshot=policy_snapshot,
-            candidates=candidates,
-        )
-        if allowed_context:
-            return _run_active_work_tree_cycle(
+        ):
+            return _skipped_maintenance_execution_payload(
                 state,
-                max_steps=1,
-                max_trees=1,
-                target_tree_id=str(allowed_context.get("tree_id") or "").strip(),
-                target_branch_id=str(allowed_context.get("branch_id") or "").strip(),
-                target_task_id=str(allowed_context.get("task_id") or "").strip(),
-                target_tool=str(allowed_context.get("recommended_tool") or "").strip(),
+                "last_active_work_tree_cycle",
+                "mission_steady_state_hold",
+                tree_count=0,
             )
-        return _skipped_maintenance_execution_payload(
-            state,
-            "last_active_work_tree_cycle",
-            "mission_steady_state_hold",
-            tree_count=0,
-        )
-    if legacy_execution_enabled:
         return _run_active_work_tree_cycle(state)
 
     active_work_tree_cycle = _orchestrator_executed_lane_cycle(
@@ -3549,8 +3892,7 @@ def _build_micro_patch_zip(state: dict) -> Path | None:
 
 
 def _micro_patch_candidates_require_review(files: list[Path]) -> bool:
-    del files
-    return False
+    return bool(files)
 
 
 def _zip_contains_only_promoted_patch_entries(zip_path: Path) -> bool:
@@ -3611,17 +3953,22 @@ def _is_patch_preview_stale_noneligible(row: dict) -> bool:
 
 
 def _auto_apply_if_eligible(zip_path: Path) -> str:
-    # Generated definition-only packs should stay in review flow, not auto-apply.
     if _zip_contains_only_promoted_patch_entries(zip_path):
         return "skipped_generated_definitions_require_review"
+    from services.governance_chain import governed_patch_apply
 
-    preview_out = nova_core.patch_preview(str(zip_path), write_report=False)
-    if "Status: eligible" not in str(preview_out):
-        return f"preview_not_eligible: {str(preview_out).strip()[:300]}"
-
-    preview_out = nova_core.patch_preview(str(zip_path), write_report=True)
-    apply_out = nova_core.execute_patch_action("apply", str(zip_path), is_admin=True)
-    return str(apply_out or "")
+    outcome = governed_patch_apply(
+        zip_path,
+        patch_preview_fn=lambda path, write_report=False: nova_core.patch_preview(path, write_report=write_report),
+        preview_approved_fn=nova_core.preview_is_approved,
+        execute_patch_apply_fn=nova_core.execute_patch_action,
+    )
+    reason = str(outcome.get("reason") or "")
+    if reason == "preview_approval_missing":
+        return "pending_operator_preview_approval"
+    if not bool(outcome.get("ok")):
+        return reason or str(outcome.get("apply_out") or "governed_patch_apply_failed")
+    return str(outcome.get("apply_out") or "governed_patch_apply_ok")
 
 
 def _run_daily_regression_if_due(state: dict) -> str:
@@ -3646,11 +3993,16 @@ def _run_daily_regression_if_due(state: dict) -> str:
         state["last_regression_date"] = today
         state["last_regression_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
         state["last_regression_status"] = summary
-        state["last_regression_stale"] = False
         state["last_regression_returncode"] = int(proc.returncode)
         state["last_regression_source"] = "scripts/run_regression.py"
         state["last_regression_lanes"] = ["all"]
+        state["last_regression_failed_lane"] = ""
+        state["last_regression_failed_tests"] = []
         state["last_regression_tail"] = output[-2000:]
+        state["last_regression_stale"] = regression_evidence_stale(
+            status_label=summary,
+            regression_date=today,
+        )
     return f"daily_regression_{summary.lower()}"
 
 
@@ -3671,19 +4023,30 @@ def _sync_regression_status_from_file(state: dict, *, status_path: Path = REGRES
     if current_at and generated_at <= current_at:
         return False
 
-    state["last_regression_date"] = str(data.get("date") or generated_at[:10] or time.strftime("%Y-%m-%d"))
-    state["last_regression_at"] = generated_at
-    state["last_regression_status"] = status
-    state["last_regression_stale"] = False
-    state["last_regression_returncode"] = _safe_int(data.get("returncode"), 0)
-    state["last_regression_source"] = str(data.get("source") or Path(status_path).name)
-    state["last_regression_lanes"] = list(data.get("lanes") or []) if isinstance(data.get("lanes"), list) else []
-    detail = str(data.get("detail") or "").strip()
-    state["last_regression_tail"] = detail or f"{state['last_regression_source']} reported {status}."
+    apply_regression_status_payload(state, data)
+    if not str(state.get("last_regression_source") or "").strip():
+        state["last_regression_source"] = str(data.get("source") or Path(status_path).name)
     return True
 
 
-def _sync_signal_intake_work_tree(state: dict, kidney_summary: dict | None = None, temporal_feed: dict | None = None) -> dict:
+def _refresh_regression_stale_from_outcome(state: dict) -> None:
+    status = str(state.get("last_regression_status") or "").strip()
+    if not regression_outcome_failed(status):
+        state["last_regression_stale"] = False
+        return
+    state["last_regression_stale"] = regression_evidence_stale(
+        status_label=status,
+        regression_date=str(state.get("last_regression_date") or ""),
+    )
+
+
+def _sync_signal_intake_work_tree(
+    state: dict,
+    kidney_summary: dict | None = None,
+    temporal_feed: dict | None = None,
+    *,
+    archive_superseded: bool = True,
+) -> dict:
     maintenance_payload = {
         "last_regression_status": str(state.get("last_regression_status") or ""),
         "last_regression_stale": bool(state.get("last_regression_stale", False)),
@@ -3742,7 +4105,10 @@ def _sync_signal_intake_work_tree(state: dict, kidney_summary: dict | None = Non
     except Exception:
         pass
 
-    results = WORK_TREE_SIGNAL_INGESTION_SERVICE.sync_status_snapshot(status_payload)
+    results = WORK_TREE_SIGNAL_INGESTION_SERVICE.sync_status_snapshot(
+        status_payload,
+        archive_superseded=archive_superseded,
+    )
     try:
         generated_queue = _generated_work_queue(limit=200)
     except Exception:
@@ -3784,11 +4150,9 @@ def _sync_signal_intake_work_tree(state: dict, kidney_summary: dict | None = Non
         if str(meta.get("kind") or "").strip().lower() == WORK_TREE_SIGNAL_INGESTION_SERVICE.SIGNAL_TREE_KIND:
             tree = candidate
             break
-    active_maintenance_regression = bool(
-        maintenance_payload["last_regression_status"]
-        and "pass" not in maintenance_payload["last_regression_status"].lower()
-        and maintenance_payload["last_regression_status"].lower() != "ok"
-        and not maintenance_payload["last_regression_stale"]
+    active_maintenance_regression = regression_failure_active(
+        status_label=str(maintenance_payload.get("last_regression_status") or ""),
+        stale=bool(maintenance_payload.get("last_regression_stale", False)),
     )
     validation_truth = status_payload.get("validation_artifact_truth") if isinstance(status_payload.get("validation_artifact_truth"), dict) else {}
     active_validation_artifact_failure = bool(
@@ -4021,7 +4385,9 @@ def _is_patch_preview_auto_approvable(row: dict) -> bool:
         return False
     if not bool((row or {}).get("zip_exists")):
         return False
-    if preview_kind not in {"autonomy_micro_patch", "teach_proposal"}:
+    if preview_kind == "autonomy_micro_patch":
+        return False
+    if preview_kind not in {"teach_proposal", "codegen_bridge"}:
         return False
     min_base_text = str((row or {}).get("min_base_revision") or "").strip()
     patch_revision_text = str((row or {}).get("patch_revision") or "").strip()
@@ -4079,8 +4445,6 @@ def _patch_queue_row_mode(row: dict) -> str:
         return "orphaned"
     if _is_patch_preview_apply_ready(row):
         return "apply"
-    if bool((row or {}).get("_auto_approve_target")) and _is_patch_preview_auto_approvable(row):
-        return "approve"
     return "review"
 
 
@@ -4159,10 +4523,10 @@ def _decide_patch_queue_next_step(tree_id: str, options: list[dict]) -> dict | N
         branch_id = str((option or {}).get("branch_id") or "").strip()
         branch = work_tree.get_branch(branch_id) if branch_id else None
         tool_name = str((option or {}).get("recommended_tool") or "").strip()
-        if tool_name not in {"patch_preview_apply", "patch_preview_approve"}:
+        if tool_name != "patch_preview_apply":
             continue
         priority = int(getattr(branch, "priority", 0) or 0) if branch is not None else 0
-        rank = 0 if tool_name == "patch_preview_apply" else 1
+        rank = 0
         created_sort = str(getattr(branch, "created_at", "") or "")
         candidates.append((rank, -priority, created_sort, dict(option)))
     if not candidates:
@@ -4242,15 +4606,79 @@ def _complete_open_branch_tasks(branch_id: str) -> int:
     return completed
 
 
+def _ensure_recurring_queue_task(
+    branch,
+    *,
+    title: str,
+    finding_key: str,
+    preferred_tool: str,
+    extra: dict[str, object],
+    reopen: bool,
+) -> None:
+    open_tasks = [
+        task
+        for task in work_tree.list_branch_tasks(branch.branch_id)
+        if str(getattr(getattr(task, "status", None), "value", getattr(task, "status", "")) or "").strip().lower()
+        not in {"complete", "dropped"}
+    ]
+    if any(str(getattr(task, "title", "") or "").strip() == title for task in open_tasks):
+        return
+
+    fingerprint = task_fingerprint(task_title=title, preferred_tool=preferred_tool)
+    task_key = task_finding_key(branch_finding_key=finding_key, task_title=title)
+    if reopen:
+        for task in work_tree.list_branch_tasks(branch.branch_id):
+            if str(getattr(task, "title", "") or "").strip() != title:
+                continue
+            status = str(getattr(getattr(task, "status", None), "value", getattr(task, "status", "")) or "").strip().lower()
+            if status != "complete":
+                continue
+            prior_meta = dict(getattr(task, "meta", {}) or {}) if isinstance(getattr(task, "meta", None), dict) else {}
+            prior_state = read_task_state(prior_meta)
+            prior_fp = str(prior_state.get(KEY_SATISFACTION_FINGERPRINT) or "").strip() or fingerprint
+            work_tree.reopen_task(
+                task.task_id,
+                meta_updates=reopen_task_meta(
+                    prior_meta,
+                    finding_key=finding_key_from_meta(prior_meta) or task_key,
+                    satisfaction_fingerprint=prior_fp,
+                    reason=REOPEN_QUEUE_PRESSURE,
+                    extra=extra,
+                ),
+            )
+            return
+
+    _complete_open_branch_tasks(branch.branch_id)
+    work_tree.add_task_to_branch(
+        branch.branch_id,
+        title,
+        meta=initial_task_meta(
+            finding_key=task_key,
+            satisfaction_fingerprint=fingerprint,
+            extra=extra,
+        ),
+    )
+
+
 def _apply_patch_queue_branch_state(branch, row: dict, *, first_seen: bool, reopen: bool) -> None:
     now = work_tree._now()
+    was_complete = branch.status == BranchStatus.COMPLETE
     mode = _patch_queue_row_mode(row)
     preview_name = _patch_queue_preview_name(row)
     branch.title = _patch_queue_branch_title(row)
     branch.bucket = PATCH_QUEUE_BUCKET
     branch.source_type = PATCH_QUEUE_SOURCE_TYPE
     branch.source_key = _patch_queue_source_key(row) or None
-    branch.source_payload = dict(row or {})
+    incoming_payload = dict(row or {})
+    lifecycle = read_branch_lifecycle(branch.source_payload)
+    if lifecycle:
+        incoming_payload = attach_branch_lifecycle(incoming_payload, lifecycle)
+    elif first_seen:
+        incoming_payload = initial_branch_lifecycle(
+            incoming_payload,
+            finding_key=str(branch.source_key or _patch_queue_source_key(row) or ""),
+        )
+    branch.source_payload = incoming_payload
     branch.last_seen_at = now
     branch.notes = _patch_queue_branch_notes(row)
     branch.evidence_count = 1 if first_seen else int(branch.evidence_count or 0) + 1
@@ -4301,59 +4729,49 @@ def _apply_patch_queue_branch_state(branch, row: dict, *, first_seen: bool, reop
         branch.allowed_tools = list(PATCH_QUEUE_REVIEW_TOOLS)
         branch.preferred_tool = "find"
 
-    if reopen and branch.status == BranchStatus.COMPLETE and mode != "retired":
+    if reopen and was_complete and mode != "retired":
+        branch.source_payload = bump_branch_reopen(
+            branch.source_payload,
+            finding_key=str(branch.source_key or _patch_queue_source_key(row) or ""),
+            reason=REOPEN_QUEUE_PRESSURE,
+        )
         branch.status = BranchStatus.READY if mode in {"apply", "approve", "review", "orphaned"} else BranchStatus.BLOCKED
         branch.resolution_state = "open"
 
     if mode == "apply" and preview_name:
         desired_task = _patch_queue_task_title(row)
-        open_tasks = [
-            task for task in work_tree.list_branch_tasks(branch.branch_id)
-            if str(getattr(getattr(task, "status", None), "value", getattr(task, "status", "")) or "").strip().lower()
-            not in {"complete", "dropped"}
-        ]
-        has_desired_task = any(str(getattr(task, "title", "") or "").strip() == desired_task for task in open_tasks)
-        if not has_desired_task:
-            _complete_open_branch_tasks(branch.branch_id)
-            work_tree.add_task_to_branch(
-                branch.branch_id,
-                desired_task,
-                meta={"patch_preview": preview_name},
-            )
+        _ensure_recurring_queue_task(
+            branch,
+            title=desired_task,
+            finding_key=str(branch.source_key or _patch_queue_source_key(row) or ""),
+            preferred_tool="patch_preview_apply",
+            extra={"patch_preview": preview_name},
+            reopen=reopen,
+        )
         branch.allowed_tools = list(PATCH_QUEUE_EXECUTE_TOOLS)
         branch.preferred_tool = "patch_preview_apply"
     elif mode == "approve" and preview_name:
         desired_task = _patch_queue_approve_task_title(row)
-        open_tasks = [
-            task for task in work_tree.list_branch_tasks(branch.branch_id)
-            if str(getattr(getattr(task, "status", None), "value", getattr(task, "status", "")) or "").strip().lower()
-            not in {"complete", "dropped"}
-        ]
-        has_desired_task = any(str(getattr(task, "title", "") or "").strip() == desired_task for task in open_tasks)
-        if not has_desired_task:
-            _complete_open_branch_tasks(branch.branch_id)
-            work_tree.add_task_to_branch(
-                branch.branch_id,
-                desired_task,
-                meta={"patch_preview": preview_name},
-            )
+        _ensure_recurring_queue_task(
+            branch,
+            title=desired_task,
+            finding_key=str(branch.source_key or _patch_queue_source_key(row) or ""),
+            preferred_tool="patch_preview_approve",
+            extra={"patch_preview": preview_name},
+            reopen=reopen,
+        )
         branch.allowed_tools = list(PATCH_QUEUE_EXECUTE_TOOLS)
         branch.preferred_tool = "patch_preview_approve"
     elif mode in {"review", "orphaned"} and preview_name:
         desired_task = _patch_queue_review_task_title(row)
-        open_tasks = [
-            task for task in work_tree.list_branch_tasks(branch.branch_id)
-            if str(getattr(getattr(task, "status", None), "value", getattr(task, "status", "")) or "").strip().lower()
-            not in {"complete", "dropped"}
-        ]
-        has_desired_task = any(str(getattr(task, "title", "") or "").strip() == desired_task for task in open_tasks)
-        if not has_desired_task:
-            _complete_open_branch_tasks(branch.branch_id)
-            work_tree.add_task_to_branch(
-                branch.branch_id,
-                desired_task,
-                meta={"patch_preview": preview_name},
-            )
+        _ensure_recurring_queue_task(
+            branch,
+            title=desired_task,
+            finding_key=str(branch.source_key or _patch_queue_source_key(row) or ""),
+            preferred_tool="find",
+            extra={"patch_preview": preview_name},
+            reopen=reopen,
+        )
     else:
         _complete_open_branch_tasks(branch.branch_id)
 
@@ -4389,19 +4807,12 @@ def _sync_patch_queue_work_tree(state: dict) -> dict:
 
     current_revision = int((patch_summary or {}).get("current_revision", 0) or 0)
     normalized_rows: list[dict] = []
-    has_apply_ready = False
     for raw_row in review_rows:
         row = dict(raw_row or {})
         row["_current_revision"] = current_revision
         normalized_rows.append(row)
-        if _is_patch_preview_apply_ready(row):
-            has_apply_ready = True
-    auto_approve_source_key = ""
-    if not has_apply_ready:
-        auto_approve_source_key = _select_patch_queue_auto_approval_target(normalized_rows, current_revision)
 
     for row in normalized_rows:
-        row["_auto_approve_target"] = _patch_queue_source_key(row) == auto_approve_source_key
         source_key = _patch_queue_source_key(row)
         preview_name = _patch_queue_preview_name(row)
         if not source_key:
@@ -4450,6 +4861,10 @@ def _sync_patch_queue_work_tree(state: dict) -> dict:
         if source_key and source_key in seen_source_keys:
             continue
         _complete_open_branch_tasks(branch.branch_id)
+        branch.source_payload = stamp_branch_satisfied(
+            dict(getattr(branch, "source_payload", {}) or {}),
+            completion_action="patch_queue_retired",
+        )
         branch.status = BranchStatus.COMPLETE
         branch.resolution_state = "resolved"
         branch.priority = 0
@@ -4701,12 +5116,22 @@ def _find_generated_queue_branch(tree_id: str, source_key: str, session_file: st
 
 def _apply_generated_queue_branch_state(branch, item: dict, *, first_seen: bool, reopen: bool) -> None:
     now = work_tree._now()
+    was_complete = branch.status == BranchStatus.COMPLETE
     session_file = _generated_queue_item_file(item)
     branch.title = _generated_queue_branch_title(item)
     branch.bucket = GENERATED_QUEUE_BUCKET
     branch.source_type = GENERATED_QUEUE_SOURCE_TYPE
     branch.source_key = _generated_queue_source_key(item) or None
-    branch.source_payload = dict(item or {})
+    incoming_payload = dict(item or {})
+    lifecycle = read_branch_lifecycle(branch.source_payload)
+    if lifecycle:
+        incoming_payload = attach_branch_lifecycle(incoming_payload, lifecycle)
+    elif first_seen:
+        incoming_payload = initial_branch_lifecycle(
+            incoming_payload,
+            finding_key=str(branch.source_key or _generated_queue_source_key(item) or ""),
+        )
+    branch.source_payload = incoming_payload
     branch.last_seen_at = now
     branch.notes = _generated_queue_branch_notes(item)
     branch.evidence_count = 1 if first_seen else int(branch.evidence_count or 0) + 1
@@ -4719,31 +5144,31 @@ def _apply_generated_queue_branch_state(branch, item: dict, *, first_seen: bool,
     branch.allowed_tools = list(GENERATED_QUEUE_EXECUTE_TOOLS)
     branch.preferred_tool = "generated_queue_run"
 
-    if reopen and branch.status == BranchStatus.COMPLETE:
+    if reopen and was_complete:
+        branch.source_payload = bump_branch_reopen(
+            branch.source_payload,
+            finding_key=str(branch.source_key or _generated_queue_source_key(item) or ""),
+            reason=REOPEN_QUEUE_PRESSURE,
+        )
         branch.status = BranchStatus.READY
         branch.resolution_state = "open"
 
     if session_file:
         desired_task = _generated_queue_task_title(item)
-        open_tasks = [
-            task for task in work_tree.list_branch_tasks(branch.branch_id)
-            if str(getattr(getattr(task, "status", None), "value", getattr(task, "status", "")) or "").strip().lower()
-            not in {"complete", "dropped"}
-        ]
-        has_desired_task = any(str(getattr(task, "title", "") or "").strip() == desired_task for task in open_tasks)
-        if not has_desired_task:
-            _complete_open_branch_tasks(branch.branch_id)
-            work_tree.add_task_to_branch(
-                branch.branch_id,
-                desired_task,
-                meta={
-                    "session_file": session_file,
-                    "family_id": str((item or {}).get("family_id") or ""),
-                    "variation_id": str((item or {}).get("variation_id") or ""),
-                    "latest_status": str((item or {}).get("latest_status") or ""),
-                    "opportunity_reason": str((item or {}).get("opportunity_reason") or ""),
-                },
-            )
+        _ensure_recurring_queue_task(
+            branch,
+            title=desired_task,
+            finding_key=str(branch.source_key or _generated_queue_source_key(item) or ""),
+            preferred_tool="generated_queue_run",
+            extra={
+                "session_file": session_file,
+                "family_id": str((item or {}).get("family_id") or ""),
+                "variation_id": str((item or {}).get("variation_id") or ""),
+                "latest_status": str((item or {}).get("latest_status") or ""),
+                "opportunity_reason": str((item or {}).get("opportunity_reason") or ""),
+            },
+            reopen=reopen,
+        )
     else:
         _complete_open_branch_tasks(branch.branch_id)
 
@@ -4817,6 +5242,10 @@ def _sync_generated_queue_work_tree(state: dict) -> dict:
         if source_key and source_key in seen_source_keys:
             continue
         _complete_open_branch_tasks(branch.branch_id)
+        branch.source_payload = stamp_branch_satisfied(
+            dict(getattr(branch, "source_payload", {}) or {}),
+            completion_action="generated_queue_retired",
+        )
         branch.status = BranchStatus.COMPLETE
         branch.resolution_state = "resolved"
         branch.priority = 0
@@ -4848,6 +5277,13 @@ def _sync_generated_queue_work_tree(state: dict) -> dict:
     }
     state["last_generated_queue_sync"] = payload
     return payload
+
+
+def _active_work_tree_execute_planned_action(tool: str, args=None):
+    tool_name = str(tool or "").strip()
+    if tool_name == "generated_queue_run":
+        return _execute_generated_queue_planned_action(tool, args)
+    return nova_core.execute_planned_action(tool, args)
 
 
 def _execute_generated_queue_planned_action(tool: str, args=None):
@@ -5358,6 +5794,10 @@ def _sync_core_thinning_work_tree(state: dict) -> dict:
             "deduped_count": int(feed.get("deduped_count", 0) or 0),
             "updated_count": int(feed.get("updated_count", 0) or 0),
             "resolved_count": int(feed.get("resolved_count", 0) or 0),
+            "satisfied_count": int(feed.get("satisfied_count", 0) or 0),
+            "satisfied_active_count": int(feed.get("satisfied_active_count", 0) or 0),
+            "executable_count": int(feed.get("executable_count", 0) or 0),
+            "reopened_count": int(feed.get("reopened_count", 0) or 0),
             "error": str(brief.get("error") or feed.get("error") or ""),
             "owner_verdict": owner_verdict,
         }
@@ -5495,7 +5935,7 @@ def _run_active_work_tree_cycle(
             continue
         loop_kwargs = {
             "max_steps": 1,
-            "execute_planned_action_fn": nova_core.execute_planned_action,
+            "execute_planned_action_fn": _active_work_tree_execute_planned_action,
         }
         if target_decider is not None:
             loop_kwargs["decide_next_step_fn"] = target_decider
@@ -5730,6 +6170,71 @@ def _archive_stale_cli_active_trees(state: dict) -> dict:
     return payload
 
 
+def _pipeline_worker_maintenance_skipped_payload(*, pipeline_ids: list[str]) -> dict[str, object]:
+    return {
+        "ok": True,
+        "status": "skipped_validation_scope",
+        "reason": "pipeline_workers_disabled_in_validation_scope",
+        "runtime_scope": runtime_scope_name(),
+        "pipeline_count": len(pipeline_ids),
+        "reclaimed_count": 0,
+        "cleared_count": 0,
+        "worker_count": 0,
+        "started_count": 0,
+        "running_count": 0,
+        "failed_count": 0,
+        "workers": [],
+    }
+
+
+def _sync_pipeline_workers_for_maintenance(state: dict) -> None:
+    pipeline_ids = [
+        str(item.pipeline_id or "").strip()
+        for item in build_pipeline_registry(ROOT / "data_sources").discover()
+        if str(item.pipeline_id or "").strip()
+    ]
+    if runtime_scope_name() == "validation":
+        skipped = _pipeline_worker_maintenance_skipped_payload(pipeline_ids=pipeline_ids)
+        state["last_pipeline_worker_reconcile"] = dict(skipped)
+        state["last_pipeline_worker_ensure"] = dict(skipped)
+        _append_log(
+            "pipeline_worker_ensure "
+            + f"status={skipped.get('status')} "
+            + f"scope={skipped.get('runtime_scope')} "
+            + f"pipelines={int(skipped.get('pipeline_count', 0) or 0)}"
+        )
+        return
+    worker_reconcile = reconcile_pipeline_workers_for_ids(
+        pipeline_ids,
+        runtime_root=RUNTIME_DIR,
+        os_name=os.name,
+    )
+    state["last_pipeline_worker_reconcile"] = worker_reconcile
+    _append_log(
+        "pipeline_worker_reconcile "
+        + f"status={worker_reconcile.get('status')} "
+        + f"reclaimed={int(worker_reconcile.get('reclaimed_count', 0) or 0)} "
+        + f"cleared={int(worker_reconcile.get('cleared_count', 0) or 0)}"
+    )
+    worker_ensure = ensure_pipeline_workers_for_ids(
+        pipeline_ids,
+        worker_script=PIPELINE_WORKER_PY,
+        venv_python=VENV_PY,
+        runtime_root=RUNTIME_DIR,
+        data_sources_root=ROOT / "data_sources",
+        subprocess_module=subprocess,
+        os_name=os.name,
+    )
+    state["last_pipeline_worker_ensure"] = worker_ensure
+    _append_log(
+        "pipeline_worker_ensure "
+        + f"status={worker_ensure.get('status')} "
+        + f"running={int(worker_ensure.get('running_count', 0) or 0)} "
+        + f"started={int(worker_ensure.get('started_count', 0) or 0)} "
+        + f"failed={int(worker_ensure.get('failed_count', 0) or 0)}"
+    )
+
+
 def run_once(*, worker_loop: bool = False) -> int:
     cycle_start = time.monotonic()
 
@@ -5750,6 +6255,11 @@ def run_once(*, worker_loop: bool = False) -> int:
         )
     except Exception as exc:
         _append_log(f"operator_webui_ensure_failed {exc}")
+
+    try:
+        _sync_pipeline_workers_for_maintenance(state)
+    except Exception as exc:
+        _append_log(f"pipeline_worker_ensure_failed {exc}")
 
     # Check for an HTTP-side trigger requesting an immediate active-work-tree run.
     if WORK_TREE_RUN_TRIGGER.exists():
@@ -6081,6 +6591,7 @@ def run_once(*, worker_loop: bool = False) -> int:
             state,
             kidney_summary=kidney_summary,
             temporal_feed=temporal_feed,
+            archive_superseded=False,
         )
         state["last_pre_execution_signal_ingestion"] = pre_execution_signal_ingestion
         _append_log(
@@ -6100,6 +6611,7 @@ def run_once(*, worker_loop: bool = False) -> int:
         state["last_pre_execution_signal_ingestion"] = pre_execution_signal_ingestion
         _append_log(f"pre_execution_signal_ingestion_failed {exc}")
 
+    autonomy_orchestrator: dict = {}
     try:
         autonomy_orchestrator = _run_autonomy_orchestrator_advisory(state, kidney_summary)
         _append_log(
@@ -6127,22 +6639,14 @@ def run_once(*, worker_loop: bool = False) -> int:
             if isinstance(state.get("last_nova_mission"), dict)
             else {}
         )
-        if legacy_execution_enabled and _mission_hold_blocks_generated_queue(mission_snapshot):
-            generated_queue_cycle = _skipped_maintenance_execution_payload(
-                state,
-                "last_generated_queue_tree_cycle",
-                "mission_steady_state_hold",
-                tree_count=1,
-            )
-        elif legacy_execution_enabled:
-            generated_queue_cycle = _run_generated_queue_work_tree_cycle(state)
-        else:
-            generated_queue_cycle = _skipped_maintenance_execution_payload(
-                state,
-                "last_generated_queue_tree_cycle",
-                "orchestrator_owns_execution",
-                tree_count=1,
-            )
+        policy_snapshot = _policy_snapshot_for_orchestrator()
+        generated_queue_cycle = _generated_queue_cycle_for_execution_mode(
+            state,
+            mission_snapshot=mission_snapshot,
+            policy_snapshot=policy_snapshot,
+            autonomy_orchestrator=autonomy_orchestrator if isinstance(autonomy_orchestrator, dict) else {},
+            legacy_execution_enabled=legacy_execution_enabled,
+        )
         _append_log(
             "generated_queue_cycle"
             f" status={generated_queue_cycle.get('status')}"
@@ -6160,10 +6664,19 @@ def run_once(*, worker_loop: bool = False) -> int:
         state["last_generated_queue_tree_cycle"] = generated_queue_cycle
         _append_log(f"generated_queue_cycle_failed {exc}")
 
+    if not legacy_execution_enabled:
+        patch_queue_cycle = _orchestrator_executed_lane_cycle(
+            autonomy_orchestrator if isinstance(autonomy_orchestrator, dict) else {},
+            "patch_queue_run_next",
+        )
+        if patch_queue_cycle:
+            state["last_work_tree_cycle"] = patch_queue_cycle
+
     try:
         active_work_tree_cycle = _active_work_tree_cycle_for_execution_mode(
             state,
             mission_snapshot=mission_snapshot,
+            policy_snapshot=policy_snapshot,
             autonomy_orchestrator=autonomy_orchestrator if isinstance(autonomy_orchestrator, dict) else {},
             legacy_execution_enabled=legacy_execution_enabled,
         )
@@ -6259,9 +6772,10 @@ def run_once(*, worker_loop: bool = False) -> int:
     regression_status = _run_daily_regression_if_due(state)
     regression_status_synced = _sync_regression_status_from_file(state)
     if regression_status == "daily_regression_skipped_already_ran" and not regression_status_synced:
-        last_regression_status = str(state.get("last_regression_status") or "").strip()
-        state["last_regression_stale"] = bool(last_regression_status and "pass" not in last_regression_status.lower() and last_regression_status.lower() != "ok")
-    else:
+        _refresh_regression_stale_from_outcome(state)
+    elif regression_status_synced:
+        _refresh_regression_stale_from_outcome(state)
+    elif regression_status != "daily_regression_skipped_already_ran":
         state["last_regression_stale"] = False
     _append_log(f"{regression_status}{'_synced_status_file' if regression_status_synced else ''}")
 
