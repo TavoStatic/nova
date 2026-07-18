@@ -24,7 +24,12 @@ SOURCE_ROOTS: tuple[SourceRoot, ...] = (
     SourceRoot(
         "runtime_control",
         shared_inventory_label("runtime_control"),
-        ("services/runtime_control.py", "services/runtime_process_state.py", "services/runtime_restart_provenance.py"),
+        (
+            "services/runtime_control.py",
+            "services/runtime_process_state.py",
+            "services/runtime_restart_provenance.py",
+            "scripts/start_nova.cmd",
+        ),
     ),
     SourceRoot(
         "scheduler_registry",
@@ -358,6 +363,8 @@ _SOURCE_COVERAGE_IGNORED_DIRS = {
     "logs",
     "runtime",
     "terminals",
+    "mcps",
+    "agent-tools",
 }
 
 
@@ -586,6 +593,8 @@ def _coverage_root_for_path(path: str) -> str:
     ):
         return "diagnostics_hygiene"
     if "control_" in low:
+        return "runtime_control"
+    if name == "start_nova.cmd" or "start_nova" in low:
         return "runtime_control"
     return ""
 
