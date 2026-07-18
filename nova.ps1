@@ -1234,19 +1234,26 @@ switch ($cmd.ToLower()) {
       Write-Host ("[FAIL] Detached webui start failed: " + $_.Exception.Message)
       exit 1
     }
-    Start-Sleep -Seconds 3
-    $logical = @(Get-NovaHttpLogicalProcessesOnPort ([int]$bindPort))
-    if ($logical.Count -gt 1) {
-      $keepPid = [int]$logical[0].ProcessId
-      Stop-NovaHttpExceptOnPort $keepPid ([int]$bindPort)
-    }
-    if (-not (Wait-NovaHttpReady $bindHost $bindPort 18)) {
+    # Health is the source of truth. Do not block readiness on CIM process
+    # scans (they can hang under load and break package validation).
+    if (-not (Wait-NovaHttpReady $bindHost $bindPort 30)) {
       Write-Host ("[FAIL] webui process did not become ready on http://" + $bindHost + ":" + $bindPort + "/api/health")
       Write-Host ("[INFO] Check logs: " + $errLog)
       exit 1
     }
-    $logical = @(Get-NovaHttpLogicalProcessesOnPort ([int]$bindPort))
-    $reportPid = if ($logical.Count -gt 0) { [int]$logical[0].ProcessId } else { 0 }
+    $reportPid = 0
+    try {
+      $listener = @(Get-NetTCPConnection -LocalPort ([int]$bindPort) -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1)
+      if ($listener.Count -gt 0) {
+        $reportPid = [int]$listener[0].OwningProcess
+      }
+    } catch {}
+    if ($reportPid -le 0) {
+      $logical = @(Get-NovaHttpLogicalProcessesOnPort ([int]$bindPort))
+      if ($logical.Count -gt 0) {
+        $reportPid = [int]$logical[0].ProcessId
+      }
+    }
     Write-Host ("[OK]   Started webui pid=" + $reportPid)
     Write-Host ("[INFO] URL: http://" + $bindHost + ":" + $bindPort + "/control")
     break
