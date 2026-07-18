@@ -109,6 +109,55 @@ class TestCoreThinningService(unittest.TestCase):
         self.assertEqual(brief.get("http_surface_candidate_count"), 1)
         order = next(item for item in list(brief.get("orders") or []) if item.get("kind") == "http_surface_candidate")
         self.assertEqual((order.get("target") or {}).get("theme"), "pipeline_control")
+        self.assertIn("non-shim", str(order.get("reason") or ""))
+
+    def test_build_brief_ignores_pure_http_delegation_shims(self):
+        """Already-extracted service shims must not invent HTTP extraction pressure."""
+        sample_http = _validation_tmp_root() / f"nova_http_shims_{uuid.uuid4().hex}.py"
+        sample_http.write_text(
+            "\n".join(
+                [
+                    "def _pipeline_create_action(payload):",
+                    "    return CONTROL_PIPELINES_SERVICE.create(payload)",
+                    "",
+                    "def _pipeline_start_action(payload):",
+                    "    return CONTROL_PIPELINES_SERVICE.start(payload)",
+                    "",
+                    "def _pipeline_pause_action(payload):",
+                    "    return CONTROL_PIPELINES_SERVICE.pause(payload)",
+                    "",
+                    "def _pipeline_archive_action(payload):",
+                    "    return CONTROL_PIPELINES_SERVICE.archive(payload)",
+                    "",
+                    "def _pipeline_update_action(payload):",
+                    "    return CONTROL_PIPELINES_SERVICE.update(payload)",
+                    "",
+                    "def _runtime_timeline_payload(limit=24):",
+                    "    return RUNTIME_TIMELINE_SERVICE.payload(limit=limit)",
+                    "",
+                    "def _runtime_artifacts_payload():",
+                    "    return RUNTIME_ARTIFACTS_SERVICE.payload()",
+                    "",
+                    "def _runtime_artifact_show_action(payload):",
+                    "    return RUNTIME_CONTROL_SERVICE.show(payload)",
+                    "",
+                    "def _guard_control_action(payload):",
+                    "    return RUNTIME_CONTROL_SERVICE.guard(payload)",
+                ]
+            ),
+            encoding="utf-8",
+        )
+        try:
+            brief = build_core_thinning_brief(sample_http)
+        finally:
+            sample_http.unlink(missing_ok=True)
+
+        self.assertTrue(brief.get("ok"))
+        self.assertEqual(brief.get("http_surface_candidate_count"), 0)
+        self.assertEqual(
+            [item for item in list(brief.get("orders") or []) if item.get("kind") == "http_surface_candidate"],
+            [],
+        )
 
     def test_owner_verdict_surfaces_lifecycle_gap_when_pressure_is_not_executable(self):
         verdict = build_core_thinning_owner_verdict(

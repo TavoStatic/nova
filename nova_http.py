@@ -47,6 +47,7 @@ from services.nova_http_transport import HTTP_TRANSPORT_SERVICE
 from services.operator_control import OPERATOR_CONTROL_SERVICE
 from services.patch_control import PATCH_CONTROL_SERVICE
 from services.nova_http_chat_runtime import HTTP_CHAT_RUNTIME_SERVICE
+from services.nova_http_control_surface import HTTP_CONTROL_SURFACE_SERVICE
 from services.nova_http_turn_finalization import HTTP_TURN_FINALIZATION_SERVICE
 from services.nova_reply_sequence import execute_http_reply_sequence_from_runtime
 from services.storage_watch import STORAGE_WATCH_SERVICE
@@ -1596,13 +1597,7 @@ def _select_logical_process(processes: list[dict], *, pid: int | None = None, cr
 
 
 def _runtime_process_note() -> str:
-    if os.name == "nt":
-        return (
-            "Windows note: the operator console reports logical service state. "
-            "Launcher and child interpreter pairs can appear as duplicate python processes, "
-            "but nova_http reporting collapses them to the leaf service process."
-        )
-    return "Process counts reflect the active service process state."
+    return HTTP_CONTROL_SURFACE_SERVICE.runtime_process_note()
 
 
 def _probe_searxng(endpoint: str, timeout: float = SEARXNG_STATUS_TIMEOUT_SEC) -> tuple[bool, str]:
@@ -1616,15 +1611,7 @@ def _probe_searxng(endpoint: str, timeout: float = SEARXNG_STATUS_TIMEOUT_SEC) -
 
 
 def _control_status_payload() -> dict:
-    with _METRICS_LOCK:
-        requests_total = _HTTP_REQUESTS_TOTAL
-        errors_total = _HTTP_ERRORS_TOTAL
-    return CONTROL_STATUS_SERVICE.runtime_status_payload(
-        core_module=nova_core,
-        session_turns=SESSION_TURNS,
-        metrics_totals=(requests_total, errors_total),
-        supplier_fns=_control_status_suppliers(),
-    )
+    return HTTP_CONTROL_SURFACE_SERVICE.control_status_payload_from_runtime(globals())
 
 
 def _cached_control_status_payload(max_age_seconds: float = CONTROL_STATUS_CACHE_TTL_SECONDS) -> dict:
@@ -1638,15 +1625,7 @@ def _cached_control_status_payload(max_age_seconds: float = CONTROL_STATUS_CACHE
 
 
 def _control_status_surfaces_payload() -> dict:
-    with _METRICS_LOCK:
-        requests_total = _HTTP_REQUESTS_TOTAL
-        errors_total = _HTTP_ERRORS_TOTAL
-    return CONTROL_STATUS_SERVICE.runtime_signal_ingestion_surfaces_payload(
-        core_module=nova_core,
-        session_turns=SESSION_TURNS,
-        metrics_totals=(requests_total, errors_total),
-        supplier_fns=_control_status_suppliers(),
-    )
+    return HTTP_CONTROL_SURFACE_SERVICE.control_status_surfaces_payload_from_runtime(globals())
 
 
 def _cached_control_status_surfaces_payload(
@@ -1689,16 +1668,7 @@ def _operator_outbox_summary(limit: int = 20) -> dict:
 
 
 def _control_policy_payload() -> dict:
-    p = nova_core.load_policy()
-    return {
-        "ok": True,
-        "tools_enabled": p.get("tools_enabled") or {},
-        "models": p.get("models") or {},
-        "memory": p.get("memory") or {},
-        "web": p.get("web") or {},
-        "server_side": p.get("server_side") or {},
-        "chat_auth": _chat_auth_payload(),
-    }
+    return HTTP_CONTROL_SURFACE_SERVICE.control_policy_payload_from_runtime(globals())
 
 
 def _control_status_suppliers() -> dict[str, object]:
@@ -1706,31 +1676,7 @@ def _control_status_suppliers() -> dict[str, object]:
 
 
 def _control_action(action: str, payload: dict) -> tuple[bool, str, dict]:
-    # Temporal calendar actions are handled here directly — they do not go
-    # through the dispatcher ladder (which requires a signature change).
-    if action == "temporal_events_list":
-        ok, msg, extra, _ = _temporal_events_list_action(payload)
-        return ok, msg, extra
-    if action == "temporal_event_save":
-        ok, msg, extra, _ = _temporal_event_save_action(payload)
-        return ok, msg, extra
-    if action == "temporal_event_delete":
-        ok, msg, extra, _ = _temporal_event_delete_action(payload)
-        return ok, msg, extra
-
-    control_hooks = {
-        **HTTP_PIPELINE_CONTROL_SERVICE.action_hooks_from_runtime(globals()),
-        **HTTP_GENERATED_WORK_SERVICE.action_hooks_from_runtime(globals()),
-        **HTTP_POLICY_SEARCH_SERVICE.action_hooks_from_runtime(globals()),
-    }
-    return NOVA_CONTROL_ACTION_DISPATCHER.dispatch_control_action_from_runtime(
-        action,
-        payload,
-        patch_control_service=PATCH_CONTROL_SERVICE,
-        updates_dir=nova_core.UPDATES_DIR,
-        runtime_scope=globals(),
-        explicit_hooks=control_hooks,
-    )
+    return HTTP_CONTROL_SURFACE_SERVICE.control_action_from_runtime(action, payload, globals())
 
 
 def _health_payload() -> dict:

@@ -268,6 +268,27 @@ def _is_service_wrapper(node: ast.FunctionDef | ast.AsyncFunctionDef) -> str:
     return ""
 
 
+def _is_pure_delegation_wrapper(node: ast.FunctionDef | ast.AsyncFunctionDef) -> bool:
+    """True when the function body is only a single call (return or statement).
+
+    These are already-extracted shims. Counting them as HTTP extraction mass
+    invents false thinning pressure after ownership has moved into services.
+    """
+    body = [
+        item
+        for item in list(node.body or [])
+        if not isinstance(item, ast.Expr) or not isinstance(getattr(item, "value", None), ast.Constant)
+    ]
+    if len(body) != 1:
+        return False
+    stmt = body[0]
+    if isinstance(stmt, ast.Return) and isinstance(stmt.value, ast.Call):
+        return True
+    if isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Call):
+        return True
+    return False
+
+
 def _function_bounds(node: ast.FunctionDef | ast.AsyncFunctionDef) -> tuple[int, int]:
     start = int(getattr(node, "lineno", 0) or 0)
     end = int(getattr(node, "end_lineno", start) or start)
@@ -309,10 +330,14 @@ def _http_surface_theme(name: str) -> str:
 def _http_surface_candidates(path: Path, functions: list[dict[str, object]], *, limit: int = 8) -> list[dict[str, object]]:
     if "http" not in path.stem.lower():
         return []
+    # Only remaining non-shim mass is extraction pressure. Pure single-call
+    # delegations already live in services; clustering them reopens forever.
     grouped: dict[str, list[dict[str, object]]] = {}
     for item in functions:
         name = str(item.get("name") or "")
         if "." in name:
+            continue
+        if bool(item.get("pure_wrapper")):
             continue
         theme = _http_surface_theme(name)
         if not theme or theme in {"is", "parse", "safe", "read", "render", "build", "load"}:
@@ -337,13 +362,14 @@ def _http_surface_candidates(path: Path, functions: list[dict[str, object]], *, 
             clusters.append(current)
 
         for cluster_index, cluster_rows in enumerate(clusters, start=1):
-            if len(cluster_rows) < 4:
+            # Require real remaining body mass, not a handful of thin adapters.
+            if len(cluster_rows) < 3:
                 continue
             start_line = int(cluster_rows[0].get("start_line", 0) or 0)
             end_line = int(cluster_rows[-1].get("end_line", 0) or 0)
             span = max(1, end_line - start_line + 1)
             total_function_lines = sum(int(row.get("line_count", 0) or 0) for row in cluster_rows)
-            if span < 40 and total_function_lines < 35:
+            if total_function_lines < 40 and span < 80:
                 continue
             label = theme if len(clusters) == 1 else f"{theme}:{cluster_index}"
             candidates.append(
@@ -357,9 +383,17 @@ def _http_surface_candidates(path: Path, functions: list[dict[str, object]], *, 
                     "function_count": len(cluster_rows),
                     "function_names": [str(row.get("name") or "") for row in cluster_rows[:20]],
                     "total_function_lines": total_function_lines,
+                    "substantive_only": True,
                 }
             )
-    candidates.sort(key=lambda item: (-int(item.get("function_count", 0) or 0), -int(item.get("line_count", 0) or 0), str(item.get("theme") or "")))
+    candidates.sort(
+        key=lambda item: (
+            -int(item.get("total_function_lines", 0) or 0),
+            -int(item.get("function_count", 0) or 0),
+            -int(item.get("line_count", 0) or 0),
+            str(item.get("theme") or ""),
+        )
+    )
     return candidates[: max(0, int(limit))]
 
 
@@ -458,11 +492,13 @@ def _analyze_core_file(
             if parent is node:
                 break
         span = _function_span(node)
+        pure_wrapper = _is_pure_delegation_wrapper(node)
         row = {
             "name": dotted_name,
             "start_line": int(getattr(node, "lineno", 0) or 0),
             "end_line": int(getattr(node, "end_lineno", getattr(node, "lineno", 0)) or 0),
             "line_count": span,
+            "pure_wrapper": pure_wrapper,
         }
         functions.append(row)
         wrapped = _is_service_wrapper(node)
@@ -516,14 +552,17 @@ def _analyze_core_file(
         )
     for item in http_surfaces:
         theme = str(item.get("theme") or "http")
+        substantive_lines = int(item.get("total_function_lines", 0) or 0)
+        function_count = int(item.get("function_count", 0) or 0)
         orders.append(
             _order(
                 kind="http_surface_candidate",
                 priority="medium",
                 title=f"Map HTTP extraction boundary: {theme}",
                 reason=(
-                    f"{theme} spans {item['line_count']} lines across {item['function_count']} "
-                    f"related functions inside {path.name}; map this cluster before extraction."
+                    f"{theme} still has {substantive_lines} non-shim lines across "
+                    f"{function_count} substantive functions inside {path.name}; "
+                    f"map this remaining cluster before extraction."
                 ),
                 target={"file": str(path), **item},
             )
