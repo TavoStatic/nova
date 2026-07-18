@@ -26,6 +26,9 @@ _SOURCE_EXCLUDED_DIRS = {
     "runtime",
     "terminals",
     "updates",
+    # Local operator/tooling trees — not package identity
+    "mcps",
+    ".vscode",
 }
 
 _SOURCE_EXCLUDED_PREFIXES = {
@@ -44,6 +47,8 @@ _SOURCE_EXCLUDED_FILES = {
     "discovery_results_phase_i.txt",
     "nova_memory.sqlite",
     "nova_grok.md",
+    "codex_audit.txt",
+    "start_nova.cmd",
 }
 
 
