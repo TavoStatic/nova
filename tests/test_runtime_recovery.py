@@ -666,6 +666,7 @@ class TestRuntimeRecovery(unittest.TestCase):
 
         self.assertIn("function Get-NovaHttpLogicalProcesses", script)
         self.assertIn("function Wait-NovaHttpStopped([int]$bindPort=0, [int]$timeoutSeconds=8)", script)
+        self.assertIn("Get-NovaHttpLogicalProcessesOnPort $bindPort", script)
         self.assertIn("$leaf = @($all | Where-Object { -not $parentIds.ContainsKey([int]$_.ProcessId) })", script)
         self.assertIn('$procs = Get-NovaHttpLogicalProcesses', script)
         self.assertIn('function Stop-NovaHttpOnPort([int]$bindPort)', script)

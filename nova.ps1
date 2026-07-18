@@ -899,18 +899,24 @@ function Wait-NovaHttpStopped([int]$bindPort=0, [int]$timeoutSeconds=8) {
   $deadline = (Get-Date).ToUniversalTime().AddSeconds($timeoutSeconds)
 
   while ((Get-Date).ToUniversalTime() -lt $deadline) {
-    $procs = @(Get-NovaHttpProcesses)
-    $listeners = @()
+    # Port-scoped waits must ignore nova_http on other ports (e.g. production
+    # 8080 while package validation starts an ephemeral port).
     if ($bindPort -gt 0) {
+      $procs = @(Get-NovaHttpLogicalProcessesOnPort $bindPort)
+      $listeners = @()
       try {
         $listeners = @(Get-NetTCPConnection -LocalPort $bindPort -State Listen -ErrorAction SilentlyContinue)
       } catch {
         $listeners = @()
       }
-    }
-
-    if ($procs.Count -eq 0 -and $listeners.Count -eq 0) {
-      return $true
+      if ($procs.Count -eq 0 -and $listeners.Count -eq 0) {
+        return $true
+      }
+    } else {
+      $procs = @(Get-NovaHttpProcesses)
+      if ($procs.Count -eq 0) {
+        return $true
+      }
     }
 
     Start-Sleep -Milliseconds 500
