@@ -4258,17 +4258,35 @@ class TestAutonomyMaintenance(unittest.TestCase):
         self.assertTrue(any("start_webui_detached.py" in token for token in command))
         self.assertFalse(any("webui-start" in token for token in command))
 
-    def test_ensure_operator_webui_running_never_restarts_over_open_port(self):
+    def test_ensure_operator_webui_running_reclaims_stuck_open_port_after_degraded_threshold(self):
         state = {"operator_webui_degraded_count": 3}
-        health = {"running": False, "pid": 5150, "http_ok": False, "port_open": True}
-        with mock.patch.object(autonomy_maintenance, "_probe_operator_webui_health", return_value=health), \
+        stuck = {"running": False, "pid": 5150, "http_ok": False, "port_open": True}
+        healthy = {"running": True, "pid": 9001, "http_ok": True, "port_open": True}
+        launcher = autonomy_maintenance.ROOT / "scripts" / "start_webui_detached.py"
+        python_exe = autonomy_maintenance.ROOT / ".venv" / "Scripts" / "python.exe"
+        if not launcher.exists() or not python_exe.exists():
+            self.skipTest("webui launcher prerequisites missing")
+        with mock.patch.object(
+                 autonomy_maintenance,
+                 "_probe_operator_webui_health",
+                 side_effect=[stuck, healthy],
+             ), \
              mock.patch.object(autonomy_maintenance, "_nova_http_direct_process_alive", return_value=True), \
-             mock.patch.object(autonomy_maintenance, "_operator_webui_port_open", return_value=True), \
-             mock.patch.object(autonomy_maintenance.subprocess, "run") as mocked_run:
+             mock.patch.object(autonomy_maintenance, "_operator_webui_port_open", return_value=False), \
+             mock.patch.object(
+                 autonomy_maintenance.runtime_processes,
+                 "logical_service_processes",
+                 return_value=[{"pid": 5150, "create_time": 1.0, "cmdline": ["python", "nova_http.py"]}],
+             ), \
+             mock.patch.object(autonomy_maintenance, "_terminate_operator_webui_pid", return_value=True) as terminate_mock, \
+             mock.patch.object(autonomy_maintenance.subprocess, "run", return_value=mock.Mock(returncode=0)) as mocked_run, \
+             mock.patch.object(autonomy_maintenance.time, "sleep", return_value=None):
             payload = autonomy_maintenance._ensure_operator_webui_running(state)
 
-        self.assertEqual(payload.get("action"), "port_busy")
-        mocked_run.assert_not_called()
+        self.assertIn(payload.get("action"), {"started", "reclaimed_started"})
+        self.assertEqual(payload.get("status"), "running")
+        terminate_mock.assert_called()
+        mocked_run.assert_called_once()
 
     def test_webui_health_reconciles_duplicate_http_processes(self):
         processes = [

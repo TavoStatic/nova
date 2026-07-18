@@ -490,6 +490,15 @@ class RuntimeControlService:
                 stderr=subprocess_module.DEVNULL,
                 creationflags=flags,
             )
+            # Brief settle window so overlapping start actions see the new process
+            # and return guard_already_running instead of spawning another tree.
+            for _ in range(20):
+                time.sleep(0.25)
+                if logical_service_processes(guard_py):
+                    return True, "guard_start_confirmed"
+                status = guard_status_fn()
+                if status.get("running"):
+                    return True, "guard_start_confirmed"
             return True, "guard_start_requested"
         except Exception as exc:
             return False, f"guard_start_failed:{exc}"

@@ -815,15 +815,22 @@ def should_stop() -> bool:
     return STOP_FILE.exists()
 
 
+# Hung --once maintenance blocks all future launches via sibling detection.
+# Cap age so self-heal cannot trap the guard in permanent skip mode.
+MAINTENANCE_MAX_AGE_SECONDS = 20 * 60
+
+
 def _is_maintenance_already_running() -> bool:
     """Cross-process check: is autonomy_maintenance.py already running as a Python script?
     Requires python as the executable and the script as a direct argument — avoids
-    false-positives from launcher processes that have the script name in their args."""
+    false-positives from launcher processes that have the script name in their args.
+    Stale/hung --once workers older than MAINTENANCE_MAX_AGE_SECONDS are terminated."""
     script_name = MAINTENANCE_SCRIPT.name
     script_str = str(MAINTENANCE_SCRIPT)
     my_pid = os.getpid()
+    now = time.time()
     try:
-        for proc in psutil.process_iter(["pid", "cmdline"]):
+        for proc in psutil.process_iter(["pid", "cmdline", "create_time"]):
             try:
                 cmdline = proc.info.get("cmdline") or []
                 if proc.pid == my_pid or len(cmdline) < 2:
@@ -836,6 +843,18 @@ def _is_maintenance_already_running() -> bool:
                 if not any(script_name in arg or script_str in arg for arg in maintenance_args):
                     continue
                 if not any(arg in {"--once", "--loop"} for arg in maintenance_args):
+                    continue
+                create_time = float(proc.info.get("create_time") or 0.0)
+                age_sec = (now - create_time) if create_time > 0 else 0.0
+                if age_sec > float(MAINTENANCE_MAX_AGE_SECONDS):
+                    log(
+                        f"[GUARD] Stale maintenance worker pid={proc.pid} "
+                        f"age_sec={age_sec:.0f} — terminating to avoid permanent skip trap"
+                    )
+                    try:
+                        proc.terminate()
+                    except (psutil.NoSuchProcess, psutil.AccessDenied):
+                        pass
                     continue
                 return True
             except (psutil.NoSuchProcess, psutil.AccessDenied):

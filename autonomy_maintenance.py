@@ -838,17 +838,36 @@ def _ensure_operator_webui_running(state: dict) -> dict:
     if not launcher.exists() or not python_exe.exists():
         return {"status": "failed", "action": "launcher_missing", "restart_reason": restart_reason}
 
+    reclaimed_pids: list[int] = []
     if port_open:
-        return {
-            "status": "degraded",
-            "action": "port_busy",
-            "pid": health.get("pid"),
-            "http_ok": bool(health.get("http_ok")),
-            "port_open": True,
-            "pid_alive": pid_alive,
-            "restart_reason": restart_reason,
-            "ts": _patch_queue_timestamp(),
-        }
+        # Trap we hit in production: port open + http_ok false forever returned
+        # port_busy and never reclaimed. After sustained degrade, terminate our
+        # nova_http processes and only stay port_busy if a foreign owner remains.
+        processes = [
+            dict(item)
+            for item in runtime_processes.logical_service_processes(ROOT / "nova_http.py")
+            if _nova_http_direct_process_alive(item)
+        ]
+        for item in processes:
+            pid = int(item.get("pid") or 0)
+            if pid > 0 and _terminate_operator_webui_pid(pid):
+                reclaimed_pids.append(pid)
+        if reclaimed_pids:
+            time.sleep(2.0)
+        port_open = _operator_webui_port_open(bind_port)
+        if port_open:
+            return {
+                "status": "degraded",
+                "action": "port_busy",
+                "pid": health.get("pid"),
+                "http_ok": bool(health.get("http_ok")),
+                "port_open": True,
+                "pid_alive": pid_alive,
+                "reclaimed_pids": reclaimed_pids,
+                "restart_reason": restart_reason,
+                "ts": _patch_queue_timestamp(),
+                "cooldown_until_epoch": now_epoch + 120.0,
+            }
 
     try:
         proc = subprocess.run(
@@ -862,11 +881,12 @@ def _ensure_operator_webui_running(state: dict) -> dict:
         health = _probe_operator_webui_health(attempts=3, delay_sec=1.5)
         result = {
             "status": "running" if bool(health.get("running")) else "failed",
-            "action": "started",
+            "action": "started" if not reclaimed_pids else "reclaimed_started",
             "pid": health.get("pid"),
             "http_ok": bool(health.get("http_ok")),
             "port_open": bool(health.get("port_open")),
             "launcher_exit_code": int(proc.returncode or 0),
+            "reclaimed_pids": reclaimed_pids,
             "restart_reason": restart_reason,
             "ts": _patch_queue_timestamp(),
             "cooldown_until_epoch": now_epoch + 120.0,
@@ -879,6 +899,7 @@ def _ensure_operator_webui_running(state: dict) -> dict:
             "status": "failed",
             "action": "start_error",
             "error": str(exc),
+            "reclaimed_pids": reclaimed_pids,
             "restart_reason": restart_reason,
             "ts": _patch_queue_timestamp(),
             "cooldown_until_epoch": now_epoch + 120.0,

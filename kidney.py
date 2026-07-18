@@ -398,12 +398,17 @@ def scan_candidates() -> list[dict[str, Any]]:
                 break
     out.extend(temp_candidates)
 
-    # Additional bloat sources for 3GB+ runtime: old exports, large action/ops journals, validation artifacts
+    # Additional bloat sources for 3GB+ runtime: old exports, large action/ops journals, validation artifacts.
+    # Never treat release package identity (zips, ledger, validation records) as disposable bloat —
+    # deleting them wiped promotion history and forced false "no-builds" / drift traps.
     export_max_age = float(cfg.get("exports_max_age_days", 3) or 3) * 86400.0
     for pdir in [RUNTIME_DIR / "validation" / "exports", RUNTIME_DIR / "exports"]:
         if pdir.exists():
             for path in sorted(pdir.glob("**/*")):
                 if path.is_dir() or _is_protected(path, protect_patterns):
+                    continue
+                path_low = str(path).replace("\\", "/").lower()
+                if "/exports/release_packages/" in path_low or path_low.endswith("/release_ledger.jsonl"):
                     continue
                 if _age_seconds(path, now) > export_max_age:
                     out.append(_build_candidate(path, "export_bloat", "delete", "export_age_limit"))
