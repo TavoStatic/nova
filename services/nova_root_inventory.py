@@ -518,6 +518,7 @@ def _coverage_root_for_path(path: str) -> str:
         or "intent_understanding" in low
         or "planner" in low
         or "turn_" in low
+        or "context_assembly" in low
         or name in {
             "action_planner.py",
             "dynamic_replanner.py",
