@@ -63,8 +63,192 @@ def _run(
     )
 
 
+def _run_streaming(
+    command: list[str],
+    *,
+    cwd: Path | None = None,
+    timeout: int = 3600,
+    env: dict[str, str] | None = None,
+    label: str = "",
+) -> subprocess.CompletedProcess[str]:
+    """Run a long command while streaming stdout/stderr live for the operator."""
+
+    title = str(label or " ".join(str(part) for part in command[:4])).strip()
+    print(f"[setup] {title}", flush=True)
+    print(f"[setup] $ {' '.join(str(part) for part in command)}", flush=True)
+    merged_env = dict(os.environ)
+    if env:
+        merged_env.update(env)
+    process = subprocess.Popen(
+        [str(part) for part in command],
+        cwd=str(cwd) if cwd is not None else None,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        env=merged_env,
+        bufsize=1,
+    )
+    chunks: list[str] = []
+    deadline = time.time() + max(30, int(timeout or 30))
+    try:
+        assert process.stdout is not None
+        while True:
+            if time.time() > deadline:
+                process.kill()
+                chunks.append("\n[setup] timed out; process killed\n")
+                print("[setup] timed out; process killed", flush=True)
+                break
+            line = process.stdout.readline()
+            if line == "" and process.poll() is not None:
+                break
+            if line:
+                chunks.append(line)
+                print(line, end="", flush=True)
+        returncode = process.wait(timeout=30)
+    except Exception as exc:
+        try:
+            process.kill()
+        except Exception:
+            pass
+        chunks.append(f"\n[setup] stream_failed:{exc}\n")
+        returncode = 1
+    return subprocess.CompletedProcess(command, int(returncode or 0), "".join(chunks), "")
+
+
 def _which(name: str) -> str:
     return str(shutil.which(name) or "").strip()
+
+
+def refresh_windows_path() -> str:
+    """Rebuild this process PATH from Machine + User registry (Windows).
+
+    winget installs update the registry PATH, but the current process keeps the
+    old PATH until we merge it back in.
+    """
+
+    if os.name != "nt":
+        return str(os.environ.get("PATH") or "")
+
+    parts: list[str] = []
+    try:
+        import winreg  # type: ignore
+
+        for hive, subkey in (
+            (winreg.HKEY_LOCAL_MACHINE, r"SYSTEM\CurrentControlSet\Control\Session Manager\Environment"),
+            (winreg.HKEY_CURRENT_USER, "Environment"),
+        ):
+            try:
+                with winreg.OpenKey(hive, subkey) as key:
+                    value, _ = winreg.QueryValueEx(key, "Path")
+            except OSError:
+                continue
+            text = str(value or "").strip()
+            if text:
+                parts.extend([item for item in text.split(";") if str(item or "").strip()])
+    except Exception:
+        parts = [item for item in str(os.environ.get("PATH") or "").split(os.pathsep) if item]
+
+    # Common install locations even before PATH registration settles.
+    local = Path(os.environ.get("LOCALAPPDATA") or "")
+    program_files = Path(os.environ.get("ProgramFiles") or r"C:\Program Files")
+    for candidate in (
+        local / "Programs" / "Python" / "Python312",
+        local / "Programs" / "Python" / "Python312" / "Scripts",
+        local / "Programs" / "Ollama",
+        program_files / "Python312",
+        program_files / "Python312" / "Scripts",
+        program_files / "Ollama",
+        local / "Nova" / "bin",
+    ):
+        if candidate.is_dir():
+            parts.append(str(candidate))
+
+    # Preserve process-local entries that may not be in the registry yet.
+    for item in str(os.environ.get("PATH") or "").split(os.pathsep):
+        clean = str(item or "").strip()
+        if clean:
+            parts.append(clean)
+
+    deduped: list[str] = []
+    seen: set[str] = set()
+    for item in parts:
+        key = item.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(item)
+    merged = os.pathsep.join(deduped)
+    os.environ["PATH"] = merged
+    return merged
+
+
+def known_python312_commands() -> list[list[str]]:
+    """Absolute Python 3.12 binaries that may exist after winget install."""
+
+    commands: list[list[str]] = []
+    local = Path(os.environ.get("LOCALAPPDATA") or "")
+    program_files = Path(os.environ.get("ProgramFiles") or r"C:\Program Files")
+    for base in (
+        local / "Programs" / "Python" / "Python312" / "python.exe",
+        program_files / "Python312" / "python.exe",
+        Path(r"C:\Python312\python.exe"),
+    ):
+        if base.is_file():
+            commands.append([str(base)])
+    return commands
+
+
+def ensure_user_path_entry(entry: str) -> tuple[bool, str]:
+    """Append entry to the current-user PATH if missing. Returns (changed, detail)."""
+
+    clean = str(entry or "").strip().rstrip("\\/")
+    if not clean:
+        return False, "empty_entry"
+    if os.name != "nt":
+        current = str(os.environ.get("PATH") or "")
+        if clean.lower() in current.lower():
+            return False, "already_on_path"
+        os.environ["PATH"] = clean + os.pathsep + current
+        return True, "updated_process_path_only"
+
+    try:
+        import winreg  # type: ignore
+
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, "Environment", 0, winreg.KEY_READ | winreg.KEY_SET_VALUE) as key:
+            try:
+                current, value_type = winreg.QueryValueEx(key, "Path")
+            except OSError:
+                current, value_type = "", winreg.REG_EXPAND_SZ
+            text = str(current or "")
+            parts = [item for item in text.split(";") if str(item or "").strip()]
+            if any(str(item).rstrip("\\/").lower() == clean.lower() for item in parts):
+                refresh_windows_path()
+                return False, "already_on_user_path"
+            parts.append(clean)
+            winreg.SetValueEx(key, "Path", 0, value_type or winreg.REG_EXPAND_SZ, ";".join(parts))
+        # Broadcast environment change so new shells pick it up.
+        try:
+            import ctypes
+
+            HWND_BROADCAST = 0xFFFF
+            WM_SETTINGCHANGE = 0x001A
+            SMTO_ABORTIFHUNG = 0x0002
+            result = ctypes.c_long()
+            ctypes.windll.user32.SendMessageTimeoutW(
+                HWND_BROADCAST,
+                WM_SETTINGCHANGE,
+                0,
+                "Environment",
+                SMTO_ABORTIFHUNG,
+                5000,
+                ctypes.byref(result),
+            )
+        except Exception:
+            pass
+        refresh_windows_path()
+        return True, f"added_user_path:{clean}"
+    except Exception as exc:
+        return False, f"user_path_update_failed:{exc}"
 
 
 def load_policy_models(root: Path) -> dict[str, str]:
@@ -144,6 +328,8 @@ def detect_python_candidates() -> list[dict[str, Any]]:
         add(["python"], "python")
     if _which("python3"):
         add(["python3"], "python3")
+    for index, command in enumerate(known_python312_commands()):
+        add(command, f"known_python312_{index}")
     return found
 
 
@@ -207,7 +393,7 @@ def ensure_python(*, install: bool = True) -> dict[str, Any]:
             messages=messages,
         )
 
-    proc = _run(
+    proc = _run_streaming(
         [
             winget,
             "install",
@@ -218,22 +404,30 @@ def ensure_python(*, install: bool = True) -> dict[str, Any]:
             "--accept-source-agreements",
         ],
         timeout=900,
+        label="install Python 3.12 via winget",
     )
     messages.append(f"winget_exit={proc.returncode}")
     if (proc.stdout or "").strip():
         messages.append((proc.stdout or "")[-500:])
-    if (proc.stderr or "").strip():
-        messages.append((proc.stderr or "")[-500:])
 
-    # Refresh detection after install.
-    time.sleep(2)
+    # winget updates registry PATH; refresh this process and probe known install dirs.
+    refresh_windows_path()
+    time.sleep(1)
     selected = select_supported_python()
+    if selected is None:
+        # One more pass after a short settle; some installs finish PATH registration late.
+        time.sleep(2)
+        refresh_windows_path()
+        selected = select_supported_python()
     if selected is None:
         return _step(
             "python",
             ok=False,
             action="install",
-            detail=f"installed via winget but Python {SUPPORTED_PYTHON_LABEL} still not selectable; open a new shell or reinstall",
+            detail=(
+                f"winget finished but Python {SUPPORTED_PYTHON_LABEL} still not selectable in this process. "
+                "Open a new terminal, or install Python 3.12 from python.org with Add to PATH."
+            ),
             messages=messages,
         )
     return _step(
@@ -268,29 +462,34 @@ def ensure_python_deps(root: Path, venv_python: Path) -> dict[str, Any]:
     if not requirements.is_file():
         return _step("python_deps", ok=False, detail="requirements.txt missing")
 
-    upgrade = _run([str(venv_python), "-m", "pip", "install", "--upgrade", "pip", "setuptools", "wheel"], cwd=root, timeout=600)
+    upgrade = _run_streaming(
+        [str(venv_python), "-m", "pip", "install", "--upgrade", "pip", "setuptools", "wheel"],
+        cwd=root,
+        timeout=600,
+        label="pip upgrade tooling",
+    )
     if upgrade.returncode != 0:
         return _step(
             "python_deps",
             ok=False,
             action="install",
             detail="pip upgrade failed",
-            messages=[(upgrade.stdout or "")[-500:], (upgrade.stderr or "")[-500:]],
+            messages=[(upgrade.stdout or "")[-800:]],
         )
 
-    install = _run(
+    install = _run_streaming(
         [str(venv_python), "-m", "pip", "install", "-r", str(requirements)],
         cwd=root,
         timeout=1800,
+        label="pip install requirements",
     )
     if install.returncode != 0:
-        tail = ((install.stdout or "") + "\n" + (install.stderr or ""))[-1200:]
         return _step(
             "python_deps",
             ok=False,
             action="install",
             detail="pip install -r requirements.txt failed",
-            messages=[tail],
+            messages=[(install.stdout or "")[-1200:]],
         )
     return _step("python_deps", ok=True, action="install", detail="requirements installed")
 
@@ -341,7 +540,7 @@ def ensure_ollama(*, install: bool = True, base: str = DEFAULT_OLLAMA_BASE) -> d
     if not ollama and install:
         winget = _which("winget")
         if winget:
-            proc = _run(
+            proc = _run_streaming(
                 [
                     winget,
                     "install",
@@ -352,10 +551,21 @@ def ensure_ollama(*, install: bool = True, base: str = DEFAULT_OLLAMA_BASE) -> d
                     "--accept-source-agreements",
                 ],
                 timeout=900,
+                label="install Ollama via winget",
             )
             messages.append(f"winget_ollama_exit={proc.returncode}")
-            messages.append(((proc.stdout or "") + (proc.stderr or ""))[-500:])
+            messages.append((proc.stdout or "")[-500:])
+            refresh_windows_path()
             ollama = _which("ollama")
+            if not ollama:
+                # Common winget location before PATH settles.
+                for candidate in (
+                    Path(os.environ.get("LOCALAPPDATA") or "") / "Programs" / "Ollama" / "ollama.exe",
+                    Path(os.environ.get("ProgramFiles") or r"C:\Program Files") / "Ollama" / "ollama.exe",
+                ):
+                    if candidate.is_file():
+                        ollama = str(candidate)
+                        break
         else:
             messages.append("winget not available for ollama install")
 
@@ -438,10 +648,17 @@ def ensure_ollama_models(
 
     if missing and install:
         for name in missing:
-            proc = _run([ollama, "pull", name], timeout=3600)
+            print(f"[setup] Pulling Ollama model {name} (this can take a long time)...", flush=True)
+            proc = _run_streaming(
+                [ollama, "pull", name],
+                timeout=3600,
+                label=f"ollama pull {name}",
+            )
             messages.append(f"pull:{name}:exit={proc.returncode}")
             if proc.returncode != 0:
-                messages.append(((proc.stdout or "") + (proc.stderr or ""))[-400:])
+                messages.append((proc.stdout or "")[-400:])
+            else:
+                print(f"[setup] Finished pull: {name}", flush=True)
         installed = ollama_tags(base=base)
         missing = [name for name in required if not model_present(name, installed)]
 
@@ -450,6 +667,75 @@ def ensure_ollama_models(
         ok=not missing,
         action="install" if install else "check",
         detail=f"missing={missing}" if missing else f"present={required}",
+        messages=messages,
+    )
+
+
+def ensure_nova_path(root: Path, *, install: bool = True) -> dict[str, Any]:
+    """Register a user-level `nova` launcher so the CLI works outside the package folder."""
+
+    package_root = Path(root).resolve()
+    nova_cmd = package_root / "nova.cmd"
+    messages: list[str] = []
+    if not nova_cmd.is_file():
+        return _step("nova_path", ok=False, detail="nova.cmd missing in package root")
+
+    local_app = Path(os.environ.get("LOCALAPPDATA") or str(package_root))
+    bin_dir = local_app / "Nova" / "bin"
+    shim_cmd = bin_dir / "nova.cmd"
+    how_to = (
+        f"From any new terminal after PATH update: nova doctor\n"
+        f"Or always: \"{nova_cmd}\" setup\n"
+        f"Package root: {package_root}"
+    )
+    messages.append(how_to)
+
+    if not install:
+        on_path = bool(_which("nova") or _which("nova.cmd"))
+        return _step(
+            "nova_path",
+            ok=True,
+            required=False,
+            action="check",
+            detail="nova on PATH" if on_path else f"shim target {shim_cmd} (not registered this run)",
+            messages=messages,
+        )
+
+    try:
+        bin_dir.mkdir(parents=True, exist_ok=True)
+        shim_body = (
+            "@echo off\r\n"
+            f"set \"NOVA_ROOT={package_root}\"\r\n"
+            f"call \"{nova_cmd}\" %*\r\n"
+        )
+        shim_cmd.write_text(shim_body, encoding="utf-8")
+        messages.append(f"wrote_shim:{shim_cmd}")
+    except Exception as exc:
+        return _step(
+            "nova_path",
+            ok=False,
+            required=False,
+            action="install",
+            detail=f"failed to write nova shim: {exc}",
+            messages=messages,
+        )
+
+    changed, path_detail = ensure_user_path_entry(str(bin_dir))
+    messages.append(path_detail)
+    refresh_windows_path()
+    # Ensure current process can resolve the shim immediately.
+    os.environ["PATH"] = str(bin_dir) + os.pathsep + str(os.environ.get("PATH") or "")
+    on_path = bool(_which("nova") or _which("nova.cmd") or shim_cmd.is_file())
+    detail = (
+        f"registered {shim_cmd}; PATH {'updated' if changed else 'already contained bin'}; "
+        f"open a new terminal then run: nova doctor"
+    )
+    return _step(
+        "nova_path",
+        ok=on_path,
+        required=False,
+        action="install",
+        detail=detail,
         messages=messages,
     )
 
@@ -517,6 +803,7 @@ def run_setup_wizard(
     include_models: bool = True,
     include_webui: bool = True,
     include_smoke: bool = True,
+    register_path: bool = True,
     webui_port: int = DEFAULT_WEBUI_PORT,
     report_path: Path | str | None = None,
 ) -> dict[str, Any]:
@@ -527,6 +814,10 @@ def run_setup_wizard(
     started = _now()
 
     steps.append(check_host(base))
+
+    # Always start from a refreshed PATH so winget/prior installs are visible.
+    if os.name == "nt":
+        refresh_windows_path()
 
     python_step = ensure_python(install=install)
     steps.append(python_step)
@@ -542,7 +833,11 @@ def run_setup_wizard(
     venv_python = base / ".venv" / "Scripts" / "python.exe"
 
     if venv_step.get("ok") and venv_python.is_file():
-        steps.append(ensure_python_deps(base, venv_python) if install else _step("python_deps", ok=venv_python.is_file(), detail="check-only"))
+        if install:
+            print("[setup] Installing Python dependencies (can take several minutes)...", flush=True)
+            steps.append(ensure_python_deps(base, venv_python))
+        else:
+            steps.append(_step("python_deps", ok=venv_python.is_file(), detail="check-only"))
         steps.append(ensure_doctor(base, venv_python))
     else:
         steps.append(_step("python_deps", ok=False, detail="skipped; venv not ready"))
@@ -570,7 +865,13 @@ def run_setup_wizard(
     else:
         steps.append(_step("webui", ok=True, required=False, detail="skipped by flag"))
 
+    if register_path:
+        steps.append(ensure_nova_path(base, install=install))
+    else:
+        steps.append(_step("nova_path", ok=True, required=False, detail="skipped by flag"))
+
     required_failed = [s["name"] for s in steps if s.get("required") and not s.get("ok")]
+    path_step = next((s for s in steps if s.get("name") == "nova_path"), {})
     report = {
         "generated_at": _now(),
         "started_at": started,
@@ -584,6 +885,13 @@ def run_setup_wizard(
         "required_failed": required_failed,
         "steps": steps,
         "required_models": required_ollama_models(base),
+        "operator_next_steps": [
+            f"Package root: {base}",
+            "Open a NEW terminal after PATH registration.",
+            "Then run: nova doctor",
+            f"Or: \"{base / 'nova.cmd'}\" doctor",
+            str((path_step or {}).get("detail") or ""),
+        ],
     }
 
     out = Path(report_path) if report_path else (base / "runtime" / "setup_wizard_report.json")
@@ -616,6 +924,12 @@ def render_setup_report(report: dict[str, Any]) -> str:
         lines.append(
             f"  [{mark}] {step.get('name')} ({step.get('action')}) :: {step.get('detail')}"
         )
+    next_steps = [str(item).strip() for item in list(report.get("operator_next_steps") or []) if str(item).strip()]
+    if next_steps:
+        lines.append("")
+        lines.append("next:")
+        for item in next_steps:
+            lines.append(f"  - {item}")
     if report.get("report_path"):
         lines.append("")
         lines.append(f"report: {report.get('report_path')}")

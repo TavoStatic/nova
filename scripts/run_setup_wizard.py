@@ -21,6 +21,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--skip-models", action="store_true", help="Skip Ollama model pulls")
     parser.add_argument("--skip-webui", action="store_true", help="Skip webui start/health proof")
     parser.add_argument("--skip-smoke", action="store_true", help="Skip smoke-base")
+    parser.add_argument("--no-register-path", action="store_true", help="Do not register user-level nova launcher on PATH")
     parser.add_argument("--webui-port", type=int, default=18088)
     parser.add_argument("--report", default="", help="Optional report path")
     parser.add_argument("--json", action="store_true")
@@ -33,6 +34,7 @@ def main(argv: list[str] | None = None) -> int:
         include_models=not bool(args.skip_models),
         include_webui=not bool(args.skip_webui),
         include_smoke=not bool(args.skip_smoke),
+        register_path=not bool(args.no_register_path),
         webui_port=int(args.webui_port),
         report_path=args.report or None,
     )

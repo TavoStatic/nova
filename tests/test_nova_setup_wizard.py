@@ -8,8 +8,10 @@ from unittest import mock
 
 from services.nova_setup_wizard import (
     SUPPORTED_PYTHON,
+    ensure_nova_path,
     model_present,
     parse_python_version,
+    refresh_windows_path,
     required_ollama_models,
     run_setup_wizard,
     select_supported_python,
@@ -61,12 +63,38 @@ class TestNovaSetupWizard(unittest.TestCase):
                         include_models=False,
                         include_webui=False,
                         include_smoke=False,
+                        register_path=False,
                     )
             self.assertFalse(report["ok"])
             names = [s["name"] for s in report["steps"]]
             self.assertIn("host", names)
             self.assertIn("python", names)
             self.assertIn("python", report["required_failed"])
+
+    def test_ensure_nova_path_writes_shim(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "nova.cmd").write_text("@echo off\r\necho nova\r\n", encoding="utf-8")
+            with mock.patch.dict("os.environ", {"LOCALAPPDATA": str(root / "local")}, clear=False):
+                with mock.patch("services.nova_setup_wizard.ensure_user_path_entry", return_value=(True, "added")):
+                    with mock.patch("services.nova_setup_wizard.refresh_windows_path", return_value=""):
+                        step = ensure_nova_path(root, install=True)
+            shim = root / "local" / "Nova" / "bin" / "nova.cmd"
+            self.assertTrue(shim.is_file())
+            self.assertIn(str(root / "nova.cmd"), shim.read_text(encoding="utf-8"))
+            self.assertTrue(step.get("ok"))
+            self.assertEqual(step.get("name"), "nova_path")
+
+    def test_refresh_windows_path_sets_environ(self):
+        with mock.patch.dict("os.environ", {"PATH": "C:\\old"}, clear=False):
+            if os_name_is_windows():
+                merged = refresh_windows_path()
+                self.assertTrue(merged)
+                self.assertTrue(str(__import__("os").environ.get("PATH") or ""))
+
+
+def os_name_is_windows() -> bool:
+    return __import__("os").name == "nt"
 
 
 if __name__ == "__main__":
