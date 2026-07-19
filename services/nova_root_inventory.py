@@ -592,7 +592,9 @@ def _coverage_root_for_path(path: str) -> str:
         or "prepush" in low
         or "sock" in low
         or "setup_wizard" in low
+        or "setup_gui" in low
         or "clean_install_sandbox" in low
+        or name in {"novasetup.pyw", "novasetup.exe"}
     ):
         return "diagnostics_hygiene"
     if "control_" in low:

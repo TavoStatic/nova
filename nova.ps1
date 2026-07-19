@@ -963,6 +963,7 @@ function Show-Help {
   Write-Host "Runtime:"
   Write-Host "  nova install                   # create/refresh venv, install deps, run doctor --fix"
   Write-Host "  nova setup [--check-only] [--skip-ollama] [--skip-models] [--skip-webui]  # full setup wizard (Python 3.12, deps, Ollama, models, proof)"
+  Write-Host "  Double-click NovaSetup.exe (or NovaSetup.pyw) for GUI setup without a command prompt"
   Write-Host "  nova package-build [--label rc1] [--version 2026.03.30] [--channel rc] [--output path]  # stage and zip base package artifact"
   Write-Host "  nova package-verify [path]     # verify latest or selected release artifact manifest/content"
   Write-Host "  nova installer-build [--artifact path] [--compiler path-to-ISCC.exe] [--output path]  # build Windows installer from a verified package zip"

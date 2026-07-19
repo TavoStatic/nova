@@ -52,6 +52,13 @@ Thumbs.db
 venv/
 .ci_venv/
 
+# Built setup executable (rebuild via scripts/build_nova_setup_exe.ps1)
+NovaSetup.exe
+**/NovaSetup.exe
+build/
+dist/
+*.spec
+
 # Test/tool caches
 .pytest_cache/
 .ruff_cache/
