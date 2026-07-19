@@ -9,7 +9,37 @@ import threading
 import traceback
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]
+def _resolve_package_root() -> Path:
+    """Prefer an explicit root, then a package folder next to the exe/script."""
+
+    import os
+
+    env_root = str(os.environ.get("NOVA_ROOT") or "").strip()
+    if env_root:
+        candidate = Path(env_root).expanduser().resolve()
+        if (candidate / "nova.cmd").is_file():
+            return candidate
+
+    frozen = bool(getattr(sys, "frozen", False))
+    here = Path(sys.executable).resolve().parent if frozen else Path(__file__).resolve().parent
+    search = [
+        Path.cwd(),
+        here,
+        here.parent,
+        Path(__file__).resolve().parents[1] if not frozen else here,
+    ]
+    for candidate in search:
+        try:
+            resolved = candidate.resolve()
+        except Exception:
+            continue
+        if (resolved / "nova.cmd").is_file() and (resolved / "requirements.txt").is_file():
+            return resolved
+    # Dev fallback: repo root next to scripts/
+    return Path(__file__).resolve().parents[1]
+
+
+ROOT = _resolve_package_root()
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
