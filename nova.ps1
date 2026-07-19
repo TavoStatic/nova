@@ -1,5 +1,5 @@
 param(
-  # Subcommand: look | lookfull | chat | camera | ls | read | find | run | webui | webui-start | webui-stop | webui-status | operator | hub | smoke | test | health | guard | install | update | diag | logs | mem | memory | config | wiring-check | release-clean | package-validate | stop
+  # Subcommand: look | lookfull | chat | camera | ls | read | find | run | webui | webui-start | webui-stop | webui-status | operator | hub | smoke | test | health | guard | install | setup | update | diag | logs | mem | memory | config | wiring-check | release-clean | package-validate | stop
   [Parameter(Position=0)]
   [string]$cmd = "help",
 
@@ -47,6 +47,7 @@ $PACKAGEREADINESSPS1 = Join-Path $ROOT "scripts\show_release_readiness.ps1"
 $PACKAGEVALIDATEPY = Join-Path $ROOT "scripts\validate_release_package.py"
 $RELEASECLEANPY = Join-Path $ROOT "scripts\release_clean_check.py"
 $WIRINGCHECKPY = Join-Path $ROOT "scripts\end_to_end_wiring_check.py"
+$SETUPWIZARDPY = Join-Path $ROOT "scripts\run_setup_wizard.py"
 $TIMEPY    = Join-Path $ROOT "scripts\run_time.py"  # Temporal review surface
 $POLICY    = Join-Path $ROOT "policy.json"    # optional
 $LOG_DIR   = Join-Path $ROOT "logs"
@@ -961,6 +962,7 @@ function Show-Help {
   Write-Host ""
   Write-Host "Runtime:"
   Write-Host "  nova install                   # create/refresh venv, install deps, run doctor --fix"
+  Write-Host "  nova setup [--check-only] [--skip-ollama] [--skip-models] [--skip-webui]  # full setup wizard (Python 3.12, deps, Ollama, models, proof)"
   Write-Host "  nova package-build [--label rc1] [--version 2026.03.30] [--channel rc] [--output path]  # stage and zip base package artifact"
   Write-Host "  nova package-verify [path]     # verify latest or selected release artifact manifest/content"
   Write-Host "  nova installer-build [--artifact path] [--compiler path-to-ISCC.exe] [--output path]  # build Windows installer from a verified package zip"
@@ -1488,6 +1490,17 @@ switch ($cmd.ToLower()) {
   "install" {
     $installCode = Invoke-NovaInstall
     exit $installCode
+  }
+
+  "setup" {
+    if (-not (Test-Path $SETUPWIZARDPY)) {
+      Write-Host ("[FAIL] Missing setup wizard: " + $SETUPWIZARDPY)
+      exit 1
+    }
+    # Bootstrap Python is required; wizard creates/repairs .venv itself.
+    $setupCode = Invoke-BootstrapPython (@($SETUPWIZARDPY) + $remainingTokens)
+    if ($null -eq $setupCode) { $setupCode = 0 }
+    exit ([int]$setupCode)
   }
 
   "package-build" {
