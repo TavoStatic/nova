@@ -591,6 +591,8 @@ def _coverage_root_for_path(path: str) -> str:
         or "hygiene" in low
         or "prepush" in low
         or "sock" in low
+        or "setup_wizard" in low
+        or "clean_install_sandbox" in low
     ):
         return "diagnostics_hygiene"
     if "control_" in low:
