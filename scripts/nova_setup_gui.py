@@ -74,7 +74,8 @@ class NovaSetupApp(tk.Tk):
             self,
             text=(
                 "Installs and verifies everything Nova needs on this machine:\n"
-                "Python 3.12, package dependencies, doctor, Ollama, models, smoke, web UI, PATH."
+                "Python 3.12, deps, doctor, SOCK hardware model sizing, disk checks,\n"
+                "Ollama, model pulls, smoke, web UI, PATH."
             ),
             font=("Segoe UI", 10),
             justify="left",

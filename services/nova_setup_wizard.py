@@ -22,6 +22,19 @@ WINGET_OLLAMA_ID = "Ollama.Ollama"
 DEFAULT_OLLAMA_BASE = "http://127.0.0.1:11434"
 DEFAULT_WEBUI_PORT = 18088
 
+# Approximate on-disk download size (GB) for Ollama pulls — used for preflight
+# disk checks before multi-GB model downloads begin.
+_MODEL_DISK_GB: dict[str, float] = {
+    "llama3.2:3b": 2.0,
+    "qwen2.5:7b": 4.7,
+    "qwen2.5vl:7b": 5.5,
+    "llama3.1:8b": 4.7,
+    "qwen2.5:14b": 9.0,
+    "qwen2.5vl:14b": 9.0,
+}
+_MODEL_DISK_BUFFER = 1.25  # spare for layers, unpack, OS headroom
+_MIN_FREE_DISK_GB_BASE = 8.0  # Python venv + deps + runtime
+
 
 def _now() -> str:
     return time.strftime("%Y-%m-%d %H:%M:%S")
@@ -607,6 +620,43 @@ def ensure_ollama(*, install: bool = True, base: str = DEFAULT_OLLAMA_BASE) -> d
     )
 
 
+def estimate_model_disk_gb(model: str) -> float:
+    name = str(model or "").strip()
+    if name in _MODEL_DISK_GB:
+        return float(_MODEL_DISK_GB[name])
+    low = name.lower()
+    if "14b" in low:
+        return 9.0
+    if "8b" in low or "7b" in low:
+        return 5.0
+    if "3b" in low or "1.5b" in low:
+        return 2.0
+    return 5.0
+
+
+def free_disk_gb(path: Path | str | None = None) -> float | None:
+    try:
+        target = Path(path or Path.cwd()).resolve()
+        if not target.exists():
+            target = target.parent if target.parent.exists() else Path.cwd()
+        usage = shutil.disk_usage(str(target))
+        return round(float(usage.free) / (1024 ** 3), 2)
+    except Exception:
+        return None
+
+
+def ollama_models_dir() -> Path:
+    # Default Ollama model store on Windows; fall back to user home.
+    local = Path(os.environ.get("LOCALAPPDATA") or str(Path.home()))
+    candidate = local / "Ollama" / "models"
+    if candidate.is_dir():
+        return candidate
+    home = Path.home() / ".ollama" / "models"
+    if home.is_dir():
+        return home
+    return local / "Ollama"
+
+
 def model_present(name: str, installed: list[str]) -> bool:
     target = str(name or "").strip()
     if not target:
@@ -628,6 +678,168 @@ def model_present(name: str, installed: list[str]) -> bool:
     return target in installed
 
 
+def ensure_sock_policy(root: Path, *, install: bool = True) -> dict[str, Any]:
+    """Run SOCK hardware profile and apply model recommendations to policy.json."""
+
+    messages: list[str] = []
+    policy_path = Path(root) / "policy.json"
+    try:
+        from services.sock_service import apply_policy, build_diff, recommend_models, scan_hardware
+    except Exception as exc:
+        return _step(
+            "sock_hardware",
+            ok=False,
+            required=False,
+            detail=f"sock_service unavailable: {exc}",
+        )
+
+    try:
+        hw = scan_hardware()
+        rec = recommend_models(hw)
+        diff = build_diff(rec, policy_path)
+    except Exception as exc:
+        return _step(
+            "sock_hardware",
+            ok=False,
+            required=False,
+            detail=f"hardware scan failed: {exc}",
+        )
+
+    messages.append(
+        f"hardware ram_gb={hw.ram_gb} vram_gb={hw.vram_gb} gpu={hw.gpu_name!r} "
+        f"cpu_cores={hw.cpu_cores} free_disk_gb={hw.storage_free_gb}"
+    )
+    messages.append(
+        f"recommended chat={rec.chat} routing={rec.routing} vision={rec.vision} stt={rec.stt_size}"
+    )
+    for key, why in dict(rec.rationale or {}).items():
+        messages.append(f"why_{key}={why}")
+    if hw.detection_notes:
+        messages.extend([f"note:{n}" for n in list(hw.detection_notes)[:8]])
+
+    applied = False
+    if install and diff.changed_keys:
+        try:
+            if not policy_path.is_file():
+                return _step(
+                    "sock_hardware",
+                    ok=False,
+                    detail="policy.json missing; cannot apply SOCK recommendations",
+                    messages=messages,
+                )
+            apply_policy(rec, policy_path)
+            applied = True
+            messages.append(f"policy_applied changed={diff.changed_keys}")
+            print(
+                f"[setup] SOCK adjusted policy models for this machine: "
+                f"chat={rec.chat} routing={rec.routing} vision={rec.vision}",
+                flush=True,
+            )
+        except Exception as exc:
+            messages.append(f"apply_failed:{exc}")
+            return _step(
+                "sock_hardware",
+                ok=False,
+                detail=f"SOCK recommendation ready but policy apply failed: {exc}",
+                messages=messages,
+            )
+    elif not diff.changed_keys:
+        messages.append("policy already matches SOCK recommendation")
+    else:
+        messages.append(f"check_only recommended_changes={diff.changed_keys}")
+
+    detail = (
+        f"ram={hw.ram_gb}GB vram={hw.vram_gb}GB gpu={hw.gpu_name or 'unknown'} "
+        f"-> chat={rec.chat} routing={rec.routing} vision={rec.vision}"
+        + (" (applied)" if applied else "")
+    )
+    return _step(
+        "sock_hardware",
+        ok=True,
+        required=False,
+        action="install" if applied else "check",
+        detail=detail,
+        messages=messages,
+    )
+
+
+def ensure_model_disk_space(root: Path, models: list[str]) -> dict[str, Any]:
+    """Fail before multi-GB Ollama pulls when free disk is insufficient."""
+
+    needed_models = [str(m).strip() for m in models if str(m).strip()]
+    if not needed_models:
+        return _step(
+            "model_disk",
+            ok=True,
+            required=False,
+            detail="no models to size",
+        )
+
+    estimates = {name: estimate_model_disk_gb(name) for name in needed_models}
+    raw_need = sum(estimates.values())
+    need_gb = round(raw_need * _MODEL_DISK_BUFFER, 2)
+    # Check the volume that will hold Ollama models, and the package root volume.
+    targets = [ollama_models_dir(), Path(root).resolve()]
+    free_readings: list[tuple[str, float | None]] = []
+    min_free: float | None = None
+    for target in targets:
+        free = free_disk_gb(target)
+        free_readings.append((str(target), free))
+        if free is None:
+            continue
+        if min_free is None or free < min_free:
+            min_free = free
+
+    messages = [
+        f"models={needed_models}",
+        f"estimates_gb={estimates}",
+        f"required_gb={need_gb} (includes buffer {_MODEL_DISK_BUFFER})",
+        f"free_readings={free_readings}",
+    ]
+    if min_free is None:
+        return _step(
+            "model_disk",
+            ok=False,
+            detail="could not determine free disk space",
+            messages=messages,
+        )
+    if min_free < need_gb:
+        print(
+            f"[setup] FAIL disk space: need ~{need_gb} GB free for models, have {min_free} GB",
+            flush=True,
+        )
+        return _step(
+            "model_disk",
+            ok=False,
+            detail=f"insufficient disk: need>={need_gb}GB free, have={min_free}GB",
+            messages=messages
+            + [
+                "Free disk space or choose a smaller SOCK model tier before pulling models.",
+                "Ollama stores models under %LOCALAPPDATA%\\Ollama on Windows.",
+            ],
+        )
+    print(f"[setup] Disk check OK: need ~{need_gb} GB, free {min_free} GB", flush=True)
+    return _step(
+        "model_disk",
+        ok=True,
+        detail=f"need={need_gb}GB free={min_free}GB",
+        messages=messages,
+    )
+
+
+def ensure_base_disk_space(root: Path) -> dict[str, Any]:
+    free = free_disk_gb(root)
+    if free is None:
+        return _step("base_disk", ok=False, detail="could not read free disk")
+    if free < _MIN_FREE_DISK_GB_BASE:
+        return _step(
+            "base_disk",
+            ok=False,
+            detail=f"need>={_MIN_FREE_DISK_GB_BASE}GB free for base install, have={free}GB",
+        )
+    return _step("base_disk", ok=True, detail=f"free={free}GB")
+
+
 def ensure_ollama_models(
     root: Path,
     *,
@@ -647,6 +859,16 @@ def ensure_ollama_models(
     messages = [f"required={required}", f"installed={installed}", f"missing_before={missing}"]
 
     if missing and install:
+        disk_step = ensure_model_disk_space(root, missing)
+        messages.extend(list(disk_step.get("messages") or []))
+        if not disk_step.get("ok"):
+            return _step(
+                "ollama_models",
+                ok=False,
+                action="install",
+                detail=f"blocked by disk check: {disk_step.get('detail')}",
+                messages=messages,
+            )
         for name in missing:
             print(f"[setup] Pulling Ollama model {name} (this can take a long time)...", flush=True)
             proc = _run_streaming(
@@ -661,6 +883,9 @@ def ensure_ollama_models(
                 print(f"[setup] Finished pull: {name}", flush=True)
         installed = ollama_tags(base=base)
         missing = [name for name in required if not model_present(name, installed)]
+    elif missing and not install:
+        disk_step = ensure_model_disk_space(root, missing)
+        messages.append(f"disk_check={disk_step.get('detail')}")
 
     return _step(
         "ollama_models",
@@ -814,6 +1039,7 @@ def run_setup_wizard(
     started = _now()
 
     steps.append(check_host(base))
+    steps.append(ensure_base_disk_space(base))
 
     # Always start from a refreshed PATH so winget/prior installs are visible.
     if os.name == "nt":
@@ -843,11 +1069,16 @@ def run_setup_wizard(
         steps.append(_step("python_deps", ok=False, detail="skipped; venv not ready"))
         steps.append(_step("doctor", ok=False, detail="skipped; venv not ready"))
 
+    # SOCK first so policy models match this machine before any multi-GB pulls.
+    sock_step = ensure_sock_policy(base, install=install)
+    steps.append(sock_step)
+
     if include_ollama:
         ollama_step = ensure_ollama(install=install)
         steps.append(ollama_step)
         if include_models:
             if ollama_step.get("ok"):
+                # Disk gate runs inside ensure_ollama_models for missing pulls.
                 steps.append(ensure_ollama_models(base, install=install))
             else:
                 steps.append(_step("ollama_models", ok=False, detail="skipped; ollama not ready"))

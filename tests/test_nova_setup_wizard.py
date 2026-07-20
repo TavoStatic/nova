@@ -8,7 +8,10 @@ from unittest import mock
 
 from services.nova_setup_wizard import (
     SUPPORTED_PYTHON,
+    ensure_model_disk_space,
     ensure_nova_path,
+    ensure_sock_policy,
+    estimate_model_disk_gb,
     model_present,
     parse_python_version,
     refresh_windows_path,
@@ -91,6 +94,44 @@ class TestNovaSetupWizard(unittest.TestCase):
                 merged = refresh_windows_path()
                 self.assertTrue(merged)
                 self.assertTrue(str(__import__("os").environ.get("PATH") or ""))
+
+    def test_estimate_model_disk_gb(self):
+        self.assertGreaterEqual(estimate_model_disk_gb("qwen2.5:7b"), 4.0)
+        self.assertGreaterEqual(estimate_model_disk_gb("qwen2.5:14b"), 8.0)
+
+    def test_ensure_model_disk_space_blocks_when_low(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with mock.patch("services.nova_setup_wizard.free_disk_gb", return_value=2.0):
+                with mock.patch("services.nova_setup_wizard.ollama_models_dir", return_value=Path(tmp)):
+                    step = ensure_model_disk_space(Path(tmp), ["qwen2.5:7b", "qwen2.5vl:7b"])
+        self.assertFalse(step.get("ok"))
+        self.assertIn("insufficient disk", str(step.get("detail") or ""))
+
+    def test_ensure_model_disk_space_ok_when_plenty(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with mock.patch("services.nova_setup_wizard.free_disk_gb", return_value=80.0):
+                with mock.patch("services.nova_setup_wizard.ollama_models_dir", return_value=Path(tmp)):
+                    step = ensure_model_disk_space(Path(tmp), ["llama3.2:3b"])
+        self.assertTrue(step.get("ok"))
+
+    def test_ensure_sock_policy_applies_recommendation(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "policy.json").write_text(
+                json.dumps({"models": {"chat": "qwen2.5:14b", "routing": "qwen2.5:14b", "vision": "qwen2.5vl:14b", "stt_size": "medium"}}),
+                encoding="utf-8",
+            )
+            hw = mock.Mock(ram_gb=16.0, vram_gb=4.0, gpu_name="Test GPU 4GB", cpu_cores=8, storage_free_gb=100.0, detection_notes=[])
+            rec = mock.Mock(chat="qwen2.5:7b", routing="qwen2.5:7b", vision="qwen2.5vl:7b", stt_size="small", rationale={"chat": "fits"})
+            diff = mock.Mock(changed_keys=["chat", "routing", "vision", "stt_size"])
+            with mock.patch("services.sock_service.scan_hardware", return_value=hw):
+                with mock.patch("services.sock_service.recommend_models", return_value=rec):
+                    with mock.patch("services.sock_service.build_diff", return_value=diff):
+                        with mock.patch("services.sock_service.apply_policy") as apply:
+                            step = ensure_sock_policy(root, install=True)
+                            apply.assert_called_once()
+            self.assertTrue(step.get("ok"))
+            self.assertEqual(step.get("name"), "sock_hardware")
 
 
 def os_name_is_windows() -> bool:
