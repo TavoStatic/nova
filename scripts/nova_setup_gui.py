@@ -49,7 +49,12 @@ try:
 except Exception as exc:  # pragma: no cover
     raise SystemExit(f"tkinter unavailable: {exc}") from exc
 
-from services.nova_setup_wizard import render_setup_report, run_setup_wizard
+from services.nova_setup_wizard import (
+    acquire_setup_singleton,
+    release_setup_singleton,
+    render_setup_report,
+    run_setup_wizard,
+)
 
 
 class NovaSetupApp(tk.Tk):
@@ -62,6 +67,7 @@ class NovaSetupApp(tk.Tk):
         self._log_queue: queue.Queue[str] = queue.Queue()
         self._worker: threading.Thread | None = None
         self._running = False
+        self.protocol("WM_DELETE_WINDOW", self._on_close)
 
         header = ttk.Label(
             self,
@@ -74,8 +80,8 @@ class NovaSetupApp(tk.Tk):
             self,
             text=(
                 "Installs and verifies everything Nova needs on this machine:\n"
-                "Python 3.12, deps, doctor, SOCK hardware model sizing, disk checks,\n"
-                "Ollama, model pulls, smoke, web UI, PATH."
+                "Python 3.12, library disk budget, deps, doctor, SOCK model sizing,\n"
+                "Ollama, model pulls, smoke, web UI, PATH. Only one setup may run."
             ),
             font=("Segoe UI", 10),
             justify="left",
@@ -104,10 +110,23 @@ class NovaSetupApp(tk.Tk):
         buttons.pack(fill="x", padx=16, pady=(0, 16))
         self.start_btn = ttk.Button(buttons, text="Start Setup", command=self.start_setup)
         self.start_btn.pack(side="left")
-        self.close_btn = ttk.Button(buttons, text="Close", command=self.destroy)
+        self.close_btn = ttk.Button(buttons, text="Close", command=self._on_close)
         self.close_btn.pack(side="right")
 
         self.after(100, self._drain_log)
+
+    def _on_close(self) -> None:
+        if self._running:
+            if not messagebox.askyesno(
+                "Nova Setup",
+                "Setup is still running. Closing will not stop background work safely.\n\nClose anyway?",
+            ):
+                return
+        try:
+            release_setup_singleton()
+        except Exception:
+            pass
+        self.destroy()
 
     def _append(self, text: str) -> None:
         self.log.configure(state="normal")
@@ -126,6 +145,7 @@ class NovaSetupApp(tk.Tk):
 
     def start_setup(self) -> None:
         if self._running:
+            messagebox.showinfo("Nova Setup", "Setup is already running in this window.")
             return
         self._running = True
         self.start_btn.configure(state="disabled")
@@ -162,13 +182,18 @@ class NovaSetupApp(tk.Tk):
                 summary = render_setup_report(report) + "\n"
                 self._log_queue.put("\n" + summary)
                 ok = bool(report.get("ok"))
-                self.after(
-                    0,
-                    lambda: self._finish(
-                        ok,
-                        "Setup completed successfully." if ok else "Setup finished with failures. See log.",
-                    ),
-                )
+                failed = list(report.get("required_failed") or [])
+                if failed == ["singleton"]:
+                    msg = "Another Nova Setup is already running. Close the other window and try again."
+                    self.after(0, lambda: self._finish(False, msg))
+                else:
+                    self.after(
+                        0,
+                        lambda: self._finish(
+                            ok,
+                            "Setup completed successfully." if ok else "Setup finished with failures. See log.",
+                        ),
+                    )
             except Exception:
                 self._log_queue.put(traceback.format_exc())
                 self.after(0, lambda: self._finish(False, "Setup crashed. See log."))
@@ -189,9 +214,28 @@ class NovaSetupApp(tk.Tk):
 
 
 def main() -> int:
-    app = NovaSetupApp()
-    app.mainloop()
-    return 0
+    locked, detail = acquire_setup_singleton()
+    if not locked:
+        try:
+            root = tk.Tk()
+            root.withdraw()
+            messagebox.showerror(
+                "Nova Setup",
+                "Another Nova Setup is already running.\n\n"
+                "Close the other setup window and try again.\n\n"
+                f"({detail})",
+            )
+            root.destroy()
+        except Exception:
+            print(f"Another Nova Setup is already running ({detail})", flush=True)
+        return 2
+
+    try:
+        app = NovaSetupApp()
+        app.mainloop()
+        return 0
+    finally:
+        release_setup_singleton()
 
 
 if __name__ == "__main__":

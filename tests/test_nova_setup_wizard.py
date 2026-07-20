@@ -8,13 +8,17 @@ from unittest import mock
 
 from services.nova_setup_wizard import (
     SUPPORTED_PYTHON,
+    acquire_setup_singleton,
+    ensure_base_disk_space,
     ensure_model_disk_space,
     ensure_nova_path,
     ensure_sock_policy,
     estimate_model_disk_gb,
+    install_disk_budget,
     model_present,
     parse_python_version,
     refresh_windows_path,
+    release_setup_singleton,
     required_ollama_models,
     run_setup_wizard,
     select_supported_python,
@@ -98,6 +102,24 @@ class TestNovaSetupWizard(unittest.TestCase):
     def test_estimate_model_disk_gb(self):
         self.assertGreaterEqual(estimate_model_disk_gb("qwen2.5:7b"), 4.0)
         self.assertGreaterEqual(estimate_model_disk_gb("qwen2.5:14b"), 8.0)
+
+    def test_install_disk_budget_includes_libraries(self):
+        budget = install_disk_budget(need_python_install=True, need_venv_libraries=True, need_ollama_app=True)
+        self.assertGreaterEqual(budget["venv_and_libraries"], 5.0)
+        self.assertGreaterEqual(budget["total"], 8.0)
+
+    def test_singleton_blocks_second_acquirer(self):
+        # Release any leftover from other tests first.
+        release_setup_singleton()
+        release_setup_singleton()
+        ok1, _ = acquire_setup_singleton()
+        self.assertTrue(ok1)
+        # Nested acquire in same process is allowed (GUI + wizard).
+        ok_nested, detail = acquire_setup_singleton()
+        self.assertTrue(ok_nested)
+        self.assertIn("nested", detail)
+        release_setup_singleton()
+        release_setup_singleton()
 
     def test_ensure_model_disk_space_blocks_when_low(self):
         with tempfile.TemporaryDirectory() as tmp:

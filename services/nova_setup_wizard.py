@@ -33,11 +33,135 @@ _MODEL_DISK_GB: dict[str, float] = {
     "qwen2.5vl:14b": 9.0,
 }
 _MODEL_DISK_BUFFER = 1.25  # spare for layers, unpack, OS headroom
-_MIN_FREE_DISK_GB_BASE = 8.0  # Python venv + deps + runtime
+# Full base install budget (Python runtime + venv libraries + headroom).
+# Measured against heavy requirements (opencv, scipy, faster-whisper, onnx, etc.).
+_DISK_PYTHON_INSTALL_GB = 0.75  # winget/python.org install footprint
+_DISK_VENV_LIBRARIES_GB = 7.0  # pip deps into .venv (wheels + unpack)
+_DISK_OLLAMA_APP_GB = 1.5  # Ollama application install
+_DISK_RUNTIME_HEADROOM_GB = 2.0  # logs, runtime state, unpack temp
+_MIN_FREE_DISK_GB_BASE = (
+    _DISK_PYTHON_INSTALL_GB + _DISK_VENV_LIBRARIES_GB + _DISK_RUNTIME_HEADROOM_GB
+)  # ~9.75 GB without models/Ollama
+
+_SETUP_MUTEX_NAME = "Local\\NovaSetupWizardSingleton"
+_setup_lock_handle: Any = None
+_setup_lock_depth = 0
 
 
 def _now() -> str:
     return time.strftime("%Y-%m-%d %H:%M:%S")
+
+
+def acquire_setup_singleton() -> tuple[bool, str]:
+    """Ensure only one setup wizard process runs at a time (Windows mutex + lock file)."""
+
+    global _setup_lock_handle, _setup_lock_depth
+    if _setup_lock_handle is not None:
+        _setup_lock_depth += 1
+        return True, f"nested_hold depth={_setup_lock_depth}"
+
+    # Windows named mutex — covers multiple double-clicks of NovaSetup.exe.
+    if os.name == "nt":
+        try:
+            import ctypes
+
+            kernel32 = ctypes.windll.kernel32
+            handle = kernel32.CreateMutexW(None, False, _SETUP_MUTEX_NAME)
+            last_error = int(kernel32.GetLastError() or 0)
+            ERROR_ALREADY_EXISTS = 183
+            if not handle:
+                return False, "mutex_create_failed"
+            if last_error == ERROR_ALREADY_EXISTS:
+                kernel32.CloseHandle(handle)
+                return False, "another_nova_setup_is_already_running"
+            _setup_lock_handle = ("mutex", handle)
+            _setup_lock_depth = 1
+            return True, "mutex_acquired"
+        except Exception as exc:
+            # Fall through to lock file.
+            last_mutex_error = str(exc)
+    else:
+        last_mutex_error = "non_windows"
+
+    lock_dir = Path(os.environ.get("LOCALAPPDATA") or Path.home() / ".nova") / "Nova"
+    try:
+        lock_dir.mkdir(parents=True, exist_ok=True)
+    except Exception:
+        lock_dir = Path.cwd()
+    lock_path = lock_dir / "setup_wizard.lock"
+    try:
+        fh = open(lock_path, "a+b")
+        if os.name == "nt":
+            import msvcrt
+
+            fh.seek(0)
+            if fh.read(1) == b"":
+                fh.write(b"0")
+                fh.flush()
+            fh.seek(0)
+            msvcrt.locking(fh.fileno(), msvcrt.LK_NBLCK, 1)
+        else:
+            import fcntl
+
+            fcntl.flock(fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        fh.seek(0)
+        fh.truncate()
+        fh.write(str(os.getpid()).encode("ascii", errors="ignore"))
+        fh.flush()
+        _setup_lock_handle = ("file", fh, lock_path)
+        _setup_lock_depth = 1
+        return True, f"lock_file:{lock_path}"
+    except Exception as exc:
+        return False, f"lock_failed:{exc};mutex={last_mutex_error}"
+
+
+def release_setup_singleton() -> None:
+    global _setup_lock_handle, _setup_lock_depth
+    if _setup_lock_handle is None:
+        _setup_lock_depth = 0
+        return
+    _setup_lock_depth = max(0, int(_setup_lock_depth) - 1)
+    if _setup_lock_depth > 0:
+        return
+    handle = _setup_lock_handle
+    _setup_lock_handle = None
+    if not handle:
+        return
+    kind = handle[0]
+    try:
+        if kind == "mutex" and os.name == "nt":
+            import ctypes
+
+            ctypes.windll.kernel32.CloseHandle(handle[1])
+        elif kind == "file":
+            fh = handle[1]
+            lock_path = handle[2] if len(handle) > 2 else None
+            if os.name == "nt":
+                import msvcrt
+
+                try:
+                    fh.seek(0)
+                    msvcrt.locking(fh.fileno(), msvcrt.LK_UNLCK, 1)
+                except Exception:
+                    pass
+            else:
+                import fcntl
+
+                try:
+                    fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
+                except Exception:
+                    pass
+            try:
+                fh.close()
+            except Exception:
+                pass
+            if lock_path:
+                try:
+                    Path(lock_path).unlink(missing_ok=True)
+                except Exception:
+                    pass
+    except Exception:
+        pass
 
 
 def _step(
@@ -827,17 +951,69 @@ def ensure_model_disk_space(root: Path, models: list[str]) -> dict[str, Any]:
     )
 
 
-def ensure_base_disk_space(root: Path) -> dict[str, Any]:
+def install_disk_budget(
+    *,
+    need_python_install: bool = True,
+    need_venv_libraries: bool = True,
+    need_ollama_app: bool = False,
+    models: list[str] | None = None,
+) -> dict[str, float]:
+    """Return GB budget breakdown for the selected install phases."""
+
+    parts = {
+        "python_install": _DISK_PYTHON_INSTALL_GB if need_python_install else 0.0,
+        "venv_and_libraries": _DISK_VENV_LIBRARIES_GB if need_venv_libraries else 0.0,
+        "ollama_app": _DISK_OLLAMA_APP_GB if need_ollama_app else 0.0,
+        "runtime_headroom": _DISK_RUNTIME_HEADROOM_GB,
+        "models": 0.0,
+    }
+    for name in list(models or []):
+        parts["models"] = float(parts["models"]) + estimate_model_disk_gb(name)
+    if parts["models"] > 0:
+        parts["models"] = round(float(parts["models"]) * _MODEL_DISK_BUFFER, 2)
+    parts["total"] = round(sum(float(v) for k, v in parts.items() if k != "total"), 2)
+    return parts
+
+
+def ensure_base_disk_space(
+    root: Path,
+    *,
+    need_python_install: bool = True,
+    need_venv_libraries: bool = True,
+    need_ollama_app: bool = False,
+    models: list[str] | None = None,
+) -> dict[str, Any]:
+    """Check free space for Python, venv libraries, Ollama app, and optional models."""
+
+    budget = install_disk_budget(
+        need_python_install=need_python_install,
+        need_venv_libraries=need_venv_libraries,
+        need_ollama_app=need_ollama_app,
+        models=models,
+    )
+    need_gb = float(budget["total"])
     free = free_disk_gb(root)
+    messages = [
+        f"budget_gb={budget}",
+        (
+            "Includes: Python installer footprint, pip libraries "
+            f"(~{_DISK_VENV_LIBRARIES_GB}GB for opencv/scipy/whisper/etc), "
+            f"runtime headroom, and model downloads when selected."
+        ),
+    ]
     if free is None:
-        return _step("base_disk", ok=False, detail="could not read free disk")
-    if free < _MIN_FREE_DISK_GB_BASE:
+        return _step("base_disk", ok=False, detail="could not read free disk", messages=messages)
+    messages.append(f"free_gb={free}")
+    if free < need_gb:
+        print(f"[setup] FAIL disk: need ~{need_gb} GB free (Python+libs+…), have {free} GB", flush=True)
         return _step(
             "base_disk",
             ok=False,
-            detail=f"need>={_MIN_FREE_DISK_GB_BASE}GB free for base install, have={free}GB",
+            detail=f"need>={need_gb}GB free for install budget, have={free}GB",
+            messages=messages,
         )
-    return _step("base_disk", ok=True, detail=f"free={free}GB")
+    print(f"[setup] Disk budget OK: need ~{need_gb} GB, free {free} GB", flush=True)
+    return _step("base_disk", ok=True, detail=f"need={need_gb}GB free={free}GB", messages=messages)
 
 
 def ensure_ollama_models(
@@ -1038,102 +1214,162 @@ def run_setup_wizard(
     steps: list[dict[str, Any]] = []
     started = _now()
 
-    steps.append(check_host(base))
-    steps.append(ensure_base_disk_space(base))
+    locked, lock_detail = acquire_setup_singleton()
+    if not locked:
+        report = {
+            "generated_at": _now(),
+            "started_at": started,
+            "finished_at": _now(),
+            "root": str(base),
+            "ok": False,
+            "required_failed": ["singleton"],
+            "steps": [
+                _step(
+                    "singleton",
+                    ok=False,
+                    detail="Another Nova Setup is already running. Close it and try again.",
+                    messages=[lock_detail],
+                )
+            ],
+            "required_models": required_ollama_models(base),
+            "operator_next_steps": ["Only one Nova Setup window/process may run at a time."],
+        }
+        print("[setup] Another setup instance is already running — exiting.", flush=True)
+        return report
 
-    # Always start from a refreshed PATH so winget/prior installs are visible.
-    if os.name == "nt":
-        refresh_windows_path()
-
-    python_step = ensure_python(install=install)
-    steps.append(python_step)
-    selected = select_supported_python() if python_step.get("ok") else None
-    python_command = list(selected.get("command") or [sys.executable]) if selected else [sys.executable]
-
-    venv_step = (
-        ensure_venv(base, python_command)
-        if python_step.get("ok")
-        else _step("venv", ok=False, detail="skipped; python not ready")
-    )
-    steps.append(venv_step)
-    venv_python = base / ".venv" / "Scripts" / "python.exe"
-
-    if venv_step.get("ok") and venv_python.is_file():
-        if install:
-            print("[setup] Installing Python dependencies (can take several minutes)...", flush=True)
-            steps.append(ensure_python_deps(base, venv_python))
-        else:
-            steps.append(_step("python_deps", ok=venv_python.is_file(), detail="check-only"))
-        steps.append(ensure_doctor(base, venv_python))
-    else:
-        steps.append(_step("python_deps", ok=False, detail="skipped; venv not ready"))
-        steps.append(_step("doctor", ok=False, detail="skipped; venv not ready"))
-
-    # SOCK first so policy models match this machine before any multi-GB pulls.
-    sock_step = ensure_sock_policy(base, install=install)
-    steps.append(sock_step)
-
-    if include_ollama:
-        ollama_step = ensure_ollama(install=install)
-        steps.append(ollama_step)
-        if include_models:
-            if ollama_step.get("ok"):
-                # Disk gate runs inside ensure_ollama_models for missing pulls.
-                steps.append(ensure_ollama_models(base, install=install))
-            else:
-                steps.append(_step("ollama_models", ok=False, detail="skipped; ollama not ready"))
-    else:
-        steps.append(_step("ollama", ok=True, required=False, detail="skipped by flag"))
-        steps.append(_step("ollama_models", ok=True, required=False, detail="skipped by flag"))
-
-    if include_smoke and venv_python.is_file():
-        steps.append(ensure_smoke_base(base, venv_python))
-    else:
-        steps.append(_step("smoke_base", ok=False if include_smoke else True, required=include_smoke, detail="skipped"))
-
-    if include_webui:
-        steps.append(ensure_webui(base, port=int(webui_port)))
-    else:
-        steps.append(_step("webui", ok=True, required=False, detail="skipped by flag"))
-
-    if register_path:
-        steps.append(ensure_nova_path(base, install=install))
-    else:
-        steps.append(_step("nova_path", ok=True, required=False, detail="skipped by flag"))
-
-    required_failed = [s["name"] for s in steps if s.get("required") and not s.get("ok")]
-    path_step = next((s for s in steps if s.get("name") == "nova_path"), {})
-    report = {
-        "generated_at": _now(),
-        "started_at": started,
-        "finished_at": _now(),
-        "root": str(base),
-        "supported_python": SUPPORTED_PYTHON_LABEL,
-        "install": bool(install),
-        "include_ollama": bool(include_ollama),
-        "include_models": bool(include_models),
-        "ok": len(required_failed) == 0,
-        "required_failed": required_failed,
-        "steps": steps,
-        "required_models": required_ollama_models(base),
-        "operator_next_steps": [
-            f"Package root: {base}",
-            "Open a NEW terminal after PATH registration.",
-            "Then run: nova doctor",
-            f"Or: \"{base / 'nova.cmd'}\" doctor",
-            str((path_step or {}).get("detail") or ""),
-        ],
-    }
-
-    out = Path(report_path) if report_path else (base / "runtime" / "setup_wizard_report.json")
     try:
-        out.parent.mkdir(parents=True, exist_ok=True)
-        out.write_text(json.dumps(report, indent=2), encoding="utf-8")
-        report["report_path"] = str(out)
-    except Exception as exc:
-        report["report_path_error"] = str(exc)
+        steps.append(check_host(base))
 
-    return report
+        # Early budget: Python + libraries (+ Ollama app if selected). Models sized after SOCK.
+        need_python = select_supported_python() is None
+        steps.append(
+            ensure_base_disk_space(
+                base,
+                need_python_install=need_python and install,
+                need_venv_libraries=install,
+                need_ollama_app=include_ollama and install and not _which("ollama"),
+                models=None,
+            )
+        )
+
+        # Always start from a refreshed PATH so winget/prior installs are visible.
+        if os.name == "nt":
+            refresh_windows_path()
+
+        python_step = ensure_python(install=install)
+        steps.append(python_step)
+        selected = select_supported_python() if python_step.get("ok") else None
+        python_command = list(selected.get("command") or [sys.executable]) if selected else [sys.executable]
+
+        venv_step = (
+            ensure_venv(base, python_command)
+            if python_step.get("ok")
+            else _step("venv", ok=False, detail="skipped; python not ready")
+        )
+        steps.append(venv_step)
+        venv_python = base / ".venv" / "Scripts" / "python.exe"
+
+        if venv_step.get("ok") and venv_python.is_file():
+            if install:
+                # Re-check library space right before the heavy pip install.
+                lib_disk = ensure_base_disk_space(
+                    base,
+                    need_python_install=False,
+                    need_venv_libraries=True,
+                    need_ollama_app=False,
+                    models=None,
+                )
+                steps.append({**lib_disk, "name": "library_disk"})
+                if not lib_disk.get("ok"):
+                    steps.append(_step("python_deps", ok=False, detail="skipped; insufficient disk for libraries"))
+                else:
+                    print("[setup] Installing Python dependencies (can take several minutes)...", flush=True)
+                    steps.append(ensure_python_deps(base, venv_python))
+            else:
+                steps.append(_step("python_deps", ok=venv_python.is_file(), detail="check-only"))
+            if any(s.get("name") == "python_deps" and s.get("ok") for s in steps):
+                steps.append(ensure_doctor(base, venv_python))
+            else:
+                steps.append(_step("doctor", ok=False, detail="skipped; deps not ready"))
+        else:
+            steps.append(_step("python_deps", ok=False, detail="skipped; venv not ready"))
+            steps.append(_step("doctor", ok=False, detail="skipped; venv not ready"))
+
+        # SOCK first so policy models match this machine before any multi-GB pulls.
+        sock_step = ensure_sock_policy(base, install=install)
+        steps.append(sock_step)
+
+        if include_ollama:
+            ollama_step = ensure_ollama(install=install)
+            steps.append(ollama_step)
+            if include_models:
+                if ollama_step.get("ok"):
+                    # Disk gate runs inside ensure_ollama_models for missing pulls.
+                    steps.append(ensure_ollama_models(base, install=install))
+                else:
+                    steps.append(_step("ollama_models", ok=False, detail="skipped; ollama not ready"))
+        else:
+            steps.append(_step("ollama", ok=True, required=False, detail="skipped by flag"))
+            steps.append(_step("ollama_models", ok=True, required=False, detail="skipped by flag"))
+
+        if include_smoke and venv_python.is_file() and any(s.get("name") == "doctor" and s.get("ok") for s in steps):
+            steps.append(ensure_smoke_base(base, venv_python))
+        else:
+            steps.append(
+                _step(
+                    "smoke_base",
+                    ok=False if include_smoke else True,
+                    required=include_smoke,
+                    detail="skipped",
+                )
+            )
+
+        if include_webui:
+            steps.append(ensure_webui(base, port=int(webui_port)))
+        else:
+            steps.append(_step("webui", ok=True, required=False, detail="skipped by flag"))
+
+        if register_path:
+            steps.append(ensure_nova_path(base, install=install))
+        else:
+            steps.append(_step("nova_path", ok=True, required=False, detail="skipped by flag"))
+
+        required_failed = [s["name"] for s in steps if s.get("required") and not s.get("ok")]
+        path_step = next((s for s in steps if s.get("name") == "nova_path"), {})
+        report = {
+            "generated_at": _now(),
+            "started_at": started,
+            "finished_at": _now(),
+            "root": str(base),
+            "supported_python": SUPPORTED_PYTHON_LABEL,
+            "install": bool(install),
+            "include_ollama": bool(include_ollama),
+            "include_models": bool(include_models),
+            "ok": len(required_failed) == 0,
+            "required_failed": required_failed,
+            "steps": steps,
+            "required_models": required_ollama_models(base),
+            "singleton": lock_detail,
+            "operator_next_steps": [
+                f"Package root: {base}",
+                "Open a NEW terminal after PATH registration.",
+                "Then run: nova doctor",
+                f"Or: \"{base / 'nova.cmd'}\" doctor",
+                str((path_step or {}).get("detail") or ""),
+            ],
+        }
+
+        out = Path(report_path) if report_path else (base / "runtime" / "setup_wizard_report.json")
+        try:
+            out.parent.mkdir(parents=True, exist_ok=True)
+            out.write_text(json.dumps(report, indent=2), encoding="utf-8")
+            report["report_path"] = str(out)
+        except Exception as exc:
+            report["report_path_error"] = str(exc)
+
+        return report
+    finally:
+        release_setup_singleton()
 
 
 def render_setup_report(report: dict[str, Any]) -> str:
