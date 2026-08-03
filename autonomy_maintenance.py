@@ -97,6 +97,22 @@ from services.work_tree_pressure_snapshot import (
     build_work_tree_pressure_snapshot_from_module,
 )
 from services.work_tree_signal_ingestion import WORK_TREE_SIGNAL_INGESTION_SERVICE
+from services.tool_identity import (
+    FIND,
+    GENERATED_QUEUE_RUN,
+    INSTALLER_VALIDATION_RUN,
+    LS,
+    MEMORY_BOOTSTRAP_JUDGMENT,
+    PHASE2_AUDIT,
+    PULSE,
+    READ,
+    RELEASE_PROMOTION_JUDGMENT,
+    RELEASE_REBUILD_VERIFY,
+    RELEASE_RECORD_VALIDATION_OUTCOME,
+    RELEASE_VALIDATION_RUN,
+    SOURCE_ROOT_JUDGMENT,
+    SUBCONSCIOUS_REVIEW_JUDGMENT,
+)
 import tools.runtime_processes as runtime_processes
 from work_tree_contracts import BranchStatus, TaskStatus
 
@@ -151,19 +167,19 @@ PATCH_QUEUE_TREE_KIND = "patch_queue"
 PATCH_QUEUE_TREE_SOURCE = "autonomy_maintenance"
 PATCH_QUEUE_SOURCE_TYPE = "patch_queue_preview"
 PATCH_QUEUE_BUCKET = "patch_queue"
-PATCH_QUEUE_ALLOWED_TOOLS = ["patch_preview_apply", "patch_rollback", "read", "find"]
+PATCH_QUEUE_ALLOWED_TOOLS = ["patch_preview_apply", "patch_rollback", READ, FIND]
 PATCH_QUEUE_EXECUTE_TOOLS = ["patch_preview_apply", "patch_rollback"]
 OPERATOR_GOVERNED_PATCH_EXECUTE_TOOLS = ["patch_preview_approve"]
-PATCH_QUEUE_REVIEW_TOOLS = ["read", "find"]
+PATCH_QUEUE_REVIEW_TOOLS = [READ, FIND]
 PATCH_QUEUE_MAX_STEPS = 3
 GENERATED_QUEUE_TREE_TITLE = "Generated Queue: governed self-repair"
 GENERATED_QUEUE_TREE_KIND = "generated_queue"
 GENERATED_QUEUE_TREE_SOURCE = "autonomy_maintenance"
 GENERATED_QUEUE_SOURCE_TYPE = "generated_queue_item"
 GENERATED_QUEUE_BUCKET = "generated_queue"
-GENERATED_QUEUE_ALLOWED_TOOLS = ["generated_queue_run", "read", "find", "queue_status"]
-GENERATED_QUEUE_EXECUTE_TOOLS = ["generated_queue_run"]
-GENERATED_QUEUE_REVIEW_TOOLS = ["read", "find", "queue_status"]
+GENERATED_QUEUE_ALLOWED_TOOLS = [GENERATED_QUEUE_RUN, READ, FIND, "queue_status"]
+GENERATED_QUEUE_EXECUTE_TOOLS = [GENERATED_QUEUE_RUN]
+GENERATED_QUEUE_REVIEW_TOOLS = [READ, FIND, "queue_status"]
 GENERATED_QUEUE_MAX_STEPS = 4
 ACTIVE_WORK_TREE_EXECUTE_TOOLS = [
     "web_fetch",
@@ -176,28 +192,28 @@ ACTIVE_WORK_TREE_EXECUTE_TOOLS = [
     "system_check",
     "os_capability",
     "queue_status",
-    "phase2_audit",
-    "pulse",
-    "read",
-    "ls",
-    "find",
+    PHASE2_AUDIT,
+    PULSE,
+    READ,
+    LS,
+    FIND,
     "pipeline",
     "edfi_explore",
     "core_health",
     "core_thinning",
-    "generated_queue_run",
-    "release_promotion_judgment",
-    "release_validation_run",
-    "release_record_validation_outcome",
-    "release_rebuild_verify",
-    "installer_validation_run",
+    GENERATED_QUEUE_RUN,
+    RELEASE_PROMOTION_JUDGMENT,
+    RELEASE_VALIDATION_RUN,
+    RELEASE_RECORD_VALIDATION_OUTCOME,
+    RELEASE_REBUILD_VERIFY,
+    INSTALLER_VALIDATION_RUN,
     "patch_apply",
-    "memory_bootstrap_judgment",
+    MEMORY_BOOTSTRAP_JUDGMENT,
     "memory_bootstrap_confirm",
     "memory_identity_bootstrap",
     "memory_hygiene",
-    "subconscious_review_judgment",
-    "source_root_judgment",
+    SUBCONSCIOUS_REVIEW_JUDGMENT,
+    SOURCE_ROOT_JUDGMENT,
     "weather_current_location",
     "weather_location",
     "location_coords",
@@ -477,20 +493,140 @@ def _active_work_candidate_tool(candidate: dict) -> str:
     return str(next_step.get("recommended_tool") or "").strip()
 
 
-def _active_work_candidate_branch(candidate: dict) -> dict:
+def _active_work_candidate_next_tool_status(candidate: dict) -> str:
+    """Branch tool_state for the candidate's recommended tool (e.g. failed)."""
     next_step = candidate.get("next_step") if isinstance(candidate.get("next_step"), dict) else {}
+    branch_id = str(next_step.get("branch_id") or candidate.get("active_branch_id") or "").strip()
+    tool_name = _active_work_candidate_tool(candidate)
+    if not branch_id or not tool_name:
+        return ""
+    try:
+        branch = work_tree.get_branch(branch_id)
+    except Exception:
+        branch = None
+    if branch is None:
+        return ""
+    tool_state = branch.tool_state if isinstance(getattr(branch, "tool_state", None), dict) else {}
+    raw = tool_state.get(tool_name)
+    if raw is None:
+        return ""
+    return str(getattr(raw, "value", raw) or "").strip().lower()
+
+
+def _active_work_candidate_args_resolvable(candidate: dict) -> bool:
+    """Path tools must resolve real args — free-text titles are not executable."""
+    tool_name = _active_work_candidate_tool(candidate)
+    if tool_name not in {"read", "ls", "find"}:
+        return True
+    next_step = candidate.get("next_step") if isinstance(candidate.get("next_step"), dict) else {}
+    task_id = str(next_step.get("task_id") or "").strip()
+    if not task_id:
+        return False
+    try:
+        task = work_tree._TASKS.get(task_id) if hasattr(work_tree, "_TASKS") else None
+        if task is None and hasattr(work_tree, "get_task"):
+            task = work_tree.get_task(task_id)  # type: ignore[attr-defined]
+    except Exception:
+        task = None
+    if task is None:
+        return False
+    try:
+        args = work_tree._tool_args_for_task(tool_name, task)
+    except Exception:
+        return False
+    return any(str(item or "").strip() for item in list(args or []))
+
+
+def _active_work_candidate_is_executable(candidate: dict) -> bool:
+    tool_name = _active_work_candidate_tool(candidate)
+    if tool_name not in ACTIVE_WORK_TREE_EXECUTE_TOOLS:
+        return False
+    if _active_work_candidate_next_tool_status(candidate) == "failed":
+        return False
+    if not _active_work_candidate_args_resolvable(candidate):
+        return False
+    return True
+
+
+def _active_work_candidate_climb_assessment(candidate: dict) -> dict:
+    """Ring 3: climb integrity for one findings-queue stem."""
+    try:
+        from services.self_scan_rings import assess_stem_climbability
+    except Exception:
+        return {
+            "climbable": _active_work_candidate_is_executable(candidate),
+            "reason": "climbable" if _active_work_candidate_is_executable(candidate) else "unclimbable",
+        }
+    tool_name = _active_work_candidate_tool(candidate)
+    next_step = candidate.get("next_step") if isinstance(candidate.get("next_step"), dict) else {}
+    task_id = str(next_step.get("task_id") or "").strip()
+    blocked_reason = ""
+    operator_hold = False
+    if task_id:
+        try:
+            task = work_tree._TASKS.get(task_id)
+            meta = dict(getattr(task, "meta", None) or {}) if task is not None else {}
+            blocked_reason = str(meta.get("blocked_reason") or meta.get("block_reason") or "").strip()
+            status = str(getattr(getattr(task, "status", None), "value", getattr(task, "status", "")) or "").lower()
+            operator_hold = status == "blocked" or bool(blocked_reason)
+        except Exception:
+            pass
+    return assess_stem_climbability(
+        tool_name=tool_name,
+        tool_status=_active_work_candidate_next_tool_status(candidate),
+        tool_args_resolvable=_active_work_candidate_args_resolvable(candidate) if tool_name in {"read", "ls", "find"} else True,
+        tool_in_safe_execute=(tool_name in ACTIVE_WORK_TREE_EXECUTE_TOOLS) if tool_name else None,
+        operator_hold=operator_hold,
+        blocked_reason=blocked_reason,
+    )
+
+
+def _active_work_candidate_branch(candidate: dict) -> dict:
+    """Serialize an active-work candidate for the orchestrator, with ladder progress.
+
+    Progress is the decision signal: prefer moving work, deprioritize stalled noise.
+    Prefer next_step.progress (live measure); fall back to task.meta or stamp.
+    Failed / unresolvable path steps are not executable so they cannot pin forever.
+    Ring 3 climb assessment is attached so thrash stems are not pinned as execute.
+    """
+    next_step = candidate.get("next_step") if isinstance(candidate.get("next_step"), dict) else {}
+    progress = next_step.get("progress") if isinstance(next_step.get("progress"), dict) else {}
+    task_id = str(next_step.get("task_id") or "").strip()
+    if (not progress or not progress.get("motion")) and task_id:
+        try:
+            stamped = work_tree.stamp_task_progress(task_id, persist=False)
+            if isinstance(stamped, dict) and stamped:
+                progress = stamped
+        except Exception:
+            progress = progress if isinstance(progress, dict) else {}
+    tool_status = _active_work_candidate_next_tool_status(candidate)
+    climb = _active_work_candidate_climb_assessment(candidate)
+    executable = bool(climb.get("climbable")) and _active_work_candidate_is_executable(candidate)
+    motion = str(progress.get("motion") or "").strip().lower()
+    # Failed tool thrash must not look like healthy "moving" progress.
+    if tool_status == "failed" or not executable:
+        if motion in {"", "moving", "not_started"}:
+            motion = "stalled"
     return {
         "branch_id": str(next_step.get("branch_id") or candidate.get("active_branch_id") or candidate.get("tree_id") or ""),
         "title": str(next_step.get("branch_title") or candidate.get("active_branch_title") or candidate.get("title") or ""),
-        "task_id": str(next_step.get("task_id") or ""),
+        "task_id": task_id,
         "task_title": str(next_step.get("task_title") or ""),
         "status": str(candidate.get("status") or ""),
         "owner": str(candidate.get("kind") or ""),
         "age_min": _safe_int(candidate.get("age_min") or 0, 0),
         "recommended_tool": str(next_step.get("recommended_tool") or ""),
+        "tool_status": tool_status,
+        "climbable": bool(climb.get("climbable")),
+        "climb_reason": str(climb.get("reason") or ""),
         "tree_id": str(candidate.get("tree_id") or ""),
         "tree_title": str(candidate.get("title") or ""),
-        "executable": _active_work_candidate_tool(candidate) in ACTIVE_WORK_TREE_EXECUTE_TOOLS,
+        "executable": executable,
+        "progress_percent": _safe_int(progress.get("percent"), 0),
+        "progress_motion": motion,
+        "progress_confidence": float(progress.get("confidence") or 0.0) if progress else 0.0,
+        "progress_summary": str(progress.get("operator_summary") or "")[:240],
+        "progress_family": str(progress.get("family_key") or "")[:120],
     }
 
 
@@ -549,6 +685,22 @@ def _work_tree_snapshot_for_orchestrator(work_tree_state: dict, active_work_cand
                 }
             )
     active_executable_count = sum(1 for branch in branches if bool(branch.get("executable")))
+    # Aggregate honest progress so orchestrator can prefer movement over noise.
+    motion_counts = {"moving": 0, "not_started": 0, "stalled": 0, "blocked": 0, "done": 0}
+    percent_sum = 0
+    percent_n = 0
+    for branch in branches:
+        motion = str(branch.get("progress_motion") or "").strip().lower()
+        if motion in motion_counts:
+            motion_counts[motion] += 1
+        try:
+            pct = int(branch.get("progress_percent") or 0)
+        except Exception:
+            pct = 0
+        if motion or pct:
+            percent_sum += max(0, min(100, pct))
+            percent_n += 1
+    avg_percent = int(round(percent_sum / percent_n)) if percent_n else 0
     return {
         "open_count": _safe_int(
             pressure.get("open_task_count")
@@ -568,6 +720,11 @@ def _work_tree_snapshot_for_orchestrator(work_tree_state: dict, active_work_cand
         "active_candidate_count": len(active_candidates) if active_candidates_provided else -1,
         "active_executable_count": active_executable_count if active_candidates_provided else -1,
         "active_unsafe_count": max(0, len(active_candidates) - active_executable_count) if active_candidates_provided else -1,
+        "progress_moving_count": int(motion_counts["moving"]),
+        "progress_stalled_count": int(motion_counts["stalled"]),
+        "progress_not_started_count": int(motion_counts["not_started"]),
+        "progress_blocked_count": int(motion_counts["blocked"]),
+        "progress_avg_percent": avg_percent,
         "branches": branches,
         "source_freshness_sec": 0,
     }
@@ -660,10 +817,51 @@ def _nova_http_direct_process_alive(process: dict) -> bool:
         return False
 
 
-def _terminate_operator_webui_pid(pid: int) -> bool:
-    from services.pipeline_worker_supervision import _default_terminate_pid
+def _webui_terminate_log(message: str) -> None:
+    """Append a one-line breadcrumb whenever something stops operator webui."""
+    try:
+        path = ROOT / "runtime" / "logs" / "webui_terminate.log"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        line = f"{time.strftime('%Y-%m-%d %H:%M:%S')} | {message}\n"
+        with path.open("a", encoding="utf-8") as handle:
+            handle.write(line)
+    except Exception:
+        pass
 
-    return _default_terminate_pid(int(pid), os_name=os.name)
+
+def _terminate_operator_webui_pid(pid: int, *, reason: str = "") -> bool:
+    """Stop one nova_http pid without process-tree kill.
+
+    Windows taskkill /T on a venv launcher parent also kills the listening child
+    that actually owns :8080. That looked like "something keeps killing the UI".
+    """
+    try:
+        resolved = int(pid)
+    except Exception:
+        return False
+    if resolved <= 0:
+        return False
+    note = str(reason or "unspecified").strip() or "unspecified"
+    ok = False
+    detail = ""
+    if os.name == "nt":
+        # Intentionally NO /T — do not wipe the child listener with the parent.
+        proc = subprocess.run(
+            ["taskkill", "/PID", str(resolved), "/F"],
+            capture_output=True,
+            text=True,
+        )
+        ok = int(proc.returncode or 0) == 0
+        detail = (proc.stdout or proc.stderr or "").strip().replace("\n", " ")[:200]
+    else:
+        try:
+            os.kill(resolved, 15)
+            ok = True
+        except Exception as exc:
+            detail = str(exc)
+            ok = False
+    _webui_terminate_log(f"terminate pid={resolved} ok={ok} reason={note} detail={detail}")
+    return ok
 
 
 def _select_operator_webui_keeper(processes: list[dict]) -> int:
@@ -671,9 +869,17 @@ def _select_operator_webui_keeper(processes: list[dict]) -> int:
         return 0
     if len(processes) == 1:
         return int(processes[0].get("pid") or 0)
+    # Prefer leaf processes (not parents of another matched nova_http pid).
+    parent_pids = {int(item.get("ppid") or 0) for item in processes if int(item.get("ppid") or 0) > 0}
+    leaves = [
+        item
+        for item in processes
+        if int(item.get("pid") or 0) > 0 and int(item.get("pid") or 0) not in parent_pids
+    ]
+    pool = leaves or list(processes)
     return int(
         max(
-            processes,
+            pool,
             key=lambda item: float(item.get("create_time") or 0.0),
         ).get("pid")
         or 0
@@ -693,18 +899,30 @@ def _reconcile_duplicate_operator_webui_processes(
             "terminated_count": 0,
         }
     keeper = int(keeper_pid or 0) or _select_operator_webui_keeper(processes)
+    # Never kill a process that is the parent of the keeper (would orphan/kill tree).
+    keeper_ppids = {
+        int(item.get("ppid") or 0)
+        for item in processes
+        if int(item.get("pid") or 0) == keeper
+    }
     terminated: list[int] = []
+    skipped: list[int] = []
     for item in processes:
         pid = int(item.get("pid") or 0)
         if pid <= 0 or pid == keeper:
             continue
-        if _terminate_operator_webui_pid(pid):
+        if pid in keeper_ppids:
+            skipped.append(pid)
+            _webui_terminate_log(f"skip terminate parent-of-keeper pid={pid} keeper={keeper}")
+            continue
+        if _terminate_operator_webui_pid(pid, reason=f"duplicate_reconcile keeper={keeper}"):
             terminated.append(pid)
     return {
         "process_count": len(processes),
         "keeper_pid": keeper or None,
         "terminated_pids": terminated,
         "terminated_count": len(terminated),
+        "skipped_parent_pids": skipped,
     }
 
 
@@ -850,7 +1068,7 @@ def _ensure_operator_webui_running(state: dict) -> dict:
         ]
         for item in processes:
             pid = int(item.get("pid") or 0)
-            if pid > 0 and _terminate_operator_webui_pid(pid):
+            if pid > 0 and _terminate_operator_webui_pid(pid, reason="degraded_port_reclaim"):
                 reclaimed_pids.append(pid)
         if reclaimed_pids:
             time.sleep(2.0)
@@ -1017,6 +1235,12 @@ def _truth_evidence_for_mission(state: dict | None) -> dict:
         ),
         "last_regression_status": str(current_state.get("last_regression_status") or ""),
         "last_regression_stale": bool(current_state.get("last_regression_stale", False)),
+        # Required for lock-contention detection (FAILED + already running, no tests).
+        # Without tail/tests, mission truth treats contention as regression_failed and freezes climb.
+        "last_regression_failed_lane": str(current_state.get("last_regression_failed_lane") or ""),
+        "last_regression_failed_tests": list(current_state.get("last_regression_failed_tests") or []),
+        "last_regression_tail": str(current_state.get("last_regression_tail") or "")[:2000],
+        "last_regression_returncode": int(current_state.get("last_regression_returncode", 0) or 0),
         "release_runtime_truth": release_truth,
         "release_status": release_status,
         "root_closure_inventory": root_closure_inventory,
@@ -1967,6 +2191,40 @@ def _refresh_root_closure_inventory_surfaces(payload: dict, *, preserve_existing
             self_repair_seed=self_repair_closure,
         )
         result = _apply_live_closure_inventory_surfaces(result, live_closure)
+        try:
+            from services.self_scan_rings import run_self_scan_rings
+
+            findings_queue: list[dict] = []
+            try:
+                for cand in _active_work_tree_candidates(ACTIVE_WORK_TREE_MAX_TREES):
+                    branch_row = _active_work_candidate_branch(cand)
+                    findings_queue.append(
+                        {
+                            "tree_id": branch_row.get("tree_id"),
+                            "branch_id": branch_row.get("branch_id"),
+                            "task_id": branch_row.get("task_id"),
+                            "task_title": branch_row.get("task_title"),
+                            "recommended_tool": branch_row.get("recommended_tool"),
+                            "tool_status": branch_row.get("tool_status"),
+                            "tool_args_resolvable": _active_work_candidate_args_resolvable(cand)
+                            if _active_work_candidate_tool(cand) in {"read", "ls", "find"}
+                            else True,
+                            "tool_in_safe_execute": _active_work_candidate_tool(cand)
+                            in ACTIVE_WORK_TREE_EXECUTE_TOOLS,
+                            "climbable": branch_row.get("climbable"),
+                            "climb_reason": branch_row.get("climb_reason"),
+                        }
+                    )
+            except Exception:
+                findings_queue = []
+            result["self_scan_rings"] = run_self_scan_rings(
+                result,
+                findings_queue=findings_queue,
+            )
+            result["self_scan_rings_ok"] = bool((result.get("self_scan_rings") or {}).get("ok"))
+        except Exception as ring_exc:
+            result["self_scan_rings"] = {"ok": False, "error": str(ring_exc)[:240]}
+            result["self_scan_rings_ok"] = False
     except Exception as exc:
         result = _apply_root_closure_inventory_surfaces(
             result,
@@ -3344,32 +3602,69 @@ def _maintenance_patch_queue_run_next_action(_payload: dict, state: dict) -> tup
 
 
 def _maintenance_active_work_tree_run_next_action(_payload: dict, state: dict) -> tuple[bool, str, dict, str]:
+    """Run the next active-work step.
+
+    Root contract: the orchestrator already applied mission hold when it selected
+    this action. Re-vetoing here after gate allow produces recommend+success with
+    executed=0 — work never starts while progress stays not_started/mid-ladder.
+    Mission hold only applies to non-orchestrator, non-operator sources.
+    """
     mission_snapshot = _mission_snapshot_for_ingestion(state)
     mission_hold_active = _mission_hold_blocks_legacy_execution(mission_snapshot)
     active_candidates = _active_work_tree_candidates(ACTIVE_WORK_TREE_MAX_TREES)
     raw_target_id = str((_payload or {}).get("target_id") or "").strip()
-    target_task_id = str((_payload or {}).get("target_step_id") or "").strip()
+    target_task_id = str(
+        (_payload or {}).get("target_step_id")
+        or (_payload or {}).get("target_task_id")
+        or (_payload or {}).get("task_id")
+        or ""
+    ).strip()
     target_tree_id = str((_payload or {}).get("target_tree_id") or "").strip()
     target_tool = str((_payload or {}).get("recommended_tool") or "").strip()
     target_branch_id = raw_target_id if (raw_target_id.startswith("branch_") or target_task_id) else ""
+    if not target_branch_id:
+        target_branch_id = str((_payload or {}).get("target_branch_id") or (_payload or {}).get("branch_id") or "").strip()
     action_context = _active_work_context_for_target(
         candidates=active_candidates,
         target_branch_id=target_branch_id,
         target_task_id=target_task_id,
+        recommended_tool=target_tool,
     )
-    if _mission_hold_blocks_action(
-        "active_work_tree_run_next",
-        mission_snapshot,
-        policy_snapshot=_policy_snapshot_for_orchestrator(),
-        action_context=action_context,
-    ) and not bool((_payload or {}).get("operator_override", False)):
+    source = str((_payload or {}).get("_source") or "").strip().lower()
+    from_orchestrator = source in {"autonomy_orchestrator", "services.autonomy_orchestrator"}
+    operator_override = bool((_payload or {}).get("operator_override", False))
+    # Second mission-hold check only for untrusted sources. Orchestrator already
+    # filtered by hold when building the recommendation; operator override is explicit.
+    if (
+        not from_orchestrator
+        and not operator_override
+        and _mission_hold_blocks_action(
+            "active_work_tree_run_next",
+            mission_snapshot,
+            policy_snapshot=_policy_snapshot_for_orchestrator(),
+            action_context=action_context,
+        )
+    ):
         skipped = _skipped_maintenance_execution_payload(
             state,
             "last_active_work_tree_cycle",
             "mission_steady_state_hold",
             tree_count=0,
         )
-        return True, "active_work_tree_run_next_skipped_mission_hold", {"cycle": skipped}, "mission_steady_state_hold"
+        return (
+            False,
+            "active_work_tree_run_next_skipped_mission_hold",
+            {
+                "cycle": skipped,
+                "action_context": {
+                    "branch_id": str(action_context.get("branch_id") or target_branch_id),
+                    "task_id": str(action_context.get("task_id") or target_task_id),
+                    "recommended_tool": str(action_context.get("recommended_tool") or target_tool),
+                    "title": str(action_context.get("title") or "")[:160],
+                },
+            },
+            "mission_steady_state_hold",
+        )
     max_steps = _safe_int((_payload or {}).get("max_steps"), ACTIVE_WORK_TREE_DEFAULT_DISPATCH_STEPS)
     max_trees = _safe_int((_payload or {}).get("max_trees"), ACTIVE_WORK_TREE_MAX_TREES)
     if mission_hold_active and action_context and not target_branch_id and not target_task_id:
@@ -3626,11 +3921,18 @@ def _execute_autonomy_recommendation(state: dict, packet: dict, policy_snapshot:
     if action_type == "generated_queue_run_next":
         _record_generated_queue_run(state, ok, msg, extra)
     cooldown_sec = max(0, _safe_int(gate.get("cooldown_sec"), 0))
+    msg_text = str(msg or "")
+    if ok:
+        result_label = "success"
+    elif "mission_hold" in msg_text or "mission_steady_state_hold" in msg_text:
+        result_label = "blocked"
+    else:
+        result_label = "failed"
     payload.update(
         {
-            "result": "success" if ok else "failed",
+            "result": result_label,
             "ok": bool(ok),
-            "message": str(msg or ""),
+            "message": msg_text,
             "extra": _compact_autonomy_execution_extra(action_type, extra),
             "events": events,
             "cooldown_sec": cooldown_sec,
@@ -3992,6 +4294,73 @@ def _auto_apply_if_eligible(zip_path: Path) -> str:
     return str(outcome.get("apply_out") or "governed_patch_apply_ok")
 
 
+# Mine work-tree history into learned solution ladders (hybrid progress design).
+# Cadence: once per calendar day max so SQLite mining is not per-cycle waste.
+SOLUTION_LADDER_LEARNING_MIN_INTERVAL_SEC = 20 * 60 * 60
+
+
+def _run_solution_ladder_learning_if_due(state: dict) -> dict:
+    """Live owner for learn_families_from_history — autonomy maintenance cycle.
+
+    Without this hook, hybrid progress only ever uses seeded ladders: learning
+    exists in code and tests but never writes runtime/work_tree/solution_ladders_learned.json.
+    """
+    now_epoch = time.time()
+    previous = (
+        dict(state.get("last_solution_ladder_learning") or {})
+        if isinstance(state.get("last_solution_ladder_learning"), dict)
+        else {}
+    )
+    last_epoch = 0.0
+    try:
+        last_epoch = float(previous.get("ran_epoch") or 0.0)
+    except Exception:
+        last_epoch = 0.0
+    if last_epoch > 0 and (now_epoch - last_epoch) < float(SOLUTION_LADDER_LEARNING_MIN_INTERVAL_SEC):
+        payload = {
+            "ts": _patch_queue_timestamp(),
+            "status": "skipped_cadence",
+            "ok": True,
+            "ran_epoch": last_epoch,
+            "next_run_sec": max(0, int(float(SOLUTION_LADDER_LEARNING_MIN_INTERVAL_SEC) - (now_epoch - last_epoch))),
+            "family_count": int(previous.get("family_count", 0) or 0),
+            "path": str(previous.get("path") or ""),
+        }
+        state["last_solution_ladder_learning"] = payload
+        return payload
+
+    try:
+        from services.work_tree_task_progress import learn_families_from_history
+
+        result = learn_families_from_history(persist=True)
+    except Exception as exc:
+        payload = {
+            "ts": _patch_queue_timestamp(),
+            "status": "failed",
+            "ok": False,
+            "error": str(exc)[:400],
+            "ran_epoch": now_epoch,
+            "family_count": 0,
+            "path": "",
+        }
+        state["last_solution_ladder_learning"] = payload
+        return payload
+
+    ok = bool((result or {}).get("ok"))
+    payload = {
+        "ts": _patch_queue_timestamp(),
+        "status": "ok" if ok else "failed",
+        "ok": ok,
+        "ran_epoch": now_epoch,
+        "family_count": int((result or {}).get("family_count", 0) or 0),
+        "path": str((result or {}).get("path") or ""),
+        "error": str((result or {}).get("error") or "")[:400],
+        "seeded_count": int((result or {}).get("seeded_count", 0) or 0),
+    }
+    state["last_solution_ladder_learning"] = payload
+    return payload
+
+
 def _run_daily_regression_if_due(state: dict) -> str:
     today = time.strftime("%Y-%m-%d")
     if str(state.get("last_regression_date") or "") == today:
@@ -4007,6 +4376,10 @@ def _run_daily_regression_if_due(state: dict) -> str:
         env=_validation_subprocess_env(),
     )
     output = ((proc.stdout or "") + "\n" + (proc.stderr or "")).strip()
+    # Lock contention is not a test failure — do not freeze mission as regression_failed.
+    if proc.returncode != 0 and "already running" in output.lower():
+        state["last_regression_tail"] = output[-2000:]
+        return "daily_regression_skipped_already_running"
     summary = "OK" if proc.returncode == 0 else "FAILED"
 
     synced = _sync_regression_status_from_file(state, status_path=REGRESSION_STATUS_FILE)
@@ -4071,6 +4444,9 @@ def _sync_signal_intake_work_tree(
     maintenance_payload = {
         "last_regression_status": str(state.get("last_regression_status") or ""),
         "last_regression_stale": bool(state.get("last_regression_stale", False)),
+        "last_regression_failed_lane": str(state.get("last_regression_failed_lane") or ""),
+        "last_regression_failed_tests": list(state.get("last_regression_failed_tests") or []),
+        "last_regression_tail": str(state.get("last_regression_tail") or "")[:2000],
     }
     try:
         pulse_payload = nova_core.build_pulse_payload()
@@ -4174,6 +4550,13 @@ def _sync_signal_intake_work_tree(
     active_maintenance_regression = regression_failure_active(
         status_label=str(maintenance_payload.get("last_regression_status") or ""),
         stale=bool(maintenance_payload.get("last_regression_stale", False)),
+        failed_tests=list(state.get("last_regression_failed_tests") or [])
+        if isinstance(state, dict)
+        else [],
+        failed_lane=str(state.get("last_regression_failed_lane") or "")
+        if isinstance(state, dict)
+        else "",
+        tail=str(state.get("last_regression_tail") or "") if isinstance(state, dict) else "",
     )
     validation_truth = status_payload.get("validation_artifact_truth") if isinstance(status_payload.get("validation_artifact_truth"), dict) else {}
     active_validation_artifact_failure = bool(
@@ -5652,6 +6035,7 @@ def _active_work_candidates_for_cycle(
 
 
 def _active_work_tree_candidates(limit: int = ACTIVE_WORK_TREE_MAX_TREES) -> list[dict]:
+    """Collect active trees with a next step, ordered by honest progress motion."""
     candidates: list[dict] = []
     for payload in work_tree.list_visual_trees(limit=max(int(limit or ACTIVE_WORK_TREE_MAX_TREES) * 4, 16)):
         if not isinstance(payload, dict):
@@ -5664,9 +6048,36 @@ def _active_work_tree_candidates(limit: int = ACTIVE_WORK_TREE_MAX_TREES) -> lis
         if not next_step:
             continue
         candidates.append(payload)
-        if len(candidates) >= max(1, int(limit or ACTIVE_WORK_TREE_MAX_TREES)):
-            break
-    return candidates
+    # Prefer moving near-complete work over stalled/blocked noise.
+    # Demote failed/unresolvable steps and untitled test-residue trees.
+    def _candidate_progress_rank(payload: dict) -> tuple:
+        next_step = payload.get("next_step") if isinstance(payload.get("next_step"), dict) else {}
+        progress = next_step.get("progress") if isinstance(next_step.get("progress"), dict) else {}
+        motion = str(progress.get("motion") or "not_started").strip().lower()
+        try:
+            percent = int(progress.get("percent") or 0)
+        except Exception:
+            percent = 0
+        executable = _active_work_candidate_is_executable(payload)
+        tool_failed = _active_work_candidate_next_tool_status(payload) == "failed"
+        if tool_failed or not executable:
+            motion = "stalled"
+        motion_rank = {
+            "moving": 0,
+            "not_started": 1,
+            "stalled": 3,
+            "blocked": 4,
+            "done": 5,
+        }.get(motion, 2)
+        percent_key = -percent if motion == "moving" else percent
+        kind = str(payload.get("kind") or "").strip().lower()
+        # Unit-test residue often has empty kind and a fixed title.
+        residue = 1 if (not kind and "solution trail" in str(payload.get("title") or "").lower()) else 0
+        executable_rank = 0 if executable else 1
+        return (executable_rank, residue, motion_rank, percent_key, str(payload.get("tree_id") or ""))
+
+    candidates.sort(key=_candidate_progress_rank)
+    return candidates[: max(1, int(limit or ACTIVE_WORK_TREE_MAX_TREES))]
 
 
 def _candidate_uses_tool(candidate: dict, tool_name: str) -> bool:
@@ -5690,11 +6101,16 @@ def _active_work_context_for_target(
     candidates: list[dict],
     target_branch_id: str = "",
     target_task_id: str = "",
+    recommended_tool: str = "",
 ) -> dict:
     branch_target = str(target_branch_id or "").strip()
     task_target = str(target_task_id or "").strip()
+    tool = str(recommended_tool or "").strip()
     if not branch_target and not task_target:
-        return _active_work_candidate_context(candidates[0]) if candidates else {}
+        context = _active_work_candidate_context(candidates[0]) if candidates else {}
+        if tool and context and not str(context.get("recommended_tool") or "").strip():
+            context["recommended_tool"] = tool
+        return context
     for candidate in candidates:
         context = _resolve_targeted_work_pin(
             candidate,
@@ -5704,9 +6120,45 @@ def _active_work_context_for_target(
         if not context:
             continue
         if branch_target and str(context.get("branch_id") or "").strip() == branch_target:
+            if tool:
+                context["recommended_tool"] = tool
             return context
         if task_target and str(context.get("task_id") or "").strip() == task_target:
+            if tool:
+                context["recommended_tool"] = tool
             return context
+    # Candidates list can miss a live pin; build context from the work tree so
+    # mission hold sees release titles/tools (otherwise read is blocked silently).
+    if branch_target or task_target:
+        try:
+            branch = work_tree.get_branch(branch_target) if branch_target else None
+            task = None
+            if task_target:
+                task = work_tree._TASKS.get(task_target) if hasattr(work_tree, "_TASKS") else None
+                if task is None:
+                    try:
+                        task = work_tree.get_task(task_target)  # type: ignore[attr-defined]
+                    except Exception:
+                        task = None
+            if branch is None and task is not None:
+                branch = work_tree.get_branch(str(getattr(task, "branch_id", "") or ""))
+            if branch is not None:
+                meta = dict(getattr(task, "meta", {}) or {}) if task is not None else {}
+                return {
+                    "branch_id": str(getattr(branch, "branch_id", "") or branch_target),
+                    "title": str(getattr(branch, "title", "") or ""),
+                    "task_id": str(getattr(task, "task_id", "") or task_target),
+                    "task_title": str(getattr(task, "title", "") or ""),
+                    "recommended_tool": tool
+                    or str(meta.get("expected_tool") or getattr(branch, "preferred_tool", "") or "").strip(),
+                    "tree_id": str(getattr(branch, "tree_id", "") or ""),
+                    "work_class": str(getattr(branch, "work_class", "") or ""),
+                    "source_type": str(getattr(branch, "source_type", "") or ""),
+                    "progress_family": f"{str(getattr(branch, 'work_class', '') or '')}|{str(getattr(branch, 'source_type', '') or '')}",
+                    "executable": True,
+                }
+        except Exception:
+            pass
     return {}
 
 
@@ -5740,21 +6192,40 @@ def _active_work_tree_target_decider(
         return None
 
     def _decide(_tree_id: str, options: list[dict]) -> dict:
+        """Prefer exact pin, then same-branch next stem.
+
+        Nova climbs ladders across tools (read → rebuild → validation). A hard
+        tool pin from the orchestrator's first recommendation must not strand
+        the second step as invalid_decision once that tool's stem is done.
+        """
+        exact: dict | None = None
+        tool_match: dict | None = None
+        branch_fallback: dict | None = None
         for option in options:
             option_branch_id = str(option.get("branch_id") or "").strip()
             option_task_id = str(option.get("task_id") or "").strip()
             option_tool = str(option.get("recommended_tool") or "").strip()
             if branch_target and option_branch_id != branch_target:
                 continue
-            if task_target and option_task_id != task_target:
-                continue
-            if tool_target and option_tool != tool_target:
-                continue
-            return {
+            candidate = {
                 "branch_id": option_branch_id,
                 "task_id": option_task_id,
                 "recommended_tool": option_tool,
             }
+            if task_target and option_task_id == task_target:
+                if (not tool_target) or option_tool == tool_target:
+                    exact = candidate
+                    break
+            if tool_target and option_tool == tool_target and tool_match is None:
+                tool_match = candidate
+            if branch_fallback is None:
+                branch_fallback = candidate
+        if exact is not None:
+            return exact
+        if tool_match is not None:
+            return tool_match
+        if branch_fallback is not None:
+            return branch_fallback
         return {
             "branch_id": branch_target or "__target_branch_not_available__",
             "task_id": task_target,
@@ -5767,14 +6238,14 @@ def _active_work_tree_target_decider(
 def _active_work_tree_failure_aware_decider(tree_id: str, options: list[dict]) -> dict:
     """Prefer options whose tool is not already marked FAILED in the branch tool_state.
     Root fix to avoid repeated tool_failed executions on active work tree tasks.
+
+    When every option is already failed, return an invalid branch id so the loop
+    emits invalid_decision instead of re-executing the same failed tool forever.
     """
     del tree_id
-    fallback = None
     for option in list(options or []):
         if not isinstance(option, dict):
             continue
-        if fallback is None:
-            fallback = option
         branch_id = str(option.get("branch_id") or "").strip()
         tool_name = str(option.get("recommended_tool") or "").strip()
         if not branch_id or not tool_name:
@@ -5782,7 +6253,8 @@ def _active_work_tree_failure_aware_decider(tree_id: str, options: list[dict]) -
         try:
             branch = work_tree.get_branch(branch_id)
             tool_state = branch.tool_state if branch is not None and isinstance(branch.tool_state, dict) else {}
-            status = str((tool_state.get(tool_name) or "")).strip().lower()
+            raw = tool_state.get(tool_name)
+            status = str(getattr(raw, "value", raw) or "").strip().lower()
             if status == "failed":
                 continue
         except Exception:
@@ -5792,11 +6264,10 @@ def _active_work_tree_failure_aware_decider(tree_id: str, options: list[dict]) -
             "task_id": str(option.get("task_id") or "").strip(),
             "recommended_tool": tool_name,
         }
-    chosen = fallback if isinstance(fallback, dict) else {}
     return {
-        "branch_id": str(chosen.get("branch_id") or "").strip(),
-        "task_id": str(chosen.get("task_id") or "").strip(),
-        "recommended_tool": str(chosen.get("recommended_tool") or "").strip(),
+        "branch_id": "__all_tools_failed__",
+        "task_id": "",
+        "recommended_tool": "",
     }
 
 
@@ -5934,6 +6405,8 @@ def _run_active_work_tree_cycle(
     processed: list[dict] = []
     skipped: list[dict] = []
     last_action = ""
+    # Climb the primary/target tree with the full step budget; lower-priority trees get one step.
+    climb_tree_id = ""
 
     for candidate in candidates:
         if attempted_total >= step_limit:
@@ -5954,14 +6427,57 @@ def _run_active_work_tree_cycle(
                 }
             )
             continue
+        # Prefer skipping a non-executable advertised next_step only when the tree
+        # has no other READY option — otherwise failure_aware can still climb.
+        if not targeted and not _active_work_candidate_is_executable(candidate):
+            try:
+                options = work_tree.list_autonomous_options(tree_id)
+            except Exception:
+                options = []
+            has_ready = False
+            for option in list(options or []):
+                if not isinstance(option, dict):
+                    continue
+                opt_branch = str(option.get("branch_id") or "").strip()
+                opt_tool = str(option.get("recommended_tool") or "").strip()
+                if not opt_branch or not opt_tool:
+                    continue
+                try:
+                    branch = work_tree.get_branch(opt_branch)
+                    tool_state = branch.tool_state if branch is not None and isinstance(branch.tool_state, dict) else {}
+                    raw = tool_state.get(opt_tool)
+                    status = str(getattr(raw, "value", raw) or "ready").strip().lower()
+                except Exception:
+                    status = "ready"
+                if status != "failed":
+                    has_ready = True
+                    break
+            if not has_ready:
+                skipped.append(
+                    {
+                        "tree_id": tree_id,
+                        "tree_title": tree_title,
+                        "tool": tool_name,
+                        "reason": "step_not_executable",
+                        "tool_status": _active_work_candidate_next_tool_status(candidate),
+                    }
+                )
+                continue
+        remaining = max(1, step_limit - attempted_total)
+        if not climb_tree_id:
+            climb_tree_id = tree_id
+        # Root: step budget was advertised as multi-step but loop always ran max_steps=1 —
+        # one paver per cycle. Spend remaining budget on the climb tree so ladders advance.
+        tree_steps = remaining if (targeted or tree_id == climb_tree_id) else 1
         loop_kwargs = {
-            "max_steps": 1,
+            "max_steps": tree_steps,
             "execute_planned_action_fn": _active_work_tree_execute_planned_action,
         }
         if target_decider is not None:
             loop_kwargs["decide_next_step_fn"] = target_decider
         history = work_tree.run_autonomous_loop(tree_id, **loop_kwargs)
-        attempted_total += 1
+        step_attempts = max(1, len(history) if history else 1)
+        attempted_total += step_attempts
         full_history.extend(history)
         last_action = str((history[-1] if history else {}).get("action") or "").strip()
         executed = [step for step in history if str(step.get("action") or "").strip() == "executed"]
@@ -5972,6 +6488,7 @@ def _run_active_work_tree_cycle(
                 "tree_title": tree_title,
                 "tool": tool_name,
                 "executed": len(executed),
+                "attempted": step_attempts,
                 "last_action": last_action,
             }
         )
@@ -6279,8 +6796,25 @@ def run_once(*, worker_loop: bool = False) -> int:
 
     try:
         _sync_pipeline_workers_for_maintenance(state)
-    except Exception as exc:
-        _append_log(f"pipeline_worker_ensure_failed {exc}")
+    except (KeyboardInterrupt, SystemExit):
+        raise
+    except BaseException as exc:
+        # Path/lease races on Windows can raise SystemError during Path formatting
+        # ("PurePath.__str__ ... exception set"). Never let that kill the cycle.
+        try:
+            detail = f"{type(exc).__name__}: {exc}"
+        except BaseException:
+            detail = type(exc).__name__
+        _append_log(f"pipeline_worker_ensure_failed {detail}")
+        try:
+            state["last_pipeline_worker_ensure"] = {
+                "ts": _patch_queue_timestamp(),
+                "status": "failed",
+                "ok": False,
+                "error": detail[:400],
+            }
+        except Exception:
+            pass
 
     # Check for an HTTP-side trigger requesting an immediate active-work-tree run.
     if WORK_TREE_RUN_TRIGGER.exists():
@@ -6824,6 +7358,25 @@ def run_once(*, worker_loop: bool = False) -> int:
         }
         state["last_signal_ingestion"] = signal_ingestion
         _append_log(f"signal_ingestion_failed {exc}")
+
+    try:
+        ladder_learning = _run_solution_ladder_learning_if_due(state)
+        _append_log(
+            "solution_ladder_learning"
+            f" status={ladder_learning.get('status')}"
+            f" families={int(ladder_learning.get('family_count', 0) or 0)}"
+            f" path={str(ladder_learning.get('path') or '')[:120]}"
+        )
+    except Exception as exc:
+        ladder_learning = {
+            "ts": _patch_queue_timestamp(),
+            "status": "failed",
+            "ok": False,
+            "error": str(exc)[:400],
+            "family_count": 0,
+        }
+        state["last_solution_ladder_learning"] = ladder_learning
+        _append_log(f"solution_ladder_learning_failed {exc}")
 
     try:
         refreshed_mission = _refresh_nova_mission_after_signal_ingestion(

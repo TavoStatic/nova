@@ -8,13 +8,21 @@ from typing import Any
 from services.evidence_validity import evidence_result_valid
 from services.nova_runtime_context import OPERATOR_OUTBOX_FILE
 from services.operator_outbox import OPERATOR_OUTBOX_SERVICE
+from services.tool_identity import (
+    INSTALLER_VALIDATION_RUN,
+    MEMORY_BOOTSTRAP_JUDGMENT,
+    RELEASE_PROMOTION_JUDGMENT,
+    STRUCTURED_JUDGMENT_TOOLS,
+    SUBCONSCIOUS_REVIEW_JUDGMENT,
+)
 
 
-SPECIALIZED_JUDGMENT_TOOLS = {
-    "installer_validation_run",
-    "memory_bootstrap_judgment",
-    "release_promotion_judgment",
-    "subconscious_review_judgment",
+# Broader than STRUCTURED_JUDGMENT_TOOLS: installer validation also ends root repair holds.
+SPECIALIZED_JUDGMENT_TOOLS = frozenset(STRUCTURED_JUDGMENT_TOOLS) | {
+    INSTALLER_VALIDATION_RUN,
+    MEMORY_BOOTSTRAP_JUDGMENT,
+    RELEASE_PROMOTION_JUDGMENT,
+    SUBCONSCIOUS_REVIEW_JUDGMENT,
 }
 
 

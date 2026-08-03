@@ -2,7 +2,8 @@ param(
   [string]$Zip = "",
   [string]$SandboxRoot = "C:\NovaSandbox",
   [int]$WebuiPort = 18088,
-  [switch]$UseExe
+  [switch]$UseExe,
+  [switch]$HeadlessExe
 )
 
 $ErrorActionPreference = "Stop"
@@ -45,6 +46,7 @@ Write-Host ("Package root : " + $pkg)
 # (RC zip may predate the wizard.)
 $overlay = @(
   "services\nova_setup_wizard.py",
+  "services\sock_service.py",
   "scripts\run_setup_wizard.py",
   "scripts\nova_setup_gui.py",
   "nova.ps1"
@@ -66,7 +68,11 @@ $env:NOVA_ROOT = $pkg
 
 Push-Location $pkg
 try {
-  if ($UseExe) {
+  Write-Host "==> package-verify"
+  & .\nova.cmd package-verify .
+  if ($LASTEXITCODE -ne 0) { throw "package-verify failed" }
+
+  if ($UseExe -or $HeadlessExe) {
     $exe = Join-Path $repoRoot "NovaSetup.exe"
     if (-not (Test-Path $exe)) {
       $exe = Join-Path $repoRoot "runtime\exports\setup_exe\NovaSetup.exe"
@@ -74,21 +80,28 @@ try {
     if (-not (Test-Path $exe)) {
       throw "NovaSetup.exe not found. Build with scripts\build_nova_setup_exe.ps1 first."
     }
-    Copy-Item $exe (Join-Path $pkg "NovaSetup.exe") -Force
-    Write-Host "==> Launching NovaSetup.exe (GUI). Close the window when finished."
-    Write-Host "    NOVA_ROOT=$pkg"
-    # GUI is interactive; for automated sandbox use CLI wizard instead.
-    # Still start it so operator can click Start Setup if desired.
-    Start-Process -FilePath (Join-Path $pkg "NovaSetup.exe") -WorkingDirectory $pkg
-    Write-Host "[INFO] GUI started. For automated pass/fail use without -UseExe."
-    exit 0
+    $localExe = Join-Path $pkg "NovaSetup.exe"
+    Copy-Item $exe $localExe -Force
+    Write-Host "==> Running REAL NovaSetup.exe against sandbox package"
+    Write-Host ("    exe  = " + $localExe)
+    Write-Host ("    root = " + $pkg)
+    $exeArgs = @(
+      "--headless",
+      "--root", $pkg,
+      "--webui-port", "$WebuiPort",
+      "--report", $report
+    )
+    $p = Start-Process -FilePath $localExe -ArgumentList $exeArgs -WorkingDirectory $pkg -Wait -PassThru -NoNewWindow
+    $code = [int]$p.ExitCode
+    Write-Host ("NovaSetup.exe exit: " + $code)
+    if (Test-Path $report) {
+      Write-Host ("Report: " + $report)
+      Get-Content $report -TotalCount 100
+    }
+    exit $code
   }
 
-  Write-Host "==> package-verify"
-  & .\nova.cmd package-verify .
-  if ($LASTEXITCODE -ne 0) { throw "package-verify failed" }
-
-  Write-Host "==> setup wizard (CLI, package root)"
+  Write-Host "==> setup wizard (CLI fallback, package root)"
   $py = Join-Path $repoRoot ".venv\Scripts\python.exe"
   if (-not (Test-Path $py)) {
     $pyCmd = Get-Command py -ErrorAction SilentlyContinue

@@ -1,0 +1,37 @@
+{
+  "id": "edfi",
+  "name": "Ed-Fi ODS Integration",
+  "version": "1.0.0",
+  "description": "Connects Nova to any Ed-Fi ODS v3 instance. Provides governed read access to schools, students, enrollments, and change tracking. Works with any SIS vendor that implements the Ed-Fi standard (Infinite Campus, Skyward, PowerSchool, eSchoolPlus, ASCENDER, and others).",
+  "author": "NYO System LLC",
+  "protocol_version": "backpack.v1",
+
+  "tools": {
+    "pipeline": "pipeline/connector.py",
+    "pipeline_class": "EdFiPipeline",
+    "nova_tool": "tools/edfi_tool.py",
+    "nova_tool_class": "EdFiExploreTool"
+  },
+
+  "requires": {
+    "nova_services": ["pipeline_bridge", "http", "scheduler"],
+    "nova_models": ["chat"],
+    "python_deps": ["requests"],
+    "nova_shell_permissions": ["backpacks.run", "backpacks.view"]
+  },
+
+  "operations": "operations.json",
+  "settings":   "settings_schema.json",
+  "brief":      "brief.md",
+
+  "pipeline_id": "edfi",
+  "read_only": true,
+  "network_scope": "district",
+
+  "runtime": {
+    "data_dir":   "runtime/edfi",
+    "audit_log":  "runtime/edfi/edfi_audit.jsonl",
+    "config_dir": "runtime/edfi/connections/{connection_id}",
+    "profile_dir":"runtime/edfi/profiles"
+  }
+}

@@ -13,6 +13,23 @@ from typing import Callable, Iterator
 import uuid
 from services.evidence_validity import evidence_result_valid
 from services.evidence_validity import invalid_tool_result
+from services.tool_identity import (
+    FIND,
+    GENERATED_QUEUE_RUN,
+    INSTALLER_VALIDATION_RUN,
+    LS,
+    MEMORY_BOOTSTRAP_JUDGMENT,
+    OPERATOR_RESPONSE,
+    PHASE2_AUDIT,
+    PULSE,
+    READ,
+    RELEASE_PROMOTION_JUDGMENT,
+    RELEASE_REBUILD_VERIFY,
+    RELEASE_RECORD_VALIDATION_OUTCOME,
+    RELEASE_VALIDATION_RUN,
+    SOURCE_ROOT_JUDGMENT,
+    SUBCONSCIOUS_REVIEW_JUDGMENT,
+)
 from work_tree_contracts import WorkTree, Branch, Task, TreeStatus, BranchStatus, TaskStatus, ToolStatus
 
 
@@ -66,29 +83,29 @@ _DEFAULT_TREE_ALLOWED_TOOLS = (
     "web_gather",
     "wikipedia_lookup",
     "stackexchange_search",
-    "read",
-    "ls",
-    "find",
+    READ,
+    LS,
+    FIND,
     "health",
     "core_health",
     "core_thinning",
     "os_capability",
-    "release_promotion_judgment",
-    "release_validation_run",
-    "release_record_validation_outcome",
-    "release_rebuild_verify",
-    "installer_validation_run",
+    RELEASE_PROMOTION_JUDGMENT,
+    RELEASE_VALIDATION_RUN,
+    RELEASE_RECORD_VALIDATION_OUTCOME,
+    RELEASE_REBUILD_VERIFY,
+    INSTALLER_VALIDATION_RUN,
     "system_check",
     "queue_status",
     "temporal_review",
-    "phase2_audit",
-    "pulse",
-    "memory_bootstrap_judgment",
+    PHASE2_AUDIT,
+    PULSE,
+    MEMORY_BOOTSTRAP_JUDGMENT,
     "memory_bootstrap_confirm",
     "memory_identity_bootstrap",
     "memory_hygiene",
-    "subconscious_review_judgment",
-    "source_root_judgment",
+    SUBCONSCIOUS_REVIEW_JUDGMENT,
+    SOURCE_ROOT_JUDGMENT,
     "pipeline",
     "weather_current_location",
     "weather_location",
@@ -97,17 +114,18 @@ _DEFAULT_TREE_ALLOWED_TOOLS = (
 _KNOWN_TOOL_NAMES = frozenset(
     _DEFAULT_TREE_ALLOWED_TOOLS
     + (
-        "generated_queue_run",
+        GENERATED_QUEUE_RUN,
         "os_capability",
         "core_health",
         "core_thinning",
         "temporal_review",
-        "source_root_judgment",
-        "release_promotion_judgment",
-        "release_validation_run",
-        "release_record_validation_outcome",
-        "release_rebuild_verify",
-        "installer_validation_run",
+        SOURCE_ROOT_JUDGMENT,
+        RELEASE_PROMOTION_JUDGMENT,
+        RELEASE_VALIDATION_RUN,
+        RELEASE_RECORD_VALIDATION_OUTCOME,
+        RELEASE_REBUILD_VERIFY,
+        INSTALLER_VALIDATION_RUN,
+        OPERATOR_RESPONSE,
         "patch_preview_approve",
         "patch_preview_apply",
         "patch_apply",
@@ -805,8 +823,21 @@ def _branch_declared_tools(branch: Branch) -> list[str]:
     return _normalize_tool_names(list(branch.required_tools) + list(branch.allowed_tools))
 
 
-def _branch_candidate_tool(branch: Branch) -> str:
+def _branch_candidate_tool(branch: Branch, task: Task | None = None) -> str:
+    """Pick the tool for the open stem.
+
+    Never silently substitute a different READY tool (e.g. bare ``read``) when
+    the stem's expected tool already FAILED — that created overnight thrash
+    with free-text path args on the wrong tool.
+    """
+    task_expected = ""
+    if task is not None and isinstance(task.meta, dict):
+        task_expected = str(task.meta.get("expected_tool") or "").strip()
     preferred = str(branch.preferred_tool or "").strip()
+    # Bound stem with a failed expected tool: stick with it so failure-aware
+    # skip / trail advance can run instead of inventing another tool.
+    if task_expected and branch.tool_state.get(task_expected) == ToolStatus.FAILED:
+        return task_expected
     if preferred and branch.tool_state.get(preferred, ToolStatus.READY) == ToolStatus.READY:
         return preferred
     declared = _branch_declared_tools(branch)
@@ -1078,6 +1109,21 @@ def record_task_evidence(
             ),
         )
         _save_branch_record(connection, branch)
+    # First tool evidence is the durable work-start on the finding.
+    try:
+        payload = dict(branch.source_payload or {}) if isinstance(branch.source_payload, dict) else {}
+        if not str(payload.get("work_started_at") or "").strip():
+            payload["work_started_at"] = created_at
+        if not str(payload.get("surfaced_at") or "").strip():
+            payload["surfaced_at"] = _iso_ts(branch.created_at) or created_at
+        branch.source_payload = payload
+    except Exception:
+        pass
+    # Solution progress is branch-owned; stamp after the evidence transaction.
+    try:
+        stamp_branch_progress(branch.branch_id, persist=True, last_evidence_id=evidence_id)
+    except Exception:
+        pass
     return evidence_id
 
 
@@ -1184,6 +1230,430 @@ def list_branch_evidence(branch_id: str, *, limit: int = 20) -> list[dict[str, o
         }
         for row in rows
     ]
+
+
+def list_task_evidence(task_id: str, *, limit: int = 40) -> list[dict[str, object]]:
+    task_key = str(task_id or "").strip()
+    if not task_key:
+        return []
+    _ensure_db()
+    max_rows = max(1, int(limit or 40))
+    with closing(_db_connect()) as connection:
+        rows = list(
+            connection.execute(
+                """
+                SELECT evidence_id, branch_id, task_id, tool_name, tool_args_json, result_text, created_at
+                FROM work_tree_evidence
+                WHERE task_id = ?
+                ORDER BY created_at ASC, evidence_id ASC
+                LIMIT ?
+                """,
+                (task_key, max_rows),
+            )
+        )
+    return [
+        {
+            "evidence_id": str(row["evidence_id"]),
+            "branch_id": str(row["branch_id"]),
+            "task_id": str(row["task_id"]),
+            "tool_name": str(row["tool_name"]),
+            "tool_args": _json_list(row["tool_args_json"]),
+            "result_text": str(row["result_text"] or ""),
+            "created_at": str(row["created_at"]),
+        }
+        for row in rows
+    ]
+
+
+def _open_tasks_on_branch(branch_id: str) -> list[Task]:
+    rows: list[Task] = []
+    for task in _TASKS.values():
+        if task.branch_id != branch_id:
+            continue
+        status = task.status.value if hasattr(task.status, "value") else str(task.status)
+        if status in {TaskStatus.COMPLETE.value, TaskStatus.DROPPED.value}:
+            continue
+        rows.append(task)
+    rows.sort(key=lambda item: (item.created_at, item.task_id))
+    return rows
+
+
+def _solution_status_for_branch(branch: Branch, open_tasks: list[Task]) -> str:
+    """Finding/branch solution state — never a single sequence stem's complete flag.
+
+    Open stems always mean the solution is still open (or blocked). Satisfaction
+    stamps must not paint 100% while work remains on the board.
+    """
+    if open_tasks:
+        if any(
+            (t.status.value if hasattr(t.status, "value") else str(t.status)).lower()
+            == TaskStatus.BLOCKED.value
+            for t in open_tasks
+        ):
+            return "blocked"
+        return "open"
+    resolution = str(branch.resolution_state or "").strip().lower()
+    if resolution in {"resolved", "retired"}:
+        return "complete"
+    payload = dict(branch.source_payload or {}) if isinstance(branch.source_payload, dict) else {}
+    finding_status = str(
+        payload.get("recurring_finding_satisfaction_status")
+        or payload.get("satisfaction_status")
+        or ""
+    ).strip().lower()
+    if finding_status in {"satisfied", "closed", "resolved"}:
+        return "complete"
+    # No open stems: if finding/resolution still open, solution is open (not done).
+    if resolution in {"", "open", "observing", "active"}:
+        return "open"
+    if str(branch.actionability or "").strip().lower() in {"safe_now", "blocked"} and str(
+        branch.source_key or ""
+    ).strip():
+        return "open"
+    branch_status = branch.status.value if hasattr(branch.status, "value") else str(branch.status)
+    if branch_status == BranchStatus.BLOCKED.value:
+        return "blocked"
+    if branch_status in {BranchStatus.COMPLETE.value, BranchStatus.ARCHIVED.value}:
+        return "complete"
+    return "open"
+
+
+def _iso_ts(value: object) -> str:
+    if value is None:
+        return ""
+    if hasattr(value, "isoformat"):
+        try:
+            return _dt(value)  # type: ignore[arg-type]
+        except Exception:
+            pass
+    text = str(value or "").strip()
+    return text
+
+
+def _ensure_branch_timeline(branch: Branch, *, evidence: list[dict[str, object]] | None = None) -> dict[str, str]:
+    """Durable radar / work-start timestamps on the finding (source_payload)."""
+    payload = dict(branch.source_payload or {}) if isinstance(branch.source_payload, dict) else {}
+    surfaced = str(payload.get("surfaced_at") or "").strip() or _iso_ts(branch.created_at)
+    if not str(payload.get("surfaced_at") or "").strip() and surfaced:
+        payload["surfaced_at"] = surfaced
+    work_started = str(payload.get("work_started_at") or "").strip()
+    rows = list(evidence or [])
+    if not work_started and rows:
+        first = min(
+            (str(row.get("created_at") or "").strip() for row in rows if str(row.get("created_at") or "").strip()),
+            default="",
+        )
+        if first:
+            work_started = first
+            payload["work_started_at"] = work_started
+    branch.source_payload = payload
+    last_seen = _iso_ts(branch.last_seen_at) or _iso_ts(branch.updated_at)
+    return {
+        "surfaced_at": surfaced,
+        "work_started_at": work_started,
+        "last_seen_at": last_seen,
+    }
+
+
+def _branch_progress_payload(branch: Branch) -> dict[str, object] | None:
+    """Canonical solution progress for a branch/finding."""
+    try:
+        from services.work_tree_task_progress import measure_solution_progress
+    except Exception:
+        return None
+    try:
+        open_tasks = _open_tasks_on_branch(branch.branch_id)
+        current = open_tasks[0] if open_tasks else None
+        current_meta = dict(current.meta or {}) if current is not None and isinstance(current.meta, dict) else {}
+        branch_title = str(branch.title or "")
+        context: dict[str, object] = {}
+        low = branch_title.lower()
+        if "stale" in low and "source" in low:
+            context["release_stale"] = True
+        evidence = list_branch_evidence(branch.branch_id, limit=80)
+        timeline = _ensure_branch_timeline(branch, evidence=evidence)
+        measured = measure_solution_progress(
+            work_class=str(branch.work_class or ""),
+            source_type=str(branch.source_type or ""),
+            branch_title=branch_title,
+            current_step_title=str(current.title if current is not None else ""),
+            solution_status=_solution_status_for_branch(branch, open_tasks),
+            evidence=evidence,
+            expected_tool=str(current_meta.get("expected_tool") or branch.preferred_tool or "").strip(),
+            context=context,
+            branch_id=branch.branch_id,
+            current_task_id=str(current.task_id if current is not None else ""),
+        )
+        measured["surfaced_at"] = timeline.get("surfaced_at") or ""
+        measured["work_started_at"] = timeline.get("work_started_at") or ""
+        measured["last_seen_at"] = timeline.get("last_seen_at") or ""
+        measured["current_step_opened_at"] = _iso_ts(current.created_at) if current is not None else ""
+        measured["current_step_updated_at"] = _iso_ts(current.updated_at) if current is not None else ""
+        # Age hints for operators (seconds); empty when unknown.
+        def _age_sec(ts_text: str) -> int | None:
+            raw = str(ts_text or "").strip()
+            if not raw:
+                return None
+            try:
+                # Accept "YYYY-MM-DDTHH:MM:SS" and with fractional / Z.
+                cleaned = raw.replace("Z", "")
+                if "." in cleaned:
+                    cleaned = cleaned.split(".", 1)[0]
+                dt_val = datetime.fromisoformat(cleaned)
+                return max(0, int((_now() - dt_val).total_seconds()))
+            except Exception:
+                return None
+
+        for key, age_key in (
+            ("surfaced_at", "surfaced_age_sec"),
+            ("work_started_at", "work_started_age_sec"),
+            ("current_step_opened_at", "current_step_age_sec"),
+        ):
+            age = _age_sec(str(measured.get(key) or ""))
+            if age is not None:
+                measured[age_key] = age
+        if not measured.get("work_started_at"):
+            measured["work_start_state"] = "not_started"
+        else:
+            measured["work_start_state"] = "started"
+        return measured
+    except Exception:
+        return None
+
+
+def _task_progress_payload(branch: Branch, task: Task | None) -> dict[str, object] | None:
+    """Operator progress for a node: always the branch solution (task is display context only)."""
+    if task is None and branch is None:
+        return None
+    return _branch_progress_payload(branch)
+
+
+def _compact_progress_meta(
+    progress: dict[str, object] | None,
+    *,
+    updated_at: str = "",
+    last_evidence_id: str = "",
+) -> dict[str, object]:
+    """Persist a progress snapshot usable by control (includes effort + markers)."""
+    if not isinstance(progress, dict) or not progress:
+        return {}
+    # Cap lists so persistence stays bounded but UI is not empty.
+    effort_rows = [
+        dict(row)
+        for row in list(progress.get("effort") or [])
+        if isinstance(row, dict)
+    ][-20:]
+    marker_rows = [
+        dict(row)
+        for row in list(progress.get("markers") or [])
+        if isinstance(row, dict)
+    ][:24]
+    row: dict[str, object] = {
+        "unit": progress.get("unit") or "solution",
+        "percent": progress.get("percent"),
+        "motion": progress.get("motion"),
+        "confidence": progress.get("confidence"),
+        "markers_achieved": progress.get("markers_achieved"),
+        "markers_total": progress.get("markers_total"),
+        "family_key": progress.get("family_key"),
+        "operator_summary": progress.get("operator_summary"),
+        "intent": progress.get("intent"),
+        "solution": progress.get("solution"),
+        "next_marker": progress.get("next_marker"),
+        "current_step_title": progress.get("current_step_title"),
+        "solution_status": progress.get("solution_status"),
+        "surfaced_at": progress.get("surfaced_at"),
+        "work_started_at": progress.get("work_started_at"),
+        "work_start_state": progress.get("work_start_state"),
+        "last_seen_at": progress.get("last_seen_at"),
+        "current_step_opened_at": progress.get("current_step_opened_at"),
+        "current_step_updated_at": progress.get("current_step_updated_at"),
+        "surfaced_age_sec": progress.get("surfaced_age_sec"),
+        "work_started_age_sec": progress.get("work_started_age_sec"),
+        "current_step_age_sec": progress.get("current_step_age_sec"),
+        "effort": effort_rows,
+        "effort_count": int(progress.get("effort_count") or len(effort_rows) or 0),
+        "markers": marker_rows,
+        "doing": progress.get("doing"),
+        "expected_tool": progress.get("expected_tool"),
+    }
+    if updated_at:
+        row["updated_at"] = updated_at
+    if last_evidence_id:
+        row["last_evidence_id"] = last_evidence_id
+    # Never persist a false complete while the board still has open work.
+    openish = str(progress.get("solution_status") or "").strip().lower() in {"open", "blocked"}
+    if openish:
+        try:
+            pct = int(progress.get("percent") or 0)
+        except Exception:
+            pct = 0
+        if pct >= 100 or str(progress.get("motion") or "").strip().lower() == "done":
+            row["percent"] = min(99, max(0, pct if pct < 100 else 99))
+            row["motion"] = "moving" if (effort_rows or pct > 0) else "not_started"
+            row["solution_status"] = str(progress.get("solution_status") or "open")
+            row["operator_summary"] = (
+                f"{row['percent']}% · {row['motion']} · "
+                f"{int(progress.get('markers_achieved') or 0)}/"
+                f"{int(progress.get('markers_total') or 0)} markers counting"
+            )
+    # Never persist 100% with empty Completed-so-far.
+    try:
+        pct2 = int(row.get("percent") or 0)
+    except Exception:
+        pct2 = 0
+    if pct2 >= 100 and int(row.get("effort_count") or 0) <= 0 and not effort_rows:
+        row["percent"] = 0
+        row["closed_without_effort"] = True
+        if str(row.get("motion") or "").strip().lower() == "done":
+            row["operator_summary"] = (
+                "0% · closed without recorded tool effort · "
+                f"{int(progress.get('markers_achieved') or 0)}/"
+                f"{int(progress.get('markers_total') or 0)} markers counting"
+            )
+        else:
+            row["motion"] = "not_started"
+            row["operator_summary"] = (
+                "0% · not_started · no recorded tool effort"
+            )
+    if progress.get("closed_without_effort"):
+        row["closed_without_effort"] = True
+    return row
+
+
+def stamp_branch_progress(
+    branch_id: str,
+    *,
+    persist: bool = True,
+    last_evidence_id: str = "",
+) -> dict[str, object]:
+    """Measure solution progress and persist on the branch (root owner).
+
+    Open tasks receive a mirror of the same snapshot for transport only —
+    they are not a separate progress unit.
+    """
+    branch = _BRANCHES.get(str(branch_id or "").strip())
+    if branch is None:
+        return {}
+    progress = _branch_progress_payload(branch)
+    if not isinstance(progress, dict) or not progress:
+        return {}
+    # Live open work must not keep a stale "done" cache from an earlier stamp.
+    open_tasks = _open_tasks_on_branch(branch.branch_id)
+    if open_tasks and str(progress.get("solution_status") or "").lower() in {"complete", "done"}:
+        progress = dict(progress)
+        progress["solution_status"] = "open"
+        try:
+            pct = int(progress.get("percent") or 0)
+        except Exception:
+            pct = 0
+        if pct >= 100 or str(progress.get("motion") or "").lower() == "done":
+            progress["percent"] = min(99, pct if pct < 100 else 99)
+            progress["motion"] = "moving" if int(progress.get("effort_count") or 0) > 0 or pct > 0 else "not_started"
+            progress["operator_summary"] = (
+                f"{progress['percent']}% · {progress['motion']} · "
+                f"{int(progress.get('markers_achieved') or 0)}/"
+                f"{int(progress.get('markers_total') or 0)} markers counting"
+            )
+    compact = _compact_progress_meta(
+        progress,
+        updated_at=_dt(_now()),
+        last_evidence_id=str(last_evidence_id or ""),
+    )
+    if not compact:
+        return {}
+    payload = dict(branch.source_payload or {}) if isinstance(branch.source_payload, dict) else {}
+    payload["solution_progress"] = compact
+    branch.source_payload = payload
+    branch.updated_at = _now()
+    for task in open_tasks:
+        meta = dict(task.meta or {}) if isinstance(task.meta, dict) else {}
+        meta["progress"] = compact
+        task.meta = meta
+        task.updated_at = branch.updated_at
+    if persist:
+        _persist_tree_state(branch.tree_id)
+    return dict(progress or {})
+
+
+def stamp_task_progress(
+    task_id: str,
+    *,
+    persist: bool = True,
+    last_evidence_id: str = "",
+) -> dict[str, object]:
+    """Stamp solution progress for the task's branch (task is not the unit)."""
+    task = _TASKS.get(str(task_id or "").strip())
+    if task is None:
+        return {}
+    return stamp_branch_progress(
+        task.branch_id,
+        persist=persist,
+        last_evidence_id=last_evidence_id,
+    )
+
+
+def stamp_branch_open_tasks_progress(branch_id: str, *, persist: bool = True) -> dict[str, object]:
+    """Stamp solution progress for a branch after signal/task updates."""
+    progress = stamp_branch_progress(branch_id, persist=persist)
+    if not progress:
+        return {"stamped": 0, "branch_id": str(branch_id or "")}
+    motion = str(progress.get("motion") or "not_started").strip().lower()
+    return {
+        "stamped": 1,
+        "motions": {motion: 1},
+        "branch_id": str(branch_id or ""),
+        "percent": progress.get("percent"),
+        "motion": motion,
+    }
+
+
+def stamp_open_tasks_progress(*, tree_id: str | None = None, persist: bool = True) -> dict[str, object]:
+    """Stamp solution progress for every branch that has open work."""
+    stamped = 0
+    motions: dict[str, int] = {}
+    tree_ids: set[str] = set()
+    seen_branches: set[str] = set()
+    for task in list(_TASKS.values()):
+        status = task.status.value if hasattr(task.status, "value") else str(task.status)
+        if status in {TaskStatus.COMPLETE.value, TaskStatus.DROPPED.value}:
+            continue
+        branch = _BRANCHES.get(task.branch_id)
+        if branch is None or branch.branch_id in seen_branches:
+            continue
+        if tree_id and branch.tree_id != tree_id:
+            continue
+        seen_branches.add(branch.branch_id)
+        progress = stamp_branch_progress(branch.branch_id, persist=False)
+        if not progress:
+            continue
+        stamped += 1
+        tree_ids.add(branch.tree_id)
+        motion = str(progress.get("motion") or "not_started").strip().lower()
+        motions[motion] = int(motions.get(motion) or 0) + 1
+    if persist:
+        for tid in tree_ids:
+            _persist_tree_state(tid)
+    return {"stamped": stamped, "motions": motions, "trees": len(tree_ids)}
+
+
+def _open_tasks_progress_payload(branch: Branch, branch_tasks: list[Task]) -> list[dict[str, object]]:
+    """Open stems with shared solution progress (same unit on each row)."""
+    solution = _branch_progress_payload(branch)
+    rows: list[dict[str, object]] = []
+    for task in branch_tasks:
+        status = task.status.value if hasattr(task.status, "value") else str(task.status)
+        if status in {TaskStatus.COMPLETE.value, TaskStatus.DROPPED.value}:
+            continue
+        rows.append(
+            {
+                "task_id": task.task_id,
+                "title": task.title,
+                "status": status,
+                "progress": solution,
+            }
+        )
+    return rows
 
 
 def list_visual_trees(limit: int | None = None) -> list[dict]:
@@ -1368,6 +1838,12 @@ def mark_task_complete(task_id: str) -> None:
     if branch is None:
         return
     branch.updated_at = now
+    # Re-measure solution progress after the stem closes. Intermediate complete
+    # must not force 100% — only branch/finding closure does.
+    try:
+        stamp_branch_progress(branch.branch_id, persist=False)
+    except Exception:
+        pass
     _refresh_tree_state(branch.tree_id, persist=True)
 
 
@@ -1875,23 +2351,23 @@ def _tool_args_for_task(tool_name: str, task: Task) -> list[str]:
         capability_args = task_meta.get("capability_args") if isinstance(task_meta.get("capability_args"), dict) else {}
         if capability_name:
             return [_json_dump({"capability": capability_name, "args": dict(capability_args or {})})]
-    if tool_name == "subconscious_review_judgment":
+    if tool_name == SUBCONSCIOUS_REVIEW_JUDGMENT:
         return [task.branch_id]
-    if tool_name == "source_root_judgment":
+    if tool_name == SOURCE_ROOT_JUDGMENT:
         return [task.branch_id]
-    if tool_name == "release_promotion_judgment":
+    if tool_name == RELEASE_PROMOTION_JUDGMENT:
         return [task.branch_id]
-    if tool_name == "release_validation_run":
+    if tool_name == RELEASE_VALIDATION_RUN:
         return [task.branch_id]
-    if tool_name == "release_record_validation_outcome":
+    if tool_name == RELEASE_RECORD_VALIDATION_OUTCOME:
         return [task.branch_id]
-    if tool_name == "installer_validation_run":
+    if tool_name == INSTALLER_VALIDATION_RUN:
         return [task.branch_id]
     if tool_name in {"patch_preview_apply", "patch_preview_approve"}:
         preview_name = _extract_patch_preview_name(task)
         if preview_name:
             return [preview_name]
-    if tool_name == "generated_queue_run":
+    if tool_name == GENERATED_QUEUE_RUN:
         session_file = _extract_generated_session_file(task)
         if session_file:
             return [session_file]
@@ -1903,11 +2379,11 @@ def _tool_args_for_task(tool_name: str, task: Task) -> list[str]:
         "core_health",
         "core_thinning",
         "health",
-        "memory_bootstrap_judgment",
+        MEMORY_BOOTSTRAP_JUDGMENT,
         "memory_identity_bootstrap",
         "memory_hygiene",
-        "phase2_audit",
-        "pulse",
+        PHASE2_AUDIT,
+        PULSE,
         "queue_status",
         "screen",
         "system_check",
@@ -1921,14 +2397,20 @@ def _tool_args_for_task(tool_name: str, task: Task) -> list[str]:
         resolved_dir = _extract_ls_path_from_task_title(title)
         if resolved_dir:
             return [resolved_dir]
+        # Never pass free-text task titles as directory paths.
+        return []
     if tool_name == "find":
         find_keyword = _extract_find_keyword_from_task_title(title)
         if find_keyword:
             return [find_keyword]
+        return []
     if tool_name == "read":
         resolved_path = _extract_read_path_from_task_title(title)
         if resolved_path:
             return [resolved_path]
+        # Root: free-text titles ("Read newest changed source…") are not paths.
+        # Passing them as tool_args guarantees overnight tool_failed thrash.
+        return []
     return [title] if title else []
 
 
@@ -1989,6 +2471,16 @@ def _rebalance_branch_tool_for_task(branch: Branch, task: Task | None) -> str:
     return ""
 
 
+def _align_branch_to_solution_trail(branch_id: str) -> dict[str, object]:
+    """Trail next-move: skip sequence stems the journal already satisfied."""
+    try:
+        from services.solution_trail import align_branch_open_stem_to_trail
+
+        return dict(align_branch_open_stem_to_trail(str(branch_id or "").strip()) or {})
+    except Exception as exc:
+        return {"ok": False, "reason": f"trail_align_failed:{str(exc)[:160]}"}
+
+
 def list_autonomous_options(tree_id: str) -> list[dict]:
     tree = get_tree(tree_id)
     if tree is None:
@@ -2004,6 +2496,7 @@ def list_autonomous_options(tree_id: str) -> list[dict]:
         )
     )
     for branch in branches:
+        _align_branch_to_solution_trail(branch.branch_id)
         if _next_open_task(branch.branch_id) is None:
             continue
         if not is_branch_ready(branch.branch_id):
@@ -2011,12 +2504,13 @@ def list_autonomous_options(tree_id: str) -> list[dict]:
         if not is_tooling_ready(branch.branch_id):
             continue
         current_task = _current_visible_task(branch.branch_id)
-        recommended_tool = _branch_candidate_tool(branch)
+        recommended_tool = _branch_candidate_tool(branch, current_task)
         if not recommended_tool:
             continue
         allowed, _ = _tool_governance_status(tree, branch, recommended_tool)
         if not allowed:
             continue
+        progress = _task_progress_payload(branch, current_task)
         options.append(
             {
                 "branch_id": branch.branch_id,
@@ -2026,9 +2520,51 @@ def list_autonomous_options(tree_id: str) -> list[dict]:
                 "recommended_tool": recommended_tool,
                 "required_tools": list(branch.required_tools),
                 "allowed_tools": list(branch.allowed_tools),
+                "progress": progress,
             }
         )
+    options.sort(
+        key=lambda opt: (
+            {
+                "moving": 0,
+                "not_started": 1,
+                "stalled": 3,
+                "blocked": 4,
+                "done": 5,
+            }.get(str(((opt.get("progress") or {}).get("motion") or "not_started")).lower(), 2),
+            -int(((opt.get("progress") or {}).get("percent") or 0))
+            if str(((opt.get("progress") or {}).get("motion") or "")).lower() == "moving"
+            else int(((opt.get("progress") or {}).get("percent") or 0)),
+            str(opt.get("branch_id") or ""),
+        )
+    )
     return options
+
+
+def _progress_decision_rank(branch: Branch) -> tuple:
+    """Prefer moving near-complete work; park stalled/blocked later."""
+    task = _next_open_task(branch.branch_id)
+    progress = _task_progress_payload(branch, task) if task is not None else None
+    motion = str((progress or {}).get("motion") or "not_started").strip().lower()
+    try:
+        percent = int((progress or {}).get("percent") or 0)
+    except Exception:
+        percent = 0
+    tool_name = _branch_candidate_tool(branch, task)
+    tool_status = branch.tool_state.get(tool_name, ToolStatus.READY) if tool_name else ToolStatus.READY
+    if tool_status == ToolStatus.FAILED:
+        motion = "stalled"
+    motion_rank = {
+        "moving": 0,
+        "not_started": 1,
+        "stalled": 3,
+        "blocked": 4,
+        "done": 5,
+    }.get(motion, 2)
+    # Among moving work, finish higher-% first (less thrash).
+    percent_key = -percent if motion == "moving" else percent
+    failed_rank = 1 if tool_status == ToolStatus.FAILED else 0
+    return (failed_rank, motion_rank, percent_key, branch.depth, -float(branch.score or 0), branch.created_at, branch.branch_id)
 
 
 def _preview_next_open_branch(tree_id: str) -> Branch | None:
@@ -2045,19 +2581,12 @@ def _preview_next_open_branch(tree_id: str) -> Branch | None:
     if not candidates:
         return None
 
-    candidates.sort(
-        key=lambda branch: (
-            branch.depth,
-            -branch.score,
-            branch.created_at,
-            branch.branch_id,
-        )
-    )
+    candidates.sort(key=_progress_decision_rank)
     return candidates[0]
 
 
 def _preview_recommended_tool(tree: WorkTree | None, branch: Branch, task: Task | None) -> tuple[str, list[str], str]:
-    recommended_tool = _branch_candidate_tool(branch)
+    recommended_tool = _branch_candidate_tool(branch, task)
     if recommended_tool:
         allowed, reason = _tool_governance_status(tree, branch, recommended_tool)
         return recommended_tool, list(branch.allowed_tools), "" if allowed else reason
@@ -2080,6 +2609,14 @@ def _preview_next_autonomous_step(tree_id: str) -> dict | None:
     branch = _preview_next_open_branch(tree_id)
     if branch is None:
         return None
+
+    trail_align = _align_branch_to_solution_trail(branch.branch_id)
+    # Re-resolve after trail may have skipped satisfied stems.
+    branch = _BRANCHES.get(branch.branch_id) or branch
+    if _next_open_task(branch.branch_id) is None:
+        branch = _preview_next_open_branch(tree_id)
+        if branch is None:
+            return None
 
     if not is_tooling_ready(branch.branch_id):
         return {
@@ -2111,7 +2648,8 @@ def _preview_next_autonomous_step(tree_id: str) -> dict | None:
             "tree_allowed_tools": _tree_allowed_tools(tree),
         }
 
-    return {
+    progress = _task_progress_payload(branch, current_task)
+    step = {
         "action": "execute",
         "branch_id": branch.branch_id,
         "branch_title": branch.title,
@@ -2121,7 +2659,15 @@ def _preview_next_autonomous_step(tree_id: str) -> dict | None:
         "required_tools": branch.required_tools,
         "allowed_tools": allowed_tools,
         "task_target": _scoped_task_target(current_task) if current_task is not None else {},
+        "progress": progress,
     }
+    if trail_align:
+        step["solution_trail"] = {
+            "reason": str(trail_align.get("reason") or ""),
+            "skipped": int(trail_align.get("skipped") or 0),
+            "preferred_tool": str(trail_align.get("preferred_tool") or ""),
+        }
+    return step
 
 
 def next_autonomous_step(tree_id: str, decide_next_step_fn: DecisionCallback | None = None) -> dict | None:
@@ -2174,12 +2720,18 @@ def next_autonomous_step(tree_id: str, decide_next_step_fn: DecisionCallback | N
     branch = next_open_branch(tree_id)
     if branch is None:
         return None
+    _align_branch_to_solution_trail(branch.branch_id)
+    branch = _BRANCHES.get(branch.branch_id) or branch
+    if _next_open_task(branch.branch_id) is None:
+        branch = next_open_branch(tree_id)
+        if branch is None:
+            return None
     if not is_tooling_ready(branch.branch_id):
         return {"action": "wait_for_tools", "branch_id": branch.branch_id, "missing_tools": [t for t in branch.required_tools if branch.tool_state.get(t) != ToolStatus.READY]}
     current_task = _next_open_task(branch.branch_id)
     if current_task is not None:
         _rebalance_branch_tool_for_task(branch, current_task)
-    recommended_tool = _branch_candidate_tool(branch)
+    recommended_tool = _branch_candidate_tool(branch, current_task)
     if not recommended_tool:
         task_declared = _task_declared_tools_allowed_by_tree(current_task, tree)
         if task_declared:
@@ -2188,7 +2740,7 @@ def next_autonomous_step(tree_id: str, decide_next_step_fn: DecisionCallback | N
                 allowed_tools=task_declared,
                 preferred_tool=task_declared[0],
             )
-            recommended_tool = _branch_candidate_tool(branch)
+            recommended_tool = _branch_candidate_tool(branch, current_task)
         if recommended_tool:
             allowed, reason = _tool_governance_status(tree, branch, recommended_tool)
             if not allowed:
@@ -2277,9 +2829,25 @@ def execute_autonomous_step(
     task.updated_at = now
     branch.updated_at = now
     branch.tool_state[tool_name] = ToolStatus.RUNNING
+    progress_before = _branch_progress_payload(branch)
     _persist_tree_state(tree_id)
 
     tool_args = _tool_args_for_task(tool_name, task)
+    if tool_name in {"read", "ls", "find"} and not [str(a).strip() for a in list(tool_args or []) if str(a).strip()]:
+        branch.tool_state[tool_name] = ToolStatus.FAILED
+        _restore_task_after_failed_execution(task, branch)
+        _persist_tree_state(tree_id)
+        return {
+            "action": "tool_failed",
+            "branch_id": branch_id,
+            "branch_title": branch.title,
+            "task_id": task.task_id,
+            "task_title": task.title,
+            "tool": tool_name,
+            "tool_args": tool_args,
+            "error": f"unresolvable_{tool_name}_args",
+        }
+
     result = execute_planned_action_fn(tool_name, tool_args)
 
     if _is_scoped_stabilization_task(task):
@@ -2406,6 +2974,23 @@ def execute_autonomous_step(
             "tool_args": tool_args,
             "error": str(exc),
         }
+    attempt_judgment: dict[str, object] = {}
+    try:
+        from services.solution_trail import record_attempt_on_branch
+
+        progress_after = _branch_progress_payload(branch)
+        attempt_judgment = dict(
+            record_attempt_on_branch(
+                branch_id,
+                tool_name=tool_name,
+                task_title=str(task.title or ""),
+                progress_before=progress_before if isinstance(progress_before, dict) else {},
+                progress_after=progress_after if isinstance(progress_after, dict) else {},
+            )
+            or {}
+        )
+    except Exception as exc:
+        attempt_judgment = {"ok": False, "reason": f"attempt_judgment_failed:{str(exc)[:160]}"}
     if tool_name == "core_thinning" and isinstance(result, dict):
         try:
             from services.core_thinning import stamp_core_thinning_task_satisfaction
@@ -2414,7 +2999,19 @@ def execute_autonomous_step(
         except Exception:
             pass
     mark_task_complete(task.task_id)
-    return {
+    sequence_advance: dict[str, object] = {}
+    try:
+        from services.work_tree_signal_ingestion import advance_branch_sequence_after_task
+
+        sequence_advance = dict(advance_branch_sequence_after_task(branch_id) or {})
+    except Exception as exc:
+        sequence_advance = {"ok": False, "reason": f"advance_failed:{str(exc)[:160]}"}
+    # Re-align so premature/redundant tools do not immediately re-open.
+    try:
+        _align_branch_to_solution_trail(branch_id)
+    except Exception:
+        pass
+    payload = {
         "action": "executed",
         "branch_id": branch_id,
         "branch_title": branch.title,
@@ -2426,6 +3023,11 @@ def execute_autonomous_step(
         "evidence_id": evidence_id,
         "task_target": _scoped_task_target(task),
     }
+    if sequence_advance:
+        payload["sequence_advance"] = sequence_advance
+    if attempt_judgment:
+        payload["attempt_judgment"] = attempt_judgment
+    return payload
 
 
 def run_autonomous_loop(
@@ -2483,6 +3085,50 @@ def _get_visual_tree_data_locked(tree_id: str) -> dict | None:
             task_declared = _task_declared_tools_allowed_by_tree(current_task, tree)
             if task_declared:
                 display_tool = task_declared[0]
+        # Measure only live solution work. Full-tree remeasure of hundreds of
+        # archived/complete branches makes control unusable and hides progress.
+        solution_progress = _branch_progress_payload(branch) if tasks_open > 0 else None
+        if tasks_open > 0 and isinstance(solution_progress, dict):
+            # Never serve a stale "done/100%" cache over live open work.
+            cached = {}
+            if isinstance(branch.source_payload, dict):
+                raw_cached = branch.source_payload.get("solution_progress")
+                if isinstance(raw_cached, dict):
+                    cached = raw_cached
+            cache_done = (
+                str(cached.get("motion") or "").lower() == "done"
+                or int(cached.get("percent") or 0) >= 100
+                or str(cached.get("solution_status") or "").lower() in {"complete", "done"}
+            )
+            live_open = str(solution_progress.get("solution_status") or "").lower() in {"open", "blocked"}
+            if cache_done and live_open:
+                try:
+                    stamp_branch_progress(branch.branch_id, persist=False)
+                except Exception:
+                    pass
+        if solution_progress is None and isinstance(branch.source_payload, dict):
+            cached = branch.source_payload.get("solution_progress")
+            if isinstance(cached, dict) and cached:
+                try:
+                    cached_pct = int(cached.get("percent") or 0)
+                except Exception:
+                    cached_pct = 0
+                cached_effort_n = int(cached.get("effort_count") or 0)
+                if not cached_effort_n and isinstance(cached.get("effort"), list):
+                    cached_effort_n = len(cached.get("effort") or [])
+                # Reject caches that claim full/done with no completed-so-far work.
+                false_complete = (
+                    cached_pct >= 100 or str(cached.get("motion") or "").lower() == "done"
+                ) and cached_effort_n <= 0
+                if tasks_open > 0 and (
+                    str(cached.get("motion") or "").lower() == "done"
+                    or cached_pct >= 100
+                ):
+                    solution_progress = _branch_progress_payload(branch)
+                elif false_complete:
+                    solution_progress = _branch_progress_payload(branch)
+                else:
+                    solution_progress = dict(cached)
         nodes.append({
             "id": branch.branch_id,
             "title": branch.title,
@@ -2514,7 +3160,11 @@ def _get_visual_tree_data_locked(tree_id: str) -> dict | None:
                 "title": current_task.title,
                 "status": current_task.status.value,
                 "meta": dict(current_task.meta or {}),
+                "progress": solution_progress,
             } if current_task is not None else None,
+            "progress": solution_progress,
+            "solution_progress": solution_progress,
+            "open_tasks": _open_tasks_progress_payload(branch, branch_tasks) if tasks_open > 0 else [],
         })
         for dep_id in branch.depends_on:
             dependency_edges.append({"from": dep_id, "to": branch.branch_id})

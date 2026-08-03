@@ -1230,11 +1230,13 @@ class TestOperatorOutboxService(unittest.TestCase):
             )
             events = OPERATOR_OUTBOX_SERVICE.read_events(path)
 
+        # Operator finished their turn even when no Work Tree target is linked;
+        # notice must close so outbox holds do not stick forever.
         self.assertFalse(response.get("ok"))
-        self.assertEqual((response.get("event") or {}).get("status"), "answered")
+        self.assertEqual((response.get("event") or {}).get("status"), "resolved")
         self.assertEqual((response.get("work_tree") or {}).get("reason"), "task_resolved_requires_work_tree_target")
         self.assertEqual(events[0].get("response_count"), 1)
-        self.assertEqual(events[0].get("status"), "answered")
+        self.assertEqual(events[0].get("status"), "resolved")
 
     def test_continue_work_response_requires_work_tree_target(self):
         with TemporaryDirectory() as temp_dir:
@@ -1261,10 +1263,12 @@ class TestOperatorOutboxService(unittest.TestCase):
                 now_fn=lambda: 2125.0,
                 uuid_fn=lambda: "responsecc",
             )
+            events = OPERATOR_OUTBOX_SERVICE.read_events(path)
 
         self.assertFalse(response.get("ok"))
-        self.assertEqual((response.get("event") or {}).get("status"), "answered")
+        self.assertEqual((response.get("event") or {}).get("status"), "resolved")
         self.assertEqual((response.get("work_tree") or {}).get("reason"), "continue_work_requires_work_tree_target")
+        self.assertEqual(events[0].get("status"), "resolved")
 
     def test_autonomy_publish_writes_operator_notice(self):
         with TemporaryDirectory() as temp_dir:

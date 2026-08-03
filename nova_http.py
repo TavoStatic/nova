@@ -837,9 +837,16 @@ def _patch_queue_run_next_action(payload: dict) -> tuple[bool, str, dict, str]:
 
 
 def _active_work_tree_run_next_action(payload: dict) -> tuple[bool, str, dict, str]:
+    """Operator control Run Next Step.
+
+    Control clicks are explicit operator intent: always operator_override so mission
+    quiet/green hold does not silently no-op the button. Prefer immediate execute;
+    fall back to maintenance trigger file if sync path fails.
+    """
     try:
         import json as _json
         import time as _time
+
         trigger = dict(payload or {})
         if not str(trigger.get("target_branch_id") or "").strip():
             branch_id = str(trigger.get("branch_id") or "").strip()
@@ -849,11 +856,61 @@ def _active_work_tree_run_next_action(payload: dict) -> tuple[bool, str, dict, s
             task_id = str(trigger.get("task_id") or "").strip()
             if task_id:
                 trigger["target_task_id"] = task_id
+        # Explicit control-surface click is operator authority.
+        trigger["operator_override"] = True
         trigger["_requested_at"] = _time.time()
-        WORK_TREE_RUN_TRIGGER_FILE.parent.mkdir(parents=True, exist_ok=True)
-        WORK_TREE_RUN_TRIGGER_FILE.write_text(_json.dumps(trigger), encoding="utf-8")
-        msg = "active_work_tree_run_next_triggered"
-        return True, msg, {"triggered": True}, msg
+        trigger.setdefault("max_steps", 1)
+        trigger.setdefault("max_trees", 1)
+
+        target_branch_id = str(trigger.get("target_branch_id") or "").strip()
+        target_task_id = str(trigger.get("target_task_id") or "").strip()
+        target_tree_id = str(trigger.get("target_tree_id") or "").strip()
+        target_tool = str(trigger.get("recommended_tool") or trigger.get("target_tool") or "").strip()
+
+        # Immediate path so the button advances work without waiting for the
+        # next maintenance cycle (and without mission hold swallowing the click).
+        try:
+            import autonomy_maintenance as am
+
+            state = am._load_state()
+            cycle_kwargs = {
+                "max_steps": 1,
+                "max_trees": 1,
+            }
+            if target_branch_id:
+                cycle_kwargs["target_branch_id"] = target_branch_id
+            if target_task_id:
+                cycle_kwargs["target_task_id"] = target_task_id
+            if target_tree_id:
+                cycle_kwargs["target_tree_id"] = target_tree_id
+            if target_tool:
+                cycle_kwargs["target_tool"] = target_tool
+            cycle = am._run_active_work_tree_cycle(state, **cycle_kwargs)
+            am._save_state(state)
+            status = str((cycle or {}).get("status") or "unknown").strip() or "unknown"
+            executed = int((cycle or {}).get("executed_count") or 0)
+            msg = f"active_work_tree_run_next_{status}"
+            if executed <= 0:
+                reason = str((cycle or {}).get("last_action") or (cycle or {}).get("reason") or status)
+                msg = f"{msg}:executed=0:{reason}"
+            return True, msg, {
+                "triggered": False,
+                "executed_now": True,
+                "executed_count": executed,
+                "cycle": cycle if isinstance(cycle, dict) else {},
+                "operator_override": True,
+            }, msg
+        except Exception as sync_exc:
+            # Fall back to async trigger for the maintenance worker.
+            WORK_TREE_RUN_TRIGGER_FILE.parent.mkdir(parents=True, exist_ok=True)
+            WORK_TREE_RUN_TRIGGER_FILE.write_text(_json.dumps(trigger), encoding="utf-8")
+            msg = "active_work_tree_run_next_triggered"
+            return True, msg, {
+                "triggered": True,
+                "executed_now": False,
+                "operator_override": True,
+                "sync_error": str(sync_exc)[:240],
+            }, msg
     except Exception as exc:
         msg = f"active_work_tree_run_next_trigger_failed:{exc}"
         return False, msg, {}, msg

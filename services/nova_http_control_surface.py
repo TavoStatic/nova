@@ -83,6 +83,15 @@ class NovaHttpControlSurfaceService:
             ok, msg, extra, _ = cls._runtime_value(runtime_scope, "_temporal_event_delete_action")(payload)
             return ok, msg, extra
 
+        # Backpacks are optional post-core capabilities. Handle at the root control
+        # surface (same idea as temporal) so we do not sprawl one-off UI-only paths.
+        if str(action or "").startswith("backpack_"):
+            from services.nova_http_backpack_control import HTTP_BACKPACK_CONTROL_SERVICE
+
+            return HTTP_BACKPACK_CONTROL_SERVICE.handle_action_from_runtime(
+                action, payload, runtime_scope
+            )
+
         control_hooks = {
             **cls._runtime_value(runtime_scope, "HTTP_PIPELINE_CONTROL_SERVICE").action_hooks_from_runtime(runtime_scope),
             **cls._runtime_value(runtime_scope, "HTTP_GENERATED_WORK_SERVICE").action_hooks_from_runtime(runtime_scope),

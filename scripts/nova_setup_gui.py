@@ -3,20 +3,25 @@
 
 from __future__ import annotations
 
+import argparse
 import queue
 import sys
 import threading
 import traceback
 from pathlib import Path
 
-def _resolve_package_root() -> Path:
+def _resolve_package_root(explicit: str = "") -> Path:
     """Prefer an explicit root, then a package folder next to the exe/script."""
 
     import os
 
-    env_root = str(os.environ.get("NOVA_ROOT") or "").strip()
-    if env_root:
-        candidate = Path(env_root).expanduser().resolve()
+    for candidate_text in (
+        str(explicit or "").strip(),
+        str(os.environ.get("NOVA_ROOT") or "").strip(),
+    ):
+        if not candidate_text:
+            continue
+        candidate = Path(candidate_text).expanduser().resolve()
         if (candidate / "nova.cmd").is_file():
             return candidate
 
@@ -39,9 +44,13 @@ def _resolve_package_root() -> Path:
     return Path(__file__).resolve().parents[1]
 
 
-ROOT = _resolve_package_root()
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
+def _bootstrap_sys_path(root: Path) -> None:
+    text = str(root)
+    if text not in sys.path:
+        sys.path.insert(0, text)
+
+
+_bootstrap_sys_path(_resolve_package_root())
 
 try:
     import tkinter as tk
@@ -58,12 +67,13 @@ from services.nova_setup_wizard import (
 
 
 class NovaSetupApp(tk.Tk):
-    def __init__(self) -> None:
+    def __init__(self, root_dir: Path | None = None, *, auto_start: bool = False) -> None:
         super().__init__()
         self.title("Nova Setup")
         self.geometry("780x560")
         self.minsize(640, 420)
-        self.root_dir = ROOT
+        self.root_dir = Path(root_dir or _resolve_package_root()).resolve()
+        self._auto_start = bool(auto_start)
         self._log_queue: queue.Queue[str] = queue.Queue()
         self._worker: threading.Thread | None = None
         self._running = False
@@ -114,6 +124,8 @@ class NovaSetupApp(tk.Tk):
         self.close_btn.pack(side="right")
 
         self.after(100, self._drain_log)
+        if self._auto_start:
+            self.after(300, self.start_setup)
 
     def _on_close(self) -> None:
         if self._running:
@@ -213,25 +225,96 @@ class NovaSetupApp(tk.Tk):
             messagebox.showerror("Nova Setup", message)
 
 
-def main() -> int:
+def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Nova Setup GUI / executable")
+    parser.add_argument("--root", default="", help="Nova package root containing nova.cmd")
+    parser.add_argument(
+        "--auto",
+        action="store_true",
+        help="Start setup immediately (for sandbox/automated exe tests)",
+    )
+    parser.add_argument(
+        "--headless",
+        action="store_true",
+        help="Run setup without GUI (exe/sandbox automation); prints report to stdout",
+    )
+    parser.add_argument("--skip-ollama", action="store_true")
+    parser.add_argument("--skip-models", action="store_true")
+    parser.add_argument("--skip-webui", action="store_true")
+    parser.add_argument("--no-register-path", action="store_true")
+    parser.add_argument("--webui-port", type=int, default=18088)
+    parser.add_argument("--report", default="")
+    return parser.parse_args(argv)
+
+
+def run_headless(args: argparse.Namespace) -> int:
+    root = _resolve_package_root(str(args.root or ""))
+    _bootstrap_sys_path(root)
+    report_path = Path(args.report) if str(args.report or "").strip() else (root / "runtime" / "setup_wizard_report.json")
+    log_path = report_path.with_suffix(".log")
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    log_fh = open(log_path, "w", encoding="utf-8", errors="replace")
+    # Windowed NovaSetup.exe has no console; bind stdio to a log file.
+    sys.stdout = log_fh  # type: ignore[assignment]
+    sys.stderr = log_fh  # type: ignore[assignment]
+
+    locked, detail = acquire_setup_singleton()
+    if not locked:
+        print(f"[setup] Another Nova Setup is already running ({detail})", flush=True)
+        log_fh.close()
+        return 2
+    try:
+        print(f"[setup] headless NovaSetup root={root}", flush=True)
+        print(f"[setup] report={report_path}", flush=True)
+        print(f"[setup] log={log_path}", flush=True)
+        report = run_setup_wizard(
+            root,
+            install=True,
+            include_ollama=not bool(args.skip_ollama),
+            include_models=not bool(args.skip_models),
+            include_webui=not bool(args.skip_webui),
+            include_smoke=True,
+            register_path=not bool(args.no_register_path),
+            webui_port=int(args.webui_port),
+            report_path=str(report_path),
+        )
+        print(render_setup_report(report), flush=True)
+        return 0 if report.get("ok") else 1
+    finally:
+        release_setup_singleton()
+        try:
+            log_fh.flush()
+            log_fh.close()
+        except Exception:
+            pass
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = _parse_args(argv)
+    root = _resolve_package_root(str(args.root or ""))
+    _bootstrap_sys_path(root)
+
+    if args.headless:
+        return run_headless(args)
+
     locked, detail = acquire_setup_singleton()
     if not locked:
         try:
-            root = tk.Tk()
-            root.withdraw()
+            probe = tk.Tk()
+            probe.withdraw()
             messagebox.showerror(
                 "Nova Setup",
                 "Another Nova Setup is already running.\n\n"
                 "Close the other setup window and try again.\n\n"
                 f"({detail})",
             )
-            root.destroy()
+            probe.destroy()
         except Exception:
             print(f"Another Nova Setup is already running ({detail})", flush=True)
         return 2
 
     try:
-        app = NovaSetupApp()
+        app = NovaSetupApp(root_dir=root, auto_start=bool(args.auto))
         app.mainloop()
         return 0
     finally:

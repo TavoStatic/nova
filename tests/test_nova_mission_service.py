@@ -381,13 +381,27 @@ class TestNovaMissionService(unittest.TestCase):
             )
         if isinstance(release_blocker, dict):
             remediation = dict(release_blocker.get("remediation") or {})
-            self.assertIn("release_rebuild_verify", list(remediation.get("tools") or []))
+            tools = list(remediation.get("tools") or [])
+            self.assertIn("release_rebuild_verify", tools)
+            # Nova must be able to climb past rebuild without a human re-authorizing.
+            self.assertIn("release_validation_run", tools)
+            self.assertIn("release_record_validation_outcome", tools)
         self.assertTrue(NovaMissionService._hold_allows_active_work_tool(mission, "release_rebuild_verify"))
         self.assertFalse(
             NovaMissionService.hold_blocks_action(
                 "active_work_tree_run_next",
                 mission_snapshot=mission,
                 action_context={"recommended_tool": "release_rebuild_verify"},
+            )
+        )
+        self.assertFalse(
+            NovaMissionService.hold_blocks_action(
+                "active_work_tree_run_next",
+                mission_snapshot=mission,
+                action_context={
+                    "recommended_tool": "release_validation_run",
+                    "title": "Release package is stale behind live source",
+                },
             )
         )
         self.assertFalse(
@@ -522,11 +536,28 @@ class TestNovaMissionService(unittest.TestCase):
                 action_context={"recommended_tool": "release_rebuild_verify"},
             )
         )
+        # Honest ladder: first release step is often read — must not dead-lock hold.
+        self.assertFalse(
+            NovaMissionService.hold_blocks_action(
+                "active_work_tree_run_next",
+                mission_snapshot=mission,
+                action_context={
+                    "recommended_tool": "read",
+                    "title": "Release package is stale behind live source",
+                    "task_title": "Read release ledger for current package",
+                },
+            )
+        )
+        # Random non-release reads still stay held.
         self.assertTrue(
             NovaMissionService.hold_blocks_action(
                 "active_work_tree_run_next",
                 mission_snapshot=mission,
-                action_context={"recommended_tool": "read"},
+                action_context={
+                    "recommended_tool": "read",
+                    "title": "Investigate control status spike",
+                    "task_title": "Read control status logs",
+                },
             )
         )
 

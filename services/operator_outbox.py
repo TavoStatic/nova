@@ -963,7 +963,11 @@ class OperatorOutboxService:
             event["response_count"] = len(responses)
             event["updated_ts_epoch"] = now_value
             event["updated_ts"] = response["ts"]
-            if clean_resolution in {"continue_work", "task_resolved"} and bool(work_tree_result.get("task_completed")):
+            # continue_work / task_resolved means the operator finished their turn on
+            # this notice. Always close it so open_count drops and work-tree holds
+            # that only wait on outbox can clear on the next signal pass.
+            # Work-tree task completion remains best-effort (may lack a linked target).
+            if clean_resolution in {"continue_work", "task_resolved"}:
                 event["status"] = "resolved"
             elif clean_resolution in {"dismissed", "stale"}:
                 event["status"] = clean_resolution

@@ -46,6 +46,7 @@ MAINTENANCE_SCRIPT = ROOT / "autonomy_maintenance.py"
 MAINTENANCE_LOG = RUNTIME_DIR / "autonomy_maintenance.guard.log"
 
 _LAST_MAINTENANCE_LAUNCH = 0.0
+_MAINTENANCE_LAUNCHED_AT = 0.0
 _MAINTENANCE_PROC: Optional[subprocess.Popen] = None
 
 CORE_ARGS = [
@@ -815,9 +816,35 @@ def should_stop() -> bool:
     return STOP_FILE.exists()
 
 
-# Hung --once maintenance blocks all future launches via sibling detection.
-# Cap age so self-heal cannot trap the guard in permanent skip mode.
+# Hung --once maintenance blocks all future launches via sibling detection
+# AND via the in-process Popen handle (poll is None forever until exit).
+# Cap age so a stuck cycle cannot stop the 5-minute timer permanently.
 MAINTENANCE_MAX_AGE_SECONDS = 20 * 60
+
+
+def _maintenance_child_timed_out(*, launched_at: float, now: float, max_age_sec: float) -> bool:
+    """True when our tracked --once child has been running longer than the cap."""
+    if launched_at <= 0:
+        return False
+    return (float(now) - float(launched_at)) > float(max_age_sec)
+
+
+def _terminate_maintenance_child(proc: Optional[subprocess.Popen], *, reason: str) -> None:
+    if proc is None:
+        return
+    pid = getattr(proc, "pid", None)
+    log(f"[GUARD] Terminating maintenance child pid={pid} reason={reason}")
+    try:
+        proc.terminate()
+    except Exception:
+        pass
+    try:
+        proc.wait(timeout=TERMINATE_TIMEOUT_SECONDS)
+    except Exception:
+        try:
+            proc.kill()
+        except Exception:
+            pass
 
 
 def _is_maintenance_already_running() -> bool:
@@ -864,25 +891,66 @@ def _is_maintenance_already_running() -> bool:
     return False
 
 
-def _maintenance_tick() -> None:
-    global _LAST_MAINTENANCE_LAUNCH, _MAINTENANCE_PROC
+# After core reaches RUNNING, wait this long before the first maintenance cycle.
+# Guard boot used to fire maintenance while core was still starting; that cycle
+# runs operator_webui_ensure (and can reclaim/restart the web UI under load).
+MAINTENANCE_POST_RUNNING_GRACE_SECONDS = 45.0
+
+
+def _maintenance_tick(attempt: GuardAttempt) -> None:
+    global _LAST_MAINTENANCE_LAUNCH, _MAINTENANCE_LAUNCHED_AT, _MAINTENANCE_PROC
 
     if not MAINTENANCE_SCRIPT.exists():
         return
 
+    now = time.time()
+
     if _MAINTENANCE_PROC is not None:
         code = _MAINTENANCE_PROC.poll()
         if code is None:
-            return
-        log(f"[GUARD] Maintenance cycle exited with code={code}")
-        _MAINTENANCE_PROC = None
+            # Root timer fix: a hung --once child used to block forever (poll never
+            # returns), so no further 5-minute launches happened. Kill past max age.
+            if _maintenance_child_timed_out(
+                launched_at=_MAINTENANCE_LAUNCHED_AT,
+                now=now,
+                max_age_sec=MAINTENANCE_MAX_AGE_SECONDS,
+            ):
+                age = now - float(_MAINTENANCE_LAUNCHED_AT or now)
+                _terminate_maintenance_child(
+                    _MAINTENANCE_PROC,
+                    reason=f"exceeded_max_age_sec={MAINTENANCE_MAX_AGE_SECONDS} age_sec={age:.0f}",
+                )
+                _MAINTENANCE_PROC = None
+                _MAINTENANCE_LAUNCHED_AT = 0.0
+                # Allow an immediate recovery launch on this tick (timer was stuck).
+                _LAST_MAINTENANCE_LAUNCH = 0.0
+            else:
+                return
+        else:
+            log(f"[GUARD] Maintenance cycle exited with code={code}")
+            _MAINTENANCE_PROC = None
+            _MAINTENANCE_LAUNCHED_AT = 0.0
+
+    # Never run maintenance while core is idle/booting/failed/restarting.
+    # That race is what made the web UI look "killed when the guard comes back".
+    if str(getattr(attempt, "state", "") or "") != STATE_RUNNING:
+        return
+
+    running_since = None
+    if attempt.heartbeat_seen_at is not None:
+        running_since = float(attempt.heartbeat_seen_at)
+    elif attempt.state_seen_at is not None:
+        running_since = float(attempt.state_seen_at)
+    elif attempt.started_at is not None:
+        running_since = float(attempt.started_at)
+    if running_since is not None and (now - running_since) < float(MAINTENANCE_POST_RUNNING_GRACE_SECONDS):
+        return
 
     # Cross-process guard: don't launch if another guard instance already started a cycle.
     if _is_maintenance_already_running():
         log("[GUARD] Maintenance already running in sibling process — skipping launch")
         return
 
-    now = time.time()
     if (now - _LAST_MAINTENANCE_LAUNCH) < MAINTENANCE_INTERVAL_SECONDS:
         return
 
@@ -896,9 +964,12 @@ def _maintenance_tick() -> None:
                 stderr=subprocess.STDOUT,
             )
         _LAST_MAINTENANCE_LAUNCH = now
+        _MAINTENANCE_LAUNCHED_AT = now
         log(f"[GUARD] Maintenance cycle launched pid={_MAINTENANCE_PROC.pid}")
     except Exception as exc:
         log(f"[GUARD] Maintenance launch failed: {exc}")
+        _MAINTENANCE_PROC = None
+        _MAINTENANCE_LAUNCHED_AT = 0.0
 
 
 def main():
@@ -922,7 +993,7 @@ def main():
             break
         _enforce_guard_singleton_or_exit()
         supervisor_tick(attempt)
-        _maintenance_tick()
+        _maintenance_tick(attempt)
         time.sleep(POLL_SECONDS)
 
     remove_file(GUARD_PID_FILE)

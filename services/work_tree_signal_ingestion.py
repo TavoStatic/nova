@@ -2546,6 +2546,62 @@ def _edfi_capability_profile_signal_from_status(status_payload: dict[str, Any]) 
     }
 
 
+def _has_backpack_edfi_surface(status_payload: dict[str, Any]) -> bool:
+    return any(
+        key in status_payload
+        for key in (
+            "backpack_fusion",
+            "backpack_fusion_ok",
+            "backpack_available_capabilities",
+            "backpack_capability_count",
+            "backpack_nova_must_know",
+        )
+    )
+
+
+def _backpack_edfi_signal_from_status(status_payload: dict[str, Any]) -> dict[str, Any] | None:
+    """Emit only when backpack fusion surface is present and unhealthy.
+
+    The source label must appear in this module so source-wiring probe can
+    prove backpack_edfi is a real signal path (not registry-only).
+    """
+    if not _has_backpack_edfi_surface(status_payload):
+        return None
+    fusion_ok = status_payload.get("backpack_fusion_ok")
+    if fusion_ok is True:
+        return None
+    fusion = status_payload.get("backpack_fusion") if isinstance(status_payload.get("backpack_fusion"), dict) else {}
+    capability_count = int(status_payload.get("backpack_capability_count") or 0)
+    if fusion_ok is None and capability_count > 0 and not fusion:
+        return None
+    return {
+        "source": "backpack_edfi",
+        "signal_class": "governance_pressure",
+        "title": "Ed-Fi backpack fusion is not healthy",
+        "fingerprint": {
+            "class": "governance_pressure",
+            "surface": "backpack_edfi",
+            "error": "backpack_fusion_not_ok",
+            "symbol": "backpack_edfi",
+        },
+        "payload": {
+            "backpack_fusion_ok": fusion_ok,
+            "backpack_fusion": dict(fusion),
+            "backpack_capability_count": capability_count,
+            "backpack_available_capabilities": list(status_payload.get("backpack_available_capabilities") or [])[:24],
+            "rationale": (
+                "Nova must fuse installed backpack capabilities into the nervous system "
+                "before treating Ed-Fi backpack ops as closed source truth."
+            ),
+        },
+        "severity": "medium",
+        "actionability": "safe_now",
+        "allowed_tools": ["edfi_explore", "read", "find"],
+        "preferred_tool": "read",
+        "next_task": "Read backpack fusion status and re-run fusion-scan if capabilities changed",
+    }
+
+
 def _has_edfi_core_surface(status_payload: dict[str, Any]) -> bool:
     return any(
         key in status_payload
@@ -2567,6 +2623,9 @@ def _edfi_core_signal_from_status(status_payload: dict[str, Any]) -> dict[str, A
     )
     ready = bool(status_payload.get("edfi_core_ready", readiness.get("ready", False)))
     if ready:
+        return None
+    # Backpack extract path operational → do not open high-severity work-tree pressure.
+    if bool(readiness.get("backpack_operational")):
         return None
     milestone = str(status_payload.get("edfi_core_milestone") or readiness.get("milestone") or "").strip()
     return {
@@ -2605,6 +2664,17 @@ def _has_data_lane_edfi_bisd_surface(status_payload: dict[str, Any]) -> bool:
 def _data_lane_edfi_bisd_signal_from_status(status_payload: dict[str, Any]) -> dict[str, Any] | None:
     if not _has_data_lane_edfi_bisd_surface(status_payload):
         return None
+    # Legacy BISD-named lane is superseded by backpacks/edfi when core is ready
+    # or a schools extract exists — stop dual-door pressure on the work tree.
+    readiness = (
+        status_payload.get("edfi_core_readiness")
+        if isinstance(status_payload.get("edfi_core_readiness"), dict)
+        else {}
+    )
+    if bool(status_payload.get("edfi_core_ready")) or bool(readiness.get("ready")):
+        return None
+    if bool(readiness.get("backpack_operational")):
+        return None
     data_pipelines = status_payload.get("data_pipelines") if isinstance(status_payload.get("data_pipelines"), dict) else {}
     pipeline_rows = [
         dict(item)
@@ -2633,13 +2703,16 @@ def _data_lane_edfi_bisd_signal_from_status(status_payload: dict[str, Any]) -> d
         "payload": {
             "data_lane_edfi_bisd_ok": not blocked,
             "pipeline_rows": pipeline_rows[:2],
-            "rationale": "District Ed-Fi lane health must be visible before BISD-specific repair work is routed.",
+            "rationale": (
+                "Legacy edfi_bisd lane is secondary to backpacks/edfi. "
+                "Prefer the backpack when installed; only inspect this lane if the backpack is missing."
+            ),
         },
         "severity": "medium",
         "actionability": "safe_now",
         "allowed_tools": ["pipeline", "read", "find"],
         "preferred_tool": "pipeline",
-        "next_task": "Inspect edfi_bisd lane status through the pipeline tool",
+        "next_task": "Prefer backpacks/edfi; only inspect legacy edfi_bisd if backpack is not installed",
     }
 
 
@@ -4587,12 +4660,44 @@ def _release_readiness_signal_from_status(status_payload: dict[str, Any]) -> dic
             "preferred_tool": "release_rebuild_verify",
             "tool_args": ["work-tree-rebuild"],
         })
+        # Full solution: rebuild is not the end. Nova must keep climbing through
+        # validation without waiting for a phase flip / new signal identity.
+        task_sequence.append({
+            "title": "Run release validation profile from current artifact",
+            "allowed_tools": ["release_validation_run"],
+            "preferred_tool": "release_validation_run",
+        })
+        task_sequence.append({
+            "title": "Run release promotion judgment from validation evidence",
+            "allowed_tools": ["release_promotion_judgment"],
+            "preferred_tool": "release_promotion_judgment",
+        })
+        task_sequence.append({
+            "title": "Record completed validation outcome in release ledger",
+            "allowed_tools": ["release_record_validation_outcome"],
+            "preferred_tool": "release_record_validation_outcome",
+        })
     if no_builds_recorded:
         task_sequence.append({
             "title": "Rebuild and verify initial release package from current source",
             "allowed_tools": ["release_rebuild_verify"],
             "preferred_tool": "release_rebuild_verify",
             "tool_args": ["work-tree-rebuild"],
+        })
+        task_sequence.append({
+            "title": "Run release validation profile from current artifact",
+            "allowed_tools": ["release_validation_run"],
+            "preferred_tool": "release_validation_run",
+        })
+        task_sequence.append({
+            "title": "Run release promotion judgment from validation evidence",
+            "allowed_tools": ["release_promotion_judgment"],
+            "preferred_tool": "release_promotion_judgment",
+        })
+        task_sequence.append({
+            "title": "Record completed validation outcome in release ledger",
+            "allowed_tools": ["release_record_validation_outcome"],
+            "preferred_tool": "release_record_validation_outcome",
         })
     blocked_task = ""
     blocked_reason = ""
@@ -4608,6 +4713,33 @@ def _release_readiness_signal_from_status(status_payload: dict[str, Any]) -> dic
             else "release_readiness_blocked"
         )
 
+    # Finding identity is the *package*, not the readiness phase. Phase flips
+    # (stale → needs-promotion → …) must update one branch and keep evidence.
+    # Phase-specific error codes stay in payload for operators, not the key.
+    package_symbol = artifact_name or artifact_path or "release_package"
+    release_fix_tools = ["read", "find", "system_check", "release_rebuild_verify"]
+    if readiness_state in {
+        "source-changed-after-build",
+        "no-builds",
+        "needs-promotion",
+        "needs-verification",
+        "",
+    } or no_builds_recorded:
+        release_fix_tools.extend(
+            [
+                "release_validation_run",
+                "release_promotion_judgment",
+                "release_record_validation_outcome",
+            ]
+        )
+    # Dedupe preserve order
+    seen_tools: set[str] = set()
+    allowed_tools_out: list[str] = []
+    for tool_name in release_fix_tools:
+        if tool_name in seen_tools:
+            continue
+        seen_tools.add(tool_name)
+        allowed_tools_out.append(tool_name)
     return {
         "source": "release",
         "signal_class": "release_readiness_gap",
@@ -4615,13 +4747,14 @@ def _release_readiness_signal_from_status(status_payload: dict[str, Any]) -> dic
         "fingerprint": {
             "class": "release_readiness_gap",
             "surface": "release",
-            "error": error_symbol,
-            "symbol": artifact_name or artifact_path or "release_package",
+            "error": "release_package_not_ready",
+            "symbol": package_symbol,
         },
         "payload": {
             "release_status_ok": release_ok,
             "latest_state": latest_state or "unknown",
             "latest_readiness_state": readiness_state or "unknown",
+            "release_phase_code": error_symbol,
             "latest_ready_to_ship": ready_to_ship,
             "latest_readiness_note": str(release.get("latest_readiness_note") or ""),
             "latest_artifact_path": artifact_path,
@@ -4656,16 +4789,88 @@ def _release_readiness_signal_from_status(status_payload: dict[str, Any]) -> dic
         },
         "severity": severity,
         "actionability": actionability,
-        "allowed_tools": ["read", "find", "system_check", "release_rebuild_verify"]
-        if readiness_state == "source-changed-after-build"
-        else ["read", "find", "system_check", "release_validation_run", "release_promotion_judgment", "release_record_validation_outcome"],
+        "allowed_tools": allowed_tools_out,
         "preferred_tool": "release_rebuild_verify"
-        if readiness_state == "source-changed-after-build"
+        if readiness_state == "source-changed-after-build" or no_builds_recorded
         else ("release_validation_run" if readiness_state in {"needs-promotion", "needs-verification"} else "read"),
         "next_task": next_task,
         "task_sequence": task_sequence,
         "blocked_task": blocked_task,
         "blocked_reason": blocked_reason,
+    }
+
+
+def _extend_release_sequence_from_progress(branch: Any) -> dict[str, Any]:
+    """When a release sequence ends at rebuild, keep the fix ladder open for validation.
+
+    Nova is the fixer: sequence must not stop mid-solution after a successful rebuild.
+    """
+    work_class = str(getattr(branch, "work_class", "") or "").strip().lower()
+    source_type = str(getattr(branch, "source_type", "") or "").strip().lower()
+    if work_class != "release_readiness_gap" and source_type not in {"release", "release_status"}:
+        return {"ok": False, "reason": "not_release_finding"}
+    try:
+        progress = dict(work_tree._branch_progress_payload(branch) or {})
+    except Exception:
+        progress = {}
+    next_marker = progress.get("next_marker") if isinstance(progress.get("next_marker"), dict) else {}
+    marker_id = str(next_marker.get("id") or next_marker.get("marker_id") or "").strip()
+    if marker_id != "validation_recorded":
+        return {"ok": False, "reason": f"next_marker_not_validation:{marker_id or 'none'}"}
+
+    tail = [
+        {
+            "title": "Run release validation profile from current artifact",
+            "allowed_tools": ["release_validation_run"],
+            "preferred_tool": "release_validation_run",
+        },
+        {
+            "title": "Run release promotion judgment from validation evidence",
+            "allowed_tools": ["release_promotion_judgment"],
+            "preferred_tool": "release_promotion_judgment",
+        },
+        {
+            "title": "Record completed validation outcome in release ledger",
+            "allowed_tools": ["release_record_validation_outcome"],
+            "preferred_tool": "release_record_validation_outcome",
+        },
+    ]
+    payload = dict(branch.source_payload or {}) if isinstance(getattr(branch, "source_payload", None), dict) else {}
+    sequence = [
+        dict(item)
+        for item in list(payload.get("task_sequence") or [])
+        if isinstance(item, dict) and str(item.get("title") or "").strip()
+    ]
+    existing_titles = {str(item.get("title") or "").strip().lower() for item in sequence}
+    appended: list[dict[str, Any]] = []
+    for item in tail:
+        title = str(item.get("title") or "").strip()
+        if title.lower() in existing_titles:
+            continue
+        sequence.append(dict(item))
+        appended.append(dict(item))
+        existing_titles.add(title.lower())
+    if not appended:
+        # Already present but maybe skippable; re-resolve next.
+        next_item = _next_sequence_task(str(getattr(branch, "branch_id", "") or ""), {"task_sequence": sequence})
+        return {"ok": bool(next_item), "reason": "tail_already_present", "item": next_item, "appended": 0}
+
+    payload["task_sequence"] = sequence
+    branch.source_payload = payload
+    try:
+        work_tree.touch_branch(str(getattr(branch, "branch_id", "") or ""))
+    except Exception:
+        pass
+    try:
+        work_tree.persist_branches()
+    except Exception:
+        pass
+    next_item = _next_sequence_task(str(getattr(branch, "branch_id", "") or ""), {"task_sequence": sequence})
+    return {
+        "ok": bool(next_item),
+        "reason": "extended_validation_tail",
+        "item": next_item,
+        "appended": len(appended),
     }
 
 
@@ -4677,10 +4882,144 @@ def _next_sequence_task(branch_id: str, normalized: dict[str, Any]) -> dict[str,
     ]
     if not sequence:
         return {}
+    branch = work_tree.get_branch(str(branch_id or "").strip())
+    progress: dict[str, Any] = {}
+    judgments: list[dict[str, Any]] = []
+    payload: dict[str, Any] = {}
+    work_class = ""
+    source_type = ""
+    if branch is not None:
+        work_class = str(getattr(branch, "work_class", "") or "")
+        source_type = str(getattr(branch, "source_type", "") or "")
+        payload = dict(branch.source_payload or {}) if isinstance(branch.source_payload, dict) else {}
+        judgments = [dict(r) for r in list(payload.get("attempt_judgments") or []) if isinstance(r, dict)]
+        try:
+            progress = dict(work_tree._branch_progress_payload(branch) or {})
+        except Exception:
+            progress = {}
     for item in sequence:
-        if not _sequence_item_satisfied(branch_id, item):
-            return item
+        if _sequence_item_satisfied(branch_id, item):
+            continue
+        preferred = str(item.get("preferred_tool") or "").strip()
+        if not preferred:
+            allowed = [str(t or "").strip() for t in list(item.get("allowed_tools") or []) if str(t or "").strip()]
+            preferred = allowed[0] if allowed else ""
+        # Do not re-open obsolete or suppressed stems (e.g. more read after drift is held).
+        try:
+            from services.solution_trail import sequence_item_should_skip_for_trail
+
+            skip_why = sequence_item_should_skip_for_trail(
+                tool_name=preferred,
+                task_title=str(item.get("title") or ""),
+                progress=progress,
+                judgments=judgments,
+                branch_payload=payload,
+                work_class=work_class,
+                source_type=source_type,
+            )
+            if skip_why is not None:
+                continue
+        except Exception:
+            pass
+        return item
     return {}
+
+
+def advance_branch_sequence_after_task(branch_id: str) -> dict[str, Any]:
+    """Spawn the next sequence task immediately after a step completes.
+
+    Without this, completing the only open stem marks the branch complete and
+    the operator loses the progress surface until the next signal-ingest cycle
+    reopens work — often a multi-minute empty window.
+    """
+    branch = work_tree.get_branch(str(branch_id or "").strip())
+    if branch is None:
+        return {"ok": False, "reason": "branch_missing"}
+    open_tasks = [
+        task
+        for task in work_tree.list_branch_tasks(branch.branch_id)
+        if str(getattr(getattr(task, "status", None), "value", getattr(task, "status", "")) or "")
+        .strip()
+        .lower()
+        not in {"complete", "dropped"}
+    ]
+    if open_tasks:
+        return {"ok": True, "reason": "already_has_open_task", "task_id": open_tasks[0].task_id}
+
+    payload = dict(branch.source_payload or {}) if isinstance(branch.source_payload, dict) else {}
+    sequence = [
+        dict(item)
+        for item in list(payload.get("task_sequence") or [])
+        if isinstance(item, dict) and str(item.get("title") or "").strip()
+    ]
+    if not sequence:
+        return {"ok": False, "reason": "no_persisted_sequence"}
+
+    # Prefer first sequence item the journal has not satisfied (trail next-move).
+    next_item = _next_sequence_task(branch.branch_id, {"task_sequence": sequence})
+    extended: dict[str, Any] = {}
+    if not next_item:
+        # Truncated sequences (e.g. rebuild-only release stems) leave Nova idle
+        # after a successful fix. Extend from solution progress so it keeps fixing.
+        extended = _extend_release_sequence_from_progress(branch)
+        if extended.get("ok") and extended.get("item"):
+            next_item = dict(extended.get("item") or {})
+        if not next_item:
+            return {
+                "ok": True,
+                "reason": "sequence_exhausted",
+                "extended": bool(extended.get("ok")),
+            }
+
+    task_text = str(next_item.get("title") or "").strip()
+    task_allowed_tools = [
+        str(tool or "").strip()
+        for tool in list(next_item.get("allowed_tools") or [])
+        if str(tool or "").strip()
+    ]
+    task_preferred_tool = str(next_item.get("preferred_tool") or "").strip()
+    if task_preferred_tool and task_preferred_tool not in task_allowed_tools:
+        task_allowed_tools = [task_preferred_tool] + task_allowed_tools
+
+    task = work_tree.add_task_to_branch(
+        branch.branch_id,
+        task_text,
+        meta=_recurring_signal_task_meta(
+            branch,
+            task_text=task_text,
+            task_preferred_tool=task_preferred_tool,
+            task_allowed_tools=task_allowed_tools,
+            sequence_task=next_item,
+        ),
+    )
+    if task_allowed_tools:
+        work_tree.set_branch_tools(
+            branch.branch_id,
+            allowed_tools=task_allowed_tools,
+            preferred_tool=task_preferred_tool if task_preferred_tool in task_allowed_tools else task_allowed_tools[0],
+        )
+    # Ensure branch is ready for the new stem (not left COMPLETE after prior sole task).
+    try:
+        if str(getattr(getattr(branch, "status", None), "value", getattr(branch, "status", "")) or "").strip().lower() in {
+            "complete",
+            "archived",
+        }:
+            branch.status = BranchStatus.READY
+            branch.resolution_state = "open"
+            work_tree.touch_branch(branch.branch_id)
+    except Exception:
+        pass
+    try:
+        work_tree.stamp_branch_progress(branch.branch_id, persist=True)
+    except Exception:
+        pass
+    return {
+        "ok": True,
+        "reason": "next_sequence_task_created",
+        "task_id": task.task_id,
+        "task_title": task_text,
+        "preferred_tool": task_preferred_tool,
+    }
 
 
 def _first_sequence_task(normalized: dict[str, Any]) -> dict[str, Any]:
@@ -5296,6 +5635,10 @@ class WorkTreeSignalIngestionService:
             }
 
         open_branch = self._find_branch_by_source_key(tree.tree_id, source_key, open_only=True)
+        if open_branch is None:
+            open_branch = self._find_release_package_continuity_branch(
+                tree.tree_id, normalized, open_only=True
+            )
         if open_branch is not None:
             self._apply_branch_update(open_branch, normalized, reopen=False)
             return {
@@ -5306,6 +5649,10 @@ class WorkTreeSignalIngestionService:
             }
 
         closed_branch = self._find_branch_by_source_key(tree.tree_id, source_key, open_only=False)
+        if closed_branch is None:
+            closed_branch = self._find_release_package_continuity_branch(
+                tree.tree_id, normalized, open_only=False
+            )
         if closed_branch is not None:
             closed_branch.source_payload = bump_branch_reopen(
                 closed_branch.source_payload,
@@ -5434,6 +5781,9 @@ class WorkTreeSignalIngestionService:
         edfi_core_signal = _edfi_core_signal_from_status(status_payload)
         if edfi_core_signal is not None:
             signals.append(edfi_core_signal)
+        backpack_edfi_signal = _backpack_edfi_signal_from_status(status_payload)
+        if backpack_edfi_signal is not None:
+            signals.append(backpack_edfi_signal)
         edfi_bisd_lane_signal = _data_lane_edfi_bisd_signal_from_status(status_payload)
         if edfi_bisd_lane_signal is not None:
             signals.append(edfi_bisd_lane_signal)
@@ -5514,7 +5864,13 @@ class WorkTreeSignalIngestionService:
         maintenance = status_payload.get("autonomy_maintenance") if isinstance(status_payload.get("autonomy_maintenance"), dict) else {}
         last_regression = str(maintenance.get("last_regression_status") or "").strip()
         last_regression_stale = bool(maintenance.get("last_regression_stale", False))
-        if regression_failure_active(status_label=last_regression, stale=last_regression_stale):
+        if regression_failure_active(
+            status_label=last_regression,
+            stale=last_regression_stale,
+            failed_tests=list(maintenance.get("last_regression_failed_tests") or []),
+            failed_lane=str(maintenance.get("last_regression_failed_lane") or ""),
+            tail=str(maintenance.get("last_regression_tail") or ""),
+        ):
             signals.append({
                 "source": "test_ecosystem",
                 "signal_class": "regression_failure",
@@ -6080,6 +6436,9 @@ class WorkTreeSignalIngestionService:
         regression_active = regression_failure_active(
             status_label=last_regression,
             stale=last_regression_stale,
+            failed_tests=list(maintenance.get("last_regression_failed_tests") or []),
+            failed_lane=str(maintenance.get("last_regression_failed_lane") or ""),
+            tail=str(maintenance.get("last_regression_tail") or ""),
         )
         if _has_regression_surface(status_payload) and not regression_active:
             if last_regression_stale:
@@ -6150,6 +6509,30 @@ class WorkTreeSignalIngestionService:
                     )
         results.extend(self._resolve_operator_control_from_outbox_truth(status_payload))
         results.extend(self.reconcile_signal_branch_hygiene(archive_superseded=archive_superseded))
+        # Batch stamp after full status sync so every open signal task has
+        # durable progress for the orchestrator and control UI.
+        try:
+            tree = self._find_signal_tree()
+            if tree is not None:
+                stamp = work_tree.stamp_open_tasks_progress(tree_id=tree.tree_id, persist=True)
+                results.append(
+                    {
+                        "action": "progress_stamp",
+                        "tree_id": tree.tree_id,
+                        "branch_id": "",
+                        "reason": "open_task_progress_measured",
+                        "progress_stamp": stamp,
+                    }
+                )
+        except Exception as exc:
+            results.append(
+                {
+                    "action": "progress_stamp",
+                    "tree_id": "",
+                    "branch_id": "",
+                    "reason": f"progress_stamp_failed:{str(exc)[:160]}",
+                }
+            )
         return results
 
     def reconcile_signal_branch_hygiene(self, *, archive_superseded: bool = True) -> list[dict[str, Any]]:
@@ -6724,6 +7107,72 @@ class WorkTreeSignalIngestionService:
             return branch
         return None
 
+    def _find_release_package_continuity_branch(
+        self,
+        tree_id: str,
+        normalized: dict[str, Any],
+        *,
+        open_only: bool,
+    ) -> Any | None:
+        """Locate the durable release package finding across readiness-phase key changes.
+
+        Legacy keys embedded the phase in the fingerprint (stale vs validation-missing).
+        Continuity is package identity so evidence and progress do not restart at 0%.
+        """
+        work_class = str(normalized.get("work_class") or "").strip().lower()
+        source = str(normalized.get("source") or "").strip().lower()
+        if work_class != "release_readiness_gap" or source != "release":
+            return None
+        payload = normalized.get("payload") if isinstance(normalized.get("payload"), dict) else {}
+        artifact_name = str(payload.get("latest_artifact_name") or "").strip()
+        artifact_path = str(payload.get("latest_artifact_path") or "").strip()
+        package_symbol = artifact_name or artifact_path
+        if not package_symbol:
+            return None
+        candidates: list[Any] = []
+        for branch in work_tree.list_tree_branches(tree_id):
+            if _is_archived_signal_branch(branch):
+                continue
+            if str(getattr(branch, "work_class", "") or "").strip().lower() != "release_readiness_gap":
+                continue
+            if str(getattr(branch, "source_type", "") or "").strip().lower() not in {"release", "release_status", ""}:
+                # Allow empty only if source_key looks like release package.
+                sk = str(getattr(branch, "source_key", "") or "")
+                if not sk.startswith("release_readiness_gap:release"):
+                    continue
+            resolution = str(getattr(branch, "resolution_state", "") or "").strip().lower()
+            if open_only and resolution in {"resolved", "retired"}:
+                continue
+            if not open_only and resolution not in {"resolved", "retired", "complete", ""}:
+                # Prefer closed/historical only when looking for reopen targets.
+                pass
+            bp = dict(getattr(branch, "source_payload", {}) or {}) if isinstance(getattr(branch, "source_payload", None), dict) else {}
+            b_name = str(bp.get("latest_artifact_name") or "").strip()
+            b_path = str(bp.get("latest_artifact_path") or "").strip()
+            sk = str(getattr(branch, "source_key", "") or "").strip()
+            same_package = (
+                (artifact_name and b_name and artifact_name == b_name)
+                or (artifact_path and b_path and artifact_path == b_path)
+                or (package_symbol and sk.endswith(f":{package_symbol}"))
+                or (package_symbol and f":{package_symbol}" in sk)
+            )
+            if not same_package:
+                continue
+            candidates.append(branch)
+        if not candidates:
+            return None
+        # Prefer open ready branches, then most recently updated.
+        def _rank(branch: Any) -> tuple:
+            resolution = str(getattr(branch, "resolution_state", "") or "").strip().lower()
+            status = str(getattr(getattr(branch, "status", None), "value", getattr(branch, "status", "")) or "").strip().lower()
+            open_rank = 0 if resolution not in {"resolved", "retired"} and status not in {"archived"} else 1
+            updated = getattr(branch, "updated_at", None)
+            ts = updated.timestamp() if hasattr(updated, "timestamp") else 0.0
+            return (open_rank, -ts)
+
+        candidates.sort(key=_rank)
+        return candidates[0]
+
     def _deserves_persisted_work(self, normalized: dict[str, Any]) -> bool:
         actionability = str(normalized.get("actionability") or "").strip().lower()
         severity = str(normalized.get("severity") or "").strip().lower()
@@ -6755,6 +7204,29 @@ class WorkTreeSignalIngestionService:
         lifecycle = read_branch_lifecycle(branch.source_payload)
         if lifecycle:
             incoming_payload = attach_branch_lifecycle(incoming_payload, lifecycle)
+        # Persist sequence so completing a stem can advance without waiting for
+        # the next full status-ingest cycle (avoids empty progress window).
+        sequence_rows = [
+            dict(item)
+            for item in list(normalized.get("task_sequence") or [])
+            if isinstance(item, dict) and str(item.get("title") or "").strip()
+        ]
+        if sequence_rows:
+            incoming_payload["task_sequence"] = sequence_rows
+        # Radar clock: first time this finding hit Nova's work tree.
+        prior_payload = dict(branch.source_payload or {}) if isinstance(branch.source_payload, dict) else {}
+        surfaced = str(prior_payload.get("surfaced_at") or incoming_payload.get("surfaced_at") or "").strip()
+        if not surfaced:
+            surfaced = (
+                work_tree._dt(branch.created_at)
+                if getattr(branch, "created_at", None) is not None
+                else now.isoformat(timespec="seconds")
+            )
+            if first_seen or reopen:
+                surfaced = now.isoformat(timespec="seconds")
+        incoming_payload["surfaced_at"] = surfaced
+        if str(prior_payload.get("work_started_at") or "").strip():
+            incoming_payload["work_started_at"] = str(prior_payload.get("work_started_at") or "").strip()
         branch.source_payload = incoming_payload
         branch.work_class = work_class
         branch.actionability = actionability
@@ -7172,6 +7644,13 @@ class WorkTreeSignalIngestionService:
                     allowed_tools=task_allowed_tools,
                     preferred_tool=task_preferred_tool if task_preferred_tool in task_allowed_tools else task_allowed_tools[0],
                 )
+
+        # Close the progress wire: after signals create/update open work, stamp
+        # ladder position so selection and UI see motion — not only after tools run.
+        try:
+            work_tree.stamp_branch_open_tasks_progress(branch.branch_id, persist=True)
+        except Exception:
+            pass
 
     def _normalize_signal(self, signal: dict[str, Any]) -> dict[str, Any]:
         source = str(signal.get("source") or "").strip().lower() or "control_status"

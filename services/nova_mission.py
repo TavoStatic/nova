@@ -7,6 +7,15 @@ from services.nova_mission_owner_verdicts import (
     _release_drift_remediation_eligible,
     build_mission_truth_gate,
 )
+from services.tool_identity import (
+    FIND,
+    LS,
+    READ,
+    RELEASE_PROMOTION_JUDGMENT,
+    RELEASE_REBUILD_VERIFY,
+    RELEASE_RECORD_VALIDATION_OUTCOME,
+    RELEASE_VALIDATION_RUN,
+)
 
 
 def _as_dict(value: Any) -> dict:
@@ -73,11 +82,32 @@ class NovaMissionService:
             "guard_start",
             "autonomy_maintenance_start",
         ],
+        # Terminal rebuild/thinning plus honest release-ladder steps (read/find first).
+        # Without the early tools, hold + next_step=read deadlocks forever.
         "hold_allow_active_work_tools": [
             "core_thinning",
-            "release_rebuild_verify",
+            RELEASE_REBUILD_VERIFY,
+            RELEASE_VALIDATION_RUN,
+            RELEASE_RECORD_VALIDATION_OUTCOME,
+            RELEASE_PROMOTION_JUDGMENT,
+            READ,
+            FIND,
+            LS,
         ],
     }
+
+    # Tools allowed through mission hold when release-drift remediation is eligible.
+    RELEASE_LADDER_HOLD_TOOLS = frozenset(
+        {
+            READ,
+            FIND,
+            LS,
+            RELEASE_REBUILD_VERIFY,
+            RELEASE_VALIDATION_RUN,
+            RELEASE_RECORD_VALIDATION_OUTCOME,
+            RELEASE_PROMOTION_JUDGMENT,
+        }
+    )
 
     MODE_PROFILES: dict[str, dict[str, Any]] = {
         "steady_state_guard": {
@@ -136,10 +166,30 @@ class NovaMissionService:
     }
     BLOCKER_DEFAULT_REMEDIATION = {
         "generated_queue_untested": {"action": "generated_queue_run_next", "tools": []},
-        "core_gate_release_drift": {"action": "generated_queue_run_next", "tools": []},
+        "core_gate_release_drift": {
+            "action": "active_work_tree_run_next",
+            "tools": [
+                READ,
+                FIND,
+                LS,
+                RELEASE_REBUILD_VERIFY,
+                RELEASE_VALIDATION_RUN,
+                RELEASE_RECORD_VALIDATION_OUTCOME,
+                RELEASE_PROMOTION_JUDGMENT,
+                "core_thinning",
+            ],
+        },
         "release_truth_stale": {
             "action": "active_work_tree_run_next",
-            "tools": ["release_rebuild_verify"],
+            "tools": [
+                READ,
+                FIND,
+                LS,
+                RELEASE_REBUILD_VERIFY,
+                RELEASE_VALIDATION_RUN,
+                RELEASE_RECORD_VALIDATION_OUTCOME,
+                RELEASE_PROMOTION_JUDGMENT,
+            ],
         },
     }
 
@@ -350,18 +400,68 @@ class NovaMissionService:
         return _as_dict(mission.get("release_runtime_truth"))
 
     @classmethod
-    def _hold_allows_active_work_tool(cls, mission_snapshot: dict | None, tool: str) -> bool:
+    def _release_ladder_hold_context_ok(cls, action_context: dict | None) -> bool:
+        """Prefer release-family work for observation-tier tools under hold."""
+        context = _as_dict(action_context)
+        blob = " ".join(
+            [
+                _text(context.get("title"), 240),
+                _text(context.get("task_title"), 240),
+                _text(context.get("tree_title"), 240),
+                _text(context.get("progress_family"), 120),
+                _text(context.get("progress_summary"), 240),
+                _text(context.get("work_class"), 120),
+                _text(context.get("source_type"), 120),
+                _text(context.get("source_key"), 160),
+            ]
+        ).lower()
+        if not blob.strip():
+            # No context (legacy callers): allow tool if mission remediation is eligible.
+            return True
+        markers = (
+            "release",
+            "package",
+            "stale",
+            "ledger",
+            "rebuild",
+            "validation",
+            "promotion",
+            "release_readiness",
+        )
+        return any(token in blob for token in markers)
+
+    @classmethod
+    def _hold_allows_active_work_tool(
+        cls,
+        mission_snapshot: dict | None,
+        tool: str,
+        *,
+        action_context: dict | None = None,
+    ) -> bool:
         clean_tool = _text(tool, 120)
-        if clean_tool not in {"core_thinning", "release_rebuild_verify"}:
+        allowed = set(cls.RELEASE_LADDER_HOLD_TOOLS) | {"core_thinning"}
+        if clean_tool not in allowed:
             return False
         mission = _as_dict(mission_snapshot)
         blockers = cls._blocker_codes(mission.get("truth_blockers")) | cls._blocker_codes(
             mission.get("green_blockers")
         )
 
-        if clean_tool == "release_rebuild_verify":
+        if clean_tool in cls.RELEASE_LADDER_HOLD_TOOLS:
+            # Observation-tier steps only on release-shaped work (avoid random reads on hold).
+            if clean_tool in {READ, FIND, LS} and not cls._release_ladder_hold_context_ok(action_context):
+                return False
             if cls._release_truth_stale_remediation_window(mission):
                 return True
+            if "core_gate_release_drift" in blockers:
+                core_gate = _as_dict(mission.get("core_gate"))
+                if _as_list(core_gate.get("missing_roots")):
+                    return False
+                return _release_drift_remediation_eligible(
+                    core_gate=core_gate,
+                    release_truth_current=_as_bool(mission.get("release_truth_current"), False),
+                    release_evidence=cls._mission_release_drift_evidence(mission),
+                )
             if not cls._base_evidence_pillars_current(mission):
                 return False
             for blocker in cls._mission_hold_blocker_records(mission):
@@ -375,6 +475,7 @@ class NovaMissionService:
                     return True
             return False
 
+        # core_thinning path (unchanged semantics)
         if "core_gate_roots_blocked" in blockers:
             return False
 
@@ -430,12 +531,35 @@ class NovaMissionService:
                 if cls._base_evidence_pillars_current(mission):
                     return True
                 continue
-            if code == "regression_failed" or tool in {"release_rebuild_verify", "core_thinning"}:
-                if code == "release_truth_stale" and tool == "release_rebuild_verify":
+            # Active-work remediation: keep core_thinning strict; allow release ladder
+            # tools (including read/find) only when release-drift remediation is eligible.
+            if tool == "core_thinning":
+                if cls._hold_allows_active_work_tool(
+                    mission,
+                    tool,
+                    action_context=context,
+                ):
+                    return True
+                continue
+            if tool in cls.RELEASE_LADDER_HOLD_TOOLS:
+                if tool in {READ, FIND, LS} and not cls._release_ladder_hold_context_ok(context):
+                    continue
+                if code == "core_gate_release_drift":
+                    core_gate = _as_dict(mission.get("core_gate"))
+                    if _release_drift_remediation_eligible(
+                        core_gate=core_gate,
+                        release_truth_current=_as_bool(mission.get("release_truth_current"), False),
+                        release_evidence=cls._mission_release_drift_evidence(mission),
+                    ):
+                        return True
+                    continue
+                if code == "release_truth_stale" or cls._release_truth_stale_remediation_window(mission):
                     return True
                 if cls._base_evidence_pillars_current(mission):
                     return True
-                if tool in {"release_rebuild_verify", "core_thinning"} and cls._release_truth_stale_remediation_window(mission):
+                continue
+            if code == "regression_failed":
+                if cls._base_evidence_pillars_current(mission):
                     return True
                 continue
             if cls.active_work_evidence_current(mission):
@@ -475,7 +599,11 @@ class NovaMissionService:
         if action in block and action == "active_work_tree_run_next":
             context = _as_dict(action_context)
             tool = _text(context.get("recommended_tool") or context.get("tool"), 120)
-            if tool in allow_active_tools and cls._hold_allows_active_work_tool(mission_snapshot, tool):
+            if tool in allow_active_tools and cls._hold_allows_active_work_tool(
+                mission_snapshot,
+                tool,
+                action_context=context,
+            ):
                 return False
         if action in block and cls._owner_remediation_allows_action(
             action,

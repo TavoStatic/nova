@@ -22,6 +22,22 @@ from services.pipeline_worker_supervision import (
 )
 
 
+def _change_cursor_maintenance_enabled() -> bool:
+    """
+    Live TEA change-cursor advances are off by default.
+
+    The Ed-Fi backpack serves reports from local extracts; background cursor
+    maintenance was a major source of rate-limit pressure (hundreds of pulls).
+    Opt in with NOVA_EDFI_CHANGE_CURSOR_MAINTENANCE=1 when needed.
+    """
+    return str(os.environ.get("NOVA_EDFI_CHANGE_CURSOR_MAINTENANCE") or "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Run a privileged Nova data-pipeline worker.")
     parser.add_argument("--pipeline", required=True, help="Pipeline id to service, e.g. sis_test")
@@ -89,7 +105,10 @@ def main() -> int:
             runtime_root=runtime_root,
             data_sources_root=data_sources_root,
         )
-        maybe_advance_tracked_cursors(str(args.connection_id or "district-main").strip() or "district-main")
+        if _change_cursor_maintenance_enabled():
+            maybe_advance_tracked_cursors(
+                str(args.connection_id or "district-main").strip() or "district-main"
+            )
         return 0
 
     idle_cycles = 0
@@ -122,8 +141,10 @@ def main() -> int:
                     detail="no_pending_requests",
                     pid=owner_pid,
                 )
-            if idle_cycles % 60 == 0:
-                maybe_advance_tracked_cursors(str(args.connection_id or "district-main").strip() or "district-main")
+            if idle_cycles % 60 == 0 and _change_cursor_maintenance_enabled():
+                maybe_advance_tracked_cursors(
+                    str(args.connection_id or "district-main").strip() or "district-main"
+                )
             time.sleep(max(0.1, float(args.poll_interval)))
         else:
             idle_cycles = 0

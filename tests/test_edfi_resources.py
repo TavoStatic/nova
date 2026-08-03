@@ -223,8 +223,35 @@ class TestGetDistrictScopedPage(unittest.TestCase):
         self.assertEqual(result.items[0]["schoolId"], 31901001)
         self.assertEqual(result.district_filter_strategy, "client_side")
         self.assertFalse(result.scan_cap_hit)
+        # Short page (3 < fetch_size) exhausts source; limit=2 is a page window.
         self.assertTrue(result.district_page_complete)
         get_page_mock.assert_called_once()
+
+    def test_collect_all_returns_every_matching_school(self) -> None:
+        """full_lea path: match count follows district size, not a fixed 25/50 cap."""
+        client = _mock_client()
+        # One short statewide page with 4 matches for LEA 31901
+        page1 = self._page_result(
+            [
+                {"schoolId": 1, "localEducationAgencyReference": {"localEducationAgencyId": 999}},
+                {"schoolId": 31901001, "localEducationAgencyReference": {"localEducationAgencyId": 31901}},
+                {"schoolId": 31901002, "localEducationAgencyReference": {"localEducationAgencyId": 31901}},
+                {"schoolId": 31901003, "localEducationAgencyReference": {"localEducationAgencyId": 31901}},
+                {"schoolId": 31901004, "localEducationAgencyReference": {"localEducationAgencyId": 31901}},
+            ]
+        )
+        with patch("services.edfi.resources.get_page", return_value=page1):
+            result = get_district_scoped_page(
+                client,
+                "ed-fi/schools",
+                district_lea_id=31901,
+                limit=2,  # would have stopped at 2 without collect_all
+                collect_all=True,
+            )
+        self.assertTrue(result.ok)
+        self.assertEqual(result.count, 4)
+        self.assertTrue(result.district_page_complete)
+        self.assertFalse(result.scan_cap_hit)
 
     def test_scan_cap_hit_marks_page_incomplete(self) -> None:
         client = _mock_client()

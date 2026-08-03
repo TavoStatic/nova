@@ -87,6 +87,53 @@ class TestNovaGuardBoot(unittest.TestCase):
         self.assertFalse(failed)
         self.assertEqual(reason, "")
 
+    def test_maintenance_child_timed_out_after_max_age(self):
+        """Hung --once must not block the 5-minute timer forever."""
+        self.assertFalse(
+            nova_guard._maintenance_child_timed_out(
+                launched_at=100.0,
+                now=100.0 + nova_guard.MAINTENANCE_MAX_AGE_SECONDS,
+                max_age_sec=nova_guard.MAINTENANCE_MAX_AGE_SECONDS,
+            )
+        )
+        self.assertTrue(
+            nova_guard._maintenance_child_timed_out(
+                launched_at=100.0,
+                now=100.0 + nova_guard.MAINTENANCE_MAX_AGE_SECONDS + 1.0,
+                max_age_sec=nova_guard.MAINTENANCE_MAX_AGE_SECONDS,
+            )
+        )
+        self.assertFalse(
+            nova_guard._maintenance_child_timed_out(
+                launched_at=0.0,
+                now=10_000.0,
+                max_age_sec=nova_guard.MAINTENANCE_MAX_AGE_SECONDS,
+            )
+        )
+
+    def test_maintenance_tick_terminates_hung_child_and_relaunches(self):
+        attempt = nova_guard.GuardAttempt(state=nova_guard.STATE_RUNNING, heartbeat_seen_at=1.0)
+        hung = mock.Mock()
+        hung.poll.return_value = None
+        hung.pid = 99999
+        new_proc = mock.Mock()
+        new_proc.pid = 100001
+
+        with mock.patch.object(nova_guard, "_MAINTENANCE_PROC", hung), \
+            mock.patch.object(nova_guard, "_MAINTENANCE_LAUNCHED_AT", 100.0), \
+            mock.patch.object(nova_guard, "_LAST_MAINTENANCE_LAUNCH", 100.0), \
+            mock.patch("nova_guard.time.time", return_value=100.0 + nova_guard.MAINTENANCE_MAX_AGE_SECONDS + 5.0), \
+            mock.patch("nova_guard._is_maintenance_already_running", return_value=False), \
+            mock.patch("nova_guard.subprocess.Popen", return_value=new_proc) as popen_mock, \
+            mock.patch("nova_guard.open", mock.mock_open()), \
+            mock.patch("nova_guard.log"):
+            nova_guard._maintenance_tick(attempt)
+            # Patch is still active — module global was reassigned to the new child.
+            self.assertIs(nova_guard._MAINTENANCE_PROC, new_proc)
+
+        hung.terminate.assert_called()
+        popen_mock.assert_called_once()
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Callable
 
 import requests
@@ -9,6 +9,7 @@ import requests
 from services.edfi.auth import AuthResult, EdFiAuthService
 from services.edfi.config import ConnectionConfig
 from services.edfi.errors import classify_http_status, classify_request_exception
+from services.edfi.rate_limit_evidence import extract_rate_limit_headers, maybe_record_from_response
 
 
 @dataclass(frozen=True)
@@ -22,6 +23,8 @@ class EdFiResponse:
     error: str = ""
     error_code: str = ""
     auth: AuthResult | None = None
+    # Sanitized rate/limit-related response headers only (never Authorization).
+    response_headers: dict[str, str] = field(default_factory=dict)
 
 
 class EdFiClient:
@@ -94,7 +97,8 @@ class EdFiClient:
             status_code = int(response.status_code)
             ok = 200 <= status_code < 300
             error_code = "" if ok else (classify_http_status(status_code) or "edfi_request_failed")
-            return EdFiResponse(
+            safe_headers = extract_rate_limit_headers(getattr(response, "headers", None) or {})
+            result = EdFiResponse(
                 ok=ok,
                 status_code=status_code,
                 latency_ms=latency_ms,
@@ -104,7 +108,26 @@ class EdFiClient:
                 error="" if ok else _compact_text(response.text),
                 error_code=error_code,
                 auth=auth_result,
+                response_headers=safe_headers,
             )
+            # Passive 429 capture + recovery timing (never floods TEA).
+            try:
+                maybe_record_from_response(
+                    status_code=status_code,
+                    method=method.upper(),
+                    url=url,
+                    error=result.error,
+                    error_code=error_code,
+                    body=parsed if not ok else None,
+                    response_headers=safe_headers,
+                    latency_ms=latency_ms,
+                    connection_id=str(getattr(self.config, "connection_id", "") or ""),
+                    base_url=str(self.config.normalized_base_url() if hasattr(self.config, "normalized_base_url") else ""),
+                    source="edfi_client",
+                )
+            except Exception:
+                pass
+            return result
         except requests.RequestException as exc:
             latency_ms = int((time.perf_counter() - started) * 1000)
             return EdFiResponse(

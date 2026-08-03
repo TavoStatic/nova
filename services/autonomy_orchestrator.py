@@ -435,6 +435,10 @@ class AutonomyOrchestratorService:
                 "active_candidate_count": _as_int(work_tree_raw.get("active_candidate_count"), -1),
                 "active_executable_count": _as_int(work_tree_raw.get("active_executable_count"), -1),
                 "active_unsafe_count": _as_int(work_tree_raw.get("active_unsafe_count"), -1),
+                "progress_moving_count": _as_int(work_tree_raw.get("progress_moving_count")),
+                "progress_stalled_count": _as_int(work_tree_raw.get("progress_stalled_count")),
+                "progress_not_started_count": _as_int(work_tree_raw.get("progress_not_started_count")),
+                "progress_avg_percent": _as_int(work_tree_raw.get("progress_avg_percent")),
                 "branches": branches,
                 "source_freshness_sec": freshness["work_tree_snapshot"],
             },
@@ -809,6 +813,25 @@ class AutonomyOrchestratorService:
                 for branch in _as_list(work_tree.get("branches"))
                 if bool(_as_dict(branch).get("executable", False))
             ]
+            # Prefer branches that are honestly moving (or not started) over stalled noise.
+            # Demote failed tool steps so overnight thrash cannot pin forever.
+            def _active_progress_rank(branch: dict[str, Any]) -> tuple:
+                motion = str(branch.get("progress_motion") or "").strip().lower()
+                pct = _as_int(branch.get("progress_percent"), 0)
+                tool_status = _safe_text(branch.get("tool_status"), 40).lower()
+                if tool_status == "failed":
+                    motion = "stalled"
+                motion_rank = {
+                    "moving": 0,
+                    "not_started": 1,
+                    "stalled": 3,
+                    "blocked": 4,
+                    "done": 5,
+                }.get(motion, 2)
+                failed_rank = 1 if tool_status == "failed" else 0
+                return (failed_rank, motion_rank, -pct if motion == "moving" else pct)
+
+            active_branches.sort(key=_active_progress_rank)
             selected_active_branch: dict[str, Any] = {}
             selected_active_index = -1
             for index, branch in enumerate(active_branches):
@@ -859,6 +882,19 @@ class AutonomyOrchestratorService:
                 effect = f"Advance up to {step_budget} governed step(s) from {active_work_count} active Work Tree signal(s)."
                 if active_branch_title:
                     effect = f"{effect} First branch: {active_branch_title}."
+                progress_summary = _safe_text(selected_active_branch.get("progress_summary"), 200)
+                progress_motion = _safe_text(selected_active_branch.get("progress_motion"), 40)
+                if progress_summary:
+                    effect = f"{effect} Progress: {progress_summary}."
+                elif progress_motion:
+                    effect = (
+                        f"{effect} Progress motion: {progress_motion}"
+                        f" ({_as_int(selected_active_branch.get('progress_percent'))}%)."
+                    )
+                moving_n = _as_int(work_tree.get("progress_moving_count"))
+                stalled_n = _as_int(work_tree.get("progress_stalled_count"))
+                if moving_n or stalled_n:
+                    effect = f"{effect} Tree motion: moving={moving_n} stalled={stalled_n}."
                 action = self._contract_action(
                     "active_work_tree_run_next",
                     reason_code="active_work_tree_ready",

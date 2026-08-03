@@ -6,6 +6,20 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from services.nova_inventory_labels import shared_inventory_label
+from services.tool_identity import (
+    FIND,
+    INSTALLER_VALIDATION_RUN,
+    MEMORY_BOOTSTRAP_JUDGMENT,
+    PHASE2_AUDIT,
+    PULSE,
+    READ,
+    RELEASE_PROMOTION_JUDGMENT,
+    RELEASE_REBUILD_VERIFY,
+    RELEASE_RECORD_VALIDATION_OUTCOME,
+    RELEASE_VALIDATION_RUN,
+    SOURCE_ROOT_JUDGMENT,
+    SUBCONSCIOUS_REVIEW_JUDGMENT,
+)
 
 
 @dataclass(frozen=True)
@@ -25,7 +39,7 @@ WIRING_SURFACES: tuple[WiringSurface, ...] = (
         "Runtime guard, core, HTTP UI, heartbeat, and process health",
         ("guard", "core", "webui", "runtime_summary", "runtime_failures"),
         ("runtime_core",),
-        ("pulse", "system_check", "read", "find"),
+        (PULSE, "system_check", READ, FIND),
         ("guard_start", "autonomy_maintenance_start", "active_work_tree_run_next"),
         ("services/control_status.py", "services/work_tree_signal_ingestion.py", "services/runtime_status.py"),
     ),
@@ -34,7 +48,7 @@ WIRING_SURFACES: tuple[WiringSurface, ...] = (
         shared_inventory_label("model_runtime"),
         ("ollama_health", "ollama_api_up", "ollama_version", "ollama_api_contract_status", "ollama_chat_route_ok", "port_ownership"),
         ("model_runtime",),
-        ("os_capability", "system_check", "read", "find"),
+        ("os_capability", "system_check", READ, FIND),
         ("active_work_tree_run_next",),
         (
             "services/ollama_health.py",
@@ -58,7 +72,7 @@ WIRING_SURFACES: tuple[WiringSurface, ...] = (
         "Policy gates that can block Nova self-observation",
         ("web_enabled", "memory_enabled", "patch_enabled", "vision_status", "voice_status"),
         ("policy_gates",),
-        ("read", "find", "system_check"),
+        (READ, FIND, "system_check"),
         ("active_work_tree_run_next",),
         ("services/policy_manager.py", "services/policy_control.py", "services/work_tree_signal_ingestion.py"),
     ),
@@ -85,7 +99,7 @@ WIRING_SURFACES: tuple[WiringSurface, ...] = (
         shared_inventory_label("work_tree"),
         ("work_tree_truth", "work_tree_tree_count", "work_tree_open_task_count"),
         ("work_tree",),
-        ("read", "find", "pulse", "queue_status"),
+        (READ, FIND, PULSE, "queue_status"),
         ("active_work_tree_run_next",),
         ("work_tree.py", "services/control_work_trees.py", "services/work_tree_signal_ingestion.py"),
     ),
@@ -94,7 +108,7 @@ WIRING_SURFACES: tuple[WiringSurface, ...] = (
         "Tool event ledger and evidence validity",
         ("tool_events_total", "last_tool_status", "last_tool_error_summary"),
         ("tool_evidence",),
-        ("read", "find", "queue_status"),
+        (READ, FIND, "queue_status"),
         ("active_work_tree_run_next",),
         ("services/tool_execution.py", "services/evidence_validity.py", "work_tree.py"),
     ),
@@ -103,7 +117,7 @@ WIRING_SURFACES: tuple[WiringSurface, ...] = (
         shared_inventory_label("action_ledger"),
         ("action_ledger_ok", "action_ledger_total", "last_route_summary", "last_action_final_answer"),
         ("action_ledger",),
-        ("read", "find", "pulse"),
+        (READ, FIND, PULSE),
         ("active_work_tree_run_next",),
         ("services/nova_action_ledger.py", "services/control_telemetry.py", "services/work_tree_signal_ingestion.py"),
     ),
@@ -139,7 +153,7 @@ WIRING_SURFACES: tuple[WiringSurface, ...] = (
         "Code generation previews, capability gap detection, memory promotion, and Leah build routing",
         ("capability_gap_count", "capability_gaps", "capabilities_roadmap"),
         ("codegen_pipeline",),
-        ("read", "find", "pulse"),
+        (READ, FIND, PULSE),
         ("codegen_run", "leah_build_run_next"),
         (
             "services/control_status.py",
@@ -158,12 +172,12 @@ WIRING_SURFACES: tuple[WiringSurface, ...] = (
         ("release_status",),
         ("release",),
         (
-            "release_validation_run",
-            "release_promotion_judgment",
-            "release_record_validation_outcome",
-            "release_rebuild_verify",
-            "read",
-            "find",
+            RELEASE_VALIDATION_RUN,
+            RELEASE_PROMOTION_JUDGMENT,
+            RELEASE_RECORD_VALIDATION_OUTCOME,
+            RELEASE_REBUILD_VERIFY,
+            READ,
+            FIND,
         ),
         ("active_work_tree_run_next",),
         (
@@ -200,7 +214,7 @@ WIRING_SURFACES: tuple[WiringSurface, ...] = (
             "edfi_capability_profile_path",
         ),
         ("edfi_capability_profile",),
-        ("read", "find"),
+        (READ, FIND),
         ("active_work_tree_run_next",),
         (
             "services/edfi/profile_evidence.py",
@@ -229,8 +243,31 @@ WIRING_SURFACES: tuple[WiringSurface, ...] = (
         ),
     ),
     WiringSurface(
+        "backpack_edfi",
+        "Ed-Fi backpack package, host, capability fusion scan, and control surface for Nova nervous system",
+        (
+            "backpack_fusion",
+            "backpack_fusion_ok",
+            "backpack_available_capabilities",
+            "backpack_capability_count",
+            "backpack_teach_rules",
+            "backpack_nova_must_know",
+            "backpack_local_schools_rows",
+        ),
+        ("backpack_edfi", "edfi_core"),
+        ("edfi_explore", "read", "find"),
+        ("active_work_tree_run_next",),
+        (
+            "backpacks/edfi/backpack.json",
+            "services/backpack_host/capability_surface.py",
+            "services/backpack_host/query.py",
+            "services/control_backpacks.py",
+            "tools/edfi_tool.py",
+        ),
+    ),
+    WiringSurface(
         "data_lane_edfi_bisd",
-        "BISD Ed-Fi data lane connector, pipeline registry entry, and operator scripts",
+        "LEGACY BISD Ed-Fi data lane (prefer backpacks/edfi)",
         ("data_pipelines", "data_pipeline_count"),
         ("data_lane_edfi_bisd",),
         ("pipeline", "read", "find"),
@@ -247,7 +284,7 @@ WIRING_SURFACES: tuple[WiringSurface, ...] = (
         "Voice runtime dependency loading and entrypoint wrappers",
         ("voice_status", "voice_runtime_status", "voice_runtime_requested"),
         ("voice",),
-        ("read", "find", "system_check"),
+        (READ, FIND, "system_check"),
         ("active_work_tree_run_next",),
         ("services/nova_voice_runtime.py", "services/voice_interaction.py", "nova_core.py"),
     ),
@@ -265,7 +302,7 @@ WIRING_SURFACES: tuple[WiringSurface, ...] = (
         shared_inventory_label("http_continuity"),
         ("active_http_sessions", "last_route_summary", "last_action_final_answer"),
         ("http_continuity",),
-        ("read", "find", "pulse"),
+        (READ, FIND, PULSE),
         ("active_work_tree_run_next",),
         ("conversation_manager.py", "services/nova_http_chat_runtime.py", "services/nova_reply_sequence.py"),
     ),
@@ -282,7 +319,7 @@ WIRING_SURFACES: tuple[WiringSurface, ...] = (
             "test_profile_profile_drift_count",
         ),
         ("test_ecosystem",),
-        ("read", "find", "queue_status"),
+        (READ, FIND, "queue_status"),
         ("active_work_tree_run_next",),
         (
             "run_regression.py",
@@ -305,7 +342,7 @@ WIRING_SURFACES: tuple[WiringSurface, ...] = (
             "release_zip_bytes",
         ),
         ("storage_release_pressure",),
-        ("read", "find", "system_check"),
+        (READ, FIND, "system_check"),
         ("active_work_tree_run_next",),
         ("services/storage_watch.py", "kidney.py", "services/release_clean.py"),
     ),
@@ -314,7 +351,7 @@ WIRING_SURFACES: tuple[WiringSurface, ...] = (
         shared_inventory_label("runtime_control"),
         ("action_readiness", "runtime_timeline", "runtime_restart_analytics", "runtime_failures"),
         ("runtime_control",),
-        ("system_check", "read", "find"),
+        ("system_check", READ, FIND),
         ("active_work_tree_run_next",),
         ("services/runtime_control.py", "services/runtime_process_state.py", "services/runtime_restart_provenance.py"),
     ),
@@ -332,7 +369,7 @@ WIRING_SURFACES: tuple[WiringSurface, ...] = (
         "Autonomy maintenance worker state, cycle execution, and maintenance error pressure",
         ("autonomy_maintenance", "runtime_worker_status", "runtime_worker_stale_identity"),
         ("autonomy_maintenance",),
-        ("read", "find", "pulse", "system_check", "source_root_judgment"),
+        (READ, FIND, PULSE, "system_check", SOURCE_ROOT_JUDGMENT),
         ("autonomy_maintenance_start", "active_work_tree_run_next"),
         ("autonomy_maintenance.py", "services/work_tree_signal_ingestion.py", "services/runtime_control.py"),
     ),
@@ -346,7 +383,7 @@ WIRING_SURFACES: tuple[WiringSurface, ...] = (
             "autonomy_orchestrator_rejection_reasons",
         ),
         ("autonomy_orchestrator",),
-        ("read", "find", "pulse", "source_root_judgment"),
+        (READ, FIND, PULSE, SOURCE_ROOT_JUDGMENT),
         ("active_work_tree_run_next",),
         (
             "services/autonomy_orchestrator.py",
@@ -360,7 +397,7 @@ WIRING_SURFACES: tuple[WiringSurface, ...] = (
         shared_inventory_label("frontdoor_cli"),
         ("backend_commands", "backend_command_count", "source_root_inventory"),
         ("frontdoor_cli",),
-        ("read", "find", "system_check"),
+        (READ, FIND, "system_check"),
         ("active_work_tree_run_next",),
         ("nova.cmd", "nova.ps1", "agent.py", "run.py", "services/work_tree_signal_ingestion.py"),
     ),
@@ -369,7 +406,7 @@ WIRING_SURFACES: tuple[WiringSurface, ...] = (
         shared_inventory_label("http_api_control"),
         ("requests_total", "errors_total", "chat_login_enabled", "source_root_inventory"),
         ("http_api_control", "http_continuity"),
-        ("read", "find", "pulse"),
+        (READ, FIND, PULSE),
         ("active_work_tree_run_next",),
         ("nova_http.py", "services/nova_http_get_routes.py", "services/nova_http_post_dispatch.py"),
     ),
@@ -378,7 +415,7 @@ WIRING_SURFACES: tuple[WiringSurface, ...] = (
         shared_inventory_label("operator_control"),
         ("operator_macros", "backend_commands", "operator_outbox", "operator_outbox_open_count", "source_root_inventory"),
         ("operator_control",),
-        ("read", "find", "pulse"),
+        (READ, FIND, PULSE),
         ("active_work_tree_run_next",),
         ("services/operator_control.py", "services/operator_outbox.py", "services/nova_control_action_dispatcher.py", "scripts/operator_cli.py", "services/work_tree_signal_ingestion.py"),
     ),
@@ -387,7 +424,7 @@ WIRING_SURFACES: tuple[WiringSurface, ...] = (
         shared_inventory_label("session_identity_auth"),
         ("chat_auth_source", "chat_users_count", "chat_login_enabled", "source_root_inventory"),
         ("session_identity_auth",),
-        ("read", "find", "pulse"),
+        (READ, FIND, PULSE),
         ("active_work_tree_run_next",),
         ("services/chat_identity.py", "services/session_admin.py", "http_session_store.py", "services/work_tree_signal_ingestion.py"),
     ),
@@ -396,7 +433,7 @@ WIRING_SURFACES: tuple[WiringSurface, ...] = (
         shared_inventory_label("conversation_routing"),
         ("last_intent", "last_planner_decision", "last_route_summary", "source_root_inventory"),
         ("conversation_routing",),
-        ("read", "find", "pulse"),
+        (READ, FIND, PULSE),
         ("active_work_tree_run_next",),
         ("services/nova_routing_support.py", "services/nova_reply_sequence.py", "services/nova_planner_contract.py", "services/work_tree_signal_ingestion.py"),
     ),
@@ -405,7 +442,7 @@ WIRING_SURFACES: tuple[WiringSurface, ...] = (
         shared_inventory_label("supervisor_fulfillment"),
         ("last_route_summary", "last_route_trace", "source_root_inventory"),
         ("supervisor_fulfillment",),
-        ("read", "find", "pulse"),
+        (READ, FIND, PULSE),
         ("active_work_tree_run_next",),
         ("supervisor.py", "services/supervisor_registry.py", "services/fulfillment_flow.py", "services/work_tree_signal_ingestion.py"),
     ),
@@ -414,7 +451,7 @@ WIRING_SURFACES: tuple[WiringSurface, ...] = (
         shared_inventory_label("reply_quality_contracts"),
         ("last_action_final_answer", "last_route_grounded", "last_route_trace", "source_root_inventory"),
         ("reply_quality_contracts",),
-        ("read", "find", "pulse"),
+        (READ, FIND, PULSE),
         ("active_work_tree_run_next",),
         ("services/nova_reflection_health.py", "services/nova_reply_runtime.py", "services/work_tree_signal_ingestion.py"),
     ),
@@ -448,7 +485,7 @@ WIRING_SURFACES: tuple[WiringSurface, ...] = (
             "source_root_inventory",
         ),
         ("tool_registry_policy", "source_root_inventory"),
-        ("read", "find", "queue_status", "os_capability"),
+        (READ, FIND, "queue_status", "os_capability"),
         ("active_work_tree_run_next",),
         (
             "tools/registry.py",
@@ -472,7 +509,7 @@ WIRING_SURFACES: tuple[WiringSurface, ...] = (
         shared_inventory_label("installer_packaging"),
         ("release_status", "installer_release_status", "installer_status", "source_root_inventory"),
         ("installer_packaging",),
-        ("installer_validation_run", "read", "find", "system_check", "source_root_judgment"),
+        (INSTALLER_VALIDATION_RUN, READ, FIND, "system_check", SOURCE_ROOT_JUDGMENT),
         ("active_work_tree_run_next",),
         (
             "services/installer_validation.py",
@@ -487,7 +524,7 @@ WIRING_SURFACES: tuple[WiringSurface, ...] = (
         shared_inventory_label("tts_audio_output"),
         ("voice_status", "voice_runtime_status", "source_root_inventory"),
         ("tts_audio_output",),
-        ("read", "find", "system_check"),
+        (READ, FIND, "system_check"),
         ("active_work_tree_run_next",),
         ("tts_say.py", "tts_piper.py", "tts_say.ps1", "services/work_tree_signal_ingestion.py"),
     ),
@@ -496,7 +533,7 @@ WIRING_SURFACES: tuple[WiringSurface, ...] = (
         shared_inventory_label("diagnostics_hygiene"),
         ("health_score", "self_check_pass_ratio", "source_root_inventory"),
         ("diagnostics_hygiene", "source_root_inventory"),
-        ("health", "system_check", "read", "find"),
+        ("health", "system_check", READ, FIND),
         ("active_work_tree_run_next",),
         ("doctor.py", "health.py", "scripts/repo_hygiene_check.py"),
     ),
@@ -505,7 +542,7 @@ WIRING_SURFACES: tuple[WiringSurface, ...] = (
         "SOCK — System Optimization and Compatibility Check: hardware scan, tier mapping, model recommendation",
         ("sock_hardware_profile", "sock_recommendation", "sock_policy_diff", "source_root_inventory"),
         ("source_root_inventory",),
-        ("system_check", "read", "find"),
+        ("system_check", READ, FIND),
         ("active_work_tree_run_next",),
         ("services/sock_service.py", "scripts/run_sock.py"),
     ),
@@ -514,7 +551,7 @@ WIRING_SURFACES: tuple[WiringSurface, ...] = (
         shared_inventory_label("safety_envelope"),
         ("subconscious_summary", "generated_work_queue", "source_root_inventory"),
         ("safety_envelope",),
-        ("phase2_audit", "read", "find"),
+        (PHASE2_AUDIT, READ, FIND),
         ("active_work_tree_run_next",),
         ("nova_safety_envelope.py", "services/subconscious_review_authority.py", "docs/PHASE2_SAFETY_ENVELOPE.md", "services/work_tree_signal_ingestion.py"),
     ),
@@ -523,16 +560,16 @@ WIRING_SURFACES: tuple[WiringSurface, ...] = (
         shared_inventory_label("metrics_ops_journal"),
         ("requests_total", "errors_total", "tool_events_total", "source_root_inventory"),
         ("metrics_ops_journal",),
-        ("read", "find", "pulse"),
+        (READ, FIND, PULSE),
         ("active_work_tree_run_next",),
         ("services/behavior_metrics.py", "services/ops_journal.py", "services/control_telemetry.py", "services/work_tree_signal_ingestion.py"),
     ),
     WiringSurface(
         "core_steward_reflection",
         shared_inventory_label("core_steward_reflection"),
-        ("pulse", "health_score", "source_root_inventory"),
+        (PULSE, "health_score", "source_root_inventory"),
         ("core_steward_reflection",),
-        ("core_health", "core_thinning", "pulse", "read", "find"),
+        ("core_health", "core_thinning", PULSE, READ, FIND),
         ("active_work_tree_run_next",),
         ("services/core_steward.py", "services/core_health_brief.py", "services/core_thinning.py", "services/work_tree_signal_ingestion.py"),
     ),
@@ -557,7 +594,7 @@ WIRING_SURFACES: tuple[WiringSurface, ...] = (
             "self_repair_closure_inventory_gap_count",
         ),
         ("source_root_inventory", "source_wiring_probe", "root_closure_inventory", "self_repair_closure_inventory"),
-        ("read", "find", "pulse"),
+        (READ, FIND, PULSE),
         ("active_work_tree_run_next",),
         ("services/nova_root_inventory.py", "services/nova_wiring_inventory.py", "services/end_to_end_wiring.py"),
     ),
@@ -590,7 +627,9 @@ EXECUTION_TOOL_CONSTANTS = (
 )
 
 REQUIRED_EVIDENCE_PATHS = frozenset(("work_tree_evidence",))
-REQUIRED_JUDGMENT_PATHS = frozenset(("signal_branch_resolution", "source_root_judgment", "tool_result_validation"))
+REQUIRED_JUDGMENT_PATHS = frozenset(
+    ("signal_branch_resolution", SOURCE_ROOT_JUDGMENT, "tool_result_validation")
+)
 REQUIRED_CLOSURE_PATHS = frozenset(("work_tree_task_completion", "signal_branch_resolution"))
 REQUIRED_OPERATOR_OUTBOX_PATHS = frozenset(("operator_outbox_notice", "work_tree_operator_notice"))
 REQUIRED_OWNED_ROOT_ROUTES = frozenset(("self_repair_closure_inventory", "source_root_judgment_sequence"))
@@ -732,18 +771,18 @@ def build_source_wiring_probe_payload(*, root: str | Path | None = None) -> dict
         judgment_paths.add("work_tree_task_completion")
     if "invalid_tool_result" in work_tree_text or "_is_invalid_tool_result" in work_tree_text:
         judgment_paths.add("tool_result_validation")
-    if "release_promotion_judgment" in tool_dispatch_text and "release_promotion_judgment" in work_tree_text:
-        judgment_paths.add("release_promotion_judgment")
-    if "memory_bootstrap_judgment" in tool_dispatch_text and "memory_bootstrap_judgment" in work_tree_text:
-        judgment_paths.add("memory_bootstrap_judgment")
-    if "subconscious_review_judgment" in tool_dispatch_text and "subconscious_review_judgment" in work_tree_text:
-        judgment_paths.add("subconscious_review_judgment")
+    if RELEASE_PROMOTION_JUDGMENT in tool_dispatch_text and RELEASE_PROMOTION_JUDGMENT in work_tree_text:
+        judgment_paths.add(RELEASE_PROMOTION_JUDGMENT)
+    if MEMORY_BOOTSTRAP_JUDGMENT in tool_dispatch_text and MEMORY_BOOTSTRAP_JUDGMENT in work_tree_text:
+        judgment_paths.add(MEMORY_BOOTSTRAP_JUDGMENT)
+    if SUBCONSCIOUS_REVIEW_JUDGMENT in tool_dispatch_text and SUBCONSCIOUS_REVIEW_JUDGMENT in work_tree_text:
+        judgment_paths.add(SUBCONSCIOUS_REVIEW_JUDGMENT)
     if (
-        "source_root_judgment" in tool_dispatch_text
-        and "source_root_judgment" in work_tree_text
+        SOURCE_ROOT_JUDGMENT in tool_dispatch_text
+        and SOURCE_ROOT_JUDGMENT in work_tree_text
         and "SOURCE_ROOT_JUDGMENT_TOOL" in signal_text
     ):
-        judgment_paths.add("source_root_judgment")
+        judgment_paths.add(SOURCE_ROOT_JUDGMENT)
     if "def respond_to_notice" in operator_outbox_text and "_record_response_in_work_tree" in operator_outbox_text:
         judgment_paths.add("operator_response_judgment")
 
@@ -854,8 +893,18 @@ def build_wiring_inventory_payload(
     signal_sources: Iterable[str] | None = None,
     planned_tools: Iterable[str] | None = None,
     advisory_actions: Iterable[str] | None = None,
+    probe_context: str | None = None,
 ) -> dict[str, Any]:
     status = status_payload if isinstance(status_payload, dict) else {}
+    # Ring 2: do not score status-key gaps without live_status probe context.
+    try:
+        from services.self_scan_rings import PROBE_LIVE, resolve_probe_context
+
+        context = resolve_probe_context(status, explicit=probe_context)
+    except Exception:
+        context = str(probe_context or ("live_status" if status else "offline")).strip().lower()
+        PROBE_LIVE = "live_status"
+    score_status_keys = context == PROBE_LIVE
     available_sources = _clean_set(signal_sources) or set(DEFAULT_SIGNAL_SOURCES)
     available_tools = _clean_set(planned_tools) or set(DEFAULT_PLANNED_TOOLS)
     available_actions = _clean_set(advisory_actions) or set(DEFAULT_ADVISORY_ACTIONS)
@@ -876,11 +925,16 @@ def build_wiring_inventory_payload(
         present_actions = [action for action in surface.advisory_actions if action in available_actions]
         missing_advisory_actions = [action for action in surface.advisory_actions if action not in available_actions]
 
-        status_visible = not surface.status_keys or not missing_status_keys
+        if score_status_keys:
+            status_visible = not surface.status_keys or not missing_status_keys
+        else:
+            # Offline/partial: status keys are not evidence of architecture failure.
+            status_visible = True
+            missing_status_keys = []
         signal_wired = not surface.signal_sources or not missing_signal_sources
         tool_wired = not surface.planned_tools or not missing_planned_tools
         action_wired = not surface.advisory_actions or not missing_advisory_actions
-        if not status_visible:
+        if score_status_keys and not status_visible:
             missing_status.append(surface.surface_id)
         if not signal_wired:
             missing_signals.append(surface.surface_id)
@@ -920,6 +974,8 @@ def build_wiring_inventory_payload(
         "missing_tool_surfaces": missing_tools,
         "missing_action_surfaces": missing_actions,
         "gap_count": gap_count,
+        "probe_context": context,
+        "status_gaps_scored": score_status_keys,
     }
 
 
@@ -930,16 +986,28 @@ def build_root_closure_inventory_payload(
     signal_sources: Iterable[str] | None = None,
     planned_tools: Iterable[str] | None = None,
     advisory_actions: Iterable[str] | None = None,
+    probe_context: str | None = None,
 ) -> dict[str, Any]:
     """Describe whether every declared root has a complete code wiring route.
 
     This inventory is intentionally stricter than source presence.  A root is
     not closure-wired just because it exists on disk; it needs a status surface,
     a signal source, a planned tool path, and an advisory action path.
+
+    Ring 2 probe context: offline/partial must not report all status keys missing
+    as architecture failures (false 46-gap storms).
     """
     from services.nova_root_inventory import SOURCE_ROOTS
 
     status = status_payload if isinstance(status_payload, dict) else {}
+    try:
+        from services.self_scan_rings import PROBE_LIVE, resolve_probe_context
+
+        context = resolve_probe_context(status, explicit=probe_context)
+    except Exception:
+        context = str(probe_context or ("live_status" if status else "offline")).strip().lower()
+        PROBE_LIVE = "live_status"
+    score_status_keys = context == PROBE_LIVE
     repo_root = Path(root).resolve() if root is not None else Path(__file__).resolve().parents[1]
     available_sources = _clean_set(signal_sources) or set(DEFAULT_SIGNAL_SOURCES)
     available_tools = _clean_set(planned_tools) or set(DEFAULT_PLANNED_TOOLS)
@@ -975,6 +1043,8 @@ def build_root_closure_inventory_payload(
 
         present_status_keys = [key for key in status_keys if key in status]
         missing_status_keys = [key for key in status_keys if key not in status]
+        if not score_status_keys:
+            missing_status_keys = []
         present_signal_sources = [source for source in signal_source_names if source in available_sources]
         missing_signal_sources = [source for source in signal_source_names if source not in available_sources]
         present_planned_tools = [tool for tool in planned_tool_names if tool in available_tools]
@@ -989,7 +1059,7 @@ def build_root_closure_inventory_payload(
         if missing_source_files:
             gaps.append("missing_source_evidence")
             missing_source_roots.append(source_root.root_id)
-        if surface is not None and status_keys and missing_status_keys:
+        if score_status_keys and surface is not None and status_keys and missing_status_keys:
             gaps.append("missing_status_surface_keys")
             missing_status_roots.append(source_root.root_id)
         if surface is not None and signal_source_names and missing_signal_sources:
@@ -1042,6 +1112,8 @@ def build_root_closure_inventory_payload(
         "missing_tool_roots": missing_tool_roots,
         "missing_action_roots": missing_action_roots,
         "roots": roots,
+        "probe_context": context,
+        "status_gaps_scored": score_status_keys,
     }
 
 

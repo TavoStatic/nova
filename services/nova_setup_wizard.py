@@ -190,14 +190,28 @@ def _run(
     timeout: int = 600,
     env: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        command,
-        cwd=str(cwd) if cwd is not None else None,
-        capture_output=True,
-        text=True,
-        timeout=timeout,
-        env=env,
-    )
+    try:
+        return subprocess.run(
+            command,
+            cwd=str(cwd) if cwd is not None else None,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            env=env,
+        )
+    except subprocess.TimeoutExpired as exc:
+        stdout = (exc.stdout or "") if isinstance(exc.stdout, str) else (
+            (exc.stdout or b"").decode("utf-8", errors="replace") if exc.stdout else ""
+        )
+        stderr = (exc.stderr or "") if isinstance(exc.stderr, str) else (
+            (exc.stderr or b"").decode("utf-8", errors="replace") if exc.stderr else ""
+        )
+        return subprocess.CompletedProcess(
+            command,
+            124,
+            stdout + "\n[setup] timed out\n",
+            stderr,
+        )
 
 
 def _run_streaming(
@@ -208,7 +222,14 @@ def _run_streaming(
     env: dict[str, str] | None = None,
     label: str = "",
 ) -> subprocess.CompletedProcess[str]:
-    """Run a long command while streaming stdout/stderr live for the operator."""
+    """Run a long command while streaming stdout/stderr live for the operator.
+
+    Wait on the *process* first, not the reader. On Windows, pip/winget child
+    processes can keep the stdout pipe open after the parent exits; waiting on
+    the reader forever was the real NovaSetup.exe hang after pip succeeded.
+    """
+
+    import threading
 
     title = str(label or " ".join(str(part) for part in command[:4])).strip()
     print(f"[setup] {title}", flush=True)
@@ -216,6 +237,10 @@ def _run_streaming(
     merged_env = dict(os.environ)
     if env:
         merged_env.update(env)
+    # CREATE_NO_WINDOW keeps headless/windowed exe runs quiet on Windows.
+    creationflags = 0
+    if os.name == "nt":
+        creationflags = int(getattr(subprocess, "CREATE_NO_WINDOW", 0) or 0)
     process = subprocess.Popen(
         [str(part) for part in command],
         cwd=str(cwd) if cwd is not None else None,
@@ -224,31 +249,65 @@ def _run_streaming(
         text=True,
         env=merged_env,
         bufsize=1,
+        creationflags=creationflags,
     )
     chunks: list[str] = []
-    deadline = time.time() + max(30, int(timeout or 30))
-    try:
-        assert process.stdout is not None
-        while True:
-            if time.time() > deadline:
-                process.kill()
-                chunks.append("\n[setup] timed out; process killed\n")
-                print("[setup] timed out; process killed", flush=True)
-                break
-            line = process.stdout.readline()
-            if line == "" and process.poll() is not None:
-                break
-            if line:
+    wait_timeout = max(30, int(timeout or 30))
+
+    def _reader() -> None:
+        try:
+            assert process.stdout is not None
+            for line in process.stdout:
                 chunks.append(line)
-                print(line, end="", flush=True)
-        returncode = process.wait(timeout=30)
+                try:
+                    print(line, end="", flush=True)
+                except Exception:
+                    pass
+        except Exception as exc:
+            chunks.append(f"\n[setup] reader_error:{exc}\n")
+
+    reader = threading.Thread(target=_reader, name="nova-setup-stream", daemon=True)
+    reader.start()
+    returncode = 1
+    timed_out = False
+    try:
+        try:
+            returncode = int(process.wait(timeout=wait_timeout) or 0)
+        except subprocess.TimeoutExpired:
+            timed_out = True
+            try:
+                process.kill()
+            except Exception:
+                pass
+            try:
+                returncode = int(process.wait(timeout=15) or 1)
+            except Exception:
+                returncode = 1
+            chunks.append("\n[setup] timed out; process killed\n")
+            print("[setup] timed out; process killed", flush=True)
     except Exception as exc:
         try:
             process.kill()
         except Exception:
             pass
         chunks.append(f"\n[setup] stream_failed:{exc}\n")
+        print(f"[setup] stream_failed:{exc}", flush=True)
         returncode = 1
+    finally:
+        # Unblock the reader if a grandchild still holds the write end of the pipe.
+        try:
+            if process.stdout is not None:
+                process.stdout.close()
+        except Exception:
+            pass
+        reader.join(timeout=5)
+        if reader.is_alive():
+            chunks.append("\n[setup] reader still running after close; continuing\n")
+            print("[setup] reader still running after close; continuing", flush=True)
+
+    if timed_out and returncode == 0:
+        returncode = 1
+    print(f"[setup] done: {title} exit={returncode}", flush=True)
     return subprocess.CompletedProcess(command, int(returncode or 0), "".join(chunks), "")
 
 
@@ -1157,43 +1216,235 @@ def ensure_smoke_base(root: Path, venv_python: Path) -> dict[str, Any]:
     )
 
 
-def ensure_webui(root: Path, *, port: int = DEFAULT_WEBUI_PORT) -> dict[str, Any]:
-    nova_cmd = Path(root) / "nova.cmd"
-    if not nova_cmd.is_file():
-        return _step("webui", ok=False, detail="nova.cmd missing")
+def _kill_listeners_on_port(port: int) -> list[str]:
+    """Best-effort kill of listeners on a TCP port (setup smoke only)."""
 
-    start = _run(
-        ["cmd", "/c", str(nova_cmd), "webui-start", "--host", "127.0.0.1", "--port", str(port)],
-        cwd=root,
-        timeout=180,
-    )
-    messages = [f"start_exit={start.returncode}", ((start.stdout or "") + (start.stderr or ""))[-500:]]
+    notes: list[str] = []
+    if os.name != "nt" or port <= 0:
+        return notes
+    try:
+        # Prefer PowerShell NetTCPConnection when it returns quickly; fall back to taskkill by pid.
+        probe = subprocess.run(
+            [
+                "powershell",
+                "-NoProfile",
+                "-Command",
+                (
+                    f"$conns = Get-NetTCPConnection -LocalPort {int(port)} -State Listen "
+                    "-ErrorAction SilentlyContinue; "
+                    "$conns | ForEach-Object { $_.OwningProcess } | Sort-Object -Unique"
+                ),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+        pids = []
+        for line in (probe.stdout or "").splitlines():
+            text = line.strip()
+            if text.isdigit():
+                pids.append(int(text))
+        for pid in pids:
+            try:
+                subprocess.run(
+                    ["taskkill", "/PID", str(pid), "/T", "/F"],
+                    capture_output=True,
+                    text=True,
+                    timeout=15,
+                )
+                notes.append(f"killed_pid={pid}")
+            except Exception as exc:
+                notes.append(f"kill_failed:{pid}:{exc}")
+    except Exception as exc:
+        notes.append(f"port_kill_probe_failed:{exc}")
+    return notes
+
+
+def ensure_webui(root: Path, *, port: int = DEFAULT_WEBUI_PORT) -> dict[str, Any]:
+    """Start nova_http directly, hit /api/health, then kill it.
+
+    Avoids `nova webui-start/stop` during setup: those paths can hang forever on
+    Windows CIM / Get-NetTCPConnection under load (seen in real NovaSetup.exe sandbox).
+    """
+
+    base = Path(root)
+    venv_python = base / ".venv" / "Scripts" / "python.exe"
+    http_py = base / "nova_http.py"
+    messages: list[str] = []
+    if not venv_python.is_file():
+        return _step("webui", ok=False, detail="venv python missing")
+    if not http_py.is_file():
+        return _step("webui", ok=False, detail="nova_http.py missing")
+
+    messages.extend(_kill_listeners_on_port(int(port)))
+    url = f"http://127.0.0.1:{int(port)}/api/health"
+    creationflags = int(getattr(subprocess, "CREATE_NO_WINDOW", 0) or 0) if os.name == "nt" else 0
+    process: subprocess.Popen[str] | None = None
     health_ok = False
-    if start.returncode == 0:
-        url = f"http://127.0.0.1:{port}/api/health"
-        for _ in range(20):
+    try:
+        process = subprocess.Popen(
+            [str(venv_python), str(http_py), "--host", "127.0.0.1", "--port", str(int(port))],
+            cwd=str(base),
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            creationflags=creationflags,
+        )
+        messages.append(f"started_pid={process.pid}")
+        deadline = time.time() + 45
+        while time.time() < deadline:
+            if process.poll() is not None:
+                messages.append(f"webui_exited_early={process.returncode}")
+                break
             try:
                 with urllib.request.urlopen(url, timeout=2) as response:
-                    health_ok = 200 <= int(getattr(response, "status", 0) or 0) < 300
-                    if health_ok:
+                    if 200 <= int(getattr(response, "status", 0) or 0) < 300:
+                        health_ok = True
                         break
             except Exception:
                 time.sleep(0.5)
         messages.append(f"health={'ok' if health_ok else 'fail'} url={url}")
+    except Exception as exc:
+        messages.append(f"start_failed:{exc}")
+    finally:
+        if process is not None and process.poll() is None:
+            try:
+                process.terminate()
+                process.wait(timeout=8)
+                messages.append("terminated")
+            except Exception:
+                try:
+                    process.kill()
+                    messages.append("killed")
+                except Exception as exc:
+                    messages.append(f"stop_failed:{exc}")
+        messages.extend(_kill_listeners_on_port(int(port)))
 
-    stop = _run(
-        ["cmd", "/c", str(nova_cmd), "webui-stop", "--port", str(port)],
-        cwd=root,
-        timeout=90,
-    )
-    messages.append(f"stop_exit={stop.returncode}")
     return _step(
         "webui",
-        ok=start.returncode == 0 and health_ok,
+        ok=health_ok,
         action="check",
         detail=f"port={port}",
         messages=messages,
     )
+
+
+def ensure_shell_first_admin(root: Path, *, install: bool = True) -> dict[str, Any]:
+    """
+    Ensure Nova Shell identity store exists and first account_admin is created when possible.
+
+    Non-interactive create uses:
+      NOVA_SHELL_ADMIN_USER
+      NOVA_SHELL_ADMIN_PASSWORD
+      NOVA_SHELL_ADMIN_DISPLAY (optional)
+
+    If credentials are not provided and no admin exists, returns a required=False
+    warning step with instructions to run scripts/setup_nova_shell.py (headless
+    field installs must set the env vars or run shell setup after).
+    """
+    messages: list[str] = []
+    base = Path(root)
+    shell_runtime = base / "runtime" / "nova_shell"
+    db_path = shell_runtime / "nova_shell.db"
+
+    try:
+        import argon2  # noqa: F401
+
+        messages.append("argon2:available")
+    except ImportError:
+        messages.append("argon2:missing — pip install argon2-cffi (or reinstall requirements.txt)")
+
+    try:
+        from services.nova_shell.admin import ShellAdmin
+        from services.nova_shell.auth import ShellAuth
+        from services.nova_shell.identity import load_or_create_identity
+        from services.nova_shell.store import ShellStore
+    except Exception as exc:
+        return _step(
+            "shell_admin",
+            ok=False,
+            required=False,
+            action="check",
+            detail=f"shell_import_failed:{exc}",
+            messages=messages,
+        )
+
+    try:
+        identity = load_or_create_identity(shell_runtime)
+        messages.append(f"installation_id={identity.installation_id}")
+        store = ShellStore(db_path=db_path)
+        auth = ShellAuth(store)
+        admin = ShellAdmin(store, auth)
+    except Exception as exc:
+        return _step(
+            "shell_admin",
+            ok=False,
+            required=False,
+            action="install" if install else "check",
+            detail=f"shell_store_failed:{exc}",
+            messages=messages,
+        )
+
+    if admin.first_admin_exists():
+        return _step(
+            "shell_admin",
+            ok=True,
+            required=False,
+            action="check",
+            detail="account_admin already exists",
+            messages=messages,
+        )
+
+    if not install:
+        return _step(
+            "shell_admin",
+            ok=False,
+            required=False,
+            action="check",
+            detail="no account_admin; check-only mode",
+            messages=messages,
+        )
+
+    username = str(os.environ.get("NOVA_SHELL_ADMIN_USER") or "").strip()
+    password = str(os.environ.get("NOVA_SHELL_ADMIN_PASSWORD") or "")
+    display = str(os.environ.get("NOVA_SHELL_ADMIN_DISPLAY") or username).strip() or username
+
+    if not username or not password:
+        return _step(
+            "shell_admin",
+            ok=False,
+            required=False,
+            action="install",
+            detail=(
+                "no account_admin created — set NOVA_SHELL_ADMIN_USER and "
+                "NOVA_SHELL_ADMIN_PASSWORD, or run: python scripts/setup_nova_shell.py"
+            ),
+            messages=messages
+            + [
+                "Shell accounts are separate from control-panel API login.",
+                "First admin role: account_admin",
+            ],
+        )
+
+    try:
+        user = admin.create_first_admin(username, password, display)
+        messages.append(f"created_user={user.get('username')}")
+        return _step(
+            "shell_admin",
+            ok=True,
+            required=False,
+            action="install",
+            detail=f"created account_admin user={user.get('username')}",
+            messages=messages,
+        )
+    except Exception as exc:
+        return _step(
+            "shell_admin",
+            ok=False,
+            required=False,
+            action="install",
+            detail=f"create_first_admin_failed:{exc}",
+            messages=messages,
+        )
 
 
 def run_setup_wizard(
@@ -1288,6 +1539,7 @@ def run_setup_wizard(
             else:
                 steps.append(_step("python_deps", ok=venv_python.is_file(), detail="check-only"))
             if any(s.get("name") == "python_deps" and s.get("ok") for s in steps):
+                print("[setup] Running doctor --fix / doctor...", flush=True)
                 steps.append(ensure_doctor(base, venv_python))
             else:
                 steps.append(_step("doctor", ok=False, detail="skipped; deps not ready"))
@@ -1296,15 +1548,18 @@ def run_setup_wizard(
             steps.append(_step("doctor", ok=False, detail="skipped; venv not ready"))
 
         # SOCK first so policy models match this machine before any multi-GB pulls.
+        print("[setup] SOCK hardware scan / policy adjust...", flush=True)
         sock_step = ensure_sock_policy(base, install=install)
         steps.append(sock_step)
 
         if include_ollama:
+            print("[setup] Ensuring Ollama...", flush=True)
             ollama_step = ensure_ollama(install=install)
             steps.append(ollama_step)
             if include_models:
                 if ollama_step.get("ok"):
                     # Disk gate runs inside ensure_ollama_models for missing pulls.
+                    print("[setup] Ensuring Ollama models...", flush=True)
                     steps.append(ensure_ollama_models(base, install=install))
                 else:
                     steps.append(_step("ollama_models", ok=False, detail="skipped; ollama not ready"))
@@ -1313,6 +1568,7 @@ def run_setup_wizard(
             steps.append(_step("ollama_models", ok=True, required=False, detail="skipped by flag"))
 
         if include_smoke and venv_python.is_file() and any(s.get("name") == "doctor" and s.get("ok") for s in steps):
+            print("[setup] Running smoke-base...", flush=True)
             steps.append(ensure_smoke_base(base, venv_python))
         else:
             steps.append(
@@ -1325,17 +1581,38 @@ def run_setup_wizard(
             )
 
         if include_webui:
+            print(f"[setup] WebUI smoke on port {webui_port}...", flush=True)
             steps.append(ensure_webui(base, port=int(webui_port)))
         else:
             steps.append(_step("webui", ok=True, required=False, detail="skipped by flag"))
 
         if register_path:
+            print("[setup] Registering user PATH launcher...", flush=True)
             steps.append(ensure_nova_path(base, install=install))
         else:
             steps.append(_step("nova_path", ok=True, required=False, detail="skipped by flag"))
 
+        # Nova Shell first account (optional unless env credentials provided).
+        print("[setup] Nova Shell first admin...", flush=True)
+        steps.append(ensure_shell_first_admin(base, install=install))
+
+        print("[setup] Writing report...", flush=True)
+
         required_failed = [s["name"] for s in steps if s.get("required") and not s.get("ok")]
         path_step = next((s for s in steps if s.get("name") == "nova_path"), {})
+        shell_step = next((s for s in steps if s.get("name") == "shell_admin"), {})
+        next_steps = [
+            f"Package root: {base}",
+            "Open a NEW terminal after PATH registration.",
+            "Then run: nova doctor",
+            f"Or: \"{base / 'nova.cmd'}\" doctor",
+            str((path_step or {}).get("detail") or ""),
+        ]
+        if shell_step and not shell_step.get("ok"):
+            next_steps.append(
+                "Create Nova Shell admin: set NOVA_SHELL_ADMIN_USER + NOVA_SHELL_ADMIN_PASSWORD "
+                "and re-run setup, or: python scripts/setup_nova_shell.py"
+            )
         report = {
             "generated_at": _now(),
             "started_at": started,
@@ -1350,13 +1627,7 @@ def run_setup_wizard(
             "steps": steps,
             "required_models": required_ollama_models(base),
             "singleton": lock_detail,
-            "operator_next_steps": [
-                f"Package root: {base}",
-                "Open a NEW terminal after PATH registration.",
-                "Then run: nova doctor",
-                f"Or: \"{base / 'nova.cmd'}\" doctor",
-                str((path_step or {}).get("detail") or ""),
-            ],
+            "operator_next_steps": [s for s in next_steps if str(s).strip()],
         }
 
         out = Path(report_path) if report_path else (base / "runtime" / "setup_wizard_report.json")

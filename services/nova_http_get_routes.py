@@ -167,6 +167,7 @@ class NovaHttpGetRoutesService:
         test_session_report_summaries_fn,
         available_test_session_definitions_fn,
         control_pipelines_payload_fn=None,
+        control_backpacks_payload_fn=None,
     ) -> tuple[int, dict] | None:
         if path not in {
             "/api/control/status",
@@ -175,6 +176,7 @@ class NovaHttpGetRoutesService:
             "/api/control/metrics",
             "/api/control/work-trees",
             "/api/control/pipelines",
+            "/api/control/backpacks",
             "/api/control/sessions",
             "/api/control/test-sessions",
         }:
@@ -209,6 +211,21 @@ class NovaHttpGetRoutesService:
         if path == "/api/control/pipelines":
             selected = str((qs.get("pipeline_id") or [""])[0]).strip()
             return 200, control_pipelines_payload_fn(selected) if control_pipelines_payload_fn else {"ok": True, "pipelines": []}
+        if path == "/api/control/backpacks":
+            selected = str((qs.get("backpack_id") or [""])[0]).strip()
+            # role= is NOT a credential (shell tokens not wired on HTTP yet).
+            # Control auth already passed; allowlist preview roles only.
+            from services.nova_shell.http_trust import resolve_control_panel_role
+
+            requested = str((qs.get("role") or [""])[0]).strip()
+            role = resolve_control_panel_role(
+                requested,
+                control_authenticated=True,
+                for_privileged_action=False,
+            )
+            if control_backpacks_payload_fn:
+                return 200, control_backpacks_payload_fn(selected, role)
+            return 200, {"ok": True, "backpacks": [], "selected_backpack_id": selected, "detail": {}}
         if path == "/api/control/sessions":
             return 200, {"ok": True, "sessions": session_summaries_fn(80)}
         return 200, {
@@ -234,6 +251,17 @@ class NovaHttpGetRoutesService:
                     runtime_scope,
                     selected_pipeline_id=selected,
                 )
+        control_backpacks_payload_fn = runtime_scope.get("_control_backpacks_payload")
+        if not callable(control_backpacks_payload_fn):
+            from services.nova_http_backpack_control import HTTP_BACKPACK_CONTROL_SERVICE
+
+            control_backpacks_payload_fn = (
+                lambda selected="", role="account_admin": HTTP_BACKPACK_CONTROL_SERVICE.payload_from_runtime(
+                    runtime_scope,
+                    selected_backpack_id=selected,
+                    role=role,
+                )
+            )
         cached_control_status_surfaces_payload_fn = runtime_scope.get("_cached_control_status_surfaces_payload")
         return NovaHttpGetRoutesService.handle_control_api_request(
             path,
@@ -246,6 +274,7 @@ class NovaHttpGetRoutesService:
             metrics_payload_fn=runtime_fn(runtime_scope, "_metrics_payload"),
             work_trees_payload_fn=runtime_fn(runtime_scope, "_work_trees_payload"),
             control_pipelines_payload_fn=control_pipelines_payload_fn,
+            control_backpacks_payload_fn=control_backpacks_payload_fn,
             session_summaries_fn=runtime_fn(runtime_scope, "_session_summaries"),
             test_session_report_summaries_fn=runtime_fn(runtime_scope, "_test_session_report_summaries"),
             available_test_session_definitions_fn=runtime_fn(runtime_scope, "_available_test_session_definitions"),

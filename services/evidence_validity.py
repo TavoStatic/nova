@@ -4,6 +4,7 @@ import json
 from typing import Any
 
 from services.tool_execution_contracts import ADMIN_APPROVED_EXECUTION_SUFFIX
+from services.tool_identity import STRUCTURED_JUDGMENT_TOOLS
 
 
 _INVALID_PREFIXES = (
@@ -38,17 +39,9 @@ _FAILURE_FRAGMENTS = (
     "ollama chat failed",
 )
 
-_JUDGMENT_TOOLS = {
-    "memory_bootstrap_judgment",
-    "release_promotion_judgment",
-    "subconscious_review_judgment",
-    "source_root_judgment",
-}
-
-
 def _is_structured_judgment_result(tool_name: str, result: dict[str, Any]) -> bool:
     tool = str(tool_name or "").strip()
-    if tool not in _JUDGMENT_TOOLS:
+    if tool not in STRUCTURED_JUDGMENT_TOOLS:
         return False
     return bool(str(result.get("schema") or "").strip() and str(result.get("verdict") or "").strip())
 

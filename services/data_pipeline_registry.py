@@ -41,7 +41,23 @@ def _lane_paused_result(pipeline_id: str, operation: str) -> dict[str, Any]:
 
 
 def build_pipeline_registry(data_sources_root: Optional[Path] = None) -> PipelineRegistry:
-    return PipelineRegistry(data_sources_root or DATA_SOURCES_ROOT)
+    """Build registry including backpacks/*/backpack.json (shadow same-id data_sources)."""
+    root = data_sources_root or DATA_SOURCES_ROOT
+    try:
+        from services.backpack_host.registry import BackpackAwarePipelineRegistry
+        from services.nova_runtime_context import BASE_DIR, RUNTIME_DIR
+
+        backpacks_root = BASE_DIR / "backpacks"
+        if backpacks_root.is_dir():
+            return BackpackAwarePipelineRegistry(
+                root,
+                backpacks_root,
+                nova_root=BASE_DIR,
+                runtime_root=RUNTIME_DIR,
+            )
+    except Exception:
+        pass
+    return PipelineRegistry(root)
 
 
 def list_pipeline_summaries(data_sources_root: Optional[Path] = None) -> list[dict[str, Any]]:

@@ -3,7 +3,7 @@
   "display_name": "BISD Ed-Fi (TEA IODS)",
   "kind": "edfi",
   "version": "0.1.0",
-  "description": "Read-only governed Ed-Fi lane for Brownsville ISD via Nova Ed-Fi Core and TEA IODS.",
+  "description": "LEGACY BISD-named Ed-Fi lane. Prefer backpacks/edfi (pipeline_id=edfi) for new installs. Kept for migration until the district instance is reconfigured under the backpack.",
   "read_only": true,
   "network_scope": "district_only",
   "safe_operations": [

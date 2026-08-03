@@ -3,6 +3,22 @@ from __future__ import annotations
 from typing import Any, Callable, Mapping, Optional
 
 from services.nova_runtime_hooks import resolve_runtime_hooks
+from services.tool_identity import (
+    FIND,
+    GENERATED_QUEUE_RUN,
+    INSTALLER_VALIDATION_RUN,
+    LS,
+    MEMORY_BOOTSTRAP_JUDGMENT,
+    PHASE2_AUDIT,
+    PULSE,
+    READ,
+    RELEASE_PROMOTION_JUDGMENT,
+    RELEASE_REBUILD_VERIFY,
+    RELEASE_RECORD_VALIDATION_OUTCOME,
+    RELEASE_VALIDATION_RUN,
+    SOURCE_ROOT_JUDGMENT,
+    SUBCONSCIOUS_REVIEW_JUDGMENT,
+)
 
 
 _EXECUTE_PLANNED_ACTION_HOOKS = {
@@ -59,32 +75,32 @@ _PLANNED_TOOL_NAMES = (
 )
 
 _PLANNED_TOOL_ALIASES = {
-    "tool_find": "find",
-    "tool_ls": "ls",
+    "tool_find": FIND,
+    "tool_ls": LS,
     "tool_queue_status": "queue_status",
-    "tool_phase2_audit": "phase2_audit",
-    "tool_nova_pulse": "pulse",
-    "tool_memory_bootstrap_judgment": "memory_bootstrap_judgment",
+    "tool_phase2_audit": PHASE2_AUDIT,
+    "tool_nova_pulse": PULSE,
+    "tool_memory_bootstrap_judgment": MEMORY_BOOTSTRAP_JUDGMENT,
     "tool_memory_bootstrap_confirm": "memory_bootstrap_confirm",
     "tool_memory_identity_bootstrap": "memory_identity_bootstrap",
     "tool_memory_hygiene": "memory_hygiene",
-    "tool_subconscious_review_judgment": "subconscious_review_judgment",
-    "tool_source_root_judgment": "source_root_judgment",
+    "tool_subconscious_review_judgment": SUBCONSCIOUS_REVIEW_JUDGMENT,
+    "tool_source_root_judgment": SOURCE_ROOT_JUDGMENT,
     "tool_pipeline": "pipeline",
     "tool_nova_self_status": "self_status",
     "tool_core_health_brief": "core_health",
     "tool_core_thinning": "core_thinning",
     "tool_os_capability": "os_capability",
-    "tool_release_promotion_judgment": "release_promotion_judgment",
-    "tool_release_validation_run": "release_validation_run",
-    "tool_release_record_validation_outcome": "release_record_validation_outcome",
-    "tool_release_rebuild_verify": "release_rebuild_verify",
-    "tool_installer_validation_run": "installer_validation_run",
+    "tool_release_promotion_judgment": RELEASE_PROMOTION_JUDGMENT,
+    "tool_release_validation_run": RELEASE_VALIDATION_RUN,
+    "tool_release_record_validation_outcome": RELEASE_RECORD_VALIDATION_OUTCOME,
+    "tool_release_rebuild_verify": RELEASE_REBUILD_VERIFY,
+    "tool_installer_validation_run": INSTALLER_VALIDATION_RUN,
     "tool_patch_preview_approve": "patch_preview_approve",
     "patch_apply": "patch_apply",
     "tool_patch_preview_apply": "patch_preview_apply",
     "patch_rollback": "patch_rollback",
-    "tool_read": "read",
+    "tool_read": READ,
     "tool_system_check": "system_check",
     "tool_update_now": "update_now",
     "tool_update_now_confirm": "update_now_confirm",

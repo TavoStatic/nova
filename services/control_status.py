@@ -313,6 +313,26 @@ class ControlStatusService:
                 "connection_id": "district-main",
                 "issues": [{"code": "edfi_core_readiness_unreadable", "detail": str(exc)}],
             }
+        try:
+            # Control status is polled often. Prefer the last fusion scan file only —
+            # never force a rescan on the hot path (that raced with webui responsiveness
+            # after backpack/work-tree governance work landed).
+            from services.backpack_host.capability_surface import get_fusion_status, load_last_scan
+
+            backpack_fusion = load_last_scan()
+            if not isinstance(backpack_fusion, dict) or not backpack_fusion:
+                backpack_fusion = get_fusion_status(max_age_sec=3600.0, force=False)
+            else:
+                backpack_fusion = dict(backpack_fusion)
+                backpack_fusion["from_cache"] = True
+        except Exception as exc:
+            backpack_fusion = {
+                "ok": False,
+                "required_ok": False,
+                "error": str(exc),
+                "available_capability_ids": [],
+                "nova_must_know": {"has_edfi_backpack": False},
+            }
         requests_total, errors_total = metrics_totals
         if hasattr(core_module, "ollama_health_payload"):
             ollama_health = core_module.ollama_health_payload()
@@ -392,6 +412,7 @@ class ControlStatusService:
             data_pipelines=data_pipelines,
             edfi_capability_profile=edfi_capability_profile,
             edfi_core_readiness=edfi_core_readiness,
+            backpack_fusion=backpack_fusion,
             requests_total=requests_total,
             errors_total=errors_total,
             storage_watch_summary=storage_watch_summary_fn(),
@@ -758,6 +779,7 @@ class ControlStatusService:
         data_pipelines: dict | None = None,
         edfi_capability_profile: dict | None = None,
         edfi_core_readiness: dict | None = None,
+        backpack_fusion: dict | None = None,
         installer_status: dict | None = None,
     ) -> dict:
         autonomy_payload = autonomy_maintenance.copy() if isinstance(autonomy_maintenance, dict) else {}
@@ -781,6 +803,11 @@ class ControlStatusService:
             dict(edfi_core_readiness or {})
             if isinstance(edfi_core_readiness, dict)
             else {"ready": False, "milestone": "", "connection_id": "district-main", "issues": []}
+        )
+        backpack_fusion_payload = (
+            dict(backpack_fusion or {})
+            if isinstance(backpack_fusion, dict)
+            else {"ok": False, "available_capability_ids": [], "nova_must_know": {}}
         )
         installer_status_payload = dict(installer_status or {}) if isinstance(installer_status, dict) else {}
         os_capability_payload = ControlStatusService._os_capability_control_payload(
@@ -967,6 +994,20 @@ class ControlStatusService:
             "edfi_core_readiness": dict(edfi_core_readiness_payload),
             "edfi_core_ready": bool(edfi_core_readiness_payload.get("ready", False)),
             "edfi_core_milestone": str(edfi_core_readiness_payload.get("milestone") or ""),
+            "backpack_fusion": backpack_fusion_payload,
+            "backpack_fusion_ok": bool(backpack_fusion_payload.get("ok")),
+            "backpack_fusion_required_ok": bool(backpack_fusion_payload.get("required_ok")),
+            "backpack_available_capabilities": list(
+                backpack_fusion_payload.get("available_capability_ids") or []
+            ),
+            "backpack_capability_count": len(
+                list(backpack_fusion_payload.get("available_capability_ids") or [])
+            ),
+            "backpack_teach_rules": list(backpack_fusion_payload.get("teach_rules") or []),
+            "backpack_nova_must_know": dict(backpack_fusion_payload.get("nova_must_know") or {}),
+            "backpack_local_schools_rows": int(
+                ((backpack_fusion_payload.get("local_hold") or {}).get("row_count") or 0)
+            ),
         }
 
         runtime_worker = autonomy_payload.get("runtime_worker") if isinstance(autonomy_payload.get("runtime_worker"), dict) else {}

@@ -15,9 +15,12 @@ from services.edfi.district_scope import (
 MILESTONE_ID = "NOVA-EDFI-002"
 
 DEFAULT_PAGE_SIZE: int = 25
-MAX_PAGE_SIZE: int = 500
+MAX_PAGE_SIZE: int = 500  # single HTTP page size to TEA (not LEA match cap)
 DEFAULT_LIMIT_CAP: int = 1_000
 MAX_LIMIT_CAP: int = 5_000
+# Soft safety for "all schools in this LEA" extracts — not a fixed district size.
+# Stops only after ODS scan completes, or this many *matching* LEA rows.
+MAX_LEA_MATCH_CAP: int = 2_000
 _DEFAULT_BACKOFF_SEC: float = 2.0
 
 
@@ -133,12 +136,19 @@ def get_district_scoped_page(
     backoff_sec: float = _DEFAULT_BACKOFF_SEC,
     audit: bool = False,
     max_scan_records: int = MAX_DISTRICT_SCAN_RECORDS,
+    collect_all: bool = False,
+    match_cap: int | None = None,
 ) -> PageResult:
-    """Collect one page of district-owned records from a statewide ODS.
+    """Collect district-owned records from a statewide ODS.
 
     TEA IODS ignores OData district filters, so this scans statewide pages and
     keeps only rows that match the configured LEA id (or Texas id prefix).
     The ``offset`` is relative to district-matched rows, not statewide rows.
+
+    collect_all:
+      Dynamic LEA size — keep scanning until the statewide collection is
+      exhausted (or safety caps). Match count grows with the district instead
+      of stopping at a fixed 25/50 row limit.
     """
     lea = normalize_district_lea_id(district_lea_id)
     if lea is None:
@@ -149,10 +159,21 @@ def get_district_scoped_page(
             error_code="district_lea_id_invalid",
         )
 
-    effective_limit = min(max(1, int(limit or DEFAULT_PAGE_SIZE)), MAX_PAGE_SIZE)
+    # Matching-row budget (LEA size), NOT the TEA HTTP page size.
+    if collect_all:
+        effective_limit = min(
+            max(1, int(match_cap or MAX_LEA_MATCH_CAP)),
+            MAX_LEA_MATCH_CAP,
+        )
+    else:
+        effective_limit = min(
+            max(1, int(limit or DEFAULT_PAGE_SIZE)),
+            MAX_LEA_MATCH_CAP,
+        )
     district_offset = max(0, int(offset or 0))
     scan_cap = max(effective_limit, int(max_scan_records or MAX_DISTRICT_SCAN_RECORDS))
-    fetch_size = min(MAX_PAGE_SIZE, max(effective_limit * 4, 100))
+    # HTTP page size to TEA — larger pages = fewer round-trips when collecting all.
+    fetch_size = MAX_PAGE_SIZE if collect_all else min(MAX_PAGE_SIZE, max(effective_limit * 4, 100))
 
     collected: list[Any] = []
     skipped = 0
@@ -163,6 +184,7 @@ def get_district_scoped_page(
     last_url = ""
     last_error = ""
     last_error_code = ""
+    source_exhausted = False
 
     while len(collected) < effective_limit and records_scanned < scan_cap:
         page = get_page(
@@ -192,12 +214,16 @@ def get_district_scoped_page(
                 break
 
         if page.count < fetch_size:
+            source_exhausted = True
             break
         statewide_offset += page.count
 
-    scan_cap_hit = records_scanned >= scan_cap
-    district_page_complete = not scan_cap_hit and not last_error_code
-    ok = not last_error_code and not scan_cap_hit and (bool(collected) or records_scanned > 0)
+    scan_cap_hit = records_scanned >= scan_cap and not source_exhausted
+    # Complete only when the statewide stream is exhausted (true full-LEA size).
+    district_page_complete = bool(source_exhausted and not last_error_code and not scan_cap_hit)
+    ok = not last_error_code and (bool(collected) or records_scanned > 0)
+    if scan_cap_hit and not collected:
+        ok = False
     result = PageResult(
         ok=ok,
         resource=str(resource or "").strip(),

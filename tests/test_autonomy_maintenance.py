@@ -188,6 +188,29 @@ class TestAutonomyMaintenance(unittest.TestCase):
         self.assertEqual(state.get("last_regression_failed_lane"), "")
         self.assertEqual(state.get("last_regression_failed_tests"), [])
 
+    def test_solution_ladder_learning_runs_when_due_and_skips_cadence(self):
+        """Gap 1: learn_families_from_history must have a live maintenance owner."""
+        state: dict = {}
+        with mock.patch(
+            "services.work_tree_task_progress.learn_families_from_history",
+            return_value={
+                "ok": True,
+                "family_count": 2,
+                "path": "runtime/work_tree/solution_ladders_learned.json",
+                "seeded_count": 8,
+                "families": {},
+            },
+        ) as learn_mock:
+            first = autonomy_maintenance._run_solution_ladder_learning_if_due(state)
+            second = autonomy_maintenance._run_solution_ladder_learning_if_due(state)
+
+        self.assertEqual(learn_mock.call_count, 1)
+        self.assertEqual(first.get("status"), "ok")
+        self.assertEqual(first.get("family_count"), 2)
+        self.assertTrue(str(first.get("path") or "").endswith("solution_ladders_learned.json"))
+        self.assertEqual(second.get("status"), "skipped_cadence")
+        self.assertEqual((state.get("last_solution_ladder_learning") or {}).get("status"), "skipped_cadence")
+
     def test_daily_regression_uses_canonical_regression_runner(self):
         with tempfile.TemporaryDirectory() as td:
             status_path = Path(td) / "regression_status.json"
@@ -3953,6 +3976,55 @@ class TestAutonomyMaintenance(unittest.TestCase):
         self.assertEqual(payload.get("processed_tree_count"), 1)
         self.assertEqual((state.get("last_active_work_tree_cycle") or {}).get("status"), "scope_blocked")
 
+    def test_run_active_work_tree_cycle_climbs_primary_tree_with_step_budget(self):
+        """Step budget must climb one ladder, not force max_steps=1 forever."""
+        state = {}
+        candidates = [
+            {
+                "tree_id": "tree-release",
+                "title": "Signal Intake: Runtime Governance",
+                "status": "active",
+                "kind": "signal_ingestion",
+                "next_step": {
+                    "branch_id": "branch-release",
+                    "branch_title": "Release package is stale behind live source",
+                    "recommended_tool": "release_rebuild_verify",
+                },
+            },
+            {
+                "tree_id": "tree-pulse",
+                "title": "Cli: nova pulse",
+                "status": "active",
+                "kind": "system",
+                "next_step": {
+                    "branch_id": "branch-pulse",
+                    "branch_title": "Run pulse",
+                    "recommended_tool": "pulse",
+                },
+            },
+        ]
+
+        with mock.patch.object(autonomy_maintenance, "_active_work_tree_candidates", return_value=candidates), \
+             mock.patch.object(
+                 autonomy_maintenance.work_tree,
+                 "run_autonomous_loop",
+                 return_value=[
+                     {"action": "executed", "tool": "release_rebuild_verify"},
+                     {"action": "executed", "tool": "release_validation_run"},
+                     {"action": "executed", "tool": "release_promotion_judgment"},
+                 ],
+             ) as loop_mock:
+            payload = autonomy_maintenance._run_active_work_tree_cycle(
+                state, max_steps=3, max_trees=2, sync_core_thinning=False
+            )
+
+        loop_mock.assert_called_once()
+        self.assertEqual(loop_mock.call_args.kwargs.get("max_steps"), 3)
+        self.assertEqual(payload.get("executed_count"), 3)
+        self.assertEqual(payload.get("attempted_count"), 3)
+        self.assertEqual(payload.get("processed_tree_count"), 1)
+        self.assertEqual(payload.get("status"), "ok")
+
     def test_run_active_work_tree_cycle_empty_history_still_consumes_attempt(self):
         state = {}
         candidates = [
@@ -4318,7 +4390,8 @@ class TestAutonomyMaintenance(unittest.TestCase):
 
             payload = autonomy_maintenance._webui_health_for_orchestrator()
 
-        terminate_mock.assert_called_once_with(7001)
+            terminate_mock.assert_called_once()
+            self.assertEqual(terminate_mock.call_args.args[0], 7001)
         self.assertEqual(payload.get("pid"), 7002)
         self.assertEqual(payload.get("process_count"), 1)
         self.assertEqual((payload.get("duplicate_reconcile") or {}).get("terminated_count"), 1)

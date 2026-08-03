@@ -4,6 +4,7 @@ from services.regression_evidence import (
     apply_regression_status_payload,
     regression_evidence_stale,
     regression_failure_active,
+    regression_failure_is_lock_contention,
 )
 
 
@@ -62,6 +63,41 @@ class TestRegressionEvidence(unittest.TestCase):
         self.assertEqual(state.get("last_regression_failed_lane"), "behavior")
         self.assertEqual(len(state.get("last_regression_failed_tests") or []), 1)
         self.assertIn("failed_tests=", str(state.get("last_regression_tail") or ""))
+
+    def test_already_running_failed_is_not_active_regression_failure(self):
+        tail = "[FAIL] regression already running (pid=5812, lanes=unit, behavior, integration)"
+        self.assertTrue(
+            regression_failure_is_lock_contention(
+                status_label="FAILED",
+                failed_tests=[],
+                failed_lane="",
+                tail=tail,
+            )
+        )
+        self.assertFalse(
+            regression_failure_active(
+                status_label="FAILED",
+                stale=False,
+                failed_tests=[],
+                failed_lane="",
+                tail=tail,
+            )
+        )
+
+    def test_lock_contention_is_not_mission_regression_blocker(self):
+        from services.nova_mission_owner_verdicts import _regression_blocker
+
+        tail = "[FAIL] regression already running (pid=5812, lanes=unit)"
+        blocker = _regression_blocker(
+            status_label="FAILED",
+            stale=False,
+            evidence={
+                "last_regression_failed_tests": [],
+                "last_regression_failed_lane": "",
+                "last_regression_tail": tail,
+            },
+        )
+        self.assertIsNone(blocker)
 
 
 if __name__ == "__main__":

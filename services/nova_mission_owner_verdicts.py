@@ -9,6 +9,26 @@ from services.regression_evidence import (
     regression_outcome_failed,
     regression_outcome_passed,
 )
+from services.tool_identity import (
+    FIND,
+    LS,
+    READ,
+    RELEASE_PROMOTION_JUDGMENT,
+    RELEASE_REBUILD_VERIFY,
+    RELEASE_RECORD_VALIDATION_OUTCOME,
+    RELEASE_VALIDATION_RUN,
+)
+
+# Full release solution ladder tools (mission hold remediation — one name surface).
+RELEASE_SOLUTION_LADDER_TOOLS = (
+    READ,
+    FIND,
+    LS,
+    RELEASE_REBUILD_VERIFY,
+    RELEASE_VALIDATION_RUN,
+    RELEASE_RECORD_VALIDATION_OUTCOME,
+    RELEASE_PROMOTION_JUDGMENT,
+)
 
 
 def _as_dict(value: Any) -> dict:
@@ -43,20 +63,40 @@ def _text(value: Any, limit: int = 220) -> str:
     return str(value or "").strip()[:limit]
 
 
-def _regression_evidence_current(*, status_label: str, stale: bool) -> bool:
+def _regression_evidence_current(
+    *,
+    status_label: str,
+    stale: bool,
+    evidence: dict | None = None,
+) -> bool:
     label = _text(status_label, 80).lower()
     if not label:
         return False
     if regression_outcome_passed(status_label):
         return True
-    return regression_failure_active(status_label=status_label, stale=stale)
+    evidence = evidence if isinstance(evidence, dict) else {}
+    return regression_failure_active(
+        status_label=status_label,
+        stale=stale,
+        failed_tests=list(evidence.get("last_regression_failed_tests") or []),
+        failed_lane=_text(evidence.get("last_regression_failed_lane"), 80),
+        tail=_text(evidence.get("last_regression_tail"), 240),
+    )
 
 
 def _regression_passed(*, status_label: str) -> bool:
     return regression_outcome_passed(status_label)
 
 
-def _regression_blocker(*, status_label: str, stale: bool, evidence: dict) -> dict[str, Any]:
+def _regression_blocker(*, status_label: str, stale: bool, evidence: dict) -> dict[str, Any] | None:
+    """Return a truth blocker, or None when regression is not a hold reason.
+
+    Lock contention ('regression already running' with no failed_tests) is not
+    evidence of broken tests. Emitting regression_stale for that case freezes
+    mission hold while Work Tree still has climbable work — wrong protocol.
+    """
+    from services.regression_evidence import regression_failure_is_lock_contention
+
     failed_tests = [
         _text(item, 240)
         for item in list(evidence.get("last_regression_failed_tests") or [])
@@ -64,7 +104,20 @@ def _regression_blocker(*, status_label: str, stale: bool, evidence: dict) -> di
     ]
     failed_lane = _text(evidence.get("last_regression_failed_lane"), 80)
     tail = _text(evidence.get("last_regression_tail"), 240)
-    if regression_failure_active(status_label=status_label, stale=stale):
+    if regression_failure_is_lock_contention(
+        status_label=status_label,
+        failed_tests=failed_tests,
+        failed_lane=failed_lane,
+        tail=tail,
+    ):
+        return None
+    if regression_failure_active(
+        status_label=status_label,
+        stale=stale,
+        failed_tests=failed_tests,
+        failed_lane=failed_lane,
+        tail=tail,
+    ):
         detail_parts = [tail or _text(status_label, 160)]
         if failed_lane:
             detail_parts.append(f"lane={failed_lane}")
@@ -77,9 +130,11 @@ def _regression_blocker(*, status_label: str, stale: bool, evidence: dict) -> di
             source="runtime/regression_status.json",
             remediation=_remediation(
                 "run_regression",
-                tools=["read", "system_check", "release_rebuild_verify", "core_thinning"],
+                tools=[READ, "system_check", RELEASE_REBUILD_VERIFY, "core_thinning"],
             ),
         )
+    if regression_outcome_passed(status_label):
+        return None
     if regression_outcome_failed(status_label) and stale:
         return _blocker(
             "regression",
@@ -87,6 +142,15 @@ def _regression_blocker(*, status_label: str, stale: bool, evidence: dict) -> di
             detail=tail or _text(status_label, 160),
             source="runtime/regression_status.json",
         )
+    if not _text(status_label, 80):
+        return _blocker(
+            "regression",
+            "regression_stale",
+            detail=tail or "regression status missing",
+            source="runtime/regression_status.json",
+        )
+    # Non-pass, non-active, non-stale, non-contention: still surface stale only
+    # when we have no better signal (avoid inventing regression_failed).
     return _blocker(
         "regression",
         "regression_stale",
@@ -319,13 +383,23 @@ def build_mission_truth_gate(
         }
 
     validation_fresh = _validation_truth_fresh(validation)
+    from services.regression_evidence import regression_failure_is_lock_contention
+
     regression_status_label = _text(evidence.get("last_regression_status"), 80)
     regression_stale = _as_bool(evidence.get("last_regression_stale"), False)
     regression_current = _regression_evidence_current(
         status_label=regression_status_label,
         stale=regression_stale,
+        evidence=evidence,
     )
-    regression_passed = _regression_passed(status_label=regression_status_label)
+    regression_lock_contention = regression_failure_is_lock_contention(
+        status_label=regression_status_label,
+        failed_tests=list(evidence.get("last_regression_failed_tests") or []),
+        failed_lane=_text(evidence.get("last_regression_failed_lane"), 80),
+        tail=_text(evidence.get("last_regression_tail"), 240),
+    )
+    # Concurrent lock is not a failed suite — do not fail the regression pillar.
+    regression_passed = _regression_passed(status_label=regression_status_label) or regression_lock_contention
     release_truth_current = _release_truth_current(
         release_truth=_as_dict(evidence.get("release_runtime_truth")),
         release_status=_as_dict(evidence.get("release_status")),
@@ -361,23 +435,36 @@ def build_mission_truth_gate(
             "regression",
             ready=regression_passed,
             source="runtime/regression_status.json",
-            blockers=[]
-            if regression_passed
-            else [
-                _regression_blocker(
-                    status_label=regression_status_label,
-                    stale=regression_stale,
-                    evidence=evidence,
+            blockers=(
+                []
+                if regression_passed
+                else [
+                    blocker
+                    for blocker in [
+                        _regression_blocker(
+                            status_label=regression_status_label,
+                            stale=regression_stale,
+                            evidence=evidence,
+                        )
+                    ]
+                    if blocker
+                ]
+            ),
+            summary=(
+                "regression lock contention (already running) — not a test failure"
+                if regression_lock_contention
+                else (
+                    _text(evidence.get("last_regression_tail"), 240)
+                    or _text(evidence.get("last_regression_status"), 160)
+                    or "regression status missing"
                 )
-            ],
-            summary=_text(evidence.get("last_regression_tail"), 240)
-            or _text(evidence.get("last_regression_status"), 160)
-            or "regression status missing",
+            ),
             evidence={
                 "status": regression_status_label,
                 "evidence_current": regression_current,
                 "passed": regression_passed,
                 "stale": regression_stale,
+                "lock_contention": regression_lock_contention,
                 "failed_lane": _text(evidence.get("last_regression_failed_lane"), 80),
                 "failed_tests": [
                     _text(item, 160)
@@ -401,9 +488,12 @@ def build_mission_truth_gate(
                         160,
                     ),
                     source="release_runtime_truth",
+                    # Full solution ladder — not rebuild alone. If Nova can only
+                    # rebuild under hold but not validate/record, she cannot finish
+                    # the release fix herself after a successful rebuild.
                     remediation=_remediation(
                         "active_work_tree_run_next",
-                        tools=["release_rebuild_verify"],
+                        tools=list(RELEASE_SOLUTION_LADDER_TOOLS),
                     ),
                 )
             ],
@@ -446,9 +536,11 @@ def build_mission_truth_gate(
                 release_truth_current=release_truth_current,
                 release_evidence=release_evidence,
             ):
+                # Include ladder steps (read/find) so hold does not deadlock on
+                # next_step=read while only terminal rebuild tools were allowed.
                 drift_remediation = _remediation(
                     "active_work_tree_run_next",
-                    tools=["release_rebuild_verify", "core_thinning"],
+                    tools=[*RELEASE_SOLUTION_LADDER_TOOLS, "core_thinning"],
                 )
             layer_blockers.append(
                 _blocker(

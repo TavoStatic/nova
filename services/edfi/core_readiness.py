@@ -12,6 +12,8 @@ from services.edfi.profile_evidence import (
 from services.nova_wiring_inventory import build_source_wiring_probe_payload, wiring_surface_ids
 
 CORE_READINESS_MILESTONE = "NOVA-EDFI-010"
+# Metadata rediscovery cadence (advisory). Not a hard block — live TEA re-profile
+# every week was creating permanent governance pressure once the profile aged.
 PROFILE_FRESHNESS_TTL_SEC = 7 * 24 * 3600
 _EDFI_CAPABILITY_SURFACE_ID = "edfi_capability_profile"
 
@@ -65,10 +67,9 @@ def _next_recommended_slice(
     inventory_declared: bool,
     evidence_loop_ready: bool,
     district_facts_ok: bool,
+    backpack_operational: bool = False,
 ) -> str:
     if not profile_ok:
-        return "edfi-profile-refresh"
-    if not profile_fresh:
         return "edfi-profile-refresh"
     if not inventory_declared:
         return "edfi-wiring-inventory"
@@ -76,7 +77,49 @@ def _next_recommended_slice(
         return "edfi-profile-evidence-loop"
     if not district_facts_ok:
         return "edfi-connection-config"
+    # Stale profile is advisory when the backpack extract path is operational.
+    if not profile_fresh and not backpack_operational:
+        return "edfi-profile-refresh"
+    if backpack_operational:
+        return "backpack-local-extract-ready"
     return "domain-layer-first-consumer"
+
+
+def _backpack_operational_snapshot(connection_id: str) -> dict[str, Any]:
+    """
+    True when the Ed-Fi backpack can serve reports without a live metadata re-probe.
+
+    This is the pressure relief valve: a saved schools extract + known LEA means
+    Nova should not keep opening work-tree pressure for 'core not ready'.
+    """
+    out: dict[str, Any] = {
+        "ok": False,
+        "has_schools_extract": False,
+        "schools_row_count": 0,
+        "extract_synced_at": "",
+        "connection_id": str(connection_id or "").strip() or DEFAULT_CONNECTION_ID,
+    }
+    try:
+        from services.edfi.extract_store import list_extracts
+
+        rows = list_extracts("edfi")
+        best: dict[str, Any] | None = None
+        for item in rows:
+            if str(item.get("intent") or "") != "schools":
+                continue
+            count = int(item.get("row_count") or 0)
+            if count <= 0:
+                continue
+            if best is None or count > int(best.get("row_count") or 0):
+                best = item
+        if best is not None:
+            out["has_schools_extract"] = True
+            out["schools_row_count"] = int(best.get("row_count") or 0)
+            out["extract_synced_at"] = str(best.get("synced_at") or "")
+            out["ok"] = True
+    except Exception:
+        pass
+    return out
 
 
 def _profile_freshness(
@@ -120,8 +163,11 @@ def read_edfi_core_readiness(
     district_facts_ok = bool(facts.get("ok")) and bool(str(facts.get("lea_id") or "").strip())
     sync_status = facts.get("sync_status")
     sync_status_present = isinstance(sync_status, dict) and bool(sync_status.get("present"))
+    backpack = _backpack_operational_snapshot(resolved_id)
+    backpack_operational = bool(backpack.get("ok"))
 
     blocking_issues: list[str] = []
+    watch_issues: list[str] = []
     if not profile_ok:
         blocking_issues.extend(_issue_messages(list(evidence.get("issues") or [])))
         if not blocking_issues:
@@ -135,10 +181,20 @@ def read_edfi_core_readiness(
             blocking_issues.extend(_issue_messages(list(facts.get("issues") or [])))
         if not str(facts.get("lea_id") or "").strip():
             blocking_issues.append("edfi_district_lea_id_missing")
+    # Stale metadata is a watch item, not a hard block — re-profile is optional and
+    # expensive on TEA. Local extracts keep the backpack operational.
     if profile_ok and not profile_fresh:
-        blocking_issues.append("edfi_profile_stale")
+        watch_issues.append("edfi_profile_stale")
+    if not backpack_operational and profile_ok and district_facts_ok:
+        watch_issues.append("edfi_schools_extract_missing")
 
-    ready = profile_ok and profile_fresh and inventory_declared and evidence_loop_ready and district_facts_ok
+    # Ready = can operate as a bridge without forcing live TEA metadata refresh.
+    ready = (
+        profile_ok
+        and inventory_declared
+        and evidence_loop_ready
+        and district_facts_ok
+    )
     if ready:
         blocking_issues = []
 
@@ -151,14 +207,18 @@ def read_edfi_core_readiness(
         "inventory_declared": inventory_declared,
         "evidence_loop_ready": evidence_loop_ready,
         "district_facts_ok": district_facts_ok,
+        "backpack_operational": backpack_operational,
+        "backpack": backpack,
         "sync_status_present": sync_status_present,
         "blocking_issues": blocking_issues[:8],
+        "watch_issues": watch_issues[:8],
         "next_recommended_slice": _next_recommended_slice(
             profile_ok=profile_ok,
             profile_fresh=profile_fresh,
             inventory_declared=inventory_declared,
             evidence_loop_ready=evidence_loop_ready,
             district_facts_ok=district_facts_ok,
+            backpack_operational=backpack_operational,
         ),
         "milestone": CORE_READINESS_MILESTONE,
         "connection_id": resolved_id,

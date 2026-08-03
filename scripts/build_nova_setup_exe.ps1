@@ -52,6 +52,7 @@ $args = $buildPyArgs + @(
   "--specpath", (Join-Path $work "spec"),
   # Collect package data used by wizard-adjacent imports if frozen later.
   "--hidden-import", "services.nova_setup_wizard",
+  "--hidden-import", "services.sock_service",
   "--hidden-import", "tkinter",
   "--hidden-import", "tkinter.ttk",
   "--hidden-import", "tkinter.scrolledtext",

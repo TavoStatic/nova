@@ -17,6 +17,7 @@ from services.edfi.district_scope import (
 )
 from services.edfi.resources import (
     DEFAULT_PAGE_SIZE,
+    MAX_LEA_MATCH_CAP,
     MAX_PAGE_SIZE,
     get_district_scoped_page,
     get_page,
@@ -24,11 +25,11 @@ from services.edfi.resources import (
 
 MILESTONE_ID = "NOVA-EDFI-002"
 
+# Prefer namespaced paths first — bare "schools"/"students" 404 on TEA and burn rate limit.
 EXPLORE_PRESETS: dict[str, list[str]] = {
-    "schools": ["schools", "ed-fi/schools"],
-    "students": ["students", "ed-fi/students"],
+    "schools": ["ed-fi/schools"],
+    "students": ["ed-fi/students"],
     "student_school_associations": [
-        "studentSchoolAssociations",
         "ed-fi/studentSchoolAssociations",
     ],
 }
@@ -188,6 +189,8 @@ def read_resource(
     offset: int = 0,
     filter_params: dict[str, Any] | None = None,
     apply_district_scope: bool = True,
+    district_lea_id_override: str | None = None,
+    collect_all: bool = False,
 ) -> dict[str, Any]:
     name = str(resource or "").strip()
     if not name:
@@ -197,7 +200,9 @@ def read_resource(
             "error": "Resource name is required.",
         }
 
-    effective_limit = min(max(1, int(limit or DEFAULT_PAGE_SIZE)), MAX_PAGE_SIZE)
+    # Match budget for LEA rows (can be full district size). Not TEA HTTP page size.
+    match_ceiling = MAX_LEA_MATCH_CAP if collect_all else MAX_PAGE_SIZE
+    effective_limit = min(max(1, int(limit or DEFAULT_PAGE_SIZE)), match_ceiling)
     config = load_connection_config(connection_id)
     if config is None:
         return {
@@ -210,8 +215,9 @@ def read_resource(
     params = dict(filter_params or {})
     district_lea_id = ""
     strategy = ""
-    if apply_district_scope and config.district_lea_id:
-        district_lea_id = str(config.district_lea_id).strip()
+    effective_lea = str(district_lea_id_override or "").strip() or str(config.district_lea_id or "").strip()
+    if apply_district_scope and effective_lea:
+        district_lea_id = effective_lea
         strategy = district_filter_strategy(config.normalized_base_url())
         if strategy == "client_side":
             page = get_district_scoped_page(
@@ -221,10 +227,47 @@ def read_resource(
                 limit=effective_limit,
                 offset=max(0, int(offset or 0)),
                 audit=True,
+                collect_all=bool(collect_all),
             )
         else:
             clause = district_lea_filter_clause(resolved, district_lea_id)
             params = merge_filter_params(params, clause)
+            # Server-side filter: page until exhausted when collect_all.
+            if collect_all:
+                from services.edfi.resources import get_all
+
+                bulk = get_all(
+                    client,
+                    resolved,
+                    page_size=min(effective_limit, 500),
+                    limit_cap=min(max(effective_limit, 1), 2_000),
+                    filter_params=params or None,
+                )
+                return {
+                    "ok": bulk.ok,
+                    "connection_id": connection_id,
+                    "district_lea_id": district_lea_id,
+                    "district_scope_applied": True,
+                    "district_filter_strategy": strategy,
+                    "records_scanned": bulk.total_fetched,
+                    "scan_cap_hit": bool(bulk.truncated),
+                    "district_page_complete": bool(bulk.ok and not bulk.truncated),
+                    "odata_filter_honored": True,
+                    "filter": str(params.get("$filter") or ""),
+                    "resource": resolved,
+                    "url": "",
+                    "offset": 0,
+                    "limit": bulk.total_fetched,
+                    "count": bulk.total_fetched,
+                    "items": list(bulk.items or []),
+                    "latency_ms": bulk.latency_ms,
+                    "status_code": 200 if bulk.ok else 0,
+                    "error": bulk.error,
+                    "error_code": bulk.error_code,
+                    "rate_limited": False,
+                    "collect_all": True,
+                    "lea_match_count": bulk.total_fetched,
+                }
             page = get_page(
                 client,
                 resolved,
@@ -264,6 +307,8 @@ def read_resource(
         "error": page.error,
         "error_code": page.error_code,
         "rate_limited": page.rate_limited,
+        "collect_all": bool(collect_all),
+        "lea_match_count": int(page.count or 0),
     }
 
 
@@ -274,6 +319,8 @@ def read_preset(
     limit: int = DEFAULT_PAGE_SIZE,
     offset: int = 0,
     apply_district_scope: bool = True,
+    district_lea_id_override: str | None = None,
+    collect_all: bool = False,
 ) -> dict[str, Any]:
     key = str(preset or "").strip().lower()
     candidates = EXPLORE_PRESETS.get(key)
@@ -293,6 +340,8 @@ def read_preset(
             limit=limit,
             offset=offset,
             apply_district_scope=apply_district_scope,
+            district_lea_id_override=district_lea_id_override,
+            collect_all=collect_all,
         )
         last_result = result
         if result.get("ok"):

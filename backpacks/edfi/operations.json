@@ -1,0 +1,83 @@
+{
+  "backpack_id": "edfi",
+  "operations": [
+    {
+      "id": "view_status",
+      "label": "View Connection Status",
+      "description": "Check ODS connection health, last sync time, resource count, and readiness blockers.",
+      "read_only": true,
+      "pipeline_operation": "connection_health",
+      "default_grants": {
+        "llc_master":    true,
+        "account_admin": true,
+        "standard_user": true,
+        "limited_user":  true,
+        "viewer":        true
+      }
+    },
+    {
+      "id": "view_data",
+      "label": "Browse Ed-Fi Data",
+      "description": "Read schools, students, enrollments, and any discovered resource. Governed read-only with row limits and redaction.",
+      "read_only": true,
+      "pipeline_operations": [
+        "list_resources",
+        "list_schools",
+        "list_students",
+        "student_school_associations"
+      ],
+      "default_grants": {
+        "llc_master":    true,
+        "account_admin": true,
+        "standard_user": true,
+        "limited_user":  true,
+        "viewer":        false
+      }
+    },
+    {
+      "id": "run_sync",
+      "label": "Run Change Sync",
+      "description": "Pull changes from the ODS since the last cursor position. Advances the change version cursor on success.",
+      "read_only": false,
+      "pipeline_operations": [
+        "sync_status",
+        "changes_since"
+      ],
+      "default_grants": {
+        "llc_master":    true,
+        "account_admin": true,
+        "standard_user": true,
+        "limited_user":  false,
+        "viewer":        false
+      }
+    },
+    {
+      "id": "configure",
+      "label": "Configure Connection",
+      "description": "Set or update ODS URL, credentials, LEA ID, and SSL settings. Requires account_admin.",
+      "read_only": false,
+      "pipeline_operations": [],
+      "default_grants": {
+        "llc_master":    true,
+        "account_admin": true,
+        "standard_user": false,
+        "limited_user":  false,
+        "viewer":        false
+      }
+    },
+    {
+      "id": "install",
+      "label": "Install / Re-profile",
+      "description": "First-time setup: authenticate, discover ODS metadata, save capability profile. Run again after credential rotation.",
+      "read_only": false,
+      "pipeline_operations": [],
+      "default_grants": {
+        "llc_master":    true,
+        "account_admin": true,
+        "standard_user": false,
+        "limited_user":  false,
+        "viewer":        false
+      }
+    }
+  ]
+}

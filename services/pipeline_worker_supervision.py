@@ -81,10 +81,20 @@ def _atomic_write_json(path: Path, payload: Mapping[str, Any]) -> None:
 
 
 def _read_json_file(path: Path) -> dict[str, Any]:
-    if not path.exists():
+    """Best-effort JSON read. Never raise — lease/heartbeat I/O is racy on Windows."""
+    try:
+        if not path.exists():
+            return {}
+    except OSError:
         return {}
     try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
+        raw = path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return {}
+    except Exception:
+        return {}
+    try:
+        payload = json.loads(raw)
     except Exception:
         return {}
     return dict(payload) if isinstance(payload, dict) else {}
@@ -174,7 +184,10 @@ def release_worker_lease(
     expected_owner_pid: int | None = None,
 ) -> bool:
     path = worker_lease_path(pipeline_id, runtime_root=runtime_root)
-    if not path.exists():
+    try:
+        if not path.exists():
+            return False
+    except OSError:
         return False
     if expected_owner_pid is not None:
         payload = _read_json_file(path)
@@ -182,11 +195,17 @@ def release_worker_lease(
             owner = int(payload.get("lease_owner_pid") or 0)
         except Exception:
             owner = 0
-        if owner != int(expected_owner_pid):
+        try:
+            expected = int(expected_owner_pid)
+        except Exception:
+            return False
+        if owner != expected:
             return False
     try:
         path.unlink(missing_ok=True)
         return True
+    except OSError:
+        return False
     except Exception:
         return False
 
@@ -501,16 +520,39 @@ def ensure_pipeline_worker_running(
 
         subprocess_module = subprocess_module or subprocess_fallback
         os_name = os_name or os.name
-        base_dir = worker_script.resolve().parent.parent
+        try:
+            script_path = Path(worker_script).resolve()
+        except OSError:
+            script_path = Path(worker_script)
+        # scripts/pipeline_worker.py → repo root; never rely on fragile multi-parent chains mid-exception.
+        if script_path.name == "pipeline_worker.py" and script_path.parent.name == "scripts":
+            base_dir = script_path.parent.parent
+        else:
+            base_dir = script_path.parent
+        try:
+            data_root = Path(data_sources_root) if data_sources_root is not None else (base_dir / "data_sources")
+            data_root_str = str(data_root)
+            runtime_root_str = str(_normalize_runtime_root(runtime_root))
+            venv_str = str(venv_python)
+            script_str = str(script_path)
+        except Exception as exc:
+            return {
+                "ok": False,
+                "status": "start_failed",
+                "pipeline_id": str(pipeline_id or "").strip(),
+                "detail": f"path_resolve_failed:{type(exc).__name__}",
+                "heartbeat": heartbeat,
+                "lease": lease,
+            }
         args = [
-            str(venv_python),
-            str(worker_script),
+            venv_str,
+            script_str,
             "--pipeline",
             str(pipeline_id or "").strip(),
             "--runtime-root",
-            str(_normalize_runtime_root(runtime_root)),
+            runtime_root_str,
             "--data-sources-root",
-            str(data_sources_root or (base_dir / "data_sources")),
+            data_root_str,
         ]
         lease_acquire = acquire_worker_lease(
             pipeline_id,
@@ -645,20 +687,40 @@ def ensure_pipeline_workers_for_ids(
     os_name: str | None = None,
     pid_alive_fn: Callable[[int], bool] | None = None,
 ) -> dict[str, Any]:
-    results = [
-        ensure_pipeline_worker_running(
-            pipeline_id,
-            worker_script=worker_script,
-            venv_python=venv_python,
-            runtime_root=runtime_root,
-            data_sources_root=data_sources_root,
-            subprocess_module=subprocess_module,
-            os_name=os_name,
-            pid_alive_fn=pid_alive_fn,
-        )
-        for pipeline_id in pipeline_ids
-        if str(pipeline_id or "").strip()
-    ]
+    results: list[dict[str, Any]] = []
+    for pipeline_id in pipeline_ids:
+        clean_id = str(pipeline_id or "").strip()
+        if not clean_id:
+            continue
+        # One pipeline must not abort ensure for all others or kill the maintenance cycle.
+        try:
+            results.append(
+                ensure_pipeline_worker_running(
+                    clean_id,
+                    worker_script=worker_script,
+                    venv_python=venv_python,
+                    runtime_root=runtime_root,
+                    data_sources_root=data_sources_root,
+                    subprocess_module=subprocess_module,
+                    os_name=os_name,
+                    pid_alive_fn=pid_alive_fn,
+                )
+            )
+        except Exception as exc:
+            try:
+                detail = f"{type(exc).__name__}: {exc}"
+            except Exception:
+                detail = type(exc).__name__
+            results.append(
+                {
+                    "ok": False,
+                    "status": "start_failed",
+                    "pipeline_id": clean_id,
+                    "detail": detail,
+                    "heartbeat": {},
+                    "lease": {},
+                }
+            )
     started = [item for item in results if item.get("status") == "start_requested"]
     running = [item for item in results if item.get("status") == "already_running"]
     duplicate = [item for item in results if item.get("status") == "duplicate_ownership"]

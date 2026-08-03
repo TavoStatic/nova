@@ -79,7 +79,15 @@ SOURCE_ROOTS: tuple[SourceRoot, ...] = (
     SourceRoot(
         "session_identity_auth",
         shared_inventory_label("session_identity_auth"),
-        ("services/chat_identity.py", "services/session_admin.py", "http_session_store.py", "services/control_login_frontdoor.py"),
+        (
+            "services/chat_identity.py",
+            "services/session_admin.py",
+            "http_session_store.py",
+            "services/control_login_frontdoor.py",
+            "services/nova_shell/auth.py",
+            "services/nova_shell/store.py",
+            "scripts/setup_nova_shell.py",
+        ),
     ),
     SourceRoot(
         "memory_identity",
@@ -124,7 +132,14 @@ SOURCE_ROOTS: tuple[SourceRoot, ...] = (
     SourceRoot(
         "work_tree",
         shared_inventory_label("work_tree"),
-        ("work_tree.py", "work_tree_contracts.py", "services/control_work_trees.py"),
+        (
+            "work_tree.py",
+            "work_tree_contracts.py",
+            "services/control_work_trees.py",
+            "services/work_tree_task_progress.py",
+            "services/solution_trail.py",
+            "services/self_scan_rings.py",
+        ),
     ),
     SourceRoot(
         "tool_registry_policy",
@@ -224,8 +239,21 @@ SOURCE_ROOTS: tuple[SourceRoot, ...] = (
         ),
     ),
     SourceRoot(
+        "backpack_edfi",
+        "Ed-Fi backpack package, host fusion, control surface, capability scan for Nova nervous system",
+        (
+            "backpacks/edfi/backpack.json",
+            "backpacks/edfi/brief.md",
+            "services/backpack_host/capability_surface.py",
+            "services/backpack_host/query.py",
+            "services/control_backpacks.py",
+            "scripts/run_backpack.py",
+            "tools/edfi_tool.py",
+        ),
+    ),
+    SourceRoot(
         "data_lane_edfi_bisd",
-        "BISD Ed-Fi data lane connector, lane config, and operator scripts",
+        "LEGACY BISD Ed-Fi data lane connector (prefer backpacks/edfi)",
         (
             "data_sources/edfi_bisd/connector.py",
             "data_sources/edfi_bisd/pipeline.json",
@@ -437,6 +465,29 @@ def _coverage_root_for_path(path: str) -> str:
         return "test_ecosystem"
     if low.startswith("services/edfi/"):
         return "edfi_core"
+    if (
+        low.startswith("backpacks/edfi/")
+        or low.startswith("services/backpack_host/")
+        or low == "services/control_backpacks.py"
+        or name in {"run_backpack.py", "_checklist_edfi_gates.py"}
+        or low.startswith("tests/test_backpack_")
+        or low.startswith("tests/test_control_backpacks")
+    ):
+        return "backpack_edfi"
+    if low.startswith("services/nova_shell/") or name in {"setup_nova_shell.py"} or "nova_shell" in low:
+        return "session_identity_auth"
+    # Agent/operator scratch scripts (underscore prefix) stay out of production roots.
+    if (
+        name.startswith("_inspect_")
+        or name.startswith("_clear_")
+        or name.startswith("_debug_")
+        or name.startswith("_checklist_")
+        or name.startswith("_webui_")
+        or name.startswith("_find_")
+        or name.startswith("_start_")
+        or name in {"build_nova_setup_exe.ps1", "bring_up_webui.py", "webui_watchdog.py"}
+    ):
+        return "diagnostics_hygiene"
     if low.startswith("data_sources/edfi_bisd/"):
         return "data_lane_edfi_bisd"
     if name in {"run_edfi_profile.py", "run_edfi_explore.py"}:
@@ -476,6 +527,21 @@ def _coverage_root_for_path(path: str) -> str:
         return "patch_pipeline"
     if "recurring_finding" in low:
         return "work_tree"
+    if (
+        "solution_trail" in low
+        or "work_tree_task_progress" in low
+        or "self_scan_rings" in low
+    ):
+        return "work_tree"
+    # Local probe / task-progress helper scripts are diagnostics, not orphans.
+    if low.startswith("scripts/") and (
+        "task_progress" in low
+        or name.startswith("_mine_")
+        or name.startswith("_sample_")
+        or name.startswith("_quick_health")
+        or name.startswith("_task_progress")
+    ):
+        return "diagnostics_hygiene"
     if name == "codex_audit.txt":
         return "diagnostics_hygiene"
     if "operator" in low or name in {"operator_macros.json"}:

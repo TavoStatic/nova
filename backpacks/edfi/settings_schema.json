@@ -1,0 +1,206 @@
+{
+  "backpack_id": "edfi",
+  "schema_version": "1.0",
+  "description": "Configuration required before the Ed-Fi backpack can connect to an ODS instance.",
+  "sections": [
+    {
+      "id": "connection",
+      "label": "ODS Connection",
+      "description": "Credentials and endpoint for the Ed-Fi ODS instance.",
+      "fields": [
+        {
+          "key": "connection_id",
+          "label": "Connection Name",
+          "type": "string",
+          "required": true,
+          "default": "district-main",
+          "description": "Unique identifier for this ODS connection. Use lowercase letters, digits, and hyphens.",
+          "pattern": "^[a-z][a-z0-9-]{1,63}$",
+          "example": "district-main"
+        },
+        {
+          "key": "base_url",
+          "label": "ODS Base URL",
+          "type": "url",
+          "required": true,
+          "description": "Root URL of the Ed-Fi ODS instance. Do not include /data/v3 or trailing slash.",
+          "example": "https://edfi.yourdomain.org"
+        },
+        {
+          "key": "client_id",
+          "label": "Client ID",
+          "type": "string",
+          "required": true,
+          "secret": false,
+          "description": "OAuth2 client ID issued by the Ed-Fi ODS administrator."
+        },
+        {
+          "key": "client_secret",
+          "label": "Client Secret",
+          "type": "password",
+          "required": true,
+          "secret": true,
+          "description": "OAuth2 client secret issued with the client id. Never commit to git; provided at install only. Stored only under runtime/ on this machine."
+        },
+        {
+          "key": "credential_access_tier",
+          "label": "Key access level",
+          "type": "string",
+          "required": false,
+          "default": "read",
+          "description": "What this client id/secret is allowed to do on the ODS (as issued by the ODS admin). read = report/read only; limited = subset of resources; full = broad read. Nova still never writes to the ODS. Does not replace Nova Shell user grants.",
+          "example": "read"
+        }
+      ]
+    },
+    {
+      "id": "scope",
+      "label": "District / region scope",
+      "description": "TEA ODS client credentials are usually statewide (can reach many districts). Nova still requires a scope policy: which LEA(s) THIS install is allowed to pull. District = one LEA. Region = explicit allowed LEA list.",
+      "fields": [
+        {
+          "key": "scope_mode",
+          "label": "Scope mode",
+          "type": "string",
+          "required": false,
+          "default": "single_lea",
+          "description": "single_lea = one district filter. multi_lea = region/ESC: same kind of key, multiple allowed LEAs (Nova policy, not a special key type).",
+          "example": "single_lea"
+        },
+        {
+          "key": "district_lea_id",
+          "label": "Primary District LEA ID",
+          "type": "string",
+          "required": false,
+          "description": "Required for single_lea. PEIMS form (031901) or Ed-Fi form (31901) both work — they match the same district. For multi_lea, optional default LEA when a query does not pass district_lea_id.",
+          "example": "031901"
+        },
+        {
+          "key": "allowed_lea_ids",
+          "label": "Allowed LEA IDs (region)",
+          "type": "string",
+          "required": false,
+          "description": "Region mode: comma-separated LEAs this Nova may query. The ODS key may still see the whole state; Nova will refuse LEAs outside this list.",
+          "example": "031901, 108904, 240901"
+        }
+      ]
+    },
+    {
+      "id": "warehouse",
+      "label": "Local warehouse (daily full pull)",
+      "description": "TEA rate-limits forbid back-to-back live pulls. Nova stores full LEA data in a local SQLite warehouse and promotes it on a schedule. User reports read local data.",
+      "fields": [
+        {
+          "key": "warehouse_sync_enabled",
+          "label": "Enable scheduled warehouse sync",
+          "type": "boolean",
+          "required": false,
+          "default": true,
+          "description": "When on, Nova may run one full LEA schools pull per day in the configured hour (not on every click)."
+        },
+        {
+          "key": "warehouse_sync_local_hour",
+          "label": "Preferred local sync hour (0-23)",
+          "type": "integer",
+          "required": false,
+          "default": 2,
+          "min": 0,
+          "max": 23,
+          "description": "Local clock hour to prefer for the daily full pull (e.g. 2 = 2:00 AM)."
+        },
+        {
+          "key": "warehouse_sync_min_gap_hours",
+          "label": "Minimum hours between full syncs",
+          "type": "integer",
+          "required": false,
+          "default": 20,
+          "min": 1,
+          "max": 168,
+          "description": "Hard gap so accidental restarts cannot hammer TEA. Default ~once per day."
+        },
+        {
+          "key": "warehouse_sync_resources",
+          "label": "Resources to sync",
+          "type": "string",
+          "required": false,
+          "default": "schools",
+          "description": "Comma-separated. Phase 1: schools. Students and others come later with the same warehouse model."
+        }
+      ]
+    },
+    {
+      "id": "advanced",
+      "label": "Advanced",
+      "description": "Override defaults only if your ODS uses non-standard paths or SSL configuration.",
+      "collapsed": true,
+      "fields": [
+        {
+          "key": "token_path",
+          "label": "Token Endpoint Path",
+          "type": "string",
+          "required": false,
+          "default": "/oauth/token",
+          "description": "Path to the OAuth2 token endpoint relative to base_url."
+        },
+        {
+          "key": "api_root",
+          "label": "API Root Path",
+          "type": "string",
+          "required": false,
+          "default": "/data/v3",
+          "description": "Path to the Ed-Fi data API root relative to base_url."
+        },
+        {
+          "key": "metadata_path",
+          "label": "Metadata Path",
+          "type": "string",
+          "required": false,
+          "default": "/metadata/resources",
+          "description": "Path to the resource metadata endpoint, appended after api_root."
+        },
+        {
+          "key": "timeout_sec",
+          "label": "Request Timeout (seconds)",
+          "type": "integer",
+          "required": false,
+          "default": 30,
+          "min": 5,
+          "max": 120
+        },
+        {
+          "key": "verify_ssl",
+          "label": "Verify SSL Certificate",
+          "type": "boolean",
+          "required": false,
+          "default": true,
+          "description": "Disable only for self-signed certs in controlled environments."
+        },
+        {
+          "key": "ca_bundle_path",
+          "label": "CA Bundle Path",
+          "type": "filepath",
+          "required": false,
+          "default": "",
+          "description": "Path to a custom CA bundle file (.pem) for SSL verification."
+        }
+      ]
+    }
+  ],
+  "install_steps": [
+    {
+      "order": 1,
+      "action": "validate_settings",
+      "description": "Validate all required fields are present and well-formed."
+    },
+    {
+      "order": 2,
+      "action": "run_self_profile",
+      "description": "Authenticate with the ODS and discover available resources. Saves capability profile to runtime/edfi/profiles/{connection_id}.json."
+    },
+    {
+      "order": 3,
+      "action": "verify_district_scope",
+      "description": "Confirm LEA ID returns at least one school record. Fails if district scoping returns empty."
+    }
+  ]
+}

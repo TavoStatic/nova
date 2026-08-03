@@ -8,6 +8,7 @@ from unittest import mock
 from services.pipeline_worker_supervision import (
     acquire_worker_lease,
     ensure_pipeline_worker_running,
+    ensure_pipeline_workers_for_ids,
     read_worker_heartbeat,
     read_worker_lease,
     reconcile_duplicate_pipeline_worker_processes,
@@ -478,6 +479,47 @@ class TestPipelineWorkerSupervision(unittest.TestCase):
                 write_worker_heartbeat("edfi_bisd", runtime_root=runtime_root, status="running", pid=6002)
             self.assertTrue(path.exists())
             self.assertGreaterEqual(attempts["count"], 3)
+
+    def test_ensure_pipeline_workers_for_ids_isolates_per_pipeline_failure(self) -> None:
+        """One pipeline raising must not abort ensure for the rest."""
+        with tempfile.TemporaryDirectory() as td:
+            runtime_root = Path(td)
+            worker_script = runtime_root / "scripts" / "pipeline_worker.py"
+            worker_script.parent.mkdir(parents=True, exist_ok=True)
+            worker_script.write_text("# stub", encoding="utf-8")
+            venv_python = runtime_root / ".venv" / "Scripts" / "python.exe"
+            venv_python.parent.mkdir(parents=True, exist_ok=True)
+            venv_python.write_text("", encoding="utf-8")
+
+            def _side_effect(pipeline_id, **_kwargs):
+                if pipeline_id == "edfi":
+                    raise SystemError("<function PurePath.__str__ ... returned a result with an exception set>")
+                return {
+                    "ok": True,
+                    "status": "already_running",
+                    "pipeline_id": pipeline_id,
+                    "heartbeat": {},
+                    "lease": {},
+                }
+
+            with mock.patch(
+                "services.pipeline_worker_supervision.ensure_pipeline_worker_running",
+                side_effect=_side_effect,
+            ):
+                result = ensure_pipeline_workers_for_ids(
+                    ["edfi", "edfi_bisd"],
+                    worker_script=worker_script,
+                    venv_python=venv_python,
+                    runtime_root=runtime_root,
+                )
+
+            self.assertEqual(result.get("worker_count"), 2)
+            self.assertEqual(result.get("failed_count"), 1)
+            self.assertEqual(result.get("running_count"), 1)
+            workers = {str(item.get("pipeline_id")): item for item in list(result.get("workers") or [])}
+            self.assertFalse(bool(workers["edfi"].get("ok")))
+            self.assertEqual(workers["edfi"].get("status"), "start_failed")
+            self.assertTrue(bool(workers["edfi_bisd"].get("ok")))
 
 
 if __name__ == "__main__":

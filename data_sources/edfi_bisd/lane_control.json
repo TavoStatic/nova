@@ -1,4 +1,6 @@
 {
-  "enabled": true,
-  "state": "running"
+  "enabled": false,
+  "state": "paused",
+  "reason": "legacy_superseded_by_backpacks_edfi",
+  "note": "Prefer backpacks/edfi (pipeline_id=edfi). Re-enable only for migration diagnostics."
 }

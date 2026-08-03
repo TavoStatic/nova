@@ -6,6 +6,8 @@ from typing import Callable, Optional
 
 import requests
 
+from services.tool_identity import FIND, LS, PHASE2_AUDIT, PULSE, READ
+
 
 ROUTING_TOOL_NAMES = (
     "none",
@@ -19,12 +21,12 @@ ROUTING_TOOL_NAMES = (
     "wikipedia_lookup",
     "stackexchange_search",
     "queue_status",
-    "pulse",
+    PULSE,
     "system_check",
-    "phase2_audit",
-    "read",
-    "find",
-    "ls",
+    PHASE2_AUDIT,
+    READ,
+    FIND,
+    LS,
     "screen",
     "camera",
     "location_coords",

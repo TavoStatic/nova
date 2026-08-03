@@ -28,6 +28,7 @@ const workTreeSelectedSummary = document.getElementById('workTreeSelectedSummary
 const workTreeEmptyState = document.getElementById('workTreeEmptyState');
 const workTreeSvg = document.getElementById('workTreeSvg');
 const workTreeBranchInfo = document.getElementById('workTreeBranchInfoBody') || document.getElementById('workTreeBranchInfo');
+const workTreeProgressPanel = document.getElementById('workTreeProgressPanel');
 const workTreeBranchActions = document.getElementById('workTreeBranchActions');
 const workTreeActionFeedback = document.getElementById('workTreeActionFeedback');
 const btnWorkTreeRunNext = document.getElementById('btnWorkTreeRunNext');
@@ -37,6 +38,30 @@ const pipelineSelect = document.getElementById('pipelineSelect');
 const pipelineListSummary = document.getElementById('pipelineListSummary');
 const pipelineCards = document.getElementById('pipelineCards');
 const pipelineStatusGrid = document.getElementById('pipelineStatusGrid');
+const backpackSelect = document.getElementById('backpackSelect');
+const backpackListSummary = document.getElementById('backpackListSummary');
+const backpackCards = document.getElementById('backpackCards');
+const backpackStatusGrid = document.getElementById('backpackStatusGrid');
+const backpackModelNote = document.getElementById('backpackModelNote');
+const backpackActionResult = document.getElementById('backpackActionResult');
+const backpackGrantsBox = document.getElementById('backpackGrantsBox');
+const backpackProbeLea = document.getElementById('backpackProbeLea');
+const backpackReportSummary = document.getElementById('backpackReportSummary');
+const backpackReportTable = document.getElementById('backpackReportTable');
+const backpackReportLimit = document.getElementById('backpackReportLimit');
+const backpackEmptyState = document.getElementById('backpackEmptyState');
+const backpackDetailBody = document.getElementById('backpackDetailBody');
+const backpackBusyBar = document.getElementById('backpackBusyBar');
+const backpackBusyText = document.getElementById('backpackBusyText');
+const backpackEnabledBadge = document.getElementById('backpackEnabledBadge');
+const bpFieldConnectionId = document.getElementById('bpFieldConnectionId');
+const bpFieldBaseUrl = document.getElementById('bpFieldBaseUrl');
+const bpFieldClientId = document.getElementById('bpFieldClientId');
+const bpFieldClientSecret = document.getElementById('bpFieldClientSecret');
+const bpFieldLea = document.getElementById('bpFieldLea');
+const bpFieldScope = document.getElementById('bpFieldScope');
+const bpFieldAllowedLeas = document.getElementById('bpFieldAllowedLeas');
+const bpFieldAccessTier = document.getElementById('bpFieldAccessTier');
 const pipelineSchemaSummary = document.getElementById('pipelineSchemaSummary');
 const pipelineNoteType = document.getElementById('pipelineNoteType');
 const pipelineNoteInput = document.getElementById('pipelineNoteInput');
@@ -189,6 +214,9 @@ let latestPolicy = null;
 let latestMetrics = null;
 let workTreesCache = [];
 let pipelinesCache = [];
+let backpacksCache = [];
+let selectedBackpackId = '';
+let backpackDetailCache = null;
 let selectedPipelineId = '';
 let pipelineDetailCache = null;
 let selectedWorkTreeId = '';
@@ -4274,11 +4302,172 @@ function renderSelectedWorkTreeSummary(tree) {
 let _inspectorBranchId = null;
 let _inspectorBranchStatus = null;
 
+function workTreeSolutionProgress(currentTask, node) {
+    // One unit: solution progress. Prefer the richest honest payload
+    // (live measure with markers/effort) over a compact/stale percent stamp.
+    const candidates = [];
+    if (node && typeof node === 'object') {
+        if (node.solution_progress && typeof node.solution_progress === 'object') {
+            candidates.push(node.solution_progress);
+        }
+        if (node.progress && typeof node.progress === 'object') {
+            candidates.push(node.progress);
+        }
+    }
+    if (currentTask && typeof currentTask === 'object') {
+        if (currentTask.progress && typeof currentTask.progress === 'object') {
+            candidates.push(currentTask.progress);
+        }
+        const meta = currentTask.meta && typeof currentTask.meta === 'object' ? currentTask.meta : null;
+        if (meta && meta.progress && typeof meta.progress === 'object') {
+            candidates.push(meta.progress);
+        }
+    }
+    if (!candidates.length) return null;
+    const hasOpen = node && Number(node.tasks_open || 0) > 0;
+    const score = (row) => {
+        if (!row || typeof row !== 'object') return -999;
+        const markers = Array.isArray(row.markers) ? row.markers.length : 0;
+        const effort = Array.isArray(row.effort) ? row.effort.length : 0;
+        const effortCount = Number(row.effort_count);
+        const effortN = Number.isFinite(effortCount) ? effortCount : effort;
+        let pct = Number(row.percent);
+        if (!Number.isFinite(pct)) pct = 0;
+        const motion = String(row.motion || '').toLowerCase();
+        const status = String(row.solution_status || '').toLowerCase();
+        // Penalize false complete on open nodes.
+        let honesty = 0;
+        if (hasOpen && (motion === 'done' || pct >= 100 || status === 'complete' || status === 'done')) {
+            honesty -= 500;
+        }
+        // Prefer payloads that can fill "Completed so far".
+        return honesty + markers * 10 + effortN * 5 + (effort > 0 ? 20 : 0) + Math.min(pct, 99) * 0.01;
+    };
+    let best = candidates[0];
+    let bestScore = score(best);
+    for (let i = 1; i < candidates.length; i += 1) {
+        const s = score(candidates[i]);
+        if (s > bestScore) {
+            best = candidates[i];
+            bestScore = s;
+        }
+    }
+    return best;
+}
+
+function renderWorkTreeProgressPanel(progress) {
+    if (!workTreeProgressPanel) return;
+    if (!progress || typeof progress !== 'object') {
+        workTreeProgressPanel.classList.add('d-none');
+        workTreeProgressPanel.innerHTML = '';
+        return;
+    }
+    const pct = Number(progress.percent);
+    let safePct = Number.isFinite(pct) ? Math.max(0, Math.min(100, Math.round(pct))) : 0;
+    let motion = String(progress.motion || 'unknown').trim().toLowerCase() || 'unknown';
+    const markers = Array.isArray(progress.markers) ? progress.markers : [];
+    const effort = Array.isArray(progress.effort) ? progress.effort : [];
+    const effortCount = Number(progress.effort_count);
+    const effortN = Number.isFinite(effortCount) ? effortCount : effort.length;
+    // Never paint "100% done" when Completed so far is empty — that is a cache lie.
+    const closedWithoutEffort = Boolean(progress.closed_without_effort) || (safePct >= 100 && effortN <= 0);
+    if (closedWithoutEffort && effortN <= 0) {
+        safePct = Math.min(safePct, 0);
+        if (motion === 'done') {
+            // keep motion done if finding closed, but percent is honest zero
+        }
+    }
+    const markerItems = markers.length
+        ? markers.map((marker) => {
+            const counts = Boolean(marker && (marker.counts != null ? marker.counts : marker.achieved));
+            const observed = Boolean(marker && marker.observed);
+            const verified = Boolean(marker && marker.verified);
+            const contradicted = Boolean(marker && marker.contradicted);
+            const conf = marker && marker.confidence != null ? Number(marker.confidence) : null;
+            const confText = conf != null && Number.isFinite(conf) ? ` conf ${Math.round(conf * 100)}%` : '';
+            let mark = '○';
+            let cls = 'is-pending';
+            if (contradicted) {
+                mark = '✗';
+                cls = 'is-pending';
+            } else if (counts && verified) {
+                mark = '✓';
+                cls = 'is-done';
+            } else if (counts && observed) {
+                mark = '◐';
+                cls = 'is-done';
+            } else if (observed && !counts) {
+                mark = '◌';
+                cls = 'is-pending';
+            }
+            const label = escapeHtml(String((marker && marker.label) || (marker && marker.id) || 'marker'));
+            const note = escapeHtml(String((marker && marker.note) || '').trim());
+            const quality = escapeHtml(String((marker && marker.quality) || '').trim());
+            const extra = [quality, confText.trim()].filter(Boolean).join(' · ');
+            return `<li class="${cls}">${mark} ${label}${extra ? ` <span class="text-muted">(${extra})</span>` : ''}${note ? ` <span class="text-muted">— ${note}</span>` : ''}</li>`;
+        }).join('')
+        : '<li class="is-pending">No solution markers for this family yet.</li>';
+    const effortItems = effort.length
+        ? effort.map((row) => {
+            const when = escapeHtml(String((row && row.created_at) || '').trim() || 'n/a');
+            const tool = escapeHtml(String((row && row.tool_name) || 'tool').trim());
+            const summary = escapeHtml(String((row && row.summary) || '').trim().replace(/\s+/g, ' ').slice(0, 140));
+            return `<li><strong>${when}</strong> · ${tool}${summary ? ` — ${summary}` : ''}</li>`;
+        }).join('')
+        : (closedWithoutEffort
+            ? '<li class="is-pending">Finding closed without recorded tool effort — nothing to list as completed so far.</li>'
+            : `<li class="is-pending">No evidence yet.${progress.expected_tool ? ` Next expected tool: <code>${escapeHtml(String(progress.expected_tool))}</code>` : ''}</li>`);
+    const formatAge = (sec) => {
+        const n = Number(sec);
+        if (!Number.isFinite(n) || n < 0) return '';
+        if (n < 60) return `${Math.round(n)}s`;
+        if (n < 3600) return `${Math.round(n / 60)}m`;
+        if (n < 86400) return `${Math.round(n / 3600)}h`;
+        return `${Math.round(n / 86400)}d`;
+    };
+    const formatWhen = (raw, ageSec) => {
+        const text = String(raw || '').trim();
+        if (!text) return '—';
+        const age = formatAge(ageSec);
+        return age ? `${text} (${age} ago)` : text;
+    };
+    const workStartState = String(progress.work_start_state || '').trim().toLowerCase();
+    const workStartedLine = workStartState === 'not_started' || !String(progress.work_started_at || '').trim()
+        ? 'not started (no tool evidence yet)'
+        : formatWhen(progress.work_started_at, progress.work_started_age_sec);
+    workTreeProgressPanel.classList.remove('d-none');
+    workTreeProgressPanel.innerHTML = [
+        '<div class="work-tree-progress-head">',
+        `<div class="work-tree-progress-pct-lg">${safePct}%</div>`,
+        `<span class="work-tree-progress-motion is-${escapeHtml(motion)}">${escapeHtml(motion.replace(/_/g, ' '))}</span>`,
+        `<span class="section-footnote">${escapeHtml(String(
+            (closedWithoutEffort && !String(progress.operator_summary || '').includes('without recorded'))
+                ? `${safePct}% · closed without recorded tool effort`
+                : (progress.operator_summary || '')
+        ))}</span>`,
+        '</div>',
+        `<div class="work-tree-progress-intent"><span class="work-tree-progress-label">Doing</span>${escapeHtml(String(progress.doing || progress.task_title || 'n/a'))}</div>`,
+        `<div class="work-tree-progress-intent"><span class="work-tree-progress-label">Intent</span>${escapeHtml(String(progress.intent || 'n/a'))}</div>`,
+        `<div class="work-tree-progress-solution"><span class="work-tree-progress-label">Solution</span>${escapeHtml(String(progress.solution || 'n/a'))}</div>`,
+        '<div class="work-tree-progress-section-title">Timeline</div>',
+        `<div class="work-tree-progress-intent"><span class="work-tree-progress-label">On radar</span>${escapeHtml(formatWhen(progress.surfaced_at, progress.surfaced_age_sec))}</div>`,
+        `<div class="work-tree-progress-intent"><span class="work-tree-progress-label">Work started</span>${escapeHtml(workStartedLine)}</div>`,
+        `<div class="work-tree-progress-intent"><span class="work-tree-progress-label">This step opened</span>${escapeHtml(formatWhen(progress.current_step_opened_at, progress.current_step_age_sec))}</div>`,
+        `<div class="work-tree-progress-intent"><span class="work-tree-progress-label">Last seen</span>${escapeHtml(formatWhen(progress.last_seen_at, null))}</div>`,
+        `<div class="section-footnote">Family: ${escapeHtml(String(progress.family_key || 'n/a'))} · ladder: ${escapeHtml(String(progress.ladder_source || 'n/a'))}</div>`,
+        '<div class="work-tree-progress-section-title">Solution markers (partial truths)</div>',
+        `<ul class="work-tree-progress-markers">${markerItems}</ul>`,
+        '<div class="work-tree-progress-section-title">Completed so far (effort)</div>',
+        `<ul class="work-tree-progress-effort">${effortItems}</ul>`,
+    ].join('');
+}
+
 function renderWorkTreeInspector(tree, node) {
     if (!workTreeBranchInfo) return;
     if (workTreeActionFeedback) workTreeActionFeedback.textContent = '';
     if (!tree) {
         workTreeBranchInfo.textContent = 'Branch inspection pending.';
+        renderWorkTreeProgressPanel(null);
         _inspectorBranchId = null;
         _inspectorBranchStatus = null;
         if (workTreeBranchActions) workTreeBranchActions.style.display = 'none';
@@ -4294,14 +4483,17 @@ function renderWorkTreeInspector(tree, node) {
             '',
             'This tree has no persisted branch history to inspect.',
         ].join('\n');
+        renderWorkTreeProgressPanel(null);
         _inspectorBranchId = null;
         _inspectorBranchStatus = null;
         if (workTreeBranchActions) workTreeBranchActions.style.display = 'none';
         return;
     }
     const currentTask = node && node.current_task && typeof node.current_task === 'object' ? node.current_task : {};
+    const progress = workTreeSolutionProgress(currentTask, node);
     _inspectorBranchId = String(node.id || node.branch_id || '');
     _inspectorBranchStatus = String(node.status || '').toLowerCase();
+    renderWorkTreeProgressPanel(progress);
     workTreeBranchInfo.textContent = [
         `Tree: ${tree.title || tree.tree_id || 'tree'}`,
         `Branch: ${node.title || node.id || 'branch'}`,
@@ -4401,15 +4593,37 @@ function renderTreeSvg(tree) {
         const color = workTreeStatusColor(node.status);
         const selected = id === selectedWorkTreeNodeId;
         const currentTask = node && node.current_task && typeof node.current_task === 'object' ? node.current_task : {};
+        const progress = workTreeSolutionProgress(currentTask, node);
+        const pctRaw = progress ? Number(progress.percent) : NaN;
+        const hasProgress = Number.isFinite(pctRaw);
+        const pct = hasProgress ? Math.max(0, Math.min(100, Math.round(pctRaw))) : null;
+        const motion = progress ? String(progress.motion || '').trim().toLowerCase() : '';
         const taskTitle = String(currentTask.title || '').trim();
         const label = String(node.title || id || 'branch');
         const tool = String(node.preferred_tool || '').trim();
+        const ringR = 22;
+        const ringC = 2 * Math.PI * ringR;
+        const ringOffset = hasProgress ? ringC * (1 - (pct / 100)) : ringC;
+        const pctClass = motion === 'blocked'
+            ? 'is-blocked'
+            : (motion === 'done' || pct === 100)
+                ? 'is-done'
+                : (motion === 'not_started' || pct === 0)
+                    ? 'is-idle'
+                    : 'is-moving';
         return [
-            `<g class="scheduled-tree-node${selected ? ' is-selected' : ''}" data-branch-id="${escapeHtml(id)}" tabindex="0">`,
+            `<g class="scheduled-tree-node${selected ? ' is-selected' : ''}${hasProgress ? ' has-progress' : ''}" data-branch-id="${escapeHtml(id)}" tabindex="0">`,
             `<circle class="scheduled-tree-node-hit" cx="${pos.x}" cy="${pos.y}" r="34"></circle>`,
-            `<circle class="scheduled-tree-node-core" cx="${pos.x}" cy="${pos.y}" r="18" fill="${color}"></circle>`,
+            hasProgress
+                ? [
+                    `<circle class="scheduled-tree-progress-track" cx="${pos.x}" cy="${pos.y}" r="${ringR}"></circle>`,
+                    `<circle class="scheduled-tree-progress-ring ${pctClass}" cx="${pos.x}" cy="${pos.y}" r="${ringR}" stroke="${color}" stroke-dasharray="${ringC.toFixed(2)}" stroke-dashoffset="${ringOffset.toFixed(2)}" transform="rotate(-90 ${pos.x} ${pos.y})"></circle>`,
+                    `<circle class="scheduled-tree-node-core" cx="${pos.x}" cy="${pos.y}" r="16" fill="${color}"></circle>`,
+                    `<text class="scheduled-tree-progress-pct" x="${pos.x}" y="${pos.y + 4}">${pct}%</text>`,
+                ].join('')
+                : `<circle class="scheduled-tree-node-core" cx="${pos.x}" cy="${pos.y}" r="18" fill="${color}"></circle>`,
             `<text class="scheduled-tree-node-label" x="${pos.x + 30}" y="${pos.y - 8}">${escapeHtml(label)}</text>`,
-            `<text class="scheduled-tree-node-meta" x="${pos.x + 30}" y="${pos.y + 12}">${escapeHtml(String(node.status || 'unknown').toUpperCase())}${tool ? ` | ${escapeHtml(tool)}` : ''}</text>`,
+            `<text class="scheduled-tree-node-meta" x="${pos.x + 30}" y="${pos.y + 12}">${escapeHtml(String(node.status || 'unknown').toUpperCase())}${tool ? ` | ${escapeHtml(tool)}` : ''}${hasProgress ? ` | ${pct}%` : ''}</text>`,
             taskTitle ? `<text class="scheduled-tree-node-task" x="${pos.x + 30}" y="${pos.y + 30}">${escapeHtml(taskTitle)}</text>` : '',
             '</g>',
         ].join('');
@@ -4957,9 +5171,13 @@ async function fetchBackendCommandsDeck() {
 const REFRESH_INTERVAL_MS = 30000;
 const REFRESH_BACKOFF_MAX_MS = 120000;
 const FULL_STATUS_BACKGROUND_REFRESH_MS = 180000;
+// Backpack deck is operator-driven; do not re-hit list/status every control poll.
+const BACKPACK_HYDRATE_INTERVAL_MS = 120000;
 let refreshBackoffMs = REFRESH_INTERVAL_MS;
 let refreshTimerHandle = null;
 let lastFullStatusHydratedAt = Date.now();
+let lastBackpackHydratedAt = 0;
+let backpackHydrateForced = false;
 
 function currentMainViewName() {
     const visible = mainViews.find((view) => !view.classList.contains('d-none'));
@@ -4982,6 +5200,406 @@ function shouldHydrateWorkTrees(viewName) {
 
 function shouldHydratePipelines(viewName) {
     return visibleViewName(viewName) === 'pipelines';
+}
+
+function shouldHydrateBackpacks(viewName) {
+    if (visibleViewName(viewName) !== 'backpacks') return false;
+    if (backpackHydrateForced) return true;
+    return (Date.now() - lastBackpackHydratedAt) >= BACKPACK_HYDRATE_INTERVAL_MS;
+}
+
+function forceBackpackHydrate() {
+    backpackHydrateForced = true;
+    lastBackpackHydratedAt = 0;
+}
+
+function selectedBackpack() {
+    return backpacksCache.find((item) => String(item && item.backpack_id ? item.backpack_id : '') === selectedBackpackId) || null;
+}
+
+function setBackpackBusy(busy, message, activeButtonId) {
+    const text = message || 'Working…';
+    if (backpackBusyText) {
+        backpackBusyText.textContent = text;
+    }
+    if (backpackBusyBar) {
+        backpackBusyBar.classList.toggle('d-none', !busy);
+        backpackBusyBar.classList.toggle('is-busy', Boolean(busy));
+        // Force visible even if Bootstrap d-none is overridden
+        backpackBusyBar.style.display = busy ? 'flex' : '';
+        if (busy) {
+            backpackBusyBar.setAttribute('aria-busy', 'true');
+            try {
+                backpackBusyBar.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+            } catch (_e) {
+                /* ignore */
+            }
+        } else {
+            backpackBusyBar.removeAttribute('aria-busy');
+        }
+    }
+    // Feedback bar so something always changes even if busy bar is off-screen
+    if (busy) {
+        setAction(text);
+    }
+    const ids = [
+        'btnBackpacksRefresh', 'btnBackpackEnable', 'btnBackpackDisable',
+        'btnBackpackSaveSettings', 'btnBackpackInstall', 'btnBackpackProbeLea',
+        'btnBackpackReportHealth', 'btnBackpackReportSchools', 'btnBackpackRefreshSchools',
+    ];
+    ids.forEach((id) => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        el.disabled = Boolean(busy);
+        if (!el.dataset.idleLabel) {
+            el.dataset.idleLabel = String(el.textContent || '').trim();
+        }
+        if (busy && activeButtonId && id === activeButtonId) {
+            el.textContent = 'Working…';
+            el.classList.add('backpack-btn-busy');
+        } else if (!busy) {
+            if (el.dataset.idleLabel) el.textContent = el.dataset.idleLabel;
+            el.classList.remove('backpack-btn-busy');
+        }
+    });
+    if (backpackSelect) backpackSelect.disabled = Boolean(busy);
+}
+
+/** Let the browser paint the spinner before a long await (fetch/TEA). */
+function paintBackpackBusy() {
+    return new Promise((resolve) => {
+        requestAnimationFrame(() => {
+            requestAnimationFrame(() => {
+                window.setTimeout(resolve, 0);
+            });
+        });
+    });
+}
+
+function sleepMs(ms) {
+    return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
+async function withBackpackBusy(message, activeButtonId, workFn, options = {}) {
+    // Minimum visible busy time so fast/failed actions still show feedback
+    const minMs = Number(options.minMs);
+    const holdMs = Number.isFinite(minMs) ? Math.max(0, minMs) : 900;
+    const started = Date.now();
+    setBackpackBusy(true, message, activeButtonId);
+    await paintBackpackBusy();
+    try {
+        return await workFn();
+    } finally {
+        const elapsed = Date.now() - started;
+        if (elapsed < holdMs) {
+            await sleepMs(holdMs - elapsed);
+        }
+        setBackpackBusy(false);
+    }
+}
+
+function showBackpackDetail(show) {
+    if (backpackEmptyState) backpackEmptyState.classList.toggle('d-none', Boolean(show));
+    if (backpackDetailBody) backpackDetailBody.classList.toggle('d-none', !show);
+}
+
+function renderBackpackCards() {
+    if (!backpackCards) return;
+    if (!backpacksCache.length) {
+        backpackCards.textContent = 'No backpacks discovered under backpacks/. Nova core can run without any.';
+        return;
+    }
+    backpackCards.innerHTML = backpacksCache.map((bp) => {
+        const id = String(bp.backpack_id || '').trim();
+        const active = id === selectedBackpackId ? ' active' : '';
+        const installed = bp.installed ? 'installed' : 'not installed';
+        const onOff = bp.enabled === false ? 'off' : 'on';
+        const name = bp.display_name || id;
+        return `<button type="button" class="pipeline-card-button${active}" data-backpack-id="${id}">
+            <div class="pipeline-card-title">${name}</div>
+            <div class="pipeline-card-meta">${id} · ${installed} · ${onOff} · v${bp.version || '?'}</div>
+        </button>`;
+    }).join('');
+    backpackCards.querySelectorAll('[data-backpack-id]').forEach((btn) => {
+        btn.addEventListener('click', async () => {
+            selectedBackpackId = String(btn.getAttribute('data-backpack-id') || '').trim();
+            await loadBackpacks({ keepFormSecrets: true });
+        });
+    });
+}
+
+function renderBackpackSelect() {
+    if (!backpackSelect) return;
+    const previous = selectedBackpackId;
+    backpackSelect.innerHTML = '';
+    const placeholder = document.createElement('option');
+    placeholder.value = '';
+    placeholder.textContent = '— Select a backpack —';
+    backpackSelect.appendChild(placeholder);
+    if (!backpacksCache.length) {
+        return;
+    }
+    backpacksCache.forEach((bp) => {
+        const option = document.createElement('option');
+        option.value = String(bp.backpack_id || '').trim();
+        const onOff = bp.enabled === false ? 'off' : 'on';
+        option.textContent = `${bp.display_name || bp.backpack_id} (${onOff})`;
+        backpackSelect.appendChild(option);
+    });
+    if (previous && backpacksCache.some((item) => String(item.backpack_id || '') === previous)) {
+        backpackSelect.value = previous;
+        selectedBackpackId = previous;
+    } else {
+        selectedBackpackId = '';
+        backpackSelect.value = '';
+    }
+}
+
+function fillBackpackForm(detail) {
+    const pub = (detail && detail.settings_public && typeof detail.settings_public === 'object')
+        ? detail.settings_public
+        : {};
+    if (bpFieldConnectionId) bpFieldConnectionId.value = String(pub.connection_id || 'district-main');
+    if (bpFieldBaseUrl) bpFieldBaseUrl.value = String(pub.base_url || '');
+    if (bpFieldClientId) bpFieldClientId.value = String(pub.client_id || '');
+    // Never re-fill secret from server (we never return it).
+    if (bpFieldClientSecret && !String(bpFieldClientSecret.value || '').trim()) {
+        bpFieldClientSecret.placeholder = detail && detail.has_client_secret_on_disk
+            ? 'Saved on this machine — leave blank to keep'
+            : 'Required for first install';
+    }
+    if (bpFieldLea) bpFieldLea.value = String(pub.district_lea_id || '');
+    if (bpFieldScope) bpFieldScope.value = String(pub.scope_mode || 'single_lea');
+    if (bpFieldAllowedLeas) bpFieldAllowedLeas.value = String(pub.allowed_lea_ids || '');
+    if (bpFieldAccessTier) bpFieldAccessTier.value = String(pub.credential_access_tier || 'read');
+    if (backpackProbeLea && !String(backpackProbeLea.value || '').trim() && pub.district_lea_id) {
+        backpackProbeLea.value = String(pub.district_lea_id);
+    }
+}
+
+function renderBackpackDetail(payload) {
+    const detail = payload && payload.detail && typeof payload.detail === 'object' ? payload.detail : {};
+    backpackDetailCache = detail;
+    if (backpackModelNote && payload && payload.model) {
+        backpackModelNote.textContent = String(payload.model.note || 'Nova first. Backpacks later. Choose a backpack to configure it.');
+    }
+    const hasSelection = Boolean(selectedBackpackId);
+    showBackpackDetail(hasSelection);
+    if (!hasSelection) {
+        if (backpackStatusGrid) backpackStatusGrid.innerHTML = '';
+        if (backpackGrantsBox) backpackGrantsBox.textContent = '';
+        return;
+    }
+    const enabled = detail.enabled !== false;
+    if (backpackEnabledBadge) {
+        backpackEnabledBadge.textContent = enabled ? 'ON' : 'OFF';
+        backpackEnabledBadge.className = enabled
+            ? 'status-pill status-pill-ok'
+            : 'status-pill status-pill-warn';
+    }
+    if (backpackStatusGrid) {
+        const status = detail.status || {};
+        const health = detail.connection_health || {};
+        const teach = detail.teach || {};
+        const lines = [
+            ['backpack', detail.backpack_id || selectedBackpackId || '—'],
+            ['power', enabled ? 'on' : 'off'],
+            ['installed', detail.installed ? 'yes' : 'no'],
+            ['settings_on_disk', detail.settings_path ? 'yes' : 'no'],
+            ['secret_on_disk', detail.has_client_secret_on_disk ? 'yes (not shown)' : 'no'],
+            ['phase', (detail.checklist && detail.checklist.phase) || 'pipeline'],
+            ['teach_rules', Array.isArray(teach.rules) ? String(teach.rules.length) : '0'],
+            ['status_ok', status.ok === false ? 'false' : String(status.live_query_ready ?? status.ok ?? '—')],
+            ['connection_id', health.connection_id || status.connection_id || '—'],
+            ['district_lea_id', health.district_lea_id || status.district_lea_id || '—'],
+            ['scope_mode', status.scope_mode || health.scope_mode || '—'],
+            ['health', health.health || status.profile_health || '—'],
+            ['blockers', Array.isArray(status.blockers) ? status.blockers.join(', ') : '—'],
+            ['error', detail.error || health.error || status.error || ''],
+        ];
+        backpackStatusGrid.innerHTML = lines.map(([k, v]) =>
+            `<div class="inspector-row"><span class="inspector-key">${k}</span><span class="inspector-val">${String(v || '')}</span></div>`
+        ).join('');
+    }
+    if (backpackGrantsBox) {
+        const grants = detail.grants || {};
+        backpackGrantsBox.textContent = JSON.stringify(grants, null, 2);
+    }
+    fillBackpackForm(detail);
+}
+
+async function fetchBackpacks() {
+    const query = selectedBackpackId
+        ? `?backpack_id=${encodeURIComponent(selectedBackpackId)}`
+        : '';
+    return getJson(`/api/control/backpacks${query}`);
+}
+
+async function loadBackpacks(options = {}) {
+    forceBackpackHydrate();
+    const payload = await fetchBackpacks();
+    backpacksCache = Array.isArray(payload && payload.backpacks)
+        ? payload.backpacks.filter((item) => item && typeof item === 'object')
+        : [];
+    // Prefer explicit local selection; never force first backpack.
+    const serverSelected = String(payload && payload.selected_backpack_id ? payload.selected_backpack_id : '').trim();
+    if (selectedBackpackId) {
+        // keep
+    } else if (serverSelected) {
+        selectedBackpackId = serverSelected;
+    } else {
+        selectedBackpackId = '';
+    }
+    if (backpackListSummary) {
+        backpackListSummary.textContent = `${backpacksCache.length} backpack${backpacksCache.length === 1 ? '' : 's'} available. Select one to configure.`;
+    }
+    renderBackpackSelect();
+    renderBackpackCards();
+    renderBackpackDetail(payload);
+    lastBackpackHydratedAt = Date.now();
+    backpackHydrateForced = false;
+    return payload;
+}
+
+function parseBackpackSettingsFromUi() {
+    const connectionId = bpFieldConnectionId ? String(bpFieldConnectionId.value || '').trim() : '';
+    const baseUrl = bpFieldBaseUrl ? String(bpFieldBaseUrl.value || '').trim() : '';
+    const clientId = bpFieldClientId ? String(bpFieldClientId.value || '').trim() : '';
+    const clientSecret = bpFieldClientSecret ? String(bpFieldClientSecret.value || '') : '';
+    const lea = bpFieldLea ? String(bpFieldLea.value || '').trim() : '';
+    const scope = bpFieldScope ? String(bpFieldScope.value || 'single_lea').trim() : 'single_lea';
+    const allowed = bpFieldAllowedLeas ? String(bpFieldAllowedLeas.value || '').trim() : '';
+    const tier = bpFieldAccessTier ? String(bpFieldAccessTier.value || 'read').trim() : 'read';
+    if (!connectionId) throw new Error('Connection name is required.');
+    if (!baseUrl) throw new Error('ODS base URL is required.');
+    if (!clientId) throw new Error('Client ID is required.');
+    // Secret required only on first install; later saves reuse on-disk secret if field left blank.
+    const hasSecretOnDisk = Boolean(
+        backpackDetailCache && backpackDetailCache.has_client_secret_on_disk
+    );
+    if (!clientSecret && !hasSecretOnDisk) {
+        throw new Error('Client secret is required for first install (it is not shown back after save).');
+    }
+    if (scope === 'single_lea' && !lea) throw new Error('District LEA ID is required for single_lea scope.');
+    if (scope === 'multi_lea' && !allowed && !lea) {
+        throw new Error('Region mode needs allowed LEA IDs (or a primary LEA).');
+    }
+    const settings = {
+        connection_id: connectionId,
+        base_url: baseUrl,
+        client_id: clientId,
+        client_secret: clientSecret,
+        scope_mode: scope,
+        credential_access_tier: tier,
+    };
+    if (lea) settings.district_lea_id = lea;
+    if (allowed) settings.allowed_lea_ids = allowed;
+    return settings;
+}
+
+function renderBackpackReportTable(report) {
+    if (!backpackReportTable) return;
+    const columns = Array.isArray(report && report.columns) ? report.columns : [];
+    const rows = Array.isArray(report && report.rows) ? report.rows : [];
+    if (!columns.length || !rows.length) {
+        backpackReportTable.classList.add('d-none');
+        backpackReportTable.innerHTML = '';
+        return;
+    }
+    const head = columns.map((c) => `<th>${String(c)}</th>`).join('');
+    const body = rows.map((row) => {
+        const cells = columns.map((c) => {
+            const v = row && Object.prototype.hasOwnProperty.call(row, c) ? row[c] : '';
+            return `<td>${String(v === null || v === undefined ? '' : v)}</td>`;
+        }).join('');
+        return `<tr>${cells}</tr>`;
+    }).join('');
+    backpackReportTable.innerHTML = `<table class="pipeline-query-table"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>`;
+    backpackReportTable.classList.remove('d-none');
+}
+
+let backpackReportCooldownUntil = 0;
+
+function backpackReportCooldownLeft() {
+    return Math.max(0, Math.ceil((backpackReportCooldownUntil - Date.now()) / 1000));
+}
+
+async function runBackpackReport(intent, options = {}) {
+    const backpackId = selectedBackpackId;
+    if (!backpackId) throw new Error('Select a backpack first.');
+    const forceRefresh = Boolean(options.forceRefresh);
+    const left = backpackReportCooldownLeft();
+    // Local extract reads skip TEA — only block live refresh during cooldown
+    if (forceRefresh && left > 0) {
+        const msg = `TEA cooldown: wait ${left}s before Refresh from ODS. Use Show schools (local) if you already have an extract.`;
+        if (backpackReportSummary) {
+            backpackReportSummary.textContent = msg;
+            backpackReportSummary.classList.add('text-warning');
+        }
+        setAction(msg);
+        return { report_ok: false, error: msg, rate_limited: true };
+    }
+    const lea = backpackProbeLea ? String(backpackProbeLea.value || '').trim() : '';
+    // Display limit for table/UI. Refresh schools uses full_lea on the server
+    // (dynamic district size) — this number does not cap how many schools are extracted.
+    let limit = 50;
+    if (backpackReportLimit) {
+        const n = Number(backpackReportLimit.value);
+        if (Number.isFinite(n) && n > 0) limit = Math.min(2000, Math.floor(n));
+    }
+    const payload = await postAction('backpack_report', {
+        backpack_id: backpackId,
+        intent,
+        lea,
+        limit,
+        role: 'account_admin',
+        force_refresh: forceRefresh,
+        prefer_local: !forceRefresh,
+    });
+    const nested = payload && payload.report && typeof payload.report === 'object' ? payload.report : null;
+    const body = nested || payload || {};
+    const reportOk = payload.report_ok !== undefined
+        ? Boolean(payload.report_ok)
+        : (body.ok !== false && !body.error);
+    const err = String(payload.error || body.error || '').trim();
+    const summary = String(payload.summary || body.summary || payload.message || '').trim();
+    const rateLimited = Boolean(payload.rate_limited || body.rate_limited);
+    if (rateLimited || /rate limit/i.test(err)) {
+        backpackReportCooldownUntil = Date.now() + 60000;
+    }
+    if (backpackReportSummary) {
+        if (!reportOk || err) {
+            backpackReportSummary.textContent = err || summary || 'Report failed.';
+            backpackReportSummary.classList.add('text-warning');
+        } else {
+            let src = '';
+            if (payload.from_extract || body.from_extract) {
+                src = ' [local extract]';
+            } else if (payload.extract_saved || body.extract_saved) {
+                src = ' [live ODS → saved local extract]';
+            } else if (payload.live_pull || body.live_pull) {
+                src = ' [live ODS]';
+            } else if (payload.from_cache || body.from_cache) {
+                src = ' [local profile]';
+            }
+            backpackReportSummary.textContent = (summary || `Report ${intent} complete.`) + src;
+            backpackReportSummary.classList.remove('text-warning');
+        }
+    }
+    const tableBody = {
+        columns: payload.columns || body.columns || [],
+        rows: payload.rows || body.rows || [],
+    };
+    renderBackpackReportTable(tableBody);
+    if (backpackActionResult) {
+        backpackActionResult.textContent = JSON.stringify(payload, null, 2);
+    }
+    if (!reportOk || err) {
+        setAction(err || payload.message || 'backpack_report_failed');
+    } else {
+        setAction(payload.message || summary || 'backpack_report_ok');
+    }
+    return payload;
 }
 
 function mergeStatusPayload(base, update) {
@@ -5052,6 +5670,7 @@ async function performRefresh() {
         const fetchSessions = shouldHydrateSessions(activeView);
         const fetchWorkTreeVisuals = shouldHydrateWorkTrees(activeView);
         const fetchPipelinesDeck = shouldHydratePipelines(activeView);
+        const fetchBackpacksDeck = shouldHydrateBackpacks(activeView);
         const results = await Promise.allSettled([
             getJson('/api/control/status/surfaces'),
             getJson('/api/control/policy'),
@@ -5061,7 +5680,8 @@ async function performRefresh() {
             fetchSessions ? getJson('/api/control/test-sessions') : Promise.resolve(null),
             fetchWorkTreeVisuals ? fetchWorkTrees() : Promise.resolve(null),
             fetchPipelinesDeck ? fetchPipelines() : Promise.resolve(null),
-            fetchBackendCommandsDeck()
+            fetchBackendCommandsDeck(),
+            fetchBackpacksDeck ? fetchBackpacks() : Promise.resolve(null)
         ]);
         const surfacesStatus = results[0].status === 'fulfilled' ? results[0].value : null;
         latestPolicy = results[1].status === 'fulfilled' ? results[1].value : null;
@@ -5072,6 +5692,7 @@ async function performRefresh() {
         const workTrees = results[6].status === 'fulfilled' ? results[6].value : null;
         const pipelines = results[7].status === 'fulfilled' ? results[7].value : null;
         const backendCommands = results[8].status === 'fulfilled' ? results[8].value : null;
+        const backpacksPayload = results[9].status === 'fulfilled' ? results[9].value : null;
         latestMetrics = metrics;
         latestStatus = mergeStatusPayload(latestStatus, surfacesStatus);
         if (fullStatus) {
@@ -5119,10 +5740,30 @@ async function performRefresh() {
         } else if (fetchPipelinesDeck) {
             renderPipelines({ok: false, pipelines: [], detail: {}});
         }
+        if (backpacksPayload) {
+            backpacksCache = Array.isArray(backpacksPayload.backpacks)
+                ? backpacksPayload.backpacks.filter((item) => item && typeof item === 'object')
+                : [];
+            // Keep local selection only; do not auto-pick the only backpack.
+            if (selectedBackpackId && !backpacksCache.some((b) => String(b.backpack_id || '') === selectedBackpackId)) {
+                selectedBackpackId = '';
+            }
+            if (backpackListSummary) {
+                backpackListSummary.textContent = `${backpacksCache.length} backpack${backpacksCache.length === 1 ? '' : 's'} available. Select one to configure.`;
+            }
+            renderBackpackSelect();
+            renderBackpackCards();
+            renderBackpackDetail(backpacksPayload);
+            lastBackpackHydratedAt = Date.now();
+            backpackHydrateForced = false;
+        } else if (fetchBackpacksDeck) {
+            if (backpackCards) backpackCards.textContent = 'Backpack feed unavailable.';
+            showBackpackDetail(false);
+        }
         decorateActionButtons(document);
             maybeAutoArmLiveTracking();
-        const labels = ['surfaces', 'policy', 'metrics', 'status-full', 'sessions', 'test-sessions', 'work-trees', 'pipelines', 'backend-commands'];
-        const requested = [true, true, true, fetchFullStatus, fetchSessions, fetchSessions, fetchWorkTreeVisuals, fetchPipelinesDeck, true];
+        const labels = ['surfaces', 'policy', 'metrics', 'status-full', 'sessions', 'test-sessions', 'work-trees', 'pipelines', 'backend-commands', 'backpacks'];
+        const requested = [true, true, true, fetchFullStatus, fetchSessions, fetchSessions, fetchWorkTreeVisuals, fetchPipelinesDeck, true, fetchBackpacksDeck];
         const failed = results
             .map((result, index) => ({result, index}))
             .filter((entry) => requested[entry.index] && entry.result.status !== 'fulfilled')
@@ -5519,6 +6160,129 @@ bindClick('btnPipelinesRefresh', async () => {
     await loadPipelines();
     setAction('Data lanes refreshed.');
 });
+bindClick('btnBackpacksRefresh', async () => {
+    await withBackpackBusy('Refreshing backpacks…', 'btnBackpacksRefresh', async () => {
+        selectedBackpackId = '';
+        if (bpFieldClientSecret) bpFieldClientSecret.value = '';
+        await loadBackpacks();
+        setAction('Backpacks refreshed. Select a backpack to continue.');
+    });
+});
+if (backpackSelect) {
+    backpackSelect.addEventListener('change', async () => {
+        selectedBackpackId = String(backpackSelect.value || '').trim();
+        if (bpFieldClientSecret) bpFieldClientSecret.value = '';
+        await withBackpackBusy('Loading backpack…', null, async () => {
+            await loadBackpacks();
+        });
+    });
+}
+bindClick('btnBackpackEnable', async () => {
+    const backpackId = selectedBackpackId;
+    if (!backpackId) return setAction('Select a backpack first.');
+    await withBackpackBusy('Turning backpack on…', 'btnBackpackEnable', async () => {
+        const payload = await postAction('backpack_set_enabled', { backpack_id: backpackId, enabled: true });
+        if (backpackActionResult) backpackActionResult.textContent = JSON.stringify(payload, null, 2);
+        await loadBackpacks();
+        setAction(payload.message || 'backpack_enabled');
+    });
+});
+bindClick('btnBackpackDisable', async () => {
+    const backpackId = selectedBackpackId;
+    if (!backpackId) return setAction('Select a backpack first.');
+    await withBackpackBusy('Turning backpack off…', 'btnBackpackDisable', async () => {
+        const payload = await postAction('backpack_set_enabled', { backpack_id: backpackId, enabled: false });
+        if (backpackActionResult) backpackActionResult.textContent = JSON.stringify(payload, null, 2);
+        await loadBackpacks();
+        setAction(payload.message || 'backpack_disabled');
+    });
+});
+bindClick('btnBackpackSaveSettings', async () => {
+    const backpackId = selectedBackpackId || (backpackSelect ? backpackSelect.value : '');
+    if (!backpackId) return setAction('Select a backpack first.');
+    let settings;
+    try {
+        settings = parseBackpackSettingsFromUi();
+    } catch (error) {
+        return setAction(String(error && error.message ? error.message : error));
+    }
+    await withBackpackBusy('Saving settings…', 'btnBackpackSaveSettings', async () => {
+        const payload = await postAction('backpack_settings_save', {
+            backpack_id: backpackId,
+            settings,
+            skip_profile: true,
+        });
+        if (backpackActionResult) backpackActionResult.textContent = JSON.stringify(payload, null, 2);
+        if (bpFieldClientSecret) bpFieldClientSecret.value = '';
+        await loadBackpacks();
+        setAction(payload.message || 'backpack_settings_saved');
+    });
+});
+bindClick('btnBackpackInstall', async () => {
+    const backpackId = selectedBackpackId || (backpackSelect ? backpackSelect.value : '');
+    if (!backpackId) return setAction('Select a backpack first.');
+    let settings;
+    try {
+        settings = parseBackpackSettingsFromUi();
+    } catch (error) {
+        return setAction(String(error && error.message ? error.message : error));
+    }
+    await withBackpackBusy('Installing and profiling ODS (can take a minute)…', 'btnBackpackInstall', async () => {
+        const payload = await postAction('backpack_install', {
+            backpack_id: backpackId,
+            settings,
+        });
+        if (backpackActionResult) backpackActionResult.textContent = JSON.stringify(payload, null, 2);
+        if (bpFieldClientSecret) bpFieldClientSecret.value = '';
+        await loadBackpacks();
+        setAction(payload.message || 'backpack_install_ok');
+    });
+});
+bindClick('btnBackpackProbeLea', async () => {
+    const backpackId = selectedBackpackId;
+    if (!backpackId) return setAction('Select a backpack first.');
+    const lea = backpackProbeLea ? String(backpackProbeLea.value || '').trim() : '';
+    if (!lea) return setAction('Enter an LEA id to probe (e.g. 031901).');
+    await withBackpackBusy('Probing LEA…', 'btnBackpackProbeLea', async () => {
+        const payload = await postAction('backpack_probe_lea', {
+            backpack_id: backpackId,
+            lea,
+            limit: 3,
+            role: 'account_admin',
+        });
+        if (backpackActionResult) backpackActionResult.textContent = JSON.stringify(payload, null, 2);
+        setAction(payload.message || 'backpack_probe_lea_ok');
+    });
+});
+bindClick('btnBackpackReportHealth', async () => {
+    if (!selectedBackpackId) return setAction('Select a backpack first.');
+    await withBackpackBusy('Loading health (local profile)…', 'btnBackpackReportHealth', async () => {
+        await runBackpackReport('health', { forceRefresh: false });
+    });
+});
+bindClick('btnBackpackReportSchools', async () => {
+    if (!selectedBackpackId) return setAction('Select a backpack first.');
+    // Default: local extract only — does not hit TEA when extract exists.
+    await withBackpackBusy(
+        'Loading schools from local extract…',
+        'btnBackpackReportSchools',
+        async () => {
+            await runBackpackReport('schools', { forceRefresh: false });
+        },
+        { minMs: 600 }
+    );
+});
+bindClick('btnBackpackRefreshSchools', async () => {
+    if (!selectedBackpackId) return setAction('Select a backpack first.');
+    await withBackpackBusy(
+        'Refreshing schools from TEA ODS (slow; may rate-limit)…',
+        'btnBackpackRefreshSchools',
+        async () => {
+            await runBackpackReport('schools', { forceRefresh: true });
+        },
+        { minMs: 1200 }
+    );
+});
 bindClick('btnPipelineCreate', async () => {
     const pipelineId = pipelineCreateId ? pipelineCreateId.value.trim() : '';
     const displayName = pipelineCreateName ? pipelineCreateName.value.trim() : '';
@@ -5682,11 +6446,65 @@ bindClick('btnGeneratedPriorityRun', async () => {
     setAction(summary.trim());
 });
 bindClick('btnWorkTreeRunNext', async () => {
-    if (workTreeActionFeedback) workTreeActionFeedback.textContent = 'Advancing branch…';
+    if (workTreeActionFeedback) workTreeActionFeedback.textContent = 'Running next step…';
     try {
-        const body = _inspectorBranchId ? {branch_id: _inspectorBranchId} : {};
+        // Operator click: always override mission quiet/green hold. Without this,
+        // the action only wrote a trigger that maintenance discarded on hold.
+        const body = {
+            operator_override: true,
+            max_steps: 1,
+            max_trees: 1,
+        };
+        if (_inspectorBranchId) {
+            body.branch_id = _inspectorBranchId;
+            body.target_branch_id = _inspectorBranchId;
+        }
+        // Prefer selected tree/task context when present on the inspector node.
+        try {
+            const tree = (workTreesCache || []).find((row) => String(row.tree_id || '') === String(selectedWorkTreeId || ''));
+            const node = tree && Array.isArray(tree.nodes)
+                ? tree.nodes.find((n) => String(n.id || n.branch_id || '') === String(_inspectorBranchId || ''))
+                : null;
+            const task = node && node.current_task && typeof node.current_task === 'object' ? node.current_task : null;
+            if (task && task.task_id) {
+                body.task_id = String(task.task_id);
+                body.target_task_id = String(task.task_id);
+            }
+            if (tree && tree.tree_id) {
+                body.target_tree_id = String(tree.tree_id);
+            }
+            const tool = String((node && node.preferred_tool) || '').trim();
+            if (tool) body.recommended_tool = tool;
+        } catch (_ctxErr) {
+            // keep branch-only body
+        }
         const payload = await postAction('active_work_tree_run_next', body);
-        if (workTreeActionFeedback) workTreeActionFeedback.textContent = payload.message || 'Step dispatched.';
+        // Extra fields are merged onto the response body by the control API.
+        const cycle = payload.cycle && typeof payload.cycle === 'object' ? payload.cycle : {};
+        const executed = Number(payload.executed_count != null ? payload.executed_count : cycle.executed_count);
+        const hist = Array.isArray(cycle.history) ? cycle.history : [];
+        const last = hist.length ? hist[hist.length - 1] : null;
+        let line = String(payload.message || 'Step finished.');
+        if (Number.isFinite(executed)) {
+            line += ` · executed=${executed}`;
+        }
+        if (last && last.action) {
+            line += ` · last=${last.action}`;
+            if (last.tool) line += `/${last.tool}`;
+            if (last.task_title) line += ` · ${last.task_title}`;
+            if (last.error) line += ` · error=${last.error}`;
+        }
+        if (payload.triggered && !payload.executed_now) {
+            line += ' · queued for maintenance worker';
+        }
+        if (workTreeActionFeedback) workTreeActionFeedback.textContent = line;
+        // Refresh tree so progress ring updates after a real step.
+        try {
+            const trees = await fetchWorkTrees();
+            if (trees) renderWorkTrees(trees);
+        } catch (_refreshErr) {
+            // non-fatal
+        }
     } catch (err) {
         if (workTreeActionFeedback) workTreeActionFeedback.textContent = 'Error: ' + (err.message || 'unknown');
     }

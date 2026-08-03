@@ -40,8 +40,50 @@ def regression_evidence_stale(
     return observed_date < current_date
 
 
-def regression_failure_active(*, status_label: str, stale: bool) -> bool:
-    return regression_outcome_failed(status_label) and not bool(stale)
+def regression_failure_is_lock_contention(
+    *,
+    status_label: str = "",
+    failed_tests: list[Any] | None = None,
+    failed_lane: str = "",
+    tail: str = "",
+    detail: str = "",
+) -> bool:
+    """False FAILED from 'regression already running' is not a real test failure.
+
+    Treating lock contention as regression_failed freezes mission hold forever
+    while Work Tree still has climbable work (Nova appears 'stuck').
+    """
+    if not regression_outcome_failed(status_label):
+        return False
+    tests = [
+        _text(item, 240)
+        for item in list(failed_tests or [])
+        if _text(item, 240)
+    ]
+    if tests or _text(failed_lane, 80):
+        return False
+    blob = f"{_text(tail, 500)} {_text(detail, 500)}".lower()
+    return "already running" in blob
+
+
+def regression_failure_active(
+    *,
+    status_label: str,
+    stale: bool,
+    failed_tests: list[Any] | None = None,
+    failed_lane: str = "",
+    tail: str = "",
+) -> bool:
+    if not regression_outcome_failed(status_label) or bool(stale):
+        return False
+    if regression_failure_is_lock_contention(
+        status_label=status_label,
+        failed_tests=failed_tests,
+        failed_lane=failed_lane,
+        tail=tail,
+    ):
+        return False
+    return True
 
 
 def regression_tail_from_payload(payload: dict[str, Any]) -> str:

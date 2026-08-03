@@ -106,7 +106,8 @@ class TestEdFiCoreReadiness(unittest.TestCase):
         self.assertEqual(readiness["next_recommended_slice"], "edfi-connection-config")
         self.assertIn("edfi_district_lea_id_missing", readiness["blocking_issues"])
 
-    def test_readiness_reports_blocked_when_profile_is_stale(self) -> None:
+    def test_readiness_treats_stale_profile_as_watch_not_block(self) -> None:
+        """Stale metadata must not keep Nova under permanent edfi_core pressure."""
         with tempfile.TemporaryDirectory() as td:
             runtime = Path(td) / "runtime" / "edfi"
             profiles = runtime / "profiles"
@@ -126,17 +127,20 @@ class TestEdFiCoreReadiness(unittest.TestCase):
             ), mock.patch("services.edfi.profile_evidence.load_connection_config", return_value=conn), mock.patch(
                 "services.edfi.profile_evidence.load_sync_state",
                 return_value={},
+            ), mock.patch(
+                "services.edfi.core_readiness._backpack_operational_snapshot",
+                return_value={"ok": False, "has_schools_extract": False, "schools_row_count": 0},
             ):
                 readiness = read_edfi_core_readiness(
                     "district-main",
                     now_fn=lambda: 1700000000.0 + (8 * 24 * 3600),
                 )
 
-        self.assertFalse(readiness["ready"])
+        self.assertTrue(readiness["ready"], readiness)
         self.assertTrue(readiness["profile_ok"])
         self.assertFalse(readiness["profile_fresh"])
-        self.assertIn("edfi_profile_stale", readiness["blocking_issues"])
-        self.assertEqual(readiness["next_recommended_slice"], "edfi-profile-refresh")
+        self.assertNotIn("edfi_profile_stale", readiness["blocking_issues"])
+        self.assertIn("edfi_profile_stale", readiness.get("watch_issues") or [])
 
     def test_readiness_marks_sync_status_present_without_requiring_it(self) -> None:
         with tempfile.TemporaryDirectory() as td:
