@@ -1,3 +1,14 @@
+<!--
+NOVA_DOC
+category: subsystem
+authority: active_working
+last_session: 2026-08-05
+last_agent: claude-cowork
+session_state: needs_update
+next_step: review for nova_http changes
+open: none
+-->
+
 # Nova-server-side
 
 Date: 2026-06-25

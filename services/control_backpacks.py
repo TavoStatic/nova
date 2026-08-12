@@ -7,7 +7,7 @@ Nova installs first (core only). Backpacks are optional capabilities added later
 into a settled environment. This service is the root contract the control panel
 and CLI both use — fix behavior here, not in one-off UI hacks.
 
-Ed-Fi (backpacks/edfi) is the reference implementation of backpack.v1.
+data connector (backpacks/edfi) is the reference implementation of backpack.v1.
 """
 
 import json
@@ -53,86 +53,16 @@ class ControlBackpacksService:
         return self.runtime_root / backpack_id / "settings.json"
 
     def _installed(self, backpack_id: str) -> bool:
-        settings = self._settings_path(backpack_id)
-        if settings.is_file():
-            return True
-        # Ed-Fi may only have connection config on older installs
-        if backpack_id == "edfi":
-            conn_root = self.runtime_root / "edfi" / "connections"
-            if conn_root.is_dir() and any(conn_root.iterdir()):
-                return True
-        return False
-
-    def _connection_config_public(self, connection_id: str = "district-main") -> dict[str, Any]:
-        """Load Ed-Fi connection config as a settings-shaped dict (includes secret for merge only)."""
-        try:
-            cid = str(connection_id or "district-main").strip() or "district-main"
-            # Prefer this service's runtime_root (tests + multi-root safe).
-            path = self.runtime_root / "edfi" / "connections" / cid / "local_config.json"
-            data = self._read_json(path)
-            if not data:
-                return {}
-            return {
-                "connection_id": str(data.get("connection_id") or cid),
-                "base_url": str(data.get("base_url") or ""),
-                "client_id": str(data.get("client_id") or ""),
-                "client_secret": str(data.get("client_secret") or ""),
-                "token_path": str(data.get("token_path") or "/oauth/token"),
-                "api_root": str(data.get("api_root") or "/data/v3"),
-                "metadata_path": str(data.get("metadata_path") or "/metadata/resources"),
-                "timeout_sec": int(data.get("timeout_sec") or 30),
-                "verify_ssl": bool(data.get("verify_ssl", True)),
-                "ca_bundle_path": str(data.get("ca_bundle_path") or ""),
-                "token_auth_mode": str(data.get("token_auth_mode") or "auto"),
-                "district_lea_id": str(data.get("district_lea_id") or ""),
-                "scope_mode": "single_lea",
-                "credential_access_tier": "read",
-            }
-        except Exception:
-            return {}
+        return self._settings_path(backpack_id).is_file()
 
     def ensure_settings(self, backpack_id: str, *, write: bool = True) -> dict[str, Any]:
-        """
-        Return backpack settings. For edfi, bootstrap from connection config when
-        settings.json is missing so Setup A1/A2 can pass without a manual retype.
-        """
+        """Return saved settings for a backpack, or empty dict if not installed."""
         bid = str(backpack_id or "").strip()
         path = self._settings_path(bid)
         existing = self._read_json(path)
         if existing:
             return existing
-        if bid != "edfi":
-            return {}
-
-        # Prefer district-main; else first connection folder
-        conn_id = "district-main"
-        conn_root = self.runtime_root / "edfi" / "connections"
-        if conn_root.is_dir():
-            names = sorted(
-                p.name for p in conn_root.iterdir() if p.is_dir() and (p / "local_config.json").is_file()
-            )
-            if names:
-                if "district-main" in names:
-                    conn_id = "district-main"
-                else:
-                    conn_id = names[0]
-
-        boot = self._connection_config_public(conn_id)
-        if not boot:
-            return {}
-
-        try:
-            from services.backpack_host.installer import BackpackInstaller
-
-            boot = BackpackInstaller.normalize_settings_values(boot)
-        except Exception:
-            pass
-
-        if write:
-            path.parent.mkdir(parents=True, exist_ok=True)
-            # Persist full settings (secret stays under runtime only; never returned via public API).
-            path.write_text(json.dumps(boot, ensure_ascii=True, indent=2), encoding="utf-8")
-        return boot
+        return {}
 
     def _public_settings(self, settings: dict[str, Any]) -> dict[str, Any]:
         return {
@@ -244,10 +174,166 @@ class ControlBackpacksService:
             )
         return rows
 
+    # ── Backpack sniffer / auto-discovery ────────────────────────────────────
+
+    _REQUIRED_FILES = {
+        "backpack_json": "backpack.json",
+        "connector": "connector.py",
+        "operations": "operations.json",
+        "settings_schema": "settings_schema.json",
+    }
+
+    _SUPPORTED_PROTOCOLS = {"backpack.v1"}
+
+    def _handshake(self, bp_dir: Path, backpack_id: str) -> dict[str, Any]:
+        """
+        Validate a newly-dropped backpack folder.
+
+        Checks that all required files are present, backpack.json parses
+        correctly, and the protocol_version is one Nova supports. Returns
+        a handshake dict consumed by the discovery log and the control panel.
+
+        ok=False means the backpack is bad or incompatible and should NOT
+        be installed.
+        """
+        checks = {
+            key: (bp_dir / fname).is_file()
+            for key, fname in self._REQUIRED_FILES.items()
+        }
+        missing = [
+            fname
+            for key, fname in self._REQUIRED_FILES.items()
+            if not checks[key]
+        ]
+
+        display_name = backpack_id
+        version = "?"
+        protocol_version = "unknown"
+        manifest_ok = False
+        incompatible = False
+        reason = ""
+
+        try:
+            manifest_data = json.loads(
+                (bp_dir / "backpack.json").read_text(encoding="utf-8")
+            )
+            manifest_ok = True
+            display_name = str(
+                manifest_data.get("name")
+                or manifest_data.get("display_name")
+                or backpack_id
+            )
+            version = str(manifest_data.get("version") or "?")
+            protocol_version = str(
+                manifest_data.get("protocol_version") or "backpack.v1"
+            )
+            if protocol_version not in self._SUPPORTED_PROTOCOLS:
+                incompatible = True
+                reason = (
+                    f"Protocol '{protocol_version}' is not supported by this Nova. "
+                    f"Supported: {', '.join(sorted(self._SUPPORTED_PROTOCOLS))}."
+                )
+        except Exception as exc:
+            reason = f"backpack.json unreadable: {exc}"
+
+        files_ok = not missing
+        ok = files_ok and manifest_ok and not incompatible
+
+        if not ok and not reason:
+            reason = f"Missing required files: {', '.join(missing)}"
+
+        return {
+            "ok": ok,
+            "backpack_id": backpack_id,
+            "display_name": display_name,
+            "version": version,
+            "protocol_version": protocol_version,
+            "home": str(bp_dir),
+            "checks": checks,
+            "missing": missing,
+            "incompatible": incompatible,
+            "reason": reason,
+            "message": (
+                f"Handshake OK — '{display_name}' v{version} found its home at {bp_dir.name}/"
+                if ok
+                else f"Bad backpack — {reason}"
+            ),
+        }
+
+    def sniff_new_backpacks(self) -> list[dict[str, Any]]:
+        """
+        Scan backpacks/ for directories that weren't there before.
+
+        Compares current directory listing against
+        runtime/backpacks/known.json. Any new directories get a
+        _handshake() validation and are written to
+        runtime/backpacks/discovery_log.jsonl. The known registry is
+        updated so subsequent calls don't re-alert.
+
+        Returns a list of handshake dicts for newly-found backpacks
+        (empty list when nothing is new).
+        """
+        import time as _time
+
+        known_path = self.runtime_root / "backpacks" / "known.json"
+        log_path = self.runtime_root / "backpacks" / "discovery_log.jsonl"
+
+        # Load previously-known IDs.
+        known_ids: set[str] = set()
+        try:
+            if known_path.exists():
+                known_ids = set(json.loads(known_path.read_text(encoding="utf-8")))
+        except Exception:
+            known_ids = set()
+
+        # Discover current backpack directories.
+        current: dict[str, Path] = {}
+        if self.backpacks_root.is_dir():
+            for child in self.backpacks_root.iterdir():
+                if child.is_dir() and (child / "backpack.json").is_file():
+                    current[child.name] = child
+
+        current_ids = set(current)
+        new_ids = current_ids - known_ids
+
+        newly_found: list[dict[str, Any]] = []
+        for bid in sorted(new_ids):
+            handshake = self._handshake(current[bid], bid)
+            entry = {
+                "discovered_at": _time.strftime("%Y-%m-%dT%H:%M:%SZ", _time.gmtime()),
+                **handshake,
+            }
+            newly_found.append(entry)
+            # Append to discovery log.
+            try:
+                log_path.parent.mkdir(parents=True, exist_ok=True)
+                with log_path.open("a", encoding="utf-8") as fh:
+                    fh.write(json.dumps(entry) + "\n")
+            except Exception:
+                pass
+
+        # Update known registry (include all current — even invalid — so we
+        # don't keep re-alerting about broken folders).
+        if new_ids:
+            try:
+                known_path.parent.mkdir(parents=True, exist_ok=True)
+                known_path.write_text(
+                    json.dumps(sorted(current_ids), ensure_ascii=True),
+                    encoding="utf-8",
+                )
+            except Exception:
+                pass
+
+        return newly_found
+
     def payload(self, *, selected_backpack_id: str = "", role: str = "account_admin") -> dict[str, Any]:
         from services.backpack_host.grant_enforcer import operation_summary
         from services.backpack_host.installer import BackpackInstaller
         from services.backpack_host.query import backpack_status
+
+        # Sniff for newly-dropped backpacks on every payload request.
+        # Lightweight (directory scan only); results go to discovery_log.jsonl.
+        newly_found = self.sniff_new_backpacks()
 
         backpacks = self.list_backpacks()
         # Do not auto-select when empty — UI requires an explicit choice.
@@ -342,6 +428,7 @@ class ControlBackpacksService:
             "selected_backpack_id": selected,
             "detail": detail,
             "role": str(role or "account_admin"),
+            "newly_found": newly_found,
         }
 
     def install(
@@ -350,6 +437,7 @@ class ControlBackpacksService:
         *,
         skip_profile: bool = False,
     ) -> tuple[bool, str, dict[str, Any], str]:
+        import time as _time
         from services.backpack_host.installer import BackpackInstaller
 
         backpack_id = str(payload.get("backpack_id") or "").strip()
@@ -358,6 +446,16 @@ class ControlBackpacksService:
             return False, "backpack_id_required", {}, "backpack_id_required"
         if not values:
             return False, "settings_required", {}, "settings_required"
+
+        # Stamp which Nova Shell user is configuring the backpack.
+        # The key/secret are ODS (system) credentials, not user credentials,
+        # but the act of saving them must be traceable to a Nova user.
+        nova_user = str(payload.get("nova_user") or payload.get("user") or "").strip()
+        if nova_user:
+            values["configured_by"] = nova_user
+            values["last_configured_at"] = _time.strftime(
+                "%Y-%m-%dT%H:%M:%SZ", _time.gmtime()
+            )
 
         try:
             backpack_dir = self._backpack_dir(backpack_id)
@@ -550,11 +648,203 @@ class ControlBackpacksService:
             "backpack_report_ok" if ok else "backpack_report_failed",
         )
 
+    def uninstall(
+        self, payload: Mapping[str, Any]
+    ) -> tuple[bool, str, dict[str, Any], str]:
+        """
+        Remove all runtime residue for a backpack.
+
+        For data connector this means:
+          runtime/edfi/settings.json
+          runtime/edfi/connections/{connection_id}/local_config.json
+          runtime/edfi/warehouse/{connection_id}.sqlite3
+          runtime/edfi/profiles/{connection_id}.json
+          runtime/edfi/enabled.json
+          runtime/backpacks/capability_scan.json
+
+        The backpack code under backpacks/edfi/ is NOT touched — it is part of
+        the Nova source tree, not install residue. Only runtime/ files are removed.
+
+        The requesting Nova Shell user is required in payload["nova_user"].
+        """
+        import shutil
+        import time as _time
+
+        backpack_id = str(payload.get("backpack_id") or "").strip()
+        if not backpack_id:
+            return False, "backpack_id_required", {}, "backpack_id_required"
+
+        nova_user = str(payload.get("nova_user") or payload.get("user") or "").strip() or "operator"
+
+        # Resolve connection_id from saved settings before we delete anything.
+        saved = self.ensure_settings(backpack_id, write=False)
+        connection_id = str(
+            saved.get("connection_id")
+            or payload.get("connection_id")
+            or "district-main"
+        ).strip() or "district-main"
+
+        # Block uninstall if a warehouse sync is actively running.
+        # The lock file is written by run_full_sync() and removed in its finally block.
+        # Removing the warehouse SQLite mid-sync would corrupt the database.
+        _sync_lock = self.runtime_root / backpack_id / "warehouse_sync.lock"
+        if _sync_lock.exists():
+            return False, "sync_in_progress", {
+                "hint": (
+                    "A warehouse sync is currently running. "
+                    "Wait for it to complete before uninstalling."
+                ),
+                "lock_file": str(_sync_lock),
+            }, "sync_in_progress"
+
+        removed: list[str] = []
+        errors: list[str] = []
+
+        def _rm(path: Path) -> None:
+            try:
+                if path.is_file():
+                    path.unlink()
+                    removed.append(str(path))
+                elif path.is_dir():
+                    shutil.rmtree(path)
+                    removed.append(str(path))
+            except Exception as exc:
+                errors.append(f"{path}: {exc}")
+
+        rt = self.runtime_root
+
+        # 1. Nuke the entire backpack runtime directory (catches all residue:
+        #    settings, connections, warehouse, profiles, cursors, extracts, audit logs, etc.)
+        backpack_runtime_dir = rt / backpack_id
+        if backpack_runtime_dir.is_dir():
+            try:
+                shutil.rmtree(backpack_runtime_dir)
+                removed.append(str(backpack_runtime_dir))
+            except Exception as exc:
+                errors.append(f"{backpack_runtime_dir}: {exc}")
+
+        # 2. capability scan (Nova's nervous-system fusion cache — outside backpack dir)
+        _rm(rt / "backpacks" / "capability_scan.json")
+
+        ok = not errors
+        extra = {
+            "ok": ok,
+            "backpack_id": backpack_id,
+            "connection_id": connection_id,
+            "uninstalled_by": nova_user,
+            "uninstalled_at": _time.strftime("%Y-%m-%dT%H:%M:%SZ", _time.gmtime()),
+            "removed": removed,
+            "errors": errors,
+            "note": (
+                "Backpack code (backpacks/edfi/) is unchanged — only runtime/ residue was removed. "
+                "Re-enter credentials and run Install + profile to reinstall."
+            ),
+        }
+        return (
+            ok,
+            "backpack_uninstall_ok" if ok else "backpack_uninstall_partial",
+            extra,
+            "backpack_uninstall_ok" if ok else "backpack_uninstall_partial",
+        )
+
+    def probe_credentials(
+        self, payload: Mapping[str, Any]
+    ) -> tuple[bool, str, dict[str, Any], str]:
+        """
+        Test ODS credentials without writing anything to disk.
+
+        Accepts either explicit fields (base_url, client_id, client_secret) or
+        falls back to what is already saved under runtime/ for the given
+        backpack_id/connection_id.  The requesting Nova Shell user must be
+        supplied in payload["nova_user"] for audit purposes — the probe result
+        records who performed the test but saves nothing itself.
+        """
+        from services.edfi.auth_probe import probe_auth
+
+        backpack_id = str(payload.get("backpack_id") or "edfi").strip() or "edfi"
+        nova_user = str(payload.get("nova_user") or payload.get("user") or "").strip()
+
+        # Resolve credential fields: prefer explicit form values, fall back to disk.
+        base_url = str(payload.get("base_url") or "").strip()
+        client_id = str(payload.get("client_id") or "").strip()
+        client_secret = str(payload.get("client_secret") or "").strip()
+
+        if not base_url or not client_id or not client_secret:
+            # Fall back to what is already on disk for this backpack.
+            saved = self.ensure_settings(backpack_id, write=False)
+            if not saved:
+                conn_id = str(payload.get("connection_id") or "district-main").strip()
+                saved = self._connection_config_public(conn_id)
+            base_url = base_url or str(saved.get("base_url") or "").strip()
+            client_id = client_id or str(saved.get("client_id") or "").strip()
+            client_secret = client_secret or str(saved.get("client_secret") or "").strip()
+
+        # Advanced overrides (optional).
+        token_path = str(payload.get("token_path") or "/oauth/token").strip() or "/oauth/token"
+        verify_ssl = payload.get("verify_ssl")
+        if verify_ssl is None:
+            verify_ssl = True
+        else:
+            verify_ssl = bool(verify_ssl)
+        ca_bundle_path = str(payload.get("ca_bundle_path") or "").strip()
+        timeout_sec = int(payload.get("timeout_sec") or 15)
+
+        result = probe_auth(
+            base_url=base_url,
+            client_id=client_id,
+            client_secret=client_secret,
+            token_path=token_path,
+            timeout_sec=min(timeout_sec, 30),
+            verify_ssl=verify_ssl,
+            ca_bundle_path=ca_bundle_path,
+        )
+
+        ok = bool(result.get("ok"))
+        extra = {
+            "ok": ok,
+            "backpack_id": backpack_id,
+            "base_url": base_url,
+            "client_id": client_id,
+            "latency_ms": result.get("latency_ms", 0),
+            "token_type": result.get("token_type", ""),
+            "error": result.get("error", ""),
+            "error_code": result.get("error_code", ""),
+            "hint": result.get("hint", ""),
+            "tested_by": nova_user,
+        }
+        return (
+            ok,
+            "backpack_probe_credentials_ok" if ok else "backpack_probe_credentials_failed",
+            extra,
+            "backpack_probe_credentials_ok" if ok else "backpack_probe_credentials_failed",
+        )
+
     def handle_action(
         self, action: str, payload: Mapping[str, Any]
     ) -> tuple[bool, str, dict[str, Any]]:
         act = str(action or "").strip()
         body = dict(payload or {})
+        if act == "backpack_sniff":
+            found = self.sniff_new_backpacks()
+            good = [f for f in found if f.get("ok")]
+            bad  = [f for f in found if not f.get("ok")]
+            return True, "sniff_complete", {
+                "ok": True,
+                "newly_found": found,
+                "good_count": len(good),
+                "bad_count": len(bad),
+                "bad": bad,
+                "message": (
+                    f"Found {len(good)} new backpack(s)."
+                    + (f" {len(bad)} bad/incompatible: {[b['backpack_id'] for b in bad]}" if bad else "")
+                ) if found else "No new backpacks found.",
+            }
+        if act == "backpack_uninstall":
+            ok, msg, extra, _ = self.uninstall(body)
+            return ok, msg, extra
+        if act == "backpack_probe_credentials":
+            ok, msg, extra, _ = self.probe_credentials(body)
+            return ok, msg, extra
         if act == "backpack_install":
             ok, msg, extra, _ = self.install(body)
             return ok, msg, extra

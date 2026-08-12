@@ -20,7 +20,7 @@ class TestTemporalPressure(unittest.TestCase):
     def test_scores_proximity_and_routes_to_work_tree_for_immediate_deadline(self):
         event = TemporalEvent(
             source="ics",
-            title="PEIMS submission",
+            title="state education data submission",
             start=datetime(2026, 6, 6, 12, 0, tzinfo=timezone.utc),
             confidence="confirmed",
             importance=1.0,
@@ -67,13 +67,13 @@ class TestNovaTemporalService(unittest.TestCase):
 
     def test_route_pressure_returns_structured_payload(self):
         service = NovaTemporalService()
-        event = TemporalEvent(source="ics", title="PEIMS deadline", start=datetime(2026, 6, 2, 9, 0, tzinfo=timezone.utc), importance=1.0)
+        event = TemporalEvent(source="ics", title="state education data deadline", start=datetime(2026, 6, 2, 9, 0, tzinfo=timezone.utc), importance=1.0)
         pressure = service.assess(event, now=datetime(2026, 6, 1, 9, 0, tzinfo=timezone.utc))
 
         payload = service.route_pressure(pressure)
 
         self.assertEqual(payload["kind"], "work_tree")
-        self.assertEqual(payload["title"], "PEIMS deadline")
+        self.assertEqual(payload["title"], "state education data deadline")
         self.assertIn("pressure", payload)
 
 
@@ -82,7 +82,7 @@ class TestCalendarIngestion(unittest.TestCase):
         ics_text = """BEGIN:VCALENDAR
 BEGIN:VEVENT
 UID:deadbeef
-SUMMARY:PEIMS deadline
+SUMMARY:state education data deadline
 DTSTART;TZID=America/Chicago:20260610T090000
 DTEND;TZID=America/Chicago:20260610T100000
 STATUS:CONFIRMED
@@ -94,7 +94,7 @@ END:VCALENDAR
 
         self.assertEqual(len(events), 1)
         event = events[0]
-        self.assertEqual(event.title, "PEIMS deadline")
+        self.assertEqual(event.title, "state education data deadline")
         self.assertIsNotNone(event.start)
         self.assertEqual(event.timezone, "America/Chicago")
         self.assertEqual(event.confidence, "CONFIRMED")

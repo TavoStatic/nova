@@ -37,8 +37,8 @@ class ReleaseCleanServiceTests(unittest.TestCase):
                     package_dir.mkdir(parents=True)
                     record_dir = package_dir / "validation_records"
                     record_dir.mkdir(parents=True)
-                    zip_path = package_dir / "nyo-system-base-rc-test.zip"
-                    record_path = record_dir / "nyo-system-base-rc-test.md"
+                    zip_path = package_dir / "nova-platform-rc-test.zip"
+                    record_path = record_dir / "nova-platform-rc-test.md"
                     zip_path.write_bytes(b"zip")
                     record_path.write_text("- Result: pass-with-notes\n", encoding="utf-8")
                     stdout = f"[OK]   Zip artifact   : {zip_path}\n[OK]   Validation seed: {record_path}\n"
@@ -74,7 +74,7 @@ class ReleaseCleanServiceTests(unittest.TestCase):
                     "package_readiness",
                 ],
             )
-            self.assertTrue(report["artifact"].endswith("nyo-system-base-rc-test.zip"))
+            self.assertTrue(report["artifact"].endswith("nova-platform-rc-test.zip"))
             self.assertTrue((tmp_path / "runtime" / "release_clean" / "latest_release_clean.json").exists())
 
     def test_release_clean_stops_on_hygiene_failure(self) -> None:
@@ -115,8 +115,8 @@ class ReleaseCleanServiceTests(unittest.TestCase):
                     package_dir.mkdir(parents=True)
                     record_dir = package_dir / "validation_records"
                     record_dir.mkdir(parents=True)
-                    zip_path = package_dir / "nyo-system-base-rc-test.zip"
-                    record_path = record_dir / "nyo-system-base-rc-test.md"
+                    zip_path = package_dir / "nova-platform-rc-test.zip"
+                    record_path = record_dir / "nova-platform-rc-test.md"
                     zip_path.write_bytes(b"zip")
                     record_path.write_text("- Result: pass-with-notes\n", encoding="utf-8")
                     stdout = f"[OK]   Zip artifact   : {zip_path}\n[OK]   Validation seed: {record_path}\n"

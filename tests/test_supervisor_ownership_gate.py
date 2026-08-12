@@ -86,7 +86,7 @@ class TestSupervisorOwnershipGate(unittest.TestCase):
             {
                 "kind": "retrieval",
                 "subject": "web_research",
-                "query": "PEIMS attendance",
+                "query": "state education data attendance",
                 "result_count": 2,
                 "urls": ["https://tea.texas.gov/a", "https://tea.texas.gov/b"],
             }

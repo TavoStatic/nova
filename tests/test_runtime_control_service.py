@@ -553,6 +553,19 @@ class TestRuntimeControlService(unittest.TestCase):
         self.assertEqual(calls[0][3], [Path("c:/Nova/runtime/guard.stop")])
         self.assertEqual(intents[0][1]["action"], "guard_restart")
 
+    def test_detached_creation_flags_include_breakaway_from_job(self):
+        class _FakeSubprocess:
+            DETACHED_PROCESS = 1
+            CREATE_NEW_PROCESS_GROUP = 2
+            CREATE_NO_WINDOW = 4
+            CREATE_BREAKAWAY_FROM_JOB = 8
+
+        flags = RUNTIME_CONTROL_SERVICE.detached_creation_flags(
+            os_name="nt",
+            subprocess_module=_FakeSubprocess,
+        )
+        self.assertEqual(flags, 1 | 2 | 4 | 8)
+
     def test_start_autonomy_maintenance_worker_starts_detached_loop(self):
         calls = []
 
@@ -561,6 +574,7 @@ class TestRuntimeControlService(unittest.TestCase):
             DETACHED_PROCESS = 1
             CREATE_NEW_PROCESS_GROUP = 2
             CREATE_NO_WINDOW = 4
+            CREATE_BREAKAWAY_FROM_JOB = 8
 
             @staticmethod
             def Popen(command, **kwargs):

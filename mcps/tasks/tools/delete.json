@@ -1,0 +1,16 @@
+{
+  "name": "delete",
+  "description": "Archive/deactivate an automation (by `task_id` from `automation_create` / `automation_list`) so it stops running. Use this when the user explicitly asks to delete, remove, or archive an automation or task. If the user says 'stop' or 'cancel', prefer `automation_pause` instead.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "task_id": {
+        "type": "string",
+        "description": "The ID of the automation to delete"
+      }
+    },
+    "required": [
+      "task_id"
+    ]
+  }
+}

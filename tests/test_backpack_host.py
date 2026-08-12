@@ -23,6 +23,8 @@ class TestOpsMap(unittest.TestCase):
         self.assertEqual(pipeline_op_to_backpack_op(root, "connection_health"), "view_status")
         self.assertEqual(pipeline_op_to_backpack_op(root, "list_schools"), "view_data")
         self.assertEqual(pipeline_op_to_backpack_op(root, "changes_since"), "run_sync")
+        self.assertEqual(pipeline_op_to_backpack_op(root, "warehouse_sync"), "run_warehouse_sync")
+        self.assertEqual(pipeline_op_to_backpack_op(root, "warehouse_status"), "run_warehouse_sync")
 
     def test_backpack_dir_lookup(self) -> None:
         found = backpack_dir_for_pipeline_id("edfi", backpacks_root=BASE_DIR / "backpacks")
@@ -47,6 +49,7 @@ class TestGrants(unittest.TestCase):
         self.assertTrue(check_grant(self.root, "view_status", "viewer"))
         self.assertFalse(check_grant(self.root, "view_data", "viewer"))
         self.assertFalse(check_grant(self.root, "run_sync", "viewer"))
+        self.assertFalse(check_grant(self.root, "run_warehouse_sync", "viewer"))
         self.assertFalse(check_grant(self.root, "install", "viewer"))
 
     def test_account_admin_can_install(self) -> None:
@@ -113,7 +116,7 @@ class TestScopeSettings(unittest.TestCase):
 
         settings = {
             "scope_mode": "multi_lea",
-            "district_lea_id": "31901",
+            "district_lea_id": "12345",
             "allowed_lea_ids": "31901, 108904",
         }
         lea, err = resolve_query_lea(settings, "108904")
@@ -123,23 +126,23 @@ class TestScopeSettings(unittest.TestCase):
         self.assertEqual(err2, "lea_not_in_allowed_list")
         self.assertEqual(lea2, "")
 
-    def test_peims_and_edfi_lea_forms_match(self) -> None:
+    def test_lea_id_forms_match(self) -> None:
         from services.backpack_host.scope_settings import (
             lea_in_list,
             lea_identity_key,
             resolve_query_lea,
         )
 
-        self.assertEqual(lea_identity_key("031901"), 31901)
-        self.assertEqual(lea_identity_key("31901"), 31901)
-        self.assertTrue(lea_in_list("031901", ["31901"]))
+        self.assertEqual(lea_identity_key("[lea-id]"), 12345)
+        self.assertEqual(lea_identity_key("12345"), 12345)
+        self.assertTrue(lea_in_list("[lea-id]", ["12345"]))
         settings = {
             "scope_mode": "single_lea",
-            "district_lea_id": "31901",
+            "district_lea_id": "12345",
         }
-        lea, err = resolve_query_lea(settings, "031901")
+        lea, err = resolve_query_lea(settings, "[lea-id]")
         self.assertIsNone(err)
-        self.assertEqual(lea, "31901")
+        self.assertEqual(lea, "12345")
 
 
 class TestInstallerValidate(unittest.TestCase):
@@ -193,13 +196,13 @@ class TestInstallerValidate(unittest.TestCase):
             "client_secret": "secret",
             "scope_mode": "district",  # alias
             "credential_access_tier": "read_only",  # alias
-            "district_lea_id": "031901",
+            "district_lea_id": "[lea-id]",
         }
         errors = installer.validate(BASE_DIR / "backpacks" / "edfi", values)
         self.assertEqual(errors, [])
         self.assertEqual(values.get("scope_mode"), "single_lea")
         self.assertEqual(values.get("credential_access_tier"), "read")
-        self.assertEqual(values.get("district_lea_id"), "31901")
+        self.assertEqual(values.get("district_lea_id"), "12345")
 
     def test_apply_normalizes_aliases_to_settings_json(self) -> None:
         from services.backpack_host.installer import BackpackInstaller
@@ -212,8 +215,8 @@ class TestInstallerValidate(unittest.TestCase):
             "client_secret": "secret",
             "scope_mode": "region",
             "credential_access_tier": "ro",
-            "district_lea_id": "031901",
-            "allowed_lea_ids": "031901, 108904",
+            "district_lea_id": "[lea-id]",
+            "allowed_lea_ids": "[lea-id], 108904",
         }
         with tempfile.TemporaryDirectory() as tmp:
             installer.apply(
@@ -224,7 +227,7 @@ class TestInstallerValidate(unittest.TestCase):
             data = json.loads((Path(tmp) / "edfi" / "settings.json").read_text(encoding="utf-8"))
             self.assertEqual(data["scope_mode"], "multi_lea")
             self.assertEqual(data["credential_access_tier"], "read")
-            self.assertEqual(data["district_lea_id"], "31901")
+            self.assertEqual(data["district_lea_id"], "12345")
             self.assertEqual(values["scope_mode"], "multi_lea")
 
 

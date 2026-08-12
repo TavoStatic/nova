@@ -23,7 +23,7 @@ function Resolve-VerificationTarget([string]$targetPath) {
       throw "No installer artifact path was provided and the default installer output folder does not exist: $installerRoot"
     }
 
-    $latestInstaller = Get-ChildItem -Path $installerRoot -File -Filter "nyo-system-installer-*.exe" |
+    $latestInstaller = Get-ChildItem -Path $installerRoot -File -Filter "nova-installer-*.exe" |
       Sort-Object LastWriteTimeUtc -Descending |
       Select-Object -First 1
 
@@ -111,7 +111,7 @@ if ($null -ne $buildEntry) {
 $failures = New-Object System.Collections.ArrayList
 
 Write-Host ""
-Write-Host "NYO System Installer Verification"
+Write-Host "Nova Installer Verification"
 Write-Host "---------------------------------"
 Write-Host ("[INFO] Target         : " + $targetItem.FullName)
 

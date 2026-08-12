@@ -1,3 +1,14 @@
+<!--
+NOVA_DOC
+category: subsystem
+authority: active_working
+last_session: 2026-08-05
+last_agent: claude-cowork
+session_state: needs_update
+next_step: verify protocol against current pipeline code
+open: none
+-->
+
 # Privileged Pipeline Protocol
 
 Status: protocol scaffold only; no active data lane is present in the current source tree.

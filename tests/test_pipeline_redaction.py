@@ -28,7 +28,7 @@ class TestPipelineRedaction(unittest.TestCase):
             "rows": [{"schoolId": 1, "website": "https://example.com"}],
             "row_count": 1,
         }
-        result = apply_redaction_to_payload(payload, "education_org_default", resource="ed-fi/schools")
+        result = apply_redaction_to_payload(payload, "education_org_default", resource="backpack/schools")
         self.assertTrue(result["redaction_applied"])
         self.assertEqual(result["redaction_profile"], "education_org_default")
         self.assertEqual(result["rows"][0]["website"], "[REDACTED]")
@@ -36,7 +36,7 @@ class TestPipelineRedaction(unittest.TestCase):
     def test_metadata_only_clears_rows(self) -> None:
         payload = {
             "ok": True,
-            "pipeline_id": "edfi_bisd",
+            "pipeline_id": "data_connector",
             "rows": [{"studentUniqueId": "1"}],
             "items": [{"studentUniqueId": "1"}],
             "row_count": 1,
@@ -50,7 +50,7 @@ class TestPipelineRedaction(unittest.TestCase):
         profile = resolve_redaction_profile(
             operation="changes_since",
             template_profile="education_org_default",
-            resource="ed-fi/students",
+            resource="backpack/students",
         )
         self.assertEqual(profile, "student_default")
 
@@ -58,7 +58,7 @@ class TestPipelineRedaction(unittest.TestCase):
         payload = {
             "ok": False,
             "edfi": {
-                "resource": "ed-fi/students",
+                "resource": "backpack/students",
                 "items": [
                     {
                         "studentUniqueId": "S123",
@@ -75,10 +75,10 @@ class TestPipelineRedaction(unittest.TestCase):
     def test_apply_redaction_upgrades_student_resource_profile(self) -> None:
         payload = {
             "ok": True,
-            "resource": "ed-fi/students",
+            "resource": "backpack/students",
             "items": [{"studentUniqueId": "S123", "firstName": "Ada"}],
         }
-        result = apply_redaction_to_payload(payload, "education_org_default", resource="ed-fi/students")
+        result = apply_redaction_to_payload(payload, "education_org_default", resource="backpack/students")
         self.assertEqual(result["redaction_profile"], "student_default")
         self.assertTrue(result["redaction_applied"])
         self.assertEqual(result["items"][0]["firstName"], "[REDACTED]")
@@ -86,10 +86,10 @@ class TestPipelineRedaction(unittest.TestCase):
     def test_student_profile_marks_student_resource_protected(self) -> None:
         payload = {
             "ok": True,
-            "resource": "ed-fi/students",
+            "resource": "backpack/students",
             "items": [{"studentUniqueId": "S123", "firstName": "Ada"}],
         }
-        result = apply_redaction_to_payload(payload, "student_default", resource="ed-fi/students")
+        result = apply_redaction_to_payload(payload, "student_default", resource="backpack/students")
         self.assertTrue(result["redaction_applied"])
         self.assertEqual(result["items"][0]["firstName"], "[REDACTED]")
 
@@ -97,7 +97,7 @@ class TestPipelineRedaction(unittest.TestCase):
         result = redact_edfi_result(
             {
                 "ok": True,
-                "resource": "ed-fi/students",
+                "resource": "backpack/students",
                 "items": [
                     {
                         "studentUniqueId": "S123",

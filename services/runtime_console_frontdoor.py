@@ -2,7 +2,7 @@ from __future__ import annotations
 
 
 class RuntimeConsoleFrontdoorService:
-    """Own the legacy NYO runtime console surface outside the HTTP transport shell."""
+    """Own the legacy Nova runtime console surface outside the HTTP transport shell."""
 
     @staticmethod
     def render_html() -> str:
@@ -14,7 +14,7 @@ RUNTIME_CONSOLE_HTML = """<!doctype html>
 <head>
   <meta charset=\"utf-8\" />
   <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" />
-    <title>NYO Runtime Console</title>
+    <title>Nova Runtime Console</title>
   <style>
     :root {
       --bg: #f7f4ec;
@@ -49,7 +49,7 @@ RUNTIME_CONSOLE_HTML = """<!doctype html>
   <div class=\"wrap\">
     <div class=\"card\">
             <div class=\"head\">
-                <div class=\"title\">NYO Runtime Console</div>
+                <div class=\"title\">Nova Runtime Console</div>
                 <div class=\"head-right\">
                     <div id=\"status\" class=\"status\">Checking health...</div>
                     <button id="btnToggleAudio" type="button" class="btn-mini alt">Voice Off</button>
@@ -60,7 +60,7 @@ RUNTIME_CONSOLE_HTML = """<!doctype html>
             </div>
       <div id=\"chat\"></div>
       <form id=\"f\">
-        <input id=\"m\" placeholder=\"Enter a request for the NYO runtime...\" autocomplete=\"off\" />
+        <input id=\"m\" placeholder=\"Enter a request for the Nova runtime...\" autocomplete=\"off\" />
         <button type=\"submit\">Send</button>
       </form>
     </div>
@@ -223,10 +223,10 @@ RUNTIME_CONSOLE_HTML = """<!doctype html>
         if (!chatLoginEnabled && !forcePrompt) return true;
         let username = (localStorage.getItem('nova_chat_user') || userId || '').trim();
         if (!username || forcePrompt) {
-            username = (window.prompt('NYO username', username || userId || '') || '').trim();
+            username = (window.prompt('Nova username', username || userId || '') || '').trim();
         }
         if (!username) return false;
-        const password = window.prompt('NYO password', '');
+        const password = window.prompt('Nova password', '');
         if (password === null) return false;
         try {
             const r = await fetch('/api/chat/login', {
@@ -377,7 +377,7 @@ RUNTIME_CONSOLE_HTML = """<!doctype html>
         await loadHistory();
         await resumePendingTurn();
         if (!historyLoaded) {
-            add('a', 'NYO runtime console ready. Enter a request when you are ready.');
+            add('a', 'Nova runtime console ready. Enter a request when you are ready.');
         }
         health();
         window.setInterval(health, 5000);

@@ -1,4 +1,15 @@
-# NYO AI SYSTEMS Operations
+<!--
+NOVA_DOC
+category: subsystem
+authority: active_working
+last_session: 2026-08-05
+last_agent: claude-cowork
+session_state: needs_update
+next_step: review operational runbook for accuracy
+open: none
+-->
+
+# Nova SYSTEMS Operations
 
 ## Environment
 
@@ -40,7 +51,7 @@ Run the core directly only when guard supervision and periodic guard-launched ma
 C:\Nova\nova.cmd run
 ```
 
-Run the NYO AI SYSTEMS web UI:
+Run the Nova SYSTEMS web UI:
 
 ```powershell
 C:\Nova\nova.cmd webui --host 127.0.0.1 --port 8080
@@ -167,7 +178,7 @@ Calendar files live under `runtime/temporal/`. Add or update ICS files there to 
 Any new backend operation should be wired through the control console instead of ad hoc manual shell steps.
 
 1. Add a command entry in `C:\Nova\backend_command_deck.json`.
-2. Open NYO control (`/control`) and use **Backend Command Console** in the **Tools** tab.
+2. Open Nova control (`/control`) and use **Backend Command Console** in the **Tools** tab.
 3. Run the command through `backend_command_run` so execution is captured in `runtime/control_action_audit.jsonl`.
 
 Deck command kinds:

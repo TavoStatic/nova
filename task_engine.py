@@ -112,13 +112,12 @@ def extract_requirements(user_text: str, config: dict | None = None) -> list[str
     explicit_web_research = _looks_like_explicit_web_research(t)
 
     # --------------------------------------------------
-    # SIS / student data / PEIMS
+    # SIS / student data / state education data
     # --------------------------------------------------
 
     sis_keywords = [
         "attendance",
         "ada",
-        "peims",
         "enrollment",
         "withdrawal",
         "student",

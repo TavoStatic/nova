@@ -1,4 +1,15 @@
-# NYO System Real-World Tasks
+<!--
+NOVA_DOC
+category: plan
+authority: stale_snapshot
+last_session: 2026-08-05
+last_agent: claude-cowork
+session_state: needs_update
+next_step: review task list for completion status
+open: none
+-->
+
+# Nova Real-World Tasks
 
 Date: 2026-04-01
 

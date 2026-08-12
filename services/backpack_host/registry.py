@@ -12,8 +12,8 @@ unchanged: importlib.import_module(connector_module) resolves the pipeline
 class from the backpack's pipeline/connector.py.
 
 Merge rule: if a backpack has the same pipeline_id as a data_sources pipeline,
-the backpack wins. This allows backpacks to eventually replace BISD-specific
-pipelines (e.g., edfi_bisd → edfi) when the district migrates to the backpack.
+the backpack wins. This allows backpacks to provide domain-specific
+pipelines (e.g., data_connector → edfi) when the district migrates to the backpack.
 """
 
 import logging
@@ -94,7 +94,7 @@ class BackpackAwarePipelineRegistry(PipelineRegistry):
         Return all pipeline manifests: data_sources pipelines + backpacks.
 
         Backpacks shadow same-id data_sources pipelines (intentional: migration
-        path from edfi_bisd → edfi).
+        path from data_connector → edfi).
         """
         pipeline_manifests = {m.pipeline_id: m for m in super().discover(refresh=refresh)}
         backpack_manifests = {m.pipeline_id: m for m in self._discover_backpacks(refresh=refresh)}

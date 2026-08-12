@@ -1,3 +1,14 @@
+<!--
+NOVA_DOC
+category: subsystem
+authority: active_working
+last_session: 2026-08-05
+last_agent: claude-cowork
+session_state: needs_update
+next_step: review retention caps after August changes
+open: none
+-->
+
 # Kidney System
 
 Last verified from code: 2026-07-12

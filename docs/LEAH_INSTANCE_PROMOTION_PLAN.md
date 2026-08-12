@@ -1,3 +1,14 @@
+<!--
+NOVA_DOC
+category: plan
+authority: stale_snapshot
+last_session: 2026-08-05
+last_agent: claude-cowork
+session_state: needs_update
+next_step: verify promotion plan against current codegen/observe mode
+open: none
+-->
+
 # Leah Instance Promotion Plan
 
 Document class: promotion plan. Current policy keeps Leah in `observe` mode with no promoted capabilities.

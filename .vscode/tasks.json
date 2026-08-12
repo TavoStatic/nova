@@ -1,0 +1,566 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "restart-nova",
+			"type": "shell",
+			"command": "powershell",
+			"args": [
+				"-NoProfile",
+				"-ExecutionPolicy",
+				"Bypass",
+				"-Command",
+				"Set-Location 'c:\\NOVA'; .\\nova.cmd webui-stop; .\\nova.cmd stop; if (Test-Path .\\runtime\\guard.stop) { Remove-Item .\\runtime\\guard.stop -Force -ErrorAction SilentlyContinue }; Start-Process -FilePath 'c:\\NOVA\\.venv\\Scripts\\python.exe' -ArgumentList @('c:\\NOVA\\nova_guard.py') -WindowStyle Hidden; .\\nova.cmd webui-start --host 127.0.0.1 --port 8080; .\\nova.cmd runtime-status; .\\nova.cmd webui-status --port 8080"
+			],
+			"problemMatcher": []
+		},
+		{
+			"label": "start-nova-guard",
+			"type": "shell",
+			"command": "powershell",
+			"args": [
+				"-NoProfile",
+				"-ExecutionPolicy",
+				"Bypass",
+				"-Command",
+				"Set-Location 'c:\\NOVA'; if (Test-Path .\\runtime\\guard.stop) { Remove-Item .\\runtime\\guard.stop -Force -ErrorAction SilentlyContinue }; $p = Start-Process -FilePath 'c:\\NOVA\\.venv\\Scripts\\python.exe' -ArgumentList 'c:\\NOVA\\nova_guard.py' -WindowStyle Hidden -PassThru; Write-Output ('started_guard_pid=' + $p.Id); .\\nova.cmd runtime-status"
+			],
+			"problemMatcher": []
+		},
+		{
+			"label": "scan-open-tasks-now",
+			"type": "shell",
+			"command": "powershell",
+			"args": [
+				"-NoProfile",
+				"-ExecutionPolicy",
+				"Bypass",
+				"-Command",
+				"Set-Location 'c:\\NOVA'; c:\\NOVA\\.venv\\Scripts\\python.exe -c \"import work_tree, datetime\\nfrom collections import defaultdict, Counter\\n\\nopen_rows=[]\\nfor t in work_tree.list_trees():\\n    for b in work_tree.list_tree_branches(t.tree_id):\\n        bst=str(getattr(b.status,'value',b.status) or '').lower()\\n        if bst in {'complete','archived'}:\\n            continue\\n        for tk in work_tree.list_branch_tasks(b.branch_id):\\n            tst=str(getattr(getattr(tk,'status',None),'value',getattr(tk,'status','')) or '').lower()\\n            if tst in {'complete','dropped'}:\\n                continue\\n            open_rows.append((b.branch_id,b.title,tk.task_id,tk.title,str(getattr(tk,'updated_at',''))))\\n\\nprint('total_open_tasks',len(open_rows))\\nprint('branches_with_open_tasks',len({r[0] for r in open_rows}))\\n\\nby_title=Counter(r[3] for r in open_rows)\\nprint('top_open_task_titles')\\nfor k,v in by_title.most_common(6):\\n    print(v,'|',k)\\n\\nby_branch=defaultdict(list)\\nfor r in open_rows:\\n    by_branch[r[0]].append(r)\\n\\nprint('branches_with_multiple_open_tasks')\\nmulti=[(bid,rows[0][1],len(rows)) for bid,rows in by_branch.items() if len(rows)>1]\\nif not multi:\\n    print('none')\\nelse:\\n    for bid,btitle,cnt in sorted(multi,key=lambda x:x[2], reverse=True)[:20]:\\n        print(cnt,'|',bid,'|',btitle)\\n\\nprint('sample_open_rows')\\nfor bid,btitle,tid,ttitle,upd in sorted(open_rows,key=lambda x:x[4], reverse=True)[:40]:\\n    print(bid,'|',tid,'|',ttitle)\\n\""
+			],
+			"problemMatcher": []
+		},
+		{
+			"label": "scan-open-tasks-now-fixed",
+			"type": "shell",
+			"command": "powershell",
+			"args": [
+				"-NoProfile",
+				"-ExecutionPolicy",
+				"Bypass",
+				"-Command",
+				"Set-Location 'c:\\NOVA'; $script=@'\nimport work_tree\nfrom collections import defaultdict, Counter\n\nopen_rows=[]\nfor t in work_tree.list_trees():\n    for b in work_tree.list_tree_branches(t.tree_id):\n        bst=str(getattr(b.status,'value',b.status) or '').lower()\n        if bst in {'complete','archived'}:\n            continue\n        for tk in work_tree.list_branch_tasks(b.branch_id):\n            tst=str(getattr(getattr(tk,'status',None),'value',getattr(tk,'status','')) or '').lower()\n            if tst in {'complete','dropped'}:\n                continue\n            open_rows.append((b.branch_id,b.title,tk.task_id,tk.title,str(getattr(tk,'updated_at',''))))\n\nprint('total_open_tasks',len(open_rows))\nprint('branches_with_open_tasks',len({r[0] for r in open_rows}))\n\nby_title=Counter(r[3] for r in open_rows)\nprint('top_open_task_titles')\nfor k,v in by_title.most_common(8):\n    print(f'{v} | {k}')\n\nby_branch=defaultdict(list)\nfor r in open_rows:\n    by_branch[r[0]].append(r)\n\nprint('branches_with_multiple_open_tasks')\nmulti=[(bid,rows[0][1],len(rows)) for bid,rows in by_branch.items() if len(rows)>1]\nif not multi:\n    print('none')\nelse:\n    for bid,btitle,cnt in sorted(multi,key=lambda x:x[2], reverse=True)[:25]:\n        print(f'{cnt} | {bid} | {btitle}')\n\nprint('sample_open_rows')\nfor bid,btitle,tid,ttitle,upd in sorted(open_rows,key=lambda x:x[4], reverse=True)[:50]:\n    print(f'{bid} | {tid} | {ttitle}')\n'@; Set-Content -Path .\\runtime\\_scan_open_tasks_tmp.py -Value $script -Encoding UTF8; c:\\NOVA\\.venv\\Scripts\\python.exe .\\runtime\\_scan_open_tasks_tmp.py; Remove-Item .\\runtime\\_scan_open_tasks_tmp.py -Force"
+			],
+			"problemMatcher": []
+		},
+		{
+			"label": "scan-open-tasks-direct-python",
+			"type": "shell",
+			"command": "c:\\NOVA\\.venv\\Scripts\\python.exe",
+			"args": [
+				"-c",
+				"import work_tree;from collections import defaultdict,Counter;open_rows=[]\nfor t in work_tree.list_trees():\n  for b in work_tree.list_tree_branches(t.tree_id):\n    bst=str(getattr(b.status,'value',b.status) or '').lower()\n    if bst in {'complete','archived'}: continue\n    for tk in work_tree.list_branch_tasks(b.branch_id):\n      tst=str(getattr(getattr(tk,'status',None),'value',getattr(tk,'status','')) or '').lower()\n      if tst in {'complete','dropped'}: continue\n      open_rows.append((b.branch_id,b.title,tk.task_id,tk.title,str(getattr(tk,'updated_at',''))))\nprint('total_open_tasks',len(open_rows))\nprint('branches_with_open_tasks',len({r[0] for r in open_rows}))\nby_title=Counter(r[3] for r in open_rows)\nprint('top_open_task_titles')\n[print(f'{v} | {k}') for k,v in by_title.most_common(8)]\nby_branch=defaultdict(list)\n[by_branch[r[0]].append(r) for r in open_rows]\nmulti=[(bid,rows[0][1],len(rows)) for bid,rows in by_branch.items() if len(rows)>1]\nprint('branches_with_multiple_open_tasks')\nprint('none' if not multi else '\\n'.join([f'{cnt} | {bid} | {btitle}' for bid,btitle,cnt in sorted(multi,key=lambda x:x[2], reverse=True)[:25]]))\nprint('sample_open_rows')\n[print(f'{bid} | {tid} | {ttitle}') for bid,btitle,tid,ttitle,upd in sorted(open_rows,key=lambda x:x[4], reverse=True)[:50]]"
+			],
+			"problemMatcher": []
+		},
+		{
+			"label": "run-scan-open-tasks-script",
+			"type": "shell",
+			"command": "c:\\NOVA\\.venv\\Scripts\\python.exe",
+			"args": [
+				"c:\\NOVA\\runtime\\scan_open_tasks.py"
+			],
+			"problemMatcher": []
+		},
+		{
+			"label": "run-scan-open-tasks-script-2",
+			"type": "shell",
+			"command": "c:\\NOVA\\.venv\\Scripts\\python.exe",
+			"args": [
+				"c:\\NOVA\\runtime\\scan_open_tasks.py"
+			],
+			"problemMatcher": []
+		},
+		{
+			"label": "run-scan-open-tasks-script-3",
+			"type": "shell",
+			"command": "c:\\NOVA\\.venv\\Scripts\\python.exe",
+			"args": [
+				"c:\\NOVA\\runtime\\scan_open_tasks.py"
+			],
+			"problemMatcher": []
+		},
+		{
+			"label": "scan-open-task-cycles-now",
+			"type": "shell",
+			"command": "c:\\NOVA\\.venv\\Scripts\\python.exe",
+			"args": [
+				"c:\\NOVA\\runtime\\scan_open_task_cycles.py"
+			],
+			"problemMatcher": []
+		},
+		{
+			"label": "scan-open-task-cycles-diff",
+			"type": "shell",
+			"command": "c:\\NOVA\\.venv\\Scripts\\python.exe",
+			"args": [
+				"c:\\NOVA\\runtime\\scan_open_task_cycles.py"
+			],
+			"problemMatcher": []
+		},
+		{
+			"label": "explain-open-task-state",
+			"type": "shell",
+			"command": "c:\\NOVA\\.venv\\Scripts\\python.exe",
+			"args": [
+				"-c",
+				"import sys, json\nfrom pathlib import Path\nsys.path.insert(0, r'c:\\NOVA')\nimport work_tree\nfrom collections import Counter\n\nrows=[]\nfor t in work_tree.list_trees():\n    for b in work_tree.list_tree_branches(t.tree_id):\n        bst=str(getattr(b.status,'value',b.status) or '').lower()\n        if bst in {'complete','archived'}:\n            continue\n        for tk in work_tree.list_branch_tasks(b.branch_id):\n            tst=str(getattr(getattr(tk,'status',None),'value',getattr(tk,'status','')) or '').lower()\n            if tst in {'complete','dropped'}:\n                continue\n            rows.append((b.branch_id,b.title,tk.task_id,tk.title,str(getattr(tk,'created_at','')),str(getattr(tk,'updated_at',''))))\n\nprint('open_task_count',len(rows))\nprint('unique_branches',len({r[0] for r in rows}))\nif rows:\n    print('oldest_updated',min(r[5] for r in rows))\n    print('newest_updated',max(r[5] for r in rows))\n\ntitle_counts=Counter(r[3] for r in rows)\nprint('title_groups')\nfor title,count in title_counts.most_common(12):\n    print(count,'|',title)\n\nprint('sample_oldest_10')\nfor r in sorted(rows, key=lambda x:x[5])[:10]:\n    print(r[0],r[2],r[3],r[5])\n\nprint('sample_newest_10')\nfor r in sorted(rows, key=lambda x:x[5], reverse=True)[:10]:\n    print(r[0],r[2],r[3],r[5])\n"
+			],
+			"problemMatcher": []
+		},
+		{
+			"label": "explain-signal-lane",
+			"type": "shell",
+			"command": "c:\\NOVA\\.venv\\Scripts\\python.exe",
+			"args": [
+				"c:\\NOVA\\runtime\\explain_signal_lane.py"
+			],
+			"problemMatcher": []
+		},
+		{
+			"label": "explain-signal-lane-2",
+			"type": "shell",
+			"command": "c:\\NOVA\\.venv\\Scripts\\python.exe",
+			"args": [
+				"c:\\NOVA\\runtime\\explain_signal_lane.py"
+			],
+			"problemMatcher": []
+		},
+		{
+			"label": "explain-signal-tree-branches",
+			"type": "shell",
+			"command": "c:\\NOVA\\.venv\\Scripts\\python.exe",
+			"args": [
+				"c:\\NOVA\\runtime\\explain_signal_tree_branches.py"
+			],
+			"problemMatcher": []
+		},
+		{
+			"label": "explain-signal-tree-branches-2",
+			"type": "shell",
+			"command": "c:\\NOVA\\.venv\\Scripts\\python.exe",
+			"args": [
+				"c:\\NOVA\\runtime\\explain_signal_tree_branches.py"
+			],
+			"problemMatcher": []
+		},
+		{
+			"label": "scan-open-task-cycles-now-verify",
+			"type": "shell",
+			"command": "c:\\NOVA\\.venv\\Scripts\\python.exe",
+			"args": [
+				"c:\\NOVA\\runtime\\scan_open_task_cycles.py"
+			],
+			"problemMatcher": []
+		},
+		{
+			"label": "inspect-repeating-branches",
+			"type": "shell",
+			"command": "c:\\NOVA\\.venv\\Scripts\\python.exe",
+			"args": [
+				"c:\\NOVA\\runtime\\inspect_repeating_branches.py"
+			],
+			"problemMatcher": []
+		},
+		{
+			"label": "inspect-source-root-sequence-state",
+			"type": "shell",
+			"command": "c:\\NOVA\\.venv\\Scripts\\python.exe",
+			"args": [
+				"c:\\NOVA\\runtime\\inspect_source_root_sequence_state.py"
+			],
+			"problemMatcher": []
+		},
+		{
+			"label": "inspect-source-root-sequence-state-2",
+			"type": "shell",
+			"command": "c:\\NOVA\\.venv\\Scripts\\python.exe",
+			"args": [
+				"c:\\NOVA\\runtime\\inspect_source_root_sequence_state.py"
+			],
+			"problemMatcher": []
+		},
+		{
+			"label": "inspect-source-root-sequence-state-3",
+			"type": "shell",
+			"command": "c:\\NOVA\\.venv\\Scripts\\python.exe",
+			"args": [
+				"c:\\NOVA\\runtime\\inspect_source_root_sequence_state.py"
+			],
+			"problemMatcher": []
+		},
+		{
+			"label": "apply-ingestion-once",
+			"type": "shell",
+			"command": "c:\\NOVA\\.venv\\Scripts\\python.exe",
+			"args": [
+				"c:\\NOVA\\runtime\\apply_ingestion_once.py"
+			],
+			"problemMatcher": []
+		},
+		{
+			"label": "validate-duplicate-realign",
+			"type": "shell",
+			"command": "c:\\NOVA\\.venv\\Scripts\\python.exe",
+			"args": [
+				"c:\\NOVA\\runtime\\validate_duplicate_realign.py"
+			],
+			"problemMatcher": []
+		},
+		{
+			"label": "validate-release-signal-sequence",
+			"type": "shell",
+			"command": "c:\\NOVA\\.venv\\Scripts\\python.exe",
+			"args": [
+				"c:\\NOVA\\runtime\\validate_release_signal_sequence.py"
+			],
+			"problemMatcher": []
+		},
+		{
+			"label": "inspect-branch-meta",
+			"type": "shell",
+			"command": "c:\\NOVA\\.venv\\Scripts\\python.exe",
+			"args": [
+				"c:\\NOVA\\runtime\\inspect_branch_meta.py"
+			],
+			"problemMatcher": []
+		},
+		{
+			"label": "validate-release-realign",
+			"type": "shell",
+			"command": "c:\\NOVA\\.venv\\Scripts\\python.exe",
+			"args": [
+				"c:\\NOVA\\runtime\\validate_release_realign.py"
+			],
+			"problemMatcher": []
+		},
+		{
+			"label": "cleanup-temp-release-branch-task",
+			"type": "shell",
+			"command": "c:\\NOVA\\.venv\\Scripts\\python.exe",
+			"args": [
+				"-c",
+				"import sys; sys.path.insert(0,r'c:\\NOVA'); import work_tree; work_tree.mark_task_dropped('task_9112dc3f', reason='temp_validation_cleanup'); print('dropped task_9112dc3f')"
+			],
+			"problemMatcher": []
+		},
+		{
+			"label": "cleanup-temp-task-script",
+			"type": "shell",
+			"command": "c:\\NOVA\\.venv\\Scripts\\python.exe",
+			"args": [
+				"c:\\NOVA\\runtime\\cleanup_temp_task.py"
+			],
+			"problemMatcher": []
+		},
+		{
+			"label": "post-fix-open-task-scan",
+			"type": "shell",
+			"command": "c:\\NOVA\\.venv\\Scripts\\python.exe",
+			"args": [
+				"c:\\NOVA\\runtime\\scan_open_task_cycles.py"
+			],
+			"problemMatcher": []
+		},
+		{
+			"label": "inspect-repeating-branches-postfix",
+			"type": "shell",
+			"command": "c:\\NOVA\\.venv\\Scripts\\python.exe",
+			"args": [
+				"c:\\NOVA\\runtime\\inspect_repeating_branches.py"
+			],
+			"problemMatcher": []
+		},
+		{
+			"label": "show-current-diff",
+			"type": "shell",
+			"command": "git",
+			"args": [
+				"diff",
+				"--",
+				"services/work_tree_signal_ingestion.py"
+			],
+			"problemMatcher": []
+		},
+		{
+			"label": "webui-status-check",
+			"type": "shell",
+			"command": "powershell",
+			"args": [
+				"-NoProfile",
+				"-ExecutionPolicy",
+				"Bypass",
+				"-Command",
+				"Set-Location 'c:\\NOVA'; .\\nova.cmd webui-status --port 8080"
+			],
+			"problemMatcher": []
+		},
+		{
+			"label": "runtime-status-check",
+			"type": "shell",
+			"command": "powershell",
+			"args": [
+				"-NoProfile",
+				"-ExecutionPolicy",
+				"Bypass",
+				"-Command",
+				"Set-Location 'c:\\NOVA'; .\\nova.cmd runtime-status"
+			],
+			"problemMatcher": []
+		},
+		{
+			"label": "tail-webui-logs",
+			"type": "shell",
+			"command": "powershell",
+			"args": [
+				"-NoProfile",
+				"-ExecutionPolicy",
+				"Bypass",
+				"-Command",
+				"Set-Location 'c:\\NOVA'; Write-Host '--- nova_http.out.log (tail) ---'; if (Test-Path .\\logs\\nova_http.out.log) { Get-Content .\\logs\\nova_http.out.log -Tail 120 }; Write-Host '--- nova_http.err.log (tail) ---'; if (Test-Path .\\logs\\nova_http.err.log) { Get-Content .\\logs\\nova_http.err.log -Tail 160 }"
+			],
+			"problemMatcher": []
+		},
+		{
+			"label": "tail-guard-logs",
+			"type": "shell",
+			"command": "powershell",
+			"args": [
+				"-NoProfile",
+				"-ExecutionPolicy",
+				"Bypass",
+				"-Command",
+				"Set-Location 'c:\\NOVA'; Write-Host '--- nova_guard.out.log (tail) ---'; if (Test-Path .\\logs\\nova_guard.out.log) { Get-Content .\\logs\\nova_guard.out.log -Tail 120 }; Write-Host '--- guard.log (tail) ---'; if (Test-Path .\\logs\\guard.log) { Get-Content .\\logs\\guard.log -Tail 120 }"
+			],
+			"problemMatcher": []
+		},
+		{
+			"label": "start-webui-and-verify",
+			"type": "shell",
+			"command": "powershell",
+			"args": [
+				"-NoProfile",
+				"-ExecutionPolicy",
+				"Bypass",
+				"-Command",
+				"Set-Location 'c:\\NOVA'; .\\nova.cmd webui-start --host 127.0.0.1 --port 8080; .\\nova.cmd webui-status --port 8080; .\\nova.cmd runtime-status"
+			],
+			"problemMatcher": []
+		},
+		{
+			"label": "fetch-control-status-json",
+			"type": "shell",
+			"command": "c:\\NOVA\\.venv\\Scripts\\python.exe",
+			"args": [
+				"-c",
+				"import json, urllib.request; data=urllib.request.urlopen('http://127.0.0.1:8080/api/control/status', timeout=10).read().decode('utf-8'); print(data[:2000])"
+			],
+			"problemMatcher": []
+		},
+		{
+			"label": "fetch-control-status-json-keys",
+			"type": "shell",
+			"command": "c:\\NOVA\\.venv\\Scripts\\python.exe",
+			"args": [
+				"-c",
+				"import json, urllib.request; data=json.loads(urllib.request.urlopen('http://127.0.0.1:8080/api/control/status', timeout=10).read().decode('utf-8')); print('keys', sorted(data.keys())[:120]); print('operator_outbox', data.get('operator_outbox')); print('operator_outbox_open_count', data.get('operator_outbox_open_count')); print('operator_outbox_latest_open_id', data.get('operator_outbox_latest_open_id'))"
+			],
+			"problemMatcher": []
+		},
+		{
+			"label": "show-open-outbox-item",
+			"type": "shell",
+			"command": "c:\\NOVA\\.venv\\Scripts\\python.exe",
+			"args": [
+				"c:\\NOVA\\runtime\\show_open_outbox_item.py"
+			],
+			"problemMatcher": []
+		},
+		{
+			"label": "show-current-open-outbox-from-file",
+			"type": "shell",
+			"command": "c:\\NOVA\\.venv\\Scripts\\python.exe",
+			"args": [
+				"c:\\NOVA\\runtime\\show_current_open_outbox_from_file.py"
+			],
+			"problemMatcher": []
+		},
+		{
+			"label": "list-open-outbox",
+			"type": "shell",
+			"command": "c:\\NOVA\\.venv\\Scripts\\python.exe",
+			"args": [
+				"c:\\NOVA\\runtime\\list_open_outbox.py"
+			],
+			"problemMatcher": []
+		},
+		{
+			"label": "nova-runtime-status",
+			"type": "shell",
+			"command": "c:\\NOVA\\nova.cmd",
+			"args": [
+				"runtime-status"
+			],
+			"problemMatcher": []
+		},
+		{
+			"label": "nova-webui-start",
+			"type": "shell",
+			"command": "c:\\NOVA\\nova.cmd",
+			"args": [
+				"webui-start",
+				"--host",
+				"127.0.0.1",
+				"--port",
+				"8080"
+			],
+			"problemMatcher": []
+		},
+		{
+			"label": "nova-webui-status",
+			"type": "shell",
+			"command": "c:\\NOVA\\nova.cmd",
+			"args": [
+				"webui-status"
+			],
+			"problemMatcher": []
+		},
+		{
+			"label": "nova-runtime-status-2",
+			"type": "shell",
+			"command": "c:\\NOVA\\nova.cmd",
+			"args": [
+				"runtime-status"
+			],
+			"problemMatcher": []
+		},
+		{
+			"label": "diag-runtime-status",
+			"type": "shell",
+			"command": "c:\\NOVA\\nova.cmd",
+			"args": [
+				"runtime-status"
+			],
+			"problemMatcher": []
+		},
+		{
+			"label": "diag-webui-status",
+			"type": "shell",
+			"command": "c:\\NOVA\\nova.cmd",
+			"args": [
+				"webui-status"
+			],
+			"problemMatcher": []
+		},
+		{
+			"label": "diag-webui-start",
+			"type": "shell",
+			"command": "c:\\NOVA\\nova.cmd",
+			"args": [
+				"webui-start",
+				"--host",
+				"127.0.0.1",
+				"--port",
+				"8080"
+			],
+			"problemMatcher": []
+		},
+		{
+			"label": "diag-webui-status-after-start",
+			"type": "shell",
+			"command": "c:\\NOVA\\nova.cmd",
+			"args": [
+				"webui-status"
+			],
+			"problemMatcher": []
+		},
+		{
+			"label": "diag-runtime-status-after-start",
+			"type": "shell",
+			"command": "c:\\NOVA\\nova.cmd",
+			"args": [
+				"runtime-status"
+			],
+			"problemMatcher": []
+		},
+		{
+			"label": "restart-webui-stop",
+			"type": "shell",
+			"command": "c:\\NOVA\\nova.cmd",
+			"args": [
+				"webui-stop"
+			],
+			"problemMatcher": []
+		},
+		{
+			"label": "restart-webui-start",
+			"type": "shell",
+			"command": "c:\\NOVA\\nova.cmd",
+			"args": [
+				"webui-start",
+				"--host",
+				"127.0.0.1",
+				"--port",
+				"8080"
+			],
+			"problemMatcher": []
+		},
+		{
+			"label": "nova-runtime-status-scan",
+			"type": "shell",
+			"command": "c:\\NOVA\\nova.cmd",
+			"args": [
+				"runtime-status"
+			],
+			"problemMatcher": []
+		},
+		{
+			"label": "nova-webui-status-scan",
+			"type": "shell",
+			"command": "c:\\NOVA\\nova.cmd",
+			"args": [
+				"webui-status"
+			],
+			"problemMatcher": []
+		},
+		{
+			"label": "nova-process-scan",
+			"type": "shell",
+			"command": "powershell",
+			"args": [
+				"-NoProfile",
+				"-Command",
+				"Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -match 'nova_http|nova.cmd webui|webui-start' } | Select-Object ProcessId,Name,CommandLine | Format-List | Out-String -Width 300"
+			],
+			"problemMatcher": []
+		},
+		{
+			"label": "nova-runtime-status-scan",
+			"type": "shell",
+			"command": "c:\\NOVA\\nova.cmd",
+			"args": [
+				"runtime-status"
+			],
+			"problemMatcher": []
+		},
+		{
+			"label": "nova-webui-status-scan",
+			"type": "shell",
+			"command": "c:\\NOVA\\nova.cmd",
+			"args": [
+				"webui-status"
+			],
+			"problemMatcher": []
+		}
+	]
+}

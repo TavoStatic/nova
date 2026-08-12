@@ -1,3 +1,14 @@
+<!--
+NOVA_DOC
+category: subsystem
+authority: active_working
+last_session: 2026-08-05
+last_agent: claude-cowork
+session_state: needs_update
+next_step: regenerate with current test count
+open: none
+-->
+
 # Nova Test Ecosystem
 
 Last verified from code: 2026-07-12
@@ -55,8 +66,8 @@ Source-profile lanes bind subsystem changes to relevant tests. Current profiles 
 - data pipelines
 - HTTP/API/control
 - memory/identity
-- Ed-Fi core
-- BISD Ed-Fi lane
+- data connector core
+- the district data connector lane
 - model runtime
 - patch pipeline
 - generated code

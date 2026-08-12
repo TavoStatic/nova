@@ -286,7 +286,6 @@ $forbiddenPathPrefixes = @(
   ".venv",
   ".pytest_cache",
   "knowledge/packs",
-  "knowledge/peims",
   "knowledge/web",
   "logs",
   "memory",
@@ -317,7 +316,7 @@ $forbiddenLeafPatterns = @(
 )
 
 Write-Host ""
-Write-Host "NYO System Package Verification"
+Write-Host "Nova Package Verification"
 Write-Host "-------------------------------"
 Write-Host ("[INFO] Target         : " + $targetItem.FullName)
 Write-Host ("[INFO] Target type    : " + $payload.root_type)

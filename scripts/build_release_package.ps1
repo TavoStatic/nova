@@ -93,7 +93,7 @@ $versionInfo = if ([string]::IsNullOrWhiteSpace($Version)) {
 
 $versionToken = Get-SafeArtifactFragment $versionInfo.token
 
-$artifactParts = @("nyo-system-base", $channelToken, $versionToken)
+$artifactParts = @("nova-platform", $channelToken, $versionToken)
 if (-not [string]::IsNullOrWhiteSpace($labelToken)) {
   $artifactParts += $labelToken
 }
@@ -122,7 +122,6 @@ $excludeDirs = @(
   ".pytest_cache",
   "__pycache__",
   "knowledge\packs",
-  "knowledge\peims",
   "knowledge\web",
   "logs",
   "memory",
@@ -150,7 +149,6 @@ $forbiddenStagePaths = @(
   ".venv",
   ".pytest_cache",
   "knowledge\packs",
-  "knowledge\peims",
   "knowledge\web",
   "updates",
   "nova_memory.sqlite"
@@ -230,6 +228,32 @@ foreach ($relPath in $trackedFiles) {
   Copy-Item -Path $src -Destination $dest -Force
 }
 
+# Root packaging honesty: staged imports under services/ must exist in the package.
+# git-ls-files packaging silently drops untracked modules and then nova test fails
+# with ModuleNotFoundError (observed: services.decision_proposal_judge).
+$importPattern = "from\s+services\.([A-Za-z0-9_]+)\s+import|import\s+services\.([A-Za-z0-9_]+)"
+$stagedPy = Get-ChildItem -Path $stageDir -Recurse -File -Filter "*.py" -ErrorAction SilentlyContinue
+$missingModules = New-Object System.Collections.Generic.List[string]
+foreach ($py in $stagedPy) {
+  $text = Get-Content -LiteralPath $py.FullName -Raw -ErrorAction SilentlyContinue
+  if ([string]::IsNullOrWhiteSpace($text)) { continue }
+  foreach ($match in [regex]::Matches($text, $importPattern)) {
+    $mod = $match.Groups[1].Value
+    if ([string]::IsNullOrWhiteSpace($mod)) { $mod = $match.Groups[2].Value }
+    if ([string]::IsNullOrWhiteSpace($mod)) { continue }
+    $modPath = Join-Path $stageDir ("services\" + $mod + ".py")
+    $modPkg = Join-Path $stageDir ("services\" + $mod + "\__init__.py")
+    if (-not (Test-Path $modPath) -and -not (Test-Path $modPkg)) {
+      $missingModules.Add("$($py.FullName.Substring($stageDir.Length).TrimStart('\','/')) imports services.$mod (missing from package)")
+    }
+  }
+}
+if ($missingModules.Count -gt 0) {
+  Write-Host "[FAIL] Package stage is incomplete — imported services modules missing:"
+  $missingModules | Select-Object -Unique | ForEach-Object { Write-Host ("  - " + $_) }
+  throw "Release package incomplete: untracked or missing services modules (git add required for new services/* files)."
+}
+
 foreach ($relativePath in $forbiddenStagePaths) {
   Remove-StageRelativePath $stageDir $relativePath
 }
@@ -273,7 +297,7 @@ Get-ChildItem -Path $stageDir -Recurse -File -Force -ErrorAction SilentlyContinu
 $manifestPath = Join-Path $stageDir "package_manifest.json"
 $manifest = [ordered]@{
   schema_version = 1
-  package_name = "NYO System Base"
+  package_name = "Nova Base"
   artifact_type = "source-bootstrap-zip"
   artifact_version = $versionToken
   version_source = $versionInfo.source
@@ -314,7 +338,6 @@ $manifest = [ordered]@{
     ".venv",
     ".pytest_cache",
     "knowledge/packs",
-    "knowledge/peims",
     "knowledge/web",
     "data_sources/*/local_config.json",
     "data_sources/*/operator_intake.jsonl",
@@ -335,7 +358,7 @@ $manifest | ConvertTo-Json -Depth 6 | Set-Content -Encoding UTF8 $manifestPath
 Compress-Archive -Path $stageDir -DestinationPath $zipPath -CompressionLevel Optimal
 
 $validationRecord = @(
-  "# NYO System RC Validation Record",
+  "# Nova RC Validation Record",
   "",
   ("Date: {0}" -f (Get-Date -Format "yyyy-MM-dd")),
   "",
@@ -428,7 +451,7 @@ $ledgerEntry = [ordered]@{
 Add-Content -Path $ledgerPath -Value (($ledgerEntry | ConvertTo-Json -Compress))
 
 Write-Host ""
-Write-Host "NYO System Release Package"
+Write-Host "Nova Release Package"
 Write-Host "--------------------------"
 Write-Host ("[OK]   Version        : " + $versionToken)
 Write-Host ("[OK]   Version source : " + $versionInfo.source)

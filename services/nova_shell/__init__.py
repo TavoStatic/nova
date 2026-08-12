@@ -8,6 +8,7 @@ from services.nova_shell.identity import get_installation_id, load_or_create_ide
 from services.nova_shell.store import ShellStore
 from services.nova_shell.auth import ShellAuth
 from services.nova_shell.admin import ShellAdmin
+from services.nova_shell.external_finish import external_finish_status
 
 __all__ = [
     "get_installation_id",
@@ -15,4 +16,5 @@ __all__ = [
     "ShellStore",
     "ShellAuth",
     "ShellAdmin",
+    "external_finish_status",
 ]

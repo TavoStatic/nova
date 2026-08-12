@@ -1,6 +1,6 @@
 ﻿{
     "schema_version":  1,
-    "package_name":  "NYO System Base",
+    "package_name":  "Nova Base",
     "artifact_type":  "source-bootstrap-zip",
     "artifact_version":  "2026.05.09",
     "version_source":  "auto-date-sequence",
@@ -40,7 +40,6 @@
                      ".venv",
                      ".pytest_cache",
                      "knowledge/packs",
-                     "knowledge/peims",
                      "knowledge/web",
                      "data_sources/*/local_config.json",
                      "data_sources/*/operator_intake.jsonl",

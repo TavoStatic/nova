@@ -15,7 +15,7 @@ Why not the privileged worker?
   data_pipeline_registry.py. That's a future task.
 
   For v1, backpack pipelines are read-only and governed (safe_query with audit).
-  In-process is sufficient. The audit log in EdFiPipeline.audit records every call.
+  In-process is sufficient. The audit log in DataConnectorPipeline.audit records every call.
 
 Usage:
     from services.backpack_host.query import run_backpack_query
@@ -143,6 +143,7 @@ def run_backpack_query(
             params,
             row_limit=row_limit,
             dry_run=dry_run,
+            role=str(role or "standard_user"),
         )
         if isinstance(result, dict):
             result.setdefault("backpack_role", str(role or "standard_user"))

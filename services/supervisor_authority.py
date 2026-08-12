@@ -5,14 +5,20 @@ from typing import Any, Callable, Optional
 from services.supervisor_patterns import normalize_text as _normalize_text
 
 
-EXPLICIT_INTENT_OWNERSHIP_RULES = frozenset()
+EXPLICIT_INTENT_OWNERSHIP_RULES: frozenset[str] = frozenset()
 
 
-EXPLICIT_HANDLE_OWNERSHIP_RULES = frozenset()
+EXPLICIT_HANDLE_OWNERSHIP_RULES: frozenset[str] = frozenset({
+    "identity_location_guard",
+})
 
 
 def default_rule_handlers() -> dict[str, Callable[..., dict[str, Any]]]:
-    return {}
+    try:
+        from services.supervisor_rules import DEFAULT_RULE_HANDLERS
+        return dict(DEFAULT_RULE_HANDLERS)
+    except ImportError:
+        return {}
 
 
 def result_is_explicitly_owned(rule_name: str, result: dict[str, Any], *, phase: str) -> bool:

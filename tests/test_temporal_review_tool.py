@@ -106,7 +106,7 @@ class TestRunSingleEvent(unittest.TestCase):
 
     def test_event_dict_returns_ok_with_pressure_and_decision(self):
         result = json.loads(self.tool.run(
-            {"payload": {"title": "PEIMS deadline", "importance": 0.9}},
+            {"payload": {"title": "state education data deadline", "importance": 0.9}},
             self.ctx,
         ))
         self.assertEqual(result["status"], "ok")

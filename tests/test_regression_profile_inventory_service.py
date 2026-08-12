@@ -91,7 +91,7 @@ class TestRegressionProfileInventoryService(unittest.TestCase):
         by_module = {row["module"]: list(row.get("lanes") or []) for row in payload.get("tests") or []}
 
         core_lane = "source_edfi_core"
-        lane_lane = "source_data_lane_edfi_bisd"
+        lane_lane = "source_data_lane_data_connector"
         core_modules = {
             "tests.test_edfi_core",
             "tests.test_edfi_core_lifecycle_demo",
@@ -104,7 +104,7 @@ class TestRegressionProfileInventoryService(unittest.TestCase):
         }
         for module in core_modules:
             self.assertIn(core_lane, by_module.get(module, []), module)
-        self.assertIn(lane_lane, by_module.get("tests.test_edfi_bisd_pipeline", []))
+        self.assertIn(lane_lane, by_module.get("tests.test_data_connector_pipeline", []))
         self.assertNotIn(lane_lane, by_module.get("tests.test_edfi_core", []))
 
 

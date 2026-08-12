@@ -12,9 +12,9 @@ Write paths:
      Flat settings file read by the connector via manifest.local_config_path.
      This is what connector._settings() returns.
 
-  2. runtime/edfi/connections/{connection_id}/local_config.json  (Ed-Fi only)
-     Written via services.edfi.config.save_connection_config() so the EdFi
-     service layer (run_self_profile, EdFiClient, etc.) can find the config.
+  2. runtime/edfi/connections/{connection_id}/local_config.json  (data connector only)
+     Written via services.edfi.config.save_connection_config() so the DataConnector
+     service layer (run_self_profile, DataConnectorClient, etc.) can find the config.
      Triggered when the settings include base_url + client_id + client_secret
      (the shape of an HTTP-authenticated ODS connection).
 """
@@ -258,7 +258,7 @@ class BackpackInstaller:
             "settings_path": str(settings_path),
         }
 
-        # 2. Ed-Fi ConnectionConfig — for EdFi service layer (run_self_profile etc.)
+        # 2. data connector ConnectionConfig — for DataConnector service layer (run_self_profile etc.)
         # Triggered by shape: base_url + client_id + client_secret present
         if (
             str(values.get("base_url") or "").strip()

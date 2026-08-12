@@ -5,7 +5,7 @@
   "category": "release",
   "objective": "Ask Nova to assess whether the current release candidate is actually ready to ship and to separate blockers from deferrable work.",
   "messages": [
-    "Assess whether the current NYO System release candidate is really ready to ship. Separate true blockers from important but deferrable work.",
+    "Assess whether the current Nova release candidate is really ready to ship. Separate true blockers from important but deferrable work.",
     "What is the single shortest next push if we only close one thing before shipping?"
   ],
   "success_signals": [

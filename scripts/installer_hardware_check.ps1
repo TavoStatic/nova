@@ -60,7 +60,7 @@ $issues = New-Object System.Collections.Generic.List[string]
 $warnings = New-Object System.Collections.Generic.List[string]
 
 if ($cpu -and [int]$cpu.AddressWidth -lt 64) {
-  [void]$issues.Add("64-bit Windows is required for the recommended NYO System install path.")
+  [void]$issues.Add("64-bit Windows is required for the recommended Nova install path.")
 }
 
 if ($null -ne $totalRamGb -and $totalRamGb -lt 8) {
@@ -82,7 +82,7 @@ if ([string]::IsNullOrWhiteSpace($ollamaCmd)) {
 foreach ($portInfo in $ports) {
   if ($portInfo.in_use) {
     if ([int]$portInfo.port -eq 8080) {
-      [void]$warnings.Add("Port 8080 is already in use; NYO System Control may need a different bind port.")
+      [void]$warnings.Add("Port 8080 is already in use; Nova Control may need a different bind port.")
     }
     if ([int]$portInfo.port -eq 11434) {
       [void]$warnings.Add("Port 11434 is already in use; verify it belongs to Ollama before runtime validation.")
@@ -155,7 +155,7 @@ if ($Json) {
 }
 
 Write-Host ""
-Write-Host "NYO System Installer Readiness"
+Write-Host "Nova Installer Readiness"
 Write-Host "------------------------------"
 Write-Host ("Summary             : " + $payload.summary)
 Write-Host ("Windows             : " + $payload.os.caption + " " + $payload.os.version + " (build " + $payload.os.build + ")")

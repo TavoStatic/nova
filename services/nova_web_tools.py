@@ -35,7 +35,7 @@ def _prioritize_research_domains(domains: list[str], query_tokens: list[str]) ->
     def _domain_score(domain: str) -> tuple[float, str]:
         low = str(domain or "").strip().lower()
         score = 0.0
-        if any(term in {"peims", "tsds", "attendance", "ada", "submission", "reporting"} for term in raw_terms):
+        if any(term in {"tsds", "attendance", "ada", "submission", "reporting"} for term in raw_terms):
             if low == "tea.texas.gov" or low.endswith(".tea.texas.gov"):
                 score += 16.0
             if "tsds.txschools.gov" in low:
@@ -55,10 +55,6 @@ def _query_seed_urls_for_domain(domain: str, query_tokens: list[str], max_candid
     domain_low = str(domain or "").strip().lower()
     raw_terms = [str(token or "").strip().lower() for token in query_tokens if str(token or "").strip()]
     expanded_terms = list(raw_terms)
-    if "peims" in raw_terms:
-        for term in ("tsds", "submission", "interchange", "student", "reporting"):
-            if term not in expanded_terms:
-                expanded_terms.append(term)
     if "attendance" in raw_terms:
         for term in ("ada", "reporting"):
             if term not in expanded_terms:
@@ -80,21 +76,17 @@ def _query_seed_urls_for_domain(domain: str, query_tokens: list[str], max_candid
         candidates.append(clean)
 
     if domain_low == "tea.texas.gov" or domain_low.endswith(".tea.texas.gov"):
-        _add(f"{base}/reports-and-data/data-submission/peims")
         _add(f"{base}/reports-and-data/data-submission")
         _add(f"{base}/reports-and-data")
         for slug in slugs[:4]:
             _add(f"{base}/reports-and-data/data-submission/{slug}")
             _add(f"{base}/reports-and-data/{slug}")
     elif "tsds.txschools.gov" in domain_low or "texasstudentdatasystem.org" in domain_low:
-        _add(f"{base}/peims")
         _add(f"{base}/tsds")
-        _add(f"{base}/resources/peims")
         for slug in slugs[:4]:
             _add(f"{base}/{slug}")
             _add(f"{base}/resources/{slug}")
     elif domain_low == "txschools.gov" or domain_low.endswith(".txschools.gov"):
-        _add(f"{base}/peims")
         _add(f"{base}/tsds")
         for slug in slugs[:4]:
             _add(f"{base}/{slug}")
@@ -126,7 +118,7 @@ def scan_candidate_urls_for_query(
         score = 0.0
         for term in terms:
             score += low.count(term) * 2.0
-        for keyword in ("peims", "tsds", "attendance", "ada", "submission", "calendar", "timeline", "report", "student-data"):
+        for keyword in ("tsds", "attendance", "ada", "submission", "calendar", "timeline", "report", "student-data"):
             if keyword in low:
                 score += 3.0
         if (parsed.path or "/") in {"", "/"}:
@@ -245,14 +237,12 @@ def extract_same_host_links(raw_html: str, base_url: str, host: str) -> list[str
 
 def expand_research_terms(tokens: list[str]) -> list[str]:
     terms = {token for token in tokens if token}
-    if "peims" in terms:
-        terms.update({"tsds", "submission", "interchange", "student", "reporting"})
+    if "reporting" in terms:
+        terms.update({"submission", "report"})
     if "attendance" in terms:
         terms.update({"ada", "attendance", "reporting"})
     if "timeline" in terms:
         terms.update({"calendar", "deadline", "dates"})
-    if "reporting" in terms:
-        terms.update({"submission", "report"})
     return list(terms)
 
 
@@ -272,7 +262,7 @@ def score_research_hit(
     total_text_hits = sum(low_text.count(token) for token in terms)
     total_url_hits = sum(low_url.count(token) for token in terms)
 
-    boost_patterns = ["peims", "tsds", "attendance", "ada", "submission", "calendar", "timeline", "report", "student-data"]
+    boost_patterns = ["tsds", "attendance", "ada", "submission", "calendar", "timeline", "report", "student-data"]
     path_boost = sum(1 for token in boost_patterns if token in low_url)
 
     score = (
@@ -360,7 +350,7 @@ def seed_urls_for_domain(
     for url in candidates:
         low = url.lower()
         score = sum(low.count(term) for term in terms)
-        for token in ("peims", "tsds", "attendance", "ada", "submission", "calendar", "timeline", "report"):
+        for token in ("tsds", "attendance", "ada", "submission", "calendar", "timeline", "report"):
             if token in low:
                 score += 2
         if score > 0:

@@ -10,7 +10,7 @@ from routing import TurnUnderstanding
 class TestActionPlanner(unittest.TestCase):
     def test_static_planner_no_longer_routes_from_surface_text(self):
         for text in (
-            "web search peims attendance rules",
+            "web search state reporting attendance rules",
             "weather in Brownsville TX",
             "wikipedia Ada Lovelace",
             "please patch apply updates.zip",
@@ -20,9 +20,9 @@ class TestActionPlanner(unittest.TestCase):
 
     def test_classify_route_returns_no_static_route(self):
         route = classify_route(TurnUnderstanding(
-            raw_text="web search peims attendance rules",
-            text="web search peims attendance rules",
-            low="web search peims attendance rules",
+            raw_text="web search state reporting attendance rules",
+            text="web search state reporting attendance rules",
+            low="web search state reporting attendance rules",
         ))
 
         self.assertIsInstance(route, RouteDecision)

@@ -362,6 +362,11 @@ class TestReleaseStatusService(unittest.TestCase):
             handoff_file.write_text("# handoff\n", encoding="utf-8")
             os.utime(handoff_file, (1900000000, 1900000000))
 
+            probe_script = root / "scripts" / "_probe_release_blockers.py"
+            probe_script.parent.mkdir(parents=True)
+            probe_script.write_text("print('probe')\n", encoding="utf-8")
+            os.utime(probe_script, (1900000000, 1900000000))
+
             payload = RELEASE_STATUS_SERVICE.status_payload(ledger_path, limit=5, source_root=root)
 
         self.assertNotEqual(payload.get("latest_readiness_state"), "source-changed-after-build")
@@ -370,6 +375,137 @@ class TestReleaseStatusService(unittest.TestCase):
         self.assertNotIn("terminals/3.txt", payload.get("latest_source_changed_after_build_sample") or [])
         self.assertNotIn("agent-tools/probe.json", payload.get("latest_source_changed_after_build_sample") or [])
         self.assertNotIn("nova_grok.md", payload.get("latest_source_changed_after_build_sample") or [])
+        self.assertNotIn("scripts/_probe_release_blockers.py", payload.get("latest_source_changed_after_build_sample") or [])
+
+    def test_status_payload_keeps_blocked_when_source_changed_after_failed_validation(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            package_dir = root / "runtime" / "exports" / "release_packages"
+            ledger_path = package_dir / "release_ledger.jsonl"
+            package_dir.mkdir(parents=True)
+            seed = package_dir / "validation_records" / "artifact-a.md"
+            seed.parent.mkdir(parents=True)
+            seed.write_text(
+                "\n".join(
+                    [
+                        "# Nova RC Validation Record",
+                        "",
+                        "Date: 2026-03-30",
+                        "",
+                        "## Candidate",
+                        "",
+                        f"- Artifact path: {package_dir / 'artifact-a.zip'}",
+                        "- Artifact version: 2026.03.30.1",
+                        "- Version source: auto",
+                        "- Release channel: rc",
+                        "- Release label: auto-version-check",
+                        "- Manifest reviewed: yes",
+                        f"- Release ledger path: {ledger_path}",
+                        "",
+                        "## Environment",
+                        "",
+                        "- Machine or VM name: test",
+                        "- Windows version: test",
+                        "- Python source used during install: test",
+                        "- Ollama expected for this target: no",
+                        "",
+                        "## Results",
+                        "",
+                        "### Bootstrap",
+                        "",
+                        "- nova package-verify .: pass",
+                        "- nova install: pass",
+                        "- Notes: none",
+                        "",
+                        "### Base Validation",
+                        "",
+                        "- full regression status: fail",
+                        "- full regression source: runtime/regression_status.json",
+                        "- full regression generated_at: 2026-03-01 00:00:00",
+                        "- full regression lanes: unit, behavior, integration",
+                        "- nova doctor: pass",
+                        "- nova runtime-status: pass",
+                        "- nova smoke-base --fix: pass",
+                        "- nova test: fail (exit 1)",
+                        "- nova wiring-check --offline: fail (exit 1)",
+                        "- Notes: none",
+                        "",
+                        "### Operator Surface",
+                        "",
+                        "- nova run: pass (launch/exit)",
+                        "- nova webui-start --host 127.0.0.1 --port 8080: pass",
+                        "- /control load result: pass (http 200)",
+                        "- Notes: none",
+                        "",
+                        "### Extended Runtime Validation",
+                        "",
+                        "- nova smoke --fix: not-run (Ollama not expected for this target)",
+                        "- Notes: none",
+                        "",
+                        "## Final Decision",
+                        "",
+                        "- Result: fail",
+                        "- Blocking issues: nova test failed",
+                        "- Non-blocking issues: none",
+                        "- Follow-up owner: release-validation",
+                        "",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            ledger_path.write_text(
+                "\n".join(
+                    [
+                        json.dumps(
+                            {
+                                "recorded_at": "2026-03-30T16:09:45.0928881-05:00",
+                                "event": "build",
+                                "artifact_name": "artifact-a.zip",
+                                "artifact_path": str(package_dir / "artifact-a.zip"),
+                                "artifact_version": "2026.03.30.1",
+                                "release_channel": "rc",
+                                "release_label": "auto-version-check",
+                                "validation_record_seed_path": str(seed),
+                            }
+                        ),
+                        json.dumps(
+                            {
+                                "recorded_at": "2026-03-30T16:12:10.0000000-05:00",
+                                "event": "verify",
+                                "artifact_name": "artifact-a.zip",
+                                "artifact_path": str(package_dir / "artifact-a.zip"),
+                                "artifact_version": "2026.03.30.1",
+                                "release_channel": "rc",
+                                "release_label": "auto-version-check",
+                                "verification_result": "pass",
+                            }
+                        ),
+                        json.dumps(
+                            {
+                                "recorded_at": "2026-03-30T16:20:00.0000000-05:00",
+                                "event": "promotion",
+                                "artifact_name": "artifact-a.zip",
+                                "artifact_path": str(package_dir / "artifact-a.zip"),
+                                "artifact_version": "2026.03.30.1",
+                                "release_channel": "rc",
+                                "release_label": "auto-version-check",
+                                "validation_result": "fail",
+                            }
+                        ),
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            source_file = root / "nova_core.py"
+            source_file.write_text("print('changed after fail')\n", encoding="utf-8")
+            os.utime(source_file, (1900000000, 1900000000))
+
+            payload = RELEASE_STATUS_SERVICE.status_payload(ledger_path, limit=5, source_root=root)
+
+        self.assertEqual(payload.get("latest_readiness_state"), "blocked")
+        self.assertTrue(payload.get("latest_source_changed_after_build"))
+        self.assertIn("fix package/host validation blockers before rebuild", payload.get("latest_readiness_note") or "")
+        self.assertFalse(payload.get("latest_ready_to_ship"))
 
 
 if __name__ == "__main__":

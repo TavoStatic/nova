@@ -2,6 +2,31 @@ from __future__ import annotations
 
 from typing import Callable, Any
 
+# Module-level cache of the last seen Ollama model list.
+# Used to detect inventory changes and notify SOCK for cache invalidation.
+_last_seen_models: frozenset[str] = frozenset()
+
+
+def _notify_sock_if_changed(current_models: list[str]) -> None:
+    """Invalidate SOCK cache when Ollama's model inventory changes."""
+    global _last_seen_models
+    current = frozenset(current_models)
+    if current == _last_seen_models:
+        return
+    added = current - _last_seen_models
+    removed = _last_seen_models - current
+    _last_seen_models = current
+    try:
+        from services.sock_service import notify_ollama_model_change
+        if added:
+            for model in added:
+                notify_ollama_model_change("pulled", model)
+        if removed:
+            for model in removed:
+                notify_ollama_model_change("deleted", model)
+    except Exception:
+        pass  # SOCK notification is best-effort — never block health checks
+
 
 def _status_code(response: Any) -> int:
     try:
@@ -93,6 +118,8 @@ def build_ollama_health_payload(
     except Exception as exc:
         tags_error = str(exc)
     available_models = _available_models(tags_payload)
+    if tags_ok:
+        _notify_sock_if_changed(available_models)
     model_available = bool(
         not configured_chat_model
         or (tags_ok and configured_chat_model in available_models)

@@ -14,7 +14,7 @@ INSTALLER_VERIFY_SCRIPT = ROOT / "scripts" / "verify_windows_installer.ps1"
 PROMOTE_SCRIPT = ROOT / "scripts" / "promote_release_package.ps1"
 STATUS_SCRIPT = ROOT / "scripts" / "show_release_status.ps1"
 READINESS_SCRIPT = ROOT / "scripts" / "show_release_readiness.ps1"
-INSTALLER_ISS = ROOT / "installer" / "NYO_System.iss"
+INSTALLER_ISS = ROOT / "installer" / "Nova_Setup.iss"
 
 
 def _write(path: Path, content: str = "x") -> None:
@@ -60,7 +60,7 @@ class TestWindowsInstallerScripts(unittest.TestCase):
             promote_script = _copy_file(repo, PROMOTE_SCRIPT, "scripts/promote_release_package.ps1")
             status_script = _copy_file(repo, STATUS_SCRIPT, "scripts/show_release_status.ps1")
             readiness_script = _copy_file(repo, READINESS_SCRIPT, "scripts/show_release_readiness.ps1")
-            _copy_file(repo, INSTALLER_ISS, "installer/NYO_System.iss")
+            _copy_file(repo, INSTALLER_ISS, "installer/Nova_Setup.iss")
 
             _write(repo / "nova.cmd", "@echo off\n")
             _write(repo / "nova.ps1", "Write-Host 'nova'\n")
@@ -78,11 +78,11 @@ class TestWindowsInstallerScripts(unittest.TestCase):
             _write(
                 fake_compiler,
                 "param([string]$issPath)\n"
-                "$outDir = [string]$env:NYO_INSTALLER_OUTPUT_DIR\n"
-                "$version = [string]$env:NYO_APP_VERSION\n"
-                "$payloadDir = [string]$env:NYO_PAYLOAD_DIR\n"
+                "$outDir = [string]$env:Nova_INSTALLER_OUTPUT_DIR\n"
+                "$version = [string]$env:Nova_APP_VERSION\n"
+                "$payloadDir = [string]$env:Nova_PAYLOAD_DIR\n"
                 "New-Item -ItemType Directory -Force -Path $outDir | Out-Null\n"
-                "$artifact = Join-Path $outDir ('nyo-system-installer-' + $version + '.exe')\n"
+                "$artifact = Join-Path $outDir ('nova-installer-' + $version + '.exe')\n"
                 "Set-Content -Path $artifact -Value \"installer\" -Encoding UTF8\n"
                 "$payload = [ordered]@{ iss_path = $issPath; version = $version; payload_dir = $payloadDir; output_dir = $outDir }\n"
                 "$payload | ConvertTo-Json -Depth 4 | Set-Content -Path (Join-Path $outDir 'compiler_env.json') -Encoding UTF8\n"
@@ -96,13 +96,13 @@ class TestWindowsInstallerScripts(unittest.TestCase):
             self.assertEqual(installer_result.returncode, 0, msg=installer_result.stdout + installer_result.stderr)
 
             installer_dir = repo / "runtime" / "exports" / "installers"
-            installer_artifacts = list(installer_dir.glob("nyo-system-installer-*.exe"))
+            installer_artifacts = list(installer_dir.glob("nova-installer-*.exe"))
             self.assertEqual(len(installer_artifacts), 1)
             self.assertTrue(installer_artifacts[0].exists())
             self.assertTrue((installer_dir / "validation_records").exists())
 
             compiler_env = json.loads((installer_dir / "compiler_env.json").read_text(encoding="utf-8-sig"))
-            self.assertTrue(str(compiler_env.get("iss_path") or "").endswith("installer\\NYO_System.iss"))
+            self.assertTrue(str(compiler_env.get("iss_path") or "").endswith("installer\\Nova_Setup.iss"))
             self.assertFalse(str(compiler_env.get("payload_dir") or "").endswith("_stage"))
             self.assertEqual(Path(compiler_env.get("output_dir")), installer_dir)
             self.assertTrue((repo / "runtime" / "exports" / "installers" / "_payload").exists())

@@ -48,7 +48,7 @@ def _fallback_review_context_for_source(source_key: str) -> dict[str, Any]:
                 "selected_result_index": 0,
             },
             "turns": [
-                ("user", "find current PEIMS reporting guidance"),
+                ("user", "find current state education data reporting guidance"),
                 ("assistant", "I found a few relevant results."),
             ],
         }

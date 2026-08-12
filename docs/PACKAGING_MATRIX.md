@@ -1,3 +1,14 @@
+<!--
+NOVA_DOC
+category: plan
+authority: stale_snapshot
+last_session: 2026-08-05
+last_agent: claude-cowork
+session_state: needs_update
+next_step: verify matrix against current packaging scripts
+open: none
+-->
+
 # Nova Packaging Matrix
 
 Date: 2026-05-18
@@ -63,7 +74,6 @@ Inputs intentionally supplied by the operator or deployment environment, rather 
 | `full_suite_out.txt`, `*.log`, ad hoc output captures | Disposable runtime artifacts | No | Debug output only |
 | `codex_*` scratch files and directories | Disposable runtime artifacts | No | Local agent probes, reflection scratch space, pulse tests, and health traces |
 | `knowledge/packs/*` active pack content | Operator-provided inputs | No by default | Optional domain extension points loaded explicitly by operators |
-| `knowledge/peims/`, `knowledge/peims_knowledge_pack.zip` | Operator-provided inputs | No | Public repo no longer treats PEIMS content as bundled product knowledge |
 | `data_sources/*/local_config.json`, `data_sources/*/operator_intake.jsonl`, `data_sources/*/lane_control.json` | Operator-provided inputs | No | Lane-local credentials, intake notes, and control toggles remain machine-local and must not ship in release artifacts |
 | chat users, control credentials, env vars | Operator-provided inputs | No | Deployment-specific auth and secrets |
 | external model/runtime backends such as local Ollama availability | Operator-provided inputs | No | Runtime dependency supplied by the deployment environment |
@@ -113,7 +123,7 @@ The remaining work is:
 
 1. continued enforcement so new generated/runtime files do not drift back into the shipped boundary
 2. release-candidate validation of the produced zip artifact on a fresh machine or VM
-3. later decision on whether NYO System also needs a frozen installer or another higher-convenience artifact
+3. later decision on whether Nova also needs a frozen installer or another higher-convenience artifact
 
 ## Related Docs
 

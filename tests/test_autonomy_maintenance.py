@@ -252,6 +252,61 @@ class TestAutonomyMaintenance(unittest.TestCase):
         self.assertEqual(state.get("last_regression_lanes"), ["unit", "behavior", "integration"])
         self.assertEqual(state.get("last_regression_source"), "scripts/run_regression.py")
 
+    def test_daily_regression_reruns_when_status_file_stale_even_if_date_is_today(self):
+        import time as _time
+
+        with tempfile.TemporaryDirectory() as td:
+            status_path = Path(td) / "regression_status.json"
+            # OK but older than release max age (6h) — must not skip forever.
+            stale_generated = _time.strftime(
+                "%Y-%m-%d %H:%M:%S",
+                _time.localtime(_time.time() - 40000),
+            )
+            status_path.write_text(
+                json.dumps(
+                    {
+                        "generated_at": stale_generated,
+                        "status": "OK",
+                        "lanes": ["unit", "behavior", "integration"],
+                        "returncode": 0,
+                        "source": "scripts/run_regression.py",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            today = _time.strftime("%Y-%m-%d")
+            state = {
+                "last_regression_date": today,
+                "last_regression_at": stale_generated,
+                "last_regression_status": "OK",
+                "last_regression_stale": False,
+            }
+
+            def _run_regression(cmd, **_kwargs):
+                status_path.write_text(
+                    json.dumps(
+                        {
+                            "generated_at": _time.strftime("%Y-%m-%d %H:%M:%S"),
+                            "date": today,
+                            "status": "OK",
+                            "lanes": ["unit", "behavior", "integration"],
+                            "returncode": 0,
+                            "source": "scripts/run_regression.py",
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+                return mock.Mock(returncode=0, stdout="ok", stderr="")
+
+            with mock.patch.object(autonomy_maintenance, "REGRESSION_STATUS_FILE", status_path), \
+                 mock.patch.object(autonomy_maintenance.subprocess, "run", side_effect=_run_regression) as run_mock, \
+                 mock.patch.object(autonomy_maintenance, "_regression_lock_owner_alive", return_value=(False, "")):
+                result = autonomy_maintenance._run_daily_regression_if_due(state)
+
+        self.assertEqual(result, "daily_regression_ok")
+        self.assertEqual(run_mock.call_count, 1)
+        self.assertEqual(state.get("last_regression_status"), "OK")
+
     def test_run_temporal_feed_pass_reads_ics_and_surfaces_pressure(self):
         state: dict = {}
         with tempfile.TemporaryDirectory() as td:
@@ -261,7 +316,7 @@ class TestAutonomyMaintenance(unittest.TestCase):
                     [
                         "BEGIN:VCALENDAR",
                         "BEGIN:VEVENT",
-                        "SUMMARY:PEIMS deadline",
+                        "SUMMARY:state education data deadline",
                         "DTSTART:20260610T090000Z",
                         "STATUS:CONFIRMED",
                         "END:VEVENT",
@@ -311,7 +366,7 @@ class TestAutonomyMaintenance(unittest.TestCase):
             "surfaced_pressures": [
                 {
                     "event": {
-                        "title": "PEIMS deadline",
+                        "title": "state education data deadline",
                         "start": "2026-06-10T09:00:00+00:00",
                     },
                     "final_score": 88.0,
@@ -362,7 +417,7 @@ class TestAutonomyMaintenance(unittest.TestCase):
     def test_sync_pipeline_workers_skipped_in_validation_scope(self):
         state: dict = {}
         fake_registry = mock.Mock()
-        fake_registry.discover.return_value = [mock.Mock(pipeline_id="edfi_bisd")]
+        fake_registry.discover.return_value = [mock.Mock(pipeline_id="data_connector")]
         with mock.patch.object(autonomy_maintenance, "build_pipeline_registry", return_value=fake_registry), \
              mock.patch.object(autonomy_maintenance, "reconcile_pipeline_workers_for_ids") as reconcile_mock, \
              mock.patch.object(autonomy_maintenance, "ensure_pipeline_workers_for_ids") as ensure_mock, \
@@ -381,7 +436,7 @@ class TestAutonomyMaintenance(unittest.TestCase):
     def test_sync_pipeline_workers_runs_reconcile_and_ensure_in_live_scope(self):
         state: dict = {}
         fake_registry = mock.Mock()
-        fake_registry.discover.return_value = [mock.Mock(pipeline_id="edfi_bisd")]
+        fake_registry.discover.return_value = [mock.Mock(pipeline_id="data_connector")]
         reconcile_payload = {"status": "ok", "reclaimed_count": 0, "cleared_count": 0}
         ensure_payload = {"status": "ok", "running_count": 1, "started_count": 0, "failed_count": 0}
         with mock.patch.object(autonomy_maintenance, "build_pipeline_registry", return_value=fake_registry), \
@@ -1002,6 +1057,55 @@ class TestAutonomyMaintenance(unittest.TestCase):
         self.assertEqual((result.get("events") or [])[0].get("act"), "guard_start")
         self.assertEqual((result.get("extra") or {}).get("guard"), {"running": True, "status": "running"})
 
+    def test_execute_autonomy_recommendation_records_decision_judge_observation_only(self):
+        state: dict = {}
+        packet = {
+            "cycle_id": "cycle-judge",
+            "decision_type": "RecommendAction",
+            "recommended_action": {
+                "action_type": "guard_start",
+                "target_kind": "runtime",
+                "target_id": "guard",
+                "reason_code": "runtime_guard_stopped",
+                "expected_effect": "Restore the runtime guard so maintenance ticks can resume.",
+                "requires_ack": False,
+                "cooldown_sec": 300,
+            },
+            "confidence": 0.82,
+            "refusal_reasons": [],
+        }
+        policy = {
+            "enabled": True,
+            "mode": "canary",
+            "execute_enabled": True,
+            "execute_allowed_actions": [],
+            "execute_allowed_action_groups": ["runtime_control"],
+            "execute_blocked_actions": [],
+            "requires_operator_ack_for": [],
+            "execute_min_confidence": 0.55,
+            # enforce off: judge must not block
+        }
+
+        with mock.patch.object(
+            autonomy_maintenance, "_maintenance_start_guard", return_value=(True, "guard_start_requested")
+        ), mock.patch.object(
+            autonomy_maintenance,
+            "_maintenance_guard_status_payload",
+            return_value={"running": True, "status": "running"},
+        ):
+            result = autonomy_maintenance._execute_autonomy_recommendation(state, packet, policy)
+
+        self.assertEqual(result.get("result"), "success")
+        proposal = result.get("decision_proposal") or state.get("last_decision_proposal") or {}
+        judge = result.get("decision_judge") or state.get("last_decision_judge") or {}
+        self.assertEqual(proposal.get("action_id"), "guard_start")
+        self.assertTrue(proposal.get("intended_effect"))
+        self.assertTrue(proposal.get("expected_evidence"))
+        self.assertTrue(judge.get("observation_only"))
+        self.assertIn(judge.get("disposition"), {"proceed", "proceed_annotate"})
+        self.assertIsNotNone((judge.get("outcome") or {}).get("execution_result"))
+        self.assertTrue(state.get("decision_judge_history"))
+
     def test_execute_autonomy_recommendation_dispatches_maintenance_start_runtime_control_action(self):
         state: dict = {}
         packet = {
@@ -1546,12 +1650,12 @@ class TestAutonomyMaintenance(unittest.TestCase):
             "last_regression_status": "OK",
             "last_regression_stale": False,
             "release_runtime_truth": {
-                "running_build_identity": "nyo-base:rc:work-tree",
+                "running_build_identity": "nova:rc:work-tree",
                 "latest_source_changed_after_build": False,
                 "runtime_drift_tolerated": False,
             },
             "release_status": {
-                "latest_artifact_name": "nyo-base:rc:work-tree",
+                "latest_artifact_name": "nova:rc:work-tree",
                 "latest_source_changed_after_build": False,
             },
             "root_closure_inventory": {

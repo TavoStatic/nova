@@ -1,3 +1,14 @@
+<!--
+NOVA_DOC
+category: subsystem
+authority: active_working
+last_session: 2026-08-05
+last_agent: claude-cowork
+session_state: needs_update
+next_step: review after codegen promotion policy changes
+open: none
+-->
+
 # Nova Patching And Teach Flow
 
 Last verified from code: 2026-07-12

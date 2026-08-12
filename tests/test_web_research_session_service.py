@@ -12,9 +12,9 @@ class TestWebResearchSessionStore(unittest.TestCase):
             (7.7, "https://example.com/3", "three"),
         ]
 
-        store.set_results("peims", rows)
+        store.set_results("state-reporting", rows)
         self.assertTrue(store.has_results())
-        self.assertEqual(store.query, "peims")
+        self.assertEqual(store.query, "state-reporting")
         self.assertEqual(store.result_count(), 3)
 
         first = store.next_page(2)

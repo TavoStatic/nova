@@ -25,9 +25,9 @@ from services.pipeline_worker_supervision import (
 class TestPipelineWorkerSupervision(unittest.TestCase):
     def _mock_supervised_spawn(self, runtime_root: Path, *, pid: int):
         def _popen(*_args, **_kwargs):
-            write_worker_lease("edfi_bisd", runtime_root=runtime_root, lease_owner_pid=pid)
+            write_worker_lease("data_connector", runtime_root=runtime_root, lease_owner_pid=pid)
             write_worker_heartbeat(
-                "edfi_bisd",
+                "data_connector",
                 runtime_root=runtime_root,
                 status="running",
                 detail="worker_started",
@@ -41,10 +41,10 @@ class TestPipelineWorkerSupervision(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             runtime_root = Path(td)
             live_pid = 4242
-            write_worker_lease("edfi_bisd", runtime_root=runtime_root, lease_owner_pid=live_pid)
-            write_worker_heartbeat("edfi_bisd", runtime_root=runtime_root, status="running", pid=live_pid)
+            write_worker_lease("data_connector", runtime_root=runtime_root, lease_owner_pid=live_pid)
+            write_worker_heartbeat("data_connector", runtime_root=runtime_root, status="running", pid=live_pid)
             heartbeat = read_worker_heartbeat(
-                "edfi_bisd",
+                "data_connector",
                 runtime_root=runtime_root,
                 stale_after_sec=30,
                 pid_alive_fn=lambda pid: int(pid) == live_pid,
@@ -57,16 +57,16 @@ class TestPipelineWorkerSupervision(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             runtime_root = Path(td)
             live_pid = 5150
-            write_worker_lease("edfi_bisd", runtime_root=runtime_root, lease_owner_pid=live_pid)
+            write_worker_lease("data_connector", runtime_root=runtime_root, lease_owner_pid=live_pid)
             write_worker_heartbeat(
-                "edfi_bisd",
+                "data_connector",
                 runtime_root=runtime_root,
                 status="running",
                 pid=live_pid,
                 now_fn=lambda: 100.0,
             )
             heartbeat = read_worker_heartbeat(
-                "edfi_bisd",
+                "data_connector",
                 runtime_root=runtime_root,
                 stale_after_sec=10,
                 now_fn=lambda: 200.0,
@@ -80,7 +80,7 @@ class TestPipelineWorkerSupervision(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             runtime_root = Path(td)
             summary = summarize_pipeline_workers(
-                ["edfi_bisd"],
+                ["data_connector"],
                 runtime_root=runtime_root,
                 now_fn=time.time,
             )
@@ -91,9 +91,9 @@ class TestPipelineWorkerSupervision(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             runtime_root = Path(td)
             live_pid = 9001
-            write_worker_lease("edfi_bisd", runtime_root=runtime_root, lease_owner_pid=live_pid)
+            write_worker_lease("data_connector", runtime_root=runtime_root, lease_owner_pid=live_pid)
             write_worker_heartbeat(
-                "edfi_bisd",
+                "data_connector",
                 runtime_root=runtime_root,
                 status="idle",
                 pid=live_pid,
@@ -106,7 +106,7 @@ class TestPipelineWorkerSupervision(unittest.TestCase):
             venv_python.write_text("", encoding="utf-8")
             popen_mock = mock.Mock()
             result = ensure_pipeline_worker_running(
-                "edfi_bisd",
+                "data_connector",
                 worker_script=worker_script,
                 venv_python=venv_python,
                 runtime_root=runtime_root,
@@ -119,7 +119,7 @@ class TestPipelineWorkerSupervision(unittest.TestCase):
     def test_dead_lease_allows_single_replacement(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             runtime_root = Path(td)
-            write_worker_lease("edfi_bisd", runtime_root=runtime_root, lease_owner_pid=8800)
+            write_worker_lease("data_connector", runtime_root=runtime_root, lease_owner_pid=8800)
             worker_script = runtime_root / "scripts" / "pipeline_worker.py"
             worker_script.parent.mkdir(parents=True, exist_ok=True)
             worker_script.write_text("# stub", encoding="utf-8")
@@ -128,7 +128,7 @@ class TestPipelineWorkerSupervision(unittest.TestCase):
             venv_python.write_text("", encoding="utf-8")
             popen_mock = mock.Mock(side_effect=self._mock_supervised_spawn(runtime_root, pid=8801))
             result = ensure_pipeline_worker_running(
-                "edfi_bisd",
+                "data_connector",
                 worker_script=worker_script,
                 venv_python=venv_python,
                 runtime_root=runtime_root,
@@ -139,14 +139,14 @@ class TestPipelineWorkerSupervision(unittest.TestCase):
             self.assertEqual(result["status"], "start_requested")
             self.assertEqual(result["lease_owner_pid"], 8801)
             popen_mock.assert_called_once()
-            lease = read_worker_lease("edfi_bisd", runtime_root=runtime_root, pid_alive_fn=lambda pid: int(pid) == 8801)
+            lease = read_worker_lease("data_connector", runtime_root=runtime_root, pid_alive_fn=lambda pid: int(pid) == 8801)
             self.assertEqual(lease.get("lease_owner_pid"), 8801)
 
     def test_conflicting_live_workers_surface_duplicate_ownership(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             runtime_root = Path(td)
             live_pid = 7700
-            write_worker_lease("edfi_bisd", runtime_root=runtime_root, lease_owner_pid=live_pid)
+            write_worker_lease("data_connector", runtime_root=runtime_root, lease_owner_pid=live_pid)
             worker_script = runtime_root / "scripts" / "pipeline_worker.py"
             worker_script.parent.mkdir(parents=True, exist_ok=True)
             worker_script.write_text("# stub", encoding="utf-8")
@@ -155,7 +155,7 @@ class TestPipelineWorkerSupervision(unittest.TestCase):
             venv_python.write_text("", encoding="utf-8")
             popen_mock = mock.Mock()
             result = ensure_pipeline_worker_running(
-                "edfi_bisd",
+                "data_connector",
                 worker_script=worker_script,
                 venv_python=venv_python,
                 runtime_root=runtime_root,
@@ -191,7 +191,7 @@ class TestPipelineWorkerSupervision(unittest.TestCase):
                 popen_mock = mock.Mock(side_effect=self._mock_supervised_spawn(runtime_root, pid=spawned_pid))
                 results.append(
                     ensure_pipeline_worker_running(
-                        "edfi_bisd",
+                        "data_connector",
                         worker_script=worker_script,
                         venv_python=venv_python,
                         runtime_root=runtime_root,
@@ -211,25 +211,25 @@ class TestPipelineWorkerSupervision(unittest.TestCase):
             self.assertEqual(len(results), 2)
             self.assertEqual(sum(1 for status in statuses if status == "start_requested"), 1)
             self.assertTrue(all(status in {"start_requested", "duplicate_ownership", "already_running"} for status in statuses))
-            lease = read_worker_lease("edfi_bisd", runtime_root=runtime_root, pid_alive_fn=lambda pid: int(pid) >= 9101)
+            lease = read_worker_lease("data_connector", runtime_root=runtime_root, pid_alive_fn=lambda pid: int(pid) >= 9101)
             self.assertTrue(lease.get("present"))
 
     def test_reconcile_clears_dead_lease_and_stale_heartbeat(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             runtime_root = Path(td)
-            write_worker_lease("edfi_bisd", runtime_root=runtime_root, lease_owner_pid=8800)
+            write_worker_lease("data_connector", runtime_root=runtime_root, lease_owner_pid=8800)
             write_worker_heartbeat(
-                "edfi_bisd",
+                "data_connector",
                 runtime_root=runtime_root,
                 status="running",
                 pid=8800,
                 now_fn=lambda: 100.0,
             )
-            tmp_path = worker_heartbeat_path("edfi_bisd", runtime_root=runtime_root).with_name("worker.heartbeat.99999.tmp")
+            tmp_path = worker_heartbeat_path("data_connector", runtime_root=runtime_root).with_name("worker.heartbeat.99999.tmp")
             tmp_path.write_text("{}", encoding="utf-8")
 
             result = reconcile_pipeline_worker_scope(
-                "edfi_bisd",
+                "data_connector",
                 runtime_root=runtime_root,
                 pid_alive_fn=lambda _pid: False,
             )
@@ -237,22 +237,22 @@ class TestPipelineWorkerSupervision(unittest.TestCase):
             self.assertEqual(result["status"], "dead_lease_cleared")
             self.assertIn("released_dead_lease", result.get("actions") or [])
             self.assertIn("removed_stale_heartbeat", result.get("actions") or [])
-            self.assertFalse(read_worker_lease("edfi_bisd", runtime_root=runtime_root).get("present"))
-            self.assertFalse(worker_heartbeat_path("edfi_bisd", runtime_root=runtime_root).exists())
+            self.assertFalse(read_worker_lease("data_connector", runtime_root=runtime_root).get("present"))
+            self.assertFalse(worker_heartbeat_path("data_connector", runtime_root=runtime_root).exists())
             self.assertFalse(tmp_path.exists())
 
     def test_reconcile_duplicate_pipeline_worker_processes_terminates_non_keeper(self) -> None:
         terminated: list[int] = []
         processes = [
-            {"pid": 8800, "create_time": 10.0, "cmdline": ["python", "pipeline_worker.py", "--pipeline", "edfi_bisd"]},
-            {"pid": 8801, "create_time": 11.0, "cmdline": ["python", "pipeline_worker.py", "--pipeline", "edfi_bisd"]},
+            {"pid": 8800, "create_time": 10.0, "cmdline": ["python", "pipeline_worker.py", "--pipeline", "data_connector"]},
+            {"pid": 8801, "create_time": 11.0, "cmdline": ["python", "pipeline_worker.py", "--pipeline", "data_connector"]},
         ]
         with mock.patch(
             "services.pipeline_worker_supervision.pipeline_worker_processes_for_id",
             return_value=processes,
         ):
             result = reconcile_duplicate_pipeline_worker_processes(
-                "edfi_bisd",
+                "data_connector",
                 keeper_pid=8801,
                 terminate_pid_fn=lambda pid: terminated.append(int(pid)) or True,
             )
@@ -264,9 +264,9 @@ class TestPipelineWorkerSupervision(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             runtime_root = Path(td)
             keeper_pid = 8805
-            write_worker_lease("edfi_bisd", runtime_root=runtime_root, lease_owner_pid=keeper_pid)
+            write_worker_lease("data_connector", runtime_root=runtime_root, lease_owner_pid=keeper_pid)
             write_worker_heartbeat(
-                "edfi_bisd",
+                "data_connector",
                 runtime_root=runtime_root,
                 status="idle",
                 pid=keeper_pid,
@@ -282,7 +282,7 @@ class TestPipelineWorkerSupervision(unittest.TestCase):
                 ],
             ):
                 result = reconcile_pipeline_worker_scope(
-                    "edfi_bisd",
+                    "data_connector",
                     runtime_root=runtime_root,
                     now_fn=lambda: 100.0,
                     pid_alive_fn=lambda pid: int(pid) == keeper_pid,
@@ -297,9 +297,9 @@ class TestPipelineWorkerSupervision(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             runtime_root = Path(td)
             live_pid = 8801
-            write_worker_lease("edfi_bisd", runtime_root=runtime_root, lease_owner_pid=live_pid)
+            write_worker_lease("data_connector", runtime_root=runtime_root, lease_owner_pid=live_pid)
             write_worker_heartbeat(
-                "edfi_bisd",
+                "data_connector",
                 runtime_root=runtime_root,
                 status="running",
                 pid=live_pid,
@@ -308,7 +308,7 @@ class TestPipelineWorkerSupervision(unittest.TestCase):
             terminated: list[int] = []
 
             result = reconcile_pipeline_worker_scope(
-                "edfi_bisd",
+                "data_connector",
                 runtime_root=runtime_root,
                 stale_after_sec=10,
                 now_fn=lambda: 500.0,
@@ -318,14 +318,14 @@ class TestPipelineWorkerSupervision(unittest.TestCase):
 
             self.assertEqual(result["status"], "orphan_reclaimed")
             self.assertEqual(terminated, [live_pid])
-            self.assertFalse(read_worker_lease("edfi_bisd", runtime_root=runtime_root).get("present"))
-            self.assertFalse(worker_heartbeat_path("edfi_bisd", runtime_root=runtime_root).exists())
+            self.assertFalse(read_worker_lease("data_connector", runtime_root=runtime_root).get("present"))
+            self.assertFalse(worker_heartbeat_path("data_connector", runtime_root=runtime_root).exists())
 
     def test_reconcile_then_ensure_starts_worker_after_dead_lease(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             runtime_root = Path(td)
-            write_worker_lease("edfi_bisd", runtime_root=runtime_root, lease_owner_pid=8802)
-            write_worker_heartbeat("edfi_bisd", runtime_root=runtime_root, status="running", pid=8802)
+            write_worker_lease("data_connector", runtime_root=runtime_root, lease_owner_pid=8802)
+            write_worker_heartbeat("data_connector", runtime_root=runtime_root, status="running", pid=8802)
             worker_script = runtime_root / "scripts" / "pipeline_worker.py"
             worker_script.parent.mkdir(parents=True, exist_ok=True)
             worker_script.write_text("# stub", encoding="utf-8")
@@ -334,13 +334,13 @@ class TestPipelineWorkerSupervision(unittest.TestCase):
             venv_python.write_text("", encoding="utf-8")
 
             reconcile_pipeline_workers_for_ids(
-                ["edfi_bisd"],
+                ["data_connector"],
                 runtime_root=runtime_root,
                 pid_alive_fn=lambda _pid: False,
             )
             popen_mock = mock.Mock(side_effect=self._mock_supervised_spawn(runtime_root, pid=8803))
             result = ensure_pipeline_worker_running(
-                "edfi_bisd",
+                "data_connector",
                 worker_script=worker_script,
                 venv_python=venv_python,
                 runtime_root=runtime_root,
@@ -364,20 +364,20 @@ class TestPipelineWorkerSupervision(unittest.TestCase):
                     bool(pid_alive_fn(pid)) if pid_alive_fn is not None else int(pid) in alive
                 ),
             ):
-                write_worker_lease("edfi_bisd", runtime_root=runtime_root, lease_owner_pid=lease_pid)
+                write_worker_lease("data_connector", runtime_root=runtime_root, lease_owner_pid=lease_pid)
                 write_worker_heartbeat(
-                    "edfi_bisd",
+                    "data_connector",
                     runtime_root=runtime_root,
                     status="running",
                     pid=foreign_pid,
                 )
                 lease = read_worker_lease(
-                    "edfi_bisd",
+                    "data_connector",
                     runtime_root=runtime_root,
                     pid_alive_fn=lambda pid: int(pid) in alive,
                 )
                 heartbeat = read_worker_heartbeat(
-                    "edfi_bisd",
+                    "data_connector",
                     runtime_root=runtime_root,
                     pid_alive_fn=lambda pid: int(pid) in alive,
                 )
@@ -398,15 +398,15 @@ class TestPipelineWorkerSupervision(unittest.TestCase):
                     bool(pid_alive_fn(pid)) if pid_alive_fn is not None else int(pid) in alive
                 ),
             ):
-                write_worker_lease("edfi_bisd", runtime_root=runtime_root, lease_owner_pid=lease_pid)
+                write_worker_lease("data_connector", runtime_root=runtime_root, lease_owner_pid=lease_pid)
                 write_worker_heartbeat(
-                    "edfi_bisd",
+                    "data_connector",
                     runtime_root=runtime_root,
                     status="running",
                     pid=foreign_pid,
                 )
                 result = reconcile_pipeline_worker_scope(
-                    "edfi_bisd",
+                    "data_connector",
                     runtime_root=runtime_root,
                     pid_alive_fn=lambda pid: int(pid) in alive,
                     terminate_pid_fn=lambda pid: terminated.append(int(pid)) or True,
@@ -415,8 +415,8 @@ class TestPipelineWorkerSupervision(unittest.TestCase):
             self.assertEqual(result["status"], "orphan_reclaimed")
             self.assertEqual(terminated, [foreign_pid])
             self.assertIn("terminated_foreign_heartbeat_owner", result.get("actions") or [])
-            self.assertFalse(read_worker_lease("edfi_bisd", runtime_root=runtime_root).get("present"))
-            self.assertFalse(worker_heartbeat_path("edfi_bisd", runtime_root=runtime_root).exists())
+            self.assertFalse(read_worker_lease("data_connector", runtime_root=runtime_root).get("present"))
+            self.assertFalse(worker_heartbeat_path("data_connector", runtime_root=runtime_root).exists())
 
     def test_ensure_reports_start_failed_when_child_exits_quickly(self) -> None:
         with tempfile.TemporaryDirectory() as td:
@@ -430,7 +430,7 @@ class TestPipelineWorkerSupervision(unittest.TestCase):
             proc = mock.Mock(pid=8804, poll=mock.Mock(return_value=1))
             popen_mock = mock.Mock(return_value=proc)
             result = ensure_pipeline_worker_running(
-                "edfi_bisd",
+                "data_connector",
                 worker_script=worker_script,
                 venv_python=venv_python,
                 runtime_root=runtime_root,
@@ -443,12 +443,12 @@ class TestPipelineWorkerSupervision(unittest.TestCase):
                 str(result.get("detail") or ""),
                 {"child_exited_before_supervision", "worker_supervision_timeout"},
             )
-            self.assertFalse(read_worker_lease("edfi_bisd", runtime_root=runtime_root).get("present"))
+            self.assertFalse(read_worker_lease("data_connector", runtime_root=runtime_root).get("present"))
 
     def test_heartbeat_write_is_atomic(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             runtime_root = Path(td)
-            path = worker_heartbeat_path("edfi_bisd", runtime_root=runtime_root)
+            path = worker_heartbeat_path("data_connector", runtime_root=runtime_root)
             observed: list[str] = []
 
             original_replace = Path.replace
@@ -458,14 +458,14 @@ class TestPipelineWorkerSupervision(unittest.TestCase):
                 return original_replace(self, target)
 
             with mock.patch.object(Path, "replace", _spy_replace):
-                write_worker_heartbeat("edfi_bisd", runtime_root=runtime_root, status="running", pid=6001)
+                write_worker_heartbeat("data_connector", runtime_root=runtime_root, status="running", pid=6001)
             self.assertTrue(path.exists())
             self.assertTrue(any(name.endswith(".tmp") for name in observed))
 
     def test_heartbeat_write_retries_replace_when_target_is_contended(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             runtime_root = Path(td)
-            path = worker_heartbeat_path("edfi_bisd", runtime_root=runtime_root)
+            path = worker_heartbeat_path("data_connector", runtime_root=runtime_root)
             original_replace = Path.replace
             attempts = {"count": 0}
 
@@ -476,7 +476,7 @@ class TestPipelineWorkerSupervision(unittest.TestCase):
                 return original_replace(self, target)
 
             with mock.patch.object(Path, "replace", _flaky_replace):
-                write_worker_heartbeat("edfi_bisd", runtime_root=runtime_root, status="running", pid=6002)
+                write_worker_heartbeat("data_connector", runtime_root=runtime_root, status="running", pid=6002)
             self.assertTrue(path.exists())
             self.assertGreaterEqual(attempts["count"], 3)
 
@@ -507,7 +507,7 @@ class TestPipelineWorkerSupervision(unittest.TestCase):
                 side_effect=_side_effect,
             ):
                 result = ensure_pipeline_workers_for_ids(
-                    ["edfi", "edfi_bisd"],
+                    ["edfi", "data_connector"],
                     worker_script=worker_script,
                     venv_python=venv_python,
                     runtime_root=runtime_root,
@@ -519,7 +519,7 @@ class TestPipelineWorkerSupervision(unittest.TestCase):
             workers = {str(item.get("pipeline_id")): item for item in list(result.get("workers") or [])}
             self.assertFalse(bool(workers["edfi"].get("ok")))
             self.assertEqual(workers["edfi"].get("status"), "start_failed")
-            self.assertTrue(bool(workers["edfi_bisd"].get("ok")))
+            self.assertTrue(bool(workers["data_connector"].get("ok")))
 
 
 if __name__ == "__main__":

@@ -15,7 +15,7 @@ def _status_payload() -> dict:
             "latest_artifact_stale": False,
             "latest_validation_record_complete": False,
             "latest_validation_record_missing_fields": ["result", "machine or vm name"],
-            "latest_artifact": "nyo-system-base-rc-2026.05.14.1-work-tree-rebuild.zip",
+            "latest_artifact": "nova-platform-rc-2026.05.14.1-work-tree-rebuild.zip",
         },
     }
 
@@ -74,7 +74,7 @@ def test_release_status_normalizes_latest_readiness_shape() -> None:
                 "latest_readiness_state": "source-changed-after-build",
                 "latest_source_status": "changed-after-build",
                 "latest_artifact_stale": True,
-                "latest_artifact_name": "nyo-system-base-rc-demo.zip",
+                "latest_artifact_name": "nova-platform-rc-demo.zip",
             },
         },
         {},
@@ -82,7 +82,7 @@ def test_release_status_normalizes_latest_readiness_shape() -> None:
 
     assert payload["release"]["readiness"] == "source-changed-after-build"
     assert payload["release"]["latest_source_status"] == "changed-after-build"
-    assert payload["release"]["artifact"] == "nyo-system-base-rc-demo.zip"
+    assert payload["release"]["artifact"] == "nova-platform-rc-demo.zip"
     assert "Release package is stale behind live source" in GROUNDED_SELF_REPORT_SERVICE.render("internals", payload)
 
 

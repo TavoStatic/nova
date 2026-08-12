@@ -11,7 +11,7 @@ $ledgerPath = Join-Path $repoRoot "runtime\exports\release_packages\release_ledg
 
 function Write-ReadinessPayload($payload) {
   Write-Host ""
-  Write-Host "NYO System Release Readiness"
+  Write-Host "Nova Release Readiness"
   Write-Host "----------------------------"
   Write-Host ("[OK]   Artifact kind  : " + $payload.artifact_kind)
   Write-Host ("[OK]   Readiness      : " + $payload.latest_readiness_state)

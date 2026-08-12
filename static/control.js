@@ -865,7 +865,7 @@ function toggleLiveTrackingAutoArm() {
         setAction('Live tracking auto-arm disabled for this browser. Future page loads will stay manual unless you re-enable it.');
         return;
     }
-    const confirmed = window.confirm('Allow NYO System Control to auto-arm live tracking each time this browser opens the control console? The browser will still control location permission, and Nova keeps only a short-lived runtime snapshot.');
+    const confirmed = window.confirm('Allow Nova to auto-arm live tracking each time this browser opens the control console? The browser will still control location permission, and Nova keeps only a short-lived runtime snapshot.');
     if (!confirmed) {
         setAction('Live tracking auto-arm remains off.');
         return;
@@ -1212,6 +1212,23 @@ function controlHeaders() {
     const headers = {'Content-Type': 'application/json'};
     if (key) headers['X-Nova-Control-Key'] = key;
     return headers;
+}
+
+/**
+ * Return the authenticated Nova Shell username for audit stamping.
+ * Reads from latestStatus when Shell bearer middleware is wired.
+ * Returns empty string in the current env-var auth mode — the backend
+ * handles missing nova_user gracefully (configured_by not stamped).
+ */
+function currentNovaUser() {
+    if (latestStatus && latestStatus.nova_shell_user) {
+        return String(latestStatus.nova_shell_user);
+    }
+    // Also check the control panel identity surface (populated when Shell is active).
+    if (latestStatus && latestStatus.shell && latestStatus.shell.current_user) {
+        return String(latestStatus.shell.current_user);
+    }
+    return '';
 }
 
 function setFeedback(text, level = 'muted') {
@@ -1695,6 +1712,74 @@ function renderMetricGrid(status) {
         rows.push(standardKeys.slice(index, index + columnCount));
     }
 
+    // ── SOCK hardware section helpers ─────────────────────────────────────────
+    const sockHw = (status && status.sock_hardware_profile) ? status.sock_hardware_profile : {};
+    const sockRec = (status && status.sock_recommendation) ? status.sock_recommendation : {};
+    const sockDiff = (status && status.sock_policy_diff) ? status.sock_policy_diff : {};
+
+    const sockCell = (label, value) => [
+        '<td class="system-matrix-cell">',
+        '<table class="system-matrix-entry" aria-hidden="true">',
+        '<tbody>',
+        '<tr>',
+        `<th scope="row" class="system-matrix-key">${escapeHtml(label)}</th>`,
+        '</tr>',
+        '<tr>',
+        `<td class="system-matrix-value">${escapeHtml(String(value != null ? value : '—'))}`,
+        '</td>',
+        '</tr>',
+        '</tbody>',
+        '</table>',
+        '</td>'
+    ].join('');
+
+    const sockGpuLabel = () => {
+        const name = String(sockHw.gpu_name || '');
+        const vram = sockHw.vram_gb != null ? `${sockHw.vram_gb} GB VRAM` : '';
+        if (!name && !vram) return '—';
+        return [name, vram].filter(Boolean).join(' · ');
+    };
+
+    const sockCpuLabel = () => {
+        const name = String(sockHw.cpu_name || '');
+        const cores = sockHw.cpu_cores ? `${sockHw.cpu_cores} cores` : '';
+        const ram = sockHw.ram_gb != null ? `${sockHw.ram_gb} GB RAM` : '';
+        if (!name) return '—';
+        return [name, cores, ram].filter(Boolean).join(' · ');
+    };
+
+    const sockNpuLabel = () => {
+        if (!sockHw.npu_detected) return 'Not detected';
+        return String(sockHw.npu_name || 'Detected');
+    };
+
+    const sockModelLabel = (role) => {
+        const model = String(sockRec[role] || '');
+        if (!model) return '—';
+        const rationale = sockRec.rationale ? String(sockRec.rationale[role] || '') : '';
+        return rationale ? `${model} — ${rationale}` : model;
+    };
+
+    const sockPolicySyncLabel = () => {
+        const changed = Array.isArray(sockDiff.changed_keys) ? sockDiff.changed_keys : [];
+        if (!sockHw.gpu_name && !sockHw.cpu_name) return 'Not scanned';
+        if (changed.length === 0) return 'In sync';
+        return `${changed.length} key${changed.length === 1 ? '' : 's'} differ — run SOCK to apply`;
+    };
+
+    const sockRows = [
+        `<tr class="system-matrix-row">
+            ${sockCell('GPU', sockGpuLabel())}
+            ${sockCell('CPU', sockCpuLabel())}
+            ${sockCell('NPU', sockNpuLabel())}
+        </tr>`,
+        `<tr class="system-matrix-row">
+            ${sockCell('Chat Model', sockModelLabel('chat'))}
+            ${sockCell('Routing Model', sockModelLabel('routing'))}
+            ${sockCell('Policy Sync', sockPolicySyncLabel())}
+        </tr>`,
+    ];
+
     statusKv.innerHTML = [
         '<tbody>',
         rows.map((row) => [
@@ -1702,6 +1787,10 @@ function renderMetricGrid(status) {
             row.map((key) => matrixCell(key)).join(''),
             '</tr>'
         ].join('')).join(''),
+        '<tr class="system-matrix-section-row">',
+        '<td class="system-matrix-section-cell" colspan="3">HARDWARE · SOCK</td>',
+        '</tr>',
+        sockRows.join(''),
         '<tr class="system-matrix-section-row">',
         '<td class="system-matrix-section-cell" colspan="3">STORAGE WATCH</td>',
         '</tr>',
@@ -1952,12 +2041,12 @@ function renderPipelineSelect() {
 const PIPELINE_QUERY_PARAM_SPECS = {
     offset: {label: 'Offset', type: 'number', placeholder: '0', defaultValue: '0'},
     query: {label: 'Query', type: 'text', placeholder: 'school'},
-    namespace: {label: 'Namespace', type: 'text', placeholder: 'ed-fi'},
+    namespace: {label: 'Namespace', type: 'text', placeholder: 'namespace'},
     resource: {
         label: 'Resource',
         type: 'select',
-        options: ['ed-fi/schools', 'ed-fi/students', 'ed-fi/studentSchoolAssociations'],
-        defaultValue: 'ed-fi/schools',
+        options: ['schools', 'students', 'studentSchoolAssociations'],
+        defaultValue: 'schools',
     },
     min_change_version: {label: 'Min change version', type: 'number', placeholder: 'saved cursor'},
     advance_cursor: {label: 'Advance cursor after pull', type: 'checkbox', defaultValue: false},
@@ -2297,7 +2386,7 @@ function renderPipelineDetail(payload) {
         {label: 'Intake log', value: String(intake.path || 'not created yet')},
     ];
     if (isEdfi) {
-        schemaRows.splice(1, 0, {label: 'Ed-Fi entities', value: String(entities.length || 0)});
+        schemaRows.splice(1, 0, {label: 'data connector entities', value: String(entities.length || 0)});
     } else {
         schemaRows.splice(1, 0,
             {label: 'Vendor dictionary', value: vendorDictionary.table_count ? `${vendorDictionary.table_count} tables | ${vendorSource.grounding_status || 'vendor_grounded'}` : 'not loaded'},
@@ -5244,7 +5333,7 @@ function setBackpackBusy(busy, message, activeButtonId) {
     }
     const ids = [
         'btnBackpacksRefresh', 'btnBackpackEnable', 'btnBackpackDisable',
-        'btnBackpackSaveSettings', 'btnBackpackInstall', 'btnBackpackProbeLea',
+        'btnBackpackTestConn', 'btnBackpackSaveSettings', 'btnBackpackInstall', 'btnBackpackUninstall', 'btnBackpackProbeLea',
         'btnBackpackReportHealth', 'btnBackpackReportSchools', 'btnBackpackRefreshSchools',
     ];
     ids.forEach((id) => {
@@ -5309,17 +5398,30 @@ function renderBackpackCards() {
         backpackCards.textContent = 'No backpacks discovered under backpacks/. Nova core can run without any.';
         return;
     }
-    backpackCards.innerHTML = backpacksCache.map((bp) => {
+    const installed = backpacksCache.filter((bp) => bp.installed === true);
+    const available = backpacksCache.filter((bp) => !bp.installed);
+    let html = installed.map((bp) => {
         const id = String(bp.backpack_id || '').trim();
         const active = id === selectedBackpackId ? ' active' : '';
-        const installed = bp.installed ? 'installed' : 'not installed';
         const onOff = bp.enabled === false ? 'off' : 'on';
         const name = bp.display_name || id;
         return `<button type="button" class="pipeline-card-button${active}" data-backpack-id="${id}">
             <div class="pipeline-card-title">${name}</div>
-            <div class="pipeline-card-meta">${id} · ${installed} · ${onOff} · v${bp.version || '?'}</div>
+            <div class="pipeline-card-meta">${id} · installed · ${onOff} · v${bp.version || '?'}</div>
         </button>`;
     }).join('');
+    if (available.length) {
+        html += available.map((bp) => {
+            const id = String(bp.backpack_id || '').trim();
+            const active = id === selectedBackpackId ? ' active' : '';
+            const name = bp.display_name || id;
+            return `<button type="button" class="pipeline-card-button pipeline-card-button-dim${active}" data-backpack-id="${id}" title="Not installed — click to set up">
+                <div class="pipeline-card-title">${name}</div>
+                <div class="pipeline-card-meta">${id} · not installed · v${bp.version || '?'}</div>
+            </button>`;
+        }).join('');
+    }
+    backpackCards.innerHTML = html;
     backpackCards.querySelectorAll('[data-backpack-id]').forEach((btn) => {
         btn.addEventListener('click', async () => {
             selectedBackpackId = String(btn.getAttribute('data-backpack-id') || '').trim();
@@ -5339,14 +5441,19 @@ function renderBackpackSelect() {
     if (!backpacksCache.length) {
         return;
     }
-    backpacksCache.forEach((bp) => {
+    const installedBackpacks = backpacksCache.filter((bp) => bp.installed === true);
+    if (!installedBackpacks.length) {
+        placeholder.textContent = '— No backpacks installed —';
+        return;
+    }
+    installedBackpacks.forEach((bp) => {
         const option = document.createElement('option');
         option.value = String(bp.backpack_id || '').trim();
         const onOff = bp.enabled === false ? 'off' : 'on';
         option.textContent = `${bp.display_name || bp.backpack_id} (${onOff})`;
         backpackSelect.appendChild(option);
     });
-    if (previous && backpacksCache.some((item) => String(item.backpack_id || '') === previous)) {
+    if (previous && installedBackpacks.some((item) => String(item.backpack_id || '') === previous)) {
         backpackSelect.value = previous;
         selectedBackpackId = previous;
     } else {
@@ -5382,6 +5489,26 @@ function renderBackpackDetail(payload) {
     backpackDetailCache = detail;
     if (backpackModelNote && payload && payload.model) {
         backpackModelNote.textContent = String(payload.model.note || 'Nova first. Backpacks later. Choose a backpack to configure it.');
+    }
+    // Discovery banner — fires when sniffer found new backpacks this refresh.
+    const newlyFound = Array.isArray(payload && payload.newly_found) ? payload.newly_found : [];
+    if (newlyFound.length) {
+        const good = newlyFound.filter((f) => f.ok);
+        const bad  = newlyFound.filter((f) => !f.ok);
+        let bannerHtml = '';
+        good.forEach((f) => {
+            bannerHtml += `<div class="backpack-discovery-banner backpack-discovery-ok">
+                ✓ New backpack found: <strong>${f.display_name || f.backpack_id}</strong> v${f.version || '?'} — handshake OK. Select it below to install.
+            </div>`;
+        });
+        bad.forEach((f) => {
+            bannerHtml += `<div class="backpack-discovery-banner backpack-discovery-bad">
+                ✗ Bad backpack dropped in backpacks/${f.backpack_id}/ — ${f.reason || 'validation failed'}. Remove or fix it before installing.
+            </div>`;
+        });
+        if (backpackModelNote) {
+            backpackModelNote.insertAdjacentHTML('afterend', bannerHtml);
+        }
     }
     const hasSelection = Boolean(selectedBackpackId);
     showBackpackDetail(hasSelection);
@@ -5451,7 +5578,10 @@ async function loadBackpacks(options = {}) {
         selectedBackpackId = '';
     }
     if (backpackListSummary) {
-        backpackListSummary.textContent = `${backpacksCache.length} backpack${backpacksCache.length === 1 ? '' : 's'} available. Select one to configure.`;
+        const installedCount = backpacksCache.filter((bp) => bp.installed === true).length;
+        backpackListSummary.textContent = installedCount
+            ? `${installedCount} backpack${installedCount === 1 ? '' : 's'} installed. Select one to configure.`
+            : 'No backpacks installed. Enter credentials below and click Install.';
     }
     renderBackpackSelect();
     renderBackpackCards();
@@ -5749,7 +5879,10 @@ async function performRefresh() {
                 selectedBackpackId = '';
             }
             if (backpackListSummary) {
-                backpackListSummary.textContent = `${backpacksCache.length} backpack${backpacksCache.length === 1 ? '' : 's'} available. Select one to configure.`;
+                const installedCount = backpacksCache.filter((bp) => bp.installed === true).length;
+                backpackListSummary.textContent = installedCount
+                    ? `${installedCount} backpack${installedCount === 1 ? '' : 's'} installed. Select one to configure.`
+                    : 'No backpacks installed. Enter credentials below and click Install.';
             }
             renderBackpackSelect();
             renderBackpackCards();
@@ -6197,6 +6330,33 @@ bindClick('btnBackpackDisable', async () => {
         setAction(payload.message || 'backpack_disabled');
     });
 });
+bindClick('btnBackpackTestConn', async () => {
+    const backpackId = selectedBackpackId || (backpackSelect ? backpackSelect.value : '');
+    if (!backpackId) return setAction('Select a backpack first.');
+    const baseUrl = bpFieldBaseUrl ? String(bpFieldBaseUrl.value || '').trim() : '';
+    const clientId = bpFieldClientId ? String(bpFieldClientId.value || '').trim() : '';
+    const clientSecret = bpFieldClientSecret ? String(bpFieldClientSecret.value || '').trim() : '';
+    if (!baseUrl) return setAction('Enter the ODS base URL before testing.');
+    if (!clientId) return setAction('Enter Client ID before testing.');
+    // Secret may already be on disk; allow test with empty field (backend falls back to saved).
+    await withBackpackBusy('Testing credentials against IODS…', 'btnBackpackTestConn', async () => {
+        const payload = await postAction('backpack_probe_credentials', {
+            backpack_id: backpackId,
+            base_url: baseUrl,
+            client_id: clientId,
+            client_secret: clientSecret,
+            nova_user: currentNovaUser(),
+        });
+        if (backpackActionResult) backpackActionResult.textContent = JSON.stringify(payload, null, 2);
+        const hint = payload.hint || '';
+        const ms = payload.latency_ms != null ? ` (${payload.latency_ms}ms)` : '';
+        if (payload.ok) {
+            setAction(`✓ Connection verified${ms}. ${hint}`);
+        } else {
+            setAction(`✗ ${payload.error || 'Connection test failed.'} ${hint}`.trim());
+        }
+    });
+});
 bindClick('btnBackpackSaveSettings', async () => {
     const backpackId = selectedBackpackId || (backpackSelect ? backpackSelect.value : '');
     if (!backpackId) return setAction('Select a backpack first.');
@@ -6211,6 +6371,7 @@ bindClick('btnBackpackSaveSettings', async () => {
             backpack_id: backpackId,
             settings,
             skip_profile: true,
+            nova_user: currentNovaUser(),
         });
         if (backpackActionResult) backpackActionResult.textContent = JSON.stringify(payload, null, 2);
         if (bpFieldClientSecret) bpFieldClientSecret.value = '';
@@ -6231,6 +6392,7 @@ bindClick('btnBackpackInstall', async () => {
         const payload = await postAction('backpack_install', {
             backpack_id: backpackId,
             settings,
+            nova_user: currentNovaUser(),
         });
         if (backpackActionResult) backpackActionResult.textContent = JSON.stringify(payload, null, 2);
         if (bpFieldClientSecret) bpFieldClientSecret.value = '';
@@ -6238,11 +6400,30 @@ bindClick('btnBackpackInstall', async () => {
         setAction(payload.message || 'backpack_install_ok');
     });
 });
+bindClick('btnBackpackUninstall', async () => {
+    const backpackId = selectedBackpackId || (backpackSelect ? backpackSelect.value : '');
+    if (!backpackId) return setAction('Select a backpack first.');
+    if (!window.confirm(`Remove all runtime data for "${backpackId}"? This cannot be undone.`)) return;
+    await withBackpackBusy('Uninstalling backpack…', 'btnBackpackUninstall', async () => {
+        try {
+            const payload = await postAction('backpack_uninstall', {
+                backpack_id: backpackId,
+                nova_user: currentNovaUser(),
+            });
+            if (backpackActionResult) backpackActionResult.textContent = JSON.stringify(payload, null, 2);
+            await loadBackpacks();
+            const removed = Array.isArray(payload.removed) ? payload.removed.length : '?';
+            setAction(`✓ Uninstalled. ${removed} item(s) removed.`);
+        } catch (err) {
+            setAction(`✗ Uninstall failed: ${err && err.message ? err.message : String(err)}`);
+        }
+    });
+});
 bindClick('btnBackpackProbeLea', async () => {
     const backpackId = selectedBackpackId;
     if (!backpackId) return setAction('Select a backpack first.');
     const lea = backpackProbeLea ? String(backpackProbeLea.value || '').trim() : '';
-    if (!lea) return setAction('Enter an LEA id to probe (e.g. 031901).');
+    if (!lea) return setAction('Enter an LEA id to probe (e.g. your-lea-id).');
     await withBackpackBusy('Probing LEA…', 'btnBackpackProbeLea', async () => {
         const payload = await postAction('backpack_probe_lea', {
             backpack_id: backpackId,
@@ -6376,7 +6557,7 @@ bindClick('btnEdfiQuickChanges', async () => {
         live: true,
         operation: 'changes_since',
         rowLimit: 10,
-        params: {resource: 'ed-fi/schools', advance_cursor: true},
+        params: {resource: 'schools', advance_cursor: true},
         confirmLive: false,
     });
 });
@@ -6952,7 +7133,7 @@ window.addEventListener('hashchange', () => {
     focusTemporalPolicyAnchor();
 });
 
-setFeedback('NYO System control linked. Fetching live status...', 'muted');
+setFeedback('Nova control linked. Fetching live status...', 'muted');
 setActiveView(initialControlView());
 focusTemporalPolicyAnchor();
 setInspectorTab('planner');

@@ -68,8 +68,8 @@ def analyze_task(task: str) -> dict:  # ← change return type for clarity
     t = task.lower().strip()
     requirements = []
 
-    # Education/PEIMS specific
-    if any(word in t for word in ["attendance", "peims", "tsds", "student data", "enrollment", "gradebook"]):
+    # Education/state education data specific
+    if any(word in t for word in ["attendance",  "tsds", "student data", "enrollment", "gradebook"]):
         requirements += ["database_connection", "sis_attendance_table", "query_execution"]
 
     if any(word in t for word in ["student", "grades", "report card", "transcript", "aeries", "skyward"]):

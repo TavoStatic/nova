@@ -183,7 +183,7 @@ $promotionEntry = [ordered]@{
 Add-Content -Path $ledgerPath -Value (($promotionEntry | ConvertTo-Json -Compress))
 
 Write-Host ""
-Write-Host "NYO System Release Artifact Promotion"
+Write-Host "Nova Release Artifact Promotion"
 Write-Host "------------------------------------"
 Write-Host ("[OK]   Artifact kind : " + [string]$promotionEntry.artifact_kind)
 Write-Host ("[OK]   Result         : " + $Result)

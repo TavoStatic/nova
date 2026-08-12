@@ -65,3 +65,36 @@ dist/
 .mypy_cache/
 .coverage
 htmlcov/
+
+# Backpacks are distributed separately — never commit dropped-in packs
+backpacks/*
+!backpacks/.gitkeep
+
+# Ed-Fi service layer ships with the backpack, not with Nova core
+services/edfi/
+
+# Internal development artifacts — not for public repo
+terminals/
+agent-tools/
+data_sources/
+codex_audit.txt
+nova_grok.md
+docs/NOVA_EDFI_CORE_V1.html
+
+# Ed-Fi service files ship with the backpack
+tools/edfi_tool.py
+scripts/run_edfi_*.py
+scripts/_checklist_edfi_gates.py
+scripts/demo_edfi_core_lifecycle.py
+tests/test_edfi_*.py
+
+# Internal audit / health snapshots
+NOVA_CODE_SCAN_*.md
+NOVA_HEALTH_REVIEW.md
+
+# Auto-generated doc indices (regenerated from live code)
+docs/FUNCTION_INDEX.md
+docs/TEST_INDEX.md
+
+# Internal planning documents
+EdFi_Backpack*.docx

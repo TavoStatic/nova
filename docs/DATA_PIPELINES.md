@@ -1,8 +1,19 @@
+<!--
+NOVA_DOC
+category: subsystem
+authority: active_working
+last_session: 2026-08-05
+last_agent: grok
+session_state: current
+next_step: none
+open: none
+-->
+
 # Data Pipelines
 
-Last verified from code: 2026-07-12
+Last verified from code: 2026-08-05
 
-Nova has a governed pipeline framework, a vendor-neutral Ed-Fi core, and an active BISD Ed-Fi lane. Domain-specific logic belongs in the lane, not in core or HTTP.
+Nova has a governed pipeline framework, a vendor-neutral data connector core, the **data connector backpack** (`backpacks/edfi` + `services/backpack_host`), and a legacy the district lane under `data_sources/data_connector`. New operator/tool traffic uses the backpack path.
 
 ## Framework
 
@@ -41,7 +52,7 @@ The framework owns discovery, query governance, audit, privileged execution, con
 
 ## Active Inventory
 
-### Vendor-Neutral Ed-Fi Core
+### Vendor-Neutral data connector Core
 
 `services/edfi/` owns:
 
@@ -55,38 +66,44 @@ The framework owns discovery, query governance, audit, privileged execution, con
 - saved profile evidence
 - change-version cursor and incremental change tracking
 
-The core does not own Texas, PEIMS, BISD, or district-specific reporting semantics.
+The core does not own Texas, state education data, the district, or district-specific reporting semantics.
 
-### BISD Ed-Fi Lane
+### data connector Backpack (preferred path)
 
-`data_sources/edfi_bisd/` is active. It owns:
+`backpacks/edfi/` + `services/backpack_host/` is the installable backpack product:
 
-- `connector.py`
-- `pipeline.json`
-- `schema_manifest.json`
-- `query_templates.json`
-- `lane_control.json`
-- local configuration example and local operator configuration
+- `backpack.json`, `operations.json`, `query_templates.json`, `settings_schema.json`, `brief.md`
+- pipeline: `backpacks/edfi/pipeline/connector.py`
+- tool: `tools/edfi_tool.py` (`edfi_explore`) via backpack host grants
+- local warehouse: `services/edfi/warehouse.py` + `warehouse_sync.py` (schools phase 1)
+- reports prefer warehouse/extract; live ODS only on explicit refresh
+- operations include `view_status`, `view_data`, `run_sync`, **`run_warehouse_sync`** (`warehouse_status` / `warehouse_sync`)
+- maintenance may run paced warehouse sync when schedule is due (`last_edfi_warehouse_sync`)
+
+### the district data connector Lane (legacy lane on disk)
+
+`data_sources/data_connector/` remains for migration and lane-style tests. New operator/tool traffic should use the backpack path.
 
 Operator probes:
 
+- `scripts/run_backpack.py` (warehouse sync CLI)
 - `scripts/run_edfi_profile.py`
 - `scripts/run_edfi_explore.py`
 - `scripts/demo_edfi_core_lifecycle.py`
 
-The lane uses Ed-Fi core services and keeps district-specific scope and query contracts outside the vendor-neutral core.
+The lane uses data connector core services and keeps district-specific scope and query contracts outside the vendor-neutral core.
 
 ### Archived SIS Test Lane
 
 The previous SIS test lane is under `data_sources/_archived/`. It is history, not an active pipeline.
 
-## Ed-Fi Tool
+## data connector Tool
 
-`tools/edfi_tool.py` registers `EdFiExploreTool`. Core exports the `edfi_explore` action for health, discovery, profile, resource, and query-oriented inspection according to its tool contract.
+`tools/edfi_tool.py` registers `DataConnectorExploreTool`. Core exports the `edfi_explore` action for health, discovery, profile, resource, and query-oriented inspection according to its tool contract.
 
 ## Evidence And Readiness
 
-Ed-Fi evidence appears through:
+data connector evidence appears through:
 
 - saved connection and capability profile artifacts
 - core readiness status
@@ -110,4 +127,4 @@ Profile existence, authentication success, resource discovery, district scope, l
 
 ## Current Inventory Defect
 
-The source-root inventory declares `edfi_core` twice and `data_lane_edfi_bisd` twice. The wiring inventory has unique surface IDs; the duplication is in source-root declarations and remains code work.
+The source-root inventory declares `edfi_core` twice and `data_lane_data_connector` twice. The wiring inventory has unique surface IDs; the duplication is in source-root declarations and remains code work.

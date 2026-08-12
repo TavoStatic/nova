@@ -937,7 +937,7 @@ class TestHttpSessionManager(unittest.TestCase):
         self.assertIn("real_world_task_create", script)
         self.assertIn("renderRealWorldTasks", script)
         self.assertIn("taskManagerSelect", script)
-        self.assertIn("NYO AI Systems Control", html)
+        self.assertIn("Nova Control", html)
         self.assertIn("NOT YOUR ORDINARY AI SYSTEM", html)
         self.assertIn("Overview", html)
         self.assertIn("Operations", html)

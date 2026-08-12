@@ -1,4 +1,15 @@
-# NYO System Fresh Machine Validation
+<!--
+NOVA_DOC
+category: plan
+authority: active_working
+last_session: 2026-08-05
+last_agent: claude-cowork
+session_state: needs_update
+next_step: verify against current installer
+open: none
+-->
+
+# Nova Fresh Machine Validation
 
 Date: 2026-05-18
 Last reviewed: 2026-05-20
@@ -7,7 +18,7 @@ Status note: same-machine extracted-package validation is recorded through the c
 
 ## Purpose
 
-This checklist is the canonical release-candidate validation flow for a built NYO System artifact on a clean Windows machine or VM.
+This checklist is the canonical release-candidate validation flow for a built Nova artifact on a clean Windows machine or VM.
 
 Use it together with [RELEASE_ARTIFACT.md](RELEASE_ARTIFACT.md) and record the result in [RC_VALIDATION_TEMPLATE.md](RC_VALIDATION_TEMPLATE.md).
 

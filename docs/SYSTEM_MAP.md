@@ -1,17 +1,31 @@
+<!--
+NOVA_DOC
+category: architecture
+authority: active_authority
+last_session: 2026-08-05
+last_agent: claude-cowork
+session_state: current
+next_step: none
+open: none
+-->
+
 # Nova System Map
 
 Code baseline: `92ca149e452e96dfd0d9224eb2d11a0862c3ccea`
 
-Last verified from code: 2026-07-12
+Last verified from code: 2026-08-05
 
 This map describes the system that exists in source. It does not publish a live health verdict. Use runtime artifacts for current process, Work Tree, validation, regression, and release state.
 
+**Check `docs/NOVA_LEDGER.md` before relying on this file — it tracks drift against current code.**
+
 ## Reading Order
 
-- `CODE_TRUTH_AUDIT_2026-07-12.md`: scan scope, documentation drift, and known mismatches
+- `docs/NOVA_LEDGER.md`: living master view — sessions, doc authority, architectural decisions. Start here.
+- `docs/NOVA_POSTAL.md`: routing table — where to find anything, where to put anything new.
 - `AUTONOMY_AND_MISSION.md`: maintenance, Mission, orchestrator, execution, and feedback contracts
-- `SERVICES_INDEX.md`: every service module and its public surface
-- `FUNCTION_INDEX.md`: every active source function, method, and class
+- `SERVICES_INDEX.md`: every service module and its public surface (232 files as of Aug 2026)
+- `FUNCTION_INDEX.md`: every active source function, method, and class (check ledger — may drift)
 - `TEST_ECOSYSTEM.md` and `TEST_INDEX.md`: test lanes and every discovered test
 
 ## System Shape
@@ -50,7 +64,7 @@ Operator / user / scheduler
                |-- Ollama
                |-- SearXNG and selected web APIs
                |-- Piper and Faster-Whisper
-               `-- operator-configured Ed-Fi ODS/API
+               `-- operator-configured data connector ODS/API
 ```
 
 Nova is local-first, not dependency-free. Some capabilities call operator-configured network services.
@@ -155,7 +169,7 @@ Main owners:
 - `services/nova_http_turn_finalization.py`
 - `services/nova_action_ledger.py`
 
-The Supervisor seam exists, but the current default rule list and explicit ownership sets are empty. Present-tense documentation must not claim populated Supervisor ownership.
+The Supervisor seam has 4 registered rules as of 2026-08-05: `intent_move_classify` (intent, non-owning), `identity_location_guard` (handle, owning), `ambiguous_clarifier_gate` (handle, non-owning), `safe_fallback_contract` (handle, non-owning). See `docs/SUPERVISOR_CONTRACT.md` for status and remaining gaps.
 
 ## Maintenance And Autonomy Flow
 
@@ -231,7 +245,7 @@ Policy controls memory enablement, scope, retention kinds, blocked kinds, source
 
 ## Tools And OS Capabilities
 
-The direct tool registry contains filesystem, codegen, patch, vision, research, system, OS capability, temporal review, and Ed-Fi explore tools.
+The direct tool registry contains filesystem, codegen, patch, vision, research, system, OS capability, temporal review, and data connector explore tools.
 
 Core exports additional named actions over those tools and services. Work Tree execution checks tree, branch, task, and tool declarations before dispatch.
 
@@ -274,13 +288,13 @@ Nova distinguishes discovered tests, compact lanes, source-profile lanes, genera
 
 No static test count or old pass result is live truth.
 
-## Data Pipelines And Ed-Fi
+## Data Pipelines And data connector
 
 The pipeline framework owns manifests, registry discovery, query guards, audit, privileged protocol/worker, control actions, schema probes, and query execution.
 
-The vendor-neutral Ed-Fi core owns OAuth, client behavior, discovery, resources, paging, district scope, diagnostics, capability profiles, readiness, and change tracking.
+The vendor-neutral data connector core owns OAuth, client behavior, discovery, resources, paging, district scope, diagnostics, capability profiles, readiness, and change tracking.
 
-The active BISD lane owns district-specific configuration, allowlisted query templates, schema manifest, connector behavior, and lane controls. Domain logic does not belong in the vendor-neutral Ed-Fi core.
+The active the district lane owns district-specific configuration, allowlisted query templates, schema manifest, connector behavior, and lane controls. Domain logic does not belong in the vendor-neutral data connector core.
 
 ## Wiring Surfaces
 
@@ -294,11 +308,11 @@ The active BISD lane owns district-specific configuration, allowlisted query tem
 | Tools and policy | `tool_registry_policy`, `tool_evidence`, `policy_gates`, `operator_control`, `safety_envelope` |
 | Memory and retrieval | `memory_identity`, `identity_profile_answers`, `web_search`, `retrieval_knowledge`, `weather_location` |
 | Mutation and release | `patch_pipeline`, `codegen_pipeline`, `release`, `installer_packaging`, `storage_release_pressure` |
-| Data | `data_pipelines`, `edfi_capability_profile`, `edfi_core`, `data_lane_edfi_bisd` |
+| Data | `data_pipelines`, `edfi_capability_profile`, `edfi_core`, `data_lane_data_connector` |
 | Media and host | `voice`, `tts_audio_output`, `vision`, `hardware_profile` |
 | Quality and operations | `test_ecosystem`, `diagnostics_hygiene`, `metrics_ops_journal`, `frontdoor_cli` |
 
-The source-root inventory declares 45 rows but only 43 unique IDs because Ed-Fi core and BISD lane are duplicated. That is current code truth, not a documentation count to normalize away.
+The source-root inventory declares 44 unique roots as of 2026-08-05. The previous duplicate `edfi_core` and `data_lane_data_connector` entries were removed — each now has one complete entry with the full evidence file list.
 
 ## Important Runtime Artifacts
 
@@ -320,15 +334,62 @@ The source-root inventory declares 45 rows but only 43 unique IDs because Ed-Fi 
 - `runtime/exports/release_packages/release_ledger.jsonl`
 - `runtime/kidney/status.json`
 
+## Decision Judge
+
+`services/decision_proposal_judge.py` implements pre-execution claim evaluation. Three schemas:
+
+- `DecisionProposal` — structured claim about what a recommended action will accomplish
+- `JudgeReport` — rule-based evaluation of the proposal before execution (observation-only)
+- `DecisionEpisode` — post-execution record linking proposal → outcome → judge_was_useful
+
+The judge is wired into `_execute_autonomy_recommendation` in `autonomy_maintenance.py`. Default policy: `decision_judge_enforce: false` (observe mode). Calibration bar: 12 episodes before signals, 30 before enforcement. `controlling_dimension` and `field_sources` provide provenance per decision.
+
+## Nova Shell
+
+`services/nova_shell/` is the operator authentication and session-trust subsystem. Wired into `nova_http.py` auth via `services/nova_shell_control_bridge.py` as of Aug 2026.
+
+Modules: `_constants.py`, `identity.py`, `store.py`, `roles.py`, `totp.py`, `recovery.py`, `auth.py`, `admin.py`, `http_trust.py`, `external_finish.py`, `telemetry.py`, `update_receiver.py`.
+
+Capabilities: password hashing, TOTP two-factor, role resolution (built-in + custom roles), session token management, recovery codes, admin CRUD.
+
+## Backpack Host
+
+`services/backpack_host/` is the data connector backpack discovery, installation, grant enforcement, and lifecycle subsystem.
+
+Modules: `__init__.py`, `registry.py`, `loader.py`, `installer.py`, `grant_enforcer.py`, `capability_surface.py`, `query.py`, `ops_map.py`, `reports.py`, `scope_settings.py`.
+
+Backpacks are self-contained data connector data connectors. The host discovers them, validates grants, controls their lifecycle, and exposes them through `services/control_backpacks.py` and `services/nova_http_backpack_control.py`.
+
+## Solution Trail
+
+`services/solution_trail.py` tracks attempted solutions on work-tree branches. Records attempt → judgment → preferred next tool. Prevents repeated execution of the same approach on a blocked branch. Key functions: `classify_attempt`, `action_suppressed_by_trail`, `append_attempt_judgment`, `preferred_tool_from_progress`.
+
+## Self-Scan Rings
+
+`services/self_scan_rings.py` implements Nova's three-ring self-scan. Designed to weave into existing scanners — not a second engine.
+
+- Ring 1: map integrity — source root inventory, evidence file presence, and NOVA_DOC header coverage
+- Ring 2: contract integrity — wiring surface contracts and status keys
+- Ring 3: climb integrity — active branch climbability assessment
+
+Results write to `docs/ledger/nova_findings.jsonl` via `scripts/nova_ledger_ingest.py`. See `docs/SELF_SCAN_RINGS_DESIGN.md`.
+
+## Setup Wizard
+
+`services/nova_setup_wizard.py` (1,674 lines) is the interactive operator setup flow. Handles: Python environment detection, Ollama model download and validation, policy initialization, Windows PATH management, dependency installation. Invoked via `scripts/run_setup_wizard.py` and `nova.ps1 setup`.
+
 ## Current Known Architectural Risks
 
 - `autonomy_maintenance.py`, Signal Intake, core, HTTP, and Work Tree remain heavy files.
 - Mission contains policy behavior in addition to verdict composition.
-- legacy and orchestrator execution coexist.
+- Legacy and orchestrator execution coexist.
+- ~~Nova Shell not wired into HTTP auth~~ — wired 2026-08-05 via nova_shell_control_bridge.py; falls back to env-var auth when no Shell DB exists.
+- Decision Judge is in observe mode — enforce gate not yet active.
+- ~~Duplicate SOURCE_ROOT entries~~ — fixed 2026-08-05; `edfi_core` and `data_lane_data_connector` now have one complete entry each.
 - failed Work Tree tools can be marked complete by maintenance.
 - actionable outbox classification is too broad by source.
 - active-work target resolution is bounded by candidate enumeration.
-- Supervisor default ownership is currently empty.
-- source-root inventory contains duplicate IDs.
+- ~~Supervisor default ownership empty~~ — 4 rules registered 2026-08-05; safe_fallback_contract still non-owning (needs fulfillment path contract to elevate).
+- ~~source-root inventory contains duplicate IDs~~ — fixed 2026-08-05.
 
 These are part of the map because hiding them would make the documentation less truthful than the code.

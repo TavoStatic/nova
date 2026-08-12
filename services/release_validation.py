@@ -319,7 +319,12 @@ def _regression_status_gate(
     if generated_epoch <= 0:
         blocking.append("full regression status has no parseable generated_at timestamp")
     elif age_sec is not None and age_sec > int(max_age_sec):
-        blocking.append(f"full regression status is stale: age_sec={int(age_sec)} max_age_sec={int(max_age_sec)}")
+        # Honest: stale host regression is a host refresh problem, not a package rebuild problem.
+        blocking.append(
+            f"full regression status is stale: age_sec={int(age_sec)} max_age_sec={int(max_age_sec)} "
+            f"(refresh host runtime/regression_status.json via scripts/run_regression.py all; "
+            f"rebuilding the package zip does not refresh this gate)"
+        )
     return {
         "ok": not blocking,
         "path": str(path),
@@ -333,6 +338,99 @@ def _regression_status_gate(
         "missing_lanes": missing_lanes,
         "detail": str(payload.get("detail") or ""),
         "blocking_issues": blocking,
+    }
+
+
+def classify_release_validation_failures(
+    *,
+    blocking_issues: list[Any] | None = None,
+    regression_gate: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Root classification of why release validation failed.
+
+    Used to choose the next rail honestly:
+    - host regression issues are fixed by refreshing host regression, not rebuild
+    - package command/wiring/test issues need package/source fixes (then rebuild)
+    - mixed failures need host first, then package
+    """
+    issues = [str(item or "").strip() for item in list(blocking_issues or []) if str(item or "").strip()]
+    gate = dict(regression_gate or {}) if isinstance(regression_gate, dict) else {}
+    classes: list[str] = []
+    for issue in issues:
+        low = issue.lower()
+        if "regression status is stale" in low:
+            classes.append("host_regression_stale")
+        elif "regression status is not ok" in low or "regression status missing" in low or "regression status unreadable" in low:
+            classes.append("host_regression_unhealthy")
+        elif "regression status has no parseable" in low or "missing required lanes" in low:
+            classes.append("host_regression_unhealthy")
+        elif "wiring-check" in low:
+            classes.append("package_wiring_check_failed")
+        elif "nova test failed" in low or low.rstrip(".").endswith("nova test failed"):
+            classes.append("package_test_failed")
+        elif "modulenotfound" in low or "no module named" in low or "package incomplete" in low:
+            classes.append("package_incomplete")
+        elif any(
+            token in low
+            for token in (
+                "package-verify",
+                "nova install failed",
+                "nova doctor failed",
+                "nova runtime-status failed",
+            )
+        ):
+            classes.append("package_bootstrap_failed")
+        elif "failed" in low:
+            classes.append("package_command_failed")
+
+    # Also derive host class from gate flags when issues already listed.
+    if gate and not gate.get("ok", True):
+        gate_issues = [str(item).lower() for item in list(gate.get("blocking_issues") or [])]
+        if any("stale" in item for item in gate_issues) and "host_regression_stale" not in classes:
+            if str(gate.get("status") or "").upper() == "OK" and int(gate.get("returncode", 1) or 0) == 0:
+                classes.append("host_regression_stale")
+            elif "host_regression_unhealthy" not in classes and "host_regression_stale" not in classes:
+                classes.append("host_regression_unhealthy")
+
+    unique = sorted(set(classes))
+    host = sorted(c for c in unique if c.startswith("host_"))
+    package = sorted(c for c in unique if c.startswith("package_"))
+
+    if host and not package:
+        next_rail = "host_regression_refresh"
+        rebuild_helps = False
+    elif package and not host:
+        next_rail = "package_source_fix_then_rebuild"
+        rebuild_helps = True
+    elif host and package:
+        next_rail = "host_then_package"
+        rebuild_helps = True
+    elif unique:
+        next_rail = "revalidate"
+        rebuild_helps = False
+    else:
+        next_rail = "none"
+        rebuild_helps = False
+
+    return {
+        "classes": unique,
+        "host_blockers": host,
+        "package_blockers": package,
+        "next_rail": next_rail,
+        # Rebuild without a package-side fix (or source change) is thrash when
+        # only host gates failed — rebuild never refreshes host regression_status.
+        "rebuild_helps": bool(rebuild_helps),
+        "rebuild_is_thrash_without_source_or_package_fix": bool(host and not package) or next_rail == "host_regression_refresh",
+        "recommended_host_action": (
+            "Run scripts/run_regression.py all so runtime/regression_status.json is fresh OK"
+            if host
+            else ""
+        ),
+        "recommended_package_action": (
+            "Fix package/source failures (wiring-check, tests, missing modules), then rebuild+revalidate"
+            if package
+            else ""
+        ),
     }
 
 
@@ -363,7 +461,7 @@ def _write_validation_record(
     follow_up_owner: str,
 ) -> None:
     lines = [
-        "# NYO System RC Validation Record",
+        "# Nova RC Validation Record",
         "",
         f"Date: {time.strftime('%Y-%m-%d')}",
         "",
@@ -611,6 +709,10 @@ def run_release_validation(
         "latest_version": artifact_version,
         "latest_channel": release_channel,
     })
+    failure_classes = classify_release_validation_failures(
+        blocking_issues=blocking_issues,
+        regression_gate=regression_gate,
+    )
     report = {
         "ok": bool(record_payload.get("exists")) and not blocking_issues,
         "completed": bool(record_payload.get("exists")),
@@ -627,6 +729,7 @@ def run_release_validation(
         "regression_gate": regression_gate,
         "blocking_issues": blocking_issues,
         "nonblocking_issues": nonblocking_issues,
+        "failure_classes": failure_classes,
         "steps": steps,
         "report_path": str(report_path),
         "created_at_epoch": time.time(),
@@ -641,6 +744,7 @@ def render_release_validation_report(report: dict[str, Any]) -> str:
         for step in list(report.get("steps") or [])
         if isinstance(step, dict)
     ]
+    failure = report.get("failure_classes") if isinstance(report.get("failure_classes"), dict) else {}
     lines = [
         "Release Validation Run",
         f"- completed: {bool(report.get('completed'))}",
@@ -651,6 +755,11 @@ def render_release_validation_report(report: dict[str, Any]) -> str:
         f"- report: {report.get('report_path') or ''}",
         f"- blocking issues: {'; '.join(report.get('blocking_issues') or []) or 'none'}",
         f"- non-blocking issues: {'; '.join(report.get('nonblocking_issues') or []) or 'none'}",
+        f"- failure classes: {', '.join(list(failure.get('classes') or [])) or 'none'}",
+        f"- next rail: {failure.get('next_rail') or 'none'}",
+        f"- rebuild helps: {bool(failure.get('rebuild_helps'))}",
+        f"- host action: {failure.get('recommended_host_action') or 'none'}",
+        f"- package action: {failure.get('recommended_package_action') or 'none'}",
         "- steps:",
     ]
     lines.extend(f"  - {item}" for item in steps)

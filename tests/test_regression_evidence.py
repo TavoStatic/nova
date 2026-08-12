@@ -99,6 +99,22 @@ class TestRegressionEvidence(unittest.TestCase):
         )
         self.assertIsNone(blocker)
 
+    def test_lock_contention_keeps_regression_evidence_current(self):
+        from services.nova_mission_owner_verdicts import _regression_evidence_current
+
+        tail = "[FAIL] regression already running (pid=5812, lanes=unit, behavior)"
+        self.assertTrue(
+            _regression_evidence_current(
+                status_label="FAILED",
+                stale=False,
+                evidence={
+                    "last_regression_failed_tests": [],
+                    "last_regression_failed_lane": "",
+                    "last_regression_tail": tail,
+                },
+            )
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

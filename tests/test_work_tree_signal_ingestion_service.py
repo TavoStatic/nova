@@ -10,8 +10,12 @@ from unittest import mock
 from pathlib import Path
 
 import work_tree
-from services.edfi.config import CAPABILITY_SCHEMA
-from services.edfi.profile_evidence import EXPECTED_BISD_RESOURCE_COUNT
+try:
+    from services.edfi.config import CAPABILITY_SCHEMA
+    from services.edfi.profile_evidence import EXPECTED_RESOURCE_COUNT as EXPECTED_RESOURCE_COUNT
+except ImportError:
+    CAPABILITY_SCHEMA: dict = {}
+    EXPECTED_RESOURCE_COUNT: int = 0
 from services.work_tree_signal_ingestion import (
     EDFI_CAPABILITY_PROFILE_READ_HOLD_REASON,
     EDFI_CAPABILITY_PROFILE_READ_TASK_TITLE,
@@ -63,8 +67,8 @@ _VALID_EDFI_PROFILE_READ_RESULT = json.dumps(
         "auth": {"ok": True},
         "discovery": {
             "ok": True,
-            "resource_count": EXPECTED_BISD_RESOURCE_COUNT,
-            "resources": ["ed-fi/schools"],
+            "resource_count": EXPECTED_RESOURCE_COUNT,
+            "resources": ["backpack/schools"],
         },
     }
 )
@@ -215,6 +219,57 @@ class TestWorkTreeSignalIngestionService(unittest.TestCase):
         self.assertIn(str(progress.get("motion") or ""), {"not_started", "moving", "stalled", "blocked", "done"})
         self.assertIn("percent", progress)
         self.assertTrue(str(progress.get("operator_summary") or "").strip())
+
+    def test_sequence_tasks_rehydrate_tool_args_from_signal_payload(self) -> None:
+        signal = {
+            "source": "control_status",
+            "signal_class": "release_readiness_gap",
+            "title": "Release package is stale behind live source",
+            "fingerprint": {
+                "class": "release_readiness_gap",
+                "surface": "release",
+                "error": "release_package_not_ready",
+                "symbol": "nova-rc.zip",
+            },
+            "payload": {
+                "release_status_ok": True,
+                "latest_state": "built",
+                "latest_readiness_state": "source-changed-after-build",
+                "release_phase_code": "release_source_changed_after_build",
+                "latest_artifact_name": "nova-rc.zip",
+                "latest_version": "2026.07.20",
+                "latest_source_newest_path": "src/release_notes.py",
+                "ledger_path": "runtime/release/ledger.jsonl",
+                "latest_validation_seed_path": "runtime/release/validation_seed.jsonl",
+            },
+            "severity": "high",
+            "actionability": "safe_now",
+            "task_sequence": [
+                {
+                    "title": "Read release ledger for current package",
+                    "allowed_tools": ["read"],
+                    "preferred_tool": "read",
+                },
+                {
+                    "title": "Read newest changed source file after release build",
+                    "allowed_tools": ["read"],
+                    "preferred_tool": "read",
+                },
+            ],
+        }
+
+        result = self.service.ingest_signal(signal)
+        self.assertEqual(result.get("action"), "created")
+
+        branch_id = str(result.get("branch_id") or "")
+        tasks = [
+            task
+            for task in work_tree.list_branch_tasks(branch_id)
+            if str(getattr(task.status, "value", task.status) or "").strip().lower() not in {"complete", "dropped"}
+        ]
+        self.assertTrue(tasks)
+        task_meta = dict(tasks[0].meta or {})
+        self.assertEqual(task_meta.get("tool_args"), ["runtime/release/ledger.jsonl"])
 
     def test_material_signal_change_increments_evidence_count(self) -> None:
         base_signal = {
@@ -509,12 +564,12 @@ class TestWorkTreeSignalIngestionService(unittest.TestCase):
             {
                 "temporal_pressure": {
                     "source": "calendar",
-                    "title": "PEIMS deadline",
+                    "title": "state education data deadline",
                     "event": {
                         "source": "calendar",
-                        "title": "PEIMS deadline",
+                        "title": "state education data deadline",
                         "start": "2026-06-10T09:00:00+00:00",
-                        "metadata": {"uid": "peims-weekly-uid"},
+                        "metadata": {"uid": "reporting-weekly-uid"},
                         "confidence": "confirmed",
                         "importance": 1.0,
                         "dependency_risk": 0.8,
@@ -532,7 +587,7 @@ class TestWorkTreeSignalIngestionService(unittest.TestCase):
         self.assertEqual(str(branch.source_type or ""), "calendar")
         self.assertEqual(str(branch.work_class or ""), "temporal_pressure")
         self.assertEqual(str(branch.preferred_tool or ""), "temporal_review")
-        self.assertIn("peims-weekly-uid", str(branch.source_key or ""))
+        self.assertIn("reporting-weekly-uid", str(branch.source_key or ""))
 
     def test_status_snapshot_does_not_treat_planned_restarts_as_pressure(self) -> None:
         results = self.service.ingest_status_snapshot(
@@ -925,7 +980,7 @@ class TestWorkTreeSignalIngestionService(unittest.TestCase):
             for task in work_tree.list_branch_tasks(branch.branch_id)
             if task.status not in {work_tree.TaskStatus.COMPLETE, work_tree.TaskStatus.DROPPED}
         ]
-        self.assertEqual(open_tasks[0].title, "Read Ed-Fi profile evidence builder")
+        self.assertEqual(open_tasks[0].title, "Read data connector profile evidence builder")
         self.assertEqual(open_tasks[0].meta.get("tool_args"), ["services/edfi/profile_evidence.py"])
 
     def test_status_snapshot_ingests_autonomy_orchestrator_ack_hold(self) -> None:
@@ -1207,6 +1262,48 @@ class TestWorkTreeSignalIngestionService(unittest.TestCase):
         self.assertEqual(open_tasks[0].title, "Synthesize subconscious review judgment for fulfillment_bridge_entry_fallthrough / fulfillment_missed")
         self.assertEqual(open_tasks[0].meta.get("expected_tool"), "subconscious_review_judgment")
         self.assertIn(premature_blocked.task_id, {task.task_id for task in dropped_tasks})
+
+    def test_actionable_task_replaces_blocked_hold_when_signal_provides_next_step(self) -> None:
+        initial_signal = {
+            "source": "control_status",
+            "signal_class": "runtime_failure",
+            "title": "Runtime failure needs attention",
+            "fingerprint": {
+                "class": "runtime_failure",
+                "surface": "control_status",
+                "error": "runtime_failure",
+                "symbol": "pulse",
+            },
+            "payload": {"error": "runtime_failure", "symbol": "pulse"},
+            "severity": "high",
+            "actionability": "blocked",
+            "blocked_task": "Await operator confirmation before proceeding",
+            "blocked_reason": "operator_response_required",
+        }
+        followup_signal = {
+            **initial_signal,
+            "actionability": "safe_now",
+            "next_task": "Inspect runtime failure and patch the offending path",
+            "task_sequence": [
+                {
+                    "title": "Inspect runtime failure and patch the offending path",
+                    "allowed_tools": ["read"],
+                    "preferred_tool": "read",
+                }
+            ],
+        }
+
+        self.service.ingest_signal(initial_signal)
+        self.service.ingest_signal(followup_signal)
+
+        branch = self._signal_branches()[0]
+        open_tasks = [
+            task for task in work_tree.list_branch_tasks(branch.branch_id)
+            if str(getattr(task.status, "value", task.status) or "").strip().lower() not in {"complete", "dropped"}
+        ]
+        self.assertEqual(len(open_tasks), 1)
+        self.assertEqual(open_tasks[0].title, "Inspect runtime failure and patch the offending path")
+        self.assertNotEqual(str(open_tasks[0].meta.get("blocked_reason") or ""), "operator_response_required")
 
     def test_ingested_branch_notes_include_signal_evidence_lines(self) -> None:
         signal = {
@@ -3024,7 +3121,10 @@ class TestWorkTreeSignalIngestionService(unittest.TestCase):
         self.assertEqual(str(branch.source_type or ""), "release")
         self.assertEqual(str(branch.work_class or ""), "release_readiness_gap")
         self.assertEqual(str(branch.actionability or ""), "safe_now")
-        self.assertEqual(str(branch.source_key or ""), "release_readiness_gap:release:release_package_not_ready:nova-rc.zip")
+        self.assertEqual(
+            str(branch.source_key or ""),
+            "release_readiness_gap:release:release_package_not_ready:package-zip:rc",
+        )
         self.assertEqual(branch.preferred_tool, "read")
         tasks = work_tree.list_branch_tasks(branch.branch_id)
         self.assertEqual(len(tasks), 1)
@@ -3090,6 +3190,78 @@ class TestWorkTreeSignalIngestionService(unittest.TestCase):
             if task.status not in {work_tree.TaskStatus.COMPLETE, work_tree.TaskStatus.DROPPED}
         ]
         self.assertEqual(open_tasks, [])
+
+    def test_release_failing_validation_stays_on_release_rail_not_source_root_judgment(self) -> None:
+        """Blocked readiness must not cage climb under quiet hold via source_root_judgment."""
+        status_payload = {
+            "alerts": [],
+            "self_check_pass_ratio": 1.0,
+            "wiring_inventory": {"gap_count": 0},
+            "release_status": {
+                "ok": True,
+                "ledger_path": "C:\\NOVA\\runtime\\exports\\release_packages\\release_ledger.jsonl",
+                "latest_state": "built-only",
+                "latest_readiness_state": "blocked",
+                "latest_ready_to_ship": False,
+                "latest_readiness_note": "Latest build has a failing validation result.",
+                "latest_artifact_name": "nova-rc-fail.zip",
+                "latest_artifact_path": "C:\\NOVA\\runtime\\exports\\release_packages\\nova-rc-fail.zip",
+                "latest_validation_seed_path": "C:\\NOVA\\runtime\\exports\\release_packages\\validation_records\\nova-rc-fail.md",
+                "latest_validation_result": "fail",
+                "latest_validation_record_complete": True,
+            },
+        }
+
+        from services.work_tree_signal_ingestion import _release_readiness_signal_from_status
+
+        signal = _release_readiness_signal_from_status(status_payload)
+        self.assertIsNotNone(signal)
+        assert signal is not None
+        self.assertEqual(signal.get("title"), "Release package has failing validation")
+        # Fail path: re-validate, do not thrash-rebuild (rebuild does not refresh host regression).
+        self.assertEqual(signal.get("preferred_tool"), "release_validation_run")
+        tools = {
+            str(item.get("preferred_tool") or "")
+            for item in list(signal.get("task_sequence") or [])
+            if isinstance(item, dict)
+        }
+        self.assertIn("release_validation_run", tools)
+        self.assertNotIn("source_root_judgment", tools)
+        # Rebuild may still appear for other readiness states, but blocked fail path
+        # must not default the sequence to rebuild thrash.
+        blocked_only_tools = tools - {"read"}
+        self.assertNotEqual(blocked_only_tools, {"release_rebuild_verify"})
+
+        normalized = self.service._normalize_signal(dict(signal))
+        seq_tools = {
+            str(item.get("preferred_tool") or "")
+            for item in list(normalized.get("task_sequence") or [])
+            if isinstance(item, dict)
+        }
+        self.assertNotIn("source_root_judgment", seq_tools)
+        self.assertIn("release_validation_run", seq_tools)
+
+        self.service.sync_status_snapshot(status_payload)
+        branch = self._signal_branches()[0]
+        self.assertEqual(branch.title, "Release package has failing validation")
+        open_tasks = [
+            task
+            for task in work_tree.list_branch_tasks(branch.branch_id)
+            if task.status not in {work_tree.TaskStatus.COMPLETE, work_tree.TaskStatus.DROPPED}
+        ]
+        self.assertTrue(open_tasks)
+        expected = str((open_tasks[0].meta or {}).get("expected_tool") or "")
+        # First open stem is often ledger read; later stems come from sequence after complete.
+        self.assertNotEqual(expected, "source_root_judgment")
+        self.assertIn(expected, {"read", "release_validation_run"})
+        payload_seq = list((branch.source_payload or {}).get("task_sequence") or [])
+        seq_tools = {
+            str(item.get("preferred_tool") or "")
+            for item in payload_seq
+            if isinstance(item, dict)
+        }
+        self.assertIn("release_validation_run", seq_tools)
+        self.assertNotIn("source_root_judgment", seq_tools)
 
     def test_release_source_changed_sequences_to_rebuild_verify(self) -> None:
         status_payload = {
@@ -3176,7 +3348,7 @@ class TestWorkTreeSignalIngestionService(unittest.TestCase):
         branch_id = branch.branch_id
         self.assertEqual(
             str(branch.source_key or ""),
-            "release_readiness_gap:release:release_package_not_ready:nova-rc.zip",
+            "release_readiness_gap:release:release_package_not_ready:package-zip:rc",
         )
         open_tasks = [
             task
@@ -3219,7 +3391,7 @@ class TestWorkTreeSignalIngestionService(unittest.TestCase):
         self.assertEqual(branches[0].branch_id, branch_id)
         self.assertEqual(
             str(branches[0].source_key or ""),
-            "release_readiness_gap:release:release_package_not_ready:nova-rc.zip",
+            "release_readiness_gap:release:release_package_not_ready:package-zip:rc",
         )
         self.assertEqual(
             str((branches[0].source_payload or {}).get("latest_readiness_state") or ""),
@@ -3230,6 +3402,55 @@ class TestWorkTreeSignalIngestionService(unittest.TestCase):
         progress = work_tree._branch_progress_payload(branches[0])
         self.assertIsNotNone(progress)
         self.assertGreater(int((progress or {}).get("percent") or 0), 0)
+
+    def test_release_rebuild_zip_does_not_mint_parallel_branches(self) -> None:
+        """Each rebuild zip must not open another full release ladder."""
+        first = {
+            "alerts": [],
+            "self_check_pass_ratio": 1.0,
+            "release_status": {
+                "ok": True,
+                "latest_channel": "rc",
+                "ledger_path": "C:\\NOVA\\runtime\\exports\\release_packages\\release_ledger.jsonl",
+                "latest_state": "built-only",
+                "latest_readiness_state": "source-changed-after-build",
+                "latest_ready_to_ship": False,
+                "latest_artifact_name": "nova-rc-2026.08.03.zip",
+                "latest_artifact_path": "C:\\NOVA\\runtime\\exports\\release_packages\\nova-rc-2026.08.03.zip",
+                "latest_source_changed_after_build": True,
+            },
+        }
+        self.service.sync_status_snapshot(first)
+        branch_id = self._signal_branches()[0].branch_id
+
+        second = {
+            "alerts": [],
+            "self_check_pass_ratio": 1.0,
+            "release_status": {
+                "ok": True,
+                "latest_channel": "rc",
+                "ledger_path": "C:\\NOVA\\runtime\\exports\\release_packages\\release_ledger.jsonl",
+                "latest_state": "built-only",
+                "latest_readiness_state": "needs-promotion",
+                "latest_ready_to_ship": False,
+                "latest_artifact_name": "nova-rc-2026.08.04.4.zip",
+                "latest_artifact_path": "C:\\NOVA\\runtime\\exports\\release_packages\\nova-rc-2026.08.04.4.zip",
+                "latest_verified_at": "2026-08-04T15:32:40-05:00",
+            },
+        }
+        results = self.service.sync_status_snapshot(second)
+        self.assertEqual([item for item in results if item.get("action") == "created"], [])
+        branches = self._signal_branches()
+        self.assertEqual(len(branches), 1)
+        self.assertEqual(branches[0].branch_id, branch_id)
+        self.assertEqual(
+            str(branches[0].source_key or ""),
+            "release_readiness_gap:release:release_package_not_ready:package-zip:rc",
+        )
+        self.assertEqual(
+            str((branches[0].source_payload or {}).get("latest_artifact_name") or ""),
+            "nova-rc-2026.08.04.4.zip",
+        )
 
     def test_status_snapshot_resolves_direct_control_runtime_fields_when_clear(self) -> None:
         self.service.sync_status_snapshot(
@@ -3715,7 +3936,7 @@ class TestSourceRootInventorySignalHelpers(unittest.TestCase):
 
     def test_looks_like_source_root_file_gap_detects_paths_and_suffixes(self) -> None:
         self.assertTrue(_looks_like_source_root_file_gap("updates/approvals.jsonl"))
-        self.assertTrue(_looks_like_source_root_file_gap("NYO-Nova-Autostart.ps1"))
+        self.assertTrue(_looks_like_source_root_file_gap("Nova-Nova-Autostart.ps1"))
         self.assertFalse(_looks_like_source_root_file_gap("codegen_pipeline"))
 
     def test_source_root_gap_evidence_task_uses_read_for_file_paths(self) -> None:

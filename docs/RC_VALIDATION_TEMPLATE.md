@@ -1,4 +1,15 @@
-# NYO System RC Validation Record
+<!--
+NOVA_DOC
+category: plan
+authority: active_working
+last_session: 2026-08-05
+last_agent: claude-cowork
+session_state: needs_update
+next_step: verify template against current validation flow
+open: none
+-->
+
+# Nova RC Validation Record
 
 Date: 2026-05-18
 

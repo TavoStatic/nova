@@ -78,7 +78,7 @@ class TestReleasePackageScripts(unittest.TestCase):
             _write(repo / "tests" / "test_placeholder.py", "def test_placeholder():\n    assert True\n")
             _write(repo / ".ci_venv" / "pyvenv.cfg", "home = C:/Python\n")
             _write(repo / "knowledge" / "packs" / "demo.txt", "pack\n")
-            _write(repo / "knowledge" / "peims" / "rules.txt", "peims\n")
+            _write(repo / "knowledge" / "internal" / "rules.txt", "internal\n")
             _write(repo / "knowledge" / "web" / "snapshot.txt", "web\n")
             _write(repo / "updates" / "patch.log", "patch log\n")
             _write(repo / "updates" / "artifact.zip", "zip\n")
@@ -113,7 +113,7 @@ class TestReleasePackageScripts(unittest.TestCase):
             self.assertIn("runtime/validation/actions/.keep", entries)
             self.assertNotIn(".ci_venv/pyvenv.cfg", entries)
             self.assertNotIn("knowledge/packs/demo.txt", entries)
-            self.assertNotIn("knowledge/peims/rules.txt", entries)
+            self.assertNotIn("knowledge/internal/rules.txt", entries)
             self.assertNotIn("knowledge/web/snapshot.txt", entries)
             self.assertNotIn("updates/patch.log", entries)
             self.assertNotIn("updates/artifact.zip", entries)
@@ -151,7 +151,7 @@ class TestReleasePackageScripts(unittest.TestCase):
 
             _write(candidate_dir / "package_manifest.json", """{
   \"schema_version\": 1,
-  \"package_name\": \"NYO System Base\",
+  \"package_name\": \"Nova Base\",
   \"artifact_type\": \"source-bootstrap-zip\",
   \"artifact_version\": \"2026.03.30.9\",
   \"release_channel\": \"rc\",
@@ -181,7 +181,7 @@ class TestReleasePackageScripts(unittest.TestCase):
             _write(candidate_dir / ".github" / "copilot-instructions.md", "internal\n")
             _write(candidate_dir / ".ci_venv" / "pyvenv.cfg", "home = C:/Python\n")
             _write(candidate_dir / ".pytest_cache" / "v" / "cache" / "nodeids", "[]\n")
-            _write(candidate_dir / "knowledge" / "peims" / "rules.txt", "peims\n")
+            _write(candidate_dir / "knowledge" / "internal" / "rules.txt", "internal\n")
             _write(candidate_dir / "LAST_SESSION.json", "{}\n")
             _write(candidate_dir / "RESUME_HERE.txt", "resume\n")
             _write(candidate_dir / "This_is_nova", "internal note\n")
@@ -200,7 +200,7 @@ class TestReleasePackageScripts(unittest.TestCase):
             self.assertIn("forbidden path present: .github", combined)
             self.assertIn("forbidden path present: .ci_venv", combined)
             self.assertIn("forbidden path present: .pytest_cache", combined)
-            self.assertIn("forbidden path present: knowledge/peims", combined)
+            self.assertIn("forbidden path present: knowledge/internal", combined)
             self.assertIn("forbidden path present: This_is_nova", combined)
             self.assertIn("forbidden path present: LAST_SESSION.json", combined)
             self.assertIn("forbidden path present: RESUME_HERE.txt", combined)

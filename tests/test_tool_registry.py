@@ -93,7 +93,7 @@ class TestToolRegistry(unittest.TestCase):
             {
                 "action": "review",
                 "payload": {
-                    "title": "PEIMS deadline",
+                    "title": "state education data deadline",
                     "start": "2026-06-10T09:00:00+00:00",
                     "importance": 1.0,
                     "dependency_risk": 0.7,

@@ -6,6 +6,7 @@ from services.layer_maturity_policy import evaluate_core_gate
 from services.regression_evidence import (
     regression_evidence_stale,
     regression_failure_active,
+    regression_failure_is_lock_contention,
     regression_outcome_failed,
     regression_outcome_passed,
 )
@@ -75,12 +76,24 @@ def _regression_evidence_current(
     if regression_outcome_passed(status_label):
         return True
     evidence = evidence if isinstance(evidence, dict) else {}
+    failed_tests = list(evidence.get("last_regression_failed_tests") or [])
+    failed_lane = _text(evidence.get("last_regression_failed_lane"), 80)
+    tail = _text(evidence.get("last_regression_tail"), 240)
+    # Concurrent lock is not a suite result. Treating it as "not current" clears the
+    # regression pillar and freezes climbable work while green_cycle stays true.
+    if regression_failure_is_lock_contention(
+        status_label=status_label,
+        failed_tests=failed_tests,
+        failed_lane=failed_lane,
+        tail=tail,
+    ):
+        return True
     return regression_failure_active(
         status_label=status_label,
         stale=stale,
-        failed_tests=list(evidence.get("last_regression_failed_tests") or []),
-        failed_lane=_text(evidence.get("last_regression_failed_lane"), 80),
-        tail=_text(evidence.get("last_regression_tail"), 240),
+        failed_tests=failed_tests,
+        failed_lane=failed_lane,
+        tail=tail,
     )
 
 

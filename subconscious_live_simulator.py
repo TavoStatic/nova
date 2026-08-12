@@ -790,7 +790,7 @@ def build_default_live_scenario_families() -> list[LiveSimulationFamily]:
                             conversation_state={
                                 "kind": "retrieval",
                                 "subject": "web_research",
-                                "query": "PEIMS attendance",
+                                "query": "state education data attendance",
                                 "result_count": 2,
                                 "urls": ["https://tea.texas.gov/a", "https://tea.texas.gov/b"],
                             },
@@ -808,7 +808,7 @@ def build_default_live_scenario_families() -> list[LiveSimulationFamily]:
                             conversation_state={
                                 "kind": "retrieval",
                                 "subject": "web_research",
-                                "query": "PEIMS attendance",
+                                "query": "state education data attendance",
                                 "result_count": 2,
                                 "urls": ["https://tea.texas.gov/a", "https://tea.texas.gov/b"],
                             },
@@ -826,7 +826,7 @@ def build_default_live_scenario_families() -> list[LiveSimulationFamily]:
                             conversation_state={
                                 "kind": "retrieval",
                                 "subject": "web_research",
-                                "query": "PEIMS attendance",
+                                "query": "state education data attendance",
                                 "result_count": 2,
                                 "urls": ["https://tea.texas.gov/a", "https://tea.texas.gov/b"],
                             },

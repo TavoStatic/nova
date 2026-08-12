@@ -245,10 +245,21 @@ def filter_actionable_capability_gaps(
     policy: dict[str, Any] | None,
     status_payload: dict[str, Any] | None = None,
 ) -> list[str]:
+    """Gaps Nova may climb via codegen/active work.
+
+    External/operator/LLC/environment finish areas stay listed as unfinished
+    but are not actionable self-codegen thrash.
+    """
+    from services.capability_finish_ownership import classify_capability
+
     status = dict(status_payload or {})
+    roadmap = status.get("capabilities_roadmap") if isinstance(status.get("capabilities_roadmap"), dict) else {}
     status["capability_gaps"] = list(gaps)
     actionable: list[str] = []
     for gap in list(gaps or []):
+        ownership = classify_capability(gap, roadmap=roadmap)
+        if not ownership.get("nova_can_finish_alone"):
+            continue
         if capability_action_allowed(gap, policy=policy, status_payload=status):
             actionable.append(gap)
     return actionable
@@ -283,6 +294,11 @@ def build_layer_maturity_summary(
             else set()
         ),
     )
+    external_gaps = [
+        str(item or "").strip().lower()
+        for item in list(payload.get("capability_gaps_external") or observed_gaps)
+        if str(item or "").strip()
+    ]
     suppress_signals = not actionable_gaps
     return {
         "ok": True,
@@ -294,6 +310,8 @@ def build_layer_maturity_summary(
         "actionable_gap_count": len(actionable_gaps),
         "observed_gaps": observed_gaps[:12],
         "actionable_gaps": actionable_gaps[:12],
+        "external_finish_gaps": external_gaps[:12],
+        "external_finish_gap_count": len(external_gaps),
         "leah_gap_count": len(leah_gaps),
         "suppress_capability_gap_signals": suppress_signals,
         "codegen_observe_mode": _clean_mode(layers.get("codegen", {}).get("mode")) == "observe",

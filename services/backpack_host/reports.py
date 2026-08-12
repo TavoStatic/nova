@@ -3,7 +3,7 @@ from __future__ import annotations
 """
 User-request report path for backpacks.
 
-Default model for Ed-Fi / TEA:
+Default model for data connector / TEA:
   1. Serve from local extract (runtime/edfi/extracts) when available.
   2. Live ODS pull only on explicit refresh (force_refresh=True).
   3. After a successful live pull, save a clean extract for next reports.
@@ -36,7 +36,7 @@ EDFI_REPORT_INTENTS: dict[str, dict[str, str]] = {
         "operation": "connection_health",
         "backpack_operation": "view_status",
         "label": "Connection health",
-        "description": "Ed-Fi connection health summary (local profile; refresh only when forced).",
+        "description": "data connector connection health summary (local profile; refresh only when forced).",
         "prefer_local": "true",
     },
     "connection_health": {
@@ -44,7 +44,7 @@ EDFI_REPORT_INTENTS: dict[str, dict[str, str]] = {
         "operation": "connection_health",
         "backpack_operation": "view_status",
         "label": "Connection health",
-        "description": "Ed-Fi connection health summary (local profile; refresh only when forced).",
+        "description": "data connector connection health summary (local profile; refresh only when forced).",
         "prefer_local": "true",
     },
     "students": {

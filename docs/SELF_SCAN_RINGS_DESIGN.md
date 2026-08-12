@@ -1,3 +1,14 @@
+<!--
+NOVA_DOC
+category: subsystem
+authority: active_authority
+last_session: 2026-08-05
+last_agent: claude-cowork
+session_state: current
+next_step: verify ring 1 doc_coverage sub-check is reflected here
+open: none
+-->
+
 # Self-scan rings — wiring design
 
 Document class: **wiring design / implementation contract**.  

@@ -33,7 +33,6 @@ _SOURCE_EXCLUDED_DIRS = {
 
 _SOURCE_EXCLUDED_PREFIXES = {
     "knowledge/packs",
-    "knowledge/peims",
     "knowledge/web",
 }
 
@@ -87,6 +86,10 @@ def _is_source_candidate(path: Path, root: Path) -> bool:
     if any(rel == prefix or rel.startswith(prefix + "/") for prefix in _SOURCE_EXCLUDED_PREFIXES):
         return False
     if parts[-1] in _SOURCE_EXCLUDED_FILES:
+        return False
+    # Operator dig/probe scripts under scripts/_*.py are not package identity.
+    # Touching them must not force source-changed rebuild thrash.
+    if len(parts) >= 2 and parts[0] == "scripts" and parts[-1].startswith("_"):
         return False
     if path.suffix.lower() in {".pyc", ".pyo", ".log", ".db", ".sqlite", ".jsonl"}:
         return False
@@ -452,9 +455,29 @@ class ReleaseStatusService:
             )
             out.update(freshness)
             if freshness.get("latest_source_changed_after_build"):
-                out["latest_readiness_state"] = "source-changed-after-build"
-                out["latest_ready_to_ship"] = False
-                out["latest_readiness_note"] = "Live source changed after the latest release build; rebuild and verify before promotion."
+                # Source drift is real, but it must not clobber an already-failed
+                # validation ladder. Overwriting blocked/fail → source-changed
+                # forces rebuild thrash without fixing package/host blockers.
+                current_state = str(out.get("latest_readiness_state") or "").strip().lower()
+                promotion_result = str(out.get("latest_validation_result") or "").strip().lower()
+                record_result = str(out.get("latest_validation_record_result") or "").strip().lower()
+                failing_validation = promotion_result == "fail" or record_result == "fail"
+                if current_state == "blocked" or failing_validation:
+                    out["latest_ready_to_ship"] = False
+                    note = str(out.get("latest_readiness_note") or "").strip()
+                    extra = (
+                        "Source also changed after build; fix package/host validation "
+                        "blockers before rebuild."
+                    )
+                    if extra not in note:
+                        out["latest_readiness_note"] = f"{note} {extra}".strip()
+                else:
+                    out["latest_readiness_state"] = "source-changed-after-build"
+                    out["latest_ready_to_ship"] = False
+                    out["latest_readiness_note"] = (
+                        "Live source changed after the latest release build; "
+                        "rebuild and verify before promotion."
+                    )
         return enrich_release_status(out)
 
 

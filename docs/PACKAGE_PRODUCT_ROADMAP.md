@@ -1,3 +1,14 @@
+<!--
+NOVA_DOC
+category: plan
+authority: stale_snapshot
+last_session: 2026-08-05
+last_agent: claude-cowork
+session_state: needs_update
+next_step: review against current LEAH build order in NOVA_POSTAL.md
+open: none
+-->
+
 # Nova Package Product Roadmap
 
 Document class: roadmap. It describes intended sequencing, not current implementation or release truth.

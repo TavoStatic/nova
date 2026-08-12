@@ -67,8 +67,8 @@ METADATA_ONLY_FIELDS = frozenset({
 })
 
 STUDENT_BEARING_RESOURCES = frozenset({
-    "ed-fi/students",
-    "ed-fi/studentSchoolAssociations",
+    "backpack/students",
+    "backpack/studentSchoolAssociations",
 })
 
 STUDENT_OPERATIONS = frozenset({
@@ -83,22 +83,22 @@ METADATA_OPERATIONS = frozenset({
 })
 
 
-def _normalize_edfi_resource(resource: Any) -> str:
+def _normalize_backpack_resource(resource: Any) -> str:
     name = str(resource or "").strip().strip("/")
     if not name:
         return ""
     if "/" not in name:
-        return f"ed-fi/{name}"
+        return f"backpack/{name}"
     return name
 
 
 def profile_for_resource(resource: Any) -> str:
-    normalized = _normalize_edfi_resource(resource)
+    normalized = _normalize_backpack_resource(resource)
     if normalized in STUDENT_BEARING_RESOURCES:
         return "student_default"
-    if normalized == "ed-fi/schools":
+    if normalized == "backpack/schools":
         return "education_org_default"
-    if normalized.startswith("ed-fi/"):
+    if normalized.startswith("backpack/"):
         return "student_default"
     return "none"
 
@@ -118,7 +118,7 @@ def resolve_redaction_profile(
         return "none"
 
     template = normalize_redaction_profile(template_profile) if template_profile else "none"
-    resolved_resource = _normalize_edfi_resource(resource)
+    resolved_resource = _normalize_backpack_resource(resource)
     if resolved_resource:
         resource_profile = profile_for_resource(resolved_resource)
         if resource_profile != "none":

@@ -57,7 +57,7 @@ if ($Json) {
 }
 
 Write-Host ""
-Write-Host "NYO System Release Ledger"
+Write-Host "Nova Release Ledger"
 Write-Host "-------------------------"
 Write-Host ("[INFO] Ledger path    : " + $ledgerPath)
 Write-Host ("[INFO] Returned rows : " + $filteredEntries.Count)

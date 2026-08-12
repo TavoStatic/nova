@@ -11,7 +11,7 @@ $ErrorActionPreference = "Stop"
 $scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $repoRoot = (Resolve-Path (Join-Path $scriptRoot "..")).Path
 $verifyScript = Join-Path $scriptRoot "verify_release_package.ps1"
-$installerScript = Join-Path $repoRoot "installer\NYO_System.iss"
+$installerScript = Join-Path $repoRoot "installer\Nova_Setup.iss"
 $defaultPackageRoot = Join-Path $repoRoot "runtime\exports\release_packages"
 $releaseLedgerPath = Join-Path $defaultPackageRoot "release_ledger.jsonl"
 
@@ -167,8 +167,8 @@ if ([string]::IsNullOrWhiteSpace($appVersion)) {
   $appVersion = $artifactStem
 }
 
-$expectedInstallerPath = Join-Path $outputRoot ("nyo-system-installer-" + $appVersion + ".exe")
-$validationRecordPath = Join-Path $validationRecordRoot ("nyo-system-installer-" + $appVersion + ".md")
+$expectedInstallerPath = Join-Path $outputRoot ("nova-installer-" + $appVersion + ".exe")
+$validationRecordPath = Join-Path $validationRecordRoot ("nova-installer-" + $appVersion + ".md")
 if (Test-Path $expectedInstallerPath) {
   Remove-Item -Force $expectedInstallerPath
 }
@@ -176,13 +176,13 @@ if (Test-Path $validationRecordPath) {
   Remove-Item -Force $validationRecordPath
 }
 
-$previousPayloadDir = $env:NYO_PAYLOAD_DIR
-$previousAppVersion = $env:NYO_APP_VERSION
-$previousOutputDir = $env:NYO_INSTALLER_OUTPUT_DIR
+$previousPayloadDir = $env:Nova_PAYLOAD_DIR
+$previousAppVersion = $env:Nova_APP_VERSION
+$previousOutputDir = $env:Nova_INSTALLER_OUTPUT_DIR
 
-$env:NYO_PAYLOAD_DIR = $payloadDir
-$env:NYO_APP_VERSION = $appVersion
-$env:NYO_INSTALLER_OUTPUT_DIR = $outputRoot
+$env:Nova_PAYLOAD_DIR = $payloadDir
+$env:Nova_APP_VERSION = $appVersion
+$env:Nova_INSTALLER_OUTPUT_DIR = $outputRoot
 
 try {
   $compileCode = Invoke-InnoCompiler $compilerPath $installerScript
@@ -195,9 +195,9 @@ try {
     exit 1
   }
 } finally {
-  $env:NYO_PAYLOAD_DIR = $previousPayloadDir
-  $env:NYO_APP_VERSION = $previousAppVersion
-  $env:NYO_INSTALLER_OUTPUT_DIR = $previousOutputDir
+  $env:Nova_PAYLOAD_DIR = $previousPayloadDir
+  $env:Nova_APP_VERSION = $previousAppVersion
+  $env:Nova_INSTALLER_OUTPUT_DIR = $previousOutputDir
 }
 
 if (-not $KeepPayload -and (Test-Path $extractRoot)) {
@@ -205,7 +205,7 @@ if (-not $KeepPayload -and (Test-Path $extractRoot)) {
 }
 
 $validationRecord = @(
-  "# NYO System Installer Validation Record",
+  "# Nova Installer Validation Record",
   "",
   "Date: " + (Get-Date -Format "yyyy-MM-dd"),
   "",

@@ -9,8 +9,8 @@ Examples:
   python scripts/run_backpack.py install edfi --settings path/to/settings.json
   python scripts/run_backpack.py install edfi --settings path.json --skip-profile
   python scripts/run_backpack.py query edfi connection_health --role standard_user
-  python scripts/run_backpack.py query edfi list_schools --role standard_user --lea 031901
-  python scripts/run_backpack.py probe-lea edfi --lea 031901 --limit 3
+  python scripts/run_backpack.py query edfi list_schools --role standard_user --lea [lea-id]
+  python scripts/run_backpack.py probe-lea edfi --lea [lea-id] --limit 3
   python scripts/run_backpack.py report edfi schools --role standard_user --limit 10
   python scripts/run_backpack.py report edfi schools --refresh --limit 50
   python scripts/run_backpack.py report edfi health --role viewer
@@ -18,8 +18,17 @@ Examples:
   python scripts/run_backpack.py warehouse-status edfi
   python scripts/run_backpack.py warehouse-sync edfi
   python scripts/run_backpack.py warehouse-sync edfi --force
+  python scripts/run_backpack.py warehouse-sync edfi --full
+  python scripts/run_backpack.py warehouse-sync edfi --full --force
+  python scripts/run_backpack.py warehouse-sync edfi --resource students
+  python scripts/run_backpack.py warehouse-sync edfi --resource grades
+  python scripts/run_backpack.py warehouse-sync edfi --resources students,attendance,grades
+  python scripts/run_backpack.py warehouse-query edfi --query-type status
+  python scripts/run_backpack.py warehouse-query edfi --query-type students --limit 20
+  python scripts/run_backpack.py warehouse-query edfi --query-type attendance --school-year 2025
+  python scripts/run_backpack.py warehouse-query edfi --query-type grades --student-id 1234567
 
-Legacy: data_sources/edfi_bisd is the old BISD-named lane. New installs use backpacks/edfi.
+Legacy: data_sources/data_connector is the old [district]-named lane. New installs use backpacks/edfi.
 TEA keys are usually statewide; --lea / allowed_lea_ids are Nova policy filters.
 Reports return reader-friendly rows for dashboards (not raw ODS JSON).
 Rate-limit evidence is captured passively on real 429s — do not flood TEA to force samples.
@@ -226,17 +235,119 @@ def cmd_warehouse_status(args: argparse.Namespace) -> int:
 
 
 def cmd_warehouse_sync(args: argparse.Namespace) -> int:
-    from services.edfi.warehouse_sync import maybe_run_scheduled_warehouse_sync, run_full_schools_sync
+    from services.edfi.warehouse_sync import (
+        _connection_id,
+        _lea_id,
+        load_backpack_settings,
+        maybe_run_scheduled_warehouse_sync,
+        run_full_sync,
+        run_resource_sync,
+    )
 
     force = bool(getattr(args, "force", False))
-    if force:
-        result = run_full_schools_sync(lea_id=str(args.lea or "").strip())
-        result["forced"] = True
-    else:
-        result = maybe_run_scheduled_warehouse_sync(force=False)
-    print(json.dumps(result, indent=2, default=str))
-    if force:
+    resource = str(getattr(args, "resource", "") or "").strip().lower()
+    resources_raw = str(getattr(args, "resources", "") or "").strip()
+    full = bool(getattr(args, "full", False))
+    lea = str(getattr(args, "lea", "") or "").strip()
+    limit_override = int(getattr(args, "limit", 0) or 0)
+
+    settings = load_backpack_settings()
+    conn = _connection_id(settings)
+    lea = lea or _lea_id(settings, lea)
+
+    if resource:
+        # Single named resource — always runs regardless of schedule.
+        result = run_resource_sync(
+            resource,
+            connection_id=conn,
+            lea_id=lea,
+            settings=settings,
+            limit=limit_override,
+        )
+        result.setdefault("mode", "single_resource")
+        print(json.dumps(result, indent=2, default=str))
         return 0 if result.get("ok") else 1
+
+    if full or resources_raw:
+        # Ordered full sync (all layers, or comma-sep subset).
+        resource_list: list[str] | None = (
+            [r.strip() for r in resources_raw.split(",") if r.strip()]
+            if resources_raw else None
+        )
+        result = run_full_sync(
+            connection_id=conn,
+            lea_id=lea,
+            resources=resource_list,
+            settings=settings,
+        )
+        if force:
+            result["forced"] = True
+        result.setdefault("mode", "full_sync")
+        print(json.dumps(result, indent=2, default=str))
+        return 0 if result.get("ok") is not False else 1
+
+    # Default: respect the daily schedule gate (or force past it).
+    result = maybe_run_scheduled_warehouse_sync(force=force, settings=settings)
+    result.setdefault("mode", "scheduled")
+    print(json.dumps(result, indent=2, default=str))
+    return 0 if result.get("ok") is not False else 1
+
+
+def cmd_warehouse_query(args: argparse.Namespace) -> int:
+    """Query the local warehouse — never hits the live ODS."""
+    from services.edfi.warehouse_sync import load_backpack_settings, _lea_id, _connection_id
+
+    settings = load_backpack_settings()
+    conn = _connection_id(settings)
+    lea = str(getattr(args, "lea", "") or _lea_id(settings) or "").strip()
+    query_type = str(args.query_type or "status").strip().lower()
+
+    params: dict = {
+        "query_type": query_type,
+        "district_lea_id": lea,
+        "lea_id": lea,
+    }
+    for flag in ("school_id", "school_year", "student_unique_id",
+                 "category", "date_from", "date_to",
+                 "grade_type", "grading_period", "program_type"):
+        val = getattr(args, flag.replace("-", "_"), None)
+        if val:
+            params[flag] = val
+    limit = int(getattr(args, "limit", 50) or 50)
+
+    from services.backpack_host.query import run_backpack_query
+    result = run_backpack_query(conn if False else "edfi", "warehouse_query",
+                                params, row_limit=limit, role=args.role,
+                                skip_grant_check=True)
+
+    if query_type == "status":
+        # Prefer tabular rows from connector/present; fall back to resource_status.
+        table_rows = [r for r in (result.get("rows") or []) if isinstance(r, dict)]
+        if not table_rows and isinstance(result.get("resource_status"), dict):
+            for name, info in sorted(result["resource_status"].items()):
+                if isinstance(info, dict):
+                    table_rows.append(
+                        {
+                            "resource": name,
+                            "synced": info.get("synced"),
+                            "row_count": info.get("row_count") or 0,
+                            "last_sync_at": info.get("last_sync_at") or info.get("synced_at") or "—",
+                        }
+                    )
+        header = f"{'Resource':<35} {'Synced':<8} {'Rows':>8}  Last sync"
+        print(header)
+        print("-" * len(header))
+        for row in table_rows:
+            name = str(row.get("resource") or "")
+            synced = "yes" if row.get("synced") else "no"
+            nrows = str(row.get("row_count") or 0)
+            last = str(row.get("last_sync_at") or "—")[:19]
+            print(f"{name:<35} {synced:<8} {nrows:>8}  {last}")
+        if result.get("summary"):
+            print(result["summary"])
+        return 0 if result.get("ok") is not False else 1
+
+    print(json.dumps(result, indent=2, default=str))
     return 0 if result.get("ok") is not False else 1
 
 
@@ -314,7 +425,7 @@ def main(argv: list[str] | None = None) -> int:
     p_query.add_argument(
         "--lea",
         default="",
-        help="District LEA for this query (031901 or 31901). Must be allowed by install scope.",
+        help="District LEA for this query ([lea-id] or 31901). Must be allowed by install scope.",
     )
     p_query.add_argument(
         "--skip-grants",
@@ -328,7 +439,7 @@ def main(argv: list[str] | None = None) -> int:
         help="Small schools probe for one LEA (avoids unscoped statewide scans)",
     )
     p_probe.add_argument("backpack_id")
-    p_probe.add_argument("--lea", required=True, help="LEA to probe (e.g. 031901)")
+    p_probe.add_argument("--lea", required=True, help="LEA to probe (e.g. [lea-id])")
     p_probe.add_argument("--limit", type=int, default=3)
     p_probe.add_argument("--role", default="account_admin")
     p_probe.add_argument("--skip-grants", action="store_true")
@@ -346,7 +457,7 @@ def main(argv: list[str] | None = None) -> int:
         help="schools | health | students | list",
     )
     p_report.add_argument("--role", default="standard_user")
-    p_report.add_argument("--lea", default="", help="Optional LEA filter (031901 or 31901)")
+    p_report.add_argument("--lea", default="", help="Optional LEA filter ([lea-id] or 31901)")
     p_report.add_argument("--limit", type=int, default=25)
     p_report.add_argument(
         "--refresh",
@@ -367,6 +478,32 @@ def main(argv: list[str] | None = None) -> int:
     p_rl.add_argument("--limit", type=int, default=20, help="Recent event count with --recent")
     p_rl.set_defaults(func=cmd_rate_limit_evidence)
 
+    p_wq = sub.add_parser(
+        "warehouse-query",
+        help=(
+            "Query the local warehouse without hitting the ODS. "
+            "query-types: status | students | attendance | attendance_summary | grades | programs"
+        ),
+    )
+    p_wq.add_argument("backpack_id", nargs="?", default="edfi")
+    p_wq.add_argument(
+        "--query-type", dest="query_type", default="status",
+        help="status | students | attendance | attendance_summary | grades | programs",
+    )
+    p_wq.add_argument("--lea", default="", help="LEA ID override")
+    p_wq.add_argument("--school-id", dest="school_id", default="")
+    p_wq.add_argument("--school-year", dest="school_year", type=int, default=0)
+    p_wq.add_argument("--student-id", dest="student_unique_id", default="")
+    p_wq.add_argument("--category", default="", help="Attendance category filter")
+    p_wq.add_argument("--date-from", dest="date_from", default="")
+    p_wq.add_argument("--date-to", dest="date_to", default="")
+    p_wq.add_argument("--grade-type", dest="grade_type", default="")
+    p_wq.add_argument("--grading-period", dest="grading_period", default="")
+    p_wq.add_argument("--program-type", dest="program_type", default="")
+    p_wq.add_argument("--limit", type=int, default=50)
+    p_wq.add_argument("--role", default="account_admin")
+    p_wq.set_defaults(func=cmd_warehouse_query)
+
     p_fuse = sub.add_parser(
         "fusion-scan",
         help="Probe backpack fusion into Nova nervous system (capabilities Nova may claim)",
@@ -376,7 +513,7 @@ def main(argv: list[str] | None = None) -> int:
 
     p_ws = sub.add_parser(
         "warehouse-status",
-        help="Local Ed-Fi SQLite warehouse status + daily schedule gate",
+        help="Local data connector SQLite warehouse status + daily schedule gate",
     )
     p_ws.add_argument("backpack_id", nargs="?", default="edfi")
     p_ws.add_argument("--lea", default="")
@@ -385,14 +522,48 @@ def main(argv: list[str] | None = None) -> int:
 
     p_wsync = sub.add_parser(
         "warehouse-sync",
-        help="Full LEA schools pull into warehouse (respects schedule unless --force)",
+        help=(
+            "Sync LEA data into the local warehouse. "
+            "Default: respects daily schedule. "
+            "Use --full for all layers, --resource for one, --resources for a subset."
+        ),
     )
     p_wsync.add_argument("backpack_id", nargs="?", default="edfi")
-    p_wsync.add_argument("--lea", default="")
+    p_wsync.add_argument("--lea", default="", help="Override LEA ID (e.g. [lea-id])")
+    p_wsync.add_argument(
+        "--resource",
+        default="",
+        help=(
+            "Sync a single named resource (e.g. students, grades, attendance). "
+            "Always runs regardless of schedule. Safe to repeat (one resource only)."
+        ),
+    )
+    p_wsync.add_argument(
+        "--resources",
+        default="",
+        help="Comma-separated subset of resources to sync (e.g. students,grades,attendance).",
+    )
+    p_wsync.add_argument(
+        "--full",
+        action="store_true",
+        help=(
+            "Run ordered full sync across all 22 resource layers in SYNC_PLAN order. "
+            "Stops on rate limit; safe to resume later."
+        ),
+    )
     p_wsync.add_argument(
         "--force",
         action="store_true",
-        help="Ignore daily schedule / min gap (rate-limit risk if repeated)",
+        help="Ignore daily schedule / min gap. With --full, runs all layers immediately.",
+    )
+    p_wsync.add_argument(
+        "--limit",
+        type=int,
+        default=0,
+        help=(
+            "Override the per-resource match cap (default: 0 = use built-in per-resource cap). "
+            "Example: --limit 5000 caps a single-resource sync at 5000 matching rows."
+        ),
     )
     p_wsync.set_defaults(func=cmd_warehouse_sync)
 

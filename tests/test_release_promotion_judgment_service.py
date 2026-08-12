@@ -10,7 +10,7 @@ def _write_record(path: Path, *, result: str = "") -> None:
     path.write_text(
         "\n".join(
             [
-                "# NYO System RC Validation Record",
+                "# Nova RC Validation Record",
                 "",
                 "## Candidate",
                 "",

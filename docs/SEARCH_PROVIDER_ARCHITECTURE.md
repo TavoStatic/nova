@@ -1,10 +1,21 @@
+<!--
+NOVA_DOC
+category: subsystem
+authority: active_working
+last_session: 2026-08-05
+last_agent: claude-cowork
+session_state: needs_update
+next_step: verify SearXNG integration status
+open: none
+-->
+
 # Search Provider Architecture
 
 Date: 2026-06-11
 
 ## Purpose
 
-This document defines the search-provider architecture for Nova as the runtime core of NYO System.
+This document defines the search-provider architecture for Nova as the runtime core of Nova.
 
 It describes:
 

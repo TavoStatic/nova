@@ -200,7 +200,7 @@ WIRING_SURFACES: tuple[WiringSurface, ...] = (
     ),
     WiringSurface(
         "edfi_capability_profile",
-        "Ed-Fi capability profile evidence, saved district contract, and profile-grounded signal closure",
+        "data connector capability profile evidence, saved district contract, and profile-grounded signal closure",
         (
             "edfi_capability_profile",
             "edfi_capability_profile_ok",
@@ -225,7 +225,7 @@ WIRING_SURFACES: tuple[WiringSurface, ...] = (
     ),
     WiringSurface(
         "edfi_core",
-        "Vendor-neutral Ed-Fi core services, explore tool, and core readiness lifecycle",
+        "Vendor-neutral data connector core services, explore tool, and core readiness lifecycle",
         (
             "edfi_core_readiness",
             "edfi_core_ready",
@@ -244,7 +244,7 @@ WIRING_SURFACES: tuple[WiringSurface, ...] = (
     ),
     WiringSurface(
         "backpack_edfi",
-        "Ed-Fi backpack package, host, capability fusion scan, and control surface for Nova nervous system",
+        "data connector backpack package, host, capability fusion scan, and control surface for Nova nervous system",
         (
             "backpack_fusion",
             "backpack_fusion_ok",
@@ -266,15 +266,15 @@ WIRING_SURFACES: tuple[WiringSurface, ...] = (
         ),
     ),
     WiringSurface(
-        "data_lane_edfi_bisd",
-        "LEGACY BISD Ed-Fi data lane (prefer backpacks/edfi)",
+        "data_lane_data_connector",
+        "LEGACY data connector data lane (prefer installed backpack)",
         ("data_pipelines", "data_pipeline_count"),
-        ("data_lane_edfi_bisd",),
+        ("data_lane_data_connector",),
         ("pipeline", "read", "find"),
         ("active_work_tree_run_next",),
         (
-            "data_sources/edfi_bisd/connector.py",
-            "data_sources/edfi_bisd/pipeline.json",
+            "data_sources/data_connector/connector.py",
+            "data_sources/data_connector/pipeline.json",
             "scripts/run_edfi_profile.py",
             "scripts/run_edfi_explore.py",
         ),

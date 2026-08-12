@@ -22,6 +22,9 @@ from services.nova_wiring_inventory import wiring_surface_ids
 from services.sock_service import get_sock_status_keys
 from services.capabilities_gap_detector import enhance_status_with_capability_gaps
 from services.layer_maturity_policy import enrich_status_with_layer_maturity
+from services.nova_shell.external_finish import external_finish_status as shell_external_finish_status
+from services.supervisor_finish import supervisor_ownership_finish_status
+from services.finish_areas_inventory import build_finish_areas_inventory
 from services.control_status_surfaces import CONTROL_STATUS_SURFACES_SERVICE
 from services.work_tree_pressure_snapshot import build_work_tree_pressure_snapshot
 
@@ -1573,6 +1576,26 @@ class ControlStatusService:
             payload.setdefault("capabilities_gap_summary", {})
             payload.setdefault("layer_maturity", {})
             payload.setdefault("suppress_capability_gap_signals", True)
+        try:
+            payload["shell_external_finish"] = shell_external_finish_status()
+        except Exception as exc:
+            payload["shell_external_finish"] = {
+                "ok": False,
+                "finisher": "llc_external",
+                "error": str(exc)[:200],
+            }
+        try:
+            payload["supervisor_ownership_finish"] = supervisor_ownership_finish_status()
+        except Exception as exc:
+            payload["supervisor_ownership_finish"] = {
+                "ok": False,
+                "finisher": "operator_policy",
+                "error": str(exc)[:200],
+            }
+        try:
+            payload["finish_areas"] = build_finish_areas_inventory()
+        except Exception as exc:
+            payload["finish_areas"] = {"ok": False, "error": str(exc)[:200]}
         root_closure_seed = {
             **payload,
             "root_closure_inventory": {},

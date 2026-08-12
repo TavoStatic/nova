@@ -26,7 +26,7 @@ def _change_cursor_maintenance_enabled() -> bool:
     """
     Live TEA change-cursor advances are off by default.
 
-    The Ed-Fi backpack serves reports from local extracts; background cursor
+    The data connector backpack serves reports from local extracts; background cursor
     maintenance was a major source of rate-limit pressure (hundreds of pulls).
     Opt in with NOVA_EDFI_CHANGE_CURSOR_MAINTENANCE=1 when needed.
     """
@@ -48,7 +48,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--connection-id",
         default="district-main",
-        help="Ed-Fi connection id for scheduled change-cursor maintenance.",
+        help="data connector connection id for scheduled change-cursor maintenance.",
     )
     return parser
 

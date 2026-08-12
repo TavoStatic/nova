@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 import hashlib
 import json
+from pathlib import Path
 from typing import Any
 
 import work_tree
@@ -78,9 +79,9 @@ VOICE_RUNTIME_READ_TASK_TITLE = "Read voice runtime dependency loader and entryp
 AUTONOMY_MAINTENANCE_LOG_TASK_TITLE = "Read runtime/autonomy_maintenance.log around the latest maintenance error"
 TOOL_EVENTS_READ_TASK_TITLE = "Read runtime/tool_events.jsonl recent tool execution events"
 OS_CAPABILITY_LEDGER_READ_TASK_TITLE = "Read runtime/os_capability_ledger.jsonl recent OS capability evidence"
-EDFI_CAPABILITY_PROFILE_READ_TASK_TITLE = "Read saved Ed-Fi capability profile evidence"
+EDFI_CAPABILITY_PROFILE_READ_TASK_TITLE = "Read saved data connector capability profile evidence"
 EDFI_CAPABILITY_PROFILE_READ_HOLD_TITLE = (
-    "Hold Ed-Fi profile branch until saved capability profile read evidence is verified"
+    "Hold data connector profile branch until saved capability profile read evidence is verified"
 )
 EDFI_CAPABILITY_PROFILE_READ_HOLD_REASON = "edfi_profile_read_evidence_required"
 SOURCE_ROOT_JUDGMENT_TASK_TITLE = "Synthesize source-root judgment from collected evidence"
@@ -1421,6 +1422,19 @@ def _append_source_root_judgment_task(source: str, signal: dict[str, Any]) -> di
     root_id = str(source or "").strip()
     if root_id not in _SOURCE_ROOT_SIGNAL_SOURCES:
         return signal
+    # Release readiness is a fix ladder, not source-root inventory. Appending
+    # source_root_judgment after reads parks climb under quiet hold (judgment is
+    # not in RELEASE_LADDER_HOLD_TOOLS) while the package fail is still open.
+    work_class = str(signal.get("work_class") or "").strip().lower()
+    signal_class = str(signal.get("signal_class") or "").strip().lower()
+    if work_class == "release_readiness_gap" or signal_class == "release_readiness_gap":
+        task_sequence = [
+            dict(item)
+            for item in list(signal.get("task_sequence") or [])
+            if isinstance(item, dict) and str(item.get("title") or "").strip()
+        ]
+        signal["task_sequence"] = task_sequence
+        return signal
     next_task = str(signal.get("next_task") or "").strip()
     task_sequence = [
         dict(item)
@@ -2407,7 +2421,7 @@ def _hold_edfi_capability_profile_branch_until_read_evidence(*, branch: Any, not
 
     observation = (
         f"Observation: {note} "
-        "Ed-Fi profile closure remains open until verified read evidence confirms the saved capability profile."
+        "data connector profile closure remains open until verified read evidence confirms the saved capability profile."
     )
     existing_notes = str(getattr(branch, "notes", "") or "").strip()
     if observation and observation not in existing_notes:
@@ -2457,23 +2471,23 @@ def _edfi_capability_profile_signal_from_status(status_payload: dict[str, Any]) 
 
     if not profile_present:
         error_symbol = "edfi_profile_missing"
-        title = "Saved Ed-Fi capability profile is missing"
+        title = "Saved data connector capability profile is missing"
         severity = "high"
     elif not auth_ok:
         error_symbol = "edfi_profile_auth_not_ok"
-        title = "Saved Ed-Fi capability profile reports auth failure"
+        title = "Saved data connector capability profile reports auth failure"
         severity = "high"
     elif resource_count <= 0:
         error_symbol = "edfi_profile_resources_empty"
-        title = "Saved Ed-Fi capability profile has no resources"
+        title = "Saved data connector capability profile has no resources"
         severity = "high"
     elif profile_status in {"failure", "watch", "missing"}:
         error_symbol = f"edfi_profile_{profile_status or 'unhealthy'}"
-        title = "Saved Ed-Fi capability profile is not healthy"
+        title = "Saved data connector capability profile is not healthy"
         severity = "high" if profile_status == "failure" else "medium"
     else:
         error_symbol = "edfi_profile_evidence_gap"
-        title = "Ed-Fi capability profile evidence is incomplete"
+        title = "data connector capability profile evidence is incomplete"
         severity = "medium"
 
     profile_path = str(
@@ -2519,8 +2533,8 @@ def _edfi_capability_profile_signal_from_status(status_payload: dict[str, Any]) 
             "live_api_required": False,
             "profile_evidence_closure_required": True,
             "rationale": (
-                "Nova's district data layer must be grounded in the saved Ed-Fi capability profile "
-                "before autonomy opens or closes Ed-Fi wiring work."
+                "Nova's district data layer must be grounded in the saved data connector capability profile "
+                "before autonomy opens or closes data connector wiring work."
             ),
         },
         "severity": severity,
@@ -2531,16 +2545,16 @@ def _edfi_capability_profile_signal_from_status(status_payload: dict[str, Any]) 
         "task_sequence": [
             _edfi_capability_profile_evidence_task(profile_path),
             {
-                "title": "Read Ed-Fi profile evidence builder",
+                "title": "Read data connector profile evidence builder",
                 "allowed_tools": ["read"],
                 "preferred_tool": "read",
                 "tool_args": ["services/edfi/profile_evidence.py"],
             },
             {
-                "title": "Read BISD governed data lane manifest",
+                "title": "Read governed data lane manifest",
                 "allowed_tools": ["read"],
                 "preferred_tool": "read",
-                "tool_args": ["data_sources/edfi_bisd/pipeline.json"],
+                "tool_args": ["data_sources/data_connector/pipeline.json"],
             },
         ],
     }
@@ -2577,7 +2591,7 @@ def _backpack_edfi_signal_from_status(status_payload: dict[str, Any]) -> dict[st
     return {
         "source": "backpack_edfi",
         "signal_class": "governance_pressure",
-        "title": "Ed-Fi backpack fusion is not healthy",
+        "title": "data connector backpack fusion is not healthy",
         "fingerprint": {
             "class": "governance_pressure",
             "surface": "backpack_edfi",
@@ -2591,7 +2605,7 @@ def _backpack_edfi_signal_from_status(status_payload: dict[str, Any]) -> dict[st
             "backpack_available_capabilities": list(status_payload.get("backpack_available_capabilities") or [])[:24],
             "rationale": (
                 "Nova must fuse installed backpack capabilities into the nervous system "
-                "before treating Ed-Fi backpack ops as closed source truth."
+                "before treating data connector backpack ops as closed source truth."
             ),
         },
         "severity": "medium",
@@ -2631,7 +2645,7 @@ def _edfi_core_signal_from_status(status_payload: dict[str, Any]) -> dict[str, A
     return {
         "source": "edfi_core",
         "signal_class": "governance_pressure",
-        "title": "Ed-Fi core readiness is not satisfied",
+        "title": "data connector core readiness is not satisfied",
         "fingerprint": {
             "class": "governance_pressure",
             "surface": "edfi_core",
@@ -2642,29 +2656,29 @@ def _edfi_core_signal_from_status(status_payload: dict[str, Any]) -> dict[str, A
             "edfi_core_readiness": dict(readiness),
             "edfi_core_ready": ready,
             "edfi_core_milestone": milestone,
-            "rationale": "Vendor-neutral Ed-Fi core must report ready before district lanes can be trusted for closure.",
+            "rationale": "Vendor-neutral data connector core must report ready before district lanes can be trusted for closure.",
         },
         "severity": "high",
         "actionability": "safe_now",
         "allowed_tools": ["edfi_explore", "read", "find", "pipeline"],
         "preferred_tool": "read",
-        "next_task": "Read Ed-Fi core readiness and verify district-main connection state",
+        "next_task": "Read data connector core readiness and verify district-main connection state",
     }
 
 
-def _has_data_lane_edfi_bisd_surface(status_payload: dict[str, Any]) -> bool:
+def _has_data_lane_data_connector_surface(status_payload: dict[str, Any]) -> bool:
     pipeline_ids = [
         str(item or "").strip().lower()
         for item in list(status_payload.get("data_pipeline_ids") or [])
         if str(item or "").strip()
     ]
-    return "edfi_bisd" in pipeline_ids or bool(status_payload.get("data_lane_edfi_bisd_ok") is False)
+    return "data_connector" in pipeline_ids or bool(status_payload.get("data_lane_data_connector_ok") is False)
 
 
-def _data_lane_edfi_bisd_signal_from_status(status_payload: dict[str, Any]) -> dict[str, Any] | None:
-    if not _has_data_lane_edfi_bisd_surface(status_payload):
+def _data_lane_data_connector_signal_from_status(status_payload: dict[str, Any]) -> dict[str, Any] | None:
+    if not _has_data_lane_data_connector_surface(status_payload):
         return None
-    # Legacy BISD-named lane is superseded by backpacks/edfi when core is ready
+    # Legacy data lane superseded by installed backpacks
     # or a schools extract exists — stop dual-door pressure on the work tree.
     readiness = (
         status_payload.get("edfi_core_readiness")
@@ -2679,7 +2693,7 @@ def _data_lane_edfi_bisd_signal_from_status(status_payload: dict[str, Any]) -> d
     pipeline_rows = [
         dict(item)
         for item in list(data_pipelines.get("pipelines") or [])
-        if isinstance(item, dict) and str(item.get("pipeline_id") or "").strip().lower() == "edfi_bisd"
+        if isinstance(item, dict) and str(item.get("pipeline_id") or "").strip().lower() == "data_connector"
     ]
     blocked = False
     for item in pipeline_rows:
@@ -2691,20 +2705,20 @@ def _data_lane_edfi_bisd_signal_from_status(status_payload: dict[str, Any]) -> d
     if pipeline_rows and not blocked:
         return None
     return {
-        "source": "data_lane_edfi_bisd",
+        "source": "data_lane_data_connector",
         "signal_class": "governance_pressure",
-        "title": "BISD Ed-Fi data lane needs inspection",
+        "title": "data connector data lane needs inspection",
         "fingerprint": {
             "class": "governance_pressure",
-            "surface": "data_lane_edfi_bisd",
-            "error": "edfi_bisd_lane_blocked",
-            "symbol": "edfi_bisd",
+            "surface": "data_lane_data_connector",
+            "error": "data_connector_lane_blocked",
+            "symbol": "data_connector",
         },
         "payload": {
-            "data_lane_edfi_bisd_ok": not blocked,
+            "data_lane_data_connector_ok": not blocked,
             "pipeline_rows": pipeline_rows[:2],
             "rationale": (
-                "Legacy edfi_bisd lane is secondary to backpacks/edfi. "
+                "Legacy data_connector lane is secondary to backpacks/edfi. "
                 "Prefer the backpack when installed; only inspect this lane if the backpack is missing."
             ),
         },
@@ -2712,7 +2726,7 @@ def _data_lane_edfi_bisd_signal_from_status(status_payload: dict[str, Any]) -> d
         "actionability": "safe_now",
         "allowed_tools": ["pipeline", "read", "find"],
         "preferred_tool": "pipeline",
-        "next_task": "Prefer backpacks/edfi; only inspect legacy edfi_bisd if backpack is not installed",
+        "next_task": "Prefer backpacks/edfi; only inspect legacy data_connector if backpack is not installed",
     }
 
 
@@ -4540,6 +4554,63 @@ def _tool_events_signal_from_status(status_payload: dict[str, Any]) -> dict[str,
     }
 
 
+def _release_post_fail_sequence(*, prefer_rebuild: bool) -> list[dict[str, Any]]:
+    """Shared release climb after a failed validation outcome."""
+    steps: list[dict[str, Any]] = []
+    if prefer_rebuild:
+        steps.append(
+            {
+                "title": "Rebuild and verify release package from current source",
+                "allowed_tools": ["release_rebuild_verify"],
+                "preferred_tool": "release_rebuild_verify",
+                "tool_args": ["work-tree-rebuild"],
+            }
+        )
+    steps.extend(
+        [
+            {
+                "title": "Run release validation profile from current artifact",
+                "allowed_tools": ["release_validation_run"],
+                "preferred_tool": "release_validation_run",
+            },
+            {
+                "title": "Run release promotion judgment from validation evidence",
+                "allowed_tools": ["release_promotion_judgment"],
+                "preferred_tool": "release_promotion_judgment",
+            },
+            {
+                "title": "Record completed validation outcome in release ledger",
+                "allowed_tools": ["release_record_validation_outcome"],
+                "preferred_tool": "release_record_validation_outcome",
+            },
+        ]
+    )
+    return steps
+
+
+def _latest_release_failure_classes(repo_root: Path | None = None) -> dict[str, Any]:
+    """Load latest validation failure classification for next-rail routing."""
+    try:
+        from services.release_validation import classify_release_validation_failures
+    except Exception:
+        return {}
+    root = Path(repo_root or Path(__file__).resolve().parents[1])
+    report_path = root / "runtime" / "validation" / "release" / "latest_release_validation.json"
+    try:
+        payload = json.loads(report_path.read_text(encoding="utf-8"))
+    except Exception:
+        payload = {}
+    if not isinstance(payload, dict):
+        return {}
+    existing = payload.get("failure_classes")
+    if isinstance(existing, dict) and existing.get("next_rail"):
+        return dict(existing)
+    return classify_release_validation_failures(
+        blocking_issues=list(payload.get("blocking_issues") or []),
+        regression_gate=payload.get("regression_gate") if isinstance(payload.get("regression_gate"), dict) else {},
+    )
+
+
 def _release_readiness_signal_from_status(status_payload: dict[str, Any]) -> dict[str, Any] | None:
     release = status_payload.get("release_status") if isinstance(status_payload.get("release_status"), dict) else {}
     if not release:
@@ -4713,16 +4784,19 @@ def _release_readiness_signal_from_status(status_payload: dict[str, Any]) -> dic
             else "release_readiness_blocked"
         )
 
-    # Finding identity is the *package*, not the readiness phase. Phase flips
-    # (stale → needs-promotion → …) must update one branch and keep evidence.
-    # Phase-specific error codes stay in payload for operators, not the key.
-    package_symbol = artifact_name or artifact_path or "release_package"
+    # Finding identity is the *active release stream*, not each zip rebuild and
+    # not the readiness phase. Per-artifact keys reopen every historical package
+    # as its own ladder (15× "Run release validation") after each rebuild thrash.
+    # Artifact name/path stay in payload for operators; the fingerprint stays stable.
+    channel = str(release.get("latest_channel") or "rc").strip() or "rc"
+    package_symbol = f"package-zip:{channel}"
     release_fix_tools = ["read", "find", "system_check", "release_rebuild_verify"]
     if readiness_state in {
         "source-changed-after-build",
         "no-builds",
         "needs-promotion",
         "needs-verification",
+        "blocked",
         "",
     } or no_builds_recorded:
         release_fix_tools.extend(
@@ -4740,6 +4814,56 @@ def _release_readiness_signal_from_status(status_payload: dict[str, Any]) -> dic
             continue
         seen_tools.add(tool_name)
         allowed_tools_out.append(tool_name)
+    failure_classes = _latest_release_failure_classes()
+    source_drift = bool(release.get("latest_source_changed_after_build", False))
+    # Only treat source-changed as a rebuild driver when readiness itself is that phase.
+    # Source drift while blocked/needs-promotion with a fail record is a note, not thrash.
+    source_changed_phase = readiness_state == "source-changed-after-build"
+    # Root routing: rebuild only when package content must change.
+    # Host regression stale/unhealthy and mixed host-first rails never prefer rebuild.
+    next_rail = str(failure_classes.get("next_rail") or "").strip()
+    package_needs_rebuild = next_rail == "package_source_fix_then_rebuild" and source_drift
+    prefer_rebuild = bool(
+        no_builds_recorded
+        or source_changed_phase
+        or (readiness_state == "blocked" and package_needs_rebuild)
+    )
+    if readiness_state == "blocked" and failure_classes.get("next_rail"):
+        # Replace blocked default sequence with classification-aware climb.
+        # Keep ledger/seed reads already appended; append post-fail climb only once.
+        has_validate = any(
+            str(item.get("preferred_tool") or "") == "release_validation_run"
+            for item in task_sequence
+            if isinstance(item, dict)
+        )
+        if not has_validate:
+            task_sequence.extend(_release_post_fail_sequence(prefer_rebuild=prefer_rebuild))
+
+    if no_builds_recorded or source_changed_phase:
+        preferred_tool_out = "release_rebuild_verify"
+    elif readiness_state == "blocked":
+        preferred_tool_out = (
+            "release_rebuild_verify" if prefer_rebuild else "release_validation_run"
+        )
+    elif readiness_state in {"needs-promotion", "needs-verification"}:
+        preferred_tool_out = "release_validation_run"
+    else:
+        preferred_tool_out = "read"
+
+    rationale = "Release readiness status is present in control status but not ready to ship."
+    if failure_classes.get("next_rail") == "host_regression_refresh":
+        rationale = (
+            "Release validation is blocked by host regression freshness/health. "
+            "Refresh runtime/regression_status.json (scripts/run_regression.py all); "
+            "rebuilding the package zip will not clear this gate."
+        )
+    elif failure_classes.get("package_blockers"):
+        rationale = (
+            "Release validation is blocked by package/source failures "
+            f"({', '.join(failure_classes.get('package_blockers') or [])}). "
+            "Fix package content, ensure modules are git-tracked for packaging, then rebuild+revalidate."
+        )
+
     return {
         "source": "release",
         "signal_class": "release_readiness_gap",
@@ -4785,14 +4909,13 @@ def _release_readiness_signal_from_status(status_payload: dict[str, Any]) -> dic
             "latest_source_newest_mtime": str(release.get("latest_source_newest_mtime") or ""),
             "latest_source_changed_after_build_sample": list(release.get("latest_source_changed_after_build_sample") or []),
             "ledger_path": ledger_path,
-            "rationale": "Release readiness status is present in control status but not ready to ship.",
+            "validation_failure_classes": failure_classes,
+            "rationale": rationale,
         },
         "severity": severity,
         "actionability": actionability,
         "allowed_tools": allowed_tools_out,
-        "preferred_tool": "release_rebuild_verify"
-        if readiness_state == "source-changed-after-build" or no_builds_recorded
-        else ("release_validation_run" if readiness_state in {"needs-promotion", "needs-verification"} else "read"),
+        "preferred_tool": preferred_tool_out,
         "next_task": next_task,
         "task_sequence": task_sequence,
         "blocked_task": blocked_task,
@@ -5020,6 +5143,51 @@ def advance_branch_sequence_after_task(branch_id: str) -> dict[str, Any]:
         "task_title": task_text,
         "preferred_tool": task_preferred_tool,
     }
+
+
+def _materialize_sequence_task_item(item: dict[str, Any], payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    resolved = dict(item or {}) if isinstance(item, dict) else {}
+    if not resolved:
+        return {}
+    existing_args = resolved.get("tool_args")
+    if isinstance(existing_args, list) and [str(arg).strip() for arg in existing_args if str(arg).strip()]:
+        return resolved
+
+    payload = dict(payload or {}) if isinstance(payload, dict) else {}
+    title = str(resolved.get("title") or "").strip().lower()
+    if "release ledger" in title:
+        ledger_path = str(payload.get("ledger_path") or "").strip()
+        if ledger_path:
+            resolved["tool_args"] = [ledger_path]
+            return resolved
+    if "validation seed" in title:
+        validation_seed_path = str(payload.get("latest_validation_seed_path") or "").strip()
+        if validation_seed_path:
+            resolved["tool_args"] = [validation_seed_path]
+            return resolved
+    if "newest changed source" in title:
+        newest_source_path = str(payload.get("latest_source_newest_path") or "").strip()
+        if newest_source_path:
+            resolved["tool_args"] = [newest_source_path]
+            return resolved
+    if "artifact" in title:
+        artifact_path = str(payload.get("latest_artifact_path") or "").strip()
+        if artifact_path:
+            resolved["tool_args"] = [artifact_path]
+            return resolved
+    return resolved
+
+
+def _materialize_task_sequence(sequence: list[dict[str, Any]] | None, payload: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+    materialized: list[dict[str, Any]] = []
+    for item in list(sequence or []):
+        if not isinstance(item, dict):
+            continue
+        title = str(item.get("title") or "").strip()
+        if not title:
+            continue
+        materialized.append(_materialize_sequence_task_item(item, payload))
+    return materialized
 
 
 def _first_sequence_task(normalized: dict[str, Any]) -> dict[str, Any]:
@@ -5375,6 +5543,15 @@ def _reset_branch_tool_state(branch, *, preserve_failed: bool = True) -> bool:
 def _signal_payload_for_material_compare(payload: dict[str, Any] | None) -> dict[str, Any]:
     cleaned = dict(payload or {})
     cleaned.pop(BRANCH_LIFECYCLE_KEY, None)
+    for metadata_key in {
+        "surfaced_at",
+        "work_started_at",
+        "task_sequence",
+        "task_sequence_status",
+        "solution_progress",
+        "recurring_finding_lifecycle",
+    }:
+        cleaned.pop(metadata_key, None)
     return cleaned
 
 
@@ -5784,9 +5961,9 @@ class WorkTreeSignalIngestionService:
         backpack_edfi_signal = _backpack_edfi_signal_from_status(status_payload)
         if backpack_edfi_signal is not None:
             signals.append(backpack_edfi_signal)
-        edfi_bisd_lane_signal = _data_lane_edfi_bisd_signal_from_status(status_payload)
-        if edfi_bisd_lane_signal is not None:
-            signals.append(edfi_bisd_lane_signal)
+        data_connector_lane_signal = _data_lane_data_connector_signal_from_status(status_payload)
+        if data_connector_lane_signal is not None:
+            signals.append(data_connector_lane_signal)
         for signal in (
             _frontdoor_cli_signal_from_status(status_payload),
             _operator_control_signal_from_status(status_payload),
@@ -6771,15 +6948,15 @@ class WorkTreeSignalIngestionService:
     def resolve_edfi_capability_profile_branches(
         self,
         *,
-        reason: str = "Saved Ed-Fi capability profile evidence reports a healthy district data layer.",
+        reason: str = "Saved data connector capability profile evidence reports a healthy district data layer.",
     ) -> list[dict[str, Any]]:
         tree = self._find_signal_tree()
         if tree is None:
             return []
 
-        note = str(reason or "").strip() or "Saved Ed-Fi capability profile evidence reports a healthy district data layer."
+        note = str(reason or "").strip() or "Saved data connector capability profile evidence reports a healthy district data layer."
         hold_note = (
-            "Saved Ed-Fi capability profile status is healthy, but verified read evidence "
+            "Saved data connector capability profile status is healthy, but verified read evidence "
             "on the profile path is still required before closure."
         )
         results: list[dict[str, Any]] = []
@@ -7114,10 +7291,11 @@ class WorkTreeSignalIngestionService:
         *,
         open_only: bool,
     ) -> Any | None:
-        """Locate the durable release package finding across readiness-phase key changes.
+        """Locate the durable release-stream finding across key and zip changes.
 
-        Legacy keys embedded the phase in the fingerprint (stale vs validation-missing).
-        Continuity is package identity so evidence and progress do not restart at 0%.
+        Legacy keys embedded phase and/or each rebuild zip name. Continuity is the
+        active package-zip stream so evidence survives rebuilds and historical zips
+        do not each reopen as parallel ladders.
         """
         work_class = str(normalized.get("work_class") or "").strip().lower()
         source = str(normalized.get("source") or "").strip().lower()
@@ -7126,9 +7304,8 @@ class WorkTreeSignalIngestionService:
         payload = normalized.get("payload") if isinstance(normalized.get("payload"), dict) else {}
         artifact_name = str(payload.get("latest_artifact_name") or "").strip()
         artifact_path = str(payload.get("latest_artifact_path") or "").strip()
-        package_symbol = artifact_name or artifact_path
-        if not package_symbol:
-            return None
+        channel = str(payload.get("latest_channel") or "rc").strip() or "rc"
+        stream_symbol = f"package-zip:{channel}"
         candidates: list[Any] = []
         for branch in work_tree.list_tree_branches(tree_id):
             if _is_archived_signal_branch(branch):
@@ -7136,39 +7313,42 @@ class WorkTreeSignalIngestionService:
             if str(getattr(branch, "work_class", "") or "").strip().lower() != "release_readiness_gap":
                 continue
             if str(getattr(branch, "source_type", "") or "").strip().lower() not in {"release", "release_status", ""}:
-                # Allow empty only if source_key looks like release package.
                 sk = str(getattr(branch, "source_key", "") or "")
                 if not sk.startswith("release_readiness_gap:release"):
                     continue
             resolution = str(getattr(branch, "resolution_state", "") or "").strip().lower()
             if open_only and resolution in {"resolved", "retired"}:
                 continue
-            if not open_only and resolution not in {"resolved", "retired", "complete", ""}:
-                # Prefer closed/historical only when looking for reopen targets.
-                pass
             bp = dict(getattr(branch, "source_payload", {}) or {}) if isinstance(getattr(branch, "source_payload", None), dict) else {}
             b_name = str(bp.get("latest_artifact_name") or "").strip()
             b_path = str(bp.get("latest_artifact_path") or "").strip()
             sk = str(getattr(branch, "source_key", "") or "").strip()
-            same_package = (
-                (artifact_name and b_name and artifact_name == b_name)
+            # Same stream: stable package-zip key, legacy per-zip keys, or same artifact.
+            same_stream = (
+                sk.endswith(f":{stream_symbol}")
+                or f":{stream_symbol}" in sk
+                or sk.startswith("release_readiness_gap:release:release_package_not_ready:")
+                or sk.startswith("release_readiness_gap:release:release_source_changed_after_build:")
+                or sk.startswith("release_readiness_gap:release:release_validation_")
+                or sk.startswith("release_readiness_gap:release:release_readiness_")
+                or (artifact_name and b_name and artifact_name == b_name)
                 or (artifact_path and b_path and artifact_path == b_path)
-                or (package_symbol and sk.endswith(f":{package_symbol}"))
-                or (package_symbol and f":{package_symbol}" in sk)
             )
-            if not same_package:
+            if not same_stream:
                 continue
             candidates.append(branch)
         if not candidates:
             return None
-        # Prefer open ready branches, then most recently updated.
+        # Prefer the branch already on the stable stream key, then open ready, then newest.
         def _rank(branch: Any) -> tuple:
+            sk = str(getattr(branch, "source_key", "") or "").strip()
+            stable_rank = 0 if sk.endswith(f":{stream_symbol}") or f":{stream_symbol}" in sk else 1
             resolution = str(getattr(branch, "resolution_state", "") or "").strip().lower()
             status = str(getattr(getattr(branch, "status", None), "value", getattr(branch, "status", "")) or "").strip().lower()
             open_rank = 0 if resolution not in {"resolved", "retired"} and status not in {"archived"} else 1
             updated = getattr(branch, "updated_at", None)
             ts = updated.timestamp() if hasattr(updated, "timestamp") else 0.0
-            return (open_rank, -ts)
+            return (stable_rank, open_rank, -ts)
 
         candidates.sort(key=_rank)
         return candidates[0]
@@ -7190,6 +7370,7 @@ class WorkTreeSignalIngestionService:
     ) -> None:
         now = datetime.now()
         actionability = str(normalized.get("actionability") or "safe_now").strip().lower()
+        prior_actionability = str(getattr(branch, "actionability", "") or "").strip().lower()
         work_class = str(normalized.get("work_class") or "").strip().lower()
         severity = str(normalized.get("severity") or "medium").strip().lower()
         materially_changed = (
@@ -7206,11 +7387,10 @@ class WorkTreeSignalIngestionService:
             incoming_payload = attach_branch_lifecycle(incoming_payload, lifecycle)
         # Persist sequence so completing a stem can advance without waiting for
         # the next full status-ingest cycle (avoids empty progress window).
-        sequence_rows = [
-            dict(item)
-            for item in list(normalized.get("task_sequence") or [])
-            if isinstance(item, dict) and str(item.get("title") or "").strip()
-        ]
+        sequence_rows = _materialize_task_sequence(
+            [dict(item) for item in list(normalized.get("task_sequence") or []) if isinstance(item, dict)],
+            incoming_payload,
+        )
         if sequence_rows:
             incoming_payload["task_sequence"] = sequence_rows
         # Radar clock: first time this finding hit Nova's work tree.
@@ -7586,6 +7766,35 @@ class WorkTreeSignalIngestionService:
                     if meta_updates:
                         work_tree.update_task_meta(open_tasks[0].task_id, meta_updates)
                     break
+            if task_text and open_tasks and actionability != "blocked" and not blocked_task:
+                current_titles = {
+                    str(getattr(task, "title", "") or "").strip()
+                    for task in open_tasks
+                    if str(getattr(task, "title", "") or "").strip()
+                }
+                blocked_statuses = [
+                    str(getattr(task.status, "value", task.status) or "").strip().lower()
+                    for task in open_tasks
+                ]
+                should_replace_blocked_hold = (
+                    actionability != "blocked"
+                    and not blocked_task
+                    and bool(open_tasks)
+                    and all(status == "blocked" for status in blocked_statuses)
+                    and (
+                        prior_actionability == "blocked"
+                        or branch.status == BranchStatus.BLOCKED
+                        or str(getattr(branch, "resolution_state", "") or "").strip().lower() == "observing"
+                    )
+                )
+                if task_text not in current_titles and should_replace_blocked_hold:
+                    for task in open_tasks:
+                        work_tree.mark_task_dropped(
+                            task.task_id,
+                            reason=f"blocked_task_replaced_by:{task_text}",
+                        )
+                    open_tasks = []
+                    blocked_open_tasks = False
             if not open_tasks and task_text:
                 work_tree.add_task_to_branch(
                     branch.branch_id,
@@ -7666,6 +7875,12 @@ class WorkTreeSignalIngestionService:
         if actionability not in {"safe_now", "blocked", "dead_end"}:
             actionability = _DEFAULT_ACTIONABILITY_BY_CLASS.get(work_class, "safe_now")
 
+        blocked_task = str(signal.get("blocked_task") or "").strip()
+        blocked_reason = str(signal.get("blocked_reason") or "").strip()
+        if actionability != "blocked" and str(signal.get("source") or "").strip().lower() != "memory_identity":
+            blocked_task = ""
+            blocked_reason = ""
+
         source_key = str(signal.get("source_key") or "").strip()
         if not source_key:
             source_key = _signal_fingerprint_key(
@@ -7691,14 +7906,17 @@ class WorkTreeSignalIngestionService:
                 if str(item or "").strip()
             ],
             "preferred_tool": str(signal.get("preferred_tool") or "").strip(),
-            "task_sequence": [
-                dict(item)
-                for item in list(signal.get("task_sequence") or [])
-                if isinstance(item, dict) and str(item.get("title") or "").strip()
-            ],
+            "task_sequence": _materialize_task_sequence(
+                [
+                    dict(item)
+                    for item in list(signal.get("task_sequence") or [])
+                    if isinstance(item, dict)
+                ],
+                payload,
+            ),
             "next_task": str(signal.get("next_task") or "").strip(),
-            "blocked_task": str(signal.get("blocked_task") or "").strip(),
-            "blocked_reason": str(signal.get("blocked_reason") or "").strip(),
+            "blocked_task": blocked_task,
+            "blocked_reason": blocked_reason,
             "repeat_sequence_on_active_signal": bool(signal.get("repeat_sequence_on_active_signal")),
         }
         return _append_source_root_judgment_task(source, normalized)

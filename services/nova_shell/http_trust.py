@@ -69,14 +69,23 @@ def resolve_control_panel_role(
 
 
 def shell_http_status() -> dict[str, Any]:
-    """Status blob for diagnostics."""
+    """Status blob for diagnostics — reflects actual wiring state."""
+    try:
+        from services.nova_shell_control_bridge import shell_status, shell_is_active
+        active = shell_is_active()
+        bridge = shell_status()
+    except Exception:
+        active = False
+        bridge = {"active": False, "reason": "bridge_import_error"}
     return {
-        "shell_bearer_middleware": False,
+        "shell_bearer_middleware": active,
         "control_auth_gates_control_api": True,
         "role_query_param_is_not_a_credential": True,
+        "shell_bridge": bridge,
         "note": (
-            "Nova Shell tokens are issued by services.nova_shell.auth but are not "
-            "yet validated on nova_http routes. Control API uses CONTROL_AUTH. "
+            "Nova Shell login is routed through services.nova_shell_control_bridge "
+            "when Shell DB exists and has at least one active user. "
+            "Falls back to NOVA_CONTROL_USER/PASS env-var auth otherwise. "
             "Backpack grant role claims from the client are allowlisted only."
         ),
     }

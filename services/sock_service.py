@@ -32,6 +32,16 @@ _NVIDIA_SMI_CANDIDATES = [
     r"C:\Windows\System32\nvidia-smi.exe",
 ]
 
+# Known install locations for rocm-smi (AMD ROCm)
+_ROCM_SMI_CANDIDATES = [
+    "rocm-smi",
+    r"C:\Program Files\AMD\ROCm\7.1\bin\rocm-smi.exe",
+    r"C:\Program Files\AMD\ROCm\6.3\bin\rocm-smi.exe",
+    r"C:\Program Files\AMD\ROCm\6.2\bin\rocm-smi.exe",
+    "/opt/rocm/bin/rocm-smi",
+    "/usr/bin/rocm-smi",
+]
+
 
 # ── dataclasses ────────────────────────────────────────────────────────────────
 
@@ -55,6 +65,7 @@ class ModelRecommendation:
     routing: str = ""
     vision: str = ""
     stt_size: str = ""
+    npu_inference: str = ""  # placeholder — populated when NPU inference layer is available
     rationale: dict[str, str] = field(default_factory=dict)
 
 
@@ -165,11 +176,86 @@ def _find_nvidia_smi() -> str | None:
     return None
 
 
+def _find_rocm_smi() -> str | None:
+    """Return the first working rocm-smi path or None."""
+    for candidate in _ROCM_SMI_CANDIDATES:
+        try:
+            r = subprocess.run(
+                [candidate, "--showproductname"],
+                capture_output=True, text=True, timeout=6,
+            )
+            if r.returncode == 0:
+                return candidate
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            continue
+    return None
+
+
+def _detect_gpu_amd_rocm(rocm_smi: str) -> tuple[float, str, list[str]]:
+    """
+    Use rocm-smi to get accurate dedicated VRAM for AMD GPUs.
+
+    rocm-smi --showmeminfo vram gives exact dedicated VRAM — no shared RAM
+    contamination unlike WMI AdapterRAM.
+    """
+    notes: list[str] = []
+    try:
+        # Get GPU name
+        r_name = subprocess.run(
+            [rocm_smi, "--showproductname", "--json"],
+            capture_output=True, text=True, timeout=8,
+        )
+        # Get VRAM total
+        r_mem = subprocess.run(
+            [rocm_smi, "--showmeminfo", "vram", "--json"],
+            capture_output=True, text=True, timeout=8,
+        )
+        gpu_name = "AMD GPU"
+        vram_bytes = 0
+
+        if r_name.returncode == 0 and r_name.stdout.strip():
+            try:
+                data = json.loads(r_name.stdout)
+                # rocm-smi JSON: {"card0": {"Card series": "...", ...}}
+                for card_data in data.values():
+                    if isinstance(card_data, dict):
+                        gpu_name = (
+                            card_data.get("Card series")
+                            or card_data.get("Card model")
+                            or card_data.get("Card vendor", "AMD GPU")
+                        )
+                        break
+            except (json.JSONDecodeError, AttributeError):
+                pass
+
+        if r_mem.returncode == 0 and r_mem.stdout.strip():
+            try:
+                data = json.loads(r_mem.stdout)
+                for card_data in data.values():
+                    if isinstance(card_data, dict):
+                        total = card_data.get("VRAM Total Memory (B)") or card_data.get("vram Total Memory (B)", 0)
+                        vram_bytes = int(total)
+                        break
+            except (json.JSONDecodeError, AttributeError, ValueError):
+                pass
+
+        if vram_bytes > 0:
+            vram_gb = round(vram_bytes / (1024 ** 3), 1)
+            notes.append(f"AMD VRAM via rocm-smi — dedicated VRAM only, no shared RAM contamination")
+            return vram_gb, str(gpu_name), notes
+
+    except Exception as exc:
+        notes.append(f"rocm-smi found but failed: {exc}")
+
+    return 0.0, "", notes
+
+
 def _detect_gpu_windows() -> tuple[float, str, list[str]]:
     """Return (vram_gb, gpu_name, notes).
 
     NVIDIA: nvidia-smi with explicit path search — gives exact dedicated VRAM.
-    AMD/Intel: PowerShell Get-CimInstance — AdapterRAM may include shared RAM,
+    AMD: rocm-smi with explicit path search — gives exact dedicated VRAM.
+    Intel/fallback: PowerShell Get-CimInstance — AdapterRAM may include shared RAM,
     flagged in notes so the operator knows.
     """
     notes: list[str] = []
@@ -195,7 +281,15 @@ def _detect_gpu_windows() -> tuple[float, str, list[str]]:
     else:
         notes.append("nvidia-smi not found — NVIDIA driver may not be installed or GPU is not NVIDIA")
 
-    # AMD / Intel fallback via CIM — dedicated VRAM only, exclude shared adapters
+    # AMD via rocm-smi — exact dedicated VRAM, no shared RAM contamination
+    rocm = _find_rocm_smi()
+    if rocm:
+        vram_gb, gpu_name, rocm_notes = _detect_gpu_amd_rocm(rocm)
+        notes.extend(rocm_notes)
+        if vram_gb > 0:
+            return vram_gb, gpu_name, notes
+
+    # Intel / fallback via CIM — dedicated VRAM only, exclude shared adapters
     data = _ps_json(
         "$gpus = Get-CimInstance Win32_VideoController |"
         " Where-Object { $_.AdapterRAM -gt 0 -and $_.AdapterRAM -lt 34359738368 } |"  # < 32 GB avoids shared RAM misreads
@@ -349,8 +443,9 @@ def scan_ollama(
 
 # ── VRAM budget and stable-pair constraint ────────────────────────────────────
 
-# Estimated VRAM required (GB) for full GPU residency at Q4_K_M quantization.
-# Used to determine whether two models can coexist without swap churn.
+# Fallback estimated VRAM required (GB) for full GPU residency at Q4_K_M quantization.
+# Used when Ollama metadata is unavailable. Live query via _vram_estimate_live()
+# is always preferred over these static values.
 _VRAM_ESTIMATE_GB: dict[str, float] = {
     "qwen2.5:14b":   9.0,
     "qwen2.5:7b":    4.5,
@@ -364,9 +459,54 @@ _VRAM_ESTIMATE_GB: dict[str, float] = {
 # consumes most of the available VRAM.  This fraction models that behaviour.
 _PARTIAL_OFFLOAD_FILL = 0.85
 
+# Cache live VRAM estimates from Ollama to avoid repeated /api/show calls
+_LIVE_VRAM_CACHE: dict[str, float] = {}
 
-def _vram_estimate(model: str) -> float:
-    """Return estimated full-GPU VRAM need (GB) for a model name."""
+
+def _vram_estimate_live(
+    model: str,
+    ollama_base: str = OLLAMA_BASE,
+) -> float | None:
+    """
+    Query Ollama /api/show for actual model size in bytes and convert to GB.
+
+    Returns None if Ollama is unreachable, model is unknown, or the response
+    does not include size metadata. Caches results per model name.
+    """
+    if model in _LIVE_VRAM_CACHE:
+        return _LIVE_VRAM_CACHE[model]
+    try:
+        import urllib.request as _urlreq
+        body = json.dumps({"name": model}).encode()
+        req = _urlreq.Request(
+            f"{ollama_base}/api/show",
+            data=body,
+            headers={"Content-Type": "application/json"},
+        )
+        with _urlreq.urlopen(req, timeout=5) as resp:
+            data = json.loads(resp.read())
+        # Ollama /api/show returns model_info with parameter_count and quantization,
+        # or details.parameter_size. We use size (bytes on disk) as the VRAM proxy.
+        size_bytes = data.get("size") or 0
+        if size_bytes and int(size_bytes) > 0:
+            vram_gb = round(int(size_bytes) / (1024 ** 3), 2)
+            _LIVE_VRAM_CACHE[model] = vram_gb
+            return vram_gb
+    except Exception:
+        pass
+    return None
+
+
+def _vram_estimate(model: str, ollama_base: str = OLLAMA_BASE) -> float:
+    """
+    Return estimated full-GPU VRAM need (GB) for a model name.
+
+    Tries Ollama /api/show first for actual model size; falls back to the
+    static lookup table and then to parameter-count heuristics.
+    """
+    live = _vram_estimate_live(model, ollama_base)
+    if live is not None:
+        return live
     if model in _VRAM_ESTIMATE_GB:
         return _VRAM_ESTIMATE_GB[model]
     low = model.lower()
@@ -493,21 +633,42 @@ def _stt_size(cpu_cores: int, ram_gb: float) -> tuple[str, str]:
     return "base", "Baseline Whisper (limited CPU)"
 
 
+def _npu_inference(npu_detected: bool, npu_name: str) -> tuple[str, str]:
+    """
+    Return NPU inference recommendation and rationale.
+
+    Currently a readiness hook — Nova does not yet route inference to the NPU.
+    When the NPU inference layer lands, this function gates the decision.
+    NPU is best suited for lightweight routing / embedding workloads where
+    latency matters more than throughput and VRAM headroom is scarce.
+    """
+    if not npu_detected:
+        return "", "No NPU detected — GPU/CPU inference only"
+    # NPU detected: flag as available, note it is not yet wired into inference routing
+    return "available", (
+        f"NPU detected ({npu_name}) — reserved for future lightweight inference routing. "
+        "Wire nova_npu_runtime when the inference layer is ready."
+    )
+
+
 def recommend_models(hw: HardwareProfile) -> ModelRecommendation:
     chat, chat_why = _chat_model(hw.vram_gb, hw.ram_gb)
     routing, routing_why = _routing_safe_for_pair(hw.vram_gb, hw.ram_gb, chat)
     vision, vision_why = _vision_model(hw.vram_gb)
     stt, stt_why = _stt_size(hw.cpu_cores, hw.ram_gb)
+    npu, npu_why = _npu_inference(hw.npu_detected, hw.npu_name)
     return ModelRecommendation(
         chat=chat,
         routing=routing,
         vision=vision,
         stt_size=stt,
+        npu_inference=npu,
         rationale={
             "chat": chat_why,
             "routing": routing_why,
             "vision": vision_why,
             "stt_size": stt_why,
+            "npu_inference": npu_why,
         },
     )
 
@@ -729,3 +890,30 @@ def get_sock_status_keys() -> dict:
         _SOCK_STATUS_CACHE.update(payload)
         _SOCK_STATUS_CACHE["_ts"] = now
         return {k: v for k, v in _SOCK_STATUS_CACHE.items() if not k.startswith("_")}
+
+
+def invalidate_sock_cache(reason: str = "") -> None:
+    """
+    Invalidate the SOCK status cache and live VRAM estimates.
+
+    Call this whenever the Ollama model inventory changes — model pulled,
+    model deleted, or Ollama restarted — so the next get_sock_status_keys()
+    call re-scans hardware and re-queries Ollama rather than serving stale data.
+
+    reason: optional string logged for diagnostics (e.g. 'model_pulled:qwen2.5:14b')
+    """
+    with _SOCK_STATUS_LOCK:
+        _SOCK_STATUS_CACHE.clear()
+        _LIVE_VRAM_CACHE.clear()
+
+
+def notify_ollama_model_change(event: str, model: str = "") -> None:
+    """
+    Notify SOCK that Ollama's model inventory has changed.
+
+    Wire this into wherever Nova detects Ollama model pulls or deletions.
+    event: 'pulled' | 'deleted' | 'restarted'
+    model: model name if known (e.g. 'qwen2.5:14b')
+    """
+    reason = f"{event}:{model}" if model else event
+    invalidate_sock_cache(reason=reason)

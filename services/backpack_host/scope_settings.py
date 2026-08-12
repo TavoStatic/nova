@@ -7,7 +7,7 @@ Texas TEA ODS credentials are typically statewide: the client id/secret can reac
 many districts. Nova still scopes every install by LEA list (policy), not by
 assuming the key is single-district.
 
-LEA forms like PEIMS 031901 and Ed-Fi 31901 are the same integer identity.
+LEA forms like state education data 123456 and data connector 123456 are the same integer identity.
 """
 
 import re
@@ -51,12 +51,12 @@ def lea_identity_key(value: Any) -> int | None:
     """
     Canonical LEA identity for comparisons.
 
-    PEIMS-style 031901 and Ed-Fi-style 31901 both map to 31901.
+    state education data-style 123456 and data connector-style 123456 are treated as the same LEA.
     """
     text = str(value or "").strip()
     if not text:
         return None
-    # Prefer shared Ed-Fi helper when available
+    # Prefer shared data connector helper when available
     try:
         from services.edfi.district_scope import normalize_district_lea_id
 
@@ -129,7 +129,7 @@ def allowed_leas_from_settings(settings: dict[str, Any]) -> list[str]:
 
 
 def primary_lea_from_settings(settings: dict[str, Any]) -> str:
-    """LEA written into ConnectionConfig for Ed-Fi core services."""
+    """LEA written into ConnectionConfig for data connector core services."""
     primary = str(settings.get("district_lea_id") or "").strip()
     if primary:
         return format_lea_id(primary)
@@ -145,7 +145,7 @@ def resolve_query_lea(
     Resolve which LEA a data query should use.
 
     Returns (lea_id, error_code_or_none).
-    LEA matching is identity-based (031901 == 31901).
+    LEA matching is identity-based (state education data format == data connector format).
     """
     mode = normalize_scope_mode(settings.get("scope_mode"))
     allowed = allowed_leas_from_settings(settings)
@@ -193,7 +193,7 @@ def validate_scope_values(values: dict[str, Any]) -> list[dict[str, str]]:
                 {
                     "code": "district_lea_id_required",
                     "field": "district_lea_id",
-                    "detail": "District mode requires district_lea_id (e.g. 031901 or 31901).",
+                    "detail": "District mode requires district_lea_id (e.g. your LEA id).",
                 }
             )
         elif lea_identity_key(values.get("district_lea_id")) is None:
@@ -201,7 +201,7 @@ def validate_scope_values(values: dict[str, Any]) -> list[dict[str, str]]:
                 {
                     "code": "district_lea_id_invalid",
                     "field": "district_lea_id",
-                    "detail": "district_lea_id must be numeric (PEIMS or Ed-Fi LEA form).",
+                    "detail": "district_lea_id must be numeric (state education data or data connector LEA form).",
                 }
             )
     else:

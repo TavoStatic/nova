@@ -9,6 +9,19 @@
 # - Optional self-patching (zip overlay + snapshot + rollback + compile test).
 # - Optional web fetch tool (allowlist + max bytes) that NEVER crashes core.
 
+"""
+Nova Core — interactive CLI/voice loop, tool registry, Ollama chat.
+
+NOVA_DOC:
+  category: subsystem
+  authority: active_authority
+  last_session: 2026-08-05
+  last_agent: claude-cowork
+  session_state: current
+  next_step: none
+  open: none
+"""
+
 from __future__ import annotations
 
 import argparse
@@ -2287,8 +2300,6 @@ def ensure_ollama():
 def _tokenize(q: str):
     q = (q or "").lower()
     toks = re.findall(r"[a-z0-9]{3,}", q)
-    if "peims" in q and "peims" not in toks:
-        toks.append("peims")
     return list(dict.fromkeys(toks))[:25]
 
 
@@ -2463,7 +2474,7 @@ def _is_local_knowledge_topic_query(text: str) -> bool:
     return False
 
 
-def _is_peims_broad_query(text: str) -> bool:
+def _is_broad_data_query(text: str) -> bool:
     del text
     return False
 

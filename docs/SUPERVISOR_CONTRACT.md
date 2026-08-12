@@ -1,18 +1,43 @@
+<!--
+NOVA_DOC
+category: subsystem
+authority: active_working
+last_session: 2026-08-05
+last_agent: claude-cowork
+session_state: needs_update
+next_step: supervisor rules still empty — Task #43
+open: Task 43: populate supervisor rules
+-->
+
 # Supervisor Ownership Constitution
 
 Last checked against code: 2026-07-12
 
 This file is the intended enforcement contract for deterministic behavior in Nova.
 
-## Current Implementation Status
+## Current Implementation Status (2026-08-05)
 
-The Supervisor seam exists, but the default registry and explicit ownership sets are currently empty:
+Four rules are registered. The seam is no longer empty.
 
-- `services/supervisor_registry.py`: `DEFAULT_SUPERVISOR_RULE_SPECS = []`
-- `services/supervisor_authority.py`: both explicit ownership sets are empty
-- `supervisor.py`: compatibility ownership sets are also empty
+| Rule | Phase | Owning | Purpose |
+|---|---|---|---|
+| `intent_move_classify` | intent | No | Classifies user move from 8 required categories (correction, redirect, meta_repair, confusion, state_declaration, selection, continuation, open_question) |
+| `identity_location_guard` | handle | **Yes** | Intercepts identity/location queries before they reach local knowledge retrieval; fires RED on `identity_location_route` probe |
+| `ambiguous_clarifier_gate` | handle | No | Detects bare ambiguous tokens ("what?", "ok", single-word clarifiers); annotates candidates for routing trace |
+| `safe_fallback_contract` | handle | No | Flags tool-directed and factual-domain queries that should not fall through to generic llm_fallback; surfaces `rule_coverage` probe pressure |
 
-Therefore the constitution below is a target contract, not proof that current turns are Supervisor-owned. Present-tense routing truth belongs to the planner/routing/reply path and its action-ledger evidence until rules are registered and exercised.
+Files:
+- `services/supervisor_rules.py`: rule implementations + `DEFAULT_RULE_HANDLERS`
+- `services/supervisor_registry.py`: `DEFAULT_SUPERVISOR_RULE_SPECS` (4 entries)
+- `supervisor.py`: `_EXPLICIT_HANDLE_OWNERSHIP_RULES = {"identity_location_guard"}`
+- `services/supervisor_authority.py`: matching explicit ownership sets
+
+Remaining gaps:
+- `safe_fallback_contract` is non-owning — it surfaces pressure but doesn't prevent the fallback. Elevate to owning once a safe fallback contract exists in the fulfillment path.
+- `intent_move_classify` annotates candidates but the fulfillment path does not yet read the intent annotation to inform routing decisions.
+- No purity regression tests yet for supervisor-owned turns.
+
+The constitution below describes the full target. The rules above are the first implementation step — not the complete picture.
 
 ## Constitution
 

@@ -462,9 +462,18 @@ class NovaMissionService:
                     release_truth_current=_as_bool(mission.get("release_truth_current"), False),
                     release_evidence=cls._mission_release_drift_evidence(mission),
                 )
-            if not cls._base_evidence_pillars_current(mission):
+            # Quiet/green hold must not cage accepted climbable release-ladder work.
+            # active_work_evidence_current covers green_cycle/truth_ready even when a
+            # lock-contention stamp clears regression_current (pillars false, no blockers).
+            evidence_ok = cls._base_evidence_pillars_current(mission) or cls.active_work_evidence_current(
+                mission
+            )
+            if not evidence_ok:
                 return False
-            for blocker in cls._mission_hold_blocker_records(mission):
+            hold_records = cls._mission_hold_blocker_records(mission)
+            if not hold_records:
+                return True
+            for blocker in hold_records:
                 remediation = cls._blocker_remediation(blocker)
                 tools = [
                     _text(item, 120)

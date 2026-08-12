@@ -451,6 +451,22 @@ class TestSessionControlService:
         report_by_file = self.latest_generated_report_by_file(reports, max(200, len(generated_defs) * 2))
         audit_by_file = self._latest_audit_by_file(Path(runtime_dir)) if runtime_dir is not None else {}
 
+        # Load latest_manifest.json — the subconscious's authoritative list of active
+        # generated definitions. Definitions absent from the manifest have been retired
+        # by the subconscious and must not be retried indefinitely. Falls back to
+        # open behavior (None) when the manifest is missing or unreadable.
+        manifest_active_paths: set[str] | None = None
+        if generated_defs:
+            try:
+                manifest_path = Path(str(generated_defs[0].get("path") or "")).parent / "latest_manifest.json"
+                if manifest_path.exists():
+                    _manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+                    _manifest_files = list(_manifest.get("files") or [])
+                    if _manifest_files:
+                        manifest_active_paths = {str(Path(f)) for f in _manifest_files}
+            except Exception:
+                pass  # Manifest unreadable — fall back to scanning all definitions
+
         items: list[dict] = []
         for item in generated_defs:
             file_name = str(item.get("file") or "").strip()
@@ -462,7 +478,23 @@ class TestSessionControlService:
             audit_row = dict(audit_by_file.get(file_name) or {})
             audit_fingerprint = str(audit_row.get("fingerprint") or "")
             already_reviewed_current = bool(fingerprint and audit_fingerprint and fingerprint == audit_fingerprint)
-            if latest_status == "warning":
+
+            # If the subconscious has retired this definition from the manifest and it
+            # has run at least once, treat it as concluded so the retry loop stops.
+            # New never-run definitions not yet in the manifest are left open (race guard).
+            item_path = str(item.get("path") or "")
+            retired_by_manifest = (
+                manifest_active_paths is not None
+                and bool(item_path)
+                and item_path not in manifest_active_paths
+                and latest_status != "never_run"
+            )
+            if retired_by_manifest:
+                already_reviewed_current = True
+
+            if retired_by_manifest:
+                opportunity_reason = "retired_by_subconscious"
+            elif latest_status == "warning":
                 opportunity_reason = "flagged_probe_followup"
             elif latest_status == "drift":
                 opportunity_reason = "parity_drift_locked" if already_reviewed_current else "parity_drift"

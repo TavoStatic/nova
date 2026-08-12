@@ -85,7 +85,7 @@ class TestNovaWebToolsService(unittest.TestCase):
         visited_domains: list[str] = []
 
         out = nova_web_tools.tool_web_research(
-            "peims",
+            "state-data",
             continue_mode=False,
             explain_missing_fn=lambda _tool, _caps: "",
             policy_tools_enabled_fn=lambda: {"web": True},
@@ -99,8 +99,8 @@ class TestNovaWebToolsService(unittest.TestCase):
             tokenize_fn=lambda text: text.split(),
             fetch_sitemap_urls_fn=lambda domain, _limit: visited_domains.append(domain) or [f"https://{domain}/sitemap.xml"],
             scan_candidate_urls_for_query_fn=lambda urls, _tokens, _max_pages, _min_score: [
-                (9.5, "https://tea.texas.gov/peims", "PEIMS overview"),
-                (8.9, "https://tea.texas.gov/peims/data", "PEIMS data submission"),
+                (9.5, "https://tea.texas.gov/reports-and-data", "state education data overview"),
+                (8.9, "https://tea.texas.gov/reports-and-data/data", "state education data data submission"),
             ]
             if "tea.texas.gov" in urls[0]
             else [],
@@ -110,18 +110,18 @@ class TestNovaWebToolsService(unittest.TestCase):
         )
 
         self.assertEqual(visited_domains, [])
-        self.assertIn("Web research results (allowlisted crawl) for: peims", out)
-        self.assertIn("https://tea.texas.gov/peims", out)
+        self.assertIn("Web research results (allowlisted crawl) for: state-data", out)
+        self.assertIn("https://tea.texas.gov/reports-and-data", out)
 
     def test_tool_web_research_uses_query_first_direct_fetch_before_sitemap(self):
         session = WebResearchSessionStore()
 
         def _scan(urls, _tokens, _max_pages, _min_score):
-            self.assertTrue(any("reports-and-data/data-submission/peims" in url for url in urls))
-            return [(9.9, "https://tea.texas.gov/reports-and-data/data-submission/peims", "PEIMS data submission guidance")]
+            self.assertTrue(any("reports-and-data/data-submission/state-data" in url for url in urls))
+            return [(9.9, "https://tea.texas.gov/reports-and-data/data-submission/state-data", "state education data data submission guidance")]
 
         out = nova_web_tools.tool_web_research(
-            "peims",
+            "state-data",
             continue_mode=False,
             explain_missing_fn=lambda _tool, _caps: "",
             policy_tools_enabled_fn=lambda: {"web": True},
@@ -140,21 +140,21 @@ class TestNovaWebToolsService(unittest.TestCase):
             session_store=session,
         )
 
-        self.assertIn("https://tea.texas.gov/reports-and-data/data-submission/peims", out)
+        self.assertIn("https://tea.texas.gov/reports-and-data/data-submission/state-data", out)
 
     def test_tool_web_research_falls_back_to_crawl_after_query_first_miss(self):
         session = WebResearchSessionStore()
         stages: list[str] = []
 
         def _scan(urls, _tokens, _max_pages, _min_score):
-            if any("reports-and-data/data-submission/peims" in url for url in urls):
+            if any("reports-and-data/data-submission/state-data" in url for url in urls):
                 stages.append("query_first")
                 return []
             stages.append("sitemap_scan")
             return []
 
         out = nova_web_tools.tool_web_research(
-            "peims",
+            "state-data",
             continue_mode=False,
             explain_missing_fn=lambda _tool, _caps: "",
             policy_tools_enabled_fn=lambda: {"web": True},
@@ -168,14 +168,14 @@ class TestNovaWebToolsService(unittest.TestCase):
             tokenize_fn=lambda text: text.split(),
             fetch_sitemap_urls_fn=lambda _domain, _limit: stages.append("sitemap_fetch") or ["https://tea.texas.gov/fallback"],
             scan_candidate_urls_for_query_fn=_scan,
-            seed_urls_for_domain_fn=lambda _domain, _tokens, _max_seed: stages.append("seed") or ["https://tea.texas.gov/reports-and-data/data-submission/peims"],
-            crawl_domain_for_query_fn=lambda _start_url, _tokens, _max_pages, _max_depth: stages.append("crawl") or [(9.7, "https://tea.texas.gov/reports-and-data/data-submission/peims", "PEIMS fallback result")],
+            seed_urls_for_domain_fn=lambda _domain, _tokens, _max_seed: stages.append("seed") or ["https://tea.texas.gov/reports-and-data/data-submission/state-data"],
+            crawl_domain_for_query_fn=lambda _start_url, _tokens, _max_pages, _max_depth: stages.append("crawl") or [(9.7, "https://tea.texas.gov/reports-and-data/data-submission/state-data", "state education data fallback result")],
             session_store=session,
         )
 
         self.assertEqual(stages[:4], ["query_first", "sitemap_fetch", "sitemap_scan", "seed"])
         self.assertIn("crawl", stages)
-        self.assertIn("https://tea.texas.gov/reports-and-data/data-submission/peims", out)
+        self.assertIn("https://tea.texas.gov/reports-and-data/data-submission/state-data", out)
 
     def test_tool_web_research_skips_seeds_after_domain_timeout(self):
         session = WebResearchSessionStore()
@@ -183,7 +183,7 @@ class TestNovaWebToolsService(unittest.TestCase):
 
         with mock.patch("services.nova_web_tools.time.perf_counter", side_effect=[0.0, 1.2]):
             out = nova_web_tools.tool_web_research(
-                "peims",
+                "state-data",
                 continue_mode=False,
                 explain_missing_fn=lambda _tool, _caps: "",
                 policy_tools_enabled_fn=lambda: {"web": True},
@@ -197,7 +197,7 @@ class TestNovaWebToolsService(unittest.TestCase):
                 tokenize_fn=lambda text: text.split(),
                 fetch_sitemap_urls_fn=lambda _domain, _limit: ["https://tea.texas.gov/sitemap.xml"],
                 scan_candidate_urls_for_query_fn=lambda _urls, _tokens, _max_pages, _min_score: [
-                    (9.5, "https://tea.texas.gov/peims", "PEIMS overview"),
+                    (9.5, "https://tea.texas.gov/reports-and-data", "state education data overview"),
                 ],
                 seed_urls_for_domain_fn=lambda _domain, _tokens, _max_seed: self.fail("seed stage should be skipped after timeout"),
                 crawl_domain_for_query_fn=lambda _start_url, _tokens, _max_pages, _max_depth: [],
@@ -205,7 +205,7 @@ class TestNovaWebToolsService(unittest.TestCase):
             )
 
         self.assertFalse(seeds_called)
-        self.assertIn("https://tea.texas.gov/peims", out)
+        self.assertIn("https://tea.texas.gov/reports-and-data", out)
 
     def test_tool_web_gather_returns_summary_snippet(self):
         out = nova_web_tools.tool_web_gather(
@@ -227,24 +227,24 @@ class TestNovaWebToolsService(unittest.TestCase):
 
     def test_build_grounded_answer_formats_strong_sources_and_filters_weak_ones(self):
         out = nova_web_tools.build_grounded_answer(
-            "PEIMS attendance reporting rules Texas TEA",
+            "state education data attendance reporting rules Texas TEA",
             max_sources=3,
             tool_web_research_fn=lambda _query: "\n".join(
                 [
-                    "https://tea.texas.gov/reports-and-data/data-submission/peims",
+                    "https://tea.texas.gov/reports-and-data/data-submission/state-data",
                     "https://txschools.gov/attendance",
                     "https://example.org/cookies",
                 ]
             ),
             tool_web_gather_fn=lambda url: {
-                "https://tea.texas.gov/reports-and-data/data-submission/peims": "Summary snippet: TEA explains PEIMS attendance submission requirements.",
+                "https://tea.texas.gov/reports-and-data/data-submission/state-data": "Summary snippet: TEA explains state education data attendance submission requirements.",
                 "https://txschools.gov/attendance": "Summary snippet: TXSchools documents attendance coding windows.",
                 "https://example.org/cookies": "Summary snippet: You need to enable JavaScript and accept our cookie policy.",
             }[url],
         )
 
         self.assertIn("I found sourced information from allowlisted references:", out)
-        self.assertIn("- TEA explains PEIMS attendance submission requirements.", out)
+        self.assertIn("- TEA explains state education data attendance submission requirements.", out)
         self.assertIn("- TXSchools documents attendance coding windows.", out)
         self.assertIn("[source: tea.texas.gov]", out)
         self.assertIn("[source: txschools.gov]", out)
@@ -253,11 +253,11 @@ class TestNovaWebToolsService(unittest.TestCase):
 
     def test_scan_candidate_urls_for_query_keeps_html_and_non_html_hits(self):
         responses = {
-            "https://tea.texas.gov/peims/guide": _FakeResponse(
-                text="<html><body>PEIMS calendar submission guide</body></html>",
+            "https://tea.texas.gov/reports-and-data/guide": _FakeResponse(
+                text="<html><body>state education data calendar submission guide</body></html>",
                 headers={"Content-Type": "text/html"},
             ),
-            "https://tea.texas.gov/files/peims-calendar.pdf": _FakeResponse(
+            "https://tea.texas.gov/files/state-data-calendar.pdf": _FakeResponse(
                 text="",
                 headers={"Content-Type": "application/pdf"},
             ),
@@ -265,21 +265,21 @@ class TestNovaWebToolsService(unittest.TestCase):
 
         hits = nova_web_tools.scan_candidate_urls_for_query(
             list(responses.keys()),
-            ["peims", "calendar"],
+            ["state-data", "calendar"],
             max_pages=5,
             min_score=3.0,
             requests_get_fn=lambda url, **_kwargs: responses[url],
             expand_research_terms_fn=lambda tokens: tokens,
-            extract_text_from_html_content_fn=lambda text, _max_chars: "PEIMS calendar submission guide",
-            score_research_hit_fn=lambda url, text, _terms, primary_tokens=None: 8.0 if ("peims" in url or "PEIMS" in text) else 0.0,
+            extract_text_from_html_content_fn=lambda text, _max_chars: "state education data calendar submission guide",
+            score_research_hit_fn=lambda url, text, _terms, primary_tokens=None: 8.0 if ("state-data" in url or "state education data" in text) else 0.0,
         )
 
         self.assertEqual(len(hits), 2)
         by_url = {url: snippet for _score, url, snippet in hits}
-        self.assertIn("https://tea.texas.gov/peims/guide", by_url)
-        self.assertIn("https://tea.texas.gov/files/peims-calendar.pdf", by_url)
-        self.assertNotIn("Non-HTML source", by_url["https://tea.texas.gov/peims/guide"])
-        self.assertIn("Non-HTML source", by_url["https://tea.texas.gov/files/peims-calendar.pdf"])
+        self.assertIn("https://tea.texas.gov/reports-and-data/guide", by_url)
+        self.assertIn("https://tea.texas.gov/files/state-data-calendar.pdf", by_url)
+        self.assertNotIn("Non-HTML source", by_url["https://tea.texas.gov/reports-and-data/guide"])
+        self.assertIn("Non-HTML source", by_url["https://tea.texas.gov/files/state-data-calendar.pdf"])
 
     def test_fetch_sitemap_urls_follows_nested_sitemaps_and_filters_host(self):
         responses = {
@@ -295,7 +295,7 @@ class TestNovaWebToolsService(unittest.TestCase):
             "https://tea.texas.gov/section.xml": _FakeResponse(
                 text="""
                 <urlset>
-                  <url><loc>https://tea.texas.gov/peims/page</loc></url>
+                  <url><loc>https://tea.texas.gov/reports-and-data/page</loc></url>
                   <url><loc>https://example.com/outside</loc></url>
                 </urlset>
                 """
@@ -313,7 +313,7 @@ class TestNovaWebToolsService(unittest.TestCase):
             urls,
             [
                 "https://tea.texas.gov/direct-page",
-                "https://tea.texas.gov/peims/page",
+                "https://tea.texas.gov/reports-and-data/page",
             ],
         )
 

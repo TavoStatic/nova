@@ -14,7 +14,7 @@ from .filesystem_tool import FileSystemTool
 from .os_capability_tool import OsCapabilityTool
 from .patch_tool import PatchTool
 from .research_tool import ResearchTool
-from .edfi_tool import EdFiExploreTool
+from .edfi_tool import DataConnectorExploreTool
 from .temporal_review_tool import TemporalReviewTool
 from .system_tool import SystemTool
 from .vision_tool import VisionTool
@@ -189,7 +189,7 @@ def build_default_registry() -> ToolRegistry:
         SystemTool(),
         OsCapabilityTool(),
         TemporalReviewTool(),
-        EdFiExploreTool(),
+        DataConnectorExploreTool(),
     ])
 
 

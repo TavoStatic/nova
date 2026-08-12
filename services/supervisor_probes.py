@@ -112,7 +112,6 @@ def looks_like_suspicious_fallback(current: dict) -> bool:
         return False
     suspicious_terms = (
         "weather",
-        "peims",
         "tsds",
         "attendance",
         "domain",

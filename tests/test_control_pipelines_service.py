@@ -238,10 +238,10 @@ class TestControlPipelinesService(unittest.TestCase):
             root = Path(td)
 
             def list_summaries(_root):
-                return [{"pipeline_id": "edfi_bisd"}]
+                return [{"pipeline_id": "data_connector"}]
 
             ok, msg, extra, detail = CONTROL_PIPELINES_SERVICE.run_query_preview(
-                {"pipeline_id": "edfi_bisd", "operation": "list_schools", "row_limit": 3},
+                {"pipeline_id": "data_connector", "operation": "list_schools", "row_limit": 3},
                 data_sources_root=root,
                 list_pipeline_summaries_fn=list_summaries,
                 preview_pipeline_query_fn=lambda *_args, **_kwargs: {
@@ -254,7 +254,7 @@ class TestControlPipelinesService(unittest.TestCase):
             self.assertTrue(ok)
             self.assertEqual(msg, "pipeline_query_preview_ok")
             self.assertEqual(extra["operation"], "list_schools")
-            self.assertEqual(detail, "pipeline_query_preview_ok:edfi_bisd:list_schools")
+            self.assertEqual(detail, "pipeline_query_preview_ok:data_connector:list_schools")
 
 
 if __name__ == "__main__":

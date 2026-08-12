@@ -1,3 +1,14 @@
+<!--
+NOVA_DOC
+category: architecture
+authority: active_working
+last_session: 2026-08-05
+last_agent: claude-cowork
+session_state: needs_update
+next_step: review for post-August 2026 changes
+open: none
+-->
+
 # Nova Architecture
 
 Last verified from code: 2026-07-12
@@ -80,7 +91,7 @@ Passing one mutation gate does not imply release readiness.
 | Work and autonomy | Work Tree, Signal Intake, pressure snapshot, Mission, orchestrator, gate |
 | Reflection and maintenance | subconscious, Kidney, core steward, core health, core thinning |
 | Change governance | safety envelope, patch, codegen, layer maturity, release, installer |
-| Data | pipeline framework, privileged protocol, Ed-Fi core, BISD lane |
+| Data | pipeline framework, privileged protocol, data connector core, the district lane |
 | Validation | regression lanes, profile inventory, test sessions, validation artifact truth |
 | Host adaptation | SOCK, Ollama health, port ownership, voice, vision, TTS |
 
@@ -140,7 +151,7 @@ Line count is pressure evidence, not proof that extraction is safe or necessary.
 - tool outcome truth belongs to execution/evidence owners
 - regression truth belongs to the regression artifact and profile inventory
 - release truth belongs to build identity, validation, and release ledger owners
-- data truth belongs to pipeline and Ed-Fi owners
+- data truth belongs to pipeline and data connector owners
 - Mission composes; it does not replace those owners
 - the control UI renders; it does not define those owners
 
@@ -152,6 +163,6 @@ Line count is pressure evidence, not proof that extraction is safe or necessary.
 - failed tool tasks completed by maintenance
 - bounded active-work target discovery
 - empty Supervisor default ownership
-- duplicate Ed-Fi source-root IDs
+- duplicate data connector source-root IDs
 
 These are not design goals. They are current implementation facts requiring owner-level investigation.

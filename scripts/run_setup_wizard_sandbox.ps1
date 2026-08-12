@@ -12,7 +12,7 @@ $repoRoot = (Resolve-Path (Join-Path $scriptRoot "..")).Path
 
 if ([string]::IsNullOrWhiteSpace($Zip)) {
   $packageRoot = Join-Path $repoRoot "runtime\exports\release_packages"
-  $latest = Get-ChildItem -Path $packageRoot -File -Filter "nyo-system-base-rc-*.zip" |
+  $latest = Get-ChildItem -Path $packageRoot -File -Filter "nova-platform-rc-*.zip" |
     Sort-Object LastWriteTimeUtc -Descending |
     Select-Object -First 1
   if ($null -eq $latest) { throw "No release zip under $packageRoot" }

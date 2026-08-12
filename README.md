@@ -1,6 +1,6 @@
 # Nova
 
-**NYO AI SYSTEMS**
+**SG Intelligence Tech LLC**
 
 Nova is a growing AI system designed to develop around a purpose.
 
@@ -44,7 +44,7 @@ Honesty does not mean Nova must stop whenever something is imperfect. It means N
 
 Nova is designed to take in new abilities without forcing every new idea into its core. A new tool, source of information, interface, testing layer, or field of work can be connected through existing contracts. Nova can then discover what the new layer provides, decide how it may be used, test its behavior, watch its health, and include its evidence in the wider system.
 
-The Ed-Fi work inside Nova demonstrates this direction. Ed-Fi is a standard used by education systems to exchange information. Nova has a reusable Ed-Fi core, connection handling, discovery, resource reading, change tracking, district boundaries, diagnostics, and a district-specific data lane. The important point is larger than education: a whole field of work can enter Nova as a connected layer while Nova continues to own the surrounding memory, tools, evidence, testing, and autonomy.
+The data connector work inside Nova demonstrates this direction. data connector is a standard used by education systems to exchange information. Nova has a reusable data connector core, connection handling, discovery, resource reading, change tracking, district boundaries, diagnostics, and a district-specific data lane. The important point is larger than education: a whole field of work can enter Nova as a connected layer while Nova continues to own the surrounding memory, tools, evidence, testing, and autonomy.
 
 The same principle applies when Nova improves itself. It can inspect areas of code that are becoming too heavy, turn that pressure into organized work, use tools to make bounded changes, run validation, and preserve release evidence. It can preview and review patches, keep snapshots, roll back changes, and record what was promoted. These are working paths for growth, not a promise that every change will be correct. Nova's strength comes from making the work inspectable and making the result answer to evidence.
 

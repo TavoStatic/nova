@@ -20,8 +20,8 @@ class TestInstallerValidationService(unittest.TestCase):
             root = Path(td)
             ledger = root / "runtime" / "exports" / "release_packages" / "release_ledger.jsonl"
             package = ledger.parent / "nova.zip"
-            installer = root / "runtime" / "exports" / "installers" / "nyo-system-installer-2026.05.26.exe"
-            record = root / "runtime" / "exports" / "installers" / "validation_records" / "nyo-system-installer-2026.05.26.md"
+            installer = root / "runtime" / "exports" / "installers" / "nova-installer-2026.05.26.exe"
+            record = root / "runtime" / "exports" / "installers" / "validation_records" / "nova-installer-2026.05.26.md"
             package.parent.mkdir(parents=True, exist_ok=True)
             package.write_text("zip", encoding="utf-8")
             _append_jsonl(

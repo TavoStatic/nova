@@ -31,7 +31,7 @@ class TestPipelineGovernedRouting(unittest.TestCase):
             },
         ) as privileged_mock:
             result = run_governed_pipeline_query(
-                "edfi_bisd",
+                "data_connector",
                 "list_schools",
                 {"offset": 0},
                 row_limit=5,

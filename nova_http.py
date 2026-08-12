@@ -1,3 +1,16 @@
+"""
+Nova HTTP runtime — operator control room and Leah web UI (port 8080).
+
+NOVA_DOC:
+  category: subsystem
+  authority: active_authority
+  last_session: 2026-08-05
+  last_agent: claude-cowork
+  session_state: current
+  next_step: none
+  open: none
+"""
+
 from __future__ import annotations
 
 import hashlib

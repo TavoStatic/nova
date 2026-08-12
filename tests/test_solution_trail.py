@@ -423,6 +423,49 @@ class SolutionTrailTests(unittest.TestCase):
         )
         self.assertEqual(classified.get("judgment"), JUDGMENT_PROVEN)
 
+    def test_release_sequence_keeps_promotion_step_after_validation_marker_advances(self):
+        branch = self._release_branch()
+        branch.source_payload = {
+            **dict(branch.source_payload or {}),
+            "task_sequence": [
+                {
+                    "title": "Run release validation profile from current artifact",
+                    "allowed_tools": ["release_validation_run"],
+                    "preferred_tool": "release_validation_run",
+                },
+                {
+                    "title": "Run release promotion judgment from validation evidence",
+                    "allowed_tools": ["release_promotion_judgment"],
+                    "preferred_tool": "release_promotion_judgment",
+                },
+                {
+                    "title": "Record completed validation outcome in release ledger",
+                    "allowed_tools": ["release_record_validation_outcome"],
+                    "preferred_tool": "release_record_validation_outcome",
+                },
+            ],
+        }
+        work_tree._BRANCHES[branch.branch_id] = branch
+
+        task = work_tree.add_task_to_branch(
+            branch.branch_id,
+            "Run release validation profile from current artifact",
+            meta={"expected_tool": "release_validation_run", "allowed_tools": ["release_validation_run"]},
+        )
+        work_tree.record_task_evidence(
+            branch_id=branch.branch_id,
+            task_id=task.task_id,
+            tool_name="release_validation_run",
+            tool_args=[],
+            result="validation ok",
+        )
+        work_tree.mark_task_complete(task.task_id)
+        work_tree.stamp_branch_progress(branch.branch_id, persist=False)
+
+        result = advance_branch_sequence_after_task(branch.branch_id)
+        self.assertTrue(result.get("ok"), result)
+        self.assertEqual(result.get("task_title"), "Run release promotion judgment from validation evidence")
+
     def test_record_and_skip_premature_validation_stem(self):
         branch = self._release_branch()
         # Establish early markers only.

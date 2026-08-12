@@ -1,4 +1,15 @@
-# NYO System Bootstrap
+<!--
+NOVA_DOC
+category: subsystem
+authority: active_working
+last_session: 2026-08-05
+last_agent: claude-cowork
+session_state: needs_update
+next_step: verify setup wizard reflects this
+open: none
+-->
+
+# Nova Bootstrap
 
 Date: 2026-05-18
 Last verified: 2026-05-20
@@ -7,7 +18,7 @@ Verification note: the source-bootstrap flow is validated from the current ledge
 
 ## Purpose
 
-This document is the canonical fresh-machine bootstrap path for the current NYO System base package.
+This document is the canonical fresh-machine bootstrap path for the current Nova base package.
 
 It describes the supported source-first install flow that turns either a fresh checkout or an extracted release zip into a runnable local runtime.
 
@@ -21,7 +32,7 @@ Current packaging reality:
 
 - Windows with PowerShell available
 - Python 3 with `venv` support on `PATH`
-- a writable package root directory containing the NYO System files
+- a writable package root directory containing the Nova files
 
 Optional but recommended:
 

@@ -1,3 +1,14 @@
+<!--
+NOVA_DOC
+category: plan
+authority: stale_snapshot
+last_session: 2026-08-05
+last_agent: claude-cowork
+session_state: needs_update
+next_step: review memory plan against actual memory lanes
+open: none
+-->
+
 # Nova Memory System Plan
 
 Document class: design plan and implementation history. Last code-truth cross-check: 2026-07-12.

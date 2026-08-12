@@ -1,4 +1,0 @@
-{
-  "connection_id": "district-main",
-  "notes": "Credentials live in runtime/edfi/connections/<connection_id>/local_config.json. This lane only references the connection id."
-}

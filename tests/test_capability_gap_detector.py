@@ -142,6 +142,8 @@ class TestCapabilityGapDetector(unittest.TestCase):
         self.assertIn("autonomous_generation", enhanced["capability_gaps"])
         self.assertIn("codegen_tool", enhanced["capabilities_registered"])
         self.assertIsNotNone(enhanced["capabilities_roadmap"])
+        self.assertIn("capability_gaps_external", enhanced)
+        self.assertIn("capability_gaps_nova_code", enhanced)
 
     def test_enhance_status_preserves_existing_fields(self):
         """Status enhancement preserves original fields."""
@@ -210,7 +212,7 @@ class TestCapabilityGapSignalGeneration(unittest.TestCase):
         status = enrich_status_with_layer_maturity(
             {
                 "capability_gap_count": 2,
-                "capability_gaps": ["autonomous_generation", "type_checking"],
+                "capability_gaps": ["autonomous_code_generation", "type_checking"],
                 "root_closure_inventory": {
                     "roots": [
                         {"root_id": root_id, "ok": True}
@@ -228,7 +230,7 @@ class TestCapabilityGapSignalGeneration(unittest.TestCase):
                 "layers": {
                     "codegen": {
                         "mode": "active",
-                        "promoted_capabilities": ["autonomous_generation", "type_checking"],
+                        "promoted_capabilities": ["autonomous_code_generation", "type_checking"],
                     },
                     "leah": {"mode": "observe", "promoted_capabilities": []},
                 }
@@ -239,7 +241,7 @@ class TestCapabilityGapSignalGeneration(unittest.TestCase):
         self.assertIsNotNone(signal)
         self.assertEqual(signal["signal_class"], "declared_capability_absent")
         self.assertEqual(signal["severity"], "medium")
-        self.assertIn("autonomous_generation", signal["payload"]["gaps"])
+        self.assertIn("autonomous_code_generation", signal["payload"]["gaps"])
         self.assertEqual(signal["payload"]["execution_group"], "generated_code")
 
     def test_signal_not_generated_when_no_gaps(self):
@@ -273,7 +275,11 @@ class TestCapabilityGapSignalGeneration(unittest.TestCase):
         status = enrich_status_with_layer_maturity(
             {
                 "capability_gap_count": 3,
-                "capability_gaps": ["cap1", "cap2", "cap3"],
+                "capability_gaps": [
+                    "type_checking",
+                    "documentation_generation",
+                    "configuration_management",
+                ],
                 "root_closure_inventory": {
                     "roots": [
                         {"root_id": root_id, "ok": True}
@@ -291,7 +297,11 @@ class TestCapabilityGapSignalGeneration(unittest.TestCase):
                 "layers": {
                     "codegen": {
                         "mode": "active",
-                        "promoted_capabilities": ["cap1", "cap2", "cap3"],
+                        "promoted_capabilities": [
+                            "type_checking",
+                            "documentation_generation",
+                            "configuration_management",
+                        ],
                     },
                     "leah": {"mode": "observe", "promoted_capabilities": []},
                 }
@@ -299,6 +309,7 @@ class TestCapabilityGapSignalGeneration(unittest.TestCase):
         )
 
         signal = _capability_gap_signal_from_status(status)
+        self.assertIsNotNone(signal)
         self.assertIn("3 capabilities", signal["title"])
 
     def test_signal_task_sequence_includes_roadmap_review(self):
@@ -309,7 +320,7 @@ class TestCapabilityGapSignalGeneration(unittest.TestCase):
         status = enrich_status_with_layer_maturity(
             {
                 "capability_gap_count": 1,
-                "capability_gaps": ["test_capability"],
+                "capability_gaps": ["type_checking"],
                 "root_closure_inventory": {
                     "roots": [
                         {"root_id": root_id, "ok": True}
@@ -327,7 +338,7 @@ class TestCapabilityGapSignalGeneration(unittest.TestCase):
                 "layers": {
                     "codegen": {
                         "mode": "active",
-                        "promoted_capabilities": ["test_capability"],
+                        "promoted_capabilities": ["type_checking"],
                     },
                     "leah": {"mode": "observe", "promoted_capabilities": []},
                 }
@@ -335,6 +346,7 @@ class TestCapabilityGapSignalGeneration(unittest.TestCase):
         )
 
         signal = _capability_gap_signal_from_status(status)
+        self.assertIsNotNone(signal)
         task_sequence = signal.get("task_sequence") or []
         task_titles = [t.get("title") or "" for t in task_sequence]
 

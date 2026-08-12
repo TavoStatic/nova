@@ -1,4 +1,15 @@
-# NYO System Dependency Contract
+<!--
+NOVA_DOC
+category: subsystem
+authority: active_working
+last_session: 2026-08-05
+last_agent: claude-cowork
+session_state: needs_update
+next_step: verify contract still holds
+open: none
+-->
+
+# Nova Dependency Contract
 
 Date: 2026-05-18
 Last verified: 2026-05-20
@@ -7,7 +18,7 @@ Verification note: dependencies are validated by `nova install` from the current
 
 ## Purpose
 
-This document is the canonical dependency contract for the current NYO System base package.
+This document is the canonical dependency contract for the current Nova base package.
 
 It defines what is required to bootstrap the package, what is bundled inside the package, and which external services are only needed for specific runtime tiers.
 
@@ -50,7 +61,7 @@ Current decision:
 Current contract:
 
 - these are treated as part of the base runtime environment, not optional extras
-- if NYO System later splits feature tiers, that should happen as an explicit packaging decision rather than silent drift
+- if Nova later splits feature tiers, that should happen as an explicit packaging decision rather than silent drift
 
 ### Level 4: External Runtime Services
 

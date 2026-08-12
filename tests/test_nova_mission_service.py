@@ -24,7 +24,7 @@ def _truth_evidence(
     hidden_by_green_regression=False,
     regression_status="OK",
     regression_stale=False,
-    release_identity="nyo-base:rc:work-tree",
+    release_identity="nova:rc:work-tree",
     release_drift=False,
     release_drift_tolerated=False,
     core_gate_ok=True,
@@ -651,6 +651,71 @@ class TestNovaMissionService(unittest.TestCase):
                 "patch_queue_run_next",
                 mission_snapshot=mission,
                 policy_snapshot=policy,
+            )
+        )
+
+    def test_quiet_hold_allows_release_ladder_when_no_blockers(self):
+        """Quiet/green hold with empty blockers must not cage climbable release steps.
+
+        Live trap: green_cycle + active_work_evidence_current, but regression_current
+        false from lock-contention stamp → pillars false → release read blocked forever.
+        """
+        mission = {
+            "enabled": True,
+            "mode": "steady_state_guard",
+            "status": "quiet_hold",
+            "action": "hold",
+            "green_cycle": True,
+            "truth_ready": True,
+            "truth_blockers": [],
+            "green_blockers": [],
+            "validation_fresh": True,
+            "regression_current": False,
+            "regression_passed": True,
+            "release_truth_current": True,
+            "generated_queue_untested_count": 0,
+        }
+        read_ctx = {
+            "recommended_tool": "read",
+            "tool": "read",
+            "title": "Read release ledger for current package",
+            "path": "runtime/release_ledger.json",
+            "reason": "validation outcome is missing",
+        }
+        self.assertTrue(NovaMissionService.active_work_evidence_current(mission))
+        self.assertFalse(NovaMissionService._base_evidence_pillars_current(mission))
+        self.assertTrue(
+            NovaMissionService._hold_allows_active_work_tool(
+                mission, "read", action_context=read_ctx
+            )
+        )
+        self.assertFalse(
+            NovaMissionService.hold_blocks_action(
+                "active_work_tree_run_next",
+                mission_snapshot=mission,
+                action_context=read_ctx,
+            )
+        )
+        self.assertFalse(
+            NovaMissionService.hold_blocks_action(
+                "active_work_tree_run_next",
+                mission_snapshot=mission,
+                action_context={
+                    "recommended_tool": "release_rebuild_verify",
+                    "title": "Release package is verified but validation outcome is missing",
+                },
+            )
+        )
+        # Random non-release reads still stay caged on hold.
+        self.assertTrue(
+            NovaMissionService.hold_blocks_action(
+                "active_work_tree_run_next",
+                mission_snapshot=mission,
+                action_context={
+                    "recommended_tool": "read",
+                    "title": "Read arbitrary notes",
+                    "path": "README.md",
+                },
             )
         )
 

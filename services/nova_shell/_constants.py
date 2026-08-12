@@ -84,24 +84,40 @@ ROLE_PERMISSIONS: dict[str, set[str]] = {
 MAX_CUSTOM_ROLE_PERMISSIONS: frozenset[str] = frozenset(ROLE_PERMISSIONS["account_admin"])
 
 # ─────────────────────────────────────────────────────────────────────────────
-# LLC Public Key (Ed25519)
+# LLC Public Key (Ed25519) — TEMPORARY bake-in
 #
-# IMPORTANT: This is a placeholder for development.
-# Before production:
-#   1. Run: python scripts/setup_nova_shell.py --generate-llc-keys
-#   2. Keep the private key OFFLINE and SECURE — never commit it.
-#   3. Replace the value below with your real public key.
-#   4. Set LLC_PUBLIC_KEY_IS_PLACEHOLDER = False.
-#   5. Rebuild and ship the package.
+# The fleet LLC system that will issue and manage real keys is NOT built yet.
+# Product is unfinished. This key is a generic development stand-in only.
+#
+# TEMP (replace when LLC management system exists):
+#   1. Generate real keys offline for the LLC.
+#   2. Keep private key OFFLINE — never commit it.
+#   3. Replace LLC_PUBLIC_KEY_PEM with the production public key.
+#   4. Set LLC_KEY_PROVISIONING = "production".
 # ─────────────────────────────────────────────────────────────────────────────
 
+# Generic Ed25519 SPKI public key (valid PEM shape for crypto libs). NOT production.
 LLC_PUBLIC_KEY_PEM = """\
 -----BEGIN PUBLIC KEY-----
-PLACEHOLDER_REPLACE_WITH_REAL_LLC_ED25519_PUBLIC_KEY_BEFORE_PRODUCTION
+MCowBQYDK2VwAyEAGb9ECWmEzf6FQbrBZ9w7lshQhqowtrbLDFw4rXAxZuE=
 -----END PUBLIC KEY-----
 """
 
-LLC_PUBLIC_KEY_IS_PLACEHOLDER = "PLACEHOLDER" in LLC_PUBLIC_KEY_PEM
+# provisioning: temporary = baked generic key; production = real LLC-managed key
+LLC_KEY_PROVISIONING: str = "temporary"
+LLC_PUBLIC_KEY_IS_PLACEHOLDER: bool = LLC_KEY_PROVISIONING != "production"
+LLC_PUBLIC_KEY_IS_TEMPORARY: bool = LLC_KEY_PROVISIONING == "temporary"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# LLC telemetry / central — TEMPORARY bake-in
+#
+# Central telemetry management is NOT built yet. Temp URL is a blank to fill.
+# Do not treat reachability as "system finished."
+# ─────────────────────────────────────────────────────────────────────────────
+
+LLC_TELEMETRY_CENTRAL_URL: str = "https://llc-central.temp.local/v1/telemetry"
+LLC_TELEMETRY_PROVISIONING: str = "temporary"  # temporary | production
+LLC_TELEMETRY_SYSTEM_BUILT: bool = False
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Session config
@@ -128,7 +144,7 @@ RECOVERY_CODE_LENGTH: int = 10
 # TOTP
 # ─────────────────────────────────────────────────────────────────────────────
 
-TOTP_ISSUER: str = "Nova by NYO System"
+TOTP_ISSUER: str = "Nova by SG Intelligence"
 TOTP_DIGITS: int = 6
 TOTP_INTERVAL: int = 30
 

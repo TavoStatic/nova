@@ -19,7 +19,7 @@ def _build_artifact(path: Path) -> None:
 
 
 def _build_long_named_artifact(path: Path) -> None:
-    package_dir = "nyo-system-base-rc-2026.05.18.16-operator-help-ready-notes-20260518_161322"
+    package_dir = "nova-platform-rc-2026.05.18.16-operator-help-ready-notes-20260518_161322"
     with zipfile.ZipFile(path, "w") as archive:
         archive.writestr(f"{package_dir}/nova.cmd", "@echo off\n")
         archive.writestr(f"{package_dir}/nova.ps1", "")
@@ -163,6 +163,39 @@ def test_release_validation_blocks_when_regression_status_is_stale(tmp_path: Pat
 
     assert report["validation_result"] == "fail"
     assert any("full regression status is stale" in issue for issue in report["blocking_issues"])
+    classes = report.get("failure_classes") or {}
+    assert "host_regression_stale" in list(classes.get("classes") or [])
+    assert classes.get("next_rail") == "host_regression_refresh"
+    assert classes.get("rebuild_helps") is False
+    assert classes.get("rebuild_is_thrash_without_source_or_package_fix") is True
+
+
+def test_classify_release_validation_failures_separates_host_and_package() -> None:
+    from services.release_validation import classify_release_validation_failures
+
+    host_only = classify_release_validation_failures(
+        blocking_issues=[
+            "full regression status is stale: age_sec=9000 max_age_sec=21600 "
+            "(refresh host runtime/regression_status.json via scripts/run_regression.py all; "
+            "rebuilding the package zip does not refresh this gate)"
+        ],
+        regression_gate={"ok": False, "status": "OK", "returncode": 0, "blocking_issues": ["stale"]},
+    )
+    assert host_only["next_rail"] == "host_regression_refresh"
+    assert host_only["rebuild_helps"] is False
+
+    mixed = classify_release_validation_failures(
+        blocking_issues=[
+            "full regression status is stale: age_sec=9000 max_age_sec=21600",
+            "nova wiring-check --offline failed",
+            "nova test failed",
+        ]
+    )
+    assert "host_regression_stale" in mixed["classes"]
+    assert "package_wiring_check_failed" in mixed["classes"]
+    assert "package_test_failed" in mixed["classes"]
+    assert mixed["next_rail"] == "host_then_package"
+    assert mixed["rebuild_helps"] is True
 
 
 def test_release_validation_removes_fresh_extract_root_for_repeated_artifact(tmp_path: Path) -> None:
@@ -210,7 +243,7 @@ def test_release_validation_removes_fresh_extract_root_for_repeated_artifact(tmp
 
 
 def test_release_validation_collapses_long_package_root_before_running_commands(tmp_path: Path) -> None:
-    artifact = tmp_path / "nyo-system-base-rc-2026.05.18.16-operator-help-ready-notes-20260518_161322.zip"
+    artifact = tmp_path / "nova-platform-rc-2026.05.18.16-operator-help-ready-notes-20260518_161322.zip"
     record = tmp_path / "nova-rc.md"
     _build_long_named_artifact(artifact)
     _write_regression_status(tmp_path)
@@ -246,7 +279,7 @@ def test_release_validation_collapses_long_package_root_before_running_commands(
 
 
 def test_prepare_package_root_extracts_wrapped_zip_directly_into_short_pkg(tmp_path: Path) -> None:
-    artifact = tmp_path / "nyo-system-base-rc-2026.05.18.16-operator-help-ready-notes-20260518_161322.zip"
+    artifact = tmp_path / "nova-platform-rc-2026.05.18.16-operator-help-ready-notes-20260518_161322.zip"
     _build_long_named_artifact(artifact)
 
     package_root, extract_root = _prepare_package_root(artifact, tmp_path / "validation")
@@ -254,7 +287,7 @@ def test_prepare_package_root_extracts_wrapped_zip_directly_into_short_pkg(tmp_p
     assert package_root.name == "pkg"
     assert package_root.parent == extract_root
     assert (package_root / "nova.cmd").exists()
-    assert not (extract_root / "nyo-system-base-rc-2026.05.18.16-operator-help-ready-notes-20260518_161322").exists()
+    assert not (extract_root / "nova-platform-rc-2026.05.18.16-operator-help-ready-notes-20260518_161322").exists()
 
 
 def test_nova_run_probe_command_uses_front_door_without_runtime_turn_by_default() -> None:

@@ -111,7 +111,7 @@ def _schools_local_hold() -> dict[str, Any]:
         settings = ControlBackpacksService().ensure_settings("edfi", write=False)
         lea = str(settings.get("district_lea_id") or out.get("lea") or "")
         conn = str(settings.get("connection_id") or "district-main")
-        # Try both raw and normalized LEA keys (031901 vs 31901).
+        # Try both raw and normalized LEA keys (state education data vs data connector format).
         lea_candidates = [lea]
         try:
             from services.backpack_host.scope_settings import format_lea_id
@@ -150,9 +150,9 @@ def _tool_registered() -> bool:
         return reg.get("edfi_explore") is not None
     except Exception:
         try:
-            from tools.edfi_tool import EdFiExploreTool
+            from tools.edfi_tool import DataConnectorExploreTool
 
-            return str(getattr(EdFiExploreTool, "name", "")) == "edfi_explore"
+            return str(getattr(DataConnectorExploreTool, "name", "")) == "edfi_explore"
         except Exception:
             return False
 
@@ -238,7 +238,7 @@ def scan_backpack_fusion(backpack_id: str = "edfi", *, persist: bool = True) -> 
     # 4) Tool registered in Nova tool nervous system
     tool_ok = _tool_registered()
     probes.append(
-        _probe("tool_edfi_explore_registered", tool_ok, "tools.registry EdFiExploreTool", severity="failure")
+        _probe("tool_edfi_explore_registered", tool_ok, "tools.registry DataConnectorExploreTool", severity="failure")
     )
 
     # 5) Host query path (local health only — no full ODS scan)

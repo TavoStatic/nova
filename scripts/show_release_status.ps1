@@ -87,7 +87,7 @@ if ($Json) {
 }
 
 Write-Host ""
-Write-Host "NYO System Release Status"
+Write-Host "Nova Release Status"
 Write-Host "-------------------------"
 Write-Host ("[OK]   Artifact kind  : " + $payload.artifact_kind)
 Write-Host ("[OK]   State          : " + $payload.latest_state)

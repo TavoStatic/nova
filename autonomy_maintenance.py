@@ -1,3 +1,16 @@
+"""
+Autonomy maintenance cycle — subconscious, Kidney, Mission, Work Tree orchestration.
+
+NOVA_DOC:
+  category: subsystem
+  authority: active_authority
+  last_session: 2026-08-05
+  last_agent: claude-cowork
+  session_state: current
+  next_step: none
+  open: none
+"""
+
 from __future__ import annotations
 
 import argparse
@@ -22,6 +35,14 @@ from services.nova_patching import bulk_reject_orphaned_previews as service_bulk
 from services.nova_patching import patch_preview_summaries as service_patch_preview_summaries
 from services.autonomy_orchestrator import AUTONOMY_ORCHESTRATOR_SERVICE
 from services.autonomy_execution_gate import AUTONOMY_EXECUTION_GATE_SERVICE
+from services.decision_proposal_judge import (
+    attach_outcome as decision_judge_attach_outcome,
+    build_decision_episode,
+    evaluate_recommendation_packet,
+    persist_decision_episode,
+    should_block_execution as decision_judge_should_block,
+)
+
 from services.control_status_surfaces import (
     derive_surfaces_url,
     merge_http_supplement_into_local,
@@ -2222,6 +2243,16 @@ def _refresh_root_closure_inventory_surfaces(payload: dict, *, preserve_existing
                 findings_queue=findings_queue,
             )
             result["self_scan_rings_ok"] = bool((result.get("self_scan_rings") or {}).get("ok"))
+            # Write ring scan results and drift alerts to the living ledger (fire-and-forget, never raises).
+            try:
+                from scripts.nova_ledger_ingest import (
+                    ingest_scan_rings_result,
+                    emit_drift_alerts_from_ring_result,
+                )
+                ingest_scan_rings_result(result["self_scan_rings"], regenerate=False)
+                emit_drift_alerts_from_ring_result(result["self_scan_rings"], regenerate=False)
+            except Exception:
+                pass  # ledger write failure must never block the maintenance cycle
         except Exception as ring_exc:
             result["self_scan_rings"] = {"ok": False, "error": str(ring_exc)[:240]}
             result["self_scan_rings_ok"] = False
@@ -3889,8 +3920,50 @@ def _dispatch_autonomy_control_action(action_type: str, payload: dict, events: l
     )
 
 
+def _decision_judge_history_from_state(state: dict) -> list[dict]:
+    history = state.get("decision_judge_history")
+    if not isinstance(history, list):
+        return []
+    return [dict(item) for item in history if isinstance(item, dict)][-24:]
+
+
+def _record_decision_judge_history(state: dict, proposal: dict, report: dict, *, result_label: str, ok: bool) -> None:
+    history = _decision_judge_history_from_state(state)
+    args = dict(proposal.get("arguments") or {}) if isinstance(proposal.get("arguments"), dict) else {}
+    history.append(
+        {
+            "ts": _patch_queue_timestamp(),
+            "action_id": str(proposal.get("action_id") or ""),
+            "action_type": str(proposal.get("action_id") or ""),
+            "tool_name": str(proposal.get("tool_name") or ""),
+            "target_id": str(args.get("target_id") or ""),
+            "disposition": str(report.get("disposition") or ""),
+            "confidence": report.get("confidence"),
+            "result": str(result_label or ""),
+            "ok": bool(ok),
+            # Calibration: filled when we later know close-condition movement.
+            "close_condition_remained_false": None,
+            "progress_moved": None,
+        }
+    )
+    state["decision_judge_history"] = history[-24:]
+
+
 def _execute_autonomy_recommendation(state: dict, packet: dict, policy_snapshot: dict) -> dict:
     last_context = _last_action_context_for_orchestrator(state)
+    # Proposal + Judge: observation-only by default (does not block execution).
+    proposal, judge_report = evaluate_recommendation_packet(
+        packet,
+        attempt_history=_decision_judge_history_from_state(state),
+        enforce_disposition=bool(
+            (policy_snapshot or {}).get("decision_judge_enforce")
+            if isinstance(policy_snapshot, dict)
+            else False
+        ),
+    )
+    state["last_decision_proposal"] = dict(proposal)
+    state["last_decision_judge"] = dict(judge_report)
+
     gate = AUTONOMY_EXECUTION_GATE_SERVICE.evaluate(
         packet,
         policy_snapshot,
@@ -3910,9 +3983,53 @@ def _execute_autonomy_recommendation(state: dict, packet: dict, policy_snapshot:
         "result": "blocked",
         "refusal_reasons": list(gate.get("refusal_reasons") or []),
         "policy_checks": dict(gate.get("policy_checks") or {}),
+        "decision_proposal": dict(proposal),
+        "decision_judge": dict(judge_report),
     }
     if not bool(gate.get("allow_execute")):
+        episode = build_decision_episode(
+            proposal=proposal,
+            judge_report=judge_report,
+            execution={"result": "gate_blocked", "gate_reason": payload.get("gate_reason")},
+        )
+        state["last_decision_episode"] = episode
+        payload["decision_episode"] = episode
+        try:
+            persist_decision_episode(episode, proposal=proposal)
+        except Exception:
+            pass
         state["last_autonomy_execution_gate"] = payload
+        return payload
+
+    # Enforcement off unless policy sets decision_judge_enforce=true.
+    if decision_judge_should_block(judge_report):
+        resolution = dict(judge_report.get("resolution_action") or {})
+        payload.update(
+            {
+                "result": "blocked",
+                "ok": False,
+                "allowed": False,
+                "message": "decision_judge_disposition_block",
+                "decision_judge_block": True,
+                "decision_judge_resolution": resolution,
+            }
+        )
+        episode = build_decision_episode(
+            proposal=proposal,
+            judge_report=judge_report,
+            execution={"result": "blocked", "message": "decision_judge_disposition_block"},
+        )
+        state["last_decision_episode"] = episode
+        payload["decision_episode"] = episode
+        try:
+            persist_decision_episode(episode, proposal=proposal)
+        except Exception:
+            pass
+        state["last_autonomy_execution_gate"] = dict(payload)
+        state["last_autonomy_execution"] = payload
+        _record_decision_judge_history(
+            state, proposal, judge_report, result_label="blocked", ok=False
+        )
         return payload
 
     events: list[dict] = []
@@ -3928,6 +4045,29 @@ def _execute_autonomy_recommendation(state: dict, packet: dict, policy_snapshot:
         result_label = "blocked"
     else:
         result_label = "failed"
+    # predicate_moved unknown at execute time — fill later when world is re-observed.
+    outcome_report = decision_judge_attach_outcome(
+        judge_report,
+        execution_result=result_label,
+        execution_ok=bool(ok),
+        close_condition_remained_false=None,
+        progress_moved=None,
+    )
+    execution_blob = {
+        "result": result_label,
+        "ok": bool(ok),
+        "message": msg_text,
+        "action_type": action_type,
+    }
+    episode = build_decision_episode(
+        proposal=proposal,
+        judge_report=outcome_report,
+        execution=execution_blob,
+    )
+    try:
+        persist_decision_episode(episode, proposal=proposal)
+    except Exception:
+        pass
     payload.update(
         {
             "result": result_label,
@@ -3937,11 +4077,19 @@ def _execute_autonomy_recommendation(state: dict, packet: dict, policy_snapshot:
             "events": events,
             "cooldown_sec": cooldown_sec,
             "cooldown_until_epoch": time.time() + cooldown_sec if cooldown_sec else 0.0,
+            "decision_judge": outcome_report,
+            "decision_episode": episode,
         }
     )
+    state["last_decision_judge"] = dict(outcome_report)
+    state["last_decision_episode"] = dict(episode)
     state["last_autonomy_execution_gate"] = dict(payload)
     state["last_autonomy_execution"] = payload
+    _record_decision_judge_history(
+        state, proposal, outcome_report, result_label=result_label, ok=bool(ok)
+    )
     return payload
+
 
 
 def _skipped_maintenance_execution_payload(state: dict, state_key: str, reason: str, *, tree_count: int = 0) -> dict:
@@ -4361,10 +4509,64 @@ def _run_solution_ladder_learning_if_due(state: dict) -> dict:
     return payload
 
 
+def _regression_lock_owner_alive() -> tuple[bool, str]:
+    """True when another live process already holds runtime/regression.lock."""
+    lock_path = RUNTIME_DIR / "regression.lock"
+    try:
+        payload = json.loads(lock_path.read_text(encoding="utf-8"))
+    except Exception:
+        return False, ""
+    if not isinstance(payload, dict):
+        return False, ""
+    owner_pid = int(payload.get("pid", 0) or 0)
+    if owner_pid <= 0 or owner_pid == int(os.getpid()):
+        return False, ""
+    try:
+        os.kill(owner_pid, 0)
+    except OSError:
+        return False, ""
+    lanes = ", ".join(str(item) for item in list(payload.get("lanes") or []))
+    started_at = str(payload.get("started_at") or "").strip()
+    detail = (
+        f"regression already running (pid={owner_pid}, "
+        f"lanes={lanes or 'unknown'}, started_at={started_at or 'unknown'})"
+    )
+    return True, detail
+
+
+def _host_regression_status_file_fresh(
+    *,
+    status_path: Path = REGRESSION_STATUS_FILE,
+    max_age_sec: int = 21600,
+) -> bool:
+    """True when host regression_status.json is OK and within max age.
+
+    Release validation gates on this file. Skipping daily regression solely because
+    last_regression_date is today leaves a multi-day-old status file and forces
+    permanent release_validation fail → rebuild thrash.
+    """
+    try:
+        from services.release_validation import _regression_status_gate
+    except Exception:
+        return False
+    gate = _regression_status_gate(status_path=Path(status_path), max_age_sec=int(max_age_sec))
+    return bool(gate.get("ok"))
+
+
 def _run_daily_regression_if_due(state: dict) -> str:
     today = time.strftime("%Y-%m-%d")
     if str(state.get("last_regression_date") or "") == today:
-        return "daily_regression_skipped_already_ran"
+        # Date alone is not enough: refresh when the on-disk gate is stale/missing.
+        if _host_regression_status_file_fresh():
+            return "daily_regression_skipped_already_ran"
+        # Fall through and re-run so release host gate can become green.
+
+    # Pre-check lock before spawning. Dual --once cycles used to each block for up to
+    # the full regression timeout waiting on a sibling, freezing the climb timer.
+    lock_held, lock_detail = _regression_lock_owner_alive()
+    if lock_held:
+        state["last_regression_tail"] = lock_detail[:2000]
+        return "daily_regression_skipped_already_running"
 
     cmd = [str(VENV_PY), str(REGRESSION_RUNNER), "all"]
     proc = subprocess.run(
@@ -5863,19 +6065,27 @@ def _resolve_targeted_work_pin(
         branch = work_tree.get_branch(resolved_branch_id)
         if branch is None or str(branch.tree_id) != tree_id:
             return {}
+        open_tasks = [
+            task
+            for task in work_tree.list_branch_tasks(resolved_branch_id)
+            if task.status not in (work_tree.TaskStatus.COMPLETE, work_tree.TaskStatus.DROPPED)
+        ]
         if task_target:
             resolved_task = next(
                 (task for task in work_tree.list_branch_tasks(resolved_branch_id) if str(task.task_id) == task_target),
                 None,
             )
-            if resolved_task is None or resolved_task.status in (work_tree.TaskStatus.COMPLETE, work_tree.TaskStatus.DROPPED):
+            # Orchestrator pins can lag behind rapid drop/recreate of the same ladder
+            # step. A dropped/missing pin must fall through to the branch's open stem
+            # or climb freezes as stale_execution_contract.
+            if resolved_task is None or resolved_task.status in (
+                work_tree.TaskStatus.COMPLETE,
+                work_tree.TaskStatus.DROPPED,
+            ):
+                resolved_task = open_tasks[0] if open_tasks else None
+            if resolved_task is None:
                 return {}
         else:
-            open_tasks = [
-                task
-                for task in work_tree.list_branch_tasks(resolved_branch_id)
-                if task.status not in (work_tree.TaskStatus.COMPLETE, work_tree.TaskStatus.DROPPED)
-            ]
             resolved_task = open_tasks[0] if open_tasks else None
     else:
         return {}
@@ -5925,8 +6135,8 @@ def _targeted_work_pin_matches_payload(
         return False
     if branch_target and str(context.get("branch_id") or "").strip() != branch_target:
         return False
-    if task_target and str(context.get("task_id") or "").strip() != task_target:
-        return False
+    # Task ids are not durable: ladder steps drop/recreate. Pin resolution already
+    # remaps to the branch's current open stem; only tool identity is enforced here.
     if tool_target and str(context.get("recommended_tool") or "").strip() != tool_target:
         return False
     return True
@@ -5968,6 +6178,64 @@ def _active_work_tree_payload_matches_target(
     return True
 
 
+def _pin_active_work_payload(
+    payload: dict,
+    *,
+    branch_target: str = "",
+    task_target: str = "",
+    tool_target: str = "",
+) -> dict | None:
+    """Build a tree payload whose next_step matches an orchestrator pin.
+
+    The tree's default next_step preview can drift from the branch the orchestrator
+    selected. Returning empty there used to emit stale_execution_contract forever
+    while the pinned branch was still ready — climb freezes after recommend.
+    """
+    if not isinstance(payload, dict):
+        return None
+    if str(payload.get("status") or "").strip().lower() != "active":
+        return None
+    if str(payload.get("kind") or "").strip().lower() in {PATCH_QUEUE_TREE_KIND, GENERATED_QUEUE_TREE_KIND}:
+        return None
+
+    branch_target = str(branch_target or "").strip()
+    task_target = str(task_target or "").strip()
+    tool_target = str(tool_target or "").strip()
+    if not branch_target and not task_target:
+        if not _active_work_tree_payload_eligible(payload):
+            return None
+        if tool_target and not _active_work_tree_payload_matches_target(
+            payload,
+            tool_target=tool_target,
+        ):
+            return None
+        return payload
+
+    pin = _resolve_targeted_work_pin(
+        payload,
+        branch_target=branch_target,
+        task_target=task_target,
+    )
+    if not pin:
+        return None
+    recommended_tool = str(pin.get("recommended_tool") or "").strip()
+    if tool_target:
+        if recommended_tool and recommended_tool != tool_target:
+            return None
+        recommended_tool = recommended_tool or tool_target
+    if not recommended_tool:
+        return None
+    pinned = dict(payload)
+    pinned["next_step"] = {
+        "branch_id": str(pin.get("branch_id") or "").strip(),
+        "branch_title": str(pin.get("title") or "").strip(),
+        "task_id": str(pin.get("task_id") or "").strip(),
+        "task_title": str(pin.get("task_title") or "").strip(),
+        "recommended_tool": recommended_tool,
+    }
+    return pinned
+
+
 def _resolve_targeted_active_work_candidates(
     *,
     target_tree_id: str = "",
@@ -5990,27 +6258,23 @@ def _resolve_targeted_active_work_candidates(
 
     if tree_target:
         payload = work_tree.get_visual_tree_data(tree_target)
-        if not _active_work_tree_payload_eligible(payload):
-            return []
-        if not _active_work_tree_payload_matches_target(
-            payload,
+        pinned = _pin_active_work_payload(
+            payload or {},
             branch_target=branch_target,
             task_target=task_target,
             tool_target=tool_target,
-        ):
-            return []
-        return [payload]
+        )
+        return [pinned] if pinned else []
 
     for payload in work_tree.list_visual_trees(limit=None):
-        if not _active_work_tree_payload_eligible(payload):
-            continue
-        if _active_work_tree_payload_matches_target(
+        pinned = _pin_active_work_payload(
             payload,
             branch_target=branch_target,
             task_target=task_target,
             tool_target=tool_target,
-        ):
-            return [payload]
+        )
+        if pinned:
+            return [pinned]
     return []
 
 
@@ -7176,6 +7440,11 @@ def run_once(*, worker_loop: bool = False) -> int:
             f" ledger={str((autonomy_orchestrator.get('ledger') or {}).get('status') or '')}"
             f" execution={str((autonomy_orchestrator.get('execution') or {}).get('result') or '')}"
         )
+        # Flush judge/execution samples even if later steps (daily regression) hang.
+        try:
+            _save_state(state)
+        except Exception as save_exc:
+            _append_log(f"post_orchestrator_state_save_failed {save_exc}")
     except Exception as exc:
         state["last_autonomy_orchestrator"] = {
             "ts": _patch_queue_timestamp(),
@@ -7333,6 +7602,35 @@ def run_once(*, worker_loop: bool = False) -> int:
     elif regression_status != "daily_regression_skipped_already_ran":
         state["last_regression_stale"] = False
     _append_log(f"{regression_status}{'_synced_status_file' if regression_status_synced else ''}")
+
+    # data connector backpack: paced warehouse sync (schools) when schedule says due.
+    # Not a live ODS hammer — warehouse_sync module enforces min gap / local hour.
+    try:
+        from services.edfi.warehouse_sync import maybe_run_scheduled_warehouse_sync
+
+        edfi_warehouse = maybe_run_scheduled_warehouse_sync(force=False)
+        if not isinstance(edfi_warehouse, dict):
+            edfi_warehouse = {"ok": False, "error": "invalid_warehouse_result"}
+        edfi_warehouse = {
+            "ts": _patch_queue_timestamp(),
+            **edfi_warehouse,
+        }
+        state["last_edfi_warehouse_sync"] = edfi_warehouse
+        _append_log(
+            "edfi_warehouse_sync"
+            f" ok={bool(edfi_warehouse.get('ok'))}"
+            f" ran={bool(edfi_warehouse.get('ran'))}"
+            f" reason={str((edfi_warehouse.get('schedule') or {}).get('reason') or edfi_warehouse.get('error') or '')[:80]}"
+        )
+    except Exception as exc:
+        edfi_warehouse = {
+            "ts": _patch_queue_timestamp(),
+            "ok": False,
+            "ran": False,
+            "error": str(exc)[:400],
+        }
+        state["last_edfi_warehouse_sync"] = edfi_warehouse
+        _append_log(f"edfi_warehouse_sync_failed {exc}")
 
     try:
         signal_ingestion = _sync_signal_intake_work_tree(

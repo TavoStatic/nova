@@ -177,8 +177,8 @@ SOURCE_PROFILE_LANES: dict[str, list[str]] = {
         "tests.test_edfi_rate_limit_evidence",
         "tests.test_edfi_warehouse",
     ],
-    "source_data_lane_edfi_bisd": [
-        "tests.test_edfi_bisd_pipeline",
+    "source_data_lane_data_connector": [
+        "tests.test_data_connector_pipeline",
         "tests.test_edfi_tool",
     ],
     "source_backpack": [

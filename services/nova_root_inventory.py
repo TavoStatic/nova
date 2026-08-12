@@ -226,39 +226,13 @@ SOURCE_ROOTS: tuple[SourceRoot, ...] = (
         ("pipelines/registry.py", "pipelines/privileged_worker.py", "services/control_pipelines.py"),
     ),
     SourceRoot(
-        "edfi_core",
-        "Vendor-neutral Ed-Fi core: auth, client, discovery, resources, district scope, profile evidence, readiness, and diagnostics",
+        "backpack_host",
+        "Backpack host infrastructure — fusion, control surface, capability scan, and run entrypoint",
         (
-            "services/edfi/__init__.py",
-            "services/edfi/auth.py",
-            "services/edfi/client.py",
-            "services/edfi/core_readiness.py",
-            "services/edfi/profile_evidence.py",
-            "services/edfi/discovery.py",
-            "tools/edfi_tool.py",
-        ),
-    ),
-    SourceRoot(
-        "backpack_edfi",
-        "Ed-Fi backpack package, host fusion, control surface, capability scan for Nova nervous system",
-        (
-            "backpacks/edfi/backpack.json",
-            "backpacks/edfi/brief.md",
             "services/backpack_host/capability_surface.py",
             "services/backpack_host/query.py",
             "services/control_backpacks.py",
             "scripts/run_backpack.py",
-            "tools/edfi_tool.py",
-        ),
-    ),
-    SourceRoot(
-        "data_lane_edfi_bisd",
-        "LEGACY BISD Ed-Fi data lane connector (prefer backpacks/edfi)",
-        (
-            "data_sources/edfi_bisd/connector.py",
-            "data_sources/edfi_bisd/pipeline.json",
-            "scripts/run_edfi_profile.py",
-            "scripts/run_edfi_explore.py",
         ),
     ),
     SourceRoot(
@@ -323,36 +297,8 @@ SOURCE_ROOTS: tuple[SourceRoot, ...] = (
         "Source-root discovery, root coverage comparison, and wiring inventory completeness",
         ("services/nova_root_inventory.py", "services/nova_wiring_inventory.py", "services/end_to_end_wiring.py"),
     ),
-    SourceRoot(
-        "edfi_core",
-        "Ed-Fi ODS HTTP client, OAuth auth, discovery, paging, district scoping, profile evidence, and change tracking — vendor-neutral, no Texas/PEIMS logic",
-        (
-            "services/edfi/__init__.py",
-            "services/edfi/auth.py",
-            "services/edfi/client.py",
-            "services/edfi/config.py",
-            "services/edfi/diagnostics.py",
-            "services/edfi/discovery.py",
-            "services/edfi/district_scope.py",
-            "services/edfi/errors.py",
-            "services/edfi/inventory.py",
-            "services/edfi/resources.py",
-            "services/edfi/profile_evidence.py",
-            "services/edfi/core_readiness.py",
-            "services/edfi/change_tracking.py",
-        ),
-    ),
-    SourceRoot(
-        "data_lane_edfi_bisd",
-        "BISD Ed-Fi data lane — connector, allowlisted query templates, schema manifest, and operator probe scripts",
-        (
-            "data_sources/edfi_bisd/connector.py",
-            "data_sources/edfi_bisd/pipeline.json",
-            "data_sources/edfi_bisd/query_templates.json",
-            "scripts/run_edfi_profile.py",
-            "scripts/run_edfi_explore.py",
-        ),
-    ),
+    # NOTE: data connector service layer and data lane ship with the installable backpack,
+    # not with Nova core. See backpacks/ for the reference implementation.
 )
 
 
@@ -464,16 +410,16 @@ def _coverage_root_for_path(path: str) -> str:
     ):
         return "test_ecosystem"
     if low.startswith("services/edfi/"):
-        return "edfi_core"
+        return "backpack_host"  # ships with the data connector backpack, not core
     if (
-        low.startswith("backpacks/edfi/")
+        low.startswith("backpacks/")
         or low.startswith("services/backpack_host/")
         or low == "services/control_backpacks.py"
-        or name in {"run_backpack.py", "_checklist_edfi_gates.py"}
+        or name == "run_backpack.py"
         or low.startswith("tests/test_backpack_")
         or low.startswith("tests/test_control_backpacks")
     ):
-        return "backpack_edfi"
+        return "backpack_host"
     if low.startswith("services/nova_shell/") or name in {"setup_nova_shell.py"} or "nova_shell" in low:
         return "session_identity_auth"
     # Agent/operator scratch scripts (underscore prefix) stay out of production roots.
@@ -488,14 +434,12 @@ def _coverage_root_for_path(path: str) -> str:
         or name in {"build_nova_setup_exe.ps1", "bring_up_webui.py", "webui_watchdog.py"}
     ):
         return "diagnostics_hygiene"
-    if low.startswith("data_sources/edfi_bisd/"):
-        return "data_lane_edfi_bisd"
-    if name in {"run_edfi_profile.py", "run_edfi_explore.py"}:
-        return "data_lane_edfi_bisd"
-    if name in {"demo_edfi_core_lifecycle.py"} or low == "tools/edfi_tool.py":
-        return "edfi_core"
+    if low.startswith("data_sources/data_connector/"):
+        return "backpack_host"
+    if name in {"run_edfi_profile.py", "run_edfi_explore.py", "demo_edfi_core_lifecycle.py"} or low == "tools/edfi_tool.py":
+        return "backpack_host"
     if low.startswith("docs/") and "edfi" in low:
-        return "edfi_core"
+        return "diagnostics_hygiene"
     if name in {"readme.md", "requirements.txt"}:
         return "frontdoor_cli"
     if name in {".gitattributes", ".gitignore", "pytest.ini"}:
@@ -504,7 +448,7 @@ def _coverage_root_for_path(path: str) -> str:
         return "diagnostics_hygiene"
     if name == "this_is_nova":
         return "source_root_inventory"
-    if name == "nyo-nova-autostart.ps1":
+    if name == "nova-autostart.ps1":
         return "frontdoor_cli"
     if low.startswith("updates/"):
         return "patch_pipeline"

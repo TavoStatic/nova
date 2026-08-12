@@ -1,4 +1,15 @@
-# NYO System Base Package Readiness
+<!--
+NOVA_DOC
+category: plan
+authority: active_working
+last_session: 2026-08-05
+last_agent: claude-cowork
+session_state: needs_update
+next_step: review against current release state
+open: none
+-->
+
+# Nova Base Package Readiness
 
 Document class: historical release-readiness checkpoint. Do not use its gate result as current runtime or release truth.
 
@@ -7,7 +18,7 @@ Last verified: 2026-05-20
 
 ## Purpose
 
-This is the canonical checklist for deciding whether NYO System is ready to be treated as a base package candidate.
+This is the canonical checklist for deciding whether Nova is ready to be treated as a base package candidate.
 
 It is intentionally stricter than "the repo runs on my machine" and narrower than a full product release.
 

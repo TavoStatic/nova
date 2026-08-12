@@ -1,10 +1,21 @@
-# NYO System Release Artifact
+<!--
+NOVA_DOC
+category: plan
+authority: active_working
+last_session: 2026-08-05
+last_agent: claude-cowork
+session_state: needs_update
+next_step: verify against current release state
+open: none
+-->
+
+# Nova Release Artifact
 
 Date: 2026-06-14
 
 ## Purpose
 
-This document defines the current base-package release artifact for NYO System.
+This document defines the current base-package release artifact for Nova.
 
 ## Canonical Artifact
 
@@ -164,7 +175,7 @@ Current nonblocking validation notes:
 
 - rerun artifact validation from the produced zip on a fresh machine or VM for release candidates
 - exercise model-backed `nova run` scripted-turn validation when the target includes Ollama/runtime chat
-- decide later whether NYO System also needs a higher-convenience installer format
+- decide later whether Nova also needs a higher-convenience installer format
 
 ## Windows Installer Layer
 
@@ -183,7 +194,7 @@ When Inno Setup is available, the repo can now compile a Windows installer wrapp
 
 This does not replace the package zip as the release truth.
 
-It wraps the verified package artifact in the current Inno Setup installer defined in `installer/NYO_System.iss`.
+It wraps the verified package artifact in the current Inno Setup installer defined in `installer/Nova_System.iss`.
 
 Installer artifacts now participate in the same shared release ledger lifecycle as package zips:
 

@@ -1,4 +1,15 @@
-# NYO System Windows Installer Plan
+<!--
+NOVA_DOC
+category: plan
+authority: stale_snapshot
+last_session: 2026-08-05
+last_agent: claude-cowork
+session_state: needs_update
+next_step: verify against installer build state
+open: none
+-->
+
+# Nova Windows Installer Plan
 
 Document class: installer plan and checkpoint history. Current artifact truth belongs to the installer/release ledgers and validation records.
 
@@ -9,7 +20,7 @@ Status note: package zip validation is current through same-machine checks for t
 
 ## Purpose
 
-This document defines the first practical Windows executable-installer path for NYO System.
+This document defines the first practical Windows executable-installer path for Nova.
 
 It is intentionally narrower than a frozen all-in-one executable build.
 
@@ -41,20 +52,20 @@ Recommended first implementation:
 
 Current repo status:
 
-- the Inno Setup definition exists at `installer/NYO_System.iss`
+- the Inno Setup definition exists at `installer/Nova_System.iss`
 - the repo now exposes `nova installer-build` as the build entrypoint for producing the installer executable from a verified package zip
 - the remaining work is validation and hardening, not inventing a new installer pipeline
 
 This keeps one release truth:
 
-- ship the NYO System package as source payload
+- ship the Nova package as source payload
 - add a convenience wrapper for Windows installation and first-run setup
 
 ## Installation Routes
 
 Yes: the installer should offer multiple routes and let the operator choose.
 
-That is better than forcing one install path because NYO System has different user types:
+That is better than forcing one install path because Nova has different user types:
 
 - operators who want the recommended guided install
 - technical users who want files laid down but prefer to bootstrap manually
@@ -123,8 +134,8 @@ The installer should do the following.
 
 ### 1. Lay Down The Payload
 
-- copy the packaged NYO System files into the install directory
-- default install root: `C:\Program Files\NYO System`
+- copy the packaged Nova files into the install directory
+- default install root: `C:\Program Files\Nova`
 - support alternate install directory when admin install is not desired
 - allow command-line current-user installs for isolated same-machine validation and non-admin operator scenarios
 
@@ -191,10 +202,10 @@ This should include:
 
 Recommended Start Menu entries:
 
-- `NYO System Shell`
-- `NYO System Control`
-- `NYO System Logs`
-- `Uninstall NYO System`
+- `Nova Shell`
+- `Nova Control`
+- `Nova Logs`
+- `Uninstall Nova`
 
 ## Packaging Flow
 
@@ -249,7 +260,7 @@ Still true after installer work:
 
 ### Phase 4: Optional Productization
 
-- decide whether NYO System should remain a bootstrap-installed runtime or move toward a frozen executable distribution
+- decide whether Nova should remain a bootstrap-installed runtime or move toward a frozen executable distribution
 
 ## First Implementation Choice
 
@@ -264,7 +275,7 @@ Why:
 
 ## Related Files
 
-- `installer/NYO_System.iss`
+- `installer/Nova_System.iss`
 - `scripts/installer_hardware_check.ps1`
 - `docs/BOOTSTRAP.md`
 - `docs/RELEASE_ARTIFACT.md`

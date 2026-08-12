@@ -71,8 +71,8 @@ class TestRegressionContracts(unittest.TestCase):
 
     def test_control_template_uses_current_branding(self):
         template = (Path(__file__).resolve().parents[1] / "templates" / "control.html").read_text(encoding="utf-8").lower()
-        self.assertIn("nyo ai systems", template)
-        self.assertNotIn("nyo system\n", template)
+        self.assertIn("nova by sg intelligence", template)
+        self.assertNotIn("nyo system", template)
 
     def test_smoke_workflow_uses_ci_safe_contract(self):
         workflow_path = Path(__file__).resolve().parents[1] / ".github" / "workflows" / "smoke_e2e.yml"

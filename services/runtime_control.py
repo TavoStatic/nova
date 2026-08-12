@@ -431,10 +431,16 @@ class RuntimeControlService:
     def detached_creation_flags(*, os_name: str = os.name, subprocess_module=subprocess) -> int:
         if os_name != "nt":
             return 0
+        # CREATE_BREAKAWAY_FROM_JOB is required so guard/maintenance children survive
+        # when the parent process is inside a Windows job object (shells, agents, --once
+        # maintenance). Without it, "guard_start_confirmed" is followed by a silent
+        # death as soon as the parent exits — autonomy freezes on endless guard_start.
+        create_breakaway = int(getattr(subprocess_module, "CREATE_BREAKAWAY_FROM_JOB", 0x01000000) or 0)
         return (
             subprocess_module.DETACHED_PROCESS
             | subprocess_module.CREATE_NEW_PROCESS_GROUP
             | subprocess_module.CREATE_NO_WINDOW
+            | create_breakaway
         )
 
     def start_guard(

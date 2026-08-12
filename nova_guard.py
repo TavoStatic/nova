@@ -1,3 +1,16 @@
+"""
+Nova Guard — supervises nova_core.py and launches maintenance cycles.
+
+NOVA_DOC:
+  category: subsystem
+  authority: active_authority
+  last_session: 2026-08-05
+  last_agent: claude-cowork
+  session_state: current
+  next_step: none
+  open: none
+"""
+
 import json
 import os
 import subprocess

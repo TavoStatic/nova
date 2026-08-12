@@ -7,12 +7,21 @@ from services.supervisor_probes import DEFAULT_SUPERVISOR_PROBES
 from services.supervisor_probes import normalize_decision
 from services.supervisor_probes import status_line
 from services.supervisor_registry import DEFAULT_SUPERVISOR_RULE_SPECS
+from services.supervisor_rules import DEFAULT_RULE_HANDLERS as _DEFAULT_RULE_HANDLERS
 
 
-_EXPLICIT_INTENT_OWNERSHIP_RULES = frozenset()
+# Rules whose results exclusively own the turn when handled=True.
+# intent_move_classify and ambiguous_clarifier_gate are observers — not listed here.
+# safe_fallback_contract is an observer — not listed here.
+# identity_location_guard sets ownership="explicit" in its result, so
+# _result_is_explicitly_owned() catches it via the ownership field check —
+# no need to list it here too, but listing it makes the contract explicit.
+_EXPLICIT_INTENT_OWNERSHIP_RULES: frozenset[str] = frozenset()
 
 
-_EXPLICIT_HANDLE_OWNERSHIP_RULES = frozenset()
+_EXPLICIT_HANDLE_OWNERSHIP_RULES: frozenset[str] = frozenset({
+    "identity_location_guard",
+})
 
 
 def _result_is_explicitly_owned(rule_name: str, result: dict[str, Any], *, phase: str) -> bool:
@@ -47,7 +56,7 @@ class Supervisor:
 
     @staticmethod
     def _rule_handlers() -> dict[str, Callable[..., dict[str, Any]]]:
-        return {}
+        return dict(_DEFAULT_RULE_HANDLERS)
 
     def register_rule(
         self,

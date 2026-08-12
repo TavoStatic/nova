@@ -1,3 +1,14 @@
+<!--
+NOVA_DOC
+category: plan
+authority: stale_snapshot
+last_session: 2026-08-05
+last_agent: claude-cowork
+session_state: needs_update
+next_step: review backlog items for current status
+open: none
+-->
+
 # Solution experience — later work
 
 Living list for the **solution experience** surface (solution progress, solution trail, how autonomy climbs findings, control-panel honesty).  
