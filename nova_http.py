@@ -47,6 +47,7 @@ from services.control_login_frontdoor import CONTROL_LOGIN_FRONTDOOR_SERVICE
 from services.control_work_trees import CONTROL_WORK_TREES_SERVICE
 from services.leah_frontdoor import LeahFrontdoorService
 from services.leah_conversation_continuity import LeahConversationContinuityStore
+from services.leah_memory_recall import LeahMemoryRecallService
 from services.nova_control_action_dispatcher import NOVA_CONTROL_ACTION_DISPATCHER
 from services.nova_http_get_routes import HTTP_GET_ROUTES_SERVICE
 from services.nova_http_frontdoor import NOVA_HTTP_FRONTDOOR_SERVICE
@@ -134,6 +135,10 @@ LEAH_FRONTDOOR_SERVICE = LeahFrontdoorService(
     fx_js_path_provider=lambda: LEAH_FX_JS_PATH,
     upload_root_provider=lambda: LEAH_UPLOADS_DIR,
     continuity_store=LeahConversationContinuityStore(),
+)
+LEAH_MEMORY_RECALL_SERVICE = LeahMemoryRecallService(
+    mem_recall_fn=nova_core.mem_recall,
+    mem_enabled_fn=nova_core.mem_enabled,
 )
 
 
@@ -372,9 +377,31 @@ def _persist_sessions() -> None:
     )
 
 
+def _record_leah_continuity_turns(session_id: str, turns: List[Tuple[str, str]]) -> None:
+    store = getattr(LEAH_FRONTDOOR_SERVICE, "_continuity_store", None)
+    record_fn = getattr(store, "record_turns", None)
+    if not callable(record_fn):
+        return
+    try:
+        record_fn(session_id, turns, limit=MAX_STORED_TURNS_PER_SESSION)
+    except Exception:
+        return
+
+
+def _recover_leah_continuity_turns(session_id: str) -> List[Tuple[str, str]]:
+    store = getattr(LEAH_FRONTDOOR_SERVICE, "_continuity_store", None)
+    load_fn = getattr(store, "load_turns", None)
+    if not callable(load_fn):
+        return []
+    try:
+        return list(load_fn(session_id) or [])
+    except Exception:
+        return []
+
+
 def _append_session_turn(session_id: str, role: str, text: str) -> List[Tuple[str, str]]:
     with _SESSION_LOCK:
-        return http_session_store.append_session_turn(
+        turns = http_session_store.append_session_turn(
             session_id,
             role,
             text,
@@ -382,11 +409,21 @@ def _append_session_turn(session_id: str, role: str, text: str) -> List[Tuple[st
             max_turns=MAX_TURNS,
             persist_callback=_persist_sessions,
         )
+    _record_leah_continuity_turns(session_id, turns)
+    return turns
 
 
 def _get_session_turns(session_id: str) -> List[Tuple[str, str]]:
     with _SESSION_LOCK:
-        return http_session_store.get_session_turns(session_id, session_turns=SESSION_TURNS)
+        turns = http_session_store.get_session_turns(session_id, session_turns=SESSION_TURNS)
+        if turns:
+            return turns
+        recovered = _recover_leah_continuity_turns(session_id)
+        if recovered:
+            SESSION_TURNS[session_id] = list(recovered)
+            _persist_sessions()
+            return list(recovered)
+        return []
 
 
 def _get_last_session_turn(session_id: str) -> tuple[str, str] | None:
@@ -935,8 +972,125 @@ def _codegen_run_action(payload: dict) -> tuple[bool, str, dict, str]:
 
 
 def _leah_build_run_next_action(payload: dict) -> tuple[bool, str, dict, str]:
-    msg = "leah_build_run_next_requires_autonomy_maintenance_scope"
-    return False, msg, {}, msg
+    """Advance the Leah build pipeline one step for the next promoted capability.
+
+    Gate conditions:
+    - layers.leah.mode must be "active"
+    - layers.leah.promoted_capabilities must be non-empty
+    - The next capability in LEAH_BUILD_SEQUENCE that is both a gap and promoted
+      must exist and not already be registered complete.
+
+    On success writes a trigger artifact to runtime/leah_build/ and returns the
+    cap name and spec so the operator (or codegen pipeline) can proceed.
+    """
+    try:
+        from services.layer_maturity_policy import (
+            normalize_layer_policy,
+            next_leah_capability_in_sequence,
+            LEAH_BUILD_SEQUENCE,
+        )
+
+        # Load live policy
+        policy_path = BASE_DIR / "policy.json"
+        try:
+            policy = json.loads(policy_path.read_text(encoding="utf-8"))
+        except Exception:
+            policy = {}
+
+        layers = normalize_layer_policy(policy)
+        leah_layer = layers.get("leah", {})
+        mode = leah_layer.get("mode", "observe")
+        promoted = leah_layer.get("promoted_capabilities", [])
+
+        if mode != "active":
+            msg = "leah_build_run_next_requires_active_mode"
+            return False, msg, {"mode": mode, "promoted": promoted}, msg
+
+        if not promoted:
+            msg = "leah_build_run_next_no_promoted_capabilities"
+            return False, msg, {"mode": mode, "promoted": promoted}, msg
+
+        # Treat all four sequence caps as gaps unless explicitly registered complete.
+        # registered_capabilities comes from runtime evidence, not just code existing.
+        gaps = list(LEAH_BUILD_SEQUENCE)
+
+        # Pull any already-registered completions from capabilities module if available.
+        registered: set[str] = set()
+        try:
+            reg_map = capabilities_mod.get_registered_capabilities() if hasattr(capabilities_mod, "get_registered_capabilities") else {}
+            if isinstance(reg_map, dict):
+                registered = {str(k).strip().lower() for k in reg_map if str(k).strip().lower().startswith("leah_")}
+        except Exception:
+            pass
+
+        next_cap = next_leah_capability_in_sequence(
+            gaps,
+            promoted_capabilities=promoted,
+            registered_capabilities=registered,
+        )
+
+        if not next_cap:
+            msg = "leah_build_run_next_sequence_complete"
+            return True, msg, {
+                "mode": mode,
+                "promoted": promoted,
+                "registered": sorted(registered),
+                "next_cap": None,
+                "status": "all_promoted_caps_registered_complete",
+            }, msg
+
+        # Build the codegen spec for this capability
+        spec = {
+            "name": next_cap,
+            "purpose": (
+                f"Implement and validate {next_cap} for Leah on this Nova instance. "
+                "Follow acceptance tests in docs/LEAH_INSTANCE_PROFILE.md."
+            ),
+            "files": [
+                {
+                    "path": f"services/{next_cap}.py",
+                    "kind": "module",
+                    "intent": f"Service implementation for capability: {next_cap}",
+                },
+                {
+                    "path": f"tests/test_{next_cap}_acceptance.py",
+                    "kind": "test",
+                    "intent": f"Acceptance tests for {next_cap} per instance profile",
+                },
+            ],
+        }
+
+        # Write trigger artifact for pick-up by the codegen pipeline
+        trigger_dir = Path(RUNTIME_DIR) / "leah_build"
+        trigger_dir.mkdir(parents=True, exist_ok=True)
+        ts = time.strftime("%Y%m%d_%H%M%S")
+        trigger_path = trigger_dir / f"build_next_{next_cap}_{ts}.json"
+        trigger_path.write_text(
+            json.dumps({
+                "schema": "nova.leah_build.trigger.v1",
+                "capability": next_cap,
+                "spec": spec,
+                "triggered_at": ts,
+                "promoted_capabilities": promoted,
+                "instance_profile": "docs/LEAH_INSTANCE_PROFILE.md",
+                "status": "pending_codegen",
+            }, indent=2),
+            encoding="utf-8",
+        )
+
+        msg = f"leah_build_run_next_triggered:{next_cap}"
+        return True, msg, {
+            "next_cap": next_cap,
+            "spec": spec,
+            "trigger_file": str(trigger_path),
+            "promoted": promoted,
+            "registered": sorted(registered),
+            "status": "pending_codegen",
+        }, msg
+
+    except Exception as exc:
+        msg = f"leah_build_run_next_failed:{exc}"
+        return False, msg, {}, msg
 
 
 # ---------------------------------------------------------------------------
@@ -1763,6 +1917,18 @@ def _health_payload() -> dict:
     }
 
 
+def _leah_nova_pulse_payload() -> dict:
+    from services.leah_nova_pulse import build_leah_nova_pulse
+
+    return build_leah_nova_pulse(
+        ollama_up=bool(nova_core.ollama_api_up()),
+        chat_model=str(nova_core.chat_model() or ""),
+        memory_enabled=bool(nova_core.mem_enabled()),
+        chat_login_enabled=bool(_chat_login_enabled()),
+        outbox=OPERATOR_OUTBOX_SERVICE.summary(OPERATOR_OUTBOX_FILE, limit=3),
+    )
+
+
 def _trim_turns(turns: List[Tuple[str, str]]) -> None:
     http_session_store.trim_turns(turns, max_turns=MAX_TURNS)
 
@@ -1904,10 +2070,22 @@ class NovaHttpHandler(BaseHTTPRequestHandler):
 
 
 def main() -> None:
-    NOVA_HTTP_FRONTDOOR_SERVICE.serve_from_runtime(
-        globals(),
-        handler_class=NovaHttpHandler,
-    )
+    from tools.runtime_singleton import acquire_role_singleton, release_role_singleton
+
+    args = NOVA_HTTP_FRONTDOOR_SERVICE.parse_args()
+    role = f"http-{int(args.port)}"
+    ok, detail = acquire_role_singleton(role)
+    if not ok:
+        print(f"Nova HTTP already running on port {args.port} ({detail}). Not starting a second instance.")
+        return
+    try:
+        NOVA_HTTP_FRONTDOOR_SERVICE.serve_from_runtime(
+            globals(),
+            handler_class=NovaHttpHandler,
+            argv=None,
+        )
+    finally:
+        release_role_singleton(role)
 
 
 if __name__ == "__main__":

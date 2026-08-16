@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -72,6 +73,25 @@ class TestLeahConversationContinuity(unittest.TestCase):
             self.assertTrue(path.exists())
             saved = json.loads(path.read_text(encoding="utf-8"))
             self.assertEqual(saved.get("stage"), "staged")
+
+    def test_turns_survive_attachment_ttl_and_merge_with_handoff(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "leah_sessions"
+            store = LeahConversationContinuityStore(root=root, ttl_seconds=60)
+            store.save(
+                "live",
+                {"stage": "handoff", "items": [{"name": "note.txt", "kind": "text"}]},
+            )
+            store.record_turns("live", [("user", "hello"), ("assistant", "here")])
+            loaded = store.load("live")
+            self.assertEqual(loaded.get("stage"), "handoff")
+            self.assertEqual(len(loaded.get("items") or []), 1)
+            self.assertEqual(store.load_turns("live"), [("user", "hello"), ("assistant", "here")])
+
+            expired = store.load("live", now=time.time() + 120)
+            self.assertEqual(expired.get("stage") or "", "")
+            self.assertEqual(expired.get("items") or [], [])
+            self.assertEqual(store.load_turns("live", now=time.time() + 120), [("user", "hello"), ("assistant", "here")])
 
 
 if __name__ == "__main__":

@@ -101,7 +101,21 @@ def run_backpack_query(
         if denied is not None:
             return denied
 
-    # Operator on/off switch (control panel). Default enabled when file missing.
+    try:
+        from services.backpack_host.install_state import backpack_runtime_installed
+
+        if not backpack_runtime_installed(str(pipeline_id or "")):
+            return {
+                "ok": False,
+                "pipeline_id": pipeline_id,
+                "operation": operation,
+                "error": "backpack_not_installed",
+                "detail": "This backpack is not installed.",
+            }
+    except Exception:
+        pass
+
+    # Operator on/off switch (control panel). Uninstalled backpacks are off.
     # Read enabled.json directly to avoid circular imports with control_backpacks.
     try:
         import json as _json

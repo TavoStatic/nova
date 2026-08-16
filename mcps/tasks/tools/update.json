@@ -1,6 +1,6 @@
 {
   "name": "update",
-  "description": "Update an existing automation (scheduled task). Use this when the user asks to change, edit, or modify an automation's name, prompt, schedule, or notification settings. Requires `task_id` and `schedule_id` from `automation_list`.",
+  "description": "Update an existing automation (scheduled and/or event-triggered). Use this when the user asks to change, edit, or modify an automation's name, prompt, schedule, event trigger filters, or notification settings. Requires `task_id` from `automation_list`. Include `schedule_id` when changing a schedule; include `trigger` when changing event filters (call automation_list_trigger_catalog for allowed providers/types/dimensions; for GitHub repos use automation_list_trigger_resources for numeric repository ids). Omitting `trigger` leaves existing event triggers unchanged.",
   "inputSchema": {
     "type": "object",
     "properties": {
@@ -10,7 +10,7 @@
       },
       "schedule_id": {
         "type": "string",
-        "description": "The ID of the schedule to update (from automation_list)"
+        "description": "The ID of the schedule to update (from automation_list). Target which schedule row to change when updating schedule fields; optional for content-only edits (resolved from the task). Echoing schedule_id alone does not rewrite the schedule."
       },
       "name": {
         "type": "string",
@@ -22,15 +22,23 @@
       },
       "cadence": {
         "type": "string",
-        "description": "RFC 5545 RRULE describing how often the automation runs (e.g. \"RRULE:FREQ=DAILY\", \"RRULE:FREQ=WEEKLY;BYDAY=MO\"). Omit / empty to run only once. Do not include DTSTART/DTEND — use time_of_day + timezone instead."
+        "description": "RFC 5545 RRULE describing how often the automation runs. Supported forms:\n- \"RRULE:FREQ=DAILY\" (every day)\n- \"RRULE:FREQ=WEEKLY;BYDAY=MO\" or \"RRULE:FREQ=WEEKLY;BYDAY=MO,WE,FR\" (one or more weekdays)\n- \"RRULE:FREQ=MONTHLY;BYMONTHDAY=15\", \"RRULE:FREQ=YEARLY\"\n- \"RRULE:FREQ=HOURLY\" (every hour), optionally restricted with window_start_time / window_end_time and BYDAY days.\nInclude when changing the recurrence. Omit entirely (with no other schedule fields) to leave the schedule unchanged. Do not include DTSTART/DTEND — use time_of_day + timezone (and window_start_time / window_end_time for hourly) instead."
       },
       "scheduled_date": {
         "type": "string",
-        "description": "ISO 8601 date for one-time automations (e.g. '2026-05-25'). Required when cadence is omitted (run-once). Defaults to today if not provided."
+        "description": "ISO 8601 date for one-time automations (e.g. '2026-05-25'). Required when changing a schedule to run-once (omit cadence). Defaults to today if not provided."
       },
       "time_of_day": {
         "type": "string",
-        "description": "Time in 24h format (e.g. '09:00'). Defaults to '09:00'."
+        "description": "Time in 24h format (e.g. '09:00') when changing a schedule. Defaults to '09:00'. With a `trigger` update, only set together with cadence/scheduled_date. Ignored for hourly cadences (use window_start_time)."
+      },
+      "window_start_time": {
+        "type": "string",
+        "description": "For hourly (FREQ=HOURLY) automations only: start of the daily run window in 24h 'HH:MM'. Must be strictly before window_end_time; omit both to run every hour all day."
+      },
+      "window_end_time": {
+        "type": "string",
+        "description": "For hourly (FREQ=HOURLY) automations only: inclusive end of the daily run window in 24h 'HH:MM' (e.g. '18:00' still fires at 18:00). Omit both to run every hour all day."
       },
       "timezone": {
         "type": "string",
@@ -45,11 +53,86 @@
           "off"
         ],
         "description": "Notification method. Defaults to 'default' (email + app)."
+      },
+      "trigger": {
+        "type": "object",
+        "description": "Replace the event trigger. Same shape as automation_create.trigger (provider, trigger_type, dimensions / email aliases). Call automation_list_trigger_catalog for allowed values. Omit entirely to leave existing triggers unchanged.",
+        "properties": {
+          "provider": {
+            "type": "string",
+            "description": "Event source wire tag from the catalog (e.g. gmail, outlook, github, finance)."
+          },
+          "trigger_type": {
+            "type": "string",
+            "description": "Event kind from the catalog (e.g. new_email, pr_opened, new_transaction)."
+          },
+          "dimensions": {
+            "type": "object",
+            "description": "Catalog dimension keys → string or array of strings. GitHub dimensions.repo must be a stringified numeric repository id from automation_list_trigger_resources (not owner/name).",
+            "additionalProperties": {
+              "oneOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              ]
+            }
+          },
+          "from": {
+            "description": "Email alias for dimensions.from. String or array.",
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            ]
+          },
+          "to": {
+            "description": "Email alias for dimensions.to. String or array.",
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            ]
+          },
+          "subject_contains": {
+            "description": "Email alias for dimensions.subject_contains. String or array.",
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            ]
+          }
+        },
+        "required": [
+          "provider"
+        ]
       }
     },
     "required": [
       "task_id",
-      "schedule_id",
       "name",
       "prompt"
     ]

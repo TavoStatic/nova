@@ -7,6 +7,7 @@ from unittest import mock
 
 from services.pipeline_worker_supervision import (
     acquire_worker_lease,
+    pid_alive,
     ensure_pipeline_worker_running,
     ensure_pipeline_workers_for_ids,
     read_worker_heartbeat,
@@ -36,6 +37,13 @@ class TestPipelineWorkerSupervision(unittest.TestCase):
             return mock.Mock(pid=pid, poll=mock.Mock(return_value=None))
 
         return _popen
+
+    def test_pid_alive_uses_pid_exists_not_signal_zero(self) -> None:
+        with mock.patch("os.kill", side_effect=OSError(87, "The parameter is incorrect")) as kill_mock, \
+             mock.patch("psutil.pid_exists", return_value=True) as exists_mock:
+            self.assertTrue(pid_alive(4242))
+        exists_mock.assert_called_once_with(4242)
+        kill_mock.assert_not_called()
 
     def test_write_and_read_fresh_heartbeat(self) -> None:
         with tempfile.TemporaryDirectory() as td:

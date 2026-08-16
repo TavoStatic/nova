@@ -4,6 +4,8 @@ import re
 import time
 from typing import Callable
 
+from services.leah_nova_pulse import statement_from_nova_life
+from services.nova_intent_understanding import self_status_belongs_to_turn
 from services.nova_self_evidence_reply import maybe_build_self_evidence_reply
 from services.nova_turn_intent_trace import attach_turn_intent_evidence_packet
 from services.nova_turn_intent_trace import build_turn_intent_evidence_packet
@@ -40,10 +42,11 @@ def _tool_evidence_context(tool, tool_result, *, limit=2500):
     )
 
 
-def _conversation_generation_context(fallback_context, packet):
+def _conversation_generation_context(fallback_context, packet, turn_intent=None, response_strategy=None):
     context = fallback_context if isinstance(fallback_context, dict) else {}
     payload = packet if isinstance(packet, dict) else {}
     conversation = payload.get("conversation_frame") if isinstance(payload.get("conversation_frame"), dict) else {}
+    planner = payload.get("planner_frame") if isinstance(payload.get("planner_frame"), dict) else {}
     lines = [
         "NOVA INTERNAL REPLY FORM:",
         "- reply_form: {}".format(CONVERSATION_REPLY_FORM),
@@ -55,6 +58,11 @@ def _conversation_generation_context(fallback_context, packet):
     chat_context = str(context.get("chat_context") or "").strip()
     state_context = str(context.get("state_context") or "").strip()
     tool_context = str(context.get("tool_evidence_context") or "").strip()
+    tool_name = str(planner.get("tool") or "").strip()
+    intent = turn_intent if turn_intent is not None else context.get("turn_intent")
+    strategy = response_strategy if response_strategy is not None else context.get("response_strategy")
+    if tool_name == "self_status" and not self_status_belongs_to_turn(intent, strategy):
+        tool_context = ""
     include_session_state = _semantic_status(packet) == "tool_evidence_available"
     blocks = [rendered] if rendered else []
     if chat_context:
@@ -70,8 +78,7 @@ def _remove_trailing_question(reply):
     text = str(reply or "").strip()
     if not text.endswith("?"):
         return text
-    cleaned = re.sub(r"(?s)(?:^|\s+)[^\n.!?]*\?\s*$", "", text).strip()
-    return cleaned or text
+    return re.sub(r"(?s)(?:^|\s+)[^\n.!?]*\?\s*$", "", text).strip()
 
 
 def _complete_thoughts(text):
@@ -105,10 +112,10 @@ def _shape_conversation_scoped_reply(reply):
     thoughts = _complete_thoughts(text)
     for thought in thoughts:
         if not _is_question_thought(thought):
-            return _remove_trailing_question(thought)
-    if thoughts:
-        return _remove_trailing_question(thoughts[0])
-    return _remove_trailing_question(text)
+            statement = _remove_trailing_question(thought)
+            if statement:
+                return statement
+    return ""
 
 
 def _render_intent_strategy_context(turn_intent, response_strategy):
@@ -158,7 +165,15 @@ def build_fallback_context(
 ):
     raw_fallback_context = build_fallback_context_details_fn(text, turns)
     fallback_context = raw_fallback_context if isinstance(raw_fallback_context, dict) else {}
-    tool_evidence_context = _tool_evidence_context(tool, tool_result)
+    fallback_context = dict(fallback_context)
+    fallback_context["turn_intent"] = turn_intent if isinstance(turn_intent, dict) else {}
+    fallback_context["response_strategy"] = response_strategy if isinstance(response_strategy, dict) else {}
+    effective_tool = str(tool or "").strip()
+    effective_result = tool_result
+    if effective_tool == "self_status" and not self_status_belongs_to_turn(turn_intent, response_strategy):
+        effective_tool = ""
+        effective_result = ""
+    tool_evidence_context = _tool_evidence_context(effective_tool, effective_result)
     if tool_evidence_context:
         fallback_context = dict(fallback_context)
         fallback_context["tool_evidence_context"] = tool_evidence_context
@@ -172,8 +187,8 @@ def build_fallback_context(
         fallback_context=fallback_context if isinstance(fallback_context, dict) else {},
         semantic_tool_observation=semantic_tool_observation,
         planner_decision=planner_decision,
-        tool=tool,
-        tool_result=tool_result,
+        tool=effective_tool,
+        tool_result=effective_result,
     )
     retrieved_context = attach_turn_intent_evidence_packet(retrieved_context, intent_evidence_packet)
     intent_strategy_ctx = _render_intent_strategy_context(turn_intent, response_strategy)
@@ -268,6 +283,7 @@ def finalize_llm_fallback_reply(
     evidence_reply = maybe_build_self_evidence_reply(
         fallback_context=fallback_context,
         intent_evidence_packet=intent_evidence_packet,
+        current_text=raw_user_text or text,
     )
     if evidence_reply:
         action_ledger_add_step(
@@ -283,7 +299,7 @@ def finalize_llm_fallback_reply(
     action_ledger_add_step("llm_fallback", "invoked", retrieved_chars=len(retrieved_context))
 
     llm_started = time.perf_counter()
-    reply_form = CONVERSATION_REPLY_FORM if leah_fast_chat else _reply_form(intent_evidence_packet)
+    reply_form = _reply_form(intent_evidence_packet)
     generation_context = retrieved_context
     if reply_form == CONVERSATION_REPLY_FORM:
         generation_context = _conversation_generation_context(fallback_context, intent_evidence_packet)
@@ -298,8 +314,12 @@ def finalize_llm_fallback_reply(
     post_started = time.perf_counter()
     if callable(preprocess_reply_fn):
         reply = preprocess_reply_fn(reply)
-    if _conversation_can_be_complete_without_task(intent_evidence_packet):
+    if reply_form == CONVERSATION_REPLY_FORM or _conversation_can_be_complete_without_task(
+        intent_evidence_packet
+    ):
         reply = _shape_conversation_scoped_reply(reply)
+        if not str(reply or "").strip():
+            reply = statement_from_nova_life()
 
     # Ephemeral chat turns are not durable memory; policy blocks chat_user storage.
 

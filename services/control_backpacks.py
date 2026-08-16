@@ -53,7 +53,9 @@ class ControlBackpacksService:
         return self.runtime_root / backpack_id / "settings.json"
 
     def _installed(self, backpack_id: str) -> bool:
-        return self._settings_path(backpack_id).is_file()
+        from services.backpack_host.install_state import backpack_runtime_installed
+
+        return backpack_runtime_installed(backpack_id, runtime_root=self.runtime_root)
 
     def ensure_settings(self, backpack_id: str, *, write: bool = True) -> dict[str, Any]:
         """Return saved settings for a backpack, or empty dict if not installed."""
@@ -101,7 +103,9 @@ class ControlBackpacksService:
         return self.runtime_root / str(backpack_id or "").strip() / "enabled.json"
 
     def is_enabled(self, backpack_id: str) -> bool:
-        """Default on. Explicit enabled.json can turn a backpack off for queries/reports."""
+        """Installed backpacks default on. Uninstalled / never-installed backpacks are off."""
+        if not self._installed(backpack_id):
+            return False
         path = self._enabled_path(backpack_id)
         if not path.is_file():
             return True
@@ -170,8 +174,20 @@ class ControlBackpacksService:
                     "settings_path": str(self._settings_path(backpack_id)),
                     "status": status,
                     "ok": True,
+                    "residue": {},
                 }
             )
+        from services.backpack_host.sanitize import scan_backpack_residue
+
+        for row in rows:
+            try:
+                row["residue"] = scan_backpack_residue(
+                    str(row.get("backpack_id") or ""),
+                    runtime_root=self.runtime_root,
+                    backpacks_root=self.backpacks_root,
+                )
+            except Exception as exc:
+                row["residue"] = {"ok": False, "error": str(exc)[:200]}
         return rows
 
     # ── Backpack sniffer / auto-discovery ────────────────────────────────────
@@ -485,6 +501,13 @@ class ControlBackpacksService:
         apply_result = installer.apply(
             backpack_dir, dict(values), runtime_root=self.runtime_root
         )
+        if apply_result.get("ok"):
+            try:
+                from services.backpack_host.install_state import clear_backpack_uninstall_mark
+
+                clear_backpack_uninstall_mark(backpack_id, runtime_root=self.runtime_root)
+            except Exception:
+                pass
         if not apply_result.get("ok"):
             return (
                 False,
@@ -652,22 +675,13 @@ class ControlBackpacksService:
         self, payload: Mapping[str, Any]
     ) -> tuple[bool, str, dict[str, Any], str]:
         """
-        Remove all runtime residue for a backpack.
+        Uninstall a backpack and sanitize every declared Nova surface it touched.
 
-        For data connector this means:
-          runtime/edfi/settings.json
-          runtime/edfi/connections/{connection_id}/local_config.json
-          runtime/edfi/warehouse/{connection_id}.sqlite3
-          runtime/edfi/profiles/{connection_id}.json
-          runtime/edfi/enabled.json
-          runtime/backpacks/capability_scan.json
-
-        The backpack code under backpacks/edfi/ is NOT touched — it is part of
-        the Nova source tree, not install residue. Only runtime/ files are removed.
-
-        The requesting Nova Shell user is required in payload["nova_user"].
+        Package files under backpacks/{id}/ stay. Runtime install residue and the
+        fusion cache, pipeline workers, and work-tree signals listed in
+        backpack_host.sanitize.BACKPACK_TOUCH_POINTS are cleaned so the rest of
+        Nova does not keep treating a deleted install as a live gap.
         """
-        import shutil
         import time as _time
 
         backpack_id = str(payload.get("backpack_id") or "").strip()
@@ -700,31 +714,19 @@ class ControlBackpacksService:
         removed: list[str] = []
         errors: list[str] = []
 
-        def _rm(path: Path) -> None:
-            try:
-                if path.is_file():
-                    path.unlink()
-                    removed.append(str(path))
-                elif path.is_dir():
-                    shutil.rmtree(path)
-                    removed.append(str(path))
-            except Exception as exc:
-                errors.append(f"{path}: {exc}")
+        uninstalled_at = _time.strftime("%Y-%m-%dT%H:%M:%SZ", _time.gmtime())
+        from services.backpack_host.sanitize import sanitize_uninstalled_backpack
 
-        rt = self.runtime_root
-
-        # 1. Nuke the entire backpack runtime directory (catches all residue:
-        #    settings, connections, warehouse, profiles, cursors, extracts, audit logs, etc.)
-        backpack_runtime_dir = rt / backpack_id
-        if backpack_runtime_dir.is_dir():
-            try:
-                shutil.rmtree(backpack_runtime_dir)
-                removed.append(str(backpack_runtime_dir))
-            except Exception as exc:
-                errors.append(f"{backpack_runtime_dir}: {exc}")
-
-        # 2. capability scan (Nova's nervous-system fusion cache — outside backpack dir)
-        _rm(rt / "backpacks" / "capability_scan.json")
+        sanitized = sanitize_uninstalled_backpack(
+            backpack_id,
+            runtime_root=self.runtime_root,
+            connection_id=connection_id,
+            nova_user=nova_user,
+            uninstalled_at=uninstalled_at,
+            backpacks_root=self.backpacks_root,
+        )
+        removed.extend(list(sanitized.get("removed") or []))
+        errors.extend(list(sanitized.get("errors") or []))
 
         ok = not errors
         extra = {
@@ -732,12 +734,15 @@ class ControlBackpacksService:
             "backpack_id": backpack_id,
             "connection_id": connection_id,
             "uninstalled_by": nova_user,
-            "uninstalled_at": _time.strftime("%Y-%m-%dT%H:%M:%SZ", _time.gmtime()),
+            "uninstalled_at": uninstalled_at,
             "removed": removed,
             "errors": errors,
+            "touch_points": dict(sanitized.get("touch_points") or {}),
+            "work_tree": list(sanitized.get("work_tree") or []),
+            "residue": dict(sanitized.get("residue") or {}),
             "note": (
-                "Backpack code (backpacks/edfi/) is unchanged — only runtime/ residue was removed. "
-                "Re-enter credentials and run Install + profile to reinstall."
+                "Backpack code is unchanged. Runtime residue and the Nova surfaces "
+                "that backpack wrote into were sanitized so the rest of Nova goes quiet."
             ),
         }
         return (

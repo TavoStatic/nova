@@ -1,0 +1,8 @@
+{
+  "name": "list_trigger_catalog",
+  "description": "List event-trigger providers, types, and filter dimensions available to this account. Some providers are feature-flagged and may be absent (e.g. GitHub, Finance). Catalog presence does not guarantee create will succeed — event-trigger authoring must also be enabled for the account. Call this before automation_create / automation_update with a `trigger`. Use the returned provider / trigger_type / dimensions keys when building the trigger args. For GitHub repository filters, also call automation_list_trigger_resources to resolve owner/name to the numeric repository id required by dimensions.repo. Use when the user wants an email, Outlook, GitHub, finance/transaction, or other event-triggered automation and you need the available options.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {}
+  }
+}

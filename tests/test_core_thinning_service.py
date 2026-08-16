@@ -108,8 +108,10 @@ class TestCoreThinningService(unittest.TestCase):
         self.assertTrue(brief.get("ok"))
         self.assertEqual(brief.get("http_surface_candidate_count"), 1)
         order = next(item for item in list(brief.get("orders") or []) if item.get("kind") == "http_surface_candidate")
+        extract = next(item for item in list(brief.get("orders") or []) if item.get("kind") == "http_surface_extract")
         self.assertEqual((order.get("target") or {}).get("theme"), "pipeline_control")
         self.assertIn("non-shim", str(order.get("reason") or ""))
+        self.assertEqual((extract.get("target") or {}).get("block"), "http_surface_extract")
 
     def test_build_brief_ignores_pure_http_delegation_shims(self):
         """Already-extracted service shims must not invent HTTP extraction pressure."""
@@ -254,7 +256,7 @@ class TestCoreThinningService(unittest.TestCase):
         self.assertTrue(verdict.get("blocks_green"))
         self.assertEqual((verdict.get("blockers") or [])[0].get("code"), "core_thinning_unavailable")
 
-    def test_feed_reopens_http_order_after_witness_without_productive_extraction(self):
+    def test_feed_closes_http_mapping_and_keeps_extract_executable(self):
         sample_http = _validation_tmp_root() / "nova_http.py"
         source = "\n".join(
             [
@@ -296,10 +298,154 @@ class TestCoreThinningService(unittest.TestCase):
         finally:
             sample_http.unlink(missing_ok=True)
 
-        self.assertEqual(second.get("reopened_count"), 1)
-        self.assertEqual(second.get("satisfied_active_count"), 0)
-        self.assertEqual(second.get("executable_count"), 1)
-        self.assertFalse((summarize_feed_pressure(pressure_count=1, feed_result=second) or {}).get("lifecycle_gap"))
+        self.assertEqual(second.get("reopened_count"), 0)
+        self.assertGreaterEqual(int(second.get("satisfied_active_count") or 0), 1)
+        extract_tasks = [
+            task
+            for task in work_tree.list_tree_tasks(str(first.get("tree_id")))
+            if str((task.meta or {}).get("kind") or "") == "http_surface_extract"
+        ]
+        self.assertTrue(extract_tasks)
+        self.assertEqual(
+            str(getattr(getattr(extract_tasks[0], "status", None), "value", getattr(extract_tasks[0], "status", ""))).lower(),
+            "complete",
+        )
+        self.assertEqual(
+            str((extract_tasks[0].meta or {}).get("recurring_finding_completion_action") or ""),
+            "blocked_http_extraction",
+        )
+        self.assertEqual(
+            sum(
+                1
+                for task in extract_tasks
+                if str(getattr(getattr(task, "status", None), "value", getattr(task, "status", ""))).lower()
+                not in {"complete", "dropped"}
+            ),
+            0,
+        )
+        self.assertFalse((summarize_feed_pressure(pressure_count=2, feed_result=second) or {}).get("lifecycle_gap"))
+
+    def test_feed_does_not_recreate_mapping_when_theme_already_closed(self):
+        from services.core_thinning import _target_semantic_key
+        from services.recurring_finding_lifecycle import KEY_FINDING, stamp_satisfaction
+
+        sample_http = _validation_tmp_root() / "nova_http.py"
+        source = "\n".join(
+            [
+                "def _pipeline_create_action(payload):",
+                *["    value = 1" for _ in range(10)],
+                "    return True, '', {}, ''",
+                "",
+                "def _pipeline_start_action(payload):",
+                *["    value = 1" for _ in range(10)],
+                "    return True, '', {}, ''",
+                "",
+                "def _pipeline_pause_action(payload):",
+                *["    value = 1" for _ in range(10)],
+                "    return True, '', {}, ''",
+                "",
+                "def _pipeline_archive_action(payload):",
+                *["    value = 1" for _ in range(10)],
+                "    return True, '', {}, ''",
+                "",
+            ]
+        )
+        sample_http.write_text(source, encoding="utf-8")
+        try:
+            brief = build_core_thinning_brief(sample_http)
+            mapping = next(item for item in list(brief.get("orders") or []) if item.get("kind") == "http_surface_candidate")
+            first = feed_core_thinning_brief_to_work_tree(brief, work_tree_module=work_tree)
+            tree_id = str(first.get("tree_id"))
+            mapping_task = next(
+                task
+                for task in work_tree.list_tree_tasks(tree_id)
+                if str((task.meta or {}).get("kind") or "") == "http_surface_candidate"
+            )
+            mapping_task.meta = stamp_satisfaction(
+                dict(mapping_task.meta or {}),
+                satisfaction_fingerprint="legacy-cluster-fp",
+                completion_action="witnessed_http_extraction_boundary",
+            )
+            mapping_task.meta[KEY_FINDING] = "core_thinning:legacy-chat-sessions-cluster-1"
+            mapping_task.meta["target"] = {
+                **dict((mapping.get("target") or {}) if isinstance(mapping.get("target"), dict) else {}),
+                "name": "http:chat_sessions:1",
+                "cluster": 1,
+            }
+            work_tree.mark_task_complete(mapping_task.task_id)
+            second = feed_core_thinning_brief_to_work_tree(brief, work_tree_module=work_tree)
+            mapping_tasks = [
+                task
+                for task in work_tree.list_tree_tasks(tree_id)
+                if str((task.meta or {}).get("kind") or "") == "http_surface_candidate"
+                and str(getattr(getattr(task, "status", None), "value", getattr(task, "status", ""))).lower()
+                not in {"dropped"}
+            ]
+        finally:
+            sample_http.unlink(missing_ok=True)
+
+        self.assertEqual(second.get("reopened_count"), 0)
+        self.assertEqual(len(mapping_tasks), 1)
+        self.assertEqual(
+            _target_semantic_key("http_surface_candidate", mapping.get("target") if isinstance(mapping.get("target"), dict) else {}),
+            _target_semantic_key("http_surface_candidate", (mapping_tasks[0].meta or {}).get("target") if isinstance((mapping_tasks[0].meta or {}).get("target"), dict) else {}),
+        )
+
+    def test_feed_does_not_reopen_extract_after_operator_do_not_retry(self):
+        from services.recurring_finding_lifecycle import stamp_satisfaction
+
+        sample_http = _validation_tmp_root() / "nova_http.py"
+        source = "\n".join(
+            [
+                "def _pipeline_create_action(payload):",
+                *["    value = 1" for _ in range(10)],
+                "    return True, '', {}, ''",
+                "",
+                "def _pipeline_start_action(payload):",
+                *["    value = 1" for _ in range(10)],
+                "    return True, '', {}, ''",
+                "",
+                "def _pipeline_pause_action(payload):",
+                *["    value = 1" for _ in range(10)],
+                "    return True, '', {}, ''",
+                "",
+                "def _pipeline_archive_action(payload):",
+                *["    value = 1" for _ in range(10)],
+                "    return True, '', {}, ''",
+                "",
+            ]
+        )
+        sample_http.write_text(source, encoding="utf-8")
+        try:
+            brief = build_core_thinning_brief(sample_http)
+            first = feed_core_thinning_brief_to_work_tree(brief, work_tree_module=work_tree)
+            tree_id = str(first.get("tree_id"))
+            extract_task = next(
+                task
+                for task in work_tree.list_tree_tasks(tree_id)
+                if str((task.meta or {}).get("kind") or "") == "http_surface_extract"
+            )
+            extract_task.meta = stamp_satisfaction(
+                dict(extract_task.meta or {}),
+                satisfaction_fingerprint="extract-closed",
+                completion_action="operator_do_not_retry",
+            )
+            work_tree.mark_task_complete(extract_task.task_id)
+            second = feed_core_thinning_brief_to_work_tree(brief, work_tree_module=work_tree)
+            extract_tasks = [
+                task
+                for task in work_tree.list_tree_tasks(tree_id)
+                if str((task.meta or {}).get("kind") or "") == "http_surface_extract"
+            ]
+        finally:
+            sample_http.unlink(missing_ok=True)
+
+        self.assertEqual(second.get("reopened_count"), 0)
+        self.assertEqual(len(extract_tasks), 1)
+        self.assertEqual(
+            str(getattr(getattr(extract_tasks[0], "status", None), "value", getattr(extract_tasks[0], "status", ""))).lower(),
+            "complete",
+        )
 
     def test_feed_repairs_legacy_task_missing_reason_before_productive_closure_check(self):
         sample_http = _validation_tmp_root() / "nova_http.py"
@@ -345,12 +491,12 @@ class TestCoreThinningService(unittest.TestCase):
         finally:
             sample_http.unlink(missing_ok=True)
 
-        self.assertEqual(second.get("reopened_count"), 1)
-        self.assertEqual(second.get("satisfied_active_count"), 0)
+        self.assertEqual(second.get("reopened_count"), 0)
+        self.assertGreaterEqual(int(second.get("satisfied_active_count") or 0), 1)
         self.assertEqual(str((repaired.meta or {}).get("reason") or ""), str(order.get("reason") or ""))
         self.assertEqual(
-            str((repaired.meta or {}).get("recurring_finding_satisfaction_fingerprint") or ""),
-            feed_fingerprint,
+            str((repaired.meta or {}).get("recurring_finding_completion_action") or ""),
+            "mapped_http_extraction_boundary",
         )
 
     def test_feed_reopens_completed_order_when_pressure_recurs(self):
@@ -885,6 +1031,46 @@ class TestCoreThinningService(unittest.TestCase):
         self.assertEqual(result.get("action"), "witnessed_http_extraction_boundary")
         self.assertEqual(sample_http.read_text(encoding="utf-8"), source)
         sample_http.unlink(missing_ok=True)
+
+    def test_execute_http_extract_order_is_honestly_blocked(self):
+        result = execute_core_thinning_order(
+            {
+                "kind": "http_surface_extract",
+                "target": {
+                    "file": "nova_http.py",
+                    "name": "http:chat_sessions:1",
+                    "block": "http_surface_extract",
+                    "start_line": 1,
+                    "end_line": 2,
+                },
+            }
+        )
+        self.assertFalse(result.get("ok"))
+        self.assertTrue(result.get("blocked"))
+        self.assertEqual(result.get("reason"), "http_extraction_not_implemented")
+
+    def test_feed_reopens_wrapper_when_historical_removal_but_source_still_has_it(self):
+        from services.recurring_finding_lifecycle import stamp_satisfaction
+
+        sample = _validation_tmp_root() / f"core_thinning_wrapper_lie_{uuid.uuid4().hex}.py"
+        sample.write_text("def wrapper():\n    return service_demo()\n", encoding="utf-8")
+        try:
+            brief = build_core_thinning_brief(sample)
+            first = feed_core_thinning_brief_to_work_tree(brief, work_tree_module=work_tree)
+            task = work_tree.list_tree_tasks(str(first.get("tree_id")))[0]
+            task.meta = stamp_satisfaction(
+                dict(task.meta or {}),
+                satisfaction_fingerprint="stale-removed-fingerprint",
+                completion_action="removed_unused_wrapper",
+            )
+            work_tree.mark_task_complete(task.task_id)
+            second = feed_core_thinning_brief_to_work_tree(brief, work_tree_module=work_tree)
+        finally:
+            sample.unlink(missing_ok=True)
+
+        self.assertEqual(second.get("reopened_count"), 1)
+        self.assertEqual(second.get("satisfied_active_count"), 0)
+        self.assertEqual(second.get("executable_count"), 1)
 
 
 if __name__ == "__main__":

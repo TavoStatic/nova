@@ -62,6 +62,28 @@ def _fmt_date(d: str) -> str:
         return str(d)
 
 
+def _scan_finding_identity(entry: dict) -> tuple:
+    """Stable identity so every cycle does not reprint the same ring finding."""
+    import re
+
+    detail = str(entry.get("detail") or entry.get("notes") or "")
+    identity = re.sub(r"\d+", "N", detail)
+    return (
+        str(entry.get("entry_type") or ""),
+        entry.get("ring"),
+        str(entry.get("module") or entry.get("file") or ""),
+        identity,
+    )
+
+
+def _latest_unique(entries: list[dict], key_fn) -> list[dict]:
+    """Keep the last JSONL occurrence per key (file order is time order)."""
+    seen: dict[object, dict] = {}
+    for entry in entries:
+        seen[key_fn(entry)] = entry
+    return list(seen.values())
+
+
 def render(sessions: list[dict], findings: list[dict]) -> str:
     now = datetime.now().strftime("%Y-%m-%d %H:%M")
     lines: list[str] = []
@@ -171,6 +193,10 @@ def render(sessions: list[dict], findings: list[dict]) -> str:
         lines.append("These are the reasons behind Nova's structural choices.")
         lines.append("")
 
+        decision_entries = _latest_unique(
+            decision_entries,
+            lambda d: str(d.get("decision_name") or d.get("detail") or "")[:160],
+        )
         decision_entries.sort(key=lambda x: x.get("decision_date", x.get("date", "")))
         for d in decision_entries:
             name = d.get("decision_name", "unnamed")
@@ -200,15 +226,16 @@ def render(sessions: list[dict], findings: list[dict]) -> str:
     # ── Nova Scan Findings ─────────────────────────────────────────────────────
     scan_findings = [
         f for f in findings
-        if f.get("entry_type") not in ("doc_classification", "decision")
+        if f.get("entry_type") not in ("doc_classification", "decision", "drift_alert")
     ]
+    scan_findings = _latest_unique(scan_findings, _scan_finding_identity)
 
     if scan_findings:
         lines.append("---")
         lines.append("")
         lines.append("## Nova Scan Findings")
         lines.append("")
-        lines.append("Findings written by Nova's rings, self-reflection, and execution outcomes.")
+        lines.append("Latest ring and execution findings. Identical cycle reprints are collapsed to one line.")
         lines.append("")
 
         scan_findings.sort(key=lambda x: x.get("date", ""), reverse=True)
@@ -232,7 +259,11 @@ def render(sessions: list[dict], findings: list[dict]) -> str:
     for d in all_drift:
         key = (d.get("ring"), d.get("category") or d.get("module", ""))
         _seen[key] = d  # later entries overwrite earlier ones (JSONL order = time order)
-    ring_drift = list(_seen.values())
+    ring_drift = [
+        item
+        for item in _seen.values()
+        if str(item.get("result") or "") == "drifted" and int(item.get("count") or 0) > 0
+    ]
 
     if stale or ring_drift:
         lines.append("---")

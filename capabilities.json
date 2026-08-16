@@ -22,6 +22,7 @@
   "speech_to_text": "Nova can transcribe voice input",
   "text_to_speech": "Nova can speak responses",
   "leah_conversation_continuity": "Leah can maintain continuity across turns and sessions",
+  "leah_memory_recall": "Leah can retrieve prior conversation and pattern memory for continuity",
   "edfi_explore": "Nova can browse a profiled data connector ODS inventory and read schools, students, and other discovered resources",
   "capability_gap_detection": "Nova can detect gaps between desired capabilities (roadmap) and registered capabilities",
   "codegen_tool": "Nova can generate code from specifications with preview-only safety constraints",

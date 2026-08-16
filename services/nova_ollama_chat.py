@@ -22,6 +22,7 @@ COMMON_BEHAVIOR_LINES = (
 )
 
 CONVERSATION_TURN_BEHAVIOR_LINES = (
+    "- Find the user's intent first. Stay honest about what evidence supports.",
     "- Use the current exchange as the active surface.",
     "- Use available session evidence when it belongs to the current exchange.",
     "- Reply with one brief statement.",

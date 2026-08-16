@@ -112,12 +112,11 @@ def pid_alive(pid: int | None, *, pid_alive_fn: Callable[[int], bool] | None = N
     if pid_alive_fn is not None:
         return bool(pid_alive_fn(resolved))
     try:
-        os.kill(resolved, 0)
-    except OSError:
-        return False
+        import psutil
+
+        return bool(psutil.pid_exists(resolved))
     except Exception:
         return False
-    return True
 
 
 def read_worker_lease(

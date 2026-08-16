@@ -50,8 +50,9 @@ _INTENT_PROMPT = (
     "- weather: outdoor conditions, temperature, rain, wind, forecast,\n"
     "  clothing for outdoors, whether to bring an umbrella or jacket\n"
     "- location: physical place, coordinates, where something or someone is\n"
-    "- system: assistant state, tasks, capabilities, health\n"
-    "- general: anything else\n"
+    "- system: live operational condition, pending work, health checks,\n"
+    "  capabilities. Not mood, feelings, greetings, or how the conversation feels.\n"
+    "- general: anything else, including presence and how Nova is doing as a person\n"
     "\n"
     "If level is 'sharing', extract the specific claim the user is making.\n"
     "If the turn is too vague or ambiguous to classify confidently,\n"
@@ -181,6 +182,21 @@ def select_response_strategy(
         "use_tool": False,
         "rationale": "{} intent, conversational response appropriate".format(level),
     }
+
+
+def self_status_belongs_to_turn(intent, strategy=None) -> bool:
+    """Operator self_status is for live work/health asks, not presence."""
+    payload = intent if isinstance(intent, dict) else {}
+    plan = strategy if isinstance(strategy, dict) else {}
+    level = str(payload.get("level") or "").strip()
+    domain = str(payload.get("domain") or "").strip()
+    if not level and not domain:
+        return True
+    if plan and not bool(plan.get("use_tool")):
+        return False
+    if level == CASUAL:
+        return False
+    return level in {REQUESTING, COMMANDING} and domain == SYSTEM
 
 
 def record_intent_outcome(

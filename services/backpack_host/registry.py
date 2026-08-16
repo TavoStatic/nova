@@ -70,6 +70,16 @@ class BackpackAwarePipelineRegistry(PipelineRegistry):
                         continue
                     if not (child / "backpack.json").exists():
                         continue
+                    if (child / "settings_schema.json").exists():
+                        try:
+                            from services.backpack_host.install_state import backpack_runtime_installed
+
+                            if not backpack_runtime_installed(
+                                child.name, runtime_root=self._runtime_root
+                            ):
+                                continue
+                        except Exception:
+                            continue
                     try:
                         manifest = load_backpack_manifest(
                             child,

@@ -145,7 +145,7 @@ def render(entries: list[dict]) -> str:
         "- Autonomy and feedback: `autonomy_*`, `nova_mission*`, `work_tree_*`, `subconscious_*`, `core_*`, `layer_maturity_policy`.",
         "- Patch, codegen, test, and release: `nova_patching`, `patch_*`, `codegen_*`, `test_session_*`, `regression_*`, `validation_*`, `release_*`, `installer_validation`.",
         "- Data and data connector: `data_pipeline_registry`, `control_pipelines`, `pipeline_privileged_bridge`, and `services/edfi/*`.",
-        "- Backpack Host: `services/backpack_host/*` — data connector backpack discovery, install, grant enforcement, lifecycle.",
+        "- Backpack Host: `services/backpack_host/*` — discovery, install, grant enforcement, uninstall sanitizer, residue scan.",
         "- Nova Shell: `services/nova_shell/*` — operator authentication, TOTP, role management, session trust.",
         "- Decision Judge: `decision_proposal_judge` — pre-execution claim evaluation with judge reports and episodes.",
         "- Solution Trail: `solution_trail` — solution path tracking and breadcrumb recording.",

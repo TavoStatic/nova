@@ -1,20 +1,15 @@
 from __future__ import annotations
 
 import argparse
-import subprocess
 import sys
 import time
 from pathlib import Path
 
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
-def _creation_flags() -> int:
-    if sys.platform != "win32":
-        return 0
-    return (
-        subprocess.DETACHED_PROCESS
-        | subprocess.CREATE_NEW_PROCESS_GROUP
-        | subprocess.CREATE_NO_WINDOW
-    )
+from tools.runtime_detach import spawn_unattached
 
 
 def main() -> int:
@@ -24,9 +19,8 @@ def main() -> int:
     parser.add_argument("--delay-seconds", type=float, default=0.0)
     args = parser.parse_args()
 
-    root = Path(__file__).resolve().parents[1]
-    python_exe = root / ".venv" / "Scripts" / "python.exe"
-    http_py = root / "nova_http.py"
+    python_exe = ROOT / ".venv" / "Scripts" / "python.exe"
+    http_py = ROOT / "nova_http.py"
     if not python_exe.exists():
         print(f"[FAIL] venv python missing: {python_exe}", file=sys.stderr)
         return 1
@@ -46,14 +40,10 @@ def main() -> int:
         "--port",
         str(int(args.port)),
     ]
-    subprocess.Popen(
-        command,
-        cwd=str(root),
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        creationflags=_creation_flags(),
-    )
+    ok, _pid, detail = spawn_unattached(command, cwd=ROOT)
+    if not ok:
+        print(f"[FAIL] unattached HTTP start failed: {detail}", file=sys.stderr)
+        return 1
     return 0
 
 

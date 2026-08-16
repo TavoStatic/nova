@@ -7,6 +7,15 @@ from typing import Any
 SELF_EVIDENCE_NEEDS = {"confirmed_identity", "operational_self"}
 MIN_SELF_EVIDENCE_CONFIDENCE = 0.70
 
+_NOVA_SELF_NATURE = re.compile(
+    r"\bare you (?:a |an )?(?:chat\s*bot|chatbot|virtual assistant|language model|\bllm\b|ai)\b",
+    re.IGNORECASE,
+)
+_NOVA_SELF_IDENTITY = re.compile(
+    r"\b(?:who are you|what are you|who is nova|what is nova|what is leah|who is leah)\b",
+    re.IGNORECASE,
+)
+
 
 def _clean(value: object, *, limit: int = 260) -> str:
     text = " ".join(str(value or "").strip().split())
@@ -32,6 +41,22 @@ def _semantic_evidence_need(packet: dict[str, Any] | None) -> str:
     if confidence < MIN_SELF_EVIDENCE_CONFIDENCE:
         return ""
     return evidence_need
+
+
+def turn_asks_nova_self(text: str) -> str:
+    """When the weak router misses, still bind identity/nature asks to evidence."""
+    compact = " ".join(str(text or "").strip().split())
+    if not compact:
+        return ""
+    if _NOVA_SELF_NATURE.search(compact):
+        return "operational_self"
+    if _NOVA_SELF_IDENTITY.search(compact):
+        return "operational_self"
+    return ""
+
+
+def _turn_asks_nova_self(text: str) -> str:
+    return turn_asks_nova_self(text)
 
 
 def _identity_facts(context: str) -> dict[str, str]:
@@ -83,8 +108,14 @@ def maybe_build_self_evidence_reply(
     *,
     fallback_context: dict[str, Any] | None,
     intent_evidence_packet: dict[str, Any] | None,
+    current_text: str = "",
 ) -> dict[str, Any]:
     evidence_need = _semantic_evidence_need(intent_evidence_packet)
+    if evidence_need not in SELF_EVIDENCE_NEEDS:
+        packet = intent_evidence_packet if isinstance(intent_evidence_packet, dict) else {}
+        evidence_need = _turn_asks_nova_self(
+            str(current_text or packet.get("current_turn") or "")
+        )
     if evidence_need not in SELF_EVIDENCE_NEEDS:
         return {}
 

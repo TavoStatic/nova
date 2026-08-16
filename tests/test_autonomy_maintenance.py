@@ -307,6 +307,23 @@ class TestAutonomyMaintenance(unittest.TestCase):
         self.assertEqual(run_mock.call_count, 1)
         self.assertEqual(state.get("last_regression_status"), "OK")
 
+    def test_regression_lock_owner_alive_uses_pid_exists_not_signal_zero(self):
+        with tempfile.TemporaryDirectory() as td:
+            lock_path = Path(td) / "regression.lock"
+            lock_path.write_text(
+                json.dumps({"pid": 4242, "lanes": ["unit"], "started_at": "2026-08-16 01:00:00"}),
+                encoding="utf-8",
+            )
+            with mock.patch.object(autonomy_maintenance, "RUNTIME_DIR", Path(td)), \
+                 mock.patch("os.kill", side_effect=OSError(87, "The parameter is incorrect")) as kill_mock, \
+                 mock.patch("psutil.pid_exists", return_value=False) as exists_mock:
+                alive, detail = autonomy_maintenance._regression_lock_owner_alive()
+
+        self.assertFalse(alive)
+        self.assertEqual(detail, "")
+        exists_mock.assert_called_once_with(4242)
+        kill_mock.assert_not_called()
+
     def test_run_temporal_feed_pass_reads_ics_and_surfaces_pressure(self):
         state: dict = {}
         with tempfile.TemporaryDirectory() as td:
@@ -1499,6 +1516,33 @@ class TestAutonomyMaintenance(unittest.TestCase):
         self.assertTrue(worker.get("active"))
         self.assertEqual(worker.get("pid"), 1234)
         self.assertEqual(worker.get("last_cycle_status"), "ok")
+
+    def test_one_shot_cycle_preserves_live_runtime_worker_identity(self):
+        worker_state = {
+            "pid": 4321,
+            "create_time": 99.0,
+            "active": True,
+            "stale_identity": False,
+            "last_cycle_status": "running",
+        }
+        with mock.patch("psutil.Process") as process_mock:
+            process_mock.return_value.create_time.return_value = 99.0
+            process_mock.return_value.cmdline.return_value = [
+                "C:/NOVA/.venv/Scripts/python.exe",
+                "C:/NOVA/autonomy_maintenance.py",
+                "--once",
+            ]
+            self.assertTrue(autonomy_maintenance._runtime_worker_loop_identity_live(worker_state))
+
+        state = {"runtime_worker": worker_state}
+        with mock.patch.object(autonomy_maintenance, "_runtime_worker_loop_identity_live", return_value=True):
+            changed = autonomy_maintenance._clear_non_loop_runtime_worker_state(state)
+
+        worker = dict(state.get("runtime_worker") or {})
+        self.assertFalse(changed)
+        self.assertTrue(worker.get("active"))
+        self.assertEqual(worker.get("pid"), 4321)
+        self.assertEqual(worker.get("last_cycle_status"), "running")
 
     def test_non_loop_cycle_clears_stale_flag_after_identity_was_removed(self):
         state = {

@@ -430,6 +430,42 @@ class TestOperatorOutboxService(unittest.TestCase):
         self.assertIn("system_check", notices[0].get("title", ""))
         self.assertIn("judgment", notices[0].get("message", ""))
 
+    def test_work_tree_does_not_republish_unimplemented_http_extract_failure(self):
+        notices = OPERATOR_OUTBOX_SERVICE.notices_from_work_tree_state(
+            {
+                "trees": [
+                    {
+                        "tree_id": "tree_extract",
+                        "title": "Core Thinning",
+                        "status": "active",
+                        "next_step": {
+                            "action": "execute",
+                            "branch_id": "branch_extract",
+                            "task_id": "task_extract",
+                            "recommended_tool": "core_thinning",
+                        },
+                        "nodes": [
+                            {
+                                "id": "branch_extract",
+                                "title": "Extract HTTP surface: chat_sessions",
+                                "status": "ready",
+                                "tool_state": {"core_thinning": "failed"},
+                                "current_task": {
+                                    "task_id": "task_extract",
+                                    "title": "Extract HTTP surface: chat_sessions",
+                                    "status": "open",
+                                    "meta": {"kind": "http_surface_extract"},
+                                },
+                            }
+                        ],
+                    }
+                ]
+            },
+            executable_tools=["core_thinning"],
+        )
+
+        self.assertEqual(notices, [])
+
     def test_work_tree_failed_tool_history_without_current_task_is_not_live_pressure(self):
         notices = OPERATOR_OUTBOX_SERVICE.notices_from_work_tree_state(
             {
@@ -1133,6 +1169,167 @@ class TestOperatorOutboxService(unittest.TestCase):
         self.assertEqual(evidence[0]["tool_name"], "operator_response")
         self.assertEqual(evidence[0]["task_id"], task.task_id)
         self.assertEqual(work_tree._BRANCHES[branch.branch_id].evidence_count, 1)
+
+    def test_append_notice_does_not_recreate_operator_resolved_dedupe(self):
+        with TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "operator_outbox.jsonl"
+            notice = OPERATOR_OUTBOX_SERVICE.append_notice(
+                path,
+                source="work_tree",
+                severity="attention",
+                title="Nova needs tool failure judgment: core_thinning",
+                message="Extract failed.",
+                dedupe_key="work_tree|tool_failed|tree_c|branch_e|task_7|core_thinning",
+                payload={"request_kind": "tool_failure_judgment"},
+                now_fn=lambda: 3000.0,
+                uuid_fn=lambda: "oldfail",
+            )
+            event_id = str((notice.get("event") or {}).get("id") or "")
+            OPERATOR_OUTBOX_SERVICE.respond_to_notice(
+                path,
+                event_id=event_id,
+                message="Do not retry.",
+                resolution="task_resolved",
+                now_fn=lambda: 3005.0,
+                uuid_fn=lambda: "resolvedf",
+            )
+            second = OPERATOR_OUTBOX_SERVICE.append_notice(
+                path,
+                source="work_tree",
+                severity="attention",
+                title="Nova needs tool failure judgment: core_thinning",
+                message="Extract failed again.",
+                dedupe_key="work_tree|tool_failed|tree_c|branch_e|task_7|core_thinning",
+                payload={"request_kind": "tool_failure_judgment"},
+                now_fn=lambda: 3010.0,
+                uuid_fn=lambda: "newfail",
+            )
+            events = OPERATOR_OUTBOX_SERVICE.read_events(path, limit=20)
+
+        self.assertTrue(second.get("suppressed"))
+        self.assertEqual(second.get("reason"), "already_operator_resolved")
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0].get("status"), "resolved")
+
+    def test_reconcile_stales_republished_notice_after_operator_resolved(self):
+        with TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "operator_outbox.jsonl"
+            first = OPERATOR_OUTBOX_SERVICE.append_notice(
+                path,
+                source="work_tree",
+                severity="attention",
+                title="Nova needs tool failure judgment: core_thinning",
+                message="Extract failed.",
+                dedupe_key="work_tree|tool_failed|tree_c|branch_e|task_7|core_thinning",
+                now_fn=lambda: 3100.0,
+                uuid_fn=lambda: "firstfail",
+            )
+            event_id = str((first.get("event") or {}).get("id") or "")
+            OPERATOR_OUTBOX_SERVICE.respond_to_notice(
+                path,
+                event_id=event_id,
+                message="Do not retry.",
+                resolution="task_resolved",
+                now_fn=lambda: 3105.0,
+                uuid_fn=lambda: "resfail",
+            )
+            # Simulate the pre-fix republish that ignored the resolved dedupe.
+            rows = OPERATOR_OUTBOX_SERVICE._load_events(path)
+            rows.append(
+                {
+                    "id": "3110000000000-dupfail",
+                    "source": "work_tree",
+                    "status": "new",
+                    "dedupe_key": "work_tree|tool_failed|tree_c|branch_e|task_7|core_thinning",
+                    "title": "Nova needs tool failure judgment: core_thinning",
+                    "message": "Extract failed again.",
+                }
+            )
+            OPERATOR_OUTBOX_SERVICE._write_events(path, rows)
+            result = OPERATOR_OUTBOX_SERVICE.reconcile_work_tree_notices(
+                path,
+                active_notices=[
+                    {"dedupe_key": "work_tree|tool_failed|tree_c|branch_e|task_7|core_thinning"}
+                ],
+                now_fn=lambda: 3110.0,
+            )
+            events = {str(item.get("id") or ""): item for item in OPERATOR_OUTBOX_SERVICE.read_events(path, limit=20)}
+
+        self.assertGreaterEqual(int(result.get("staled_count") or 0), 1)
+        self.assertEqual(events["3110000000000-dupfail"].get("status"), "stale")
+        self.assertEqual(events["3110000000000-dupfail"].get("status_note"), "operator_already_resolved")
+
+    def test_task_resolved_clears_operator_outbox_wait_hold(self):
+        from services.recurring_finding_lifecycle import KEY_COMPLETION_ACTION
+
+        with TemporaryDirectory() as temp_dir:
+            db_path = Path(temp_dir) / "work_tree.sqlite3"
+            work_tree._set_db_path(db_path)
+            extract_tree = work_tree.initialize_tree("Core Thinning")
+            extract_branch = work_tree._BRANCHES[extract_tree.root_branch_id]
+            extract_task = work_tree.add_task_to_branch(
+                extract_branch.branch_id,
+                "Extract HTTP surface: chat_sessions",
+                meta={
+                    "kind": "http_surface_extract",
+                    "recurring_finding_key": "core_thinning:extract-chat-sessions",
+                    "recurring_finding_satisfaction_fingerprint": "fp-extract",
+                },
+            )
+            hold_tree = work_tree.initialize_tree("Signal Intake: Runtime Governance")
+            hold_branch = work_tree._BRANCHES[hold_tree.root_branch_id]
+            hold_branch.source_type = "operator_control"
+            hold_branch.work_class = "operator_requested"
+            wait_task = work_tree.add_task_to_branch(
+                hold_branch.branch_id,
+                "Wait for operator response or authority assignment on the open outbox item",
+            )
+            work_tree.mark_task_blocked(wait_task.task_id, "operator_response_required")
+            path = Path(temp_dir) / "operator_outbox.jsonl"
+            notice = OPERATOR_OUTBOX_SERVICE.append_notice(
+                path,
+                source="work_tree",
+                severity="attention",
+                title="Nova needs tool failure judgment: core_thinning",
+                message="Extract HTTP surface failed.",
+                payload={
+                    "tree_id": extract_tree.tree_id,
+                    "tree_title": extract_tree.title,
+                    "branch_id": extract_branch.branch_id,
+                    "branch_title": extract_branch.title,
+                    "task": {
+                        "task_id": extract_task.task_id,
+                        "title": extract_task.title,
+                        "status": "open",
+                    },
+                    "request_kind": "tool_failure_judgment",
+                },
+                now_fn=lambda: 2200.0,
+                uuid_fn=lambda: "noticehold",
+            )
+            event_id = str((notice.get("event") or {}).get("id") or "")
+
+            response = OPERATOR_OUTBOX_SERVICE.respond_to_notice(
+                path,
+                event_id=event_id,
+                message="Do not retry. Mapping can close. Extraction is not implemented.",
+                responder="operator",
+                resolution="task_resolved",
+                work_tree_module=work_tree,
+                now_fn=lambda: 2205.0,
+                uuid_fn=lambda: "responsehd",
+            )
+
+        self.assertTrue(response.get("ok"))
+        self.assertEqual((response.get("event") or {}).get("status"), "resolved")
+        self.assertEqual(work_tree._TASKS[extract_task.task_id].status, TaskStatus.COMPLETE)
+        self.assertEqual(
+            (work_tree._TASKS[extract_task.task_id].meta or {}).get(KEY_COMPLETION_ACTION),
+            "operator_do_not_retry",
+        )
+        self.assertEqual(work_tree._TASKS[wait_task.task_id].status, TaskStatus.COMPLETE)
+        self.assertEqual(work_tree._BRANCHES[hold_branch.branch_id].resolution_state, "resolved")
+        self.assertGreaterEqual(int((response.get("operator_hold") or {}).get("cleared_count") or 0), 1)
 
     def test_continue_work_response_satisfies_blocked_operator_wait(self):
         with TemporaryDirectory() as temp_dir:

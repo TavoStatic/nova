@@ -58,13 +58,13 @@ class NovaHttpRequestBindingService:
         token_hex_fn,
         attachment_context_service=None,
         append_session_turn_fn=None,
+        memory_recall_service=None,
     ) -> tuple[int, dict]:
         ok_chat, chat_user = chat_login_auth_fn(handler)
         if not ok_chat:
             return 403, {"ok": False, "error": chat_user}
 
         message = str(payload.get("message") or "").strip()
-        raw_message = message
         session_id = str(payload.get("session_id") or "").strip()
         user_id = normalize_user_id_fn(chat_user) or request_user_id_fn(handler, qs, payload)
         attachments = NovaHttpRequestBindingService._normalize_attachment_items(payload.get("attachments"))
@@ -79,23 +79,25 @@ class NovaHttpRequestBindingService:
             return 403, {"ok": False, "error": reason_owner, "session_id": session_id}
 
         if attachments and attachment_context_service is not None:
-            recent_items, recent_stage = attachment_context_service.recent_session_context(session_id)
-            direct_attachment_reply = attachment_context_service.maybe_answer_attachment_turn(
-                message,
-                attachments,
-                recent_items=recent_items,
-                recent_stage=recent_stage,
-            )
             attachment_context_service.remember_session_context(session_id, attachments, stage="handoff")
             message = attachment_context_service.compose_chat_message(message, attachments)
+        elif attachment_context_service is not None:
+            # No live attachments in this turn — recover staged context from the store.
+            # This is the post-navigation path: browser JS staged list is empty but the
+            # server-side store still holds what the operator uploaded before navigating away.
+            try:
+                recovered_items, _stage = attachment_context_service.recent_session_context(session_id)
+                if recovered_items:
+                    message = attachment_context_service.compose_chat_message(message, recovered_items)
+            except Exception:
+                pass  # store failure must never break a chat turn
 
-            if direct_attachment_reply:
-                user_echo = raw_message or f"[Shared {len(attachments)} staged item(s)]"
-                if append_session_turn_fn is not None:
-                    append_session_turn_fn(session_id, "user", user_echo)
-                    append_session_turn_fn(session_id, "assistant", direct_attachment_reply)
-                invalidate_control_status_cache_fn()
-                return 200, {"ok": True, "session_id": session_id, "reply": direct_attachment_reply}
+        if memory_recall_service is not None:
+            try:
+                recall_ctx = memory_recall_service.recall_for_turn(message)
+                message = memory_recall_service.inject_into_message(message, recall_ctx)
+            except Exception:
+                pass  # recall failure must never break a chat turn
 
         try:
             reply = process_chat_fn(session_id, message, user_id=user_id)
@@ -203,6 +205,7 @@ class NovaHttpRequestBindingService:
             token_hex_fn=secrets.token_hex,
             attachment_context_service=runtime_fn(runtime_scope, "LEAH_FRONTDOOR_SERVICE"),
             append_session_turn_fn=runtime_fn(runtime_scope, "_append_session_turn"),
+            memory_recall_service=runtime_fn(runtime_scope, "LEAH_MEMORY_RECALL_SERVICE"),
         )
 
 

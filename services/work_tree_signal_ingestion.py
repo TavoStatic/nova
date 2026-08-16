@@ -1514,13 +1514,54 @@ def _operator_outbox_actionable_open_count(status_payload: dict[str, Any]) -> in
     return None
 
 
+def _operator_outbox_claimed_open_id(status_payload: dict[str, Any]) -> str:
+    payload = dict(status_payload or {})
+    outbox = payload.get("operator_outbox") if isinstance(payload.get("operator_outbox"), dict) else {}
+    return str(
+        payload.get("operator_outbox_actionable_latest_open_id")
+        or outbox.get("operator_actionable_latest_open_id")
+        or payload.get("operator_outbox_latest_open_id")
+        or outbox.get("latest_open_id")
+        or ""
+    ).strip()
+
+
+def _operator_outbox_notice_still_open(event_id: str) -> bool | None:
+    clean_id = str(event_id or "").strip()
+    if not clean_id:
+        return None
+    try:
+        from services.nova_runtime_context import OPERATOR_OUTBOX_FILE
+        from services.operator_outbox import CLOSED_NOTICE_STATUSES, OPERATOR_OUTBOX_SERVICE
+
+        for event in list(OPERATOR_OUTBOX_SERVICE.read_events(OPERATOR_OUTBOX_FILE, limit=10000) or []):
+            if not isinstance(event, dict):
+                continue
+            if str(event.get("id") or "").strip() != clean_id:
+                continue
+            status = str(event.get("status") or "").strip().lower()
+            return status not in CLOSED_NOTICE_STATUSES
+    except Exception:
+        return None
+    return None
+
+
+def _verified_operator_outbox_open_count(status_payload: dict[str, Any], *, fallback: int) -> int:
+    claimed_id = _operator_outbox_claimed_open_id(status_payload)
+    still_open = _operator_outbox_notice_still_open(claimed_id)
+    if still_open is False:
+        return 0
+    return max(0, int(fallback or 0))
+
+
 def _operator_control_signal_from_status(status_payload: dict[str, Any]) -> dict[str, Any] | None:
     if not _has_operator_control_surface(status_payload):
         return None
     outbox = status_payload.get("operator_outbox") if isinstance(status_payload.get("operator_outbox"), dict) else {}
     actionable_open_count = _operator_outbox_actionable_open_count(status_payload)
     raw_open_count = _as_int(status_payload.get("operator_outbox_open_count", outbox.get("open_count", 0)), 0)
-    open_count = raw_open_count if actionable_open_count is None else actionable_open_count
+    reported_open_count = raw_open_count if actionable_open_count is None else actionable_open_count
+    open_count = _verified_operator_outbox_open_count(status_payload, fallback=reported_open_count)
     outbox_ok = bool(outbox.get("ok", True))
     if outbox_ok and open_count <= 0:
         return None
@@ -2468,6 +2509,12 @@ def _edfi_capability_profile_signal_from_status(status_payload: dict[str, Any]) 
     ]
     if profile_ok and profile_present and auth_ok and resource_count > 0 and issue_count <= 0:
         return None
+    if (
+        profile_status in {"not_installed", "uninstalled"}
+        or profile.get("installed") is False
+        or str(profile.get("evidence_source") or "") == "backpack_not_installed"
+    ):
+        return None
 
     if not profile_present:
         error_symbol = "edfi_profile_missing"
@@ -2584,6 +2631,9 @@ def _backpack_edfi_signal_from_status(status_payload: dict[str, Any]) -> dict[st
     fusion_ok = status_payload.get("backpack_fusion_ok")
     if fusion_ok is True:
         return None
+    fusion_status = str(fusion.get("status") or "").strip().lower()
+    if fusion.get("installed") is False or fusion_status in {"not_installed", "uninstalled"}:
+        return None
     fusion = status_payload.get("backpack_fusion") if isinstance(status_payload.get("backpack_fusion"), dict) else {}
     capability_count = int(status_payload.get("backpack_capability_count") or 0)
     if fusion_ok is None and capability_count > 0 and not fusion:
@@ -2637,6 +2687,11 @@ def _edfi_core_signal_from_status(status_payload: dict[str, Any]) -> dict[str, A
     )
     ready = bool(status_payload.get("edfi_core_ready", readiness.get("ready", False)))
     if ready:
+        return None
+    if readiness.get("installed") is False or str(readiness.get("profile_status") or "").strip().lower() in {
+        "not_installed",
+        "uninstalled",
+    }:
         return None
     # Backpack extract path operational → do not open high-severity work-tree pressure.
     if bool(readiness.get("backpack_operational")):
@@ -6219,7 +6274,44 @@ class WorkTreeSignalIngestionService:
                 )
             )
         if _has_edfi_capability_profile_surface(status_payload) and _edfi_capability_profile_signal_from_status(status_payload) is None:
-            results.extend(self.resolve_edfi_capability_profile_branches())
+            profile = (
+                status_payload.get("edfi_capability_profile")
+                if isinstance(status_payload.get("edfi_capability_profile"), dict)
+                else {}
+            )
+            profile_status = str(
+                status_payload.get("edfi_capability_profile_status") or profile.get("status") or ""
+            ).strip().lower()
+            backpack_absent = (
+                profile.get("installed") is False
+                or profile_status in {"not_installed", "uninstalled"}
+            )
+            results.extend(
+                self.resolve_edfi_capability_profile_branches(
+                    reason=(
+                        "Ed-Fi backpack is not installed; a missing capability profile is not a gap."
+                        if backpack_absent
+                        else "Saved data connector capability profile evidence reports a healthy district data layer."
+                    ),
+                    require_read_evidence=not backpack_absent,
+                )
+            )
+        if _has_edfi_core_surface(status_payload) and _edfi_core_signal_from_status(status_payload) is None:
+            results.extend(
+                self.resolve_signal_branches(
+                    signal_class="governance_pressure",
+                    source="edfi_core",
+                    reason="Ed-Fi core is not an active installed backpack surface.",
+                )
+            )
+        if _has_backpack_edfi_surface(status_payload) and _backpack_edfi_signal_from_status(status_payload) is None:
+            results.extend(
+                self.resolve_signal_branches(
+                    signal_class="governance_pressure",
+                    source="backpack_edfi",
+                    reason="Ed-Fi backpack fusion is quiet because the backpack is not installed.",
+                )
+            )
         if _has_frontdoor_cli_surface(status_payload) and _frontdoor_cli_signal_from_status(status_payload) is None:
             results.extend(
                 self.resolve_signal_branches(
@@ -6794,17 +6886,18 @@ class WorkTreeSignalIngestionService:
         if _has_operator_control_surface(status_payload):
             actionable_open_count = _operator_outbox_actionable_open_count(status_payload)
             if actionable_open_count is not None:
-                open_count = actionable_open_count
+                reported = actionable_open_count
             else:
                 outbox = (
                     status_payload.get("operator_outbox")
                     if isinstance(status_payload.get("operator_outbox"), dict)
                     else {}
                 )
-                open_count = _as_int(
+                reported = _as_int(
                     status_payload.get("operator_outbox_open_count", outbox.get("open_count", 0)),
                     0,
                 )
+            open_count = _verified_operator_outbox_open_count(status_payload, fallback=reported)
         else:
             try:
                 from services.nova_runtime_context import OPERATOR_OUTBOX_FILE
@@ -6949,6 +7042,7 @@ class WorkTreeSignalIngestionService:
         self,
         *,
         reason: str = "Saved data connector capability profile evidence reports a healthy district data layer.",
+        require_read_evidence: bool = True,
     ) -> list[dict[str, Any]]:
         tree = self._find_signal_tree()
         if tree is None:
@@ -6981,7 +7075,7 @@ class WorkTreeSignalIngestionService:
                 or branch_payload.get("profile_evidence_path")
                 or ""
             ).strip()
-            if _edfi_capability_profile_read_evidence_satisfied(
+            if (not require_read_evidence) or _edfi_capability_profile_read_evidence_satisfied(
                 branch.branch_id,
                 expected_path=expected_profile_path,
             ):

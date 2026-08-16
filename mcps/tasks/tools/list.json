@@ -1,6 +1,6 @@
 {
   "name": "list",
-  "description": "List the user's active automations (scheduled tasks) with their schedules and recent results. Use this when the user asks to see their automations, tasks, reminders, or scheduled jobs.Each entry includes `task.task_id`, `task.is_active` (whether the automation is active or archived), `schedules[*].schedule_id`, and `schedules[*].is_enabled` (false means the schedule is paused) for use with the other automation tools.",
+  "description": "List the user's active automations — time-based schedules and event triggers (Gmail, Outlook, GitHub, Finance, …). Use this when the user asks to see their automations, tasks, reminders, scheduled jobs, or event-triggered automations. Each entry includes `taskId`, `isActive`, `schedules[*].scheduleId` / `schedules[*].isEnabled`, and `triggers` (provider, trigger_type, dimensions, from/to/subject_contains, enabled) for use with the other automation tools.",
   "inputSchema": {
     "type": "object",
     "properties": {}

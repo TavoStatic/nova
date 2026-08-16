@@ -2,8 +2,8 @@
 NOVA_DOC
 category: architecture
 authority: active_authority
-last_session: 2026-08-05
-last_agent: claude-cowork
+last_session: 2026-08-16
+last_agent: grok
 session_state: current
 next_step: none
 open: none
@@ -11,7 +11,7 @@ open: none
 
 # Documentation Ownership
 
-Last verified: 2026-08-05
+Last verified: 2026-08-16
 
 ## Start Here
 
@@ -37,7 +37,7 @@ This file tells you who owns what. The ledger tells you what is current.
 
 - `SYSTEM_MAP.md`: current processes, ownership, APIs, artifacts, and wiring surfaces — anchored to commit 92ca149
 - `ARCHITECTURE.md`: design intent and current implementation boundaries
-- `SERVICES_INDEX.md`: every service module — current as of Aug 2026
+- `SERVICES_INDEX.md`: every service module — regenerate after backpack-host or sanitizer changes (`python scripts/regenerate_services_index.py`)
 - `FUNCTION_INDEX.md`: every active source function, method, and class — regenerated 2026-08-05 (561 files, 6577 fns)
 - `TEST_INDEX.md`: every discovered test function and lane membership — regenerated 2026-08-05 (245 modules, 2344 fns)
 
@@ -59,6 +59,7 @@ This file tells you who owns what. The ledger tells you what is current.
 - `KIDNEY_SYSTEM.md`: cleanup and retention
 - `SOCK_SYSTEM.md`: hardware/model compatibility
 - `DATA_PIPELINES.md`: pipeline framework, data connector core, and domain lanes
+- Backpack uninstall contract lives in code: `services/backpack_host/sanitize.py` and `services/backpack_host/install_state.py`. The named decision is `backpack_uninstall_touch_list` in the ledger.
 - `SEARCH_PROVIDER_ARCHITECTURE.md`: search providers and research routing
 - `PATCHING.md`: patch governance
 - `OPERATIONS.md`: commands and operating procedures
@@ -91,6 +92,7 @@ Remaining archive candidates (at root):
 - adding or removing a source function requires regenerating `FUNCTION_INDEX.md`
 - adding or removing a service requires regenerating `SERVICES_INDEX.md`
 - adding or removing tests or lane membership requires regenerating `TEST_INDEX.md` and checking `TEST_ECOSYSTEM.md`
+- adding a backpack runtime write path requires declaring it in that backpack's manifest and keeping `services/backpack_host/sanitize.py` able to discover it
 - adding a wiring surface or source root requires updating `SYSTEM_MAP.md`
 - changing Mission, orchestrator, gate, maintenance order, Work Tree pressure, or outbox semantics requires updating `AUTONOMY_AND_MISSION.md`
 - changing process topology or HTTP routes requires updating `SYSTEM_MAP.md` and the root README

@@ -4261,7 +4261,7 @@ def _runtime_worker_loop_identity_live(worker_state: dict) -> bool:
     except Exception:
         return False
     joined_cmdline = " ".join(cmdline)
-    return "--loop" in cmdline and "autonomy_maintenance.py" in joined_cmdline
+    return ("--loop" in cmdline or "--once" in cmdline) and "autonomy_maintenance.py" in joined_cmdline
 
 
 def _clear_non_loop_runtime_worker_state(state: dict, *, timestamp_fn: Callable[[], str] | None = None) -> bool:
@@ -4522,8 +4522,11 @@ def _regression_lock_owner_alive() -> tuple[bool, str]:
     if owner_pid <= 0 or owner_pid == int(os.getpid()):
         return False, ""
     try:
-        os.kill(owner_pid, 0)
-    except OSError:
+        import psutil
+
+        if not psutil.pid_exists(owner_pid):
+            return False, ""
+    except Exception:
         return False, ""
     lanes = ", ".join(str(item) for item in list(payload.get("lanes") or []))
     started_at = str(payload.get("started_at") or "").strip()
@@ -7734,15 +7737,22 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--max-cycles", type=int, default=0, help="Optional cycle cap for loop mode; 0 means run continuously")
     parser.add_argument("--stop-on-error", action="store_true", help="Exit loop mode after the first failed cycle")
     args = parser.parse_args(argv)
-    if args.loop:
-        return run_worker(
-            interval_sec=args.interval_sec,
-            max_cycles=args.max_cycles,
-            continue_on_error=not bool(args.stop_on_error),
-        )
-    if args.once:
+    from tools.runtime_singleton import acquire_role_singleton, release_role_singleton
+
+    ok, detail = acquire_role_singleton("maintenance")
+    if not ok:
+        print(f"Nova maintenance already running ({detail}). Skipping this cycle.")
+        return 0
+    try:
+        if args.loop:
+            return run_worker(
+                interval_sec=args.interval_sec,
+                max_cycles=args.max_cycles,
+                continue_on_error=not bool(args.stop_on_error),
+            )
         return run_once()
-    return run_once()
+    finally:
+        release_role_singleton("maintenance")
 
 
 if __name__ == "__main__":

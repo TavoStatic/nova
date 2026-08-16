@@ -3,116 +3,83 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>L.E.A.H. | Living Environment Autonomous Hub</title>
+  <title>Leah</title>
   <link rel="stylesheet" href="/static/leah.css?v={{LEAH_CSS_VERSION}}" />
 </head>
 <body>
- <!--  <canvas id="leahBackdrop" class="leah-backdrop" aria-hidden="true"></canvas> -->
-  <div class="leah-shell">
-    <aside class="leah-rail">
-      <div class="brand-card">
-        <div class="brand-mark">L.E.A.H.</div>
-        <h1>Living Environment Autonomous Hub</h1>
-        <p>Your local AI experience hub for conversation, sensing, and staged work.</p>
-        <div class="build-badge">Build {{LEAH_BUILD_VERSION}}</div>
-      </div>
+  <div class="leah-app">
+    <header class="leah-top">
+      <div class="wordmark">Leah</div>
+      <p id="activityHeadline" class="status-line">Nova is here.</p>
+      <span id="presenceHealth" class="quiet-dot" title="Health">…</span>
+    </header>
 
-      <section class="rail-panel">
-        <div class="panel-title">Presence</div>
-        <div class="presence-grid">
-          <div class="presence-chip" id="presenceHealth">Checking health</div>
-          <div class="presence-chip" id="presenceThinking">Idle</div>
-          <div class="presence-chip" id="presenceListening">Listen Off</div>
-          <div class="presence-chip" id="presenceVoice">Voice Off</div>
-          <div class="presence-chip" id="presenceCamera">Camera Off</div>
-          <div class="presence-chip" id="presenceMood">Calm Flow</div>
-          <div class="presence-chip" id="presenceUploads">0 staged</div>
-        </div>
-      </section>
-
-      <section class="rail-panel">
-        <div class="panel-title">Session</div>
-        <dl class="mini-facts">
-          <div><dt>Session</dt><dd id="sessionLabel">Not started</dd></div>
-          <div><dt>User</dt><dd id="userLabel">Unknown</dd></div>
-          <div><dt>Mode</dt><dd id="modeLabel">Conversation</dd></div>
-          <div><dt>Mood</dt><dd id="moodLabel">Calm Flow</dd></div>
-        </dl>
-      </section>
-    </aside>
-
-    <main class="leah-main">
-      <section class="conversation-stage">
-        <div class="conversation-head">
-          <div class="welcome-line">Hi, <span id="welcomeUser" class="welcome-user">there</span></div>
-          <button id="btnNewSession" type="button" class="action-button ghost">New Session</button>
-        </div>
-
-        <div id="chat" class="chat-stream"></div>
-
-        <div class="composer-wrap">
-          <div id="dropZone" class="drop-zone" tabindex="0" role="button" aria-label="Upload files to LEAH">
-            <div class="drop-title">Drop files here or tap to upload</div>
-            <div class="drop-copy">PDFs, images, notes, or anything you want Nova to stage for the next turn.</div>
-          </div>
-
-          <form id="composerForm" class="composer-form">
-            <textarea id="messageInput" rows="3" placeholder="Talk to Nova through LEAH..."></textarea>
-            <div class="composer-actions">
-              <div class="dock-actions">
-                <input id="fileInput" type="file" multiple hidden />
-                <button id="btnUpload" type="button" class="action-button">Upload</button>
-                <button id="btnCamera" type="button" class="action-button">Camera</button>
-                <button id="btnCapture" type="button" class="action-button ghost">Capture</button>
-                <button id="btnMic" type="button" class="action-button">Mic</button>
-                <button id="btnListen" type="button" class="action-button ghost">Listen</button>
-                <button id="btnVoice" type="button" class="action-button ghost">Voice</button>
-              </div>
-              <button id="btnSend" type="submit" class="send-button">Send</button>
-            </div>
-          </form>
-        </div>
-      </section>
+    <main class="leah-stage">
+      <div id="chat" class="chat-stream"></div>
     </main>
 
-    <aside class="context-rail">
-      <section class="context-panel">
-        <div class="panel-title">What Nova Is Doing</div>
-        <p id="activityHeadline" class="context-lead">Nova is idle and waiting for the next turn.</p>
-        <div id="activityDetail" class="context-detail">Nova is ready for your next file, question, or signal.</div>
-      </section>
-
-      <section class="context-panel">
-        <div class="panel-title">What You Shared</div>
-        <p class="panel-copy">Files and camera captures stay visible here until you hand them to Nova in a turn.</p>
+    <footer class="leah-dock">
+      <div id="sensingDock" class="sensing-dock" hidden>
+        <video id="cameraPreview" class="camera-preview" autoplay playsinline muted></video>
+        <canvas id="cameraCanvas" hidden></canvas>
+        <div id="cameraEmpty" class="sr-only">Camera preview</div>
+        <div id="transcriptBox" class="transcript" hidden></div>
         <ul id="stagedList" class="staged-list"></ul>
-      </section>
+      </div>
 
-      <section class="context-panel">
-        <div class="panel-title">Live Sensing</div>
-        <div class="media-stack">
-          <video id="cameraPreview" class="camera-preview" autoplay playsinline muted></video>
-          <canvas id="cameraCanvas" hidden></canvas>
-          <div id="cameraEmpty" class="camera-empty">Camera preview will appear here when enabled.</div>
+      <form id="composerForm" class="composer">
+        <div id="dropZone" class="composer-shell">
+          <textarea id="messageInput" rows="2" placeholder="Speak, or type…"></textarea>
         </div>
-        <div id="transcriptBox" class="transcript-box">Voice transcript will appear here when Nova is listening.</div>
-      </section>
-    </aside>
+        <div class="composer-bar">
+          <input id="fileInput" type="file" multiple hidden />
+          <button id="btnUpload" type="button" class="icon-btn" title="Share a file">File</button>
+          <button id="btnCamera" type="button" class="icon-btn" title="Camera">Camera</button>
+          <button id="btnCapture" type="button" class="icon-btn" title="Capture" hidden>Capture</button>
+          <button id="btnMic" type="button" class="icon-btn" title="Listen">Mic</button>
+          <button id="btnListen" type="button" class="icon-btn" title="Keep listening">Listen</button>
+          <button id="btnVoice" type="button" class="icon-btn" title="Nova can speak">Voice</button>
+          <button id="btnSend" type="submit" class="send-btn">Send</button>
+        </div>
+      </form>
+    </footer>
+  </div>
+
+  <!-- Kept for leah.js; not shown -->
+  <div class="sr-only" aria-hidden="true">
+    <div id="presenceThinking"></div>
+    <div id="presenceListening"></div>
+    <div id="presenceVoice"></div>
+    <div id="presenceCamera"></div>
+    <div id="presenceMood"></div>
+    <div id="presenceUploads"></div>
+    <div id="sessionLabel"></div>
+    <div id="userLabel"></div>
+    <div id="modeLabel"></div>
+    <div id="moodLabel"></div>
+    <div id="welcomeUser"></div>
+    <div id="activityDetail"></div>
+    <div id="heroState"></div>
+    <div id="heroInputs"></div>
+    <div id="pulseRuntime"></div>
+    <div id="pulseQueue"></div>
+    <div id="pulseSearch"></div>
+    <div id="pulseMaintenance"></div>
+    <div id="pulseTask"></div>
   </div>
 
   <script>
     window.__LEAH_CONFIG__ = {
-      healthUrl: '/api/health',
-      controlStatusUrl: '',
-      chatUrl: '/api/chat',
-      chatHistoryUrl: '/api/chat/history',
-      chatResumeUrl: '/api/chat/resume',
-      chatLoginUrl: '/api/chat/login',
-      chatLogoutUrl: '/api/chat/logout',
-      uploadUrl: '/api/chat/upload'
+      healthUrl: "/api/health",
+      controlStatusUrl: "/api/leah/pulse",
+      chatUrl: "/api/chat",
+      chatHistoryUrl: "/api/chat/history",
+      chatResumeUrl: "/api/chat/resume",
+      chatLoginUrl: "/api/chat/login",
+      chatLogoutUrl: "/api/chat/logout",
+      uploadUrl: "/api/chat/upload"
     };
   </script>
-  <script src="/static/leah_fx.js?v={{LEAH_FX_JS_VERSION}}"></script>
   <script src="/static/leah.js?v={{LEAH_JS_VERSION}}"></script>
 </body>
 </html>

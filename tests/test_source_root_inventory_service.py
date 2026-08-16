@@ -66,9 +66,11 @@ class TestSourceRootInventoryService(unittest.TestCase):
     def test_source_inventory_backpack_roots_are_separate(self) -> None:
         payload = build_source_root_inventory_payload()
         roots = {row["root_id"]: set(row.get("covered_source_files") or []) for row in payload.get("roots") or []}
-        # Verify no backpack paths bleed into core roots
-        core_paths = set().union(*roots.values())
-        self.assertFalse(any(path.startswith("backpacks/") for path in core_paths))
+        # Package files belong on backpack_host only — never on a core Nova root.
+        for root_id, paths in roots.items():
+            if root_id == "backpack_host":
+                continue
+            self.assertFalse(any(path.startswith("backpacks/") for path in paths), root_id)
 
     def test_source_inventory_ignores_vscode_tasks_json(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

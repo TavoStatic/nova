@@ -14,7 +14,6 @@ from .filesystem_tool import FileSystemTool
 from .os_capability_tool import OsCapabilityTool
 from .patch_tool import PatchTool
 from .research_tool import ResearchTool
-from .edfi_tool import DataConnectorExploreTool
 from .temporal_review_tool import TemporalReviewTool
 from .system_tool import SystemTool
 from .vision_tool import VisionTool
@@ -179,8 +178,24 @@ class ToolRegistry:
             raise
 
 
+def _optional_data_connector_tool() -> NovaTool | None:
+    """Backpack explore tool is optional — Nova core must boot without a dropped-in pack."""
+    try:
+        from .edfi_tool import DataConnectorExploreTool
+
+        return DataConnectorExploreTool()
+    except Exception:
+        pass
+    try:
+        from .edfi_tool import EdFiExploreTool
+
+        return EdFiExploreTool()
+    except Exception:
+        return None
+
+
 def build_default_registry() -> ToolRegistry:
-    return ToolRegistry([
+    tools: list[NovaTool] = [
         FileSystemTool(),
         CodegenTool(),
         PatchTool(),
@@ -189,8 +204,11 @@ def build_default_registry() -> ToolRegistry:
         SystemTool(),
         OsCapabilityTool(),
         TemporalReviewTool(),
-        DataConnectorExploreTool(),
-    ])
+    ]
+    connector = _optional_data_connector_tool()
+    if connector is not None:
+        tools.append(connector)
+    return ToolRegistry(tools)
 
 
 def build_core_tool_exports(runtime_scope: dict[str, Any]) -> dict[str, Any]:

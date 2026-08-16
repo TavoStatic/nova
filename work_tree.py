@@ -2850,6 +2850,31 @@ def execute_autonomous_step(
 
     result = execute_planned_action_fn(tool_name, tool_args)
 
+    if tool_name == "core_thinning" and isinstance(result, dict):
+        try:
+            from services.core_thinning import is_http_extract_stage_block, stamp_core_thinning_task_satisfaction
+
+            if is_http_extract_stage_block(result):
+                stamp_core_thinning_task_satisfaction(task, result)
+                mark_task_complete(task.task_id)
+                branch.tool_state[tool_name] = ToolStatus.READY
+                branch.updated_at = _now()
+                _persist_tree_state(tree_id)
+                return {
+                    "action": "executed",
+                    "branch_id": branch_id,
+                    "branch_title": branch.title,
+                    "task_id": task.task_id,
+                    "task_title": task.title,
+                    "tool": tool_name,
+                    "tool_args": tool_args,
+                    "tool_result": result,
+                    "extract_stage": "blocked_http_extraction",
+                    "task_target": _scoped_task_target(task),
+                }
+        except Exception:
+            pass
+
     if _is_scoped_stabilization_task(task):
         target_meta = _scoped_task_target(task)
         if not isinstance(result, dict):

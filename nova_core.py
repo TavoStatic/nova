@@ -1843,26 +1843,8 @@ def build_learning_context(query: str) -> str:
     return str(build_learning_context_details(query).get("context") or "")
 
 
-def _render_chat_context(turns: list[tuple[str, str]], max_chars: int = 1800, current_text: str = "") -> str:
-    return service_render_chat_context(
-        turns,
-        max_chars=max_chars,
-        current_text=current_text,
-        chat_context_turns=CHAT_CONTEXT_TURNS,
-    )
 
 
-def _render_session_state_context(
-    *,
-    conversation_state: dict | None = None,
-    pending_action: dict | None = None,
-    max_chars: int = 1600,
-) -> str:
-    return service_render_session_state_context(
-        conversation_state=conversation_state,
-        pending_action=pending_action,
-        max_chars=max_chars,
-    )
 
 
 def build_fallback_context_details(
@@ -3770,6 +3752,13 @@ def run_loop(tts):
 # Entrypoint
 # =========================
 def main():
+    from tools.runtime_singleton import acquire_role_singleton, release_role_singleton
+
+    ok, detail = acquire_role_singleton("core")
+    if not ok:
+        print(f"Nova core already running ({detail}). Not starting a second instance.")
+        return
+
     ap = argparse.ArgumentParser()
     ap.add_argument("mode", nargs="?", default="run", choices=["run"])
     ap.add_argument("--heartbeat", default=str(DEFAULT_HEARTBEAT))
@@ -3793,6 +3782,7 @@ def main():
     finally:
         hb_stop.set()
         tts.stop()
+        release_role_singleton("core")
 
 
 if __name__ == "__main__":

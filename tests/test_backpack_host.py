@@ -91,7 +91,10 @@ class TestLoaderAndQueryGrants(unittest.TestCase):
 
         with mock.patch(
             "services.backpack_host.query._registry"
-        ) as reg:
+        ) as reg, mock.patch(
+            "services.backpack_host.install_state.backpack_runtime_installed",
+            return_value=True,
+        ):
             reg.return_value.instantiate.return_value = _Pipe()
             result = run_backpack_query("edfi", "list_schools", role="standard_user")
         self.assertTrue(result.get("ok"))

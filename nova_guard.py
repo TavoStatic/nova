@@ -188,29 +188,47 @@ def _lock_belongs_to_live_guard(data: Optional[dict]) -> bool:
         return False
     pid = int(data.get("pid", 0) or 0)
     create_time = data.get("create_time")
-    command = data.get("command")
-    if pid <= 0 or not isinstance(create_time, (int, float)) or not isinstance(command, dict):
+    command = data.get("command") if isinstance(data.get("command"), dict) else {}
+    if pid <= 0 or not isinstance(create_time, (int, float)):
         return False
     try:
         process = psutil.Process(pid)
         if abs(float(process.create_time()) - float(create_time)) >= 1.0:
             return False
-        return _cmdline_matches_identity(process.cmdline(), command)
+        cmdline = process.cmdline()
+        from tools.runtime_processes import matches_script_process
+
+        try:
+            cwd = process.cwd()
+        except Exception:
+            cwd = ROOT
+        script = str((command or {}).get("script") or GUARD_SCRIPT)
+        if matches_script_process(cmdline, script, cwd=cwd) or matches_script_process(
+            cmdline, GUARD_SCRIPT, cwd=cwd
+        ):
+            return True
+        if command:
+            return _cmdline_matches_identity(cmdline, command)
+        return False
     except Exception:
         return False
 
 
 def _live_guard_process_pids(*, exclude_pid: int | None = None) -> list[int]:
-    """Return PIDs for live nova_guard.py processes (direct script args only)."""
+    """Return PIDs for live nova_guard.py processes (direct script args only).
+
+    A venv launcher stub copies the same command line as its child. Treat the
+    parent of another match as a launcher, not a second guard.
+    """
     from tools.runtime_processes import matches_script_process
 
     skip_pid = int(exclude_pid or 0)
-    pids: list[int] = []
+    rows: list[tuple[int, int]] = []
     try:
-        for proc in psutil.process_iter(["pid", "cmdline"]):
+        for proc in psutil.process_iter(["pid", "ppid", "cmdline"]):
             try:
                 pid = int(proc.pid or 0)
-                if pid <= 0 or pid == skip_pid:
+                if pid <= 0:
                     continue
                 cmdline = [str(arg or "") for arg in list(proc.info.get("cmdline") or [])]
                 if len(cmdline) < 2:
@@ -224,12 +242,21 @@ def _live_guard_process_pids(*, exclude_pid: int | None = None) -> list[int]:
                     cwd = ROOT
                 if not matches_script_process(cmdline, GUARD_SCRIPT, cwd=cwd):
                     continue
-                pids.append(pid)
+                ppid = int((proc.info or {}).get("ppid") or 0)
+                try:
+                    ppid = int(proc.ppid() or ppid or 0)
+                except Exception:
+                    pass
+                rows.append((pid, ppid))
             except (psutil.NoSuchProcess, psutil.AccessDenied):
                 pass
     except Exception:
         pass
-    return sorted(set(pids))
+    parent_ids = {ppid for _pid, ppid in rows if ppid > 0}
+    pids = {pid for pid, _ppid in rows if pid not in parent_ids}
+    if skip_pid:
+        pids.discard(skip_pid)
+    return sorted(pids)
 
 
 def _another_live_guard_process(*, exclude_pid: int | None = None) -> int | None:
@@ -238,20 +265,27 @@ def _another_live_guard_process(*, exclude_pid: int | None = None) -> int | None
 
 
 def _enforce_guard_singleton_or_exit() -> None:
-    from tools.runtime_processes import logical_service_processes
-
     my_pid = os.getpid()
     lock_data = read_json(LOCK_FILE) or {}
     owner_pid = int(lock_data.get("pid", 0) or 0)
     if owner_pid > 0 and owner_pid != my_pid and _lock_belongs_to_live_guard(lock_data):
         log(f"[GUARD] Lock owned by pid={owner_pid}; exiting duplicate guard pid={my_pid}.")
         sys.exit(0)
-    logical = logical_service_processes(GUARD_SCRIPT)
-    if len(logical) <= 1:
+    others = _live_guard_process_pids(exclude_pid=my_pid)
+    if not others:
         return
-    other_pid = _another_live_guard_process(exclude_pid=my_pid)
-    if other_pid is not None and owner_pid != my_pid:
-        log(f"[GUARD] Another guard process is already running (pid={other_pid}); exiting pid={my_pid}.")
+    my_ct = _process_create_time(my_pid)
+    oldest_pid = my_pid
+    oldest_ct = float(my_ct) if my_ct is not None else time.time()
+    for pid in others:
+        other_ct = _process_create_time(pid)
+        if other_ct is None:
+            continue
+        if other_ct < oldest_ct - 0.05 or (abs(other_ct - oldest_ct) < 0.05 and pid < oldest_pid):
+            oldest_pid = pid
+            oldest_ct = float(other_ct)
+    if oldest_pid != my_pid:
+        log(f"[GUARD] Another guard is already running (pid={oldest_pid}); exiting pid={my_pid}.")
         sys.exit(0)
 
 
@@ -577,26 +611,45 @@ def _reset_attempt_runtime_fields(attempt: GuardAttempt) -> None:
     attempt.boot_timeout_seconds = _derive_boot_timeout_seconds()
 
 
+def _live_core_pid() -> int | None:
+    from tools.runtime_processes import logical_service_processes
+
+    rows = logical_service_processes(NOVA_CORE)
+    live = [item for item in rows if int(item.get("pid") or 0) > 0]
+    if not live:
+        return None
+    live.sort(key=lambda item: (float(item.get("create_time") or 0.0), int(item.get("pid") or 0)))
+    return int(live[0]["pid"])
+
+
 def spawn_core(reason: str) -> int:
+    existing = _live_core_pid()
+    if existing:
+        log(f"[GUARD] Adopting existing nova_core pid={existing} instead of spawning ({reason})")
+        return int(existing)
     if not VENV_PY.exists():
         raise FileNotFoundError(f"venv python not found: {VENV_PY}")
     if not NOVA_CORE.exists():
         raise FileNotFoundError(f"nova_core.py not found: {NOVA_CORE}")
 
-    creationflags = subprocess.CREATE_NEW_CONSOLE if os.name == "nt" else 0
-    log(f"[GUARD] Starting nova_core.py (NEW CONSOLE) because: {reason}")
-    process = subprocess.Popen(
-        [str(VENV_PY), str(NOVA_CORE), *CORE_ARGS],
-        cwd=str(ROOT),
-        creationflags=creationflags,
-    )
-    log(f"[OK] Spawned core pid={process.pid}")
-    return int(process.pid)
+    from tools.runtime_detach import spawn_unattached
+
+    log(f"[GUARD] Starting nova_core.py (unattached) because: {reason}")
+    ok, pid, detail = spawn_unattached([str(VENV_PY), str(NOVA_CORE), *CORE_ARGS], cwd=ROOT)
+    if not ok or not pid:
+        raise RuntimeError(f"core_spawn_failed:{detail}")
+    log(f"[OK] Spawned core pid={pid} ({detail})")
+    return int(pid)
 
 
 def start_new_attempt(attempt: GuardAttempt, reason: str) -> None:
-    _clear_core_runtime_artifacts()
-    pid = spawn_core(reason)
+    existing = _live_core_pid()
+    if existing:
+        pid = int(existing)
+        log(f"[GUARD] Existing nova_core pid={pid} — not clearing artifacts or spawning ({reason})")
+    else:
+        _clear_core_runtime_artifacts()
+        pid = spawn_core(reason)
     intent = RUNTIME_RESTART_PROVENANCE_SERVICE.consume_pending_intent(
         RESTART_INTENT_FILE,
         now=time.time(),
@@ -969,13 +1022,17 @@ def _maintenance_tick(attempt: GuardAttempt) -> None:
 
     RUNTIME_DIR.mkdir(parents=True, exist_ok=True)
     try:
-        with open(MAINTENANCE_LOG, "a", encoding="utf-8") as fh:
-            _MAINTENANCE_PROC = subprocess.Popen(
-                [str(VENV_PY), str(MAINTENANCE_SCRIPT), "--once"],
-                cwd=str(ROOT),
-                stdout=fh,
-                stderr=subprocess.STDOUT,
-            )
+        flags = 0
+        if os.name == "nt":
+            flags = subprocess.CREATE_NEW_PROCESS_GROUP | getattr(subprocess, "CREATE_NO_WINDOW", 0)
+        fh = open(MAINTENANCE_LOG, "a", encoding="utf-8")
+        _MAINTENANCE_PROC = subprocess.Popen(
+            [str(VENV_PY), str(MAINTENANCE_SCRIPT), "--once"],
+            cwd=str(ROOT),
+            stdout=fh,
+            stderr=subprocess.STDOUT,
+            creationflags=flags,
+        )
         _LAST_MAINTENANCE_LAUNCH = now
         _MAINTENANCE_LAUNCHED_AT = now
         log(f"[GUARD] Maintenance cycle launched pid={_MAINTENANCE_PROC.pid}")
@@ -986,6 +1043,19 @@ def _maintenance_tick(attempt: GuardAttempt) -> None:
 
 
 def main():
+    from tools.runtime_singleton import acquire_role_singleton, release_role_singleton
+
+    ok, detail = acquire_role_singleton("guard")
+    if not ok:
+        log(f"[GUARD] Another guard already holds the runtime singleton ({detail}); exiting.")
+        sys.exit(0)
+    try:
+        _guard_main_supervised()
+    finally:
+        release_role_singleton("guard")
+
+
+def _guard_main_supervised() -> None:
     acquire_lock_or_exit()
 
     log("===================================================")
@@ -998,20 +1068,30 @@ def main():
 
     attempt = build_initial_attempt()
 
-    while True:
-        if should_stop():
-            log("[GUARD] Stop file detected. Exiting guard.")
-            if attempt.state in {STATE_BOOTING, STATE_RUNNING, STATE_FAILED}:
-                _resolve_attempt(attempt)
-            break
-        _enforce_guard_singleton_or_exit()
-        supervisor_tick(attempt)
-        _maintenance_tick(attempt)
-        time.sleep(POLL_SECONDS)
-
-    remove_file(GUARD_PID_FILE)
-    remove_file(LOCK_FILE)
-    log("[GUARD] Guard stopped.")
+    try:
+        while True:
+            if should_stop():
+                log("[GUARD] Stop file detected. Exiting guard.")
+                if attempt.state in {STATE_BOOTING, STATE_RUNNING, STATE_FAILED}:
+                    _resolve_attempt(attempt)
+                break
+            _enforce_guard_singleton_or_exit()
+            supervisor_tick(attempt)
+            _maintenance_tick(attempt)
+            time.sleep(POLL_SECONDS)
+    except KeyboardInterrupt:
+        log("[GUARD] KeyboardInterrupt — a child or console signal hit the guard process.")
+        raise
+    except SystemExit as exc:
+        log(f"[GUARD] SystemExit {exc.code!r} — lock files left in place.")
+        raise
+    except Exception as exc:
+        log(f"[GUARD] Unhandled exception: {type(exc).__name__}: {exc}")
+        raise
+    else:
+        remove_file(GUARD_PID_FILE)
+        remove_file(LOCK_FILE)
+        log("[GUARD] Guard stopped.")
 
 
 if __name__ == "__main__":

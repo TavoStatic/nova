@@ -23,6 +23,7 @@ class NovaHttpGetRoutesService:
         render_control_login_html_fn=None,
         render_control_html_fn=None,
         health_payload_fn=None,
+        leah_pulse_payload_fn=None,
         ollama_api_up_fn=None,
         chat_model_fn=None,
         memory_enabled_fn=None,
@@ -74,6 +75,9 @@ class NovaHttpGetRoutesService:
             return {"kind": "text", "code": 200, "body": render_control_html_fn()}
         if path == "/api/health":
             return {"kind": "json", "code": 200, "body": health_payload_fn()}
+        if path == "/api/leah/pulse":
+            pulse_fn = leah_pulse_payload_fn or health_payload_fn
+            return {"kind": "json", "code": 200, "body": pulse_fn()}
         return None
 
     @staticmethod
@@ -128,6 +132,7 @@ class NovaHttpGetRoutesService:
             render_control_login_html_fn=runtime_fn(runtime_scope, "_render_control_login_html"),
             render_control_html_fn=runtime_fn(runtime_scope, "_render_control_html"),
             health_payload_fn=runtime_fn(runtime_scope, "_health_payload"),
+            leah_pulse_payload_fn=runtime_scope.get("_leah_nova_pulse_payload"),
         )
 
     @staticmethod

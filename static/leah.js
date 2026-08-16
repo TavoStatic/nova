@@ -4,7 +4,7 @@
   const config = Object.assign(
     {
       healthUrl: "/api/health",
-      controlStatusUrl: "/api/control/status",
+      controlStatusUrl: "/api/leah/pulse",
       chatUrl: "/api/chat",
       chatHistoryUrl: "/api/chat/history",
       chatResumeUrl: "/api/chat/resume",
@@ -41,6 +41,7 @@
     moodMode: "calm",
     moodReason: "steady runtime",
     lastRuntimePulse: null,
+    lastOutreachId: "",
   };
 
   const moodProfiles = {
@@ -99,7 +100,7 @@
     btnListen: document.getElementById("btnListen"),
     btnVoice: document.getElementById("btnVoice"),
     btnSend: document.getElementById("btnSend"),
-    btnNewSession: document.getElementById("btnNewSession"),
+    btnNewSession: null,
     stagedList: document.getElementById("stagedList"),
     activityHeadline: document.getElementById("activityHeadline"),
     activityDetail: document.getElementById("activityDetail"),
@@ -234,6 +235,7 @@
     syncHeroInputs();
     syncSessionLabels();
     syncButtons();
+    syncSensingDock();
   }
 
   function hasImmediateLocalFocus() {
@@ -327,10 +329,27 @@
     }
   }
 
+  function syncSensingDock() {
+    const dock = document.getElementById("sensingDock");
+    if (!dock) return;
+    const hasStage = state.stagedItems.length > 0 || state.recentHandoff.length > 0;
+    const show = Boolean(state.cameraLive || state.recognitionActive || hasStage);
+    dock.hidden = !show;
+    if (dom.transcriptBox) {
+      dom.transcriptBox.hidden = !state.recognitionActive && !(dom.transcriptBox.textContent || "").trim();
+    }
+    if (dom.btnCapture) {
+      dom.btnCapture.hidden = !state.cameraLive;
+    }
+  }
+
   function setTranscript(text, live = false) {
     if (!dom.transcriptBox) return;
-    dom.transcriptBox.textContent = text || "Voice transcript will appear here when Nova is listening.";
-    dom.transcriptBox.classList.toggle("live", Boolean(live && text));
+    const value = String(text || "").trim();
+    dom.transcriptBox.textContent = value;
+    dom.transcriptBox.hidden = !value;
+    dom.transcriptBox.classList.toggle("live", Boolean(live && value));
+    syncSensingDock();
   }
 
   function pushActivity(title, meta = "") {
@@ -406,17 +425,12 @@
       setUserFacingStatus(payload, summary);
       return;
     }
-    if (!summary.searchOk) {
-      setActivityHeadline("Nova is online, but the search lane is offline right now.");
-      setUserFacingStatus(payload, summary);
-      return;
-    }
     if (summary.workTreeStatus && summary.workTreeStatus !== "idle" && summary.workTreeStatus !== "complete") {
-      setActivityHeadline(`Nova is online and the Work Tree is ${summary.workTreeStatus}.`);
+      setActivityHeadline(`Nova is here. Work tree is ${summary.workTreeStatus.replace(/_/g, " ")}.`);
       setUserFacingStatus(payload, summary);
       return;
     }
-    setActivityHeadline("Nova is online, healthy, and waiting for the next thing that matters.");
+    setActivityHeadline("Nova is here.");
     setUserFacingStatus(payload, summary);
   }
 
@@ -559,10 +573,7 @@
     if (!dom.stagedList) return;
     dom.stagedList.innerHTML = "";
     if (!state.stagedItems.length && !state.recentHandoff.length) {
-      const empty = document.createElement("li");
-      empty.className = "empty-state";
-      empty.textContent = "Nothing staged yet. Upload a file or capture something before the next turn.";
-      dom.stagedList.appendChild(empty);
+      syncSensingDock();
       syncPresence();
       return;
     }
@@ -607,6 +618,7 @@
       entry.appendChild(meta);
       dom.stagedList.appendChild(entry);
     });
+    syncSensingDock();
     syncPresence();
   }
 
@@ -697,14 +709,14 @@
       const payload = await response.json();
       state.chatLoginEnabled = Boolean(payload.chat_login_enabled);
       if (payload.ollama_api_up) {
-        setChip(dom.presenceHealth, `Healthy | ${payload.chat_model || "model ready"}`, "ok");
-        setChip(dom.headerPresenceHealth, `Healthy | ${payload.chat_model || "model ready"}`, "ok");
+        setChip(dom.presenceHealth, "Ready", "ok");
+        setChip(dom.headerPresenceHealth, "Ready", "ok");
         if (!state.thinking && !state.uploading && !state.listenMode && !state.recognitionActive && !state.cameraLive && !state.stagedItems.length && !state.recentHandoff.length) {
           setMood("calm", "steady runtime");
         }
       } else {
-        setChip(dom.presenceHealth, "Model unavailable", "danger");
-        setChip(dom.headerPresenceHealth, "Model unavailable", "danger");
+        setChip(dom.presenceHealth, "Offline", "danger");
+        setChip(dom.headerPresenceHealth, "Offline", "danger");
         setMood("strain", "model unavailable");
       }
     } catch (_) {
@@ -714,12 +726,27 @@
     }
   }
 
+  function applyNovaOutreach(payload) {
+    const outreach = payload && payload.nova_outreach;
+    if (!outreach) return;
+    const kind = String(outreach.kind || "");
+    const text = String(outreach.text || "").trim();
+    if (kind !== "attention" || !text) return;
+    const oid = String(outreach.id || "");
+    if (oid && oid === state.lastOutreachId) return;
+    state.lastOutreachId = oid;
+    addMessage("assistant", text);
+    setActivityHeadline(text);
+    setMood("focus", "runtime pressure");
+  }
+
   async function refreshRuntimePulse() {
     if (!config.controlStatusUrl) return;
     try {
       const response = await fetch(config.controlStatusUrl);
       const payload = await response.json();
       updateRuntimePulse(payload || {});
+      applyNovaOutreach(payload || {});
     } catch (_) {
       setPulseField(dom.pulseRuntime, "Unable to reach runtime pulse.");
       setPulseField(dom.pulseQueue, "Queue state unavailable.");
@@ -1168,13 +1195,7 @@
       if (dom.fileInput) dom.fileInput.value = "";
     });
 
-    dom.dropZone?.addEventListener("click", () => dom.fileInput?.click());
-    dom.dropZone?.addEventListener("keydown", (event) => {
-      if (event.key === "Enter" || event.key === " ") {
-        event.preventDefault();
-        dom.fileInput?.click();
-      }
-    });
+    // File button opens the picker. Drop-zone is drag-only so typing is not stolen.
     dom.dropZone?.addEventListener("dragover", (event) => {
       event.preventDefault();
       dom.dropZone?.classList.add("dragging");
@@ -1243,13 +1264,20 @@
     syncPresence();
     await loadHistory();
     await resumePendingTurn();
-    if (!state.historyLoaded) {
-      addMessage("system", "LEAH is live. Upload, speak, capture, or start typing when you are ready.");
-      setActivityHeadline("Nova is here. Bring it your next file, thought, or signal.");
+    try {
+      const response = await fetch(config.controlStatusUrl);
+      const payload = await response.json();
+      updateRuntimePulse(payload || {});
+      applyNovaOutreach(payload || {});
+    } catch (_) {
+      if (!state.historyLoaded) {
+        setActivityHeadline("Nova is here.");
+      }
     }
     void checkHealth();
     state.healthTimer = window.setInterval(() => {
       void checkHealth();
+      void refreshRuntimePulse();
     }, 25000);
   }
 

@@ -167,6 +167,55 @@ class TestControlBackpacksService(unittest.TestCase):
             data = json.loads((runtime / "edfi" / "settings.json").read_text(encoding="utf-8"))
             self.assertEqual(data.get("client_secret"), "keep-me")
 
+    def test_uninstall_removes_runtime_and_does_not_stay_enabled(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime = Path(tmp)
+            svc = ControlBackpacksService(
+                backpacks_root=BASE_DIR / "backpacks",
+                runtime_root=runtime,
+                nova_root=BASE_DIR,
+            )
+            ok, msg, _, _ = svc.install(
+                {
+                    "backpack_id": "edfi",
+                    "settings": {
+                        "connection_id": "panel-test",
+                        "base_url": "https://example.invalid",
+                        "client_id": "id",
+                        "client_secret": "secret",
+                        "scope_mode": "single_lea",
+                        "district_lea_id": "31901",
+                        "credential_access_tier": "read",
+                    },
+                    "skip_profile": True,
+                },
+                skip_profile=True,
+            )
+            self.assertTrue(ok, msg)
+            self.assertTrue(svc._installed("edfi"))
+            self.assertTrue(svc.is_enabled("edfi"))
+            fusion = runtime / "backpacks" / "capability_scan.json"
+            fusion.parent.mkdir(parents=True, exist_ok=True)
+            fusion.write_text('{"ok": false, "backpack_id": "edfi"}', encoding="utf-8")
+            worker = runtime / "pipelines" / "edfi"
+            worker.mkdir(parents=True, exist_ok=True)
+            (worker / "worker.lease.json").write_text("{}", encoding="utf-8")
+            (worker / "worker.heartbeat").write_text("alive", encoding="utf-8")
+
+            ok2, msg2, extra, _ = svc.uninstall({"backpack_id": "edfi", "nova_user": "operator"})
+            self.assertTrue(ok2, msg2)
+            self.assertEqual(msg2, "backpack_uninstall_ok")
+            self.assertFalse((runtime / "edfi" / "settings.json").is_file())
+            self.assertFalse(fusion.is_file())
+            self.assertFalse(worker.exists())
+            self.assertFalse(svc._installed("edfi"))
+            self.assertFalse(svc.is_enabled("edfi"))
+            mark = runtime / "backpacks" / "uninstalled" / "edfi.json"
+            self.assertTrue(mark.is_file())
+            self.assertIn("uninstalled_at", extra)
+            self.assertEqual((extra.get("touch_points") or {}).get("runtime_dir"), "edfi")
+            self.assertIn("edfi_capability_profile", (extra.get("touch_points") or {}).get("signal_sources") or ())
+
 
 if __name__ == "__main__":
     unittest.main()

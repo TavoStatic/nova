@@ -10,10 +10,7 @@ class TestNovaHttpProfile(unittest.TestCase):
         nova_http.SESSION_STATE_MANAGER.clear()
 
     def test_generate_chat_reply_routes_semantic_web_fetch(self):
-        with mock.patch(
-            "services.nova_reply_sequence.load_leah_fast_chat_from_core",
-            return_value=False,
-        ), mock.patch.object(
+        with mock.patch.object(
             nova_http.nova_core,
             "_llm_classify_routing_intent",
             return_value={

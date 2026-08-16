@@ -68,6 +68,31 @@ def _operator_notice_is_internal_wait(event: dict[str, Any]) -> bool:
     )
 
 
+def _latest_notice_resolution(event: dict[str, Any]) -> str:
+    for row in reversed(_safe_list(event.get("responses"))):
+        if not isinstance(row, dict):
+            continue
+        resolution = _safe_text(row.get("resolution"), 80).lower()
+        if resolution:
+            return resolution
+    return ""
+
+
+def _operator_closed_dedupe_keys(events: list[dict[str, Any]]) -> set[str]:
+    closed: set[str] = set()
+    for event in _safe_list(events):
+        if not isinstance(event, dict):
+            continue
+        dedupe = _safe_text(event.get("dedupe_key"), 220)
+        if not dedupe:
+            continue
+        if _safe_status(event.get("status")) not in CLOSED_NOTICE_STATUSES:
+            continue
+        if _latest_notice_resolution(event) in {"task_resolved", "dismissed"}:
+            closed.add(dedupe)
+    return closed
+
+
 def _operator_actionable_open_events(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
     actionable: list[dict[str, Any]] = []
     for event in _safe_list(events):
@@ -423,6 +448,13 @@ class OperatorOutboxService:
         now_value = float((now_fn or time.time)())
         dedupe = _safe_text(dedupe_key, 220)
         existing = self._load_events(path)
+        if dedupe and dedupe in _operator_closed_dedupe_keys(existing):
+            return {
+                "ok": True,
+                "deduped": True,
+                "suppressed": True,
+                "reason": "already_operator_resolved",
+            }
         if dedupe:
             for index in range(len(existing) - 1, -1, -1):
                 row = existing[index]
@@ -553,7 +585,11 @@ class OperatorOutboxService:
         task_completed = False
         if resolution in {"continue_work", "task_resolved"}:
             try:
-                work_tree_module.mark_task_complete(task_id)
+                complete_fn = getattr(work_tree_module, "complete_task_with_recurring_finding", None)
+                if resolution == "task_resolved" and callable(complete_fn):
+                    complete_fn(task_id, completion_action="operator_do_not_retry", ok=True)
+                else:
+                    work_tree_module.mark_task_complete(task_id)
                 task_completed = True
             except Exception as exc:
                 return {
@@ -571,6 +607,59 @@ class OperatorOutboxService:
             "task_completed": task_completed,
             "target": target,
         }
+
+    def _clear_operator_outbox_holds(self, work_tree_module: Any = None) -> dict[str, Any]:
+        if work_tree_module is None:
+            try:
+                import work_tree as work_tree_module
+            except Exception:
+                return {"ok": False, "cleared_count": 0, "reason": "work_tree_unavailable"}
+        from services.work_tree_operator_hold import OPERATOR_HOLD_TASK_TITLES
+        from work_tree_contracts import BranchStatus
+
+        reload_fn = getattr(work_tree_module, "reload_persisted_state", None)
+        if callable(reload_fn):
+            reload_fn()
+        cleared = 0
+        resolved_branches = 0
+        for tree in list(getattr(work_tree_module, "list_trees", lambda: [])() or []):
+            list_branches = getattr(work_tree_module, "list_tree_branches", None)
+            if not callable(list_branches):
+                continue
+            for branch in list(list_branches(tree.tree_id) or []):
+                source_type = str(getattr(branch, "source_type", "") or "").strip().lower()
+                if source_type != "operator_control":
+                    continue
+                for task in list(work_tree_module.list_branch_tasks(branch.branch_id) or []):
+                    status = str(
+                        getattr(getattr(task, "status", None), "value", getattr(task, "status", "")) or ""
+                    ).strip().lower()
+                    if status in {"complete", "dropped"}:
+                        continue
+                    title = str(getattr(task, "title", "") or "").strip()
+                    if title not in OPERATOR_HOLD_TASK_TITLES and "Wait for operator response" not in title:
+                        continue
+                    work_tree_module.mark_task_complete(task.task_id)
+                    cleared += 1
+                open_left = [
+                    task
+                    for task in list(work_tree_module.list_branch_tasks(branch.branch_id) or [])
+                    if str(
+                        getattr(getattr(task, "status", None), "value", getattr(task, "status", "")) or ""
+                    ).strip().lower()
+                    not in {"complete", "dropped"}
+                ]
+                if open_left:
+                    continue
+                branch.status = BranchStatus.COMPLETE
+                branch.resolution_state = "resolved"
+                branch.priority = 0
+                branch.actionability = "safe_now"
+                touch = getattr(work_tree_module, "touch_branch", None)
+                if callable(touch):
+                    touch(branch.branch_id)
+                resolved_branches += 1
+        return {"ok": True, "cleared_count": cleared, "resolved_branch_count": resolved_branches}
 
     def set_notice_status(
         self,
@@ -624,6 +713,7 @@ class OperatorOutboxService:
 
         now_value = float((now_fn or time.time)())
         staled = 0
+        operator_closed_keys = _operator_closed_dedupe_keys(rows)
         latest_active_index_by_key: dict[str, int] = {}
         for index, event in enumerate(rows):
             if _safe_status(event.get("status")) in CLOSED_NOTICE_STATUSES:
@@ -641,6 +731,13 @@ class OperatorOutboxService:
                 continue
             dedupe = _safe_text(event.get("dedupe_key"), 220)
             if not dedupe.startswith("work_tree|"):
+                continue
+            if dedupe in operator_closed_keys:
+                event["status"] = "stale"
+                event["status_note"] = "operator_already_resolved"
+                event["updated_ts_epoch"] = now_value
+                event["updated_ts"] = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(now_value))
+                staled += 1
                 continue
             if dedupe in active_keys:
                 if latest_active_index_by_key.get(dedupe) == index:
@@ -975,12 +1072,19 @@ class OperatorOutboxService:
                 event["status"] = "answered"
             rows[index] = event
             self._write_events(path, rows)
-            return {
+            hold_result = {}
+            if _safe_status(event.get("status")) in CLOSED_NOTICE_STATUSES:
+                if not _operator_actionable_open_events(rows):
+                    hold_result = self._clear_operator_outbox_holds(work_tree_module)
+            result = {
                 "ok": bool(work_tree_result.get("ok", True)),
                 "event": event,
                 "response": response,
                 "work_tree": work_tree_result,
             }
+            if hold_result:
+                result["operator_hold"] = hold_result
+            return result
 
         return {"ok": False, "reason": "event_not_found"}
 
@@ -1220,7 +1324,11 @@ class OperatorOutboxService:
                     for tool, state in tool_state.items()
                     if _safe_text(state, 80).lower() == "failed" and _safe_text(tool, 120)
                 ]
+                task_meta = _safe_dict(current_task.get("meta"))
                 if failed_tools and has_live_task and not branch_closed:
+                    task_kind = _safe_text(task_meta.get("kind"), 80).lower()
+                    if task_kind == "http_surface_extract" and "core_thinning" in failed_tools:
+                        continue
                     failed_label = ", ".join(failed_tools[:4])
                     add(
                         {

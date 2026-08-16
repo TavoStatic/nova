@@ -28,21 +28,20 @@ class TestLeahFrontdoorService(unittest.TestCase):
         )
         self.assertIsNone(reply)
 
-    def test_text_attachment_still_returns_direct_preview_when_available(self):
-        with unittest.mock.patch.object(self.service, "_text_preview", return_value="hello world"):
-            reply = self.service.maybe_answer_attachment_turn(
-                "can you read it?",
-                [
-                    {
-                        "name": "note.txt",
-                        "original_name": "note.txt",
-                        "path": r"C:\nova\runtime\leah_uploads\note.txt",
-                        "mime": "text/plain",
-                        "source": "upload",
-                    }
-                ],
-            )
-        self.assertIn("hello world", str(reply or ""))
+    def test_text_attachment_stays_on_nova_spine(self):
+        reply = self.service.maybe_answer_attachment_turn(
+            "can you read it?",
+            [
+                {
+                    "name": "note.txt",
+                    "original_name": "note.txt",
+                    "path": r"C:\nova\runtime\leah_uploads\note.txt",
+                    "mime": "text/plain",
+                    "source": "upload",
+                }
+            ],
+        )
+        self.assertIsNone(reply)
 
 
 if __name__ == "__main__":

@@ -9,8 +9,10 @@ from services.nova_inventory_labels import shared_inventory_label
 from services.tool_identity import (
     FIND,
     INSTALLER_VALIDATION_RUN,
+    LS,
     MEMORY_BOOTSTRAP_JUDGMENT,
     PHASE2_AUDIT,
+    OPERATOR_RESPONSE,
     PULSE,
     READ,
     RELEASE_PROMOTION_JUDGMENT,
@@ -263,6 +265,22 @@ WIRING_SURFACES: tuple[WiringSurface, ...] = (
             "services/backpack_host/query.py",
             "services/control_backpacks.py",
             "tools/edfi_tool.py",
+        ),
+    ),
+    WiringSurface(
+        "backpack_host",
+        "Backpack host install contract — discovery, settings, uninstall sanitizer, and residue scan",
+        (
+            "backpack_fusion",
+            "backpack_fusion_ok",
+        ),
+        ("backpack_host",),
+        ("read", "find"),
+        ("active_work_tree_run_next",),
+        (
+            "services/backpack_host/sanitize.py",
+            "services/backpack_host/install_state.py",
+            "services/control_backpacks.py",
         ),
     ),
     WiringSurface(
@@ -634,6 +652,24 @@ REQUIRED_CLOSURE_PATHS = frozenset(("work_tree_task_completion", "signal_branch_
 REQUIRED_OPERATOR_OUTBOX_PATHS = frozenset(("operator_outbox_notice", "work_tree_operator_notice"))
 REQUIRED_OWNED_ROOT_ROUTES = frozenset(("self_repair_closure_inventory", "source_root_judgment_sequence"))
 
+_LITERAL_NAME_TO_TOOL = {
+    "LS": LS,
+    "READ": READ,
+    "FIND": FIND,
+    "PULSE": PULSE,
+    "PHASE2_AUDIT": PHASE2_AUDIT,
+    "OPERATOR_RESPONSE": OPERATOR_RESPONSE,
+    "SOURCE_ROOT_JUDGMENT": SOURCE_ROOT_JUDGMENT,
+    "GENERATED_QUEUE_RUN": "generated_queue_run",
+    "MEMORY_BOOTSTRAP_JUDGMENT": MEMORY_BOOTSTRAP_JUDGMENT,
+    "SUBCONSCIOUS_REVIEW_JUDGMENT": SUBCONSCIOUS_REVIEW_JUDGMENT,
+    "INSTALLER_VALIDATION_RUN": INSTALLER_VALIDATION_RUN,
+    "RELEASE_PROMOTION_JUDGMENT": RELEASE_PROMOTION_JUDGMENT,
+    "RELEASE_VALIDATION_RUN": RELEASE_VALIDATION_RUN,
+    "RELEASE_RECORD_VALIDATION_OUTCOME": RELEASE_RECORD_VALIDATION_OUTCOME,
+    "RELEASE_REBUILD_VERIFY": RELEASE_REBUILD_VERIFY,
+}
+
 
 def _clean_set(values: Iterable[str] | None) -> set[str]:
     return {str(item or "").strip() for item in list(values or []) if str(item or "").strip()}
@@ -684,7 +720,30 @@ def _literal_string_sequence(source: str, constant_names: Iterable[str]) -> set[
         for item in value_node.elts:
             if isinstance(item, ast.Constant) and isinstance(item.value, str) and item.value.strip():
                 values.add(item.value.strip())
+            elif isinstance(item, ast.Name):
+                resolved = _LITERAL_NAME_TO_TOOL.get(item.id)
+                if resolved:
+                    values.add(str(resolved).strip())
     return values
+
+
+def _source_mentions(source: str, token: str) -> bool:
+    if not source or not token:
+        return False
+    variants = {
+        token,
+        token.lower(),
+        token.upper(),
+        token.replace("_", ""),
+        token.replace("_", "").lower(),
+        token.replace("_", "").upper(),
+    }
+    for key, value in _LITERAL_NAME_TO_TOOL.items():
+        if str(value).strip() == str(token).strip():
+            variants.add(key)
+            variants.add(key.lower())
+            variants.add(key.upper())
+    return any(variant in source for variant in variants)
 
 
 def _literal_dict_string_values(source: str, key_name: str) -> set[str]:
@@ -739,13 +798,13 @@ def build_source_wiring_probe_payload(*, root: str | Path | None = None) -> dict
         tool
         for surface in WIRING_SURFACES
         for tool in surface.planned_tools
-        if tool in tool_dispatch_text or tool in work_tree_text
+        if _source_mentions(tool_dispatch_text, tool) or _source_mentions(work_tree_text, tool)
     }
     advisory_actions = {
         action
         for surface in WIRING_SURFACES
         for action in surface.advisory_actions
-        if action in dispatcher_text
+        if _source_mentions(dispatcher_text, action)
     }
     executable_tools = _literal_string_sequence(autonomy_text, EXECUTION_TOOL_CONSTANTS)
     executable_actions = {
@@ -771,15 +830,15 @@ def build_source_wiring_probe_payload(*, root: str | Path | None = None) -> dict
         judgment_paths.add("work_tree_task_completion")
     if "invalid_tool_result" in work_tree_text or "_is_invalid_tool_result" in work_tree_text:
         judgment_paths.add("tool_result_validation")
-    if RELEASE_PROMOTION_JUDGMENT in tool_dispatch_text and RELEASE_PROMOTION_JUDGMENT in work_tree_text:
+    if _source_mentions(tool_dispatch_text, RELEASE_PROMOTION_JUDGMENT) and _source_mentions(work_tree_text, RELEASE_PROMOTION_JUDGMENT):
         judgment_paths.add(RELEASE_PROMOTION_JUDGMENT)
-    if MEMORY_BOOTSTRAP_JUDGMENT in tool_dispatch_text and MEMORY_BOOTSTRAP_JUDGMENT in work_tree_text:
+    if _source_mentions(tool_dispatch_text, MEMORY_BOOTSTRAP_JUDGMENT) and _source_mentions(work_tree_text, MEMORY_BOOTSTRAP_JUDGMENT):
         judgment_paths.add(MEMORY_BOOTSTRAP_JUDGMENT)
-    if SUBCONSCIOUS_REVIEW_JUDGMENT in tool_dispatch_text and SUBCONSCIOUS_REVIEW_JUDGMENT in work_tree_text:
+    if _source_mentions(tool_dispatch_text, SUBCONSCIOUS_REVIEW_JUDGMENT) and _source_mentions(work_tree_text, SUBCONSCIOUS_REVIEW_JUDGMENT):
         judgment_paths.add(SUBCONSCIOUS_REVIEW_JUDGMENT)
     if (
-        SOURCE_ROOT_JUDGMENT in tool_dispatch_text
-        and SOURCE_ROOT_JUDGMENT in work_tree_text
+        _source_mentions(tool_dispatch_text, SOURCE_ROOT_JUDGMENT)
+        and _source_mentions(work_tree_text, SOURCE_ROOT_JUDGMENT)
         and "SOURCE_ROOT_JUDGMENT_TOOL" in signal_text
     ):
         judgment_paths.add(SOURCE_ROOT_JUDGMENT)

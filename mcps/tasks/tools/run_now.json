@@ -1,0 +1,16 @@
+{
+  "name": "run_now",
+  "description": "Test-run an automation immediately, once, without changing its schedule or event triggers. Use this when the user asks to test run, try, run now, run immediately, or fire an automation or scheduled task once right now. Requires `task_id` from `automation_create` / `automation_list`. The run is queued asynchronously (schedules are not modified); poll `automation_get_results` for the output once it completes.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "task_id": {
+        "type": "string",
+        "description": "The ID of the automation to test-run now (from automation_list)"
+      }
+    },
+    "required": [
+      "task_id"
+    ]
+  }
+}

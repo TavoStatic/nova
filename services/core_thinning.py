@@ -18,16 +18,13 @@ from services.recurring_finding_lifecycle import (
     DECISION_REOPEN,
     DECISION_SATISFIED,
     DECISION_SKIP,
-    KEY_COMPLETION_ACTION,
     KEY_FINDING,
     KEY_SATISFACTION_FINGERPRINT,
-    PRODUCTIVE_CLOSURE_ACTIONS,
     REOPEN_RECURRING_PRESSURE,
     classify_task_meta,
     fingerprint_from_parts,
     finding_key_from_meta,
     initial_task_meta,
-    read_task_state,
     reopen_task_meta,
     stamp_satisfaction,
     summarize_feed_pressure,
@@ -97,14 +94,24 @@ def _branch_priority(value: Any) -> int:
     return {"high": 90, "medium": 70, "low": 40, "info": 20}.get(str(value or "").strip().lower(), 50)
 
 
+HTTP_ORDER_KINDS = frozenset({"http_surface_candidate", "http_surface_extract"})
+
+
+def _normalized_target_file(target: dict[str, object] | None) -> str:
+    file_name = str((target or {}).get("file") or "").replace("\\", "/").strip()
+    return Path(file_name).name.lower()
+
+
 def _target_semantic_key(kind: Any, target: dict[str, object] | None) -> str:
     data = dict(target or {})
-    file_name = str(data.get("file") or "").replace("\\", "/").lower()
+    kind_text = str(kind or "").strip().lower()
+    file_name = _normalized_target_file(data)
+    if kind_text in HTTP_ORDER_KINDS:
+        theme = str(data.get("theme") or "").strip().lower()
+        return "|".join([kind_text, file_name, theme])
     name = str(data.get("name") or data.get("function") or "").strip().lower()
     wrapped = str(data.get("wrapped_call") or "").strip().lower()
-    theme = str(data.get("theme") or "").strip().lower()
-    cluster = str(data.get("cluster") or "").strip().lower()
-    return "|".join([str(kind or "").strip().lower(), file_name, name, wrapped, theme, cluster])
+    return "|".join([kind_text, file_name, name, wrapped])
 
 
 def _core_thinning_order_task_fields(
@@ -126,18 +133,18 @@ def _core_thinning_order_task_fields(
 def _order_satisfaction_key(order: dict[str, object] | None) -> str:
     data = dict(order or {})
     target = dict(data.get("target") or {}) if isinstance(data.get("target"), dict) else {}
-    return fingerprint_from_parts(
-        [
-            str(data.get("kind") or "").strip().lower(),
-            _target_semantic_key(data.get("kind"), target),
-            str(target.get("wrapped_call") or "").strip().lower(),
-            str(target.get("start_line") or ""),
-            str(target.get("end_line") or ""),
-            str(target.get("line_count") or ""),
-            str(target.get("function_count") or ""),
-            str(data.get("reason") or "").strip().lower()[:120],
-        ]
-    )
+    kind_text = str(data.get("kind") or "").strip().lower()
+    parts = [kind_text, _target_semantic_key(kind_text, target)]
+    if kind_text not in HTTP_ORDER_KINDS:
+        parts.append(str(target.get("wrapped_call") or "").strip().lower())
+    return fingerprint_from_parts(parts)
+
+
+def is_http_extract_stage_block(result: dict[str, object] | None) -> bool:
+    payload = dict(result or {}) if isinstance(result, dict) else {}
+    action = str(payload.get("action") or "").strip().lower()
+    reason = str(payload.get("reason") or "").strip().lower()
+    return action == "blocked_http_extraction" or reason == "http_extraction_not_implemented"
 
 
 def _repair_core_thinning_task_meta(
@@ -157,27 +164,53 @@ def _repair_core_thinning_task_meta(
         setattr(task, "meta", payload)
         if hasattr(work_tree_module, "touch_branch"):
             work_tree_module.touch_branch(getattr(task, "branch_id"))
-    state = read_task_state(payload)
-    completion_action = str(state.get(KEY_COMPLETION_ACTION) or "").strip().lower()
-    if completion_action in PRODUCTIVE_CLOSURE_ACTIONS:
-        expected_fp = _order_satisfaction_key(order)
-        if str(state.get(KEY_SATISFACTION_FINGERPRINT) or "") != expected_fp:
-            payload = stamp_satisfaction(
-                payload,
-                satisfaction_fingerprint=expected_fp,
-                completion_action=completion_action,
-                ok=True,
-            )
-            setattr(task, "meta", payload)
-            if hasattr(work_tree_module, "touch_branch"):
-                work_tree_module.touch_branch(getattr(task, "branch_id"))
+    # Do not restamp a historical productive action onto a new fingerprint.
+    # If the current scan still sees this order, classify/reopen must decide.
     return payload
+
+
+def _clear_failed_core_thinning_tool(work_tree_module, task: object) -> None:
+    get_branch = getattr(work_tree_module, "get_branch", None)
+    if not callable(get_branch):
+        return
+    branch = get_branch(getattr(task, "branch_id", ""))
+    if branch is None or not isinstance(getattr(branch, "tool_state", None), dict):
+        return
+    raw = branch.tool_state.get("core_thinning")
+    if str(getattr(raw, "value", raw) or "").strip().lower() != "failed":
+        return
+    try:
+        from work_tree_contracts import ToolStatus
+
+        branch.tool_state["core_thinning"] = ToolStatus.READY
+    except Exception:
+        branch.tool_state["core_thinning"] = "ready"
+    touch = getattr(work_tree_module, "touch_branch", None)
+    if callable(touch):
+        touch(getattr(branch, "branch_id", ""))
+
+
+def _close_unimplemented_http_extract(work_tree_module, task: object) -> None:
+    stamp_core_thinning_task_satisfaction(
+        task,
+        {
+            "ok": False,
+            "blocked": True,
+            "action": "blocked_http_extraction",
+            "reason": "http_extraction_not_implemented",
+        },
+    )
+    mark_complete = getattr(work_tree_module, "mark_task_complete", None)
+    if callable(mark_complete):
+        mark_complete(getattr(task, "task_id", ""))
+    _clear_failed_core_thinning_tool(work_tree_module, task)
 
 
 def stamp_core_thinning_task_satisfaction(task: object, result: dict[str, object] | None) -> None:
     """Record completion evidence on a core-thinning task before it is marked complete."""
     payload = dict(result or {})
-    if not bool(payload.get("ok")):
+    extract_block = is_http_extract_stage_block(payload)
+    if not bool(payload.get("ok")) and not extract_block:
         return
     meta = dict(getattr(task, "meta", {}) or {}) if isinstance(getattr(task, "meta", None), dict) else {}
     order = {
@@ -185,13 +218,16 @@ def stamp_core_thinning_task_satisfaction(task: object, result: dict[str, object
         "reason": str(meta.get("reason") or ""),
         "target": dict(meta.get("target") or {}) if isinstance(meta.get("target"), dict) else {},
     }
+    action = str(payload.get("action") or "").strip()
+    if extract_block and not action:
+        action = "blocked_http_extraction"
     setattr(
         task,
         "meta",
         stamp_satisfaction(
             meta,
             satisfaction_fingerprint=_order_satisfaction_key(order),
-            completion_action=str(payload.get("action") or ""),
+            completion_action=action,
             ok=True,
         ),
     )
@@ -554,6 +590,7 @@ def _analyze_core_file(
         theme = str(item.get("theme") or "http")
         substantive_lines = int(item.get("total_function_lines", 0) or 0)
         function_count = int(item.get("function_count", 0) or 0)
+        map_target = {"file": str(path), **item, "block": "http_surface_candidate"}
         orders.append(
             _order(
                 kind="http_surface_candidate",
@@ -564,7 +601,21 @@ def _analyze_core_file(
                     f"{function_count} substantive functions inside {path.name}; "
                     f"map this remaining cluster before extraction."
                 ),
-                target={"file": str(path), **item},
+                target=map_target,
+            )
+        )
+        extract_target = {"file": str(path), **item, "block": "http_surface_extract"}
+        orders.append(
+            _order(
+                kind="http_surface_extract",
+                priority="medium",
+                title=f"Extract HTTP surface: {theme}",
+                reason=(
+                    f"{theme} mapping can close after a verified witness; "
+                    f"extraction is a separate step for the remaining "
+                    f"{function_count} functions / {substantive_lines} lines in {path.name}."
+                ),
+                target=extract_target,
             )
         )
 
@@ -993,6 +1044,25 @@ def execute_core_thinning_order(payload: str | dict[str, object], *, python_exec
     except Exception as exc:
         return {"ok": False, "scope_ok": False, "verified": False, "reason": f"parse_failed:{exc}"}
 
+    payload_kind = ""
+    if isinstance(payload, dict):
+        payload_kind = str(payload.get("kind") or "").strip()
+    if block == "http_surface_extract" or payload_kind == "http_surface_extract":
+        return {
+            "ok": False,
+            "scope_ok": True,
+            "verified": False,
+            "blocked": True,
+            "action": "blocked_http_extraction",
+            "reason": "http_extraction_not_implemented",
+            "target": {
+                "file": str(path),
+                "name": name,
+                "start_line": start_line,
+                "end_line": end_line,
+            },
+        }
+
     if block == "http_surface_candidate" or name.startswith("http:"):
         lines = source.splitlines()
         if end_line > len(lines):
@@ -1159,16 +1229,34 @@ def feed_core_thinning_brief_to_work_tree(brief: dict[str, object], *, work_tree
             work_tree_module.set_tree_execution_policy(tree.tree_id, allowed_tools=list(CORE_THINNING_ALLOWED_TOOLS), require_explicit_allow=True)
 
     existing_order_ids: set[str] = set()
+    existing_identities: set[str] = set()
     resolved_count = 0
     updated_count = 0
     reopened_count = 0
     satisfied_count = 0
     satisfied_active_count = 0
+
+    def _claim_order(order_payload: dict[str, object] | None, fallback_id: str = "") -> str:
+        claimed = str((order_payload or {}).get("order_id") or "").strip() or str(fallback_id or "").strip()
+        identity = ""
+        if order_payload:
+            target = dict(order_payload.get("target") or {}) if isinstance(order_payload.get("target"), dict) else {}
+            identity = _target_semantic_key(order_payload.get("kind"), target)
+        if claimed:
+            existing_order_ids.add(claimed)
+        if identity:
+            existing_identities.add(identity)
+        return claimed
+
     for task in list(work_tree_module.list_tree_tasks(tree.tree_id) or []):
         meta = dict(getattr(task, "meta", {}) or {})
         order_id = finding_key_from_meta(meta)
         status = _status_value(getattr(task, "status", ""))
+        task_target = dict(meta.get("target") or {}) if isinstance(meta.get("target"), dict) else {}
+        identity = _target_semantic_key(meta.get("kind"), task_target)
         order = dict(order_by_id.get(order_id) or {})
+        if not order and identity:
+            order = dict(order_by_semantic_key.get(identity) or {})
         meta = _repair_core_thinning_task_meta(task, meta, order, brief=brief, work_tree_module=work_tree_module)
         current_fingerprint = _order_satisfaction_key(order) if order else ""
         decision = classify_task_meta(
@@ -1182,13 +1270,13 @@ def feed_core_thinning_brief_to_work_tree(brief: dict[str, object], *, work_tree
         if decision == DECISION_REOPEN:
             _reopen_core_thinning_task(work_tree_module, task, order, brief=brief)
             reopened_count += 1
-            existing_order_ids.add(order_id)
+            _claim_order(order, order_id)
             continue
         if decision == DECISION_SATISFIED:
             satisfied_count += 1
-            if order_id and order_id in active_order_ids:
+            claimed_id = _claim_order(order or order_by_semantic_key.get(identity) or {}, order_id)
+            if claimed_id and claimed_id in active_order_ids:
                 satisfied_active_count += 1
-                existing_order_ids.add(order_id)
             resolved_count += 1
             continue
         if decision in {DECISION_ACTIVE, DECISION_ACTIVE_UPDATE}:
@@ -1213,9 +1301,9 @@ def feed_core_thinning_brief_to_work_tree(brief: dict[str, object], *, work_tree
                 branch.priority = expected_priority
                 work_tree_module.touch_branch(task.branch_id)
                 updated_count += 1
-            existing_order_ids.add(order_id)
+            _claim_order(order, order_id)
             continue
-        semantic_key = _target_semantic_key(meta.get("kind"), meta.get("target") if isinstance(meta.get("target"), dict) else {})
+        semantic_key = identity or _target_semantic_key(meta.get("kind"), task_target)
         semantic_order = dict(order_by_semantic_key.get(semantic_key) or {}) if semantic_key else {}
         semantic_order_id = str(semantic_order.get("order_id") or "").strip()
         if semantic_order_id:
@@ -1226,7 +1314,7 @@ def feed_core_thinning_brief_to_work_tree(brief: dict[str, object], *, work_tree
             if branch is not None:
                 branch.priority = _branch_priority(semantic_order.get("priority"))
             work_tree_module.touch_branch(task.branch_id)
-            existing_order_ids.add(semantic_order_id)
+            _claim_order(semantic_order, semantic_order_id)
             updated_count += 1
             continue
         if hasattr(work_tree_module, "mark_task_dropped"):
@@ -1240,7 +1328,9 @@ def feed_core_thinning_brief_to_work_tree(brief: dict[str, object], *, work_tree
     deduped_count = 0
     for order in orders:
         order_id = str(order.get("order_id") or "").strip()
-        if not order_id or order_id in existing_order_ids:
+        target = dict(order.get("target") or {}) if isinstance(order.get("target"), dict) else {}
+        identity = _target_semantic_key(order.get("kind"), target)
+        if not order_id or order_id in existing_order_ids or (identity and identity in existing_identities):
             deduped_count += 1
             continue
         target = _normalize_core_thinning_target(order)
@@ -1257,7 +1347,29 @@ def feed_core_thinning_brief_to_work_tree(brief: dict[str, object], *, work_tree
         )
         work_tree_module.set_branch_tools(branch.branch_id, allowed_tools=[str(order.get("recommended_tool") or "patch_apply")], preferred_tool=str(order.get("recommended_tool") or "patch_apply"))
         existing_order_ids.add(order_id)
+        if identity:
+            existing_identities.add(identity)
         added_count += 1
+
+    for task in list(work_tree_module.list_tree_tasks(tree.tree_id) or []):
+        meta = dict(getattr(task, "meta", {}) or {})
+        if str(meta.get("kind") or "").strip() != "http_surface_extract":
+            continue
+        if _status_value(getattr(task, "status", "")) in {"complete", "dropped"}:
+            continue
+        _close_unimplemented_http_extract(work_tree_module, task)
+        claimed_id = _claim_order(
+            {
+                "order_id": finding_key_from_meta(meta),
+                "kind": "http_surface_extract",
+                "target": dict(meta.get("target") or {}) if isinstance(meta.get("target"), dict) else {},
+            },
+            finding_key_from_meta(meta),
+        )
+        satisfied_count += 1
+        if claimed_id and claimed_id in active_order_ids:
+            satisfied_active_count += 1
+        resolved_count += 1
 
     executable_count = 0
     for task in list(work_tree_module.list_tree_tasks(tree.tree_id) or []):

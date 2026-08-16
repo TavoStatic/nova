@@ -1225,14 +1225,14 @@ switch ($cmd.ToLower()) {
     Ensure-Logs
     $outLog = Join-Path $LOG_DIR "nova_http.out.log"
     $errLog = Join-Path $LOG_DIR "nova_http.err.log"
+    $detachPy = Join-Path $ROOT "scripts\start_webui_detached.py"
     try {
-      Start-Process `
-        -FilePath $venvPython `
-        -ArgumentList @($WEBUIPY, "--host", $bindHost, "--port", $bindPort) `
-        -WorkingDirectory $ROOT `
-        -WindowStyle Hidden `
-        -RedirectStandardOutput $outLog `
-        -RedirectStandardError $errLog | Out-Null
+      & $venvPython $detachPy "--host" $bindHost "--port" $bindPort
+      if ($LASTEXITCODE -ne 0) {
+        Write-Host "[FAIL] Unattached webui start failed."
+        Write-Host ("[INFO] Check logs: " + $errLog)
+        exit 1
+      }
     } catch {
       Write-Host ("[FAIL] Detached webui start failed: " + $_.Exception.Message)
       exit 1
@@ -1476,7 +1476,16 @@ switch ($cmd.ToLower()) {
       $useFix = $false
       if ($remainingTokens -contains "--fix") { $useFix = $true }
       if (-not (Run-DoctorPreflight $useFix)) { exit 1 }
-      Run-Py $GUARDPY
+      Ensure-Python
+      $detachGuard = Join-Path $ROOT "scripts\start_guard_detached.py"
+      & $venvPython $detachGuard
+      if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      if (Wait-NovaCoreSignal 25) {
+        Write-Host "[OK]   Guard started; core heartbeat is present."
+      } else {
+        Write-Host "[OK]   Guard start issued. Core heartbeat not seen yet."
+      }
+      break
     } else {
       Write-Host "[WARN] nova_guard.py not found at $GUARDPY"
       Write-Host "       (Future bridge: supervisor/auto-restart.)"

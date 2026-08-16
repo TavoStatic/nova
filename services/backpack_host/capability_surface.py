@@ -166,6 +166,13 @@ def scan_backpack_fusion(backpack_id: str = "edfi", *, persist: bool = True) -> 
     bid = str(backpack_id or "edfi").strip() or "edfi"
     probes: list[dict[str, Any]] = []
     started = _now()
+    installed = False
+    try:
+        from services.backpack_host.install_state import backpack_runtime_installed
+
+        installed = backpack_runtime_installed(bid)
+    except Exception:
+        installed = False
 
     # 1) Package on disk
     backpack_dir = BASE_DIR / "backpacks" / bid
@@ -178,6 +185,36 @@ def scan_backpack_fusion(backpack_id: str = "edfi", *, persist: bool = True) -> 
             severity="failure",
         )
     )
+    if not installed:
+        tool_ok = _tool_registered()
+        probes.append(
+            _probe("tool_edfi_explore_registered", tool_ok, "tools.registry DataConnectorExploreTool", severity="failure")
+        )
+        probes.append(_probe("install_state", True, "not_installed", severity="info"))
+        scan = {
+            "schema": SCAN_SCHEMA,
+            "ok": True,
+            "required_ok": True,
+            "installed": False,
+            "status": "not_installed",
+            "backpack_id": bid,
+            "scanned_at": _iso(),
+            "scanned_at_epoch": started,
+            "duration_ms": int((_now() - started) * 1000),
+            "enabled": False,
+            "probes": probes,
+            "available_capability_ids": [],
+            "teach_rules": [],
+            "nova_must_know": {"must_prefer_local": True},
+        }
+        if persist:
+            try:
+                SCAN_PATH.parent.mkdir(parents=True, exist_ok=True)
+                SCAN_PATH.write_text(json.dumps(scan, indent=2, ensure_ascii=True), encoding="utf-8")
+                scan["scan_path"] = str(SCAN_PATH)
+            except Exception as exc:
+                scan["persist_error"] = str(exc)[:200]
+        return scan
 
     # 2) Settings / install
     settings: dict[str, Any] = {}
@@ -332,6 +369,8 @@ def scan_backpack_fusion(backpack_id: str = "edfi", *, persist: bool = True) -> 
         "schema": SCAN_SCHEMA,
         "ok": fused_ok,
         "required_ok": required_ok,
+        "installed": True,
+        "status": "installed",
         "backpack_id": bid,
         "scanned_at": _iso(),
         "scanned_at_epoch": started,

@@ -1,5 +1,6 @@
 requests
 psutil
+jinja2
 faster-whisper
 sounddevice
 scipy

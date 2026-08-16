@@ -74,7 +74,7 @@ class NovaHttpFrontdoorService:
             "public_pages": tuple(public_renderers.keys()),
             "protected_pages": ("/control/login", "/control"),
             "static_assets": tuple(static_routes.keys()),
-            "public_api_get": ("/api/health",),
+            "public_api_get": ("/api/health", "/api/leah/pulse"),
             "chat_api_get": ("/api/chat/history",),
             "control_api_get": (
                 "/api/control/status",

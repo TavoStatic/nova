@@ -28,9 +28,7 @@ class _FakeAttachmentContext:
         return [], ""
 
     def maybe_answer_attachment_turn(self, message, attachments, *, recent_items=None, recent_stage=""):
-        del recent_items, recent_stage
-        if message == "can you read it?":
-            return "Yes. I can read it directly."
+        del message, attachments, recent_items, recent_stage
         return None
 
     def compose_chat_message(self, message, attachments):
@@ -121,10 +119,16 @@ class TestNovaHttpRequestBindingService(unittest.TestCase):
         self.assertEqual(payload.get("session_id"), "upload123")
         self.assertEqual(attachment_context.remembered[0][2], "staged")
 
-    def test_handle_chat_request_direct_attachment_reply_uses_attachment_context(self):
+    def test_handle_chat_request_attachments_go_through_nova_spine(self):
         invalidations = []
-        appended_turns = []
         attachment_context = _FakeAttachmentContext()
+        seen = {}
+
+        def _process(session_id, message, user_id=""):
+            seen["session_id"] = session_id
+            seen["message"] = message
+            seen["user_id"] = user_id
+            return "spine-reply"
 
         code, payload = HTTP_REQUEST_BINDING_SERVICE.handle_chat_request(
             handler=object(),
@@ -139,23 +143,17 @@ class TestNovaHttpRequestBindingService(unittest.TestCase):
             normalize_user_id_fn=lambda user: str(user or "").strip(),
             request_user_id_fn=lambda *_args, **_kwargs: "runner",
             assert_session_owner_fn=lambda *_args, **_kwargs: (True, "owner_bound"),
-            process_chat_fn=lambda *_args, **_kwargs: "should not run",
+            process_chat_fn=_process,
             invalidate_control_status_cache_fn=lambda: invalidations.append("invalidated"),
             token_hex_fn=lambda _size: "unused",
             attachment_context_service=attachment_context,
-            append_session_turn_fn=lambda session_id, role, text: appended_turns.append((session_id, role, text)),
         )
 
         self.assertEqual(code, 200)
-        self.assertEqual(payload.get("reply"), "Yes. I can read it directly.")
+        self.assertEqual(payload.get("reply"), "spine-reply")
+        self.assertEqual(seen.get("session_id"), "attach123")
+        self.assertIn("ATTACHMENTS=1", str(seen.get("message") or ""))
         self.assertEqual(invalidations, ["invalidated"])
-        self.assertEqual(
-            appended_turns,
-            [
-                ("attach123", "user", "can you read it?"),
-                ("attach123", "assistant", "Yes. I can read it directly."),
-            ],
-        )
         self.assertEqual(attachment_context.remembered[0][2], "handoff")
 
     def test_handle_chat_request_from_runtime_resolves_scope(self):

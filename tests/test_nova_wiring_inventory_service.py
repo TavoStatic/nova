@@ -139,6 +139,12 @@ class NovaWiringInventoryServiceTests(unittest.TestCase):
         self.assertIn("edfi_capability_profile", payload["signal_sources"])
         self.assertIn("edfi_capability_profile", wiring_surface_ids())
 
+    def test_backpack_host_install_contract_is_a_wiring_surface(self) -> None:
+        surface = next(item for item in WIRING_SURFACES if item.surface_id == "backpack_host")
+        self.assertEqual(surface.signal_sources, ("backpack_host",))
+        self.assertIn("services/backpack_host/sanitize.py", surface.source_files)
+        self.assertIn("backpack_host", wiring_surface_ids())
+
     def test_runtime_search_and_scheduler_roots_do_not_borrow_control_status_signal_routes(self) -> None:
         by_id = {item.surface_id: item for item in WIRING_SURFACES}
 

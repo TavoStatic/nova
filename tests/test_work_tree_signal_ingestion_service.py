@@ -1724,6 +1724,49 @@ class TestWorkTreeSignalIngestionService(unittest.TestCase):
         self.assertEqual(branch.resolution_state, "resolved")
         self.assertEqual(branch.status, work_tree.BranchStatus.COMPLETE)
 
+    def test_operator_control_resolves_when_claimed_notice_is_already_closed(self) -> None:
+        from services.operator_outbox import OPERATOR_OUTBOX_SERVICE
+
+        outbox_path = self._tmp / "operator_outbox.jsonl"
+        notice = OPERATOR_OUTBOX_SERVICE.append_notice(
+            outbox_path,
+            source="work_tree",
+            severity="attention",
+            title="Nova needs tool failure judgment: core_thinning",
+            message="Extract HTTP surface is not implemented.",
+            now_fn=lambda: 5000.0,
+            uuid_fn=lambda: "closedid",
+        )
+        event_id = str((notice.get("event") or {}).get("id") or "")
+        OPERATOR_OUTBOX_SERVICE.set_notice_status(outbox_path, event_id=event_id, status="resolved")
+        stale_open_payload = {
+            "operator_outbox": {
+                "ok": True,
+                "open_count": 1,
+                "operator_actionable_open_count": 1,
+                "latest_open_id": event_id,
+                "operator_actionable_latest_open_id": event_id,
+            },
+            "operator_outbox_open_count": 1,
+            "operator_outbox_actionable_open_count": 1,
+            "operator_outbox_latest_open_id": event_id,
+            "operator_outbox_actionable_latest_open_id": event_id,
+        }
+        self.service.sync_status_snapshot(stale_open_payload)
+        self.assertTrue(self._signal_branches())
+
+        with mock.patch("services.nova_runtime_context.OPERATOR_OUTBOX_FILE", outbox_path):
+            self.service.sync_status_snapshot(stale_open_payload)
+
+        branch = self._signal_branches()[0]
+        open_tasks = [
+            task for task in work_tree.list_branch_tasks(branch.branch_id)
+            if task.status not in {work_tree.TaskStatus.COMPLETE, work_tree.TaskStatus.DROPPED}
+        ]
+        self.assertEqual(open_tasks, [])
+        self.assertEqual(branch.resolution_state, "resolved")
+        self.assertEqual(branch.status, work_tree.BranchStatus.COMPLETE)
+
     def test_operator_control_ignores_autonomy_internal_outbox_notices(self) -> None:
         payload = {
             "operator_outbox": {
@@ -3925,6 +3968,30 @@ class TestWorkTreeSignalIngestionService(unittest.TestCase):
         self.assertEqual(branch.status, work_tree.BranchStatus.COMPLETE)
         self.assertIn("Regression failure aged stale", str(branch.notes or ""))
 
+    def test_uninstalled_edfi_backpack_resolves_missing_profile_branch(self) -> None:
+        self.service.sync_status_snapshot(dict(_MISSING_EDFI_PROFILE_STATUS))
+        branch = self._signal_branches()[0]
+        self.assertEqual(str(branch.source_type or ""), "edfi_capability_profile")
+
+        results = self.service.sync_status_snapshot(
+            {
+                "edfi_capability_profile_ok": True,
+                "edfi_capability_profile_present": False,
+                "edfi_capability_profile_status": "not_installed",
+                "edfi_capability_profile": {
+                    "ok": True,
+                    "status": "not_installed",
+                    "present": False,
+                    "installed": False,
+                    "evidence_source": "backpack_not_installed",
+                },
+            }
+        )
+        branch = work_tree.get_branch(branch.branch_id)
+        self.assertTrue(any(item.get("action") == "resolved" for item in results))
+        self.assertEqual(branch.status, work_tree.BranchStatus.COMPLETE)
+        self.assertEqual(str(branch.resolution_state or ""), "resolved")
+
 
 class TestSourceRootInventorySignalHelpers(unittest.TestCase):
     def test_policy_gates_does_not_treat_missing_allow_domain_count_as_zero(self) -> None:
@@ -4016,6 +4083,23 @@ class TestSourceRootInventorySignalHelpers(unittest.TestCase):
                     "profile_evidence_path": "runtime/edfi/profiles/district-main.json",
                     "evidence_source": "saved_capability_profile",
                     "live_api_required": False,
+                },
+            }
+        )
+        self.assertIsNone(signal)
+
+    def test_edfi_capability_profile_signal_absent_when_backpack_not_installed(self) -> None:
+        signal = _edfi_capability_profile_signal_from_status(
+            {
+                "edfi_capability_profile_ok": True,
+                "edfi_capability_profile_present": False,
+                "edfi_capability_profile_status": "not_installed",
+                "edfi_capability_profile": {
+                    "ok": True,
+                    "status": "not_installed",
+                    "present": False,
+                    "installed": False,
+                    "evidence_source": "backpack_not_installed",
                 },
             }
         )

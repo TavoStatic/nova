@@ -1,0 +1,45 @@
+{
+  "name": "list_trigger_resources",
+  "description": "List selectable GitHub resources for event-trigger dimensions (repositories, branches, authors). Use this when authoring a GitHub automation and you need the numeric repository id for dimensions.repo — backend rejects owner/name. Flow: automation_list_trigger_catalog → automation_list_trigger_resources (provider=github, resource_type=repository, optional query) → automation_create with dimensions.repo set to each resource's id (stringified). For branch/author suggestions, pass repo_ids from a prior repository listing. Resources are install-scoped (repos under the user's GitHub App installations that can receive webhooks). Linear resource kinds are not yet served.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "provider": {
+        "type": "string",
+        "description": "Trigger provider wire tag (v1: github). Must appear in automation_list_trigger_catalog for this account."
+      },
+      "resource_type": {
+        "type": "string",
+        "enum": [
+          "repository",
+          "branch",
+          "author"
+        ],
+        "description": "Resource kind to list: repository (GitHub repos — id is the value for dimensions.repo), branch, or author (branch/author require repo_ids). Linear kinds are not yet served."
+      },
+      "query": {
+        "type": "string",
+        "description": "Optional case-insensitive substring filter on display_name (e.g. 'xai' matches xai-org/xai). Page tokens are only valid for the query that produced them."
+      },
+      "page_token": {
+        "type": "string",
+        "description": "Opaque cursor from a prior response's next_page_token. Omit for the first page."
+      },
+      "force_refresh": {
+        "type": "boolean",
+        "description": "When true, bypass server-side cache and re-list from the provider. Defaults to false."
+      },
+      "repo_ids": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "Stringified GitHub repository ids from a prior repository listing. Required for resource_type branch/author (max 5); ignored for repository. Bare numbers are also accepted."
+      }
+    },
+    "required": [
+      "provider",
+      "resource_type"
+    ]
+  }
+}

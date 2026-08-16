@@ -1,6 +1,6 @@
 # Nova Living Ledger
 
-_Generated: 2026-08-05 17:27_
+_Generated: 2026-08-16 17:48_
 
 Two sources feed this document: **developer sessions** and **Nova's own scan findings**.
 Append to `docs/ledger/session_log.jsonl` (developer) or `docs/ledger/nova_findings.jsonl` (Nova),
@@ -11,6 +11,124 @@ then re-run `python scripts/generate_nova_ledger.py`.
 ## Session History
 
 Chronological record of every developer session that touched Nova.
+
+### 2026-08-16 — grok
+_Session: http-thinning-hold-root_
+
+**Modules touched:** `services/core_thinning.py`, `services/recurring_finding_lifecycle.py`, `services/work_tree_signal_ingestion.py`, `services/operator_outbox.py`, `work_tree.py`
+
+**Changes:**
+- HTTP thinning identity is kind|file|theme so closed mapping is not recreated on cluster/line drift
+- Unimplemented extract and operator do-not-retry close the extract stage instead of reopening into outbox
+- Outbox resolve stamps extract closure and clears the wait-for-operator hold when no actionable notices remain
+- Ingest verifies claimed open notice ids against the live outbox so a stale snapshot cannot recreate the hold
+
+**Meta:** 6 tests added
+
+_Note: Root of the thinning/outbox loop: finding identity drifted by cluster index and line counts; extract completion was treated as retryable; operator hold survived a resolved notice because ingest trusted a stale open-count snapshot._
+
+### 2026-08-16 — grok
+_Session: extract-outbox-republish-root_
+
+**Modules touched:** `services/operator_outbox.py`, `services/core_thinning.py`
+
+**Changes:**
+- Do not republish a tool-failure notice the operator already resolved
+- Stale a later duplicate of that same dedupe
+- Skip unimplemented HTTP extract failures as operator-judgment pressure
+- Feeder closes open extract stages as not-implemented and clears the failed tool state
+
+**Meta:** 4 tests added
+
+_Note: Live loop after the first fix: extract stayed open with core_thinning=failed, so every cycle republished tool_failure_judgment and recreated the wait hold. Applied feed+reconcile+hold resolve on the live tree; intake reads are now the open work._
+
+### 2026-08-16 — grok
+_Session: edfi-uninstall-residue_
+
+**Modules touched:** `services/backpack_host/install_state.py`, `services/control_backpacks.py`, `services/edfi/profile_evidence.py`, `services/edfi/core_readiness.py`, `services/backpack_host/capability_surface.py`, `services/backpack_host/registry.py`, `services/work_tree_signal_ingestion.py`
+
+**Changes:**
+- Uninstalled Ed-Fi is a valid quiet state
+- not a missing-profile defect
+- Fusion/core/pipeline registry no longer treat package files as an installed backpack
+- Work-tree Ed-Fi and pipeline-registry branches resolve without requiring a read of a deleted profile
+
+**Meta:** 4 tests added
+
+_Note: Residue after backpack uninstall: status still defaulted district-main, fusion scored missing settings as unhealthy, and profile close required read evidence of the deleted file._
+
+### 2026-08-16 — grok
+_Session: backpack-uninstall-sanitize_
+
+**Modules touched:** `services/backpack_host/sanitize.py`, `services/control_backpacks.py`, `services/edfi/warehouse_sync.py`
+
+**Changes:**
+- Uninstall now sanitizes a declared touch-point list
+- not just runtime/edfi
+- Fusion cache and pipeline workers are removed with the backpack
+- Scheduled warehouse sync stays quiet when the backpack is not installed
+
+**Meta:** 3 tests added
+
+_Note: Operator called the real gap: diagnosis chased the open tasks instead of asking what still believed the backpack was installed. Sanitizer is the install-contract root._
+
+### 2026-08-16 — grok
+_Session: any-backpack-uninstall-sanitize_
+
+**Modules touched:** `services/backpack_host/sanitize.py`, `services/control_backpacks.py`, `services/backpack_host/query.py`
+
+**Changes:**
+- Uninstall sanitizer now discovers runtime paths from any backpack.json and settings defaults
+- Reports uninstall clears runtime/views which is outside runtime/reports
+- Residue scan reports leftovers Nova has not declared yet
+- Queries refuse uninstalled backpacks instead of treating missing enabled.json as on
+
+**Meta:** 5 tests added
+
+_Note: Ed-Fi-only overlay is no longer the sanitizer. Any backpack gets runtime dir, pipeline workers, manifest paths, matching work-tree branches, and a leftover scan._
+
+### 2026-08-16 — grok
+_Session: ledger-decision-dedupe_
+
+**Modules touched:** `scripts/generate_nova_ledger.py`, `services/nova_wiring_inventory.py`, `services/nova_root_inventory.py`, `docs/DOC_OWNERSHIP.md`, `docs/SERVICES_INDEX.md`
+
+**Changes:**
+- Elevated backpack_uninstall_touch_list to a named architectural decision
+- Ledger scan findings now keep the latest line per finding identity
+- Wired backpack_host and classified the leftover source files
+- Regenerated SERVICES_INDEX and refreshed DOC_OWNERSHIP
+
+**Meta:** 3 tests added · docs updated: `docs/DOC_OWNERSHIP.md`, `docs/SERVICES_INDEX.md`
+
+_Note: Operator: decision belongs with root_cause_first_principle; scan findings were reprinting every cycle._
+
+### 2026-08-16 — grok
+_Session: winerror87-pid-probe_
+
+**Modules touched:** `services/pipeline_worker_supervision.py`, `tests/test_autonomy_maintenance.py`, `tests/test_pipeline_worker_supervision.py`
+
+**Changes:**
+- Confirmed regression lock uses psutil.pid_exists
+- Replaced the remaining os.kill(pid
+- 0) probe in pipeline worker supervision
+- Added tests that WinError 87 cannot come back through those paths
+
+**Meta:** 2 tests added
+
+_Note: Overnight cycle exit 1 was POSIX signal-0 on Windows. Named lock helper was already fixed; the same probe was still live on pipeline worker leases._
+
+### 2026-08-15 — grok
+_Session: leah-pause_
+
+**Modules touched:** `tests/test_leah_memory_recall_at5.py`, `capabilities_roadmap.json`, `docs/LEAH_INSTANCE_PROFILE.md`
+
+**Changes:**
+- Rewrote AT-5 as honest write-path vs inject-if-hit tests
+- Recorded operator pause on Leah build
+
+**Meta:** 11 tests added · docs updated: `docs/LEAH_INSTANCE_PROFILE.md`, `capabilities_roadmap.json`
+
+_Note: Operator paused Leah 2026-08-15. Continuity stays promoted. Memory recall not promoted. AT-5 still open on mem_recall surfacing a pinned fact. Do not start voice or emotion._
 
 ### 2026-08-05 — claude-cowork
 _Session: fix_entry_points_20260805_
@@ -138,11 +256,11 @@ _Session: edfi_backpack_and_nova_shell_
 **Modules touched:** `backpacks/edfi/`, `services/backpack_host/`, `nova_shell/`, `tools/`
 
 **Changes:**
-- data connector backpack structure built
+- Ed-Fi backpack structure built
 - Backpack Host — discovery, install, grant enforcement, lifecycle
 - Nova Shell security scaffolding, identity, store, roles, auth, admin
 - Custom roles CRUD added
-- data connector code scan completed
+- Ed-Fi code scan completed
 
 _Note: Tasks 13-25 completed_
 
@@ -232,6 +350,7 @@ Every known doc file classified by authority and last verification date.
 | `docs/DECISION_PROPOSAL_JUDGE.md` | 2026-08-04 | developer | Decision Judge architecture — DecisionProposal, JudgeReport, DecisionEpisode schemas. Current. |
 | `docs/DEPENDENCY_CONTRACT.md` | 2026-05-20 | developer | Dependency contract. |
 | `docs/DOC_OWNERSHIP.md` | 2026-07-12 | developer | Authority structure for all docs. Needs update — new docs since July 12 not registered. |
+| `docs/DOC_OWNERSHIP.md` | 2026-08-16 | grok | Updated 2026-08-16: backpack uninstall contract and sanitizer registered. Ledger is authority for the named decision backpack_uninstall_touch_list. |
 | `docs/FRESH_MACHINE_VALIDATION.md` | 2026-05-20 | developer | Fresh machine validation protocol. |
 | `docs/KIDNEY_SYSTEM.md` | 2026-07-12 | developer | Kidney thinning and memory hygiene system. |
 | `docs/NOVA_COACHING_INCOMPLETE_HANDOFF.md` | 2026-08-02 | developer | Nova coaching doc — incomplete handoff behavior. Verified against character test. |
@@ -262,6 +381,7 @@ Every known doc file classified by authority and last verification date.
 | `docs/NOVA_SERVER_SIDE.md` | 2026-06-26 | developer | Server-side architecture notes. |
 | `docs/PACKAGE_PRODUCT_ROADMAP.md` | 2026-07-12 | developer | Product roadmap. |
 | `docs/REAL_WORLD_TASKS.md` | 2026-04-28 | developer | Real world task examples. Oldest active doc — verify still relevant. |
+| `docs/SERVICES_INDEX.md` | 2026-08-16 | grok | Regenerated 2026-08-16. Includes backpack_host/sanitize.py and install_state.py. |
 | `docs/SOCK_SYSTEM.md` | 2026-08-05 | nova | Updated 2026-08-05. Hardware Detection section added covering ROCm/HIP, NPU, live VRAM, cache invalidation. |
 | `docs/SOLUTION_EXPERIENCE_BACKLOG.md` | 2026-08-02 | developer | Backlog for solution experience improvements. Active. |
 | `docs/TEST_INDEX.md` | 2026-08-05 | nova | Regenerated 2026-08-05. 245 test modules, 2344 test functions. Up from 215 modules / 2016 fns (July 12 vintage). |
@@ -416,18 +536,32 @@ nova_grok.md was created at the end of the June 27-28 2026 Grok session (Turn 41
 **Affects:** `nova_grok.md`
 **Source:** `nova_grok.md Turn 41-44` · Status: active
 
+### `backpack_uninstall_touch_list` — 2026-08-16
+_Modules: services/backpack_host/sanitize.py_
+
+If a backpack can write into a Nova surface, that surface has to be on the uninstall list. Uninstall is not delete runtime/{id}. Discover runtime paths from the backpack manifest and settings defaults, overlay the Nova surfaces the package cannot declare (work-tree sources, fusion cache, maintenance keys), resolve matching work-tree pressure, and report undeclared leftovers instead of pretending the rest of Nova is clean.
+
+**Rationale:** Nova self-corrects. An uninstall that only deletes the backpack folder leaves status, fusion, pipeline workers, warehouse sync, and work-tree signals treating the backpack as a broken install. Those surfaces keep opening the same tasks. The install contract must name every write target or the residue scan must admit the gap.
+
+**Affects:** `services/backpack_host/sanitize.py`, `services/backpack_host/install_state.py`, `services/control_backpacks.py`, `services/edfi/warehouse_sync.py`, `services/work_tree_signal_ingestion.py`
+**Source:** `operator session 2026-08-16` · Status: active
+
 ---
 
 ## Nova Scan Findings
 
-Findings written by Nova's rings, self-reflection, and execution outcomes.
+Latest ring and execution findings. Identical cycle reprints are collapsed to one line.
 
+- **2026-08-16** Ring 3 `climb_integrity` — verified: gap_count=0, queue=8 climbable=8 unclimbable=0
+- **2026-08-16** Ring 1 `map_integrity` — verified: gap_count=0, unwired_roots=0, unclassified_files=0
+- **2026-08-16** Ring 2 `contract_integrity` — drifted: gap_count=74, probe_context=live_status, wiring_gaps=39, closure_gaps=35
+- **2026-08-16** Ring 1 `nova_root_inventory` — verified: 0 source root(s) not wired in nova_root_inventory.py
+- **2026-08-16** Ring 1 `nova_root_inventory` — verified: 0 source file(s) have no SOURCE_ROOT classification
+- **2026-08-15** Ring 2 `contract_integrity` — drifted: gap_count=89, probe_context=live_status, wiring_gaps=39, closure_gaps=35, probe_gaps=15
+- **2026-08-14** Ring 2 `contract_integrity` — drifted: gap_count=17, probe_context=live_status, closure_gaps=2, probe_gaps=15
+- **2026-08-11** Ring 1 `map_integrity` — drifted: gap_count=11, unclassified_files=11
 - **2026-08-05** Ring 1 `map_integrity` — drifted: gap_count=9, unclassified_files=9, stale_docs=9
 - **2026-08-05** Ring 2 `contract_integrity` — drifted: gap_count=15, probe_context=offline, probe_gaps=15
-- **2026-08-05** Ring 3 `climb_integrity` — verified: gap_count=0, queue=0 climbable=0 unclimbable=0
-- **2026-08-05** Ring 1 `nova_root_inventory` — drifted: 9 source file(s) have no SOURCE_ROOT classification
-- **2026-08-05** Ring 1 `nova_doc_coverage` — drifted: 9 doc(s) have stale NOVA_DOC block (last_session > 30 days)
-- **2026-08-05** Ring 2 `ring2_contract_integrity` — drifted: 15 contract probe gap(s) (offline): services lack HTTP-reachable health probe
 
 ---
 
@@ -436,8 +570,9 @@ Findings written by Nova's rings, self-reflection, and execution outcomes.
 ### Ring scan gaps (latest per category)
 
 - **2026-08-05** Ring 1 `nova_doc_coverage` — 9 doc(s) have stale NOVA_DOC block (last_session > 30 days)
-- **2026-08-05** Ring 1 `nova_root_inventory` — 9 source file(s) have no SOURCE_ROOT classification
-- **2026-08-05** Ring 2 `ring2_contract_integrity` — 15 contract probe gap(s) (offline): services lack HTTP-reachable health probe
+- **2026-08-16** Ring 2 `ring2_contract_integrity` — 35 closure gap(s): work-tree tracks open but no resolution evidence
+- **2026-08-15** Ring 2 `ring2_contract_integrity` — 15 contract probe gap(s) (live_status): services lack HTTP-reachable health probe
+- **2026-08-16** Ring 2 `ring2_contract_integrity` — 39 wiring gap(s): service/script registered but not surfaced in status
 
 ### Stale authority documents
 

@@ -136,39 +136,68 @@ class TestRecurringFindingLifecycle(unittest.TestCase):
         lifecycle = read_branch_lifecycle(payload)
         self.assertEqual(lifecycle[KEY_VERSION], 2)
 
-    def test_order_satisfaction_fingerprint_requires_reason_in_meta_for_stamp_parity(self):
+    def test_order_satisfaction_fingerprint_ignores_http_line_and_reason_drift(self):
         from services.core_thinning import _order_satisfaction_key, stamp_core_thinning_task_satisfaction
 
         order = {
             "kind": "http_surface_candidate",
             "reason": (
-                "chat_sessions spans 81 lines across 12 related functions inside nova_http.py; "
-                "map this cluster before extraction."
+                "chat_sessions still has 81 non-shim lines across 12 substantive functions "
+                "inside nova_http.py; map this remaining cluster before extraction."
             ),
             "target": {
-                "file": "nova_http.py",
-                "name": "chat_sessions",
+                "file": "C:/NOVA/nova_http.py",
+                "name": "http:chat_sessions:1",
                 "theme": "chat_sessions",
-                "line_count": 81,
-                "function_count": 12,
+                "cluster": 1,
+                "start_line": 359,
+                "end_line": 441,
+                "line_count": 83,
+                "function_count": 5,
+            },
+        }
+        drifted = {
+            **order,
+            "reason": "chat_sessions still has 42 non-shim lines across 5 substantive functions inside nova_http.py.",
+            "target": {
+                **dict(order["target"]),
+                "name": "http:chat_sessions:2",
+                "cluster": 2,
+                "start_line": 545,
+                "end_line": 767,
+                "line_count": 223,
+                "function_count": 19,
             },
         }
         feed_fingerprint = _order_satisfaction_key(order)
+        self.assertEqual(feed_fingerprint, _order_satisfaction_key(drifted))
         task = type("Task", (), {})()
         task.meta = {
             "kind": order["kind"],
             "target": dict(order["target"]),
         }
         stamp_core_thinning_task_satisfaction(task, {"ok": True, "action": "witnessed_http_extraction_boundary"})
-        mismatched = str((task.meta or {}).get("recurring_finding_satisfaction_fingerprint") or "")
-        self.assertNotEqual(mismatched, feed_fingerprint)
-
-        task.meta["reason"] = order["reason"]
-        stamp_core_thinning_task_satisfaction(task, {"ok": True, "action": "witnessed_http_extraction_boundary"})
         matched = str((task.meta or {}).get("recurring_finding_satisfaction_fingerprint") or "")
         self.assertEqual(matched, feed_fingerprint)
 
-    def test_classify_task_meta_reopens_witnessed_http_mapping_under_recurring_pressure(self):
+    def test_classify_task_meta_does_not_reopen_completed_http_extract(self):
+        meta = stamp_satisfaction(
+            initial_task_meta(finding_key="order-extract", satisfaction_fingerprint="fp-extract"),
+            satisfaction_fingerprint="fp-extract",
+            completion_action="operator_do_not_retry",
+        )
+        meta["kind"] = "http_surface_extract"
+        self.assertEqual(
+            classify_task_meta(
+                meta=meta,
+                item_status="complete",
+                active_finding_keys={"order-extract"},
+                current_fingerprint="fp-extract-drifted",
+            ),
+            "satisfied",
+        )
+
+    def test_classify_task_meta_closes_witnessed_http_mapping_stage(self):
         meta = stamp_satisfaction(
             initial_task_meta(finding_key="order-http", satisfaction_fingerprint="fp-http"),
             satisfaction_fingerprint="fp-http",
@@ -181,10 +210,10 @@ class TestRecurringFindingLifecycle(unittest.TestCase):
                 active_finding_keys={"order-http"},
                 current_fingerprint="fp-http",
             ),
-            "reopen",
+            "satisfied",
         )
 
-    def test_classify_task_meta_treats_legacy_mapped_http_alias_as_non_productive(self):
+    def test_classify_task_meta_closes_legacy_mapped_http_alias_as_mapping_stage(self):
         meta = stamp_satisfaction(
             initial_task_meta(finding_key="order-http", satisfaction_fingerprint="fp-http"),
             satisfaction_fingerprint="fp-http",
@@ -196,6 +225,22 @@ class TestRecurringFindingLifecycle(unittest.TestCase):
                 item_status="complete",
                 active_finding_keys={"order-http"},
                 current_fingerprint="fp-http",
+            ),
+            "satisfied",
+        )
+
+    def test_classify_task_meta_reopens_wrapper_when_source_still_reports_it(self):
+        meta = stamp_satisfaction(
+            initial_task_meta(finding_key="order-wrap", satisfaction_fingerprint="fp-old"),
+            satisfaction_fingerprint="fp-new",
+            completion_action="removed_unused_wrapper",
+        )
+        self.assertEqual(
+            classify_task_meta(
+                meta=meta,
+                item_status="complete",
+                active_finding_keys={"order-wrap"},
+                current_fingerprint="fp-new",
             ),
             "reopen",
         )

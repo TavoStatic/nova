@@ -231,6 +231,8 @@ SOURCE_ROOTS: tuple[SourceRoot, ...] = (
         (
             "services/backpack_host/capability_surface.py",
             "services/backpack_host/query.py",
+            "services/backpack_host/sanitize.py",
+            "services/backpack_host/install_state.py",
             "services/control_backpacks.py",
             "scripts/run_backpack.py",
         ),
@@ -448,8 +450,22 @@ def _coverage_root_for_path(path: str) -> str:
         return "diagnostics_hygiene"
     if name == "this_is_nova":
         return "source_root_inventory"
-    if name == "nova-autostart.ps1":
+    if name in {"nova-autostart.ps1", "nyo-nova-autostart.ps1", "nova-nova-autostart.ps1"}:
         return "frontdoor_cli"
+    if name.startswith("tmp_") or name.startswith("_tmp") or low.startswith("scripts/_"):
+        return "diagnostics_hygiene"
+    if name in {"tmp_inspect_task.py"}:
+        return "diagnostics_hygiene"
+    if name in {"regenerate_function_index.py", "regenerate_services_index.py", "generate_nova_ledger.py", "nova_ledger_ingest.py", "log_session.py"}:
+        return "source_root_inventory"
+    if name == "probe_raw_resource.py":
+        return "backpack_host"
+    if name == "start_unattached_later.py":
+        return "runtime_core"
+    if "decision_proposal_judge" in low:
+        return "autonomy_orchestrator"
+    if "finish_areas_inventory" in low:
+        return "source_root_inventory"
     if low.startswith("updates/"):
         return "patch_pipeline"
     if "nova_server_side" in low:

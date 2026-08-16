@@ -126,12 +126,8 @@ class TestRunTestSessionIsolation(unittest.TestCase):
 
             with tempfile.TemporaryDirectory() as td:
                 base = Path(td)
-                with mock.patch(
-                    "services.nova_reply_sequence.load_leah_fast_chat_from_core",
-                    return_value=False,
-                ):
-                    cli_result = run_cli_session(session_meta["messages"], base / "cli")
-                    http_result = run_http_session(session_meta["messages"], base / "http")
+                cli_result = run_cli_session(session_meta["messages"], base / "cli")
+                http_result = run_http_session(session_meta["messages"], base / "http")
 
             comparison = compare_sessions(cli_result, http_result)
         finally:

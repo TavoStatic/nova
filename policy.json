@@ -147,10 +147,10 @@
   },
   "layers": {
     "leah": {
-      "mode": "observe",
+      "mode": "active",
       "fast_chat": true,
       "fast_chat_skip_spine": false,
-      "promoted_capabilities": []
+      "promoted_capabilities": ["leah_conversation_continuity"]
     },
     "codegen": {
       "mode": "observe",

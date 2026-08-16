@@ -1105,6 +1105,50 @@ class TestWorkTree(unittest.TestCase):
         self.assertEqual(step["task_target"]["block"], "routing_supervisor_intent")
         self.assertEqual(work_tree._TASKS[task.task_id].status, work_tree.TaskStatus.COMPLETE)
 
+    def test_execute_autonomous_step_completes_blocked_http_extract_stage(self) -> None:
+        tree = work_tree.initialize_tree("HTTP extract stage")
+        root_branch = work_tree._BRANCHES[tree.root_branch_id]
+        task = work_tree.add_task_to_branch(
+            root_branch.branch_id,
+            "Extract HTTP surface: chat_sessions",
+            meta={
+                "kind": "http_surface_extract",
+                "recurring_finding_key": "core_thinning:extract-chat-sessions",
+                "target": {
+                    "file": "nova_http.py",
+                    "function": "http:chat_sessions",
+                    "block": "http_surface_extract",
+                    "theme": "chat_sessions",
+                    "start_line": 359,
+                    "end_line": 441,
+                },
+                "scope": "single_block_only",
+            },
+        )
+        work_tree.set_tree_execution_policy(tree.tree_id, allowed_tools=["core_thinning"], require_explicit_allow=True)
+        work_tree.set_branch_tools(root_branch.branch_id, allowed_tools=["core_thinning"], preferred_tool="core_thinning")
+
+        step = work_tree.execute_autonomous_step(
+            tree.tree_id,
+            execute_planned_action_fn=lambda tool, args=None: {
+                "ok": False,
+                "scope_ok": True,
+                "verified": False,
+                "blocked": True,
+                "action": "blocked_http_extraction",
+                "reason": "http_extraction_not_implemented",
+            },
+        )
+
+        self.assertEqual(step["action"], "executed")
+        self.assertEqual(step.get("extract_stage"), "blocked_http_extraction")
+        self.assertEqual(work_tree._TASKS[task.task_id].status, work_tree.TaskStatus.COMPLETE)
+        self.assertEqual(
+            (work_tree._TASKS[task.task_id].meta or {}).get("recurring_finding_completion_action"),
+            "blocked_http_extraction",
+        )
+        self.assertNotEqual((root_branch.tool_state or {}).get("core_thinning"), work_tree.ToolStatus.FAILED)
+
     def test_sqlite_sets_schema_version(self) -> None:
         with closing(work_tree._db_connect()) as connection:
             version = int(connection.execute("PRAGMA user_version").fetchone()[0])
