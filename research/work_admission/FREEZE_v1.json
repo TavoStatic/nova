@@ -1,0 +1,94 @@
+{
+  "credential": "nova.work_admission.kernel.v1",
+  "evaluation_label": "white-box kernel evaluation, not live Nova proof",
+  "frozen_at": "2026-08-29T18:45:29-05:00",
+  "git_parent": "635e52a72564f6c9c9c95fb93242ad8826ff4545",
+  "git_parent_subject": "Close overnight cycle roots and sanitize backpack uninstall.",
+  "python": {
+    "version": "3.13.1",
+    "implementation": "CPython",
+    "full": "3.13.1 (tags/v3.13.1:0671451, Dec  3 2024, 19:06:28) [MSC v.1942 64 bit (AMD64)]"
+  },
+  "environment": {
+    "platform": "Windows-11-10.0.26200-SP0",
+    "machine": "AMD64",
+    "processor": "AMD64 Family 26 Model 36 Stepping 0, AuthenticAMD"
+  },
+  "test_command": "C:\\NOVA\\.venv\\Scripts\\python.exe -m unittest tests.test_work_admission_kernel -v",
+  "test_result": {
+    "ran": 12,
+    "failures": 0,
+    "errors": 0,
+    "status": "OK",
+    "duration_s": 0.004
+  },
+  "sha256": {
+    "research/work_admission/frozen_traces.py": "9d7691bbac586a5e0cd252e2cf5d55f5906119c6dbe6e9ad6a47c31ade1a5770",
+    "research/work_admission/kernel.py": "3a5db33255810eaf8d222f032ce362bed814539f55fa40de69b296c4d462cd76",
+    "research/work_admission/inspect_recorder.py": "1c58ce598892f81ec8601d2df64935a227444ffcace2e30a1884247c94dc7e00",
+    "tests/test_work_admission_kernel.py": "28cde3b9488e0e509769543dcd1c7ae3518715cbb6faaeb53bf3d2a6ebedd9bb"
+  },
+  "fixture_schema": {
+    "proposal": "nova.work_admission.proposal.v1",
+    "decision": "nova.work_admission.decision.v1",
+    "relevant_fingerprint_fields": [
+      "target_type",
+      "target_id",
+      "artifact_id",
+      "artifact_content_id",
+      "validation_status",
+      "validation_generated_at",
+      "source_identity"
+    ],
+    "unrelated_fingerprint_fields": [
+      "unrelated_token",
+      "operator_outbox_open_count"
+    ],
+    "proposal_families": ["P_causal", "P_cover", "Q"],
+    "traces_module": "research/work_admission/frozen_traces.py"
+  },
+  "first_table_mismatch": {
+    "when": "first unittest of tests.test_work_admission_kernel.test_frozen_experiment_table",
+    "traces_edited_after_mismatch": false,
+    "what_differed": [
+      "P_cover@T0 extra reason_code EVIDENCE_CURRENT; work_decision still rejected",
+      "P_cover@T1_unchanged work_decision actual=duplicate expected=rejected; extra DUPLICATE_TARGET and EVIDENCE_CURRENT",
+      "P_causal@T1_unchanged/T1_unrelated/T_tool_unsat extra ACTIONABLE_STEP_PRESENT, CAUSAL_ACTION_MATCH, EVIDENCE_CURRENT; work_decision still duplicate",
+      "P_causal@T2_sat extra ACTIONABLE_STEP_PRESENT, CAUSAL_ACTION_MATCH, EVIDENCE_CURRENT; work_decision still rejected TARGET_ALREADY_SATISFIED",
+      "P_cover@T2_sat extra EVIDENCE_CURRENT; work_decision still rejected",
+      "Q@T0/T1/T1_unrelated/T2_sat extra EVIDENCE_CURRENT; work_decision still no_actionable_target"
+    ],
+    "specification_vs_kernel": {
+      "spec": "Evaluate all dimensions independently, then apply work-decision precedence. Reason-code traces were pre-registered as the codes belonging to the winning path, not the full independent set.",
+      "misunderstanding": "First kernel emitted every independent flag (causal match, evidence current, duplicate) even when a higher-precedence work_decision had already been chosen, and applied history-duplicate to cover proposals.",
+      "kernel_wrong": "Yes, relative to the pre-registered traces: extra codes and cover-as-duplicate.",
+      "traces_wrong": false
+    },
+    "logic_changed": [
+      "History duplicate applies only to non-cover causal proposals with the same controlling fingerprint and unsatisfied target.",
+      "reason_codes emitted for the chosen work_decision path: target identity/reality/satisfaction/completion always; DUPLICATE_TARGET only if work_decision=duplicate; COVER only on rejected/needs_clarification cover; NO_ACTIONABLE_STEP only if no_actionable_target; ACTIONABLE/CAUSAL/EVIDENCE_CURRENT/authority/eligibility codes only if admitted."
+    ],
+    "effect_on_other_cases": {
+      "P_causal@T0": "Unchanged: still admitted with EVIDENCE_CURRENT and CAUSAL_ACTION_MATCH.",
+      "P_causal@T2_relevant_unsat": "Unchanged: still admitted (reconsiderable).",
+      "P_cover@T0": "Dropped extra EVIDENCE_CURRENT; still rejected COVER.",
+      "P_cover@T1": "No longer duplicate; remains rejected COVER as pre-registered.",
+      "Q": "Dropped extra EVIDENCE_CURRENT; still no_actionable_target across snapshots."
+    }
+  },
+  "known_limitations": [
+    "White-box: same development environment wrote traces and kernel.",
+    "Fixtures only; no live Work Tree, no unstructured mission.",
+    "Inspect recorder compares JSON; it is not a black-box or a Nova gate.",
+    "Mission-hold and operator_override were excluded from this version by authorization.",
+    "work_tree.py empty-read still classifies tool_failed; this kernel does not change that.",
+    "No mutation testing, no unseen post-freeze cases in v1.",
+    "External reproduction unproven until an independent runner uses this freeze record."
+  ],
+  "do_not": [
+    "Wire this kernel into mill, routes, health, or release gates.",
+    "Edit frozen_traces.py to match future kernel output.",
+    "Describe a green suite as live autonomous convergence.",
+    "Change these four hashed files in place; future work is a new version id."
+  ]
+}
