@@ -1,0 +1,32 @@
+{
+  "applies_to": "nova.work_admission.kernel.v1",
+  "commit": "dfa8745376dc769bc55bcdf8f0c65c13a59db00c",
+  "does_not_modify_v1_hashed_sources": true,
+  "recorded_at": "2026-08-29T18:50:00-05:00",
+  "design_question": {
+    "id": "v1-winning-path-reason-codes",
+    "question": "Does v1 preserve enough non-winning evaluated facts for an outside reviewer to reconstruct the complete decision, or does it expose only the winning reason path?",
+    "spec_said": "Dimensions should be evaluated independently.",
+    "v1_emits": "reason_codes for the chosen work_decision path only.",
+    "example": "A rejected cover may also have current evidence, but EVIDENCE_CURRENT may not appear because it lost precedence.",
+    "do_not_change_v1": true,
+    "possible_v2_shape_if_unseen_tests_require_it": {
+      "evaluated_facts": [],
+      "decision_reason_codes": [],
+      "winning_rule": ""
+    }
+  },
+  "credential_statement": "Work Admission Kernel v1 is frozen at commit dfa8745. It is a deterministic, non-mutating white-box mechanism evaluated against 12 preregistered cases. The first implementation mismatch and subsequent kernel-only correction are preserved. The kernel is not connected to Nova's live mill and has not received independent reproduction.",
+  "research_brief": {
+    "section": "Preliminary Technical Evidence",
+    "repo_status": "No two-page research brief file found under docs/ at freeze time. Do not invent one in this addendum."
+  },
+  "next_outside_v1": [
+    "Verify tests from a clean checkout of dfa8745 using the documented command.",
+    "Annotated git tag for the freeze.",
+    "Preserve complete console output.",
+    "Unseen challenge cases without modifying v1.",
+    "Mutation tests on disposable copies.",
+    "Outside reviewer reproduction and contract challenge."
+  ]
+}

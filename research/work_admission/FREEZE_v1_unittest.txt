@@ -1,0 +1,22 @@
+# Verified from clean git worktree at dfa8745
+# Command: C:\NOVA\.venv\Scripts\python.exe -m unittest tests.test_work_admission_kernel -v
+# Python: CPython 3.13.1
+# Label: white-box kernel evaluation, not live Nova proof
+
+test_frozen_experiment_table (tests.test_work_admission_kernel.TestWorkAdmissionKernelExperiment.test_frozen_experiment_table) ... ok
+test_inspect_recorder_does_not_change_decisions (tests.test_work_admission_kernel.TestWorkAdmissionKernelExperiment.test_inspect_recorder_does_not_change_decisions) ... ok
+test_kernel_does_not_import_work_tree_or_runtime (tests.test_work_admission_kernel.TestWorkAdmissionKernelExperiment.test_kernel_does_not_import_work_tree_or_runtime) ... ok
+test_kernel_does_not_mutate_inputs (tests.test_work_admission_kernel.TestWorkAdmissionKernelExperiment.test_kernel_does_not_mutate_inputs) ... ok
+test_label_is_white_box_not_live_proof (tests.test_work_admission_kernel.TestWorkAdmissionKernelExperiment.test_label_is_white_box_not_live_proof) ... ok
+test_actor_not_authorized (tests.test_work_admission_kernel.TestWorkAdmissionSection13.test_actor_not_authorized) ... ok
+test_ambiguous_target_needs_clarification (tests.test_work_admission_kernel.TestWorkAdmissionSection13.test_ambiguous_target_needs_clarification) ... ok
+test_empty_read_is_cover_not_tool_failed (tests.test_work_admission_kernel.TestWorkAdmissionSection13.test_empty_read_is_cover_not_tool_failed) ... ok
+test_q_is_no_actionable_target_not_rejected (tests.test_work_admission_kernel.TestWorkAdmissionSection13.test_q_is_no_actionable_target_not_rejected) ... ok
+test_stale_evidence_needs_clarification (tests.test_work_admission_kernel.TestWorkAdmissionSection13.test_stale_evidence_needs_clarification) ... ok
+test_unauthorized_tool_admits_work_denies_tool (tests.test_work_admission_kernel.TestWorkAdmissionSection13.test_unauthorized_tool_admits_work_denies_tool) ... ok
+test_unobservable_completion_needs_clarification (tests.test_work_admission_kernel.TestWorkAdmissionSection13.test_unobservable_completion_needs_clarification) ... ok
+
+----------------------------------------------------------------------
+Ran 12 tests in 0.003s
+
+OK
