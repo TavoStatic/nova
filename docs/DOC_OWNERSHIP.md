@@ -2,7 +2,7 @@
 NOVA_DOC
 category: architecture
 authority: active_authority
-last_session: 2026-08-16
+last_session: 2026-08-29
 last_agent: grok
 session_state: current
 next_step: none
@@ -52,6 +52,10 @@ This file tells you who owns what. The ledger tells you what is current.
 - `CODE_TRUTH_AUDIT_2026-08-04.md`: deep scan August 2026 — archived
 - `CODE_TRUTH_AUDIT_2026-07-12.md`: scan baseline July 2026 — archived
 
+### Current Audit Work Map
+
+- `AUDIT_WORK_MAP_2026-08-25.md`: current audit scope and work mapping only; does not declare health or authorize repairs
+
 ### Subsystem Truth
 
 - `AUTONOMY_AND_MISSION.md`: Mission, orchestrator, gate, Work Tree, pressure, and outbox
@@ -69,6 +73,7 @@ This file tells you who owns what. The ledger tells you what is current.
 - `SELF_SCAN_RINGS_DESIGN.md`: three-ring self-scan design — woven into existing scanners, not a second engine
 - `DECISION_PROPOSAL_JUDGE.md`: Decision Judge schemas (DecisionProposal, JudgeReport, DecisionEpisode), disposition rules, provenance
 - `SOLUTION_EXPERIENCE_BACKLOG.md`: backlog for solution experience improvements
+- `RESEARCH_BRIEF.md`: two-page sponsor brief — preliminary white-box evidence for Work Admission Kernel v1; historical; does not override code/runtime; not a live-autonomy claim
 
 ### Nova Coaching
 
