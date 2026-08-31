@@ -9,7 +9,7 @@ next_step: none
 open: none
 -->
 
-# Nova SYSTEMS Documentation
+# Nova Documentation
 
 ## Start Here
 
