@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import unittest
 import uuid
@@ -10,11 +11,20 @@ from services.solution_trail import (
     JUDGMENT_PREMATURE,
     JUDGMENT_PROVEN,
     JUDGMENT_REDUNDANT,
+    JUDGMENT_REFUSED,
+    PRESSURE_EMPTY_CLAIM,
+    PRESSURE_INHERITED,
     action_suppressed_by_trail,
     align_branch_open_stem_to_trail,
+    branch_has_active_refuse,
     classify_attempt,
+    derive_branch_memory_kind,
+    mill_judgment_signal,
+    trail_world_holds,
     preferred_tool_from_progress,
     record_attempt_on_branch,
+    record_refuse_on_branch,
+    record_world_hold_on_branch,
 )
 from services.work_tree_signal_ingestion import advance_branch_sequence_after_task
 from services.work_tree_task_progress import measure_solution_progress
@@ -529,13 +539,367 @@ class SolutionTrailTests(unittest.TestCase):
         for task in open_tasks:
             self.assertNotIn("validation profile", task.title.lower())
 
+    def test_refuse_without_invoke_changes_pickup_until_source_key_is_active(self) -> None:
+        tree = work_tree.initialize_tree("Signal Intake", meta={"kind": "signal_ingestion", "last_active_source_keys": []})
+        branch = work_tree.add_branch_to_tree(tree.tree_id, "Declared capability gap", "work", tree.root_branch_id)
+        branch.source_key = "declared_capability_absent:capability_manifest:gap"
+        branch.work_class = "capability_gap"
+        work_tree.set_branch_tools(branch.branch_id, allowed_tools=["read"], preferred_tool="read")
+        work_tree.add_task_to_branch(
+            branch.branch_id,
+            "Read capabilities roadmap manifest",
+            meta={"expected_tool": "read", "allowed_tools": ["read"]},
+        )
+        before = work_tree.list_autonomous_options(tree.tree_id)
+        self.assertTrue(any(str(item.get("branch_id")) == branch.branch_id for item in before))
+
+        rec = record_refuse_on_branch(
+            branch.branch_id,
+            reason="not_in_active_ingest",
+            retry_when=[{"type": "source_key_in_active_set", "value": branch.source_key}],
+            do_not_retry_while=[{"type": "no_open_stem"}],
+            tool_name="read",
+        )
+        self.assertTrue(rec.get("ok"))
+        self.assertFalse(rec.get("already"))
+        self.assertEqual((rec.get("judgment") or {}).get("judgment"), JUDGMENT_REFUSED)
+        pressure = ((rec.get("judgment") or {}).get("pressure") or {})
+        self.assertEqual(pressure.get("event"), PRESSURE_EMPTY_CLAIM)
+        self.assertEqual(pressure.get("note"), PRESSURE_EMPTY_CLAIM)
+        self.assertFalse(pressure.get("invoke"))
+        self.assertNotIn("evidence_count", pressure)
+
+        after = work_tree.list_autonomous_options(tree.tree_id)
+        self.assertFalse(any(str(item.get("branch_id")) == branch.branch_id for item in after))
+        live = work_tree.get_branch(branch.branch_id)
+        self.assertIsNotNone(live)
+        self.assertNotEqual(str(live.resolution_state or "").strip().lower(), "resolved")
+        self.assertTrue(
+            any(t.status not in {work_tree.TaskStatus.COMPLETE, work_tree.TaskStatus.DROPPED} for t in work_tree.list_branch_tasks(branch.branch_id))
+        )
+
+        again = record_refuse_on_branch(
+            branch.branch_id,
+            reason="not_in_active_ingest",
+            retry_when=[{"type": "source_key_in_active_set", "value": branch.source_key}],
+        )
+        self.assertTrue(again.get("already"))
+
+        tree.meta = dict(tree.meta or {})
+        tree.meta["last_active_source_keys"] = [branch.source_key]
+        work_tree.save_tree(tree)
+        self.assertIsNone(
+            branch_has_active_refuse(
+                work_tree.get_branch(branch.branch_id),
+                has_open_stem=True,
+                active_source_keys={branch.source_key},
+            )
+        )
+        released = work_tree.list_autonomous_options(tree.tree_id)
+        self.assertTrue(any(str(item.get("branch_id")) == branch.branch_id for item in released))
+
+    def test_refuse_inherits_pressure_from_prior_attempt(self) -> None:
+        branch = self._release_branch()
+        work_tree.set_branch_tools(branch.branch_id, allowed_tools=["read"], preferred_tool="read")
+        rec_attempt = record_attempt_on_branch(
+            branch.branch_id,
+            tool_name="read",
+            task_title="Read release ledger for current package",
+            progress_before={"markers": []},
+            progress_after={"markers": []},
+        )
+        prior_id = str((rec_attempt.get("judgment") or {}).get("attempt_id") or "")
+        self.assertTrue(prior_id)
+        refused = record_refuse_on_branch(
+            branch.branch_id,
+            reason="no_stem_sequence_exhausted",
+            retry_when=[{"type": "has_open_stem"}],
+            do_not_retry_while=[{"type": "no_open_stem"}],
+            tool_name="read",
+        )
+        pressure = ((refused.get("judgment") or {}).get("pressure") or {})
+        self.assertEqual(pressure.get("event"), PRESSURE_INHERITED)
+        self.assertEqual(pressure.get("inherited_from"), prior_id)
+        self.assertFalse(pressure.get("invoke"))
+        self.assertNotIn("evidence_count", pressure)
+        self.assertNotEqual(pressure.get("note"), PRESSURE_EMPTY_CLAIM)
+        self.assertIsNotNone(
+            branch_has_active_refuse(work_tree.get_branch(branch.branch_id), has_open_stem=False)
+        )
+        self.assertIsNone(
+            branch_has_active_refuse(work_tree.get_branch(branch.branch_id), has_open_stem=True)
+        )
+
+    def test_teach_unclaimable_refusals_writes_without_minting(self) -> None:
+        from services.work_tree_signal_ingestion import WorkTreeSignalIngestionService
+
+        tree = work_tree.initialize_tree(
+            "Signal Intake: Runtime Governance",
+            meta={"kind": "signal_ingestion", "source": "runtime_signals", "signal_ingestion": True},
+        )
+        branch = work_tree.add_branch_to_tree(tree.tree_id, "Declared capability gap", "work", tree.root_branch_id)
+        branch.source_key = "declared_capability_absent:capability_manifest:gap"
+        branch.source_type = "capability_manifest"
+        branch.work_class = "capability_gap"
+        branch.resolution_state = "open"
+        svc = WorkTreeSignalIngestionService()
+        results = svc.teach_unclaimable_refusals(active_source_keys=set())
+        self.assertTrue(any(item.get("action") == "refused" and item.get("branch_id") == branch.branch_id for item in results))
+        self.assertEqual(work_tree.list_branch_tasks(branch.branch_id), [])
+        live = work_tree.get_branch(branch.branch_id)
+        self.assertEqual(str(live.resolution_state or ""), "open")
+        self.assertIsNotNone(branch_has_active_refuse(live, has_open_stem=False, active_source_keys=set()))
+        self.assertIsNone(branch_has_active_refuse(live, has_open_stem=False, active_source_keys={branch.source_key}))
+
+    def test_empty_claim_pressure_ignores_evidence_count(self) -> None:
+        tree = work_tree.initialize_tree("Empty claim pressure")
+        branch = work_tree.add_branch_to_tree(tree.tree_id, "Pre-meta leftover", "work", tree.root_branch_id)
+        branch.evidence_count = 12
+        rec = record_refuse_on_branch(
+            branch.branch_id,
+            reason="not_in_active_ingest",
+            retry_when=[{"type": "source_key_in_active_set", "value": "k"}],
+        )
+        pressure = ((rec.get("judgment") or {}).get("pressure") or {})
+        self.assertEqual(pressure.get("event"), PRESSURE_EMPTY_CLAIM)
+        self.assertNotIn("evidence_count", pressure)
+        self.assertEqual(int(work_tree.get_branch(branch.branch_id).evidence_count or 0), 12)
+
+    def test_derive_kind_shared_by_pickup_and_visual(self) -> None:
+        tree = work_tree.initialize_tree(
+            "Shared kind",
+            meta={"kind": "signal_ingestion", "last_active_source_keys": []},
+        )
+        branch = work_tree.add_branch_to_tree(tree.tree_id, "Declared capability gap", "work", tree.root_branch_id)
+        branch.source_key = "declared_capability_absent:capability_manifest:gap"
+        work_tree.set_branch_tools(branch.branch_id, allowed_tools=["read"], preferred_tool="read")
+        work_tree.add_task_to_branch(
+            branch.branch_id,
+            "Read capabilities roadmap manifest",
+            meta={"expected_tool": "read", "allowed_tools": ["read"]},
+        )
+        record_refuse_on_branch(
+            branch.branch_id,
+            reason="not_in_active_ingest",
+            retry_when=[{"type": "source_key_in_active_set", "value": branch.source_key}],
+        )
+        derived = derive_branch_memory_kind(
+            work_tree.get_branch(branch.branch_id),
+            has_open_stem=True,
+            active_source_keys=set(),
+        )
+        self.assertEqual(derived.get("kind"), JUDGMENT_REFUSED)
+        self.assertTrue(derived.get("controlling"))
+        visual = work_tree.get_visual_tree_data(tree.tree_id)
+        node = next(item for item in (visual.get("nodes") or []) if item.get("id") == branch.branch_id)
+        self.assertEqual(node.get("branch_memory_kind"), derived)
+        inspected = work_tree.inspect_tree(tree.tree_id)
+        ready = {row.get("branch_id"): row for row in list(inspected.get("ready_branches") or [])}
+        if branch.branch_id in ready:
+            self.assertEqual((ready[branch.branch_id].get("branch_memory_kind") or {}).get("kind"), JUDGMENT_REFUSED)
+        self.assertFalse(any(str(item.get("branch_id")) == branch.branch_id for item in work_tree.list_autonomous_options(tree.tree_id)))
+
+    def test_same_world_refuse_changes_only_that_branch_pickup(self) -> None:
+        tree = work_tree.initialize_tree(
+            "Same-world pickup",
+            meta={"kind": "signal_ingestion", "last_active_source_keys": []},
+        )
+        work_tree.set_tree_execution_policy(tree.tree_id, allowed_tools=["read"], require_explicit_allow=True)
+        refused = work_tree.add_branch_to_tree(tree.tree_id, "Unclaimable leftover", "work", tree.root_branch_id)
+        kept = work_tree.add_branch_to_tree(tree.tree_id, "Claimable stem", "work", tree.root_branch_id)
+        for branch, key in ((refused, "leftover:gap"), (kept, "live:gap")):
+            branch.source_key = key
+            work_tree.set_branch_tools(branch.branch_id, allowed_tools=["read"], preferred_tool="read")
+            work_tree.add_task_to_branch(
+                branch.branch_id,
+                "Read current source",
+                meta={"expected_tool": "read", "allowed_tools": ["read"]},
+            )
+        before_ids = {str(item.get("branch_id")) for item in work_tree.list_autonomous_options(tree.tree_id)}
+        self.assertIn(refused.branch_id, before_ids)
+        self.assertIn(kept.branch_id, before_ids)
+
+        rec = record_refuse_on_branch(
+            refused.branch_id,
+            reason="not_in_active_ingest",
+            retry_when=[{"type": "source_key_in_active_set", "value": refused.source_key}],
+        )
+        self.assertTrue(rec.get("ok"))
+        after_ids = {str(item.get("branch_id")) for item in work_tree.list_autonomous_options(tree.tree_id)}
+        self.assertNotIn(refused.branch_id, after_ids)
+        self.assertIn(kept.branch_id, after_ids)
+
+        visual = work_tree.get_visual_tree_data(tree.tree_id)
+        node_ids = {item.get("id") for item in (visual.get("nodes") or [])}
+        self.assertIn(refused.branch_id, node_ids)
+        self.assertIn(kept.branch_id, node_ids)
+        live = work_tree.get_branch(refused.branch_id)
+        self.assertNotEqual(str(live.resolution_state or "").strip().lower(), "resolved")
+        self.assertNotEqual(str(getattr(live.status, "value", live.status) or "").lower(), "archived")
+
+        tree.meta = dict(tree.meta or {})
+        tree.meta["last_active_source_keys"] = [refused.source_key]
+        work_tree.save_tree(tree)
+        restored_ids = {str(item.get("branch_id")) for item in work_tree.list_autonomous_options(tree.tree_id)}
+        self.assertIn(refused.branch_id, restored_ids)
+        self.assertIn(kept.branch_id, restored_ids)
+        released = derive_branch_memory_kind(
+            work_tree.get_branch(refused.branch_id),
+            has_open_stem=True,
+            active_source_keys={refused.source_key},
+        )
+        self.assertEqual(released.get("kind"), JUDGMENT_REFUSED)
+        self.assertFalse(released.get("controlling"))
+
+    def test_mill_judgment_signal_names_no_model(self) -> None:
+        tree = work_tree.initialize_tree(
+            "Mill signal",
+            meta={"kind": "signal_ingestion", "last_active_source_keys": []},
+        )
+        branch = work_tree.add_branch_to_tree(tree.tree_id, "Uninstalled leftover", "work", tree.root_branch_id)
+        branch.source_key = "declared_capability_absent:edfi"
+        work_tree.set_branch_tools(branch.branch_id, allowed_tools=["read"], preferred_tool="read")
+        work_tree.add_task_to_branch(
+            branch.branch_id,
+            "Read leftover",
+            meta={"expected_tool": "read", "allowed_tools": ["read"]},
+        )
+        record_refuse_on_branch(
+            branch.branch_id,
+            reason="not_in_active_ingest",
+            retry_when=[{"type": "source_key_in_active_set", "value": branch.source_key}],
+        )
+        derived = derive_branch_memory_kind(
+            work_tree.get_branch(branch.branch_id),
+            has_open_stem=True,
+            active_source_keys=set(),
+        )
+        signal = mill_judgment_signal(derived)
+        self.assertEqual(signal.get("class"), JUDGMENT_REFUSED)
+        self.assertTrue(signal.get("controlling"))
+        self.assertNotIn("model", signal)
+        blob = json.dumps(signal)
+        self.assertNotIn("qwen", blob.lower())
+        self.assertNotIn("llama", blob.lower())
+        stuffed = mill_judgment_signal({**derived, "model": "qwen2.5:14b", "chat": "qwen3.5:9b"})
+        self.assertNotIn("model", stuffed)
+        self.assertNotIn("chat", stuffed)
+        self.assertEqual(stuffed.get("class"), JUDGMENT_REFUSED)
+
+    def test_paid_trail_holds_world_and_blocks_sequence_remint(self) -> None:
+        from services.solution_trail import record_attempt_on_branch
+        from services.work_tree_signal_ingestion import advance_branch_sequence_after_task
+
+        tree = work_tree.initialize_tree("Compact paid trail")
+        branch = work_tree.add_branch_to_tree(
+            tree.tree_id,
+            "Validation profile has source-observed tests outside compact lanes",
+            "work",
+            tree.root_branch_id,
+        )
+        work_tree.set_branch_tools(branch.branch_id, allowed_tools=["source_root_judgment"], preferred_tool="source_root_judgment")
+        first = work_tree.add_task_to_branch(
+            branch.branch_id,
+            "Synthesize source-root judgment from collected evidence",
+            meta={"expected_tool": "source_root_judgment", "allowed_tools": ["source_root_judgment"]},
+        )
+        branch.source_payload = {
+            "task_sequence": [
+                {
+                    "title": "Synthesize source-root judgment from collected evidence",
+                    "allowed_tools": ["source_root_judgment"],
+                    "preferred_tool": "source_root_judgment",
+                },
+                {
+                    "title": "Synthesize source-root judgment from collected evidence",
+                    "allowed_tools": ["source_root_judgment"],
+                    "preferred_tool": "source_root_judgment",
+                },
+            ]
+        }
+        work_tree._TASKS[first.task_id].status = work_tree.TaskStatus.ATTEMPTED
+        record_attempt_on_branch(
+            branch.branch_id,
+            tool_name="source_root_judgment",
+            task_title=first.title,
+            progress_before={"markers": []},
+            progress_after={"markers": []},
+        )
+        held = trail_world_holds(work_tree.get_branch(branch.branch_id), has_open_stem=True)
+        self.assertIsNotNone(held)
+        self.assertEqual((held or {}).get("class"), JUDGMENT_REDUNDANT)
+        result = advance_branch_sequence_after_task(branch.branch_id)
+        self.assertEqual(result.get("reason"), "trail_world_holds")
+        titles = [
+            item.title
+            for item in work_tree.list_branch_tasks(branch.branch_id)
+            if item.status not in {work_tree.TaskStatus.COMPLETE, work_tree.TaskStatus.DROPPED}
+        ]
+        self.assertEqual(titles.count("Synthesize source-root judgment from collected evidence"), 1)
+
+    def test_sip_skip_world_hold_blocks_sequence_remint(self) -> None:
+        from services.work_tree_signal_ingestion import advance_branch_sequence_after_task
+
+        tree = work_tree.initialize_tree("Sip world hold")
+        branch = work_tree.add_branch_to_tree(
+            tree.tree_id,
+            "Validation profile has source-observed tests outside compact lanes",
+            "work",
+            tree.root_branch_id,
+        )
+        first = work_tree.add_task_to_branch(
+            branch.branch_id,
+            "Synthesize source-root judgment from collected evidence",
+            meta={"expected_tool": "source_root_judgment", "allowed_tools": ["source_root_judgment"]},
+        )
+        branch.source_payload = {
+            "task_sequence": [
+                {
+                    "title": "Synthesize source-root judgment from collected evidence",
+                    "allowed_tools": ["source_root_judgment"],
+                    "preferred_tool": "source_root_judgment",
+                },
+                {
+                    "title": "Synthesize source-root judgment from collected evidence",
+                    "allowed_tools": ["source_root_judgment"],
+                    "preferred_tool": "source_root_judgment",
+                },
+            ]
+        }
+        record_world_hold_on_branch(
+            branch.branch_id,
+            tool_name="source_root_judgment",
+            task_title=first.title,
+            reason="skip_until_world_changes",
+            input_ref="source_root_judgment",
+        )
+        work_tree._TASKS[first.task_id].status = work_tree.TaskStatus.ATTEMPTED
+        held = trail_world_holds(work_tree.get_branch(branch.branch_id), has_open_stem=True)
+        self.assertIsNotNone(held)
+        result = advance_branch_sequence_after_task(branch.branch_id)
+        self.assertEqual(result.get("reason"), "trail_world_holds")
+        open_titles = [
+            item.title
+            for item in work_tree.list_branch_tasks(branch.branch_id)
+            if item.status in {work_tree.TaskStatus.OPEN, work_tree.TaskStatus.ACTIVE}
+        ]
+        self.assertEqual(open_titles, [])
+
 
 class SolutionProgressStampHonestyTests(unittest.TestCase):
     def setUp(self) -> None:
-        work_tree._clear_in_memory()
+        base_tmp = _validation_tmp_root()
+        base_tmp.mkdir(parents=True, exist_ok=True)
+        self._db_path = base_tmp / f"solution_stamp_{uuid.uuid4().hex}.sqlite3"
+        work_tree._set_db_path(self._db_path)
 
     def tearDown(self) -> None:
         work_tree._clear_in_memory()
+        try:
+            if self._db_path.exists():
+                self._db_path.unlink()
+        except Exception:
+            pass
 
     def test_closed_finding_without_effort_is_not_100_percent(self):
         from services.work_tree_task_progress import measure_solution_progress

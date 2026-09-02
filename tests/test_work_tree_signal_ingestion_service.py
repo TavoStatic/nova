@@ -19,21 +19,29 @@ except ImportError:
 from services.work_tree_signal_ingestion import (
     EDFI_CAPABILITY_PROFILE_READ_HOLD_REASON,
     EDFI_CAPABILITY_PROFILE_READ_TASK_TITLE,
+    META_CONTINUITY_GAP_REASON,
+    META_CONTINUITY_GAP_SELF_QUESTION,
+    META_CONTINUITY_GAP_TASK_TITLE,
     SOURCE_ROOT_SEQUENCE_EXHAUSTED_HOLD_REASON,
     WorkTreeSignalIngestionService,
     _autonomy_orchestrator_signal_from_status,
+    _backpack_edfi_signal_from_status,
+    _backpack_host_signal_from_status,
     _branch_why_summary,
     _data_pipeline_evidence_task,
+    _data_pipeline_signal_from_status,
     _edfi_capability_profile_read_evidence_satisfied,
     _edfi_capability_profile_signal_from_status,
     _gap_evidence_task,
     _looks_like_source_root_file_gap,
+    _operator_control_signal_from_status,
     _policy_gates_signal_from_status,
     _root_closure_inventory_signals_from_status,
     _self_repair_closure_inventory_signals_from_status,
     _source_root_gap_evidence_task,
     _source_root_inventory_signal_from_status,
     _source_wiring_probe_gap_evidence_task,
+    _temporal_pressure_signal_from_status,
     _validation_artifact_truth_signal_from_status,
 )
 
@@ -96,7 +104,7 @@ _HEALTHY_EDFI_PROFILE_STATUS = {
 
 
 class TestAutonomyOrchestratorSignal(unittest.TestCase):
-    def test_execution_failure_surfaces_as_autonomy_orchestrator_signal(self):
+    def test_pin_miss_does_not_mint_a_new_finding(self):
         signal = _autonomy_orchestrator_signal_from_status(
             {
                 "autonomy_orchestrator_decision": "recommend_action",
@@ -114,13 +122,179 @@ class TestAutonomyOrchestratorSignal(unittest.TestCase):
             }
         )
 
+        self.assertIsNone(signal)
+
+    def test_execution_failure_surfaces_as_autonomy_orchestrator_signal(self):
+        signal = _autonomy_orchestrator_signal_from_status(
+            {
+                "autonomy_orchestrator_decision": "recommend_action",
+                "autonomy_orchestrator_decision_type": "RecommendAction",
+                "autonomy_orchestrator_action_type": "active_work_tree_run_next",
+                "autonomy_orchestrator_ledger_status": "recorded",
+                "autonomy_orchestrator_rejection_reasons": [],
+                "autonomy_orchestrator_execution_result": "failed",
+                "autonomy_orchestrator_execution_message": "active_work_tree_run_next_execution_failed",
+                "autonomy_orchestrator_execution_cycle_status": "execution_failed",
+                "autonomy_orchestrator_target_id": "branch-core",
+                "autonomy_orchestrator_target_step_id": "task-core",
+                "autonomy_orchestrator_target_tree_id": "tree-core",
+                "autonomy_orchestrator_recommended_tool": "core_thinning",
+            }
+        )
+
         self.assertIsNotNone(signal)
         self.assertEqual(signal.get("source"), "autonomy_orchestrator")
-        self.assertEqual((signal.get("fingerprint") or {}).get("error"), "invalid_decision")
+        self.assertEqual((signal.get("fingerprint") or {}).get("error"), "execution_failed")
         payload = signal.get("payload") or {}
         self.assertEqual(payload.get("execution_result"), "failed")
         self.assertEqual(payload.get("target_tree_id"), "tree-core")
         self.assertEqual(payload.get("recommended_tool"), "core_thinning")
+
+
+class TestBackpackHostSignals(unittest.TestCase):
+    def test_edfi_fusion_unhealthy_does_not_crash_when_fusion_dict_is_present(self) -> None:
+        signal = _backpack_edfi_signal_from_status(
+            {
+                "backpack_fusion_ok": False,
+                "backpack_capability_count": 2,
+                "backpack_fusion": {"installed": True, "status": "installed", "ok": False},
+            }
+        )
+        self.assertIsNotNone(signal)
+        self.assertEqual(signal.get("source"), "backpack_edfi")
+
+    def test_edfi_fusion_stays_quiet_when_backpack_is_not_installed(self) -> None:
+        signal = _backpack_edfi_signal_from_status(
+            {
+                "backpack_fusion_ok": False,
+                "backpack_fusion": {"installed": False, "status": "not_installed", "ok": False},
+            }
+        )
+        self.assertIsNone(signal)
+
+    def test_edfi_fusion_stays_quiet_when_install_contract_is_unreadable(self) -> None:
+        signal = _backpack_edfi_signal_from_status(
+            {
+                "backpack_fusion_ok": False,
+                "backpack_fusion": {"ok": False, "error": "fusion_unreadable"},
+            }
+        )
+        self.assertIsNone(signal)
+
+    def test_host_stays_quiet_when_uninstall_is_closed(self) -> None:
+        signal = _backpack_host_signal_from_status(
+            {
+                "backpack_fusion_ok": True,
+                "backpack_fusion": {"installed": False, "status": "not_installed", "ok": True},
+            }
+        )
+        self.assertIsNone(signal)
+
+    def test_host_fires_when_uninstalled_fusion_snapshot_is_leftover_cache(self) -> None:
+        signal = _backpack_host_signal_from_status(
+            {
+                "backpack_fusion_ok": True,
+                "backpack_fusion": {
+                    "installed": False,
+                    "status": "not_installed",
+                    "ok": True,
+                    "from_cache": True,
+                },
+            }
+        )
+        self.assertIsNotNone(signal)
+        self.assertEqual(signal.get("source"), "backpack_host")
+        self.assertEqual((signal.get("fingerprint") or {}).get("error"), "backpack_host_uninstall_residue")
+
+    def test_host_stays_quiet_when_installed_fusion_is_unhealthy(self) -> None:
+        signal = _backpack_host_signal_from_status(
+            {
+                "backpack_fusion_ok": False,
+                "backpack_fusion": {"installed": True, "status": "installed", "ok": False},
+            }
+        )
+        self.assertIsNone(signal)
+
+    def test_host_fires_when_install_contract_is_unreadable(self) -> None:
+        signal = _backpack_host_signal_from_status(
+            {
+                "backpack_fusion_ok": False,
+                "backpack_fusion": {"ok": False, "error": "fusion_unreadable"},
+            }
+        )
+        self.assertIsNotNone(signal)
+        self.assertEqual(signal.get("source"), "backpack_host")
+        self.assertEqual((signal.get("fingerprint") or {}).get("error"), "backpack_host_contract_unreadable")
+
+    def test_host_fires_when_residue_sanitizer_failed(self) -> None:
+        signal = _backpack_host_signal_from_status(
+            {
+                "backpack_fusion_ok": True,
+                "backpack_fusion": {"installed": False, "status": "not_installed", "ok": True},
+                "autonomy_maintenance": {
+                    "last_backpack_residue_sanitize": {"status": "failed", "ok": False, "error": "unlink failed"},
+                },
+            }
+        )
+        self.assertIsNotNone(signal)
+        self.assertEqual(signal.get("source"), "backpack_host")
+        self.assertEqual((signal.get("fingerprint") or {}).get("error"), "backpack_host_residue_sanitize_failed")
+
+    def test_data_pipeline_signal_quiet_when_no_live_lanes(self) -> None:
+        self.assertIsNone(
+            _data_pipeline_signal_from_status(
+                {
+                    "data_pipeline_registry_ok": True,
+                    "data_pipeline_count": 0,
+                    "data_pipeline_ids": [],
+                    "data_pipelines": {"ok": True, "pipelines": []},
+                }
+            )
+        )
+
+    def test_data_pipeline_signal_ignores_uninstalled_residue_lane(self) -> None:
+        self.assertIsNone(
+            _data_pipeline_signal_from_status(
+                {
+                    "data_pipeline_registry_ok": True,
+                    "data_pipeline_count": 1,
+                    "data_pipeline_ids": ["edfi_bisd"],
+                    "data_pipelines": {
+                        "ok": True,
+                        "pipelines": [
+                            {
+                                "pipeline_id": "edfi_bisd",
+                                "installed": False,
+                                "status": "not_installed",
+                                "lane_state": {"enabled": False, "state": "paused"},
+                            }
+                        ],
+                    },
+                }
+            )
+        )
+
+    def test_data_pipeline_signal_still_flags_a_live_paused_lane(self) -> None:
+        signal = _data_pipeline_signal_from_status(
+            {
+                "data_pipeline_registry_ok": True,
+                "data_pipeline_count": 1,
+                "data_pipeline_ids": ["sis_test"],
+                "data_pipelines": {
+                    "ok": True,
+                    "pipelines": [
+                        {
+                            "pipeline_id": "sis_test",
+                            "installed": True,
+                            "lane_state": {"enabled": False, "state": "paused"},
+                        }
+                    ],
+                },
+            }
+        )
+        self.assertIsNotNone(signal)
+        self.assertEqual((signal or {}).get("title"), "Data pipeline lane is blocked or paused")
+        self.assertEqual(((signal or {}).get("fingerprint") or {}).get("symbol"), "sis_test")
 
 
 def _workspace_case_dir(prefix: str) -> Path:
@@ -831,6 +1005,41 @@ class TestWorkTreeSignalIngestionService(unittest.TestCase):
         self.assertEqual((branch.source_payload or {}).get("release_validation_extract_count"), 4)
         self.assertEqual((branch.source_payload or {}).get("release_stage_count"), 2)
 
+    def test_status_snapshot_resolves_storage_watch_when_ok(self) -> None:
+        self.service.sync_status_snapshot(
+            {
+                "storage_watch_status": "danger",
+                "storage_watch_note": "release validation extracts total 1396.1 MB",
+                "storage_watch_total_bytes": 1_396_000_000,
+            }
+        )
+        branch = self._signal_branches()[0]
+        self.assertEqual(str(branch.source_type or ""), "storage_release_pressure")
+        open_tasks = [
+            task
+            for task in work_tree.list_branch_tasks(branch.branch_id)
+            if str(getattr(task.status, "value", task.status) or "").strip().lower() not in {"complete", "dropped"}
+        ]
+        self.assertTrue(open_tasks)
+
+        results = self.service.sync_status_snapshot(
+            {
+                "storage_watch_status": "ok",
+                "storage_watch_note": "watched storage is within normal limits",
+                "storage_watch_total_bytes": 12,
+            }
+        )
+
+        self.assertTrue(any(item.get("action") == "resolved" for item in results))
+        branch = work_tree.get_branch(branch.branch_id)
+        self.assertEqual(str(branch.resolution_state or ""), "resolved")
+        open_after = [
+            task
+            for task in work_tree.list_branch_tasks(branch.branch_id)
+            if str(getattr(task.status, "value", task.status) or "").strip().lower() not in {"complete", "dropped"}
+        ]
+        self.assertFalse(open_after)
+
     def test_status_snapshot_ingests_patch_pipeline_governance_gap(self) -> None:
         results = self.service.ingest_status_snapshot(
             {
@@ -1433,6 +1642,62 @@ class TestWorkTreeSignalIngestionService(unittest.TestCase):
         self.assertIn("Validation profile has source-observed tests outside compact lanes", titles)
         self.assertNotIn("Resolve self-check failures in control status", titles)
 
+    def test_paid_trail_holds_world_and_blocks_compact_lane_ingest_remint(self) -> None:
+        from services.solution_trail import record_world_hold_on_branch
+
+        status_payload = {
+            "alerts": ["test_profile_inventory:drift=1;gaps=0;source_observed=1;inactive_install_profile=0"],
+            "self_check_pass_ratio": 0.91,
+            "test_profile_inventory_ok": False,
+            "test_profile_profile_gap_count": 0,
+            "test_profile_profile_drift_count": 1,
+            "test_profile_source_observed_count": 1,
+            "test_profile_inventory": {
+                "ok": False,
+                "profile_drift_count": 1,
+                "source_observed_count": 1,
+                "profile_drift_tests": [
+                    {
+                        "path": "tests/test_evidence_validity.py",
+                        "profile_class": "source_observed",
+                    }
+                ],
+            },
+        }
+        self.service.sync_status_snapshot(status_payload)
+        branch = [
+            item
+            for item in self._signal_branches()
+            if item.title == "Validation profile has source-observed tests outside compact lanes"
+        ][0]
+        open_before = [
+            task
+            for task in work_tree.list_branch_tasks(branch.branch_id)
+            if task.status not in {work_tree.TaskStatus.COMPLETE, work_tree.TaskStatus.DROPPED}
+        ]
+        self.assertTrue(open_before)
+        judgment = work_tree.add_task_to_branch(
+            branch.branch_id,
+            "Synthesize source-root judgment from collected evidence",
+            meta={"expected_tool": "source_root_judgment", "allowed_tools": ["source_root_judgment"]},
+        )
+        for task in list(open_before) + [judgment]:
+            work_tree._TASKS[task.task_id].status = work_tree.TaskStatus.ATTEMPTED
+        record_world_hold_on_branch(
+            branch.branch_id,
+            tool_name="source_root_judgment",
+            task_title=judgment.title,
+            reason="skip_until_world_changes",
+            input_ref="source_root_judgment",
+        )
+        self.service.sync_status_snapshot(status_payload)
+        open_after = [
+            task
+            for task in work_tree.list_branch_tasks(branch.branch_id)
+            if task.status in {work_tree.TaskStatus.OPEN, work_tree.TaskStatus.ACTIVE}
+        ]
+        self.assertEqual(open_after, [])
+
     def test_sync_resolves_stale_generic_self_check_when_typed_branch_owns_alert(self) -> None:
         self.service.ingest_signal(
             {
@@ -1598,7 +1863,79 @@ class TestWorkTreeSignalIngestionService(unittest.TestCase):
         identity_tasks = work_tree.list_branch_tasks(by_source["identity_profile_answers"].branch_id)
         self.assertIn("Read memory routing purpose controls", identity_tasks[0].title)
         self.assertEqual(by_source["safety_envelope"].preferred_tool, "phase2_audit")
+        envelope_seq = list((by_source["safety_envelope"].source_payload or {}).get("task_sequence") or [])
+        envelope_tools = {
+            str(item.get("preferred_tool") or "")
+            for item in envelope_seq
+            if isinstance(item, dict)
+        }
+        self.assertIn("phase2_audit", envelope_tools)
+        self.assertNotIn("source_root_judgment", envelope_tools)
+        envelope_open = [
+            task.title
+            for task in work_tree.list_branch_tasks(by_source["safety_envelope"].branch_id)
+            if task.status not in {work_tree.TaskStatus.COMPLETE, work_tree.TaskStatus.DROPPED}
+        ]
+        self.assertFalse(any("source-root judgment" in title.lower() for title in envelope_open))
         self.assertEqual(by_source["core_steward_reflection"].preferred_tool, "core_health")
+
+    def test_safety_envelope_sequence_does_not_append_source_root_judgment(self) -> None:
+        from services.work_tree_signal_ingestion import _safety_envelope_signal_from_status
+
+        signal = _safety_envelope_signal_from_status(
+            {
+                "safety_enabled": True,
+                "pending_review_total": 1,
+                "quarantine_total": 0,
+                "safety_mode": "enforce",
+            }
+        )
+        self.assertIsNotNone(signal)
+        normalized = self.service._normalize_signal(dict(signal or {}))
+        tools = {
+            str(item.get("preferred_tool") or "")
+            for item in list(normalized.get("task_sequence") or [])
+            if isinstance(item, dict)
+        }
+        self.assertIn("phase2_audit", tools)
+        self.assertNotIn("source_root_judgment", tools)
+
+    def test_safety_envelope_quarantine_alone_is_not_open_review_pressure(self) -> None:
+        from services.work_tree_signal_ingestion import _safety_envelope_signal_from_status
+
+        quarantined_only = _safety_envelope_signal_from_status(
+            {
+                "safety_enabled": True,
+                "pending_review_total": 0,
+                "quarantine_total": 1,
+                "safety_mode": "enforce",
+            }
+        )
+        still_pending = _safety_envelope_signal_from_status(
+            {
+                "safety_enabled": True,
+                "pending_review_total": 1,
+                "quarantine_total": 1,
+                "safety_mode": "enforce",
+            }
+        )
+        self.assertIsNone(quarantined_only)
+        self.assertIsNotNone(still_pending)
+
+    def test_cancelled_calendar_events_are_not_temporal_work_tree_pressure(self) -> None:
+        signals = _temporal_pressure_signal_from_status(
+            {
+                "temporal_pressure": {
+                    "event": {
+                        "source": "calendar",
+                        "title": "Temporal verification review",
+                        "start": "2026-06-08T09:00:00+00:00",
+                        "confidence": "CANCELLED",
+                    }
+                }
+            }
+        )
+        self.assertEqual(signals, [])
 
     def test_installer_packaging_gap_routes_to_installer_validation_tool(self) -> None:
         status_payload = {
@@ -1767,6 +2104,35 @@ class TestWorkTreeSignalIngestionService(unittest.TestCase):
         self.assertEqual(branch.resolution_state, "resolved")
         self.assertEqual(branch.status, work_tree.BranchStatus.COMPLETE)
 
+    def test_unresolved_open_branch_without_sequence_gets_meta_continuity_task(self) -> None:
+        signal = {
+            "source": "control_status",
+            "signal_class": "governance_pressure",
+            "title": "Meta continuity no-open-task regression",
+            "source_key": "governance_pressure:control_status:meta_continuity_no_open_task",
+            "payload": {"note": "synthetic"},
+            "actionability": "safe_now",
+            "allowed_tools": [],
+            "preferred_tool": "",
+            "task_sequence": [],
+        }
+
+        self.service.ingest_signal(signal)
+
+        branch = next(
+            item for item in self._signal_branches()
+            if str(item.source_key or "") == signal["source_key"]
+        )
+        open_tasks = [
+            task for task in work_tree.list_branch_tasks(branch.branch_id)
+            if task.status not in {work_tree.TaskStatus.COMPLETE, work_tree.TaskStatus.DROPPED}
+        ]
+        self.assertEqual(len(open_tasks), 1)
+        self.assertEqual(open_tasks[0].title, META_CONTINUITY_GAP_TASK_TITLE)
+        self.assertEqual((open_tasks[0].meta or {}).get("meta_reason"), META_CONTINUITY_GAP_REASON)
+        self.assertEqual((open_tasks[0].meta or {}).get("self_question"), META_CONTINUITY_GAP_SELF_QUESTION)
+        self.assertEqual(str(branch.resolution_state or ""), "open")
+
     def test_operator_control_ignores_autonomy_internal_outbox_notices(self) -> None:
         payload = {
             "operator_outbox": {
@@ -1900,7 +2266,7 @@ class TestWorkTreeSignalIngestionService(unittest.TestCase):
 
         self.assertIn("Synthesize source-root judgment from collected evidence", completed_titles)
         self.assertEqual(work_tree.get_branch(branch.branch_id).resolution_state, "open")
-        self.assertEqual(work_tree.get_branch(branch.branch_id).status, work_tree.BranchStatus.COMPLETE)
+        self.assertNotEqual(work_tree.get_branch(branch.branch_id).status, work_tree.BranchStatus.COMPLETE)
 
         self.service.sync_status_snapshot(status_payload)
 
@@ -2052,6 +2418,89 @@ class TestWorkTreeSignalIngestionService(unittest.TestCase):
         ]
         self.assertEqual(open_tasks, [])
         self.assertEqual(work_tree.get_branch(branch.branch_id).resolution_state, "observing")
+
+    def test_source_root_hold_with_operator_response_evidence_is_completed(self) -> None:
+        status_payload = {
+            "source_root_inventory": {
+                "gap_count": 1,
+                "ok": False,
+                "unclassified_source_files": [".vscode/tasks.json"],
+                "unwired_roots": [],
+                "missing_evidence_roots": [],
+            },
+            "source_root_inventory_ok": False,
+            "source_root_inventory_gap_count": 1,
+        }
+
+        self.service.sync_status_snapshot(status_payload)
+        branch = next(
+            item for item in self._signal_branches()
+            if str(item.source_type or "") == "source_root_inventory"
+        )
+        for _ in range(8):
+            open_tasks = [
+                task for task in work_tree.list_branch_tasks(branch.branch_id)
+                if task.status not in {work_tree.TaskStatus.COMPLETE, work_tree.TaskStatus.DROPPED}
+            ]
+            self.assertTrue(open_tasks)
+            task = open_tasks[0]
+            expected_tool = str((task.meta or {}).get("expected_tool") or "read")
+            if expected_tool == "source_root_judgment":
+                result = (
+                    "Source Root Judgment\n"
+                    "- verdict: gap_confirmed\n"
+                    "- ok: True\n"
+                    f"- branch: {branch.branch_id}\n"
+                )
+            else:
+                result = {"ok": True, "evidence": task.title}
+            work_tree.record_task_evidence(
+                branch_id=branch.branch_id,
+                task_id=task.task_id,
+                tool_name=expected_tool,
+                tool_args=list((task.meta or {}).get("tool_args") or []),
+                result=result,
+            )
+            work_tree.mark_task_complete(task.task_id)
+            self.service.sync_status_snapshot(status_payload)
+            if expected_tool == "source_root_judgment":
+                break
+
+        hold_task = next(
+            task for task in work_tree.list_branch_tasks(branch.branch_id)
+            if task.status == work_tree.TaskStatus.BLOCKED
+            and task.title == "Hold source-root branch for operator judgment"
+        )
+        work_tree.record_task_evidence(
+            branch_id=branch.branch_id,
+            task_id=hold_task.task_id,
+            tool_name="operator_response",
+            tool_args=["dismissed-notice"],
+            result={"operator_response": "Dismissed by operator.", "resolution": "dismissed"},
+        )
+        self.service.sync_status_snapshot(status_payload)
+        hold_task = work_tree._TASKS[hold_task.task_id]
+        self.assertEqual(hold_task.status, work_tree.TaskStatus.COMPLETE)
+        branch = work_tree.get_branch(branch.branch_id)
+        self.assertEqual(str(branch.resolution_state or ""), "resolved")
+        self.assertEqual(branch.status, work_tree.BranchStatus.COMPLETE)
+
+    def test_operator_control_stays_quiet_when_disk_outbox_is_empty(self) -> None:
+        with mock.patch(
+            "services.work_tree_signal_ingestion._disk_operator_outbox_actionable_open_count",
+            return_value=0,
+        ):
+            signal = _operator_control_signal_from_status(
+                {
+                    "operator_outbox_open_count": 1,
+                    "operator_outbox": {
+                        "ok": True,
+                        "open_count": 1,
+                        "operator_actionable_open_count": 1,
+                    },
+                }
+            )
+        self.assertIsNone(signal)
 
     def test_source_root_sequence_routes_failed_evidence_to_judgment(self) -> None:
         status_payload = {
@@ -2352,6 +2801,103 @@ class TestWorkTreeSignalIngestionService(unittest.TestCase):
         branch = self._signal_branches()[0]
         self.assertEqual(str(branch.resolution_state or ""), "resolved")
         self.assertEqual(branch.status, work_tree.BranchStatus.COMPLETE)
+
+    def test_source_wiring_probe_exhausted_hold_resolves_when_probe_is_clean(self) -> None:
+        failing = {
+            "alerts": [],
+            "self_check_pass_ratio": 1.0,
+            "source_wiring_probe_ok": False,
+            "source_wiring_probe_gap_count": 1,
+            "source_wiring_probe": {
+                "ok": False,
+                "gap_count": 1,
+                "missing_signal_sources": ["backpack_host"],
+            },
+        }
+        clear = {
+            "alerts": [],
+            "self_check_pass_ratio": 1.0,
+            "source_wiring_probe_ok": True,
+            "source_wiring_probe_gap_count": 0,
+            "source_wiring_probe": {"ok": True, "gap_count": 0},
+        }
+
+        self.service.sync_status_snapshot(failing)
+        branch = next(
+            item for item in self._signal_branches()
+            if str(item.source_type or "") == "source_wiring_probe"
+        )
+
+        for _ in range(8):
+            open_tasks = [
+                task for task in work_tree.list_branch_tasks(branch.branch_id)
+                if task.status not in {work_tree.TaskStatus.COMPLETE, work_tree.TaskStatus.DROPPED}
+            ]
+            self.assertTrue(open_tasks)
+            task = open_tasks[0]
+            expected_tool = str((task.meta or {}).get("expected_tool") or "read")
+            if expected_tool == "source_root_judgment":
+                result = (
+                    "Source Root Judgment\n"
+                    "- verdict: gap_confirmed\n"
+                    "- ok: True\n"
+                    f"- branch: {branch.branch_id}\n"
+                )
+            else:
+                result = {"ok": True, "evidence": task.title}
+            work_tree.record_task_evidence(
+                branch_id=branch.branch_id,
+                task_id=task.task_id,
+                tool_name=expected_tool,
+                tool_args=list((task.meta or {}).get("tool_args") or []),
+                result=result,
+            )
+            work_tree.mark_task_complete(task.task_id)
+            self.service.sync_status_snapshot(failing)
+            if expected_tool == "source_root_judgment":
+                break
+
+        open_tasks = [
+            task for task in work_tree.list_branch_tasks(branch.branch_id)
+            if task.status not in {work_tree.TaskStatus.COMPLETE, work_tree.TaskStatus.DROPPED}
+        ]
+        self.assertEqual(len(open_tasks), 1)
+        self.assertEqual(open_tasks[0].title, "Hold source-root branch for operator judgment")
+        self.assertEqual(
+            (open_tasks[0].meta or {}).get("blocked_reason"),
+            SOURCE_ROOT_SEQUENCE_EXHAUSTED_HOLD_REASON,
+        )
+
+        results = self.service.sync_status_snapshot(clear)
+        self.assertTrue(any(item.get("action") == "resolved" for item in results))
+        branch = work_tree.get_branch(branch.branch_id)
+        self.assertEqual(str(branch.resolution_state or ""), "resolved")
+        self.assertEqual(branch.status, work_tree.BranchStatus.COMPLETE)
+        open_tasks = [
+            task for task in work_tree.list_branch_tasks(branch.branch_id)
+            if task.status not in {work_tree.TaskStatus.COMPLETE, work_tree.TaskStatus.DROPPED}
+        ]
+        self.assertEqual(open_tasks, [])
+
+    def test_unreadable_backpack_host_contract_becomes_work_tree_pressure(self) -> None:
+        results = self.service.sync_status_snapshot(
+            {
+                "alerts": [],
+                "self_check_pass_ratio": 1.0,
+                "backpack_fusion_ok": False,
+                "backpack_fusion": {"ok": False, "error": "fusion_unreadable"},
+            }
+        )
+        self.assertTrue(any(item.get("action") == "created" for item in results))
+        branch = next(
+            item for item in self._signal_branches()
+            if str(item.source_type or "") == "backpack_host"
+        )
+        self.assertEqual(str(branch.work_class or ""), "governance_pressure")
+        self.assertNotIn(
+            "backpack_edfi",
+            {str(item.source_type or "") for item in self._signal_branches()},
+        )
 
     def test_status_snapshot_ingests_blocked_generated_queue_pressure(self) -> None:
         status_payload = {
@@ -3306,6 +3852,49 @@ class TestWorkTreeSignalIngestionService(unittest.TestCase):
         self.assertIn("release_validation_run", seq_tools)
         self.assertNotIn("source_root_judgment", seq_tools)
 
+    def test_complete_fail_record_is_failing_validation_not_missing_outcome(self) -> None:
+        from services.work_tree_signal_ingestion import _release_readiness_signal_from_status
+
+        status_payload = {
+            "alerts": [],
+            "self_check_pass_ratio": 1.0,
+            "wiring_inventory": {"gap_count": 0},
+            "release_status": {
+                "ok": True,
+                "ledger_path": "C:\\NOVA\\runtime\\exports\\release_packages\\release_ledger.jsonl",
+                "latest_state": "built-only",
+                "latest_readiness_state": "needs-promotion",
+                "latest_ready_to_ship": False,
+                "latest_readiness_note": "Latest build was verified, but no validation outcome is recorded yet.",
+                "latest_artifact_name": "nova-rc-fail.zip",
+                "latest_artifact_path": "C:\\NOVA\\runtime\\exports\\release_packages\\nova-rc-fail.zip",
+                "latest_validation_seed_path": "C:\\NOVA\\runtime\\exports\\release_packages\\validation_records\\nova-rc-fail.md",
+                "latest_validation_result": "",
+                "latest_validation_record_complete": True,
+                "latest_validation_record_result": "fail",
+            },
+        }
+        signal = _release_readiness_signal_from_status(status_payload)
+        self.assertIsNotNone(signal)
+        assert signal is not None
+        self.assertEqual(signal.get("title"), "Release package has failing validation")
+        titles = [
+            str(item.get("title") or "")
+            for item in list(signal.get("task_sequence") or [])
+            if isinstance(item, dict)
+        ]
+        self.assertFalse(any("Record completed validation outcome" in title for title in titles))
+
+        self.service.sync_status_snapshot(status_payload)
+        branch = self._signal_branches()[0]
+        self.assertEqual(branch.title, "Release package has failing validation")
+        open_titles = [
+            task.title
+            for task in work_tree.list_branch_tasks(branch.branch_id)
+            if task.status not in {work_tree.TaskStatus.COMPLETE, work_tree.TaskStatus.DROPPED}
+        ]
+        self.assertFalse(any("Record completed validation outcome" in title for title in open_titles))
+
     def test_release_source_changed_sequences_to_rebuild_verify(self) -> None:
         status_payload = {
             "alerts": [],
@@ -4106,7 +4695,7 @@ class TestSourceRootInventorySignalHelpers(unittest.TestCase):
         self.assertIsNone(signal)
 
 class TestMissionAmbientGovernanceSuppression(unittest.TestCase):
-    def test_quiet_hold_suppresses_ambient_root_closure_signals(self) -> None:
+    def test_quiet_hold_still_opens_ambient_fronts(self) -> None:
         status_payload = {
             "alerts": [],
             "nova_mission": {
@@ -4132,13 +4721,54 @@ class TestMissionAmbientGovernanceSuppression(unittest.TestCase):
             },
         }
 
-        service = WorkTreeSignalIngestionService()
-        signals = service.ingest_status_snapshot(status_payload)
-        sources = {str(item.get("source") or "") for item in signals}
+        work_tree._clear_in_memory()
+        with mock.patch.object(work_tree, "_persist_tree_state", return_value=None):
+            service = WorkTreeSignalIngestionService()
+            results = service.ingest_status_snapshot(status_payload)
 
-        self.assertNotIn("root_closure_inventory", sources)
-        self.assertNotIn("self_repair_closure_inventory", sources)
-        self.assertNotIn("source_root_inventory", sources)
+        created = [item for item in results if str(item.get("action") or "") == "created"]
+        self.assertGreaterEqual(len(created), 1)
+
+    def test_quiet_hold_still_updates_existing_unfinished_ambient_branch(self) -> None:
+        work_tree._clear_in_memory()
+        with mock.patch.object(work_tree, "_persist_tree_state", return_value=None):
+            service = WorkTreeSignalIngestionService()
+            created = service.ingest_signal(
+                {
+                    "source": "root_closure_inventory",
+                    "signal_class": "governance_pressure",
+                    "title": "Wire source root end to end: model_runtime",
+                    "source_key": "governance_pressure:root_closure_inventory:root_closure_gap:model_runtime",
+                    "payload": {"root_id": "model_runtime"},
+                    "severity": "high",
+                    "actionability": "safe_now",
+                }
+            )
+            self.assertEqual(created.get("action"), "created")
+            results = service.ingest_status_snapshot(
+                {
+                    "alerts": [],
+                    "nova_mission": {
+                        "enabled": True,
+                        "mode": "steady_state_guard",
+                        "action": "hold",
+                        "actionable_fresh_gap_signal_count": 0,
+                    },
+                    "root_closure_inventory": {
+                        "ok": False,
+                        "gap_count": 1,
+                        "roots": [{"root_id": "model_runtime", "ok": False, "gaps": ["missing_status"]}],
+                    },
+                }
+            )
+
+        self.assertTrue(any(item.get("action") == "updated" for item in results))
+        self.assertTrue(
+            any(
+                item.get("action") == "updated" and item.get("branch_id") == created.get("branch_id")
+                for item in results
+            )
+        )
 
 
 class TestReleaseDriftClosureSuppression(unittest.TestCase):

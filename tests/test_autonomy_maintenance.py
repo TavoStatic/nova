@@ -74,6 +74,22 @@ class TestAutonomyMaintenance(unittest.TestCase):
             ),
         )
 
+    def test_apply_storage_watch_stamps_ingest_surface_keys(self):
+        payload = autonomy_maintenance._apply_storage_watch_to_status_payload(
+            {},
+            {
+                "status": "ok",
+                "note": "watched storage is within normal limits",
+                "total_bytes": 12,
+                "runtime_total_bytes": 12,
+                "runtime_file_count": 3,
+                "release_validation_extract_bytes": 0,
+            },
+        )
+        self.assertEqual(payload.get("storage_watch_status"), "ok")
+        self.assertEqual(payload.get("storage_watch_note"), "watched storage is within normal limits")
+        self.assertEqual(int(payload.get("storage_watch_total_bytes") or 0), 12)
+
     def test_queue_pressure_uses_open_count_zero_as_clear_truth(self):
         payload = autonomy_maintenance._queue_pressure_for_orchestrator(
             {
@@ -306,6 +322,58 @@ class TestAutonomyMaintenance(unittest.TestCase):
         self.assertEqual(result, "daily_regression_ok")
         self.assertEqual(run_mock.call_count, 1)
         self.assertEqual(state.get("last_regression_status"), "OK")
+        self.assertLessEqual(int(run_mock.call_args.kwargs.get("timeout") or 0), 15 * 60)
+
+    def test_daily_regression_skips_retry_after_failed_attempt_today(self):
+        import time as _time
+
+        today = _time.strftime("%Y-%m-%d")
+        state = {
+            "last_regression_date": today,
+            "last_regression_status": "FAILED",
+            "last_regression_stale": True,
+        }
+        with mock.patch.object(autonomy_maintenance, "_host_regression_status_file_fresh", return_value=False), \
+             mock.patch.object(autonomy_maintenance.subprocess, "run") as run_mock:
+            result = autonomy_maintenance._run_daily_regression_if_due(state)
+        self.assertEqual(result, "daily_regression_skipped_already_attempted")
+        run_mock.assert_not_called()
+
+    def test_daily_regression_records_timeout_without_hanging_the_cycle(self):
+        import subprocess as _subprocess
+        import time as _time
+
+        today = _time.strftime("%Y-%m-%d")
+        state = {"last_regression_date": "2026-05-13", "last_regression_status": "FAILED"}
+        with tempfile.TemporaryDirectory() as td:
+            status_path = Path(td) / "regression_status.json"
+            status_path.write_text(
+                json.dumps(
+                    {
+                        "generated_at": "2026-08-01 00:09:41",
+                        "status": "OK",
+                        "lanes": ["unit", "behavior", "integration"],
+                        "returncode": 0,
+                    }
+                ),
+                encoding="utf-8",
+            )
+            with mock.patch.object(
+                autonomy_maintenance.subprocess,
+                "run",
+                side_effect=_subprocess.TimeoutExpired(cmd=["python"], timeout=720),
+            ), mock.patch.object(autonomy_maintenance, "_append_log"), mock.patch.object(
+                autonomy_maintenance, "REGRESSION_STATUS_FILE", status_path
+            ), mock.patch.object(
+                autonomy_maintenance, "_regression_lock_owner_alive", return_value=(False, "")
+            ):
+                result = autonomy_maintenance._run_daily_regression_if_due(state)
+            payload = json.loads(status_path.read_text(encoding="utf-8"))
+        self.assertEqual(result, "daily_regression_timed_out")
+        self.assertEqual(state.get("last_regression_status"), "TIMED_OUT")
+        self.assertEqual(state.get("last_regression_date"), today)
+        self.assertEqual(payload.get("status"), "TIMED_OUT")
+        self.assertEqual(payload.get("generated_at"), state.get("last_regression_at"))
 
     def test_regression_lock_owner_alive_uses_pid_exists_not_signal_zero(self):
         with tempfile.TemporaryDirectory() as td:
@@ -318,6 +386,7 @@ class TestAutonomyMaintenance(unittest.TestCase):
                  mock.patch("os.kill", side_effect=OSError(87, "The parameter is incorrect")) as kill_mock, \
                  mock.patch("psutil.pid_exists", return_value=False) as exists_mock:
                 alive, detail = autonomy_maintenance._regression_lock_owner_alive()
+            self.assertFalse(lock_path.exists())
 
         self.assertFalse(alive)
         self.assertEqual(detail, "")
@@ -433,15 +502,17 @@ class TestAutonomyMaintenance(unittest.TestCase):
 
     def test_sync_pipeline_workers_skipped_in_validation_scope(self):
         state: dict = {}
-        fake_registry = mock.Mock()
-        fake_registry.discover.return_value = [mock.Mock(pipeline_id="data_connector")]
-        with mock.patch.object(autonomy_maintenance, "build_pipeline_registry", return_value=fake_registry), \
+        classified = {"enabled": ["data_connector"], "paused": [], "discovered": ["data_connector"]}
+        with mock.patch.object(autonomy_maintenance, "classify_pipeline_ids_for_workers", return_value=classified), \
+             mock.patch.object(autonomy_maintenance, "runtime_pipeline_worker_ids", return_value=[]), \
              mock.patch.object(autonomy_maintenance, "reconcile_pipeline_workers_for_ids") as reconcile_mock, \
+             mock.patch.object(autonomy_maintenance, "stop_pipeline_workers_for_ids") as stop_mock, \
              mock.patch.object(autonomy_maintenance, "ensure_pipeline_workers_for_ids") as ensure_mock, \
              mock.patch.object(autonomy_maintenance, "runtime_scope_name", return_value="validation"):
             autonomy_maintenance._sync_pipeline_workers_for_maintenance(state)
 
         reconcile_mock.assert_not_called()
+        stop_mock.assert_not_called()
         ensure_mock.assert_not_called()
         skipped = dict(state.get("last_pipeline_worker_ensure") or {})
         self.assertEqual(skipped.get("status"), "skipped_validation_scope")
@@ -449,23 +520,93 @@ class TestAutonomyMaintenance(unittest.TestCase):
         self.assertEqual(skipped.get("runtime_scope"), "validation")
         self.assertEqual(int(skipped.get("pipeline_count", 0) or 0), 1)
         self.assertEqual((state.get("last_pipeline_worker_reconcile") or {}).get("status"), "skipped_validation_scope")
+        self.assertEqual((state.get("last_pipeline_worker_stop") or {}).get("status"), "skipped_validation_scope")
 
     def test_sync_pipeline_workers_runs_reconcile_and_ensure_in_live_scope(self):
         state: dict = {}
-        fake_registry = mock.Mock()
-        fake_registry.discover.return_value = [mock.Mock(pipeline_id="data_connector")]
+        classified = {"enabled": ["data_connector"], "paused": [], "discovered": ["data_connector"]}
         reconcile_payload = {"status": "ok", "reclaimed_count": 0, "cleared_count": 0}
         ensure_payload = {"status": "ok", "running_count": 1, "started_count": 0, "failed_count": 0}
-        with mock.patch.object(autonomy_maintenance, "build_pipeline_registry", return_value=fake_registry), \
+        with mock.patch.object(autonomy_maintenance, "classify_pipeline_ids_for_workers", return_value=classified), \
+             mock.patch.object(autonomy_maintenance, "runtime_pipeline_worker_ids", return_value=[]), \
              mock.patch.object(autonomy_maintenance, "runtime_scope_name", return_value="live"), \
              mock.patch.object(autonomy_maintenance, "reconcile_pipeline_workers_for_ids", return_value=reconcile_payload) as reconcile_mock, \
+             mock.patch.object(autonomy_maintenance, "stop_pipeline_workers_for_ids", return_value={"status": "absent"}) as stop_mock, \
              mock.patch.object(autonomy_maintenance, "ensure_pipeline_workers_for_ids", return_value=ensure_payload) as ensure_mock:
             autonomy_maintenance._sync_pipeline_workers_for_maintenance(state)
 
         reconcile_mock.assert_called_once()
+        stop_mock.assert_called_once_with([], runtime_root=autonomy_maintenance.RUNTIME_DIR, os_name=mock.ANY)
         ensure_mock.assert_called_once()
+        self.assertEqual(ensure_mock.call_args.args[0], ["data_connector"])
         self.assertEqual((state.get("last_pipeline_worker_reconcile") or {}).get("status"), "ok")
         self.assertEqual((state.get("last_pipeline_worker_ensure") or {}).get("running_count"), 1)
+
+    def test_sync_pipeline_workers_stops_paused_and_leftover_without_ensuring_them(self):
+        state: dict = {}
+        classified = {
+            "enabled": ["live_lane"],
+            "paused": ["paused_lane"],
+            "discovered": ["live_lane", "paused_lane"],
+        }
+        with mock.patch.object(autonomy_maintenance, "classify_pipeline_ids_for_workers", return_value=classified), \
+             mock.patch.object(autonomy_maintenance, "runtime_pipeline_worker_ids", return_value=["paused_lane", "ghost"]), \
+             mock.patch.object(autonomy_maintenance, "runtime_scope_name", return_value="live"), \
+             mock.patch.object(autonomy_maintenance, "reconcile_pipeline_workers_for_ids", return_value={"status": "ok"}) as reconcile_mock, \
+             mock.patch.object(autonomy_maintenance, "stop_pipeline_workers_for_ids", return_value={"status": "stopped", "stopped_count": 2}) as stop_mock, \
+             mock.patch.object(autonomy_maintenance, "ensure_pipeline_workers_for_ids", return_value={"status": "ok"}) as ensure_mock:
+            autonomy_maintenance._sync_pipeline_workers_for_maintenance(state)
+
+        self.assertEqual(sorted(reconcile_mock.call_args.args[0]), ["ghost", "live_lane", "paused_lane"])
+        self.assertEqual(sorted(stop_mock.call_args.args[0]), ["ghost", "paused_lane"])
+        self.assertEqual(ensure_mock.call_args.args[0], ["live_lane"])
+        self.assertEqual((state.get("last_pipeline_worker_stop") or {}).get("status"), "stopped")
+
+    def test_sanitize_uninstalled_backpack_residue_skipped_in_validation_scope(self):
+        state: dict = {}
+        with mock.patch.object(autonomy_maintenance, "runtime_scope_name", return_value="validation"):
+            payload = autonomy_maintenance._sanitize_uninstalled_backpack_residue(state)
+        self.assertEqual(payload.get("status"), "skipped_validation_scope")
+        self.assertEqual(int(payload.get("sanitized_count") or 0), 0)
+        self.assertEqual((state.get("last_backpack_residue_sanitize") or {}).get("status"), "skipped_validation_scope")
+
+    def test_sanitize_uninstalled_backpack_residue_runs_when_not_installed(self):
+        state: dict = {}
+        with mock.patch.object(autonomy_maintenance, "runtime_scope_name", return_value="live"), \
+             mock.patch.object(autonomy_maintenance, "_discover_backpack_ids", return_value=["edfi"]), \
+             mock.patch(
+                 "services.backpack_host.install_state.backpack_runtime_installed",
+                 return_value=False,
+             ), \
+             mock.patch(
+                 "services.backpack_host.sanitize.scan_backpack_residue",
+                 return_value={"residue": True, "found": ["runtime/edfi"]},
+             ), \
+             mock.patch(
+                 "services.backpack_host.sanitize.sanitize_uninstalled_backpack",
+                 return_value={"ok": True, "backpack_id": "edfi"},
+             ) as sanitize_mock:
+            payload = autonomy_maintenance._sanitize_uninstalled_backpack_residue(state)
+        sanitize_mock.assert_called_once()
+        self.assertEqual(payload.get("status"), "ok")
+        self.assertEqual(int(payload.get("sanitized_count", 0) or 0), 1)
+        self.assertEqual(payload.get("backpack_ids"), ["edfi"])
+
+    def test_backpack_residue_sanitize_step_records_failure(self):
+        state: dict = {}
+        with mock.patch.object(autonomy_maintenance, "_append_log") as log_mock, \
+             mock.patch.object(autonomy_maintenance, "_patch_queue_timestamp", return_value="ts"), \
+             mock.patch.object(
+                 autonomy_maintenance,
+                 "_sanitize_uninstalled_backpack_residue",
+                 side_effect=RuntimeError("disk gone"),
+             ):
+            payload = autonomy_maintenance._run_backpack_residue_sanitize_step(state)
+        self.assertEqual(payload.get("status"), "failed")
+        self.assertFalse(payload.get("ok"))
+        self.assertIn("disk gone", str(payload.get("error") or ""))
+        self.assertEqual((state.get("last_backpack_residue_sanitize") or {}).get("status"), "failed")
+        log_mock.assert_called()
 
     def test_run_once_logs_cycle_duration_on_subconscious_failure(self):
         with tempfile.TemporaryDirectory() as td:
@@ -3812,6 +3953,151 @@ class TestAutonomyMaintenance(unittest.TestCase):
         self.assertNotEqual(payload.get("status"), "stale_execution_contract")
         self.assertEqual(payload.get("target_tree_id"), "tree-core")
         self.assertEqual(loop_mock.call_args.args[0], "tree-core")
+
+    def test_pin_active_work_keeps_branch_when_inspector_tool_disagrees(self):
+        payload = {
+            "tree_id": "tree-signal",
+            "title": "Signal Intake: Runtime Governance",
+            "status": "active",
+            "kind": "signal_ingestion",
+            "next_step": {
+                "branch_id": "branch-other",
+                "task_id": "task-other",
+                "recommended_tool": "read",
+            },
+        }
+        pin = {
+            "branch_id": "branch-storage",
+            "title": "Runtime storage watch reports pressure",
+            "task_id": "task-storage",
+            "task_title": "Inspect storage watch snapshot and runtime archive growth",
+            "recommended_tool": "system_check",
+        }
+        with mock.patch.object(autonomy_maintenance, "_resolve_targeted_work_pin", return_value=pin):
+            pinned = autonomy_maintenance._pin_active_work_payload(
+                payload,
+                branch_target="branch-storage",
+                task_target="task-storage",
+                tool_target="read",
+            )
+        self.assertIsNotNone(pinned)
+        self.assertEqual((pinned.get("next_step") or {}).get("recommended_tool"), "system_check")
+        self.assertEqual((pinned.get("next_step") or {}).get("branch_id"), "branch-storage")
+
+    def test_target_decider_takes_existing_option_when_pin_missing(self):
+        decide = autonomy_maintenance._active_work_tree_target_decider(
+            "branch_ghost",
+            "task_ghost",
+            "core_thinning",
+        )
+        options = [
+            {
+                "branch_id": "branch_live",
+                "task_id": "task_live",
+                "recommended_tool": "read",
+                "branch_title": "Live pickup stem",
+            }
+        ]
+        picked = decide("tree_live", options)
+        self.assertEqual(picked.get("branch_id"), "branch_live")
+        self.assertEqual(picked.get("task_id"), "task_live")
+        self.assertNotEqual(picked.get("branch_id"), "branch_ghost")
+
+    def test_leftover_complete_shell_pin_refuses_and_stays_visible(self):
+        self._isolated_work_tree_db()
+        tree = work_tree.initialize_tree(
+            "Http: leftover console shell",
+            meta={"kind": "system", "source": "http"},
+        )
+        root = work_tree._BRANCHES[tree.root_branch_id]
+        branch = work_tree.add_branch_to_tree(tree.tree_id, "Http leftover ready", "work", root.branch_id)
+        work_tree.set_branch_tools(branch.branch_id, allowed_tools=["read"], preferred_tool="read")
+        done = work_tree.add_task_to_branch(
+            branch.branch_id,
+            "Seeded complete stem",
+            meta={"expected_tool": "read", "allowed_tools": ["read"]},
+        )
+        work_tree.mark_task_complete(done.task_id)
+        self.assertFalse(
+            any(
+                task.status not in (work_tree.TaskStatus.COMPLETE, work_tree.TaskStatus.DROPPED)
+                for task in work_tree.list_branch_tasks(branch.branch_id)
+            )
+        )
+        visual = work_tree.get_visual_tree_data(tree.tree_id)
+        self.assertIsNotNone(visual)
+        visual["next_step"] = {
+            "branch_id": branch.branch_id,
+            "task_id": "",
+            "recommended_tool": "read",
+        }
+        pin = autonomy_maintenance._resolve_targeted_work_pin(
+            visual,
+            branch_target=branch.branch_id,
+        )
+        self.assertEqual(pin, {})
+        live = work_tree.get_branch(branch.branch_id)
+        self.assertIsNotNone(live)
+        self.assertNotEqual(str(live.resolution_state or "").strip().lower(), "resolved")
+        self.assertNotEqual(str(getattr(live.status, "value", live.status) or "").lower(), "archived")
+        self.assertNotEqual(str(getattr(work_tree.get_tree(tree.tree_id).status, "value", "") or "").lower(), "archived")
+        from services.solution_trail import JUDGMENT_REFUSED, branch_has_active_refuse
+
+        refuse = branch_has_active_refuse(live, has_open_stem=False)
+        self.assertIsNotNone(refuse)
+        self.assertEqual(str((refuse or {}).get("judgment") or ""), JUDGMENT_REFUSED)
+        self.assertEqual(str((refuse or {}).get("reason") or ""), "complete_without_open_stem")
+        still = work_tree.get_visual_tree_data(tree.tree_id)
+        node_ids = {item.get("id") for item in (still.get("nodes") or [])}
+        self.assertIn(branch.branch_id, node_ids)
+        node = next(item for item in (still.get("nodes") or []) if item.get("id") == branch.branch_id)
+        kind = node.get("branch_memory_kind") or {}
+        self.assertEqual(kind.get("kind"), JUDGMENT_REFUSED)
+        self.assertTrue(kind.get("controlling"))
+        self.assertFalse(any(str(item.get("branch_id")) == branch.branch_id for item in work_tree.list_autonomous_options(tree.tree_id)))
+
+    def test_non_execute_next_step_is_not_eligible_work(self):
+        payload = {
+            "status": "active",
+            "kind": "core_thinning",
+            "next_step": {
+                "action": "trail_suppressed",
+                "branch_id": "branch_mill",
+                "recommended_tool": "core_thinning",
+            },
+        }
+        self.assertFalse(autonomy_maintenance._active_work_tree_payload_eligible(payload))
+
+    def test_planner_executable_requires_live_pickup(self):
+        self._isolated_work_tree_db()
+        tree = work_tree.initialize_tree("Pickup truth")
+        root = work_tree._BRANCHES[tree.root_branch_id]
+        branch = work_tree.add_branch_to_tree(tree.tree_id, "Review wrapper shim mill", "core_thinning", root.branch_id)
+        work_tree.set_tree_execution_policy(tree.tree_id, allowed_tools=["core_thinning"], require_explicit_allow=True)
+        work_tree.set_branch_tools(branch.branch_id, allowed_tools=["core_thinning"], preferred_tool="core_thinning")
+        task = work_tree.add_task_to_branch(branch.branch_id, "Review wrapper shim mill")
+        live = {
+            "tree_id": tree.tree_id,
+            "title": tree.title,
+            "status": "active",
+            "kind": "core_thinning",
+            "next_step": {
+                "action": "execute",
+                "branch_id": branch.branch_id,
+                "task_id": task.task_id,
+                "recommended_tool": "core_thinning",
+            },
+        }
+        self.assertTrue(autonomy_maintenance._active_work_candidate_is_executable(live))
+        from services.observation_spine import apply_repeated_path_to_trail
+
+        apply_repeated_path_to_trail(
+            branch_id=branch.branch_id,
+            tool_name="core_thinning",
+            task_title=task.title,
+            input_ref="core_thinning|",
+        )
+        self.assertFalse(autonomy_maintenance._active_work_candidate_is_executable(live))
 
     def test_run_active_work_tree_cycle_keeps_task_open_after_tool_failed(self):
         self._isolated_work_tree_db()

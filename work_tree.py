@@ -38,6 +38,14 @@ _BRANCHES: dict[str, Branch] = {}
 _TASKS: dict[str, Task] = {}
 _SCORES: dict[str, float] = {}
 _STATE_LOCK = threading.RLock()
+_BRANCH_LOCKS: dict[str, threading.RLock] = {}  # Per-branch locks for meta effect application
+SIGNAL_STILL_PRESENT_REEXAMINE_TITLE = "signal still present after task completion — re-examine"
+_TASK_STEM_CLOSED = {TaskStatus.COMPLETE, TaskStatus.DROPPED}
+
+
+def _resolution_is_closed(branch: Branch) -> bool:
+    resolution = str(branch.resolution_state or "").strip().lower()
+    return resolution in {"resolved", "retired"}
 
 
 _BASE_DIR = Path(__file__).resolve().parent
@@ -834,10 +842,13 @@ def _branch_candidate_tool(branch: Branch, task: Task | None = None) -> str:
     if task is not None and isinstance(task.meta, dict):
         task_expected = str(task.meta.get("expected_tool") or "").strip()
     preferred = str(branch.preferred_tool or "").strip()
-    # Bound stem with a failed expected tool: stick with it so failure-aware
-    # skip / trail advance can run instead of inventing another tool.
-    if task_expected and branch.tool_state.get(task_expected) == ToolStatus.FAILED:
-        return task_expected
+    declared = _branch_declared_tools(branch)
+    # Stem interpretation first when the open task's tool is already declared.
+    if task_expected and task_expected in declared:
+        if branch.tool_state.get(task_expected, ToolStatus.READY) == ToolStatus.READY:
+            return task_expected
+        if branch.tool_state.get(task_expected) == ToolStatus.FAILED:
+            return task_expected
     if preferred and branch.tool_state.get(preferred, ToolStatus.READY) == ToolStatus.READY:
         return preferred
     declared = _branch_declared_tools(branch)
@@ -925,7 +936,7 @@ def _branch_ancestor_ids(branch_id: str) -> list[str]:
 
 def _refresh_branch_state(branch: Branch) -> bool:
     tasks = _branch_tasks(branch.branch_id)
-    open_tasks = [task for task in tasks if task.status not in (TaskStatus.COMPLETE, TaskStatus.DROPPED)]
+    open_tasks = [task for task in tasks if task.status not in _TASK_STEM_CLOSED]
     active_tasks = [task for task in open_tasks if task.status == TaskStatus.ACTIVE]
     blocked_tasks = [task for task in open_tasks if task.status == TaskStatus.BLOCKED]
     was_active = branch.status == BranchStatus.ACTIVE
@@ -950,7 +961,13 @@ def _refresh_branch_state(branch: Branch) -> bool:
     elif open_tasks and len(blocked_tasks) == len(open_tasks):
         branch.status = BranchStatus.BLOCKED
     elif branch.open_stem_count == 0:
-        branch.status = BranchStatus.COMPLETE
+        had_finished_work = any(task.status in _TASK_STEM_CLOSED for task in tasks)
+        if _resolution_is_closed(branch) or not had_finished_work:
+            branch.status = BranchStatus.COMPLETE
+        elif previous_status in {BranchStatus.COMPLETE, BranchStatus.ARCHIVED}:
+            branch.status = BranchStatus.READY
+        else:
+            branch.status = previous_status
     elif active_tasks or can_preserve_active:
         branch.status = BranchStatus.ACTIVE
     else:
@@ -1046,6 +1063,27 @@ def get_branch(branch_id: str) -> Branch | None:
     return _BRANCHES.get(branch_id)
 
 
+@contextmanager
+def _acquire_branch_lock(branch_id: str):
+    """Context manager for per-branch locking when applying meta effects.
+    
+    Prevents race conditions when multiple --once cycles overlap and both try to
+    mutate a branch's source_payload (e.g., applying observation spine effects).
+    """
+    clean_id = str(branch_id or "").strip()
+    if not clean_id:
+        yield
+        return
+    
+    with _STATE_LOCK:
+        if clean_id not in _BRANCH_LOCKS:
+            _BRANCH_LOCKS[clean_id] = threading.RLock()
+        lock = _BRANCH_LOCKS[clean_id]
+    
+    with lock:
+        yield
+
+
 def list_tree_branches(tree_id: str) -> list[Branch]:
     return _tree_branches(tree_id)
 
@@ -1109,6 +1147,19 @@ def record_task_evidence(
             ),
         )
         _save_branch_record(connection, branch)
+    try:
+        invalid, reason = invalid_tool_result(tool_name, result)
+        _observe_boundary(
+            source="evidence",
+            operation="accept" if not invalid else "reject",
+            subject=str(tool_name or "").strip(),
+            input_ref=str(branch.branch_id),
+            output_ref=evidence_id,
+            outcome="accepted" if not invalid else "rejected",
+            reason_code=reason or None,
+        )
+    except Exception:
+        pass
     # First tool evidence is the durable work-start on the finding.
     try:
         payload = dict(branch.source_payload or {}) if isinstance(branch.source_payload, dict) else {}
@@ -1847,12 +1898,113 @@ def mark_task_complete(task_id: str) -> None:
     _refresh_tree_state(branch.tree_id, persist=True)
 
 
+def mark_task_attempted(
+    task_id: str,
+    *,
+    tool_name: str = "",
+    tool_result: object = None,
+    evidence_id: str = "",
+) -> None:
+    """Record that a tool ran without closing the finding. Not a success."""
+    task = _TASKS.get(task_id)
+    if task is None:
+        raise ValueError(f"Task {task_id} not found")
+    if task.status in (TaskStatus.COMPLETE, TaskStatus.DROPPED):
+        return
+    now = _now()
+    task.status = TaskStatus.ATTEMPTED
+    task.updated_at = now
+    meta = dict(task.meta or {}) if isinstance(task.meta, dict) else {}
+    meta["last_attempt"] = {
+        "at": _iso_ts(now),
+        "tool": str(tool_name or "").strip(),
+        "result": _compact_tool_result_text(tool_result, max_chars=2000),
+        "evidence_id": str(evidence_id or "").strip(),
+        "gap_closed": False,
+    }
+    task.meta = meta
+    branch = _BRANCHES.get(task.branch_id)
+    if branch is None:
+        return
+    branch.updated_at = now
+    try:
+        stamp_branch_progress(branch.branch_id, persist=False)
+    except Exception:
+        pass
+    _refresh_tree_state(branch.tree_id, persist=True)
+
+
+def _task_finding_is_satisfied(task: Task) -> bool:
+    from services.recurring_finding_lifecycle import KEY_SATISFACTION_STATUS, STATUS_SATISFIED, read_task_state
+
+    state = read_task_state(getattr(task, "meta", {}) or {})
+    return str(state.get(KEY_SATISFACTION_STATUS) or "").strip().lower() == STATUS_SATISFIED
+
+
+def _close_branch_finding_from_task(branch: Branch, task: Task) -> None:
+    from services.recurring_finding_lifecycle import KEY_COMPLETION_ACTION, read_task_state, stamp_branch_satisfied
+
+    if _resolution_is_closed(branch):
+        return
+    state = read_task_state(getattr(task, "meta", {}) or {})
+    branch.resolution_state = "resolved"
+    try:
+        branch.source_payload = stamp_branch_satisfied(
+            dict(branch.source_payload or {}) if isinstance(branch.source_payload, dict) else {},
+            completion_action=str(state.get(KEY_COMPLETION_ACTION) or ""),
+        )
+    except Exception:
+        pass
+
+
+def _executed_stem_is_done(task: Task, branch: Branch, tool_result: object) -> bool:
+    if _task_finding_is_satisfied(task) or _resolution_is_closed(branch):
+        return True
+    if _is_scoped_stabilization_task(task) and isinstance(tool_result, dict) and bool(tool_result.get("verified")):
+        return True
+    return False
+
+
+def _finalize_executed_task(
+    task: Task,
+    branch: Branch,
+    *,
+    tool_name: str,
+    tool_result: object,
+    evidence_id: str = "",
+) -> str:
+    """Close the stem only when the finding (or a verified scoped step) is done. Otherwise keep ATTEMPTED."""
+    if _task_finding_is_satisfied(task):
+        _close_branch_finding_from_task(branch, task)
+    if _executed_stem_is_done(task, branch, tool_result):
+        mark_task_complete(task.task_id)
+        close_state = "complete"
+    else:
+        mark_task_attempted(
+            task.task_id,
+            tool_name=tool_name,
+            tool_result=tool_result,
+            evidence_id=evidence_id,
+        )
+        close_state = "attempted"
+    _observe_boundary(
+        source="progress",
+        operation="commit",
+        subject=str(branch.branch_id),
+        input_ref=str(tool_name or "").strip() or None,
+        output_ref=str(evidence_id or "").strip() or None,
+        outcome=close_state,
+        reason_code=str(branch.resolution_state or "").strip() or None,
+    )
+    return close_state
+
+
 def mark_task_dropped(task_id: str, reason: str = "") -> None:
     task = _TASKS.get(task_id)
     if task is None:
         raise ValueError(f"Task {task_id} not found")
 
-    if task.status == TaskStatus.DROPPED:
+    if task.status in (TaskStatus.COMPLETE, TaskStatus.DROPPED):
         return
 
     now = _now()
@@ -2079,6 +2231,13 @@ def is_tree_complete(tree_id: str) -> bool:
             return False
         if branch.open_stem_count > 0:
             return False
+        if not _resolution_is_closed(branch):
+            had_work = any(
+                task.status in {TaskStatus.COMPLETE, TaskStatus.DROPPED, TaskStatus.ATTEMPTED}
+                for task in _branch_tasks(branch.branch_id)
+            )
+            if had_work:
+                return False
     return True
 
 
@@ -2183,14 +2342,13 @@ def is_tooling_ready(branch_id: str) -> bool:
 
 def _next_open_task(branch_id: str) -> Task | None:
     tasks = _branch_tasks(branch_id)
-    return next(
-        (
-            task
-            for task in tasks
-            if task.status not in (TaskStatus.COMPLETE, TaskStatus.DROPPED, TaskStatus.BLOCKED)
-        ),
-        None,
-    )
+    for task in tasks:
+        if task.status in {TaskStatus.OPEN, TaskStatus.ACTIVE}:
+            return task
+    for task in tasks:
+        if task.status == TaskStatus.ATTEMPTED:
+            return task
+    return None
 
 
 def _current_visible_task(branch_id: str) -> Task | None:
@@ -2201,7 +2359,7 @@ def _current_visible_task(branch_id: str) -> Task | None:
         (
             task
             for task in _branch_tasks(branch_id)
-            if task.status not in (TaskStatus.COMPLETE, TaskStatus.DROPPED)
+            if task.status not in _TASK_STEM_CLOSED and task.status != TaskStatus.ATTEMPTED
         ),
         None,
     )
@@ -2471,8 +2629,26 @@ def _rebalance_branch_tool_for_task(branch: Branch, task: Task | None) -> str:
     return ""
 
 
+def _drop_minted_reexamine_stems(branch_id: str) -> int:
+    """Leftover re-examine was a minted cover. It is not the next real stem."""
+    dropped = 0
+    for task in list(_branch_tasks(str(branch_id or "").strip())):
+        title = str(task.title or "").strip()
+        if title != SIGNAL_STILL_PRESENT_REEXAMINE_TITLE:
+            continue
+        if task.status in _TASK_STEM_CLOSED:
+            continue
+        mark_task_dropped(task.task_id, reason="minted_reexamine_hides_letter")
+        dropped += 1
+    return dropped
+
+
 def _align_branch_to_solution_trail(branch_id: str) -> dict[str, object]:
     """Trail next-move: skip sequence stems the journal already satisfied."""
+    try:
+        _drop_minted_reexamine_stems(branch_id)
+    except Exception:
+        pass
     try:
         from services.solution_trail import align_branch_open_stem_to_trail
 
@@ -2481,11 +2657,312 @@ def _align_branch_to_solution_trail(branch_id: str) -> dict[str, object]:
         return {"ok": False, "reason": f"trail_align_failed:{str(exc)[:160]}"}
 
 
+def _follow_solution_trail_after_open_gap(branch: Branch) -> dict[str, object]:
+    """After a miss, follow the journal's next marker on this branch. No minted task."""
+    from services.solution_trail import preferred_tool_from_progress
+
+    payload = dict(branch.source_payload or {}) if isinstance(branch.source_payload, dict) else {}
+    progress = _branch_progress_payload(branch) or {}
+    sequence_tools: list[str] = []
+    for item in list(payload.get("task_sequence") or []):
+        if not isinstance(item, dict):
+            continue
+        for tool in list(item.get("allowed_tools") or []):
+            name = str(tool or "").strip()
+            if name and name not in sequence_tools:
+                sequence_tools.append(name)
+        preferred = str(item.get("preferred_tool") or "").strip()
+        if preferred and preferred not in sequence_tools:
+            sequence_tools.append(preferred)
+    allowed = [str(tool or "").strip() for tool in list(branch.allowed_tools or []) if str(tool or "").strip()]
+    next_tool = preferred_tool_from_progress(
+        progress,
+        allowed_tools=sequence_tools or allowed or None,
+        work_class=str(branch.work_class or ""),
+        source_type=str(branch.source_type or ""),
+    )
+    if next_tool:
+        try:
+            tools = list(dict.fromkeys(([next_tool] + sequence_tools + allowed)))
+            set_branch_tools(branch.branch_id, allowed_tools=tools or [next_tool], preferred_tool=next_tool)
+        except Exception:
+            pass
+    trail = _align_branch_to_solution_trail(branch.branch_id)
+    trail["preferred_tool"] = next_tool or str(trail.get("preferred_tool") or "")
+    return trail
+
+
+def _controlling_input_ref(branch: Branch, tool_name: str) -> str:
+    progress = _branch_progress_payload(branch) or {}
+    held = []
+    for row in list(progress.get("markers") or []):
+        if isinstance(row, dict) and row.get("counts"):
+            mid = str(row.get("id") or row.get("marker_id") or "").strip()
+            if mid:
+                held.append(mid)
+    held.sort()
+    payload = dict(branch.source_payload or {}) if isinstance(branch.source_payload, dict) else {}
+    package = "|".join(
+        str(payload.get(key) or "").strip()
+        for key in ("latest_artifact_path", "latest_version", "latest_verified_at")
+        if str(payload.get(key) or "").strip()
+    )
+    return "|".join(part for part in (str(tool_name or "").strip().lower(), ",".join(held), package) if part)[:160]
+
+
+def _maybe_revise_self_prediction(branch: Branch, tool_name: str, task: Task | None, input_ref: str) -> None:
+    try:
+        from services.observation_spine import (
+            SELF_PREDICTION_MISS,
+            apply_self_prediction_miss_to_trail,
+            meta_check,
+        )
+
+        finding = meta_check()
+        if finding.finding_code != SELF_PREDICTION_MISS:
+            return
+        apply_self_prediction_miss_to_trail(
+            branch_id=str(branch.branch_id),
+            tool_name=str(tool_name or ""),
+            task_title=str(getattr(task, "title", "") or ""),
+            input_ref=input_ref or str(branch.branch_id),
+            predicted_subject=str(finding.subject or ""),
+            predicted_ref=finding.input_ref,
+        )
+    except Exception:
+        pass
+
+
+def _maybe_stop_repeated_path(branch: Branch, tool_name: str, task: Task | None, input_ref: str) -> None:
+    try:
+        from services.observation_spine import (
+            REPEATED_UNCHANGED_PATH,
+            apply_repeated_path_to_trail,
+            meta_check,
+        )
+
+        finding = meta_check()
+        if finding.finding_code != REPEATED_UNCHANGED_PATH:
+            return
+        if str(finding.subject or "") != str(tool_name or "").strip():
+            return
+        apply_repeated_path_to_trail(
+            branch_id=str(branch.branch_id),
+            tool_name=str(tool_name or ""),
+            task_title=str(getattr(task, "title", "") or ""),
+            input_ref=input_ref or finding.input_ref,
+        )
+    except Exception:
+        pass
+
+
+_SIP_SKIP_TOKENS = {
+    "skip_until_world_changes",
+    "stop_until_ref_changes",
+    "treat_as_uninstalled_history",
+    "historical_identity",
+}
+
+
+def _mill_sip_before_judgment_tool(branch: Branch, tool_name: str) -> dict:
+    """Give SOCK the mill signal before source_root_judgment. Trail still owns remint."""
+    if str(tool_name or "").strip() != "source_root_judgment":
+        return {}
+    try:
+        from services.sock_service import choose_mill_capacity, run_with_mill_capacity
+    except Exception:
+        return {}
+    signal = _mill_judgment_signal_payload(branch)
+    try:
+        lease = choose_mill_capacity(signal)
+    except Exception:
+        return {"mill_judgment_signal": signal}
+    rec = {
+        "mill_judgment_signal": signal,
+        "sip_model": str(lease.model or ""),
+        "sip_temporary": bool(lease.temporary),
+        "sip_reason": str(lease.reason or ""),
+    }
+    if not lease.temporary:
+        return rec
+
+    def _invoke(model: str) -> str:
+        import json
+        import urllib.request
+
+        prompt = (
+            f"Mill class={signal.get('class') or ''} pressure={signal.get('pressure_event') or ''}. "
+            "Choose exactly one: remint_same | skip_until_world_changes | "
+            "treat_as_uninstalled_history | historical_identity | invoke_again"
+        )
+        payload = {
+            "model": model,
+            "messages": [{"role": "user", "content": prompt}],
+            "stream": False,
+            "think": False,
+            "options": {"num_ctx": 8192, "temperature": 0, "num_predict": 24},
+        }
+        req = urllib.request.Request(
+            "http://127.0.0.1:11434/api/chat",
+            data=json.dumps(payload).encode(),
+            headers={"Content-Type": "application/json"},
+        )
+        with urllib.request.urlopen(req, timeout=60) as resp:
+            body = json.loads(resp.read().decode())
+        msg = body.get("message") if isinstance(body.get("message"), dict) else {}
+        return str(msg.get("content") or "").strip()
+
+    try:
+        sip_lease, content = run_with_mill_capacity(signal, _invoke)
+        text = " ".join(str(content or "").lower().replace("*", " ").replace("#", " ").split())
+        rec["sip_model"] = str(sip_lease.ran_model or sip_lease.model or "")
+        rec["sip_choice"] = str(content or "")[:80]
+        rec["skip_tool"] = any(token in text for token in _SIP_SKIP_TOKENS)
+    except Exception as exc:
+        rec["sip_error"] = str(exc)[:160]
+    return rec
+
+
+def _observe_boundary(**kwargs) -> None:
+    try:
+        from services.observation_spine import observe_quietly
+
+        observe_quietly(**kwargs)
+    except Exception:
+        pass
+    try:
+        from services.cognitive_workspace import record_event
+
+        record_event(
+            event_type=str(kwargs.get("operation") or "boundary_observed"),
+            subject=str(kwargs.get("subject") or "work_tree"),
+            content={
+                "input_ref": kwargs.get("input_ref"),
+                "output_ref": kwargs.get("output_ref"),
+                "outcome": kwargs.get("outcome"),
+                "reason_code": kwargs.get("reason_code"),
+            },
+            origin=str(kwargs.get("source") or "work_tree"),
+        )
+    except Exception:
+        pass
+
+
+def _trail_suppresses_recommended_tool(branch: Branch, task: Task | None, tool_name: str) -> bool:
+    tool = str(tool_name or "").strip()
+    if not tool:
+        return False
+    try:
+        from services.solution_trail import action_suppressed_by_trail
+
+        payload = dict(branch.source_payload or {}) if isinstance(branch.source_payload, dict) else {}
+        return (
+            action_suppressed_by_trail(
+                tool_name=tool,
+                task_title=str(getattr(task, "title", "") or ""),
+                judgments=list(payload.get("attempt_judgments") or []),
+                progress=_branch_progress_payload(branch) or {},
+                branch_payload=payload,
+                has_open_stem=_next_open_task(branch.branch_id) is not None,
+                active_source_keys=_tree_last_active_source_keys(branch.tree_id),
+                source_key=str(getattr(branch, "source_key", "") or payload.get("source_key") or ""),
+            )
+            is not None
+        )
+    except Exception:
+        return False
+
+
+def _tree_last_active_source_keys(tree_id: str) -> set[str]:
+    tree = _TREES.get(tree_id)
+    meta = dict(tree.meta or {}) if tree is not None and isinstance(tree.meta, dict) else {}
+    raw = meta.get("last_active_source_keys")
+    if not isinstance(raw, list):
+        return set()
+    return {str(item or "").strip() for item in raw if str(item or "").strip()}
+
+
+def _branch_memory_kind_payload(
+    branch: Branch,
+    *,
+    has_open_stem: bool | None = None,
+    progress: dict | None = None,
+    active_source_keys: set[str] | None = None,
+) -> dict:
+    try:
+        from services.solution_trail import derive_branch_memory_kind
+
+        stem = bool(has_open_stem) if has_open_stem is not None else _next_open_task(branch.branch_id) is not None
+        keys = active_source_keys if active_source_keys is not None else _tree_last_active_source_keys(branch.tree_id)
+        return derive_branch_memory_kind(
+            branch,
+            has_open_stem=stem,
+            active_source_keys=keys,
+            progress=progress if isinstance(progress, dict) else {},
+        )
+    except Exception:
+        return {
+            "kind": "",
+            "controlling": False,
+            "reason": "",
+            "retry_when": [],
+            "pressure": {},
+            "source": "",
+        }
+
+
+def _mill_judgment_signal_payload(
+    branch: Branch,
+    *,
+    has_open_stem: bool | None = None,
+    progress: dict | None = None,
+    active_source_keys: set[str] | None = None,
+    kind: dict | None = None,
+) -> dict:
+    try:
+        from services.solution_trail import mill_judgment_signal
+
+        payload = kind if isinstance(kind, dict) else _branch_memory_kind_payload(
+            branch,
+            has_open_stem=has_open_stem,
+            progress=progress,
+            active_source_keys=active_source_keys,
+        )
+        return mill_judgment_signal(payload)
+    except Exception:
+        return {
+            "class": "",
+            "controlling": False,
+            "pressure_event": "",
+            "invoke": True,
+            "reason": "",
+            "source": "",
+        }
+
+
+def _branch_has_active_refuse(branch: Branch) -> bool:
+    memory = _branch_memory_kind_payload(branch)
+    return str(memory.get("kind") or "") == "refused" and bool(memory.get("controlling"))
+
+
 def list_autonomous_options(tree_id: str) -> list[dict]:
     tree = get_tree(tree_id)
     if tree is None:
         return []
     options: list[dict] = []
+    meta_context: dict[str, object] = {}
+    try:
+        from services.observation_spine import build_observation_spine_payload
+
+        spine = build_observation_spine_payload()
+        meta_context = {
+            "finding_code": str(spine.get("finding_code") or ""),
+            "effect": str(spine.get("effect") or ""),
+            "self_questions": list(spine.get("self_questions") or []),
+            "self_model": dict(spine.get("self_model") or {}) if isinstance(spine.get("self_model"), dict) else {},
+        }
+    except Exception:
+        meta_context = {}
     branches = list(_tree_branches(tree_id))
     branches.sort(
         key=lambda branch: (
@@ -2497,6 +2974,8 @@ def list_autonomous_options(tree_id: str) -> list[dict]:
     )
     for branch in branches:
         _align_branch_to_solution_trail(branch.branch_id)
+        if _branch_has_active_refuse(branch):
+            continue
         if _next_open_task(branch.branch_id) is None:
             continue
         if not is_branch_ready(branch.branch_id):
@@ -2507,10 +2986,17 @@ def list_autonomous_options(tree_id: str) -> list[dict]:
         recommended_tool = _branch_candidate_tool(branch, current_task)
         if not recommended_tool:
             continue
+        if _trail_suppresses_recommended_tool(branch, current_task, recommended_tool):
+            continue
         allowed, _ = _tool_governance_status(tree, branch, recommended_tool)
         if not allowed:
             continue
         progress = _task_progress_payload(branch, current_task)
+        kind = _branch_memory_kind_payload(
+            branch,
+            has_open_stem=True,
+            progress=progress if isinstance(progress, dict) else {},
+        )
         options.append(
             {
                 "branch_id": branch.branch_id,
@@ -2521,28 +3007,64 @@ def list_autonomous_options(tree_id: str) -> list[dict]:
                 "required_tools": list(branch.required_tools),
                 "allowed_tools": list(branch.allowed_tools),
                 "progress": progress,
+                "meta_context": meta_context,
+                "branch_memory_kind": kind,
+                "mill_judgment_signal": _mill_judgment_signal_payload(branch, kind=kind),
             }
         )
-    options.sort(
-        key=lambda opt: (
-            {
-                "moving": 0,
-                "not_started": 1,
-                "stalled": 3,
-                "blocked": 4,
-                "done": 5,
-            }.get(str(((opt.get("progress") or {}).get("motion") or "not_started")).lower(), 2),
-            -int(((opt.get("progress") or {}).get("percent") or 0))
-            if str(((opt.get("progress") or {}).get("motion") or "")).lower() == "moving"
-            else int(((opt.get("progress") or {}).get("percent") or 0)),
-            str(opt.get("branch_id") or ""),
+        _observe_boundary(
+            source="pickup",
+            operation="offer",
+            subject=recommended_tool,
+            input_ref=branch.branch_id,
+            outcome="offered",
+            reason_code=str((progress or {}).get("motion") or "") or None,
         )
-    )
+    try:
+        from services.observation_spine import COMPETING_INTERPRETATIONS, meta_check
+
+        finding = meta_check()
+        competing = finding.finding_code == COMPETING_INTERPRETATIONS
+    except Exception:
+        competing = False
+    options.sort(key=_pickup_option_rank)
+    if competing and options:
+        _observe_boundary(
+            source="pickup",
+            operation="select_next_action",
+            subject=str(options[0].get("recommended_tool") or ""),
+            input_ref=str(options[0].get("branch_id") or "") or None,
+            outcome="selected",
+            reason_code="competing_interpretations",
+        )
     return options
 
 
+def _pickup_option_rank(opt: dict) -> tuple:
+    """Before collapse: an open high-% finding beats a sibling that has not started."""
+    progress = opt.get("progress") if isinstance(opt.get("progress"), dict) else {}
+    motion = str(progress.get("motion") or "not_started").strip().lower()
+    try:
+        percent = int(progress.get("percent") or 0)
+    except Exception:
+        percent = 0
+    solution = str(progress.get("solution_status") or "").strip().lower()
+    finishing = solution in {"", "open"} and percent >= 75
+    if finishing:
+        return (0, -percent, str(opt.get("branch_id") or ""))
+    motion_rank = {
+        "moving": 1,
+        "not_started": 2,
+        "stalled": 3,
+        "blocked": 4,
+        "done": 5,
+    }.get(motion, 2)
+    percent_key = -percent if motion == "moving" else percent
+    return (motion_rank, percent_key, str(opt.get("branch_id") or ""))
+
+
 def _progress_decision_rank(branch: Branch) -> tuple:
-    """Prefer moving near-complete work; park stalled/blocked later."""
+    """Prefer finishing an open high-% finding before starting a sibling."""
     task = _next_open_task(branch.branch_id)
     progress = _task_progress_payload(branch, task) if task is not None else None
     motion = str((progress or {}).get("motion") or "not_started").strip().lower()
@@ -2550,19 +3072,24 @@ def _progress_decision_rank(branch: Branch) -> tuple:
         percent = int((progress or {}).get("percent") or 0)
     except Exception:
         percent = 0
+    solution = str((progress or {}).get("solution_status") or "").strip().lower()
     tool_name = _branch_candidate_tool(branch, task)
     tool_status = branch.tool_state.get(tool_name, ToolStatus.READY) if tool_name else ToolStatus.READY
     if tool_status == ToolStatus.FAILED:
         motion = "stalled"
-    motion_rank = {
-        "moving": 0,
-        "not_started": 1,
-        "stalled": 3,
-        "blocked": 4,
-        "done": 5,
-    }.get(motion, 2)
-    # Among moving work, finish higher-% first (less thrash).
-    percent_key = -percent if motion == "moving" else percent
+    finishing = solution in {"", "open"} and percent >= 75
+    if finishing:
+        motion_rank = 0
+        percent_key = -percent
+    else:
+        motion_rank = {
+            "moving": 1,
+            "not_started": 2,
+            "stalled": 3,
+            "blocked": 4,
+            "done": 5,
+        }.get(motion, 2)
+        percent_key = -percent if motion == "moving" else percent
     failed_rank = 1 if tool_status == ToolStatus.FAILED else 0
     return (failed_rank, motion_rank, percent_key, branch.depth, -float(branch.score or 0), branch.created_at, branch.branch_id)
 
@@ -2606,6 +3133,24 @@ def _preview_next_autonomous_step(tree_id: str) -> dict | None:
     if tree is None:
         return None
 
+    options = list_autonomous_options(tree_id)
+    if options:
+        opt = options[0]
+        return {
+            "action": "execute",
+            "branch_id": str(opt.get("branch_id") or ""),
+            "branch_title": str(opt.get("branch_title") or ""),
+            "task_id": str(opt.get("task_id") or ""),
+            "task_title": str(opt.get("task_title") or ""),
+            "recommended_tool": str(opt.get("recommended_tool") or ""),
+            "required_tools": list(opt.get("required_tools") or []),
+            "allowed_tools": list(opt.get("allowed_tools") or []),
+            "progress": dict(opt.get("progress") or {}) if isinstance(opt.get("progress"), dict) else {},
+            "meta_context": dict(opt.get("meta_context") or {}) if isinstance(opt.get("meta_context"), dict) else {},
+            "branch_memory_kind": dict(opt.get("branch_memory_kind") or {}) if isinstance(opt.get("branch_memory_kind"), dict) else {},
+            "mill_judgment_signal": dict(opt.get("mill_judgment_signal") or {}) if isinstance(opt.get("mill_judgment_signal"), dict) else {},
+        }
+
     branch = _preview_next_open_branch(tree_id)
     if branch is None:
         return None
@@ -2648,7 +3193,17 @@ def _preview_next_autonomous_step(tree_id: str) -> dict | None:
             "tree_allowed_tools": _tree_allowed_tools(tree),
         }
 
+    if _trail_suppresses_recommended_tool(branch, current_task, recommended_tool):
+        # Not a runnable next step. Advertising this branch as next_step is how
+        # planner and pickup diverged into an invalid_decision mill.
+        return None
+
     progress = _task_progress_payload(branch, current_task)
+    kind = _branch_memory_kind_payload(
+        branch,
+        has_open_stem=True,
+        progress=progress if isinstance(progress, dict) else {},
+    )
     step = {
         "action": "execute",
         "branch_id": branch.branch_id,
@@ -2660,6 +3215,8 @@ def _preview_next_autonomous_step(tree_id: str) -> dict | None:
         "allowed_tools": allowed_tools,
         "task_target": _scoped_task_target(current_task) if current_task is not None else {},
         "progress": progress,
+        "branch_memory_kind": kind,
+        "mill_judgment_signal": _mill_judgment_signal_payload(branch, kind=kind),
     }
     if trail_align:
         step["solution_trail"] = {
@@ -2745,6 +3302,16 @@ def next_autonomous_step(tree_id: str, decide_next_step_fn: DecisionCallback | N
             allowed, reason = _tool_governance_status(tree, branch, recommended_tool)
             if not allowed:
                 return _governance_payload(tree, branch, recommended_tool, reason)
+            if _trail_suppresses_recommended_tool(branch, current_task, recommended_tool):
+                return {
+                    "action": "trail_suppressed",
+                    "branch_id": branch.branch_id,
+                    "branch_title": branch.title,
+                    "task_id": str(current_task.task_id) if current_task is not None else "",
+                    "task_title": str(current_task.title) if current_task is not None else "",
+                    "recommended_tool": recommended_tool,
+                    "reason": "repeated_unchanged_path",
+                }
             return {
                 "action": "execute",
                 "branch_id": branch.branch_id,
@@ -2767,6 +3334,16 @@ def next_autonomous_step(tree_id: str, decide_next_step_fn: DecisionCallback | N
     allowed, reason = _tool_governance_status(tree, branch, recommended_tool)
     if not allowed:
         return _governance_payload(tree, branch, recommended_tool, reason)
+    if _trail_suppresses_recommended_tool(branch, current_task, recommended_tool):
+        return {
+            "action": "trail_suppressed",
+            "branch_id": branch.branch_id,
+            "branch_title": branch.title,
+            "task_id": str(current_task.task_id) if current_task is not None else "",
+            "task_title": str(current_task.title) if current_task is not None else "",
+            "recommended_tool": recommended_tool,
+            "reason": "repeated_unchanged_path",
+        }
     return {
         "action": "execute",
         "branch_id": branch.branch_id,
@@ -2824,6 +3401,45 @@ def execute_autonomous_step(
                 "task_target": _scoped_task_target(task),
             }
 
+    sip = _mill_sip_before_judgment_tool(branch, tool_name)
+    if sip.get("skip_tool"):
+        input_ref = _controlling_input_ref(branch, tool_name)
+        try:
+            from services.solution_trail import record_world_hold_on_branch
+
+            record_world_hold_on_branch(
+                branch_id,
+                tool_name=tool_name,
+                task_title=str(task.title or ""),
+                reason="skip_until_world_changes",
+                input_ref=input_ref,
+            )
+        except Exception:
+            pass
+        try:
+            mark_task_attempted(task.task_id, tool_name=tool_name, tool_result=sip)
+        except Exception:
+            pass
+        _observe_boundary(
+            source="mill",
+            operation="invoke",
+            subject=tool_name,
+            input_ref=input_ref or branch_id,
+            outcome="skipped",
+            reason_code="mill_sip_skip",
+        )
+        return {
+            "action": "skipped_world",
+            "branch_id": branch_id,
+            "branch_title": branch.title,
+            "task_id": task.task_id,
+            "task_title": task.title,
+            "tool": tool_name,
+            "reason": "mill_sip_skip",
+            **{k: sip.get(k) for k in ("sip_model", "sip_choice", "sip_reason") if sip.get(k) is not None},
+            "mill_judgment_signal": _mill_judgment_signal_payload(branch, has_open_stem=True),
+        }
+
     now = _now()
     task.status = TaskStatus.ACTIVE
     task.updated_at = now
@@ -2849,19 +3465,47 @@ def execute_autonomous_step(
         }
 
     result = execute_planned_action_fn(tool_name, tool_args)
+    input_ref = _controlling_input_ref(branch, tool_name)
+    try:
+        payload = dict(branch.source_payload or {}) if isinstance(branch.source_payload, dict) else {}
+        if input_ref:
+            payload["observation_input_ref"] = input_ref
+            branch.source_payload = payload
+    except Exception:
+        pass
+    invoke_outcome = "success"
+    invoke_reason = ""
+    if isinstance(result, dict):
+        if result.get("blocked"):
+            invoke_outcome = "blocked"
+            invoke_reason = str(result.get("reason") or result.get("action") or "")
+        elif result.get("ok") is False:
+            invoke_outcome = "failed"
+            invoke_reason = str(result.get("reason") or result.get("error") or "")
+    _observe_boundary(
+        source="executor",
+        operation="invoke",
+        subject=tool_name,
+        input_ref=input_ref or branch_id,
+        outcome=invoke_outcome,
+        reason_code=invoke_reason or None,
+    )
+    _maybe_revise_self_prediction(branch, tool_name, task, input_ref or branch_id)
+    _maybe_stop_repeated_path(branch, tool_name, task, input_ref or branch_id)
 
     if tool_name == "core_thinning" and isinstance(result, dict):
         try:
-            from services.core_thinning import is_http_extract_stage_block, stamp_core_thinning_task_satisfaction
+            from services.core_thinning import is_http_extract_stage_block
 
             if is_http_extract_stage_block(result):
-                stamp_core_thinning_task_satisfaction(task, result)
-                mark_task_complete(task.task_id)
+                blocked_reason = str(result.get("reason") or "http_extraction_not_implemented")
+                mark_task_blocked(task.task_id, reason=blocked_reason)
                 branch.tool_state[tool_name] = ToolStatus.READY
                 branch.updated_at = _now()
                 _persist_tree_state(tree_id)
                 return {
-                    "action": "executed",
+                    "action": "blocked",
+                    "reason": blocked_reason,
                     "branch_id": branch_id,
                     "branch_title": branch.title,
                     "task_id": task.task_id,
@@ -3023,7 +3667,13 @@ def execute_autonomous_step(
             stamp_core_thinning_task_satisfaction(task, result)
         except Exception:
             pass
-    mark_task_complete(task.task_id)
+    task_close = _finalize_executed_task(
+        task,
+        branch,
+        tool_name=tool_name,
+        tool_result=result,
+        evidence_id=str(evidence_id or ""),
+    )
     sequence_advance: dict[str, object] = {}
     try:
         from services.work_tree_signal_ingestion import advance_branch_sequence_after_task
@@ -3031,11 +3681,13 @@ def execute_autonomous_step(
         sequence_advance = dict(advance_branch_sequence_after_task(branch_id) or {})
     except Exception as exc:
         sequence_advance = {"ok": False, "reason": f"advance_failed:{str(exc)[:160]}"}
-    # Re-align so premature/redundant tools do not immediately re-open.
-    try:
-        _align_branch_to_solution_trail(branch_id)
-    except Exception:
-        pass
+    if task_close == "complete":
+        try:
+            _align_branch_to_solution_trail(branch_id)
+        except Exception:
+            pass
+    elif not sequence_advance.get("ok"):
+        sequence_advance = _follow_solution_trail_after_open_gap(branch)
     payload = {
         "action": "executed",
         "branch_id": branch_id,
@@ -3046,12 +3698,18 @@ def execute_autonomous_step(
         "tool_args": tool_args,
         "tool_result": result,
         "evidence_id": evidence_id,
+        "task_close": task_close,
         "task_target": _scoped_task_target(task),
     }
     if sequence_advance:
         payload["sequence_advance"] = sequence_advance
     if attempt_judgment:
         payload["attempt_judgment"] = attempt_judgment
+    payload["mill_judgment_signal"] = _mill_judgment_signal_payload(
+        branch,
+        has_open_stem=_next_open_task(branch_id) is not None,
+        progress=_branch_progress_payload(branch),
+    )
     return payload
 
 
@@ -3099,6 +3757,7 @@ def _get_visual_tree_data_locked(tree_id: str) -> dict | None:
     dependency_edges: list[dict] = []
     nodes: list[dict] = []
     task_counts: dict[str, int] = {status.value: 0 for status in TaskStatus}
+    active_source_keys = _tree_last_active_source_keys(tree_id)
     for branch in branches:
         branch_tasks = [t for t in tasks_snapshot if t.branch_id == branch.branch_id]
         tasks_open = sum(1 for t in branch_tasks if t.status not in (TaskStatus.COMPLETE, TaskStatus.DROPPED))
@@ -3190,6 +3849,12 @@ def _get_visual_tree_data_locked(tree_id: str) -> dict | None:
             "progress": solution_progress,
             "solution_progress": solution_progress,
             "open_tasks": _open_tasks_progress_payload(branch, branch_tasks) if tasks_open > 0 else [],
+            "branch_memory_kind": _branch_memory_kind_payload(
+                branch,
+                has_open_stem=tasks_open > 0,
+                progress=solution_progress if isinstance(solution_progress, dict) else {},
+                active_source_keys=active_source_keys,
+            ),
         })
         for dep_id in branch.depends_on:
             dependency_edges.append({"from": dep_id, "to": branch.branch_id})
@@ -3280,6 +3945,7 @@ def inspect_tree(tree_id: str) -> dict | None:
                 "status": current_task.status.value,
                 "meta": dict(current_task.meta or {}),
             } if current_task is not None else None,
+            "branch_memory_kind": _branch_memory_kind_payload(branch),
         }
 
     active_branch = next((branch for branch in branches if branch.status == BranchStatus.ACTIVE), None)

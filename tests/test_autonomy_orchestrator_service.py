@@ -609,7 +609,7 @@ class TestAutonomyOrchestratorService(unittest.TestCase):
         )
 
         self.assertEqual(packet["decision_type"], SPEC_DECISION_DEFER)
-        self.assertIn("operator_hold_pending", packet["refusal_reasons"])
+        self.assertIn("no_legal_action", packet["refusal_reasons"])
         self.assertNotIn("operator_ack_required", packet["refusal_reasons"])
         self.assertEqual(packet["candidates_considered"], [])
 
@@ -630,7 +630,7 @@ class TestAutonomyOrchestratorService(unittest.TestCase):
         )
 
         self.assertEqual(packet["decision_type"], SPEC_DECISION_DEFER)
-        self.assertIn("work_tree_observing_root_truth", packet["refusal_reasons"])
+        self.assertIn("no_legal_action", packet["refusal_reasons"])
         self.assertNotIn("operator_ack_required", packet["refusal_reasons"])
         self.assertEqual(packet["candidates_considered"], [])
 
@@ -759,15 +759,78 @@ class TestAutonomyOrchestratorService(unittest.TestCase):
             )
         )
 
-        self.assertEqual(packet["decision_type"], SPEC_DECISION_DEFER)
-        self.assertIn("mission_green_cycle_hold", packet["refusal_reasons"])
-        self.assertEqual(packet["policy_checks"]["candidate_available"], "mission_hold")
+        self.assertEqual(packet["decision_type"], SPEC_DECISION_RECOMMEND_ACTION)
+        action_types = [
+            _safe_action_type(item)
+            for item in packet.get("candidates_considered") or []
+        ]
+        self.assertIn("pulse_status", action_types)
+        self.assertTrue(bool((packet.get("evidence") or {}).get("mission_snapshot")))
+
+    def test_evaluate_next_action_stops_repeated_pulse_path(self):
+        service = AutonomyOrchestratorService()
+        with patch.object(
+            AutonomyOrchestratorService,
+            "_repeated_path_blocks_action",
+            return_value=True,
+        ):
+            packet = service.evaluate_next_action(
+                _spec_envelope(
+                    triage={
+                        "seam_pressure_scores": {"fallback_overuse": 0.97},
+                        "confidence": 0.97,
+                        "source": "subconscious_work_tree_triage",
+                    },
+                    mission={},
+                )
+            )
         action_types = [
             _safe_action_type(item)
             for item in packet.get("candidates_considered") or []
         ]
         self.assertNotIn("pulse_status", action_types)
-        self.assertTrue(bool((packet.get("evidence") or {}).get("mission_snapshot")))
+
+    def test_mill_skip_loop_blocks_pulse_and_clears_after_mill_run(self):
+        from services.observation_spine import observe, reset_observations, trailing_mill_skip_loop
+
+        reset_observations()
+        service = AutonomyOrchestratorService()
+        envelope = _spec_envelope(
+            triage={
+                "seam_pressure_scores": {"fallback_overuse": 0.97},
+                "confidence": 0.97,
+                "source": "subconscious_work_tree_triage",
+            },
+            mission={},
+        )
+        try:
+            for _ in range(3):
+                observe(
+                    source="mill",
+                    operation="invoke",
+                    subject="active_work_tree_cycle",
+                    input_ref="orchestrator_owns_execution",
+                    outcome="skipped",
+                    reason_code="orchestrator_owns_execution",
+                )
+            self.assertTrue(trailing_mill_skip_loop())
+            blocked = service.evaluate_next_action(envelope)
+            blocked_types = [_safe_action_type(item) for item in blocked.get("candidates_considered") or []]
+            self.assertNotIn("pulse_status", blocked_types)
+            observe(
+                source="mill",
+                operation="invoke",
+                subject="active_work_tree_cycle",
+                input_ref="ok",
+                outcome="ok",
+                reason_code="mill_skip_stop_run",
+            )
+            self.assertFalse(trailing_mill_skip_loop())
+            cleared = service.evaluate_next_action(envelope)
+            cleared_types = [_safe_action_type(item) for item in cleared.get("candidates_considered") or []]
+            self.assertIn("pulse_status", cleared_types)
+        finally:
+            reset_observations()
 
     def test_evaluate_next_action_holds_green_mission_over_investigate_candidate(self):
         service = AutonomyOrchestratorService()
@@ -779,13 +842,11 @@ class TestAutonomyOrchestratorService(unittest.TestCase):
             )
         )
 
-        self.assertEqual(packet["decision_type"], SPEC_DECISION_DEFER)
-        self.assertIn("mission_green_cycle_hold", packet["refusal_reasons"])
         action_types = [
             _safe_action_type(item)
             for item in packet.get("candidates_considered") or []
         ]
-        self.assertNotIn("generated_queue_investigate", action_types)
+        self.assertIn("generated_queue_investigate", action_types)
 
     def test_evaluate_next_action_holds_green_mission_over_generated_queue_run_next(self):
         service = AutonomyOrchestratorService()
@@ -807,16 +868,10 @@ class TestAutonomyOrchestratorService(unittest.TestCase):
             )
         )
 
-        self.assertEqual(packet["decision_type"], SPEC_DECISION_DEFER)
-        self.assertIn("mission_green_cycle_hold", packet["refusal_reasons"])
-        action_types = [
-            _safe_action_type(item)
-            for item in packet.get("candidates_considered") or []
-        ]
-        self.assertNotIn("generated_queue_run_next", action_types)
-        self.assertNotIn("pulse_status", action_types)
+        self.assertEqual(packet["decision_type"], SPEC_DECISION_RECOMMEND_ACTION)
+        self.assertEqual(packet["recommended_action"]["action_type"], "generated_queue_run_next")
 
-    def test_evaluate_next_action_holds_green_mission_over_active_work_tree_run_next(self):
+    def test_evaluate_next_action_holds_green_mission_over_unrelated_work_tree_step(self):
         service = AutonomyOrchestratorService()
 
         packet = service.evaluate_next_action(
@@ -825,12 +880,13 @@ class TestAutonomyOrchestratorService(unittest.TestCase):
                     "active_executable_count": 1,
                     "branches": [
                         {
-                            "branch_id": "branch_5e7dc5b7",
-                            "title": "Release package is verified but validation outcome is missing",
+                            "branch_id": "branch_7cc0a7e7",
+                            "title": "Data pipeline lane is blocked or paused",
                             "status": "ready",
                             "executable": True,
-                            "recommended_tool": "read",
-                            "task_id": "task_b9b95578",
+                            "recommended_tool": "pipeline",
+                            "task_id": "task_0f3fa041",
+                            "tree_id": "tree_f7f132c4",
                         }
                     ],
                 },
@@ -838,13 +894,48 @@ class TestAutonomyOrchestratorService(unittest.TestCase):
             )
         )
 
-        self.assertEqual(packet["decision_type"], SPEC_DECISION_DEFER)
-        self.assertIn("mission_green_cycle_hold", packet["refusal_reasons"])
-        action_types = [
-            _safe_action_type(item)
-            for item in packet.get("candidates_considered") or []
-        ]
-        self.assertNotIn("active_work_tree_run_next", action_types)
+        self.assertEqual(packet["decision_type"], SPEC_DECISION_RECOMMEND_ACTION)
+        self.assertEqual(packet["recommended_action"]["action_type"], "active_work_tree_run_next")
+        self.assertEqual(packet["recommended_action"]["target_id"], "branch_7cc0a7e7")
+
+    def test_evaluate_next_action_runs_work_tree_when_mission_is_investigating(self):
+        service = AutonomyOrchestratorService()
+
+        packet = service.evaluate_next_action(
+            _spec_envelope(
+                work_tree={
+                    "active_executable_count": 1,
+                    "working_count": 1,
+                    "progress_moving_count": 1,
+                    "branches": [
+                        {
+                            "branch_id": "branch_7cc0a7e7",
+                            "title": "Data pipeline lane is blocked or paused",
+                            "status": "active",
+                            "executable": True,
+                            "recommended_tool": "pipeline",
+                            "task_id": "task_0f3fa041",
+                            "tree_id": "tree_f7f132c4",
+                        }
+                    ],
+                },
+                mission={
+                    "status": "watch",
+                    "action": "investigate",
+                    "green_cycle": False,
+                    "headline": "mission watch: evaluate fresh gap pressure",
+                    "unfinished_continue_count": 1,
+                    "actionable_fresh_gap_signal_count": 1,
+                    "fresh_gap_signal_count": 1,
+                    "ops_ready": False,
+                },
+            )
+        )
+
+        self.assertEqual(packet["decision_type"], SPEC_DECISION_RECOMMEND_ACTION)
+        self.assertEqual(packet["recommended_action"]["action_type"], "active_work_tree_run_next")
+        self.assertEqual(packet["recommended_action"]["target_id"], "branch_7cc0a7e7")
+        self.assertEqual(packet["recommended_action"]["recommended_tool"], "pipeline")
 
     def test_evaluate_next_action_allows_core_thinning_under_green_mission_hold(self):
         service = AutonomyOrchestratorService()
@@ -973,12 +1064,8 @@ class TestAutonomyOrchestratorService(unittest.TestCase):
             )
         )
 
-        self.assertEqual(packet["decision_type"], SPEC_DECISION_DEFER)
-        action_types = [
-            _safe_action_type(item)
-            for item in packet.get("candidates_considered") or []
-        ]
-        self.assertNotIn("codegen_run", action_types)
+        self.assertEqual(packet["decision_type"], SPEC_DECISION_RECOMMEND_ACTION)
+        self.assertEqual(packet["recommended_action"]["action_type"], "codegen_run")
 
     def test_evaluate_next_action_holds_validation_required_mission_without_green_cycle(self):
         service = AutonomyOrchestratorService()

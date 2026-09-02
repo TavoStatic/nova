@@ -19,7 +19,7 @@ import subprocess
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 ROOT = Path(__file__).resolve().parents[1]
 POLICY_PATH = ROOT / "policy.json"
@@ -89,6 +89,21 @@ class WarmResult:
     elapsed_ms: int = 0
     ok: bool = False
     error: str = ""
+
+
+@dataclass
+class CapacityLease:
+    """Temporary mill-capacity residency. Does not rewrite policy.json."""
+
+    model: str = ""
+    standing: str = ""
+    temporary: bool = False
+    mill_class: str = ""
+    pressure_event: str = ""
+    reason: str = ""
+    granted: bool = False
+    released: bool = False
+    ran_model: str = ""
 
 
 @dataclass
@@ -447,12 +462,33 @@ def scan_ollama(
 # Used when Ollama metadata is unavailable. Live query via _vram_estimate_live()
 # is always preferred over these static values.
 _VRAM_ESTIMATE_GB: dict[str, float] = {
-    "qwen2.5:14b":   9.0,
-    "qwen2.5:7b":    4.5,
-    "qwen2.5vl:14b": 9.0,
-    "qwen2.5vl:7b":  4.5,
-    "llama3.1:8b":   5.0,
-    "llama3.2:3b":   2.0,
+    # Qwen 2.5 text
+    "qwen2.5:32b":   20.0,
+    "qwen2.5:14b":    9.0,
+    "qwen2.5:7b":     4.5,
+    "qwen3.5:9b":     6.6,
+    "qwen3.5:4b":     3.4,
+    "qwen3.5:2b":     2.7,
+    "qwen3.5:0.8b":   1.0,
+    "qwen2.5:3b":     2.0,
+    # Qwen 2.5 vision
+    "qwen2.5vl:72b": 42.0,
+    "qwen2.5vl:14b":  9.0,
+    "qwen2.5vl:7b":   4.5,
+    # Phi-4 (Microsoft — strong reasoning at 14B)
+    "phi4:14b":       9.0,
+    "phi4":           9.0,
+    # Llama
+    "llama3.1:8b":    5.0,
+    "llama3.2:3b":    2.0,
+    "llama3.3:70b":  42.0,
+    # Gemma 3
+    "gemma3:27b":    17.0,
+    "gemma3:12b":     7.5,
+    "gemma3:4b":      2.5,
+    # Mistral
+    "mistral:7b":     4.5,
+    "mistral-small3.1:24b": 15.0,
 }
 
 # When a model exceeds VRAM, Ollama does partial layer offload and still
@@ -557,31 +593,61 @@ def _is_stable_pair(chat: str, routing: str, vram_gb: float) -> bool:
     return (chat_eff + routing_need) <= vram_gb
 
 
+# ── preferred_models policy override ──────────────────────────────────────────
+
+def _preferred_models() -> dict[str, str]:
+    """Read preferred_models overrides from policy.json.
+
+    Keys map to tier slots: tier_24gb_chat, tier_12gb_chat, tier_8gb_chat,
+    tier_4gb_chat, tier_cpu32_chat, tier_cpu16_chat, tier_24gb_vision,
+    tier_12gb_vision, tier_4gb_vision, routing.
+    """
+    try:
+        p = json.loads(POLICY_PATH.read_text(encoding="utf-8"))
+        pm = p.get("preferred_models") or {}
+        return {k: str(v) for k, v in pm.items() if k != "_comment" and v}
+    except Exception:
+        return {}
+
+
 # ── tier mapping and model selection ──────────────────────────────────────────
 
 def _chat_model(vram_gb: float, ram_gb: float) -> tuple[str, str]:
+    pm = _preferred_models()
+    if vram_gb >= 24.0:
+        m = pm.get("tier_24gb_chat", "qwen2.5:32b")
+        return m, f"GPU ({vram_gb:.0f} GB VRAM) supports 32B+ models"
     if vram_gb >= 12.0:
-        return "qwen2.5:14b", f"GPU ({vram_gb:.0f} GB VRAM) supports partial 14B offload"
+        m = pm.get("tier_12gb_chat", "phi4:14b")
+        return m, f"GPU ({vram_gb:.0f} GB VRAM) fits 14B fully — strong reasoning"
     if vram_gb >= 8.0:
-        return "llama3.1:8b", f"GPU ({vram_gb:.0f} GB VRAM) fits 8B fully"
+        m = pm.get("tier_8gb_chat", "qwen2.5:14b")
+        return m, f"GPU ({vram_gb:.0f} GB VRAM) fits 14B with headroom"
     if vram_gb >= 4.0:
         # Mid-tier GPU: prefer GPU-resident 7B over CPU-based 14B.
         # A CPU 14B model still partially offloads layers to VRAM, which
         # competes with the routing model and causes swap churn on <8 GB VRAM.
-        return "qwen2.5:7b", (
+        m = pm.get("tier_4gb_chat", "qwen2.5:7b")
+        return m, (
             f"GPU ({vram_gb:.0f} GB VRAM) fits 7B fully — "
             "preferred over CPU 14B to avoid routing VRAM contention"
         )
     if ram_gb >= 32.0:
-        return "qwen2.5:14b", f"32 GB+ RAM supports CPU inference for 14B (Q4 ~9 GB) — no usable GPU"
+        m = pm.get("tier_cpu32_chat", "qwen2.5:14b")
+        return m, f"32 GB+ RAM supports CPU inference for 14B (Q4 ~9 GB) — no usable GPU"
     if ram_gb >= 16.0:
-        return "llama3.1:8b", f"16 GB+ RAM supports CPU inference for 8B"
+        m = pm.get("tier_cpu16_chat", "llama3.1:8b")
+        return m, f"16 GB+ RAM supports CPU inference for 8B"
     return "llama3.2:3b", f"Baseline — limited RAM ({ram_gb:.0f} GB) or VRAM ({vram_gb:.0f} GB)"
 
 
 def _routing_model(vram_gb: float, ram_gb: float) -> tuple[str, str]:
+    pm = _preferred_models()
+    preferred_routing = pm.get("routing", "")
+    if preferred_routing:
+        return preferred_routing, f"routing model from preferred_models policy override"
     if vram_gb >= 8.0:
-        return "qwen2.5:14b", f"GPU ({vram_gb:.0f} GB VRAM) supports 14B routing"
+        return "qwen2.5:7b", f"GPU ({vram_gb:.0f} GB VRAM) — 7B routing keeps headroom for chat"
     if vram_gb >= 4.0:
         return "qwen2.5:7b", f"GPU ({vram_gb:.0f} GB VRAM) fits 7B routing — fast intent classification"
     if ram_gb >= 16.0:
@@ -620,9 +686,15 @@ def _routing_safe_for_pair(vram_gb: float, ram_gb: float, chat_name: str) -> tup
 
 
 def _vision_model(vram_gb: float) -> tuple[str, str]:
-    if vram_gb >= 8.0:
-        return "qwen2.5vl:14b", f"GPU ({vram_gb:.0f} GB VRAM) supports 14B vision"
-    return "qwen2.5vl:7b", f"GPU ({vram_gb:.0f} GB VRAM) fits 7B vision model"
+    pm = _preferred_models()
+    if vram_gb >= 24.0:
+        m = pm.get("tier_24gb_vision", "qwen2.5vl:72b")
+        return m, f"GPU ({vram_gb:.0f} GB VRAM) supports 72B vision model"
+    if vram_gb >= 12.0:
+        m = pm.get("tier_12gb_vision", "qwen2.5vl:14b")
+        return m, f"GPU ({vram_gb:.0f} GB VRAM) fits 14B vision fully"
+    m = pm.get("tier_4gb_vision", "qwen2.5vl:7b")
+    return m, f"GPU ({vram_gb:.0f} GB VRAM) fits 7B vision model"
 
 
 def _stt_size(cpu_cores: int, ram_gb: float) -> tuple[str, str]:
@@ -671,6 +743,236 @@ def recommend_models(hw: HardwareProfile) -> ModelRecommendation:
             "npu_inference": npu_why,
         },
     )
+
+
+# — mill capacity lease (temporary residency; does not rewrite policy) ———
+
+# Lane measure 2026-09-01. Key is mill class + pressure_event.
+# 9B won refused (world-ended / identity) and redundant+empty_claim
+# (missing evidence). 9B lost redundant+inherited_attempt (paid trail).
+# 14B has no class until it wins one. Missing key → standing.
+_DELIBERATE_EVIDENCE: dict[tuple[str, str], str] = {
+    ("refused", ""): "qwen3.5:9b",
+    ("refused", "inherited_attempt"): "qwen3.5:9b",
+    ("refused", "empty_claim"): "qwen3.5:9b",
+    ("redundant", "empty_claim"): "qwen3.5:9b",
+}
+
+
+def _lease_record_path(record_path: Path | None = None) -> Path:
+    if record_path is not None:
+        return record_path
+    try:
+        from services.nova_runtime_context import RUNTIME_DIR
+
+        return Path(RUNTIME_DIR) / "_internal" / "capacity_lease.json"
+    except Exception:
+        return ROOT / "runtime" / "_internal" / "capacity_lease.json"
+
+
+def _standing_chat(policy_path: Path = POLICY_PATH) -> str:
+    models = _read_policy(policy_path).get("models") or {}
+    return str(models.get("chat") or "").strip() or "qwen2.5:7b"
+
+
+def _signal_packet(signal: Any) -> dict[str, Any]:
+    row = dict(signal) if isinstance(signal, dict) else {}
+    return {
+        "class": str(row.get("class") or "").strip().lower(),
+        "controlling": bool(row.get("controlling")),
+        "pressure_event": str(row.get("pressure_event") or "").strip().lower(),
+        "invoke": True if row.get("invoke") is None else bool(row.get("invoke")),
+        "reason": str(row.get("reason") or "").strip()[:120],
+        "source": str(row.get("source") or "").strip()[:80],
+    }
+
+
+def _deliberate_candidate(klass: str, pressure_event: str) -> str:
+    if klass == "refused":
+        return "qwen3.5:9b"
+    return _DELIBERATE_EVIDENCE.get((klass, pressure_event), "")
+
+
+def _model_pulled(model: str, inventory: OllamaInventory) -> bool:
+    name = str(model or "").strip()
+    if not name:
+        return False
+    pulled = list(inventory.pulled or [])
+    if name in pulled:
+        return True
+    base = name.split(":")[0]
+    return any(str(item).split(":")[0] == base and str(item) == name for item in pulled)
+
+
+def _temporary_feasible(model: str, hw: HardwareProfile) -> bool:
+    """Can this box serve *model* as a short sip after standing is unloaded."""
+    ram = float(getattr(hw, "ram_gb", 0) or 0)
+    vram = float(getattr(hw, "vram_gb", 0) or 0)
+    need = _vram_estimate(model)
+    if ram < 16.0:
+        return False
+    # Sequential residency: standing is unloaded first, so the sip may split.
+    if need <= vram:
+        return True
+    return ram >= 24.0 and vram >= 4.0
+
+
+def _standing_lease(
+    standing: str,
+    packet: dict[str, Any],
+    reason: str,
+) -> CapacityLease:
+    return CapacityLease(
+        model=standing,
+        standing=standing,
+        temporary=False,
+        mill_class=str(packet.get("class") or ""),
+        pressure_event=str(packet.get("pressure_event") or ""),
+        reason=reason,
+    )
+
+
+def choose_mill_capacity(
+    signal: Any,
+    *,
+    standing: str = "",
+    hw: HardwareProfile | None = None,
+    inventory: OllamaInventory | None = None,
+    policy_path: Path = POLICY_PATH,
+) -> CapacityLease:
+    """Pick capacity from mill class+pressure and hardware. Does not write policy."""
+    packet = _signal_packet(signal)
+    stand = str(standing or _standing_chat(policy_path) or "").strip() or "qwen2.5:7b"
+    candidate = _deliberate_candidate(str(packet.get("class") or ""), str(packet.get("pressure_event") or ""))
+    if not candidate or candidate == stand:
+        why = "standing" if not candidate else "candidate_is_standing"
+        return _standing_lease(stand, packet, why)
+    pulled = inventory
+    if pulled is None:
+        pulled = scan_ollama()
+    if not _model_pulled(candidate, pulled):
+        return _standing_lease(stand, packet, "deliberate_not_pulled")
+    profile = hw if hw is not None else scan_hardware()
+    if not _temporary_feasible(candidate, profile):
+        return _standing_lease(stand, packet, "deliberate_not_feasible")
+    return CapacityLease(
+        model=candidate,
+        standing=stand,
+        temporary=True,
+        mill_class=str(packet.get("class") or ""),
+        pressure_event=str(packet.get("pressure_event") or ""),
+        reason="evidenced_deliberate",
+    )
+
+
+def _write_lease_record(lease: CapacityLease, record_path: Path | None = None) -> None:
+    if record_path is None and not lease.temporary:
+        return
+    path = _lease_record_path(record_path)
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            json.dumps(
+                {
+                    "model": lease.model,
+                    "standing": lease.standing,
+                    "temporary": lease.temporary,
+                    "mill_class": lease.mill_class,
+                    "pressure_event": lease.pressure_event,
+                    "reason": lease.reason,
+                    "granted": lease.granted,
+                    "released": lease.released,
+                    "ran_model": lease.ran_model,
+                },
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+    except Exception:
+        pass
+
+
+def _ollama_stop(model: str, stop_fn: Callable[[str], None] | None = None) -> None:
+    name = str(model or "").strip()
+    if not name:
+        return
+    if stop_fn is not None:
+        stop_fn(name)
+        return
+    try:
+        subprocess.run(
+            ["ollama", "stop", name],
+            capture_output=True,
+            timeout=20,
+            check=False,
+        )
+    except Exception:
+        pass
+
+
+def grant_capacity_lease(
+    lease: CapacityLease,
+    *,
+    stop_fn: Callable[[str], None] | None = None,
+    record_path: Path | None = None,
+) -> CapacityLease:
+    if lease.temporary and lease.model and lease.model != lease.standing:
+        _ollama_stop(lease.standing, stop_fn=stop_fn)
+    lease.granted = True
+    _write_lease_record(lease, record_path)
+    return lease
+
+
+def release_capacity_lease(
+    lease: CapacityLease,
+    *,
+    stop_fn: Callable[[str], None] | None = None,
+    record_path: Path | None = None,
+) -> CapacityLease:
+    if lease.temporary and lease.model and lease.model != lease.standing:
+        _ollama_stop(lease.model, stop_fn=stop_fn)
+    lease.released = True
+    _write_lease_record(lease, record_path)
+    return lease
+
+
+def run_with_mill_capacity(
+    signal: Any,
+    invoke_fn: Callable[[str], Any],
+    *,
+    standing: str = "",
+    hw: HardwareProfile | None = None,
+    inventory: OllamaInventory | None = None,
+    policy_path: Path = POLICY_PATH,
+    stop_fn: Callable[[str], None] | None = None,
+    record_path: Path | None = None,
+) -> tuple[CapacityLease, Any]:
+    """Grant a temporary sip, invoke, unload, restore standing. Policy unchanged."""
+    lease = choose_mill_capacity(
+        signal,
+        standing=standing,
+        hw=hw,
+        inventory=inventory,
+        policy_path=policy_path,
+    )
+    before = ""
+    try:
+        before = policy_path.read_text(encoding="utf-8")
+    except Exception:
+        before = ""
+    try:
+        grant_capacity_lease(lease, stop_fn=stop_fn, record_path=record_path)
+        result = invoke_fn(lease.model)
+        lease.ran_model = lease.model
+        return lease, result
+    finally:
+        release_capacity_lease(lease, stop_fn=stop_fn, record_path=record_path)
+        try:
+            after = policy_path.read_text(encoding="utf-8")
+            if before and after != before:
+                policy_path.write_text(before, encoding="utf-8")
+        except Exception:
+            pass
 
 
 # — policy diff and apply ——————————————————————————————————————————————

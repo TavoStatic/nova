@@ -37,6 +37,38 @@ class TestWorkTree(unittest.TestCase):
         except Exception:
             pass
 
+    def test_pickup_finishes_open_high_percent_before_sibling_not_started(self) -> None:
+        finishing = {
+            "branch_id": "branch_release",
+            "recommended_tool": "release_record_validation_outcome",
+            "progress": {"motion": "stalled", "percent": 99, "solution_status": "open"},
+        }
+        sibling = {
+            "branch_id": "branch_envelope",
+            "recommended_tool": "phase2_audit",
+            "progress": {"motion": "not_started", "percent": 0, "solution_status": "open"},
+        }
+        ranked = sorted([sibling, finishing], key=work_tree._pickup_option_rank)
+        self.assertEqual(ranked[0]["branch_id"], "branch_release")
+
+    def test_stem_expected_tool_wins_over_preferred_when_ready(self) -> None:
+        tree = work_tree.initialize_tree("Stem vs preferred")
+        root_branch = work_tree._BRANCHES[tree.root_branch_id]
+        task = work_tree.add_task_to_branch(
+            root_branch.branch_id,
+            "Record completed validation outcome in release ledger",
+            meta={"expected_tool": "release_record_validation_outcome", "allowed_tools": ["release_record_validation_outcome"]},
+        )
+        work_tree.set_branch_tools(
+            root_branch.branch_id,
+            allowed_tools=["phase2_audit", "release_record_validation_outcome"],
+            preferred_tool="phase2_audit",
+        )
+        self.assertEqual(
+            work_tree._branch_candidate_tool(root_branch, task),
+            "release_record_validation_outcome",
+        )
+
     def test_next_open_branch_prefers_nearest_eligible_branch(self) -> None:
         tree = work_tree.initialize_tree("Build runtime")
         root_branch = work_tree._BRANCHES[tree.root_branch_id]
@@ -136,9 +168,9 @@ class TestWorkTree(unittest.TestCase):
 
         work_tree.mark_task_complete(root_task.task_id)
 
-        self.assertTrue(work_tree.is_branch_ready(child_branch.branch_id))
-        self.assertEqual(root_branch.status, BranchStatus.COMPLETE)
-        self.assertEqual(child_branch.status, BranchStatus.READY)
+        self.assertFalse(work_tree.is_branch_ready(child_branch.branch_id))
+        self.assertNotEqual(root_branch.status, BranchStatus.COMPLETE)
+        self.assertEqual(child_branch.status, BranchStatus.BLOCKED)
 
     def test_next_autonomous_step_waits_for_missing_tools(self) -> None:
         tree = work_tree.initialize_tree("Tool wait")
@@ -308,7 +340,7 @@ class TestWorkTree(unittest.TestCase):
         self.assertEqual(step["action"], "executed")
         self.assertEqual(step["tool"], "generated_queue_run")
         self.assertEqual(calls, [("generated_queue_run", ["subconscious_demo_family_turn.json"])])
-        self.assertEqual(work_tree._TASKS[task.task_id].status, work_tree.TaskStatus.COMPLETE)
+        self.assertEqual(work_tree._TASKS[task.task_id].status, work_tree.TaskStatus.ATTEMPTED)
 
     def test_os_capability_task_uses_structured_capability_request_args(self) -> None:
         tree = work_tree.initialize_tree("OS capability route")
@@ -343,7 +375,7 @@ class TestWorkTree(unittest.TestCase):
             json.loads(calls[0][1][0]),
             {"capability": "verify_ollama_model", "args": {"probe_chat": False}},
         )
-        self.assertEqual(work_tree._TASKS[task.task_id].status, work_tree.TaskStatus.COMPLETE)
+        self.assertEqual(work_tree._TASKS[task.task_id].status, work_tree.TaskStatus.ATTEMPTED)
 
     def test_execute_autonomous_step_stops_when_branch_has_no_tool_assignment(self) -> None:
         tree = work_tree.initialize_tree("Missing assignment boundary")
@@ -376,12 +408,43 @@ class TestWorkTree(unittest.TestCase):
     def test_tree_becomes_complete_after_all_tasks_complete(self) -> None:
         tree = work_tree.initialize_tree("Close tree")
         root_branch = work_tree._BRANCHES[tree.root_branch_id]
+        root_branch.resolution_state = "resolved"
         task = work_tree.add_task_to_branch(root_branch.branch_id, "Done")
 
         work_tree.mark_task_complete(task.task_id)
 
         self.assertTrue(work_tree.is_tree_complete(tree.tree_id))
         self.assertEqual(work_tree.get_tree(tree.tree_id).status, TreeStatus.COMPLETE)
+
+    def test_completed_task_is_not_reclassified_as_dropped(self) -> None:
+        tree = work_tree.initialize_tree("No hiding")
+        root_branch = work_tree._BRANCHES[tree.root_branch_id]
+        task = work_tree.add_task_to_branch(root_branch.branch_id, "Real work")
+
+        work_tree.mark_task_complete(task.task_id)
+        work_tree.mark_task_dropped(task.task_id, reason="stale_task_recovery")
+
+        self.assertEqual(work_tree._TASKS[task.task_id].status, work_tree.TaskStatus.COMPLETE)
+        self.assertNotIn("drop_reason", (work_tree._TASKS[task.task_id].meta or {}))
+
+    def test_open_resolution_does_not_complete_when_stems_are_done(self) -> None:
+        tree = work_tree.initialize_tree("Honest failure")
+        root_branch = work_tree._BRANCHES[tree.root_branch_id]
+        root_branch.resolution_state = "open"
+        task = work_tree.add_task_to_branch(root_branch.branch_id, "Done")
+        prior_status = root_branch.status
+
+        work_tree.mark_task_complete(task.task_id)
+
+        self.assertNotEqual(root_branch.status, BranchStatus.COMPLETE)
+        self.assertEqual(root_branch.status, prior_status)
+        self.assertFalse(work_tree.is_tree_complete(tree.tree_id))
+        open_titles = [
+            task.title
+            for task in work_tree.list_branch_tasks(root_branch.branch_id)
+            if task.status not in {work_tree.TaskStatus.COMPLETE, work_tree.TaskStatus.DROPPED}
+        ]
+        self.assertNotIn(work_tree.SIGNAL_STILL_PRESENT_REEXAMINE_TITLE, open_titles)
 
     def test_run_autonomous_loop_without_executor_is_planning_only(self) -> None:
         tree = work_tree.initialize_tree("Loop tree")
@@ -409,7 +472,7 @@ class TestWorkTree(unittest.TestCase):
         self.assertEqual(history[0]["action"], "wait_for_tools")
         self.assertFalse(work_tree.is_tree_complete(tree.tree_id))
 
-    def test_execute_autonomous_step_runs_real_tool_and_completes_task(self) -> None:
+    def test_execute_autonomous_step_runs_real_tool_and_attempts_open_finding(self) -> None:
         tree = work_tree.initialize_tree("Execute tree")
         root_branch = work_tree._BRANCHES[tree.root_branch_id]
         task = work_tree.add_task_to_branch(root_branch.branch_id, "search student_data")
@@ -422,17 +485,265 @@ class TestWorkTree(unittest.TestCase):
         )
 
         self.assertEqual(step["action"], "executed")
+        self.assertEqual(step.get("task_close"), "attempted")
         self.assertEqual(step["tool"], "web_search")
         self.assertEqual(step["tool_result"], "search results")
         self.assertTrue(str(step.get("evidence_id") or "").startswith("evidence_"))
         self.assertEqual(calls, [("web_search", ["search student_data"])])
-        self.assertEqual(work_tree._TASKS[task.task_id].status, work_tree.TaskStatus.COMPLETE)
+        self.assertEqual(work_tree._TASKS[task.task_id].status, work_tree.TaskStatus.ATTEMPTED)
+        last_attempt = dict((work_tree._TASKS[task.task_id].meta or {}).get("last_attempt") or {})
+        self.assertEqual(last_attempt.get("gap_closed"), False)
+        self.assertNotEqual(str(root_branch.resolution_state or ""), "resolved")
+        visual = work_tree.get_visual_tree_data(tree.tree_id)
+        self.assertEqual(int((visual or {}).get("counts", {}).get("open_tasks") or 0), 1)
+        open_titles = [
+            item.title
+            for item in work_tree.list_branch_tasks(root_branch.branch_id)
+            if item.status not in {work_tree.TaskStatus.COMPLETE, work_tree.TaskStatus.DROPPED}
+        ]
+        self.assertIn("search student_data", open_titles)
+        self.assertNotIn(work_tree.SIGNAL_STILL_PRESENT_REEXAMINE_TITLE, open_titles)
         evidence = work_tree.list_branch_evidence(root_branch.branch_id)
         self.assertEqual(len(evidence), 1)
         self.assertEqual(evidence[0]["task_id"], task.task_id)
         self.assertEqual(evidence[0]["tool_name"], "web_search")
         self.assertEqual(evidence[0]["tool_args"], ["search student_data"])
         self.assertEqual(evidence[0]["result_text"], "search results")
+
+    def test_execute_autonomous_step_completes_when_resolution_closed(self) -> None:
+        tree = work_tree.initialize_tree("Closed finding")
+        root_branch = work_tree._BRANCHES[tree.root_branch_id]
+        task = work_tree.add_task_to_branch(root_branch.branch_id, "search student_data")
+        work_tree.set_branch_tools(root_branch.branch_id, allowed_tools=["web_search"], preferred_tool="web_search")
+        root_branch.resolution_state = "resolved"
+
+        step = work_tree.execute_autonomous_step(
+            tree.tree_id,
+            execute_planned_action_fn=lambda tool, args=None: "search results",
+        )
+
+        self.assertEqual(step["action"], "executed")
+        self.assertEqual(work_tree._TASKS[task.task_id].status, work_tree.TaskStatus.COMPLETE)
+        self.assertEqual(root_branch.status, BranchStatus.COMPLETE)
+
+    def test_closed_finding_finishes_leftover_stem_without_remint(self) -> None:
+        tree = work_tree.initialize_tree("Closed leftover")
+        root_branch = work_tree._BRANCHES[tree.root_branch_id]
+        leftover = work_tree.add_task_to_branch(root_branch.branch_id, "search leftover status")
+        work_tree.set_branch_tools(root_branch.branch_id, allowed_tools=["web_search"], preferred_tool="web_search")
+        root_branch.resolution_state = "resolved"
+        root_branch.source_payload = {
+            "task_sequence": [
+                {"title": "Next inspect", "allowed_tools": ["web_search"], "preferred_tool": "web_search"},
+            ]
+        }
+
+        step = work_tree.execute_autonomous_step(
+            tree.tree_id,
+            execute_planned_action_fn=lambda tool, args=None: "search results",
+        )
+
+        self.assertEqual(step["action"], "executed")
+        self.assertEqual((step.get("sequence_advance") or {}).get("reason"), "finding_already_closed")
+        self.assertEqual(work_tree._TASKS[leftover.task_id].status, work_tree.TaskStatus.COMPLETE)
+        self.assertEqual(root_branch.status, BranchStatus.COMPLETE)
+        open_titles = [
+            item.title
+            for item in work_tree.list_branch_tasks(root_branch.branch_id)
+            if item.status not in {work_tree.TaskStatus.COMPLETE, work_tree.TaskStatus.DROPPED}
+        ]
+        self.assertEqual(open_titles, [])
+
+    def test_satisfied_thinning_result_closes_finding(self) -> None:
+        from services.recurring_finding_lifecycle import stamp_satisfaction
+
+        tree = work_tree.initialize_tree("Thin close")
+        root_branch = work_tree._BRANCHES[tree.root_branch_id]
+        task = work_tree.add_task_to_branch(
+            root_branch.branch_id,
+            "Review wrapper shim leftover",
+            meta=stamp_satisfaction(
+                {"kind": "wrapper_candidate", "recurring_finding_key": "core_thinning:wrapper"},
+                satisfaction_fingerprint="fp-wrapper",
+                completion_action="removed_unused_wrapper",
+            ),
+        )
+        work_tree.set_tree_execution_policy(tree.tree_id, allowed_tools=["core_thinning"], require_explicit_allow=True)
+        work_tree.set_branch_tools(root_branch.branch_id, allowed_tools=["core_thinning"], preferred_tool="core_thinning")
+
+        step = work_tree.execute_autonomous_step(
+            tree.tree_id,
+            execute_planned_action_fn=lambda tool, args=None: {
+                "ok": True,
+                "verified": True,
+                "action": "removed_unused_wrapper",
+            },
+        )
+
+        self.assertEqual(step["action"], "executed")
+        self.assertEqual(work_tree._TASKS[task.task_id].status, work_tree.TaskStatus.COMPLETE)
+        self.assertEqual(str(root_branch.resolution_state or ""), "resolved")
+        self.assertEqual(root_branch.status, BranchStatus.COMPLETE)
+
+    def test_sequence_advances_after_attempted_step_without_dropping_attempt(self) -> None:
+        from services.work_tree_signal_ingestion import advance_branch_sequence_after_task
+
+        tree = work_tree.initialize_tree("Attempted ladder")
+        root_branch = work_tree._BRANCHES[tree.root_branch_id]
+        first_task = work_tree.add_task_to_branch(root_branch.branch_id, "read guard_boot_history.json")
+        root_branch.source_payload = {
+            "task_sequence": [
+                {"title": "read guard_boot_history.json", "allowed_tools": ["read"], "preferred_tool": "read"},
+                {"title": "review guard findings", "allowed_tools": ["read"], "preferred_tool": "read"},
+            ]
+        }
+        work_tree.set_branch_tools(root_branch.branch_id, allowed_tools=["read"], preferred_tool="read")
+        work_tree._TASKS[first_task.task_id].status = work_tree.TaskStatus.ATTEMPTED
+        work_tree._TASKS[first_task.task_id].updated_at = work_tree._now()
+
+        result = advance_branch_sequence_after_task(root_branch.branch_id)
+
+        self.assertEqual(result.get("reason"), "next_sequence_task_created")
+        self.assertEqual(work_tree._TASKS[first_task.task_id].status, work_tree.TaskStatus.ATTEMPTED)
+        open_titles = [
+            item.title
+            for item in work_tree.list_branch_tasks(root_branch.branch_id)
+            if item.status not in {work_tree.TaskStatus.COMPLETE, work_tree.TaskStatus.DROPPED}
+        ]
+        self.assertIn("read guard_boot_history.json", open_titles)
+        self.assertIn("review guard findings", open_titles)
+
+    def test_autonomous_option_exposes_observation_meta_context(self) -> None:
+        from services.observation_spine import observe, reset_observations
+
+        tree = work_tree.initialize_tree("Meta option context")
+        root_branch = work_tree._BRANCHES[tree.root_branch_id]
+        work_tree.add_task_to_branch(root_branch.branch_id, "search student_data")
+        work_tree.set_branch_tools(root_branch.branch_id, allowed_tools=["web_search"], preferred_tool="web_search")
+        reset_observations()
+        try:
+            observe(
+                source="executor",
+                operation="invoke",
+                subject="web_search",
+                input_ref="same-input",
+                outcome="success",
+            )
+            observe(
+                source="executor",
+                operation="invoke",
+                subject="web_search",
+                input_ref="same-input",
+                outcome="success",
+            )
+            observe(
+                source="executor",
+                operation="invoke",
+                subject="web_search",
+                input_ref="same-input",
+                outcome="success",
+            )
+
+            options = work_tree.list_autonomous_options(tree.tree_id)
+            self.assertEqual(len(options), 1)
+            mill_signal = options[0].get("mill_judgment_signal") or {}
+            self.assertIn("class", mill_signal)
+            self.assertNotIn("model", mill_signal)
+            meta_context = options[0].get("meta_context") or {}
+            self.assertEqual(meta_context.get("finding_code"), "REPEATED_UNCHANGED_PATH")
+            self.assertIn("What changed since the last attempt on this path?", meta_context.get("self_questions") or [])
+            self.assertEqual(
+                ((meta_context.get("self_model") or {}).get("current_internal_condition") or {}).get("meta_finding"),
+                "REPEATED_UNCHANGED_PATH",
+            )
+        finally:
+            reset_observations()
+
+    def test_source_root_judgment_sip_skip_does_not_invoke_tool(self) -> None:
+        from types import SimpleNamespace
+
+        tree = work_tree.initialize_tree("Sip skip")
+        root = work_tree._BRANCHES[tree.root_branch_id]
+        work_tree.add_task_to_branch(root.branch_id, "Synthesize source-root judgment from collected evidence")
+        work_tree.set_tree_execution_policy(
+            tree.tree_id,
+            allowed_tools=["source_root_judgment"],
+            require_explicit_allow=True,
+        )
+        work_tree.set_branch_tools(root.branch_id, allowed_tools=["source_root_judgment"], preferred_tool="source_root_judgment")
+        invoked = []
+
+        def _lease():
+            return SimpleNamespace(
+                model="qwen3.5:9b",
+                temporary=True,
+                reason="evidenced_deliberate",
+                ran_model="qwen3.5:9b",
+            )
+
+        with mock.patch("services.sock_service.choose_mill_capacity", return_value=_lease()), mock.patch(
+            "services.sock_service.run_with_mill_capacity",
+            return_value=(_lease(), "skip_until_world_changes"),
+        ):
+            step = work_tree.execute_autonomous_step(
+                tree.tree_id,
+                execute_planned_action_fn=lambda tool, args=None: invoked.append(tool) or {"ok": True},
+            )
+        self.assertEqual(step.get("action"), "skipped_world")
+        self.assertEqual(invoked, [])
+        task = work_tree.list_branch_tasks(root.branch_id)[0]
+        self.assertEqual(task.status, work_tree.TaskStatus.ATTEMPTED)
+        from services.solution_trail import trail_world_holds
+        from services.work_tree_signal_ingestion import advance_branch_sequence_after_task
+
+        held = trail_world_holds(work_tree.get_branch(root.branch_id), has_open_stem=True)
+        self.assertIsNotNone(held)
+        self.assertEqual((held or {}).get("class"), "redundant")
+        root.source_payload = {
+            **dict(root.source_payload or {}),
+            "task_sequence": [
+                {
+                    "title": "Synthesize source-root judgment from collected evidence",
+                    "allowed_tools": ["source_root_judgment"],
+                    "preferred_tool": "source_root_judgment",
+                },
+                {
+                    "title": "Synthesize source-root judgment from collected evidence",
+                    "allowed_tools": ["source_root_judgment"],
+                    "preferred_tool": "source_root_judgment",
+                },
+            ],
+        }
+        result = advance_branch_sequence_after_task(root.branch_id)
+        self.assertEqual(result.get("reason"), "trail_world_holds")
+        open_titles = [
+            item.title
+            for item in work_tree.list_branch_tasks(root.branch_id)
+            if item.status in {work_tree.TaskStatus.OPEN, work_tree.TaskStatus.ACTIVE}
+        ]
+        self.assertEqual(open_titles, [])
+
+    def test_sequence_does_not_remint_on_closed_finding(self) -> None:
+        from services.work_tree_signal_ingestion import advance_branch_sequence_after_task
+
+        tree = work_tree.initialize_tree("Closed sequence")
+        root_branch = work_tree._BRANCHES[tree.root_branch_id]
+        root_branch.resolution_state = "resolved"
+        root_branch.source_payload = {
+            "task_sequence": [
+                {"title": "Next inspect", "allowed_tools": ["read"], "preferred_tool": "read"},
+            ]
+        }
+
+        result = advance_branch_sequence_after_task(root_branch.branch_id)
+
+        self.assertEqual(result.get("reason"), "finding_already_closed")
+        open_tasks = [
+            item
+            for item in work_tree.list_branch_tasks(root_branch.branch_id)
+            if item.status not in {work_tree.TaskStatus.COMPLETE, work_tree.TaskStatus.DROPPED}
+        ]
+        self.assertEqual(open_tasks, [])
 
     def test_execute_autonomous_step_marks_failed_tool_state(self) -> None:
         tree = work_tree.initialize_tree("Failure tree")
@@ -512,7 +823,7 @@ class TestWorkTree(unittest.TestCase):
         self.assertEqual(step["action"], "executed")
         self.assertEqual(step["tool"], "patch_preview_apply")
         self.assertEqual(calls, [("patch_preview_apply", ["preview_queue_item.txt"])])
-        self.assertEqual(work_tree._TASKS[task.task_id].status, work_tree.TaskStatus.COMPLETE)
+        self.assertEqual(work_tree._TASKS[task.task_id].status, work_tree.TaskStatus.ATTEMPTED)
 
     def test_execute_autonomous_step_patch_preview_approve_uses_preview_meta(self) -> None:
         tree = work_tree.initialize_tree("Patch preview approval execution")
@@ -542,7 +853,7 @@ class TestWorkTree(unittest.TestCase):
         self.assertEqual(step["action"], "executed")
         self.assertEqual(step["tool"], "patch_preview_approve")
         self.assertEqual(calls, [("patch_preview_approve", ["preview_queue_item.txt"])])
-        self.assertEqual(work_tree._TASKS[task.task_id].status, work_tree.TaskStatus.COMPLETE)
+        self.assertEqual(work_tree._TASKS[task.task_id].status, work_tree.TaskStatus.ATTEMPTED)
 
     def test_execute_autonomous_step_read_not_a_file_marks_failed(self) -> None:
         tree = work_tree.initialize_tree("Read failure tree")
@@ -600,7 +911,7 @@ class TestWorkTree(unittest.TestCase):
 
         self.assertEqual(step["action"], "executed")
         self.assertEqual(step["tool"], "source_root_judgment")
-        self.assertEqual(work_tree._TASKS[task.task_id].status, work_tree.TaskStatus.COMPLETE)
+        self.assertEqual(work_tree._TASKS[task.task_id].status, work_tree.TaskStatus.ATTEMPTED)
 
     def test_execute_autonomous_step_read_preserves_relative_path(self) -> None:
         tree = work_tree.initialize_tree("Read relative path tree")
@@ -645,7 +956,7 @@ class TestWorkTree(unittest.TestCase):
         self.assertEqual(step["action"], "executed")
         self.assertEqual(step["tool"], "ls")
         self.assertEqual(step["tool_result"], {"tool": "ls", "args": ["runtime"]})
-        self.assertEqual(work_tree._TASKS[task.task_id].status, work_tree.TaskStatus.COMPLETE)
+        self.assertEqual(work_tree._TASKS[task.task_id].status, work_tree.TaskStatus.ATTEMPTED)
 
     def test_execute_autonomous_step_patch_apply_not_a_file_marks_failed(self) -> None:
         tree = work_tree.initialize_tree("Patch apply failure tree")
@@ -685,7 +996,7 @@ class TestWorkTree(unittest.TestCase):
         self.assertEqual(step["tool"], "find")
         self.assertEqual(step["tool_result"], {"tool": "find", "args": ["test_generic_fallback_does_not_hide_viable_specific_route"]})
         self.assertEqual(root_branch.preferred_tool, "find")
-        self.assertEqual(work_tree._TASKS[task.task_id].status, work_tree.TaskStatus.COMPLETE)
+        self.assertEqual(work_tree._TASKS[task.task_id].status, work_tree.TaskStatus.ATTEMPTED)
 
     def test_execute_autonomous_step_uses_explicit_task_tool_args(self) -> None:
         tree = work_tree.initialize_tree("Scoped evidence tree")
@@ -796,11 +1107,20 @@ class TestWorkTree(unittest.TestCase):
 
         history = work_tree.run_autonomous_loop(
             tree.tree_id,
+            max_steps=2,
             execute_planned_action_fn=lambda tool, args=None: f"ok:{args[0] if args else tool}",
         )
 
         self.assertEqual([step["action"] for step in history], ["executed", "executed"])
-        self.assertTrue(work_tree.is_tree_complete(tree.tree_id))
+        self.assertFalse(work_tree.is_tree_complete(tree.tree_id))
+        first = work_tree.list_branch_tasks(root_branch.branch_id)[0]
+        self.assertEqual(first.status, work_tree.TaskStatus.ATTEMPTED)
+        open_titles = [
+            task.title
+            for task in work_tree.list_branch_tasks(root_branch.branch_id)
+            if task.status not in {work_tree.TaskStatus.COMPLETE, work_tree.TaskStatus.DROPPED}
+        ]
+        self.assertNotIn(work_tree.SIGNAL_STILL_PRESENT_REEXAMINE_TITLE, open_titles)
 
     def test_visual_tree_preserves_selected_active_branch_without_running_task(self) -> None:
         tree = work_tree.initialize_tree("Visual active branch")
@@ -1105,7 +1425,7 @@ class TestWorkTree(unittest.TestCase):
         self.assertEqual(step["task_target"]["block"], "routing_supervisor_intent")
         self.assertEqual(work_tree._TASKS[task.task_id].status, work_tree.TaskStatus.COMPLETE)
 
-    def test_execute_autonomous_step_completes_blocked_http_extract_stage(self) -> None:
+    def test_execute_autonomous_step_blocks_unimplemented_http_extract(self) -> None:
         tree = work_tree.initialize_tree("HTTP extract stage")
         root_branch = work_tree._BRANCHES[tree.root_branch_id]
         task = work_tree.add_task_to_branch(
@@ -1140,10 +1460,11 @@ class TestWorkTree(unittest.TestCase):
             },
         )
 
-        self.assertEqual(step["action"], "executed")
+        self.assertEqual(step["action"], "blocked")
         self.assertEqual(step.get("extract_stage"), "blocked_http_extraction")
-        self.assertEqual(work_tree._TASKS[task.task_id].status, work_tree.TaskStatus.COMPLETE)
-        self.assertEqual(
+        self.assertEqual(step.get("reason"), "http_extraction_not_implemented")
+        self.assertEqual(work_tree._TASKS[task.task_id].status, work_tree.TaskStatus.BLOCKED)
+        self.assertNotEqual(
             (work_tree._TASKS[task.task_id].meta or {}).get("recurring_finding_completion_action"),
             "blocked_http_extraction",
         )

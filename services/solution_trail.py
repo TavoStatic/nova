@@ -25,8 +25,181 @@ MAX_ATTEMPT_JUDGMENTS = 24
 JUDGMENT_PROVEN = "proven"
 JUDGMENT_REDUNDANT = "redundant"
 JUDGMENT_PREMATURE = "premature"
+JUDGMENT_REFUSED = "refused"
 
-_SUPPRESSING = frozenset({JUDGMENT_REDUNDANT, JUDGMENT_PREMATURE})
+_SUPPRESSING = frozenset({JUDGMENT_REDUNDANT, JUDGMENT_PREMATURE, JUDGMENT_REFUSED})
+REFUSE_SOURCE = "signal_reconcile"
+PRESSURE_INHERITED = "inherited_attempt"
+PRESSURE_EMPTY_CLAIM = "empty_claim"
+
+
+def _empty_memory_kind() -> dict[str, Any]:
+    return {
+        "kind": "",
+        "controlling": False,
+        "reason": "",
+        "retry_when": [],
+        "pressure": {},
+        "source": "",
+    }
+
+
+def _refuse_pressure(prior: dict[str, Any]) -> dict[str, Any]:
+    """Cost of the refuse lesson. Inherit a prior attempt; never evidence_count."""
+    row = _as_dict(prior)
+    inherited_from = _text(row.get("attempt_id"), 40)
+    if inherited_from:
+        return {
+            "event": PRESSURE_INHERITED,
+            "invoke": False,
+            "inherited_from": inherited_from,
+            "inherited_judgment": _text(row.get("judgment"), 40),
+            "inherited_reason": _text(row.get("reason"), 120),
+            "inherited_at": _text(row.get("at"), 40),
+        }
+    return {
+        "event": PRESSURE_EMPTY_CLAIM,
+        "invoke": False,
+        "inherited_from": "",
+        "inherited_judgment": "",
+        "inherited_reason": "",
+        "inherited_at": "",
+        "note": PRESSURE_EMPTY_CLAIM,
+    }
+
+
+def derive_branch_memory_kind(
+    branch: Any,
+    *,
+    has_open_stem: bool = False,
+    active_source_keys: set[str] | None = None,
+    progress: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Current instruction kind from trail. Derived, never stored on the branch.
+
+    Pickup and the visual payload must call this with the same world
+    (stem + active source keys). Controlling refuse is the pickup skip.
+    """
+    payload = dict(getattr(branch, "source_payload", None) or {}) if isinstance(getattr(branch, "source_payload", None), dict) else {}
+    source_key = str(getattr(branch, "source_key", "") or payload.get("source_key") or "").strip()
+    rows = [dict(r) for r in list(payload.get(ATTEMPT_JUDGMENTS_KEY) or []) if isinstance(r, dict)]
+    if not rows:
+        return _empty_memory_kind()
+    holding_progress = dict(progress or {})
+    released: dict[str, Any] | None = None
+    for row in reversed(rows):
+        klass = _text(row.get("judgment"), 40).lower()
+        if klass not in {JUDGMENT_REFUSED, JUDGMENT_REDUNDANT, JUDGMENT_PREMATURE, JUDGMENT_PROVEN}:
+            continue
+        suppressing = klass in _SUPPRESSING and judgment_still_suppresses(
+            row,
+            progress=holding_progress,
+            branch_payload=payload,
+            has_open_stem=has_open_stem,
+            active_source_keys=active_source_keys,
+            source_key=source_key,
+        )
+        info = {
+            "kind": klass,
+            "controlling": bool(suppressing),
+            "reason": _text(row.get("reason"), 120),
+            "retry_when": [dict(c) for c in list(row.get("retry_when") or []) if isinstance(c, dict)],
+            "pressure": dict(row.get("pressure") or {}) if isinstance(row.get("pressure"), dict) else {},
+            "source": _text(row.get("source"), 80),
+        }
+        if suppressing or klass == JUDGMENT_PROVEN:
+            return info
+        if released is None:
+            released = info
+    return released or _empty_memory_kind()
+
+
+def mill_judgment_signal(kind: Any = None) -> dict[str, Any]:
+    """SOCK handoff packet from derived trail kind. Never names a model.
+
+    Derived, not stored. Mill class + pressure only.
+    """
+    row = _as_dict(kind)
+    pressure = _as_dict(row.get("pressure"))
+    klass = _text(row.get("kind") or row.get("class"), 40).lower()
+    if klass not in {JUDGMENT_REFUSED, JUDGMENT_REDUNDANT, JUDGMENT_PREMATURE, JUDGMENT_PROVEN}:
+        klass = ""
+    invoke_raw = pressure.get("invoke")
+    return {
+        "class": klass,
+        "controlling": bool(row.get("controlling")),
+        "pressure_event": _text(pressure.get("event"), 40).lower(),
+        "invoke": True if invoke_raw is None else bool(invoke_raw),
+        "reason": _text(row.get("reason"), 120),
+        "source": _text(row.get("source"), 80),
+    }
+
+
+def trail_world_holds(branch: Any, *, has_open_stem: bool | None = None) -> dict[str, Any] | None:
+    """Paid trail / refuse is world evidence. Controlling redundant or refused holds."""
+    stem = bool(has_open_stem)
+    if has_open_stem is None:
+        try:
+            import work_tree
+
+            stem = work_tree._next_open_task(str(getattr(branch, "branch_id", "") or "")) is not None
+        except Exception:
+            stem = False
+    kind = derive_branch_memory_kind(branch, has_open_stem=stem, progress={})
+    signal = mill_judgment_signal(kind)
+    if bool(signal.get("controlling")) and str(signal.get("class") or "") in {JUDGMENT_REDUNDANT, JUDGMENT_REFUSED}:
+        return signal
+    return None
+
+
+def record_world_hold_on_branch(
+    branch_id: str,
+    *,
+    tool_name: str = "",
+    task_title: str = "",
+    reason: str = "skip_until_world_changes",
+    input_ref: str = "",
+    source: str = "mill_sip",
+) -> dict[str, Any]:
+    """Sip/skip is world evidence. Controlling redundant until the ref changes."""
+    import work_tree
+
+    clean_id = str(branch_id or "").strip()
+    if not clean_id:
+        return {"ok": False, "reason": "missing_path"}
+    branch = work_tree.get_branch(clean_id)
+    if branch is None:
+        return {"ok": False, "reason": "branch_missing"}
+    payload = dict(branch.source_payload or {}) if isinstance(branch.source_payload, dict) else {}
+    controlling = _text(input_ref, 160) or _text(payload.get("observation_input_ref"), 160)
+    package = _package_identity(payload)
+    if controlling:
+        payload["observation_input_ref"] = controlling
+    record = {
+        "judgment": JUDGMENT_REDUNDANT,
+        "reason": _text(reason, 120) or "skip_until_world_changes",
+        "tool": _norm_tool(tool_name),
+        "task_title": _text(task_title, 200),
+        "target_markers": [],
+        "do_not_retry_while": (
+            [{"type": "same_input_ref", "value": controlling}]
+            if controlling
+            else ([{"type": "same_package_identity", "value": package}] if package else [])
+        ),
+        "retry_when": (
+            [{"type": "input_ref_changed", "from": controlling}]
+            if controlling
+            else ([{"type": "package_identity_changed", "from": package}] if package else [])
+        ),
+        "conditions": {"input_ref": controlling, "package_identity": package},
+        "source": _text(source, 80) or "mill_sip",
+    }
+    branch.source_payload = append_attempt_judgment(payload, record)
+    try:
+        work_tree.touch_branch(clean_id)
+    except Exception:
+        pass
+    return {"ok": True, "judgment": record}
 
 
 def _as_dict(value: Any) -> dict[str, Any]:
@@ -192,6 +365,10 @@ def _clause_holds(
     *,
     holding: dict[str, bool],
     package_identity: str,
+    input_ref: str = "",
+    has_open_stem: bool = False,
+    active_source_keys: set[str] | None = None,
+    source_key: str = "",
 ) -> bool:
     kind = _text(clause.get("type"), 80).lower()
     if kind == "marker_true":
@@ -204,6 +381,25 @@ def _clause_holds(
     if kind == "package_identity_changed":
         prior = _text(clause.get("from"), 400)
         return bool(prior) and package_identity != prior
+    if kind == "same_input_ref":
+        stored = _text(clause.get("value"), 160)
+        current = _text(input_ref, 160)
+        return bool(stored) and (not current or current == stored)
+    if kind == "input_ref_changed":
+        prior = _text(clause.get("from"), 160)
+        current = _text(input_ref, 160)
+        return bool(prior) and bool(current) and current != prior
+    if kind == "invoke_matches_selection":
+        # Selection is revised elsewhere. This clause never self-releases a miss.
+        return False
+    if kind == "has_open_stem":
+        return bool(has_open_stem)
+    if kind == "no_open_stem":
+        return not bool(has_open_stem)
+    if kind == "source_key_in_active_set":
+        key = _text(source_key or clause.get("value"), 400)
+        active = {str(item or "").strip() for item in set(active_source_keys or set()) if str(item or "").strip()}
+        return bool(key) and key in active
     return False
 
 
@@ -212,6 +408,9 @@ def judgment_still_suppresses(
     *,
     progress: dict[str, Any] | None,
     branch_payload: dict[str, Any] | None = None,
+    has_open_stem: bool = False,
+    active_source_keys: set[str] | None = None,
+    source_key: str = "",
 ) -> bool:
     """True while reactivation contract has not fired."""
     row = _as_dict(judgment)
@@ -220,18 +419,25 @@ def judgment_still_suppresses(
         return False
     holding = _holding_map(progress)
     package_identity = _package_identity(_as_dict(branch_payload))
+    input_ref = _text(_as_dict(branch_payload).get("observation_input_ref"), 160)
+    clause_kwargs = {
+        "holding": holding,
+        "package_identity": package_identity,
+        "input_ref": input_ref,
+        "has_open_stem": bool(has_open_stem),
+        "active_source_keys": active_source_keys,
+        "source_key": source_key or _text(_as_dict(branch_payload).get("source_key"), 400),
+    }
     # Prefer explicit retry_when: suppress until ALL retry clauses hold.
     retry_when = [dict(c) for c in list(row.get("retry_when") or []) if isinstance(c, dict)]
     if retry_when:
-        return not all(
-            _clause_holds(c, holding=holding, package_identity=package_identity) for c in retry_when
-        )
+        return not all(_clause_holds(c, **clause_kwargs) for c in retry_when)
     # Fallback: suppress while any do_not_retry_while holds.
     blockers = [dict(c) for c in list(row.get("do_not_retry_while") or []) if isinstance(c, dict)]
     if blockers:
-        return any(_clause_holds(c, holding=holding, package_identity=package_identity) for c in blockers)
-    # Redundant with empty contract: suppress only if still no work needed (conservative).
-    return klass == JUDGMENT_REDUNDANT
+        return any(_clause_holds(c, **clause_kwargs) for c in blockers)
+    # Redundant/refused with empty contract: suppress only if still no work needed (conservative).
+    return klass in {JUDGMENT_REDUNDANT, JUDGMENT_REFUSED}
 
 
 def action_suppressed_by_trail(
@@ -241,25 +447,52 @@ def action_suppressed_by_trail(
     judgments: list[dict[str, Any]] | None = None,
     progress: dict[str, Any] | None = None,
     branch_payload: dict[str, Any] | None = None,
+    has_open_stem: bool = False,
+    active_source_keys: set[str] | None = None,
+    source_key: str = "",
 ) -> dict[str, Any] | None:
-    """Return the active suppressing judgment for this tool/title, if any."""
+    """Return the active suppressing judgment for this tool/title, if any.
+    
+    Prunes expired judgments (whose retry_when conditions hold) before checking,
+    so feedback closure works: when a condition changes, suppression lifts.
+    """
     tool = _norm_tool(tool_name)
     title = _text(task_title, 200).lower()
     if not tool and not title:
         return None
+    
+    # Prune expired judgments before checking
     rows = [dict(r) for r in list(judgments or []) if isinstance(r, dict)]
+    rows = _prune_expired_judgments(
+        rows,
+        progress=progress,
+        branch_payload=branch_payload,
+        has_open_stem=has_open_stem,
+        active_source_keys=active_source_keys,
+        source_key=source_key,
+    )
+    
     for row in reversed(rows):
         j_tool = _norm_tool(row.get("tool"))
         j_title = _text(row.get("task_title"), 200).lower()
         if tool and j_tool:
             if tool != j_tool:
                 continue
+            if title and j_title and title != j_title:
+                continue
         elif title and j_title:
             if title != j_title:
                 continue
         else:
             continue
-        if not judgment_still_suppresses(row, progress=progress, branch_payload=branch_payload):
+        if not judgment_still_suppresses(
+            row,
+            progress=progress,
+            branch_payload=branch_payload,
+            has_open_stem=has_open_stem,
+            active_source_keys=active_source_keys,
+            source_key=source_key,
+        ):
             continue
         return row
     return None
@@ -327,6 +560,40 @@ def sequence_item_should_skip_for_trail(
     return None
 
 
+def _prune_expired_judgments(
+    rows: list[dict[str, Any]],
+    *,
+    progress: dict[str, Any] | None = None,
+    branch_payload: dict[str, Any] | None = None,
+    has_open_stem: bool = False,
+    active_source_keys: set[str] | None = None,
+    source_key: str = "",
+) -> list[dict[str, Any]]:
+    """Remove judgments whose retry_when conditions have been satisfied.
+    
+    This closes the feedback loop: when a condition changes (e.g., input_ref),
+    the suppression is lifted automatically rather than accumulating forever.
+    """
+    if not rows:
+        return rows
+    
+    kept = []
+    for row in rows:
+        # Check if this suppressing judgment is still active
+        if not judgment_still_suppresses(
+            row,
+            progress=progress,
+            branch_payload=branch_payload,
+            has_open_stem=has_open_stem,
+            active_source_keys=active_source_keys,
+            source_key=source_key,
+        ):
+            # Condition has changed; judgment is expired, skip it
+            continue
+        kept.append(row)
+    return kept
+
+
 def append_attempt_judgment(branch_payload: dict[str, Any] | None, judgment: dict[str, Any]) -> dict[str, Any]:
     """Persist one judgment on finding payload (bounded)."""
     payload = dict(branch_payload or {}) if isinstance(branch_payload, dict) else {}
@@ -374,6 +641,103 @@ def record_attempt_on_branch(
     }
     branch.source_payload = append_attempt_judgment(payload, record)
     return {"ok": True, "judgment": record}
+
+
+def record_refuse_on_branch(
+    branch_id: str,
+    *,
+    reason: str,
+    retry_when: list[dict[str, Any]],
+    do_not_retry_while: list[dict[str, Any]] | None = None,
+    tool_name: str = "",
+    task_title: str = "",
+) -> dict[str, Any]:
+    """Teach unclaimable without an invoke. Same trail as attempt judgments.
+
+    Pressure is inherited from the last trail row when present so later
+    applications of the lesson do not require paying again.
+    """
+    import work_tree
+
+    clean_id = str(branch_id or "").strip()
+    why = _text(reason, 120)
+    if not clean_id or not why:
+        return {"ok": False, "reason": "missing_path"}
+    branch = work_tree.get_branch(clean_id)
+    if branch is None:
+        return {"ok": False, "reason": "branch_missing"}
+    payload = dict(branch.source_payload or {}) if isinstance(branch.source_payload, dict) else {}
+    source_key = str(getattr(branch, "source_key", "") or "").strip()
+    if source_key and not str(payload.get("source_key") or "").strip():
+        payload["source_key"] = source_key
+    existing = [dict(r) for r in list(payload.get(ATTEMPT_JUDGMENTS_KEY) or []) if isinstance(r, dict)]
+    for row in reversed(existing):
+        if _text(row.get("judgment"), 40).lower() != JUDGMENT_REFUSED:
+            continue
+        if _text(row.get("reason"), 120) != why:
+            continue
+        if judgment_still_suppresses(
+            row,
+            progress={},
+            branch_payload=payload,
+            source_key=source_key,
+        ):
+            return {"ok": True, "already": True, "judgment": row}
+    prior = existing[-1] if existing else {}
+    pressure = _refuse_pressure(prior)
+    record = {
+        "judgment": JUDGMENT_REFUSED,
+        "reason": why,
+        "tool": _norm_tool(tool_name),
+        "task_title": _text(task_title, 200),
+        "target_markers": [],
+        "do_not_retry_while": [dict(c) for c in list(do_not_retry_while or []) if isinstance(c, dict)],
+        "retry_when": [dict(c) for c in list(retry_when or []) if isinstance(c, dict)],
+        "conditions": {"source_key": source_key},
+        "pressure": pressure,
+        "source": REFUSE_SOURCE,
+    }
+    if not record["retry_when"]:
+        return {"ok": False, "reason": "retry_when_required"}
+    branch.source_payload = append_attempt_judgment(payload, record)
+    try:
+        work_tree.touch_branch(clean_id)
+    except Exception:
+        pass
+    stored = list((branch.source_payload or {}).get(ATTEMPT_JUDGMENTS_KEY) or [])
+    written = stored[-1] if stored else record
+    return {"ok": True, "already": False, "judgment": written}
+
+
+def branch_has_active_refuse(
+    branch: Any,
+    *,
+    has_open_stem: bool = False,
+    active_source_keys: set[str] | None = None,
+) -> dict[str, Any] | None:
+    """Active refused lesson on this branch, if the release contract has not fired."""
+    payload = dict(getattr(branch, "source_payload", None) or {}) if isinstance(getattr(branch, "source_payload", None), dict) else {}
+    source_key = str(getattr(branch, "source_key", "") or payload.get("source_key") or "").strip()
+    progress: dict[str, Any] = {}
+    try:
+        import work_tree
+
+        progress = dict(work_tree._branch_progress_payload(branch) or {})
+    except Exception:
+        progress = {}
+    for row in reversed([dict(r) for r in list(payload.get(ATTEMPT_JUDGMENTS_KEY) or []) if isinstance(r, dict)]):
+        if _text(row.get("judgment"), 40).lower() != JUDGMENT_REFUSED:
+            continue
+        if judgment_still_suppresses(
+            row,
+            progress=progress,
+            branch_payload=payload,
+            has_open_stem=has_open_stem,
+            active_source_keys=active_source_keys,
+            source_key=source_key,
+        ):
+            return row
+    return None
 
 
 def preferred_tool_from_progress(
@@ -458,7 +822,7 @@ def align_branch_open_stem_to_trail(branch_id: str) -> dict[str, Any]:
             if str(getattr(getattr(task, "status", None), "value", getattr(task, "status", "")) or "")
             .strip()
             .lower()
-            not in {"complete", "dropped"}
+            not in {"complete", "dropped", "attempted"}
         ]
         if not open_tasks:
             advanced = advance_branch_sequence_after_task(branch.branch_id)
