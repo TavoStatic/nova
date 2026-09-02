@@ -2,8 +2,8 @@
 NOVA_DOC
 category: architecture
 authority: active_authority
-last_session: 2026-08-05
-last_agent: claude-cowork
+last_session: 2026-09-01
+last_agent: grok
 session_state: current
 next_step: none
 open: none
@@ -80,6 +80,8 @@ Before closing the session:
 | Decision Judge design | `docs/DECISION_PROPOSAL_JUDGE.md` |
 | Self-scan rings design | `docs/SELF_SCAN_RINGS_DESIGN.md` |
 | SOCK hardware system | `docs/SOCK_SYSTEM.md` |
+| Mill LLM lane measure (2026-09-01 scores) | `docs/MILL_LANE_MEASURE_2026-09-01.md` — evidence; SOCK contract stays in SOCK_SYSTEM |
+| Mill skip/remint/stop/pulse (promoted) | `docs/AUTONOMY_AND_MISSION.md` — sip-execute is not promoted |
 | Hardware optimizer decisions | `docs/NOVA_LEDGER.md` → Architectural Decisions |
 
 **Where to write new `.md` files:**

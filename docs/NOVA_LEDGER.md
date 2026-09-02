@@ -1,6 +1,6 @@
 # Nova Living Ledger
 
-_Generated: 2026-09-01 22:07_
+_Generated: 2026-09-01 22:23_
 
 Two sources feed this document: **developer sessions** and **Nova's own scan findings**.
 Append to `docs/ledger/session_log.jsonl` (developer) or `docs/ledger/nova_findings.jsonl` (Nova),
@@ -66,6 +66,20 @@ _Session: mill-skip-causal_
 **Meta:** 4 tests added
 
 _Note: Closure is a changed next cycle in the trail. Model lane closed. No SOCK apply. No commit._
+
+### 2026-09-01 — grok
+_Session: mill-skip-promote_
+
+**Modules touched:** `docs/AUTONOMY_AND_MISSION.md`, `docs/SOCK_SYSTEM.md`, `docs/NOVA_POSTAL.md`, `docs/DOC_OWNERSHIP.md`, `docs/NOVA_LEDGER.md`
+
+**Changes:**
+- Promote mill skip/remint/stop/pulse as live mill-cycle control
+- Leave mill sip-execute unwired-not-claimed
+- Record decision mill_skip_remint_stop_pulse_promoted
+
+**Meta:** docs updated: `docs/AUTONOMY_AND_MISSION.md`, `docs/SOCK_SYSTEM.md`, `docs/NOVA_POSTAL.md`, `docs/DOC_OWNERSHIP.md`
+
+_Note: Live trail matched tests for skip/remint/stop/pulse only. No SOCK apply. Sip-execute not promoted._
 
 ### 2026-08-31 — grok
 _Session: mill-veins-spine_
@@ -1151,6 +1165,16 @@ _Modules: sock_service_
 
 Mill does not name a model. SOCK leases temporary capacity from mill_judgment_signal. Standing qwen3.5:4b; sip qwen3.5:9b on refused and redundant+empty_claim; 14B has no mill class. Generation beat size on Nova mill set.
 
+
+### `mill_skip_remint_stop_pulse_promoted` — 2026-09-01
+_Modules: autonomy_maintenance.py / services/observation_spine.py / services/solution_trail.py / services/autonomy_orchestrator.py / services/work_tree_signal_ingestion.py_
+
+Promote skip/remint/stop/pulse mill-cycle control only. Three trailing mill skips run mill once; mill-ok clears the force; pulse may return; paid trail blocks compact-lane remint. Do not promote mill sip-execute of standing 4B / sip 9B on source_root_judgment.
+
+**Rationale:** Live trail on 2026-09-01 matched the test trail for skip, remint, stop, and pulse (commit 23fa484). source_root_judgment was not reached because the paid trail left no OPEN stem, so sip-execute is wired but not live-promoted.
+
+**Affects:** `autonomy_maintenance.py`, `services/observation_spine.py`, `services/solution_trail.py`, `services/autonomy_orchestrator.py`, `services/work_tree_signal_ingestion.py`, `work_tree.py`
+**Source:** `docs/AUTONOMY_AND_MISSION.md` · Status: active
 
 ---
 

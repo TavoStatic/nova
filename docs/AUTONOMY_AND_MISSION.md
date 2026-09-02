@@ -2,16 +2,16 @@
 NOVA_DOC
 category: subsystem
 authority: active_working
-last_session: 2026-08-05
-last_agent: claude-cowork
-session_state: needs_update
-next_step: review mission boundary after orchestrator work
-open: none
+last_session: 2026-09-01
+last_agent: grok
+session_state: current
+next_step: none
+open: mill sip-execute not live-promoted
 -->
 
 # Nova Autonomy And Mission
 
-Last verified from code: 2026-07-12
+Last verified from code: 2026-09-01 (skip/remint/stop/pulse live-promoted; mill sip-execute not promoted; rest of this file still lags)
 
 ## Purpose
 
@@ -160,6 +160,33 @@ These are the required documentation and implementation invariants:
 - pressure visibility must not be converted into truth failure without an owner contract
 - pressure suppression must not erase diagnosis
 - execution context must identify the same tree, branch, task, and tool at every handoff
+- mill judgment class + pressure are derived, not a fifth stored status; the mill does not name an LLM
+- SOCK may lease a temporary mill model from that signal; standing `chat_model()` stays the policy string
+- a cycle `ok` with mill `executed=0` is not proof the finding moved
+- mill skip of `orchestrator_owns_execution` is a loop event; three trailing mill skips run mill once
+- a spine `loop` / `pulse` / `SELF_PREDICTION_MISS` report that leaves the next cycle identical is representation, not control
+- paid trail (controlling `redundant` / `refused`) holds the world; ingest must keep `attempt_judgments`
+
+## Mill capacity handoff
+
+Pickup and execute steps carry `mill_judgment_signal` from `services/solution_trail.py` (`mill_judgment_signal`). Mill-adjacent LLM invokes go through `services.sock_service.run_with_mill_capacity`. Kernel tool execute (`source_root_judgment`, `read`, …) is not an LLM sip — leasing 9B around those tools is caffeine with no thinking.
+
+Evidence for which model wins which mill class: `docs/MILL_LANE_MEASURE_2026-09-01.md`. SOCK contract: `docs/SOCK_SYSTEM.md`.
+
+## Mill skip / remint / stop / pulse (promoted 2026-09-01)
+
+Live-validated on `codex/push-prep` commit `23fa484`. Promote **only** this control. Do not promote mill sip-execute.
+
+- Three trailing mill `invoke` skips on `active_work_tree_cycle` (`orchestrator_owns_execution`) run mill once (`mill_skip_stop_run`).
+- Mill-ok clears the trailing force. The next cycle does not remint mill; pulse may return.
+- Paid trail (`trail_world_holds`) blocks compact-lane remint. Ingest keeps `attempt_judgments`.
+- Spine may still report `REPEATED_UNCHANGED_PATH` after mill-ok. Control uses trailing mill observations, not that report.
+
+Live trail 2026-09-01: skip, skip, skip → `22:14:01` mill `idle` / `mill_skip_stop_run` → `22:18:53` mill `skipped` and orchestrator `pulse_status`. Compact-lane `branch_d1817af9` stayed `ATTEMPTED` (`task_53c41ded`); OPEN `[]`.
+
+Overnight 2026-09-01 (~7h) before this control: 74 cycles `ok`, mill execute 0, spine on **pulse_status**. That trail is historical.
+
+Sip-execute of standing 4B / sip 9B when `source_root_judgment` is reached is **wired, not live-promoted**. This cycle did not reach that tool because the paid trail left no OPEN judgment stem.
 
 ## Known Current Violations Or Risks
 
@@ -168,5 +195,6 @@ These are the required documentation and implementation invariants:
 - target resolution is bounded by candidate enumeration
 - Mission still contains execution exceptions and ambient-ingestion suppression, so it is more than a thin verdict sentence
 - mixed legacy/orchestrator execution creates two paths that must remain behaviorally aligned
+- mill sip-execute on `source_root_judgment` is wired (standing 4B / sip 9B) and not live-promoted
 
 These statements are code-truth findings. They are not resolved by this document.

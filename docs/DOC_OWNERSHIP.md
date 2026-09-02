@@ -2,7 +2,7 @@
 NOVA_DOC
 category: architecture
 authority: active_authority
-last_session: 2026-08-29
+last_session: 2026-09-01
 last_agent: grok
 session_state: current
 next_step: none
@@ -58,10 +58,11 @@ This file tells you who owns what. The ledger tells you what is current.
 
 ### Subsystem Truth
 
-- `AUTONOMY_AND_MISSION.md`: Mission, orchestrator, gate, Work Tree, pressure, and outbox
+- `AUTONOMY_AND_MISSION.md`: Mission, orchestrator, gate, Work Tree, pressure, outbox, and promoted mill skip/remint/stop/pulse (sip-execute not promoted)
 - `TEST_ECOSYSTEM.md`: test discovery, lane membership, generated tests, and validation truth
 - `KIDNEY_SYSTEM.md`: cleanup and retention
-- `SOCK_SYSTEM.md`: hardware/model compatibility
+- `SOCK_SYSTEM.md`: hardware/model compatibility and mill capacity lease (standing vs temporary sip)
+- `MILL_LANE_MEASURE_2026-09-01.md`: Ollama mill-judgment scores (3.5 vs 2.5); evidence only — does not override live mill
 - `DATA_PIPELINES.md`: pipeline framework, data connector core, and domain lanes
 - Backpack uninstall contract lives in code: `services/backpack_host/sanitize.py` and `services/backpack_host/install_state.py`. The named decision is `backpack_uninstall_touch_list` in the ledger.
 - `SEARCH_PROVIDER_ARCHITECTURE.md`: search providers and research routing
