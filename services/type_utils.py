@@ -68,13 +68,16 @@ def _as_bool_or_none(value: Any) -> bool | None:
     return None
 
 
-def _text(value: Any, limit: int | None = None, default: str = "") -> str:
-    """Normalize value to a clean stripped string with optional character limit."""
+def _text(value: Any, limit: int | str | None = None, default: str = "") -> str:
+    """Normalize value to a clean stripped string with optional character limit or default."""
+    if isinstance(limit, str):
+        default = limit
+        limit = None
     if value is None:
         return default
     rendered = str(value).strip()
     if not rendered and default:
         rendered = default
-    if limit is not None and limit >= 0:
+    if isinstance(limit, int) and limit >= 0:
         return rendered[:limit]
     return rendered

@@ -7,45 +7,391 @@
   <link rel="stylesheet" href="/static/leah.css?v={{LEAH_CSS_VERSION}}" />
 </head>
 <body>
-  <div class="leah-app">
-    <header class="leah-top">
-      <div class="wordmark">Leah</div>
-      <p id="activityHeadline" class="status-line">Nova is here.</p>
-      <span id="presenceHealth" class="quiet-dot" title="Health">…</span>
-    </header>
+  <header class="top-bar">
+    <div class="top-brand">NOVA</div>
+    <nav class="top-nav">
+      <span class="top-nav-item">People</span>
+      <span class="top-nav-item">Context</span>
+      <span class="top-nav-item">Progress</span>
+    </nav>
+    <div class="top-status">
+      <span>LEAH</span>
+      <span>|</span>
+      <span>OPERATIONAL</span>
+      <div class="top-status-dot"></div>
+    </div>
+  </header>
 
-    <main class="leah-stage">
-      <div id="chat" class="chat-stream"></div>
+  <div class="main-grid">
+    <aside class="left-rail">
+      <div class="status-card">
+        <div class="status-icon-wrap">
+          <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>
+        </div>
+        <div class="status-text">
+          <div class="status-label">CORE</div>
+          <div class="status-state ok" id="stateCore">ONLINE</div>
+        </div>
+      </div>
+      <div class="status-card">
+        <div class="status-icon-wrap">
+          <svg viewBox="0 0 24 24"><path d="M12 2L3 7v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V7l-9-5z"/></svg>
+        </div>
+        <div class="status-text">
+          <div class="status-label">GUARD</div>
+          <div class="status-state active" id="stateGuard">ACTIVE</div>
+        </div>
+      </div>
+      <div class="status-card">
+        <div class="status-icon-wrap">
+          <svg viewBox="0 0 24 24"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+        </div>
+        <div class="status-text">
+          <div class="status-label">HTTP</div>
+          <div class="status-state ok" id="stateHttp">CONNECTED</div>
+        </div>
+      </div>
+      <div class="status-card">
+        <div class="status-icon-wrap">
+          <svg viewBox="0 0 24 24"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>
+        </div>
+        <div class="status-text">
+          <div class="status-label">OLLAMA</div>
+          <div class="status-state ok" id="stateOllama">READY</div>
+        </div>
+      </div>
+      <div class="left-footer">A MORE<br>HUMAN<br>TOMORROW</div>
+    </aside>
+
+    <main class="center-stage">
+      <div class="hud-container">
+        <!-- Single dense SVG radial instrument -->
+        <svg class="hud-svg" viewBox="0 0 700 700" xmlns="http://www.w3.org/2000/svg">
+          <defs>
+            <!-- Glow filters -->
+            <filter id="glow-sm"><feGaussianBlur stdDeviation="2" result="g"/><feMerge><feMergeNode in="g"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+            <filter id="glow-md"><feGaussianBlur stdDeviation="4" result="g"/><feMerge><feMergeNode in="g"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+            <filter id="glow-lg"><feGaussianBlur stdDeviation="8" result="g"/><feMerge><feMergeNode in="g"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+            <filter id="glow-xl"><feGaussianBlur stdDeviation="14" result="g"/><feMerge><feMergeNode in="g"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+            <!-- Gradients -->
+            <radialGradient id="center-glow" cx="50%" cy="50%" r="50%">
+              <stop offset="0%" stop-color="rgba(0,200,255,0.25)"/>
+              <stop offset="40%" stop-color="rgba(0,150,220,0.1)"/>
+              <stop offset="100%" stop-color="transparent"/>
+            </radialGradient>
+            <radialGradient id="core-bg" cx="50%" cy="50%" r="50%">
+              <stop offset="0%" stop-color="rgba(0,180,240,0.12)"/>
+              <stop offset="60%" stop-color="rgba(6,14,28,0.95)"/>
+              <stop offset="100%" stop-color="rgba(6,14,28,1)"/>
+            </radialGradient>
+            <linearGradient id="arc-bright" x1="0%" y1="0%" x2="100%" y2="0%">
+              <stop offset="0%" stop-color="rgba(0,220,255,0.95)"/>
+              <stop offset="100%" stop-color="rgba(0,160,220,0.6)"/>
+            </linearGradient>
+            <linearGradient id="arc-dim" x1="0%" y1="0%" x2="100%" y2="0%">
+              <stop offset="0%" stop-color="rgba(0,180,240,0.5)"/>
+              <stop offset="100%" stop-color="rgba(0,180,240,0.15)"/>
+            </linearGradient>
+            <mask id="ring-mask">
+              <rect width="700" height="700" fill="white"/>
+              <circle cx="350" cy="350" r="155" fill="black"/>
+            </mask>
+          </defs>
+
+          <!-- Background glow -->
+          <circle cx="350" cy="350" r="345" fill="url(#center-glow)"/>
+
+          <!-- ═══ LAYER 1: Outermost tick ring (compass) ═══ -->
+          <g class="layer-ticks-outer" opacity="0.5">
+            <!-- 72 ticks around the outer edge -->
+            <g id="ticks-outer">
+              <line x1="350" y1="8" x2="350" y2="22" stroke="#00c8ff" stroke-width="1.5" opacity="0.6"/>
+              <line x1="350" y1="8" x2="350" y2="18" stroke="#00c8ff" stroke-width="0.8" opacity="0.4" transform="rotate(5,350,350)"/>
+              <line x1="350" y1="8" x2="350" y2="22" stroke="#00c8ff" stroke-width="1.5" opacity="0.7" transform="rotate(10,350,350)"/>
+              <line x1="350" y1="8" x2="350" y2="16" stroke="#00c8ff" stroke-width="0.6" opacity="0.35" transform="rotate(15,350,350)"/>
+              <line x1="350" y1="8" x2="350" y2="22" stroke="#00c8ff" stroke-width="1.5" opacity="0.65" transform="rotate(20,350,350)"/>
+              <line x1="350" y1="8" x2="350" y2="18" stroke="#00c8ff" stroke-width="0.8" opacity="0.45" transform="rotate(25,350,350)"/>
+              <line x1="350" y1="8" x2="350" y2="22" stroke="#00c8ff" stroke-width="1.5" opacity="0.7" transform="rotate(30,350,350)"/>
+              <line x1="350" y1="8" x2="350" y2="16" stroke="#00c8ff" stroke-width="0.6" opacity="0.35" transform="rotate(35,350,350)"/>
+              <line x1="350" y1="8" x2="350" y2="22" stroke="#00c8ff" stroke-width="1.5" opacity="0.6" transform="rotate(40,350,350)"/>
+              <line x1="350" y1="8" x2="350" y2="18" stroke="#00c8ff" stroke-width="0.8" opacity="0.4" transform="rotate(45,350,350)"/>
+              <line x1="350" y1="8" x2="350" y2="22" stroke="#00c8ff" stroke-width="1.5" opacity="0.7" transform="rotate(50,350,350)"/>
+              <line x1="350" y1="8" x2="350" y2="16" stroke="#00c8ff" stroke-width="0.6" opacity="0.35" transform="rotate(55,350,350)"/>
+              <line x1="350" y1="8" x2="350" y2="22" stroke="#00c8ff" stroke-width="1.5" opacity="0.65" transform="rotate(60,350,350)"/>
+              <line x1="350" y1="8" x2="350" y2="18" stroke="#00c8ff" stroke-width="0.8" opacity="0.45" transform="rotate(65,350,350)"/>
+              <line x1="350" y1="8" x2="350" y2="22" stroke="#00c8ff" stroke-width="1.5" opacity="0.7" transform="rotate(70,350,350)"/>
+              <line x1="350" y1="8" x2="350" y2="16" stroke="#00c8ff" stroke-width="0.6" opacity="0.35" transform="rotate(75,350,350)"/>
+              <line x1="350" y1="8" x2="350" y2="22" stroke="#00c8ff" stroke-width="1.5" opacity="0.6" transform="rotate(80,350,350)"/>
+              <line x1="350" y1="8" x2="350" y2="18" stroke="#00c8ff" stroke-width="0.8" opacity="0.4" transform="rotate(85,350,350)"/>
+              <line x1="350" y1="8" x2="350" y2="22" stroke="#00c8ff" stroke-width="1.5" opacity="0.7" transform="rotate(90,350,350)"/>
+              <line x1="350" y1="8" x2="350" y2="16" stroke="#00c8ff" stroke-width="0.6" opacity="0.35" transform="rotate(95,350,350)"/>
+              <line x1="350" y1="8" x2="350" y2="22" stroke="#00c8ff" stroke-width="1.5" opacity="0.65" transform="rotate(100,350,350)"/>
+              <line x1="350" y1="8" x2="350" y2="18" stroke="#00c8ff" stroke-width="0.8" opacity="0.45" transform="rotate(105,350,350)"/>
+              <line x1="350" y1="8" x2="350" y2="22" stroke="#00c8ff" stroke-width="1.5" opacity="0.7" transform="rotate(110,350,350)"/>
+              <line x1="350" y1="8" x2="350" y2="16" stroke="#00c8ff" stroke-width="0.6" opacity="0.35" transform="rotate(115,350,350)"/>
+              <line x1="350" y1="8" x2="350" y2="22" stroke="#00c8ff" stroke-width="1.5" opacity="0.6" transform="rotate(120,350,350)"/>
+              <line x1="350" y1="8" x2="350" y2="18" stroke="#00c8ff" stroke-width="0.8" opacity="0.4" transform="rotate(125,350,350)"/>
+              <line x1="350" y1="8" x2="350" y2="22" stroke="#00c8ff" stroke-width="1.5" opacity="0.7" transform="rotate(130,350,350)"/>
+              <line x1="350" y1="8" x2="350" y2="16" stroke="#00c8ff" stroke-width="0.6" opacity="0.35" transform="rotate(135,350,350)"/>
+              <line x1="350" y1="8" x2="350" y2="22" stroke="#00c8ff" stroke-width="1.5" opacity="0.65" transform="rotate(140,350,350)"/>
+              <line x1="350" y1="8" x2="350" y2="18" stroke="#00c8ff" stroke-width="0.8" opacity="0.45" transform="rotate(145,350,350)"/>
+              <line x1="350" y1="8" x2="350" y2="22" stroke="#00c8ff" stroke-width="1.5" opacity="0.7" transform="rotate(150,350,350)"/>
+              <line x1="350" y1="8" x2="350" y2="16" stroke="#00c8ff" stroke-width="0.6" opacity="0.35" transform="rotate(155,350,350)"/>
+              <line x1="350" y1="8" x2="350" y2="22" stroke="#00c8ff" stroke-width="1.5" opacity="0.6" transform="rotate(160,350,350)"/>
+              <line x1="350" y1="8" x2="350" y2="18" stroke="#00c8ff" stroke-width="0.8" opacity="0.4" transform="rotate(165,350,350)"/>
+              <line x1="350" y1="8" x2="350" y2="22" stroke="#00c8ff" stroke-width="1.5" opacity="0.7" transform="rotate(170,350,350)"/>
+              <line x1="350" y1="8" x2="350" y2="16" stroke="#00c8ff" stroke-width="0.6" opacity="0.35" transform="rotate(175,350,350)"/>
+              <line x1="350" y1="8" x2="350" y2="22" stroke="#00c8ff" stroke-width="1.5" opacity="0.65" transform="rotate(180,350,350)"/>
+              <line x1="350" y1="8" x2="350" y2="18" stroke="#00c8ff" stroke-width="0.8" opacity="0.45" transform="rotate(185,350,350)"/>
+              <line x1="350" y1="8" x2="350" y2="22" stroke="#00c8ff" stroke-width="1.5" opacity="0.7" transform="rotate(190,350,350)"/>
+              <line x1="350" y1="8" x2="350" y2="16" stroke="#00c8ff" stroke-width="0.6" opacity="0.35" transform="rotate(195,350,350)"/>
+              <line x1="350" y1="8" x2="350" y2="22" stroke="#00c8ff" stroke-width="1.5" opacity="0.6" transform="rotate(200,350,350)"/>
+              <line x1="350" y1="8" x2="350" y2="18" stroke="#00c8ff" stroke-width="0.8" opacity="0.4" transform="rotate(205,350,350)"/>
+              <line x1="350" y1="8" x2="350" y2="22" stroke="#00c8ff" stroke-width="1.5" opacity="0.7" transform="rotate(210,350,350)"/>
+              <line x1="350" y1="8" x2="350" y2="16" stroke="#00c8ff" stroke-width="0.6" opacity="0.35" transform="rotate(215,350,350)"/>
+              <line x1="350" y1="8" x2="350" y2="22" stroke="#00c8ff" stroke-width="1.5" opacity="0.65" transform="rotate(220,350,350)"/>
+              <line x1="350" y1="8" x2="350" y2="18" stroke="#00c8ff" stroke-width="0.8" opacity="0.45" transform="rotate(225,350,350)"/>
+              <line x1="350" y1="8" x2="350" y2="22" stroke="#00c8ff" stroke-width="1.5" opacity="0.7" transform="rotate(230,350,350)"/>
+              <line x1="350" y1="8" x2="350" y2="16" stroke="#00c8ff" stroke-width="0.6" opacity="0.35" transform="rotate(235,350,350)"/>
+              <line x1="350" y1="8" x2="350" y2="22" stroke="#00c8ff" stroke-width="1.5" opacity="0.6" transform="rotate(240,350,350)"/>
+              <line x1="350" y1="8" x2="350" y2="18" stroke="#00c8ff" stroke-width="0.8" opacity="0.4" transform="rotate(245,350,350)"/>
+              <line x1="350" y1="8" x2="350" y2="22" stroke="#00c8ff" stroke-width="1.5" opacity="0.7" transform="rotate(250,350,350)"/>
+              <line x1="350" y1="8" x2="350" y2="16" stroke="#00c8ff" stroke-width="0.6" opacity="0.35" transform="rotate(255,350,350)"/>
+              <line x1="350" y1="8" x2="350" y2="22" stroke="#00c8ff" stroke-width="1.5" opacity="0.65" transform="rotate(260,350,350)"/>
+              <line x1="350" y1="8" x2="350" y2="18" stroke="#00c8ff" stroke-width="0.8" opacity="0.45" transform="rotate(265,350,350)"/>
+              <line x1="350" y1="8" x2="350" y2="22" stroke="#00c8ff" stroke-width="1.5" opacity="0.7" transform="rotate(270,350,350)"/>
+              <line x1="350" y1="8" x2="350" y2="16" stroke="#00c8ff" stroke-width="0.6" opacity="0.35" transform="rotate(275,350,350)"/>
+              <line x1="350" y1="8" x2="350" y2="22" stroke="#00c8ff" stroke-width="1.5" opacity="0.6" transform="rotate(280,350,350)"/>
+              <line x1="350" y1="8" x2="350" y2="18" stroke="#00c8ff" stroke-width="0.8" opacity="0.4" transform="rotate(285,350,350)"/>
+              <line x1="350" y1="8" x2="350" y2="22" stroke="#00c8ff" stroke-width="1.5" opacity="0.7" transform="rotate(290,350,350)"/>
+              <line x1="350" y1="8" x2="350" y2="16" stroke="#00c8ff" stroke-width="0.6" opacity="0.35" transform="rotate(295,350,350)"/>
+              <line x1="350" y1="8" x2="350" y2="22" stroke="#00c8ff" stroke-width="1.5" opacity="0.65" transform="rotate(300,350,350)"/>
+              <line x1="350" y1="8" x2="350" y2="18" stroke="#00c8ff" stroke-width="0.8" opacity="0.45" transform="rotate(305,350,350)"/>
+              <line x1="350" y1="8" x2="350" y2="22" stroke="#00c8ff" stroke-width="1.5" opacity="0.7" transform="rotate(310,350,350)"/>
+              <line x1="350" y1="8" x2="350" y2="16" stroke="#00c8ff" stroke-width="0.6" opacity="0.35" transform="rotate(315,350,350)"/>
+              <line x1="350" y1="8" x2="350" y2="22" stroke="#00c8ff" stroke-width="1.5" opacity="0.6" transform="rotate(320,350,350)"/>
+              <line x1="350" y1="8" x2="350" y2="18" stroke="#00c8ff" stroke-width="0.8" opacity="0.4" transform="rotate(325,350,350)"/>
+              <line x1="350" y1="8" x2="350" y2="22" stroke="#00c8ff" stroke-width="1.5" opacity="0.7" transform="rotate(330,350,350)"/>
+              <line x1="350" y1="8" x2="350" y2="16" stroke="#00c8ff" stroke-width="0.6" opacity="0.35" transform="rotate(335,350,350)"/>
+              <line x1="350" y1="8" x2="350" y2="22" stroke="#00c8ff" stroke-width="1.5" opacity="0.65" transform="rotate(340,350,350)"/>
+              <line x1="350" y1="8" x2="350" y2="18" stroke="#00c8ff" stroke-width="0.8" opacity="0.45" transform="rotate(345,350,350)"/>
+              <line x1="350" y1="8" x2="350" y2="22" stroke="#00c8ff" stroke-width="1.5" opacity="0.7" transform="rotate(350,350,350)"/>
+              <line x1="350" y1="8" x2="350" y2="16" stroke="#00c8ff" stroke-width="0.6" opacity="0.35" transform="rotate(355,350,350)"/>
+            </g>
+          </g>
+
+          <!-- ═══ LAYER 2: Outer ring circles ═══ -->
+          <circle cx="350" cy="350" r="340" fill="none" stroke="rgba(0,200,255,0.3)" stroke-width="1" filter="url(#glow-sm)"/>
+          <circle cx="350" cy="350" r="330" fill="none" stroke="rgba(0,200,255,0.15)" stroke-width="0.5" stroke-dasharray="2 6"/>
+
+          <!-- ═══ LAYER 3: Thick arc segments (activity ring) ═══ -->
+          <g class="layer-arcs" filter="url(#glow-md)">
+            <!-- Main bright arc - top right -->
+            <path d="M350,55 A295,295 0 0,1 605,200" fill="none" stroke="url(#arc-bright)" stroke-width="8" stroke-linecap="round"/>
+            <!-- Secondary arc - right -->
+            <path d="M615,220 A295,295 0 0,1 580,520" fill="none" stroke="rgba(0,200,255,0.45)" stroke-width="5" stroke-linecap="round"/>
+            <!-- Bottom arc -->
+            <path d="M560,560 A295,295 0 0,1 180,580" fill="none" stroke="url(#arc-dim)" stroke-width="6" stroke-linecap="round"/>
+            <!-- Left arc -->
+            <path d="M160,560 A295,295 0 0,1 100,300" fill="none" stroke="rgba(0,200,255,0.35)" stroke-width="4" stroke-linecap="round"/>
+            <!-- Top left arc -->
+            <path d="M110,280 A295,295 0 0,1 200,90" fill="none" stroke="rgba(0,200,255,0.3)" stroke-width="5" stroke-linecap="round"/>
+            <!-- Small connecting arc -->
+            <path d="M215,75 A295,295 0 0,1 335,57" fill="none" stroke="rgba(0,200,255,0.2)" stroke-width="3" stroke-linecap="round"/>
+          </g>
+
+          <!-- ═══ LAYER 4: Middle ring with dense ticks ═══ -->
+          <circle cx="350" cy="350" r="265" fill="none" stroke="rgba(0,200,255,0.25)" stroke-width="1.5" filter="url(#glow-sm)"/>
+          <g class="layer-ticks-mid" opacity="0.55">
+            <!-- Dense tick marks around middle ring -->
+            <g id="ticks-mid"></g>
+          </g>
+
+          <!-- ═══ LAYER 5: Barcode/data pattern ring ═══ -->
+          <g class="layer-barcode" mask="url(#ring-mask)">
+            <g id="barcode-lines">
+              <!-- Generated barcode-like short lines -->
+            </g>
+          </g>
+
+          <!-- ═══ LAYER 6: Inner bright ring ═══ -->
+          <circle cx="350" cy="350" r="200" fill="none" stroke="rgba(0,200,255,0.35)" stroke-width="2" filter="url(#glow-sm)"/>
+          <circle cx="350" cy="350" r="190" fill="none" stroke="rgba(0,200,255,0.2)" stroke-width="1"/>
+
+          <!-- ═══ LAYER 7: Evidence flow nodes ═══ -->
+          <g class="layer-evidence" filter="url(#glow-sm)">
+            <circle cx="350" cy="155" r="3.5" fill="#00c8ff" opacity="0.8"/>
+            <circle cx="490" cy="200" r="3" fill="#00bbdd" opacity="0.7"/>
+            <circle cx="510" cy="370" r="3" fill="#00c8ff" opacity="0.75"/>
+            <circle cx="420" cy="500" r="2.5" fill="#00ee77" opacity="0.7"/>
+            <circle cx="270" cy="510" r="3" fill="#00c8ff" opacity="0.7"/>
+            <circle cx="195" cy="380" r="2.8" fill="#a855f7" opacity="0.65"/>
+            <circle cx="210" cy="230" r="2.5" fill="#00c8ff" opacity="0.7"/>
+            <!-- Paths between evidence nodes -->
+            <path d="M350,155 L490,200" stroke="rgba(0,200,255,0.15)" stroke-width="0.8"/>
+            <path d="M490,200 L510,370" stroke="rgba(0,200,255,0.12)" stroke-width="0.6"/>
+            <path d="M510,370 L420,500" stroke="rgba(0,200,255,0.12)" stroke-width="0.6"/>
+            <path d="M420,500 L270,510" stroke="rgba(0,238,119,0.1)" stroke-width="0.5"/>
+            <path d="M270,510 L195,380" stroke="rgba(0,200,255,0.12)" stroke-width="0.6"/>
+            <path d="M195,380 L210,230" stroke="rgba(168,85,247,0.1)" stroke-width="0.5"/>
+            <path d="M210,230 L350,155" stroke="rgba(0,200,255,0.12)" stroke-width="0.6"/>
+          </g>
+
+          <!-- ═══ LAYER 8: Scattered particles ═══ -->
+          <g class="layer-particles">
+            <circle cx="280" cy="120" r="1.5" fill="#00c8ff" opacity="0.5">
+              <animate attributeName="opacity" values="0.3;0.8;0.3" dur="4s" repeatCount="indefinite"/>
+            </circle>
+            <circle cx="520" cy="150" r="1" fill="#00ee77" opacity="0.4">
+              <animate attributeName="opacity" values="0.2;0.7;0.2" dur="5s" repeatCount="indefinite"/>
+            </circle>
+            <circle cx="580" cy="320" r="1.2" fill="#00c8ff" opacity="0.45">
+              <animate attributeName="opacity" values="0.3;0.75;0.3" dur="3.5s" repeatCount="indefinite"/>
+            </circle>
+            <circle cx="550" cy="480" r="1" fill="#a855f7" opacity="0.4">
+              <animate attributeName="opacity" values="0.2;0.65;0.2" dur="4.5s" repeatCount="indefinite"/>
+            </circle>
+            <circle cx="150" cy="450" r="1.3" fill="#00c8ff" opacity="0.5">
+              <animate attributeName="opacity" values="0.3;0.8;0.3" dur="3.8s" repeatCount="indefinite"/>
+            </circle>
+            <circle cx="130" cy="250" r="1" fill="#00ee77" opacity="0.4">
+              <animate attributeName="opacity" values="0.25;0.7;0.25" dur="4.2s" repeatCount="indefinite"/>
+            </circle>
+            <circle cx="400" cy="90" r="0.8" fill="#00c8ff" opacity="0.35">
+              <animate attributeName="opacity" values="0.2;0.6;0.2" dur="5.5s" repeatCount="indefinite"/>
+            </circle>
+            <circle cx="300" cy="560" r="1.1" fill="#00c8ff" opacity="0.4">
+              <animate attributeName="opacity" values="0.3;0.7;0.3" dur="3.2s" repeatCount="indefinite"/>
+            </circle>
+            <circle cx="460" cy="550" r="0.9" fill="#a855f7" opacity="0.35">
+              <animate attributeName="opacity" values="0.2;0.65;0.2" dur="4.8s" repeatCount="indefinite"/>
+            </circle>
+            <circle cx="600" cy="250" r="1" fill="#00c8ff" opacity="0.4">
+              <animate attributeName="opacity" values="0.25;0.7;0.25" dur="3.6s" repeatCount="indefinite"/>
+            </circle>
+            <circle cx="100" cy="350" r="1.2" fill="#00ee77" opacity="0.45">
+              <animate attributeName="opacity" values="0.3;0.75;0.3" dur="4.4s" repeatCount="indefinite"/>
+            </circle>
+            <circle cx="350" cy="600" r="0.8" fill="#00c8ff" opacity="0.35">
+              <animate attributeName="opacity" values="0.2;0.6;0.2" dur="5.2s" repeatCount="indefinite"/>
+            </circle>
+          </g>
+
+          <!-- ═══ LAYER 9: Core chamber ═══ -->
+          <circle cx="350" cy="350" r="160" fill="url(#core-bg)" stroke="rgba(0,200,255,0.25)" stroke-width="1.5"/>
+          <circle cx="350" cy="350" r="155" fill="none" stroke="rgba(0,200,255,0.1)" stroke-width="0.5"/>
+          <!-- Inner glow layers -->
+          <circle cx="350" cy="350" r="140" fill="none" stroke="rgba(0,200,255,0.08)" stroke-width="0.5"/>
+          <circle cx="350" cy="350" r="120" fill="none" stroke="rgba(0,200,255,0.05)" stroke-width="0.3"/>
+
+          <!-- ═══ Center text ═══ -->
+          <text x="350" y="340" text-anchor="middle" fill="#e4eef6" font-size="68" font-weight="200" letter-spacing="16" font-family="Segoe UI, system-ui, sans-serif" filter="url(#glow-md)">LEAH</text>
+          <text x="350" y="380" text-anchor="middle" fill="#00c8ff" font-size="13" letter-spacing="8" font-family="Segoe UI, system-ui, sans-serif" filter="url(#glow-sm)">OBSERVING</text>
+
+          <!-- ═══ Orbit node positions (marked with glows) ═══ -->
+          <!-- Memory - top -->
+          <g class="node-marker" transform="translate(350,25)">
+            <circle r="45" fill="rgba(6,14,28,0.9)" stroke="rgba(168,85,247,0.5)" stroke-width="1.5" filter="url(#glow-md)"/>
+            <circle r="38" fill="none" stroke="rgba(168,85,247,0.3)" stroke-width="1"/>
+            <circle r="22" fill="rgba(168,85,247,0.15)" stroke="rgba(168,85,247,0.5)" stroke-width="1.5"/>
+            <text y="4" text-anchor="middle" fill="#a855f7" font-size="16" filter="url(#glow-sm)">&#x1F9E0;</text>
+            <text y="62" text-anchor="middle" fill="#6a8aa8" font-size="9" letter-spacing="2" font-family="Segoe UI, system-ui, sans-serif">MEMORY</text>
+          </g>
+
+          <!-- Voice - top right -->
+          <g class="node-marker" transform="translate(580,210)">
+            <circle r="42" fill="rgba(6,14,28,0.9)" stroke="rgba(0,200,255,0.5)" stroke-width="1.5" filter="url(#glow-md)"/>
+            <circle r="35" fill="none" stroke="rgba(0,200,255,0.3)" stroke-width="1"/>
+            <circle r="20" fill="rgba(0,200,255,0.12)" stroke="rgba(0,200,255,0.5)" stroke-width="1.5"/>
+            <text y="4" text-anchor="middle" fill="#00c8ff" font-size="16" filter="url(#glow-sm)">&#x1F3A4;</text>
+            <text y="58" text-anchor="middle" fill="#6a8aa8" font-size="9" letter-spacing="2" font-family="Segoe UI, system-ui, sans-serif">VOICE</text>
+          </g>
+
+          <!-- Continuity - bottom right -->
+          <g class="node-marker" transform="translate(540,540)">
+            <circle r="42" fill="rgba(6,14,28,0.9)" stroke="rgba(0,200,255,0.5)" stroke-width="1.5" filter="url(#glow-md)"/>
+            <circle r="35" fill="none" stroke="rgba(0,200,255,0.3)" stroke-width="1"/>
+            <circle r="20" fill="rgba(0,200,255,0.12)" stroke="rgba(0,200,255,0.5)" stroke-width="1.5"/>
+            <text y="4" text-anchor="middle" fill="#00c8ff" font-size="16" filter="url(#glow-sm)">&#x1F465;</text>
+            <text y="58" text-anchor="middle" fill="#6a8aa8" font-size="9" letter-spacing="2" font-family="Segoe UI, system-ui, sans-serif">CONTINUITY</text>
+          </g>
+
+          <!-- Persona - bottom -->
+          <g class="node-marker" transform="translate(350,600)">
+            <circle r="42" fill="rgba(6,14,28,0.9)" stroke="rgba(255,170,51,0.5)" stroke-width="1.5" filter="url(#glow-md)"/>
+            <circle r="35" fill="none" stroke="rgba(255,170,51,0.3)" stroke-width="1"/>
+            <circle r="20" fill="rgba(255,170,51,0.12)" stroke="rgba(255,170,51,0.5)" stroke-width="1.5"/>
+            <text y="4" text-anchor="middle" fill="#ffaa33" font-size="16" filter="url(#glow-sm)">&#x1F464;</text>
+            <text y="58" text-anchor="middle" fill="#6a8aa8" font-size="9" letter-spacing="2" font-family="Segoe UI, system-ui, sans-serif">PERSONA</text>
+          </g>
+
+          <!-- State - bottom left -->
+          <g class="node-marker" transform="translate(160,530)">
+            <circle r="42" fill="rgba(6,14,28,0.9)" stroke="rgba(0,200,255,0.5)" stroke-width="1.5" filter="url(#glow-md)"/>
+            <circle r="35" fill="none" stroke="rgba(0,200,255,0.3)" stroke-width="1"/>
+            <circle r="20" fill="rgba(0,200,255,0.12)" stroke="rgba(0,200,255,0.5)" stroke-width="1.5"/>
+            <text y="4" text-anchor="middle" fill="#00c8ff" font-size="16" filter="url(#glow-sm)">&#x1F4BE;</text>
+            <text y="58" text-anchor="middle" fill="#6a8aa8" font-size="9" letter-spacing="2" font-family="Segoe UI, system-ui, sans-serif">STATE</text>
+          </g>
+
+          <!-- Nova - top left -->
+          <g class="node-marker" transform="translate(130,220)">
+            <circle r="42" fill="rgba(6,14,28,0.9)" stroke="rgba(0,200,255,0.5)" stroke-width="1.5" filter="url(#glow-md)"/>
+            <circle r="35" fill="none" stroke="rgba(0,200,255,0.3)" stroke-width="1"/>
+            <circle r="20" fill="rgba(0,200,255,0.12)" stroke="rgba(0,200,255,0.5)" stroke-width="1.5"/>
+            <text y="4" text-anchor="middle" fill="#00c8ff" font-size="16" filter="url(#glow-sm)">&#x1F441;</text>
+            <text y="58" text-anchor="middle" fill="#6a8aa8" font-size="9" letter-spacing="2" font-family="Segoe UI, system-ui, sans-serif">NOVA</text>
+          </g>
+
+        </svg>
+      </div>
     </main>
 
-    <footer class="leah-dock">
-      <div id="sensingDock" class="sensing-dock" hidden>
-        <video id="cameraPreview" class="camera-preview" autoplay playsinline muted></video>
-        <canvas id="cameraCanvas" hidden></canvas>
-        <div id="cameraEmpty" class="sr-only">Camera preview</div>
-        <div id="transcriptBox" class="transcript" hidden></div>
-        <ul id="stagedList" class="staged-list"></ul>
+    <aside class="right-rail">
+      <div class="panel">
+        <div class="panel-head">
+          <span class="panel-head-icon">&#9672;</span>
+          <span class="panel-head-title">CURRENT FOCUS</span>
+          <span class="panel-head-badge" id="focusBadge">OPERATOR</span>
+        </div>
+        <div class="focus-list">
+          <div class="focus-item"><span class="focus-key">Task</span><span class="focus-val" id="focusTask">Monitoring conversation</span></div>
+          <div class="focus-item"><span class="focus-key">Context</span><span class="focus-val" id="focusContext">Project workspace</span></div>
+          <div class="focus-item"><span class="focus-key">Memory</span><span class="focus-val" id="focusMemory">Retrieval active</span></div>
+          <div class="focus-item"><span class="focus-key">Voice</span><span class="focus-val" id="focusVoice">Ready</span></div>
+          <div class="focus-item"><span class="focus-key">Continuity</span><span class="focus-val" id="focusContinuity">Maintaining session</span></div>
+          <div class="focus-item"><span class="focus-key">System</span><span class="focus-val" id="focusSystem">All systems nominal</span></div>
+        </div>
       </div>
-
-      <form id="composerForm" class="composer">
-        <div id="dropZone" class="composer-shell">
-          <textarea id="messageInput" rows="2" placeholder="Speak, or type…"></textarea>
+      <div class="panel">
+        <div class="panel-head">
+          <span class="panel-head-icon">&#9671;</span>
+          <span class="panel-head-title">EVIDENCE</span>
+          <span class="panel-head-badge live">LIVE</span>
         </div>
-        <div class="composer-bar">
-          <input id="fileInput" type="file" multiple hidden />
-          <button id="btnUpload" type="button" class="icon-btn" title="Share a file">File</button>
-          <button id="btnCamera" type="button" class="icon-btn" title="Camera">Camera</button>
-          <button id="btnCapture" type="button" class="icon-btn" title="Capture" hidden>Capture</button>
-          <button id="btnMic" type="button" class="icon-btn" title="Listen">Mic</button>
-          <button id="btnListen" type="button" class="icon-btn" title="Keep listening">Listen</button>
-          <button id="btnVoice" type="button" class="icon-btn" title="Nova can speak">Voice</button>
-          <button id="btnSend" type="submit" class="send-btn">Send</button>
+        <div class="evidence-list" id="evidenceFeed">
+          <div class="evidence-item"><span class="evidence-text">System initialized</span><span class="evidence-time">now</span></div>
         </div>
-      </form>
-    </footer>
+      </div>
+      <div class="right-footer">CONTEXT<br>CREATES<br>POSSIBILITY</div>
+    </aside>
   </div>
 
-  <!-- Kept for leah.js; not shown -->
+  <div class="input-bar">
+    <form id="composerForm" class="input-pill">
+      <button id="btnUpload" type="button" class="input-btn" title="Attach file">
+        <svg viewBox="0 0 24 24"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
+      </button>
+      <textarea id="messageInput" rows="1" placeholder="Talk to Leah..."></textarea>
+      <button id="btnMic" type="button" class="input-btn" title="Voice input">
+        <svg viewBox="0 0 24 24"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/></svg>
+      </button>
+      <button id="btnSend" type="submit" class="input-send" title="Send">
+        <svg viewBox="0 0 24 24"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+      </button>
+    </form>
+  </div>
+
   <div class="sr-only" aria-hidden="true">
     <div id="presenceThinking"></div>
     <div id="presenceListening"></div>
@@ -66,6 +412,21 @@
     <div id="pulseSearch"></div>
     <div id="pulseMaintenance"></div>
     <div id="pulseTask"></div>
+    <div id="presenceHealth"></div>
+    <div id="headerPresenceHealth"></div>
+    <div id="headerPresenceThinking"></div>
+    <div id="headerPresenceListening"></div>
+    <div id="headerPresenceVoice"></div>
+    <div id="headerPresenceCamera"></div>
+    <div id="headerPresenceMood"></div>
+    <div id="activityHeadline"></div>
+    <div id="stagedList"></div>
+    <div id="transcriptBox"></div>
+    <div id="cameraPreview"></div>
+    <div id="cameraCanvas"></div>
+    <div id="cameraEmpty"></div>
+    <div id="sensingDock"></div>
+    <div id="chat"></div>
   </div>
 
   <script>
@@ -79,7 +440,79 @@
       chatLogoutUrl: "/api/chat/logout",
       uploadUrl: "/api/chat/upload"
     };
+
+    // Generate dense tick marks and barcode lines
+    (function() {
+      var svg = document.querySelector('.hud-svg');
+      if (!svg) return;
+      var ns = 'http://www.w3.org/2000/svg';
+
+      // Generate outer ticks (72 ticks)
+      var ticksOuter = document.getElementById('ticks-outer');
+      if (ticksOuter) {
+        for (var i = 0; i < 72; i++) {
+          var angle = i * 5;
+          var line = document.createElementNS(ns, 'line');
+          var isMajor = i % 6 === 0;
+          var isMinor = i % 3 === 0;
+          line.setAttribute('x1', '350');
+          line.setAttribute('y1', '8');
+          line.setAttribute('x2', '350');
+          line.setAttribute('y2', isMajor ? '22' : isMinor ? '18' : '14');
+          line.setAttribute('stroke', '#00c8ff');
+          line.setAttribute('stroke-width', isMajor ? '1.5' : isMinor ? '0.8' : '0.5');
+          line.setAttribute('opacity', isMajor ? '0.7' : isMinor ? '0.45' : '0.3');
+          line.setAttribute('transform', 'rotate(' + angle + ',350,350)');
+          ticksOuter.appendChild(line);
+        }
+      }
+
+      // Generate mid ticks (120 ticks around r=265)
+      var ticksMid = document.getElementById('ticks-mid');
+      if (ticksMid) {
+        for (var i = 0; i < 120; i++) {
+          var angle = i * 3;
+          var isMajor = i % 10 === 0;
+          var isMed = i % 5 === 0;
+          var line = document.createElementNS(ns, 'line');
+          var r1 = 255;
+          var r2 = isMajor ? 248 : isMed ? 250 : 252;
+          var rad = angle * Math.PI / 180;
+          line.setAttribute('x1', 350 + Math.sin(rad) * r1);
+          line.setAttribute('y1', 350 - Math.cos(rad) * r1);
+          line.setAttribute('x2', 350 + Math.sin(rad) * r2);
+          line.setAttribute('y2', 350 - Math.cos(rad) * r2);
+          line.setAttribute('stroke', i % 30 < 10 ? '#00c8ff' : i % 30 < 20 ? '#0088cc' : '#8855dd');
+          line.setAttribute('stroke-width', isMajor ? '1.5' : isMed ? '1' : '0.5');
+          line.setAttribute('opacity', isMajor ? '0.6' : isMed ? '0.4' : '0.25');
+          ticksMid.appendChild(line);
+        }
+      }
+
+      // Generate barcode lines (radial short lines between r=195 and r=260)
+      var barcode = document.getElementById('barcode-lines');
+      if (barcode) {
+        for (var i = 0; i < 180; i++) {
+          var angle = i * 2;
+          var line = document.createElementNS(ns, 'line');
+          var h = 3 + Math.random() * 12;
+          var r1 = 200;
+          var r2 = r1 + h;
+          var rad = angle * Math.PI / 180;
+          var opacity = 0.15 + Math.random() * 0.35;
+          line.setAttribute('x1', 350 + Math.sin(rad) * r1);
+          line.setAttribute('y1', 350 - Math.cos(rad) * r1);
+          line.setAttribute('x2', 350 + Math.sin(rad) * r2);
+          line.setAttribute('y2', 350 - Math.cos(rad) * r2);
+          line.setAttribute('stroke', Math.random() > 0.7 ? '#00ee77' : '#00c8ff');
+          line.setAttribute('stroke-width', '1.5');
+          line.setAttribute('opacity', opacity);
+          barcode.appendChild(line);
+        }
+      }
+    })();
   </script>
   <script src="/static/leah.js?v={{LEAH_JS_VERSION}}"></script>
+  <script src="/static/leah_fx.js?v={{LEAH_JS_VERSION}}"></script>
 </body>
 </html>

@@ -133,6 +133,19 @@
     headerPresenceVoice: document.getElementById("headerPresenceVoice"),
     headerPresenceCamera: document.getElementById("headerPresenceCamera"),
     headerPresenceMood: document.getElementById("headerPresenceMood"),
+    dotCore: document.getElementById("stateCore"),
+    dotGuard: document.getElementById("stateGuard"),
+    dotHttp: document.getElementById("stateHttp"),
+    dotOllama: document.getElementById("stateOllama"),
+    focusTask: document.getElementById("focusTask"),
+    focusContext: document.getElementById("focusContext"),
+    focusMemory: document.getElementById("focusMemory"),
+    focusVoice: document.getElementById("focusVoice"),
+    focusContinuity: document.getElementById("focusContinuity"),
+    focusSystem: document.getElementById("focusSystem"),
+    evidenceFeed: document.getElementById("evidenceFeed"),
+    hudStatus: document.getElementById("hudStatus"),
+    hudRing: document.querySelector(".hud-container"),
   };
 
   function makeUserId() {
@@ -192,6 +205,38 @@
     if (dom.moodLabel) {
       const profile = moodProfiles[state.moodMode] || moodProfiles.calm;
       dom.moodLabel.textContent = `${profile.label} · ${state.moodReason || profile.note}`;
+    }
+  }
+
+  function setStatus(el, ok, label) {
+    if (!el) return;
+    el.textContent = label || (ok ? "ONLINE" : "OFFLINE");
+    el.className = "status-state " + (ok ? "ok" : "off");
+  }
+
+  function updateStatusDots(summary) {
+    setStatus(dom.dotCore, summary.runtimeOk, summary.runtimeOk ? "ONLINE" : "OFFLINE");
+    setStatus(dom.dotGuard, state.lastRuntimePulse?.guard_running ?? false, (state.lastRuntimePulse?.guard_running ?? false) ? "ACTIVE" : "INACTIVE");
+    setStatus(dom.dotHttp, true, "CONNECTED");
+    setStatus(dom.dotOllama, state.lastRuntimePulse?.ollama_api_up ?? false, (state.lastRuntimePulse?.ollama_api_up ?? false) ? "READY" : "OFFLINE");
+  }
+
+  function updateFocusPanel(summary) {
+    if (dom.focusTask) dom.focusTask.textContent = summary.queueActionable > 0 ? "Active repair queue" : "Monitoring conversation";
+    if (dom.focusSystem) dom.focusSystem.textContent = summary.runtimeOk ? "All systems nominal" : "Runtime recovering";
+    if (dom.focusMemory) dom.focusMemory.textContent = state.lastRuntimePulse?.memory_enabled ? "Retrieval active" : "Memory off";
+    if (dom.focusContinuity) dom.focusContinuity.textContent = state.sessionId ? "Maintaining session" : "No active session";
+    if (dom.focusVoice) dom.focusVoice.textContent = state.voiceEnabled ? "Active" : "Ready";
+  }
+
+  function appendEvidence(text) {
+    if (!dom.evidenceFeed) return;
+    const entry = document.createElement("div");
+    entry.className = "evidence-entry";
+    entry.innerHTML = '<span class="evidence-text">' + text + '</span><span class="evidence-time">now</span>';
+    dom.evidenceFeed.prepend(entry);
+    while (dom.evidenceFeed.children.length > 8) {
+      dom.evidenceFeed.lastChild.remove();
     }
   }
 
@@ -305,17 +350,14 @@
   function syncButtons() {
     if (dom.btnVoice) {
       dom.btnVoice.classList.toggle("live", state.voiceEnabled);
-      dom.btnVoice.textContent = state.voiceEnabled ? "Voice On" : "Voice";
     }
     if (dom.btnMic) {
       dom.btnMic.disabled = !SpeechRecognitionCtor;
       dom.btnMic.classList.toggle("live", !state.listenMode && state.recognitionActive);
-      dom.btnMic.textContent = !SpeechRecognitionCtor ? "Mic Unavailable" : (state.listenMode ? "Mic Ready" : (state.recognitionActive ? "Stop Mic" : "Mic"));
     }
     if (dom.btnListen) {
       dom.btnListen.disabled = !SpeechRecognitionCtor;
       dom.btnListen.classList.toggle("live", state.listenMode);
-      dom.btnListen.textContent = !SpeechRecognitionCtor ? "Listen Off" : (state.listenMode ? "Stop Listen" : "Listen");
     }
     if (dom.btnCamera) {
       dom.btnCamera.classList.toggle("live", state.cameraLive);
@@ -482,6 +524,25 @@
       setPulseField(dom.pulseSearch, searchText);
       setPulseField(dom.pulseMaintenance, describeMaintenanceMode(summary.maintenanceStatus));
       setPulseField(dom.pulseTask, taskText);
+
+    updateStatusDots(summary);
+    updateFocusPanel(summary);
+
+    if (dom.hudStatus) {
+      if (state.thinking) {
+        dom.hudStatus.textContent = "THINKING";
+      } else if (state.uploading) {
+        dom.hudStatus.textContent = "STAGING";
+      } else if (state.listenMode) {
+        dom.hudStatus.textContent = "LISTENING";
+      } else if (summary.runtimeOk && summary.health >= 100) {
+        dom.hudStatus.textContent = "OBSERVING";
+      } else if (summary.runtimeOk) {
+        dom.hudStatus.textContent = "ONLINE";
+      } else {
+        dom.hudStatus.textContent = "RECOVERING";
+      }
+    }
 
     if (!state.thinking && !state.uploading && !state.listenMode && !state.recognitionActive) {
       if (!summary.searchOk) {
@@ -709,8 +770,12 @@
       const payload = await response.json();
       state.chatLoginEnabled = Boolean(payload.chat_login_enabled);
       if (payload.ollama_api_up) {
+        appendEvidence("Ollama online");
         setChip(dom.presenceHealth, "Ready", "ok");
         setChip(dom.headerPresenceHealth, "Ready", "ok");
+        state.lastRuntimePulse = state.lastRuntimePulse || {};
+        state.lastRuntimePulse.ollama_api_up = true;
+        state.lastRuntimePulse.memory_enabled = payload.memory_enabled;
         if (!state.thinking && !state.uploading && !state.listenMode && !state.recognitionActive && !state.cameraLive && !state.stagedItems.length && !state.recentHandoff.length) {
           setMood("calm", "steady runtime");
         }
@@ -843,6 +908,7 @@
     const outgoing = raw || "Please inspect the staged context for this turn.";
     const userEcho = raw || `[Shared ${state.stagedItems.length} staged item(s)]`;
     addMessage("user", userEcho);
+    appendEvidence("Turn sent" + (hasStaged ? " with " + state.stagedItems.length + " attachments" : ""));
     state.thinking = true;
     setMood(
       hasStaged ? "focus" : inferMoodFromText(outgoing, "focus"),
@@ -879,6 +945,7 @@
       }
       const reply = payload.reply || (payload.error ? `Error: ${payload.error}` : "No reply");
       addMessage("assistant", String(reply));
+      appendEvidence(reply.substring(0, 60) + (reply.length > 60 ? "..." : ""));
       if (response.ok && payload.reply) {
         const replyMood = inferMoodFromText(reply, hasStaged ? "focus" : "calm");
         const replyReason =
@@ -1247,6 +1314,20 @@
     dom.btnNewSession?.addEventListener("click", () => {
       resetSession();
     });
+
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "/" && document.activeElement?.tagName !== "TEXTAREA" && document.activeElement?.tagName !== "INPUT") {
+        event.preventDefault();
+        dom.input?.focus();
+      }
+      if (event.key === "Escape" && document.activeElement === dom.input) {
+        dom.input.blur();
+      }
+      if (event.ctrlKey && event.shiftKey && event.key === "N") {
+        event.preventDefault();
+        resetSession();
+      }
+    });
   }
 
   async function boot() {
@@ -1262,6 +1343,7 @@
     renderStagedItems();
     setMood("calm", "steady runtime");
     syncPresence();
+    appendEvidence("System initialized");
     await loadHistory();
     await resumePendingTurn();
     try {

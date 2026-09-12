@@ -66,7 +66,9 @@ class TestTypeUtils(unittest.TestCase):
         self.assertEqual(_text("hello world", limit=5), "hello")
         self.assertEqual(_text(None), "")
         self.assertEqual(_text(None, default="fallback"), "fallback")
+        self.assertEqual(_text(None, "positional_default"), "positional_default")
         self.assertEqual(_text("", default="default_text"), "default_text")
+        self.assertEqual(_text("", "positional_default"), "positional_default")
         self.assertEqual(_text(12345, limit=3), "123")
 
 
