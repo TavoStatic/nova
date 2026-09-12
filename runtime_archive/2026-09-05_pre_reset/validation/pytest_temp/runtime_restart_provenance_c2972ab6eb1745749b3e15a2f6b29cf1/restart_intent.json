@@ -1,0 +1,1 @@
+{"ok": true, "intent_id": "100-bc1e0cc8", "ts": 100.0, "created_at_utc": "1970-01-01T00:01:40Z", "expires_at": 1000.0, "ttl_seconds": 900, "source": "runtime_control", "action": "guard_restart", "reason": "operator_requested_guard_restart", "requested_by": "operator", "planned": true}

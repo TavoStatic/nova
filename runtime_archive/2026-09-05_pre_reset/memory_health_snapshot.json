@@ -1,0 +1,7 @@
+{
+  "updated_at": 1788622114,
+  "last_good_total": 22,
+  "memory_db_path": "C:\\NOVA\\nova_memory.sqlite",
+  "learned_facts_path": "C:\\NOVA\\memory\\learned_facts.json",
+  "identity_path": "C:\\NOVA\\memory\\identity.json"
+}

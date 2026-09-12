@@ -1,0 +1,417 @@
+{
+  "schema": "nova.work_tree_solution_ladder.v1",
+  "updated_at": "2026-09-05T12:41:00Z",
+  "meta": {
+    "min_samples": 5,
+    "limit_tasks": 1500,
+    "family_count": 5
+  },
+  "families": {
+    "generated_session_repair|generated_queue_item": {
+      "family_key": "generated_session_repair|generated_queue_item",
+      "intent": "Resolve recurring work like: run generated session subconscious_repeated-weak-pressure-family_soft-smalltalk-",
+      "solution": "Task complete with the evidence pattern seen in successful history.",
+      "source": "learned",
+      "markers": [
+        {
+          "marker_id": "started",
+          "label": "First investigation evidence recorded",
+          "weight": 0.2941176470588235,
+          "stage": 0,
+          "tools": [],
+          "title_keywords": [],
+          "result_keywords": [],
+          "requires_complete": false,
+          "any_evidence": true,
+          "min_evidence": 0,
+          "requires_markers": [],
+          "verify_tools": []
+        },
+        {
+          "marker_id": "via_generated_queue_run",
+          "label": "Evidence via generated_queue_run",
+          "weight": 0.23529411764705882,
+          "stage": 1,
+          "tools": [
+            "generated_queue_run"
+          ],
+          "title_keywords": [],
+          "result_keywords": [],
+          "requires_complete": false,
+          "any_evidence": false,
+          "min_evidence": 0,
+          "requires_markers": [
+            "started"
+          ],
+          "verify_tools": []
+        },
+        {
+          "marker_id": "via_operator_response",
+          "label": "Evidence via operator_response",
+          "weight": 0.23529411764705882,
+          "stage": 2,
+          "tools": [
+            "operator_response"
+          ],
+          "title_keywords": [],
+          "result_keywords": [],
+          "requires_complete": false,
+          "any_evidence": false,
+          "min_evidence": 0,
+          "requires_markers": [
+            "via_generated_queue_run"
+          ],
+          "verify_tools": []
+        },
+        {
+          "marker_id": "closed",
+          "label": "Task completed",
+          "weight": 0.23529411764705882,
+          "stage": 3,
+          "tools": [],
+          "title_keywords": [],
+          "result_keywords": [],
+          "requires_complete": true,
+          "any_evidence": false,
+          "min_evidence": 0,
+          "requires_markers": [
+            "via_operator_response"
+          ],
+          "verify_tools": []
+        }
+      ]
+    },
+    "release_readiness_gap|release": {
+      "family_key": "release_readiness_gap|release",
+      "intent": "Resolve recurring work like: Run release validation profile from current artifact",
+      "solution": "Task complete with the evidence pattern seen in successful history.",
+      "source": "learned",
+      "markers": [
+        {
+          "marker_id": "started",
+          "label": "First investigation evidence recorded",
+          "weight": 0.23809523809523808,
+          "stage": 0,
+          "tools": [],
+          "title_keywords": [],
+          "result_keywords": [],
+          "requires_complete": false,
+          "any_evidence": true,
+          "min_evidence": 0,
+          "requires_markers": [],
+          "verify_tools": []
+        },
+        {
+          "marker_id": "via_read",
+          "label": "Evidence via read",
+          "weight": 0.19047619047619047,
+          "stage": 1,
+          "tools": [
+            "read"
+          ],
+          "title_keywords": [],
+          "result_keywords": [],
+          "requires_complete": false,
+          "any_evidence": false,
+          "min_evidence": 0,
+          "requires_markers": [
+            "started"
+          ],
+          "verify_tools": []
+        },
+        {
+          "marker_id": "via_release_rebuild_verify",
+          "label": "Evidence via release_rebuild_verify",
+          "weight": 0.19047619047619047,
+          "stage": 2,
+          "tools": [
+            "release_rebuild_verify"
+          ],
+          "title_keywords": [],
+          "result_keywords": [],
+          "requires_complete": false,
+          "any_evidence": false,
+          "min_evidence": 0,
+          "requires_markers": [
+            "via_read"
+          ],
+          "verify_tools": []
+        },
+        {
+          "marker_id": "via_release_validation_run",
+          "label": "Evidence via release_validation_run",
+          "weight": 0.19047619047619047,
+          "stage": 3,
+          "tools": [
+            "release_validation_run"
+          ],
+          "title_keywords": [],
+          "result_keywords": [],
+          "requires_complete": false,
+          "any_evidence": false,
+          "min_evidence": 0,
+          "requires_markers": [
+            "via_release_rebuild_verify"
+          ],
+          "verify_tools": []
+        },
+        {
+          "marker_id": "closed",
+          "label": "Task completed",
+          "weight": 0.19047619047619047,
+          "stage": 4,
+          "tools": [],
+          "title_keywords": [],
+          "result_keywords": [],
+          "requires_complete": true,
+          "any_evidence": false,
+          "min_evidence": 0,
+          "requires_markers": [
+            "via_release_validation_run"
+          ],
+          "verify_tools": []
+        }
+      ]
+    },
+    "governance_pressure|safety_envelope": {
+      "family_key": "governance_pressure|safety_envelope",
+      "intent": "Resolve recurring work like: Run safety-envelope audit",
+      "solution": "Task complete with the evidence pattern seen in successful history.",
+      "source": "learned",
+      "markers": [
+        {
+          "marker_id": "started",
+          "label": "First investigation evidence recorded",
+          "weight": 0.2941176470588235,
+          "stage": 0,
+          "tools": [],
+          "title_keywords": [],
+          "result_keywords": [],
+          "requires_complete": false,
+          "any_evidence": true,
+          "min_evidence": 0,
+          "requires_markers": [],
+          "verify_tools": []
+        },
+        {
+          "marker_id": "via_phase2_audit",
+          "label": "Evidence via phase2_audit",
+          "weight": 0.23529411764705882,
+          "stage": 1,
+          "tools": [
+            "phase2_audit"
+          ],
+          "title_keywords": [],
+          "result_keywords": [],
+          "requires_complete": false,
+          "any_evidence": false,
+          "min_evidence": 0,
+          "requires_markers": [
+            "started"
+          ],
+          "verify_tools": []
+        },
+        {
+          "marker_id": "via_source_root_judgment",
+          "label": "Evidence via source_root_judgment",
+          "weight": 0.23529411764705882,
+          "stage": 2,
+          "tools": [
+            "source_root_judgment"
+          ],
+          "title_keywords": [],
+          "result_keywords": [],
+          "requires_complete": false,
+          "any_evidence": false,
+          "min_evidence": 0,
+          "requires_markers": [
+            "via_phase2_audit"
+          ],
+          "verify_tools": []
+        },
+        {
+          "marker_id": "closed",
+          "label": "Task completed",
+          "weight": 0.23529411764705882,
+          "stage": 3,
+          "tools": [],
+          "title_keywords": [],
+          "result_keywords": [],
+          "requires_complete": true,
+          "any_evidence": false,
+          "min_evidence": 0,
+          "requires_markers": [
+            "via_source_root_judgment"
+          ],
+          "verify_tools": []
+        }
+      ]
+    },
+    "governance_pressure|data_pipelines": {
+      "family_key": "governance_pressure|data_pipelines",
+      "intent": "Resolve recurring work like: List registered data pipelines",
+      "solution": "Task complete with the evidence pattern seen in successful history.",
+      "source": "learned",
+      "markers": [
+        {
+          "marker_id": "started",
+          "label": "First investigation evidence recorded",
+          "weight": 0.23809523809523808,
+          "stage": 0,
+          "tools": [],
+          "title_keywords": [],
+          "result_keywords": [],
+          "requires_complete": false,
+          "any_evidence": true,
+          "min_evidence": 0,
+          "requires_markers": [],
+          "verify_tools": []
+        },
+        {
+          "marker_id": "via_source_root_judgment",
+          "label": "Evidence via source_root_judgment",
+          "weight": 0.19047619047619047,
+          "stage": 1,
+          "tools": [
+            "source_root_judgment"
+          ],
+          "title_keywords": [],
+          "result_keywords": [],
+          "requires_complete": false,
+          "any_evidence": false,
+          "min_evidence": 0,
+          "requires_markers": [
+            "started"
+          ],
+          "verify_tools": []
+        },
+        {
+          "marker_id": "via_pipeline",
+          "label": "Evidence via pipeline",
+          "weight": 0.19047619047619047,
+          "stage": 2,
+          "tools": [
+            "pipeline"
+          ],
+          "title_keywords": [],
+          "result_keywords": [],
+          "requires_complete": false,
+          "any_evidence": false,
+          "min_evidence": 0,
+          "requires_markers": [
+            "via_source_root_judgment"
+          ],
+          "verify_tools": []
+        },
+        {
+          "marker_id": "via_operator_response",
+          "label": "Evidence via operator_response",
+          "weight": 0.19047619047619047,
+          "stage": 3,
+          "tools": [
+            "operator_response"
+          ],
+          "title_keywords": [],
+          "result_keywords": [],
+          "requires_complete": false,
+          "any_evidence": false,
+          "min_evidence": 0,
+          "requires_markers": [
+            "via_pipeline"
+          ],
+          "verify_tools": []
+        },
+        {
+          "marker_id": "closed",
+          "label": "Task completed",
+          "weight": 0.19047619047619047,
+          "stage": 4,
+          "tools": [],
+          "title_keywords": [],
+          "result_keywords": [],
+          "requires_complete": true,
+          "any_evidence": false,
+          "min_evidence": 0,
+          "requires_markers": [
+            "via_operator_response"
+          ],
+          "verify_tools": []
+        }
+      ]
+    },
+    "unknown|unknown": {
+      "family_key": "unknown|unknown",
+      "intent": "Resolve recurring work like: Extract HTTP surface: chat_sessions: chat_sessions mapping can close after a ver",
+      "solution": "Task complete with the evidence pattern seen in successful history.",
+      "source": "learned",
+      "markers": [
+        {
+          "marker_id": "started",
+          "label": "First investigation evidence recorded",
+          "weight": 0.2941176470588235,
+          "stage": 0,
+          "tools": [],
+          "title_keywords": [],
+          "result_keywords": [],
+          "requires_complete": false,
+          "any_evidence": true,
+          "min_evidence": 0,
+          "requires_markers": [],
+          "verify_tools": []
+        },
+        {
+          "marker_id": "via_core_thinning",
+          "label": "Evidence via core_thinning",
+          "weight": 0.23529411764705882,
+          "stage": 1,
+          "tools": [
+            "core_thinning"
+          ],
+          "title_keywords": [],
+          "result_keywords": [],
+          "requires_complete": false,
+          "any_evidence": false,
+          "min_evidence": 0,
+          "requires_markers": [
+            "started"
+          ],
+          "verify_tools": []
+        },
+        {
+          "marker_id": "via_operator_response",
+          "label": "Evidence via operator_response",
+          "weight": 0.23529411764705882,
+          "stage": 2,
+          "tools": [
+            "operator_response"
+          ],
+          "title_keywords": [],
+          "result_keywords": [],
+          "requires_complete": false,
+          "any_evidence": false,
+          "min_evidence": 0,
+          "requires_markers": [
+            "via_core_thinning"
+          ],
+          "verify_tools": []
+        },
+        {
+          "marker_id": "closed",
+          "label": "Task completed",
+          "weight": 0.23529411764705882,
+          "stage": 3,
+          "tools": [],
+          "title_keywords": [],
+          "result_keywords": [],
+          "requires_complete": true,
+          "any_evidence": false,
+          "min_evidence": 0,
+          "requires_markers": [
+            "via_operator_response"
+          ],
+          "verify_tools": []
+        }
+      ]
+    }
+  }
+}

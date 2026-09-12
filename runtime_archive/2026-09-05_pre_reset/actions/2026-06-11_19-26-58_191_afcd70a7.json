@@ -1,0 +1,161 @@
+{
+  "ts": "2026-06-11 19:26:52",
+  "channel": "cli",
+  "session_id": "",
+  "input_source": "typed",
+  "user_input": "can you give me the weather for today ?",
+  "intent": "",
+  "planner_decision": "run_tool",
+  "tool": "weather_current_location",
+  "tool_args": {
+    "args": []
+  },
+  "tool_result": "25.909736306604444,-97.5060703195954: Tonight: 81\u00b0F, Partly Cloudy then Slight Chance Rain Showers. Wind 8 to 14 mph SE. [source: api.weather.gov]",
+  "final_answer": "25.909736306604444,-97.5060703195954: Tonight: 81\u00b0F, Partly Cloudy then Slight Chance Rain Showers. Wind 8 to 14 mph SE. [source: api.weather.gov]",
+  "reply_contract": "weather_lookup.current_location",
+  "reply_outcome": {
+    "intent": "weather_lookup",
+    "kind": "current_location",
+    "reply_contract": "weather_lookup.current_location",
+    "execution_profile": {
+      "total_time": 6071,
+      "planner_time": 4311,
+      "llm_time": 0,
+      "tool_time": 1437,
+      "post_time": 0,
+      "tool_selection_time": 2624
+    }
+  },
+  "turn_acts": [],
+  "grounded": true,
+  "active_subject": "last_tool_evidence:weather_current_location",
+  "continuation_used": false,
+  "route_trace": [
+    {
+      "stage": "input",
+      "outcome": "received",
+      "data": {
+        "channel": "cli",
+        "input_source": "typed"
+      }
+    },
+    {
+      "stage": "intent_understanding",
+      "outcome": "classified",
+      "detail": "weather information for today",
+      "data": {
+        "level": "requesting",
+        "domain": "weather",
+        "confidence": 0.8,
+        "strategy": "fulfill"
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "semantic_tool_intent",
+      "data": {
+        "duration_ms": 2624
+      }
+    },
+    {
+      "stage": "action_planner",
+      "outcome": "semantic_intent",
+      "detail": "The user is asking for current weather information, which requires accessing an external source.",
+      "data": {
+        "tool": "weather_current_location",
+        "confidence": 0.7
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "tool_selection",
+      "data": {
+        "duration_ms": 2624
+      }
+    },
+    {
+      "stage": "action_planner",
+      "outcome": "run_tool",
+      "data": {
+        "tool": "weather_current_location"
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "tool_response",
+      "data": {
+        "duration_ms": 1437,
+        "tool": "weather_current_location"
+      }
+    },
+    {
+      "stage": "tool_execution",
+      "outcome": "ok",
+      "data": {
+        "tool": "weather_current_location",
+        "grounded": true
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "planner",
+      "data": {
+        "duration_ms": 4311
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "planner_call",
+      "data": {
+        "duration_ms": 4311
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "execute_reply_sequence",
+      "data": {
+        "duration_ms": 6071
+      }
+    },
+    {
+      "stage": "timing_breakdown",
+      "outcome": "completed",
+      "detail": "execute_reply_sequence",
+      "data": {
+        "total_time": 6071,
+        "planner_time": 4311,
+        "llm_time": 0,
+        "tool_time": 1437,
+        "post_time": 0,
+        "tool_selection_time": 2624
+      }
+    },
+    {
+      "stage": "finalize",
+      "outcome": "run_tool",
+      "data": {
+        "grounded": true,
+        "tool": "weather_current_location"
+      }
+    }
+  ],
+  "provider_used": "weather_current_location",
+  "provider_candidates": [],
+  "provider_family": "weather_current_location",
+  "routing_decision": {
+    "final_owner": "action_planner",
+    "planner_owner": "action_planner",
+    "planner_action": "run_tool",
+    "planner_tool": "weather_current_location",
+    "reply_contract": "weather_lookup.current_location",
+    "reply_outcome_kind": "current_location",
+    "turn_acts": []
+  },
+  "route_summary": "input:received -> intent_understanding:classified -> action_planner:semantic_intent -> action_planner:run_tool -> tool_execution:ok -> finalize:run_tool"
+}

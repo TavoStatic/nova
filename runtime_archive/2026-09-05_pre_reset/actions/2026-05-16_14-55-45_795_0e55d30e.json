@@ -1,0 +1,213 @@
+{
+  "ts": "2026-05-16 14:55:45",
+  "channel": "http",
+  "session_id": "stub_content_probe_cac8f28d",
+  "input_source": "typed",
+  "user_input": "tell me about the first one",
+  "intent": "chat",
+  "planner_decision": "llm_fallback",
+  "tool": "",
+  "tool_args": {},
+  "tool_result": "",
+  "final_answer": "MODEL_OWNED:tell me about the first one",
+  "reply_contract": "",
+  "reply_outcome": {
+    "execution_profile": {
+      "total_time": 27,
+      "planner_time": 0,
+      "llm_time": 0,
+      "tool_time": 0,
+      "post_time": 0,
+      "tool_selection_time": 0
+    }
+  },
+  "turn_acts": [],
+  "grounded": false,
+  "active_subject": "",
+  "continuation_used": false,
+  "route_trace": [
+    {
+      "stage": "input",
+      "outcome": "received",
+      "data": {
+        "channel": "http",
+        "input_source": "typed",
+        "intent": "chat"
+      }
+    },
+    {
+      "stage": "direction_analysis",
+      "outcome": "general_chat",
+      "data": {
+        "effective_query": "tell me about the first one",
+        "identity_focused": false,
+        "bypass_pattern_routes": false
+      }
+    },
+    {
+      "stage": "truth_hierarchy",
+      "outcome": "skipped",
+      "detail": "content_owned_chat_disabled"
+    },
+    {
+      "stage": "hard_answer",
+      "outcome": "skipped",
+      "detail": "content_owned_chat_disabled"
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "planner_decide_actions",
+      "data": {
+        "duration_ms": 0
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "tool_selection",
+      "data": {
+        "duration_ms": 0
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "planner_call",
+      "data": {
+        "duration_ms": 0
+      }
+    },
+    {
+      "stage": "policy_gate",
+      "outcome": "allowed"
+    },
+    {
+      "stage": "memory_context",
+      "outcome": "empty",
+      "data": {
+        "memory_used": false,
+        "knowledge_used": false,
+        "memory_chars": 0,
+        "knowledge_chars": 0
+      }
+    },
+    {
+      "stage": "chat_context",
+      "outcome": "used",
+      "data": {
+        "chars": 33
+      }
+    },
+    {
+      "stage": "llm_fallback",
+      "outcome": "invoked",
+      "data": {
+        "retrieved_chars": 55
+      }
+    },
+    {
+      "stage": "llm_call",
+      "outcome": "started"
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "llm_call",
+      "data": {
+        "duration_ms": 0
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "post_processing",
+      "data": {
+        "duration_ms": 0
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "execute_reply_sequence",
+      "data": {
+        "duration_ms": 27
+      }
+    },
+    {
+      "stage": "timing_breakdown",
+      "outcome": "completed",
+      "detail": "execute_reply_sequence",
+      "data": {
+        "total_time": 27,
+        "planner_time": 0,
+        "llm_time": 0,
+        "tool_time": 0,
+        "post_time": 0,
+        "tool_selection_time": 0
+      }
+    },
+    {
+      "stage": "finalize",
+      "outcome": "llm_fallback",
+      "data": {
+        "grounded": false
+      }
+    }
+  ],
+  "provider_used": "",
+  "provider_candidates": [],
+  "provider_family": "",
+  "routing_decision": {
+    "input_preview": "tell me about the first one",
+    "entry_point": "http",
+    "intent_phase": {
+      "phase": "intent",
+      "handled": false,
+      "rule_name": "",
+      "intent": "",
+      "action": "",
+      "priority": null,
+      "candidates": [
+        {
+          "rule_name": "weather_lookup",
+          "priority": 62,
+          "handled": false
+        },
+        {
+          "rule_name": "web_research_family",
+          "priority": 62,
+          "handled": false
+        }
+      ]
+    },
+    "handle_phase": {
+      "phase": "handle",
+      "handled": false,
+      "rule_name": "",
+      "intent": "",
+      "action": "",
+      "priority": null,
+      "candidates": [
+        {
+          "rule_name": "location_weather",
+          "priority": 46,
+          "handled": false
+        },
+        {
+          "rule_name": "retrieval_followup",
+          "priority": 47,
+          "handled": false
+        }
+      ]
+    },
+    "final_owner": "fallback",
+    "allowed_bypass": false,
+    "allowed_bypass_category": "",
+    "bypass_reason": "",
+    "reply_contract": "",
+    "reply_outcome_kind": "",
+    "turn_acts": []
+  },
+  "route_summary": "input:received -> direction_analysis:general_chat -> truth_hierarchy:skipped -> hard_answer:skipped -> policy_gate:allowed -> memory_context:empty -> chat_context:used -> llm_fallback:invoked -> llm_call:started -> finalize:llm_fallback"
+}

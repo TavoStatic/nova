@@ -1,0 +1,162 @@
+{
+  "regression_status": {
+    "generated_at": "2026-07-14 10:32:42",
+    "date": "2026-07-14",
+    "status": "OK",
+    "lanes": [
+      "unit",
+      "behavior",
+      "integration"
+    ],
+    "returncode": 0,
+    "detail": "",
+    "failed_lane": "",
+    "failed_tests": [],
+    "source": "scripts/run_regression.py",
+    "test_profile_inventory_ok": true,
+    "test_profile_profile_gap_count": 0,
+    "test_profile_profile_drift_count": 0,
+    "test_profile_profile_attention_count": 3,
+    "test_profile_curated_target_count": 228,
+    "test_profile_curated_test_file_count": 213,
+    "test_profile_root_test_file_count": 216,
+    "test_profile_all_test_file_count": 228,
+    "test_profile_source_observed_count": 0,
+    "test_profile_outside_curated_count": 0,
+    "test_profile_install_profile_inactive_count": 0,
+    "test_profile_install_profile_optional_inactive_count": 3,
+    "test_profile_unclassified_count": 0,
+    "test_profile_gap_tests": [],
+    "test_profile_profile_drift_tests": [],
+    "validation_artifact_truth_status": "ok",
+    "validation_artifact_truth_ok": true,
+    "validation_artifact_failure_count": 0,
+    "validation_artifact_llm_unavailable_count": 0,
+    "validation_artifact_hidden_by_green_regression": false,
+    "validation_artifact_latest_failure": {
+      "path": "",
+      "failure_kind": "",
+      "final_answer": ""
+    }
+  },
+  "maintenance_regression": {
+    "last_regression_status": "OK",
+    "last_regression_stale": false,
+    "last_regression_at": "2026-07-14 10:32:42",
+    "last_regression_date": "2026-07-14"
+  },
+  "pipeline_ensure": {
+    "ok": false,
+    "status": "partial",
+    "worker_count": 1,
+    "started_count": 0,
+    "running_count": 0,
+    "duplicate_count": 1,
+    "failed_count": 1,
+    "workers": [
+      {
+        "ok": false,
+        "status": "duplicate_ownership",
+        "pipeline_id": "edfi_bisd",
+        "conflicting_owner_pid": 47312,
+        "heartbeat": {
+          "pipeline_id": "edfi_bisd",
+          "present": true,
+          "fresh": false,
+          "supervised_ok": false,
+          "status": "running",
+          "detail": "start_requested",
+          "updated_at": 1784036568,
+          "age_sec": 20159,
+          "stale_after_sec": 120,
+          "pid": 47312,
+          "path": "C:\\NOVA\\runtime\\pipelines\\edfi_bisd\\worker.heartbeat",
+          "lease": {
+            "pipeline_id": "edfi_bisd",
+            "present": true,
+            "path": "C:\\NOVA\\runtime\\pipelines\\edfi_bisd\\worker.lease.json",
+            "lease_owner_pid": 47312,
+            "lease_live": true,
+            "claimed_at": 1784036568,
+            "generation": 2,
+            "runtime_root": "C:\\NOVA\\runtime",
+            "scope_key": "edfi_bisd@C:\\NOVA\\runtime"
+          },
+          "lease_owner_pid": 47312,
+          "lease_live": true,
+          "pid_matches_lease": true
+        },
+        "lease": {
+          "pipeline_id": "edfi_bisd",
+          "present": true,
+          "path": "C:\\NOVA\\runtime\\pipelines\\edfi_bisd\\worker.lease.json",
+          "lease_owner_pid": 47312,
+          "lease_live": true,
+          "claimed_at": 1784036568,
+          "generation": 2,
+          "runtime_root": "C:\\NOVA\\runtime",
+          "scope_key": "edfi_bisd@C:\\NOVA\\runtime"
+        }
+      }
+    ]
+  },
+  "pipeline_reconcile": null,
+  "core_thinning_sync": {
+    "ts": "2026-07-14 14:19:50",
+    "status": "ok",
+    "tree_id": "tree_c7936c7a",
+    "tree_title": "Core Thinning",
+    "order_count": 8,
+    "added_count": 0,
+    "deduped_count": 8,
+    "updated_count": 0,
+    "resolved_count": 1,
+    "satisfied_count": 1,
+    "satisfied_active_count": 0,
+    "executable_count": 8,
+    "reopened_count": 0,
+    "error": "",
+    "owner_verdict": {
+      "owner": "core_thinning",
+      "ready": false,
+      "status": "pressure",
+      "source": "core_thinning",
+      "summary": "core/http thinning has 8 ready work order(s)",
+      "blocks_green": false,
+      "blockers": [
+        {
+          "owner": "core_thinning",
+          "code": "core_http_thinning_pressure",
+          "detail": "8 core/http thinning work order(s) ready",
+          "source": "core_thinning",
+          "remediation": {
+            "action": "active_work_tree_run_next",
+            "tools": [
+              "core_thinning"
+            ]
+          }
+        }
+      ],
+      "evidence": {
+        "order_count": 8,
+        "line_count": 5805,
+        "function_count": 487,
+        "large_function_count": 0,
+        "http_surface_candidate_count": 8,
+        "wrapper_candidate_count": 0,
+        "pressure_count": 8,
+        "unresolved_pressure_count": 8,
+        "executable_count": 8,
+        "reopened_count": 0,
+        "satisfied_count": 1,
+        "satisfied_active_count": 0,
+        "resolved_count": 1,
+        "added_count": 0,
+        "deduped_count": 8,
+        "pressure_backed_by_executable": true,
+        "lifecycle_gap": "",
+        "feed_status": "resolved"
+      }
+    }
+  }
+}

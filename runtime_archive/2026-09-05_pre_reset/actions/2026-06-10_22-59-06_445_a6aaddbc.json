@@ -1,0 +1,129 @@
+{
+  "ts": "2026-06-10 22:59:03",
+  "channel": "cli",
+  "session_id": "",
+  "input_source": "typed",
+  "user_input": "what are those tasks that you have ?",
+  "intent": "",
+  "planner_decision": "work_tree",
+  "tool": "work_tree_status",
+  "tool_args": {
+    "query": "what are those tasks that you have ?"
+  },
+  "tool_result": "",
+  "final_answer": "",
+  "reply_contract": "",
+  "reply_outcome": {
+    "execution_profile": {
+      "total_time": 3347,
+      "planner_time": 3347,
+      "llm_time": 0,
+      "tool_time": 0,
+      "post_time": 0,
+      "tool_selection_time": 3347
+    }
+  },
+  "turn_acts": [],
+  "grounded": false,
+  "active_subject": "",
+  "continuation_used": false,
+  "route_trace": [
+    {
+      "stage": "input",
+      "outcome": "received",
+      "data": {
+        "channel": "cli",
+        "input_source": "typed"
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "semantic_tool_intent",
+      "data": {
+        "duration_ms": 3347
+      }
+    },
+    {
+      "stage": "action_planner",
+      "outcome": "semantic_intent",
+      "detail": "The user is asking about the current status of Nova, specifically inquiring about tasks that need attention. This aligns with nova_live_state and requires live_self_status evidence. The work_tree_status tool can provide ",
+      "data": {
+        "tool": "work_tree_status",
+        "confidence": 0.9
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "tool_selection",
+      "data": {
+        "duration_ms": 3347
+      }
+    },
+    {
+      "stage": "action_planner",
+      "outcome": "work_tree",
+      "data": {
+        "tool": "work_tree_status"
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "planner",
+      "data": {
+        "duration_ms": 3347
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "planner_call",
+      "data": {
+        "duration_ms": 3347
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "execute_reply_sequence",
+      "data": {
+        "duration_ms": 3347
+      }
+    },
+    {
+      "stage": "timing_breakdown",
+      "outcome": "completed",
+      "detail": "execute_reply_sequence",
+      "data": {
+        "total_time": 3347,
+        "planner_time": 3347,
+        "llm_time": 0,
+        "tool_time": 0,
+        "post_time": 0,
+        "tool_selection_time": 3347
+      }
+    },
+    {
+      "stage": "finalize",
+      "outcome": "work_tree",
+      "data": {
+        "grounded": false,
+        "tool": "work_tree_status"
+      }
+    }
+  ],
+  "provider_used": "work_tree_status",
+  "provider_candidates": [],
+  "provider_family": "work_tree_status",
+  "routing_decision": {
+    "final_owner": "work_tree",
+    "planner_owner": "work_tree",
+    "planner_action": "no_active_tree",
+    "planner_tool": "work_tree_status",
+    "reply_outcome_kind": "",
+    "turn_acts": []
+  },
+  "route_summary": "input:received -> action_planner:semantic_intent -> action_planner:work_tree -> finalize:work_tree"
+}

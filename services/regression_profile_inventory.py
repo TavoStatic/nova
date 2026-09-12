@@ -53,6 +53,8 @@ def _active_pipeline_ids(root: Path) -> list[str]:
 
 
 def _missing_install_lanes(path: Path, text: str, active_pipeline_ids: set[str]) -> list[str]:
+    if path.name.lower().startswith("test_edfi"):
+        return ["edfi_core"]
     normalized = text.replace("'", '"')
     uses_repo_data_sources = 'parents[1] / "data_sources"' in normalized or 'PipelineRegistry(Path(__file__).resolve().parents[1] / "data_sources")' in normalized
     imports_archived_connector = "data_sources.sis_test" in normalized
@@ -60,6 +62,10 @@ def _missing_install_lanes(path: Path, text: str, active_pipeline_ids: set[str])
     if requires_sis_test and "sis_test" not in active_pipeline_ids:
         return ["sis_test"]
     return []
+
+
+def _is_removed_install_surface(path: Path) -> bool:
+    return path.name.lower().startswith("test_edfi")
 
 
 def _optional_inactive_install_lanes(text: str, missing_lanes: list[str]) -> list[str]:
@@ -136,6 +142,7 @@ def build_regression_profile_inventory_payload(
         "source_observed": 0,
         "install_profile_inactive": 0,
         "install_profile_optional_inactive": 0,
+        "removed_install_surface": 0,
         "authoritative_behavior": 0,
         "legacy_excluded": 0,
         "runtime_live": 0,
@@ -157,6 +164,8 @@ def build_regression_profile_inventory_payload(
 
         if module_name in curated_modules:
             profile_class = "curated"
+        elif _is_removed_install_surface(path):
+            profile_class = "removed_install_surface"
         elif missing_lanes and sorted(optional_inactive_lanes) == sorted(missing_lanes):
             profile_class = "install_profile_optional_inactive"
         elif missing_lanes:

@@ -1,0 +1,146 @@
+{
+  "schema": "nova.backpack_capability_scan.v1",
+  "ok": false,
+  "required_ok": false,
+  "installed": true,
+  "status": "installed",
+  "backpack_id": "edfi",
+  "scanned_at": "2026-08-27T04:26:56Z",
+  "scanned_at_epoch": 1787804815.6881757,
+  "duration_ms": 343,
+  "enabled": true,
+  "connection_id": "test-only",
+  "district_lea_id": "31901",
+  "probes": [
+    {
+      "probe": "backpack_package",
+      "ok": true,
+      "detail": "C:\\NOVA\\backpacks\\edfi",
+      "severity": "info"
+    },
+    {
+      "probe": "setup_settings",
+      "ok": true,
+      "detail": "connection_id=test-only lea=31901",
+      "severity": "info"
+    },
+    {
+      "probe": "control_enabled",
+      "ok": true,
+      "detail": "on",
+      "severity": "info"
+    },
+    {
+      "probe": "teach_surface",
+      "ok": true,
+      "detail": "rules=6",
+      "severity": "info"
+    },
+    {
+      "probe": "backpack_status",
+      "ok": false,
+      "detail": "profile_ok=False auth_ok=False lea=31901",
+      "severity": "failure"
+    },
+    {
+      "probe": "tool_edfi_explore_registered",
+      "ok": true,
+      "detail": "tools.registry DataConnectorExploreTool",
+      "severity": "info"
+    },
+    {
+      "probe": "host_query_health",
+      "ok": false,
+      "detail": "ok=False health=None",
+      "severity": "failure"
+    },
+    {
+      "probe": "local_schools_hold",
+      "ok": false,
+      "detail": "source= rows=0 lea=",
+      "severity": "warning"
+    },
+    {
+      "probe": "edfi_core_readiness",
+      "ok": false,
+      "detail": "ready=False backpack_op=False",
+      "severity": "warning"
+    }
+  ],
+  "probe_fail_count": 4,
+  "declared_capabilities": [
+    {
+      "id": "edfi.connection_health_local",
+      "label": "Connection health (local profile)",
+      "live_ods": false,
+      "tool": "edfi_explore",
+      "action": "health"
+    },
+    {
+      "id": "edfi.schools_local",
+      "label": "Schools directory from local hold",
+      "live_ods": false,
+      "tool": "edfi_explore",
+      "action": "schools",
+      "source": "warehouse_or_extract"
+    },
+    {
+      "id": "edfi.schools_sync",
+      "label": "Deliberate full-LEA schools refresh from ODS",
+      "live_ods": true,
+      "rate_limit_risk": true,
+      "tool": "edfi_explore",
+      "action": "schools_refresh"
+    },
+    {
+      "id": "edfi.resource_catalog_profile",
+      "label": "Discovered resource names from saved profile",
+      "live_ods": false,
+      "tool": "edfi_explore",
+      "action": "list_resources"
+    },
+    {
+      "id": "edfi.teach_rules",
+      "label": "Pipeline teach rules for Nova",
+      "live_ods": false,
+      "source": "brief_and_control_teach"
+    }
+  ],
+  "available_capability_ids": [
+    "edfi.schools_sync",
+    "edfi.teach_rules"
+  ],
+  "local_hold": {
+    "has_extract": false,
+    "has_warehouse": false,
+    "row_count": 0,
+    "lea": "",
+    "source": ""
+  },
+  "teach_rules": [
+    "Prefer local dated data (warehouse/extract) over live ODS for answers.",
+    "Never invent LEA, campus, or student facts not present in local hold.",
+    "Always treat scope: only this install's LEA (or allowed list).",
+    "If data is missing or rate-limited, say so \u2014 do not re-hit TEA in a loop.",
+    "Partial pages are not the full district unless a full-LEA sync completed.",
+    "Setup and control first; dashboards only within declared capabilities later."
+  ],
+  "teach_phase": "pipeline",
+  "status_snapshot": {
+    "profile_ok": false,
+    "auth_ok": false,
+    "resource_count": 0,
+    "readiness": "blocked"
+  },
+  "core_ready": false,
+  "nova_must_know": {
+    "has_edfi_backpack": true,
+    "may_answer_schools_from_local": false,
+    "may_live_pull_schools": true,
+    "must_prefer_local": true,
+    "must_not_invent": true,
+    "pipeline_phase": true,
+    "dashboard_phase": false
+  },
+  "note": "Fusion scan is local-first. Green control checklist is not enough \u2014 Nova must see available_capability_ids and teach_rules."
+}

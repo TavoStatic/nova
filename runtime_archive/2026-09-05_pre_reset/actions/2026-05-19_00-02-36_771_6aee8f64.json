@@ -1,0 +1,145 @@
+{
+  "ts": "2026-05-19 00:02:34",
+  "channel": "http",
+  "session_id": "ad4986042aaccb36",
+  "input_source": "typed",
+  "user_input": "we can not start fresh your algorithem is contaminated and its making you tell lies and making you fabricates explenations that do not exist.",
+  "intent": "",
+  "planner_decision": "llm_fallback",
+  "tool": "",
+  "tool_args": {},
+  "tool_result": "",
+  "final_answer": "I understand the concern about my algorithm's contamination and the impact it has on providing accurate information. I'm unsure how to address this issue, as I don't have a clear understanding of what's causing the problem or how to rectify it. Can you provide more context or guidance on how to move forward?",
+  "reply_contract": "",
+  "reply_outcome": {
+    "execution_profile": {
+      "total_time": 2013,
+      "planner_time": 830,
+      "llm_time": 1130,
+      "tool_time": 0,
+      "post_time": 0,
+      "tool_selection_time": 0
+    }
+  },
+  "turn_acts": [],
+  "grounded": false,
+  "active_subject": "",
+  "continuation_used": false,
+  "route_trace": [
+    {
+      "stage": "input",
+      "outcome": "received",
+      "data": {
+        "channel": "http",
+        "input_source": "typed"
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "semantic_tool_intent",
+      "data": {
+        "duration_ms": 830
+      }
+    },
+    {
+      "stage": "action_planner",
+      "outcome": "semantic_none",
+      "data": {
+        "confidence": 0.0
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "tool_selection",
+      "data": {
+        "duration_ms": 830
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "planner_call",
+      "data": {
+        "duration_ms": 830
+      }
+    },
+    {
+      "stage": "memory_context",
+      "outcome": "empty",
+      "data": {
+        "memory_used": false,
+        "knowledge_used": false,
+        "memory_chars": 0,
+        "knowledge_chars": 0
+      }
+    },
+    {
+      "stage": "chat_context",
+      "outcome": "used",
+      "data": {
+        "chars": 1243
+      }
+    },
+    {
+      "stage": "llm_fallback",
+      "outcome": "invoked",
+      "data": {
+        "retrieved_chars": 1265
+      }
+    },
+    {
+      "stage": "llm_call",
+      "outcome": "started"
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "llm_call",
+      "data": {
+        "duration_ms": 1130
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "post_processing",
+      "data": {
+        "duration_ms": 0
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "execute_reply_sequence",
+      "data": {
+        "duration_ms": 2013
+      }
+    },
+    {
+      "stage": "timing_breakdown",
+      "outcome": "completed",
+      "detail": "execute_reply_sequence",
+      "data": {
+        "total_time": 2013,
+        "planner_time": 830,
+        "llm_time": 1130,
+        "tool_time": 0,
+        "post_time": 0,
+        "tool_selection_time": 0
+      }
+    },
+    {
+      "stage": "finalize",
+      "outcome": "llm_fallback",
+      "data": {
+        "grounded": false
+      }
+    }
+  ],
+  "provider_used": "",
+  "provider_candidates": [],
+  "provider_family": "",
+  "route_summary": "input:received -> action_planner:semantic_none -> memory_context:empty -> chat_context:used -> llm_fallback:invoked -> llm_call:started -> finalize:llm_fallback"
+}

@@ -1,0 +1,192 @@
+{
+  "ts": "2026-05-18 14:14:37",
+  "channel": "http",
+  "session_id": "codex_proof_contract_probe_1779131676",
+  "input_source": "typed",
+  "user_input": "can you prove that from your internals?",
+  "intent": "chat",
+  "planner_decision": "run_tool",
+  "tool": "system_check",
+  "tool_args": {
+    "args": []
+  },
+  "tool_result": "{\n  \"profile\": \"runtime\",\n  \"heartbeat\": {\n    \"ok\": true,\n    \"info\": \"age=0s\",\n    \"required\": true\n  },\n  \"core_state\": {\n    \"ok\": true,\n    \"info\": \"pid=55936\",\n    \"required\": true\n  },\n  \"ollama\": {\n    \"ok\": true,\n    \"info\": \"version=0.24.0;tags=200;chat_route=400;chat_model=llama3.2:3b;model_status=available\",\n    \"required\": true\n  },\n  \"ok\": true\n}",
+  "final_answer": "{\n  \"profile\": \"runtime\",\n  \"heartbeat\": {\n    \"ok\": true,\n    \"info\": \"age=0s\",\n    \"required\": true\n  },\n  \"core_state\": {\n    \"ok\": true,\n    \"info\": \"pid=55936\",\n    \"required\": true\n  },\n  \"ollama\": {\n    \"ok\": true,\n    \"info\": \"version=0.24.0;tags=200;chat_route=400;chat_model=llama3.2:3b;model_status=available\",\n    \"required\": true\n  },\n  \"ok\": true\n}",
+  "reply_contract": "system_check.current",
+  "reply_outcome": {
+    "intent": "system_check",
+    "kind": "current",
+    "reply_contract": "system_check.current",
+    "execution_profile": {
+      "total_time": 1072,
+      "planner_time": 1072,
+      "llm_time": 0,
+      "tool_time": 583,
+      "post_time": 0,
+      "tool_selection_time": 489
+    }
+  },
+  "turn_acts": [
+    "ask"
+  ],
+  "grounded": true,
+  "active_subject": "system_check:runtime",
+  "continuation_used": false,
+  "route_trace": [
+    {
+      "stage": "input",
+      "outcome": "received",
+      "data": {
+        "channel": "http",
+        "input_source": "typed",
+        "intent": "chat"
+      }
+    },
+    {
+      "stage": "direction_analysis",
+      "outcome": "general_chat",
+      "data": {
+        "effective_query": "can you prove that from your internals?",
+        "turn_acts": "ask",
+        "identity_focused": false,
+        "bypass_pattern_routes": false
+      }
+    },
+    {
+      "stage": "truth_hierarchy",
+      "outcome": "skipped",
+      "detail": "content_owned_chat_disabled"
+    },
+    {
+      "stage": "hard_answer",
+      "outcome": "skipped",
+      "detail": "content_owned_chat_disabled"
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "semantic_tool_intent",
+      "data": {
+        "duration_ms": 489
+      }
+    },
+    {
+      "stage": "action_planner",
+      "outcome": "semantic_intent",
+      "data": {
+        "tool": "system_check",
+        "confidence": 0.0
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "tool_selection",
+      "data": {
+        "duration_ms": 489
+      }
+    },
+    {
+      "stage": "action_planner",
+      "outcome": "run_tool",
+      "data": {
+        "tool": "system_check"
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "tool_response",
+      "data": {
+        "duration_ms": 583,
+        "tool": "system_check"
+      }
+    },
+    {
+      "stage": "tool_execution",
+      "outcome": "ok",
+      "data": {
+        "tool": "system_check",
+        "grounded": true
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "planner",
+      "data": {
+        "duration_ms": 1072
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "planner_call",
+      "data": {
+        "duration_ms": 1072
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "execute_reply_sequence",
+      "data": {
+        "duration_ms": 1072
+      }
+    },
+    {
+      "stage": "timing_breakdown",
+      "outcome": "completed",
+      "detail": "execute_reply_sequence",
+      "data": {
+        "total_time": 1072,
+        "planner_time": 1072,
+        "llm_time": 0,
+        "tool_time": 583,
+        "post_time": 0,
+        "tool_selection_time": 489
+      }
+    },
+    {
+      "stage": "finalize",
+      "outcome": "run_tool",
+      "data": {
+        "grounded": true,
+        "tool": "system_check"
+      }
+    }
+  ],
+  "provider_used": "",
+  "provider_candidates": [],
+  "provider_family": "",
+  "routing_decision": {
+    "input_preview": "can you prove that from your internals?",
+    "entry_point": "http",
+    "intent_phase": {
+      "phase": "intent",
+      "handled": false,
+      "rule_name": "",
+      "intent": "",
+      "action": "",
+      "priority": null,
+      "candidates": []
+    },
+    "handle_phase": {
+      "phase": "handle",
+      "handled": false,
+      "rule_name": "",
+      "intent": "",
+      "action": "",
+      "priority": null,
+      "candidates": []
+    },
+    "final_owner": "fallback",
+    "allowed_bypass": false,
+    "allowed_bypass_category": "",
+    "bypass_reason": "",
+    "reply_contract": "system_check.current",
+    "reply_outcome_kind": "current",
+    "turn_acts": []
+  },
+  "route_summary": "input:received -> direction_analysis:general_chat -> truth_hierarchy:skipped -> hard_answer:skipped -> action_planner:semantic_intent -> action_planner:run_tool -> tool_execution:ok -> finalize:run_tool"
+}

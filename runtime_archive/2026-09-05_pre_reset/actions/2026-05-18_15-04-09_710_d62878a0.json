@@ -1,0 +1,124 @@
+{
+  "ts": "2026-05-18 15:04:09",
+  "channel": "http",
+  "session_id": "codex_intent_drift_probe_1779134645",
+  "input_source": "typed",
+  "user_input": "why did you give me all that information ?",
+  "intent": "chat",
+  "planner_decision": "truth_hierarchy",
+  "tool": "action_ledger",
+  "tool_args": {
+    "query": "why did you give me all that information ?"
+  },
+  "tool_result": "Last action record: intent=chat; decision=conversation_intake; tool=none; grounded=False. route=input:received -> direction_analysis:general_chat -> conversation_intake:prompt_answer -> finalize:conversation_intake. final_answer=Go ahead. I'm listening.",
+  "final_answer": "Last action record: intent=chat; decision=conversation_intake; tool=none; grounded=False. route=input:received -> direction_analysis:general_chat -> conversation_intake:prompt_answer -> finalize:conversation_intake. final_answer=Go ahead. I'm listening.",
+  "reply_contract": "",
+  "reply_outcome": {
+    "execution_profile": {
+      "total_time": 3,
+      "planner_time": 0,
+      "llm_time": 0,
+      "tool_time": 0,
+      "post_time": 0,
+      "tool_selection_time": 0
+    }
+  },
+  "turn_acts": [
+    "ask"
+  ],
+  "grounded": true,
+  "active_subject": "",
+  "continuation_used": false,
+  "route_trace": [
+    {
+      "stage": "input",
+      "outcome": "received",
+      "data": {
+        "channel": "http",
+        "input_source": "typed",
+        "intent": "chat"
+      }
+    },
+    {
+      "stage": "direction_analysis",
+      "outcome": "general_chat",
+      "data": {
+        "effective_query": "why did you give me all that information ?",
+        "turn_acts": "ask",
+        "identity_focused": false,
+        "bypass_pattern_routes": false
+      }
+    },
+    {
+      "stage": "truth_hierarchy",
+      "outcome": "matched",
+      "data": {
+        "source": "action_ledger",
+        "grounded": true,
+        "operational": true
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "execute_reply_sequence",
+      "data": {
+        "duration_ms": 3
+      }
+    },
+    {
+      "stage": "timing_breakdown",
+      "outcome": "completed",
+      "detail": "execute_reply_sequence",
+      "data": {
+        "total_time": 3,
+        "planner_time": 0,
+        "llm_time": 0,
+        "tool_time": 0,
+        "post_time": 0,
+        "tool_selection_time": 0
+      }
+    },
+    {
+      "stage": "finalize",
+      "outcome": "truth_hierarchy",
+      "data": {
+        "grounded": true,
+        "tool": "action_ledger"
+      }
+    }
+  ],
+  "provider_used": "",
+  "provider_candidates": [],
+  "provider_family": "",
+  "routing_decision": {
+    "input_preview": "why did you give me all that information ?",
+    "entry_point": "http",
+    "intent_phase": {
+      "phase": "intent",
+      "handled": false,
+      "rule_name": "",
+      "intent": "",
+      "action": "",
+      "priority": null,
+      "candidates": []
+    },
+    "handle_phase": {
+      "phase": "handle",
+      "handled": false,
+      "rule_name": "",
+      "intent": "",
+      "action": "",
+      "priority": null,
+      "candidates": []
+    },
+    "final_owner": "fallback",
+    "allowed_bypass": false,
+    "allowed_bypass_category": "",
+    "bypass_reason": "",
+    "reply_contract": "",
+    "reply_outcome_kind": "",
+    "turn_acts": []
+  },
+  "route_summary": "input:received -> direction_analysis:general_chat -> truth_hierarchy:matched -> finalize:truth_hierarchy"
+}

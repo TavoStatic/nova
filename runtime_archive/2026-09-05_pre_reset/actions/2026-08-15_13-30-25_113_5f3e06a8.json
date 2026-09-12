@@ -1,0 +1,226 @@
+{
+  "ts": "2026-08-15 13:30:19",
+  "channel": "http",
+  "session_id": "fbb870771d1cad90",
+  "input_source": "http",
+  "user_input": "what i meant was how are you working today?  are you experiencing any major problems that i can help you with.  are all your systems ok ?",
+  "intent": "",
+  "planner_decision": "llm_fallback",
+  "tool": "",
+  "tool_args": {},
+  "tool_result": "",
+  "final_answer": "I'm functioning smoothly and haven't encountered any major issues. All my systems are operating as expected. How can I assist you today? If there's anything specific you're concerned about, feel free to let me know!",
+  "reply_contract": "",
+  "reply_outcome": {
+    "kind": "llm_fallback",
+    "intent_evidence_packet": {
+      "schema": "nova.turn_intent_evidence",
+      "version": "1.0.0",
+      "trace_authority": "hypothesis_only",
+      "answer_authority": "available_evidence",
+      "current_turn": "what i meant was how are you working today? are you experiencing any major problems that i can help you with. are all your systems ok ?",
+      "conversation_frame": {
+        "turn_count": 39,
+        "current_user_turn_is_latest": true,
+        "previous_assistant_turn": "I'm just a program designed to assist with information and tasks, so I don't have feelings in the traditional sense. How can I help you today?",
+        "last_assistant_repeats_earlier_assistant": false
+      },
+      "planner_frame": {
+        "decision": "",
+        "tool": "",
+        "semantic_tool_observation": {
+          "confidence": 0.0
+        }
+      },
+      "available_evidence": [
+        {
+          "name": "current_user_turn",
+          "available": true,
+          "chars": 137
+        },
+        {
+          "name": "recent_chat_context",
+          "available": true,
+          "chars": 527
+        },
+        {
+          "name": "session_state_context",
+          "available": false,
+          "chars": 0
+        },
+        {
+          "name": "learning_context",
+          "available": true,
+          "chars": 1583
+        },
+        {
+          "name": "confirmed_identity_context",
+          "available": true,
+          "chars": 235
+        },
+        {
+          "name": "operational_self_context",
+          "available": true,
+          "chars": 1346
+        },
+        {
+          "name": "tool_result",
+          "available": false,
+          "chars": 0
+        }
+      ],
+      "answer_contract": {
+        "infer_intent_from_turn_and_conversation": true,
+        "trace_is_route_authority": false,
+        "evidence_is_claim_authority": true,
+        "tool_route_requires_external_evidence_gap": true,
+        "conversation_can_be_complete_without_task": false,
+        "reply_form": "evidence_bound_reply"
+      }
+    },
+    "execution_profile": {
+      "total_time": 5064,
+      "planner_time": 0,
+      "llm_time": 2553,
+      "tool_time": 0,
+      "post_time": 0,
+      "tool_selection_time": 0
+    }
+  },
+  "turn_acts": [],
+  "grounded": false,
+  "active_subject": "",
+  "continuation_used": false,
+  "route_trace": [
+    {
+      "stage": "input",
+      "outcome": "received",
+      "data": {
+        "channel": "http",
+        "input_source": "http"
+      }
+    },
+    {
+      "stage": "intent_understanding",
+      "outcome": "classified",
+      "detail": "operational status",
+      "data": {
+        "level": "sharing",
+        "domain": "system",
+        "confidence": 0.8,
+        "strategy": "accept_and_engage"
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "planner_call",
+      "data": {
+        "duration_ms": 0
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "planner_call",
+      "data": {
+        "duration_ms": 0
+      }
+    },
+    {
+      "stage": "memory_context",
+      "outcome": "used",
+      "data": {
+        "memory_used": false,
+        "identity_used": true,
+        "operational_identity_used": true,
+        "knowledge_used": false,
+        "memory_chars": 0,
+        "identity_chars": 235,
+        "operational_identity_chars": 1346,
+        "knowledge_chars": 0
+      }
+    },
+    {
+      "stage": "chat_context",
+      "outcome": "used",
+      "data": {
+        "chars": 527
+      }
+    },
+    {
+      "stage": "turn_intent_evidence",
+      "outcome": "attached",
+      "data": {
+        "trace_authority": "hypothesis_only",
+        "answer_authority": "available_evidence"
+      }
+    },
+    {
+      "stage": "llm_fallback",
+      "outcome": "invoked",
+      "data": {
+        "retrieved_chars": 3082
+      }
+    },
+    {
+      "stage": "llm_call",
+      "outcome": "started"
+    },
+    {
+      "stage": "llm_fallback",
+      "outcome": "invoked",
+      "data": {
+        "retrieved_chars": 3082
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "llm_call",
+      "data": {
+        "duration_ms": 2553
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "post_processing",
+      "data": {
+        "duration_ms": 0
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "execute_reply_sequence",
+      "data": {
+        "duration_ms": 5064
+      }
+    },
+    {
+      "stage": "timing_breakdown",
+      "outcome": "completed",
+      "detail": "execute_reply_sequence",
+      "data": {
+        "total_time": 5064,
+        "planner_time": 0,
+        "llm_time": 2553,
+        "tool_time": 0,
+        "post_time": 0,
+        "tool_selection_time": 0
+      }
+    },
+    {
+      "stage": "finalize",
+      "outcome": "llm_fallback",
+      "data": {
+        "grounded": false
+      }
+    }
+  ],
+  "provider_used": "",
+  "provider_candidates": [],
+  "provider_family": "",
+  "route_summary": "input:received -> intent_understanding:classified -> memory_context:used -> chat_context:used -> turn_intent_evidence:attached -> llm_fallback:invoked -> llm_call:started -> llm_fallback:invoked -> finalize:llm_fallback"
+}

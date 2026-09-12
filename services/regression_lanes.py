@@ -3,6 +3,7 @@ from __future__ import annotations
 
 COMPACT_REGRESSION_LANES: dict[str, list[str]] = {
     "unit": [
+        "tests.test_gatekeeper",
         "tests.test_health",
         "tests.test_installer_validation_service",
         "tests.test_smoke_test",
@@ -55,6 +56,10 @@ COMPACT_REGRESSION_LANES: dict[str, list[str]] = {
         "tests.test_recurring_finding_lifecycle",
         "tests.test_regression_contracts",
         "tests.test_regression_evidence",
+        "tests.test_regression_truth_registry",
+        "tests.test_regression_status_projection",
+        "tests.test_regression_lane_worker",
+        "tests.test_regression_lane_worker_integration",
         "tests.test_release_status_service",
         "tests.test_release_runtime_truth_service",
         "tests.test_release_clean_service",
@@ -134,6 +139,7 @@ SOURCE_PROFILE_LANES: dict[str, list[str]] = {
         "tests.test_pipeline_worker_supervision",
         "tests.test_thorough_audit_verdict",
         "tests.test_pipeline_governed_routing",
+        "tests.test_backpack_pipeline_registry",
     ],
     "source_http_api_control": [
         "tests.test_control_status_surfaces_service",
@@ -161,31 +167,15 @@ SOURCE_PROFILE_LANES: dict[str, list[str]] = {
         "tests.test_memory_retention_service",
         "tests.test_leah_conversation_continuity",
         "tests.test_nova_memory_learning_service",
-    ],
-    "source_edfi_core": [
-        "tests.test_edfi_core",
-        "tests.test_edfi_core_lifecycle_demo",
-        "tests.test_edfi_core_readiness",
-        "tests.test_edfi_profile_evidence",
-        "tests.test_edfi_change_tracking",
-        "tests.test_edfi_district_scope",
-        "tests.test_edfi_inventory",
-        "tests.test_edfi_resources",
-        "tests.test_edfi_connector_unit",
-        "tests.test_edfi_extract_store",
-        "tests.test_edfi_present",
-        "tests.test_edfi_rate_limit_evidence",
-        "tests.test_edfi_warehouse",
-    ],
-    "source_data_lane_data_connector": [
-        "tests.test_data_connector_pipeline",
-        "tests.test_edfi_tool",
+        "tests.test_leah_memory_recall_acceptance",
+        "tests.test_leah_memory_recall_at5",
     ],
     "source_backpack": [
         "tests.test_backpack_capability_surface",
         "tests.test_backpack_host",
         "tests.test_backpack_reports",
         "tests.test_control_backpacks",
+        "tests.test_backpack_sanitize",
     ],
     "source_nova_shell": [
         "tests.test_nova_shell_admin",
@@ -237,6 +227,8 @@ SOURCE_PROFILE_LANES: dict[str, list[str]] = {
         "tests.test_runtime_restart_provenance_service",
         "tests.test_supervisor_runtime",
         "tests.test_server_side_runtime_service",
+        "tests.test_runtime_detach",
+        "tests.test_runtime_singleton",
     ],
     "source_subconscious": [
         "tests.test_subconscious_review_authority_service",
@@ -283,6 +275,15 @@ SOURCE_PROFILE_LANES: dict[str, list[str]] = {
         "tests.test_source_root_inventory_service",
         "tests.test_storage_watch_service",
         "tests.test_teach_flow",
+        "tests.test_capability_finish_ownership",
+        "tests.test_decision_proposal_judge",
+        "tests.test_generate_nova_ledger",
+        "tests.test_leah_conversation_continuity_acceptance",
+        "tests.test_leah_nova_pulse",
+        "tests.test_observation_spine",
+        "tests.test_observation_spine_fixes",
+        "tests.test_self_scan_rings",
+        "tests.test_work_admission_kernel",
     ],
     "source_tool_registry_policy": [
         "tests.test_os_capability_operator_outbox_service",
@@ -303,5 +304,6 @@ SOURCE_PROFILE_LANES: dict[str, list[str]] = {
         "tests.test_work_tree_seeding_service",
         "tests.test_work_tree_signal_ingestion_service",
         "tests.test_work_tree_operator_hold_service",
+        "tests.test_nova_work_tree_loop_eval",
     ],
 }

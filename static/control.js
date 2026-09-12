@@ -196,6 +196,19 @@ const telemetryGraphToolbar = document.getElementById('telemetryGraphToolbar');
 const telemetryGraphFootnote = document.getElementById('telemetryGraphFootnote');
 const telemetryGraphButtons = Array.from(document.querySelectorAll('[data-telemetry-graph]'));
 const temporalNavLink = document.getElementById('temporalNavLink');
+const navMetaMeta = document.getElementById('navMetaMeta');
+const metaFindingBadge = document.getElementById('metaFindingBadge');
+const metaFindingSummary = document.getElementById('metaFindingSummary');
+const metaFindingGrid = document.getElementById('metaFindingGrid');
+const metaBoundaryGrid = document.getElementById('metaBoundaryGrid');
+const metaWindowBadge = document.getElementById('metaWindowBadge');
+const metaTapeTable = document.getElementById('metaTapeTable');
+const metaSourceCounts = document.getElementById('metaSourceCounts');
+const metaSelfQuestions = document.getElementById('metaSelfQuestions');
+const metaInternalPositions = document.getElementById('metaInternalPositions');
+const metaSelfModel = document.getElementById('metaSelfModel');
+const metaOperationCounts = document.getElementById('metaOperationCounts');
+const metaSubjectCounts = document.getElementById('metaSubjectCounts');
 const navButtons = Array.from(document.querySelectorAll('[data-view-target]'));
 const mainViews = Array.from(document.querySelectorAll('.main-view'));
 const centerTabBar = document.querySelector('.center-tab-bar');
@@ -3356,6 +3369,135 @@ function recommendedInspectorTab(status, session) {
     return {tab: 'ledger', label: 'Ledger', why: 'trace history is the next best signal'};
 }
 
+function observationSpine(status) {
+    const spine = status && status.observation_spine && typeof status.observation_spine === 'object'
+        ? status.observation_spine
+        : {};
+    const required = Array.isArray(spine.required_state_change) ? spine.required_state_change : [];
+    return {
+        ok: Boolean(status && (status.observation_spine_ok != null ? status.observation_spine_ok : spine.ok)),
+        status: String((status && status.observation_spine_status) || spine.status || 'empty'),
+        findingCode: String((status && status.observation_finding_code) || spine.finding_code || 'NO_META_INTERVENTION'),
+        findingLabel: String((status && status.observation_finding_label) || spine.finding_label || 'Watching — no interrupt'),
+        effect: String((status && status.observation_effect) || spine.effect || 'continue'),
+        effectLabel: String((status && status.observation_effect_label) || spine.effect_label || 'Continue'),
+        subject: String((status && status.observation_subject) || spine.subject || ''),
+        inputRef: (status && status.observation_input_ref != null ? status.observation_input_ref : spine.input_ref) || '',
+        windowCount: Number((status && status.observation_window_count != null) ? status.observation_window_count : (spine.window_count || 0)),
+        windowCap: Number(spine.window_cap != null ? spine.window_cap : 64),
+        firstSeq: Number(spine.first_seq || 0),
+        lastSeq: Number(spine.last_seq || 0),
+        intervening: Boolean(status && (status.observation_intervening != null ? status.observation_intervening : spine.intervening)),
+        requiredChange: required,
+        sourceCounts: spine.source_counts && typeof spine.source_counts === 'object' ? spine.source_counts : {},
+        operationCounts: spine.operation_counts && typeof spine.operation_counts === 'object' ? spine.operation_counts : {},
+        subjectCounts: spine.subject_counts && typeof spine.subject_counts === 'object' ? spine.subject_counts : {},
+        lastSelect: spine.last_select && typeof spine.last_select === 'object' ? spine.last_select : null,
+        lastInvoke: spine.last_invoke && typeof spine.last_invoke === 'object' ? spine.last_invoke : null,
+        lastGate: spine.last_gate && typeof spine.last_gate === 'object' ? spine.last_gate : null,
+        observations: Array.isArray(spine.observations) ? spine.observations : [],
+        selfQuestions: Array.isArray(spine.self_questions) ? spine.self_questions : (Array.isArray(status && status.observation_self_questions) ? status.observation_self_questions : []),
+        internalPositions: Array.isArray(spine.internal_positions) ? spine.internal_positions : (Array.isArray(status && status.observation_internal_positions) ? status.observation_internal_positions : []),
+        selfModel: spine.self_model && typeof spine.self_model === 'object' ? spine.self_model : ((status && status.observation_self_model && typeof status.observation_self_model === 'object') ? status.observation_self_model : {}),
+    };
+}
+
+function observationRowLine(row) {
+    if (!row || typeof row !== 'object') return 'none';
+    const parts = [
+        row.source || 'unknown',
+        row.operation || 'unknown',
+        row.subject || '',
+        row.outcome || '',
+    ].filter(Boolean);
+    const refs = [row.input_ref, row.reason_code].filter(Boolean);
+    return refs.length ? `${parts.join(' / ')}\n${refs.join(' | ')}` : parts.join(' / ');
+}
+
+function countEntries(counts) {
+    return Object.keys(counts || {}).map((key) => ({label: key, value: String(counts[key])}));
+}
+
+function renderMetaView(status) {
+    const meta = observationSpine(status);
+    if (navMetaMeta) {
+        navMetaMeta.textContent = meta.intervening
+            ? String(meta.findingCode || 'intervening').replace(/_/g, ' ').toLowerCase()
+            : (meta.windowCount ? 'watching' : 'empty');
+    }
+    if (metaFindingBadge) {
+        const tone = meta.intervening ? 'danger' : (meta.status === 'watching' ? 'good' : 'neutral');
+        metaFindingBadge.className = `status-pill status-pill-${tone}`;
+        metaFindingBadge.textContent = meta.intervening ? 'Intervening' : (meta.status === 'watching' ? 'Watching' : (meta.status || 'pending'));
+    }
+    if (metaFindingSummary) {
+        metaFindingSummary.textContent = meta.intervening
+            ? `${meta.findingLabel}. Effect: ${meta.effectLabel}.`
+            : (meta.windowCount
+                ? `Meta is watching ${meta.windowCount} boundary event${meta.windowCount === 1 ? '' : 's'}. No interrupt this pass.`
+                : 'Observation window is empty. Meta has nothing to score yet.');
+    }
+    renderInspectorList(metaFindingGrid, [
+        {label: 'Finding', value: `${meta.findingCode}\n${meta.findingLabel}`},
+        {label: 'Effect', value: `${meta.effect}\n${meta.effectLabel}`},
+        {label: 'Subject', value: meta.subject || 'n/a'},
+        {label: 'Controlling ref', value: meta.inputRef || 'n/a'},
+        {label: 'Required change', value: meta.requiredChange.length ? meta.requiredChange.join('\n') : 'none'},
+        {label: 'Window', value: `${meta.windowCount} / ${meta.windowCap}  seq ${meta.firstSeq || '—'}–${meta.lastSeq || '—'}`},
+    ]);
+    renderInspectorList(metaBoundaryGrid, [
+        {label: 'Last select', value: observationRowLine(meta.lastSelect)},
+        {label: 'Last invoke', value: observationRowLine(meta.lastInvoke)},
+        {label: 'Last gate', value: observationRowLine(meta.lastGate)},
+    ]);
+    if (metaWindowBadge) {
+        metaWindowBadge.textContent = `${meta.windowCount} / ${meta.windowCap}`;
+    }
+    if (metaTapeTable) {
+        const rows = meta.observations.slice().reverse();
+        if (!rows.length) {
+            metaTapeTable.innerHTML = '<tbody><tr><td>Observation tape empty.</td></tr></tbody>';
+        } else {
+            metaTapeTable.innerHTML = [
+                '<thead><tr><th>Seq</th><th>Source</th><th>Op</th><th>Subject</th><th>Input</th><th>Outcome</th><th>Reason</th></tr></thead>',
+                '<tbody>',
+                rows.map((row) => {
+                    const match = meta.intervening && meta.subject && String(row.subject || '') === meta.subject;
+                    return [
+                        `<tr class="${match ? 'meta-tape-row is-subject' : 'meta-tape-row'}">`,
+                        `<td>${escapeHtml(String(row.seq != null ? row.seq : ''))}</td>`,
+                        `<td>${escapeHtml(String(row.source || ''))}</td>`,
+                        `<td>${escapeHtml(String(row.operation || ''))}</td>`,
+                        `<td>${escapeHtml(String(row.subject || ''))}</td>`,
+                        `<td>${escapeHtml(String(row.input_ref || ''))}</td>`,
+                        `<td>${escapeHtml(String(row.outcome || ''))}</td>`,
+                        `<td>${escapeHtml(String(row.reason_code || ''))}</td>`,
+                        '</tr>'
+                    ].join('');
+                }).join(''),
+                '</tbody>'
+            ].join('');
+        }
+    }
+    renderInspectorList(metaSourceCounts, countEntries(meta.sourceCounts));
+    renderInspectorList(metaOperationCounts, countEntries(meta.operationCounts));
+    renderInspectorList(metaSubjectCounts, countEntries(meta.subjectCounts));
+    renderInspectorList(metaSelfQuestions, meta.selfQuestions.map((question) => ({label: 'Question', value: question})));
+    renderInspectorList(metaInternalPositions, meta.internalPositions.map((position) => ({
+        label: `${position.status || 'competing'} · ${Math.round(Number(position.confidence || 0) * 100)}%`,
+        value: `${position.proposition || 'n/a'}\n${(position.supporting_evidence || []).join(', ') || 'none'} supporting · ${(position.opposing_evidence || []).join(', ') || 'none'} opposing`,
+    })));
+    const modelCondition = meta.selfModel.current_internal_condition || {};
+    renderInspectorList(metaSelfModel, [
+        {label: 'Identity', value: meta.selfModel.identity || 'n/a'},
+        {label: 'Observed capabilities', value: (meta.selfModel.observed_capabilities || []).join(', ') || 'none'},
+        {label: 'Active constraints', value: (meta.selfModel.active_constraints || []).join(', ') || 'none'},
+        {label: 'Condition', value: JSON.stringify(modelCondition)},
+        {label: 'Predicted states', value: (meta.selfModel.predicted_future_states || []).join('\n') || 'none'},
+        {label: 'Evidence seqs', value: (meta.selfModel.source_observation_seqs || []).join(', ') || 'none'},
+    ]);
+}
+
 function openOperatorDeck() {
     setActiveView('operations');
     const operationsShell = document.querySelector('.layer-tab-shell[data-layer-tabs="operations"]');
@@ -3500,6 +3642,7 @@ function renderOverviewFocus(status) {
     const queueOpen = Number(status.generated_work_queue_open_count != null ? status.generated_work_queue_open_count : 0);
     const queueNext = shortArtifactName(status.generated_work_queue_next_file || '');
     const memory = memoryHealthDetails(status);
+    const meta = observationSpine(status);
     const heartbeatAge = Number((status.runtime_summary && status.runtime_summary.core && status.runtime_summary.core.heartbeat_age_sec != null)
         ? status.runtime_summary.core.heartbeat_age_sec
         : (status.heartbeat_age_sec != null ? status.heartbeat_age_sec : 0));
@@ -3524,16 +3667,23 @@ function renderOverviewFocus(status) {
                 ? `Needs Help\n${attentionMessage}`
                 : (operatorOutboxOpenCount(status) > 0
                     ? `Outbox Hold\n${operatorOutboxOpenCount(status)} open notice${operatorOutboxOpenCount(status) === 1 ? '' : 's'}`
-                    : `${centerTarget.label}\n${centerTarget.why}`),
+                    : (meta.intervening
+                        ? `Meta ${meta.findingCode}\n${meta.effectLabel}`
+                        : `${centerTarget.label}\n${centerTarget.why}`)),
             actions: operatorOutboxOpenCount(status) > 0
                 ? [
                     {label: 'Operator Deck', view: 'operations', layerTab: 'operator-deck'},
                     {label: 'Blocked Tree', view: 'scheduled-tree', workTreeMode: 'blocked'},
                 ]
-                : [
-                    {label: centerTarget.label, center: centerTarget.tab},
-                    {label: inspectorTarget.label, inspector: inspectorTarget.tab},
-                ],
+                : (meta.intervening
+                    ? [
+                        {label: 'Meta', view: 'meta'},
+                        {label: inspectorTarget.label, inspector: inspectorTarget.tab},
+                    ]
+                    : [
+                        {label: centerTarget.label, center: centerTarget.tab},
+                        {label: inspectorTarget.label, inspector: inspectorTarget.tab},
+                    ]),
         },
     ];
     overviewFocusStrip.innerHTML = focusCards.map((card) => [
@@ -3618,6 +3768,7 @@ function renderCenterMissionBrief(status) {
     const tool = String(status.last_action_tool || 'no tool');
     const routeSummary = compactRouteSummary(status.last_route_summary || 'route lane not available', 5);
     const memory = memoryHealthDetails(status);
+    const meta = observationSpine(status);
     const mission = status.nova_mission && typeof status.nova_mission === 'object' ? status.nova_mission : {};
     const missionStatus = String(mission.status || status.nova_mission_status || 'unknown');
     const missionAction = String(mission.action || status.nova_mission_action || 'n/a');
@@ -3688,11 +3839,18 @@ function renderCenterMissionBrief(status) {
         },
         {
             key: 'Recommended Surface',
-            value: `${centerTarget.label}\n${centerTarget.why}`,
-            actions: [
-                {label: `Open ${centerTarget.label}`, center: centerTarget.tab},
-                {label: `Lens ${inspectorTarget.label}`, inspector: inspectorTarget.tab},
-            ],
+            value: meta.intervening
+                ? `Meta\n${meta.findingLabel}`
+                : `${centerTarget.label}\n${centerTarget.why}`,
+            actions: meta.intervening
+                ? [
+                    {label: 'Open Meta', view: 'meta'},
+                    {label: `Lens ${inspectorTarget.label}`, inspector: inspectorTarget.tab},
+                ]
+                : [
+                    {label: `Open ${centerTarget.label}`, center: centerTarget.tab},
+                    {label: `Lens ${inspectorTarget.label}`, inspector: inspectorTarget.tab},
+                ],
             wide: true,
         },
     ];
@@ -3702,7 +3860,7 @@ function renderCenterMissionBrief(status) {
         `<div class="center-brief-value">${escapeHtml(card.value)}</div>`,
         Array.isArray(card.actions) && card.actions.length ? [
             '<div class="center-brief-actions">',
-            card.actions.map((action) => `<button type="button" class="focus-jump-button"${action.center ? ` data-focus-center-tab="${escapeHtml(action.center)}"` : ''}${action.inspector ? ` data-focus-inspector-tab="${escapeHtml(action.inspector)}"` : ''}>${escapeHtml(action.label)}</button>`).join(''),
+            card.actions.map((action) => `<button type="button" class="focus-jump-button"${action.center ? ` data-focus-center-tab="${escapeHtml(action.center)}"` : ''}${action.inspector ? ` data-focus-inspector-tab="${escapeHtml(action.inspector)}"` : ''}${action.view ? ` data-focus-view="${escapeHtml(action.view)}"` : ''}>${escapeHtml(action.label)}</button>`).join(''),
             '</div>'
         ].join('') : '',
         '</div>'
@@ -4263,9 +4421,11 @@ function formatWorkTreeLabel(tree) {
     const status = String(tree && tree.status ? tree.status : 'unknown').trim().toLowerCase();
     const counts = tree && tree.counts && typeof tree.counts === 'object' ? tree.counts : {};
     const branchCounts = counts && counts.branches && typeof counts.branches === 'object' ? counts.branches : {};
-    const branchTotal = Object.values(branchCounts).reduce((sum, value) => sum + Number(value || 0), 0);
+    const countedBranches = Object.values(branchCounts).reduce((sum, value) => sum + Number(value || 0), 0);
+    const nodeCount = Array.isArray(tree.nodes) ? tree.nodes.length : 0;
+    const branchTotal = countedBranches || nodeCount;
     const openTasks = Number(counts.open_tasks || 0);
-    return `${title} | tree ${status} | ${branchTotal} total branches | ${openTasks} open tasks`;
+    return `${title} | tree ${status} | ${branchTotal} total branches | ${openTasks} open task stems`;
 }
 
 function renderWorkTreeSelect() {
@@ -4326,23 +4486,31 @@ function workTreeNodeVisibleInMode(node) {
     return true;
 }
 
+function workTreeCountFromStatus(key, fallback = 0) {
+    const status = latestStatus && typeof latestStatus === 'object' ? latestStatus : {};
+    const value = Number(status[key]);
+    return Number.isFinite(value) ? value : fallback;
+}
+
 function renderWorkTreeAggregateSummary(payload) {
     const counts = payload && payload.counts && typeof payload.counts === 'object' ? payload.counts : {};
-    const total = Number(counts.total || workTreesCache.length || 0);
-    const active = Number(counts.active || 0);
-    const branches = Number(counts.branches || 0);
-    const openTasks = Number(counts.open_tasks || 0);
-    const working = Number(counts.working || 0);
-    const pending = Number(counts.pending || 0);
-    const blocked = Number(counts.blocked || 0);
-    const complete = Number(counts.complete || 0);
+    const total = Number(counts.total || workTreesCache.length || workTreeCountFromStatus('work_tree_tree_count') || 0);
+    const active = Number(counts.active || workTreeCountFromStatus('work_tree_active_tree_count') || 0);
+    const branches = Number(counts.branches || workTreeCountFromStatus('work_tree_branch_count') || 0);
+    const openTasks = Number(counts.open_tasks || workTreeCountFromStatus('work_tree_open_task_count') || 0);
+    const working = Number(counts.working || workTreeCountFromStatus('work_tree_working_branch_count') || 0);
+    const pending = Number(counts.pending || workTreeCountFromStatus('work_tree_pending_branch_count') || 0);
+    const blocked = Number(counts.blocked || workTreeCountFromStatus('work_tree_blocked_branch_count') || 0);
+    const complete = Number(counts.complete || workTreeCountFromStatus('work_tree_complete_branch_count') || 0);
     if (workTreeGlobalCounts) {
         workTreeGlobalCounts.innerHTML = [
             '<span class="scheduled-tree-count-label">All Trees</span>',
             `<span class="scheduled-tree-count-pill">${total} trees</span>`,
             `<span class="scheduled-tree-count-pill is-active">${active} active trees</span>`,
             `<span class="scheduled-tree-count-pill">${branches} total branches</span>`,
-            `<span class="scheduled-tree-count-pill">${openTasks} open tasks</span>`,
+            `<span class="scheduled-tree-count-pill">${openTasks} open task stems</span>`,
+            `<span class="scheduled-tree-count-pill">${pending} pending branches</span>`,
+            `<span class="scheduled-tree-count-pill">${blocked} blocked branches</span>`,
         ].join('');
     }
     if (workTreeLiveSummary) {
@@ -4362,7 +4530,9 @@ function renderSelectedWorkTreeSummary(tree) {
     }
     const counts = tree && tree.counts && typeof tree.counts === 'object' ? tree.counts : {};
     const branchCounts = counts && counts.branches && typeof counts.branches === 'object' ? counts.branches : {};
-    const branchTotal = Object.values(branchCounts).reduce((sum, value) => sum + Number(value || 0), 0);
+    const countedBranches = Object.values(branchCounts).reduce((sum, value) => sum + Number(value || 0), 0);
+    const nodeCount = Array.isArray(tree.nodes) ? tree.nodes.length : 0;
+    const branchTotal = countedBranches || nodeCount;
     const openTasks = Number(counts.open_tasks || 0);
     const nextStep = tree && tree.next_step && typeof tree.next_step === 'object' ? tree.next_step : {};
     const nextAction = String(nextStep.action || '').trim() || 'idle';
@@ -4373,9 +4543,10 @@ function renderSelectedWorkTreeSummary(tree) {
             '<span class="scheduled-tree-count-label">Selected Tree</span>',
             `<span class="${escapeHtml(workTreeStatusClass(tree.status))}">${escapeHtml(String(tree.status || 'unknown').toUpperCase())}</span>`,
             `<span class="scheduled-tree-count-pill">${branchTotal} total branches</span>`,
-            `<span class="scheduled-tree-count-pill">${openTasks} open tasks</span>`,
+            `<span class="scheduled-tree-count-pill">${openTasks} open task stems</span>`,
             `<span class="scheduled-tree-count-pill">${Number(branchCounts.active || 0)} working branches</span>`,
             `<span class="scheduled-tree-count-pill">${Number(branchCounts.ready || 0)} ready branches</span>`,
+            `<span class="scheduled-tree-count-pill">${Number(branchCounts.blocked || 0)} blocked branches</span>`,
         ].join('');
     }
     if (workTreeSelectedSummary) {
@@ -4390,6 +4561,17 @@ function renderSelectedWorkTreeSummary(tree) {
 
 let _inspectorBranchId = null;
 let _inspectorBranchStatus = null;
+
+function workTreeInstructionLine(node) {
+    const memory = node && node.branch_memory_kind && typeof node.branch_memory_kind === 'object'
+        ? node.branch_memory_kind
+        : {};
+    const kind = String(memory.kind || '').trim();
+    if (!kind) return 'Instruction: none';
+    const hold = memory.controlling ? 'holding' : 'released';
+    const reason = String(memory.reason || '').trim();
+    return `Instruction: ${kind} (${hold})${reason ? ` · ${reason}` : ''}`;
+}
 
 function workTreeSolutionProgress(currentTask, node) {
     // One unit: solution progress. Prefer the richest honest payload
@@ -4589,6 +4771,7 @@ function renderWorkTreeInspector(tree, node) {
         `Status: ${node.status || 'unknown'}`,
         `Depth: ${node.depth != null ? node.depth : 'n/a'}`,
         `Tasks: ${node.tasks_open != null ? node.tasks_open : 'n/a'} open / ${node.tasks_total != null ? node.tasks_total : 'n/a'} total`,
+        workTreeInstructionLine(node),
         `Preferred tool: ${node.preferred_tool || 'n/a'}`,
         `Current task: ${currentTask.title || 'none'}`,
         `Next step: ${nextStep.action || 'idle'} | tool=${nextStep.recommended_tool || 'n/a'}`,
@@ -5755,6 +5938,7 @@ function renderStatusSpine(status, metrics) {
     renderLiveTracking(status);
     renderOverviewFocus(status);
     renderCenterMissionBrief(status);
+    renderMetaView(status);
     renderTelemetrySummary(metrics, status);
     renderTelemetryPressure(metrics, status);
     if (runtimeNoteBar && status.runtime_process_note != null) {
@@ -6679,6 +6863,9 @@ bindClick('btnWorkTreeRunNext', async () => {
             line += ' · queued for maintenance worker';
         }
         if (workTreeActionFeedback) workTreeActionFeedback.textContent = line;
+        if (Number.isFinite(executed) && executed <= 0 && !payload.triggered) {
+            throw new Error(line);
+        }
         // Refresh tree so progress ring updates after a real step.
         try {
             const trees = await fetchWorkTrees();
@@ -7063,6 +7250,8 @@ bindClick('btnStallOpenOperatorDeck', () => { openOperatorDeck(); setAction('Ope
 bindClick('btnStallDismissOutbox', async () => { await dismissOperatorOutboxNotice(); });
 bindClick('btnStallRunQueueNext', async () => { await runNextGeneratedQueueItem(); });
 bindClick('btnStallOpenScheduledTree', () => { openScheduledTreeBlockedView(); setAction('Opened Scheduled Tree blocked view.'); });
+bindClick('btnMetaOpenOperatorDeck', () => { openOperatorDeck(); setAction('Opened Operations → Operator Deck.'); });
+bindClick('btnMetaOpenHealth', () => { setActiveView('health'); setAction('Opened Health.'); });
 bindClick('btnWorkTreeOpenOperatorDeck', () => { openOperatorDeck(); setAction('Opened Operations → Operator Deck.'); });
 bindClick('btnWorkTreeDismissOutbox', async () => { await dismissOperatorOutboxNotice(); });
 bindClick('btnWorkTreeRunQueueNext', async () => { await runNextGeneratedQueueItem(); });

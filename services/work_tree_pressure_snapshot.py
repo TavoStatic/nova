@@ -20,6 +20,19 @@ def _as_int(value: Any, default: int = 0) -> int:
         return default
 
 
+def _branches_from_counts(counts: dict, *, fallback: int = 0) -> int:
+    """Accept either a branch total or the per-status dict the visual tree uses."""
+    raw = counts.get("branches") if isinstance(counts, dict) else None
+    if isinstance(raw, dict):
+        total = sum(_as_int(value, 0) for value in raw.values())
+        if total:
+            return total
+    numbered = _as_int(raw, 0)
+    if numbered:
+        return numbered
+    return fallback
+
+
 def _text(value: Any, limit: int = 240) -> str:
     return str(value or "").strip()[:limit]
 
@@ -106,7 +119,9 @@ def _pressure_from_nodes(
     working_count = _as_int(counts.get("working"), 0)
     blocked_count = _as_int(counts.get("blocked"), 0)
     complete_count = _as_int(counts.get("complete"), 0)
-    branch_count = _as_int(counts.get("branches"), len(nodes))
+    branch_count = _branches_from_counts(counts, fallback=len(nodes))
+    if branch_count <= 0 and nodes:
+        branch_count = len(nodes)
 
     observing_count = 0
     blocked_observing_count = 0
@@ -183,11 +198,20 @@ def _pressure_from_nodes(
 def build_work_tree_pressure_snapshot(work_trees_payload: dict | None, *, branches: list[dict] | None = None) -> dict:
     payload = _as_dict(work_trees_payload)
     counts = _as_dict(payload.get("counts"))
+    nodes: list[dict] = []
+    tree_branch_total = 0
+    tree_open_total = 0
+    tree_rows = _as_list(payload.get("trees"))
+    for tree in tree_rows:
+        tree_payload = _as_dict(tree)
+        tree_branch_total += _branch_total(tree_payload)
+        tree_open_total += _as_int(_as_dict(tree_payload.get("counts")).get("open_tasks"), 0)
+        nodes.extend([node for node in _as_list(tree_payload.get("nodes")) if isinstance(node, dict)])
     normalized_counts = {
-        "total": _as_int(counts.get("total"), 0),
+        "total": _as_int(counts.get("total"), len(tree_rows)),
         "active": _as_int(counts.get("active"), 0),
-        "branches": _as_int(counts.get("branches"), 0),
-        "open_tasks": _as_int(counts.get("open_tasks"), 0),
+        "branches": _branches_from_counts(counts, fallback=tree_branch_total or len(nodes)),
+        "open_tasks": _as_int(counts.get("open_tasks"), 0) or tree_open_total,
         "working": _as_int(counts.get("working"), 0),
         "pending": _as_int(counts.get("pending"), 0),
         "blocked": _as_int(counts.get("blocked"), 0),
@@ -195,10 +219,6 @@ def build_work_tree_pressure_snapshot(work_trees_payload: dict | None, *, branch
         "stale": _as_int(counts.get("stale"), 0),
         "oldest_open_age_min": _as_int(counts.get("oldest_open_age_min"), 0),
     }
-    nodes: list[dict] = []
-    for tree in _as_list(payload.get("trees")):
-        tree_payload = _as_dict(tree)
-        nodes.extend([node for node in _as_list(tree_payload.get("nodes")) if isinstance(node, dict)])
     return _pressure_from_nodes(
         counts=normalized_counts,
         nodes=nodes,

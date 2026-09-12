@@ -1,0 +1,23 @@
+{
+  "turns": [
+    {
+      "role": "user",
+      "text": "Remember this project codeword: BLUEFIN-4419. Repeat it back."
+    },
+    {
+      "role": "assistant",
+      "text": "Pinned memory saved: BLUEFIN-4419. Repeat it back."
+    },
+    {
+      "role": "user",
+      "text": "What project codeword did I just give you?"
+    },
+    {
+      "role": "assistant",
+      "text": "BLUEFIN-4419."
+    }
+  ],
+  "turn_ts": 1786820301.5157344,
+  "session_id": "leah-at1-1786820280",
+  "ts": 1786820280.6915777
+}

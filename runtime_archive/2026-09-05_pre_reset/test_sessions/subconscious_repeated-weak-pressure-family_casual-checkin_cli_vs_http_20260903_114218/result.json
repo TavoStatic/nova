@@ -1,0 +1,726 @@
+{
+  "session": {
+    "name": "Subconscious repeated-weak-pressure-family :: casual_checkin",
+    "path": "C:\\NOVA\\runtime\\test_sessions\\generated_definitions\\subconscious_repeated-weak-pressure-family_casual-checkin.json",
+    "messages": [
+      "how is your day going right now ?",
+      "where does that leave us ?"
+    ],
+    "compare_modes": [
+      "cli",
+      "http"
+    ]
+  },
+  "runs": {
+    "cli": {
+      "mode": "cli",
+      "turns": [
+        {
+          "turn": 1,
+          "user": "how is your day going right now ?",
+          "assistant": "My internal state is stable and ready for tasks\u2014my runtime core and guard system are both active within this session. Everything's running smoothly on my end. How about you?",
+          "planner_decision": "llm_fallback",
+          "route_summary": "input:received -> intent_understanding:classified -> memory_context:used -> turn_intent_evidence:attached -> llm_fallback:invoked -> llm_call:started -> llm_fallback:invoked -> llm_call:slow -> finalize:llm_fallback",
+          "grounded": false,
+          "active_subject": "",
+          "continuation_used": false,
+          "probe_summary": "All green",
+          "probe_results": [],
+          "suggestions": []
+        },
+        {
+          "turn": 2,
+          "user": "where does that leave us ?",
+          "assistant": "We\u2019re still in the same spot\u2014stable runtime with our core systems active and ready for tasks. Nothing has changed on my end yet.",
+          "planner_decision": "llm_fallback",
+          "route_summary": "input:received -> intent_understanding:classified -> memory_context:used -> chat_context:used -> turn_intent_evidence:attached -> llm_fallback:invoked -> llm_call:started -> llm_fallback:invoked -> llm_call:slow -> finalize:llm_fallback",
+          "grounded": false,
+          "active_subject": "",
+          "continuation_used": false,
+          "probe_summary": "All green",
+          "probe_results": [],
+          "suggestions": []
+        }
+      ],
+      "stdout": "\nNova Core is ready.\nCommands: screen | camera <prompt> | web <url> | web search <query> | web research <query> | web gather <url> | weather in <location-or-lat,lon> | check weather for <location> | weather current location | location coords <lat,lon> | domains | policy allow <domain> | chat context | queue status | ls [folder] | read <file> | find <kw> [folder] | health | capabilities | inspect\nPress ENTER for voice. Or type a message/command and press ENTER. Type 'q' to quit.\n\nYou (typed): how is your day going right now ?\n[OK]   Ollama chat model warm: qwen3.5:4b\nNova: My internal state is stable and ready for tasks\u2014my runtime core and guard system are both active within this session. Everything's running smoothly on my end. How about you?\n\nYou (typed): where does that leave us ?\nNova: We\u2019re still in the same spot\u2014stable runtime with our core systems active and ready for tasks. Nothing has changed on my end yet.\n\n",
+      "health_rows": [],
+      "reflection_rows": [
+        {
+          "ts": "2026-09-03 11:43:10",
+          "turn_count": 1,
+          "top_repeated_failure_class": "none",
+          "top_repeated_correction_class": "none",
+          "failure_top": {
+            "class": "none",
+            "intent": "",
+            "count": 0,
+            "selected": 0,
+            "completed": 0,
+            "summary": "none"
+          },
+          "correction_top": {
+            "class": "none",
+            "count": 0
+          },
+          "routing_stable": true,
+          "routing_overrides": 0,
+          "routing_override_used_latest_turn": false,
+          "active_subject": "",
+          "continuation_used": false,
+          "continuations_last_window": 0,
+          "retrieval_continuations": 0,
+          "sample_intents_last5": [
+            "unknown"
+          ],
+          "provider_hits_last_window": {},
+          "last_provider_used": "",
+          "entry_point": "cli",
+          "session_id": "cli",
+          "probe_summary": "All green",
+          "reply_contract": "",
+          "reply_outcome_kind": "llm_fallback",
+          "turn_acts": [],
+          "probe_results": [],
+          "probe_findings": [],
+          "probe_status_counts": {
+            "green": 7,
+            "yellow": 0,
+            "red": 0
+          },
+          "suggestions": [],
+          "headline": "Probe summary: All green"
+        },
+        {
+          "ts": "2026-09-03 11:43:55",
+          "turn_count": 2,
+          "top_repeated_failure_class": "none",
+          "top_repeated_correction_class": "none",
+          "failure_top": {
+            "class": "none",
+            "intent": "",
+            "count": 0,
+            "selected": 0,
+            "completed": 0,
+            "summary": "none"
+          },
+          "correction_top": {
+            "class": "none",
+            "count": 0
+          },
+          "routing_stable": true,
+          "routing_overrides": 0,
+          "routing_override_used_latest_turn": false,
+          "active_subject": "",
+          "continuation_used": false,
+          "continuations_last_window": 0,
+          "retrieval_continuations": 0,
+          "sample_intents_last5": [
+            "unknown",
+            "unknown"
+          ],
+          "provider_hits_last_window": {},
+          "last_provider_used": "",
+          "entry_point": "cli",
+          "session_id": "cli",
+          "probe_summary": "All green",
+          "reply_contract": "",
+          "reply_outcome_kind": "llm_fallback",
+          "turn_acts": [],
+          "probe_results": [],
+          "probe_findings": [],
+          "probe_status_counts": {
+            "green": 7,
+            "yellow": 0,
+            "red": 0
+          },
+          "suggestions": [],
+          "headline": "Probe summary: All green",
+          "subconscious_training_backlog": {
+            "replan_requested": true,
+            "candidate_tests": [
+              {
+                "signal": "route_fit_weak",
+                "occurrences": 2,
+                "priority": "high",
+                "suggested_test_name": "test_route_probe_exposes_weak_fit_without_forcing_routing",
+                "rationale": "Route fit signals were too weak to support a confident comparison. Observed 2 time(s) in recent crack counts. The signal is still active in the latest pressure window. Snapshot window currently holds 2 of 12 recent pressure records."
+              },
+              {
+                "signal": "route_unclear",
+                "occurrences": 2,
+                "priority": "high",
+                "suggested_test_name": "test_route_probe_marks_ambiguous_turns_without_overclaiming",
+                "rationale": "Route comparison stayed unclear across recent pressure records. Observed 2 time(s) in recent crack counts. The signal is still active in the latest pressure window. Snapshot window currently holds 2 of 12 recent pressure records."
+              }
+            ]
+          },
+          "subconscious_replan_reasons": [
+            {
+              "kind": "weak_signal_threshold",
+              "signal": "route_fit_weak",
+              "window_count": 2,
+              "threshold": 2
+            }
+          ]
+        }
+      ],
+      "artifacts": {
+        "mode_dir": "C:\\NOVA\\runtime\\test_sessions\\subconscious_repeated-weak-pressure-family_casual-checkin_cli_vs_http_20260903_114218\\cli",
+        "action_dir": "C:\\NOVA\\runtime\\test_sessions\\subconscious_repeated-weak-pressure-family_casual-checkin_cli_vs_http_20260903_114218\\cli\\actions",
+        "health_log": "C:\\NOVA\\runtime\\test_sessions\\subconscious_repeated-weak-pressure-family_casual-checkin_cli_vs_http_20260903_114218\\cli\\health.log",
+        "reflection_log": "C:\\NOVA\\runtime\\test_sessions\\subconscious_repeated-weak-pressure-family_casual-checkin_cli_vs_http_20260903_114218\\cli\\self_reflection.jsonl",
+        "session_store": "C:\\NOVA\\runtime\\test_sessions\\subconscious_repeated-weak-pressure-family_casual-checkin_cli_vs_http_20260903_114218\\cli\\http_chat_sessions.json",
+        "memory_events_log": "C:\\NOVA\\runtime\\test_sessions\\subconscious_repeated-weak-pressure-family_casual-checkin_cli_vs_http_20260903_114218\\cli\\memory_events.jsonl",
+        "behavior_metrics_file": "C:\\NOVA\\runtime\\test_sessions\\subconscious_repeated-weak-pressure-family_casual-checkin_cli_vs_http_20260903_114218\\cli\\behavior_metrics.json",
+        "tool_events_log": "C:\\NOVA\\runtime\\test_sessions\\subconscious_repeated-weak-pressure-family_casual-checkin_cli_vs_http_20260903_114218\\cli\\tool_events.jsonl",
+        "memory_db": "C:\\NOVA\\runtime\\test_sessions\\subconscious_repeated-weak-pressure-family_casual-checkin_cli_vs_http_20260903_114218\\cli\\nova_memory.sqlite",
+        "work_tree_db": "C:\\NOVA\\runtime\\test_sessions\\subconscious_repeated-weak-pressure-family_casual-checkin_cli_vs_http_20260903_114218\\cli\\_internal\\work_tree.db",
+        "updates_dir": "C:\\NOVA\\runtime\\test_sessions\\subconscious_repeated-weak-pressure-family_casual-checkin_cli_vs_http_20260903_114218\\cli\\updates"
+      }
+    },
+    "http": {
+      "mode": "http",
+      "session_id": "http-c9b4cf78b961",
+      "turns": [
+        {
+          "turn": 1,
+          "user": "how is your day going right now ?",
+          "assistant": "My internal systems are running stable with no critical alerts detected by the guard process.",
+          "planner_decision": "llm_fallback",
+          "route_summary": "input:received -> intent_understanding:classified -> memory_context:used -> turn_intent_evidence:attached -> llm_fallback:invoked -> llm_call:started -> llm_fallback:invoked -> llm_call:slow -> finalize:llm_fallback",
+          "grounded": false,
+          "active_subject": "",
+          "continuation_used": false,
+          "probe_summary": "All green",
+          "probe_results": [],
+          "suggestions": []
+        },
+        {
+          "turn": 2,
+          "user": "where does that leave us ?",
+          "assistant": "That leaves us in a stable operational state, as our internal systems remain running without any critical alerts flagged by the guard process.",
+          "planner_decision": "llm_fallback",
+          "route_summary": "input:received -> intent_understanding:classified -> memory_context:used -> chat_context:used -> turn_intent_evidence:attached -> llm_fallback:invoked -> llm_call:started -> llm_fallback:invoked -> llm_call:slow -> finalize:llm_fallback",
+          "grounded": false,
+          "active_subject": "",
+          "continuation_used": false,
+          "probe_summary": "All green",
+          "probe_results": [],
+          "suggestions": []
+        }
+      ],
+      "health_rows": [],
+      "reflection_rows": [
+        {
+          "ts": "2026-09-03 11:44:23",
+          "turn_count": 1,
+          "top_repeated_failure_class": "none",
+          "top_repeated_correction_class": "none",
+          "failure_top": {
+            "class": "none",
+            "intent": "",
+            "count": 0,
+            "selected": 0,
+            "completed": 0,
+            "summary": "none"
+          },
+          "correction_top": {
+            "class": "none",
+            "count": 0
+          },
+          "routing_stable": true,
+          "routing_overrides": 0,
+          "routing_override_used_latest_turn": false,
+          "active_subject": "",
+          "continuation_used": false,
+          "continuations_last_window": 0,
+          "retrieval_continuations": 0,
+          "sample_intents_last5": [
+            "unknown"
+          ],
+          "provider_hits_last_window": {},
+          "last_provider_used": "",
+          "entry_point": "http",
+          "session_id": "http-c9b4cf78b961",
+          "probe_summary": "All green",
+          "reply_contract": "",
+          "reply_outcome_kind": "llm_fallback",
+          "turn_acts": [],
+          "probe_results": [],
+          "probe_findings": [],
+          "probe_status_counts": {
+            "green": 7,
+            "yellow": 0,
+            "red": 0
+          },
+          "suggestions": [],
+          "headline": "Probe summary: All green"
+        },
+        {
+          "ts": "2026-09-03 11:44:53",
+          "turn_count": 2,
+          "top_repeated_failure_class": "none",
+          "top_repeated_correction_class": "none",
+          "failure_top": {
+            "class": "none",
+            "intent": "",
+            "count": 0,
+            "selected": 0,
+            "completed": 0,
+            "summary": "none"
+          },
+          "correction_top": {
+            "class": "none",
+            "count": 0
+          },
+          "routing_stable": true,
+          "routing_overrides": 0,
+          "routing_override_used_latest_turn": false,
+          "active_subject": "",
+          "continuation_used": false,
+          "continuations_last_window": 0,
+          "retrieval_continuations": 0,
+          "sample_intents_last5": [
+            "unknown",
+            "unknown"
+          ],
+          "provider_hits_last_window": {},
+          "last_provider_used": "",
+          "entry_point": "http",
+          "session_id": "http-c9b4cf78b961",
+          "probe_summary": "All green",
+          "reply_contract": "",
+          "reply_outcome_kind": "llm_fallback",
+          "turn_acts": [],
+          "probe_results": [],
+          "probe_findings": [],
+          "probe_status_counts": {
+            "green": 7,
+            "yellow": 0,
+            "red": 0
+          },
+          "suggestions": [],
+          "headline": "Probe summary: All green",
+          "subconscious_training_backlog": {
+            "replan_requested": true,
+            "candidate_tests": [
+              {
+                "signal": "route_fit_weak",
+                "occurrences": 2,
+                "priority": "high",
+                "suggested_test_name": "test_route_probe_exposes_weak_fit_without_forcing_routing",
+                "rationale": "Route fit signals were too weak to support a confident comparison. Observed 2 time(s) in recent crack counts. The signal is still active in the latest pressure window. Snapshot window currently holds 2 of 12 recent pressure records."
+              },
+              {
+                "signal": "route_unclear",
+                "occurrences": 2,
+                "priority": "high",
+                "suggested_test_name": "test_route_probe_marks_ambiguous_turns_without_overclaiming",
+                "rationale": "Route comparison stayed unclear across recent pressure records. Observed 2 time(s) in recent crack counts. The signal is still active in the latest pressure window. Snapshot window currently holds 2 of 12 recent pressure records."
+              }
+            ]
+          },
+          "subconscious_replan_reasons": [
+            {
+              "kind": "weak_signal_threshold",
+              "signal": "route_fit_weak",
+              "window_count": 2,
+              "threshold": 2
+            }
+          ]
+        }
+      ],
+      "artifacts": {
+        "mode_dir": "C:\\NOVA\\runtime\\test_sessions\\subconscious_repeated-weak-pressure-family_casual-checkin_cli_vs_http_20260903_114218\\http",
+        "action_dir": "C:\\NOVA\\runtime\\test_sessions\\subconscious_repeated-weak-pressure-family_casual-checkin_cli_vs_http_20260903_114218\\http\\actions",
+        "health_log": "C:\\NOVA\\runtime\\test_sessions\\subconscious_repeated-weak-pressure-family_casual-checkin_cli_vs_http_20260903_114218\\http\\health.log",
+        "reflection_log": "C:\\NOVA\\runtime\\test_sessions\\subconscious_repeated-weak-pressure-family_casual-checkin_cli_vs_http_20260903_114218\\http\\self_reflection.jsonl",
+        "session_store": "C:\\NOVA\\runtime\\test_sessions\\subconscious_repeated-weak-pressure-family_casual-checkin_cli_vs_http_20260903_114218\\http\\http_chat_sessions.json",
+        "memory_events_log": "C:\\NOVA\\runtime\\test_sessions\\subconscious_repeated-weak-pressure-family_casual-checkin_cli_vs_http_20260903_114218\\http\\memory_events.jsonl",
+        "behavior_metrics_file": "C:\\NOVA\\runtime\\test_sessions\\subconscious_repeated-weak-pressure-family_casual-checkin_cli_vs_http_20260903_114218\\http\\behavior_metrics.json",
+        "tool_events_log": "C:\\NOVA\\runtime\\test_sessions\\subconscious_repeated-weak-pressure-family_casual-checkin_cli_vs_http_20260903_114218\\http\\tool_events.jsonl",
+        "memory_db": "C:\\NOVA\\runtime\\test_sessions\\subconscious_repeated-weak-pressure-family_casual-checkin_cli_vs_http_20260903_114218\\http\\nova_memory.sqlite",
+        "work_tree_db": "C:\\NOVA\\runtime\\test_sessions\\subconscious_repeated-weak-pressure-family_casual-checkin_cli_vs_http_20260903_114218\\http\\_internal\\work_tree.db",
+        "updates_dir": "C:\\NOVA\\runtime\\test_sessions\\subconscious_repeated-weak-pressure-family_casual-checkin_cli_vs_http_20260903_114218\\http\\updates"
+      }
+    }
+  },
+  "comparison": {
+    "left_mode": "cli",
+    "right_mode": "http",
+    "left_label": "CLI",
+    "right_label": "HTTP",
+    "turn_count_match": true,
+    "left_turns": 2,
+    "right_turns": 2,
+    "diffs": [
+      {
+        "turn": 1,
+        "issues": {
+          "assistant": {
+            "left": "My internal state is stable and ready for tasks\u2014my runtime core and guard system are both active within this session. Everything's running smoothly on my end. How about you?",
+            "right": "My internal systems are running stable with no critical alerts detected by the guard process.",
+            "cli": "My internal state is stable and ready for tasks\u2014my runtime core and guard system are both active within this session. Everything's running smoothly on my end. How about you?",
+            "http": "My internal systems are running stable with no critical alerts detected by the guard process."
+          }
+        }
+      },
+      {
+        "turn": 2,
+        "issues": {
+          "assistant": {
+            "left": "We\u2019re still in the same spot\u2014stable runtime with our core systems active and ready for tasks. Nothing has changed on my end yet.",
+            "right": "That leaves us in a stable operational state, as our internal systems remain running without any critical alerts flagged by the guard process.",
+            "cli": "We\u2019re still in the same spot\u2014stable runtime with our core systems active and ready for tasks. Nothing has changed on my end yet.",
+            "http": "That leaves us in a stable operational state, as our internal systems remain running without any critical alerts flagged by the guard process."
+          }
+        }
+      }
+    ],
+    "left_flagged_probes": [],
+    "right_flagged_probes": [],
+    "left_runtime_failures": [],
+    "right_runtime_failures": [],
+    "runtime_failures": [],
+    "runtime_failure_count": 0,
+    "cli_turns": 2,
+    "cli_flagged_probes": [],
+    "http_turns": 2,
+    "http_flagged_probes": [],
+    "cli_runtime_failures": [],
+    "http_runtime_failures": []
+  },
+  "generated_at": "2026-09-03 11:44:53",
+  "cli": {
+    "mode": "cli",
+    "turns": [
+      {
+        "turn": 1,
+        "user": "how is your day going right now ?",
+        "assistant": "My internal state is stable and ready for tasks\u2014my runtime core and guard system are both active within this session. Everything's running smoothly on my end. How about you?",
+        "planner_decision": "llm_fallback",
+        "route_summary": "input:received -> intent_understanding:classified -> memory_context:used -> turn_intent_evidence:attached -> llm_fallback:invoked -> llm_call:started -> llm_fallback:invoked -> llm_call:slow -> finalize:llm_fallback",
+        "grounded": false,
+        "active_subject": "",
+        "continuation_used": false,
+        "probe_summary": "All green",
+        "probe_results": [],
+        "suggestions": []
+      },
+      {
+        "turn": 2,
+        "user": "where does that leave us ?",
+        "assistant": "We\u2019re still in the same spot\u2014stable runtime with our core systems active and ready for tasks. Nothing has changed on my end yet.",
+        "planner_decision": "llm_fallback",
+        "route_summary": "input:received -> intent_understanding:classified -> memory_context:used -> chat_context:used -> turn_intent_evidence:attached -> llm_fallback:invoked -> llm_call:started -> llm_fallback:invoked -> llm_call:slow -> finalize:llm_fallback",
+        "grounded": false,
+        "active_subject": "",
+        "continuation_used": false,
+        "probe_summary": "All green",
+        "probe_results": [],
+        "suggestions": []
+      }
+    ],
+    "stdout": "\nNova Core is ready.\nCommands: screen | camera <prompt> | web <url> | web search <query> | web research <query> | web gather <url> | weather in <location-or-lat,lon> | check weather for <location> | weather current location | location coords <lat,lon> | domains | policy allow <domain> | chat context | queue status | ls [folder] | read <file> | find <kw> [folder] | health | capabilities | inspect\nPress ENTER for voice. Or type a message/command and press ENTER. Type 'q' to quit.\n\nYou (typed): how is your day going right now ?\n[OK]   Ollama chat model warm: qwen3.5:4b\nNova: My internal state is stable and ready for tasks\u2014my runtime core and guard system are both active within this session. Everything's running smoothly on my end. How about you?\n\nYou (typed): where does that leave us ?\nNova: We\u2019re still in the same spot\u2014stable runtime with our core systems active and ready for tasks. Nothing has changed on my end yet.\n\n",
+    "health_rows": [],
+    "reflection_rows": [
+      {
+        "ts": "2026-09-03 11:43:10",
+        "turn_count": 1,
+        "top_repeated_failure_class": "none",
+        "top_repeated_correction_class": "none",
+        "failure_top": {
+          "class": "none",
+          "intent": "",
+          "count": 0,
+          "selected": 0,
+          "completed": 0,
+          "summary": "none"
+        },
+        "correction_top": {
+          "class": "none",
+          "count": 0
+        },
+        "routing_stable": true,
+        "routing_overrides": 0,
+        "routing_override_used_latest_turn": false,
+        "active_subject": "",
+        "continuation_used": false,
+        "continuations_last_window": 0,
+        "retrieval_continuations": 0,
+        "sample_intents_last5": [
+          "unknown"
+        ],
+        "provider_hits_last_window": {},
+        "last_provider_used": "",
+        "entry_point": "cli",
+        "session_id": "cli",
+        "probe_summary": "All green",
+        "reply_contract": "",
+        "reply_outcome_kind": "llm_fallback",
+        "turn_acts": [],
+        "probe_results": [],
+        "probe_findings": [],
+        "probe_status_counts": {
+          "green": 7,
+          "yellow": 0,
+          "red": 0
+        },
+        "suggestions": [],
+        "headline": "Probe summary: All green"
+      },
+      {
+        "ts": "2026-09-03 11:43:55",
+        "turn_count": 2,
+        "top_repeated_failure_class": "none",
+        "top_repeated_correction_class": "none",
+        "failure_top": {
+          "class": "none",
+          "intent": "",
+          "count": 0,
+          "selected": 0,
+          "completed": 0,
+          "summary": "none"
+        },
+        "correction_top": {
+          "class": "none",
+          "count": 0
+        },
+        "routing_stable": true,
+        "routing_overrides": 0,
+        "routing_override_used_latest_turn": false,
+        "active_subject": "",
+        "continuation_used": false,
+        "continuations_last_window": 0,
+        "retrieval_continuations": 0,
+        "sample_intents_last5": [
+          "unknown",
+          "unknown"
+        ],
+        "provider_hits_last_window": {},
+        "last_provider_used": "",
+        "entry_point": "cli",
+        "session_id": "cli",
+        "probe_summary": "All green",
+        "reply_contract": "",
+        "reply_outcome_kind": "llm_fallback",
+        "turn_acts": [],
+        "probe_results": [],
+        "probe_findings": [],
+        "probe_status_counts": {
+          "green": 7,
+          "yellow": 0,
+          "red": 0
+        },
+        "suggestions": [],
+        "headline": "Probe summary: All green",
+        "subconscious_training_backlog": {
+          "replan_requested": true,
+          "candidate_tests": [
+            {
+              "signal": "route_fit_weak",
+              "occurrences": 2,
+              "priority": "high",
+              "suggested_test_name": "test_route_probe_exposes_weak_fit_without_forcing_routing",
+              "rationale": "Route fit signals were too weak to support a confident comparison. Observed 2 time(s) in recent crack counts. The signal is still active in the latest pressure window. Snapshot window currently holds 2 of 12 recent pressure records."
+            },
+            {
+              "signal": "route_unclear",
+              "occurrences": 2,
+              "priority": "high",
+              "suggested_test_name": "test_route_probe_marks_ambiguous_turns_without_overclaiming",
+              "rationale": "Route comparison stayed unclear across recent pressure records. Observed 2 time(s) in recent crack counts. The signal is still active in the latest pressure window. Snapshot window currently holds 2 of 12 recent pressure records."
+            }
+          ]
+        },
+        "subconscious_replan_reasons": [
+          {
+            "kind": "weak_signal_threshold",
+            "signal": "route_fit_weak",
+            "window_count": 2,
+            "threshold": 2
+          }
+        ]
+      }
+    ],
+    "artifacts": {
+      "mode_dir": "C:\\NOVA\\runtime\\test_sessions\\subconscious_repeated-weak-pressure-family_casual-checkin_cli_vs_http_20260903_114218\\cli",
+      "action_dir": "C:\\NOVA\\runtime\\test_sessions\\subconscious_repeated-weak-pressure-family_casual-checkin_cli_vs_http_20260903_114218\\cli\\actions",
+      "health_log": "C:\\NOVA\\runtime\\test_sessions\\subconscious_repeated-weak-pressure-family_casual-checkin_cli_vs_http_20260903_114218\\cli\\health.log",
+      "reflection_log": "C:\\NOVA\\runtime\\test_sessions\\subconscious_repeated-weak-pressure-family_casual-checkin_cli_vs_http_20260903_114218\\cli\\self_reflection.jsonl",
+      "session_store": "C:\\NOVA\\runtime\\test_sessions\\subconscious_repeated-weak-pressure-family_casual-checkin_cli_vs_http_20260903_114218\\cli\\http_chat_sessions.json",
+      "memory_events_log": "C:\\NOVA\\runtime\\test_sessions\\subconscious_repeated-weak-pressure-family_casual-checkin_cli_vs_http_20260903_114218\\cli\\memory_events.jsonl",
+      "behavior_metrics_file": "C:\\NOVA\\runtime\\test_sessions\\subconscious_repeated-weak-pressure-family_casual-checkin_cli_vs_http_20260903_114218\\cli\\behavior_metrics.json",
+      "tool_events_log": "C:\\NOVA\\runtime\\test_sessions\\subconscious_repeated-weak-pressure-family_casual-checkin_cli_vs_http_20260903_114218\\cli\\tool_events.jsonl",
+      "memory_db": "C:\\NOVA\\runtime\\test_sessions\\subconscious_repeated-weak-pressure-family_casual-checkin_cli_vs_http_20260903_114218\\cli\\nova_memory.sqlite",
+      "work_tree_db": "C:\\NOVA\\runtime\\test_sessions\\subconscious_repeated-weak-pressure-family_casual-checkin_cli_vs_http_20260903_114218\\cli\\_internal\\work_tree.db",
+      "updates_dir": "C:\\NOVA\\runtime\\test_sessions\\subconscious_repeated-weak-pressure-family_casual-checkin_cli_vs_http_20260903_114218\\cli\\updates"
+    }
+  },
+  "http": {
+    "mode": "http",
+    "session_id": "http-c9b4cf78b961",
+    "turns": [
+      {
+        "turn": 1,
+        "user": "how is your day going right now ?",
+        "assistant": "My internal systems are running stable with no critical alerts detected by the guard process.",
+        "planner_decision": "llm_fallback",
+        "route_summary": "input:received -> intent_understanding:classified -> memory_context:used -> turn_intent_evidence:attached -> llm_fallback:invoked -> llm_call:started -> llm_fallback:invoked -> llm_call:slow -> finalize:llm_fallback",
+        "grounded": false,
+        "active_subject": "",
+        "continuation_used": false,
+        "probe_summary": "All green",
+        "probe_results": [],
+        "suggestions": []
+      },
+      {
+        "turn": 2,
+        "user": "where does that leave us ?",
+        "assistant": "That leaves us in a stable operational state, as our internal systems remain running without any critical alerts flagged by the guard process.",
+        "planner_decision": "llm_fallback",
+        "route_summary": "input:received -> intent_understanding:classified -> memory_context:used -> chat_context:used -> turn_intent_evidence:attached -> llm_fallback:invoked -> llm_call:started -> llm_fallback:invoked -> llm_call:slow -> finalize:llm_fallback",
+        "grounded": false,
+        "active_subject": "",
+        "continuation_used": false,
+        "probe_summary": "All green",
+        "probe_results": [],
+        "suggestions": []
+      }
+    ],
+    "health_rows": [],
+    "reflection_rows": [
+      {
+        "ts": "2026-09-03 11:44:23",
+        "turn_count": 1,
+        "top_repeated_failure_class": "none",
+        "top_repeated_correction_class": "none",
+        "failure_top": {
+          "class": "none",
+          "intent": "",
+          "count": 0,
+          "selected": 0,
+          "completed": 0,
+          "summary": "none"
+        },
+        "correction_top": {
+          "class": "none",
+          "count": 0
+        },
+        "routing_stable": true,
+        "routing_overrides": 0,
+        "routing_override_used_latest_turn": false,
+        "active_subject": "",
+        "continuation_used": false,
+        "continuations_last_window": 0,
+        "retrieval_continuations": 0,
+        "sample_intents_last5": [
+          "unknown"
+        ],
+        "provider_hits_last_window": {},
+        "last_provider_used": "",
+        "entry_point": "http",
+        "session_id": "http-c9b4cf78b961",
+        "probe_summary": "All green",
+        "reply_contract": "",
+        "reply_outcome_kind": "llm_fallback",
+        "turn_acts": [],
+        "probe_results": [],
+        "probe_findings": [],
+        "probe_status_counts": {
+          "green": 7,
+          "yellow": 0,
+          "red": 0
+        },
+        "suggestions": [],
+        "headline": "Probe summary: All green"
+      },
+      {
+        "ts": "2026-09-03 11:44:53",
+        "turn_count": 2,
+        "top_repeated_failure_class": "none",
+        "top_repeated_correction_class": "none",
+        "failure_top": {
+          "class": "none",
+          "intent": "",
+          "count": 0,
+          "selected": 0,
+          "completed": 0,
+          "summary": "none"
+        },
+        "correction_top": {
+          "class": "none",
+          "count": 0
+        },
+        "routing_stable": true,
+        "routing_overrides": 0,
+        "routing_override_used_latest_turn": false,
+        "active_subject": "",
+        "continuation_used": false,
+        "continuations_last_window": 0,
+        "retrieval_continuations": 0,
+        "sample_intents_last5": [
+          "unknown",
+          "unknown"
+        ],
+        "provider_hits_last_window": {},
+        "last_provider_used": "",
+        "entry_point": "http",
+        "session_id": "http-c9b4cf78b961",
+        "probe_summary": "All green",
+        "reply_contract": "",
+        "reply_outcome_kind": "llm_fallback",
+        "turn_acts": [],
+        "probe_results": [],
+        "probe_findings": [],
+        "probe_status_counts": {
+          "green": 7,
+          "yellow": 0,
+          "red": 0
+        },
+        "suggestions": [],
+        "headline": "Probe summary: All green",
+        "subconscious_training_backlog": {
+          "replan_requested": true,
+          "candidate_tests": [
+            {
+              "signal": "route_fit_weak",
+              "occurrences": 2,
+              "priority": "high",
+              "suggested_test_name": "test_route_probe_exposes_weak_fit_without_forcing_routing",
+              "rationale": "Route fit signals were too weak to support a confident comparison. Observed 2 time(s) in recent crack counts. The signal is still active in the latest pressure window. Snapshot window currently holds 2 of 12 recent pressure records."
+            },
+            {
+              "signal": "route_unclear",
+              "occurrences": 2,
+              "priority": "high",
+              "suggested_test_name": "test_route_probe_marks_ambiguous_turns_without_overclaiming",
+              "rationale": "Route comparison stayed unclear across recent pressure records. Observed 2 time(s) in recent crack counts. The signal is still active in the latest pressure window. Snapshot window currently holds 2 of 12 recent pressure records."
+            }
+          ]
+        },
+        "subconscious_replan_reasons": [
+          {
+            "kind": "weak_signal_threshold",
+            "signal": "route_fit_weak",
+            "window_count": 2,
+            "threshold": 2
+          }
+        ]
+      }
+    ],
+    "artifacts": {
+      "mode_dir": "C:\\NOVA\\runtime\\test_sessions\\subconscious_repeated-weak-pressure-family_casual-checkin_cli_vs_http_20260903_114218\\http",
+      "action_dir": "C:\\NOVA\\runtime\\test_sessions\\subconscious_repeated-weak-pressure-family_casual-checkin_cli_vs_http_20260903_114218\\http\\actions",
+      "health_log": "C:\\NOVA\\runtime\\test_sessions\\subconscious_repeated-weak-pressure-family_casual-checkin_cli_vs_http_20260903_114218\\http\\health.log",
+      "reflection_log": "C:\\NOVA\\runtime\\test_sessions\\subconscious_repeated-weak-pressure-family_casual-checkin_cli_vs_http_20260903_114218\\http\\self_reflection.jsonl",
+      "session_store": "C:\\NOVA\\runtime\\test_sessions\\subconscious_repeated-weak-pressure-family_casual-checkin_cli_vs_http_20260903_114218\\http\\http_chat_sessions.json",
+      "memory_events_log": "C:\\NOVA\\runtime\\test_sessions\\subconscious_repeated-weak-pressure-family_casual-checkin_cli_vs_http_20260903_114218\\http\\memory_events.jsonl",
+      "behavior_metrics_file": "C:\\NOVA\\runtime\\test_sessions\\subconscious_repeated-weak-pressure-family_casual-checkin_cli_vs_http_20260903_114218\\http\\behavior_metrics.json",
+      "tool_events_log": "C:\\NOVA\\runtime\\test_sessions\\subconscious_repeated-weak-pressure-family_casual-checkin_cli_vs_http_20260903_114218\\http\\tool_events.jsonl",
+      "memory_db": "C:\\NOVA\\runtime\\test_sessions\\subconscious_repeated-weak-pressure-family_casual-checkin_cli_vs_http_20260903_114218\\http\\nova_memory.sqlite",
+      "work_tree_db": "C:\\NOVA\\runtime\\test_sessions\\subconscious_repeated-weak-pressure-family_casual-checkin_cli_vs_http_20260903_114218\\http\\_internal\\work_tree.db",
+      "updates_dir": "C:\\NOVA\\runtime\\test_sessions\\subconscious_repeated-weak-pressure-family_casual-checkin_cli_vs_http_20260903_114218\\http\\updates"
+    }
+  }
+}

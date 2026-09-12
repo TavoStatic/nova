@@ -1,0 +1,19 @@
+{
+  "tier": "A1",
+  "resolved_at": "2026-07-14",
+  "supersedes": "runtime/validation/evidence/20260714_tier_a_a1_prefix",
+  "classification_preserved": "runtime/validation/evidence/20260714_tier_a_a1_prefix/harness_defect_classification.json",
+  "fixes": [
+    {
+      "defect_id": "harness-executor-wrapper",
+      "files": ["tests/test_autonomy_maintenance.py"],
+      "change": "Assert _active_work_tree_execute_planned_action wrapper contract."
+    },
+    {
+      "defect_id": "harness-regression-date",
+      "files": ["tests/test_regression_evidence.py"],
+      "change": "Use calendar today for same-day stale contract instead of hardcoded 2026-07-13."
+    }
+  ],
+  "acceptance": "unittest tests.test_regression_evidence tests.test_autonomy_maintenance.TestAutonomyMaintenance.test_run_active_work_tree_cycle_resyncs_core_thinning_before_execution"
+}

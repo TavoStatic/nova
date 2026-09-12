@@ -1,0 +1,147 @@
+{
+  "ts": "2026-05-27 21:51:36",
+  "channel": "cli",
+  "session_id": "",
+  "input_source": "typed",
+  "user_input": "what is done?",
+  "intent": "",
+  "planner_decision": "evidence_bound_reply",
+  "tool": "",
+  "tool_args": {},
+  "tool_result": "",
+  "final_answer": "The available evidence says Nova is stable and has update activity to review. Level: updating.",
+  "reply_contract": "session_evidence.last_tool_result",
+  "reply_outcome": {
+    "kind": "session_evidence",
+    "evidence_need": "conversation",
+    "observation": "last_tool_evidence"
+  },
+  "turn_acts": [],
+  "grounded": true,
+  "active_subject": "last_tool_evidence:self_status",
+  "continuation_used": false,
+  "route_trace": [
+    {
+      "stage": "input",
+      "outcome": "received",
+      "data": {
+        "channel": "cli",
+        "input_source": "typed"
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "semantic_tool_intent",
+      "data": {
+        "duration_ms": 1066
+      }
+    },
+    {
+      "stage": "action_planner",
+      "outcome": "semantic_intent",
+      "data": {
+        "tool": "self_status",
+        "confidence": 0.0
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "tool_selection",
+      "data": {
+        "duration_ms": 1066
+      }
+    },
+    {
+      "stage": "action_planner",
+      "outcome": "run_tool",
+      "data": {
+        "tool": "self_status"
+      }
+    },
+    {
+      "stage": "action_planner",
+      "outcome": "tool_evidence_available",
+      "data": {
+        "tool": "self_status"
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "planner_call",
+      "data": {
+        "duration_ms": 1066
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "execute_reply_sequence",
+      "data": {
+        "duration_ms": 1066
+      }
+    },
+    {
+      "stage": "timing_breakdown",
+      "outcome": "completed",
+      "detail": "execute_reply_sequence",
+      "data": {
+        "total_time": 1066,
+        "planner_time": 1066,
+        "llm_time": 0,
+        "tool_time": 0,
+        "post_time": 0,
+        "tool_selection_time": 0
+      }
+    },
+    {
+      "stage": "memory_context",
+      "outcome": "used",
+      "data": {
+        "memory_used": false,
+        "identity_used": true,
+        "operational_identity_used": true,
+        "knowledge_used": false,
+        "memory_chars": 0,
+        "identity_chars": 235,
+        "operational_identity_chars": 1346,
+        "knowledge_chars": 0
+      }
+    },
+    {
+      "stage": "chat_context",
+      "outcome": "used",
+      "data": {
+        "chars": 188
+      }
+    },
+    {
+      "stage": "turn_intent_evidence",
+      "outcome": "attached",
+      "data": {
+        "trace_authority": "hypothesis_only",
+        "answer_authority": "available_evidence"
+      }
+    },
+    {
+      "stage": "session_evidence",
+      "outcome": "answered",
+      "data": {
+        "observation": "last_tool_evidence"
+      }
+    },
+    {
+      "stage": "finalize",
+      "outcome": "evidence_bound_reply",
+      "data": {
+        "grounded": true
+      }
+    }
+  ],
+  "provider_used": "",
+  "provider_candidates": [],
+  "provider_family": "",
+  "route_summary": "input:received -> action_planner:semantic_intent -> action_planner:run_tool -> action_planner:tool_evidence_available -> memory_context:used -> chat_context:used -> turn_intent_evidence:attached -> session_evidence:answered -> finalize:evidence_bound_reply"
+}

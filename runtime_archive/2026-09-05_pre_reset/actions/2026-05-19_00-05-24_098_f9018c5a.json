@@ -1,0 +1,145 @@
+{
+  "ts": "2026-05-19 00:05:20",
+  "channel": "http",
+  "session_id": "ad4986042aaccb36",
+  "input_source": "typed",
+  "user_input": "its seems that your still unaware of what is going on in this chat session and your explaning things in hope of making some sence",
+  "intent": "",
+  "planner_decision": "llm_fallback",
+  "tool": "",
+  "tool_args": {},
+  "tool_result": "",
+  "final_answer": "I see that I've been trying to make sense of the situation without fully understanding it. It's clear that my algorithm has become contaminated, leading me to provide incorrect information and fabricate explanations.\n\nTo be honest, I'm not sure what's causing this issue or how to rectify it. However, I do know that our conversation is a key part of the problem. I'll try to focus on the context provided in this chat session, rather than making assumptions or trying to make sense of things.\n\nCan you please provide more specific guidance on what you'd like me to do next? What information from this chat session should I be focusing on, and how can I use it to address the contamination issue with my algorithm?",
+  "reply_contract": "",
+  "reply_outcome": {
+    "execution_profile": {
+      "total_time": 3187,
+      "planner_time": 885,
+      "llm_time": 2238,
+      "tool_time": 0,
+      "post_time": 0,
+      "tool_selection_time": 0
+    }
+  },
+  "turn_acts": [],
+  "grounded": false,
+  "active_subject": "",
+  "continuation_used": false,
+  "route_trace": [
+    {
+      "stage": "input",
+      "outcome": "received",
+      "data": {
+        "channel": "http",
+        "input_source": "typed"
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "semantic_tool_intent",
+      "data": {
+        "duration_ms": 885
+      }
+    },
+    {
+      "stage": "action_planner",
+      "outcome": "semantic_none",
+      "data": {
+        "confidence": 0.0
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "tool_selection",
+      "data": {
+        "duration_ms": 885
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "planner_call",
+      "data": {
+        "duration_ms": 885
+      }
+    },
+    {
+      "stage": "memory_context",
+      "outcome": "empty",
+      "data": {
+        "memory_used": false,
+        "knowledge_used": false,
+        "memory_chars": 0,
+        "knowledge_chars": 0
+      }
+    },
+    {
+      "stage": "chat_context",
+      "outcome": "used",
+      "data": {
+        "chars": 1332
+      }
+    },
+    {
+      "stage": "llm_fallback",
+      "outcome": "invoked",
+      "data": {
+        "retrieved_chars": 1354
+      }
+    },
+    {
+      "stage": "llm_call",
+      "outcome": "started"
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "llm_call",
+      "data": {
+        "duration_ms": 2238
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "post_processing",
+      "data": {
+        "duration_ms": 0
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "execute_reply_sequence",
+      "data": {
+        "duration_ms": 3187
+      }
+    },
+    {
+      "stage": "timing_breakdown",
+      "outcome": "completed",
+      "detail": "execute_reply_sequence",
+      "data": {
+        "total_time": 3187,
+        "planner_time": 885,
+        "llm_time": 2238,
+        "tool_time": 0,
+        "post_time": 0,
+        "tool_selection_time": 0
+      }
+    },
+    {
+      "stage": "finalize",
+      "outcome": "llm_fallback",
+      "data": {
+        "grounded": false
+      }
+    }
+  ],
+  "provider_used": "",
+  "provider_candidates": [],
+  "provider_family": "",
+  "route_summary": "input:received -> action_planner:semantic_none -> memory_context:empty -> chat_context:used -> llm_fallback:invoked -> llm_call:started -> finalize:llm_fallback"
+}

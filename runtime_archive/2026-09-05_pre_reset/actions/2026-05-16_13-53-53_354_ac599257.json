@@ -1,0 +1,139 @@
+{
+  "ts": "2026-05-16 13:53:52",
+  "channel": "http",
+  "session_id": "codex_live_raw_33ebca3dd50e44a6a6ffb62d2b5cceec",
+  "input_source": "typed",
+  "user_input": "weather current location",
+  "intent": "weather_lookup",
+  "planner_decision": "run_tool",
+  "tool": "weather_current_location",
+  "tool_args": {},
+  "tool_result": "25.938262151516582,-97.45503783905623: This Afternoon: 92\u00b0F, Sunny. Wind 16 mph SE. [source: api.weather.gov]",
+  "final_answer": "25.938262151516582,-97.45503783905623: This Afternoon: 92\u00b0F, Sunny. Wind 16 mph SE. [source: api.weather.gov]",
+  "reply_contract": "weather_lookup.current_location",
+  "reply_outcome": {
+    "intent": "weather_lookup",
+    "kind": "current_location",
+    "reply_contract": "weather_lookup.current_location",
+    "weather_mode": "current_location",
+    "location_value": "",
+    "requires_tool": true,
+    "pending_action": null,
+    "next_state": {
+      "kind": "weather_result",
+      "subject": "weather",
+      "weather_mode": "current_location",
+      "location_value": "",
+      "source_host": "api.weather.gov",
+      "tool_result": "25.938262151516582,-97.45503783905623: This Afternoon: 92\u00b0F, Sunny. Wind 16 mph SE. [source: api.weather.gov]"
+    },
+    "state_delta": {
+      "kind": "weather_result",
+      "subject": "weather",
+      "weather_mode": "current_location",
+      "location_value": "",
+      "source_host": "api.weather.gov",
+      "tool_result": "25.938262151516582,-97.45503783905623: This Afternoon: 92\u00b0F, Sunny. Wind 16 mph SE. [source: api.weather.gov]"
+    },
+    "tool_result": "25.938262151516582,-97.45503783905623: This Afternoon: 92\u00b0F, Sunny. Wind 16 mph SE. [source: api.weather.gov]"
+  },
+  "turn_acts": [
+    "command"
+  ],
+  "grounded": true,
+  "active_subject": "weather_result:weather",
+  "continuation_used": false,
+  "route_trace": [
+    {
+      "stage": "input",
+      "outcome": "received",
+      "data": {
+        "channel": "http",
+        "input_source": "typed",
+        "intent": "weather_lookup"
+      }
+    },
+    {
+      "stage": "direction_analysis",
+      "outcome": "explicit_command",
+      "data": {
+        "effective_query": "weather current location",
+        "turn_acts": "command",
+        "identity_focused": false,
+        "bypass_pattern_routes": false
+      }
+    },
+    {
+      "stage": "action_planner",
+      "outcome": "run_tool",
+      "data": {
+        "tool": "weather_current_location"
+      }
+    },
+    {
+      "stage": "tool_execution",
+      "outcome": "ok",
+      "data": {
+        "tool": "weather_current_location"
+      }
+    },
+    {
+      "stage": "supervisor_intent",
+      "outcome": "handled",
+      "detail": "weather_lookup",
+      "data": {
+        "rule": "weather_lookup"
+      }
+    },
+    {
+      "stage": "finalize",
+      "outcome": "run_tool",
+      "data": {
+        "grounded": true,
+        "tool": "weather_current_location"
+      }
+    }
+  ],
+  "provider_used": "",
+  "provider_candidates": [],
+  "provider_family": "",
+  "routing_decision": {
+    "input_preview": "weather current location",
+    "entry_point": "http",
+    "intent_phase": {
+      "phase": "intent",
+      "handled": true,
+      "rule_name": "weather_lookup",
+      "intent": "weather_lookup",
+      "action": "",
+      "priority": 62,
+      "candidates": [
+        {
+          "rule_name": "weather_lookup",
+          "priority": 62,
+          "handled": true,
+          "intent": "weather_lookup"
+        }
+      ]
+    },
+    "handle_phase": {
+      "phase": "handle",
+      "handled": false,
+      "rule_name": "",
+      "intent": "",
+      "action": "",
+      "priority": null,
+      "candidates": []
+    },
+    "final_owner": "supervisor_intent",
+    "allowed_bypass": false,
+    "allowed_bypass_category": "",
+    "bypass_reason": "",
+    "reply_contract": "weather_lookup.current_location",
+    "reply_outcome_kind": "current_location",
+    "turn_acts": [
+      "command"
+    ]
+  },
+  "route_summary": "input:received -> direction_analysis:explicit_command -> action_planner:run_tool -> tool_execution:ok -> supervisor_intent:handled -> finalize:run_tool"
+}

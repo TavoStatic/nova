@@ -1,6 +1,7 @@
 import json
 import tempfile
 import unittest
+from contextlib import ExitStack
 from pathlib import Path
 from unittest.mock import patch
 
@@ -12,6 +13,71 @@ from services.nova_runtime_context import TOOL_EVENTS_FILE
 from tools import ToolContext, build_default_registry
 from tools.base_tool import ToolInvocationError
 from tools.registry import build_core_tool_exports
+
+
+def _hermetic_status_patches() -> list[tuple[str, object]]:
+    return [
+        ("nova_http._http_status_payload", lambda: {"ok": True, "running": False, "pid": None}),
+        ("nova_http._runtime_timeline_payload", lambda limit=24: {"ok": True}),
+        ("nova_http._subconscious_status_summary", lambda limit=80: {"ok": True, "count": 0}),
+        ("nova_http._subconscious_live_summary", lambda limit=6: {"ok": True, "count": 0}),
+        ("nova_http._generated_work_queue", lambda limit=24: {"ok": True, "count": 0, "items": []}),
+        ("nova_http._autonomy_maintenance_summary", lambda: {"ok": True}),
+        ("nova_http._work_trees_payload", lambda limit=32: {"ok": True, "trees": []}),
+        ("nova_http._work_tree_pressure_payload", lambda: {"ok": True}),
+        ("nova_http._operator_outbox_summary", lambda limit=20: {"ok": True, "count": 0, "latest_id": "", "latest_open_id": ""}),
+        ("nova_http._load_operator_macros", lambda limit=24: []),
+        ("nova_http._load_backend_commands", lambda limit=40: []),
+        ("nova_http._memory_events_summary", lambda limit=80: {"ok": True, "count": 0, "rows": []}),
+        ("nova_http._action_ledger_summary", lambda limit=60: {"ok": True, "count": 0, "rows": []}),
+        ("nova_http._os_capability_ledger_summary", lambda limit=80: {"ok": True, "count": 0, "rows": []}),
+        ("nova_http._provider_telemetry_payload", lambda *args, **kwargs: {"ok": True, "checks": []}),
+        ("nova_http._runtime_summary_payload", lambda *args, **kwargs: {"ok": True}),
+        ("nova_http._runtime_artifacts_payload", lambda: {"ok": True, "artifacts": []}),
+        ("nova_http._validation_artifact_truth_payload", lambda: {"ok": True, "status": "ok"}),
+        ("nova_http._runtime_restart_analytics_payload", lambda: {"ok": True, "data_points": []}),
+        ("nova_http._runtime_failure_reasons_payload", lambda *args, **kwargs: {"ok": True, "items": []}),
+        ("nova_http._port_ownership_payload", lambda: {"ok": True}),
+        ("nova_http._action_readiness_payload", lambda *args, **kwargs: {"ok": True}),
+        ("nova_http._release_status_payload", lambda limit=8: {"ok": True, "rows": []}),
+        ("nova_http._installer_status_payload", lambda limit=8: {"ok": True, "rows": []}),
+        ("nova_http._patch_action_readiness_payload", lambda *args, **kwargs: {"ok": True}),
+        ("nova_http._storage_watch_summary", lambda: {"ok": True}),
+        ("nova_http._runtime_process_note", lambda: ""),
+        ("nova_http._heartbeat_age_seconds", lambda: 0),
+        ("nova_http._build_self_check", lambda *args, **kwargs: {"ok": True, "health_score": 100, "pass_ratio": 1.0, "alerts": []}),
+        ("nova_http._control_policy_payload", lambda: {"ok": True}),
+        ("nova_http._probe_searxng", lambda endpoint=None: {"ok": False, "note": "stubbed"}),
+        ("nova_http.nova_core.ollama_health_payload", lambda: {"ok": True, "server_ok": False, "status": "ok", "info": ""}),
+        ("nova_http.nova_core.voice_status_payload", lambda: {}),
+        ("nova_http.nova_core.vision_status_payload", lambda *args, **kwargs: {}),
+        ("nova_http.nova_core.mem_stats_payload", lambda *args, **kwargs: {"memory": None, "scope": "private"}),
+        ("nova_http.nova_core.patch_status_payload", lambda: {"ok": True}),
+        ("nova_http.nova_core.build_pulse_payload", lambda: {"ok": True}),
+        ("nova_http.nova_core.update_now_pending_payload", lambda: {}),
+        ("nova_http.nova_core.runtime_device_location_payload", lambda: {}),
+        ("nova_http.nova_core.get_search_provider_priority", lambda: ["html"]),
+        ("services.control_status.pipeline_worker_summary", lambda: {"ok": True, "worker_count": 0, "supervised_count": 0}),
+        ("services.control_status.list_pipeline_summaries", lambda: []),
+        ("services.control_status.build_capability_profile_evidence", lambda: {"ok": False, "status": "failure", "present": False, "issue_count": 0, "issues": []}),
+        ("services.control_status.read_edfi_core_readiness", lambda connection_id="district-main": {"ready": False, "connection_id": connection_id}),
+        ("services.control_status.summarize_gatekeeper_records", lambda: {"ok": True, "count": 0, "status_counts": {}}),
+        ("services.control_status.FRONTDOOR_CLI_PARITY_SERVICE.build_surfaces", lambda **kwargs: {"ok": True, "backend_commands": [], "frontdoor_cli_status": "", "cli_http_parity": {}}),
+        ("services.backpack_host.capability_surface.load_last_scan", lambda: {"ok": True, "available_capability_ids": []}),
+        ("services.backpack_host.capability_surface.get_fusion_status", lambda **kwargs: {"ok": True, "required_ok": True, "available_capability_ids": []}),
+    ]
+
+
+class _HermeticStatusPatches:
+
+    def __enter__(self):
+        self._stack = ExitStack()
+        for target, value in _hermetic_status_patches():
+            self._stack.enter_context(patch(target, value))
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        return self._stack.__exit__(exc_type, exc, tb)
 
 
 class TestToolRegistry(unittest.TestCase):
@@ -431,7 +497,8 @@ class TestToolRegistry(unittest.TestCase):
                 # Patch the service instance's events_log_path directly
                 original_path = nova_core.TOOL_REGISTRY_SERVICE.events_log_path
                 nova_core.TOOL_REGISTRY_SERVICE.events_log_path = event_path
-                with patch("nova_http.TOOL_EVENTS_LOG", event_path), \
+                with _HermeticStatusPatches(), \
+                     patch("nova_http.TOOL_EVENTS_LOG", event_path), \
                      patch("nova_core.load_policy", return_value=policy), \
                      patch("nova_http.nova_core.load_policy", return_value=policy), \
                      patch("nova_http.nova_core.ollama_api_up", return_value=False), \

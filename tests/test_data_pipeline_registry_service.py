@@ -2,6 +2,7 @@ from pathlib import Path
 import unittest
 from unittest import mock
 
+from services.data_pipeline_registry import classify_pipeline_ids_for_workers
 from services.data_pipeline_registry import get_pipeline_schema_probe
 from services.data_pipeline_registry import get_pipeline_status
 from services.data_pipeline_registry import list_pipeline_summaries
@@ -135,6 +136,21 @@ class TestDataPipelineRegistryService(unittest.TestCase):
         self.assertFalse(result["ok"])
         self.assertEqual(result["execution_mode"], "blocked")
         self.assertIn("paused", result["error"])
+
+    def test_classify_pipeline_ids_for_workers_splits_paused_lanes(self):
+        control_path = self.data_sources_root / "sis_test" / "lane_control.json"
+        old_text = control_path.read_text(encoding="utf-8") if control_path.exists() else None
+        try:
+            control_path.write_text('{"enabled": false, "state": "paused"}', encoding="utf-8")
+            classified = classify_pipeline_ids_for_workers(self.data_sources_root)
+        finally:
+            if old_text is None:
+                control_path.unlink(missing_ok=True)
+            else:
+                control_path.write_text(old_text, encoding="utf-8")
+
+        self.assertIn("sis_test", classified.get("paused") or [])
+        self.assertNotIn("sis_test", classified.get("enabled") or [])
 
     def test_run_pipeline_query_requests_live_mode(self):
         with mock.patch(

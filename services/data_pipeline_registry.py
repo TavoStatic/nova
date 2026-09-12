@@ -40,6 +40,28 @@ def _lane_paused_result(pipeline_id: str, operation: str) -> dict[str, Any]:
     }
 
 
+def classify_pipeline_ids_for_workers(
+    data_sources_root: Optional[Path] = None,
+) -> dict[str, list[str]]:
+    """Split discovered pipelines into worker-ensure vs worker-stop sets."""
+    root = data_sources_root or DATA_SOURCES_ROOT
+    enabled: list[str] = []
+    paused: list[str] = []
+    for item in build_pipeline_registry(root).discover():
+        pipeline_id = str(getattr(item, "pipeline_id", "") or "").strip()
+        if not pipeline_id:
+            continue
+        if bool(_lane_control_state(pipeline_id, data_sources_root=root).get("enabled", True)):
+            enabled.append(pipeline_id)
+        else:
+            paused.append(pipeline_id)
+    return {
+        "enabled": enabled,
+        "paused": paused,
+        "discovered": [*enabled, *paused],
+    }
+
+
 def build_pipeline_registry(data_sources_root: Optional[Path] = None) -> PipelineRegistry:
     """Build registry including backpacks/*/backpack.json (shadow same-id data_sources)."""
     root = data_sources_root or DATA_SOURCES_ROOT

@@ -1,0 +1,187 @@
+{
+  "captured_at": "2026-07-03T17:02:34+00:00",
+  "rows": [
+    {
+      "branch_id": "branch_95aa9cb7",
+      "branch_title": "Wire source root end to end: tts_audio_output",
+      "task_id": "task_789dde28",
+      "task_title": "Run pulse and verify required status keys for tts_audio_output",
+      "updated_at": "2026-07-02 22:35:34.655106"
+    },
+    {
+      "branch_id": "branch_b445740c",
+      "branch_title": "Wire source root end to end: vision",
+      "task_id": "task_7e25eaf9",
+      "task_title": "Run pulse and verify required status keys for vision",
+      "updated_at": "2026-07-02 22:35:38.098560"
+    },
+    {
+      "branch_id": "branch_3e95d7d1",
+      "branch_title": "Wire source root end to end: test_ecosystem",
+      "task_id": "task_ffce97f0",
+      "task_title": "Run pulse and verify required status keys for test_ecosystem",
+      "updated_at": "2026-07-02 22:35:46.092082"
+    },
+    {
+      "branch_id": "branch_cd5f4098",
+      "branch_title": "Wire source root end to end: diagnostics_hygiene",
+      "task_id": "task_45985c50",
+      "task_title": "Run pulse and verify required status keys for diagnostics_hygiene",
+      "updated_at": "2026-07-02 22:35:49.894960"
+    },
+    {
+      "branch_id": "branch_9b623f22",
+      "branch_title": "Wire source root end to end: safety_envelope",
+      "task_id": "task_45181817",
+      "task_title": "Run pulse and verify required status keys for safety_envelope",
+      "updated_at": "2026-07-02 22:35:53.703335"
+    },
+    {
+      "branch_id": "branch_4c065046",
+      "branch_title": "Wire source root end to end: storage_release_pressure",
+      "task_id": "task_cf90c558",
+      "task_title": "Run pulse and verify required status keys for storage_release_pressure",
+      "updated_at": "2026-07-02 22:35:57.509788"
+    },
+    {
+      "branch_id": "branch_32ddccb6",
+      "branch_title": "Wire source root end to end: metrics_ops_journal",
+      "task_id": "task_685adbbd",
+      "task_title": "Run pulse and verify required status keys for metrics_ops_journal",
+      "updated_at": "2026-07-02 22:36:01.200320"
+    },
+    {
+      "branch_id": "branch_73263ebf",
+      "branch_title": "Wire source root end to end: core_steward_reflection",
+      "task_id": "task_e444b9f8",
+      "task_title": "Run pulse and verify required status keys for core_steward_reflection",
+      "updated_at": "2026-07-02 22:36:05.023856"
+    },
+    {
+      "branch_id": "branch_c9a26149",
+      "branch_title": "Wire source root end to end: source_root_inventory",
+      "task_id": "task_32a831ac",
+      "task_title": "Run pulse and verify required status keys for source_root_inventory",
+      "updated_at": "2026-07-02 22:36:08.508274"
+    },
+    {
+      "branch_id": "branch_cb2bfcfd",
+      "branch_title": "Wire source root end to end: runtime_core",
+      "task_id": "task_754bbca7",
+      "task_title": "Run pulse and verify required status keys for runtime_core",
+      "updated_at": "2026-07-02 22:33:57.528922"
+    },
+    {
+      "branch_id": "branch_13d6c475",
+      "branch_title": "Wire source root end to end: runtime_control",
+      "task_id": "task_15ee6fc1",
+      "task_title": "Run pulse and verify required status keys for runtime_control",
+      "updated_at": "2026-07-02 22:34:01.834155"
+    },
+    {
+      "branch_id": "branch_de475629",
+      "branch_title": "Wire source root end to end: scheduler_registry",
+      "task_id": "task_446c7430",
+      "task_title": "Run pulse and verify required status keys for scheduler_registry",
+      "updated_at": "2026-07-02 22:34:05.756563"
+    },
+    {
+      "branch_id": "branch_af34b4e8",
+      "branch_title": "Wire source root end to end: autonomy_maintenance",
+      "task_id": "task_204e83b5",
+      "task_title": "Run pulse and verify required status keys for autonomy_maintenance",
+      "updated_at": "2026-07-02 22:34:09.912760"
+    },
+    {
+      "branch_id": "branch_45207334",
+      "branch_title": "Wire source root end to end: autonomy_orchestrator",
+      "task_id": "task_c7b5074e",
+      "task_title": "Run pulse and verify required status keys for autonomy_orchestrator",
+      "updated_at": "2026-07-02 22:34:13.831568"
+    },
+    {
+      "branch_id": "branch_1cfe67f9",
+      "branch_title": "Wire source root end to end: memory_identity",
+      "task_id": "task_1c7d2709",
+      "task_title": "Run pulse and verify required status keys for memory_identity",
+      "updated_at": "2026-07-02 22:34:26.186608"
+    },
+    {
+      "branch_id": "branch_6b494364",
+      "branch_title": "Wire source root end to end: web_search",
+      "task_id": "task_75076027",
+      "task_title": "Run pulse and verify required status keys for web_search",
+      "updated_at": "2026-07-02 22:34:37.501938"
+    },
+    {
+      "branch_id": "branch_05f22b44",
+      "branch_title": "Wire source root end to end: tool_evidence",
+      "task_id": "task_2f4a1f72",
+      "task_title": "Run pulse and verify required status keys for tool_evidence",
+      "updated_at": "2026-07-02 22:34:57.102456"
+    },
+    {
+      "branch_id": "branch_3132072d",
+      "branch_title": "Wire source root end to end: action_ledger",
+      "task_id": "task_6c1ed5a6",
+      "task_title": "Run pulse and verify required status keys for action_ledger",
+      "updated_at": "2026-07-02 22:35:01.052998"
+    },
+    {
+      "branch_id": "branch_c93ad4a0",
+      "branch_title": "Wire source root end to end: generated_queue",
+      "task_id": "task_8715a939",
+      "task_title": "Run pulse and verify required status keys for generated_queue",
+      "updated_at": "2026-07-02 22:35:05.297172"
+    },
+    {
+      "branch_id": "branch_933cf523",
+      "branch_title": "Wire source root end to end: subconscious",
+      "task_id": "task_5a31ea30",
+      "task_title": "Run pulse and verify required status keys for subconscious",
+      "updated_at": "2026-07-02 22:35:08.792987"
+    },
+    {
+      "branch_id": "branch_333b9e5d",
+      "branch_title": "Wire source root end to end: patch_pipeline",
+      "task_id": "task_1e6ce38b",
+      "task_title": "Run pulse and verify required status keys for patch_pipeline",
+      "updated_at": "2026-07-02 22:35:12.414772"
+    },
+    {
+      "branch_id": "branch_f9c638d5",
+      "branch_title": "Wire source root end to end: release",
+      "task_id": "task_7a276427",
+      "task_title": "Run pulse and verify required status keys for release",
+      "updated_at": "2026-07-02 22:35:20.132818"
+    },
+    {
+      "branch_id": "branch_5cb37274",
+      "branch_title": "Wire source root end to end: http_continuity",
+      "task_id": "task_55f5ef4e",
+      "task_title": "Run pulse and verify required status keys for http_continuity",
+      "updated_at": "2026-07-02 22:35:42.338820"
+    },
+    {
+      "branch_id": "branch_882b7612",
+      "branch_title": "Source root inventory has uncovered unwired roots or files",
+      "task_id": "task_f301810f",
+      "task_title": "Read source root inventory catalog",
+      "updated_at": "2026-07-02 22:33:52.969649"
+    },
+    {
+      "branch_id": "branch_3175ae5e",
+      "branch_title": "Release package is verified but validation outcome is missing",
+      "task_id": "task_a7734c6a",
+      "task_title": "Read release ledger for current package",
+      "updated_at": "2026-07-02 22:36:12.832573"
+    },
+    {
+      "branch_id": "branch_2823324e",
+      "branch_title": "Release package is stale behind live source",
+      "task_id": "task_5b6c1a72",
+      "task_title": "Read release ledger for current package",
+      "updated_at": "2026-07-03 12:02:00.476714"
+    }
+  ]
+}

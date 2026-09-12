@@ -1,0 +1,12 @@
+{
+  "deterministic_hit": 0,
+  "tool_route": 0,
+  "llm_fallback": 8,
+  "top_repeated_failure_class": "none",
+  "top_repeated_correction_class": "none",
+  "routing_stable": true,
+  "last_reflection_turn": 899,
+  "last_reflection_at": "2026-08-31 13:52:39",
+  "last_event": "llm_fallback",
+  "updated_at": "2026-08-31 13:50:39"
+}

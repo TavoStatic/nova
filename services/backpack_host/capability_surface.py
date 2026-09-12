@@ -23,6 +23,28 @@ SCAN_PATH = RUNTIME_DIR / "backpacks" / "capability_scan.json"
 SCAN_SCHEMA = "nova.backpack_capability_scan.v1"
 
 
+def _fusion_snapshot_is_absent(payload: dict[str, Any] | None) -> bool:
+    data = dict(payload or {}) if isinstance(payload, dict) else {}
+    status = str(data.get("status") or "").strip().lower()
+    return data.get("installed") is False or status in {"not_installed", "uninstalled"}
+
+
+def _drop_absent_fusion_snapshot() -> None:
+    """Uninstalled absence is not a fusion cache. Leaving the file is residue."""
+    if not SCAN_PATH.is_file():
+        return
+    try:
+        data = json.loads(SCAN_PATH.read_text(encoding="utf-8"))
+    except Exception:
+        return
+    if not isinstance(data, dict) or not _fusion_snapshot_is_absent(data):
+        return
+    try:
+        SCAN_PATH.unlink()
+    except Exception:
+        pass
+
+
 def _now() -> float:
     return time.time()
 
@@ -207,13 +229,9 @@ def scan_backpack_fusion(backpack_id: str = "edfi", *, persist: bool = True) -> 
             "teach_rules": [],
             "nova_must_know": {"must_prefer_local": True},
         }
-        if persist:
-            try:
-                SCAN_PATH.parent.mkdir(parents=True, exist_ok=True)
-                SCAN_PATH.write_text(json.dumps(scan, indent=2, ensure_ascii=True), encoding="utf-8")
-                scan["scan_path"] = str(SCAN_PATH)
-            except Exception as exc:
-                scan["persist_error"] = str(exc)[:200]
+        # Do not persist absence. Sanitizer already removed this file; writing it
+        # back is uninstall residue, and control status would cache it forever.
+        _drop_absent_fusion_snapshot()
         return scan
 
     # 2) Settings / install
@@ -427,7 +445,12 @@ def load_last_scan() -> dict[str, Any] | None:
         data = json.loads(SCAN_PATH.read_text(encoding="utf-8"))
     except Exception:
         return None
-    return data if isinstance(data, dict) else None
+    if not isinstance(data, dict):
+        return None
+    if _fusion_snapshot_is_absent(data):
+        _drop_absent_fusion_snapshot()
+        return None
+    return data
 
 
 def get_fusion_status(*, max_age_sec: float = 300.0, force: bool = False) -> dict[str, Any]:

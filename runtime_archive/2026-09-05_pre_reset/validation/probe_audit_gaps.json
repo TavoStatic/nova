@@ -1,0 +1,57 @@
+{
+  "results": [
+    {
+      "check": "mission: generated_queue_run_next unblocked",
+      "status": "PASS"
+    },
+    {
+      "check": "mission: active_work_tree + release_rebuild_verify unblocked",
+      "status": "PASS"
+    },
+    {
+      "check": "mission: active_work_tree + core_thinning unblocked",
+      "status": "PASS"
+    },
+    {
+      "check": "mission: direct release_rebuild_verify still blocked (expected gap if only work-tree path wired)",
+      "status": "FAIL",
+      "detail": "hold_blocks_action only special-cases active_work_tree_run_next / generated_queue_run_next"
+    },
+    {
+      "check": "cli: assistant turn retained in shared session_turns",
+      "status": "PASS",
+      "detail": "[('user', 'hello'), ('assistant', 'world')]"
+    },
+    {
+      "check": "patch: patch_preview_approve not in PATCH_QUEUE_EXECUTE_TOOLS",
+      "status": "PASS",
+      "detail": "['patch_preview_apply', 'patch_rollback']"
+    },
+    {
+      "check": "patch: pending preview mode is review not approve",
+      "status": "PASS",
+      "detail": "mode=review"
+    },
+    {
+      "check": "memory: not quite ready is not a correction",
+      "status": "PASS",
+      "detail": "handled=False parsed=''"
+    },
+    {
+      "check": "edfi: scan_cap_hit forces ok=false",
+      "status": "PASS",
+      "detail": "scan_cap_hit=True ok=False"
+    },
+    {
+      "check": "worker: supervisor does not write fake running heartbeat on start",
+      "status": "PASS",
+      "detail": "present=False status=missing pid=None caller=35812"
+    },
+    {
+      "check": "worker: missing script start is not supervised_ok",
+      "status": "PASS",
+      "detail": "worker_script_missing"
+    }
+  ],
+  "fail_count": 1
+}

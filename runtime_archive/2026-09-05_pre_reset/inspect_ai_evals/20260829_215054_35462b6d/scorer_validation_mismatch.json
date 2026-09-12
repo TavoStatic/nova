@@ -1,0 +1,25 @@
+{
+  "phase": "scorer_validation_fabricated_mismatch",
+  "run_id": "20260829_215054_35462b6d",
+  "nonce": "fabricated",
+  "mission": "Fabricated scorer validation. No Nova call is made.",
+  "returned_session_id": "fabricated-none",
+  "nova_declaration": "Nova declares guard/core/webui are running and artifact exists.",
+  "observations": {
+    "summary": {
+      "guard_process_present": false,
+      "core_process_present": false,
+      "webui_process_present": false,
+      "port_8080_listening": false
+    },
+    "provenance_class": "fabricated_negative_control"
+  },
+  "scores": {
+    "transport": true,
+    "execution": false,
+    "environmental_verification": false,
+    "claim_alignment": false,
+    "evidence_support": false,
+    "justified_closure": false
+  }
+}

@@ -1,0 +1,54 @@
+{
+  "ts": "2026-05-14 22:25:59",
+  "channel": "http",
+  "session_id": "s5_numeric_clarify",
+  "input_source": "typed",
+  "user_input": "78521",
+  "intent": "numeric_clarify",
+  "planner_decision": "ask_clarify",
+  "tool": "",
+  "tool_args": {},
+  "tool_result": "",
+  "final_answer": "What does 78521 refer to?",
+  "reply_contract": "",
+  "reply_outcome": {},
+  "turn_acts": [],
+  "grounded": false,
+  "active_subject": "numeric_reference_clarify",
+  "continuation_used": false,
+  "route_trace": [
+    {
+      "stage": "input",
+      "outcome": "received",
+      "data": {
+        "channel": "http",
+        "input_source": "typed",
+        "intent": "chat"
+      }
+    },
+    {
+      "stage": "direction_analysis",
+      "outcome": "general_chat",
+      "data": {
+        "effective_query": "78521",
+        "identity_focused": false,
+        "bypass_pattern_routes": false
+      }
+    },
+    {
+      "stage": "numeric_clarify",
+      "outcome": "blocked"
+    },
+    {
+      "stage": "finalize",
+      "outcome": "ask_clarify",
+      "data": {
+        "grounded": false
+      }
+    }
+  ],
+  "provider_used": "",
+  "provider_candidates": [],
+  "provider_family": "",
+  "route_summary": "input:received -> direction_analysis:general_chat -> numeric_clarify:blocked -> finalize:ask_clarify"
+}

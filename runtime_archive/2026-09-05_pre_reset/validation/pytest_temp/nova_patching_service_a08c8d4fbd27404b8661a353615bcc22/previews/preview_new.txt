@@ -1,0 +1,12 @@
+Patch Preview
+Zip: teach_proposal_a.zip
+Patch revision: 5
+Min base revision: 4
+Status: eligible
+
+Added files:
+- examples.jsonl
+- nova_patch.json
+
+Diff summary:
+- No text diffs available or all changes are binary/non-text

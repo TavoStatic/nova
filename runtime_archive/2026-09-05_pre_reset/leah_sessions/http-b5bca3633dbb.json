@@ -1,0 +1,23 @@
+{
+  "turns": [
+    {
+      "role": "user",
+      "text": "how are you doing today ?"
+    },
+    {
+      "role": "assistant",
+      "text": "Running well\u2014core state, heartbeat, and maintenance loops are all active and healthy on the local runtime side today."
+    },
+    {
+      "role": "user",
+      "text": "what now"
+    },
+    {
+      "role": "assistant",
+      "text": "Maintenance cycles are still running and health checks remain green. I'm ready for your next input or any new tasks you want to route through the system."
+    }
+  ],
+  "turn_ts": 1788366257.595749,
+  "session_id": "http-b5bca3633dbb",
+  "ts": 1788366213.2304077
+}

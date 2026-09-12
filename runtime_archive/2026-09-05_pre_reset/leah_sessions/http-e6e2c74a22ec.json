@@ -1,0 +1,23 @@
+{
+  "turns": [
+    {
+      "role": "user",
+      "text": "how are you doing today ?"
+    },
+    {
+      "role": "assistant",
+      "text": "Running smoothly with all systems operational and ready for your input. What do you need help with today?"
+    },
+    {
+      "role": "user",
+      "text": "what now"
+    },
+    {
+      "role": "assistant",
+      "text": "All systems are still green and ready for input. What do you need help with today?"
+    }
+  ],
+  "turn_ts": 1788353984.933629,
+  "session_id": "http-e6e2c74a22ec",
+  "ts": 1788353939.3006616
+}

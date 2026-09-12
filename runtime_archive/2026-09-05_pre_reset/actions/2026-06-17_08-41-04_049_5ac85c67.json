@@ -1,0 +1,286 @@
+{
+  "ts": "2026-06-17 08:40:51",
+  "channel": "http",
+  "session_id": "leah-latency-probe",
+  "input_source": "http",
+  "user_input": "latency probe 3 2026-06-17T08:40:51.5312298-05:00",
+  "intent": "",
+  "planner_decision": "llm_fallback",
+  "tool": "self_status",
+  "tool_args": {},
+  "tool_result": "Nova Self Status - 2026-06-17 08:41:00\nLevel: hurting\nSummary: Nova is running, but one or more support surfaces are strained.\nSignals:\n- [WARNING] Local code changed since last accepted state: 12 changed file(s): nova_http.py, piper/espeak-ng.dll, piper/models/en_US-lessac-medium.onnx, piper/onnxruntime.dll, piper/onnxruntime_providers_shared.dll, +7 more. Diff +94/-4; latest regression is FAILED but marked stale. (next: git diff --stat)",
+  "final_answer": "Nova is currently running but experiencing some strain, as indicated by the local code changes since the last accepted state. There are 12 changed files with a diff of +94/-4, and one latest regression marked as FAILED but considered stale. If you need more details or assistance related to this, feel free to ask!",
+  "reply_contract": "",
+  "reply_outcome": {
+    "kind": "llm_fallback",
+    "intent_evidence_packet": {
+      "schema": "nova.turn_intent_evidence",
+      "version": "1.0.0",
+      "trace_authority": "hypothesis_only",
+      "answer_authority": "available_evidence",
+      "current_turn": "latency probe 3 2026-06-17T08:40:51.5312298-05:00",
+      "conversation_frame": {
+        "turn_count": 7,
+        "current_user_turn_is_latest": true,
+        "previous_assistant_turn": "Nova is currently running but experiencing some strain, as indicated by the local code changes since the last accepted state. There are 12 changed files with a diff of +94/-4, and one latest regression marked as FAILED but considered stale. If you need more details or assistance related to this, feel free to ask!",
+        "last_assistant_repeats_earlier_assistant": true
+      },
+      "planner_frame": {
+        "decision": "tool_evidence_for_fallback",
+        "tool": "self_status",
+        "semantic_tool_observation": {
+          "tool": "self_status",
+          "confidence": 0.9,
+          "reason": "The user is probing for latency and the recent assistant responses indicate Nova's current state, so the goal is to get live self-status evidence.",
+          "evidence_need": "live_self_status",
+          "answer_target": "nova_live_state",
+          "source": "llm_intent",
+          "status": "tool_result_available"
+        }
+      },
+      "available_evidence": [
+        {
+          "name": "current_user_turn",
+          "available": true,
+          "chars": 49
+        },
+        {
+          "name": "recent_chat_context",
+          "available": true,
+          "chars": 1101
+        },
+        {
+          "name": "session_state_context",
+          "available": false,
+          "chars": 0
+        },
+        {
+          "name": "learning_context",
+          "available": true,
+          "chars": 1669
+        },
+        {
+          "name": "confirmed_identity_context",
+          "available": true,
+          "chars": 235
+        },
+        {
+          "name": "operational_self_context",
+          "available": true,
+          "chars": 1346
+        },
+        {
+          "name": "tool_result",
+          "available": true,
+          "chars": 442
+        }
+      ],
+      "answer_contract": {
+        "infer_intent_from_turn_and_conversation": true,
+        "trace_is_route_authority": false,
+        "evidence_is_claim_authority": true,
+        "tool_route_requires_external_evidence_gap": true,
+        "conversation_can_be_complete_without_task": false,
+        "reply_form": "evidence_bound_reply"
+      }
+    },
+    "deferred_tool": {
+      "tool": "self_status",
+      "reply_contract": "self_status.current",
+      "grounded": true
+    },
+    "execution_profile": {
+      "total_time": 12330,
+      "planner_time": 5444,
+      "llm_time": 3445,
+      "tool_time": 0,
+      "post_time": 76,
+      "tool_selection_time": 0
+    }
+  },
+  "turn_acts": [],
+  "grounded": true,
+  "active_subject": "",
+  "continuation_used": false,
+  "route_trace": [
+    {
+      "stage": "input",
+      "outcome": "received",
+      "data": {
+        "channel": "http",
+        "input_source": "http"
+      }
+    },
+    {
+      "stage": "intent_understanding",
+      "outcome": "classified",
+      "data": {
+        "level": "casual",
+        "domain": "general",
+        "confidence": 0.0,
+        "strategy": "clarify"
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "semantic_tool_intent",
+      "data": {
+        "duration_ms": 2938
+      }
+    },
+    {
+      "stage": "action_planner",
+      "outcome": "semantic_intent",
+      "detail": "The user is probing for latency and the recent assistant responses indicate Nova's current state, so the goal is to get live self-status evidence.",
+      "data": {
+        "tool": "self_status",
+        "confidence": 0.9
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "tool_selection",
+      "data": {
+        "duration_ms": 2938
+      }
+    },
+    {
+      "stage": "action_planner",
+      "outcome": "run_tool",
+      "data": {
+        "tool": "self_status"
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "tool_response",
+      "data": {
+        "duration_ms": 2506,
+        "tool": "self_status"
+      }
+    },
+    {
+      "stage": "tool_execution",
+      "outcome": "ok",
+      "data": {
+        "tool": "self_status",
+        "grounded": true
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "planner",
+      "data": {
+        "duration_ms": 5444
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "planner_call",
+      "data": {
+        "duration_ms": 5444
+      }
+    },
+    {
+      "stage": "action_planner",
+      "outcome": "tool_evidence_for_fallback",
+      "data": {
+        "tool": "self_status"
+      }
+    },
+    {
+      "stage": "memory_context",
+      "outcome": "used",
+      "data": {
+        "memory_used": true,
+        "identity_used": true,
+        "operational_identity_used": true,
+        "knowledge_used": false,
+        "memory_chars": 84,
+        "identity_chars": 235,
+        "operational_identity_chars": 1346,
+        "knowledge_chars": 0
+      }
+    },
+    {
+      "stage": "chat_context",
+      "outcome": "used",
+      "data": {
+        "chars": 1101
+      }
+    },
+    {
+      "stage": "turn_intent_evidence",
+      "outcome": "attached",
+      "data": {
+        "trace_authority": "hypothesis_only",
+        "answer_authority": "available_evidence"
+      }
+    },
+    {
+      "stage": "llm_fallback",
+      "outcome": "invoked",
+      "data": {
+        "retrieved_chars": 4077
+      }
+    },
+    {
+      "stage": "llm_call",
+      "outcome": "started"
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "llm_call",
+      "data": {
+        "duration_ms": 3445
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "post_processing",
+      "data": {
+        "duration_ms": 76
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "execute_reply_sequence",
+      "data": {
+        "duration_ms": 12330
+      }
+    },
+    {
+      "stage": "timing_breakdown",
+      "outcome": "completed",
+      "detail": "execute_reply_sequence",
+      "data": {
+        "total_time": 12330,
+        "planner_time": 5444,
+        "llm_time": 3445,
+        "tool_time": 0,
+        "post_time": 76,
+        "tool_selection_time": 0
+      }
+    },
+    {
+      "stage": "finalize",
+      "outcome": "llm_fallback",
+      "data": {
+        "grounded": true,
+        "tool": "self_status"
+      }
+    }
+  ],
+  "provider_used": "self_status",
+  "provider_candidates": [],
+  "provider_family": "self_status",
+  "route_summary": "input:received -> intent_understanding:classified -> action_planner:semantic_intent -> action_planner:run_tool -> tool_execution:ok -> action_planner:tool_evidence_for_fallback -> memory_context:used -> chat_context:used -> turn_intent_evidence:attached -> llm_fallback:invoked -> llm_call:started -> finalize:llm_fallback"
+}

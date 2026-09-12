@@ -626,7 +626,24 @@ def _real_world_task_create_action(payload: dict) -> tuple[bool, str, dict, str]
 
 
 def _delete_session(session_id: str) -> tuple[bool, str]:
-    return SESSION_ADMIN_SERVICE.delete_session_from_runtime(session_id, runtime_scope=globals(), core_module=nova_core)
+    ok, message = SESSION_ADMIN_SERVICE.delete_session_from_runtime(
+        session_id,
+        runtime_scope=globals(),
+        core_module=nova_core,
+    )
+    if ok:
+        continuity_store = getattr(LEAH_FRONTDOOR_SERVICE, "_continuity_store", None)
+        clear_fn = getattr(continuity_store, "clear", None)
+        if callable(clear_fn):
+            try:
+                clear_fn(session_id)
+            except Exception:
+                pass
+        try:
+            LEAH_FRONTDOOR_SERVICE._session_context.pop(str(session_id or "").strip(), None)
+        except Exception:
+            pass
+    return ok, message
 
 
 def _parse_request_path(raw_path: str) -> tuple[str, dict]:

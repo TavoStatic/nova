@@ -1,0 +1,79 @@
+{
+  "ts": "2026-08-14 23:21:45",
+  "channel": "http",
+  "session_id": "leah-timeout-test",
+  "input_source": "http",
+  "user_input": "who are you?",
+  "intent": "",
+  "planner_decision": "evidence_bound_reply",
+  "tool": "",
+  "tool_args": {},
+  "tool_result": "",
+  "final_answer": "I am Nova. Current evidence shows a local AI runtime with registered internal systems, not only a model reply.\nConfirmed identity evidence lists the developer as Gustavo Uribe (Gus).\nRegistered operational surfaces: runtime core, guard system, work tree, health monitoring, memory systems, task routing, maintenance loops, release verification, subconscious priority, autonomy handling.",
+  "reply_contract": "self_evidence.operational_self",
+  "reply_outcome": {
+    "kind": "self_evidence",
+    "evidence_need": "operational_self",
+    "identity_used": true,
+    "operational_identity_used": true,
+    "intent_evidence_packet": {},
+    "execution_profile": {
+      "total_time": 2,
+      "planner_time": 0,
+      "llm_time": 0,
+      "tool_time": 0,
+      "post_time": 0,
+      "tool_selection_time": 0
+    }
+  },
+  "turn_acts": [],
+  "grounded": true,
+  "active_subject": "",
+  "continuation_used": false,
+  "route_trace": [
+    {
+      "stage": "input",
+      "outcome": "received",
+      "data": {
+        "channel": "http",
+        "input_source": "http"
+      }
+    },
+    {
+      "stage": "self_evidence",
+      "outcome": "answered_before_ollama"
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "execute_reply_sequence",
+      "data": {
+        "duration_ms": 2
+      }
+    },
+    {
+      "stage": "timing_breakdown",
+      "outcome": "completed",
+      "detail": "execute_reply_sequence",
+      "data": {
+        "total_time": 2,
+        "planner_time": 0,
+        "llm_time": 0,
+        "tool_time": 0,
+        "post_time": 0,
+        "tool_selection_time": 0
+      }
+    },
+    {
+      "stage": "finalize",
+      "outcome": "evidence_bound_reply",
+      "data": {
+        "grounded": true
+      }
+    }
+  ],
+  "provider_used": "",
+  "provider_candidates": [],
+  "provider_family": "",
+  "route_summary": "input:received -> self_evidence:answered_before_ollama -> finalize:evidence_bound_reply"
+}

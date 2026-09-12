@@ -1,0 +1,145 @@
+{
+  "ts": "2026-05-18 23:43:05",
+  "channel": "http",
+  "session_id": "ad4986042aaccb36",
+  "input_source": "typed",
+  "user_input": "i have not asked you to explain how you behave all i said was hi nova",
+  "intent": "",
+  "planner_decision": "llm_fallback",
+  "tool": "",
+  "tool_args": {},
+  "tool_result": "",
+  "final_answer": "You're right, I overexplained. Hi again! How can I assist you today?",
+  "reply_contract": "",
+  "reply_outcome": {
+    "execution_profile": {
+      "total_time": 1474,
+      "planner_time": 873,
+      "llm_time": 522,
+      "tool_time": 0,
+      "post_time": 0,
+      "tool_selection_time": 0
+    }
+  },
+  "turn_acts": [],
+  "grounded": false,
+  "active_subject": "",
+  "continuation_used": false,
+  "route_trace": [
+    {
+      "stage": "input",
+      "outcome": "received",
+      "data": {
+        "channel": "http",
+        "input_source": "typed"
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "semantic_tool_intent",
+      "data": {
+        "duration_ms": 872
+      }
+    },
+    {
+      "stage": "action_planner",
+      "outcome": "semantic_none",
+      "data": {
+        "confidence": 0.0
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "tool_selection",
+      "data": {
+        "duration_ms": 872
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "planner_call",
+      "data": {
+        "duration_ms": 873
+      }
+    },
+    {
+      "stage": "memory_context",
+      "outcome": "empty",
+      "data": {
+        "memory_used": false,
+        "knowledge_used": false,
+        "memory_chars": 0,
+        "knowledge_chars": 0
+      }
+    },
+    {
+      "stage": "chat_context",
+      "outcome": "used",
+      "data": {
+        "chars": 749
+      }
+    },
+    {
+      "stage": "llm_fallback",
+      "outcome": "invoked",
+      "data": {
+        "retrieved_chars": 771
+      }
+    },
+    {
+      "stage": "llm_call",
+      "outcome": "started"
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "llm_call",
+      "data": {
+        "duration_ms": 522
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "post_processing",
+      "data": {
+        "duration_ms": 0
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "execute_reply_sequence",
+      "data": {
+        "duration_ms": 1474
+      }
+    },
+    {
+      "stage": "timing_breakdown",
+      "outcome": "completed",
+      "detail": "execute_reply_sequence",
+      "data": {
+        "total_time": 1474,
+        "planner_time": 873,
+        "llm_time": 522,
+        "tool_time": 0,
+        "post_time": 0,
+        "tool_selection_time": 0
+      }
+    },
+    {
+      "stage": "finalize",
+      "outcome": "llm_fallback",
+      "data": {
+        "grounded": false
+      }
+    }
+  ],
+  "provider_used": "",
+  "provider_candidates": [],
+  "provider_family": "",
+  "route_summary": "input:received -> action_planner:semantic_none -> memory_context:empty -> chat_context:used -> llm_fallback:invoked -> llm_call:started -> finalize:llm_fallback"
+}

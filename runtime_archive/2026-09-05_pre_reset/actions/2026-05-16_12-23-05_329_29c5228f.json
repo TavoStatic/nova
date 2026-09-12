@@ -1,0 +1,66 @@
+{
+  "ts": "2026-05-16 12:22:57",
+  "channel": "http",
+  "session_id": "codex_content_owner_probe",
+  "input_source": "typed",
+  "user_input": "You are not just a simple conversational AI anymore. You have a runtime, a guard system, a Work Tree, health monitoring, memory systems, task routing, maintenance loops, release verification, subconscious priority evaluation, and autonomy handling. So the better answer to what are you should use those internals.",
+  "intent": "chat",
+  "planner_decision": "grounded_self_report",
+  "tool": "",
+  "tool_args": {},
+  "tool_result": "",
+  "final_answer": "Live health score is 95/100.\nWork Tree is blocked_observing with 3 open task(s). Current branch: Review subconscious priority with fulfillment/supervisor: subconscious_pressure_backlog_generation / route_fit_weak.\nAlerts: work_tree_unresolved_truth:blocked=1;observing=0;latent_root=0;operator_hold=0.\nWhat needs attention: Control status alert: work_tree_unresolved_truth:blocked=1;observing=0;latent_root=0;operator_hold=0; Work Tree is blocked_observing with 3 open task(s); current branch: Review subconscious priority with fulfillment/supervisor: subconscious_pressure_backlog_generation / route_fit_weak; Release package is stale behind live source and needs rebuild verification.\nSource: live control status and Work Tree.",
+  "reply_contract": "runtime.self_report.live_status",
+  "reply_outcome": {
+    "source": "live_control_status_and_work_tree",
+    "tool": "control_status"
+  },
+  "turn_acts": [
+    "command",
+    "inform",
+    "mixed"
+  ],
+  "grounded": true,
+  "active_subject": "operational_status:runtime_truth",
+  "continuation_used": false,
+  "route_trace": [
+    {
+      "stage": "input",
+      "outcome": "received",
+      "data": {
+        "channel": "http",
+        "input_source": "typed",
+        "intent": "chat"
+      }
+    },
+    {
+      "stage": "direction_analysis",
+      "outcome": "explicit_command",
+      "data": {
+        "effective_query": "You are not just a simple conversational AI anymore. You have a runtime, a guard system, a Work Tree, health monitoring, memory systems, task routing, maintenance loops, release ve",
+        "turn_acts": "command,inform,mixed",
+        "identity_focused": false,
+        "bypass_pattern_routes": false
+      }
+    },
+    {
+      "stage": "grounded_self_report",
+      "outcome": "control_status",
+      "detail": "live_status_reply",
+      "data": {
+        "tool": "control_status"
+      }
+    },
+    {
+      "stage": "finalize",
+      "outcome": "grounded_self_report",
+      "data": {
+        "grounded": true
+      }
+    }
+  ],
+  "provider_used": "",
+  "provider_candidates": [],
+  "provider_family": "",
+  "route_summary": "input:received -> direction_analysis:explicit_command -> grounded_self_report:control_status -> finalize:grounded_self_report"
+}

@@ -1,0 +1,200 @@
+{
+  "ts": "2026-05-16 14:55:45",
+  "channel": "http",
+  "session_id": "stub_content_probe_2731402f",
+  "input_source": "typed",
+  "user_input": "status",
+  "intent": "chat",
+  "planner_decision": "run_tool",
+  "tool": "system_check",
+  "tool_args": {
+    "args": []
+  },
+  "tool_result": "TOOL:system_check",
+  "final_answer": "TOOL:system_check",
+  "reply_contract": "",
+  "reply_outcome": {
+    "execution_profile": {
+      "total_time": 0,
+      "planner_time": 0,
+      "llm_time": 0,
+      "tool_time": 0,
+      "post_time": 0,
+      "tool_selection_time": 0
+    }
+  },
+  "turn_acts": [],
+  "grounded": true,
+  "active_subject": "",
+  "continuation_used": false,
+  "route_trace": [
+    {
+      "stage": "input",
+      "outcome": "received",
+      "data": {
+        "channel": "http",
+        "input_source": "typed",
+        "intent": "chat"
+      }
+    },
+    {
+      "stage": "direction_analysis",
+      "outcome": "general_chat",
+      "data": {
+        "effective_query": "status",
+        "identity_focused": false,
+        "bypass_pattern_routes": false
+      }
+    },
+    {
+      "stage": "truth_hierarchy",
+      "outcome": "skipped",
+      "detail": "content_owned_chat_disabled"
+    },
+    {
+      "stage": "hard_answer",
+      "outcome": "skipped",
+      "detail": "content_owned_chat_disabled"
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "planner_decide_actions",
+      "data": {
+        "duration_ms": 0
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "tool_selection",
+      "data": {
+        "duration_ms": 0
+      }
+    },
+    {
+      "stage": "action_planner",
+      "outcome": "run_tool",
+      "data": {
+        "tool": "system_check"
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "tool_response",
+      "data": {
+        "duration_ms": 0,
+        "tool": "system_check"
+      }
+    },
+    {
+      "stage": "tool_execution",
+      "outcome": "ok",
+      "data": {
+        "tool": "system_check",
+        "grounded": true
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "planner",
+      "data": {
+        "duration_ms": 0
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "planner_call",
+      "data": {
+        "duration_ms": 0
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "execute_reply_sequence",
+      "data": {
+        "duration_ms": 0
+      }
+    },
+    {
+      "stage": "timing_breakdown",
+      "outcome": "completed",
+      "detail": "execute_reply_sequence",
+      "data": {
+        "total_time": 0,
+        "planner_time": 0,
+        "llm_time": 0,
+        "tool_time": 0,
+        "post_time": 0,
+        "tool_selection_time": 0
+      }
+    },
+    {
+      "stage": "finalize",
+      "outcome": "run_tool",
+      "data": {
+        "grounded": true,
+        "tool": "system_check"
+      }
+    }
+  ],
+  "provider_used": "",
+  "provider_candidates": [],
+  "provider_family": "",
+  "routing_decision": {
+    "input_preview": "status",
+    "entry_point": "http",
+    "intent_phase": {
+      "phase": "intent",
+      "handled": false,
+      "rule_name": "",
+      "intent": "",
+      "action": "",
+      "priority": null,
+      "candidates": [
+        {
+          "rule_name": "weather_lookup",
+          "priority": 62,
+          "handled": false
+        },
+        {
+          "rule_name": "web_research_family",
+          "priority": 62,
+          "handled": false
+        }
+      ]
+    },
+    "handle_phase": {
+      "phase": "handle",
+      "handled": false,
+      "rule_name": "",
+      "intent": "",
+      "action": "",
+      "priority": null,
+      "candidates": [
+        {
+          "rule_name": "location_weather",
+          "priority": 46,
+          "handled": false
+        },
+        {
+          "rule_name": "retrieval_followup",
+          "priority": 47,
+          "handled": false
+        }
+      ]
+    },
+    "final_owner": "fallback",
+    "allowed_bypass": false,
+    "allowed_bypass_category": "",
+    "bypass_reason": "",
+    "reply_contract": "",
+    "reply_outcome_kind": "",
+    "turn_acts": []
+  },
+  "route_summary": "input:received -> direction_analysis:general_chat -> truth_hierarchy:skipped -> hard_answer:skipped -> action_planner:run_tool -> tool_execution:ok -> finalize:run_tool"
+}

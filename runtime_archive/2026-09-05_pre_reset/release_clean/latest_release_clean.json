@@ -1,0 +1,51 @@
+{
+  "artifact": null,
+  "created_at_epoch": 1785898089.910212,
+  "failure_reason": "package_build_failed",
+  "label": "work-tree-rebuild",
+  "ok": false,
+  "readiness": {},
+  "report_path": "C:\\NOVA\\runtime\\release_clean\\latest_release_clean.json",
+  "steps": [
+    {
+      "command": [
+        "C:\\NOVA\\.venv\\Scripts\\python.exe",
+        "C:\\NOVA\\scripts\\repo_hygiene_check.py"
+      ],
+      "duration_sec": 0.166,
+      "name": "repo_hygiene",
+      "returncode": 0,
+      "stderr": "",
+      "stdout": "repo_hygiene_check: OK\n"
+    },
+    {
+      "command": [
+        "C:\\NOVA\\.venv\\Scripts\\python.exe",
+        "C:\\NOVA\\scripts\\smoke_test.py"
+      ],
+      "duration_sec": 0.368,
+      "name": "smoke_runtime",
+      "returncode": 0,
+      "stderr": "",
+      "stdout": "Nova smoke test starting...\nSmoke tier: runtime\ntask_engine.analyze_request: True\nanalyze_request returned type: <class 'task_engine.TaskResult'>\ncapabilities.describe_capabilities: True\ndescribe_capabilities output (truncated): Current capabilities:\n\u2022 runtime_core: Nova runs as a local runtime with core state, heartbeat, HTTP, CLI, and service surfaces\n\u2022 guard_system: Nova has a guard process and maintenance loop that supervise runtime health\n\u2022 work_tree: Nova can organize internal work into trees, branches, tasks, tool evidence, and blocker state\n\u2022 health_monitoring: Nova can inspect health score, dependency state, Work\nhealth.py exit: 0\n{\n  \"profile\": \"runtime\",\n  \"heartbeat\": {\n    \"ok\": true,\n    \"info\": \"age=0s\",\n    \"required\": true\n  },\n  \"core_state\": {\n    \"ok\": true,\n    \"info\": \"pid=34668\",\n    \"required\": true\n  },\n  \"ollama\": {\n    \"ok\": true,\n    \"info\": \"version=0.32.5;tags=200;chat_route=400;chat_model=qwen2.5:7b;model_status=available\",\n    \"required\": true\n  },\n  \"ok\": true\n}\n\nSMOKE TEST [RUNTIME]: OK\n"
+    },
+    {
+      "command": [
+        "powershell.exe",
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        "C:\\NOVA\\scripts\\build_release_package.ps1",
+        "-Label",
+        "work-tree-rebuild"
+      ],
+      "duration_sec": 0.258,
+      "name": "package_build",
+      "returncode": 1,
+      "stderr": "At C:\\NOVA\\scripts\\build_release_package.ps1:376 char:81\n+ ... ing]::IsNullOrWhiteSpace($labelToken)) { \"\" } else { $labelToken })),\n+                                              ~~~~~~~~~~~~~~~~~~~~~~~~~\nThe string is missing the terminator: \".\nAt C:\\NOVA\\scripts\\build_release_package.ps1:376 char:79\n+ ... l: {0}\" -f $(if ([string]::IsNullOrWhiteSpace($labelToken)) { \"\" } el ...\n+                                                                 ~\nMissing closing '}' in statement block or type definition.\nAt C:\\NOVA\\scripts\\build_release_package.ps1:376 char:107\n+ ... ing]::IsNullOrWhiteSpace($labelToken)) { \"\" } else { $labelToken })),\n+                                                                        ~\nMissing closing ')' in subexpression.\nAt C:\\NOVA\\scripts\\build_release_package.ps1:253 char:34\n+ if ($missingModules.Count -gt 0) {\n+                                  ~\nMissing closing '}' in statement block or type definition.\nAt C:\\NOVA\\scripts\\build_release_package.ps1:421 char:1\n+ )\n+ ~\nUnexpected token ')' in expression or statement.\n    + CategoryInfo          : ParserError: (:) [], ParentContainsErrorRecordException\n    + FullyQualifiedErrorId : TerminatorExpectedAtEndOfString\n \n",
+      "stdout": ""
+    }
+  ],
+  "validation_record": null
+}

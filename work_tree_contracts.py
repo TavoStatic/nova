@@ -23,6 +23,7 @@ class TaskStatus(str, Enum):
     OPEN = "open"
     ACTIVE = "active"
     BLOCKED = "blocked"
+    ATTEMPTED = "attempted"
     COMPLETE = "complete"
     DROPPED = "dropped"
 

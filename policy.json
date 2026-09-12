@@ -51,10 +51,23 @@
     "temporal_review": true
   },
   "models": {
-    "chat": "qwen2.5:7b",
-    "routing": "qwen2.5:7b",
+    "chat": "qwen3.5:4b",
+    "routing": "qwen3.5:4b",
     "vision": "qwen2.5vl:7b",
     "stt_size": "medium"
+  },
+  "preferred_models": {
+    "_comment": "Override SOCK tier defaults without code changes. Remove a key to let SOCK decide. SOCK still validates VRAM fit before applying.",
+    "tier_24gb_chat": "qwen2.5:32b",
+    "tier_12gb_chat": "phi4:14b",
+    "tier_8gb_chat": "qwen2.5:14b",
+    "tier_4gb_chat": "qwen3.5:4b",
+    "tier_cpu32_chat": "qwen2.5:14b",
+    "tier_cpu16_chat": "llama3.1:8b",
+    "tier_24gb_vision": "qwen2.5vl:72b",
+    "tier_12gb_vision": "qwen2.5vl:14b",
+    "tier_4gb_vision": "qwen2.5vl:7b",
+    "routing": "qwen3.5:4b"
   },
   "memory": {
     "enabled": true,
@@ -143,7 +156,24 @@
     "temp_max_total_mb": 50,
     "protect_patterns": ["core_health_brief.json", "work_tree.db"],
     "exports_max_age_days": 3,
-    "ledger_max_mb": 20
+    "ledger_max_mb": 20,
+    "release_extract_max_age_days": 3,
+    "release_validation_extract_max_total_mb": 1024,
+    "release_stage_max_age_days": 3,
+    "release_stage_max_total_mb": 256,
+    "subconscious_run_max_age_days": 2,
+    "subconscious_run_keep_count": 24,
+    "subconscious_run_max_flag": 400,
+    "recovery_quarantine_max_age_days": 14,
+    "recovery_quarantine_keep_count": 1
+  },
+  "observation_spine": {
+    "enabled": true,
+    "mode": "enforce",
+    "repeat_unchanged_threshold": 3,
+    "window_size": 64,
+    "persist_to_runtime": true,
+    "comments": "repeat_unchanged_threshold: minimum consecutive identical (source, operation, subject, input_ref) to trigger REPEATED_UNCHANGED_PATH. window_size: max observations retained in rolling buffer. Lower threshold=more aggressive loop detection, higher=more tolerance for legitimate repetition."
   },
   "layers": {
     "leah": {
@@ -211,16 +241,9 @@
       "subconscious_triage_is_pressure": false,
       "generated_queue_backlog_is_pressure": false,
       "require_core_gate_for_green": true,
-      "ingestion_suppress_ambient_on_hold": true,
+      "ingestion_suppress_ambient_on_hold": false,
       "sustained_watch_cycles": 6,
-      "hold_block_actions": [
-        "active_work_tree_run_next",
-        "generated_queue_run_next",
-        "generated_queue_investigate",
-        "pulse_status",
-        "codegen_run",
-        "leah_build_run_next"
-      ],
+      "hold_block_actions": [],
       "hold_allow_actions": [
         "patch_queue_run_next",
         "guard_start",

@@ -1,0 +1,107 @@
+{
+  "ts": "2026-05-14 22:25:59",
+  "channel": "http",
+  "session_id": "s5_clean_slate_loc",
+  "input_source": "typed",
+  "user_input": "my location is Brownsville Texas",
+  "intent": "policy_block",
+  "planner_decision": "policy_block",
+  "tool": "",
+  "tool_args": {},
+  "tool_result": "",
+  "final_answer": "This clean session is identity-only, so I won't store or use location here.",
+  "reply_contract": "policy.identity_only_mode",
+  "reply_outcome": {
+    "intent": "policy_block",
+    "kind": "identity_only_block",
+    "blocked_domain": "location",
+    "reply_contract": "policy.identity_only_mode"
+  },
+  "turn_acts": [
+    "inform"
+  ],
+  "grounded": false,
+  "active_subject": "",
+  "continuation_used": false,
+  "route_trace": [
+    {
+      "stage": "input",
+      "outcome": "received",
+      "data": {
+        "channel": "http",
+        "input_source": "typed",
+        "intent": "chat"
+      }
+    },
+    {
+      "stage": "direction_analysis",
+      "outcome": "generic_declarative",
+      "data": {
+        "effective_query": "my location is Brownsville Texas",
+        "turn_acts": "inform",
+        "identity_focused": false,
+        "bypass_pattern_routes": false
+      }
+    },
+    {
+      "stage": "policy_gate",
+      "outcome": "blocked",
+      "detail": "identity_only_mode",
+      "data": {
+        "blocked_domain": "location"
+      }
+    },
+    {
+      "stage": "finalize",
+      "outcome": "policy_block",
+      "data": {
+        "grounded": false
+      }
+    }
+  ],
+  "provider_used": "",
+  "provider_candidates": [],
+  "provider_family": "",
+  "routing_decision": {
+    "input_preview": "my location is Brownsville Texas",
+    "entry_point": "http",
+    "intent_phase": {
+      "phase": "intent",
+      "handled": true,
+      "rule_name": "set_location_explicit",
+      "intent": "set_location",
+      "action": "",
+      "priority": 62,
+      "candidates": [
+        {
+          "rule_name": "smalltalk",
+          "priority": 61,
+          "handled": false
+        },
+        {
+          "rule_name": "set_location",
+          "priority": 62,
+          "handled": true,
+          "intent": "set_location"
+        }
+      ]
+    },
+    "handle_phase": {
+      "phase": "handle",
+      "handled": false,
+      "rule_name": "",
+      "intent": "",
+      "action": "",
+      "priority": null,
+      "candidates": []
+    },
+    "final_owner": "supervisor_intent",
+    "allowed_bypass": false,
+    "allowed_bypass_category": "",
+    "bypass_reason": "",
+    "reply_contract": "policy.identity_only_mode",
+    "reply_outcome_kind": "identity_only_block",
+    "turn_acts": []
+  },
+  "route_summary": "input:received -> direction_analysis:generic_declarative -> policy_gate:blocked -> finalize:policy_block"
+}

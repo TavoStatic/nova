@@ -1331,6 +1331,65 @@ class TestOperatorOutboxService(unittest.TestCase):
         self.assertEqual(work_tree._BRANCHES[hold_branch.branch_id].resolution_state, "resolved")
         self.assertGreaterEqual(int((response.get("operator_hold") or {}).get("cleared_count") or 0), 1)
 
+    def test_dismissed_response_completes_linked_hold_and_source_root_task(self):
+        with TemporaryDirectory() as temp_dir:
+            db_path = Path(temp_dir) / "work_tree.sqlite3"
+            work_tree._set_db_path(db_path)
+            tree = work_tree.initialize_tree("Signal Intake: Runtime Governance")
+            branch = work_tree._BRANCHES[tree.root_branch_id]
+            branch.source_type = "source_wiring_probe"
+            branch.work_class = "governance_pressure"
+            hold_task = work_tree.add_task_to_branch(
+                branch.branch_id,
+                "Hold source-root branch for operator judgment",
+            )
+            work_tree.mark_task_blocked(hold_task.task_id, "source_root_sequence_exhausted_gap_persists")
+            wait_tree = work_tree.initialize_tree("Outbox mirror")
+            wait_branch = work_tree._BRANCHES[wait_tree.root_branch_id]
+            wait_branch.source_type = "operator_control"
+            wait_task = work_tree.add_task_to_branch(
+                wait_branch.branch_id,
+                "Wait for operator response or authority assignment on the open outbox item",
+            )
+            work_tree.mark_task_blocked(wait_task.task_id, "operator_response_required")
+            path = Path(temp_dir) / "operator_outbox.jsonl"
+            notice = OPERATOR_OUTBOX_SERVICE.append_notice(
+                path,
+                source="work_tree",
+                severity="attention",
+                title="Nova needs operator information: Source wiring probe found missing source-derived paths",
+                message="I need operator information for Source wiring probe found missing source-derived paths.",
+                payload={
+                    "tree_id": tree.tree_id,
+                    "branch_id": branch.branch_id,
+                    "task_id": hold_task.task_id,
+                    "task_title": hold_task.title,
+                    "blocked_reason": "source_root_sequence_exhausted_gap_persists",
+                    "request_kind": "blocked_work",
+                },
+                now_fn=lambda: 3300.0,
+                uuid_fn=lambda: "dismisshold",
+            )
+            event_id = str((notice.get("event") or {}).get("id") or "")
+            response = OPERATOR_OUTBOX_SERVICE.respond_to_notice(
+                path,
+                event_id=event_id,
+                message="Dismissed by operator.",
+                responder="operator",
+                resolution="dismissed",
+                work_tree_module=work_tree,
+                now_fn=lambda: 3305.0,
+                uuid_fn=lambda: "dismissresp",
+            )
+
+        self.assertTrue(response.get("ok"))
+        self.assertEqual((response.get("event") or {}).get("status"), "dismissed")
+        self.assertTrue((response.get("work_tree") or {}).get("task_completed"))
+        self.assertEqual(work_tree._TASKS[hold_task.task_id].status, TaskStatus.COMPLETE)
+        self.assertEqual(work_tree._TASKS[wait_task.task_id].status, TaskStatus.COMPLETE)
+        self.assertEqual(work_tree._BRANCHES[branch.branch_id].resolution_state, "resolved")
+        self.assertEqual(work_tree._BRANCHES[wait_branch.branch_id].resolution_state, "resolved")
+
     def test_continue_work_response_satisfies_blocked_operator_wait(self):
         with TemporaryDirectory() as temp_dir:
             db_path = Path(temp_dir) / "work_tree.sqlite3"

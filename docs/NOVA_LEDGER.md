@@ -1,6 +1,6 @@
 # Nova Living Ledger
 
-_Generated: 2026-09-01 22:23_
+_Generated: 2026-09-12 00:27_
 
 Two sources feed this document: **developer sessions** and **Nova's own scan findings**.
 Append to `docs/ledger/session_log.jsonl` (developer) or `docs/ledger/nova_findings.jsonl` (Nova),
@@ -11,6 +11,197 @@ then re-run `python scripts/generate_nova_ledger.py`.
 ## Session History
 
 Chronological record of every developer session that touched Nova.
+
+### 2026-09-12 — claude-cowork
+_Session: push-prep-20260912_
+
+**Modules touched:** `services/gatekeeper.py`, `services/regression_truth_registry.py`, `services/regression_status_projection.py`, `scripts/regression_lane_worker.py`, `autonomy_maintenance.py`
+
+**Changes:**
+- Gatekeeper observation layer
+- Regression Truth Registry
+- status projection
+- detached lane worker
+- source root inventory alignments
+- test profile inventory alignments
+
+**Meta:** 40 tests added
+
+### 2026-09-09 — opencode
+
+**Modules touched:** `scripts/regression_lane_worker.py`, `tests/test_autonomy_maintenance.py`, `tests/test_regression_lane_worker_integration.py`
+
+**Changes:**
+- fix max_lane_seconds default; hermetic autonomy tests; integration tempdir fix
+
+_Note: Regression Truth Registry FULL certification achieved on fingerprint 9230977c17863d2ebc8db072e1c92985103f1d20121f57f10058ded8a1da6e78. Fixed max_lane_seconds() bug (unset env var -> 1s worker timeout). Hermetic 10 _execute_autonomy_recommendation tests via _isolated_work_tree_db(); fixed WinError32 tempdir cleanup in lane_worker_integration (ignore_cleanup_errors). Unit lane PASS 5848s (956 tests), behavior PASS 1953s (144), integration PASS 85s (83). regression_status.json OK/FULL; control surface last_regression_status=OK; regression owner verdict ready blocks_green. truth_ready still False due to pre-existing core_gate_release_drift (layer_maturity)._
+
+### 2026-09-08 — opencode
+_Session: regression-truth-registry-slice1-20260908_
+
+**Modules touched:** `services/regression_truth_registry.py`, `tests/test_regression_truth_registry.py`
+
+**Changes:**
+- Slice 1 of Regression Truth Registry: pure per-lane truth store (append-only JSONL records)
+- fingerprint-only freshness (time is metadata)
+- derived certification ladder FULL/PARTIAL/TIMED_OUT/FAILED/NOT_CURRENT with explicit reason
+- pending_lanes honoring unit-to-behavior-to-integration eligibility chain
+- optional derived truth.json snapshot
+
+**Meta:** 13 tests added
+
+_Note: Test-first per design decided by operator (fingerprint-only freshness; staggered evidence-driven cadence; fast check stays on existing pulse/health; no new lane; no age-based staleness). Pure module, no wiring, no changes to live consumers or regression_status.json. All 13 unit tests green._
+
+### 2026-09-08 — opencode
+_Session: regression-truth-registry-slice1-semantic-lock-20260908_
+
+**Modules touched:** `services/regression_truth_registry.py`, `tests/test_regression_truth_registry.py`
+
+**Changes:**
+- Applied operator semantic lock to slice 1: FAILED now narrowly means explicit FAILED on the current fingerprint only (TIMED_OUT is an incomplete observation
+- never FAILED); certification ladder is FULL/FAILED/PARTIAL/NOT_CURRENT with machine-readable reason codes (e.g. behavior_timed_out_on_current
+- integration_not_observed_on_current
+- integration_not_current
+- unit_failed_on_current); pending_lanes renamed lanes_needing_observation and returns all missing lane observations in preferred order without gating (registry states what is known; scheduler decides what to observe next)
+
+**Meta:** 15 tests added
+
+_Note: Supersedes slice-1 log entry pending_lanes/eligibility-chain wording. Added the two required semantic tests (TIMED_OUT is not FAILED; needs_observation does not become the scheduler) plus six-month-old-record-is-current fingerprint-freshness test. 15 unit tests green; still pure module, no wiring, no live changes._
+
+### 2026-09-08 — opencode
+_Session: regression-truth-registry-slice2-20260908_
+
+**Modules touched:** `autonomy_maintenance.py`, `services/regression_truth_registry.py`, `services/regression_status_projection.py`, `tests/test_autonomy_maintenance.py`, `tests/test_regression_truth_registry.py`, `tests/test_regression_status_projection.py`
+
+**Changes:**
+- scheduler rewired to per-lane staggered regression runs recorded into regression_truth.jsonl; regression_status.json now written by projection (scheduler:regression_truth_registry); removed whole-file TIMED_OUT path and _write_host_regression_timeout_status; per-day per-lane attempt rail via state regression_lane_attempts; FIRST five pinned scheduler tests rewritten to new contract plus new stagger test
+
+**Meta:** 28 tests added
+
+_Note: slice-2 of regression truth registry. 15 registry + 7 projection + 6 rewritten/new maintenance tests verified green. net-neutral for mission gate and signal intake (regression_outcome_failed treats PARTIAL/NOT_CURRENT as failed). guard-cap: per-lane budget 720s bounded by nova_guard 20min maintenance cap; cold lanes cannot FULL under maintenance -> honest per-lane TIMED_OUT -> PARTIAL. known consumer delta: nova_core pulse regression alert only on startswith(FAIL), PARTIAL no longer alerts; slice-3 decision. run_once smoke test unverified due inherent runtime; regression fully mocked there._
+
+### 2026-09-08 — opencode
+_Session: regression-truth-registry-slice3-20260908_
+
+**Modules touched:** `scripts/regression_lane_worker.py`, `autonomy_maintenance.py`, `nova_core.py`, `services/release_validation.py`, `services/regression_evidence.py`, `services/control_status_surfaces.py`, `tests/test_regression_lane_worker.py`, `tests/test_autonomy_maintenance.py`
+
+**Changes:**
+- Detached per-lane regression worker making FULL reachable outside guard-capped maintenance; spawn-time attempt rail with pid crash-recovery; pulse alert migrated from startswith(FAIL) to explicit regression truth states; release gate and evidence payload enriched with certification/reason; control status surfaces expose certification/reason
+
+**Meta:** 6 tests added
+
+_Note: PARTIAL remains unresolved/not-certified; no readiness changes. 60-test affected-surface run green. Full maintenance module too slow, verify by subset. run_once smoke test unverified (pre-existing slow, mocked)._
+
+### 2026-09-08 — opencode
+_Session: regression-truth-registry-e2e-20260908_
+
+**Modules touched:** `scripts/regression_lane_worker.py`, `autonomy_maintenance.py`, `services/regression_lanes.py`, `tests/test_regression_lane_worker_integration.py`, `tests/test_autonomy_maintenance.py`
+
+**Changes:**
+- Real end-to-end harness spawning the actual worker and full maintenance spawn chain against a stub lane runner; worker handle tracking + prune to stop detached-Popen GC warnings and give observable worker state; extracted _finalize_regression_branch for run_once outer-cycle stale semantics; NOVA_REGRESSION_RUNNER test seam; unit lane now includes registry/projection/worker/integration/gatekeeper tests; fixed run_once_logs test leaking real detached lane runs under new spawn semantics
+
+**Meta:** 6 tests added
+
+_Note: Proved FULL reachable: full chain (spawn->worker->run->record->republish->consumers) verified on real processes. run_once smoke green 6.4s. Pre-existing lane drift fixed (test_gatekeeper unregistered since 9/7 broke profile-inventory test). Full 100+ module unit lane still to run to completion in production._
+
+### 2026-09-07 — claude-cowork
+_Session: gatekeeper-governance-layer_
+
+**Modules touched:** `services/gatekeeper.py`, `services/control_status.py`, `autonomy_maintenance.py`, `tests/test_gatekeeper.py`, `tests/test_autonomy_maintenance.py`
+
+**Changes:**
+- Gatekeeper service implemented - validate/append/compact/summarize
+- observation_key
+- first/last observed_at
+- Control-status exposes gatekeeper ledger and gatekeeper_ok
+- autonomy_maintenance records regression-gate observations on source-fingerprint change
+- Tests - test_gatekeeper.py (4) plus retries-after-fingerprint-change (1)
+
+**Meta:** 5 tests added · docs updated: `docs/SERVICES_INDEX.md`, `docs/FUNCTION_INDEX.md`
+
+_Note: Close-out attests only the Gatekeeper slice verified 2026-09-07. Sessions 2026-09-02 through 2026-09-07 remain unlogged (ledger last logged 2026-09-01 mill-skip-promote). Provenance: Gus = architect/authority, claude-cowork = implementation agent, NOVA = system, evidence = tests plus live runtime (records ledger compacted to 3 rows, same_failed_fingerprint seen_count 21; all-lanes regression run pid 32424 started 22:15:17)._
+
+### 2026-09-07 — codex
+_Session: gatekeeper-postal-docs-20260907_
+
+**Modules touched:** `services/gatekeeper.py`, `autonomy_maintenance.py`, `services/control_status.py`, `tests/test_gatekeeper.py`, `docs/DOC_OWNERSHIP.md`, `docs/SYSTEM_MAP.md`
+
+**Changes:**
+- Implemented evidence-backed Gatekeeper observation and regression lesson flow
+- Documented Gatekeeper ownership and system mapping
+
+**Meta:** 20 tests added · docs added: `none` · docs updated: `docs/DOC_OWNERSHIP.md`, `docs/SYSTEM_MAP.md`
+
+_Note: Gatekeeper is observational only; no policy mutation or automatic retirement. Runtime records compact repeated observations with seen_count and first/last timestamps._
+
+### 2026-09-07 — codex
+_Session: ledger-backfill-correction-20260907_
+
+**Modules touched:** `docs/ledger/session_log.jsonl`, `docs/NOVA_LEDGER.md`
+
+**Changes:**
+- Backfilled verified runtime-reset
+- regression-root
+- contract-reconciliation
+- and release-validation work preceding Gatekeeper
+
+**Meta:** docs added: `none` · docs updated: `docs/NOVA_LEDGER.md`
+
+_Note: Supersedes the earlier note claiming the 2026-09-02 through 2026-09-07 work remained unlogged. Backfill is consolidated where exact session boundaries were unavailable; no unverified claims were added._
+
+### 2026-09-07 — codex
+_Session: gatekeeper-ring1-registration-20260907_
+
+**Modules touched:** `services/nova_root_inventory.py`, `docs/DOC_OWNERSHIP.md`, `docs/SYSTEM_MAP.md`
+
+**Changes:**
+- Registered Gatekeeper in autonomy source-root inventory and corrected path classification so Ring 1 map integrity reports zero unclassified source files
+
+**Meta:** 18 tests added · docs added: `none` · docs updated: `none`
+
+_Note: Gatekeeper Ring 1 debt closed: live source inventory ok=true gap_count=0. One unrelated existing wiring test still expects empty status to be non-closed._
+
+### 2026-09-07 — codex
+_Session: ring1-phase2-archive-20260907_
+
+**Modules touched:** `docs/PHASE2_SAFETY_ENVELOPE.md`, `docs/archive/PHASE2_SAFETY_ENVELOPE.md`
+
+**Changes:**
+- Moved classified historical Phase 2 Safety Envelope document from docs root into docs/archive to clear undeclared current-document drift while preserving the full artifact
+
+**Meta:** 1 tests added · docs added: `none` · docs updated: `none`
+
+_Note: Ring 1 source inventory remains ok=true gap_count=0; Gatekeeper classification remains clean._
+
+### 2026-09-06 — codex
+_Session: contract-reconciliation-and-release-20260906_
+
+**Modules touched:** `services/sock_service.py`, `services/regression_lanes.py`, `services/regression_profile_inventory.py`, `services/nova_live_closure.py`, `autonomy_maintenance.py`, `nova_http.py`, `scripts/build_release_package.ps1`, `scripts/verify_release_package.ps1`, `tests/test_sock_service.py`, `tests/test_autonomy_maintenance.py`, `tests/test_autonomy_orchestrator_service.py`, `tests/test_http_session_manager.py`, `tests/test_release_package_scripts.py`, `tests/test_windows_installer_scripts.py`
+
+**Changes:**
+- Reconciled stale SOCK and mission contracts
+- Removed Ed-Fi core from active regression and closure contracts while preserving backpack surfaces
+- Fixed Work Tree attempted-versus-complete expectations and legacy retirement discovery
+- Fixed HTTP session continuity deletion
+- Fixed release package PowerShell parsing and forbidden-content verification
+
+**Meta:** 124 tests added · docs added: `none` · docs updated: `none`
+
+_Note: Full uncapped regression completed with unit and behavior green; integration was subsequently rerun after package/installer fixes and passed 83 tests. Ed-Fi core remains repository residue for later push cleanup, not an active Nova contract._
+
+### 2026-09-05 — codex
+_Session: runtime-reset-and-regression-root-20260905_
+
+**Modules touched:** `work_tree.py`, `autonomy_maintenance.py`, `runtime/_internal/work_tree.db`, `runtime/regression_status.json`
+
+**Changes:**
+- Archived and reset runtime state without deleting project code
+- Proved full-file SQLite guard read and refresh/preview recomputation costs
+- Added header-only database guard and controlled A/B evidence
+
+**Meta:** 70 tests added · docs added: `none` · docs updated: `none`
+
+_Note: Runtime archive preserved before reset. Work Tree tests 70 passed. A/B profiles used the same stopped-service test conditions; no production policy change was made._
 
 ### 2026-09-01 — grok
 _Session: mill-capacity-lease_
@@ -1182,16 +1373,17 @@ Promote skip/remint/stop/pulse mill-cycle control only. Three trailing mill skip
 
 Latest ring and execution findings. Identical cycle reprints are collapsed to one line.
 
-- **2026-09-01** Ring 3 `climb_integrity` — verified: gap_count=0, queue=0 climbable=0 unclimbable=0
-- **2026-09-01** Ring 2 `contract_integrity` — drifted: gap_count=61, probe_context=live_status, wiring_gaps=33, closure_gaps=28
-- **2026-09-01** Ring 1 `map_integrity` — drifted: gap_count=1, undeclared_docs=1
-- **2026-09-01** Ring 2 `contract_integrity` — verified: gap_count=0, probe_context=live_status
+- **2026-09-12** Ring 3 `climb_integrity` — verified: gap_count=0, queue=0 climbable=0 unclimbable=0
+- **2026-09-12** Ring 2 `contract_integrity` — drifted: gap_count=61, probe_context=live_status, wiring_gaps=33, closure_gaps=28
+- **2026-09-12** Ring 1 `map_integrity` — drifted: gap_count=1, undeclared_docs=1
+- **2026-09-11** Ring 2 `contract_integrity` — verified: gap_count=0, probe_context=live_status
+- **2026-09-09** Ring 1 `map_integrity` — drifted: gap_count=2, unclassified_files=2
+- **2026-09-09** Ring 2 `contract_integrity` — drifted: gap_count=1, probe_context=live_status, closure_gaps=1
+- **2026-09-08** Ring 1 `map_integrity` — verified: gap_count=0
+- **2026-09-07** Ring 1 `map_integrity` — drifted: gap_count=2, unclassified_files=1, undeclared_docs=1
 - **2026-09-01** `autonomy_maintenance` — caution: Overnight 2026-08-31 23:45 to 2026-09-01 06:41: 74 cycles ok, mill executed=0 trees=0, no capacity lease. Spine REPEATED_UNCHANGED_PATH on pulse_status not mill skip.
-- **2026-08-31** Ring 1 `map_integrity` — drifted: gap_count=2, unclassified_files=1, undeclared_docs=1
-- **2026-08-22** Ring 1 `map_integrity` — drifted: gap_count=1, unclassified_files=1
 - **2026-08-22** Ring 2 `contract_integrity` — drifted: gap_count=76, probe_context=live_status, wiring_gaps=40, closure_gaps=35, probe_gaps=1
 - **2026-08-22** Ring 2 `contract_integrity` — drifted: gap_count=2, probe_context=live_status, closure_gaps=1, probe_gaps=1
-- **2026-08-22** Ring 1 `map_integrity` — verified: gap_count=0
 - **2026-08-16** Ring 1 `map_integrity` — verified: gap_count=0, unwired_roots=0, unclassified_files=0
 - **2026-08-16** Ring 1 `nova_root_inventory` — verified: 0 source root(s) not wired in nova_root_inventory.py
 - **2026-08-16** Ring 1 `nova_root_inventory` — verified: 0 source file(s) have no SOURCE_ROOT classification
@@ -1205,11 +1397,11 @@ Latest ring and execution findings. Identical cycle reprints are collapsed to on
 ### Ring scan gaps (latest per category)
 
 - **2026-08-05** Ring 1 `nova_doc_coverage` — 9 doc(s) have stale NOVA_DOC block (last_session > 30 days)
-- **2026-08-31** Ring 1 `nova_root_inventory` — 1 source file(s) have no SOURCE_ROOT classification
-- **2026-09-01** Ring 1 `nova_doc_coverage` — 1 doc(s) in docs/ missing NOVA_DOC header block
-- **2026-09-01** Ring 2 `ring2_contract_integrity` — 28 closure gap(s): work-tree tracks open but no resolution evidence
+- **2026-09-09** Ring 1 `nova_root_inventory` — 2 source file(s) have no SOURCE_ROOT classification
+- **2026-09-12** Ring 1 `nova_doc_coverage` — 1 doc(s) in docs/ missing NOVA_DOC header block
+- **2026-09-12** Ring 2 `ring2_contract_integrity` — 28 closure gap(s): work-tree tracks open but no resolution evidence
 - **2026-08-22** Ring 2 `ring2_contract_integrity` — 1 contract probe gap(s) (live_status): services lack HTTP-reachable health probe
-- **2026-09-01** Ring 2 `ring2_contract_integrity` — 33 wiring gap(s): service/script registered but not surfaced in status
+- **2026-09-12** Ring 2 `ring2_contract_integrity` — 33 wiring gap(s): service/script registered but not surfaced in status
 
 ### Stale authority documents
 

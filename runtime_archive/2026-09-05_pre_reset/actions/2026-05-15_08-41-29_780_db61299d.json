@@ -1,0 +1,64 @@
+{
+  "ts": "2026-05-15 08:41:02",
+  "channel": "http",
+  "session_id": "d58a771caab3f036",
+  "input_source": "typed",
+  "user_input": "how is your health ?",
+  "intent": "chat",
+  "planner_decision": "grounded_self_report",
+  "tool": "",
+  "tool_args": {},
+  "tool_result": "",
+  "final_answer": "Live health score is 100/100.\nWork Tree is clear with 0 open task(s). Current branch: Release package is stale behind live source.\nWhat needs attention: Release package is stale behind live source and needs rebuild verification.\nSource: live control status and Work Tree.",
+  "reply_contract": "runtime.self_report.live_status",
+  "reply_outcome": {
+    "source": "live_control_status_and_work_tree",
+    "tool": "control_status"
+  },
+  "turn_acts": [
+    "command"
+  ],
+  "grounded": true,
+  "active_subject": "operational_status:runtime_truth",
+  "continuation_used": false,
+  "route_trace": [
+    {
+      "stage": "input",
+      "outcome": "received",
+      "data": {
+        "channel": "http",
+        "input_source": "typed",
+        "intent": "chat"
+      }
+    },
+    {
+      "stage": "direction_analysis",
+      "outcome": "explicit_command",
+      "data": {
+        "effective_query": "how is your health ?",
+        "turn_acts": "command",
+        "identity_focused": false,
+        "bypass_pattern_routes": false
+      }
+    },
+    {
+      "stage": "grounded_self_report",
+      "outcome": "control_status",
+      "detail": "live_status_reply",
+      "data": {
+        "tool": "control_status"
+      }
+    },
+    {
+      "stage": "finalize",
+      "outcome": "grounded_self_report",
+      "data": {
+        "grounded": true
+      }
+    }
+  ],
+  "provider_used": "",
+  "provider_candidates": [],
+  "provider_family": "",
+  "route_summary": "input:received -> direction_analysis:explicit_command -> grounded_self_report:control_status -> finalize:grounded_self_report"
+}

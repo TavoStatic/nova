@@ -1,0 +1,20 @@
+{
+  "tier_b_plus_completed_at": "2026-07-14",
+  "signal_branch_archival": {
+    "root_fix": "archive_superseded_complete_signal_branches retains newest complete branch per (source_type, source_key prefix) and archives older resolved complete branches",
+    "root_files": ["services/work_tree_signal_ingestion.py"],
+    "grouping_key": "source_type + first 3 colon segments of source_key",
+    "live_result": "runtime/validation/evidence/20260714_tier_b_plus_archival/signal_branch_archival.json",
+    "before": {"total": 792, "complete": 532, "archived": 257, "live": 8},
+    "after": {"total": 792, "complete": 78, "archived": 711, "live": 8},
+    "archived_this_run": 454,
+    "archived_rerun_with_persist_branches": 367,
+    "elapsed_sec": 1.05,
+    "durability_fix": "work_tree.persist_branches upserts archived branches without full-tree rewrite; avoids clobber when maintenance holds stale memory",
+    "status": "implemented_and_applied_live"
+  },
+  "tests": [
+    "test_archive_superseded_complete_signal_branches_keeps_newest_per_group"
+  ],
+  "acceptance_command": "python -m unittest tests.test_work_tree_signal_ingestion_service.TestSignalBranchDedupe"
+}

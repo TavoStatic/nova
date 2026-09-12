@@ -937,11 +937,14 @@ class TestHttpSessionManager(unittest.TestCase):
         self.assertIn("real_world_task_create", script)
         self.assertIn("renderRealWorldTasks", script)
         self.assertIn("taskManagerSelect", script)
-        self.assertIn("Nova Control", html)
+        self.assertIn("NOT YOUR ORDINARY AI SYSTEM", html)
         self.assertIn("NOT YOUR ORDINARY AI SYSTEM", html)
         self.assertIn("Overview", html)
         self.assertIn("Operations", html)
         self.assertIn("Sessions", html)
+        self.assertIn('data-view-target="meta"', html)
+        self.assertIn('data-view="meta"', html)
+        self.assertIn("renderMetaView", script)
         self.assertIn("Logs", html)
         self.assertIn("Parity Test Runs", html)
         self.assertIn('data-layer-tab="task-manager"', html)
@@ -1760,7 +1763,10 @@ class TestHttpSessionManager(unittest.TestCase):
             stop_file = nova_http.RUNTIME_DIR / "guard.stop"
             stop_file.write_text("stale", encoding="utf-8")
 
-            with mock.patch("nova_http.subprocess.Popen"):
+            with mock.patch(
+                "services.runtime_control.spawn_unattached",
+                return_value=(True, 777, "mock_spawn"),
+            ):
                 ok, msg = nova_http._start_guard()
 
             self.assertTrue(ok)

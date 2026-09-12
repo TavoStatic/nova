@@ -1,21 +1,25 @@
 {
   "name": "list_trigger_resources",
-  "description": "List selectable GitHub resources for event-trigger dimensions (repositories, branches, authors). Use this when authoring a GitHub automation and you need the numeric repository id for dimensions.repo — backend rejects owner/name. Flow: automation_list_trigger_catalog → automation_list_trigger_resources (provider=github, resource_type=repository, optional query) → automation_create with dimensions.repo set to each resource's id (stringified). For branch/author suggestions, pass repo_ids from a prior repository listing. Resources are install-scoped (repos under the user's GitHub App installations that can receive webhooks). Linear resource kinds are not yet served.",
+  "description": "List selectable resources for event-trigger dimensions (GitHub repositories / branches / authors, Linear teams / projects). Use this when authoring a GitHub or Linear automation. For GitHub, dimensions.repo must be the numeric repository id — backend rejects owner/name. For Linear, dimensions.team and dimensions.project must be Linear UUIDs — not team keys or project names. Flow: automation_list_trigger_catalog → automation_list_trigger_resources (provider=github resource_type=repository, or provider=linear resource_type=team|project, optional query) → automation_create with each resource's id. For GitHub branch/author suggestions, pass repo_ids from a prior repository listing.",
   "inputSchema": {
     "type": "object",
     "properties": {
       "provider": {
         "type": "string",
-        "description": "Trigger provider wire tag (v1: github). Must appear in automation_list_trigger_catalog for this account."
+        "description": "Trigger provider wire tag (github, linear, finance, stripe). Must appear in automation_list_trigger_catalog for this account."
       },
       "resource_type": {
         "type": "string",
         "enum": [
           "repository",
           "branch",
-          "author"
+          "author",
+          "team",
+          "project",
+          "customer",
+          "product"
         ],
-        "description": "Resource kind to list: repository (GitHub repos — id is the value for dimensions.repo), branch, or author (branch/author require repo_ids). Linear kinds are not yet served."
+        "description": "Resource kind to list: repository / branch / author (GitHub; branch/author require repo_ids), team / project (Linear UUIDs for dimensions.team / dimensions.project), or customer / product (Stripe/Finance)."
       },
       "query": {
         "type": "string",

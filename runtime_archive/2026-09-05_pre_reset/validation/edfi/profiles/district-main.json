@@ -1,0 +1,25 @@
+{
+  "schema": "nova.edfi_capability.v1",
+  "milestone": "NOVA-EDFI-001",
+  "connection_id": "district-main",
+  "base_url": "https://odsprod.tea.texas.gov/odsedfiapi2026",
+  "health": "ok",
+  "discovered_at": 1783968965,
+  "auth": {
+    "ok": true,
+    "type": "oauth2_client_credentials"
+  },
+  "discovery": {
+    "ok": true,
+    "resource_count": 445,
+    "resources": [
+      "ed-fi/schools",
+      "ed-fi/students",
+      "ed-fi/studentSchoolAssociations"
+    ],
+    "namespaces": [
+      "ed-fi",
+      "TX"
+    ]
+  }
+}

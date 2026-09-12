@@ -47,6 +47,7 @@ SOURCE_ROOTS: tuple[SourceRoot, ...] = (
         (
             "services/autonomy_orchestrator.py",
             "services/nova_mission.py",
+            "services/gatekeeper.py",
             "autonomy_maintenance.py",
             "services/work_tree_signal_ingestion.py",
         ),
@@ -263,9 +264,11 @@ SOURCE_ROOTS: tuple[SourceRoot, ...] = (
         (
             "scripts/run_regression.py",
             "scripts/run_test_session.py",
+            "scripts/regression_lane_worker.py",
             "services/validation_artifact_truth.py",
             "services/regression_profile_inventory.py",
             "services/regression_lanes.py",
+            "services/regression_status_projection.py",
         ),
     ),
     SourceRoot(
@@ -403,6 +406,7 @@ def _coverage_root_for_path(path: str) -> str:
         or name.startswith("test_")
         or name in {"smoke_test.py", "http_test_session_helpers.py", "http_chat_flow.py", "run_regression.py"}
         or "run_regression" in low
+        or "regression" in low
         or "regression_lanes" in low
         or "regression_evidence" in low
         or "validation_artifact" in low
@@ -456,6 +460,12 @@ def _coverage_root_for_path(path: str) -> str:
         return "diagnostics_hygiene"
     if name in {"tmp_inspect_task.py"}:
         return "diagnostics_hygiene"
+    if name in {"check_changes.py", "status_check.py", "run_critical_tests.py"}:
+        return "diagnostics_hygiene"
+    if "observation_spine" in low:
+        return "work_tree"
+    if "cognitive_workspace" in low:
+        return "work_tree"
     if name in {"regenerate_function_index.py", "regenerate_services_index.py", "generate_nova_ledger.py", "nova_ledger_ingest.py", "log_session.py"}:
         return "source_root_inventory"
     if name == "probe_raw_resource.py":
@@ -463,6 +473,8 @@ def _coverage_root_for_path(path: str) -> str:
     if name == "start_unattached_later.py":
         return "runtime_core"
     if "decision_proposal_judge" in low:
+        return "autonomy_orchestrator"
+    if low == "services/gatekeeper.py":
         return "autonomy_orchestrator"
     if "finish_areas_inventory" in low:
         return "source_root_inventory"

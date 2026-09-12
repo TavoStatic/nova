@@ -54,6 +54,7 @@
                 <button class="nav-pill" data-view-target="operations" type="button"><span class="nav-pill-icon-stack" aria-hidden="true"><i class="bi bi-wrench-adjustable-circle nav-pill-icon nav-pill-icon-outline"></i><i class="bi bi-wrench-adjustable-circle-fill nav-pill-icon nav-pill-icon-fill"></i></span><span class="nav-pill-copy"><span class="nav-pill-label">Operations</span><span class="nav-pill-meta">Control plane</span></span></button>
                 <button class="nav-pill" data-view-target="sessions" type="button"><span class="nav-pill-icon-stack" aria-hidden="true"><i class="bi bi-binoculars nav-pill-icon nav-pill-icon-outline"></i><i class="bi bi-binoculars-fill nav-pill-icon nav-pill-icon-fill"></i></span><span class="nav-pill-copy"><span class="nav-pill-label">Sessions</span><span class="nav-pill-meta">Live threads</span></span></button>
                 <button class="nav-pill" data-view-target="scheduled-tree" type="button"><span class="nav-pill-icon-stack" aria-hidden="true"><i class="bi bi-diagram-3 nav-pill-icon nav-pill-icon-outline"></i><i class="bi bi-diagram-3-fill nav-pill-icon nav-pill-icon-fill"></i></span><span class="nav-pill-copy"><span class="nav-pill-label">Scheduled Tree</span><span class="nav-pill-meta">Work Tree map</span></span></button>
+                <button class="nav-pill" data-view-target="meta" type="button"><span class="nav-pill-icon-stack" aria-hidden="true"><i class="bi bi-eye nav-pill-icon nav-pill-icon-outline"></i><i class="bi bi-eye-fill nav-pill-icon nav-pill-icon-fill"></i></span><span class="nav-pill-copy"><span class="nav-pill-label">Meta</span><span id="navMetaMeta" class="nav-pill-meta">Observer</span></span></button>
                 <button class="nav-pill" data-view-target="pipelines" type="button"><span class="nav-pill-icon-stack" aria-hidden="true"><i class="bi bi-database nav-pill-icon nav-pill-icon-outline"></i><i class="bi bi-database-fill nav-pill-icon nav-pill-icon-fill"></i></span><span class="nav-pill-copy"><span class="nav-pill-label">Data lanes</span><span class="nav-pill-meta">Pipelines</span></span></button>
                 <button class="nav-pill" data-view-target="backpacks" type="button"><span class="nav-pill-icon-stack" aria-hidden="true"><i class="bi bi-box-seam nav-pill-icon nav-pill-icon-outline"></i><i class="bi bi-box-seam-fill nav-pill-icon nav-pill-icon-fill"></i></span><span class="nav-pill-copy"><span class="nav-pill-label">Backpacks</span><span class="nav-pill-meta">Capabilities</span></span></button>
                 <button class="nav-pill" data-view-target="logs" type="button"><span class="nav-pill-icon-stack" aria-hidden="true"><i class="bi bi-file-earmark-medical nav-pill-icon nav-pill-icon-outline"></i><i class="bi bi-file-earmark-medical-fill nav-pill-icon nav-pill-icon-fill"></i></span><span class="nav-pill-copy"><span class="nav-pill-label">Logs</span><span class="nav-pill-meta">Trace ledger</span></span></button>
@@ -986,6 +987,102 @@
                             </div>
                             <div id="workTreeActionFeedback" class="section-footnote mt-1"></div>
                         </div>
+                    </div>
+                </div>
+            </section>
+
+            <section class="main-view d-none" data-view="meta">
+                <div class="layer-tab-shell mb-3" data-layer-tabs="meta">
+                    <div class="layer-tab-head">
+                        <div class="layer-tab-bar" role="tablist" aria-label="Meta sections">
+                            <button class="layer-tab-button active" type="button" role="tab" aria-selected="true" data-layer-tab="meta-finding" tabindex="0">
+                                <i class="bi bi-eye"></i>
+                                <span class="layer-tab-copy"><span>Live</span><span>Finding</span></span>
+                            </button>
+                            <button class="layer-tab-button" type="button" role="tab" aria-selected="false" data-layer-tab="meta-tape" tabindex="-1">
+                                <i class="bi bi-list-ol"></i>
+                                <span class="layer-tab-copy"><span>Observation</span><span>Tape</span></span>
+                            </button>
+                            <button class="layer-tab-button" type="button" role="tab" aria-selected="false" data-layer-tab="meta-pressure" tabindex="-1">
+                                <i class="bi bi-bar-chart"></i>
+                                <span class="layer-tab-copy"><span>Path</span><span>Pressure</span></span>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="layer-tab-panels">
+                        <section class="layer-tab-panel" role="tabpanel" data-layer-panel="meta-finding">
+                            <div class="panel-card main-card">
+                                <div class="section-head">
+                                    <div>
+                                        <div class="section-title"><span class="section-title-wrap"><i class="bi bi-eye section-title-icon" aria-hidden="true"></i><span>Meta Finding</span></span></div>
+                                        <div class="section-subtitle">One interrupt pass over the live observation window. Effects land on the existing solution trail, not a second planner.</div>
+                                    </div>
+                                    <span id="metaFindingBadge" class="status-pill status-pill-neutral">Meta pending</span>
+                                </div>
+                                <div id="metaFindingSummary" class="patch-narrative">Meta feed pending.</div>
+                                <div class="button-row wrap-buttons mt-3">
+                                    <button id="btnMetaOpenOperatorDeck" class="btn btn-sm btn-operator-primary" type="button">Open Operator Deck</button>
+                                    <button id="btnMetaOpenHealth" class="btn btn-sm btn-operator-warn" type="button">Open Health</button>
+                                </div>
+                                <div id="metaFindingGrid" class="inspector-stack mt-3">Finding pending.</div>
+                                <div class="patch-log-wrap mt-3">
+                                    <div class="patch-column-title">Last Select / Invoke / Gate</div>
+                                    <div id="metaBoundaryGrid" class="inspector-stack">Boundary rows pending.</div>
+                                </div>
+                                <div class="patch-grid mt-3">
+                                    <div class="patch-column">
+                                        <div class="patch-column-title">Self-Questions</div>
+                                        <div id="metaSelfQuestions" class="inspector-stack">No self-questions.</div>
+                                    </div>
+                                    <div class="patch-column">
+                                        <div class="patch-column-title">Internal Positions</div>
+                                        <div id="metaInternalPositions" class="inspector-stack">No competing positions.</div>
+                                    </div>
+                                </div>
+                                <div class="patch-log-wrap mt-3">
+                                    <div class="patch-column-title">Grounded Self-Model</div>
+                                    <div id="metaSelfModel" class="inspector-stack">Self-model pending.</div>
+                                </div>
+                            </div>
+                        </section>
+                        <section class="layer-tab-panel" role="tabpanel" data-layer-panel="meta-tape" hidden>
+                            <div class="panel-card main-card">
+                                <div class="section-head">
+                                    <div>
+                                        <div class="section-title"><span class="section-title-wrap"><i class="bi bi-list-ol section-title-icon" aria-hidden="true"></i><span>Observation Tape</span></span></div>
+                                        <div class="section-subtitle">Rolling window of boundary events Meta is looking at: pickup, planner, gates, executor, mill.</div>
+                                    </div>
+                                    <span id="metaWindowBadge" class="status-pill status-pill-neutral">0 / 64</span>
+                                </div>
+                                <div class="runtime-timeline-wrap">
+                                    <table id="metaTapeTable" class="runtime-timeline-table" aria-label="Observation tape"></table>
+                                </div>
+                            </div>
+                        </section>
+                        <section class="layer-tab-panel" role="tabpanel" data-layer-panel="meta-pressure" hidden>
+                            <div class="panel-card main-card">
+                                <div class="section-head">
+                                    <div>
+                                        <div class="section-title"><span class="section-title-wrap"><i class="bi bi-bar-chart section-title-icon" aria-hidden="true"></i><span>Path Pressure</span></span></div>
+                                        <div class="section-subtitle">How often each source, operation, and subject appears in the current window.</div>
+                                    </div>
+                                </div>
+                                <div class="patch-grid">
+                                    <div class="patch-column">
+                                        <div class="patch-column-title">Sources</div>
+                                        <div id="metaSourceCounts" class="inspector-stack">Source counts pending.</div>
+                                    </div>
+                                    <div class="patch-column">
+                                        <div class="patch-column-title">Operations</div>
+                                        <div id="metaOperationCounts" class="inspector-stack">Operation counts pending.</div>
+                                    </div>
+                                    <div class="patch-column">
+                                        <div class="patch-column-title">Subjects</div>
+                                        <div id="metaSubjectCounts" class="inspector-stack">Subject counts pending.</div>
+                                    </div>
+                                </div>
+                            </div>
+                        </section>
                     </div>
                 </div>
             </section>

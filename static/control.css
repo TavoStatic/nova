@@ -3661,6 +3661,11 @@ body.sidebar-collapsed.inspector-collapsed .control-shell { grid-template-column
     color: rgba(226, 232, 240, 0.92);
 }
 
+.meta-tape-row.is-subject td {
+    color: var(--warn);
+    background: rgba(255, 179, 71, 0.08);
+}
+
 @media (max-width: 980px) {
     .pipeline-control-layout {
         grid-template-columns: 1fr;

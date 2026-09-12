@@ -1,0 +1,321 @@
+{
+  "ts": "2026-05-16 11:56:56",
+  "channel": "http",
+  "session_id": "a6b530a0c1601d2a",
+  "input_source": "typed",
+  "user_input": "so you have interal parts that keep you healthy .  You also have an anutonomy section",
+  "intent": "chat",
+  "planner_decision": "llm_fallback",
+  "tool": "",
+  "tool_args": {},
+  "tool_result": "",
+  "final_answer": "I think I understand what you're getting at. My internal systems do have various components that help maintain my health and functionality. One of those components is the \"Health Score\" system, which currently shows a perfect score of 100/100. This suggests that all my internal parts are functioning within normal parameters. Another component is the \"Work Tree\", which appears to be organized into tasks and branches. I see that there are three open tasks, including one related to reviewing a report on subconscious pressure backlog generation. Regarding autonomy, I'm not entirely sure what you mean by this term in the context of my internal systems. Could you provide more information or clarify what you're referring to?",
+  "reply_contract": "",
+  "reply_outcome": {
+    "execution_profile": {
+      "total_time": 3520,
+      "planner_time": 851,
+      "llm_time": 2349,
+      "tool_time": 0,
+      "post_time": 5,
+      "tool_selection_time": 0
+    }
+  },
+  "turn_acts": [
+    "inform"
+  ],
+  "grounded": false,
+  "active_subject": "operational_status:runtime_truth",
+  "continuation_used": false,
+  "route_trace": [
+    {
+      "stage": "input",
+      "outcome": "received",
+      "data": {
+        "channel": "http",
+        "input_source": "typed",
+        "intent": "chat"
+      }
+    },
+    {
+      "stage": "direction_analysis",
+      "outcome": "generic_declarative",
+      "data": {
+        "effective_query": "so you have interal parts that keep you healthy .  You also have an anutonomy section",
+        "turn_acts": "inform",
+        "identity_focused": false,
+        "bypass_pattern_routes": false
+      }
+    },
+    {
+      "stage": "truth_hierarchy",
+      "outcome": "not_matched"
+    },
+    {
+      "stage": "hard_answer",
+      "outcome": "not_matched"
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "planner_decide_actions",
+      "data": {
+        "duration_ms": 0
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "tool_selection",
+      "data": {
+        "duration_ms": 0
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "planner_call",
+      "data": {
+        "duration_ms": 851
+      }
+    },
+    {
+      "stage": "policy_gate",
+      "outcome": "allowed"
+    },
+    {
+      "stage": "memory_context",
+      "outcome": "empty",
+      "data": {
+        "memory_used": false,
+        "knowledge_used": false,
+        "memory_chars": 0,
+        "knowledge_chars": 0
+      }
+    },
+    {
+      "stage": "chat_context",
+      "outcome": "used",
+      "data": {
+        "chars": 1167
+      }
+    },
+    {
+      "stage": "session_fact_sheet",
+      "outcome": "used",
+      "data": {
+        "chars": 134
+      }
+    },
+    {
+      "stage": "llm_fallback",
+      "outcome": "invoked",
+      "data": {
+        "retrieved_chars": 1345
+      }
+    },
+    {
+      "stage": "llm_call",
+      "outcome": "started"
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "llm_call",
+      "data": {
+        "duration_ms": 2349
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "post_processing",
+      "data": {
+        "duration_ms": 5
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "execute_reply_sequence",
+      "data": {
+        "duration_ms": 3520
+      }
+    },
+    {
+      "stage": "timing_breakdown",
+      "outcome": "completed",
+      "detail": "execute_reply_sequence",
+      "data": {
+        "total_time": 3520,
+        "planner_time": 851,
+        "llm_time": 2349,
+        "tool_time": 0,
+        "post_time": 5,
+        "tool_selection_time": 0
+      }
+    },
+    {
+      "stage": "finalize",
+      "outcome": "llm_fallback",
+      "data": {
+        "grounded": false
+      }
+    }
+  ],
+  "provider_used": "",
+  "provider_candidates": [],
+  "provider_family": "",
+  "routing_decision": {
+    "input_preview": "so you have interal parts that keep you healthy . You also have an anutonomy section",
+    "entry_point": "http",
+    "intent_phase": {
+      "phase": "intent",
+      "handled": false,
+      "rule_name": "",
+      "intent": "",
+      "action": "",
+      "priority": null,
+      "candidates": [
+        {
+          "rule_name": "smalltalk",
+          "priority": 61,
+          "handled": false
+        },
+        {
+          "rule_name": "set_location",
+          "priority": 62,
+          "handled": false
+        },
+        {
+          "rule_name": "store_fact",
+          "priority": 62,
+          "handled": false
+        },
+        {
+          "rule_name": "weather_lookup",
+          "priority": 62,
+          "handled": false
+        },
+        {
+          "rule_name": "web_research_family",
+          "priority": 62,
+          "handled": false
+        },
+        {
+          "rule_name": "capability_query",
+          "priority": 63,
+          "handled": false
+        },
+        {
+          "rule_name": "policy_domain_query",
+          "priority": 64,
+          "handled": false
+        },
+        {
+          "rule_name": "assistant_name",
+          "priority": 66,
+          "handled": false
+        },
+        {
+          "rule_name": "self_identity_web_challenge",
+          "priority": 67,
+          "handled": false
+        },
+        {
+          "rule_name": "name_origin",
+          "priority": 68,
+          "handled": false
+        },
+        {
+          "rule_name": "developer_full_name",
+          "priority": 69,
+          "handled": false
+        },
+        {
+          "rule_name": "developer_profile",
+          "priority": 70,
+          "handled": false
+        }
+      ]
+    },
+    "handle_phase": {
+      "phase": "handle",
+      "handled": false,
+      "rule_name": "",
+      "intent": "",
+      "action": "",
+      "priority": null,
+      "candidates": [
+        {
+          "rule_name": "reflective_retry",
+          "priority": 30,
+          "handled": false
+        },
+        {
+          "rule_name": "profile_certainty",
+          "priority": 35,
+          "handled": false
+        },
+        {
+          "rule_name": "identity_history_family",
+          "priority": 36,
+          "handled": false
+        },
+        {
+          "rule_name": "open_probe_family",
+          "priority": 37,
+          "handled": false
+        },
+        {
+          "rule_name": "session_fact_recall",
+          "priority": 38,
+          "handled": false
+        },
+        {
+          "rule_name": "last_question_recall",
+          "priority": 39,
+          "handled": false
+        },
+        {
+          "rule_name": "self_location",
+          "priority": 40,
+          "handled": false
+        },
+        {
+          "rule_name": "rules_list",
+          "priority": 41,
+          "handled": false
+        },
+        {
+          "rule_name": "location_recall",
+          "priority": 42,
+          "handled": false
+        },
+        {
+          "rule_name": "location_name",
+          "priority": 44,
+          "handled": false
+        },
+        {
+          "rule_name": "location_weather",
+          "priority": 46,
+          "handled": false
+        },
+        {
+          "rule_name": "retrieval_followup",
+          "priority": 47,
+          "handled": false
+        }
+      ]
+    },
+    "final_owner": "fallback",
+    "allowed_bypass": false,
+    "allowed_bypass_category": "",
+    "bypass_reason": "",
+    "reply_contract": "",
+    "reply_outcome_kind": "",
+    "turn_acts": []
+  },
+  "route_summary": "input:received -> direction_analysis:generic_declarative -> truth_hierarchy:not_matched -> hard_answer:not_matched -> policy_gate:allowed -> memory_context:empty -> chat_context:used -> session_fact_sheet:used -> llm_fallback:invoked -> llm_call:started -> finalize:llm_fallback"
+}

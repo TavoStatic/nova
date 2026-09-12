@@ -14,6 +14,7 @@ from services.solution_trail import (
     JUDGMENT_REFUSED,
     PRESSURE_EMPTY_CLAIM,
     PRESSURE_INHERITED,
+    _prune_expired_judgments,
     action_suppressed_by_trail,
     align_branch_open_stem_to_trail,
     branch_has_active_refuse,
@@ -628,6 +629,96 @@ class SolutionTrailTests(unittest.TestCase):
         )
         self.assertIsNone(
             branch_has_active_refuse(work_tree.get_branch(branch.branch_id), has_open_stem=True)
+        )
+
+    def test_record_refuse_carries_causal_facts_through_persistence_and_contract(self) -> None:
+        tree = work_tree.initialize_tree("Causal refusal tree")
+        branch = work_tree.add_branch_to_tree(
+            tree.tree_id,
+            "Worker timeout from unset max-lane-seconds",
+            "work",
+            tree.root_branch_id,
+        )
+        branch.work_class = "regression_failure"
+        branch.source_type = "test_ecosystem"
+        branch.source_key = "regression_failure:test_ecosystem:regression_failure:daily_regression"
+        branch.resolution_state = "open"
+        condition_bugged = "regression_lane_worker/max_lane_seconds/env_unset/v1"
+        condition_fixed = "regression_lane_worker/max_lane_seconds/default_14400/v1"
+        branch.source_payload = {
+            "source_key": branch.source_key,
+            "observation_input_ref": condition_bugged,
+        }
+
+        causal = {
+            "causal_condition": "NOVA_REGRESSION_MAX_LANE_SECONDS unset",
+            "causal_observed_failure": "worker recorded TIMED_OUT after ~1.5s",
+            "causal_verified_cause": "unset env resolved to max_lane_seconds() == 1",
+            "causal_change_made": "default parsing corrected",
+            "causal_observed_result": "default resolves to 14400s; worker proceeds normally",
+            "causal_scope": "regression_lane_worker / lane execution",
+        }
+
+        rec = record_refuse_on_branch(
+            branch.branch_id,
+            reason="worker_timed_out_1.5s_env_unset",
+            retry_when=[{"type": "input_ref_changed", "from": condition_bugged}],
+            do_not_retry_while=[{"type": "same_input_ref", "value": condition_bugged}],
+            tool_name="run",
+            task_title="launch regression unit lane via worker",
+            causal=causal,
+        )
+        self.assertTrue(rec.get("ok"))
+        self.assertFalse(rec.get("already"))
+        self.assertEqual((rec.get("judgment") or {}).get("judgment"), JUDGMENT_REFUSED)
+        for key, value in causal.items():
+            self.assertEqual((rec.get("judgment") or {}).get(key), value)
+
+        # True SQLite round-trip on the public seam.
+        work_tree._BRANCHES.clear()
+        work_tree._TASKS.clear()
+        work_tree._SCORES.clear()
+        self.assertTrue(work_tree.reload_persisted_state())
+        live = work_tree.get_branch(branch.branch_id)
+        self.assertIsNotNone(live)
+        payload = dict(live.source_payload or {})
+        rows = [dict(r) for r in payload.get("attempt_judgments") or [] if isinstance(r, dict)]
+        self.assertEqual(len(rows), 1)
+        row = rows[0]
+        self.assertEqual(row.get("judgment"), JUDGMENT_REFUSED)
+        for key, value in causal.items():
+            self.assertEqual(row.get(key), value)
+
+        # Same causal condition -> identical failed attempt suppressed.
+        same_ctx = dict(payload)
+        same_ctx["observation_input_ref"] = condition_bugged
+        self.assertIsNotNone(
+            action_suppressed_by_trail(
+                tool_name="run",
+                task_title="launch regression unit lane via worker",
+                judgments=[row],
+                branch_payload=same_ctx,
+                source_key=branch.source_key,
+            )
+        )
+
+        # Changed causal condition -> refusal expires, attempt eligible again.
+        changed_ctx = dict(payload)
+        changed_ctx["observation_input_ref"] = condition_fixed
+        self.assertIsNone(
+            action_suppressed_by_trail(
+                tool_name="run",
+                task_title="launch regression unit lane via worker",
+                judgments=[row],
+                branch_payload=changed_ctx,
+                source_key=branch.source_key,
+            )
+        )
+
+        # Expired judgment pruned when the condition changes.
+        self.assertEqual(
+            _prune_expired_judgments([row], branch_payload=changed_ctx, progress={}),
+            [],
         )
 
     def test_teach_unclaimable_refusals_writes_without_minting(self) -> None:

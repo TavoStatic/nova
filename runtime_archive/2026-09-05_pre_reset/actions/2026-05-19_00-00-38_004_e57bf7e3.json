@@ -1,0 +1,145 @@
+{
+  "ts": "2026-05-19 00:00:35",
+  "channel": "http",
+  "session_id": "ad4986042aaccb36",
+  "input_source": "typed",
+  "user_input": "it looks like your are still way off topic .. your giving me wrong answers ..  your making things up for the sake of conversation and that is wrong to do..  it sound more like your lying to me.",
+  "intent": "",
+  "planner_decision": "llm_fallback",
+  "tool": "",
+  "tool_args": {},
+  "tool_result": "",
+  "final_answer": "I apologize for providing incorrect information and straying from the topic. I understand that this has caused frustration and mistrust.\n\nTo start anew, I'll be honest with you - I don't have a specific name or identity beyond being an AI runtime on Windows. My purpose is to assist users like you with accurate and relevant responses based on my training data and our conversation context.\n\nI should not have provided incorrect information earlier, and I appreciate your feedback in helping me improve. Can we start fresh and focus on the topic at hand? What would you like to discuss or ask about?",
+  "reply_contract": "",
+  "reply_outcome": {
+    "execution_profile": {
+      "total_time": 2820,
+      "planner_time": 899,
+      "llm_time": 1876,
+      "tool_time": 0,
+      "post_time": 0,
+      "tool_selection_time": 0
+    }
+  },
+  "turn_acts": [],
+  "grounded": false,
+  "active_subject": "",
+  "continuation_used": false,
+  "route_trace": [
+    {
+      "stage": "input",
+      "outcome": "received",
+      "data": {
+        "channel": "http",
+        "input_source": "typed"
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "semantic_tool_intent",
+      "data": {
+        "duration_ms": 899
+      }
+    },
+    {
+      "stage": "action_planner",
+      "outcome": "semantic_none",
+      "data": {
+        "confidence": 0.0
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "tool_selection",
+      "data": {
+        "duration_ms": 899
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "planner_call",
+      "data": {
+        "duration_ms": 899
+      }
+    },
+    {
+      "stage": "memory_context",
+      "outcome": "empty",
+      "data": {
+        "memory_used": false,
+        "knowledge_used": false,
+        "memory_chars": 0,
+        "knowledge_chars": 0
+      }
+    },
+    {
+      "stage": "chat_context",
+      "outcome": "used",
+      "data": {
+        "chars": 1131
+      }
+    },
+    {
+      "stage": "llm_fallback",
+      "outcome": "invoked",
+      "data": {
+        "retrieved_chars": 1153
+      }
+    },
+    {
+      "stage": "llm_call",
+      "outcome": "started"
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "llm_call",
+      "data": {
+        "duration_ms": 1876
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "post_processing",
+      "data": {
+        "duration_ms": 0
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "execute_reply_sequence",
+      "data": {
+        "duration_ms": 2820
+      }
+    },
+    {
+      "stage": "timing_breakdown",
+      "outcome": "completed",
+      "detail": "execute_reply_sequence",
+      "data": {
+        "total_time": 2820,
+        "planner_time": 899,
+        "llm_time": 1876,
+        "tool_time": 0,
+        "post_time": 0,
+        "tool_selection_time": 0
+      }
+    },
+    {
+      "stage": "finalize",
+      "outcome": "llm_fallback",
+      "data": {
+        "grounded": false
+      }
+    }
+  ],
+  "provider_used": "",
+  "provider_candidates": [],
+  "provider_family": "",
+  "route_summary": "input:received -> action_planner:semantic_none -> memory_context:empty -> chat_context:used -> llm_fallback:invoked -> llm_call:started -> finalize:llm_fallback"
+}

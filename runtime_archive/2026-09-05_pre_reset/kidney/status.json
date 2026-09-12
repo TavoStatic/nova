@@ -1,0 +1,41 @@
+{
+  "ts": "2026-09-05 10:24:25",
+  "enabled": true,
+  "mode": "enforce",
+  "dry_run": false,
+  "status_write": "live",
+  "protect_patterns": [
+    "core_health_brief.json",
+    "work_tree.db"
+  ],
+  "candidate_count": 1,
+  "archive_count": 0,
+  "delete_count": 1,
+  "candidates": [
+    {
+      "path": "C:\\NOVA\\runtime\\subconscious_runs\\20260905_075441_phase1-auto",
+      "name": "20260905_075441_phase1-auto",
+      "category": "subconscious_run_bloat",
+      "action": "delete",
+      "reason": "subconscious_run_count_limit",
+      "size_bytes": 0,
+      "age_seconds": 8983.585172653198
+    }
+  ],
+  "snapshot_path": "",
+  "snapshot_skipped_reason": "storage_watch_batch",
+  "cleanup_snapshot_pruned_count": 0,
+  "cleanup_snapshot_retained_count": 8,
+  "applied": [
+    {
+      "path": "C:\\NOVA\\runtime\\subconscious_runs\\20260905_075441_phase1-auto",
+      "name": "20260905_075441_phase1-auto",
+      "category": "subconscious_run_bloat",
+      "action": "delete",
+      "reason": "subconscious_run_count_limit",
+      "size_bytes": 0,
+      "age_seconds": 8983.585172653198,
+      "result": "deleted"
+    }
+  ]
+}

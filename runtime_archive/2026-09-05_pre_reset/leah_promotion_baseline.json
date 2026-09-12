@@ -1,0 +1,102 @@
+{
+  "schema": "nova.leah_promotion_baseline.v1",
+  "captured_at": 1783167255,
+  "milestone": "P0",
+  "core_gate": {
+    "ok": true,
+    "drift_blocked": false,
+    "missing_roots": [],
+    "required_roots": [
+      "model_runtime",
+      "conversation_routing",
+      "frontdoor_cli",
+      "operator_control",
+      "http_api_control"
+    ]
+  },
+  "next_leah_capability": "",
+  "capability_gaps": [
+    "api_gateway",
+    "autonomous_code_generation",
+    "capability_gap_detection",
+    "code_generation_memory",
+    "codegen_patch_bridge",
+    "codegen_tool",
+    "configuration_management",
+    "database_schema_generation",
+    "dependency_resolution",
+    "deployment_automation",
+    "documentation_generation",
+    "generated_code_tests",
+    "integration_testing",
+    "leah_emotional_state_model",
+    "leah_memory_recall",
+    "leah_voice_persona_engine",
+    "performance_profiling",
+    "rollback_management",
+    "security_scanning",
+    "type_checking"
+  ],
+  "capability_gaps_actionable": [],
+  "capability_gaps_observed": [
+    "api_gateway",
+    "autonomous_code_generation",
+    "capability_gap_detection",
+    "code_generation_memory",
+    "codegen_patch_bridge",
+    "codegen_tool",
+    "configuration_management",
+    "database_schema_generation",
+    "dependency_resolution",
+    "deployment_automation",
+    "documentation_generation",
+    "generated_code_tests"
+  ],
+  "layer_policy": {
+    "leah": {
+      "mode": "active",
+      "promoted_capabilities": [
+        "leah_conversation_continuity"
+      ]
+    },
+    "codegen": {
+      "mode": "observe",
+      "promoted_capabilities": []
+    }
+  },
+  "gap_summary": {
+    "ok": true,
+    "enabled": true,
+    "registered_count": 23,
+    "declared_count": 21,
+    "gap_count": 20,
+    "gaps": [
+      "api_gateway",
+      "autonomous_code_generation",
+      "capability_gap_detection",
+      "code_generation_memory",
+      "codegen_patch_bridge",
+      "codegen_tool",
+      "configuration_management",
+      "database_schema_generation",
+      "dependency_resolution",
+      "deployment_automation",
+      "documentation_generation",
+      "generated_code_tests",
+      "integration_testing",
+      "leah_emotional_state_model",
+      "leah_memory_recall",
+      "leah_voice_persona_engine",
+      "performance_profiling",
+      "rollback_management",
+      "security_scanning",
+      "type_checking"
+    ],
+    "gap_detection_ts": ""
+  },
+  "work_tree": {
+    "ok": false,
+    "error": "list_trees() got an unexpected keyword argument 'limit'"
+  },
+  "status_source": "local_dependency_probe"
+}

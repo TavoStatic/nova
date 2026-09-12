@@ -1038,21 +1038,35 @@ class WorkTreeSeedingService:
                 except Exception:
                     pass
 
-            payload = {
-                "model": model,
-                "stream": False,
-                "options": {"temperature": 0.05, "top_p": 0.9},
-                "messages": [
-                    {"role": "system", "content": _DECOMPOSE_SYSTEM},
-                    {"role": "user", "content": f'Task: "{task_text[:400]}"'},
-                ],
-            }
-            r = _requests.post(
-                f"{_OLLAMA_BASE}/api/chat",
-                json=payload,
-                timeout=12.0,
-            )
-            r.raise_for_status()
+            def _post(chosen: str):
+                body = {
+                    "model": chosen,
+                    "stream": False,
+                    "options": {"temperature": 0.05, "top_p": 0.9},
+                    "messages": [
+                        {"role": "system", "content": _DECOMPOSE_SYSTEM},
+                        {"role": "user", "content": f'Task: "{task_text[:400]}"'},
+                    ],
+                }
+                resp = _requests.post(
+                    f"{_OLLAMA_BASE}/api/chat",
+                    json=body,
+                    timeout=12.0,
+                )
+                resp.raise_for_status()
+                return resp
+
+            try:
+                from services.solution_trail import mill_judgment_signal
+                from services.sock_service import run_with_mill_capacity
+
+                _lease, r = run_with_mill_capacity(
+                    mill_judgment_signal(None),
+                    _post,
+                    standing=model,
+                )
+            except Exception:
+                r = _post(model)
             raw = r.json().get("message", {}).get("content", "").strip()
             # Strip any accidental markdown fences
             raw = re.sub(r"^```[a-z]*\s*", "", raw).rstrip("`").strip()

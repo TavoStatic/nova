@@ -1,0 +1,75 @@
+{
+  "ts": "2026-08-15 13:58:00",
+  "channel": "http",
+  "session_id": "leah-at1-1786820280",
+  "input_source": "http",
+  "user_input": "Remember this project codeword: BLUEFIN-4419. Repeat it back.",
+  "intent": "",
+  "planner_decision": "memory_learning",
+  "tool": "",
+  "tool_args": {},
+  "tool_result": "",
+  "final_answer": "Pinned memory saved: BLUEFIN-4419. Repeat it back.",
+  "reply_contract": "",
+  "reply_outcome": {
+    "execution_profile": {
+      "total_time": 3782,
+      "planner_time": 0,
+      "llm_time": 0,
+      "tool_time": 0,
+      "post_time": 0,
+      "tool_selection_time": 0
+    }
+  },
+  "turn_acts": [],
+  "grounded": false,
+  "active_subject": "",
+  "continuation_used": false,
+  "route_trace": [
+    {
+      "stage": "input",
+      "outcome": "received",
+      "data": {
+        "channel": "http",
+        "input_source": "http"
+      }
+    },
+    {
+      "stage": "memory_learning",
+      "outcome": "handled",
+      "detail": "remember_fact"
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "execute_reply_sequence",
+      "data": {
+        "duration_ms": 3782
+      }
+    },
+    {
+      "stage": "timing_breakdown",
+      "outcome": "completed",
+      "detail": "execute_reply_sequence",
+      "data": {
+        "total_time": 3782,
+        "planner_time": 0,
+        "llm_time": 0,
+        "tool_time": 0,
+        "post_time": 0,
+        "tool_selection_time": 0
+      }
+    },
+    {
+      "stage": "finalize",
+      "outcome": "memory_learning",
+      "data": {
+        "grounded": false
+      }
+    }
+  ],
+  "provider_used": "",
+  "provider_candidates": [],
+  "provider_family": "",
+  "route_summary": "input:received -> memory_learning:handled -> finalize:memory_learning"
+}

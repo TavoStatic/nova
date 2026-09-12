@@ -1,0 +1,23 @@
+{
+  "turns": [
+    {
+      "role": "user",
+      "text": "how are you doing today ?"
+    },
+    {
+      "role": "assistant",
+      "text": "I'm functioning well and ready to assist you! How can I help you today?"
+    },
+    {
+      "role": "user",
+      "text": "what now"
+    },
+    {
+      "role": "assistant",
+      "text": "I'm here and ready to assist you! What would you like to know or discuss today? Whether it's a question, a topic, or just a chat, feel free to share."
+    }
+  ],
+  "turn_ts": 1786936903.9367537,
+  "session_id": "http-bc038dc0be19",
+  "ts": 1786936898.4000437
+}

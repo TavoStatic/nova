@@ -1,0 +1,15 @@
+{
+  "turns": [
+    {
+      "role": "user",
+      "text": "What project codeword did I give you earlier?"
+    },
+    {
+      "role": "assistant",
+      "text": "Uncertain, as I don't have access to previous interactions without your providing that information now."
+    }
+  ],
+  "turn_ts": 1786820423.1524475,
+  "session_id": "leah-at3-1786820339",
+  "ts": 1786820418.071487
+}

@@ -1,0 +1,148 @@
+{
+  "ts": "2026-05-19 14:30:49",
+  "channel": "http",
+  "session_id": "gate-allowed-39b45e",
+  "input_source": "typed",
+  "user_input": "can you access http://127.0.0.1:8080/control?",
+  "intent": "",
+  "planner_decision": "run_tool",
+  "tool": "web_fetch",
+  "tool_args": {
+    "args": [
+      "http://127.0.0.1:8080/control"
+    ]
+  },
+  "tool_result": "[OK] Saved: C:\\NOVA\\knowledge\\web\\20260519_143050_127.0.0.1_c5bf3fa6dea92e8a.html (text/html, 100824 bytes)",
+  "final_answer": "[OK] Saved: C:\\NOVA\\knowledge\\web\\20260519_143050_127.0.0.1_c5bf3fa6dea92e8a.html (text/html, 100824 bytes)",
+  "reply_contract": "",
+  "reply_outcome": {
+    "execution_profile": {
+      "total_time": 1306,
+      "planner_time": 1306,
+      "llm_time": 0,
+      "tool_time": 12,
+      "post_time": 0,
+      "tool_selection_time": 1293
+    }
+  },
+  "turn_acts": [],
+  "grounded": true,
+  "active_subject": "",
+  "continuation_used": false,
+  "route_trace": [
+    {
+      "stage": "input",
+      "outcome": "received",
+      "data": {
+        "channel": "http",
+        "input_source": "typed"
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "semantic_tool_intent",
+      "data": {
+        "duration_ms": 1293
+      }
+    },
+    {
+      "stage": "action_planner",
+      "outcome": "semantic_intent",
+      "data": {
+        "tool": "web_fetch",
+        "confidence": 0.0
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "tool_selection",
+      "data": {
+        "duration_ms": 1293
+      }
+    },
+    {
+      "stage": "action_planner",
+      "outcome": "run_tool",
+      "data": {
+        "tool": "web_fetch"
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "tool_response",
+      "data": {
+        "duration_ms": 12,
+        "tool": "web_fetch"
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "web_search",
+      "data": {
+        "duration_ms": 12,
+        "tool": "web_fetch"
+      }
+    },
+    {
+      "stage": "tool_execution",
+      "outcome": "ok",
+      "data": {
+        "tool": "web_fetch",
+        "grounded": true
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "planner",
+      "data": {
+        "duration_ms": 1306
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "planner_call",
+      "data": {
+        "duration_ms": 1306
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "execute_reply_sequence",
+      "data": {
+        "duration_ms": 1306
+      }
+    },
+    {
+      "stage": "timing_breakdown",
+      "outcome": "completed",
+      "detail": "execute_reply_sequence",
+      "data": {
+        "total_time": 1306,
+        "planner_time": 1306,
+        "llm_time": 0,
+        "tool_time": 12,
+        "post_time": 0,
+        "tool_selection_time": 1293
+      }
+    },
+    {
+      "stage": "finalize",
+      "outcome": "run_tool",
+      "data": {
+        "grounded": true,
+        "tool": "web_fetch"
+      }
+    }
+  ],
+  "provider_used": "web fetch",
+  "provider_candidates": [],
+  "provider_family": "web fetch",
+  "route_summary": "input:received -> action_planner:semantic_intent -> action_planner:run_tool -> tool_execution:ok -> finalize:run_tool"
+}

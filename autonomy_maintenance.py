@@ -14,6 +14,7 @@ NOVA_DOC:
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import subprocess
@@ -76,12 +77,15 @@ from services.regression_evidence import (
     regression_failure_active,
     regression_outcome_failed,
 )
+from services.regression_status_projection import project_canonical_status
+from services.regression_truth_registry import lanes_needing_observation
 from services.release_runtime_truth import (
     RELEASE_RUNTIME_TRUTH_SERVICE,
     build_release_runtime_truth_summary,
     enrich_release_status,
     evaluate_http_model_runtime_probe,
 )
+from services.gatekeeper import append_record as append_gatekeeper_record
 from services.release_status import RELEASE_STATUS_SERVICE
 from services.control_work_trees import CONTROL_WORK_TREES_SERVICE
 from services.core_thinning import build_core_thinning_brief as service_build_core_thinning_brief
@@ -158,9 +162,16 @@ STATE_FILE = RUNTIME_DIR / "autonomy_maintenance_state.json"
 MAINT_LOG = RUNTIME_DIR / "autonomy_maintenance.log"
 REGRESSION_STATUS_FILE = RUNTIME_DIR / "regression_status.json"
 REGRESSION_RUNNER = ROOT / "scripts" / "run_regression.py"
+REGRESSION_LANE_WORKER = ROOT / "scripts" / "regression_lane_worker.py"
 # Guard kills --once at 20 minutes. A 90-minute regression wait is how overnight
 # cycles die silent after stale_cli_tree_archive with no cycle_complete line.
-DAILY_REGRESSION_TIMEOUT_SEC = 12 * 60
+DAILY_REGRESSION_TIMEOUT_SEC = 4 * 60 * 60
+REGRESSION_LANE_TIMEOUT_SEC = {
+    "unit": DAILY_REGRESSION_TIMEOUT_SEC,
+    "behavior": DAILY_REGRESSION_TIMEOUT_SEC,
+    "integration": DAILY_REGRESSION_TIMEOUT_SEC,
+}
+REGRESSION_TRUTHS_PATH = RUNTIME_DIR / "regression" / "regression_truth.jsonl"
 AUTONOMY_ORCHESTRATOR_LEDGER = AUTONOMY_ORCHESTRATOR_LEDGER_FILE
 OPERATOR_OUTBOX = OPERATOR_OUTBOX_FILE
 RESTART_INTENT_PATH = RUNTIME_DIR / "restart_intent.json"
@@ -1320,6 +1331,12 @@ def _truth_evidence_for_mission(state: dict | None) -> dict:
         "last_regression_failed_tests": list(current_state.get("last_regression_failed_tests") or []),
         "last_regression_tail": str(current_state.get("last_regression_tail") or "")[:2000],
         "last_regression_returncode": int(current_state.get("last_regression_returncode", 0) or 0),
+        "last_regression_skip_reason": str(current_state.get("last_regression_skip_reason") or ""),
+        "last_regression_retry_eligible": bool(current_state.get("last_regression_retry_eligible", False)),
+        "last_regression_current_fingerprint": str(current_state.get("last_regression_current_fingerprint") or "")[:64],
+        "last_regression_lesson": dict(current_state.get("last_regression_lesson") or {})
+        if isinstance(current_state.get("last_regression_lesson"), dict)
+        else {},
         "release_runtime_truth": release_truth,
         "release_status": release_status,
         "root_closure_inventory": root_closure_inventory,
@@ -4688,111 +4705,346 @@ def _host_regression_status_file_fresh(
     return bool(gate.get("ok"))
 
 
+def _regression_source_fingerprint() -> str:
+    """Fingerprint code and tests so a changed surface can retry after failure."""
+    digest = hashlib.sha256()
+    roots = (ROOT / "services", ROOT / "tests", ROOT / "scripts")
+    paths: list[Path] = []
+    for root in roots:
+        if not root.exists():
+            continue
+        paths.extend(path for path in root.rglob("*") if path.is_file() and "__pycache__" not in path.parts)
+    paths.extend((ROOT / name for name in ("autonomy_maintenance.py", "work_tree.py", "policy.json") if (ROOT / name).is_file()))
+    for path in sorted(set(paths), key=lambda item: str(item).lower()):
+        try:
+            digest.update(str(path.relative_to(ROOT)).replace("\\", "/").encode("utf-8"))
+            digest.update(path.read_bytes())
+        except OSError:
+            continue
+    return digest.hexdigest()
+
+
+def _regression_lesson(
+    *,
+    outcome: str,
+    fingerprint: str,
+    previous_fingerprint: str = "",
+    reason: str = "",
+    failed_tests: list[str] | None = None,
+    failed_lane: str = "",
+    tail: str = "",
+) -> dict:
+    changed = bool(previous_fingerprint and previous_fingerprint != fingerprint)
+    tests = [str(item).strip() for item in list(failed_tests or []) if str(item).strip()]
+    return {
+        "outcome": str(outcome or "unknown").strip().lower(),
+        "source_changed_since_previous_attempt": changed,
+        "observed_failed_lane": str(failed_lane or "").strip(),
+        "observed_failed_tests": tests[:24],
+        "observed_detail": str(tail or "").strip()[:2000],
+        "rail_reason": str(reason or "").strip(),
+        "next_action": (
+            "retry_regression_after_source_change"
+            if changed
+            else "hold_until_source_or_evidence_changes"
+        ),
+    }
+
+
+def _record_regression_gate_observation(state: dict, *, decision: str, reason: str) -> None:
+    lesson = dict(state.get("last_regression_lesson") or {})
+    if not lesson:
+        return
+    now = time.strftime("%Y-%m-%dT%H:%M:%S%z")
+    record = {
+        "gate_id": "daily_regression_retry",
+        "record_type": "gate_observation",
+        "status": "WATCH",
+        "purpose": "Prevent overlapping regression runs while allowing new evidence or changed code to justify reevaluation.",
+        "decision_context": {
+            "decision": decision,
+            "controlling_reason": reason,
+            "observed_at": now,
+        },
+        "evidence_before": [
+            {
+                "source": "runtime/autonomy_maintenance_state.json",
+                "claim": str(state.get("last_regression_status") or ""),
+                "source_timestamp": str(state.get("last_regression_at") or now),
+                "fingerprint": str(state.get("last_regression_current_fingerprint") or ""),
+                "authority": "runtime_truth_surface",
+            }
+        ],
+        "expected_effect": {
+            "claim": "Avoid duplicate regression work without freezing changed code or new evidence.",
+            "verification_source": "next regression outcome and source fingerprint",
+        },
+        "outcome": {
+            "classification": "retry_decision_observed",
+            "finding": str(lesson.get("observed_detail") or ""),
+            "gate_logic_fault": False,
+            "evidence_freshness_fault": reason == "same_failed_fingerprint",
+        },
+        "utility_verdict": {
+            "value": "unknown",
+            "verified_by": None,
+            "reason": "The rail outcome is recorded; usefulness requires a later accepted oracle.",
+        },
+        "assumption_state": {
+            "architecture_drift_detected": False,
+            "input_contract_drift_detected": False,
+            "stale_input_detected": reason == "same_failed_fingerprint",
+            "inactivity_used_as_evidence": False,
+        },
+        "lesson": {
+            "statement": str(lesson.get("next_action") or ""),
+            "proposed_resolution": {
+                "type": "regression_reevaluation",
+                "action": str(lesson.get("next_action") or ""),
+                "changes_authority": False,
+                "changes_policy": False,
+            },
+        },
+        "resolution_candidates": [
+            {"action": "retry_regression_after_source_change", "reason": "Source or evidence changed."},
+            {"action": "surface_operator_notice", "reason": "Freshness or usefulness remains unknown."},
+        ],
+        "verification_contract": {
+            "accepted_oracles": ["fresh_runtime_observation", "closure_event", "operator_confirmed_verdict"],
+            "model_assessment_is_evidence": False,
+            "model_role": "analyst_only",
+        },
+        "assessment_ttl": {"expires_if_unverified": True, "expired_state": "unknown"},
+        "retirement_contract": {"retire_on_inactivity": False, "retire_on_elapsed_time": False, "review_on_assumption_drift": True},
+        "automatic_policy_change": False,
+        "automatic_gate_retirement": False,
+    }
+    try:
+        append_gatekeeper_record(record)
+    except Exception:
+        pass
+
+
 def _run_daily_regression_if_due(state: dict) -> str:
     today = time.strftime("%Y-%m-%d")
-    last_status = str(state.get("last_regression_status") or "").strip().upper()
-    if str(state.get("last_regression_date") or "") == today:
-        # Date alone is not enough: refresh when the on-disk gate is stale/missing.
-        if _host_regression_status_file_fresh():
-            return "daily_regression_skipped_already_ran"
-        # One failed or timed-out attempt today is a finding. Re-running it every
-        # cycle is how mill froze overnight (90-minute wait, 20-minute guard kill).
-        if last_status in {"FAILED", "TIMED_OUT"}:
-            return "daily_regression_skipped_already_attempted"
+    _prune_regression_worker_tracking()
+    if str(state.get("last_regression_date") or "") == today and _host_regression_status_file_fresh():
+        return "daily_regression_skipped_already_ran"
+
+    current_fingerprint = _regression_source_fingerprint()
+    previous_fingerprint = str(state.get("last_regression_fingerprint") or "")
+    missing = lanes_needing_observation(REGRESSION_TRUTHS_PATH, current_fingerprint)
+    if not missing:
+        _write_regression_projection(state, current_fingerprint)
+        return "daily_regression_skipped_no_lane_needs_observation"
+
+    lane = _next_regression_lane(state, missing, current_fingerprint)
+    if lane is None:
+        state["last_regression_skip_reason"] = "same_failed_fingerprint"
+        state["last_regression_retry_eligible"] = False
+        state["last_regression_current_fingerprint"] = current_fingerprint
+        state["last_regression_lesson"] = _regression_lesson(
+            outcome="skipped",
+            fingerprint=current_fingerprint,
+            previous_fingerprint=previous_fingerprint,
+            reason="same_failed_fingerprint",
+            tail="all pending lanes attempted today on unchanged source",
+        )
+        _record_regression_gate_observation(state, decision="block", reason="same_failed_fingerprint")
+        _append_log("daily_regression_skipped_already_attempted reason=same_failed_fingerprint")
+        return "daily_regression_skipped_already_attempted"
 
     # Pre-check lock before spawning. Dual --once cycles used to each block for up to
     # the full regression timeout waiting on a sibling, freezing the climb timer.
     lock_held, lock_detail = _regression_lock_owner_alive()
     if lock_held:
         state["last_regression_tail"] = lock_detail[:2000]
+        state["last_regression_skip_reason"] = "regression_lock_held"
+        state["last_regression_retry_eligible"] = False
+        state["last_regression_current_fingerprint"] = current_fingerprint
+        state["last_regression_lesson"] = _regression_lesson(
+            outcome="running",
+            fingerprint=current_fingerprint,
+            previous_fingerprint=previous_fingerprint,
+            reason="regression_lock_held",
+            tail=lock_detail,
+        )
+        _record_regression_gate_observation(state, decision="defer", reason="regression_lock_held")
         return "daily_regression_skipped_already_running"
 
-    cmd = [str(VENV_PY), str(REGRESSION_RUNNER), "all"]
+    timeout_sec = int(REGRESSION_LANE_TIMEOUT_SEC.get(lane, DAILY_REGRESSION_TIMEOUT_SEC))
+    worker_log = _regression_worker_log(lane)
     _append_log(
-        "daily_regression_starting "
-        + f"timeout_sec={int(DAILY_REGRESSION_TIMEOUT_SEC)} "
-        + f"runner={REGRESSION_RUNNER.name}"
+        "daily_regression_lane_starting "
+        + f"lane={lane} timeout_sec={timeout_sec} worker={REGRESSION_LANE_WORKER.name}"
     )
     try:
-        proc = subprocess.run(
-            cmd,
-            cwd=str(ROOT),
-            capture_output=True,
-            text=True,
-            timeout=int(DAILY_REGRESSION_TIMEOUT_SEC),
-            env=_validation_subprocess_env(),
+        worker_log.parent.mkdir(parents=True, exist_ok=True)
+        worker_env = os.environ.copy()
+        worker_env["NOVA_REGRESSION_TRUTHS_PATH"] = str(REGRESSION_TRUTHS_PATH)
+        worker_env["NOVA_REGRESSION_STATUS_FILE"] = str(REGRESSION_STATUS_FILE)
+        worker_env["NOVA_REGRESSION_LOCK_FILE"] = str(RUNTIME_DIR / "regression.lock")
+        worker_env["NOVA_REGRESSION_MAX_LANE_SECONDS"] = str(timeout_sec)
+        worker_env["NOVA_REGRESSION_WORKER_LOG"] = str(worker_log)
+        cmd = [str(VENV_PY), str(REGRESSION_LANE_WORKER), lane, current_fingerprint]
+        creation_flags = 0
+        if os.name == "nt":
+            creation_flags |= getattr(subprocess, "CREATE_NO_WINDOW", 0)
+        with open(worker_log, "ab") as logf:
+            proc = subprocess.Popen(
+                cmd,
+                cwd=str(ROOT),
+                stdin=subprocess.DEVNULL,
+                stdout=logf,
+                stderr=subprocess.STDOUT,
+                env=worker_env,
+                start_new_session=True,
+                creationflags=creation_flags,
+            )
+    except Exception as exc:
+        state["last_regression_tail"] = str(exc)[:2000]
+        state["last_regression_skip_reason"] = "lane_start_failed"
+        state["last_regression_retry_eligible"] = False
+        state["last_regression_current_fingerprint"] = current_fingerprint
+        state["last_regression_lesson"] = _regression_lesson(
+            outcome="start_failed",
+            fingerprint=current_fingerprint,
+            previous_fingerprint=previous_fingerprint,
+            reason="lane_start_failed",
+            tail=str(exc)[:2000],
         )
-    except subprocess.TimeoutExpired as exc:
-        chunks = []
-        for chunk in (exc.stdout, exc.stderr):
-            if chunk is None:
-                continue
-            if isinstance(chunk, bytes):
-                chunks.append(chunk.decode("utf-8", errors="replace"))
-            else:
-                chunks.append(str(chunk))
-        output = "\n".join(chunks).strip()
-        state["last_regression_date"] = today
-        state["last_regression_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
-        state["last_regression_status"] = "TIMED_OUT"
-        state["last_regression_returncode"] = -1
-        state["last_regression_source"] = "scripts/run_regression.py"
-        state["last_regression_lanes"] = ["all"]
-        state["last_regression_failed_lane"] = ""
-        state["last_regression_failed_tests"] = []
-        state["last_regression_tail"] = (output or f"timed out after {int(DAILY_REGRESSION_TIMEOUT_SEC)}s")[-2000:]
-        state["last_regression_stale"] = True
-        _write_host_regression_timeout_status(state)
-        _append_log(f"daily_regression_timed_out timeout_sec={int(DAILY_REGRESSION_TIMEOUT_SEC)}")
-        return "daily_regression_timed_out"
-    output = ((proc.stdout or "") + "\n" + (proc.stderr or "")).strip()
-    # Lock contention is not a test failure — do not freeze mission as regression_failed.
-    if proc.returncode != 0 and "already running" in output.lower():
-        state["last_regression_tail"] = output[-2000:]
-        return "daily_regression_skipped_already_running"
-    summary = "OK" if proc.returncode == 0 else "FAILED"
+        _record_regression_gate_observation(state, decision="defer", reason="lane_start_failed")
+        _append_log(f"daily_regression_lane_start_failed lane={lane} error={str(exc)[:200]}")
+        return "daily_regression_lane_start_failed"
 
-    synced = _sync_regression_status_from_file(state, status_path=REGRESSION_STATUS_FILE)
-    if not synced:
-        state["last_regression_date"] = today
-        state["last_regression_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
-        state["last_regression_status"] = summary
-        state["last_regression_returncode"] = int(proc.returncode)
-        state["last_regression_source"] = "scripts/run_regression.py"
-        state["last_regression_lanes"] = ["all"]
-        state["last_regression_failed_lane"] = ""
-        state["last_regression_failed_tests"] = []
-        state["last_regression_tail"] = output[-2000:]
-        state["last_regression_stale"] = regression_evidence_stale(
-            status_label=summary,
-            regression_date=today,
-        )
-    return f"daily_regression_{summary.lower()}"
+    worker_pid = int(getattr(proc, "pid", 0) or 0)
+    _track_regression_worker(proc)
+    _record_regression_lane_attempt(state, lane, current_fingerprint, today, pid=worker_pid)
+    _write_regression_projection(state, current_fingerprint)
+    state["last_regression_worker_pid"] = worker_pid
+    state["last_regression_worker_log"] = str(worker_log)
+    state["last_regression_skip_reason"] = ""
+    state["last_regression_retry_eligible"] = False
+    state["last_regression_current_fingerprint"] = current_fingerprint
+    state["last_regression_lesson"] = _regression_lesson(
+        outcome="started",
+        fingerprint=current_fingerprint,
+        previous_fingerprint=previous_fingerprint,
+        reason="lane_spawned_detached",
+        tail=f"lane={lane} pid={worker_pid} worker_log={worker_log}",
+    )
+    _record_regression_gate_observation(state, decision="defer", reason="lane_in_progress")
+    _append_log(f"daily_regression_lane_started lane={lane} pid={worker_pid} worker_log={worker_log}")
+    return "daily_regression_lane_started"
 
 
-def _write_host_regression_timeout_status(state: dict, *, status_path: Path | None = None) -> None:
-    """Keep host regression_status.json aligned with a timed-out daily run.
+_ACTIVE_REGRESSION_WORKERS: dict[int, "subprocess.Popen[bytes]"] = {}
 
-    If the previous OK file is left in place, release validation treats a 26-day-old
-    pass as stale forever, which drives package-rebuild thrash instead of a host refresh.
-    """
-    payload = {
-        "generated_at": str(state.get("last_regression_at") or time.strftime("%Y-%m-%d %H:%M:%S")),
-        "date": str(state.get("last_regression_date") or time.strftime("%Y-%m-%d")),
-        "status": "TIMED_OUT",
-        "lanes": list(state.get("last_regression_lanes") or ["all"]),
-        "returncode": int(state.get("last_regression_returncode", -1) or -1),
-        "detail": str(state.get("last_regression_tail") or f"timed out after {int(DAILY_REGRESSION_TIMEOUT_SEC)}s")[:500],
-        "failed_lane": "",
-        "failed_tests": [],
-        "source": str(state.get("last_regression_source") or "scripts/run_regression.py"),
-    }
+
+def _regression_worker_log(lane: str) -> Path:
+    return RUNTIME_DIR / "regression" / f"lane_{lane}_worker.log"
+
+
+def _track_regression_worker(proc: "subprocess.Popen[bytes] | None") -> None:
+    pid = int(getattr(proc, "pid", 0) or 0)
+    if not pid:
+        return
+    _ACTIVE_REGRESSION_WORKERS[int(pid)] = proc
+
+
+def _prune_regression_worker_tracking() -> None:
+    for pid, proc in list(_ACTIVE_REGRESSION_WORKERS.items()):
+        try:
+            if proc.poll() is not None:
+                _ACTIVE_REGRESSION_WORKERS.pop(int(pid), None)
+        except Exception:
+            _ACTIVE_REGRESSION_WORKERS.pop(int(pid), None)
+
+
+def _active_regression_worker_count() -> int:
+    _prune_regression_worker_tracking()
+    return len(_ACTIVE_REGRESSION_WORKERS)
+
+
+def _regression_attempts(state: dict, today: str) -> dict:
+    attempts = state.get("regression_lane_attempts")
+    if not isinstance(attempts, dict):
+        attempts = {}
+    if str(attempts.get("date") or "") != today:
+        attempts = {"date": today, "attempts": {}}
+        state["regression_lane_attempts"] = attempts
+    per_lane = attempts.get("attempts")
+    if not isinstance(per_lane, dict):
+        per_lane = {}
+        attempts["attempts"] = per_lane
+    return per_lane
+
+
+def _record_regression_lane_attempt(state: dict, lane: str, fingerprint: str, today: str, pid: int | None = None) -> None:
+    per_lane = _regression_attempts(state, today)
+    per_lane[str(lane)] = str(fingerprint)
+    attempts = state.get("regression_lane_attempts")
+    if not isinstance(attempts, dict):
+        attempts = {"date": today, "attempts": per_lane}
+    pids = attempts.get("attempt_pids")
+    if not isinstance(pids, dict):
+        pids = {}
+    if pid:
+        pids[str(lane)] = int(pid)
+    attempts["attempt_pids"] = pids
+    state["regression_lane_attempts"] = attempts
+
+
+def _next_regression_lane(state: dict, missing: list[str], fingerprint: str) -> str | None:
+    today = time.strftime("%Y-%m-%d")
+    per_lane = _regression_attempts(state, today)
+    attempts = state.get("regression_lane_attempts")
+    attempt_pids = attempts.get("attempt_pids") if isinstance(attempts, dict) else {}
+    if not isinstance(attempt_pids, dict):
+        attempt_pids = {}
+    for lane in missing:
+        if per_lane.get(str(lane)) != str(fingerprint):
+            return lane
+        pid = int(attempt_pids.get(str(lane)) or 0)
+        if pid > 0 and not _pid_exists(pid):
+            return lane
+    return None
+
+
+def _pid_exists(pid: int) -> bool:
+    if int(pid or 0) <= 0:
+        return False
     try:
-        path = Path(status_path or REGRESSION_STATUS_FILE)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(payload, ensure_ascii=True, indent=2), encoding="utf-8")
+        import psutil
+
+        return bool(psutil.pid_exists(int(pid)))
+    except Exception:
+        return False
+
+
+def _write_regression_projection(state: dict, fingerprint: str) -> None:
+    payload = project_canonical_status(REGRESSION_TRUTHS_PATH, fingerprint)
+    try:
+        REGRESSION_STATUS_FILE.parent.mkdir(parents=True, exist_ok=True)
+        REGRESSION_STATUS_FILE.write_text(json.dumps(payload, ensure_ascii=True, indent=2), encoding="utf-8")
     except Exception:
         pass
+    state["last_regression_date"] = str(payload.get("date") or "")
+    state["last_regression_at"] = str(payload.get("generated_at") or "")
+    state["last_regression_status"] = str(payload.get("status") or "")
+    state["last_regression_returncode"] = int(payload.get("returncode", 1) or 1)
+    state["last_regression_source"] = str(payload.get("source") or "scheduler:regression_truth_registry")
+    state["last_regression_lanes"] = [str(item) for item in list(payload.get("lanes") or [])]
+    state["last_regression_failed_lane"] = str(payload.get("failed_lane") or "")
+    state["last_regression_failed_tests"] = []
+    state["last_regression_tail"] = str(payload.get("detail") or "")[:2000]
+    state["last_regression_stale"] = regression_evidence_stale(
+        status_label=str(payload.get("status") or ""),
+        regression_date=str(payload.get("date") or ""),
+    )
+    state["last_regression_fingerprint"] = fingerprint
+    state["last_regression_current_fingerprint"] = fingerprint
+    state["last_regression_certification"] = str(payload.get("certification") or "")
 
 
 def _sync_regression_status_from_file(state: dict, *, status_path: Path = REGRESSION_STATUS_FILE) -> bool:
@@ -4827,6 +5079,15 @@ def _refresh_regression_stale_from_outcome(state: dict) -> None:
         status_label=status,
         regression_date=str(state.get("last_regression_date") or ""),
     )
+
+
+def _finalize_regression_branch(state: dict, regression_status: str, regression_status_synced: bool) -> None:
+    if regression_status == "daily_regression_skipped_already_ran" and not regression_status_synced:
+        _refresh_regression_stale_from_outcome(state)
+    elif regression_status_synced:
+        _refresh_regression_stale_from_outcome(state)
+    elif regression_status != "daily_regression_skipped_already_ran":
+        state["last_regression_stale"] = False
 
 
 def _sync_signal_intake_work_tree(
@@ -7077,7 +7338,10 @@ def _retire_legacy_patch_update_trees(state: dict) -> dict:
     retired: list[dict] = []
     now = work_tree._now()
     reason = "Retired legacy patch/update shell after governed patch queue adoption."
-    for candidate in _active_work_tree_candidates(limit=64):
+    # Retirement is cleanup, not execution. Inspect the full visual-tree
+    # snapshot so unsafe or otherwise non-executable legacy shells are still
+    # retired instead of being hidden by the executable-work filter.
+    for candidate in work_tree.list_visual_trees(limit=None):
         tree_id = str(candidate.get("tree_id") or "").strip()
         tree_kind = str(candidate.get("kind") or "").strip().lower()
         tree_source = str(candidate.get("source") or "").strip().lower()
@@ -7985,12 +8249,7 @@ def run_once(*, worker_loop: bool = False) -> int:
 
     regression_status = _run_daily_regression_if_due(state)
     regression_status_synced = _sync_regression_status_from_file(state)
-    if regression_status == "daily_regression_skipped_already_ran" and not regression_status_synced:
-        _refresh_regression_stale_from_outcome(state)
-    elif regression_status_synced:
-        _refresh_regression_stale_from_outcome(state)
-    elif regression_status != "daily_regression_skipped_already_ran":
-        state["last_regression_stale"] = False
+    _finalize_regression_branch(state, regression_status, regression_status_synced)
     _append_log(f"{regression_status}{'_synced_status_file' if regression_status_synced else ''}")
 
     # data connector backpack: paced warehouse sync (schools) when schedule says due.

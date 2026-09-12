@@ -285,7 +285,7 @@ def classify_task_meta(
     )
     if decision == DECISION_REOPEN and task_has_mapping_closure(meta):
         return DECISION_SATISFIED
-    if decision == DECISION_REOPEN and task_is_http_extract(meta):
+    if decision == DECISION_REOPEN and task_has_extract_stage_closure(meta):
         return DECISION_SATISFIED
     if decision == DECISION_REOPEN and task_has_productive_closure(
         meta,

@@ -1,0 +1,9 @@
+{
+  "connection_id": "test-only",
+  "base_url": "https://example.invalid",
+  "client_id": "id",
+  "client_secret": "secret",
+  "scope_mode": "single_lea",
+  "district_lea_id": "31901",
+  "credential_access_tier": "read"
+}

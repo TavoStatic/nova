@@ -675,6 +675,130 @@ def ensure_pipeline_worker_running(
 
 
 
+def runtime_pipeline_worker_ids(*, runtime_root: Path | None = None) -> list[str]:
+    """Pipeline ids that still have a worker lease or heartbeat on disk."""
+    root = _normalize_runtime_root(runtime_root) / "pipelines"
+    if not root.exists():
+        return []
+    found: list[str] = []
+    for child in sorted(root.iterdir()):
+        if not child.is_dir():
+            continue
+        if (child / "worker.lease.json").exists() or (child / "worker.heartbeat").exists():
+            found.append(child.name)
+    return found
+
+
+def stop_pipeline_worker(
+    pipeline_id: str,
+    *,
+    runtime_root: Path | None = None,
+    terminate_pid_fn: Callable[[int], bool] | None = None,
+    os_name: str | None = None,
+    pid_alive_fn: Callable[[int], bool] | None = None,
+) -> dict[str, Any]:
+    """Terminate a live worker and clear its lease/heartbeat, including paused lanes."""
+    clean_id = str(pipeline_id or "").strip()
+    heartbeat = read_worker_heartbeat(
+        clean_id,
+        runtime_root=runtime_root,
+        pid_alive_fn=pid_alive_fn,
+    )
+    lease = dict(heartbeat.get("lease") or read_worker_lease(clean_id, runtime_root=runtime_root, pid_alive_fn=pid_alive_fn))
+    pids: list[int] = []
+    for raw in (lease.get("lease_owner_pid"), heartbeat.get("pid")):
+        try:
+            pid = int(raw)
+        except Exception:
+            continue
+        if pid > 0 and pid not in pids:
+            pids.append(pid)
+    terminator = terminate_pid_fn or (lambda pid: _default_terminate_pid(pid, os_name=os_name))
+    terminated: list[int] = []
+    failed: list[int] = []
+    for pid in pids:
+        if not pid_alive(pid, pid_alive_fn=pid_alive_fn):
+            continue
+        if terminator(pid):
+            terminated.append(pid)
+        else:
+            failed.append(pid)
+    released = release_worker_lease(clean_id, runtime_root=runtime_root)
+    heartbeat_removed = _remove_worker_heartbeat(clean_id, runtime_root=runtime_root)
+    if failed:
+        status = "stop_failed"
+    elif terminated:
+        status = "stopped"
+    elif released or heartbeat_removed or pids:
+        status = "cleared"
+    else:
+        status = "absent"
+    return {
+        "ok": not failed,
+        "status": status,
+        "pipeline_id": clean_id,
+        "terminated_pids": terminated,
+        "failed_pids": failed,
+        "lease_released": released,
+        "heartbeat_removed": heartbeat_removed,
+    }
+
+
+def stop_pipeline_workers_for_ids(
+    pipeline_ids: list[str],
+    *,
+    runtime_root: Path | None = None,
+    terminate_pid_fn: Callable[[int], bool] | None = None,
+    os_name: str | None = None,
+    pid_alive_fn: Callable[[int], bool] | None = None,
+) -> dict[str, Any]:
+    results = [
+        stop_pipeline_worker(
+            pipeline_id,
+            runtime_root=runtime_root,
+            terminate_pid_fn=terminate_pid_fn,
+            os_name=os_name,
+            pid_alive_fn=pid_alive_fn,
+        )
+        for pipeline_id in pipeline_ids
+        if str(pipeline_id or "").strip()
+    ]
+    stopped = [item for item in results if item.get("status") == "stopped"]
+    cleared = [item for item in results if item.get("status") == "cleared"]
+    failed = [item for item in results if not item.get("ok")]
+    if failed:
+        aggregate = "partial" if stopped or cleared else "failed"
+    elif stopped:
+        aggregate = "stopped"
+    elif cleared:
+        aggregate = "cleared"
+    else:
+        aggregate = "absent"
+    return {
+        "ok": not failed,
+        "status": aggregate,
+        "worker_count": len(results),
+        "stopped_count": len(stopped),
+        "cleared_count": len(cleared),
+        "failed_count": len(failed),
+        "workers": results,
+    }
+
+
+def _lane_control_enabled(pipeline_id: str, data_sources_root: Path | None) -> bool:
+    """Return False if lane_control.json explicitly disables this pipeline."""
+    if data_sources_root is None:
+        return True
+    try:
+        ctrl_path = Path(data_sources_root) / str(pipeline_id) / "lane_control.json"
+        if ctrl_path.is_file():
+            ctrl = json.loads(ctrl_path.read_text(encoding="utf-8"))
+            return bool(ctrl.get("enabled", True))
+    except Exception:
+        pass
+    return True
+
+
 def ensure_pipeline_workers_for_ids(
     pipeline_ids: list[str],
     *,
@@ -690,6 +814,17 @@ def ensure_pipeline_workers_for_ids(
     for pipeline_id in pipeline_ids:
         clean_id = str(pipeline_id or "").strip()
         if not clean_id:
+            continue
+        # Belt-and-suspenders: refuse to ensure a lane that lane_control marks disabled,
+        # even if the caller's classification was stale.
+        if not _lane_control_enabled(clean_id, data_sources_root):
+            results.append({
+                "ok": True,
+                "status": "skipped_paused_lane",
+                "pipeline_id": clean_id,
+                "heartbeat": {},
+                "lease": {},
+            })
             continue
         # One pipeline must not abort ensure for all others or kill the maintenance cycle.
         try:

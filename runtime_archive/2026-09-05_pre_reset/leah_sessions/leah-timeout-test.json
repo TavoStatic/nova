@@ -1,0 +1,31 @@
+{
+  "turns": [
+    {
+      "role": "user",
+      "text": "hi"
+    },
+    {
+      "role": "assistant",
+      "text": "Hello."
+    },
+    {
+      "role": "user",
+      "text": "who are you?"
+    },
+    {
+      "role": "assistant",
+      "text": "I am Nova. Current evidence shows a local AI runtime with registered internal systems, not only a model reply.\nConfirmed identity evidence lists the developer as Gustavo Uribe (Gus).\nRegistered operational surfaces: runtime core, guard system, work tree, health monitoring, memory systems, task routing, maintenance loops, release verification, subconscious priority, autonomy handling."
+    },
+    {
+      "role": "user",
+      "text": "are you a chatbot?"
+    },
+    {
+      "role": "assistant",
+      "text": "I am Nova. Current evidence shows a local AI runtime with registered internal systems, not only a model reply.\nConfirmed identity evidence lists the developer as Gustavo Uribe (Gus).\nRegistered operational surfaces: runtime core, guard system, work tree, health monitoring, memory systems, task routing, maintenance loops, release verification, subconscious priority, autonomy handling."
+    }
+  ],
+  "turn_ts": 1786767705.6386676,
+  "session_id": "leah-timeout-test",
+  "ts": 1786767704.1270664
+}

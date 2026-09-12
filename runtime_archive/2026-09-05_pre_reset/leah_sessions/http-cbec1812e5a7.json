@@ -1,0 +1,23 @@
+{
+  "turns": [
+    {
+      "role": "user",
+      "text": "can you help me a little here ?"
+    },
+    {
+      "role": "assistant",
+      "text": "(error: Ollama chat failed: HTTPConnectionPool(host='127.0.0.1', port=11434): Max retries exceeded with url: /api/chat (Caused by NewConnectionError(\"HTTPConnection(host='127.0.0.1', port=11434): Failed to es)"
+    },
+    {
+      "role": "user",
+      "text": "what do you think then ?"
+    },
+    {
+      "role": "assistant",
+      "text": "(error: Ollama chat failed: HTTPConnectionPool(host='127.0.0.1', port=11434): Max retries exceeded with url: /api/chat (Caused by NewConnectionError(\"HTTPConnection(host='127.0.0.1', port=11434): Failed to es)"
+    }
+  ],
+  "turn_ts": 1787923278.0053625,
+  "session_id": "http-cbec1812e5a7",
+  "ts": 1787923265.8563347
+}

@@ -1,0 +1,13 @@
+{
+  "generated_at": "2026-09-05 00:14:55",
+  "date": "2026-09-05",
+  "status": "TIMED_OUT",
+  "lanes": [
+    "all"
+  ],
+  "returncode": -1,
+  "detail": ".......................",
+  "failed_lane": "",
+  "failed_tests": [],
+  "source": "scripts/run_regression.py"
+}

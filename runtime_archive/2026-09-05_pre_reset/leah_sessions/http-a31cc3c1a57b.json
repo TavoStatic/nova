@@ -1,0 +1,23 @@
+{
+  "turns": [
+    {
+      "role": "user",
+      "text": "can you help me a little here ?"
+    },
+    {
+      "role": "assistant",
+      "text": "Of course!"
+    },
+    {
+      "role": "user",
+      "text": "what do you think then ?"
+    },
+    {
+      "role": "assistant",
+      "text": "Sure! Could you please provide more details about what you need help with? That way, I can give you the most accurate assistance."
+    }
+  ],
+  "turn_ts": 1787011415.0219307,
+  "session_id": "http-a31cc3c1a57b",
+  "ts": 1787011407.897269
+}

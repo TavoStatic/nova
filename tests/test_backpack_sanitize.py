@@ -23,6 +23,7 @@ class TestBackpackSanitize(unittest.TestCase):
         self.assertIn("edfi_capability_profile", points["signal_sources"])
         self.assertIn("edfi_core", points["signal_sources"])
         self.assertIn("backpack_edfi", points["signal_sources"])
+        self.assertIn("backpack_host", points["signal_sources"])
         self.assertTrue(points["fusion_scan"])
         self.assertTrue(any("runtime/edfi" in str(item) for item in points.get("runtime_decls") or []))
 
@@ -63,6 +64,15 @@ class TestBackpackSanitize(unittest.TestCase):
             mark = json.loads((runtime / "backpacks" / "uninstalled" / "edfi.json").read_text(encoding="utf-8"))
             self.assertEqual(mark.get("status"), "uninstalled")
             self.assertFalse(result.get("installed"))
+
+    def test_residue_scan_defaults_to_package_manifest_paths(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime = Path(tmp)
+            views = runtime / "views"
+            views.mkdir()
+            (views / "board.html").write_text("<html></html>", encoding="utf-8")
+            scan = scan_backpack_residue("reports", runtime_root=runtime)
+            self.assertTrue(any(str(item).replace("\\", "/").endswith("/views") for item in scan.get("found") or []))
 
     def test_reports_uninstall_clears_declared_views_dir(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

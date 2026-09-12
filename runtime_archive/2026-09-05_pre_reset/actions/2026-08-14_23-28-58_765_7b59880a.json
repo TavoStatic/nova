@@ -1,0 +1,71 @@
+{
+  "ts": "2026-08-14 23:28:58",
+  "channel": "http",
+  "session_id": "leah-floor-test",
+  "input_source": "http",
+  "user_input": "so!",
+  "intent": "",
+  "planner_decision": "conversation_floor",
+  "tool": "",
+  "tool_args": {},
+  "tool_result": "",
+  "final_answer": "I'm already in work on this machine. You don't have to hand me a task.",
+  "reply_contract": "conversation_turn",
+  "reply_outcome": {
+    "kind": "nova_has_the_floor",
+    "execution_profile": {
+      "total_time": 14,
+      "planner_time": 0,
+      "llm_time": 0,
+      "tool_time": 0,
+      "post_time": 0,
+      "tool_selection_time": 0
+    }
+  },
+  "turn_acts": [],
+  "grounded": false,
+  "active_subject": "",
+  "continuation_used": false,
+  "route_trace": [
+    {
+      "stage": "input",
+      "outcome": "received",
+      "data": {
+        "channel": "http",
+        "input_source": "http"
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "execute_reply_sequence",
+      "data": {
+        "duration_ms": 14
+      }
+    },
+    {
+      "stage": "timing_breakdown",
+      "outcome": "completed",
+      "detail": "execute_reply_sequence",
+      "data": {
+        "total_time": 14,
+        "planner_time": 0,
+        "llm_time": 0,
+        "tool_time": 0,
+        "post_time": 0,
+        "tool_selection_time": 0
+      }
+    },
+    {
+      "stage": "finalize",
+      "outcome": "conversation_floor",
+      "data": {
+        "grounded": false
+      }
+    }
+  ],
+  "provider_used": "",
+  "provider_candidates": [],
+  "provider_family": "",
+  "route_summary": "input:received -> finalize:conversation_floor"
+}

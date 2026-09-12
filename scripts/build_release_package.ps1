@@ -148,6 +148,7 @@ $forbiddenStagePaths = @(
   ".ci_venv",
   ".venv",
   ".pytest_cache",
+  "knowledge\internal",
   "knowledge\packs",
   "knowledge\web",
   "updates",
@@ -244,14 +245,15 @@ foreach ($py in $stagedPy) {
     $modPath = Join-Path $stageDir ("services\" + $mod + ".py")
     $modPkg = Join-Path $stageDir ("services\" + $mod + "\__init__.py")
     if (-not (Test-Path $modPath) -and -not (Test-Path $modPkg)) {
-      $missingModules.Add("$($py.FullName.Substring($stageDir.Length).TrimStart('\','/')) imports services.$mod (missing from package)")
+      $relativePyPath = $py.FullName.Substring($stageDir.Length).TrimStart([char[]]@('\\', '/'))
+      $missingModules.Add("$relativePyPath imports services.$mod (missing from package)")
     }
   }
 }
 if ($missingModules.Count -gt 0) {
-  Write-Host "[FAIL] Package stage is incomplete — imported services modules missing:"
+  Write-Host "[FAIL] Package stage is incomplete - imported services modules missing:"
   $missingModules | Select-Object -Unique | ForEach-Object { Write-Host ("  - " + $_) }
-  throw "Release package incomplete: untracked or missing services modules (git add required for new services/* files)."
+  throw "Release package incomplete: missing services modules."
 }
 
 foreach ($relativePath in $forbiddenStagePaths) {
@@ -357,6 +359,7 @@ $manifest | ConvertTo-Json -Depth 6 | Set-Content -Encoding UTF8 $manifestPath
 
 Compress-Archive -Path $stageDir -DestinationPath $zipPath -CompressionLevel Optimal
 
+$releaseLabelText = if ([string]::IsNullOrWhiteSpace($labelToken)) { "" } else { $labelToken }
 $validationRecord = @(
   "# Nova RC Validation Record",
   "",
@@ -370,7 +373,7 @@ $validationRecord = @(
   ("- Artifact version: {0}" -f $versionToken),
   ("- Version source: {0}" -f $versionInfo.source),
   ("- Release channel: {0}" -f $channelToken),
-  ("- Release label: {0}" -f $(if ([string]::IsNullOrWhiteSpace($labelToken)) { "" } else { $labelToken })),
+  ("- Release label: {0}" -f $releaseLabelText),
   "- Manifest reviewed: yes/no",
   ("- Release ledger path: {0}" -f $ledgerPath),
   "",

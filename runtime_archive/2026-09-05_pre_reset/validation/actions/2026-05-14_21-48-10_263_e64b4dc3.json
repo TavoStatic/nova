@@ -1,0 +1,63 @@
+{
+  "ts": "2026-05-14 21:48:10",
+  "channel": "http",
+  "session_id": "s4_mixed_weather",
+  "input_source": "typed",
+  "user_input": "the weather looks good. i wonder if the weather will stay like this for the rest of the day. can you check what the rest of the forecast will be",
+  "intent": "clarify_mixed_turn",
+  "planner_decision": "ask_clarify",
+  "tool": "",
+  "tool_args": {},
+  "tool_result": "",
+  "final_answer": "I think you're both giving context and asking me to do something. Do you want me to treat the first part as context and answer the request, or focus on just one part first?",
+  "reply_contract": "turn.clarify_mixed_intent",
+  "reply_outcome": {
+    "intent": "clarify_mixed_turn",
+    "kind": "mixed_info_request",
+    "reply_contract": "turn.clarify_mixed_intent"
+  },
+  "turn_acts": [
+    "ask",
+    "inform",
+    "mixed"
+  ],
+  "grounded": false,
+  "active_subject": "",
+  "continuation_used": false,
+  "route_trace": [
+    {
+      "stage": "input",
+      "outcome": "received",
+      "data": {
+        "channel": "http",
+        "input_source": "typed",
+        "intent": "weather_lookup"
+      }
+    },
+    {
+      "stage": "direction_analysis",
+      "outcome": "general_chat",
+      "data": {
+        "effective_query": "the weather looks good. i wonder if the weather will stay like this for the rest of the day. can you check what the rest of the forecast will be",
+        "turn_acts": "ask,inform,mixed",
+        "identity_focused": false,
+        "bypass_pattern_routes": false
+      }
+    },
+    {
+      "stage": "mixed_turn_clarify",
+      "outcome": "blocked"
+    },
+    {
+      "stage": "finalize",
+      "outcome": "ask_clarify",
+      "data": {
+        "grounded": false
+      }
+    }
+  ],
+  "provider_used": "",
+  "provider_candidates": [],
+  "provider_family": "",
+  "route_summary": "input:received -> direction_analysis:general_chat -> mixed_turn_clarify:blocked -> finalize:ask_clarify"
+}

@@ -1,6 +1,6 @@
 {
   "name": "create",
-  "description": "Create a new automation: Grok runs the prompt on a schedule and/or when an event fires (Gmail/Outlook email, GitHub, Finance, …), and optionally notifies the user. Use this when the user asks to create an automation, reminder, scheduled task, recurring check, or an event-triggered automation — every morning, daily, weekly, at a specific future time, or when an email / GitHub / finance event matches. For event triggers: call `automation_list_trigger_catalog` first (feature flags control which providers appear), then set `trigger` with provider, trigger_type, and dimensions (or email aliases from/to/subject_contains). For GitHub, resolve repos via `automation_list_trigger_resources` and put the returned numeric repository `id` into dimensions.repo (not owner/name). Omit schedule fields for trigger-only. For time-based only, set cadence (or leave empty for run-once). You can combine both.",
+  "description": "Create a new automation: Grok runs the prompt on a schedule and/or when an event fires (Gmail/Outlook email, GitHub, Finance, Linear, …), and optionally notifies the user. Use this when the user asks to create an automation, reminder, scheduled task, recurring check, or an event-triggered automation — every morning, daily, weekly, at a specific future time, or when an email / GitHub / finance / Linear event matches. For event triggers: call `automation_list_trigger_catalog` first (feature flags control which providers appear), then set `trigger` with provider, trigger_type, and dimensions (or email aliases from/to/subject_contains). For GitHub, resolve repos via `automation_list_trigger_resources` and put the returned numeric repository `id` into dimensions.repo (not owner/name). When Linear is in the catalog, resolve teams/projects the same way (provider=linear, resource_type=team|project) and put each resource `id` into dimensions.team / dimensions.project (UUIDs, not keys or names). Omit schedule fields for trigger-only. For time-based only, set cadence (or leave empty for run-once). You can combine both. Created from a conversation inside a project, the automation is linked to that project automatically and each run happens inside it (with the project's instructions and files).",
   "inputSchema": {
     "type": "object",
     "properties": {
@@ -48,19 +48,19 @@
       },
       "trigger": {
         "type": "object",
-        "description": "Optional event trigger. Call automation_list_trigger_catalog first — only listed providers/types/dimensions are available for this account (some are feature-flagged: GitHub, Finance, …). Prefer `dimensions` map with catalog keys. For email (gmail/outlook) you may use from/to/subject_contains aliases instead; at least one email filter is required. Defaults: trigger_type new_email for gmail/outlook.",
+        "description": "Optional event trigger. Call automation_list_trigger_catalog first — only listed providers/types/dimensions are available for this account (some are feature-flagged: GitHub, Finance, Linear, …). Prefer `dimensions` map with catalog keys. For email (gmail/outlook) you may use from/to/subject_contains aliases instead; at least one email filter is required. Defaults: trigger_type new_email for gmail/outlook.",
         "properties": {
           "provider": {
             "type": "string",
-            "description": "Event source wire tag from the catalog (e.g. gmail, outlook, github, finance)."
+            "description": "Event source wire tag from the catalog (e.g. gmail, outlook, github, finance, linear)."
           },
           "trigger_type": {
             "type": "string",
-            "description": "Event kind from the catalog (e.g. new_email, pr_opened, new_transaction). Required except gmail/outlook (default new_email) and webhook."
+            "description": "Event kind from the catalog (e.g. new_email, pr_opened, new_transaction, issue_created). Required except gmail/outlook (default new_email) and webhook."
           },
           "dimensions": {
             "type": "object",
-            "description": "Catalog dimension keys → string or array of strings (e.g. {\"from\":[\"@x.ai\"], \"repo\":[\"314159\"], \"amount_min\":\"50\"}). Keys must match the catalog entry for this trigger_type. GitHub dimensions.repo MUST be a stringified numeric repository id from automation_list_trigger_resources (resource_type=repository) — never owner/name.",
+            "description": "Catalog dimension keys → string or array of strings (e.g. {\"from\":[\"@x.ai\"], \"repo\":[\"314159\"], \"team\":[\"<linear-team-uuid>\"], \"amount_min\":\"50\"}). Keys must match the catalog entry for this trigger_type. GitHub dimensions.repo MUST be a stringified numeric repository id from automation_list_trigger_resources (resource_type=repository) — never owner/name. Linear dimensions.team / dimensions.project MUST be Linear UUIDs from automation_list_trigger_resources (provider=linear, resource_type=team|project) — not team keys or project names.",
             "additionalProperties": {
               "oneOf": [
                 {

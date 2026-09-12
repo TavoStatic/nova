@@ -1,0 +1,32 @@
+{
+  "backpack_id": "edfi",
+  "status": "uninstalled",
+  "connection_id": "",
+  "uninstalled_by": "autonomy_maintenance",
+  "uninstalled_at": "",
+  "touch_points": {
+    "pipeline_ids": [
+      "edfi",
+      "edfi_bisd"
+    ],
+    "signal_sources": [
+      "edfi_capability_profile",
+      "edfi_core",
+      "backpack_edfi",
+      "backpack_host"
+    ],
+    "fusion_scan": true,
+    "runtime_decls": [
+      "runtime/edfi",
+      "runtime/edfi/connections/{connection_id}",
+      "runtime/edfi/edfi_audit.jsonl",
+      "runtime/edfi/profiles"
+    ],
+    "extra_runtime_paths": [
+      "C:\\NOVA\\runtime\\edfi",
+      "C:\\NOVA\\runtime\\edfi\\connections",
+      "C:\\NOVA\\runtime\\edfi\\edfi_audit.jsonl",
+      "C:\\NOVA\\runtime\\edfi\\profiles"
+    ]
+  }
+}

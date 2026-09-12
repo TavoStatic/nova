@@ -1,0 +1,240 @@
+{
+  "ts": "2026-05-27 22:21:38",
+  "channel": "cli",
+  "session_id": "",
+  "input_source": "typed",
+  "user_input": "i was trying to have a simple conversation with you .",
+  "intent": "",
+  "planner_decision": "llm_fallback",
+  "tool": "",
+  "tool_args": {},
+  "tool_result": "",
+  "final_answer": "I apologize for not fully capturing the intent of our conversation earlier. It seems I got caught up in providing evidence and explanations instead of engaging in a natural conversation.\n\nTo start fresh, what would you like to talk about? Is there something specific on your mind that you'd like to discuss or ask about? I'll do my best to provide a more conversational response this time around.",
+  "reply_contract": "",
+  "reply_outcome": {
+    "kind": "llm_fallback",
+    "intent_evidence_packet": {
+      "schema": "nova.turn_intent_evidence",
+      "version": "1.0.0",
+      "trace_authority": "hypothesis_only",
+      "answer_authority": "available_evidence",
+      "current_turn": "i was trying to have a simple conversation with you .",
+      "conversation_frame": {
+        "turn_count": 11,
+        "current_user_turn_is_latest": true,
+        "previous_assistant_turn": "I apologize for not accurately capturing your goal earlier. Upon reviewing our conversation transcript, I noticed that you were trying to understand my state and functionality. You asked if I was sure about being within normal parameters, which suggested that you wanted to clarify my operational status. However, I didn't fully grasp the intent behind your question. If I had, I would have provided a more accurate response, such as confirming or denying my normal functioning status based on my operational self-evidence and tool results. Can you please provide more context or clarify what you were trying to achieve with that question? I'll do my best to understand your goal and provide a more accurate response moving forward.",
+        "last_assistant_repeats_earlier_assistant": false
+      },
+      "planner_frame": {
+        "decision": "unhandled",
+        "tool": "self_status",
+        "semantic_tool_observation": {
+          "tool": "self_status",
+          "confidence": 0.0,
+          "evidence_need": "live_self_status",
+          "answer_target": "nova_live_state",
+          "source": "llm_intent",
+          "status": "tool_result_available"
+        }
+      },
+      "available_evidence": [
+        {
+          "name": "current_user_turn",
+          "available": true,
+          "chars": 53
+        },
+        {
+          "name": "recent_chat_context",
+          "available": true,
+          "chars": 1003
+        },
+        {
+          "name": "session_state_context",
+          "available": false,
+          "chars": 0
+        },
+        {
+          "name": "learning_context",
+          "available": true,
+          "chars": 1583
+        },
+        {
+          "name": "confirmed_identity_context",
+          "available": true,
+          "chars": 235
+        },
+        {
+          "name": "operational_self_context",
+          "available": true,
+          "chars": 1346
+        },
+        {
+          "name": "tool_result",
+          "available": true,
+          "chars": 414
+        }
+      ],
+      "answer_contract": {
+        "infer_intent_from_turn_and_conversation": true,
+        "trace_is_route_authority": false,
+        "evidence_is_claim_authority": true,
+        "tool_route_requires_external_evidence_gap": true,
+        "conversation_can_be_complete_without_task": false,
+        "reply_form": "evidence_bound_reply"
+      }
+    }
+  },
+  "turn_acts": [],
+  "grounded": false,
+  "active_subject": "",
+  "continuation_used": false,
+  "route_trace": [
+    {
+      "stage": "input",
+      "outcome": "received",
+      "data": {
+        "channel": "cli",
+        "input_source": "typed"
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "semantic_tool_intent",
+      "data": {
+        "duration_ms": 1213
+      }
+    },
+    {
+      "stage": "action_planner",
+      "outcome": "semantic_intent",
+      "data": {
+        "tool": "self_status",
+        "confidence": 0.0
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "tool_selection",
+      "data": {
+        "duration_ms": 1213
+      }
+    },
+    {
+      "stage": "action_planner",
+      "outcome": "run_tool",
+      "data": {
+        "tool": "self_status"
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "tool_response",
+      "data": {
+        "duration_ms": 152,
+        "tool": "self_status"
+      }
+    },
+    {
+      "stage": "tool_execution",
+      "outcome": "ok",
+      "data": {
+        "tool": "self_status",
+        "grounded": true
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "planner",
+      "data": {
+        "duration_ms": 1366
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "planner_call",
+      "data": {
+        "duration_ms": 1366
+      }
+    },
+    {
+      "stage": "action_planner",
+      "outcome": "tool_evidence_for_fallback",
+      "data": {
+        "tool": "self_status"
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "execute_reply_sequence",
+      "data": {
+        "duration_ms": 1366
+      }
+    },
+    {
+      "stage": "timing_breakdown",
+      "outcome": "completed",
+      "detail": "execute_reply_sequence",
+      "data": {
+        "total_time": 1366,
+        "planner_time": 1366,
+        "llm_time": 0,
+        "tool_time": 0,
+        "post_time": 0,
+        "tool_selection_time": 0
+      }
+    },
+    {
+      "stage": "memory_context",
+      "outcome": "used",
+      "data": {
+        "memory_used": false,
+        "identity_used": true,
+        "operational_identity_used": true,
+        "knowledge_used": false,
+        "memory_chars": 0,
+        "identity_chars": 235,
+        "operational_identity_chars": 1346,
+        "knowledge_chars": 0
+      }
+    },
+    {
+      "stage": "chat_context",
+      "outcome": "used",
+      "data": {
+        "chars": 1003
+      }
+    },
+    {
+      "stage": "turn_intent_evidence",
+      "outcome": "attached",
+      "data": {
+        "trace_authority": "hypothesis_only",
+        "answer_authority": "available_evidence"
+      }
+    },
+    {
+      "stage": "llm_fallback",
+      "outcome": "invoked",
+      "data": {
+        "retrieved_chars": 3865
+      }
+    },
+    {
+      "stage": "finalize",
+      "outcome": "llm_fallback",
+      "data": {
+        "grounded": false
+      }
+    }
+  ],
+  "provider_used": "",
+  "provider_candidates": [],
+  "provider_family": "",
+  "route_summary": "input:received -> action_planner:semantic_intent -> action_planner:run_tool -> tool_execution:ok -> action_planner:tool_evidence_for_fallback -> memory_context:used -> chat_context:used -> turn_intent_evidence:attached -> llm_fallback:invoked -> finalize:llm_fallback"
+}

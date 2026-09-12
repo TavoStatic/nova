@@ -1,0 +1,23 @@
+{
+  "turns": [
+    {
+      "role": "user",
+      "text": "how is your day going right now ?"
+    },
+    {
+      "role": "assistant",
+      "text": "My heartbeat is steady and no alerts triggered today. Systems are running smoothly within my Work Tree boundaries. How about you?"
+    },
+    {
+      "role": "user",
+      "text": "where does that leave us ?"
+    },
+    {
+      "role": "assistant",
+      "text": "We're holding steady at that baseline\u2014heartbeat is good and systems aren't flagging anything within my Work Tree boundaries yet."
+    }
+  ],
+  "turn_ts": 1788280496.9752567,
+  "session_id": "http-1de3b9da80d2",
+  "ts": 1788280449.7163227
+}

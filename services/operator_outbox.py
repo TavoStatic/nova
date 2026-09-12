@@ -583,10 +583,10 @@ class OperatorOutboxService:
             return {"ok": False, "applied": False, "reason": f"work_tree_evidence_failed:{exc}", "target": target}
 
         task_completed = False
-        if resolution in {"continue_work", "task_resolved"}:
+        if resolution in {"continue_work", "task_resolved", "dismissed"}:
             try:
                 complete_fn = getattr(work_tree_module, "complete_task_with_recurring_finding", None)
-                if resolution == "task_resolved" and callable(complete_fn):
+                if resolution in {"task_resolved", "dismissed"} and callable(complete_fn):
                     complete_fn(task_id, completion_action="operator_do_not_retry", ok=True)
                 else:
                     work_tree_module.mark_task_complete(task_id)
@@ -608,7 +608,13 @@ class OperatorOutboxService:
             "target": target,
         }
 
-    def _clear_operator_outbox_holds(self, work_tree_module: Any = None) -> dict[str, Any]:
+    def _clear_operator_outbox_holds(
+        self,
+        work_tree_module: Any = None,
+        *,
+        target_branch_id: str = "",
+        clear_operator_control_waits: bool = True,
+    ) -> dict[str, Any]:
         if work_tree_module is None:
             try:
                 import work_tree as work_tree_module
@@ -620,6 +626,7 @@ class OperatorOutboxService:
         reload_fn = getattr(work_tree_module, "reload_persisted_state", None)
         if callable(reload_fn):
             reload_fn()
+        wanted_branch = _safe_text(target_branch_id, 120)
         cleared = 0
         resolved_branches = 0
         for tree in list(getattr(work_tree_module, "list_trees", lambda: [])() or []):
@@ -628,7 +635,9 @@ class OperatorOutboxService:
                 continue
             for branch in list(list_branches(tree.tree_id) or []):
                 source_type = str(getattr(branch, "source_type", "") or "").strip().lower()
-                if source_type != "operator_control":
+                is_target = bool(wanted_branch) and str(getattr(branch, "branch_id", "") or "").strip() == wanted_branch
+                is_operator_control = source_type == "operator_control"
+                if not is_target and not (clear_operator_control_waits and is_operator_control):
                     continue
                 for task in list(work_tree_module.list_branch_tasks(branch.branch_id) or []):
                     status = str(
@@ -1074,8 +1083,16 @@ class OperatorOutboxService:
             self._write_events(path, rows)
             hold_result = {}
             if _safe_status(event.get("status")) in CLOSED_NOTICE_STATUSES:
-                if not _operator_actionable_open_events(rows):
-                    hold_result = self._clear_operator_outbox_holds(work_tree_module)
+                target_branch_id = _safe_text(
+                    (work_tree_result.get("target") or {}).get("branch_id")
+                    or self.work_tree_target_from_event(event).get("branch_id"),
+                    120,
+                )
+                hold_result = self._clear_operator_outbox_holds(
+                    work_tree_module,
+                    target_branch_id=target_branch_id,
+                    clear_operator_control_waits=not _operator_actionable_open_events(rows),
+                )
             result = {
                 "ok": bool(work_tree_result.get("ok", True)),
                 "event": event,

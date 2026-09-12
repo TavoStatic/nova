@@ -1,0 +1,139 @@
+{
+  "ts": "2026-05-14 21:51:50",
+  "channel": "http",
+  "session_id": "s_name_ui",
+  "input_source": "typed",
+  "user_input": "why should i try to use the web for your name ?",
+  "intent": "self_identity_web_challenge",
+  "planner_decision": "deterministic",
+  "tool": "",
+  "tool_args": {},
+  "tool_result": "",
+  "final_answer": "You should not need web research for my name. I already know my name is Nova, so that should be answered directly from my verified identity facts.",
+  "reply_contract": "",
+  "reply_outcome": {},
+  "turn_acts": [
+    "ask"
+  ],
+  "grounded": true,
+  "active_subject": "",
+  "continuation_used": false,
+  "route_trace": [
+    {
+      "stage": "input",
+      "outcome": "received",
+      "data": {
+        "channel": "http",
+        "input_source": "typed",
+        "intent": "chat"
+      }
+    },
+    {
+      "stage": "direction_analysis",
+      "outcome": "identity_query",
+      "data": {
+        "effective_query": "why should i try to use the web for your name ?",
+        "turn_acts": "ask",
+        "identity_focused": true,
+        "bypass_pattern_routes": true
+      }
+    },
+    {
+      "stage": "supervisor_intent",
+      "outcome": "handled",
+      "detail": "self_identity_web_challenge",
+      "data": {
+        "rule": "self_identity_web_challenge"
+      }
+    },
+    {
+      "stage": "finalize",
+      "outcome": "deterministic",
+      "data": {
+        "grounded": true
+      }
+    }
+  ],
+  "provider_used": "",
+  "provider_candidates": [],
+  "provider_family": "",
+  "routing_decision": {
+    "input_preview": "why should i try to use the web for your name ?",
+    "entry_point": "http",
+    "intent_phase": {
+      "phase": "intent",
+      "handled": true,
+      "rule_name": "self_identity_web_challenge",
+      "intent": "self_identity_web_challenge",
+      "action": "",
+      "priority": 67,
+      "candidates": [
+        {
+          "rule_name": "smalltalk",
+          "priority": 61,
+          "handled": false
+        },
+        {
+          "rule_name": "set_location",
+          "priority": 62,
+          "handled": false
+        },
+        {
+          "rule_name": "store_fact",
+          "priority": 62,
+          "handled": false
+        },
+        {
+          "rule_name": "weather_lookup",
+          "priority": 62,
+          "handled": false
+        },
+        {
+          "rule_name": "web_research_family",
+          "priority": 62,
+          "handled": false
+        },
+        {
+          "rule_name": "capability_query",
+          "priority": 63,
+          "handled": false
+        },
+        {
+          "rule_name": "policy_domain_query",
+          "priority": 64,
+          "handled": false
+        },
+        {
+          "rule_name": "assistant_name",
+          "priority": 66,
+          "handled": false
+        },
+        {
+          "rule_name": "self_identity_web_challenge",
+          "priority": 67,
+          "handled": true,
+          "intent": "self_identity_web_challenge"
+        }
+      ]
+    },
+    "handle_phase": {
+      "phase": "handle",
+      "handled": false,
+      "rule_name": "",
+      "intent": "",
+      "action": "",
+      "priority": null,
+      "candidates": []
+    },
+    "final_owner": "supervisor_intent",
+    "allowed_bypass": false,
+    "allowed_bypass_category": "",
+    "bypass_reason": "",
+    "reply_contract": "",
+    "reply_outcome_kind": "",
+    "turn_acts": [
+      "ask"
+    ]
+  },
+  "route_summary": "input:received -> direction_analysis:identity_query -> supervisor_intent:handled -> finalize:deterministic"
+}

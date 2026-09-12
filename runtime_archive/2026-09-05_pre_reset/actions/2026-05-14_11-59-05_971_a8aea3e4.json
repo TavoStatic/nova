@@ -1,0 +1,64 @@
+{
+  "ts": "2026-05-14 11:58:57",
+  "channel": "http",
+  "session_id": "codex-after-core-refresh-trouble",
+  "input_source": "typed",
+  "user_input": "what is troubling you today?",
+  "intent": "chat",
+  "planner_decision": "grounded_self_report",
+  "tool": "",
+  "tool_args": {},
+  "tool_result": "",
+  "final_answer": "Today I am mainly stuck on: Work Tree is open with 6 open task(s); current branch: Guard process is not running; task: Inspect guard status and runtime timeline; Release package is stale behind live source and needs rebuild verification.\nWork Tree is open with 6 open task(s). Current branch: Guard process is not running. Current task: Inspect guard status and runtime timeline.\nRelease readiness: source-changed-after-build.\nSource: live control status and Work Tree.",
+  "reply_contract": "runtime.self_report.live_status",
+  "reply_outcome": {
+    "source": "live_control_status_and_work_tree",
+    "tool": "control_status"
+  },
+  "turn_acts": [
+    "command"
+  ],
+  "grounded": true,
+  "active_subject": "",
+  "continuation_used": false,
+  "route_trace": [
+    {
+      "stage": "input",
+      "outcome": "received",
+      "data": {
+        "channel": "http",
+        "input_source": "typed",
+        "intent": "chat"
+      }
+    },
+    {
+      "stage": "direction_analysis",
+      "outcome": "explicit_command",
+      "data": {
+        "effective_query": "what is troubling you today?",
+        "turn_acts": "command",
+        "identity_focused": false,
+        "bypass_pattern_routes": false
+      }
+    },
+    {
+      "stage": "grounded_self_report",
+      "outcome": "control_status",
+      "detail": "live_status_reply",
+      "data": {
+        "tool": "control_status"
+      }
+    },
+    {
+      "stage": "finalize",
+      "outcome": "grounded_self_report",
+      "data": {
+        "grounded": true
+      }
+    }
+  ],
+  "provider_used": "",
+  "provider_candidates": [],
+  "provider_family": "",
+  "route_summary": "input:received -> direction_analysis:explicit_command -> grounded_self_report:control_status -> finalize:grounded_self_report"
+}

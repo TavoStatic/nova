@@ -1,0 +1,120 @@
+{
+  "generated_at": "2026-07-19 18:23:34",
+  "started_at": "2026-07-19 18:23:33",
+  "finished_at": "2026-07-19 18:23:34",
+  "root": "C:\\NOVA",
+  "supported_python": "3.12",
+  "install": false,
+  "include_ollama": true,
+  "include_models": true,
+  "ok": true,
+  "required_failed": [],
+  "steps": [
+    {
+      "name": "host",
+      "ok": true,
+      "required": true,
+      "action": "check",
+      "detail": "os=Windows arch=AMD64 root=C:\\NOVA",
+      "messages": []
+    },
+    {
+      "name": "python",
+      "ok": true,
+      "required": true,
+      "action": "check",
+      "detail": "using py -3.12 (Python 3.12.6)",
+      "messages": [
+        "candidate=sys.executable:Python 3.13.1",
+        "candidate=py -3.12:Python 3.12.6",
+        "candidate=py -3:Python 3.14.6",
+        "candidate=python:Python 3.13.1",
+        "candidate=python3:Python was not found; run without arguments to install from the Microsoft Store, or disable this shortcut from Settings > Apps > Advanced app settings > App execution aliases.",
+        "candidate=known_python312_0:Python 3.12.6"
+      ]
+    },
+    {
+      "name": "venv",
+      "ok": true,
+      "required": true,
+      "action": "check",
+      "detail": "C:\\NOVA\\.venv\\Scripts\\python.exe",
+      "messages": []
+    },
+    {
+      "name": "python_deps",
+      "ok": true,
+      "required": true,
+      "action": "check",
+      "detail": "check-only",
+      "messages": []
+    },
+    {
+      "name": "doctor",
+      "ok": true,
+      "required": true,
+      "action": "fix",
+      "detail": "fix_exit=0 check_exit=0",
+      "messages": [
+        "e:action_planner.py :: C:\\NOVA\\action_planner.py\n[OK] file:agent.py :: C:\\NOVA\\agent.py\n[OK] file:health.py :: C:\\NOVA\\health.py\n[OK] file:policy.json :: C:\\NOVA\\policy.json\n[OK] dir:runtime :: C:\\NOVA\\runtime\n[OK] dir:logs :: C:\\NOVA\\logs\n[OK] dir:knowledge :: C:\\NOVA\\knowledge\n[OK] venv:python :: C:\\NOVA\\.venv\\Scripts\\python.exe\n[OK] policy:allowed_root :: policy.json\n[OK] policy:tools_enabled :: policy.json\n[OK] policy:models :: policy.json\n[OK] tts:piper_exe :: C:\\NOVA\\piper\\piper.exe\n[OK] tts:piper_model :: C:\\NOVA\\piper\\models\\en_US-lessac-medium.onnx\n[OK] runtime:ollama_on_path :: PATH\n[OK] seam:nova_http_transport_boundary :: C:\\NOVA\\nova_http.py\n[OK] seam:nova_http_control_delegation :: C:\\NOVA\\nova_http.py\n\n{\n  \"required_ok\": true,\n  \"required_failed\": [],\n  \"checks_total\": 21\n}\n"
+      ]
+    },
+    {
+      "name": "ollama",
+      "ok": true,
+      "required": true,
+      "action": "check",
+      "detail": "binary=C:\\Users\\hotst\\AppData\\Local\\Programs\\Ollama\\ollama.EXE api=up base=http://127.0.0.1:11434",
+      "messages": []
+    },
+    {
+      "name": "ollama_models",
+      "ok": true,
+      "required": true,
+      "action": "check",
+      "detail": "present=['qwen2.5:7b', 'qwen2.5vl:7b']",
+      "messages": [
+        "required=['qwen2.5:7b', 'qwen2.5vl:7b']",
+        "installed=['qwen2.5-coder:1.5b-base', 'llama3.1:8b', 'qwen2.5:14b', 'qwen2.5:7b', 'nomic-embed-text:latest', 'qwen2.5vl:7b', 'llama3.2:3b']",
+        "missing_before=[]"
+      ]
+    },
+    {
+      "name": "smoke_base",
+      "ok": true,
+      "required": false,
+      "action": "check",
+      "detail": "skipped",
+      "messages": []
+    },
+    {
+      "name": "webui",
+      "ok": true,
+      "required": false,
+      "action": "check",
+      "detail": "skipped by flag",
+      "messages": []
+    },
+    {
+      "name": "nova_path",
+      "ok": true,
+      "required": false,
+      "action": "check",
+      "detail": "nova on PATH",
+      "messages": [
+        "From any new terminal after PATH update: nova doctor\nOr always: \"C:\\NOVA\\nova.cmd\" setup\nPackage root: C:\\NOVA"
+      ]
+    }
+  ],
+  "required_models": [
+    "qwen2.5:7b",
+    "qwen2.5vl:7b"
+  ],
+  "operator_next_steps": [
+    "Package root: C:\\NOVA",
+    "Open a NEW terminal after PATH registration.",
+    "Then run: nova doctor",
+    "Or: \"C:\\NOVA\\nova.cmd\" doctor",
+    "nova on PATH"
+  ]
+}

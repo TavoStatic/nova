@@ -291,8 +291,8 @@ WIRING_SURFACES: tuple[WiringSurface, ...] = (
         ("pipeline", "read", "find"),
         ("active_work_tree_run_next",),
         (
-            "data_sources/data_connector/connector.py",
-            "data_sources/data_connector/pipeline.json",
+            "backpacks/edfi/pipeline/connector.py",
+            "backpacks/edfi/backpack.json",
             "scripts/run_edfi_profile.py",
             "scripts/run_edfi_explore.py",
         ),
@@ -345,6 +345,8 @@ WIRING_SURFACES: tuple[WiringSurface, ...] = (
             "services/validation_artifact_truth.py",
             "services/regression_profile_inventory.py",
             "services/regression_lanes.py",
+            "services/regression_status_projection.py",
+            "scripts/regression_lane_worker.py",
         ),
     ),
     WiringSurface(

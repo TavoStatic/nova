@@ -38,6 +38,9 @@ class TestControlStatusSurfacesService(unittest.TestCase):
             "work_tree_truth": {"status": "blocked_observing", "open_task_count": 4},
             "work_tree_truth_status": "blocked_observing",
             "work_tree_open_task_count": 4,
+            "observation_spine": {"ok": True, "status": "intervening", "finding_code": "REPEATED_UNCHANGED_PATH"},
+            "observation_intervening": True,
+            "observation_finding_code": "REPEATED_UNCHANGED_PATH",
             "grounded_self_report": {"huge": "payload"},
             "operator_attention_message": "ignore me",
         }
@@ -57,6 +60,9 @@ class TestControlStatusSurfacesService(unittest.TestCase):
         self.assertEqual((surfaces.get("work_tree_truth") or {}).get("open_task_count"), 4)
         self.assertEqual(surfaces.get("work_tree_truth_status"), "blocked_observing")
         self.assertEqual(surfaces.get("work_tree_open_task_count"), 4)
+        self.assertEqual((surfaces.get("observation_spine") or {}).get("finding_code"), "REPEATED_UNCHANGED_PATH")
+        self.assertTrue(surfaces.get("observation_intervening"))
+        self.assertEqual(surfaces.get("observation_finding_code"), "REPEATED_UNCHANGED_PATH")
         self.assertNotIn("grounded_self_report", surfaces)
         self.assertNotIn("operator_attention_message", surfaces)
 

@@ -16,6 +16,7 @@ the backpack wins. This allows backpacks to provide domain-specific
 pipelines (e.g., data_connector → edfi) when the district migrates to the backpack.
 """
 
+import json
 import logging
 from pathlib import Path
 from typing import Optional
@@ -58,6 +59,64 @@ class BackpackAwarePipelineRegistry(PipelineRegistry):
         self._nova_root = nova_root
         self._runtime_root = runtime_root
         self._backpack_manifest_cache: Optional[dict[str, PipelineManifest]] = None
+
+    def _uninstalled_pipeline_ids(self) -> set[str]:
+        """Legacy data_sources leftovers of an uninstalled backpack are not live lanes."""
+        ids: set[str] = set()
+        try:
+            from services.backpack_host.install_state import backpack_runtime_installed
+            from services.backpack_host.sanitize import backpack_touch_points
+        except Exception:
+            return ids
+
+        mark_dir = Path(self._runtime_root) / "backpacks" / "uninstalled"
+        if mark_dir.is_dir():
+            for path in mark_dir.glob("*.json"):
+                bid = path.stem
+                try:
+                    data = json.loads(path.read_text(encoding="utf-8"))
+                except Exception:
+                    data = {}
+                if isinstance(data, dict):
+                    bid = str(data.get("backpack_id") or bid).strip() or bid
+                    nested = data.get("touch_points") if isinstance(data.get("touch_points"), dict) else {}
+                    for pid in list(nested.get("pipeline_ids") or []):
+                        text = str(pid or "").strip()
+                        if text:
+                            ids.add(text)
+                if bid:
+                    ids.add(bid)
+                try:
+                    for pid in backpack_touch_points(
+                        bid, runtime_root=self._runtime_root, backpacks_root=self.backpacks_root
+                    ).get("pipeline_ids") or ():
+                        text = str(pid or "").strip()
+                        if text:
+                            ids.add(text)
+                except Exception:
+                    pass
+
+        if self.backpacks_root.exists():
+            for child in self.backpacks_root.iterdir():
+                if not child.is_dir():
+                    continue
+                if not (child / "backpack.json").exists() and not (child / "settings_schema.json").exists():
+                    continue
+                try:
+                    if backpack_runtime_installed(child.name, runtime_root=self._runtime_root):
+                        continue
+                except Exception:
+                    continue
+                try:
+                    for pid in backpack_touch_points(
+                        child.name, runtime_root=self._runtime_root, backpacks_root=self.backpacks_root
+                    ).get("pipeline_ids") or ():
+                        text = str(pid or "").strip()
+                        if text:
+                            ids.add(text)
+                except Exception:
+                    ids.add(child.name)
+        return {item for item in ids if item}
 
     # ── Backpack discovery ─────────────────────────────────────────────────
 
@@ -109,4 +168,6 @@ class BackpackAwarePipelineRegistry(PipelineRegistry):
         pipeline_manifests = {m.pipeline_id: m for m in super().discover(refresh=refresh)}
         backpack_manifests = {m.pipeline_id: m for m in self._discover_backpacks(refresh=refresh)}
         merged = {**pipeline_manifests, **backpack_manifests}
+        for pid in self._uninstalled_pipeline_ids():
+            merged.pop(pid, None)
         return sorted(merged.values(), key=lambda m: m.pipeline_id.lower())

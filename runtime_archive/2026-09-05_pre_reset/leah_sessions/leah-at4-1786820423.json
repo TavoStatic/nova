@@ -1,0 +1,23 @@
+{
+  "turns": [
+    {
+      "role": "user",
+      "text": "ping"
+    },
+    {
+      "role": "assistant",
+      "text": "Pong! How can I assist you today?"
+    },
+    {
+      "role": "user",
+      "text": "still there?"
+    },
+    {
+      "role": "assistant",
+      "text": "Pong! Still here and ready to help. What can I assist you with today?"
+    }
+  ],
+  "turn_ts": 1786820428.4943132,
+  "session_id": "leah-at4-1786820423",
+  "ts": 1786820425.9702282
+}

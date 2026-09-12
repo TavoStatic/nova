@@ -1,0 +1,229 @@
+{
+  "ts": "2026-06-16 21:58:09",
+  "channel": "http",
+  "session_id": "operator-27941edc",
+  "input_source": "http",
+  "user_input": "operator deck wire-check ping",
+  "intent": "",
+  "planner_decision": "llm_fallback",
+  "tool": "",
+  "tool_args": {},
+  "tool_result": "",
+  "final_answer": "Sure, I'll provide a concise summary of the current runtime state based on the available evidence:\n\n- **Guard System**: The guard process is actively supervising and no active failures are reported.\n- **Core State**: The core runtime is operating normally with no issues noted.\n- **WebUI State**: The web user interface (webui) appears to be functioning without any problems.\n\nThere are currently no high-risk conditions or restart pressures that require immediate operator attention. However, it's always a good practice to monitor the system for any unexpected changes or alerts.\n\nIf you need more detailed information or have specific concerns, feel free to ask!",
+  "reply_contract": "",
+  "reply_outcome": {
+    "kind": "llm_fallback",
+    "intent_evidence_packet": {
+      "schema": "nova.turn_intent_evidence",
+      "version": "1.0.0",
+      "trace_authority": "hypothesis_only",
+      "answer_authority": "available_evidence",
+      "current_turn": "operator deck wire-check ping",
+      "conversation_frame": {
+        "turn_count": 3,
+        "current_user_turn_is_latest": true,
+        "previous_assistant_turn": "Based on the operational evidence: - **Guard System**: The guard process is actively supervising the runtime health. - **Core State**: The core runtime is operating normally with no active failures reported. - **WebUI State**: The web user interface (webui) appears to be functioning without issues, as indicated by the 95% health score. - **Restart Pressure**: There are currently no indications of restart pressure or imminent need for a restart. **Highest Current Runtime Risk**: The highest current runtime risk is related to the 4 pending tasks in the scheduled tree. These tasks may indicate potential bottlenecks or issues that could affect system performance if not addressed promptly. The health score of 95% suggests overall good health, but close monitoring of these pending tasks is recommended. Please review and address any pending tasks to maintain optimal system operation.",
+        "last_assistant_repeats_earlier_assistant": false
+      },
+      "planner_frame": {
+        "decision": "",
+        "tool": "",
+        "semantic_tool_observation": {
+          "confidence": 0.0,
+          "status": "unavailable",
+          "duration_ms": 4221
+        }
+      },
+      "available_evidence": [
+        {
+          "name": "current_user_turn",
+          "available": true,
+          "chars": 29
+        },
+        {
+          "name": "recent_chat_context",
+          "available": true,
+          "chars": 618
+        },
+        {
+          "name": "session_state_context",
+          "available": false,
+          "chars": 0
+        },
+        {
+          "name": "learning_context",
+          "available": true,
+          "chars": 1909
+        },
+        {
+          "name": "confirmed_identity_context",
+          "available": true,
+          "chars": 235
+        },
+        {
+          "name": "operational_self_context",
+          "available": true,
+          "chars": 1346
+        },
+        {
+          "name": "tool_result",
+          "available": false,
+          "chars": 0
+        }
+      ],
+      "answer_contract": {
+        "infer_intent_from_turn_and_conversation": true,
+        "trace_is_route_authority": false,
+        "evidence_is_claim_authority": true,
+        "tool_route_requires_external_evidence_gap": true,
+        "conversation_can_be_complete_without_task": false,
+        "reply_form": "evidence_bound_reply"
+      }
+    },
+    "execution_profile": {
+      "total_time": 12012,
+      "planner_time": 4221,
+      "llm_time": 5113,
+      "tool_time": 0,
+      "post_time": 123,
+      "tool_selection_time": 0
+    }
+  },
+  "turn_acts": [],
+  "grounded": false,
+  "active_subject": "",
+  "continuation_used": false,
+  "route_trace": [
+    {
+      "stage": "input",
+      "outcome": "received",
+      "data": {
+        "channel": "http",
+        "input_source": "http"
+      }
+    },
+    {
+      "stage": "intent_understanding",
+      "outcome": "classified",
+      "detail": "runtime state and risks",
+      "data": {
+        "level": "sharing",
+        "domain": "system",
+        "confidence": 0.8,
+        "strategy": "accept_and_engage"
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "semantic_tool_intent",
+      "data": {
+        "duration_ms": 4221
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "tool_selection",
+      "data": {
+        "duration_ms": 4221
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "planner_call",
+      "data": {
+        "duration_ms": 4221
+      }
+    },
+    {
+      "stage": "memory_context",
+      "outcome": "used",
+      "data": {
+        "memory_used": true,
+        "identity_used": true,
+        "operational_identity_used": true,
+        "knowledge_used": false,
+        "memory_chars": 324,
+        "identity_chars": 235,
+        "operational_identity_chars": 1346,
+        "knowledge_chars": 0
+      }
+    },
+    {
+      "stage": "chat_context",
+      "outcome": "used",
+      "data": {
+        "chars": 618
+      }
+    },
+    {
+      "stage": "turn_intent_evidence",
+      "outcome": "attached",
+      "data": {
+        "trace_authority": "hypothesis_only",
+        "answer_authority": "available_evidence"
+      }
+    },
+    {
+      "stage": "llm_fallback",
+      "outcome": "invoked",
+      "data": {
+        "retrieved_chars": 3641
+      }
+    },
+    {
+      "stage": "llm_call",
+      "outcome": "started"
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "llm_call",
+      "data": {
+        "duration_ms": 5113
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "post_processing",
+      "data": {
+        "duration_ms": 123
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "execute_reply_sequence",
+      "data": {
+        "duration_ms": 12012
+      }
+    },
+    {
+      "stage": "timing_breakdown",
+      "outcome": "completed",
+      "detail": "execute_reply_sequence",
+      "data": {
+        "total_time": 12012,
+        "planner_time": 4221,
+        "llm_time": 5113,
+        "tool_time": 0,
+        "post_time": 123,
+        "tool_selection_time": 0
+      }
+    },
+    {
+      "stage": "finalize",
+      "outcome": "llm_fallback",
+      "data": {
+        "grounded": false
+      }
+    }
+  ],
+  "provider_used": "",
+  "provider_candidates": [],
+  "provider_family": "",
+  "route_summary": "input:received -> intent_understanding:classified -> memory_context:used -> chat_context:used -> turn_intent_evidence:attached -> llm_fallback:invoked -> llm_call:started -> finalize:llm_fallback"
+}

@@ -96,6 +96,7 @@ from services.nova_self_status import render_self_status as service_render_self_
 from services.control_work_trees import CONTROL_WORK_TREES_SERVICE
 from services.work_tree_pressure_snapshot import build_work_tree_pressure_snapshot
 from services.release_status import RELEASE_STATUS_SERVICE
+from services.regression_evidence import regression_outcome_failed as service_regression_outcome_failed
 from services.core_health_brief import build_core_health_brief as service_build_core_health_brief
 from services.core_health_brief import feed_core_health_brief_to_work_tree as service_feed_core_health_brief_to_work_tree
 from services.core_health_brief import render_core_health_brief as service_render_core_health_brief
@@ -3489,7 +3490,7 @@ def _self_report_local_status_payload(work_trees_payload: dict) -> dict:
     if memory_status and memory_status not in {"ok", "ready", "healthy"}:
         alerts.append(f"memory_health:{memory_status}")
     last_regression_status = str(pulse_payload.get("last_regression_status") or "").strip().upper()
-    if last_regression_status.startswith("FAIL") and not bool(pulse_payload.get("last_regression_stale")):
+    if service_regression_outcome_failed(last_regression_status) and not bool(pulse_payload.get("last_regression_stale")):
         alerts.append(f"regression:{last_regression_status}")
     work_tree_truth = _self_report_work_tree_truth(work_trees_payload)
     return {
@@ -3553,7 +3554,7 @@ def _apply_latest_regression_validation(pulse_payload: dict) -> dict:
         return payload
     payload["last_regression_status"] = "OK"
     payload["last_regression_stale"] = False
-    payload["last_regression_source"] = "scripts/run_regression.py"
+    payload["last_regression_source"] = str(marker.get("source") or "scripts/run_regression.py")
     payload["last_regression_at"] = str(marker.get("generated_at") or "")
     return payload
 

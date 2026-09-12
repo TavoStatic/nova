@@ -1,0 +1,29 @@
+{
+  "ts": 1786820301.8604085,
+  "stage": "staged",
+  "items": [
+    {
+      "name": "warehouse-label.txt",
+      "original_name": "warehouse-label.txt",
+      "path": "C:\\NOVA\\runtime\\leah_uploads\\leah-at2-1786820301\\20260815_135821_01_warehouse-label.txt",
+      "bytes": 55,
+      "mime": "text/plain",
+      "source": "upload",
+      "uploaded_at": 1786820301,
+      "session_id": "leah-at2-1786820301",
+      "user_id": "leah-at-tester"
+    }
+  ],
+  "session_id": "leah-at2-1786820301",
+  "turns": [
+    {
+      "role": "user",
+      "text": "What file did I stage, and what warehouse label is in it?"
+    },
+    {
+      "role": "assistant",
+      "text": "Uncertain without access to your Git repository or staging area."
+    }
+  ],
+  "turn_ts": 1786820307.519225
+}

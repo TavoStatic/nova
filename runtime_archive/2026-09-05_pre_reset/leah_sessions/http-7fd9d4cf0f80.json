@@ -1,0 +1,23 @@
+{
+  "turns": [
+    {
+      "role": "user",
+      "text": "how is your day going right now ?"
+    },
+    {
+      "role": "assistant",
+      "text": "As a runtime assistant, I don't experience days in the traditional sense. However, I'm ready to assist you with any questions or tasks you have! How can I help you today?"
+    },
+    {
+      "role": "user",
+      "text": "where does that leave us ?"
+    },
+    {
+      "role": "assistant",
+      "text": "You asked how my day was going, and I explained that as a runtime assistant, I don't experience days."
+    }
+  ],
+  "turn_ts": 1787186604.3444364,
+  "session_id": "http-7fd9d4cf0f80",
+  "ts": 1787186564.2764711
+}

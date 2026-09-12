@@ -1,0 +1,15 @@
+{
+  "turns": [
+    {
+      "role": "user",
+      "text": "hi nova"
+    },
+    {
+      "role": "assistant",
+      "text": "MODEL_REPLY"
+    }
+  ],
+  "turn_ts": 1787446769.0218709,
+  "session_id": "session-1",
+  "ts": 1786768608.810859
+}

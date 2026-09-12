@@ -294,7 +294,13 @@ def _guard_db_header(stage: str) -> None:
     if not _DB_PATH.exists():
         return
     try:
-        data = _DB_PATH.read_bytes()
+        # Only the header is needed: SQLite's magic lives in the first 16 bytes
+        # of a 100-byte header. Reading the entire file on every connection made
+        # inventory sweeps cost O(db_size * connections) — 6,000 full reads in
+        # one measured profile, 333s of pure disk I/O for a single status build.
+        file_size = _DB_PATH.stat().st_size
+        with _DB_PATH.open("rb") as handle:
+            data = handle.read(100)
     except Exception as exc:
         _append_db_guard("read_failed", f"stage={stage} err={exc}")
         return
@@ -306,7 +312,7 @@ def _guard_db_header(stage: str) -> None:
         has_bom = data.startswith(b"\xEF\xBB\xBF")
         _append_db_guard(
             "invalid_header",
-            f"stage={stage} size={len(data)} has_bom={has_bom} header={header_hex}",
+            f"stage={stage} size={file_size} has_bom={has_bom} header={header_hex}",
         )
 
 
@@ -1715,11 +1721,20 @@ def list_visual_trees(limit: int | None = None) -> list[dict]:
 def _list_visual_trees_locked(limit: int | None = None) -> list[dict]:
     _load_persisted_state()
     max_items = None if limit is None else max(1, int(limit))
+    # Refresh-once semantics: refresh every tree exactly once at the boundary,
+    # then build all branch payloads from that refreshed snapshot. The previous
+    # shape refreshed inside get_visual_tree_data per tree *per caller sweep*,
+    # and closure-inventory builds sweep repeatedly — multiplying refresh work
+    # by sweep count and persisting the same unchanged state over and over.
+    for tree in list(_TREES.values()):
+        if tree.status == TreeStatus.ARCHIVED:
+            continue
+        _refresh_tree_state(tree.tree_id, persist=True)
     ranked_payloads: list[tuple[tuple[object, ...], dict]] = []
     for tree in list(_TREES.values()):
         if tree.status == TreeStatus.ARCHIVED:
             continue
-        payload = get_visual_tree_data(tree.tree_id)
+        payload = _get_visual_tree_data_locked(tree.tree_id, refresh=False)
         if payload is None:
             continue
         counts = payload.get("counts") if isinstance(payload.get("counts"), dict) else {}
@@ -3133,6 +3148,18 @@ def _preview_next_autonomous_step(tree_id: str) -> dict | None:
     if tree is None:
         return None
 
+    # Observation must not pay the full pickup pipeline for trees with no
+    # actionable branch. Gate on cheap branch facts first; only compute options
+    # and trail alignment when at least one branch can actually act.
+    has_actionable_branch = any(
+        branch.status in (BranchStatus.READY, BranchStatus.ACTIVE)
+        and int(branch.open_stem_count or 0) > 0
+        and is_branch_ready(branch.branch_id)
+        for branch in _tree_branches(tree_id)
+    )
+    if not has_actionable_branch:
+        return None
+
     options = list_autonomous_options(tree_id)
     if options:
         opt = options[0]
@@ -3747,11 +3774,12 @@ def get_visual_tree_data(tree_id: str) -> dict | None:
         return _get_visual_tree_data_locked(tree_id)
 
 
-def _get_visual_tree_data_locked(tree_id: str) -> dict | None:
+def _get_visual_tree_data_locked(tree_id: str, *, refresh: bool = True) -> dict | None:
     tree = get_tree(tree_id)
     if tree is None:
         return None
-    _refresh_tree_state(tree_id, persist=False)
+    if refresh:
+        _refresh_tree_state(tree_id, persist=False)
     branches = _tree_branches(tree_id)
     tasks_snapshot = list(_TASKS.values())
     dependency_edges: list[dict] = []

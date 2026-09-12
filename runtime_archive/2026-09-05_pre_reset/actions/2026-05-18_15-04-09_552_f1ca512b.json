@@ -1,0 +1,124 @@
+{
+  "ts": "2026-05-18 15:04:09",
+  "channel": "http",
+  "session_id": "codex_intent_drift_probe_1779134645",
+  "input_source": "typed",
+  "user_input": "give you an update on the progress we are having creating you",
+  "intent": "chat",
+  "planner_decision": "conversation_intake",
+  "tool": "",
+  "tool_args": {
+    "query": "give you an update on the progress we are having creating you"
+  },
+  "tool_result": "",
+  "final_answer": "Go ahead. I'm listening.",
+  "reply_contract": "conversation_intake.ready",
+  "reply_outcome": {
+    "intent": "conversation_intake",
+    "kind": "ready_for_user_input",
+    "reply_contract": "conversation_intake.ready",
+    "execution_profile": {
+      "total_time": 0,
+      "planner_time": 0,
+      "llm_time": 0,
+      "tool_time": 0,
+      "post_time": 0,
+      "tool_selection_time": 0
+    }
+  },
+  "turn_acts": [
+    "answer_to_prompt"
+  ],
+  "grounded": false,
+  "active_subject": "",
+  "continuation_used": false,
+  "route_trace": [
+    {
+      "stage": "input",
+      "outcome": "received",
+      "data": {
+        "channel": "http",
+        "input_source": "typed",
+        "intent": "chat"
+      }
+    },
+    {
+      "stage": "direction_analysis",
+      "outcome": "general_chat",
+      "data": {
+        "effective_query": "give you an update on the progress we are having creating you",
+        "turn_acts": "answer_to_prompt",
+        "identity_focused": false,
+        "bypass_pattern_routes": false
+      }
+    },
+    {
+      "stage": "conversation_intake",
+      "outcome": "prompt_answer",
+      "data": {
+        "turn_acts": "answer_to_prompt"
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "execute_reply_sequence",
+      "data": {
+        "duration_ms": 0
+      }
+    },
+    {
+      "stage": "timing_breakdown",
+      "outcome": "completed",
+      "detail": "execute_reply_sequence",
+      "data": {
+        "total_time": 0,
+        "planner_time": 0,
+        "llm_time": 0,
+        "tool_time": 0,
+        "post_time": 0,
+        "tool_selection_time": 0
+      }
+    },
+    {
+      "stage": "finalize",
+      "outcome": "conversation_intake",
+      "data": {
+        "grounded": false
+      }
+    }
+  ],
+  "provider_used": "",
+  "provider_candidates": [],
+  "provider_family": "",
+  "routing_decision": {
+    "input_preview": "give you an update on the progress we are having creating you",
+    "entry_point": "http",
+    "intent_phase": {
+      "phase": "intent",
+      "handled": false,
+      "rule_name": "",
+      "intent": "",
+      "action": "",
+      "priority": null,
+      "candidates": []
+    },
+    "handle_phase": {
+      "phase": "handle",
+      "handled": false,
+      "rule_name": "",
+      "intent": "",
+      "action": "",
+      "priority": null,
+      "candidates": []
+    },
+    "final_owner": "core_legacy",
+    "allowed_bypass": false,
+    "allowed_bypass_category": "",
+    "bypass_reason": "",
+    "reply_contract": "conversation_intake.ready",
+    "reply_outcome_kind": "ready_for_user_input",
+    "turn_acts": []
+  },
+  "route_summary": "input:received -> direction_analysis:general_chat -> conversation_intake:prompt_answer -> finalize:conversation_intake"
+}

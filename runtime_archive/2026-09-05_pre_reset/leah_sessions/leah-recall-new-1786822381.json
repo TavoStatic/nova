@@ -1,0 +1,15 @@
+{
+  "turns": [
+    {
+      "role": "user",
+      "text": "what did I tell you about the orchard lot code?"
+    },
+    {
+      "role": "assistant",
+      "text": "You mentioned that the orchard lot code is associated with a specific section of land used for fruit cultivation, but you didn't provide any detailed information about its exact"
+    }
+  ],
+  "turn_ts": 1786822387.620189,
+  "session_id": "leah-recall-new-1786822381",
+  "ts": 1786822381.9201353
+}

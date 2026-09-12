@@ -1,0 +1,36 @@
+{
+  "before": {
+    "total": 792,
+    "complete": 532,
+    "archived": 257,
+    "live": 8
+  },
+  "after": {
+    "total": 792,
+    "complete": 78,
+    "archived": 711,
+    "live": 8
+  },
+  "archived_count": 454,
+  "elapsed_sec": 1.05,
+  "sample_actions": [
+    {
+      "action": "archived",
+      "tree_id": "tree_f7f132c4",
+      "branch_id": "branch_6b494364",
+      "reason": "Superseded complete signal branch archived after canonical retention."
+    },
+    {
+      "action": "archived",
+      "tree_id": "tree_f7f132c4",
+      "branch_id": "branch_05f22b44",
+      "reason": "Superseded complete signal branch archived after canonical retention."
+    },
+    {
+      "action": "archived",
+      "tree_id": "tree_f7f132c4",
+      "branch_id": "branch_3132072d",
+      "reason": "Superseded complete signal branch archived after canonical retention."
+    }
+  ]
+}

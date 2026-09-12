@@ -1,0 +1,20 @@
+test_apply_regression_status_payload_preserves_failed_tests (tests.test_regression_evidence.TestRegressionEvidence.test_apply_regression_status_payload_preserves_failed_tests) ... ok
+test_prior_day_failed_regression_is_stale (tests.test_regression_evidence.TestRegressionEvidence.test_prior_day_failed_regression_is_stale) ... ok
+test_same_day_failed_regression_is_not_stale (tests.test_regression_evidence.TestRegressionEvidence.test_same_day_failed_regression_is_not_stale) ... ok
+test_build_hard_fail_report_fails_on_gap_count_not_only_semantic_gaps (tests.test_thorough_audit_verdict.TestThoroughAuditVerdict.test_build_hard_fail_report_fails_on_gap_count_not_only_semantic_gaps) ... ok
+test_build_hard_fail_report_passes_when_closure_ok (tests.test_thorough_audit_verdict.TestThoroughAuditVerdict.test_build_hard_fail_report_passes_when_closure_ok) ... ok
+test_live_closure_hard_fail_when_gap_roots_without_semantic_live_gaps (tests.test_thorough_audit_verdict.TestThoroughAuditVerdict.test_live_closure_hard_fail_when_gap_roots_without_semantic_live_gaps) ... ok
+test_concurrent_ensure_creates_one_worker_lease (tests.test_pipeline_worker_supervision.TestPipelineWorkerSupervision.test_concurrent_ensure_creates_one_worker_lease) ... ok
+test_conflicting_live_workers_surface_duplicate_ownership (tests.test_pipeline_worker_supervision.TestPipelineWorkerSupervision.test_conflicting_live_workers_surface_duplicate_ownership) ... ok
+test_dead_lease_allows_single_replacement (tests.test_pipeline_worker_supervision.TestPipelineWorkerSupervision.test_dead_lease_allows_single_replacement) ... ok
+test_heartbeat_write_is_atomic (tests.test_pipeline_worker_supervision.TestPipelineWorkerSupervision.test_heartbeat_write_is_atomic) ... ok
+test_live_matching_lease_prevents_spawn (tests.test_pipeline_worker_supervision.TestPipelineWorkerSupervision.test_live_matching_lease_prevents_spawn) ... ok
+test_stale_heartbeat_is_not_supervised (tests.test_pipeline_worker_supervision.TestPipelineWorkerSupervision.test_stale_heartbeat_is_not_supervised) ... ok
+test_summarize_pipeline_workers_reports_missing (tests.test_pipeline_worker_supervision.TestPipelineWorkerSupervision.test_summarize_pipeline_workers_reports_missing) ... ok
+test_write_and_read_fresh_heartbeat (tests.test_pipeline_worker_supervision.TestPipelineWorkerSupervision.test_write_and_read_fresh_heartbeat) ... ok
+test_run_active_work_tree_cycle_resyncs_core_thinning_before_execution (tests.test_autonomy_maintenance.TestAutonomyMaintenance.test_run_active_work_tree_cycle_resyncs_core_thinning_before_execution) ... ok
+
+----------------------------------------------------------------------
+Ran 15 tests in 0.257s
+
+OK

@@ -1,0 +1,229 @@
+{
+  "ts": "2026-05-28 15:54:38",
+  "channel": "http",
+  "session_id": "d4d5b73c1b17caac",
+  "input_source": "typed",
+  "user_input": "what do you know about your creator ?",
+  "intent": "",
+  "planner_decision": "llm_fallback",
+  "tool": "",
+  "tool_args": {},
+  "tool_result": "",
+  "final_answer": "My creator, Gustavo Uribe, is a developer who has worked on my architecture and training data. He's also known by his nickname, \"Gus.\" I have some information about him through my internal identity evidence.\n\nAccording to my knowledge, Gustavo Uribe is the person responsible for designing and building me as a conversational AI model. He has likely contributed to my development and fine-tuning, but I don't have more detailed information about his personal life or background.\n\nIf you'd like to know more about Gustavo Uribe, I can try to provide some general information about him based on publicly available sources. However, please note that my knowledge is limited to what's been incorporated into my training data, and I may not have access to the most up-to-date or personal information about him.",
+  "reply_contract": "",
+  "reply_outcome": {
+    "kind": "llm_fallback",
+    "intent_evidence_packet": {
+      "schema": "nova.turn_intent_evidence",
+      "version": "1.0.0",
+      "trace_authority": "hypothesis_only",
+      "answer_authority": "available_evidence",
+      "current_turn": "what do you know about your creator ?",
+      "conversation_frame": {
+        "turn_count": 15,
+        "current_user_turn_is_latest": true,
+        "previous_assistant_turn": "I'd love to continue our conversation and explore topics that interest you. Since we just started, I can suggest a few ideas. We could discuss your goals or interests, and I'll do my best to provide helpful information or insights. Alternatively, if you're feeling stuck, I can offer some conversation starters or questions to get us going. If you're curious about me, Nova, I'd be happy to share more about my capabilities, limitations, or what makes me tick. I've got a lot of internal knowledge and evidence that I could share with you! What sounds appealing to you?",
+        "last_assistant_repeats_earlier_assistant": false
+      },
+      "planner_frame": {
+        "decision": "",
+        "tool": "",
+        "semantic_tool_observation": {
+          "tool": "none",
+          "confidence": 0.0,
+          "evidence_need": "confirmed_identity",
+          "answer_target": "nova_self",
+          "source": "llm_intent",
+          "status": "none",
+          "duration_ms": 1269
+        }
+      },
+      "available_evidence": [
+        {
+          "name": "current_user_turn",
+          "available": true,
+          "chars": 37
+        },
+        {
+          "name": "recent_chat_context",
+          "available": true,
+          "chars": 944
+        },
+        {
+          "name": "session_state_context",
+          "available": false,
+          "chars": 0
+        },
+        {
+          "name": "learning_context",
+          "available": true,
+          "chars": 1583
+        },
+        {
+          "name": "confirmed_identity_context",
+          "available": true,
+          "chars": 235
+        },
+        {
+          "name": "operational_self_context",
+          "available": true,
+          "chars": 1346
+        },
+        {
+          "name": "tool_result",
+          "available": false,
+          "chars": 0
+        }
+      ],
+      "answer_contract": {
+        "infer_intent_from_turn_and_conversation": true,
+        "trace_is_route_authority": false,
+        "evidence_is_claim_authority": true,
+        "tool_route_requires_external_evidence_gap": true,
+        "conversation_can_be_complete_without_task": false,
+        "reply_form": "evidence_bound_reply"
+      }
+    },
+    "execution_profile": {
+      "total_time": 4390,
+      "planner_time": 1269,
+      "llm_time": 2953,
+      "tool_time": 0,
+      "post_time": 0,
+      "tool_selection_time": 0
+    }
+  },
+  "turn_acts": [],
+  "grounded": false,
+  "active_subject": "",
+  "continuation_used": false,
+  "route_trace": [
+    {
+      "stage": "input",
+      "outcome": "received",
+      "data": {
+        "channel": "http",
+        "input_source": "typed"
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "semantic_tool_intent",
+      "data": {
+        "duration_ms": 1269
+      }
+    },
+    {
+      "stage": "action_planner",
+      "outcome": "semantic_none",
+      "data": {
+        "confidence": 0.0
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "tool_selection",
+      "data": {
+        "duration_ms": 1269
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "planner_call",
+      "data": {
+        "duration_ms": 1269
+      }
+    },
+    {
+      "stage": "memory_context",
+      "outcome": "used",
+      "data": {
+        "memory_used": false,
+        "identity_used": true,
+        "operational_identity_used": true,
+        "knowledge_used": false,
+        "memory_chars": 0,
+        "identity_chars": 235,
+        "operational_identity_chars": 1346,
+        "knowledge_chars": 0
+      }
+    },
+    {
+      "stage": "chat_context",
+      "outcome": "used",
+      "data": {
+        "chars": 944
+      }
+    },
+    {
+      "stage": "turn_intent_evidence",
+      "outcome": "attached",
+      "data": {
+        "trace_authority": "hypothesis_only",
+        "answer_authority": "available_evidence"
+      }
+    },
+    {
+      "stage": "llm_fallback",
+      "outcome": "invoked",
+      "data": {
+        "retrieved_chars": 3194
+      }
+    },
+    {
+      "stage": "llm_call",
+      "outcome": "started"
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "llm_call",
+      "data": {
+        "duration_ms": 2953
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "post_processing",
+      "data": {
+        "duration_ms": 0
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "execute_reply_sequence",
+      "data": {
+        "duration_ms": 4390
+      }
+    },
+    {
+      "stage": "timing_breakdown",
+      "outcome": "completed",
+      "detail": "execute_reply_sequence",
+      "data": {
+        "total_time": 4390,
+        "planner_time": 1269,
+        "llm_time": 2953,
+        "tool_time": 0,
+        "post_time": 0,
+        "tool_selection_time": 0
+      }
+    },
+    {
+      "stage": "finalize",
+      "outcome": "llm_fallback",
+      "data": {
+        "grounded": false
+      }
+    }
+  ],
+  "provider_used": "",
+  "provider_candidates": [],
+  "provider_family": "",
+  "route_summary": "input:received -> action_planner:semantic_none -> memory_context:used -> chat_context:used -> turn_intent_evidence:attached -> llm_fallback:invoked -> llm_call:started -> finalize:llm_fallback"
+}

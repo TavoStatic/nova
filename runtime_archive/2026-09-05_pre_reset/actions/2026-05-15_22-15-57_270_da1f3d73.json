@@ -1,0 +1,64 @@
+{
+  "ts": "2026-05-15 22:15:52",
+  "channel": "http",
+  "session_id": "bf77534b2b5bb4a7",
+  "input_source": "typed",
+  "user_input": "are your sure all your system are a ok?",
+  "intent": "chat",
+  "planner_decision": "grounded_self_report",
+  "tool": "",
+  "tool_args": {},
+  "tool_result": "",
+  "final_answer": "Live internals: health_score 100/100; Work Tree is clear with 1 open task(s). Current branch: HTTP grounded self-report needs active work continuity.\nRuntime: core=running, guard=running, webui=running.\nOllama: chat_ready=True, status=ok, model=.\nMemory: status=ok, enabled=True.\nRelease: readiness=source-changed-after-build, source=changed-after-build, artifact_stale=True.\nWhat needs attention: Release package is stale behind live source and needs rebuild verification.\nSource: live control status and Work Tree.",
+  "reply_contract": "runtime.self_report.live_status",
+  "reply_outcome": {
+    "source": "live_control_status_and_work_tree",
+    "tool": "control_status"
+  },
+  "turn_acts": [
+    "command"
+  ],
+  "grounded": true,
+  "active_subject": "operational_status:runtime_truth",
+  "continuation_used": false,
+  "route_trace": [
+    {
+      "stage": "input",
+      "outcome": "received",
+      "data": {
+        "channel": "http",
+        "input_source": "typed",
+        "intent": "chat"
+      }
+    },
+    {
+      "stage": "direction_analysis",
+      "outcome": "explicit_command",
+      "data": {
+        "effective_query": "are your sure all your system are a ok?",
+        "turn_acts": "command",
+        "identity_focused": false,
+        "bypass_pattern_routes": false
+      }
+    },
+    {
+      "stage": "grounded_self_report",
+      "outcome": "control_status",
+      "detail": "live_status_reply",
+      "data": {
+        "tool": "control_status"
+      }
+    },
+    {
+      "stage": "finalize",
+      "outcome": "grounded_self_report",
+      "data": {
+        "grounded": true
+      }
+    }
+  ],
+  "provider_used": "",
+  "provider_candidates": [],
+  "provider_family": "",
+  "route_summary": "input:received -> direction_analysis:explicit_command -> grounded_self_report:control_status -> finalize:grounded_self_report"
+}

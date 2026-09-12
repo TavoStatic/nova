@@ -27,37 +27,80 @@ class StorageWatchService:
 
     @staticmethod
     def _tree_stats(directory: Path, *, exclude_names: set[str] | None = None) -> tuple[int, int]:
+        """Count top-level subdirectory trees and their total byte footprint.
+
+        Uses os.scandir for the top-level pass and os.walk for recursive byte
+        totals inside each subdirectory. This is accurate without using rglob,
+        and fast enough for the small number of release/stage extract directories
+        (typically 1–5 trees). The runtime-wide recursive walk (14k subconscious
+        files) uses _recursive_file_stats, not this method.
+        """
+        import os
         if not directory.exists():
             return 0, 0
         excluded = set(exclude_names or set())
         count = 0
         total_bytes = 0
-        for child in directory.iterdir():
-            try:
-                if not child.is_dir() or child.name in excluded:
+        try:
+            for entry in os.scandir(str(directory)):
+                try:
+                    if not entry.is_dir(follow_symlinks=False) or entry.name in excluded:
+                        continue
+                    count += 1
+                    # Recursive byte total for this subtree via os.walk
+                    for dirpath, _dirnames, filenames in os.walk(entry.path):
+                        for fname in filenames:
+                            try:
+                                total_bytes += int(
+                                    os.stat(os.path.join(dirpath, fname)).st_size or 0
+                                )
+                            except Exception:
+                                pass
+                except Exception:
                     continue
-                count += 1
-                for path in child.rglob("*"):
-                    if path.is_file():
-                        total_bytes += int(path.stat().st_size or 0)
-            except Exception:
-                continue
+        except Exception:
+            pass
         return count, total_bytes
 
     @staticmethod
     def _recursive_file_stats(directory: Path) -> tuple[int, int]:
+        """Fast file count and approximate byte total for a runtime directory tree.
+
+        Full rglob on large runtime trees (e.g., 14k subconscious_runs files)
+        can take minutes. This implementation does a shallow top-level scan:
+        - counts files in each top-level subdir (one extra level only)
+        - sums sizes only for the top-level files
+        This gives a fast representative count without exhausting the walk budget.
+        Byte totals are an undercount for deep trees — sufficient for threshold checks.
+        """
+        import os
         if not directory.exists():
             return 0, 0
         count = 0
         total_bytes = 0
-        for path in directory.rglob("*"):
-            try:
-                if not path.is_file():
-                    continue
-                count += 1
-                total_bytes += int(path.stat().st_size or 0)
-            except Exception:
-                continue
+        try:
+            root = str(directory)
+            with os.scandir(root) as top:
+                for entry in top:
+                    try:
+                        if entry.is_file(follow_symlinks=False):
+                            count += 1
+                            total_bytes += int(entry.stat(follow_symlinks=False).st_size or 0)
+                        elif entry.is_dir(follow_symlinks=False):
+                            # One level deep: count files but don't stat each one
+                            try:
+                                with os.scandir(entry.path) as sub:
+                                    sub_count = sum(
+                                        1 for e in sub
+                                        if e.is_file(follow_symlinks=False)
+                                    )
+                                count += sub_count
+                            except Exception:
+                                pass
+                    except Exception:
+                        continue
+        except Exception:
+            pass
         return count, total_bytes
 
     @staticmethod

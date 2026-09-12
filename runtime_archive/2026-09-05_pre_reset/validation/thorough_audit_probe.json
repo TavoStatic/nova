@@ -1,0 +1,165 @@
+{
+  "sections": {
+    "e2e_wiring": {
+      "ok": true,
+      "failed_checks": [],
+      "check_count": 83
+    },
+    "live_closure": {
+      "gap_count": 33,
+      "gap_roots": [
+        "runtime_control",
+        "autonomy_orchestrator",
+        "policy_gates",
+        "session_identity_auth",
+        "memory_identity",
+        "identity_profile_answers",
+        "supervisor_fulfillment",
+        "reply_quality_contracts",
+        "web_search",
+        "retrieval_knowledge",
+        "tool_registry_policy",
+        "tool_evidence",
+        "action_ledger",
+        "subconscious",
+        "patch_pipeline",
+        "codegen_pipeline",
+        "installer_packaging",
+        "data_pipelines",
+        "edfi_core",
+        "data_lane_edfi_bisd",
+        "voice",
+        "tts_audio_output",
+        "vision",
+        "http_continuity",
+        "test_ecosystem",
+        "diagnostics_hygiene",
+        "safety_envelope",
+        "storage_release_pressure",
+        "metrics_ops_journal",
+        "core_steward_reflection",
+        "source_root_inventory",
+        "edfi_core",
+        "data_lane_edfi_bisd"
+      ],
+      "live_gaps": []
+    },
+    "mission": {
+      "action": "hold",
+      "status": "validation_required",
+      "truth_ready": false,
+      "green_cycle": false,
+      "truth_blockers": [
+        "release_truth_stale",
+        "generated_queue_untested"
+      ],
+      "green_blockers": [
+        {
+          "owner": "release",
+          "code": "release_truth_stale",
+          "detail": "",
+          "source": "release_runtime_truth",
+          "remediation": {
+            "action": "active_work_tree_run_next",
+            "tools": [
+              "release_rebuild_verify"
+            ]
+          }
+        },
+        {
+          "owner": "generated_queue",
+          "code": "generated_queue_untested",
+          "detail": "1 untested generated queue item(s)",
+          "source": "generated_work_queue",
+          "remediation": {
+            "action": "generated_queue_run_next"
+          }
+        }
+      ],
+      "owner_blockers": [
+        {
+          "owner": "release",
+          "code": "release_truth_stale",
+          "detail": "",
+          "source": "release_runtime_truth"
+        },
+        {
+          "owner": "generated_queue",
+          "code": "generated_queue_untested",
+          "detail": "1 untested generated queue item(s)",
+          "source": "generated_work_queue"
+        },
+        {
+          "owner": "core_thinning",
+          "code": "core_http_thinning_pressure",
+          "detail": "8 core/http thinning work order(s) ready",
+          "source": "core_thinning"
+        }
+      ],
+      "validation_fresh": true,
+      "regression_current": true,
+      "release_truth_current": false,
+      "active_work_evidence_current": false,
+      "active_work_candidate_count": 1,
+      "active_executable_count": 1,
+      "executable_branches": [
+        {
+          "branch_id": "branch_3a7b9ee0",
+          "title": "Map HTTP extraction boundary: operator",
+          "task_id": "task_e46e9078",
+          "task_title": "Map HTTP extraction boundary: operator: operator spans 87 lines across 4 related functions inside nova_http.py; map this cluster before extraction.",
+          "status": "active",
+          "owner": "",
+          "age_min": 0,
+          "recommended_tool": "core_thinning",
+          "tree_id": "tree_c7936c7a",
+          "tree_title": "Core Thinning",
+          "executable": true
+        }
+      ],
+      "remediation_checks": [
+        {
+          "tool": "release_rebuild_verify",
+          "hold_allows": true,
+          "active_work_blocked": false
+        },
+        {
+          "tool": "core_thinning",
+          "hold_allows": true,
+          "active_work_blocked": false
+        }
+      ],
+      "autonomy_blocked": false,
+      "autonomy_block_reasons": []
+    },
+    "regression": {
+      "status_label": "OK",
+      "last_regression_stale": false,
+      "failed_lane": "",
+      "failed_tests": [],
+      "failure_active": false,
+      "evidence_stale_by_date": false
+    },
+    "core_thinning": {
+      "order_count": 8,
+      "executable_count": 6,
+      "witnessed": true,
+      "sync_executable_count": 6,
+      "pressure_without_executable": false
+    },
+    "source_profiles": {
+      "module_count": 125,
+      "tests_run": 1056,
+      "failures": 0,
+      "errors": 0,
+      "failed_ids": [],
+      "env_only_failed_ids": [],
+      "code_failed_ids": [],
+      "ok": true,
+      "code_ok": true
+    }
+  },
+  "semantic_live_gap_count": 0,
+  "mission_autonomy_blocked": false,
+  "hard_fail": false
+}

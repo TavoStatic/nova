@@ -1,0 +1,292 @@
+{
+  "ts": "2026-08-11 19:28:36",
+  "channel": "cli",
+  "session_id": "",
+  "input_source": "typed",
+  "user_input": "yes please guide me",
+  "intent": "",
+  "planner_decision": "llm_fallback",
+  "tool": "self_status",
+  "tool_args": {},
+  "tool_result": "Nova Self Status - 2026-08-11 19:28:40\nLevel: failed\nSummary: Nova has a failure signal that needs attention.\nSignals:\n- [FAILURE] Latest regression is not green: FAILED (next: run regression)\n- [WARNING] Local code changed since last accepted state: 169 changed file(s): .vscode/, AGENTS.md, EdFi_Backpack_v2_Plan.docx, EdFi_Backpack_v2_Plan_new.docx, README.md, +164 more. Diff +21936/-7189; latest regression is FAILED. (next: git diff --stat)",
+  "final_answer": "Certainly! Let's address the issues step-by-step:\n\n1. **Run Regression Tests**: Since the latest regression test failed, we need to rerun these tests to identify any new issues that might have arisen from recent code changes.\n\n2. **Review Code Changes**: There were 169 files affected since the last accepted state. We should review these changes to understand what modifications were made and ensure they align with our project requirements.\n\n3. **Apply Necessary Fixes**: Once we've identified any issues or inconsistencies, apply the necessary fixes to resolve them.\n\n4. **Re-run Regression Tests After Fixes**: After making the required changes, rerun the regression tests to verify that everything is working as expected.\n\nWould you like to start by running the regression tests? If so, I can guide you through the process.",
+  "reply_contract": "",
+  "reply_outcome": {
+    "kind": "llm_fallback",
+    "intent_evidence_packet": {
+      "schema": "nova.turn_intent_evidence",
+      "version": "1.0.0",
+      "trace_authority": "hypothesis_only",
+      "answer_authority": "available_evidence",
+      "current_turn": "yes please guide me",
+      "conversation_frame": {
+        "turn_count": 25,
+        "current_user_turn_is_latest": true,
+        "previous_assistant_turn": "Nova has identified some issues that require attention, specifically with the latest regression test failing and local code changes since the last accepted state. While I'm equipped to handle these situations, resolving them might involve running specific tools or processes. To proceed, we need to determine which steps are necessary: 1. Re-run the regression tests. 2. Review and possibly revert the recent code changes. Would you like me to guide you through these steps?",
+        "last_assistant_repeats_earlier_assistant": false
+      },
+      "planner_frame": {
+        "decision": "tool_evidence_for_fallback",
+        "tool": "self_status",
+        "semantic_tool_observation": {
+          "tool": "self_status",
+          "confidence": 0.0,
+          "evidence_need": "live_self_status",
+          "answer_target": "nova_live_state",
+          "source": "llm_intent",
+          "status": "tool_result_available"
+        }
+      },
+      "available_evidence": [
+        {
+          "name": "current_user_turn",
+          "available": true,
+          "chars": 19
+        },
+        {
+          "name": "recent_chat_context",
+          "available": true,
+          "chars": 1054
+        },
+        {
+          "name": "session_state_context",
+          "available": false,
+          "chars": 0
+        },
+        {
+          "name": "learning_context",
+          "available": true,
+          "chars": 1583
+        },
+        {
+          "name": "confirmed_identity_context",
+          "available": true,
+          "chars": 235
+        },
+        {
+          "name": "operational_self_context",
+          "available": true,
+          "chars": 1346
+        },
+        {
+          "name": "tool_result",
+          "available": true,
+          "chars": 446
+        }
+      ],
+      "answer_contract": {
+        "infer_intent_from_turn_and_conversation": true,
+        "trace_is_route_authority": false,
+        "evidence_is_claim_authority": true,
+        "tool_route_requires_external_evidence_gap": true,
+        "conversation_can_be_complete_without_task": false,
+        "reply_form": "evidence_bound_reply"
+      }
+    },
+    "deferred_tool": {
+      "tool": "self_status",
+      "reply_contract": "self_status.current",
+      "grounded": true
+    },
+    "execution_profile": {
+      "total_time": 9761,
+      "planner_time": 1684,
+      "llm_time": 6005,
+      "tool_time": 0,
+      "post_time": 0,
+      "tool_selection_time": 0
+    }
+  },
+  "turn_acts": [],
+  "grounded": true,
+  "active_subject": "",
+  "continuation_used": false,
+  "route_trace": [
+    {
+      "stage": "input",
+      "outcome": "received",
+      "data": {
+        "channel": "cli",
+        "input_source": "typed"
+      }
+    },
+    {
+      "stage": "intent_understanding",
+      "outcome": "classified",
+      "detail": "guidance on resolving technical issues",
+      "data": {
+        "level": "commanding",
+        "domain": "system",
+        "confidence": 0.8,
+        "strategy": "fulfill"
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "semantic_tool_intent",
+      "data": {
+        "duration_ms": 1294
+      }
+    },
+    {
+      "stage": "action_planner",
+      "outcome": "semantic_intent",
+      "data": {
+        "tool": "self_status",
+        "confidence": 0.0
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "tool_selection",
+      "data": {
+        "duration_ms": 1294
+      }
+    },
+    {
+      "stage": "action_planner",
+      "outcome": "run_tool",
+      "data": {
+        "tool": "self_status"
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "tool_response",
+      "data": {
+        "duration_ms": 389,
+        "tool": "self_status"
+      }
+    },
+    {
+      "stage": "tool_execution",
+      "outcome": "ok",
+      "data": {
+        "tool": "self_status",
+        "grounded": true
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "planner",
+      "data": {
+        "duration_ms": 1684
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "planner_call",
+      "data": {
+        "duration_ms": 1684
+      }
+    },
+    {
+      "stage": "action_planner",
+      "outcome": "tool_evidence_for_fallback",
+      "data": {
+        "tool": "self_status"
+      }
+    },
+    {
+      "stage": "memory_context",
+      "outcome": "used",
+      "data": {
+        "memory_used": false,
+        "identity_used": true,
+        "operational_identity_used": true,
+        "knowledge_used": false,
+        "memory_chars": 0,
+        "identity_chars": 235,
+        "operational_identity_chars": 1346,
+        "knowledge_chars": 0
+      }
+    },
+    {
+      "stage": "chat_context",
+      "outcome": "used",
+      "data": {
+        "chars": 1054
+      }
+    },
+    {
+      "stage": "turn_intent_evidence",
+      "outcome": "attached",
+      "data": {
+        "trace_authority": "hypothesis_only",
+        "answer_authority": "available_evidence"
+      }
+    },
+    {
+      "stage": "llm_fallback",
+      "outcome": "invoked",
+      "data": {
+        "retrieved_chars": 4227
+      }
+    },
+    {
+      "stage": "llm_call",
+      "outcome": "started"
+    },
+    {
+      "stage": "llm_fallback",
+      "outcome": "invoked",
+      "data": {
+        "retrieved_chars": 4227
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "llm_call",
+      "data": {
+        "duration_ms": 6005
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "post_processing",
+      "data": {
+        "duration_ms": 0
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "execute_reply_sequence",
+      "data": {
+        "duration_ms": 9761
+      }
+    },
+    {
+      "stage": "timing_breakdown",
+      "outcome": "completed",
+      "detail": "execute_reply_sequence",
+      "data": {
+        "total_time": 9761,
+        "planner_time": 1684,
+        "llm_time": 6005,
+        "tool_time": 0,
+        "post_time": 0,
+        "tool_selection_time": 0
+      }
+    },
+    {
+      "stage": "finalize",
+      "outcome": "llm_fallback",
+      "data": {
+        "grounded": true,
+        "tool": "self_status"
+      }
+    }
+  ],
+  "provider_used": "self_status",
+  "provider_candidates": [],
+  "provider_family": "self_status",
+  "route_summary": "input:received -> intent_understanding:classified -> action_planner:semantic_intent -> action_planner:run_tool -> tool_execution:ok -> action_planner:tool_evidence_for_fallback -> memory_context:used -> chat_context:used -> turn_intent_evidence:attached -> llm_fallback:invoked -> llm_call:started -> llm_fallback:invoked -> finalize:llm_fallback"
+}

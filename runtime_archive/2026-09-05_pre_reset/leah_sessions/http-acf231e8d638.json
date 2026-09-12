@@ -1,0 +1,11 @@
+{
+  "turns": [
+    {
+      "role": "user",
+      "text": "how is your day going right now ?"
+    }
+  ],
+  "turn_ts": 1787099998.6353226,
+  "session_id": "http-acf231e8d638",
+  "ts": 1787099998.6370554
+}

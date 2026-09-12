@@ -1,0 +1,140 @@
+{
+  "ts": "2026-08-11 19:33:54",
+  "channel": "cli",
+  "session_id": "",
+  "input_source": "typed",
+  "user_input": "I am applying a fix as we chat  let me know if its helping or making things worst for you ..",
+  "intent": "",
+  "planner_decision": "work_tree",
+  "tool": "work_tree_execute",
+  "tool_args": {
+    "query": "I am applying a fix as we chat  let me know if its helping or making things worst for you .."
+  },
+  "tool_result": "",
+  "final_answer": "No active Work Tree is selected.",
+  "reply_contract": "",
+  "reply_outcome": {
+    "execution_profile": {
+      "total_time": 5194,
+      "planner_time": 3260,
+      "llm_time": 0,
+      "tool_time": 0,
+      "post_time": 0,
+      "tool_selection_time": 3260
+    }
+  },
+  "turn_acts": [],
+  "grounded": false,
+  "active_subject": "",
+  "continuation_used": false,
+  "route_trace": [
+    {
+      "stage": "input",
+      "outcome": "received",
+      "data": {
+        "channel": "cli",
+        "input_source": "typed"
+      }
+    },
+    {
+      "stage": "intent_understanding",
+      "outcome": "classified",
+      "detail": "fixing issues",
+      "data": {
+        "level": "sharing",
+        "domain": "system",
+        "confidence": 0.8,
+        "strategy": "accept_and_engage"
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "semantic_tool_intent",
+      "data": {
+        "duration_ms": 3260
+      }
+    },
+    {
+      "stage": "action_planner",
+      "outcome": "semantic_intent",
+      "detail": "The user is asking for guidance on resolving issues, and the assistant has suggested running regression tests as a step. Since this involves executing specific actions within the Work Tree, a tool action is required.",
+      "data": {
+        "tool": "work_tree_execute",
+        "confidence": 0.7
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "tool_selection",
+      "data": {
+        "duration_ms": 3260
+      }
+    },
+    {
+      "stage": "action_planner",
+      "outcome": "work_tree",
+      "data": {
+        "tool": "work_tree_execute"
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "planner",
+      "data": {
+        "duration_ms": 3260
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "planner_call",
+      "data": {
+        "duration_ms": 3260
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "execute_reply_sequence",
+      "data": {
+        "duration_ms": 5194
+      }
+    },
+    {
+      "stage": "timing_breakdown",
+      "outcome": "completed",
+      "detail": "execute_reply_sequence",
+      "data": {
+        "total_time": 5194,
+        "planner_time": 3260,
+        "llm_time": 0,
+        "tool_time": 0,
+        "post_time": 0,
+        "tool_selection_time": 3260
+      }
+    },
+    {
+      "stage": "finalize",
+      "outcome": "work_tree",
+      "data": {
+        "grounded": false,
+        "tool": "work_tree_execute"
+      }
+    }
+  ],
+  "provider_used": "work_tree_execute",
+  "provider_candidates": [],
+  "provider_family": "work_tree_execute",
+  "routing_decision": {
+    "final_owner": "work_tree",
+    "planner_owner": "work_tree",
+    "planner_action": "no_active_tree",
+    "planner_tool": "work_tree_execute",
+    "reply_outcome_kind": "",
+    "turn_acts": []
+  },
+  "route_summary": "input:received -> intent_understanding:classified -> action_planner:semantic_intent -> action_planner:work_tree -> finalize:work_tree"
+}

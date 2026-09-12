@@ -1,0 +1,22 @@
+{
+  "backpack_id": "reports",
+  "status": "uninstalled",
+  "connection_id": "",
+  "uninstalled_by": "autonomy_maintenance",
+  "uninstalled_at": "",
+  "touch_points": {
+    "pipeline_ids": [
+      "reports"
+    ],
+    "signal_sources": [],
+    "fusion_scan": false,
+    "runtime_decls": [
+      "runtime/views",
+      "runtime/views/render_audit.jsonl"
+    ],
+    "extra_runtime_paths": [
+      "C:\\NOVA\\runtime\\views",
+      "C:\\NOVA\\runtime\\views\\render_audit.jsonl"
+    ]
+  }
+}

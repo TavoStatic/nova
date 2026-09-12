@@ -7,6 +7,8 @@ import uuid
 
 import work_tree
 from services.core_thinning import (
+    CORE_THINNING_SOURCE_TYPE,
+    CORE_THINNING_WORK_CLASS,
     CORE_THINNING_WORK_IDENTITY,
     build_core_thinning_brief,
     build_core_thinning_owner_verdict,
@@ -161,6 +163,104 @@ class TestCoreThinningService(unittest.TestCase):
             [],
         )
 
+    def test_build_brief_ignores_lock_wrapped_http_delegation_shims(self):
+        """Threading-lock-wrapped single delegations must not count as HTTP surface mass.
+
+        with SESSION_LOCK: return service.method(...) is threading infrastructure,
+        not extraction pressure. Only context managers whose name contains a known
+        threading-primitive token (lock/mutex/rlock) are recognised as shims.
+        Semantic context managers (db.transaction, open, etc.) must still generate
+        extraction pressure.
+        """
+        sample_http = _validation_tmp_root() / f"nova_http_lock_{uuid.uuid4().hex}.py"
+        sample_http.write_text(
+            "\n".join(
+                [
+                    "_SESSION_LOCK = None  # mock",
+                    "_db = None  # mock",
+                    "",
+                    # These three use a real lock name — should be invisible.
+                    "def _get_last_session_turn(session_id):",
+                    "    with _SESSION_LOCK:",
+                    "        return SESSION_STORE.get_last_turn(session_id, session_turns=SESSION_TURNS)",
+                    "",
+                    "def _session_summaries(limit=60):",
+                    "    with _SESSION_LOCK:",
+                    "        return SESSION_STORE.summaries(",
+                    "            session_turns=SESSION_TURNS,",
+                    "            session_owners=SESSION_OWNERS,",
+                    "            limit=limit,",
+                    "        )",
+                    "",
+                    "def _prune_chat_sessions():",
+                    "    with _SESSION_LOCK:",
+                    "        SESSION_STORE.prune(session_turns=SESSION_TURNS, now_fn=None)",
+                ]
+            ),
+            encoding="utf-8",
+        )
+        try:
+            brief = build_core_thinning_brief(sample_http)
+        finally:
+            sample_http.unlink(missing_ok=True)
+
+        self.assertTrue(brief.get("ok"))
+        self.assertEqual(brief.get("http_surface_candidate_count"), 0,
+                         "Threading-lock-wrapped single delegations must not generate HTTP surface pressure")
+        self.assertEqual(
+            [item for item in list(brief.get("orders") or []) if item.get("kind") == "http_surface_candidate"],
+            [],
+        )
+
+    def test_build_brief_preserves_pressure_for_semantic_context_manager_wrappers(self):
+        """Non-lock context managers (transactions, file handles) must still generate pressure.
+
+        Only threading primitives (lock/mutex/rlock names) are silent. A with block
+        whose context manager is named 'transaction', 'conn', 'cursor', etc. is
+        semantically meaningful and must remain visible to the extraction scanner.
+        """
+        sample_http = _validation_tmp_root() / f"nova_http_txn_{uuid.uuid4().hex}.py"
+        # Functions need enough body mass to clear the 40-line threshold.
+        # Each gets 10 lines of body so total_function_lines >= 40.
+        body_lines = ["    x = 1" for _ in range(9)]
+        sample_http.write_text(
+            "\n".join(
+                [
+                    "_db = None  # mock",
+                    "",
+                    # These use a non-lock context manager — must stay visible.
+                    "def _session_write(session_id):",
+                    "    with _db.transaction():",
+                    *["        x = 1" for _ in range(9)],
+                    "        SESSION_STORE.write(session_id)",
+                    "",
+                    "def _session_read(session_id):",
+                    "    with _db.transaction():",
+                    *["        x = 1" for _ in range(9)],
+                    "        return SESSION_STORE.read(session_id)",
+                    "",
+                    "def _session_delete(session_id):",
+                    "    with _db.transaction():",
+                    *["        x = 1" for _ in range(9)],
+                    "        SESSION_STORE.delete(session_id)",
+                    "",
+                    "def _session_expire(session_id):",
+                    "    with _db.transaction():",
+                    *["        x = 1" for _ in range(9)],
+                    "        SESSION_STORE.expire(session_id)",
+                ]
+            ),
+            encoding="utf-8",
+        )
+        try:
+            brief = build_core_thinning_brief(sample_http)
+        finally:
+            sample_http.unlink(missing_ok=True)
+
+        self.assertTrue(brief.get("ok"))
+        self.assertEqual(brief.get("http_surface_candidate_count"), 1,
+                         "Semantic context manager wrappers must still appear as HTTP surface pressure")
+
     def test_owner_verdict_surfaces_lifecycle_gap_when_pressure_is_not_executable(self):
         verdict = build_core_thinning_owner_verdict(
             {
@@ -306,23 +406,19 @@ class TestCoreThinningService(unittest.TestCase):
             if str((task.meta or {}).get("kind") or "") == "http_surface_extract"
         ]
         self.assertTrue(extract_tasks)
-        self.assertEqual(
-            str(getattr(getattr(extract_tasks[0], "status", None), "value", getattr(extract_tasks[0], "status", ""))).lower(),
-            "complete",
-        )
-        self.assertEqual(
+        extract_status = str(
+            getattr(getattr(extract_tasks[0], "status", None), "value", getattr(extract_tasks[0], "status", ""))
+        ).lower()
+        self.assertNotIn(extract_status, {"complete", "dropped"})
+        self.assertNotEqual(
             str((extract_tasks[0].meta or {}).get("recurring_finding_completion_action") or ""),
             "blocked_http_extraction",
         )
-        self.assertEqual(
-            sum(
-                1
-                for task in extract_tasks
-                if str(getattr(getattr(task, "status", None), "value", getattr(task, "status", ""))).lower()
-                not in {"complete", "dropped"}
-            ),
-            0,
+        self.assertNotEqual(
+            str((extract_tasks[0].meta or {}).get("recurring_finding_satisfaction_status") or ""),
+            "satisfied",
         )
+        self.assertGreaterEqual(int(second.get("executable_count") or 0), 1)
         self.assertFalse((summarize_feed_pressure(pressure_count=2, feed_result=second) or {}).get("lifecycle_gap"))
 
     def test_feed_does_not_recreate_mapping_when_theme_already_closed(self):
@@ -569,6 +665,48 @@ class TestCoreThinningService(unittest.TestCase):
         self.assertEqual(task.meta.get("recurring_finding_completion_action"), "removed_unused_wrapper")
         self.assertTrue(task.meta.get("recurring_finding_satisfaction_fingerprint"))
 
+    def test_stamp_does_not_satisfy_blocked_extract_or_miss(self):
+        from services.core_thinning import stamp_core_thinning_task_satisfaction
+
+        extract = type("Task", (), {})()
+        extract.meta = {
+            "kind": "http_surface_extract",
+            "target": {"file": "nova_http.py", "name": "http:chat_sessions", "block": "http_surface_extract"},
+        }
+        stamp_core_thinning_task_satisfaction(
+            extract,
+            {
+                "ok": False,
+                "blocked": True,
+                "action": "blocked_http_extraction",
+                "reason": "http_extraction_not_implemented",
+            },
+        )
+        self.assertNotEqual(extract.meta.get("recurring_finding_satisfaction_status"), "satisfied")
+        self.assertNotEqual(extract.meta.get("recurring_finding_completion_action"), "blocked_http_extraction")
+
+        miss = type("Task", (), {})()
+        miss.meta = {
+            "kind": "wrapper_candidate",
+            "target": {"file": "nova_core.py", "name": "demo_wrapper", "wrapped_call": "service_demo"},
+        }
+        stamp_core_thinning_task_satisfaction(
+            miss,
+            {"ok": False, "reason": "callers_still_present"},
+        )
+        self.assertNotEqual(miss.meta.get("recurring_finding_satisfaction_status"), "satisfied")
+
+        witness = type("Task", (), {})()
+        witness.meta = {
+            "kind": "http_surface_candidate",
+            "target": {"file": "nova_http.py", "name": "http:chat_sessions"},
+        }
+        stamp_core_thinning_task_satisfaction(
+            witness,
+            {"ok": True, "verified": False, "action": "witnessed_http_extraction_boundary"},
+        )
+        self.assertEqual(witness.meta.get("recurring_finding_completion_action"), "witnessed_http_extraction_boundary")
+
     def test_feed_brief_creates_deduped_core_thinning_tree(self):
         sample = _validation_tmp_root() / f"core_thinning_feed_{uuid.uuid4().hex}.py"
         sample.write_text("def wrapper():\n    return service_demo()\n", encoding="utf-8")
@@ -578,17 +716,28 @@ class TestCoreThinningService(unittest.TestCase):
             sample.unlink(missing_ok=True)
 
         first = feed_core_thinning_brief_to_work_tree(brief, work_tree_module=work_tree)
+        tree = work_tree.get_tree(str(first.get("tree_id")))
+        self.assertIsNotNone(tree)
+        finding = next(
+            branch
+            for branch in work_tree.list_tree_branches(tree.tree_id)
+            if branch.branch_id != tree.root_branch_id
+        )
+        finding.work_class = None
+        finding.source_type = None
+        work_tree.touch_branch(finding.branch_id)
         second = feed_core_thinning_brief_to_work_tree(brief, work_tree_module=work_tree)
+        live = work_tree.get_branch(finding.branch_id)
 
         self.assertTrue(first.get("ok"))
         self.assertTrue(first.get("created"))
         self.assertEqual(first.get("added_count"), 1)
         self.assertEqual(second.get("added_count"), 0)
         self.assertEqual(second.get("deduped_count"), 1)
-
-        tree = work_tree.get_tree(str(first.get("tree_id")))
-        self.assertIsNotNone(tree)
         self.assertEqual((tree.meta or {}).get("work_identity_key"), CORE_THINNING_WORK_IDENTITY)
+        self.assertIsNotNone(live)
+        self.assertEqual(str(live.work_class or ""), CORE_THINNING_WORK_CLASS)
+        self.assertEqual(str(live.source_type or ""), CORE_THINNING_SOURCE_TYPE)
         task = work_tree.list_tree_tasks(tree.tree_id)[0]
         self.assertEqual(task.meta.get("scope"), "single_block_only")
         self.assertEqual((task.meta.get("target") or {}).get("function"), "wrapper")
@@ -1027,7 +1176,7 @@ class TestCoreThinningService(unittest.TestCase):
 
         self.assertTrue(result.get("ok"))
         self.assertTrue(result.get("scope_ok"))
-        self.assertTrue(result.get("verified"))
+        self.assertFalse(result.get("verified"))
         self.assertEqual(result.get("action"), "witnessed_http_extraction_boundary")
         self.assertEqual(sample_http.read_text(encoding="utf-8"), source)
         sample_http.unlink(missing_ok=True)
@@ -1071,6 +1220,40 @@ class TestCoreThinningService(unittest.TestCase):
         self.assertEqual(second.get("reopened_count"), 1)
         self.assertEqual(second.get("satisfied_active_count"), 0)
         self.assertEqual(second.get("executable_count"), 1)
+
+    def test_feed_retires_finding_when_scan_no_longer_reports_it(self):
+        sample = _validation_tmp_root() / f"core_thinning_retire_{uuid.uuid4().hex}.py"
+        sample.write_text("def wrapper():\n    return service_demo()\n", encoding="utf-8")
+        try:
+            brief = build_core_thinning_brief(sample)
+            first = feed_core_thinning_brief_to_work_tree(brief, work_tree_module=work_tree)
+            tree_id = str(first.get("tree_id"))
+            finding = next(
+                branch
+                for branch in work_tree.list_tree_branches(tree_id)
+                if branch.branch_id != work_tree.get_tree(tree_id).root_branch_id
+            )
+            work_tree.add_task_to_branch(finding.branch_id, work_tree.SIGNAL_STILL_PRESENT_REEXAMINE_TITLE)
+            sample.write_text("def remaining():\n    return 1\n", encoding="utf-8")
+            second = feed_core_thinning_brief_to_work_tree(
+                build_core_thinning_brief(sample),
+                work_tree_module=work_tree,
+            )
+        finally:
+            sample.unlink(missing_ok=True)
+
+        self.assertGreaterEqual(int(second.get("retired_count") or 0), 1)
+        live = work_tree.get_branch(finding.branch_id)
+        self.assertIsNotNone(live)
+        self.assertEqual(str(live.resolution_state or ""), "resolved")
+        open_titles = [
+            task.title
+            for task in work_tree.list_branch_tasks(finding.branch_id)
+            if str(getattr(getattr(task, "status", None), "value", getattr(task, "status", ""))).lower()
+            not in {"complete", "dropped"}
+        ]
+        self.assertEqual(open_titles, [])
+        self.assertNotEqual(str(getattr(live.status, "value", live.status)), "active")
 
 
 if __name__ == "__main__":

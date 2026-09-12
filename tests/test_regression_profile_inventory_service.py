@@ -86,12 +86,10 @@ class TestRegressionProfileInventoryService(unittest.TestCase):
         self.assertEqual(payload["profile_gap_count"], 0)
         self.assertEqual(payload["profile_drift_count"], 0)
 
-    def test_edfi_tests_map_to_separate_source_profile_lanes(self):
+    def test_uninstalled_edfi_core_is_not_in_active_source_profile(self):
         payload = build_regression_profile_inventory_payload(test_lanes=SOURCE_PROFILE_LANES)
         by_module = {row["module"]: list(row.get("lanes") or []) for row in payload.get("tests") or []}
 
-        core_lane = "source_edfi_core"
-        lane_lane = "source_data_lane_data_connector"
         core_modules = {
             "tests.test_edfi_core",
             "tests.test_edfi_core_lifecycle_demo",
@@ -103,9 +101,11 @@ class TestRegressionProfileInventoryService(unittest.TestCase):
             "tests.test_edfi_resources",
         }
         for module in core_modules:
-            self.assertIn(core_lane, by_module.get(module, []), module)
-        self.assertIn(lane_lane, by_module.get("tests.test_data_connector_pipeline", []))
-        self.assertNotIn(lane_lane, by_module.get("tests.test_edfi_core", []))
+            row = next(item for item in payload["tests"] if item["module"] == module)
+            self.assertEqual(row["profile_class"], "removed_install_surface")
+            self.assertEqual(row["lanes"], [])
+        self.assertNotIn("source_edfi_core", SOURCE_PROFILE_LANES)
+        self.assertNotIn("source_data_lane_data_connector", SOURCE_PROFILE_LANES)
 
 
 if __name__ == "__main__":

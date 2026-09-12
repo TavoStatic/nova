@@ -59,6 +59,7 @@ This file tells you who owns what. The ledger tells you what is current.
 ### Subsystem Truth
 
 - `AUTONOMY_AND_MISSION.md`: Mission, orchestrator, gate, Work Tree, pressure, outbox, and promoted mill skip/remint/stop/pulse (sip-execute not promoted)
+- `services/gatekeeper.py`: evidence-backed observation of existing gate and rail decisions; non-authoritative, no policy mutation or automatic retirement
 - `TEST_ECOSYSTEM.md`: test discovery, lane membership, generated tests, and validation truth
 - `KIDNEY_SYSTEM.md`: cleanup and retention
 - `SOCK_SYSTEM.md`: hardware/model compatibility and mill capacity lease (standing vs temporary sip)

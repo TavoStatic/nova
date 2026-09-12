@@ -1,0 +1,37 @@
+{
+  "generated_at": "2026-07-13 09:41:02",
+  "date": "2026-07-13",
+  "status": "FAILED",
+  "lanes": [
+    "unit",
+    "behavior",
+    "integration"
+  ],
+  "returncode": 1,
+  "detail": "unit lane",
+  "failed_lane": "unit",
+  "failed_tests": [
+    "tests.test_autonomy_maintenance.TestAutonomyMaintenance.test_local_dependency_probe_closes_core_gate_roots_without_http",
+    "tests.test_autonomy_orchestrator_service.TestAutonomyOrchestratorService.test_evaluate_next_action_allows_core_thinning_under_green_mission_hold",
+    "tests.test_autonomy_orchestrator_service.TestAutonomyOrchestratorService.test_evaluate_next_action_allows_core_thinning_when_release_drift_blocks_green",
+    "tests.test_autonomy_orchestrator_service.TestAutonomyOrchestratorService.test_evaluate_next_action_runs_generated_queue_to_clear_own_truth_blocker",
+    "tests.test_run_regression.TestRunRegressionScript.test_main_fails_when_validation_artifacts_disagree_after_green_lanes",
+    "tests.test_run_regression.TestRunRegressionScript.test_main_runs_selected_lane"
+  ],
+  "source": "scripts/run_regression.py",
+  "test_profile_inventory_ok": true,
+  "test_profile_profile_gap_count": 0,
+  "test_profile_profile_drift_count": 0,
+  "test_profile_profile_attention_count": 3,
+  "test_profile_curated_target_count": 225,
+  "test_profile_curated_test_file_count": 210,
+  "test_profile_root_test_file_count": 213,
+  "test_profile_all_test_file_count": 225,
+  "test_profile_source_observed_count": 0,
+  "test_profile_outside_curated_count": 0,
+  "test_profile_install_profile_inactive_count": 0,
+  "test_profile_install_profile_optional_inactive_count": 3,
+  "test_profile_unclassified_count": 0,
+  "test_profile_gap_tests": [],
+  "test_profile_profile_drift_tests": []
+}

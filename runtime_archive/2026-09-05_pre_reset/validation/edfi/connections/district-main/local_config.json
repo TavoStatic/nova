@@ -1,0 +1,7 @@
+{
+  "connection_id": "district-main",
+  "base_url": "https://odsprod.tea.texas.gov/odsedfiapi2026",
+  "client_id": "demo-client-id",
+  "client_secret": "demo-client-secret",
+  "district_lea_id": "31901"
+}

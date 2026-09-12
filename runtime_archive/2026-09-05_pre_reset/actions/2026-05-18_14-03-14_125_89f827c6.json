@@ -1,0 +1,193 @@
+{
+  "ts": "2026-05-18 14:03:13",
+  "channel": "http",
+  "session_id": "codex_live_intent_probe_1779130980",
+  "input_source": "typed",
+  "user_input": "what are your capabilities ?",
+  "intent": "chat",
+  "planner_decision": "run_tool",
+  "tool": "capability_inventory",
+  "tool_args": {
+    "args": []
+  },
+  "tool_result": "Current capabilities:\n\u2022 runtime_core: Nova runs as a local runtime with core state, heartbeat, HTTP, CLI, and service surfaces\n\u2022 guard_system: Nova has a guard process and maintenance loop that supervise runtime health\n\u2022 work_tree: Nova can organize internal work into trees, branches, tasks, tool evidence, and blocker state\n\u2022 health_monitoring: Nova can inspect health score, dependency state, Work Tree truth, release readiness, and runtime alerts\n\u2022 memory_systems: Nova has memory and identity plumbing for continuity when enabled and valid\n\u2022 task_routing: Nova routes user and maintenance intent through command, supervisor, planner, and tool-dispatch paths\n\u2022 maintenance_loops: Nova can run recurring maintenance cycles for generated work, Work Tree intake, release checks, and cleanup observation\n\u2022 release_verification: Nova can inspect release readiness, validation outcomes, rebuild state, and promotion judgment\n\u2022 subconscious_priority: Nova can read subconscious priority output and route generated pressure into Work Tree review\n\u2022 autonomy_handling: Nova has autonomy advisory, execution gate, action ledger, and active Work Tree execution machinery\n\u2022 operator_outbox: Nova can publish operator-facing notices when autonomous work is blocked or needs help\n\u2022 web_access: Nova can retrieve information from allowed websites\n\u2022 file_read: Nova can read files within allowed root directory\n\u2022 file_search: Nova can search files for keywords\n\u2022 system_checks: Nova can run local system health checks and diagnostics\n\u2022 queue_status: Nova can inspect its standing generated work queue and report the next open regression item\n\u2022 vision: Nova can analyze screenshots or camera input\n\u2022 speech_to_text: Nova can transcribe voice input\n\u2022 text_to_speech: Nova can speak responses\n",
+  "final_answer": "Current capabilities:\n\u2022 runtime_core: Nova runs as a local runtime with core state, heartbeat, HTTP, CLI, and service surfaces\n\u2022 guard_system: Nova has a guard process and maintenance loop that supervise runtime health\n\u2022 work_tree: Nova can organize internal work into trees, branches, tasks, tool evidence, and blocker state\n\u2022 health_monitoring: Nova can inspect health score, dependency state, Work Tree truth, release readiness, and runtime alerts\n\u2022 memory_systems: Nova has memory and identity plumbing for continuity when enabled and valid\n\u2022 task_routing: Nova routes user and maintenance intent through command, supervisor, planner, and tool-dispatch paths\n\u2022 maintenance_loops: Nova can run recurring maintenance cycles for generated work, Work Tree intake, release checks, and cleanup observation\n\u2022 release_verification: Nova can inspect release readiness, validation outcomes, rebuild state, and promotion judgment\n\u2022 subconscious_priority: Nova can read subconscious priority output and route generated pressure into Work Tree review\n\u2022 autonomy_handling: Nova has autonomy advisory, execution gate, action ledger, and active Work Tree execution machinery\n\u2022 operator_outbox: Nova can publish operator-facing notices when autonomous work is blocked or needs help\n\u2022 web_access: Nova can retrieve information from allowed websites\n\u2022 file_read: Nova can read files within allowed root directory\n\u2022 file_search: Nova can search files for keywords\n\u2022 system_checks: Nova can run local system health checks and diagnostics\n\u2022 queue_status: Nova can inspect its standing generated work queue and report the next open regression item\n\u2022 vision: Nova can analyze screenshots or camera input\n\u2022 speech_to_text: Nova can transcribe voice input\n\u2022 text_to_speech: Nova can speak responses",
+  "reply_contract": "capability_inventory.current",
+  "reply_outcome": {
+    "intent": "capability_inventory",
+    "kind": "current",
+    "reply_contract": "capability_inventory.current",
+    "execution_profile": {
+      "total_time": 596,
+      "planner_time": 595,
+      "llm_time": 0,
+      "tool_time": 0,
+      "post_time": 0,
+      "tool_selection_time": 595
+    }
+  },
+  "turn_acts": [
+    "ask",
+    "continue_thread"
+  ],
+  "grounded": true,
+  "active_subject": "capability_inventory:runtime",
+  "continuation_used": false,
+  "route_trace": [
+    {
+      "stage": "input",
+      "outcome": "received",
+      "data": {
+        "channel": "http",
+        "input_source": "typed",
+        "intent": "chat"
+      }
+    },
+    {
+      "stage": "direction_analysis",
+      "outcome": "general_chat",
+      "data": {
+        "effective_query": "what are your capabilities ?",
+        "turn_acts": "ask,continue_thread",
+        "identity_focused": false,
+        "bypass_pattern_routes": false
+      }
+    },
+    {
+      "stage": "truth_hierarchy",
+      "outcome": "skipped",
+      "detail": "content_owned_chat_disabled"
+    },
+    {
+      "stage": "hard_answer",
+      "outcome": "skipped",
+      "detail": "content_owned_chat_disabled"
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "semantic_tool_intent",
+      "data": {
+        "duration_ms": 595
+      }
+    },
+    {
+      "stage": "action_planner",
+      "outcome": "semantic_intent",
+      "data": {
+        "tool": "capability_inventory",
+        "confidence": 0.5
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "tool_selection",
+      "data": {
+        "duration_ms": 595
+      }
+    },
+    {
+      "stage": "action_planner",
+      "outcome": "run_tool",
+      "data": {
+        "tool": "capability_inventory"
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "tool_response",
+      "data": {
+        "duration_ms": 0,
+        "tool": "capability_inventory"
+      }
+    },
+    {
+      "stage": "tool_execution",
+      "outcome": "ok",
+      "data": {
+        "tool": "capability_inventory",
+        "grounded": true
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "planner",
+      "data": {
+        "duration_ms": 595
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "planner_call",
+      "data": {
+        "duration_ms": 595
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "execute_reply_sequence",
+      "data": {
+        "duration_ms": 596
+      }
+    },
+    {
+      "stage": "timing_breakdown",
+      "outcome": "completed",
+      "detail": "execute_reply_sequence",
+      "data": {
+        "total_time": 596,
+        "planner_time": 595,
+        "llm_time": 0,
+        "tool_time": 0,
+        "post_time": 0,
+        "tool_selection_time": 595
+      }
+    },
+    {
+      "stage": "finalize",
+      "outcome": "run_tool",
+      "data": {
+        "grounded": true,
+        "tool": "capability_inventory"
+      }
+    }
+  ],
+  "provider_used": "",
+  "provider_candidates": [],
+  "provider_family": "",
+  "routing_decision": {
+    "input_preview": "what are your capabilities ?",
+    "entry_point": "http",
+    "intent_phase": {
+      "phase": "intent",
+      "handled": false,
+      "rule_name": "",
+      "intent": "",
+      "action": "",
+      "priority": null,
+      "candidates": []
+    },
+    "handle_phase": {
+      "phase": "handle",
+      "handled": false,
+      "rule_name": "",
+      "intent": "",
+      "action": "",
+      "priority": null,
+      "candidates": []
+    },
+    "final_owner": "fallback",
+    "allowed_bypass": false,
+    "allowed_bypass_category": "",
+    "bypass_reason": "",
+    "reply_contract": "capability_inventory.current",
+    "reply_outcome_kind": "current",
+    "turn_acts": []
+  },
+  "route_summary": "input:received -> direction_analysis:general_chat -> truth_hierarchy:skipped -> hard_answer:skipped -> action_planner:semantic_intent -> action_planner:run_tool -> tool_execution:ok -> finalize:run_tool"
+}

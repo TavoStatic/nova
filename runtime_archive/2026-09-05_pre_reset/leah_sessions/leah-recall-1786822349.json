@@ -1,0 +1,23 @@
+{
+  "turns": [
+    {
+      "role": "user",
+      "text": "remember this: the orchard lot code is CEDAR-2206"
+    },
+    {
+      "role": "assistant",
+      "text": "Pinned memory saved: the orchard lot code is CEDAR-2206"
+    },
+    {
+      "role": "user",
+      "text": "what did I tell you about the orchard lot code?"
+    },
+    {
+      "role": "assistant",
+      "text": "You told me to remember that the orchard lot code is CEDAR-2206."
+    }
+  ],
+  "turn_ts": 1786822368.8983212,
+  "session_id": "leah-recall-1786822349",
+  "ts": 1786822349.3022325
+}

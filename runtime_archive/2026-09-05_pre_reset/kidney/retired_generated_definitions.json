@@ -1,0 +1,62 @@
+{
+  "subconscious_repeated-weak-pressure-family_ambiguous-clarification.json": {
+    "file": "subconscious_repeated-weak-pressure-family_ambiguous-clarification.json",
+    "fingerprint": "3aad42c6db544c1a450784ec5c73808b69fa4696",
+    "family_id": "repeated-weak-pressure-family",
+    "variation_id": "ambiguous_clarification",
+    "label": "phase1_auto",
+    "source": "subconscious_generated",
+    "category": "quarantined_waste",
+    "action": "delete",
+    "reason": "quarantine_age_limit",
+    "retired_at": "2026-09-04 23:47:11",
+    "retired_at_ts": 1788583631.636304,
+    "source_path": "C:\\NOVA\\runtime\\test_sessions\\quarantine\\subconscious_repeated-weak-pressure-family_ambiguous-clarification.json",
+    "target_path": ""
+  },
+  "subconscious_repeated-weak-pressure-family_casual-checkin.json": {
+    "file": "subconscious_repeated-weak-pressure-family_casual-checkin.json",
+    "fingerprint": "87606aa3dfadbfb6ece57fbfafe9a2f2b287be9a",
+    "family_id": "repeated-weak-pressure-family",
+    "variation_id": "casual_checkin",
+    "label": "phase1_auto",
+    "source": "subconscious_generated",
+    "category": "quarantined_waste",
+    "action": "delete",
+    "reason": "quarantine_age_limit",
+    "retired_at": "2026-09-04 23:47:11",
+    "retired_at_ts": 1788583631.6404672,
+    "source_path": "C:\\NOVA\\runtime\\test_sessions\\quarantine\\subconscious_repeated-weak-pressure-family_casual-checkin.json",
+    "target_path": ""
+  },
+  "subconscious_repeated-weak-pressure-family_plain-followup.json": {
+    "file": "subconscious_repeated-weak-pressure-family_plain-followup.json",
+    "fingerprint": "b43d5c5ec35c63a18e5065164bc9b4df7e1c6fb7",
+    "family_id": "repeated-weak-pressure-family",
+    "variation_id": "plain_followup",
+    "label": "phase1_auto",
+    "source": "subconscious_generated",
+    "category": "quarantined_waste",
+    "action": "delete",
+    "reason": "quarantine_age_limit",
+    "retired_at": "2026-09-04 23:47:11",
+    "retired_at_ts": 1788583631.654434,
+    "source_path": "C:\\NOVA\\runtime\\test_sessions\\quarantine\\subconscious_repeated-weak-pressure-family_plain-followup.json",
+    "target_path": ""
+  },
+  "subconscious_repeated-weak-pressure-family_soft-smalltalk-then-ambiguity.json": {
+    "file": "subconscious_repeated-weak-pressure-family_soft-smalltalk-then-ambiguity.json",
+    "fingerprint": "80f8ef9d5d8ab9cee75378f26f68155c686fd8f4",
+    "family_id": "repeated-weak-pressure-family",
+    "variation_id": "soft_smalltalk_then_ambiguity",
+    "label": "phase1_auto",
+    "source": "subconscious_generated",
+    "category": "quarantined_waste",
+    "action": "delete",
+    "reason": "quarantine_age_limit",
+    "retired_at": "2026-09-05 00:17:42",
+    "retired_at_ts": 1788585462.7942362,
+    "source_path": "C:\\NOVA\\runtime\\test_sessions\\quarantine\\subconscious_repeated-weak-pressure-family_soft-smalltalk-then-ambiguity.json",
+    "target_path": ""
+  }
+}

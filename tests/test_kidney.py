@@ -97,8 +97,9 @@ class TestKidney(unittest.TestCase):
         if not path.exists():
             path.write_text("x", encoding="utf-8")
         ts = time.time() - age_seconds
-        path.touch()
-        Path(path).chmod(0o666)
+        if path.is_file():
+            path.touch()
+            Path(path).chmod(0o666)
         import os
         os.utime(path, (ts, ts))
 
@@ -391,6 +392,178 @@ class TestKidney(unittest.TestCase):
         self.assertEqual(summary.get("cleanup_snapshot_retained_count"), 24)
         retained = sorted(p for p in kidney.KIDNEY_SNAPSHOTS_DIR.iterdir() if p.is_file())
         self.assertEqual(len(retained), 24)
+
+    def test_scan_candidates_ages_out_release_extract_trees(self):
+        self._write_policy({"enabled": True, "mode": "observe", "release_extract_max_age_days": 3})
+        extract = kidney.RUNTIME_DIR / "validation" / "release" / "_manual_pkg_probe"
+        payload = extract / "payload.bin"
+        logs = kidney.RUNTIME_DIR / "validation" / "release" / "release_command_logs"
+        record = kidney.RUNTIME_DIR / "validation" / "release" / "latest_release_validation.json"
+        payload.parent.mkdir(parents=True, exist_ok=True)
+        payload.write_bytes(b"x" * 64)
+        logs.mkdir(parents=True, exist_ok=True)
+        (logs / "run.log").write_text("kept", encoding="utf-8")
+        record.write_text("{}", encoding="utf-8")
+        self._touch_old(extract, 5 * 86400)
+
+        candidates = kidney.scan_candidates()
+        extract_rows = [row for row in candidates if row.get("category") == "release_extract_bloat"]
+
+        self.assertEqual(len(extract_rows), 1)
+        self.assertEqual(extract_rows[0].get("name"), "_manual_pkg_probe")
+        self.assertEqual(extract_rows[0].get("reason"), "release_extract_age_limit")
+        self.assertFalse(any(row.get("name") == "release_command_logs" for row in candidates))
+        self.assertFalse(any(row.get("name") == "latest_release_validation.json" for row in candidates))
+
+    def test_scan_candidates_caps_release_extract_total_size(self):
+        self._write_policy(
+            {
+                "enabled": True,
+                "mode": "observe",
+                "release_extract_max_age_days": 30,
+                "release_validation_extract_max_total_mb": 0.003,
+            }
+        )
+        root = kidney.RUNTIME_DIR / "validation" / "release"
+        newest = root / "fresh-keep"
+        oldest = root / "fresh-drop"
+        (newest / "payload.bin").parent.mkdir(parents=True, exist_ok=True)
+        (oldest / "payload.bin").parent.mkdir(parents=True, exist_ok=True)
+        (newest / "payload.bin").write_bytes(b"n" * 2048)
+        (oldest / "payload.bin").write_bytes(b"o" * 2048)
+        self._touch_old(newest, 60)
+        self._touch_old(oldest, 120)
+
+        candidates = kidney.scan_candidates()
+        extract_rows = [row for row in candidates if row.get("category") == "release_extract_bloat"]
+        names = {row.get("name") for row in extract_rows}
+
+        self.assertEqual(names, {"fresh-drop"})
+        self.assertEqual(extract_rows[0].get("reason"), "release_extract_total_size_limit")
+
+    def test_scan_candidates_does_not_flag_release_package_zips(self):
+        self._write_policy({"enabled": True, "mode": "observe", "exports_max_age_days": 1})
+        package_dir = kidney.RUNTIME_DIR / "exports" / "release_packages"
+        package_dir.mkdir(parents=True, exist_ok=True)
+        zip_path = package_dir / "nyo-system-base-rc.zip"
+        ledger = package_dir / "release_ledger.jsonl"
+        zip_path.write_bytes(b"z" * 128)
+        ledger.write_text("{}\n", encoding="utf-8")
+        self._touch_old(zip_path, 10 * 86400)
+        self._touch_old(ledger, 10 * 86400)
+
+        candidates = kidney.scan_candidates()
+        names = {row.get("name") for row in candidates}
+        self.assertNotIn("nyo-system-base-rc.zip", names)
+        self.assertNotIn("release_ledger.jsonl", names)
+
+    def test_run_kidney_deletes_stale_extract_without_zipping_it(self):
+        self._write_policy(
+            {
+                "enabled": True,
+                "mode": "enforce",
+                "release_extract_max_age_days": 3,
+            }
+        )
+        extract = kidney.RUNTIME_DIR / "validation" / "release" / "x-old-probe"
+        (extract / "payload.bin").parent.mkdir(parents=True, exist_ok=True)
+        (extract / "payload.bin").write_bytes(b"x" * 32)
+        self._touch_old(extract, 5 * 86400)
+
+        summary = kidney.run_kidney(dry_run=False)
+
+        self.assertFalse(extract.exists())
+        self.assertEqual(summary.get("snapshot_path"), "")
+        self.assertEqual(summary.get("snapshot_skipped_reason"), "storage_watch_batch")
+        applied = list(summary.get("applied") or [])
+        self.assertTrue(any(row.get("result") == "deleted" and row.get("name") == "x-old-probe" for row in applied))
+
+    def test_scan_candidates_ages_out_release_stage_trees(self):
+        self._write_policy({"enabled": True, "mode": "observe", "release_stage_max_age_days": 3})
+        stage = kidney.RUNTIME_DIR / "exports" / "release_packages" / "_stage" / "candidate-a"
+        (stage / "payload.bin").parent.mkdir(parents=True, exist_ok=True)
+        (stage / "payload.bin").write_bytes(b"y" * 16)
+        self._touch_old(stage, 5 * 86400)
+
+        candidates = kidney.scan_candidates()
+        stage_rows = [row for row in candidates if row.get("category") == "release_stage_bloat"]
+
+        self.assertEqual(len(stage_rows), 1)
+        self.assertEqual(stage_rows[0].get("name"), "candidate-a")
+        self.assertEqual(stage_rows[0].get("reason"), "release_stage_age_limit")
+
+    def test_scan_candidates_caps_subconscious_runs_and_keeps_latest_pointers(self):
+        self._write_policy(
+            {
+                "enabled": True,
+                "mode": "observe",
+                "subconscious_run_max_age_days": 30,
+                "subconscious_run_keep_count": 2,
+                "subconscious_run_max_flag": 10,
+            }
+        )
+        root = kidney.RUNTIME_DIR / "subconscious_runs"
+        root.mkdir(parents=True, exist_ok=True)
+        (root / "latest.json").write_text("{}", encoding="utf-8")
+        (root / "latest.md").write_text("kept", encoding="utf-8")
+        for idx, age in enumerate((30, 120, 240, 360)):
+            run_dir = root / f"20260821_00000{idx}_phase1-auto"
+            run_dir.mkdir()
+            (run_dir / "report.json").write_text("{}", encoding="utf-8")
+            self._touch_old(run_dir, age)
+
+        candidates = kidney.scan_candidates()
+        run_rows = [row for row in candidates if row.get("category") == "subconscious_run_bloat"]
+        names = {row.get("name") for row in run_rows}
+
+        self.assertEqual(len(run_rows), 2)
+        self.assertTrue(names.issubset({"20260821_000002_phase1-auto", "20260821_000003_phase1-auto"}))
+        self.assertTrue((root / "latest.json").exists())
+        self.assertFalse(any(row.get("name") == "latest.json" for row in candidates))
+
+    def test_scan_candidates_ages_out_recovery_quarantine(self):
+        self._write_policy(
+            {
+                "enabled": True,
+                "mode": "observe",
+                "recovery_quarantine_max_age_days": 14,
+                "recovery_quarantine_keep_count": 1,
+            }
+        )
+        old = kidney.RUNTIME_DIR / "recovery_quarantine" / "decontam_20260513_131620"
+        old.mkdir(parents=True, exist_ok=True)
+        (old / "note.txt").write_text("old", encoding="utf-8")
+        self._touch_old(old, 20 * 86400)
+
+        candidates = kidney.scan_candidates()
+        rows = [row for row in candidates if row.get("category") == "recovery_quarantine_bloat"]
+
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0].get("name"), "decontam_20260513_131620")
+        self.assertEqual(rows[0].get("reason"), "recovery_quarantine_age_limit")
+
+    def test_run_kidney_deletes_stale_subconscious_run_without_zipping_it(self):
+        self._write_policy(
+            {
+                "enabled": True,
+                "mode": "enforce",
+                "subconscious_run_max_age_days": 2,
+                "subconscious_run_keep_count": 24,
+            }
+        )
+        run_dir = kidney.RUNTIME_DIR / "subconscious_runs" / "20260101_000000_old"
+        run_dir.mkdir(parents=True, exist_ok=True)
+        (run_dir / "report.json").write_text("{}", encoding="utf-8")
+        self._touch_old(run_dir, 5 * 86400)
+        latest = kidney.RUNTIME_DIR / "subconscious_runs" / "latest.json"
+        latest.write_text("{}", encoding="utf-8")
+
+        summary = kidney.run_kidney(dry_run=False)
+
+        self.assertFalse(run_dir.exists())
+        self.assertTrue(latest.exists())
+        self.assertEqual(summary.get("snapshot_path"), "")
+        self.assertEqual(summary.get("snapshot_skipped_reason"), "storage_watch_batch")
 
 
 if __name__ == "__main__":

@@ -1,0 +1,23 @@
+{
+  "turns": [
+    {
+      "role": "user",
+      "text": "are you doing alright today nova ?"
+    },
+    {
+      "role": "assistant",
+      "text": "I'm functioning well, thank you for asking! How can I assist you today?"
+    },
+    {
+      "role": "user",
+      "text": "okay so what next ?"
+    },
+    {
+      "role": "assistant",
+      "text": "It seems you're ready to proceed with a specific task or ask about something in particular. Could you please provide more details on what you need assistance with? Whether it's a question, a request for information, or a task you'd like help completing, I'm here to assist you!"
+    }
+  ],
+  "turn_ts": 1787186908.9935708,
+  "session_id": "http-e4a84fda4873",
+  "ts": 1787186875.581073
+}

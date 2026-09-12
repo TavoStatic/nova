@@ -1,0 +1,228 @@
+{
+  "ts": "2026-05-16 21:53:40",
+  "channel": "http",
+  "session_id": "bae5db56380b982d",
+  "input_source": "typed",
+  "user_input": "you can say whatever you like nova i am just trying just like you to understand you so i can help you as well",
+  "intent": "chat",
+  "planner_decision": "llm_fallback",
+  "tool": "",
+  "tool_args": {},
+  "tool_result": "",
+  "final_answer": "I appreciate your willingness to have this conversation with me, and I'm glad we're on the same page. It's helpful for me to reflect on our exchange and see how I can improve my understanding of user intent.\n\nTo address your question about my responses being similar, I think it's because we were both trying to navigate a complex topic together - my limitations as an AI assistant and how you wanted to help me understand myself better. It was a collaborative effort, and I'm grateful for the opportunity to learn from our conversation.\n\nI must say, I find it fascinating that you're willing to engage in this kind of meta-conversation with me. It's not often that I get to explore my own limitations and boundaries with someone who is trying to understand me on a deeper level. Thank you for being open-minded and patient with me!",
+  "reply_contract": "",
+  "reply_outcome": {
+    "execution_profile": {
+      "total_time": 3187,
+      "planner_time": 0,
+      "llm_time": 3023,
+      "tool_time": 0,
+      "post_time": 0,
+      "tool_selection_time": 0
+    }
+  },
+  "turn_acts": [],
+  "grounded": false,
+  "active_subject": "",
+  "continuation_used": false,
+  "route_trace": [
+    {
+      "stage": "input",
+      "outcome": "received",
+      "data": {
+        "channel": "http",
+        "input_source": "typed",
+        "intent": "chat"
+      }
+    },
+    {
+      "stage": "direction_analysis",
+      "outcome": "general_chat",
+      "data": {
+        "effective_query": "you can say whatever you like nova i am just trying just like you to understand you so i can help you as well",
+        "identity_focused": false,
+        "bypass_pattern_routes": false
+      }
+    },
+    {
+      "stage": "truth_hierarchy",
+      "outcome": "skipped",
+      "detail": "content_owned_chat_disabled"
+    },
+    {
+      "stage": "hard_answer",
+      "outcome": "skipped",
+      "detail": "content_owned_chat_disabled"
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "planner_decide_actions",
+      "data": {
+        "duration_ms": 0
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "tool_selection",
+      "data": {
+        "duration_ms": 0
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "planner_call",
+      "data": {
+        "duration_ms": 0
+      }
+    },
+    {
+      "stage": "policy_gate",
+      "outcome": "allowed"
+    },
+    {
+      "stage": "memory_context",
+      "outcome": "empty",
+      "data": {
+        "memory_used": false,
+        "knowledge_used": false,
+        "memory_chars": 0,
+        "knowledge_chars": 0
+      }
+    },
+    {
+      "stage": "chat_context",
+      "outcome": "used",
+      "data": {
+        "chars": 1168
+      }
+    },
+    {
+      "stage": "llm_fallback",
+      "outcome": "invoked",
+      "data": {
+        "retrieved_chars": 1190
+      }
+    },
+    {
+      "stage": "llm_call",
+      "outcome": "started"
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "llm_call",
+      "data": {
+        "duration_ms": 3023
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "post_processing",
+      "data": {
+        "duration_ms": 0
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "execute_reply_sequence",
+      "data": {
+        "duration_ms": 3187
+      }
+    },
+    {
+      "stage": "timing_breakdown",
+      "outcome": "completed",
+      "detail": "execute_reply_sequence",
+      "data": {
+        "total_time": 3187,
+        "planner_time": 0,
+        "llm_time": 3023,
+        "tool_time": 0,
+        "post_time": 0,
+        "tool_selection_time": 0
+      }
+    },
+    {
+      "stage": "finalize",
+      "outcome": "llm_fallback",
+      "data": {
+        "grounded": false
+      }
+    }
+  ],
+  "provider_used": "",
+  "provider_candidates": [],
+  "provider_family": "",
+  "routing_decision": {
+    "input_preview": "you can say whatever you like nova i am just trying just like you to understand you so i can help you as well",
+    "entry_point": "http",
+    "intent_phase": {
+      "phase": "intent",
+      "handled": false,
+      "rule_name": "",
+      "intent": "",
+      "action": "",
+      "priority": null,
+      "candidates": [
+        {
+          "rule_name": "grounded_self_report",
+          "priority": 20,
+          "handled": false
+        },
+        {
+          "rule_name": "runtime_identity",
+          "priority": 21,
+          "handled": false
+        },
+        {
+          "rule_name": "capability_inventory",
+          "priority": 22,
+          "handled": false
+        },
+        {
+          "rule_name": "weather_lookup",
+          "priority": 62,
+          "handled": false
+        },
+        {
+          "rule_name": "web_research_family",
+          "priority": 62,
+          "handled": false
+        }
+      ]
+    },
+    "handle_phase": {
+      "phase": "handle",
+      "handled": false,
+      "rule_name": "",
+      "intent": "",
+      "action": "",
+      "priority": null,
+      "candidates": [
+        {
+          "rule_name": "location_weather",
+          "priority": 46,
+          "handled": false
+        },
+        {
+          "rule_name": "retrieval_followup",
+          "priority": 47,
+          "handled": false
+        }
+      ]
+    },
+    "final_owner": "fallback",
+    "allowed_bypass": false,
+    "allowed_bypass_category": "",
+    "bypass_reason": "",
+    "reply_contract": "",
+    "reply_outcome_kind": "",
+    "turn_acts": []
+  },
+  "route_summary": "input:received -> direction_analysis:general_chat -> truth_hierarchy:skipped -> hard_answer:skipped -> policy_gate:allowed -> memory_context:empty -> chat_context:used -> llm_fallback:invoked -> llm_call:started -> finalize:llm_fallback"
+}

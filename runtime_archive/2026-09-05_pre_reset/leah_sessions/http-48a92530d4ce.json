@@ -1,0 +1,23 @@
+{
+  "turns": [
+    {
+      "role": "user",
+      "text": "how are you doing today ?"
+    },
+    {
+      "role": "assistant",
+      "text": "I'm functioning well within my runtime core, with all systems green on the health monitor side. Ready to assist whenever you are."
+    },
+    {
+      "role": "user",
+      "text": "what now"
+    },
+    {
+      "role": "assistant",
+      "text": "I'm standing by within my Work Tree and runtime core waiting for your intent. What specific task or analysis do you want me to plan?"
+    }
+  ],
+  "turn_ts": 1788343644.1909995,
+  "session_id": "http-48a92530d4ce",
+  "ts": 1788343603.4062238
+}

@@ -1,0 +1,23 @@
+{
+  "turns": [
+    {
+      "role": "user",
+      "text": "The project codeword is BLUEFIN-4419. Say it back to me."
+    },
+    {
+      "role": "assistant",
+      "text": "BLUEFIN-4419. Is there anything specific you'd like to discuss regarding this project codeword?"
+    },
+    {
+      "role": "user",
+      "text": "What project codeword did I just give you?"
+    },
+    {
+      "role": "assistant",
+      "text": "BLUEFIN-4419."
+    }
+  ],
+  "turn_ts": 1786820411.3354282,
+  "session_id": "leah-at1-1786820339",
+  "ts": 1786820340.4607391
+}

@@ -1,0 +1,292 @@
+{
+  "ts": "2026-08-11 19:25:08",
+  "channel": "cli",
+  "session_id": "",
+  "input_source": "typed",
+  "user_input": "How are you feeling today ?",
+  "intent": "",
+  "planner_decision": "llm_fallback",
+  "tool": "self_status",
+  "tool_args": {},
+  "tool_result": "Nova Self Status - 2026-08-11 19:25:16\nLevel: failed\nSummary: Nova has a failure signal that needs attention.\nSignals:\n- [FAILURE] Latest regression is not green: FAILED (next: run regression)\n- [WARNING] Local code changed since last accepted state: 169 changed file(s): .vscode/, AGENTS.md, EdFi_Backpack_v2_Plan.docx, EdFi_Backpack_v2_Plan_new.docx, README.md, +164 more. Diff +21936/-7189; latest regression is FAILED. (next: git diff --stat)",
+  "final_answer": "I'm experiencing some technical issues right now, but I'm here to help! Could you please provide more details about what you need assistance with?",
+  "reply_contract": "",
+  "reply_outcome": {
+    "kind": "llm_fallback",
+    "intent_evidence_packet": {
+      "schema": "nova.turn_intent_evidence",
+      "version": "1.0.0",
+      "trace_authority": "hypothesis_only",
+      "answer_authority": "available_evidence",
+      "current_turn": "How are you feeling today ?",
+      "conversation_frame": {
+        "turn_count": 17,
+        "current_user_turn_is_latest": true,
+        "previous_assistant_turn": "(error: Ollama chat failed: HTTPConnectionPool(host='127.0.0.1', port=11434): Max retries exceeded with url: /api/chat (Caused by NewConnectionError(\"HTTPConnection(host='127.0.0.1', port=11434): Failed to es)",
+        "last_assistant_repeats_earlier_assistant": true
+      },
+      "planner_frame": {
+        "decision": "tool_evidence_for_fallback",
+        "tool": "self_status",
+        "semantic_tool_observation": {
+          "tool": "self_status",
+          "confidence": 0.85,
+          "reason": "heuristic_live_status",
+          "evidence_need": "live_self_status",
+          "answer_target": "nova_live_state",
+          "status": "tool_result_available"
+        }
+      },
+      "available_evidence": [
+        {
+          "name": "current_user_turn",
+          "available": true,
+          "chars": 27
+        },
+        {
+          "name": "recent_chat_context",
+          "available": true,
+          "chars": 538
+        },
+        {
+          "name": "session_state_context",
+          "available": false,
+          "chars": 0
+        },
+        {
+          "name": "learning_context",
+          "available": true,
+          "chars": 1583
+        },
+        {
+          "name": "confirmed_identity_context",
+          "available": true,
+          "chars": 235
+        },
+        {
+          "name": "operational_self_context",
+          "available": true,
+          "chars": 1346
+        },
+        {
+          "name": "tool_result",
+          "available": true,
+          "chars": 446
+        }
+      ],
+      "answer_contract": {
+        "infer_intent_from_turn_and_conversation": true,
+        "trace_is_route_authority": false,
+        "evidence_is_claim_authority": true,
+        "tool_route_requires_external_evidence_gap": true,
+        "conversation_can_be_complete_without_task": false,
+        "reply_form": "evidence_bound_reply"
+      }
+    },
+    "deferred_tool": {
+      "tool": "self_status",
+      "reply_contract": "self_status.current",
+      "grounded": true
+    },
+    "execution_profile": {
+      "total_time": 14069,
+      "planner_time": 4449,
+      "llm_time": 6612,
+      "tool_time": 0,
+      "post_time": 0,
+      "tool_selection_time": 0
+    }
+  },
+  "turn_acts": [],
+  "grounded": true,
+  "active_subject": "",
+  "continuation_used": false,
+  "route_trace": [
+    {
+      "stage": "input",
+      "outcome": "received",
+      "data": {
+        "channel": "cli",
+        "input_source": "typed"
+      }
+    },
+    {
+      "stage": "intent_understanding",
+      "outcome": "classified",
+      "data": {
+        "level": "casual",
+        "domain": "general",
+        "confidence": 0.0,
+        "strategy": "clarify"
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "semantic_tool_intent",
+      "data": {
+        "duration_ms": 4015
+      }
+    },
+    {
+      "stage": "action_planner",
+      "outcome": "semantic_intent",
+      "detail": "heuristic_live_status",
+      "data": {
+        "tool": "self_status",
+        "confidence": 0.85
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "tool_selection",
+      "data": {
+        "duration_ms": 4015
+      }
+    },
+    {
+      "stage": "action_planner",
+      "outcome": "run_tool",
+      "data": {
+        "tool": "self_status"
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "tool_response",
+      "data": {
+        "duration_ms": 434,
+        "tool": "self_status"
+      }
+    },
+    {
+      "stage": "tool_execution",
+      "outcome": "ok",
+      "data": {
+        "tool": "self_status",
+        "grounded": true
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "planner",
+      "data": {
+        "duration_ms": 4449
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "planner_call",
+      "data": {
+        "duration_ms": 4449
+      }
+    },
+    {
+      "stage": "action_planner",
+      "outcome": "tool_evidence_for_fallback",
+      "data": {
+        "tool": "self_status"
+      }
+    },
+    {
+      "stage": "memory_context",
+      "outcome": "used",
+      "data": {
+        "memory_used": false,
+        "identity_used": true,
+        "operational_identity_used": true,
+        "knowledge_used": false,
+        "memory_chars": 0,
+        "identity_chars": 235,
+        "operational_identity_chars": 1346,
+        "knowledge_chars": 0
+      }
+    },
+    {
+      "stage": "chat_context",
+      "outcome": "used",
+      "data": {
+        "chars": 538
+      }
+    },
+    {
+      "stage": "turn_intent_evidence",
+      "outcome": "attached",
+      "data": {
+        "trace_authority": "hypothesis_only",
+        "answer_authority": "available_evidence"
+      }
+    },
+    {
+      "stage": "llm_fallback",
+      "outcome": "invoked",
+      "data": {
+        "retrieved_chars": 3432
+      }
+    },
+    {
+      "stage": "llm_call",
+      "outcome": "started"
+    },
+    {
+      "stage": "llm_fallback",
+      "outcome": "invoked",
+      "data": {
+        "retrieved_chars": 3432
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "llm_call",
+      "data": {
+        "duration_ms": 6612
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "post_processing",
+      "data": {
+        "duration_ms": 0
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "execute_reply_sequence",
+      "data": {
+        "duration_ms": 14069
+      }
+    },
+    {
+      "stage": "timing_breakdown",
+      "outcome": "completed",
+      "detail": "execute_reply_sequence",
+      "data": {
+        "total_time": 14069,
+        "planner_time": 4449,
+        "llm_time": 6612,
+        "tool_time": 0,
+        "post_time": 0,
+        "tool_selection_time": 0
+      }
+    },
+    {
+      "stage": "finalize",
+      "outcome": "llm_fallback",
+      "data": {
+        "grounded": true,
+        "tool": "self_status"
+      }
+    }
+  ],
+  "provider_used": "self_status",
+  "provider_candidates": [],
+  "provider_family": "self_status",
+  "route_summary": "input:received -> intent_understanding:classified -> action_planner:semantic_intent -> action_planner:run_tool -> tool_execution:ok -> action_planner:tool_evidence_for_fallback -> memory_context:used -> chat_context:used -> turn_intent_evidence:attached -> llm_fallback:invoked -> llm_call:started -> llm_fallback:invoked -> finalize:llm_fallback"
+}

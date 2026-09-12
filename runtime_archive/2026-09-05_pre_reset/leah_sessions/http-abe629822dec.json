@@ -1,0 +1,23 @@
+{
+  "turns": [
+    {
+      "role": "user",
+      "text": "how are you doing today ?"
+    },
+    {
+      "role": "assistant",
+      "text": "I'm functioning normally\u2014my core systems and heartbeat are all green, so I'm ready to assist you today."
+    },
+    {
+      "role": "user",
+      "text": "what now"
+    },
+    {
+      "role": "assistant",
+      "text": "Systems are holding steady\u2014I'm ready for your next instruction whenever you're set."
+    }
+  ],
+  "turn_ts": 1788354849.9923317,
+  "session_id": "http-abe629822dec",
+  "ts": 1788354772.4013488
+}

@@ -1,0 +1,151 @@
+{
+  "ts": "2026-08-14 22:50:01",
+  "channel": "http",
+  "session_id": "leah-live-test",
+  "input_source": "http",
+  "user_input": "can you read it?\n\n[LEAH session context]\nThe user staged the following local items for this turn.\nTreat these local items as the primary context for the turn when the user is asking about them.\nIf the user asks whether you can read, inspect, review, or summarize them, answer that directly instead of switching to a generic planning reply.\n- upload: note.txt | text/plain | path=C:/nova/README.md",
+  "intent": "",
+  "planner_decision": "run_tool",
+  "tool": "read",
+  "tool_args": {
+    "args": [
+      "C:/nova/README.md"
+    ]
+  },
+  "tool_result": "# Nova\n\n**By SG Intelligence Tech, LLC**\n\n<table>\n<tr>\n<td valign=\"top\" width=\"55%\">\n\nNova is a local AI runtime that works continuously \u2014 not just when you talk to it. It plans, remembers, uses tools, manages ongoing work, checks its own results, and extends itself through installable backpacks.\n\n</td>\n<td valign=\"top\" width=\"45%\">\n\n<img src=\"docs/screenshots/nova-control-overview.jpg\" width=\"100%\" />\n\n</td>\n</tr>\n</table>\n\n---\n\n## What Nova Does\n\nMost AI tools respond and forget. Nova keeps working.\n\n<table>\n<tr>\n<td valign=\"top\" width=\"55%\">\n\n**Persistent runtime** \u2014 Nova runs in the background with a guard process, heartbeat, and maintenance loop. Work continues across sessions.\n\n**Work Trees** \u2014 complex goals are broken into branches, tasks, and dependencies. Nova tracks what is open, blocked, or complete.\n\n</td>\n<td valign=\"top\" width=\"45%\">\n\n<img src=\"docs/screenshots/nova-work-tree.jpg\" width=\"100%\" />\n\n</td>\n</tr>\n<tr>\n<td valign=\"top\" width=\"55%\">\n\n**Memory** \u2014 Nova retains facts, corrections, and context with rules for when to remember, recall, or discard stale material.\n\n**Tools** \u2014 file access, web research, vision, voice, system inspection, code generation, and data pipelines. Tool results are recorded as evidence, not assumed.\n\n**Self-observation** \u2014 Nova monitors its own health, runs regression tests, watches for repeated weak signals, and surfaces blockers instead of hiding them.\n\n</td>\n<td valign=\"top\" width=\"45%\">\n\n<img src=\"docs/screenshots/nova-health.jpg\" width=\"100%\" />\n\n</td>\n</tr>\n<tr>\n<td valign=\"top\" width=\"55%\">\n\n**Backpacks** \u2014 domain capabilities install as self-contained plugins. Nova discovers and validates them automatically.\n\n</td>\n<td valign=\"top\" width=\"45%\">\n\n<img src=\"docs/screenshots/nova-backpacks.jpg\" width=\"100%\" />\n\n</td>\n</tr>\n</table>\n\n---\n\n## Requirements\n\n- Windows 10 / 11\n- Python 3.11+\n- [Ollama](https://ollama.com) (local model runtime)\n- PowerShell 7+\n\n---\n\n## Quick Start\n\n```powershell\n# 1. Install dependencies\n.\\nova.cmd install\n\n# 2. Run diagnostics\n.\\nova.cmd doctor\n\n# 3. Start the guard (keeps Nova running)\n.\\nova.cmd guard\n\n# 4. Open the control panel\n.\\nova.cmd webui-start --host 127.0.0.1 --port 8080\n```\n\nThen open:\n- **Control Room** \u2192 http://127.0.0.1:8080/control\n- **Leah** (conversational interface) \u2192 http://127.0.0.1:8080/leah\n\n---\n\n## Backpacks\n\n<table>\n<tr>\n<td valign=\"top\" width=\"55%\">\n\nBackpacks are installable capability modules. Drop a backpack folder into `backpacks/` and Nova detects it on the next control panel refresh, validates the protocol handshake, and makes it available for install.\n\nEach backpack ships its own manifest, schema, connector, and operations \u2014 Nova provides the platform.\n\n```\nbackpacks/\n  my-backpack/\n    backpack.json       \u2190 manifest + protocol version\n    connector.py        \u2190 data connector\n    operations.json     \u2190 declared operations\n    settings_schema.json\n```\n\n</td>\n<td valign=\"top\" width=\"45%\">\n\n<img src=\"docs/screenshots/nova-data-lanes.jpg\" width=\"100%\" />\n\n</td>\n</tr>\n</table>\n\n---\n\n## Architecture\n\n```\nnova_guard.py          \u2190 supervises the runtime, restarts on failure\nnova_core.py           \u2190 routes requests, owns memory and tool dispatch\nautonomy_maintenance.py\u2190 maintenance loop: work trees, regression, cleanup\nnova_http.py           \u2190 HTTP layer (control panel, Leah, API)\nservices/              \u2190 190+ service modules\nbackpacks/             \u2190 installable domain capabilities\npipelines/             \u2190 governed data pipeline framework\nnova_shell/            \u2190 authentication, roles, TOTP, session management\n```\n\nNova separates the platform (core, guard, shell, pipelines) from domain knowledge (backpacks). A new field of work connects through the backpack interface without touching Nova's core.\n\n---\n\n## Key Interfaces\n\n<table>\n<tr>\n<td valign=\"top\" width=\"55%\">\n\n| Interface | URL | Description |\n|-----------|-----|-------------|\n| Control Room | `/control` | Manage backpacks, pipelines, work tree, system status |\n| Leah | `/leah` | Conversational AI front door |\n| CLI | `nova.cmd` | Install, doctor, smoke tests, releases |\n| Voice | \u2014 | Speech-to-text input, TTS output |\n\n</td>\n<td valign=\"top\" width=\"45%\">\n\n<img src=\"docs/screenshots/nova-sessions.jpg\" width=\"100%\" />\n\n</td>\n</tr>\n</table>\n\n---\n\n## Self-Governance\n\n<table>\n<tr>\n<td valign=\"top\" width=\"55%\">\n\nNova does not assume things worked. It records evidence.\n\n- Tests span conversation, memory, tools, autonomy, pipelines, and domain layers (236 test files)\n- The subconscious system watches for repeated weak signals and surfaces them as organized work\n- The Kidney system archives stale material and cleans what no longer belongs\n- SOCK profiles the host machine and matches AI models to available hardware\n- The guard recovers a failed runtime without operator intervention\n\n</td>\n<td valign=\"top\" width=\"45%\">\n\n<img src=\"docs/screenshots/nova-planner-reasoning.jpg\" width=\"100%\" />\n\n</td>\n</tr>\n</table>\n\n---\n\n## Documentation\n\n- [System Map](docs/SYSTEM_MAP.md) \u2014 how the major systems connect\n- [Architecture](docs/ARCHITECTURE.md) \u2014 structural decisions and design intent\n- [Services Index](docs/SERVICES_INDEX.md) \u2014 full service inventory\n- [Test Ecosystem](docs/TEST_ECOSYSTEM.md) \u2014 regression lanes and test strategy\n- [Operations](docs/OPERATIONS.md) \u2014 running, maintaining, and releasing Nova\n- [Autonomy and Mission](docs/AUTONOMY_AND_MISSION.md) \u2014 how Nova uses purpose to direct work\n- [Nova Ledger](docs/NOVA_LEDGER.md) \u2014 living record of capabilities and progress\n\n---\n\n## License\n\nNova is proprietary software. \u00a9 2026 SG Intelligence Tech, LLC. All rights reserved.\n\nContact: [github.com/TavoStatic](https://github.com/TavoStatic)",
+  "final_answer": "# Nova\n\n**By SG Intelligence Tech, LLC**\n\n<table>\n<tr>\n<td valign=\"top\" width=\"55%\">\n\nNova is a local AI runtime that works continuously \u2014 not just when you talk to it. It plans, remembers, uses tools, manages ongoing work, checks its own results, and extends itself through installable backpacks.\n\n</td>\n<td valign=\"top\" width=\"45%\">\n\n<img src=\"docs/screenshots/nova-control-overview.jpg\" width=\"100%\" />\n\n</td>\n</tr>\n</table>\n\n---\n\n## What Nova Does\n\nMost AI tools respond and forget. Nova keeps working.\n\n<table>\n<tr>\n<td valign=\"top\" width=\"55%\">\n\n**Persistent runtime** \u2014 Nova runs in the background with a guard process, heartbeat, and maintenance loop. Work continues across sessions.\n\n**Work Trees** \u2014 complex goals are broken into branches, tasks, and dependencies. Nova tracks what is open, blocked, or complete.\n\n</td>\n<td valign=\"top\" width=\"45%\">\n\n<img src=\"docs/screenshots/nova-work-tree.jpg\" width=\"100%\" />\n\n</td>\n</tr>\n<tr>\n<td valign=\"top\" width=\"55%\">\n\n**Memory** \u2014 Nova retains facts, corrections, and context with rules for when to remember, recall, or discard stale material.\n\n**Tools** \u2014 file access, web research, vision, voice, system inspection, code generation, and data pipelines. Tool results are recorded as evidence, not assumed.\n\n**Self-observation** \u2014 Nova monitors its own health, runs regression tests, watches for repeated weak signals, and surfaces blockers instead of hiding them.\n\n</td>\n<td valign=\"top\" width=\"45%\">\n\n<img src=\"docs/screenshots/nova-health.jpg\" width=\"100%\" />\n\n</td>\n</tr>\n<tr>\n<td valign=\"top\" width=\"55%\">\n\n**Backpacks** \u2014 domain capabilities install as self-contained plugins. Nova discovers and validates them automatically.\n\n</td>\n<td valign=\"top\" width=\"45%\">\n\n<img src=\"docs/screenshots/nova-backpacks.jpg\" width=\"100%\" />\n\n</td>\n</tr>\n</table>\n\n---\n\n## Requirements\n\n- Windows 10 / 11\n- Python 3.11+\n- [Ollama](https://ollama.com) (local model runtime)\n- PowerShell 7+\n\n---\n\n## Quick Start\n\n```powershell\n# 1. Install dependencies\n.\\nova.cmd install\n\n# 2. Run diagnostics\n.\\nova.cmd doctor\n\n# 3. Start the guard (keeps Nova running)\n.\\nova.cmd guard\n\n# 4. Open the control panel\n.\\nova.cmd webui-start --host 127.0.0.1 --port 8080\n```\n\nThen open:\n- **Control Room** \u2192 http://127.0.0.1:8080/control\n- **Leah** (conversational interface) \u2192 http://127.0.0.1:8080/leah\n\n---\n\n## Backpacks\n\n<table>\n<tr>\n<td valign=\"top\" width=\"55%\">\n\nBackpacks are installable capability modules. Drop a backpack folder into `backpacks/` and Nova detects it on the next control panel refresh, validates the protocol handshake, and makes it available for install.\n\nEach backpack ships its own manifest, schema, connector, and operations \u2014 Nova provides the platform.\n\n```\nbackpacks/\n  my-backpack/\n    backpack.json       \u2190 manifest + protocol version\n    connector.py        \u2190 data connector\n    operations.json     \u2190 declared operations\n    settings_schema.json\n```\n\n</td>\n<td valign=\"top\" width=\"45%\">\n\n<img src=\"docs/screenshots/nova-data-lanes.jpg\" width=\"100%\" />\n\n</td>\n</tr>\n</table>\n\n---\n\n## Architecture\n\n```\nnova_guard.py          \u2190 supervises the runtime, restarts on failure\nnova_core.py           \u2190 routes requests, owns memory and tool dispatch\nautonomy_maintenance.py\u2190 maintenance loop: work trees, regression, cleanup\nnova_http.py           \u2190 HTTP layer (control panel, Leah, API)\nservices/              \u2190 190+ service modules\nbackpacks/             \u2190 installable domain capabilities\npipelines/             \u2190 governed data pipeline framework\nnova_shell/            \u2190 authentication, roles, TOTP, session management\n```\n\nNova separates the platform (core, guard, shell, pipelines) from domain knowledge (backpacks). A new field of work connects through the backpack interface without touching Nova's core.\n\n---\n\n## Key Interfaces\n\n<table>\n<tr>\n<td valign=\"top\" width=\"55%\">\n\n| Interface | URL | Description |\n|-----------|-----|-------------|\n| Control Room | `/control` | Manage backpacks, pipelines, work tree, system status |\n| Leah | `/leah` | Conversational AI front door |\n| CLI | `nova.cmd` | Install, doctor, smoke tests, releases |\n| Voice | \u2014 | Speech-to-text input, TTS output |\n\n</td>\n<td valign=\"top\" width=\"45%\">\n\n<img src=\"docs/screenshots/nova-sessions.jpg\" width=\"100%\" />\n\n</td>\n</tr>\n</table>\n\n---\n\n## Self-Governance\n\n<table>\n<tr>\n<td valign=\"top\" width=\"55%\">\n\nNova does not assume things worked. It records evidence.\n\n- Tests span conversation, memory, tools, autonomy, pipelines, and domain layers (236 test files)\n- The subconscious system watches for repeated weak signals and surfaces them as organized work\n- The Kidney system archives stale material and cleans what no longer belongs\n- SOCK profiles the host machine and matches AI models to available hardware\n- The guard recovers a failed runtime without operator intervention\n\n</td>\n<td valign=\"top\" width=\"45%\">\n\n<img src=\"docs/screenshots/nova-planner-reasoning.jpg\" width=\"100%\" />\n\n</td>\n</tr>\n</table>\n\n---\n\n## Documentation\n\n- [System Map](docs/SYSTEM_MAP.md) \u2014 how the major systems connect\n- [Architecture](docs/ARCHITECTURE.md) \u2014 structural decisions and design intent\n- [Services Index](docs/SERVICES_INDEX.md) \u2014 full service inventory\n- [Test Ecosystem](docs/TEST_ECOSYSTEM.md) \u2014 regression lanes and test strategy\n- [Operations](docs/OPERATIONS.md) \u2014 running, maintaining, and releasing Nova\n- [Autonomy and Mission](docs/AUTONOMY_AND_MISSION.md) \u2014 how Nova uses purpose to direct work\n- [Nova Ledger](docs/NOVA_LEDGER.md) \u2014 living record of capabilities and progress\n\n---\n\n## License\n\nNova is proprietary software. \u00a9 2026 SG Intelligence Tech, LLC. All rights reserved.\n\nContact: [github.com/TavoStatic](https://github.com/TavoStatic)",
+  "reply_contract": "",
+  "reply_outcome": {
+    "execution_profile": {
+      "total_time": 4481,
+      "planner_time": 2687,
+      "llm_time": 0,
+      "tool_time": 266,
+      "post_time": 0,
+      "tool_selection_time": 2420
+    }
+  },
+  "turn_acts": [],
+  "grounded": true,
+  "active_subject": "last_tool_evidence:read",
+  "continuation_used": false,
+  "route_trace": [
+    {
+      "stage": "input",
+      "outcome": "received",
+      "data": {
+        "channel": "http",
+        "input_source": "http"
+      }
+    },
+    {
+      "stage": "intent_understanding",
+      "outcome": "classified",
+      "detail": "read file",
+      "data": {
+        "level": "requesting",
+        "domain": "system",
+        "confidence": 0.8,
+        "strategy": "fulfill"
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "semantic_tool_intent",
+      "data": {
+        "duration_ms": 2420
+      }
+    },
+    {
+      "stage": "action_planner",
+      "outcome": "semantic_intent",
+      "detail": "The user is asking whether Nova can read a specific file, so a read tool is needed to answer.",
+      "data": {
+        "tool": "read",
+        "confidence": 0.0
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "tool_selection",
+      "data": {
+        "duration_ms": 2420
+      }
+    },
+    {
+      "stage": "action_planner",
+      "outcome": "run_tool",
+      "data": {
+        "tool": "read"
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "tool_response",
+      "data": {
+        "duration_ms": 266,
+        "tool": "read"
+      }
+    },
+    {
+      "stage": "tool_execution",
+      "outcome": "ok",
+      "data": {
+        "tool": "read",
+        "grounded": true
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "planner",
+      "data": {
+        "duration_ms": 2687
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "planner_call",
+      "data": {
+        "duration_ms": 2687
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "execute_reply_sequence",
+      "data": {
+        "duration_ms": 4481
+      }
+    },
+    {
+      "stage": "timing_breakdown",
+      "outcome": "completed",
+      "detail": "execute_reply_sequence",
+      "data": {
+        "total_time": 4481,
+        "planner_time": 2687,
+        "llm_time": 0,
+        "tool_time": 266,
+        "post_time": 0,
+        "tool_selection_time": 2420
+      }
+    },
+    {
+      "stage": "finalize",
+      "outcome": "run_tool",
+      "data": {
+        "grounded": true,
+        "tool": "read"
+      }
+    }
+  ],
+  "provider_used": "read",
+  "provider_candidates": [],
+  "provider_family": "read",
+  "route_summary": "input:received -> intent_understanding:classified -> action_planner:semantic_intent -> action_planner:run_tool -> tool_execution:ok -> finalize:run_tool"
+}

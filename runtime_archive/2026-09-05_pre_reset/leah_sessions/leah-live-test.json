@@ -1,0 +1,32 @@
+{
+  "turns": [
+    {
+      "role": "user",
+      "text": "What is your name, and what is Leah to you?"
+    },
+    {
+      "role": "assistant",
+      "text": "I am Nova, and Leah is not related to me in any capacity."
+    },
+    {
+      "role": "user",
+      "text": "can you read it?\n\n[LEAH session context]\nThe user staged the following local items for this turn.\nTreat these local items as the primary context for the turn when the user is asking about them.\nIf the user asks whether you can read, inspect, review, or summarize them, answer that directly instead of switching to a generic planning reply.\n- upload: note.txt | text/plain | path=C:/nova/README.md"
+    },
+    {
+      "role": "assistant",
+      "text": "Assistant returned a tool result. The result is available as last tool evidence."
+    }
+  ],
+  "turn_ts": 1786765805.657786,
+  "session_id": "leah-live-test",
+  "ts": 1786765801.0094905,
+  "stage": "handoff",
+  "items": [
+    {
+      "name": "note.txt",
+      "path": "C:/nova/README.md",
+      "mime": "text/plain",
+      "source": "upload"
+    }
+  ]
+}

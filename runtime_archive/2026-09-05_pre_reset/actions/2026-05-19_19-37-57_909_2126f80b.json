@@ -1,0 +1,149 @@
+{
+  "ts": "2026-05-19 19:37:56",
+  "channel": "cli",
+  "session_id": "",
+  "input_source": "typed",
+  "user_input": "It seems like your crashing",
+  "intent": "",
+  "planner_decision": "run_tool",
+  "tool": "self_status",
+  "tool_args": {
+    "args": []
+  },
+  "tool_result": "Nova Self Status - 2026-05-19 19:37:57\nLevel: updating\nSummary: Nova is stable and has update activity to review.\nSignals:\n- [INFO] Local code changed since last accepted state: 149 changed file(s): active_task_constraints.py, diag_ollama_check.py, followup_move_classifier.py, http_chat_flow.py, nova_core.py, +144 more. Diff +2140/-26831; latest regression is OK. (next: git diff --stat)",
+  "final_answer": "Nova Self Status - 2026-05-19 19:37:57\nLevel: updating\nSummary: Nova is stable and has update activity to review.\nSignals:\n- [INFO] Local code changed since last accepted state: 149 changed file(s): active_task_constraints.py, diag_ollama_check.py, followup_move_classifier.py, http_chat_flow.py, nova_core.py, +144 more. Diff +2140/-26831; latest regression is OK. (next: git diff --stat)",
+  "reply_contract": "self_status.current",
+  "reply_outcome": {
+    "intent": "self_status",
+    "kind": "current",
+    "reply_contract": "self_status.current",
+    "execution_profile": {
+      "total_time": 1608,
+      "planner_time": 1608,
+      "llm_time": 0,
+      "tool_time": 410,
+      "post_time": 0,
+      "tool_selection_time": 1198
+    }
+  },
+  "turn_acts": [],
+  "grounded": true,
+  "active_subject": "",
+  "continuation_used": false,
+  "route_trace": [
+    {
+      "stage": "input",
+      "outcome": "received",
+      "data": {
+        "channel": "cli",
+        "input_source": "typed"
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "semantic_tool_intent",
+      "data": {
+        "duration_ms": 1198
+      }
+    },
+    {
+      "stage": "action_planner",
+      "outcome": "semantic_intent",
+      "data": {
+        "tool": "self_status",
+        "confidence": 0.0
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "tool_selection",
+      "data": {
+        "duration_ms": 1198
+      }
+    },
+    {
+      "stage": "action_planner",
+      "outcome": "run_tool",
+      "data": {
+        "tool": "self_status"
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "tool_response",
+      "data": {
+        "duration_ms": 410,
+        "tool": "self_status"
+      }
+    },
+    {
+      "stage": "tool_execution",
+      "outcome": "ok",
+      "data": {
+        "tool": "self_status",
+        "grounded": true
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "planner",
+      "data": {
+        "duration_ms": 1608
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "planner_call",
+      "data": {
+        "duration_ms": 1608
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "execute_reply_sequence",
+      "data": {
+        "duration_ms": 1608
+      }
+    },
+    {
+      "stage": "timing_breakdown",
+      "outcome": "completed",
+      "detail": "execute_reply_sequence",
+      "data": {
+        "total_time": 1608,
+        "planner_time": 1608,
+        "llm_time": 0,
+        "tool_time": 410,
+        "post_time": 0,
+        "tool_selection_time": 1198
+      }
+    },
+    {
+      "stage": "finalize",
+      "outcome": "run_tool",
+      "data": {
+        "grounded": true,
+        "tool": "self_status"
+      }
+    }
+  ],
+  "provider_used": "self_status",
+  "provider_candidates": [],
+  "provider_family": "self_status",
+  "routing_decision": {
+    "final_owner": "action_planner",
+    "planner_owner": "action_planner",
+    "planner_action": "run_tool",
+    "planner_tool": "self_status",
+    "reply_contract": "self_status.current",
+    "reply_outcome_kind": "current",
+    "turn_acts": []
+  },
+  "route_summary": "input:received -> action_planner:semantic_intent -> action_planner:run_tool -> tool_execution:ok -> finalize:run_tool"
+}

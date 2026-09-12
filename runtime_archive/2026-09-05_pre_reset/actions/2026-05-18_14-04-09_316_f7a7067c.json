@@ -1,0 +1,192 @@
+{
+  "ts": "2026-05-18 14:04:08",
+  "channel": "http",
+  "session_id": "codex_identity_probe_a_1779131047 codex_identity_probe_b_1779131047",
+  "input_source": "typed",
+  "user_input": "who are you ?",
+  "intent": "chat",
+  "planner_decision": "run_tool",
+  "tool": "runtime_identity",
+  "tool_args": {
+    "args": []
+  },
+  "tool_result": "I am Nova, a local AI runtime. Conversation is one interface; my registered internal parts include runtime_core, guard_system, work_tree, health_monitoring, memory_systems, task_routing, maintenance_loops, release_verification, subconscious_priority, autonomy_handling, operator_outbox. Those parts monitor state, route work, maintain continuity, and move governed tasks through the system.",
+  "final_answer": "I am Nova, a local AI runtime. Conversation is one interface; my registered internal parts include runtime_core, guard_system, work_tree, health_monitoring, memory_systems, task_routing, maintenance_loops, release_verification, subconscious_priority, autonomy_handling, operator_outbox. Those parts monitor state, route work, maintain continuity, and move governed tasks through the system.",
+  "reply_contract": "runtime_identity.current",
+  "reply_outcome": {
+    "intent": "runtime_identity",
+    "kind": "current",
+    "reply_contract": "runtime_identity.current",
+    "execution_profile": {
+      "total_time": 926,
+      "planner_time": 926,
+      "llm_time": 0,
+      "tool_time": 1,
+      "post_time": 0,
+      "tool_selection_time": 924
+    }
+  },
+  "turn_acts": [
+    "ask"
+  ],
+  "grounded": true,
+  "active_subject": "runtime_identity:runtime",
+  "continuation_used": false,
+  "route_trace": [
+    {
+      "stage": "input",
+      "outcome": "received",
+      "data": {
+        "channel": "http",
+        "input_source": "typed",
+        "intent": "chat"
+      }
+    },
+    {
+      "stage": "direction_analysis",
+      "outcome": "general_chat",
+      "data": {
+        "effective_query": "who are you ?",
+        "turn_acts": "ask",
+        "identity_focused": false,
+        "bypass_pattern_routes": false
+      }
+    },
+    {
+      "stage": "truth_hierarchy",
+      "outcome": "skipped",
+      "detail": "content_owned_chat_disabled"
+    },
+    {
+      "stage": "hard_answer",
+      "outcome": "skipped",
+      "detail": "content_owned_chat_disabled"
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "semantic_tool_intent",
+      "data": {
+        "duration_ms": 924
+      }
+    },
+    {
+      "stage": "action_planner",
+      "outcome": "semantic_intent",
+      "data": {
+        "tool": "runtime_identity",
+        "confidence": 0.0
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "tool_selection",
+      "data": {
+        "duration_ms": 924
+      }
+    },
+    {
+      "stage": "action_planner",
+      "outcome": "run_tool",
+      "data": {
+        "tool": "runtime_identity"
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "tool_response",
+      "data": {
+        "duration_ms": 1,
+        "tool": "runtime_identity"
+      }
+    },
+    {
+      "stage": "tool_execution",
+      "outcome": "ok",
+      "data": {
+        "tool": "runtime_identity",
+        "grounded": true
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "planner",
+      "data": {
+        "duration_ms": 926
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "planner_call",
+      "data": {
+        "duration_ms": 926
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "execute_reply_sequence",
+      "data": {
+        "duration_ms": 926
+      }
+    },
+    {
+      "stage": "timing_breakdown",
+      "outcome": "completed",
+      "detail": "execute_reply_sequence",
+      "data": {
+        "total_time": 926,
+        "planner_time": 926,
+        "llm_time": 0,
+        "tool_time": 1,
+        "post_time": 0,
+        "tool_selection_time": 924
+      }
+    },
+    {
+      "stage": "finalize",
+      "outcome": "run_tool",
+      "data": {
+        "grounded": true,
+        "tool": "runtime_identity"
+      }
+    }
+  ],
+  "provider_used": "",
+  "provider_candidates": [],
+  "provider_family": "",
+  "routing_decision": {
+    "input_preview": "who are you ?",
+    "entry_point": "http",
+    "intent_phase": {
+      "phase": "intent",
+      "handled": false,
+      "rule_name": "",
+      "intent": "",
+      "action": "",
+      "priority": null,
+      "candidates": []
+    },
+    "handle_phase": {
+      "phase": "handle",
+      "handled": false,
+      "rule_name": "",
+      "intent": "",
+      "action": "",
+      "priority": null,
+      "candidates": []
+    },
+    "final_owner": "fallback",
+    "allowed_bypass": false,
+    "allowed_bypass_category": "",
+    "bypass_reason": "",
+    "reply_contract": "runtime_identity.current",
+    "reply_outcome_kind": "current",
+    "turn_acts": []
+  },
+  "route_summary": "input:received -> direction_analysis:general_chat -> truth_hierarchy:skipped -> hard_answer:skipped -> action_planner:semantic_intent -> action_planner:run_tool -> tool_execution:ok -> finalize:run_tool"
+}

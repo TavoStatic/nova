@@ -1,0 +1,139 @@
+{
+  "ts": "2026-05-18 23:54:03",
+  "channel": "http",
+  "session_id": "ad4986042aaccb36",
+  "input_source": "typed",
+  "user_input": "Can you prove what you just shared with me ?",
+  "intent": "",
+  "planner_decision": "run_tool",
+  "tool": "wikipedia_lookup",
+  "tool_args": {
+    "args": [
+      "my creator"
+    ]
+  },
+  "tool_result": "Wikipedia summary for: Creator Clash\nhttps://en.wikipedia.org/wiki/Creator_Clash\nCreator Clash was a recurring for-profit crossover boxing event co-founded by content creators Ian \"iDubbbz\" Jomha and Anisa Jomha, in partnership with event management company \"Real Good Touring\". Creator Clash held two events to varied results. The first event in 2022 sold over 100,000 PPV buys and raised $1.3 million for charity, but the second event in 2023 only sold 50,000 PPV buys and failed to raise any money for charity.\nRelated pages:\n1. Tyler, the Creator\n   https://en.wikipedia.org/wiki/Tyler%2C_the_Creator\n2. Duendita\n   https://en.wikipedia.org/wiki/Duendita",
+  "final_answer": "Wikipedia summary for: Creator Clash\nhttps://en.wikipedia.org/wiki/Creator_Clash\nCreator Clash was a recurring for-profit crossover boxing event co-founded by content creators Ian \"iDubbbz\" Jomha and Anisa Jomha, in partnership with event management company \"Real Good Touring\". Creator Clash held two events to varied results. The first event in 2022 sold over 100,000 PPV buys and raised $1.3 million for charity, but the second event in 2023 only sold 50,000 PPV buys and failed to raise any money for charity.\nRelated pages:\n1. Tyler, the Creator\n   https://en.wikipedia.org/wiki/Tyler%2C_the_Creator\n2. Duendita\n   https://en.wikipedia.org/wiki/Duendita",
+  "reply_contract": "",
+  "reply_outcome": {
+    "execution_profile": {
+      "total_time": 2393,
+      "planner_time": 2393,
+      "llm_time": 0,
+      "tool_time": 1395,
+      "post_time": 0,
+      "tool_selection_time": 998
+    }
+  },
+  "turn_acts": [],
+  "grounded": true,
+  "active_subject": "",
+  "continuation_used": false,
+  "route_trace": [
+    {
+      "stage": "input",
+      "outcome": "received",
+      "data": {
+        "channel": "http",
+        "input_source": "typed"
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "semantic_tool_intent",
+      "data": {
+        "duration_ms": 998
+      }
+    },
+    {
+      "stage": "action_planner",
+      "outcome": "semantic_intent",
+      "data": {
+        "tool": "wikipedia_lookup",
+        "confidence": 0.0
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "tool_selection",
+      "data": {
+        "duration_ms": 998
+      }
+    },
+    {
+      "stage": "action_planner",
+      "outcome": "run_tool",
+      "data": {
+        "tool": "wikipedia_lookup"
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "tool_response",
+      "data": {
+        "duration_ms": 1395,
+        "tool": "wikipedia_lookup"
+      }
+    },
+    {
+      "stage": "tool_execution",
+      "outcome": "ok",
+      "data": {
+        "tool": "wikipedia_lookup",
+        "grounded": true
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "planner",
+      "data": {
+        "duration_ms": 2393
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "planner_call",
+      "data": {
+        "duration_ms": 2393
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "execute_reply_sequence",
+      "data": {
+        "duration_ms": 2393
+      }
+    },
+    {
+      "stage": "timing_breakdown",
+      "outcome": "completed",
+      "detail": "execute_reply_sequence",
+      "data": {
+        "total_time": 2393,
+        "planner_time": 2393,
+        "llm_time": 0,
+        "tool_time": 1395,
+        "post_time": 0,
+        "tool_selection_time": 998
+      }
+    },
+    {
+      "stage": "finalize",
+      "outcome": "run_tool",
+      "data": {
+        "grounded": true,
+        "tool": "wikipedia_lookup"
+      }
+    }
+  ],
+  "provider_used": "wikipedia_lookup",
+  "provider_candidates": [],
+  "provider_family": "wikipedia_lookup",
+  "route_summary": "input:received -> action_planner:semantic_intent -> action_planner:run_tool -> tool_execution:ok -> finalize:run_tool"
+}

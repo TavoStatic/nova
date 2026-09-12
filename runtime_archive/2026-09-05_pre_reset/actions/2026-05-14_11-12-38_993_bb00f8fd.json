@@ -1,0 +1,64 @@
+{
+  "ts": "2026-05-14 11:12:36",
+  "channel": "http",
+  "session_id": "codex-live-http-grounded-trouble",
+  "input_source": "typed",
+  "user_input": "what is troubling you today?",
+  "intent": "chat",
+  "planner_decision": "grounded_self_report",
+  "tool": "",
+  "tool_args": {},
+  "tool_result": "",
+  "final_answer": "Today I am mainly stuck on: Work Tree is open with 1 open task(s); current branch: Release package is stale behind live source; task: Read release ledger for current package Release package is stale behind live source and needs rebuild verification.\nWork Tree is open with 1 open task(s). Current branch: Release package is stale behind live source. Current task: Read release ledger for current package.\nRelease readiness: source-changed-after-build.\nSource: live control status and Work Tree.",
+  "reply_contract": "runtime.self_report.live_status",
+  "reply_outcome": {
+    "source": "live_control_status_and_work_tree",
+    "tool": "control_status"
+  },
+  "turn_acts": [
+    "ask"
+  ],
+  "grounded": false,
+  "active_subject": "",
+  "continuation_used": false,
+  "route_trace": [
+    {
+      "stage": "input",
+      "outcome": "received",
+      "data": {
+        "channel": "http",
+        "input_source": "typed",
+        "intent": "chat"
+      }
+    },
+    {
+      "stage": "direction_analysis",
+      "outcome": "general_chat",
+      "data": {
+        "effective_query": "what is troubling you today?",
+        "turn_acts": "ask",
+        "identity_focused": false,
+        "bypass_pattern_routes": false
+      }
+    },
+    {
+      "stage": "grounded_self_report",
+      "outcome": "control_status",
+      "detail": "live_status_reply",
+      "data": {
+        "tool": "control_status"
+      }
+    },
+    {
+      "stage": "finalize",
+      "outcome": "grounded_self_report",
+      "data": {
+        "grounded": false
+      }
+    }
+  ],
+  "provider_used": "",
+  "provider_candidates": [],
+  "provider_family": "",
+  "route_summary": "input:received -> direction_analysis:general_chat -> grounded_self_report:control_status -> finalize:grounded_self_report"
+}

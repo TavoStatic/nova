@@ -1,0 +1,154 @@
+{
+  "ts": "2026-05-14 22:12:21",
+  "channel": "http",
+  "session_id": "s9_online",
+  "input_source": "typed",
+  "user_input": "research PEIMS online",
+  "intent": "web_research_family",
+  "planner_decision": "run_tool",
+  "tool": "web_research",
+  "tool_args": {
+    "args": [
+      "PEIMS"
+    ]
+  },
+  "tool_result": "1) https://tea.texas.gov/a\n2) https://tea.texas.gov/b",
+  "final_answer": "1) https://tea.texas.gov/a\n2) https://tea.texas.gov/b",
+  "reply_contract": "web_research_family.research_prompt",
+  "reply_outcome": {
+    "intent": "web_research_family",
+    "kind": "research_prompt",
+    "reply_contract": "web_research_family.research_prompt",
+    "tool_name": "web_research",
+    "provider_candidates": [
+      "general_web"
+    ],
+    "provider_family": "general_web",
+    "provider_used": "general_web",
+    "query": "PEIMS",
+    "requires_tool": true,
+    "state_delta": {},
+    "tool_result": "1) https://tea.texas.gov/a\n2) https://tea.texas.gov/b"
+  },
+  "turn_acts": [
+    "ask"
+  ],
+  "grounded": true,
+  "active_subject": "retrieval:web_research",
+  "continuation_used": false,
+  "route_trace": [
+    {
+      "stage": "input",
+      "outcome": "received",
+      "data": {
+        "channel": "http",
+        "input_source": "typed",
+        "intent": "chat"
+      }
+    },
+    {
+      "stage": "direction_analysis",
+      "outcome": "general_chat",
+      "data": {
+        "effective_query": "research PEIMS online",
+        "turn_acts": "ask",
+        "identity_focused": false,
+        "bypass_pattern_routes": false
+      }
+    },
+    {
+      "stage": "action_planner",
+      "outcome": "run_tool",
+      "data": {
+        "tool": "web_research"
+      }
+    },
+    {
+      "stage": "tool_execution",
+      "outcome": "ok",
+      "data": {
+        "tool": "web_research"
+      }
+    },
+    {
+      "stage": "supervisor_intent",
+      "outcome": "handled",
+      "detail": "web_research_family",
+      "data": {
+        "rule": "web_research_family"
+      }
+    },
+    {
+      "stage": "finalize",
+      "outcome": "run_tool",
+      "data": {
+        "grounded": true,
+        "tool": "web_research"
+      }
+    }
+  ],
+  "provider_used": "general_web",
+  "provider_candidates": [
+    "general_web"
+  ],
+  "provider_family": "general_web",
+  "routing_decision": {
+    "input_preview": "research PEIMS online",
+    "entry_point": "http",
+    "intent_phase": {
+      "phase": "intent",
+      "handled": true,
+      "rule_name": "web_research_family",
+      "intent": "web_research_family",
+      "action": "",
+      "priority": 62,
+      "candidates": [
+        {
+          "rule_name": "smalltalk",
+          "priority": 61,
+          "handled": false
+        },
+        {
+          "rule_name": "set_location",
+          "priority": 62,
+          "handled": false
+        },
+        {
+          "rule_name": "store_fact",
+          "priority": 62,
+          "handled": false
+        },
+        {
+          "rule_name": "weather_lookup",
+          "priority": 62,
+          "handled": false
+        },
+        {
+          "rule_name": "web_research_family",
+          "priority": 62,
+          "handled": true,
+          "intent": "web_research_family"
+        }
+      ]
+    },
+    "handle_phase": {
+      "phase": "handle",
+      "handled": false,
+      "rule_name": "",
+      "intent": "",
+      "action": "",
+      "priority": null,
+      "candidates": []
+    },
+    "final_owner": "supervisor_intent",
+    "allowed_bypass": false,
+    "allowed_bypass_category": "",
+    "bypass_reason": "",
+    "reply_contract": "web_research_family.research_prompt",
+    "reply_outcome_kind": "research_prompt",
+    "turn_acts": [
+      "ask"
+    ]
+  },
+  "route_summary": "input:received -> direction_analysis:general_chat -> action_planner:run_tool -> tool_execution:ok -> supervisor_intent:handled -> finalize:run_tool"
+}

@@ -1,0 +1,23 @@
+{
+  "turns": [
+    {
+      "role": "user",
+      "text": "how are you doing today ?"
+    },
+    {
+      "role": "assistant",
+      "text": "I\u2019m doing well; my core systems are active and health checks are passing. Everything\u2019s ready to help if you need anything specific today."
+    },
+    {
+      "role": "user",
+      "text": "what now"
+    },
+    {
+      "role": "assistant",
+      "text": "No active tasks are pending right now. My systems are online and ready for your next instruction or status check."
+    }
+  ],
+  "turn_ts": 1788347269.468277,
+  "session_id": "http-e07a897db2f5",
+  "ts": 1788347208.4524677
+}

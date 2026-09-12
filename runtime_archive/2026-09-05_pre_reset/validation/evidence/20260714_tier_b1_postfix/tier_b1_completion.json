@@ -1,0 +1,22 @@
+{
+  "tier_b1_completed_at": "2026-07-14",
+  "b1_core_thinning": {
+    "root_fix": "mapped_http_extraction_boundary demoted to witness; productive closure requires real mutation actions",
+    "root_files": [
+      "services/recurring_finding_lifecycle.py",
+      "services/core_thinning.py"
+    ],
+    "semantics_evidence": "runtime/validation/evidence/20260714_tier_b1_postfix/b1_closure_semantics.json",
+    "live_feed_evidence": "runtime/validation/evidence/20260714_tier_b1_postfix/core_thinning_brief_snapshot.json",
+    "status": "implemented_and_evidence_captured"
+  },
+  "harness_validation_scope": {
+    "root_fix": "autonomy_maintenance skips pipeline reconcile/ensure when runtime_scope_name() == validation",
+    "tests": [
+      "test_sync_pipeline_workers_skipped_in_validation_scope",
+      "test_sync_pipeline_workers_runs_reconcile_and_ensure_in_live_scope"
+    ],
+    "status": "implemented_and_tested"
+  },
+  "acceptance_command": "python -m unittest tests.test_core_thinning_service tests.test_recurring_finding_lifecycle tests.test_work_tree_signal_ingestion_service tests.test_pipeline_worker_supervision"
+}

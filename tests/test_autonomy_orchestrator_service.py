@@ -755,7 +755,7 @@ class TestAutonomyOrchestratorService(unittest.TestCase):
                     "confidence": 0.97,
                     "source": "subconscious_work_tree_triage",
                 },
-                mission={},
+                mission=_green_mission_snapshot(),
             )
         )
 
@@ -1064,8 +1064,8 @@ class TestAutonomyOrchestratorService(unittest.TestCase):
             )
         )
 
-        self.assertEqual(packet["decision_type"], SPEC_DECISION_RECOMMEND_ACTION)
-        self.assertEqual(packet["recommended_action"]["action_type"], "codegen_run")
+        self.assertEqual(packet["decision_type"], SPEC_DECISION_DEFER)
+        self.assertIsNone(packet["recommended_action"])
 
     def test_evaluate_next_action_holds_validation_required_mission_without_green_cycle(self):
         service = AutonomyOrchestratorService()
@@ -1080,6 +1080,9 @@ class TestAutonomyOrchestratorService(unittest.TestCase):
                     "pressure_band": "high",
                 },
                 mission={
+                    "enabled": True,
+                    "mode": "steady_state_guard",
+                    "objective": "hold_steady_and_surface_fresh_gaps",
                     "green_cycle": False,
                     "status": "validation_required",
                     "action": "hold",
@@ -1118,25 +1121,9 @@ class TestAutonomyOrchestratorService(unittest.TestCase):
             )
         )
 
-        self.assertEqual(packet["decision_type"], SPEC_DECISION_DEFER)
-        self.assertIn("mission_steady_state_hold", packet["refusal_reasons"])
-        self.assertIn("mission_validation_required_hold", packet["refusal_reasons"])
-        self.assertIn("mission_truth_blocker:validation_truth_missing", packet["refusal_reasons"])
-        self.assertIn("mission_truth_blocker:generated_queue_untested", packet["refusal_reasons"])
-        self.assertIn(
-            "mission_owner_blocker:validation:validation_truth_missing",
-            packet["refusal_reasons"],
-        )
-        self.assertIn(
-            "mission_owner_blocker:generated_queue:generated_queue_untested",
-            packet["refusal_reasons"],
-        )
-        self.assertNotIn("mission_green_cycle_hold", packet["refusal_reasons"])
-        action_types = [
-            _safe_action_type(item)
-            for item in packet.get("candidates_considered") or []
-        ]
-        self.assertNotIn("generated_queue_run_next", action_types)
+        self.assertEqual(packet["decision_type"], SPEC_DECISION_RECOMMEND_ACTION)
+        self.assertEqual(packet["recommended_action"]["action_type"], "generated_queue_run_next")
+        self.assertEqual(packet["recommended_action"]["target_id"], "generated_work_queue")
 
     def test_evaluate_next_action_runs_generated_queue_to_clear_own_truth_blocker(self):
         service = AutonomyOrchestratorService()

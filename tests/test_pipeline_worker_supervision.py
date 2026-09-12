@@ -15,6 +15,8 @@ from services.pipeline_worker_supervision import (
     reconcile_duplicate_pipeline_worker_processes,
     reconcile_pipeline_worker_scope,
     reconcile_pipeline_workers_for_ids,
+    runtime_pipeline_worker_ids,
+    stop_pipeline_worker,
     summarize_pipeline_workers,
     write_worker_heartbeat,
     write_worker_lease,
@@ -528,6 +530,35 @@ class TestPipelineWorkerSupervision(unittest.TestCase):
             self.assertFalse(bool(workers["edfi"].get("ok")))
             self.assertEqual(workers["edfi"].get("status"), "start_failed")
             self.assertTrue(bool(workers["data_connector"].get("ok")))
+
+    def test_runtime_pipeline_worker_ids_finds_lease_and_heartbeat(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            runtime_root = Path(td)
+            write_worker_lease("edfi_bisd", runtime_root=runtime_root, lease_owner_pid=30440)
+            write_worker_heartbeat("reports", runtime_root=runtime_root, status="running", pid=43748)
+            (runtime_root / "pipelines" / "idle").mkdir(parents=True)
+            self.assertEqual(
+                runtime_pipeline_worker_ids(runtime_root=runtime_root),
+                ["edfi_bisd", "reports"],
+            )
+
+    def test_stop_pipeline_worker_terminates_live_owner_and_clears_lease(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            runtime_root = Path(td)
+            live_pid = 30440
+            write_worker_lease("edfi_bisd", runtime_root=runtime_root, lease_owner_pid=live_pid)
+            write_worker_heartbeat("edfi_bisd", runtime_root=runtime_root, status="running", pid=live_pid)
+            terminated: list[int] = []
+            result = stop_pipeline_worker(
+                "edfi_bisd",
+                runtime_root=runtime_root,
+                pid_alive_fn=lambda pid: int(pid) == live_pid,
+                terminate_pid_fn=lambda pid: terminated.append(int(pid)) or True,
+            )
+            self.assertEqual(result.get("status"), "stopped")
+            self.assertEqual(terminated, [live_pid])
+            self.assertFalse(read_worker_lease("edfi_bisd", runtime_root=runtime_root).get("present"))
+            self.assertFalse(worker_heartbeat_path("edfi_bisd", runtime_root=runtime_root).exists())
 
 
 if __name__ == "__main__":

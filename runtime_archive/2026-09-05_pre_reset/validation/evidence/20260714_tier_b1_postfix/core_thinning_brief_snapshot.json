@@ -1,0 +1,64 @@
+{
+  "order_count": 8,
+  "executable_count": 8,
+  "reopened_count": 0,
+  "resolved_count": 1,
+  "satisfied_count": 1,
+  "verdict": {
+    "owner": "core_thinning",
+    "ready": false,
+    "status": "pressure",
+    "source": "core_thinning",
+    "summary": "core/http thinning has 8 ready work order(s)",
+    "blocks_green": false,
+    "blockers": [
+      {
+        "owner": "core_thinning",
+        "code": "core_http_thinning_pressure",
+        "detail": "8 core/http thinning work order(s) ready",
+        "source": "core_thinning",
+        "remediation": {
+          "action": "active_work_tree_run_next",
+          "tools": [
+            "core_thinning"
+          ]
+        }
+      }
+    ],
+    "evidence": {
+      "order_count": 8,
+      "line_count": 5805,
+      "function_count": 487,
+      "large_function_count": 0,
+      "http_surface_candidate_count": 8,
+      "wrapper_candidate_count": 0,
+      "pressure_count": 8,
+      "unresolved_pressure_count": 8,
+      "executable_count": 8,
+      "reopened_count": 0,
+      "satisfied_count": 1,
+      "satisfied_active_count": 0,
+      "resolved_count": 1,
+      "added_count": 0,
+      "deduped_count": 8,
+      "pressure_backed_by_executable": true,
+      "lifecycle_gap": "",
+      "feed_status": "resolved"
+    }
+  },
+  "feed": {
+    "ok": true,
+    "status": "resolved",
+    "tree_id": "tree_c7936c7a",
+    "created": false,
+    "added_count": 0,
+    "deduped_count": 8,
+    "resolved_count": 1,
+    "updated_count": 0,
+    "reopened_count": 0,
+    "satisfied_count": 1,
+    "satisfied_active_count": 0,
+    "executable_count": 8,
+    "order_count": 8
+  }
+}

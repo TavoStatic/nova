@@ -1,0 +1,140 @@
+{
+  "ts": "2026-05-14 00:05:29",
+  "channel": "http",
+  "session_id": "s11_direct",
+  "input_source": "typed",
+  "user_input": "check the weather if you can please..",
+  "intent": "weather_lookup",
+  "planner_decision": "ask_clarify",
+  "tool": "",
+  "tool_args": {},
+  "tool_result": "",
+  "final_answer": "What location should I use for the weather lookup?",
+  "reply_contract": "weather_lookup.clarify",
+  "reply_outcome": {
+    "intent": "weather_lookup",
+    "kind": "clarify",
+    "reply_contract": "weather_lookup.clarify",
+    "weather_mode": "clarify",
+    "location_value": "",
+    "requires_tool": false,
+    "pending_action": {
+      "kind": "weather_lookup",
+      "status": "awaiting_location",
+      "saved_location_available": false,
+      "preferred_tool": "weather_location"
+    },
+    "next_state": null,
+    "state_delta": {}
+  },
+  "turn_acts": [
+    "ask"
+  ],
+  "grounded": false,
+  "active_subject": "",
+  "continuation_used": false,
+  "route_trace": [
+    {
+      "stage": "input",
+      "outcome": "received",
+      "data": {
+        "channel": "http",
+        "input_source": "typed",
+        "intent": "weather_lookup"
+      }
+    },
+    {
+      "stage": "direction_analysis",
+      "outcome": "general_chat",
+      "data": {
+        "effective_query": "check the weather if you can please..",
+        "turn_acts": "ask",
+        "identity_focused": false,
+        "bypass_pattern_routes": false
+      }
+    },
+    {
+      "stage": "action_planner",
+      "outcome": "ask_clarify"
+    },
+    {
+      "stage": "pending_action",
+      "outcome": "awaiting_location",
+      "data": {
+        "tool": "weather"
+      }
+    },
+    {
+      "stage": "supervisor_intent",
+      "outcome": "handled",
+      "detail": "weather_lookup",
+      "data": {
+        "rule": "weather_lookup"
+      }
+    },
+    {
+      "stage": "finalize",
+      "outcome": "ask_clarify",
+      "data": {
+        "grounded": false
+      }
+    }
+  ],
+  "provider_used": "",
+  "provider_candidates": [],
+  "provider_family": "",
+  "routing_decision": {
+    "input_preview": "check the weather if you can please..",
+    "entry_point": "http",
+    "intent_phase": {
+      "phase": "intent",
+      "handled": true,
+      "rule_name": "weather_lookup",
+      "intent": "weather_lookup",
+      "action": "",
+      "priority": 62,
+      "candidates": [
+        {
+          "rule_name": "smalltalk",
+          "priority": 61,
+          "handled": false
+        },
+        {
+          "rule_name": "set_location",
+          "priority": 62,
+          "handled": false
+        },
+        {
+          "rule_name": "store_fact",
+          "priority": 62,
+          "handled": false
+        },
+        {
+          "rule_name": "weather_lookup",
+          "priority": 62,
+          "handled": true,
+          "intent": "weather_lookup"
+        }
+      ]
+    },
+    "handle_phase": {
+      "phase": "handle",
+      "handled": false,
+      "rule_name": "",
+      "intent": "",
+      "action": "",
+      "priority": null,
+      "candidates": []
+    },
+    "final_owner": "supervisor_intent",
+    "allowed_bypass": false,
+    "allowed_bypass_category": "",
+    "bypass_reason": "",
+    "reply_contract": "weather_lookup.clarify",
+    "reply_outcome_kind": "clarify",
+    "turn_acts": [
+      "ask"
+    ]
+  },
+  "route_summary": "input:received -> direction_analysis:general_chat -> action_planner:ask_clarify -> pending_action:awaiting_location -> supervisor_intent:handled -> finalize:ask_clarify"
+}

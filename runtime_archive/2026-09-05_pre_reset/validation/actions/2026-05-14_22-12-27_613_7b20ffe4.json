@@ -1,0 +1,160 @@
+{
+  "ts": "2026-05-14 22:12:27",
+  "channel": "http",
+  "session_id": "s6_res",
+  "input_source": "typed",
+  "user_input": "are you sure that is all the information you about him?",
+  "intent": "conversation_followup",
+  "planner_decision": "deterministic",
+  "tool": "",
+  "tool_args": {},
+  "tool_result": "",
+  "final_answer": "Here are the other verified facts I have about Gus. Developer full name: Gustavo Uribe. Developer nickname: Gus.",
+  "reply_contract": "",
+  "reply_outcome": {},
+  "turn_acts": [],
+  "grounded": true,
+  "active_subject": "identity_profile:developer",
+  "continuation_used": true,
+  "route_trace": [
+    {
+      "stage": "input",
+      "outcome": "received",
+      "data": {
+        "channel": "http",
+        "input_source": "typed",
+        "intent": "chat"
+      }
+    },
+    {
+      "stage": "direction_analysis",
+      "outcome": "general_chat",
+      "data": {
+        "effective_query": "are you sure that is all the information you about him?",
+        "identity_focused": false,
+        "bypass_pattern_routes": false
+      }
+    },
+    {
+      "stage": "profile_followup",
+      "outcome": "matched",
+      "data": {
+        "rule": "profile_certainty"
+      }
+    },
+    {
+      "stage": "finalize",
+      "outcome": "deterministic",
+      "data": {
+        "grounded": true
+      }
+    }
+  ],
+  "provider_used": "",
+  "provider_candidates": [],
+  "provider_family": "",
+  "routing_decision": {
+    "input_preview": "are you sure that is all the information you about him?",
+    "entry_point": "http",
+    "intent_phase": {
+      "phase": "intent",
+      "handled": false,
+      "rule_name": "",
+      "intent": "",
+      "action": "",
+      "priority": null,
+      "candidates": [
+        {
+          "rule_name": "smalltalk",
+          "priority": 61,
+          "handled": false
+        },
+        {
+          "rule_name": "set_location",
+          "priority": 62,
+          "handled": false
+        },
+        {
+          "rule_name": "store_fact",
+          "priority": 62,
+          "handled": false
+        },
+        {
+          "rule_name": "weather_lookup",
+          "priority": 62,
+          "handled": false
+        },
+        {
+          "rule_name": "web_research_family",
+          "priority": 62,
+          "handled": false
+        },
+        {
+          "rule_name": "capability_query",
+          "priority": 63,
+          "handled": false
+        },
+        {
+          "rule_name": "policy_domain_query",
+          "priority": 64,
+          "handled": false
+        },
+        {
+          "rule_name": "assistant_name",
+          "priority": 66,
+          "handled": false
+        },
+        {
+          "rule_name": "self_identity_web_challenge",
+          "priority": 67,
+          "handled": false
+        },
+        {
+          "rule_name": "name_origin",
+          "priority": 68,
+          "handled": false
+        },
+        {
+          "rule_name": "developer_full_name",
+          "priority": 69,
+          "handled": false
+        },
+        {
+          "rule_name": "developer_profile",
+          "priority": 70,
+          "handled": false
+        }
+      ]
+    },
+    "handle_phase": {
+      "phase": "handle",
+      "handled": true,
+      "rule_name": "profile_certainty",
+      "intent": "conversation_followup",
+      "action": "identity_profile_followup",
+      "priority": 35,
+      "candidates": [
+        {
+          "rule_name": "reflective_retry",
+          "priority": 30,
+          "handled": false
+        },
+        {
+          "rule_name": "profile_certainty",
+          "priority": 35,
+          "handled": true,
+          "action": "identity_profile_followup",
+          "intent": "conversation_followup"
+        }
+      ]
+    },
+    "final_owner": "supervisor_handle",
+    "allowed_bypass": false,
+    "allowed_bypass_category": "",
+    "bypass_reason": "",
+    "reply_contract": "",
+    "reply_outcome_kind": "",
+    "turn_acts": []
+  },
+  "route_summary": "input:received -> direction_analysis:general_chat -> profile_followup:matched -> finalize:deterministic"
+}

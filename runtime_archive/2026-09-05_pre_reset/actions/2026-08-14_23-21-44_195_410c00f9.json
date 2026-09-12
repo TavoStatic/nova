@@ -1,0 +1,82 @@
+{
+  "ts": "2026-08-14 23:21:44",
+  "channel": "http",
+  "session_id": "leah-timeout-test",
+  "input_source": "http",
+  "user_input": "hi",
+  "intent": "",
+  "planner_decision": "conversation_presence",
+  "tool": "",
+  "tool_args": {},
+  "tool_result": "",
+  "final_answer": "Hello.",
+  "reply_contract": "conversation_turn",
+  "reply_outcome": {
+    "kind": "presence",
+    "execution_profile": {
+      "total_time": 2,
+      "planner_time": 0,
+      "llm_time": 0,
+      "tool_time": 0,
+      "post_time": 0,
+      "tool_selection_time": 0
+    }
+  },
+  "turn_acts": [],
+  "grounded": false,
+  "active_subject": "",
+  "continuation_used": false,
+  "route_trace": [
+    {
+      "stage": "input",
+      "outcome": "received",
+      "data": {
+        "channel": "http",
+        "input_source": "http"
+      }
+    },
+    {
+      "stage": "intent_understanding",
+      "outcome": "classified",
+      "detail": "presence",
+      "data": {
+        "level": "casual",
+        "domain": "general",
+        "confidence": 1.0,
+        "strategy": "accept_and_engage"
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "execute_reply_sequence",
+      "data": {
+        "duration_ms": 2
+      }
+    },
+    {
+      "stage": "timing_breakdown",
+      "outcome": "completed",
+      "detail": "execute_reply_sequence",
+      "data": {
+        "total_time": 2,
+        "planner_time": 0,
+        "llm_time": 0,
+        "tool_time": 0,
+        "post_time": 0,
+        "tool_selection_time": 0
+      }
+    },
+    {
+      "stage": "finalize",
+      "outcome": "conversation_presence",
+      "data": {
+        "grounded": false
+      }
+    }
+  ],
+  "provider_used": "",
+  "provider_candidates": [],
+  "provider_family": "",
+  "route_summary": "input:received -> intent_understanding:classified -> finalize:conversation_presence"
+}

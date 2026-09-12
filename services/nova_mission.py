@@ -15,6 +15,7 @@ from services.tool_identity import (
     RELEASE_REBUILD_VERIFY,
     RELEASE_RECORD_VALIDATION_OUTCOME,
     RELEASE_VALIDATION_RUN,
+    SYSTEM_CHECK,
 )
 
 
@@ -67,16 +68,9 @@ class NovaMissionService:
         "subconscious_triage_is_pressure": False,
         "generated_queue_backlog_is_pressure": False,
         "require_core_gate_for_green": True,
-        "ingestion_suppress_ambient_on_hold": True,
+        "ingestion_suppress_ambient_on_hold": False,
         "sustained_watch_cycles": 6,
-        "hold_block_actions": [
-            "active_work_tree_run_next",
-            "generated_queue_run_next",
-            "generated_queue_investigate",
-            "pulse_status",
-            "codegen_run",
-            "leah_build_run_next",
-        ],
+        "hold_block_actions": [],
         "hold_allow_actions": [
             "patch_queue_run_next",
             "guard_start",
@@ -86,6 +80,7 @@ class NovaMissionService:
         # Without the early tools, hold + next_step=read deadlocks forever.
         "hold_allow_active_work_tools": [
             "core_thinning",
+            SYSTEM_CHECK,
             RELEASE_REBUILD_VERIFY,
             RELEASE_VALIDATION_RUN,
             RELEASE_RECORD_VALIDATION_OUTCOME,
@@ -106,6 +101,15 @@ class NovaMissionService:
             RELEASE_VALIDATION_RUN,
             RELEASE_RECORD_VALIDATION_OUTCOME,
             RELEASE_PROMOTION_JUDGMENT,
+        }
+    )
+    HOUSEKEEPING_HOLD_TOOLS = frozenset({SYSTEM_CHECK})
+    HOUSEKEEPING_HOLD_WORK_CLASSES = frozenset({"maintenance_pressure"})
+    HOUSEKEEPING_HOLD_SOURCES = frozenset(
+        {
+            "storage_release_pressure",
+            "scheduler_registry",
+            "autonomy_maintenance",
         }
     )
 
@@ -213,9 +217,10 @@ class NovaMissionService:
     @classmethod
     def execution_contract(cls, policy_snapshot: dict | None) -> dict[str, Any]:
         policy = cls._mission_policy(policy_snapshot)
-        block = _normalize_action_names(policy.get("hold_block_actions")) or _normalize_action_names(
-            cls.DEFAULT_POLICY["hold_block_actions"]
-        )
+        if "hold_block_actions" in policy:
+            block = _normalize_action_names(policy.get("hold_block_actions"))
+        else:
+            block = _normalize_action_names(cls.DEFAULT_POLICY["hold_block_actions"])
         allow = _normalize_action_names(policy.get("hold_allow_actions")) or _normalize_action_names(
             cls.DEFAULT_POLICY["hold_allow_actions"]
         )
@@ -431,6 +436,33 @@ class NovaMissionService:
         return any(token in blob for token in markers)
 
     @classmethod
+    def _housekeeping_hold_context_ok(cls, action_context: dict | None) -> bool:
+        """Housekeeping findings may run during hold. Climb/expansion findings may not."""
+        context = _as_dict(action_context)
+        work_class = _text(context.get("work_class"), 120).lower()
+        source_type = _text(context.get("source_type"), 120).lower()
+        if work_class in cls.HOUSEKEEPING_HOLD_WORK_CLASSES:
+            return True
+        if source_type in cls.HOUSEKEEPING_HOLD_SOURCES:
+            return True
+        family = _text(context.get("progress_family"), 120).lower()
+        if "maintenance_pressure" in family or "storage_release" in family:
+            return True
+        blob = " ".join(
+            [
+                _text(context.get("title"), 240),
+                _text(context.get("task_title"), 240),
+                _text(context.get("tree_title"), 240),
+            ]
+        ).lower()
+        if not blob.strip():
+            return False
+        return any(
+            token in blob
+            for token in ("storage watch", "storage_watch", "archive growth", "runtime archive")
+        )
+
+    @classmethod
     def _hold_allows_active_work_tool(
         cls,
         mission_snapshot: dict | None,
@@ -439,13 +471,23 @@ class NovaMissionService:
         action_context: dict | None = None,
     ) -> bool:
         clean_tool = _text(tool, 120)
-        allowed = set(cls.RELEASE_LADDER_HOLD_TOOLS) | {"core_thinning"}
+        allowed = set(cls.RELEASE_LADDER_HOLD_TOOLS) | {"core_thinning"} | set(cls.HOUSEKEEPING_HOLD_TOOLS)
         if clean_tool not in allowed:
             return False
         mission = _as_dict(mission_snapshot)
         blockers = cls._blocker_codes(mission.get("truth_blockers")) | cls._blocker_codes(
             mission.get("green_blockers")
         )
+
+        if clean_tool in cls.HOUSEKEEPING_HOLD_TOOLS:
+            if not cls._housekeeping_hold_context_ok(action_context):
+                return False
+            if "core_gate_roots_blocked" in blockers:
+                return False
+            core_gate = _as_dict(mission.get("core_gate"))
+            if _as_list(core_gate.get("missing_roots")):
+                return False
+            return True
 
         if clean_tool in cls.RELEASE_LADDER_HOLD_TOOLS:
             # Observation-tier steps only on release-shaped work (avoid random reads on hold).
@@ -597,12 +639,28 @@ class NovaMissionService:
         action = _text(action_type, 120)
         if not action:
             return False
+
+        def _done(blocked: bool, reason_code: str = "") -> bool:
+            try:
+                from services.observation_spine import observe_quietly
+
+                observe_quietly(
+                    source="mission_gate",
+                    operation="admit_action",
+                    subject=action,
+                    outcome="denied" if blocked else "admitted",
+                    reason_code=reason_code or ("HOLD_SCOPE" if blocked else None),
+                )
+            except Exception:
+                pass
+            return blocked
+
         contract = cls.execution_contract(policy_snapshot)
         allow = set(contract.get("hold_allow_actions") or [])
         if action in allow:
-            return False
+            return _done(False)
         if not cls.hold_blocks_legacy_execution(mission_snapshot):
-            return False
+            return _done(False)
         block = set(contract.get("hold_block_actions") or [])
         allow_active_tools = set(contract.get("hold_allow_active_work_tools") or [])
         if action in block and action == "active_work_tree_run_next":
@@ -613,19 +671,19 @@ class NovaMissionService:
                 tool,
                 action_context=context,
             ):
-                return False
+                return _done(False)
         if action in block and cls._owner_remediation_allows_action(
             action,
             mission_snapshot,
             action_context=action_context,
         ):
-            return False
-        return action in block
+            return _done(False)
+        return _done(bool(action in block), "HOLD_SCOPE" if action in block else "")
 
     @classmethod
     def ingestion_suppresses_ambient_governance(cls, mission_snapshot: dict | None, policy_snapshot: dict | None = None) -> bool:
         policy = cls._mission_policy(policy_snapshot)
-        if not _as_bool(policy.get("ingestion_suppress_ambient_on_hold"), True):
+        if not _as_bool(policy.get("ingestion_suppress_ambient_on_hold"), False):
             return False
         mission = _as_dict(mission_snapshot)
         if not cls.hold_blocks_legacy_execution(mission):
@@ -749,6 +807,18 @@ class NovaMissionService:
         blocked_count = _as_int(work_tree.get("blocked_count"), 0)
         operator_hold_count = _as_int(work_tree.get("operator_hold_count"), 0)
         non_operator_blocked_count = max(0, blocked_count - operator_hold_count)
+        working_count = _as_int(work_tree.get("working_count"), 0)
+        pending_count = _as_int(work_tree.get("pending_count"), 0)
+        executable_count = _as_int(work_tree.get("active_executable_count"), 0)
+        if executable_count < 0:
+            executable_count = 0
+        moving_count = _as_int(work_tree.get("progress_moving_count"), 0)
+        not_started_count = _as_int(work_tree.get("progress_not_started_count"), 0)
+        unfinished_continue_count = max(
+            working_count + pending_count,
+            moving_count + not_started_count,
+            executable_count,
+        )
         triage_approved = _as_int(hints.get("approved_review_count"), 0)
         high_priority = _as_int(queue.get("high_priority_count"), 0)
         generated_actionable = _as_int(queue.get("generated_actionable_count"), high_priority)
@@ -780,12 +850,18 @@ class NovaMissionService:
 
         actionable_triage_count = triage_approved if subconscious_triage_is_pressure else 0
         actionable_queue_count = high_priority if generated_queue_backlog_is_pressure else max(0, patch_ready)
+        if not release_stale_ready_is_pressure:
+            unfinished_continue_count = max(
+                0,
+                unfinished_continue_count - release_stale_ready_count,
+            )
         actionable_fresh_gap_signal_count = max(
             0,
             latent_root_signal_count
             + actionable_triage_count
             + actionable_queue_count
-            + non_operator_blocked_count,
+            + non_operator_blocked_count
+            + unfinished_continue_count,
         )
         if mode == "operator_focus" and operator_hold_count > 0:
             actionable_fresh_gap_signal_count = max(actionable_fresh_gap_signal_count, operator_hold_count)
@@ -899,6 +975,7 @@ class NovaMissionService:
             "blocked_count": blocked_count,
             "operator_hold_count": operator_hold_count,
             "non_operator_blocked_count": non_operator_blocked_count,
+            "unfinished_continue_count": unfinished_continue_count,
             "actionable_fresh_gap_signal_count": actionable_fresh_gap_signal_count,
             "fresh_gap_signal_count": fresh_gap_signal_count,
             "posture_band": posture_band,

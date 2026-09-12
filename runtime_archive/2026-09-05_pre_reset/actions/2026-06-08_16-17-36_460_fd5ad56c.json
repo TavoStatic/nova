@@ -1,0 +1,129 @@
+{
+  "ts": "2026-06-08 16:17:33",
+  "channel": "cli",
+  "session_id": "",
+  "input_source": "typed",
+  "user_input": "start working on them and let me know what is the outcome.  do not lie about either !",
+  "intent": "",
+  "planner_decision": "work_tree",
+  "tool": "work_tree_execute",
+  "tool_args": {
+    "query": "start working on them and let me know what is the outcome.  do not lie about either !"
+  },
+  "tool_result": "",
+  "final_answer": "",
+  "reply_contract": "",
+  "reply_outcome": {
+    "execution_profile": {
+      "total_time": 3178,
+      "planner_time": 3178,
+      "llm_time": 0,
+      "tool_time": 0,
+      "post_time": 0,
+      "tool_selection_time": 3178
+    }
+  },
+  "turn_acts": [],
+  "grounded": false,
+  "active_subject": "",
+  "continuation_used": false,
+  "route_trace": [
+    {
+      "stage": "input",
+      "outcome": "received",
+      "data": {
+        "channel": "cli",
+        "input_source": "typed"
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "semantic_tool_intent",
+      "data": {
+        "duration_ms": 3178
+      }
+    },
+    {
+      "stage": "action_planner",
+      "outcome": "semantic_intent",
+      "detail": "The user wants the assistant to start working on the pending tasks and ensure an outcome is reported accurately, indicating a need for the assistant to execute work tree actions.",
+      "data": {
+        "tool": "work_tree_execute",
+        "confidence": 0.7
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "tool_selection",
+      "data": {
+        "duration_ms": 3178
+      }
+    },
+    {
+      "stage": "action_planner",
+      "outcome": "work_tree",
+      "data": {
+        "tool": "work_tree_execute"
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "planner",
+      "data": {
+        "duration_ms": 3178
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "planner_call",
+      "data": {
+        "duration_ms": 3178
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "execute_reply_sequence",
+      "data": {
+        "duration_ms": 3178
+      }
+    },
+    {
+      "stage": "timing_breakdown",
+      "outcome": "completed",
+      "detail": "execute_reply_sequence",
+      "data": {
+        "total_time": 3178,
+        "planner_time": 3178,
+        "llm_time": 0,
+        "tool_time": 0,
+        "post_time": 0,
+        "tool_selection_time": 3178
+      }
+    },
+    {
+      "stage": "finalize",
+      "outcome": "work_tree",
+      "data": {
+        "grounded": false,
+        "tool": "work_tree_execute"
+      }
+    }
+  ],
+  "provider_used": "work_tree_execute",
+  "provider_candidates": [],
+  "provider_family": "work_tree_execute",
+  "routing_decision": {
+    "final_owner": "work_tree",
+    "planner_owner": "work_tree",
+    "planner_action": "no_active_tree",
+    "planner_tool": "work_tree_execute",
+    "reply_outcome_kind": "",
+    "turn_acts": []
+  },
+  "route_summary": "input:received -> action_planner:semantic_intent -> action_planner:work_tree -> finalize:work_tree"
+}

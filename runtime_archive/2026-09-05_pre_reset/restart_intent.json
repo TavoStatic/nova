@@ -1,0 +1,1 @@
+{"ok": true, "intent_id": "1788622116-433ed237", "ts": 1788622116.6418438, "created_at_utc": "2026-09-05T15:28:36Z", "expires_at": 1788623016.6418438, "ttl_seconds": 900, "source": "stop_guard_script", "action": "guard_stop", "reason": "operator_requested_guard_stop", "requested_by": "operator", "planned": true}

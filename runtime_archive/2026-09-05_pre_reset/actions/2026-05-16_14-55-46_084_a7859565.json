@@ -1,0 +1,143 @@
+{
+  "ts": "2026-05-16 14:55:46",
+  "channel": "http",
+  "session_id": "stub_content_probe_a29391a4",
+  "input_source": "typed",
+  "user_input": "weather in Brownsville TX",
+  "intent": "weather_lookup",
+  "planner_decision": "run_tool",
+  "tool": "weather_location",
+  "tool_args": {
+    "args": [
+      "Brownsville TX"
+    ]
+  },
+  "tool_result": "TOOL:weather_location",
+  "final_answer": "TOOL:weather_location",
+  "reply_contract": "weather_lookup.explicit_location",
+  "reply_outcome": {
+    "intent": "weather_lookup",
+    "kind": "explicit_location",
+    "reply_contract": "weather_lookup.explicit_location",
+    "weather_mode": "explicit_location",
+    "location_value": "Brownsville TX",
+    "requires_tool": true,
+    "pending_action": null,
+    "next_state": {
+      "kind": "weather_result",
+      "subject": "weather",
+      "weather_mode": "explicit_location",
+      "location_value": "Brownsville TX",
+      "source_host": "api.weather.gov",
+      "tool_result": "TOOL:weather_location"
+    },
+    "state_delta": {
+      "kind": "weather_result",
+      "subject": "weather",
+      "weather_mode": "explicit_location",
+      "location_value": "Brownsville TX",
+      "source_host": "api.weather.gov",
+      "tool_result": "TOOL:weather_location"
+    },
+    "tool_result": "TOOL:weather_location"
+  },
+  "turn_acts": [
+    "command"
+  ],
+  "grounded": true,
+  "active_subject": "weather_result:weather",
+  "continuation_used": false,
+  "route_trace": [
+    {
+      "stage": "input",
+      "outcome": "received",
+      "data": {
+        "channel": "http",
+        "input_source": "typed",
+        "intent": "weather_lookup"
+      }
+    },
+    {
+      "stage": "direction_analysis",
+      "outcome": "explicit_command",
+      "data": {
+        "effective_query": "weather in Brownsville TX",
+        "turn_acts": "command",
+        "identity_focused": false,
+        "bypass_pattern_routes": false
+      }
+    },
+    {
+      "stage": "action_planner",
+      "outcome": "run_tool",
+      "data": {
+        "tool": "weather_location"
+      }
+    },
+    {
+      "stage": "tool_execution",
+      "outcome": "ok",
+      "data": {
+        "tool": "weather_location"
+      }
+    },
+    {
+      "stage": "supervisor_intent",
+      "outcome": "handled",
+      "detail": "weather_lookup",
+      "data": {
+        "rule": "weather_lookup"
+      }
+    },
+    {
+      "stage": "finalize",
+      "outcome": "run_tool",
+      "data": {
+        "grounded": true,
+        "tool": "weather_location"
+      }
+    }
+  ],
+  "provider_used": "",
+  "provider_candidates": [],
+  "provider_family": "",
+  "routing_decision": {
+    "input_preview": "weather in Brownsville TX",
+    "entry_point": "http",
+    "intent_phase": {
+      "phase": "intent",
+      "handled": true,
+      "rule_name": "weather_lookup",
+      "intent": "weather_lookup",
+      "action": "",
+      "priority": 62,
+      "candidates": [
+        {
+          "rule_name": "weather_lookup",
+          "priority": 62,
+          "handled": true,
+          "intent": "weather_lookup"
+        }
+      ]
+    },
+    "handle_phase": {
+      "phase": "handle",
+      "handled": false,
+      "rule_name": "",
+      "intent": "",
+      "action": "",
+      "priority": null,
+      "candidates": []
+    },
+    "final_owner": "supervisor_intent",
+    "allowed_bypass": false,
+    "allowed_bypass_category": "",
+    "bypass_reason": "",
+    "reply_contract": "weather_lookup.explicit_location",
+    "reply_outcome_kind": "explicit_location",
+    "turn_acts": [
+      "command"
+    ]
+  },
+  "route_summary": "input:received -> direction_analysis:explicit_command -> action_planner:run_tool -> tool_execution:ok -> supervisor_intent:handled -> finalize:run_tool"
+}

@@ -197,6 +197,19 @@ class TestRecurringFindingLifecycle(unittest.TestCase):
             "satisfied",
         )
 
+    def test_classify_task_meta_reopens_extract_without_stage_closure(self):
+        meta = initial_task_meta(finding_key="order-extract", satisfaction_fingerprint="fp-extract")
+        meta["kind"] = "http_surface_extract"
+        self.assertEqual(
+            classify_task_meta(
+                meta=meta,
+                item_status="complete",
+                active_finding_keys={"order-extract"},
+                current_fingerprint="fp-extract",
+            ),
+            "reopen",
+        )
+
     def test_classify_task_meta_closes_witnessed_http_mapping_stage(self):
         meta = stamp_satisfaction(
             initial_task_meta(finding_key="order-http", satisfaction_fingerprint="fp-http"),

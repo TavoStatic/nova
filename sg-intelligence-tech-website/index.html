@@ -1,0 +1,554 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SG Intelligence Tech, LLC</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:       #0a0c10;
+      --surface:  #111318;
+      --border:   #1e2230;
+      --accent:   #4f8ef7;
+      --accent2:  #7c5cfc;
+      --text:     #e4e8f0;
+      --muted:    #8891a8;
+      --card:     #13161e;
+    }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Inter', sans-serif;
+      font-size: 16px;
+      line-height: 1.7;
+    }
+
+    /* ── NAV ── */
+    nav {
+      position: fixed; top: 0; left: 0; right: 0; z-index: 100;
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 0 48px;
+      height: 64px;
+      background: rgba(10,12,16,0.85);
+      backdrop-filter: blur(12px);
+      border-bottom: 1px solid var(--border);
+    }
+    .nav-logo {
+      font-size: 15px; font-weight: 600; letter-spacing: 0.02em;
+      color: var(--text); text-decoration: none;
+    }
+    .nav-logo span { color: var(--accent); }
+    .nav-links { display: flex; gap: 32px; list-style: none; }
+    .nav-links a {
+      color: var(--muted); text-decoration: none; font-size: 14px;
+      transition: color 0.2s;
+    }
+    .nav-links a:hover { color: var(--text); }
+    .nav-cta {
+      background: var(--accent); color: #fff; border: none;
+      padding: 8px 20px; border-radius: 6px; font-size: 14px;
+      font-weight: 500; cursor: pointer; text-decoration: none;
+      transition: opacity 0.2s;
+    }
+    .nav-cta:hover { opacity: 0.85; }
+
+    /* ── HERO ── */
+    .hero {
+      min-height: 100vh;
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+      text-align: center;
+      padding: 120px 24px 80px;
+      position: relative; overflow: hidden;
+    }
+    .hero::before {
+      content: '';
+      position: absolute; inset: 0;
+      background: radial-gradient(ellipse 80% 60% at 50% 20%, rgba(79,142,247,0.08) 0%, transparent 70%),
+                  radial-gradient(ellipse 60% 40% at 80% 80%, rgba(124,92,252,0.06) 0%, transparent 70%);
+      pointer-events: none;
+    }
+    .hero-badge {
+      display: inline-block;
+      border: 1px solid var(--border);
+      background: var(--surface);
+      color: var(--muted);
+      font-size: 12px; font-weight: 500;
+      padding: 5px 14px; border-radius: 100px;
+      letter-spacing: 0.08em; text-transform: uppercase;
+      margin-bottom: 28px;
+    }
+    .hero h1 {
+      font-size: clamp(2.4rem, 6vw, 4.2rem);
+      font-weight: 700; line-height: 1.15;
+      letter-spacing: -0.02em;
+      max-width: 820px;
+      margin-bottom: 24px;
+    }
+    .hero h1 .grad {
+      background: linear-gradient(135deg, var(--accent) 0%, var(--accent2) 100%);
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+    .hero p {
+      font-size: 1.15rem; color: var(--muted);
+      max-width: 600px; margin-bottom: 40px;
+    }
+    .hero-actions { display: flex; gap: 16px; flex-wrap: wrap; justify-content: center; }
+    .btn-primary {
+      background: var(--accent); color: #fff;
+      padding: 13px 28px; border-radius: 8px;
+      font-size: 15px; font-weight: 500;
+      text-decoration: none; transition: opacity 0.2s;
+    }
+    .btn-primary:hover { opacity: 0.85; }
+    .btn-secondary {
+      border: 1px solid var(--border); color: var(--text);
+      padding: 13px 28px; border-radius: 8px;
+      font-size: 15px; font-weight: 500;
+      text-decoration: none; background: var(--surface);
+      transition: border-color 0.2s;
+    }
+    .btn-secondary:hover { border-color: var(--accent); }
+
+    /* ── STATS BAR ── */
+    .stats-bar {
+      background: var(--surface);
+      border-top: 1px solid var(--border);
+      border-bottom: 1px solid var(--border);
+      padding: 40px 48px;
+      display: flex; justify-content: center; gap: 80px;
+      flex-wrap: wrap;
+    }
+    .stat { text-align: center; }
+    .stat-num {
+      font-size: 2rem; font-weight: 700;
+      background: linear-gradient(135deg, var(--accent), var(--accent2));
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+    .stat-label { font-size: 13px; color: var(--muted); margin-top: 4px; }
+
+    /* ── SECTIONS ── */
+    section { padding: 100px 48px; max-width: 1160px; margin: 0 auto; }
+    .section-label {
+      font-size: 12px; font-weight: 600; letter-spacing: 0.12em;
+      text-transform: uppercase; color: var(--accent);
+      margin-bottom: 16px;
+    }
+    .section-title {
+      font-size: clamp(1.8rem, 3.5vw, 2.6rem);
+      font-weight: 700; line-height: 1.2;
+      letter-spacing: -0.02em; margin-bottom: 20px;
+    }
+    .section-sub {
+      font-size: 1.05rem; color: var(--muted);
+      max-width: 580px; margin-bottom: 60px;
+    }
+
+    /* ── PROBLEM ── */
+    .problem-grid {
+      display: grid; grid-template-columns: 1fr 1fr;
+      gap: 24px; margin-top: 48px;
+    }
+    .problem-card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px; padding: 28px;
+    }
+    .problem-card h3 {
+      font-size: 15px; font-weight: 600; margin-bottom: 10px;
+      color: var(--text);
+    }
+    .problem-card p { font-size: 14px; color: var(--muted); line-height: 1.65; }
+    .problem-card .icon {
+      width: 36px; height: 36px; border-radius: 8px;
+      background: rgba(79,142,247,0.1);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 18px; margin-bottom: 16px;
+    }
+
+    /* ── NOVA FEATURE SPLIT ── */
+    .feature-split {
+      display: grid; grid-template-columns: 1fr 1fr;
+      gap: 80px; align-items: center; margin-bottom: 100px;
+    }
+    .feature-split.reverse { direction: rtl; }
+    .feature-split.reverse > * { direction: ltr; }
+    .feature-text h2 {
+      font-size: clamp(1.5rem, 3vw, 2rem);
+      font-weight: 700; line-height: 1.25;
+      margin-bottom: 16px; letter-spacing: -0.01em;
+    }
+    .feature-text p { color: var(--muted); margin-bottom: 20px; font-size: 15px; }
+    .feature-visual {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 16px; padding: 32px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 13px; color: var(--muted);
+      line-height: 1.8;
+    }
+    .mono-accent { color: var(--accent); }
+    .mono-green  { color: #4ade80; }
+    .mono-yellow { color: #facc15; }
+    .mono-red    { color: #f87171; }
+    .mono-purple { color: #c084fc; }
+
+    /* ── RESEARCH ── */
+    .research-grid {
+      display: grid; grid-template-columns: repeat(3, 1fr);
+      gap: 24px;
+    }
+    .research-card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px; padding: 32px;
+      transition: border-color 0.2s;
+    }
+    .research-card:hover { border-color: var(--accent); }
+    .research-num {
+      font-size: 11px; font-weight: 700; letter-spacing: 0.1em;
+      color: var(--accent); text-transform: uppercase; margin-bottom: 16px;
+    }
+    .research-card h3 {
+      font-size: 16px; font-weight: 600; margin-bottom: 12px;
+    }
+    .research-card p { font-size: 14px; color: var(--muted); line-height: 1.65; }
+
+    /* ── DATA CALLOUT ── */
+    .data-callout {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 16px; padding: 56px;
+      text-align: center; margin: 0 0 100px;
+    }
+    .data-callout blockquote {
+      font-size: clamp(1.2rem, 2.5vw, 1.7rem);
+      font-weight: 600; line-height: 1.4;
+      color: var(--text); max-width: 780px;
+      margin: 0 auto 32px; letter-spacing: -0.01em;
+    }
+    .data-row {
+      display: flex; gap: 48px; justify-content: center;
+      flex-wrap: wrap; margin-top: 40px;
+    }
+    .data-item { text-align: center; }
+    .data-num {
+      font-size: 2.2rem; font-weight: 700;
+      background: linear-gradient(135deg, var(--accent), var(--accent2));
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+    .data-desc { font-size: 13px; color: var(--muted); margin-top: 6px; max-width: 180px; }
+
+    /* ── TEAM / ABOUT ── */
+    .about-split {
+      display: grid; grid-template-columns: 1fr 1fr;
+      gap: 80px; align-items: start;
+    }
+    .about-split h2 {
+      font-size: clamp(1.5rem, 3vw, 2rem);
+      font-weight: 700; margin-bottom: 20px;
+    }
+    .about-split p { color: var(--muted); font-size: 15px; margin-bottom: 16px; }
+    .tag-row { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 24px; }
+    .tag {
+      font-size: 12px; font-weight: 500;
+      border: 1px solid var(--border);
+      padding: 5px 12px; border-radius: 100px;
+      color: var(--muted);
+    }
+
+    /* ── CTA ── */
+    .cta-section {
+      text-align: center; padding: 100px 48px;
+      border-top: 1px solid var(--border);
+    }
+    .cta-section h2 {
+      font-size: clamp(1.8rem, 4vw, 2.8rem);
+      font-weight: 700; margin-bottom: 20px;
+      letter-spacing: -0.02em;
+    }
+    .cta-section p { color: var(--muted); max-width: 480px; margin: 0 auto 36px; }
+
+    /* ── FOOTER ── */
+    footer {
+      border-top: 1px solid var(--border);
+      padding: 32px 48px;
+      display: flex; align-items: center; justify-content: space-between;
+      color: var(--muted); font-size: 13px; flex-wrap: wrap; gap: 16px;
+    }
+    footer a { color: var(--muted); text-decoration: none; }
+    footer a:hover { color: var(--text); }
+
+    /* ── RESPONSIVE ── */
+    @media (max-width: 900px) {
+      nav { padding: 0 24px; }
+      .nav-links { display: none; }
+      section { padding: 64px 24px; }
+      .problem-grid, .research-grid { grid-template-columns: 1fr; }
+      .feature-split, .feature-split.reverse, .about-split {
+        grid-template-columns: 1fr; gap: 40px; direction: ltr;
+      }
+      .stats-bar { gap: 40px; padding: 40px 24px; }
+      .data-callout { padding: 40px 24px; }
+      footer { flex-direction: column; text-align: center; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- NAV -->
+<nav>
+  <a class="nav-logo" href="#">SG Intelligence<span> Tech</span></a>
+  <ul class="nav-links">
+    <li><a href="#problem">Problem</a></li>
+    <li><a href="#nova">Nova</a></li>
+    <li><a href="#research">Research</a></li>
+    <li><a href="#about">About</a></li>
+  </ul>
+  <a class="nav-cta" href="#contact">Contact</a>
+</nav>
+
+<!-- HERO -->
+<section class="hero">
+  <div class="hero-badge">Autonomous Runtime Research</div>
+  <h1>AI that governs itself<br/><span class="grad">from evidence, not assumption</span></h1>
+  <p>SG Intelligence Tech builds the infrastructure layer that lets autonomous AI systems know — with proof — what they have actually done.</p>
+  <div class="hero-actions">
+    <a class="btn-primary" href="#nova">See Nova</a>
+    <a class="btn-secondary" href="https://github.com/TavoStatic/nova" target="_blank">GitHub →</a>
+  </div>
+</section>
+
+<!-- STATS BAR -->
+<div class="stats-bar">
+  <div class="stat">
+    <div class="stat-num">13,859</div>
+    <div class="stat-label">Autonomous decisions logged</div>
+  </div>
+  <div class="stat">
+    <div class="stat-num">94%</div>
+    <div class="stat-label">Decisions made on stale evidence</div>
+  </div>
+  <div class="stat">
+    <div class="stat-num">236</div>
+    <div class="stat-label">Regression test files</div>
+  </div>
+  <div class="stat">
+    <div class="stat-num">1,071</div>
+    <div class="stat-label">Work tree branches tracked</div>
+  </div>
+</div>
+
+<!-- PROBLEM -->
+<section id="problem">
+  <div class="section-label">The Problem</div>
+  <h2 class="section-title">Autonomous systems act on what they believe.<br/>The belief is usually wrong.</h2>
+  <p class="section-sub">Every autonomous AI runtime faces the same structural failure: components report their own state, and the system trusts those reports without independent verification.</p>
+  <div class="problem-grid">
+    <div class="problem-card">
+      <div class="icon">⚠</div>
+      <h3>Self-report diverges from runtime truth</h3>
+      <p>A tool registers as available but fails in the live environment. A route exists in code but never produces a real output. Work is archived as complete while the evidence chain is still open.</p>
+    </div>
+    <div class="problem-card">
+      <div class="icon">🔁</div>
+      <h3>Stale evidence drives live decisions</h3>
+      <p>94% of autonomous decisions in a working runtime were made using evidence that was no longer current. The system continued acting as though the last known state was still true.</p>
+    </div>
+    <div class="problem-card">
+      <div class="icon">📋</div>
+      <h3>Completion ≠ closure</h3>
+      <p>Recorded activity creates apparent progress without satisfying the causal prerequisites for actual completion. The log says done. The work is not done.</p>
+    </div>
+    <div class="problem-card">
+      <div class="icon">🔒</div>
+      <h3>No framework governs the gap</h3>
+      <p>Existing systems verify task outputs, preserve provenance, or enforce action policies. None reconstruct operational truth about the runtime itself from independent causal evidence.</p>
+    </div>
+  </div>
+</section>
+
+<!-- NOVA FEATURES -->
+<section id="nova" style="max-width:1160px;margin:0 auto;padding:0 48px 100px;">
+  <div class="section-label">Nova</div>
+  <h2 class="section-title">A runtime that derives its own truth</h2>
+  <p class="section-sub">Nova is a local AI runtime that works continuously — governing its own operation from evidence, not assumption.</p>
+
+  <div class="feature-split">
+    <div class="feature-text">
+      <h2>Evidence-derived operational state</h2>
+      <p>Nova reconstructs its own operational state from independent runtime artifacts — process heartbeats, tool output records, causal dependency chains, and evidence ledger entries — rather than accepting component self-declarations.</p>
+      <p>A component that says it is running must prove it. A task that says it is complete must show its causal chain.</p>
+    </div>
+    <div class="feature-visual">
+      <div><span class="mono-accent">claim</span>: capability_available</div>
+      <div>&nbsp; tool: warehouse_sync</div>
+      <div>&nbsp; declared_at: 2026-08-20T01:14:22Z</div>
+      <br/>
+      <div><span class="mono-green">✓ evidence</span>: process_heartbeat (age: 3s)</div>
+      <div><span class="mono-green">✓ evidence</span>: last_output_valid (age: 12s)</div>
+      <div><span class="mono-red">✗ evidence</span>: live_closure_probe → FAILED</div>
+      <br/>
+      <div><span class="mono-yellow">verdict</span>: structurally_present</div>
+      <div><span class="mono-red">state</span>: not_operationally_usable</div>
+      <br/>
+      <div><span class="mono-purple">transition</span>: BLOCKED — causal</div>
+      <div>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;closure not satisfied</div>
+    </div>
+  </div>
+
+  <div class="feature-split reverse">
+    <div class="feature-text">
+      <h2>Self-closing work graphs with causal lineage</h2>
+      <p>Nova organizes work into trees of branches, tasks, and dependencies. Each branch carries its own evidence chain. A branch cannot close unless the causal prerequisites are satisfied — not because the system declared them complete.</p>
+      <p>1,071 branches tracked. 893 archived. 26 closed with zero evidence — flagged, not silently buried.</p>
+    </div>
+    <div class="feature-visual">
+      <div><span class="mono-accent">branch</span>: warehouse_sync_v2</div>
+      <div>&nbsp; status: archived</div>
+      <div>&nbsp; evidence_count: 47</div>
+      <div>&nbsp; causal_closure: <span class="mono-green">verified</span></div>
+      <br/>
+      <div><span class="mono-accent">branch</span>: leah_memory_recall</div>
+      <div>&nbsp; status: in_progress</div>
+      <div>&nbsp; evidence_count: 0</div>
+      <div>&nbsp; causal_closure: <span class="mono-red">open</span></div>
+      <div>&nbsp; blocked_by: read_path_unverified</div>
+    </div>
+  </div>
+
+  <div class="feature-split">
+    <div class="feature-text">
+      <h2>Continuous autonomous maintenance</h2>
+      <p>A guard process watches the runtime and recovers from failure. A maintenance loop runs regression, cleanup, and work-tree progression on a schedule. The orchestrator makes 13,859 documented decisions — defers when evidence is stale, blocks when the core is red, acts when conditions are verified.</p>
+    </div>
+    <div class="feature-visual">
+      <div><span class="mono-green">● guard</span>&nbsp;&nbsp; pid=48556 &nbsp;uptime=8h42m</div>
+      <div><span class="mono-green">● core</span>&nbsp;&nbsp;&nbsp; pid=41580 &nbsp;RUNNING</div>
+      <div><span class="mono-green">● http</span>&nbsp;&nbsp;&nbsp; port=8080 &nbsp;200 OK</div>
+      <br/>
+      <div>orchestrator decisions: 13,859</div>
+      <div>&nbsp; recommend_action: <span class="mono-green">11,106</span></div>
+      <div>&nbsp; defer (stale evidence): <span class="mono-yellow">2,715</span></div>
+      <div>&nbsp; block (posture red): <span class="mono-red">38</span></div>
+      <br/>
+      <div>last maintenance: <span class="mono-accent">2m ago</span></div>
+      <div>regression: <span class="mono-green">OK</span> (236 tests)</div>
+    </div>
+  </div>
+</section>
+
+<!-- DATA CALLOUT -->
+<div style="max-width:1160px;margin:0 auto;padding:0 48px;">
+  <div class="data-callout">
+    <blockquote>"A system should not be permitted to derive operational truth from its own narrative. Its state must be reconstructed from causally relevant runtime evidence."</blockquote>
+    <p style="color:var(--muted);font-size:14px;">The principle behind Nova — and the research hypothesis driving Phase I development.</p>
+    <div class="data-row">
+      <div class="data-item">
+        <div class="data-num">94%</div>
+        <div class="data-desc">of decisions made on stale evidence in baseline runtime</div>
+      </div>
+      <div class="data-item">
+        <div class="data-num">97%</div>
+        <div class="data-desc">of hard blocks caused by component self-report diverging from core state</div>
+      </div>
+      <div class="data-item">
+        <div class="data-num">3%</div>
+        <div class="data-desc">of archived branches closed with zero causal evidence</div>
+      </div>
+      <div class="data-item">
+        <div class="data-num">100%</div>
+        <div class="data-desc">of defers had confidence below 0.5 — system knew it was uncertain</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- RESEARCH -->
+<section id="research">
+  <div class="section-label">Research</div>
+  <h2 class="section-title">Phase I: Evidence-Derived State Protocol</h2>
+  <p class="section-sub">Three technical problems. One mechanism. Measured against a real failure corpus.</p>
+  <div class="research-grid">
+    <div class="research-card">
+      <div class="research-num">Problem 01</div>
+      <h3>Evidence-State Derivation</h3>
+      <p>Reconstruct operational state from heterogeneous runtime artifacts — process records, tool output logs, causal dependency chains, validity intervals — of differing types, ages, and reliability.</p>
+    </div>
+    <div class="research-card">
+      <div class="research-num">Problem 02</div>
+      <h3>Causal Closure</h3>
+      <p>Determine whether an evidence chain satisfies all causal prerequisites for autonomous task completion. State transitions permitted only when required evidence relations are satisfied.</p>
+    </div>
+    <div class="research-card">
+      <div class="research-num">Problem 03</div>
+      <h3>Live Semantic Verification</h3>
+      <p>Determine whether a registered capability produces the required real-world effect — not merely that it exists structurally. Classify routes as live-complete, evidence-dead, or absent.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ABOUT -->
+<section id="about">
+  <div class="about-split">
+    <div>
+      <div class="section-label">About</div>
+      <h2 class="section-title" style="margin-bottom:20px;">Built in South Texas.<br/>Running continuously.</h2>
+      <p>SG Intelligence Tech, LLC is an AI research and development company based in Brownsville, Texas. We build autonomous runtime infrastructure — the layer that lets AI systems verify their own state and govern their own operation without constant human arbitration.</p>
+      <p>Nova, our flagship runtime, was built in one month and has been running and self-governing for over four months. It produces the evidence corpus that drives our research.</p>
+      <div class="tag-row">
+        <span class="tag">Autonomous Systems</span>
+        <span class="tag">Runtime Governance</span>
+        <span class="tag">Evidence-Grounded AI</span>
+        <span class="tag">NSF SBIR</span>
+        <span class="tag">Brownsville, TX</span>
+      </div>
+    </div>
+    <div>
+      <div class="feature-visual" style="margin-bottom:24px;">
+        <div><span class="mono-accent">company</span>: SG Intelligence Tech, LLC</div>
+        <div><span class="mono-accent">founded</span>: 2026</div>
+        <div><span class="mono-accent">location</span>: Brownsville, Texas</div>
+        <div><span class="mono-accent">focus</span>: Autonomous runtime research</div>
+        <br/>
+        <div><span class="mono-accent">flagship</span>: Nova runtime</div>
+        <div><span class="mono-accent">build_time</span>: 1 month</div>
+        <div><span class="mono-accent">test_time</span>: 4 months</div>
+        <div><span class="mono-accent">status</span>: <span class="mono-green">continuously running</span></div>
+        <br/>
+        <div><span class="mono-accent">github</span>: TavoStatic/nova</div>
+        <div><span class="mono-accent">license</span>: proprietary</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- CTA -->
+<div class="cta-section" id="contact">
+  <h2>Let's talk about what<br/>autonomous systems should prove</h2>
+  <p>Research partnerships, grant collaboration, or early access to Nova.</p>
+  <a class="btn-primary" href="mailto:guribe@bisd.us">Get in touch</a>
+</div>
+
+<!-- FOOTER -->
+<footer>
+  <span>© 2026 SG Intelligence Tech, LLC — Brownsville, Texas</span>
+  <div style="display:flex;gap:24px;">
+    <a href="https://github.com/TavoStatic/nova" target="_blank">GitHub</a>
+    <a href="mailto:guribe@bisd.us">Contact</a>
+  </div>
+</footer>
+
+</body>
+</html>

@@ -1,0 +1,139 @@
+{
+  "ts": "2026-05-16 17:27:13",
+  "channel": "http",
+  "session_id": "webtool_probe_c00f35d2",
+  "input_source": "typed",
+  "user_input": "web research peims attendance rules",
+  "intent": "web_research_family",
+  "planner_decision": "run_tool",
+  "tool": "web_research",
+  "tool_args": {
+    "args": [
+      "peims attendance rules"
+    ]
+  },
+  "tool_result": "No relevant pages found across allowlisted domains for that query.",
+  "final_answer": "No relevant pages found across allowlisted domains for that query.",
+  "reply_contract": "web_research_family.research_prompt",
+  "reply_outcome": {
+    "intent": "web_research_family",
+    "kind": "research_prompt",
+    "reply_contract": "web_research_family.research_prompt",
+    "tool_name": "web_research",
+    "provider_candidates": [
+      "general_web"
+    ],
+    "provider_family": "general_web",
+    "provider_used": "general_web",
+    "query": "peims attendance rules",
+    "requires_tool": true,
+    "state_delta": {},
+    "tool_result": "No relevant pages found across allowlisted domains for that query."
+  },
+  "turn_acts": [
+    "command"
+  ],
+  "grounded": true,
+  "active_subject": "retrieval:web_research",
+  "continuation_used": false,
+  "route_trace": [
+    {
+      "stage": "input",
+      "outcome": "received",
+      "data": {
+        "channel": "http",
+        "input_source": "typed",
+        "intent": "web_research"
+      }
+    },
+    {
+      "stage": "direction_analysis",
+      "outcome": "explicit_command",
+      "data": {
+        "effective_query": "web research peims attendance rules",
+        "turn_acts": "command",
+        "identity_focused": false,
+        "bypass_pattern_routes": false
+      }
+    },
+    {
+      "stage": "action_planner",
+      "outcome": "run_tool",
+      "data": {
+        "tool": "web_research"
+      }
+    },
+    {
+      "stage": "tool_execution",
+      "outcome": "ok",
+      "data": {
+        "tool": "web_research"
+      }
+    },
+    {
+      "stage": "supervisor_intent",
+      "outcome": "handled",
+      "detail": "web_research_family",
+      "data": {
+        "rule": "web_research_family"
+      }
+    },
+    {
+      "stage": "finalize",
+      "outcome": "run_tool",
+      "data": {
+        "grounded": true,
+        "tool": "web_research"
+      }
+    }
+  ],
+  "provider_used": "general_web",
+  "provider_candidates": [
+    "general_web"
+  ],
+  "provider_family": "general_web",
+  "routing_decision": {
+    "input_preview": "web research peims attendance rules",
+    "entry_point": "http",
+    "intent_phase": {
+      "phase": "intent",
+      "handled": true,
+      "rule_name": "web_research_family",
+      "intent": "web_research_family",
+      "action": "",
+      "priority": 62,
+      "candidates": [
+        {
+          "rule_name": "weather_lookup",
+          "priority": 62,
+          "handled": false
+        },
+        {
+          "rule_name": "web_research_family",
+          "priority": 62,
+          "handled": true,
+          "intent": "web_research_family"
+        }
+      ]
+    },
+    "handle_phase": {
+      "phase": "handle",
+      "handled": false,
+      "rule_name": "",
+      "intent": "",
+      "action": "",
+      "priority": null,
+      "candidates": []
+    },
+    "final_owner": "supervisor_intent",
+    "allowed_bypass": false,
+    "allowed_bypass_category": "",
+    "bypass_reason": "",
+    "reply_contract": "web_research_family.research_prompt",
+    "reply_outcome_kind": "research_prompt",
+    "turn_acts": [
+      "command"
+    ]
+  },
+  "route_summary": "input:received -> direction_analysis:explicit_command -> action_planner:run_tool -> tool_execution:ok -> supervisor_intent:handled -> finalize:run_tool"
+}

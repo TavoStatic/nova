@@ -1,0 +1,30 @@
+{
+  "generated_at": "2026-07-13 11:51:55",
+  "date": "2026-07-13",
+  "status": "FAILED",
+  "lanes": [
+    "integration"
+  ],
+  "returncode": 1,
+  "detail": "integration lane",
+  "failed_lane": "integration",
+  "failed_tests": [
+    "tests.test_run_test_session.TestRunTestSessionIsolation.test_generated_canary_has_no_cli_http_drift"
+  ],
+  "source": "scripts/run_regression.py",
+  "test_profile_inventory_ok": true,
+  "test_profile_profile_gap_count": 0,
+  "test_profile_profile_drift_count": 0,
+  "test_profile_profile_attention_count": 3,
+  "test_profile_curated_target_count": 226,
+  "test_profile_curated_test_file_count": 211,
+  "test_profile_root_test_file_count": 214,
+  "test_profile_all_test_file_count": 226,
+  "test_profile_source_observed_count": 0,
+  "test_profile_outside_curated_count": 0,
+  "test_profile_install_profile_inactive_count": 0,
+  "test_profile_install_profile_optional_inactive_count": 3,
+  "test_profile_unclassified_count": 0,
+  "test_profile_gap_tests": [],
+  "test_profile_profile_drift_tests": []
+}

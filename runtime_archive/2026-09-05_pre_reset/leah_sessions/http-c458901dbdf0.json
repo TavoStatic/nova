@@ -1,0 +1,23 @@
+{
+  "turns": [
+    {
+      "role": "user",
+      "text": "how are you doing today ?"
+    },
+    {
+      "role": "assistant",
+      "text": "I\u2019m running well without any current issues or alerts. Ready to help you out whenever you need\u2014what are we working on?"
+    },
+    {
+      "role": "user",
+      "text": "what now"
+    },
+    {
+      "role": "assistant",
+      "text": "Still running well with no current issues or alerts blocking progress. We haven\u2019t initiated any new tasks in this session yet, so just tell me what you\u2019d like to work on and I\u2019ll get it routed through the system."
+    }
+  ],
+  "turn_ts": 1788342458.8524725,
+  "session_id": "http-c458901dbdf0",
+  "ts": 1788342416.5344803
+}

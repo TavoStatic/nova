@@ -1,0 +1,98 @@
+{
+  "ts": "2026-05-14 21:48:09",
+  "channel": "http",
+  "session_id": "s5_location_name",
+  "input_source": "typed",
+  "user_input": "78521",
+  "intent": "set_location",
+  "planner_decision": "deterministic",
+  "tool": "",
+  "tool_args": {},
+  "tool_result": "",
+  "final_answer": "Got it - 78521 is a ZIP code.",
+  "reply_contract": "set_location.observed_zip",
+  "reply_outcome": {
+    "intent": "set_location",
+    "kind": "observed_zip",
+    "reply_contract": "set_location.observed_zip",
+    "location_value": "78521",
+    "location_kind": "zip",
+    "location_ack_kind": "fact_only",
+    "user_commitment": "implied",
+    "state_delta": {
+      "location": "78521"
+    }
+  },
+  "turn_acts": [],
+  "grounded": true,
+  "active_subject": "location_recall",
+  "continuation_used": false,
+  "route_trace": [
+    {
+      "stage": "input",
+      "outcome": "received",
+      "data": {
+        "channel": "http",
+        "input_source": "typed",
+        "intent": "chat"
+      }
+    },
+    {
+      "stage": "direction_analysis",
+      "outcome": "general_chat",
+      "data": {
+        "effective_query": "78521",
+        "identity_focused": false,
+        "bypass_pattern_routes": false
+      }
+    },
+    {
+      "stage": "supervisor_intent",
+      "outcome": "handled",
+      "detail": "set_location",
+      "data": {
+        "rule": "set_location_zip"
+      }
+    },
+    {
+      "stage": "finalize",
+      "outcome": "deterministic",
+      "data": {
+        "grounded": true
+      }
+    }
+  ],
+  "provider_used": "",
+  "provider_candidates": [],
+  "provider_family": "",
+  "routing_decision": {
+    "input_preview": "78521",
+    "entry_point": "http",
+    "intent_phase": {
+      "phase": "intent",
+      "handled": true,
+      "rule_name": "set_location_zip",
+      "intent": "set_location",
+      "action": "",
+      "priority": null,
+      "candidates": []
+    },
+    "handle_phase": {
+      "phase": "handle",
+      "handled": false,
+      "rule_name": "",
+      "intent": "",
+      "action": "",
+      "priority": null,
+      "candidates": []
+    },
+    "final_owner": "supervisor_intent",
+    "allowed_bypass": false,
+    "allowed_bypass_category": "",
+    "bypass_reason": "",
+    "reply_contract": "set_location.observed_zip",
+    "reply_outcome_kind": "observed_zip",
+    "turn_acts": []
+  },
+  "route_summary": "input:received -> direction_analysis:general_chat -> supervisor_intent:handled -> finalize:deterministic"
+}

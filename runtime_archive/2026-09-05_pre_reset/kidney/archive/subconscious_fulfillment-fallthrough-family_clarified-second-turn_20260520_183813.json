@@ -1,0 +1,30 @@
+{
+  "name": "Subconscious fulfillment-fallthrough-family :: clarified_second_turn",
+  "messages": [
+    "I need help deciding.",
+    "Show me the possible paths first so I can compare tradeoffs."
+  ],
+  "source": "subconscious_generated",
+  "label": "phase1_auto",
+  "family_id": "fulfillment-fallthrough-family",
+  "target_seam": "fulfillment_bridge_entry_fallthrough",
+  "variation_id": "clarified_second_turn",
+  "training_priorities": [
+    {
+      "seam": "fulfillment_bridge_entry_fallthrough",
+      "signal": "fallback_overuse",
+      "robustness": 0.97,
+      "suggested_test_name": "test_generic_fallback_does_not_hide_viable_specific_route",
+      "rationale": "Robust family pressure kept surfacing fallback_overuse.",
+      "urgency": "high"
+    },
+    {
+      "seam": "fulfillment_bridge_entry_fallthrough",
+      "signal": "fulfillment_missed",
+      "robustness": 0.97,
+      "suggested_test_name": "test_route_probe_surfaces_clear_fulfillment_without_fallback_loss",
+      "rationale": "Robust family pressure kept surfacing fulfillment_missed.",
+      "urgency": "high"
+    }
+  ]
+}

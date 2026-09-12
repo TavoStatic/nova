@@ -1,6 +1,6 @@
 {
   "name": "update",
-  "description": "Update an existing automation (scheduled and/or event-triggered). Use this when the user asks to change, edit, or modify an automation's name, prompt, schedule, event trigger filters, or notification settings. Requires `task_id` from `automation_list`. Include `schedule_id` when changing a schedule; include `trigger` when changing event filters (call automation_list_trigger_catalog for allowed providers/types/dimensions; for GitHub repos use automation_list_trigger_resources for numeric repository ids). Omitting `trigger` leaves existing event triggers unchanged.",
+  "description": "Update an existing automation (scheduled and/or event-triggered). Use this when the user asks to change, edit, or modify an automation's name, prompt, schedule, event trigger filters, or notification settings. Requires `task_id` from `automation_list`. Include `schedule_id` when changing a schedule; include `trigger` when changing event filters (call automation_list_trigger_catalog for allowed providers/types/dimensions; for GitHub repos use automation_list_trigger_resources for numeric repository ids; for Linear teams / projects use the same tool with provider=linear and resource_type=team|project when Linear is in the catalog). Omitting `trigger` leaves existing event triggers unchanged.",
   "inputSchema": {
     "type": "object",
     "properties": {
@@ -60,15 +60,15 @@
         "properties": {
           "provider": {
             "type": "string",
-            "description": "Event source wire tag from the catalog (e.g. gmail, outlook, github, finance)."
+            "description": "Event source wire tag from the catalog (e.g. gmail, outlook, github, finance, linear)."
           },
           "trigger_type": {
             "type": "string",
-            "description": "Event kind from the catalog (e.g. new_email, pr_opened, new_transaction)."
+            "description": "Event kind from the catalog (e.g. new_email, pr_opened, new_transaction, issue_created)."
           },
           "dimensions": {
             "type": "object",
-            "description": "Catalog dimension keys → string or array of strings. GitHub dimensions.repo must be a stringified numeric repository id from automation_list_trigger_resources (not owner/name).",
+            "description": "Catalog dimension keys → string or array of strings. GitHub dimensions.repo must be a stringified numeric repository id from automation_list_trigger_resources (not owner/name). Linear dimensions.team / dimensions.project must be Linear UUIDs from automation_list_trigger_resources (provider=linear, resource_type=team|project).",
             "additionalProperties": {
               "oneOf": [
                 {

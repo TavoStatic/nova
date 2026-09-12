@@ -1,0 +1,153 @@
+{
+  "ts": "2026-05-14 21:48:12",
+  "channel": "http",
+  "session_id": "s11_direct",
+  "input_source": "typed",
+  "user_input": "Brownsville TX 78521",
+  "intent": "weather_lookup",
+  "planner_decision": "run_tool",
+  "tool": "weather_location",
+  "tool_args": {
+    "args": [
+      "Brownsville TX 78521"
+    ]
+  },
+  "tool_result": "Brownsville, TX 78521: Tomorrow: 72\u00b0F, Clear. [source: api.weather.gov]",
+  "final_answer": "Brownsville, TX 78521: Tomorrow: 72\u00b0F, Clear. [source: api.weather.gov]",
+  "reply_contract": "weather_lookup.explicit_location",
+  "reply_outcome": {
+    "intent": "weather_lookup",
+    "kind": "explicit_location",
+    "reply_contract": "weather_lookup.explicit_location",
+    "weather_mode": "explicit_location",
+    "location_value": "Brownsville TX 78521",
+    "requires_tool": true,
+    "pending_action": null,
+    "next_state": {
+      "kind": "weather_result",
+      "subject": "weather",
+      "weather_mode": "explicit_location",
+      "location_value": "Brownsville TX 78521",
+      "source_host": "api.weather.gov",
+      "tool_result": "Brownsville, TX 78521: Tomorrow: 72\u00b0F, Clear. [source: api.weather.gov]"
+    },
+    "state_delta": {
+      "kind": "weather_result",
+      "subject": "weather",
+      "weather_mode": "explicit_location",
+      "location_value": "Brownsville TX 78521",
+      "source_host": "api.weather.gov",
+      "tool_result": "Brownsville, TX 78521: Tomorrow: 72\u00b0F, Clear. [source: api.weather.gov]"
+    },
+    "tool_result": "Brownsville, TX 78521: Tomorrow: 72\u00b0F, Clear. [source: api.weather.gov]"
+  },
+  "turn_acts": [],
+  "grounded": true,
+  "active_subject": "weather_result:weather",
+  "continuation_used": false,
+  "route_trace": [
+    {
+      "stage": "input",
+      "outcome": "received",
+      "data": {
+        "channel": "http",
+        "input_source": "typed",
+        "intent": "chat"
+      }
+    },
+    {
+      "stage": "direction_analysis",
+      "outcome": "general_chat",
+      "data": {
+        "effective_query": "Brownsville TX 78521",
+        "identity_focused": false,
+        "bypass_pattern_routes": false
+      }
+    },
+    {
+      "stage": "action_planner",
+      "outcome": "run_tool",
+      "data": {
+        "tool": "weather_location"
+      }
+    },
+    {
+      "stage": "tool_execution",
+      "outcome": "ok",
+      "data": {
+        "tool": "weather_location"
+      }
+    },
+    {
+      "stage": "supervisor_intent",
+      "outcome": "handled",
+      "detail": "weather_lookup",
+      "data": {
+        "rule": "weather_lookup"
+      }
+    },
+    {
+      "stage": "finalize",
+      "outcome": "run_tool",
+      "data": {
+        "grounded": true,
+        "tool": "weather_location"
+      }
+    }
+  ],
+  "provider_used": "",
+  "provider_candidates": [],
+  "provider_family": "",
+  "routing_decision": {
+    "input_preview": "Brownsville TX 78521",
+    "entry_point": "http",
+    "intent_phase": {
+      "phase": "intent",
+      "handled": true,
+      "rule_name": "weather_lookup",
+      "intent": "weather_lookup",
+      "action": "",
+      "priority": 62,
+      "candidates": [
+        {
+          "rule_name": "smalltalk",
+          "priority": 61,
+          "handled": false
+        },
+        {
+          "rule_name": "set_location",
+          "priority": 62,
+          "handled": false
+        },
+        {
+          "rule_name": "store_fact",
+          "priority": 62,
+          "handled": false
+        },
+        {
+          "rule_name": "weather_lookup",
+          "priority": 62,
+          "handled": true,
+          "intent": "weather_lookup"
+        }
+      ]
+    },
+    "handle_phase": {
+      "phase": "handle",
+      "handled": false,
+      "rule_name": "",
+      "intent": "",
+      "action": "",
+      "priority": null,
+      "candidates": []
+    },
+    "final_owner": "supervisor_intent",
+    "allowed_bypass": false,
+    "allowed_bypass_category": "",
+    "bypass_reason": "",
+    "reply_contract": "weather_lookup.explicit_location",
+    "reply_outcome_kind": "explicit_location",
+    "turn_acts": []
+  },
+  "route_summary": "input:received -> direction_analysis:general_chat -> action_planner:run_tool -> tool_execution:ok -> supervisor_intent:handled -> finalize:run_tool"
+}

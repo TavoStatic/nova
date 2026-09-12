@@ -1,6 +1,6 @@
 # Services Index
 
-Last generated from code: 2026-08-16
+Last generated from code: 2026-09-07
 
 This is the exhaustive service-module index. Architectural ownership is described in `SYSTEM_MAP.md`; function-level detail is in `FUNCTION_INDEX.md`.
 
@@ -27,8 +27,8 @@ This is the exhaustive service-module index. Architectural ownership is describe
 
 | Module | Lines | Public classes/functions | Singleton | Description |
 |---|---:|---|---|---|
-| `services/autonomy_execution_gate.py` | 262 | AutonomyExecutionGateService | AUTONOMY_EXECUTION_GATE_SERVICE | - |
-| `services/autonomy_orchestrator.py` | 1586 | AutonomyOrchestratorService | AUTONOMY_ORCHESTRATOR_SERVICE | - |
+| `services/autonomy_execution_gate.py` | 282 | AutonomyExecutionGateService | AUTONOMY_EXECUTION_GATE_SERVICE | - |
+| `services/autonomy_orchestrator.py` | 1592 | AutonomyOrchestratorService | AUTONOMY_ORCHESTRATOR_SERVICE | - |
 | `services/autonomy_orchestrator_ledger.py` | 214 | AutonomyOrchestratorLedgerService | AUTONOMY_ORCHESTRATOR_LEDGER_SERVICE | - |
 | `services/behavior_metrics.py` | 67 | BehaviorMetricsStore | - | - |
 | `services/capabilities_gap_detector.py` | 128 | detect_capability_gaps, enhance_status_with_capability_gaps | CAPABILITY_GAP_DETECTOR_SERVICE | Capability gap detection service. |
@@ -36,23 +36,24 @@ This is the exhaustive service-module index. Architectural ownership is describe
 | `services/chat_identity.py` | 198 | ChatIdentityService | CHAT_IDENTITY_SERVICE | - |
 | `services/codegen_memory_recorder.py` | 348 | record_generated_pattern, lookup_patterns_by_capability, lookup_patterns_by_spec, build_memory_injection_context, CodegenMemoryRecorderService | CODEGEN_MEMORY_RECORDER_SERVICE | Codegen Self-Extension Memory Service |
 | `services/codegen_patch_bridge.py` | 318 | validate_codegen_preview, bridge_codegen_to_patch, materialize_codegen_patch_zip, format_bridge_summary | CODEGEN_PATCH_BRIDGE_SERVICE | Bridge from codegen preview payloads to formal patch artifacts. |
+| `services/cognitive_workspace.py` | 229 | CognitiveEvent, CognitiveWorkspace, reset, update_workspace, current_workspace, record_event, recent_events, payload | - | Live cognitive workspace and bounded event stream for meta reasoning. |
 | `services/control_actions.py` | 43 | ControlActionsService | CONTROL_ACTIONS_SERVICE | - |
 | `services/control_assets.py` | 36 | ControlAssetsService | CONTROL_ASSETS_SERVICE | - |
 | `services/control_auth.py` | 253 | ControlAuthService | CONTROL_AUTH_SERVICE | - |
 | `services/control_backpacks.py` | 894 | ControlBackpacksService | CONTROL_BACKPACKS_SERVICE | - |
 | `services/control_login_frontdoor.py` | 89 | ControlLoginFrontdoorService | CONTROL_LOGIN_FRONTDOOR_SERVICE | - |
 | `services/control_pipelines.py` | 549 | ControlPipelinesService | CONTROL_PIPELINES_SERVICE | - |
-| `services/control_status.py` | 1686 |  | - | (syntax error — could not parse) |
+| `services/control_status.py` | 1734 |  | - | (syntax error — could not parse) |
 | `services/control_status_cache.py` | 34 | ControlStatusCacheService | CONTROL_STATUS_CACHE_SERVICE | - |
-| `services/control_status_surfaces.py` | 507 | signal_ingestion_top_level_keys, derive_surfaces_url, extract_signal_ingestion_surfaces, merge_http_supplement_into_local, release_drift_detected, ControlStatusSurfacesService | CONTROL_STATUS_SURFACES_SERVICE | - |
+| `services/control_status_surfaces.py` | 533 | signal_ingestion_top_level_keys, derive_surfaces_url, extract_signal_ingestion_surfaces, merge_http_supplement_into_local, release_drift_detected, ControlStatusSurfacesService | CONTROL_STATUS_SURFACES_SERVICE | - |
 | `services/control_telemetry.py` | 724 | ControlTelemetryService | - | - |
 | `services/control_work_trees.py` | 231 | ControlWorkTreesService | CONTROL_WORK_TREES_SERVICE | - |
 | `services/core_health_brief.py` | 412 | build_core_health_brief, write_core_health_brief, render_core_health_brief, feed_core_health_brief_to_work_tree | - | - |
 | `services/core_seam_guard.py` | 128 | CoreSeamGuardService | CORE_SEAM_GUARD_SERVICE | - |
 | `services/core_steward.py` | 345 | build_core_steward_payload, build_core_steward_gates, render_core_steward | - | - |
 | `services/core_steward_contracts.py` | 4 |  | - | - |
-| `services/core_thinning.py` | 1411 | is_http_extract_stage_block, stamp_core_thinning_task_satisfaction, build_core_thinning_brief, build_core_thinning_owner_verdict, render_core_thinning_brief, execute_core_thinning_order, feed_core_thinning_brief_to_work_tree | - | - |
-| `services/data_pipeline_registry.py` | 188 | build_pipeline_registry, list_pipeline_summaries, pipeline_worker_summary, get_pipeline_status, get_pipeline_schema_probe, search_pipeline_vendor_dictionary, plan_pipeline_report, preview_pipeline_query, +2 more | - | - |
+| `services/core_thinning.py` | 1493 | is_http_extract_stage_block, stamp_core_thinning_task_satisfaction, build_core_thinning_brief, build_core_thinning_owner_verdict, render_core_thinning_brief, execute_core_thinning_order, feed_core_thinning_brief_to_work_tree | - | - |
+| `services/data_pipeline_registry.py` | 210 | classify_pipeline_ids_for_workers, build_pipeline_registry, list_pipeline_summaries, pipeline_worker_summary, get_pipeline_status, get_pipeline_schema_probe, search_pipeline_vendor_dictionary, plan_pipeline_report, +3 more | - | - |
 | `services/decision_pipeline.py` | 120 | make_trace_entry, RegisteredStage, StageRegistry, run_registered_stages | - | - |
 | `services/decision_proposal_judge.py` | 953 | derive_claim_fields, build_decision_proposal, judge_proposal, should_block_execution, compute_judge_was_useful, attach_outcome, build_decision_episode, evaluate_recommendation_packet, +2 more | - | Decision proposal + rule-based Judge (observation-first). |
 | `services/end_to_end_wiring.py` | 764 | run_end_to_end_wiring_check | - | - |
@@ -60,6 +61,7 @@ This is the exhaustive service-module index. Architectural ownership is describe
 | `services/finish_areas_inventory.py` | 55 | build_finish_areas_inventory | - | Aggregate unfinished finish-areas (not pending thrash tasks). |
 | `services/frontdoor_cli_parity.py` | 184 | build_frontdoor_cli_surfaces, FrontdoorCliParityService | FRONTDOOR_CLI_PARITY_SERVICE | - |
 | `services/fulfillment_flow.py` | 247 | FulfillmentFlowService | - | - |
+| `services/gatekeeper.py` | 199 | validate_record, read_records, append_record, compact_records, summarize_records | GATEKEEPER_SERVICE | Evidence-backed observations about Nova's existing gates and rails. |
 | `services/generated_work_queue_snapshot.py` | 35 | generated_work_queue_payload | - | - |
 | `services/governance_chain.py` | 204 | release_rebuild_success, release_rebuild_tool_payload, governed_patch_apply, run_codegen_to_patch_chain | - | - |
 | `services/identity_memory.py` | 54 | IdentityMemoryService | - | IdentityMemoryService - Encapsulates identity memory validity. |
@@ -78,7 +80,7 @@ This is the exhaustive service-module index. Architectural ownership is describe
 | `services/memory_identity_bootstrap.py` | 189 | build_identity_bootstrap_preview, apply_identity_bootstrap, render_identity_bootstrap_result | - | - |
 | `services/memory_production.py` | 258 | build_memory_recall_plan, build_memory_read_plan, parse_correction, extract_color_preferences_from_text, MemoryLearningOutcome, apply_user_memory_learning | - | - |
 | `services/memory_retention.py` | 289 | parse_retention_policy, evaluate_contamination, apply_memory_hygiene, render_memory_hygiene_result | - | - |
-| `services/memory_routing.py` | 131 | MemoryRecallPlan, MemoryRoutingService | MEMORY_ROUTING_SERVICE | - |
+| `services/memory_routing.py` | 136 | MemoryRecallPlan, MemoryRoutingService | MEMORY_ROUTING_SERVICE | - |
 | `services/nova_action_ledger.py` | 220 | start_action_ledger_record, write_action_ledger_record, finalize_action_ledger_record, finalize_action_ledger_record_from_runtime | - | - |
 | `services/nova_action_ledger_helpers.py` | 336 | action_ledger_add_step, action_ledger_route_summary, recent_action_ledger_records, latest_action_ledger_record, action_history_reply, record_completed_tool_execution, record_requested_tool_clarification, detect_repeated_tool_intent_without_execution, +5 more | - | - |
 | `services/nova_calendar_ingestion.py` | 516 | load_sidecar_enrichment, save_sidecar_enrichment, serialize_events_to_ics, parse_ics_text, parse_ics_file, normalize_calendar_event, read_calendar_events, write_calendar_event, +1 more | - | - |
@@ -112,7 +114,7 @@ This is the exhaustive service-module index. Architectural ownership is describe
 | `services/nova_location_weather.py` | 589 | weather_source_host, weather_unavailable_message, weather_response_style, format_weather_output, runtime_device_backend_provider, coerce_bounded_float, coerce_optional_metric, normalize_source_timestamp, +18 more | - | - |
 | `services/nova_memory_events.py` | 56 | append_memory_event, record_memory_event | - | - |
 | `services/nova_memory_learning.py` | 1125 | mem_stats_payload, mem_add, mem_recall, prefix_from_earlier_memory, normalize_recent_learning_item, mem_get_recent_learned, mem_stats, mem_audit, +21 more | - | - |
-| `services/nova_mission.py` | 920 | NovaMissionService | NOVA_MISSION_SERVICE | - |
+| `services/nova_mission.py` | 997 | NovaMissionService | NOVA_MISSION_SERVICE | - |
 | `services/nova_mission_owner_verdicts.py` | 657 | build_mission_truth_gate | - | - |
 | `services/nova_ollama_chat.py` | 175 | ollama_chat | - | - |
 | `services/nova_operational_identity.py` | 46 | operational_identity_context_for_prompt | - | - |
@@ -124,7 +126,7 @@ This is the exhaustive service-module index. Architectural ownership is describe
 | `services/nova_reply_context_contract.py` | 4 |  | - | - |
 | `services/nova_reply_runtime.py` | 39 | apply_reply_runtime_effects | - | - |
 | `services/nova_reply_sequence.py` | 453 | execute_reply_sequence_from_runtime, execute_http_reply_sequence_from_runtime, execute_reply_sequence | - | - |
-| `services/nova_root_inventory.py` | 702 | SourceRoot, source_root_ids, build_source_root_inventory_payload | - | - |
+| `services/nova_root_inventory.py` | 708 | SourceRoot, source_root_ids, build_source_root_inventory_payload | - | - |
 | `services/nova_route_probing.py` | 127 | evaluate_deterministic_route_viability, build_probe_turn_routes | - | - |
 | `services/nova_routing_helpers.py` | 62 | strip_invocation_prefix, resolve_research_provider | - | - |
 | `services/nova_routing_support.py` | 492 | intent_trace_preview, supervisor_result_has_route, supervisor_candidate_trace, supervisor_phase_record, build_routing_decision, finalize_routing_decision, llm_classify_routing_intent | - | - |
@@ -149,9 +151,10 @@ This is the exhaustive service-module index. Architectural ownership is describe
 | `services/nova_web_contracts.py` | 3 |  | - | - |
 | `services/nova_web_tools.py` | 1173 | scan_candidate_urls_for_query, extract_urls, decode_search_href, extract_text_from_path, extract_text_from_html_content, extract_same_host_links, expand_research_terms, score_research_hit, +16 more | - | - |
 | `services/nova_wiring_inventory.py` | 1371 | WiringSurface, build_source_wiring_probe_payload, build_wiring_inventory_payload, build_root_closure_inventory_payload, build_self_repair_closure_inventory_payload, wiring_surface_ids | - | - |
+| `services/observation_spine.py` | 821 | Observation, CognitiveEvent, DynamicSelfModel, InternalPosition, MetaResult, reset_observations, reset_memory_only, recent_observations, +7 more | - | Bounded observer over Nova's existing causal boundaries. |
 | `services/ollama_health.py` | 195 | build_ollama_health_payload | - | - |
 | `services/operator_control.py` | 328 | OperatorControlService | OPERATOR_CONTROL_SERVICE | - |
-| `services/operator_outbox.py` | 1494 | OperatorOutboxService | OPERATOR_OUTBOX_SERVICE | - |
+| `services/operator_outbox.py` | 1511 | OperatorOutboxService | OPERATOR_OUTBOX_SERVICE | - |
 | `services/ops_journal.py` | 123 | append_ops_event | - | - |
 | `services/os_capability_operator_outbox.py` | 177 | build_os_capability_notice, publish_os_capability_notice | - | - |
 | `services/os_capability_registry.py` | 583 | OsCapabilityRegistryService | OS_CAPABILITY_REGISTRY_SERVICE | - |
@@ -159,19 +162,19 @@ This is the exhaustive service-module index. Architectural ownership is describe
 | `services/patch_control.py` | 375 | PatchControlService | PATCH_CONTROL_SERVICE | - |
 | `services/patch_promotion_memory.py` | 234 | extract_codegen_content_from_patch_zip, record_patch_promotion_to_memory, inject_memory_context_into_codegen_prompt, PatchPromotionMemoryService | PATCH_PROMOTION_MEMORY_SERVICE | Patch Promotion Memory Integration |
 | `services/pipeline_privileged_bridge.py` | 135 | queue_privileged_pipeline_query, wait_for_privileged_pipeline_query, run_privileged_pipeline_query, unwrap_privileged_pipeline_response, run_governed_pipeline_query | - | - |
-| `services/pipeline_worker_supervision.py` | 1118 | worker_heartbeat_path, worker_lease_path, worker_spawn_error_log_path, pid_alive, read_worker_lease, write_worker_lease, release_worker_lease, acquire_worker_lease, +9 more | - | - |
+| `services/pipeline_worker_supervision.py` | 1252 | worker_heartbeat_path, worker_lease_path, worker_spawn_error_log_path, pid_alive, read_worker_lease, write_worker_lease, release_worker_lease, acquire_worker_lease, +12 more | - | - |
 | `services/policy_control.py` | 187 | PolicyControlService | POLICY_CONTROL_SERVICE | - |
 | `services/policy_manager.py` | 758 | PolicyManager | - | - |
 | `services/port_ownership.py` | 164 | PortOwnershipService | PORT_OWNERSHIP_SERVICE | - |
 | `services/probe_bootstrap.py` | 45 | validation_runtime_dir, apply_validation_probe_env, restore_probe_env | - | Validation-runtime bootstrap for operator probes. |
 | `services/recurring_finding_lifecycle.py` | 439 | fingerprint_from_parts, read_task_state, finding_key_from_meta, finding_version, task_finding_key, task_fingerprint, initial_task_meta, stamp_satisfaction, +14 more | - | - |
 | `services/regression_evidence.py` | 134 | regression_outcome_label, regression_outcome_failed, regression_outcome_passed, regression_evidence_stale, regression_failure_is_lock_contention, regression_failure_active, regression_tail_from_payload, apply_regression_status_payload | - | - |
-| `services/regression_lanes.py` | 307 |  | - | - |
-| `services/regression_profile_inventory.py` | 247 | build_regression_profile_inventory_payload | REGRESSION_PROFILE_INVENTORY_SERVICE | - |
+| `services/regression_lanes.py` | 304 |  | - | - |
+| `services/regression_profile_inventory.py` | 256 | build_regression_profile_inventory_payload | REGRESSION_PROFILE_INVENTORY_SERVICE | - |
 | `services/release_clean.py` | 324 | run_release_clean | - | - |
 | `services/release_promotion_judgment.py` | 313 | release_validation_record_payload, build_release_promotion_judgment, render_release_promotion_judgment | - | - |
 | `services/release_runtime_truth.py` | 132 | running_build_identity, enrich_release_status, build_release_runtime_truth_summary, release_drift_suppresses_closure_signals, evaluate_http_model_runtime_probe, ReleaseRuntimeTruthService | RELEASE_RUNTIME_TRUTH_SERVICE | - |
-| `services/release_status.py` | 484 | ReleaseStatusService | RELEASE_STATUS_SERVICE | - |
+| `services/release_status.py` | 495 | ReleaseStatusService | RELEASE_STATUS_SERVICE | - |
 | `services/release_validation.py` | 831 | classify_release_validation_failures, run_release_validation, render_release_validation_report, record_release_validation_outcome, render_release_outcome_recording | - | - |
 | `services/release_validation_contracts.py` | 3 |  | - | - |
 | `services/runtime_analytics.py` | 349 | RuntimeAnalyticsService | RUNTIME_ANALYTICS_SERVICE | - |
@@ -188,10 +191,10 @@ This is the exhaustive service-module index. Architectural ownership is describe
 | `services/server_side_runtime.py` | 148 | ServerSideRuntimeService | SERVER_SIDE_RUNTIME_SERVICE | - |
 | `services/session_admin.py` | 108 | SessionAdminService | SESSION_ADMIN_SERVICE | - |
 | `services/session_state.py` | 201 | SubconsciousState, SessionStateService | - | Session state management service. Consolidates fulfillment state and subconscious state handling. |
-| `services/sock_service.py` | 919 | HardwareProfile, ModelRecommendation, OllamaInventory, PolicyDiff, WarmResult, SockReport, scan_hardware, scan_ollama, +8 more | - | - |
-| `services/solution_trail.py` | 614 | classify_attempt, judgment_still_suppresses, action_suppressed_by_trail, tool_targets_already_held, sequence_item_should_skip_for_trail, append_attempt_judgment, record_attempt_on_branch, preferred_tool_from_progress, +1 more | - | Solution trail: attempt journal → judgment → next productive move. |
+| `services/sock_service.py` | 1221 | HardwareProfile, ModelRecommendation, OllamaInventory, PolicyDiff, WarmResult, CapacityLease, SockReport, scan_hardware, +13 more | - | - |
+| `services/solution_trail.py` | 978 | derive_branch_memory_kind, mill_judgment_signal, trail_world_holds, record_world_hold_on_branch, classify_attempt, judgment_still_suppresses, action_suppressed_by_trail, tool_targets_already_held, +7 more | - | Solution trail: attempt journal → judgment → next productive move. |
 | `services/source_root_judgment.py` | 328 | build_source_root_judgment, build_source_root_operator_notice, publish_source_root_operator_notice, render_source_root_judgment | - | - |
-| `services/storage_watch.py` | 182 | StorageWatchService | STORAGE_WATCH_SERVICE | - |
+| `services/storage_watch.py` | 225 | StorageWatchService | STORAGE_WATCH_SERVICE | - |
 | `services/subconscious_control.py` | 134 | SubconsciousControlService | SUBCONSCIOUS_CONTROL_SERVICE | - |
 | `services/subconscious_reporting.py` | 95 | build_training_backlog_summary, build_robust_weakness_summary | - | - |
 | `services/subconscious_review_authority.py` | 466 | SubconsciousReviewAuthorityService | SUBCONSCIOUS_REVIEW_AUTHORITY_SERVICE | - |
@@ -211,33 +214,33 @@ This is the exhaustive service-module index. Architectural ownership is describe
 | `services/tool_console.py` | 90 | ToolConsoleService | - | - |
 | `services/tool_execution.py` | 70 | ToolExecutionService | - | - |
 | `services/tool_execution_contracts.py` | 3 |  | - | - |
-| `services/tool_identity.py` | 132 | canonicalize_tool_name, evidence_quality, is_verified_tool, is_observed_tool, quality_names, all_quality_tool_names, collect_marker_tool_names | - | Shared tool name identity and evidence quality for progress honesty. |
+| `services/tool_identity.py` | 134 | canonicalize_tool_name, evidence_quality, is_verified_tool, is_observed_tool, quality_names, all_quality_tool_names, collect_marker_tool_names | - | Shared tool name identity and evidence quality for progress honesty. |
 | `services/tool_registry.py` | 208 | ToolInvocationEvent, ToolRegistryService | - | ToolRegistryService - Manages tool registry and event logging. |
 | `services/validation_artifact_truth.py` | 306 | ValidationArtifactTruthService | VALIDATION_ARTIFACT_TRUTH_SERVICE | - |
 | `services/voice_interaction.py` | 100 | VoiceInteractionService | VOICE_INTERACTION_SERVICE | - |
 | `services/web_research_session.py` | 80 | WebResearchPage, WebResearchSessionStore | - | - |
 | `services/work_tree_decision_adapter.py` | 417 | WorkTreeDecisionOutcome, IdentityDecisionScores, WorkTreeDecisionAdapter | - | Decision-only adaptive learning for work-tree routing. |
 | `services/work_tree_operator_hold.py` | 70 | node_is_operator_hold | - | - |
-| `services/work_tree_pressure_snapshot.py` | 260 | build_work_tree_pressure_snapshot, build_work_tree_pressure_snapshot_from_module | - | - |
-| `services/work_tree_seeding.py` | 1185 | WorkTreeSeedingService | WORK_TREE_SEEDING_SERVICE | - |
-| `services/work_tree_signal_ingestion.py` | 8107 | advance_branch_sequence_after_task, WorkTreeSignalIngestionService | WORK_TREE_SIGNAL_INGESTION_SERVICE | - |
-| `services/work_tree_task_progress.py` | 1297 | SolutionMarker, SolutionLadder, family_key, learned_ladders_path, work_tree_db_path, load_learned_ladders, save_learned_ladders, get_ladder, +5 more | - | Work-tree task progress: distance to a defined solution. |
+| `services/work_tree_pressure_snapshot.py` | 280 | build_work_tree_pressure_snapshot, build_work_tree_pressure_snapshot_from_module | - | - |
+| `services/work_tree_seeding.py` | 1199 | WorkTreeSeedingService | WORK_TREE_SEEDING_SERVICE | - |
+| `services/work_tree_signal_ingestion.py` | 8666 | advance_branch_sequence_after_task, WorkTreeSignalIngestionService | WORK_TREE_SIGNAL_INGESTION_SERVICE | - |
+| `services/work_tree_task_progress.py` | 1356 | SolutionMarker, SolutionLadder, family_key, learned_ladders_path, work_tree_db_path, load_learned_ladders, save_learned_ladders, get_ladder, +5 more | - | Work-tree task progress: distance to a defined solution. |
 
 ## Backpack Host
 
 | Module | Lines | Public classes/functions | Singleton | Description |
 |---|---:|---|---|---|
 | `services/backpack_host/__init__.py` | 31 |  | - | - |
-| `services/backpack_host/capability_surface.py` | 446 | declared_capabilities_edfi, scan_backpack_fusion, load_last_scan, get_fusion_status | - | - |
+| `services/backpack_host/capability_surface.py` | 469 | declared_capabilities_edfi, scan_backpack_fusion, load_last_scan, get_fusion_status | - | - |
 | `services/backpack_host/grant_enforcer.py` | 102 | load_operations, check_grant, require_grant, list_allowed_operations, operation_summary | - | - |
 | `services/backpack_host/install_state.py` | 49 | backpack_settings_path, backpack_runtime_installed, backpack_uninstall_mark_path, write_backpack_uninstall_mark, clear_backpack_uninstall_mark | - | - |
 | `services/backpack_host/installer.py` | 372 | BackpackInstaller | - | - |
 | `services/backpack_host/loader.py` | 123 | load_backpack_manifest | - | - |
 | `services/backpack_host/ops_map.py` | 97 | pipeline_op_to_backpack_op, backpack_dir_for_pipeline_id, resolve_shell_role | - | - |
 | `services/backpack_host/query.py` | 204 | run_backpack_query, backpack_status, list_backpack_summaries | - | - |
-| `services/backpack_host/registry.py` | 112 | BackpackAwarePipelineRegistry | - | - |
+| `services/backpack_host/registry.py` | 173 | BackpackAwarePipelineRegistry | - | - |
 | `services/backpack_host/reports.py` | 624 | list_report_intents, resolve_report_intent, clear_report_cache, run_backpack_report | - | - |
-| `services/backpack_host/sanitize.py` | 396 | backpack_touch_points, planned_sanitize_paths, scan_backpack_residue, sanitize_uninstalled_backpack | - | - |
+| `services/backpack_host/sanitize.py` | 424 | backpack_touch_points, planned_sanitize_paths, scan_backpack_residue, sanitize_uninstalled_backpack | - | - |
 | `services/backpack_host/scope_settings.py` | 231 | normalize_scope_mode, normalize_access_tier, lea_identity_key, format_lea_id, lea_in_list, parse_lea_list, allowed_leas_from_settings, primary_lea_from_settings, +2 more | - | - |
 
 ## data connector Data Layer

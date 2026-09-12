@@ -1,0 +1,23 @@
+{
+  "turns": [
+    {
+      "role": "user",
+      "text": "are you doing alright today nova ?"
+    },
+    {
+      "role": "assistant",
+      "text": "I'm functioning well and ready to assist you! How can I help you today?"
+    },
+    {
+      "role": "user",
+      "text": "okay so what next ?"
+    },
+    {
+      "role": "assistant",
+      "text": "Let's focus on your goal or question."
+    }
+  ],
+  "turn_ts": 1786944474.9543543,
+  "session_id": "http-4b88b4e0a960",
+  "ts": 1786944466.9707253
+}

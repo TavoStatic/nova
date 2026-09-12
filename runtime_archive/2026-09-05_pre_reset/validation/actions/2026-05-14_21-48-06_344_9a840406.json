@@ -1,0 +1,156 @@
+{
+  "ts": "2026-05-14 21:48:06",
+  "channel": "http",
+  "session_id": "s5_clean_slate_weather",
+  "input_source": "typed",
+  "user_input": "weather now",
+  "intent": "policy_block",
+  "planner_decision": "policy_block",
+  "tool": "",
+  "tool_args": {},
+  "tool_result": "",
+  "final_answer": "This clean session is identity-only, so I won't run weather lookups here.",
+  "reply_contract": "policy.identity_only_mode",
+  "reply_outcome": {
+    "intent": "policy_block",
+    "kind": "identity_only_block",
+    "blocked_domain": "weather",
+    "reply_contract": "policy.identity_only_mode"
+  },
+  "turn_acts": [
+    "command"
+  ],
+  "grounded": false,
+  "active_subject": "",
+  "continuation_used": false,
+  "route_trace": [
+    {
+      "stage": "input",
+      "outcome": "received",
+      "data": {
+        "channel": "http",
+        "input_source": "typed",
+        "intent": "weather_lookup"
+      }
+    },
+    {
+      "stage": "direction_analysis",
+      "outcome": "explicit_command",
+      "data": {
+        "effective_query": "weather now",
+        "turn_acts": "command",
+        "identity_focused": false,
+        "bypass_pattern_routes": false
+      }
+    },
+    {
+      "stage": "policy_gate",
+      "outcome": "blocked",
+      "detail": "identity_only_mode",
+      "data": {
+        "blocked_domain": "weather"
+      }
+    },
+    {
+      "stage": "finalize",
+      "outcome": "policy_block",
+      "data": {
+        "grounded": false
+      }
+    }
+  ],
+  "provider_used": "",
+  "provider_candidates": [],
+  "provider_family": "",
+  "routing_decision": {
+    "input_preview": "weather now",
+    "entry_point": "http",
+    "intent_phase": {
+      "phase": "intent",
+      "handled": false,
+      "rule_name": "",
+      "intent": "",
+      "action": "",
+      "priority": null,
+      "candidates": [
+        {
+          "rule_name": "smalltalk",
+          "priority": 61,
+          "handled": false
+        },
+        {
+          "rule_name": "set_location",
+          "priority": 62,
+          "handled": false
+        },
+        {
+          "rule_name": "store_fact",
+          "priority": 62,
+          "handled": false
+        },
+        {
+          "rule_name": "weather_lookup",
+          "priority": 62,
+          "handled": false
+        },
+        {
+          "rule_name": "web_research_family",
+          "priority": 62,
+          "handled": false
+        },
+        {
+          "rule_name": "capability_query",
+          "priority": 63,
+          "handled": false
+        },
+        {
+          "rule_name": "policy_domain_query",
+          "priority": 64,
+          "handled": false
+        },
+        {
+          "rule_name": "assistant_name",
+          "priority": 66,
+          "handled": false
+        },
+        {
+          "rule_name": "self_identity_web_challenge",
+          "priority": 67,
+          "handled": false
+        },
+        {
+          "rule_name": "name_origin",
+          "priority": 68,
+          "handled": false
+        },
+        {
+          "rule_name": "developer_full_name",
+          "priority": 69,
+          "handled": false
+        },
+        {
+          "rule_name": "developer_profile",
+          "priority": 70,
+          "handled": false
+        }
+      ]
+    },
+    "handle_phase": {
+      "phase": "handle",
+      "handled": false,
+      "rule_name": "",
+      "intent": "",
+      "action": "",
+      "priority": null,
+      "candidates": []
+    },
+    "final_owner": "fallback",
+    "allowed_bypass": false,
+    "allowed_bypass_category": "",
+    "bypass_reason": "",
+    "reply_contract": "policy.identity_only_mode",
+    "reply_outcome_kind": "identity_only_block",
+    "turn_acts": []
+  },
+  "route_summary": "input:received -> direction_analysis:explicit_command -> policy_gate:blocked -> finalize:policy_block"
+}

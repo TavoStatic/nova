@@ -1,0 +1,201 @@
+{
+  "ts": "2026-05-19 23:32:45",
+  "channel": "cli",
+  "session_id": "",
+  "input_source": "typed",
+  "user_input": "or you could of said i am also having a good day too. or a bad one .. kept it simple",
+  "intent": "",
+  "planner_decision": "llm_fallback",
+  "tool": "",
+  "tool_args": {},
+  "tool_result": "",
+  "final_answer": "You're right, I could have responded with something like \"I'm glad to hear that\" or \"That's great to know\" without trying to interpret the context further. Sometimes, simplicity is indeed the best approach, especially in conversations where the goal is just to acknowledge and move forward. Thank you for pointing this out and helping me improve my responses!",
+  "reply_contract": "",
+  "reply_outcome": {
+    "kind": "llm_fallback",
+    "intent_evidence_packet": {
+      "schema": "nova.turn_intent_evidence",
+      "version": "1.0.0",
+      "trace_authority": "hypothesis_only",
+      "answer_authority": "available_evidence",
+      "current_turn": "or you could of said i am also having a good day too. or a bad one .. kept it simple",
+      "conversation_frame": {
+        "turn_count": 37,
+        "current_user_turn_is_latest": true,
+        "previous_assistant_turn": "You're right, I didn't accurately capture the essence of your response. You simply said \"its good\" without providing any further explanation or context about what's making your day good. That's actually a very concise and direct way to express a positive sentiment, which is often more effective than elaborating on it. In hindsight, my follow-up question was unnecessary, as you didn't provide enough information to warrant a response about my day. I should have simply acknowledged your brief message with something like \"That's great to hear!\" or just left the conversation there.",
+        "last_assistant_repeats_earlier_assistant": false
+      },
+      "planner_frame": {
+        "decision": "",
+        "tool": "",
+        "semantic_tool_observation": {
+          "tool": "self_status",
+          "confidence": 0.0,
+          "evidence_need": "live_self_status",
+          "answer_target": "nova_live_state",
+          "source": "llm_intent",
+          "status": "weak_tool_route",
+          "duration_ms": 1408
+        }
+      },
+      "available_evidence": [
+        {
+          "name": "current_user_turn",
+          "available": true,
+          "chars": 84
+        },
+        {
+          "name": "recent_chat_context",
+          "available": true,
+          "chars": 1170
+        },
+        {
+          "name": "session_state_context",
+          "available": false,
+          "chars": 0
+        },
+        {
+          "name": "learning_context",
+          "available": true,
+          "chars": 1583
+        },
+        {
+          "name": "confirmed_identity_context",
+          "available": true,
+          "chars": 235
+        },
+        {
+          "name": "operational_self_context",
+          "available": true,
+          "chars": 1346
+        },
+        {
+          "name": "tool_result",
+          "available": false,
+          "chars": 0
+        }
+      ],
+      "answer_contract": {
+        "infer_intent_from_turn_and_conversation": true,
+        "trace_is_route_authority": false,
+        "evidence_is_claim_authority": true,
+        "tool_route_requires_external_evidence_gap": true,
+        "conversation_can_be_complete_without_task": false
+      }
+    }
+  },
+  "turn_acts": [],
+  "grounded": false,
+  "active_subject": "",
+  "continuation_used": false,
+  "route_trace": [
+    {
+      "stage": "input",
+      "outcome": "received",
+      "data": {
+        "channel": "cli",
+        "input_source": "typed"
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "semantic_tool_intent",
+      "data": {
+        "duration_ms": 1408
+      }
+    },
+    {
+      "stage": "action_planner",
+      "outcome": "semantic_weak_tool_route",
+      "data": {
+        "tool": "self_status",
+        "confidence": 0.0
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "tool_selection",
+      "data": {
+        "duration_ms": 1408
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "planner_call",
+      "data": {
+        "duration_ms": 1408
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "execute_reply_sequence",
+      "data": {
+        "duration_ms": 1408
+      }
+    },
+    {
+      "stage": "timing_breakdown",
+      "outcome": "completed",
+      "detail": "execute_reply_sequence",
+      "data": {
+        "total_time": 1408,
+        "planner_time": 1408,
+        "llm_time": 0,
+        "tool_time": 0,
+        "post_time": 0,
+        "tool_selection_time": 0
+      }
+    },
+    {
+      "stage": "memory_context",
+      "outcome": "used",
+      "data": {
+        "memory_used": false,
+        "identity_used": true,
+        "operational_identity_used": true,
+        "knowledge_used": false,
+        "memory_chars": 0,
+        "identity_chars": 235,
+        "operational_identity_chars": 1346,
+        "knowledge_chars": 0
+      }
+    },
+    {
+      "stage": "chat_context",
+      "outcome": "used",
+      "data": {
+        "chars": 1170
+      }
+    },
+    {
+      "stage": "turn_intent_evidence",
+      "outcome": "attached",
+      "data": {
+        "trace_authority": "hypothesis_only",
+        "answer_authority": "available_evidence"
+      }
+    },
+    {
+      "stage": "llm_fallback",
+      "outcome": "invoked",
+      "data": {
+        "retrieved_chars": 3509
+      }
+    },
+    {
+      "stage": "finalize",
+      "outcome": "llm_fallback",
+      "data": {
+        "grounded": false
+      }
+    }
+  ],
+  "provider_used": "",
+  "provider_candidates": [],
+  "provider_family": "",
+  "route_summary": "input:received -> action_planner:semantic_weak_tool_route -> memory_context:used -> chat_context:used -> turn_intent_evidence:attached -> llm_fallback:invoked -> finalize:llm_fallback"
+}

@@ -1,0 +1,15 @@
+{
+  "connection_id": "panel-test",
+  "base_url": "https://example.invalid",
+  "client_id": "id",
+  "client_secret": "secret",
+  "token_path": "/oauth/token",
+  "api_root": "/data/v3",
+  "metadata_path": "/metadata/resources",
+  "sample_resource": "schools",
+  "timeout_sec": 30,
+  "verify_ssl": true,
+  "ca_bundle_path": "",
+  "token_auth_mode": "auto",
+  "district_lea_id": "31901"
+}

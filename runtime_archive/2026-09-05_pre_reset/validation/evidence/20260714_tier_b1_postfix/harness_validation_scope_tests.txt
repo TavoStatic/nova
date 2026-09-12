@@ -1,0 +1,9 @@
+2026-07-14 19:41:26 | pipeline_worker_ensure status=skipped_validation_scope scope=validation pipelines=1
+2026-07-14 19:41:26 | pipeline_worker_reconcile status=ok reclaimed=0 cleared=0
+2026-07-14 19:41:26 | pipeline_worker_ensure status=ok running=1 started=0 failed=0
+----------------------------------------------------------------------
+Ran 2 tests in 0.002s
+
+OK
+
+exit_code=0

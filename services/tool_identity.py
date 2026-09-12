@@ -25,6 +25,7 @@ READ = "read"
 FIND = "find"
 PULSE = "pulse"
 LS = "ls"
+SYSTEM_CHECK = "system_check"
 
 RELEASE_REBUILD_VERIFY = "release_rebuild_verify"
 RELEASE_RECORD_VALIDATION_OUTCOME = "release_record_validation_outcome"
@@ -60,6 +61,7 @@ EVIDENCE_QUALITY: dict[str, str] = {
     FIND: "observed",
     PULSE: "observed",
     LS: "observed",
+    "core_thinning": "observed",
     # Verification-tier (specialized judgment / release / queue tools)
     RELEASE_REBUILD_VERIFY: "verified",
     RELEASE_RECORD_VALIDATION_OUTCOME: "verified",

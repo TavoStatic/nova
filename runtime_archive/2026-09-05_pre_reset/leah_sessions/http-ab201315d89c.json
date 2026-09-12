@@ -1,0 +1,23 @@
+{
+  "turns": [
+    {
+      "role": "user",
+      "text": "how are you doing today ?"
+    },
+    {
+      "role": "assistant",
+      "text": "I\u2019m doing well, thanks for asking. My core state is stable and I\u2019ve got the heartbeat active on my end right now."
+    },
+    {
+      "role": "user",
+      "text": "what now"
+    },
+    {
+      "role": "assistant",
+      "text": "Nothing specific is pending in my work tree right now, so just let me know what you'd like to tackle next. My heartbeat's still active and systems are stable."
+    }
+  ],
+  "turn_ts": 1788354405.3593013,
+  "session_id": "http-ab201315d89c",
+  "ts": 1788354360.5904195
+}

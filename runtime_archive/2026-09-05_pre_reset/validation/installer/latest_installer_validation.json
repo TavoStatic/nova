@@ -1,0 +1,30 @@
+{
+  "completed": false,
+  "failure_reason": "installer_build_failed",
+  "generated_at": "2026-09-05T00:03:06.774330",
+  "installer_artifact": "",
+  "ok": false,
+  "package_artifact": "C:\\Users\\hotst\\AppData\\Local\\Temp\\tmpiee1q_1n\\runtime\\exports\\release_packages\\nova.zip",
+  "report_path": "C:\\NOVA\\runtime\\validation\\installer\\latest_installer_validation.json",
+  "schema": "installer_validation_report.v1",
+  "steps": [
+    {
+      "command": [
+        "powershell.exe",
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        "C:\\Users\\hotst\\AppData\\Local\\Temp\\tmpiee1q_1n\\scripts\\build_windows_installer.ps1",
+        "-Artifact",
+        "C:\\Users\\hotst\\AppData\\Local\\Temp\\tmpiee1q_1n\\runtime\\exports\\release_packages\\nova.zip"
+      ],
+      "name": "build_windows_installer",
+      "returncode": 1,
+      "stderr": "",
+      "stdout": "[FAIL] Inno Setup compiler not found."
+    }
+  ],
+  "validation_record": "",
+  "validation_result": ""
+}

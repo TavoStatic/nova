@@ -1,0 +1,23 @@
+{
+  "turns": [
+    {
+      "role": "user",
+      "text": "how is your day going right now ?"
+    },
+    {
+      "role": "assistant",
+      "text": "Hello! I'm here and ready to assist you. How can I help you today?"
+    },
+    {
+      "role": "user",
+      "text": "where does that leave us ?"
+    },
+    {
+      "role": "assistant",
+      "text": "It seems like you were checking in on how I'm doing and asking about my day. Currently, I'm here and ready to assist you with any questions or tasks you might have. How can I be of help today?"
+    }
+  ],
+  "turn_ts": 1787360250.8773499,
+  "session_id": "http-c0a10c9149f8",
+  "ts": 1787360222.1005285
+}

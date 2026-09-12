@@ -1,0 +1,176 @@
+{
+  "ts": "2026-05-16 14:36:26",
+  "channel": "http",
+  "session_id": "3590363c90d51c58",
+  "input_source": "typed",
+  "user_input": "are you sure about the active work tree?  you dont have branches that are stuck or pending to be resolved ?",
+  "intent": "chat",
+  "planner_decision": "work_tree",
+  "tool": "work_tree",
+  "tool_args": {
+    "tree_id": "tree_18e253d5"
+  },
+  "tool_result": "{\"action\": \"inspect\", \"tree_id\": \"tree_18e253d5\", \"snapshot_text\": \"Active work tree: Http: what is your current system health? (complete). Tasks open: 0 of 1. Ready branches: 0. Blocked branches: 0. Tree policy allows: core_health, core_thinning, find, health, ls, ....\"}",
+  "final_answer": "Active work tree: Http: what is your current system health? (complete). Tasks open: 0 of 1. Ready branches: 0. Blocked branches: 0. Tree policy allows: core_health, core_thinning, find, health, ls, ....",
+  "reply_contract": "",
+  "reply_outcome": {
+    "execution_profile": {
+      "total_time": 1,
+      "planner_time": 1,
+      "llm_time": 0,
+      "tool_time": 0,
+      "post_time": 0,
+      "tool_selection_time": 0
+    }
+  },
+  "turn_acts": [
+    "inform"
+  ],
+  "grounded": true,
+  "active_subject": "",
+  "continuation_used": false,
+  "route_trace": [
+    {
+      "stage": "input",
+      "outcome": "received",
+      "data": {
+        "channel": "http",
+        "input_source": "typed",
+        "intent": "chat"
+      }
+    },
+    {
+      "stage": "direction_analysis",
+      "outcome": "generic_declarative",
+      "data": {
+        "effective_query": "are you sure about the active work tree?  you dont have branches that are stuck or pending to be resolved ?",
+        "turn_acts": "inform",
+        "identity_focused": false,
+        "bypass_pattern_routes": false
+      }
+    },
+    {
+      "stage": "truth_hierarchy",
+      "outcome": "skipped",
+      "detail": "content_owned_chat_disabled"
+    },
+    {
+      "stage": "hard_answer",
+      "outcome": "skipped",
+      "detail": "content_owned_chat_disabled"
+    },
+    {
+      "stage": "work_tree",
+      "outcome": "matched",
+      "detail": "inspect"
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "work_tree_sequence",
+      "data": {
+        "duration_ms": 1
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "planner",
+      "data": {
+        "duration_ms": 1
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "planner_call",
+      "data": {
+        "duration_ms": 1
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "execute_reply_sequence",
+      "data": {
+        "duration_ms": 1
+      }
+    },
+    {
+      "stage": "timing_breakdown",
+      "outcome": "completed",
+      "detail": "execute_reply_sequence",
+      "data": {
+        "total_time": 1,
+        "planner_time": 1,
+        "llm_time": 0,
+        "tool_time": 0,
+        "post_time": 0,
+        "tool_selection_time": 0
+      }
+    },
+    {
+      "stage": "finalize",
+      "outcome": "work_tree",
+      "data": {
+        "grounded": true,
+        "tool": "work_tree"
+      }
+    }
+  ],
+  "provider_used": "",
+  "provider_candidates": [],
+  "provider_family": "",
+  "routing_decision": {
+    "input_preview": "are you sure about the active work tree? you dont have branches that are stuck or pending to be resolved ?",
+    "entry_point": "http",
+    "intent_phase": {
+      "phase": "intent",
+      "handled": false,
+      "rule_name": "",
+      "intent": "",
+      "action": "",
+      "priority": null,
+      "candidates": [
+        {
+          "rule_name": "weather_lookup",
+          "priority": 62,
+          "handled": false
+        },
+        {
+          "rule_name": "web_research_family",
+          "priority": 62,
+          "handled": false
+        }
+      ]
+    },
+    "handle_phase": {
+      "phase": "handle",
+      "handled": false,
+      "rule_name": "",
+      "intent": "",
+      "action": "",
+      "priority": null,
+      "candidates": [
+        {
+          "rule_name": "location_weather",
+          "priority": 46,
+          "handled": false
+        },
+        {
+          "rule_name": "retrieval_followup",
+          "priority": 47,
+          "handled": false
+        }
+      ]
+    },
+    "final_owner": "core_legacy",
+    "allowed_bypass": false,
+    "allowed_bypass_category": "",
+    "bypass_reason": "",
+    "reply_contract": "",
+    "reply_outcome_kind": "",
+    "turn_acts": []
+  },
+  "route_summary": "input:received -> direction_analysis:generic_declarative -> truth_hierarchy:skipped -> hard_answer:skipped -> work_tree:matched -> finalize:work_tree"
+}

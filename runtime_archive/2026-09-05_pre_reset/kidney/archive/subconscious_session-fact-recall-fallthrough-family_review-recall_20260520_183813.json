@@ -1,0 +1,21 @@
+{
+  "name": "Subconscious session-fact-recall-fallthrough-family :: review_recall",
+  "messages": [
+    "Which review was blocked?"
+  ],
+  "source": "subconscious_generated",
+  "label": "phase1_auto",
+  "family_id": "session-fact-recall-fallthrough-family",
+  "target_seam": "session_fact_recall_route_fallthrough",
+  "variation_id": "review_recall",
+  "training_priorities": [
+    {
+      "seam": "session_fact_recall_route_fallthrough",
+      "signal": "fallback_overuse",
+      "robustness": 0.97,
+      "suggested_test_name": "test_generic_fallback_does_not_hide_viable_specific_route",
+      "rationale": "Robust family pressure kept surfacing fallback_overuse.",
+      "urgency": "high"
+    }
+  ]
+}

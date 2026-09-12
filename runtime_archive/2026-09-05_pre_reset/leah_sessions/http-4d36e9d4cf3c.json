@@ -1,0 +1,23 @@
+{
+  "turns": [
+    {
+      "role": "user",
+      "text": "how are you doing today ?"
+    },
+    {
+      "role": "assistant",
+      "text": "I'm doing well, thanks for asking. My internal systems are all green\u2014no alerts or blockers detected\u2014and I\u2019m ready to help you out whenever you need something done."
+    },
+    {
+      "role": "user",
+      "text": "what now"
+    },
+    {
+      "role": "assistant",
+      "text": "Nothing flagged as blocked right now\u2014my systems are still green and ready for input. What do you need help with?"
+    }
+  ],
+  "turn_ts": 1788355306.077196,
+  "session_id": "http-4d36e9d4cf3c",
+  "ts": 1788355256.307325
+}

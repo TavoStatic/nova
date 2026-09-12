@@ -1,0 +1,85 @@
+{
+  "schema": "nova.work_tree_solution_ladder.v1",
+  "updated_at": "2026-08-27T04:25:55Z",
+  "meta": {
+    "min_samples": 5,
+    "limit_tasks": 1500,
+    "family_count": 1
+  },
+  "families": {
+    "release_readiness_gap|release": {
+      "family_key": "release_readiness_gap|release",
+      "intent": "Resolve recurring work like: Read release ledger for current package",
+      "solution": "Task complete with the evidence pattern seen in successful history.",
+      "source": "learned",
+      "markers": [
+        {
+          "marker_id": "started",
+          "label": "First investigation evidence recorded",
+          "weight": 0.2941176470588235,
+          "stage": 0,
+          "tools": [],
+          "title_keywords": [],
+          "result_keywords": [],
+          "requires_complete": false,
+          "any_evidence": true,
+          "min_evidence": 0,
+          "requires_markers": [],
+          "verify_tools": []
+        },
+        {
+          "marker_id": "via_read",
+          "label": "Evidence via read",
+          "weight": 0.23529411764705882,
+          "stage": 1,
+          "tools": [
+            "read"
+          ],
+          "title_keywords": [],
+          "result_keywords": [],
+          "requires_complete": false,
+          "any_evidence": false,
+          "min_evidence": 0,
+          "requires_markers": [
+            "started"
+          ],
+          "verify_tools": []
+        },
+        {
+          "marker_id": "via_release_rebuild_verify",
+          "label": "Evidence via release_rebuild_verify",
+          "weight": 0.23529411764705882,
+          "stage": 2,
+          "tools": [
+            "release_rebuild_verify"
+          ],
+          "title_keywords": [],
+          "result_keywords": [],
+          "requires_complete": false,
+          "any_evidence": false,
+          "min_evidence": 0,
+          "requires_markers": [
+            "via_read"
+          ],
+          "verify_tools": []
+        },
+        {
+          "marker_id": "closed",
+          "label": "Task completed",
+          "weight": 0.23529411764705882,
+          "stage": 3,
+          "tools": [],
+          "title_keywords": [],
+          "result_keywords": [],
+          "requires_complete": true,
+          "any_evidence": false,
+          "min_evidence": 0,
+          "requires_markers": [
+            "via_release_rebuild_verify"
+          ],
+          "verify_tools": []
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "turns": [
+    {
+      "role": "user",
+      "text": "how is your day going right now ?"
+    },
+    {
+      "role": "assistant",
+      "text": "My day is proceeding as expected with ongoing maintenance and readiness checks. How can I assist you today?"
+    },
+    {
+      "role": "user",
+      "text": "where does that leave us ?"
+    },
+    {
+      "role": "assistant",
+      "text": "We are currently ready to address any questions or assistance you need."
+    }
+  ],
+  "turn_ts": 1788096505.7714794,
+  "session_id": "http-cb1cca77b602",
+  "ts": 1788096498.7536678
+}

@@ -1,0 +1,12 @@
+{
+  "productive_closure_actions": [
+    "removed_unused_wrapper"
+  ],
+  "witness_closure_actions": [
+    "mapped_http_extraction_boundary",
+    "witnessed_http_extraction_boundary"
+  ],
+  "mapped_http_extraction_boundary_in_productive": false,
+  "mapped_http_extraction_boundary_in_witness": true,
+  "witnessed_http_in_witness": true
+}

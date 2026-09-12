@@ -1,0 +1,49 @@
+﻿# SearX configuration with JSON format support for Nova health probe
+server:
+  bind_address: "0.0.0.0"
+  port: 8080
+  secret_key: "ultrasecretkey"
+  image_proxy: true
+  public_instance: false
+
+ui:
+  static_path: "/usr/local/searxng/searx/static"
+  templates_path: "/usr/local/searxng/searx/templates"
+  default_theme: "simple"
+  default_locale: "en"
+  autocomplete: "lxc_google"
+
+search:
+  autocomplete_min: 4
+  default_lang: "en"
+  formats:
+    - name: "json"
+      url: "/search?format=json"
+    - name: "html"
+      url: "/search"
+
+redis:
+  url: "redis://localhost:6379/0"
+
+plugins:
+  - plugin_id: "Hash_plugin"
+  - plugin_id: "Calc_plugin"
+
+engines:
+  - name: "duckduckgo"
+    engine: "duckduckgo"
+    shortcut: "ddg"
+    timeout: 5.0
+    disabled: false
+
+  - name: "google"
+    engine: "google"
+    shortcut: "g"
+    timeout: 5.0
+    disabled: false
+
+  - name: "bing"
+    engine: "bing"
+    shortcut: "b"
+    timeout: 5.0
+    disabled: false

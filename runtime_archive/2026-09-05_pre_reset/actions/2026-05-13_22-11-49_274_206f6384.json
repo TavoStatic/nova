@@ -1,0 +1,320 @@
+{
+  "ts": "2026-05-13 22:11:45",
+  "channel": "http",
+  "session_id": "c2c781bd6c7fbd40",
+  "input_source": "typed",
+  "user_input": "gus",
+  "intent": "chat",
+  "planner_decision": "deterministic",
+  "tool": "",
+  "tool_args": {},
+  "tool_result": "",
+  "final_answer": "I don't know that based on what I can verify right now, and I don't want to make it up. If you want, I can stay on the current thread, ask a clarifying question, or use a grounded source or tool if one is available. If you know the answer or want to correct me, tell me and I'll store it so I do better next time.",
+  "reply_contract": "open_probe.safe_fallback",
+  "reply_outcome": {
+    "intent": "open_probe_family",
+    "kind": "safe_fallback",
+    "reply_contract": "open_probe.safe_fallback",
+    "reply_text": "I don't know that based on what I can verify right now, and I don't want to make it up. If you want, I can stay on the current thread, ask a clarifying question, or use a grounded source or tool if one is available. If you know the answer or want to correct me, tell me and I'll store it so I do better next time.",
+    "state_delta": {}
+  },
+  "turn_acts": [],
+  "grounded": false,
+  "active_subject": "",
+  "continuation_used": false,
+  "route_trace": [
+    {
+      "stage": "input",
+      "outcome": "received",
+      "data": {
+        "channel": "http",
+        "input_source": "typed",
+        "intent": "chat"
+      }
+    },
+    {
+      "stage": "direction_analysis",
+      "outcome": "general_chat",
+      "data": {
+        "effective_query": "gus",
+        "identity_focused": false,
+        "bypass_pattern_routes": false
+      }
+    },
+    {
+      "stage": "truth_hierarchy",
+      "outcome": "not_matched"
+    },
+    {
+      "stage": "hard_answer",
+      "outcome": "not_matched"
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "planner_decide_actions",
+      "data": {
+        "duration_ms": 0
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "tool_selection",
+      "data": {
+        "duration_ms": 0
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "planner_call",
+      "data": {
+        "duration_ms": 0
+      }
+    },
+    {
+      "stage": "policy_gate",
+      "outcome": "allowed"
+    },
+    {
+      "stage": "memory_context",
+      "outcome": "empty",
+      "data": {
+        "memory_used": false,
+        "knowledge_used": false,
+        "memory_chars": 0,
+        "knowledge_chars": 0
+      }
+    },
+    {
+      "stage": "chat_context",
+      "outcome": "used",
+      "data": {
+        "chars": 182
+      }
+    },
+    {
+      "stage": "session_fact_sheet",
+      "outcome": "used",
+      "data": {
+        "chars": 134
+      }
+    },
+    {
+      "stage": "llm_fallback",
+      "outcome": "invoked",
+      "data": {
+        "retrieved_chars": 360
+      }
+    },
+    {
+      "stage": "llm_call",
+      "outcome": "started"
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "llm_call",
+      "data": {
+        "duration_ms": 2810
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "post_processing",
+      "data": {
+        "duration_ms": 0
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "execute_reply_sequence",
+      "data": {
+        "duration_ms": 3940
+      }
+    },
+    {
+      "stage": "timing_breakdown",
+      "outcome": "completed",
+      "detail": "execute_reply_sequence",
+      "data": {
+        "total_time": 3940,
+        "planner_time": 0,
+        "llm_time": 2810,
+        "tool_time": 0,
+        "post_time": 0,
+        "tool_selection_time": 0
+      }
+    },
+    {
+      "stage": "open_probe",
+      "outcome": "matched",
+      "detail": "safe_fallback"
+    },
+    {
+      "stage": "finalize",
+      "outcome": "deterministic",
+      "data": {
+        "grounded": false
+      }
+    }
+  ],
+  "provider_used": "",
+  "provider_candidates": [],
+  "provider_family": "",
+  "routing_decision": {
+    "input_preview": "gus",
+    "entry_point": "http",
+    "intent_phase": {
+      "phase": "intent",
+      "handled": false,
+      "rule_name": "",
+      "intent": "",
+      "action": "",
+      "priority": null,
+      "candidates": [
+        {
+          "rule_name": "smalltalk",
+          "priority": 61,
+          "handled": false
+        },
+        {
+          "rule_name": "set_location",
+          "priority": 62,
+          "handled": false
+        },
+        {
+          "rule_name": "store_fact",
+          "priority": 62,
+          "handled": false
+        },
+        {
+          "rule_name": "weather_lookup",
+          "priority": 62,
+          "handled": false
+        },
+        {
+          "rule_name": "web_research_family",
+          "priority": 62,
+          "handled": false
+        },
+        {
+          "rule_name": "capability_query",
+          "priority": 63,
+          "handled": false
+        },
+        {
+          "rule_name": "policy_domain_query",
+          "priority": 64,
+          "handled": false
+        },
+        {
+          "rule_name": "assistant_name",
+          "priority": 66,
+          "handled": false
+        },
+        {
+          "rule_name": "self_identity_web_challenge",
+          "priority": 67,
+          "handled": false
+        },
+        {
+          "rule_name": "name_origin",
+          "priority": 68,
+          "handled": false
+        },
+        {
+          "rule_name": "developer_full_name",
+          "priority": 69,
+          "handled": false
+        },
+        {
+          "rule_name": "developer_profile",
+          "priority": 70,
+          "handled": false
+        }
+      ]
+    },
+    "handle_phase": {
+      "phase": "handle",
+      "handled": false,
+      "rule_name": "",
+      "intent": "",
+      "action": "",
+      "priority": null,
+      "candidates": [
+        {
+          "rule_name": "reflective_retry",
+          "priority": 30,
+          "handled": false
+        },
+        {
+          "rule_name": "profile_certainty",
+          "priority": 35,
+          "handled": false
+        },
+        {
+          "rule_name": "identity_history_family",
+          "priority": 36,
+          "handled": false
+        },
+        {
+          "rule_name": "open_probe_family",
+          "priority": 37,
+          "handled": false
+        },
+        {
+          "rule_name": "session_fact_recall",
+          "priority": 38,
+          "handled": false
+        },
+        {
+          "rule_name": "last_question_recall",
+          "priority": 39,
+          "handled": false
+        },
+        {
+          "rule_name": "self_location",
+          "priority": 40,
+          "handled": false
+        },
+        {
+          "rule_name": "rules_list",
+          "priority": 41,
+          "handled": false
+        },
+        {
+          "rule_name": "location_recall",
+          "priority": 42,
+          "handled": false
+        },
+        {
+          "rule_name": "location_name",
+          "priority": 44,
+          "handled": false
+        },
+        {
+          "rule_name": "location_weather",
+          "priority": 46,
+          "handled": false
+        },
+        {
+          "rule_name": "retrieval_followup",
+          "priority": 47,
+          "handled": false
+        }
+      ]
+    },
+    "final_owner": "supervisor_handle",
+    "allowed_bypass": false,
+    "allowed_bypass_category": "",
+    "bypass_reason": "",
+    "reply_contract": "open_probe.safe_fallback",
+    "reply_outcome_kind": "safe_fallback",
+    "turn_acts": []
+  },
+  "route_summary": "input:received -> direction_analysis:general_chat -> truth_hierarchy:not_matched -> hard_answer:not_matched -> policy_gate:allowed -> memory_context:empty -> chat_context:used -> session_fact_sheet:used -> llm_fallback:invoked -> llm_call:started -> open_probe:matched -> finalize:deterministic"
+}

@@ -1,0 +1,13 @@
+{
+  "generated_at": "2026-06-27 01:04:27",
+  "level": "steady",
+  "summary": "core health signals are clear",
+  "source_levels": {
+    "core_steward": "unknown",
+    "self_status": "unknown"
+  },
+  "repair_order_count": 0,
+  "repair_work_orders": [],
+  "advisory_count": 0,
+  "advisories": []
+}

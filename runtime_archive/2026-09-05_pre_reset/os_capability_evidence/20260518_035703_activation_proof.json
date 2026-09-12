@@ -1,0 +1,36 @@
+﻿{
+    "schema":  "nova.os_capability_diagnostics_bundle.v1",
+    "created_utc":  "2026-05-18T03:57:03.8399084Z",
+    "label":  "activation_proof",
+    "base_dir":  "C:\\NOVA",
+    "runtime_files":  [
+                          {
+                              "path":  "runtime\\core.heartbeat",
+                              "size_bytes":  18,
+                              "last_write_utc":  "2026-05-18T03:57:03.2333443Z"
+                          },
+                          {
+                              "path":  "runtime\\autonomy_maintenance_state.json",
+                              "size_bytes":  20468,
+                              "last_write_utc":  "2026-05-18T03:56:15.3256855Z"
+                          },
+                          {
+                              "path":  "runtime\\operator_outbox.jsonl",
+                              "size_bytes":  299766,
+                              "last_write_utc":  "2026-05-18T01:05:58.4811839Z"
+                          },
+                          {
+                              "path":  "runtime\\os_capability_ledger.jsonl",
+                              "size_bytes":  14738,
+                              "last_write_utc":  "2026-05-18T03:57:03.4602556Z"
+                          },
+                          {
+                              "path":  "runtime\\health.log",
+                              "size_bytes":  8219,
+                              "last_write_utc":  "2026-05-17T02:50:36.9900631Z"
+                          }
+                      ],
+    "runtime_tails":  {
+
+                      }
+}

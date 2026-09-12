@@ -1,0 +1,23 @@
+{
+  "turns": [
+    {
+      "role": "user",
+      "text": "how are you doing today ?"
+    },
+    {
+      "role": "assistant",
+      "text": "I'm running smoothly with no active alerts from my health monitoring systems. Ready to assist if there's something specific on your mind today?"
+    },
+    {
+      "role": "user",
+      "text": "what now"
+    },
+    {
+      "role": "assistant",
+      "text": "Running smoothly with no active alerts from my health monitoring systems. What do you need help with?"
+    }
+  ],
+  "turn_ts": 1788355710.9884667,
+  "session_id": "http-e768584141e0",
+  "ts": 1788355657.374963
+}

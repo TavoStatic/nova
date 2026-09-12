@@ -1,0 +1,120 @@
+{
+  "reconcile": {
+    "ok": true,
+    "status": "dead_lease_cleared",
+    "worker_count": 1,
+    "reclaimed_count": 0,
+    "cleared_count": 1,
+    "partial_count": 0,
+    "no_action_count": 0,
+    "workers": [
+      {
+        "ok": true,
+        "status": "dead_lease_cleared",
+        "pipeline_id": "edfi_bisd",
+        "actions": [
+          "released_dead_lease",
+          "removed_stale_heartbeat"
+        ],
+        "tmp_removed": [],
+        "heartbeat": {
+          "pipeline_id": "edfi_bisd",
+          "present": true,
+          "fresh": false,
+          "supervised_ok": false,
+          "status": "idle",
+          "detail": "no_pending_requests",
+          "updated_at": 1784063593,
+          "age_sec": 12503,
+          "stale_after_sec": 120,
+          "pid": 64532,
+          "path": "C:\\NOVA\\runtime\\pipelines\\edfi_bisd\\worker.heartbeat",
+          "lease": {
+            "pipeline_id": "edfi_bisd",
+            "present": true,
+            "path": "C:\\NOVA\\runtime\\pipelines\\edfi_bisd\\worker.lease.json",
+            "lease_owner_pid": 64532,
+            "lease_live": false,
+            "claimed_at": 1784063588,
+            "generation": 1,
+            "runtime_root": "C:\\NOVA\\runtime",
+            "scope_key": "edfi_bisd@C:\\NOVA\\runtime"
+          },
+          "lease_owner_pid": 64532,
+          "lease_live": false,
+          "pid_matches_lease": true
+        },
+        "lease": {
+          "pipeline_id": "edfi_bisd",
+          "present": true,
+          "path": "C:\\NOVA\\runtime\\pipelines\\edfi_bisd\\worker.lease.json",
+          "lease_owner_pid": 64532,
+          "lease_live": false,
+          "claimed_at": 1784063588,
+          "generation": 1,
+          "runtime_root": "C:\\NOVA\\runtime",
+          "scope_key": "edfi_bisd@C:\\NOVA\\runtime"
+        }
+      }
+    ]
+  },
+  "ensure": {
+    "ok": true,
+    "status": "started",
+    "worker_count": 1,
+    "started_count": 1,
+    "running_count": 0,
+    "duplicate_count": 0,
+    "failed_count": 0,
+    "workers": [
+      {
+        "ok": true,
+        "status": "start_requested",
+        "pipeline_id": "edfi_bisd",
+        "child_pid": 52244,
+        "launcher_pid": 19892,
+        "lease_owner_pid": 52244,
+        "supervision_verified": true,
+        "heartbeat": {
+          "pipeline_id": "edfi_bisd",
+          "present": true,
+          "fresh": true,
+          "supervised_ok": true,
+          "status": "idle",
+          "detail": "no_pending_requests",
+          "updated_at": 1784076096,
+          "age_sec": 0,
+          "stale_after_sec": 120,
+          "pid": 52244,
+          "path": "C:\\NOVA\\runtime\\pipelines\\edfi_bisd\\worker.heartbeat",
+          "lease": {
+            "pipeline_id": "edfi_bisd",
+            "present": true,
+            "path": "C:\\NOVA\\runtime\\pipelines\\edfi_bisd\\worker.lease.json",
+            "lease_owner_pid": 52244,
+            "lease_live": true,
+            "claimed_at": 1784076096,
+            "generation": 1,
+            "runtime_root": "C:\\NOVA\\runtime",
+            "scope_key": "edfi_bisd@C:\\NOVA\\runtime"
+          },
+          "lease_owner_pid": 52244,
+          "lease_live": true,
+          "pid_matches_lease": true
+        },
+        "lease": {
+          "pipeline_id": "edfi_bisd",
+          "present": true,
+          "path": "C:\\NOVA\\runtime\\pipelines\\edfi_bisd\\worker.lease.json",
+          "lease_owner_pid": 52244,
+          "lease_live": true,
+          "claimed_at": 1784076096,
+          "generation": 1,
+          "runtime_root": "C:\\NOVA\\runtime",
+          "scope_key": "edfi_bisd@C:\\NOVA\\runtime"
+        }
+      }
+    ]
+  },
+  "captured_at": "2026-07-14 19:41:36"
+}

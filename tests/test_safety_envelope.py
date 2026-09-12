@@ -223,6 +223,50 @@ class TestSafetyEnvelope(unittest.TestCase):
         self.assertFalse(pending_path.exists())
         self.assertTrue((nova_safety_envelope.PROMOTED_DEFINITIONS_ROOT / self.definition_path.name).exists())
 
+    def test_operator_accept_promotes_passing_pending_item(self):
+        self._write_policy({"enabled": True, "mode": "enforce", "human_veto_first_n": 3})
+        nova_safety_envelope.PENDING_REVIEW_ROOT.mkdir(parents=True, exist_ok=True)
+        pending_path = nova_safety_envelope.PENDING_REVIEW_ROOT / self.definition_path.name
+        pending_path.write_text(self.definition_path.read_text(encoding="utf-8"), encoding="utf-8")
+
+        with mock.patch("nova_safety_envelope._run_replay", return_value={"ok": True, "reason": "ok", "comparison": {}, "report_path": ""}), \
+            mock.patch("nova_safety_envelope._pool_similarity", return_value=(0.2, "other.json")), \
+            mock.patch("nova_safety_envelope._family_fallback_score", return_value=0.2):
+            result = nova_safety_envelope.operator_accept_pending_review(pending_path)
+
+        self.assertTrue(result.get("ok"))
+        self.assertEqual(result.get("status"), "promoted")
+        self.assertTrue(result.get("operator_accepted"))
+        self.assertFalse(pending_path.exists())
+        self.assertTrue((nova_safety_envelope.PROMOTED_DEFINITIONS_ROOT / self.definition_path.name).exists())
+
+    def test_failed_gates_quarantine_even_inside_human_veto_window(self):
+        self._write_policy({"enabled": True, "mode": "enforce", "human_veto_first_n": 3})
+        with mock.patch("nova_safety_envelope._run_replay", return_value={"ok": False, "reason": "replay_failed:exit:1", "comparison": {}, "report_path": ""}), \
+            mock.patch("nova_safety_envelope._pool_similarity", return_value=(0.2, "other.json")), \
+            mock.patch("nova_safety_envelope._family_fallback_score", return_value=None):
+            result = nova_safety_envelope.promote_or_quarantine(self.definition_path)
+
+        self.assertEqual(result.get("status"), "quarantined")
+        self.assertTrue((nova_safety_envelope.QUARANTINE_ROOT / self.definition_path.name).exists())
+        self.assertFalse((nova_safety_envelope.PENDING_REVIEW_ROOT / self.definition_path.name).exists())
+
+    def test_operator_accept_refuses_failed_gates(self):
+        self._write_policy({"enabled": True, "mode": "enforce", "human_veto_first_n": 3})
+        nova_safety_envelope.PENDING_REVIEW_ROOT.mkdir(parents=True, exist_ok=True)
+        pending_path = nova_safety_envelope.PENDING_REVIEW_ROOT / self.definition_path.name
+        pending_path.write_text(self.definition_path.read_text(encoding="utf-8"), encoding="utf-8")
+
+        with mock.patch("nova_safety_envelope._run_replay", return_value={"ok": False, "reason": "replay_failed:exit:1", "comparison": {}, "report_path": ""}), \
+            mock.patch("nova_safety_envelope._pool_similarity", return_value=(0.2, "other.json")), \
+            mock.patch("nova_safety_envelope._family_fallback_score", return_value=0.2):
+            result = nova_safety_envelope.operator_accept_pending_review(pending_path)
+
+        self.assertFalse(result.get("ok"))
+        self.assertEqual(result.get("status"), "refused_failed_gates")
+        self.assertTrue(pending_path.exists())
+        self.assertFalse((nova_safety_envelope.PROMOTED_DEFINITIONS_ROOT / self.definition_path.name).exists())
+
     def test_replay_retry_recovers_transient_failure(self):
         self._write_policy({
             "enabled": True,

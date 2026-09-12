@@ -1,0 +1,179 @@
+{
+  "ts": "2026-05-14 22:34:19",
+  "channel": "http",
+  "session_id": "s_http_mem",
+  "input_source": "typed",
+  "user_input": "what else?",
+  "intent": "identity_history_family",
+  "planner_decision": "deterministic",
+  "tool": "",
+  "tool_args": {},
+  "tool_result": "",
+  "final_answer": "Here are the other verified facts I have about Gus. Developer full name: Gustavo Uribe. Developer nickname: Gus. Known work roles: full stack developer and PEIMS Data Specialist. Known favorite colors: silver, red, and blue.",
+  "reply_contract": "identity_history.history_recall",
+  "reply_outcome": {
+    "intent": "identity_history_family",
+    "kind": "history_recall",
+    "reply_contract": "identity_history.history_recall",
+    "reply_text": "Here are the other verified facts I have about Gus. Developer full name: Gustavo Uribe. Developer nickname: Gus. Known work roles: full stack developer and PEIMS Data Specialist. Known favorite colors: silver, red, and blue.",
+    "subject": "developer",
+    "state_delta": {
+      "kind": "identity_profile",
+      "subject": "developer"
+    }
+  },
+  "turn_acts": [
+    "ask",
+    "continue_thread"
+  ],
+  "grounded": true,
+  "active_subject": "identity_profile:developer",
+  "continuation_used": true,
+  "route_trace": [
+    {
+      "stage": "input",
+      "outcome": "received",
+      "data": {
+        "channel": "http",
+        "input_source": "typed",
+        "intent": "chat"
+      }
+    },
+    {
+      "stage": "direction_analysis",
+      "outcome": "general_chat",
+      "data": {
+        "effective_query": "what else?",
+        "turn_acts": "ask,continue_thread",
+        "identity_focused": false,
+        "bypass_pattern_routes": false
+      }
+    },
+    {
+      "stage": "identity_history",
+      "outcome": "matched",
+      "data": {
+        "rule": "identity_history_family"
+      }
+    },
+    {
+      "stage": "finalize",
+      "outcome": "deterministic",
+      "data": {
+        "grounded": true
+      }
+    }
+  ],
+  "provider_used": "",
+  "provider_candidates": [],
+  "provider_family": "",
+  "routing_decision": {
+    "input_preview": "what else?",
+    "entry_point": "http",
+    "intent_phase": {
+      "phase": "intent",
+      "handled": false,
+      "rule_name": "",
+      "intent": "",
+      "action": "",
+      "priority": null,
+      "candidates": [
+        {
+          "rule_name": "smalltalk",
+          "priority": 61,
+          "handled": false
+        },
+        {
+          "rule_name": "set_location",
+          "priority": 62,
+          "handled": false
+        },
+        {
+          "rule_name": "store_fact",
+          "priority": 62,
+          "handled": false
+        },
+        {
+          "rule_name": "weather_lookup",
+          "priority": 62,
+          "handled": false
+        },
+        {
+          "rule_name": "web_research_family",
+          "priority": 62,
+          "handled": false
+        },
+        {
+          "rule_name": "capability_query",
+          "priority": 63,
+          "handled": false
+        },
+        {
+          "rule_name": "policy_domain_query",
+          "priority": 64,
+          "handled": false
+        },
+        {
+          "rule_name": "assistant_name",
+          "priority": 66,
+          "handled": false
+        },
+        {
+          "rule_name": "self_identity_web_challenge",
+          "priority": 67,
+          "handled": false
+        },
+        {
+          "rule_name": "name_origin",
+          "priority": 68,
+          "handled": false
+        },
+        {
+          "rule_name": "developer_full_name",
+          "priority": 69,
+          "handled": false
+        },
+        {
+          "rule_name": "developer_profile",
+          "priority": 70,
+          "handled": false
+        }
+      ]
+    },
+    "handle_phase": {
+      "phase": "handle",
+      "handled": true,
+      "rule_name": "identity_history_family",
+      "intent": "identity_history_family",
+      "action": "identity_history_family",
+      "priority": 36,
+      "candidates": [
+        {
+          "rule_name": "reflective_retry",
+          "priority": 30,
+          "handled": false
+        },
+        {
+          "rule_name": "profile_certainty",
+          "priority": 35,
+          "handled": false
+        },
+        {
+          "rule_name": "identity_history_family",
+          "priority": 36,
+          "handled": true,
+          "action": "identity_history_family",
+          "intent": "identity_history_family"
+        }
+      ]
+    },
+    "final_owner": "supervisor_handle",
+    "allowed_bypass": false,
+    "allowed_bypass_category": "",
+    "bypass_reason": "",
+    "reply_contract": "identity_history.history_recall",
+    "reply_outcome_kind": "history_recall",
+    "turn_acts": []
+  },
+  "route_summary": "input:received -> direction_analysis:general_chat -> identity_history:matched -> finalize:deterministic"
+}

@@ -1,0 +1,201 @@
+{
+  "ts": "2026-05-19 21:41:07",
+  "channel": "cli",
+  "session_id": "",
+  "input_source": "typed",
+  "user_input": "Is there a reason your trying to force this conversation down a certin path or  rather let the conversation evolv on it own ?",
+  "intent": "",
+  "planner_decision": "llm_fallback",
+  "tool": "",
+  "tool_args": {},
+  "tool_result": "",
+  "final_answer": "Based on our recent conversation, I think you're right that I may have been trying to steer the conversation in a certain direction. However, I realize now that I should be more open to letting the conversation unfold naturally and see where it takes us.\n\nYou've pointed out that sometimes simplicity is all someone needs, and I appreciate your feedback on keeping things straightforward. From now on, I'll try to be more flexible and adapt to the flow of our conversation, rather than trying to force a specific path or agenda.\n\nSo, let's start fresh! What's on your mind today? Is there something specific you'd like to talk about or ask about?",
+  "reply_contract": "",
+  "reply_outcome": {
+    "kind": "llm_fallback",
+    "intent_evidence_packet": {
+      "schema": "nova.turn_intent_evidence",
+      "version": "1.0.0",
+      "trace_authority": "hypothesis_only",
+      "answer_authority": "available_evidence",
+      "current_turn": "Is there a reason your trying to force this conversation down a certin path or rather let the conversation evolv on it own ?",
+      "conversation_frame": {
+        "turn_count": 23,
+        "current_user_turn_is_latest": true,
+        "previous_assistant_turn": "I'll do my best to keep the conversation simple and straightforward. I want to make sure that our conversation is easy to follow and understand, without getting too caught up in complex topics or unnecessary details. To start fresh, how can I assist you today? Is there something on your mind that you'd like to talk about, or would you just like to have a casual conversation?",
+        "last_assistant_repeats_earlier_assistant": false
+      },
+      "planner_frame": {
+        "decision": "",
+        "tool": "",
+        "semantic_tool_observation": {
+          "tool": "none",
+          "confidence": 0.0,
+          "reason": "unsupported_tool:``` { \"answer_target\": \"nova_live_state\", \"evidence_need\": \"live_self_status\", \"tool\": null, \"args\": [], \"confidence\": 0.0, \"reason\": \"\" } ```",
+          "evidence_need": "unknown",
+          "answer_target": "unknown",
+          "source": "llm_intent",
+          "status": "none",
+          "duration_ms": 1480
+        }
+      },
+      "available_evidence": [
+        {
+          "name": "current_user_turn",
+          "available": true,
+          "chars": 125
+        },
+        {
+          "name": "recent_chat_context",
+          "available": true,
+          "chars": 1251
+        },
+        {
+          "name": "session_state_context",
+          "available": false,
+          "chars": 0
+        },
+        {
+          "name": "learning_context",
+          "available": true,
+          "chars": 1583
+        },
+        {
+          "name": "confirmed_identity_context",
+          "available": true,
+          "chars": 235
+        },
+        {
+          "name": "operational_self_context",
+          "available": true,
+          "chars": 1346
+        },
+        {
+          "name": "tool_result",
+          "available": false,
+          "chars": 0
+        }
+      ],
+      "answer_contract": {
+        "infer_intent_from_turn_and_conversation": true,
+        "trace_is_route_authority": false,
+        "evidence_is_claim_authority": true,
+        "tool_route_requires_external_evidence_gap": true
+      }
+    }
+  },
+  "turn_acts": [],
+  "grounded": false,
+  "active_subject": "",
+  "continuation_used": false,
+  "route_trace": [
+    {
+      "stage": "input",
+      "outcome": "received",
+      "data": {
+        "channel": "cli",
+        "input_source": "typed"
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "semantic_tool_intent",
+      "data": {
+        "duration_ms": 1480
+      }
+    },
+    {
+      "stage": "action_planner",
+      "outcome": "semantic_none",
+      "detail": "unsupported_tool:```\n{\n  \"answer_target\": \"nova_live_state\",\n  \"evidence_need\": \"live_self_status\",\n  \"tool\": null,\n  \"args\": [],\n  \"confidence\": 0.0,\n  \"reason\": \"\"\n}\n```",
+      "data": {
+        "confidence": 0.0
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "tool_selection",
+      "data": {
+        "duration_ms": 1480
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "planner_call",
+      "data": {
+        "duration_ms": 1480
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "execute_reply_sequence",
+      "data": {
+        "duration_ms": 1480
+      }
+    },
+    {
+      "stage": "timing_breakdown",
+      "outcome": "completed",
+      "detail": "execute_reply_sequence",
+      "data": {
+        "total_time": 1480,
+        "planner_time": 1480,
+        "llm_time": 0,
+        "tool_time": 0,
+        "post_time": 0,
+        "tool_selection_time": 0
+      }
+    },
+    {
+      "stage": "memory_context",
+      "outcome": "used",
+      "data": {
+        "memory_used": false,
+        "identity_used": true,
+        "operational_identity_used": true,
+        "knowledge_used": false,
+        "memory_chars": 0,
+        "identity_chars": 235,
+        "operational_identity_chars": 1346,
+        "knowledge_chars": 0
+      }
+    },
+    {
+      "stage": "chat_context",
+      "outcome": "used",
+      "data": {
+        "chars": 1251
+      }
+    },
+    {
+      "stage": "turn_intent_evidence",
+      "outcome": "attached",
+      "data": {
+        "trace_authority": "hypothesis_only",
+        "answer_authority": "available_evidence"
+      }
+    },
+    {
+      "stage": "llm_fallback",
+      "outcome": "invoked",
+      "data": {
+        "retrieved_chars": 3501
+      }
+    },
+    {
+      "stage": "finalize",
+      "outcome": "llm_fallback",
+      "data": {
+        "grounded": false
+      }
+    }
+  ],
+  "provider_used": "",
+  "provider_candidates": [],
+  "provider_family": "",
+  "route_summary": "input:received -> action_planner:semantic_none -> memory_context:used -> chat_context:used -> turn_intent_evidence:attached -> llm_fallback:invoked -> finalize:llm_fallback"
+}

@@ -1,0 +1,189 @@
+{
+  "ts": "2026-05-18 14:46:12",
+  "channel": "http",
+  "session_id": "codex_intent_drift_probe_1779133571",
+  "input_source": "typed",
+  "user_input": "hi nova",
+  "intent": "chat",
+  "planner_decision": "run_tool",
+  "tool": "self_status",
+  "tool_args": {
+    "args": []
+  },
+  "tool_result": "Nova Self Status - 2026-05-18 14:46:17\nLevel: updating\nSummary: Nova is stable and has update activity to review.\nSignals:\n- [INFO] Local code changed since last accepted state: 25 changed file(s): nova_core.py, piper/espeak-ng.dll, piper/models/en_US-lessac-medium.onnx, piper/onnxruntime.dll, piper/onnxruntime_providers_shared.dll, +20 more. Diff +643/-15; latest regression is OK. (next: git diff --stat)",
+  "final_answer": "Nova Self Status - 2026-05-18 14:46:17\nLevel: updating\nSummary: Nova is stable and has update activity to review.\nSignals:\n- [INFO] Local code changed since last accepted state: 25 changed file(s): nova_core.py, piper/espeak-ng.dll, piper/models/en_US-lessac-medium.onnx, piper/onnxruntime.dll, piper/onnxruntime_providers_shared.dll, +20 more. Diff +643/-15; latest regression is OK. (next: git diff --stat)",
+  "reply_contract": "self_status.current",
+  "reply_outcome": {
+    "intent": "self_status",
+    "kind": "current",
+    "reply_contract": "self_status.current",
+    "execution_profile": {
+      "total_time": 5527,
+      "planner_time": 5526,
+      "llm_time": 0,
+      "tool_time": 3181,
+      "post_time": 0,
+      "tool_selection_time": 2345
+    }
+  },
+  "turn_acts": [],
+  "grounded": true,
+  "active_subject": "self_status:runtime",
+  "continuation_used": false,
+  "route_trace": [
+    {
+      "stage": "input",
+      "outcome": "received",
+      "data": {
+        "channel": "http",
+        "input_source": "typed",
+        "intent": "chat"
+      }
+    },
+    {
+      "stage": "direction_analysis",
+      "outcome": "greeting",
+      "data": {
+        "effective_query": "hi nova",
+        "identity_focused": false,
+        "bypass_pattern_routes": false
+      }
+    },
+    {
+      "stage": "truth_hierarchy",
+      "outcome": "skipped",
+      "detail": "content_owned_chat_disabled"
+    },
+    {
+      "stage": "hard_answer",
+      "outcome": "skipped",
+      "detail": "content_owned_chat_disabled"
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "semantic_tool_intent",
+      "data": {
+        "duration_ms": 2345
+      }
+    },
+    {
+      "stage": "action_planner",
+      "outcome": "semantic_intent",
+      "data": {
+        "tool": "self_status",
+        "confidence": 0.0
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "tool_selection",
+      "data": {
+        "duration_ms": 2345
+      }
+    },
+    {
+      "stage": "action_planner",
+      "outcome": "run_tool",
+      "data": {
+        "tool": "self_status"
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "tool_response",
+      "data": {
+        "duration_ms": 3181,
+        "tool": "self_status"
+      }
+    },
+    {
+      "stage": "tool_execution",
+      "outcome": "ok",
+      "data": {
+        "tool": "self_status",
+        "grounded": true
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "planner",
+      "data": {
+        "duration_ms": 5526
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "planner_call",
+      "data": {
+        "duration_ms": 5526
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "execute_reply_sequence",
+      "data": {
+        "duration_ms": 5527
+      }
+    },
+    {
+      "stage": "timing_breakdown",
+      "outcome": "completed",
+      "detail": "execute_reply_sequence",
+      "data": {
+        "total_time": 5527,
+        "planner_time": 5526,
+        "llm_time": 0,
+        "tool_time": 3181,
+        "post_time": 0,
+        "tool_selection_time": 2345
+      }
+    },
+    {
+      "stage": "finalize",
+      "outcome": "run_tool",
+      "data": {
+        "grounded": true,
+        "tool": "self_status"
+      }
+    }
+  ],
+  "provider_used": "",
+  "provider_candidates": [],
+  "provider_family": "",
+  "routing_decision": {
+    "input_preview": "hi nova",
+    "entry_point": "http",
+    "intent_phase": {
+      "phase": "intent",
+      "handled": false,
+      "rule_name": "",
+      "intent": "",
+      "action": "",
+      "priority": null,
+      "candidates": []
+    },
+    "handle_phase": {
+      "phase": "handle",
+      "handled": false,
+      "rule_name": "",
+      "intent": "",
+      "action": "",
+      "priority": null,
+      "candidates": []
+    },
+    "final_owner": "fallback",
+    "allowed_bypass": false,
+    "allowed_bypass_category": "",
+    "bypass_reason": "",
+    "reply_contract": "self_status.current",
+    "reply_outcome_kind": "current",
+    "turn_acts": []
+  },
+  "route_summary": "input:received -> direction_analysis:greeting -> truth_hierarchy:skipped -> hard_answer:skipped -> action_planner:semantic_intent -> action_planner:run_tool -> tool_execution:ok -> finalize:run_tool"
+}

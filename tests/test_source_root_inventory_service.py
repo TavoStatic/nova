@@ -63,6 +63,32 @@ class TestSourceRootInventoryService(unittest.TestCase):
         self.assertIn("updates/approvals.jsonl", covered)
         self.assertIn("nova_grok.jsonl", covered)
 
+    def test_source_inventory_classifies_live_meta_and_ad_hoc_probe_scripts(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            services = root / "services"
+            services.mkdir()
+            (services / "observation_spine.py").write_text("# spine\n", encoding="utf-8")
+            (services / "cognitive_workspace.py").write_text("# workspace\n", encoding="utf-8")
+            (root / "check_changes.py").write_text("# probe\n", encoding="utf-8")
+            (root / "status_check.py").write_text("# probe\n", encoding="utf-8")
+            (root / "run_critical_tests.py").write_text("# probe\n", encoding="utf-8")
+            (root / "nova.cmd").write_text("@echo off\n", encoding="utf-8")
+
+            payload = build_source_root_inventory_payload(root=root, wiring_surface_ids=source_root_ids())
+
+        self.assertEqual(payload.get("unclassified_source_files"), [])
+        covered = {
+            path
+            for row in payload.get("roots") or []
+            for path in row.get("covered_source_files") or []
+        }
+        self.assertIn("services/observation_spine.py", covered)
+        self.assertIn("services/cognitive_workspace.py", covered)
+        self.assertIn("check_changes.py", covered)
+        self.assertIn("status_check.py", covered)
+        self.assertIn("run_critical_tests.py", covered)
+
     def test_source_inventory_backpack_roots_are_separate(self) -> None:
         payload = build_source_root_inventory_payload()
         roots = {row["root_id"]: set(row.get("covered_source_files") or []) for row in payload.get("roots") or []}

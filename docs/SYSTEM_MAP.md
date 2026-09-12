@@ -344,6 +344,12 @@ The source-root inventory declares 44 unique roots as of 2026-08-05. The previou
 
 The judge is wired into `_execute_autonomy_recommendation` in `autonomy_maintenance.py`. Default policy: `decision_judge_enforce: false` (observe mode). Calibration bar: 12 episodes before signals, 30 before enforcement. `controlling_dimension` and `field_sources` provide provenance per decision.
 
+## Gatekeeper
+
+`services/gatekeeper.py` observes existing gates and rails without becoming a new authority layer. It validates and compacts `runtime/gatekeeper_records.jsonl`, preserves repeated observations with `seen_count` plus first/last observation timestamps, and exposes a read-only summary through control status.
+
+Gatekeeper records may describe stale evidence, retry decisions, expected effects, and later outcomes. Utility remains `unknown` until an accepted oracle verifies it. Models are analysts only; Gatekeeper does not mutate policy, authorize actions, or retire gates.
+
 ## Nova Shell
 
 `services/nova_shell/` is the operator authentication and session-trust subsystem. Wired into `nova_http.py` auth via `services/nova_shell_control_bridge.py` as of Aug 2026.

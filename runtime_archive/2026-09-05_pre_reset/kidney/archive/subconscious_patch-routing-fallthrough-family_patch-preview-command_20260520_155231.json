@@ -1,0 +1,21 @@
+{
+  "name": "Subconscious patch-routing-fallthrough-family :: patch_preview_command",
+  "messages": [
+    "patch preview teach.zip"
+  ],
+  "source": "subconscious_generated",
+  "label": "phase1_auto",
+  "family_id": "patch-routing-fallthrough-family",
+  "target_seam": "patch_routing_fallthrough",
+  "variation_id": "patch_preview_command",
+  "training_priorities": [
+    {
+      "seam": "patch_routing_fallthrough",
+      "signal": "fallback_overuse",
+      "robustness": 0.97,
+      "suggested_test_name": "test_generic_fallback_does_not_hide_viable_specific_route",
+      "rationale": "Robust family pressure kept surfacing fallback_overuse.",
+      "urgency": "high"
+    }
+  ]
+}

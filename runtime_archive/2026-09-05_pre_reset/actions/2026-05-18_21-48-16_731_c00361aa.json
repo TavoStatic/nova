@@ -1,0 +1,192 @@
+{
+  "ts": "2026-05-18 21:48:15",
+  "channel": "http",
+  "session_id": "ad4986042aaccb36",
+  "input_source": "typed",
+  "user_input": "what can i do for you ?",
+  "intent": "chat",
+  "planner_decision": "run_tool",
+  "tool": "operator_help",
+  "tool_args": {
+    "args": []
+  },
+  "tool_result": "Today I am mainly stuck on: Work Tree is open with 1 open task(s); current branch: Release package is stale behind live source; task: Rebuild and verify release package from current source; Release package is stale behind live source and needs rebuild verification.\nWork Tree is open with 1 open task(s). Current branch: Release package is stale behind live source. Current task: Rebuild and verify release package from current source.\nRelease readiness: source-changed-after-build.\nSource: live control status and Work Tree.",
+  "final_answer": "Today I am mainly stuck on: Work Tree is open with 1 open task(s); current branch: Release package is stale behind live source; task: Rebuild and verify release package from current source; Release package is stale behind live source and needs rebuild verification.\nWork Tree is open with 1 open task(s). Current branch: Release package is stale behind live source. Current task: Rebuild and verify release package from current source.\nRelease readiness: source-changed-after-build.\nSource: live control status and Work Tree.",
+  "reply_contract": "operator_help.current",
+  "reply_outcome": {
+    "intent": "operator_help",
+    "kind": "current",
+    "reply_contract": "operator_help.current",
+    "execution_profile": {
+      "total_time": 1467,
+      "planner_time": 1466,
+      "llm_time": 0,
+      "tool_time": 523,
+      "post_time": 0,
+      "tool_selection_time": 943
+    }
+  },
+  "turn_acts": [
+    "ask"
+  ],
+  "grounded": true,
+  "active_subject": "operator_help:runtime",
+  "continuation_used": false,
+  "route_trace": [
+    {
+      "stage": "input",
+      "outcome": "received",
+      "data": {
+        "channel": "http",
+        "input_source": "typed",
+        "intent": "chat"
+      }
+    },
+    {
+      "stage": "direction_analysis",
+      "outcome": "general_chat",
+      "data": {
+        "effective_query": "what can i do for you ?",
+        "turn_acts": "ask",
+        "identity_focused": false,
+        "bypass_pattern_routes": false
+      }
+    },
+    {
+      "stage": "truth_hierarchy",
+      "outcome": "skipped",
+      "detail": "content_owned_chat_disabled"
+    },
+    {
+      "stage": "hard_answer",
+      "outcome": "skipped",
+      "detail": "content_owned_chat_disabled"
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "semantic_tool_intent",
+      "data": {
+        "duration_ms": 943
+      }
+    },
+    {
+      "stage": "action_planner",
+      "outcome": "semantic_intent",
+      "data": {
+        "tool": "operator_help",
+        "confidence": 0.9
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "tool_selection",
+      "data": {
+        "duration_ms": 943
+      }
+    },
+    {
+      "stage": "action_planner",
+      "outcome": "run_tool",
+      "data": {
+        "tool": "operator_help"
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "tool_response",
+      "data": {
+        "duration_ms": 523,
+        "tool": "operator_help"
+      }
+    },
+    {
+      "stage": "tool_execution",
+      "outcome": "ok",
+      "data": {
+        "tool": "operator_help",
+        "grounded": true
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "planner",
+      "data": {
+        "duration_ms": 1466
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "planner_call",
+      "data": {
+        "duration_ms": 1467
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "execute_reply_sequence",
+      "data": {
+        "duration_ms": 1467
+      }
+    },
+    {
+      "stage": "timing_breakdown",
+      "outcome": "completed",
+      "detail": "execute_reply_sequence",
+      "data": {
+        "total_time": 1467,
+        "planner_time": 1466,
+        "llm_time": 0,
+        "tool_time": 523,
+        "post_time": 0,
+        "tool_selection_time": 943
+      }
+    },
+    {
+      "stage": "finalize",
+      "outcome": "run_tool",
+      "data": {
+        "grounded": true,
+        "tool": "operator_help"
+      }
+    }
+  ],
+  "provider_used": "",
+  "provider_candidates": [],
+  "provider_family": "",
+  "routing_decision": {
+    "input_preview": "what can i do for you ?",
+    "entry_point": "http",
+    "intent_phase": {
+      "phase": "intent",
+      "handled": false,
+      "rule_name": "",
+      "intent": "",
+      "action": "",
+      "priority": null,
+      "candidates": []
+    },
+    "handle_phase": {
+      "phase": "handle",
+      "handled": false,
+      "rule_name": "",
+      "intent": "",
+      "action": "",
+      "priority": null,
+      "candidates": []
+    },
+    "final_owner": "fallback",
+    "allowed_bypass": false,
+    "allowed_bypass_category": "",
+    "bypass_reason": "",
+    "reply_contract": "operator_help.current",
+    "reply_outcome_kind": "current",
+    "turn_acts": []
+  },
+  "route_summary": "input:received -> direction_analysis:general_chat -> truth_hierarchy:skipped -> hard_answer:skipped -> action_planner:semantic_intent -> action_planner:run_tool -> tool_execution:ok -> finalize:run_tool"
+}

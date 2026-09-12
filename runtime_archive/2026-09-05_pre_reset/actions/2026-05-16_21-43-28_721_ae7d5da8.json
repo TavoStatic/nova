@@ -1,0 +1,103 @@
+{
+  "ts": "2026-05-16 21:43:24",
+  "channel": "http",
+  "session_id": "bae5db56380b982d",
+  "input_source": "typed",
+  "user_input": "give you an update on the progress we are having creating you",
+  "intent": "grounded_self_report",
+  "planner_decision": "grounded_self_report",
+  "tool": "",
+  "tool_args": {},
+  "tool_result": "",
+  "final_answer": "Live internals: health_score 91/100; Work Tree is blocked_observing with 5 open task(s). Current branch: Resolve self-check failures in control status. Current task: Confirm failing self-check probes and route each probe to root-cause branch.\nRuntime: core=running, guard=running, webui=running.\nOllama: chat_ready=True, status=ok, model=.\nMemory: status=ok, enabled=True.\nRelease: readiness=source-changed-after-build, source=changed-after-build, artifact_stale=True.\nWhat needs attention: Control status alert: test_profile_inventory:drift=1;gaps=0;source_observed=1;inactive_install_profile=0; Control status alert: work_tree_unresolved_truth:blocked=2;observing=1;latent_root=0;operator_hold=0; Work Tree is blocked_observing with 5 open task(s); current branch: Resolve self-check failures in control status; task: Confirm failing self-check probes and route each probe to root-cause branch\nAlerts: test_profile_inventory:drift=1;gaps=0;source_observed=1;inactive_install_profile=0; work_tree_unresolved_truth:blocked=2;observing=1;latent_root=0;operator_hold=0.\nSource: live control status and Work Tree.",
+  "reply_contract": "grounded_self_report.internals",
+  "reply_outcome": {
+    "intent": "grounded_self_report",
+    "kind": "internals",
+    "reply_contract": "grounded_self_report.internals",
+    "reply_text": "Live internals: health_score 91/100; Work Tree is blocked_observing with 5 open task(s). Current branch: Resolve self-check failures in control status. Current task: Confirm failing self-check probes and route each probe to root-cause branch.\nRuntime: core=running, guard=running, webui=running.\nOllama: chat_ready=True, status=ok, model=.\nMemory: status=ok, enabled=True.\nRelease: readiness=source-changed-after-build, source=changed-after-build, artifact_stale=True.\nWhat needs attention: Control status alert: test_profile_inventory:drift=1;gaps=0;source_observed=1;inactive_install_profile=0; Control status alert: work_tree_unresolved_truth:blocked=2;observing=1;latent_root=0;operator_hold=0; Work Tree is blocked_observing with 5 open task(s); current branch: Resolve self-check failures in control status; task: Confirm failing self-check probes and route each probe to root-cause branch\nAlerts: test_profile_inventory:drift=1;gaps=0;source_observed=1;inactive_install_profile=0; work_tree_unresolved_truth:blocked=2;observing=1;latent_root=0;operator_hold=0.\nSource: live control status and Work Tree."
+  },
+  "turn_acts": [],
+  "grounded": true,
+  "active_subject": "",
+  "continuation_used": false,
+  "route_trace": [
+    {
+      "stage": "input",
+      "outcome": "received",
+      "data": {
+        "channel": "http",
+        "input_source": "typed",
+        "intent": "chat"
+      }
+    },
+    {
+      "stage": "direction_analysis",
+      "outcome": "general_chat",
+      "data": {
+        "effective_query": "give you an update on the progress we are having creating you",
+        "identity_focused": false,
+        "bypass_pattern_routes": false
+      }
+    },
+    {
+      "stage": "action_planner",
+      "outcome": "grounded_self_report"
+    },
+    {
+      "stage": "supervisor_intent",
+      "outcome": "handled",
+      "detail": "grounded_self_report",
+      "data": {
+        "rule": "grounded_self_report"
+      }
+    },
+    {
+      "stage": "finalize",
+      "outcome": "grounded_self_report",
+      "data": {
+        "grounded": true
+      }
+    }
+  ],
+  "provider_used": "",
+  "provider_candidates": [],
+  "provider_family": "",
+  "routing_decision": {
+    "input_preview": "give you an update on the progress we are having creating you",
+    "entry_point": "http",
+    "intent_phase": {
+      "phase": "intent",
+      "handled": true,
+      "rule_name": "grounded_self_report",
+      "intent": "grounded_self_report",
+      "action": "",
+      "priority": 20,
+      "candidates": [
+        {
+          "rule_name": "grounded_self_report",
+          "priority": 20,
+          "handled": true,
+          "intent": "grounded_self_report"
+        }
+      ]
+    },
+    "handle_phase": {
+      "phase": "handle",
+      "handled": false,
+      "rule_name": "",
+      "intent": "",
+      "action": "",
+      "priority": null,
+      "candidates": []
+    },
+    "final_owner": "supervisor_intent",
+    "allowed_bypass": false,
+    "allowed_bypass_category": "",
+    "bypass_reason": "",
+    "reply_contract": "grounded_self_report.internals",
+    "reply_outcome_kind": "internals",
+    "turn_acts": []
+  },
+  "route_summary": "input:received -> direction_analysis:general_chat -> action_planner:grounded_self_report -> supervisor_intent:handled -> finalize:grounded_self_report"
+}

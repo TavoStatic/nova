@@ -1,0 +1,57 @@
+{
+  "ts": "2026-05-14 22:15:33",
+  "channel": "http",
+  "session_id": "s5_weather_zip",
+  "input_source": "typed",
+  "user_input": "weather now",
+  "intent": "weather_lookup",
+  "planner_decision": "deterministic",
+  "tool": "",
+  "tool_args": {},
+  "tool_result": "",
+  "final_answer": "Forecast for 78521: rain",
+  "reply_contract": "",
+  "reply_outcome": {},
+  "turn_acts": [
+    "command"
+  ],
+  "grounded": true,
+  "active_subject": "location_recall",
+  "continuation_used": false,
+  "route_trace": [
+    {
+      "stage": "input",
+      "outcome": "received",
+      "data": {
+        "channel": "http",
+        "input_source": "typed",
+        "intent": "weather_lookup"
+      }
+    },
+    {
+      "stage": "direction_analysis",
+      "outcome": "explicit_command",
+      "data": {
+        "effective_query": "weather now",
+        "turn_acts": "command",
+        "identity_focused": false,
+        "bypass_pattern_routes": false
+      }
+    },
+    {
+      "stage": "weather_lookup",
+      "outcome": "saved_location"
+    },
+    {
+      "stage": "finalize",
+      "outcome": "deterministic",
+      "data": {
+        "grounded": true
+      }
+    }
+  ],
+  "provider_used": "",
+  "provider_candidates": [],
+  "provider_family": "",
+  "route_summary": "input:received -> direction_analysis:explicit_command -> weather_lookup:saved_location -> finalize:deterministic"
+}

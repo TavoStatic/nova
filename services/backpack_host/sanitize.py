@@ -9,6 +9,7 @@ maintenance keys). If a path is not on that list, residue scan reports it.
 """
 
 import json
+import os
 import re
 import shutil
 from pathlib import Path
@@ -23,9 +24,10 @@ from services.backpack_host.install_state import (
 # Keep this thin. Manifest runtime/settings paths are discovered automatically.
 BACKPACK_SURFACE_OVERLAYS: dict[str, dict[str, Any]] = {
     "edfi": {
-        "signal_sources": ("edfi_capability_profile", "edfi_core", "backpack_edfi"),
+        "signal_sources": ("edfi_capability_profile", "edfi_core", "backpack_edfi", "backpack_host"),
         "fusion_scan": True,
         "maintenance_state_keys": ("last_edfi_warehouse_sync",),
+        "pipeline_ids": ("edfi_bisd",),
     }
 }
 
@@ -157,10 +159,15 @@ def _rm(path: Path, removed: list[str], errors: list[str]) -> None:
 
 
 def _clear_pipeline_workers(runtime_root: Path, pipeline_ids: tuple[str, ...], removed: list[str], errors: list[str]) -> None:
-    for pipeline_id in pipeline_ids:
-        slug = _safe_id(pipeline_id)
-        if not slug:
-            continue
+    ids = tuple(_safe_id(pipeline_id) for pipeline_id in pipeline_ids if _safe_id(pipeline_id))
+    if ids:
+        try:
+            from services.pipeline_worker_supervision import stop_pipeline_workers_for_ids
+
+            stop_pipeline_workers_for_ids(list(ids), runtime_root=runtime_root, os_name=os.name)
+        except Exception as exc:
+            errors.append(f"stop_workers:{exc}")
+    for slug in ids:
         _rm(runtime_root / "pipelines" / slug, removed, errors)
 
 
@@ -254,9 +261,31 @@ def _sanitize_work_tree(backpack_id: str, *, points: dict[str, Any], reason: str
                     "reason": reason,
                 }
             )
+            try:
+                from services.observation_spine import observe_quietly
+
+                observe_quietly(
+                    source="sanitize",
+                    operation="resolve",
+                    subject=str(source_type or bid),
+                    input_ref=str(branch.branch_id),
+                    outcome="resolved",
+                    reason_code="backpack_uninstalled",
+                )
+            except Exception:
+                pass
         return results
     except Exception as exc:
         return [{"action": "work_tree_sanitize_failed", "error": str(exc)[:240]}]
+
+
+def _default_backpacks_root() -> Path:
+    try:
+        from services.nova_runtime_context import BASE_DIR
+
+        return Path(BASE_DIR) / "backpacks"
+    except Exception:
+        return Path(__file__).resolve().parents[2] / "backpacks"
 
 
 def planned_sanitize_paths(
@@ -265,6 +294,8 @@ def planned_sanitize_paths(
     runtime_root: Path,
     backpacks_root: Path | None = None,
 ) -> list[Path]:
+    if backpacks_root is None:
+        backpacks_root = _default_backpacks_root()
     points = backpack_touch_points(backpack_id, runtime_root=runtime_root, backpacks_root=backpacks_root)
     rt = Path(runtime_root)
     planned = [rt / str(points["runtime_dir"])]
@@ -288,6 +319,8 @@ def scan_backpack_residue(
     """Report leftover runtime files for a backpack, including undeclared paths."""
     bid = _safe_id(backpack_id)
     rt = Path(runtime_root)
+    if backpacks_root is None:
+        backpacks_root = _default_backpacks_root()
     points = backpack_touch_points(bid, runtime_root=rt, backpacks_root=backpacks_root)
     planned = {path.resolve() for path in planned_sanitize_paths(bid, runtime_root=rt, backpacks_root=backpacks_root)}
     found: list[str] = []
@@ -337,12 +370,7 @@ def sanitize_uninstalled_backpack(
     bid = _safe_id(backpack_id)
     rt = Path(runtime_root)
     if backpacks_root is None:
-        try:
-            from services.nova_runtime_context import BASE_DIR
-
-            backpacks_root = Path(BASE_DIR) / "backpacks"
-        except Exception:
-            backpacks_root = None
+        backpacks_root = _default_backpacks_root()
     points = backpack_touch_points(bid, runtime_root=rt, backpacks_root=backpacks_root)
     removed: list[str] = []
     errors: list[str] = []

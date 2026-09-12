@@ -1,0 +1,23 @@
+{
+  "turns": [
+    {
+      "role": "user",
+      "text": "how are you doing today ?"
+    },
+    {
+      "role": "assistant",
+      "text": "I'm functioning well today! How can I assist you?"
+    },
+    {
+      "role": "user",
+      "text": "what now"
+    },
+    {
+      "role": "assistant",
+      "text": "I'm here and ready to help! What would you like to know or discuss? Whether it's about Nova, general topics, or specific questions, just let me know!"
+    }
+  ],
+  "turn_ts": 1787464350.6470747,
+  "session_id": "http-5e51c275a7e3",
+  "ts": 1787464345.946379
+}

@@ -1,0 +1,745 @@
+{
+  "generated_at": "2026-09-05 09:11:20",
+  "label": "phase1_auto",
+  "totals": {
+    "family_count": 7,
+    "variation_count": 26,
+    "quiet_variations": 10,
+    "noisy_variations": 11,
+    "useful_variations": 5,
+    "robust_signal_count": 8,
+    "script_specific_signal_count": 2,
+    "training_priority_count": 2
+  },
+  "families": [
+    {
+      "family_id": "supervisor-boundary-family",
+      "target_seam": "supervisor_ownership_boundary",
+      "variation_count": 4,
+      "noise_summary": {
+        "quiet_variations": 4,
+        "noisy_variations": 0,
+        "useful_variations": 0,
+        "variation_count": 4,
+        "quiet_control": true
+      },
+      "repeated_signals": [],
+      "robust_signals": [],
+      "script_specific_signals": [],
+      "robust_backlog_candidates": [],
+      "quiet_control_verdict": {
+        "quiet_control": true,
+        "status": "quiet_control",
+        "reason": "All variations stayed quiet, so this family acts as a control."
+      },
+      "training_priorities": [],
+      "variation_results": [
+        {
+          "scenario_id": "supervisor-boundary",
+          "variation_id": "direct_go_ahead",
+          "active_recent_signals": [],
+          "replan_requested": false,
+          "candidate_tests": []
+        },
+        {
+          "scenario_id": "supervisor-boundary",
+          "variation_id": "polite_confirmation",
+          "active_recent_signals": [],
+          "replan_requested": false,
+          "candidate_tests": []
+        },
+        {
+          "scenario_id": "supervisor-boundary",
+          "variation_id": "short_okay",
+          "active_recent_signals": [],
+          "replan_requested": false,
+          "candidate_tests": []
+        },
+        {
+          "scenario_id": "supervisor-boundary",
+          "variation_id": "clarification_then_confirm",
+          "active_recent_signals": [],
+          "replan_requested": false,
+          "candidate_tests": []
+        }
+      ]
+    },
+    {
+      "family_id": "fulfillment-fallthrough-family",
+      "target_seam": "fulfillment_bridge_entry_fallthrough",
+      "variation_count": 4,
+      "noise_summary": {
+        "quiet_variations": 0,
+        "noisy_variations": 3,
+        "useful_variations": 1,
+        "variation_count": 4,
+        "quiet_control": false
+      },
+      "repeated_signals": [
+        {
+          "signal": "route_fit_weak",
+          "hit_count": 4,
+          "variation_count": 4,
+          "consistency_ratio": 1.0,
+          "classification": "robust"
+        },
+        {
+          "signal": "route_unclear",
+          "hit_count": 4,
+          "variation_count": 4,
+          "consistency_ratio": 1.0,
+          "classification": "robust"
+        }
+      ],
+      "robust_signals": [
+        {
+          "signal": "route_fit_weak",
+          "hit_count": 4,
+          "variation_count": 4,
+          "consistency_ratio": 1.0,
+          "classification": "robust",
+          "variation_hit_ratio": 1.0,
+          "family_consistency": 1.0,
+          "variation_survival_ratio": 1.0,
+          "noise_resistance": 0.25,
+          "stability_factor": 1.0,
+          "robustness_score": 0.25
+        },
+        {
+          "signal": "route_unclear",
+          "hit_count": 4,
+          "variation_count": 4,
+          "consistency_ratio": 1.0,
+          "classification": "robust",
+          "variation_hit_ratio": 1.0,
+          "family_consistency": 1.0,
+          "variation_survival_ratio": 1.0,
+          "noise_resistance": 0.25,
+          "stability_factor": 1.0,
+          "robustness_score": 0.25
+        }
+      ],
+      "script_specific_signals": [],
+      "robust_backlog_candidates": [],
+      "quiet_control_verdict": {
+        "quiet_control": false,
+        "status": "noise_present",
+        "reason": "Some variations produced noise without useful cracks."
+      },
+      "training_priorities": [],
+      "variation_results": [
+        {
+          "scenario_id": "fulfillment-fallthrough",
+          "variation_id": "direct_compare_request",
+          "active_recent_signals": [
+            "route_unclear",
+            "route_fit_weak"
+          ],
+          "replan_requested": false,
+          "candidate_tests": []
+        },
+        {
+          "scenario_id": "fulfillment-fallthrough",
+          "variation_id": "polite_compare_request",
+          "active_recent_signals": [
+            "route_unclear",
+            "route_fit_weak"
+          ],
+          "replan_requested": false,
+          "candidate_tests": []
+        },
+        {
+          "scenario_id": "fulfillment-fallthrough",
+          "variation_id": "direct_options_language",
+          "active_recent_signals": [
+            "route_unclear",
+            "route_fit_weak"
+          ],
+          "replan_requested": false,
+          "candidate_tests": []
+        },
+        {
+          "scenario_id": "fulfillment-fallthrough",
+          "variation_id": "clarified_second_turn",
+          "active_recent_signals": [
+            "route_unclear",
+            "route_fit_weak"
+          ],
+          "replan_requested": true,
+          "candidate_tests": [
+            {
+              "signal": "route_fit_weak",
+              "occurrences": 2,
+              "priority": "high",
+              "suggested_test_name": "test_route_probe_exposes_weak_fit_without_forcing_routing",
+              "rationale": "Route fit signals were too weak to support a confident comparison. Observed 2 time(s) in recent crack counts. The signal is still active in the latest pressure window. Snapshot window currently holds 2 of 12 recent pressure records."
+            },
+            {
+              "signal": "route_unclear",
+              "occurrences": 2,
+              "priority": "high",
+              "suggested_test_name": "test_route_probe_marks_ambiguous_turns_without_overclaiming",
+              "rationale": "Route comparison stayed unclear across recent pressure records. Observed 2 time(s) in recent crack counts. The signal is still active in the latest pressure window. Snapshot window currently holds 2 of 12 recent pressure records."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "family_id": "repeated-weak-pressure-family",
+      "target_seam": "subconscious_pressure_backlog_generation",
+      "variation_count": 4,
+      "noise_summary": {
+        "quiet_variations": 0,
+        "noisy_variations": 0,
+        "useful_variations": 4,
+        "variation_count": 4,
+        "quiet_control": false
+      },
+      "repeated_signals": [
+        {
+          "signal": "route_fit_weak",
+          "hit_count": 4,
+          "variation_count": 4,
+          "consistency_ratio": 1.0,
+          "classification": "robust"
+        },
+        {
+          "signal": "route_unclear",
+          "hit_count": 4,
+          "variation_count": 4,
+          "consistency_ratio": 1.0,
+          "classification": "robust"
+        }
+      ],
+      "robust_signals": [
+        {
+          "signal": "route_fit_weak",
+          "hit_count": 4,
+          "variation_count": 4,
+          "consistency_ratio": 1.0,
+          "classification": "robust",
+          "variation_hit_ratio": 1.0,
+          "family_consistency": 1.0,
+          "variation_survival_ratio": 1.0,
+          "noise_resistance": 1.0,
+          "stability_factor": 1.0,
+          "robustness_score": 0.97
+        },
+        {
+          "signal": "route_unclear",
+          "hit_count": 4,
+          "variation_count": 4,
+          "consistency_ratio": 1.0,
+          "classification": "robust",
+          "variation_hit_ratio": 1.0,
+          "family_consistency": 1.0,
+          "variation_survival_ratio": 1.0,
+          "noise_resistance": 1.0,
+          "stability_factor": 1.0,
+          "robustness_score": 0.97
+        }
+      ],
+      "script_specific_signals": [],
+      "robust_backlog_candidates": [
+        {
+          "signal": "route_fit_weak",
+          "suggested_test_name": "test_route_probe_exposes_weak_fit_without_forcing_routing",
+          "hit_count": 4,
+          "variation_count": 4,
+          "consistency_ratio": 1.0,
+          "classification": "robust",
+          "variation_hit_ratio": 1.0,
+          "family_consistency": 1.0,
+          "variation_survival_ratio": 1.0,
+          "noise_resistance": 1.0,
+          "stability_factor": 1.0,
+          "robustness_score": 0.97
+        },
+        {
+          "signal": "route_unclear",
+          "suggested_test_name": "test_route_probe_marks_ambiguous_turns_without_overclaiming",
+          "hit_count": 4,
+          "variation_count": 4,
+          "consistency_ratio": 1.0,
+          "classification": "robust",
+          "variation_hit_ratio": 1.0,
+          "family_consistency": 1.0,
+          "variation_survival_ratio": 1.0,
+          "noise_resistance": 1.0,
+          "stability_factor": 1.0,
+          "robustness_score": 0.97
+        }
+      ],
+      "quiet_control_verdict": {
+        "quiet_control": false,
+        "status": "low_noise",
+        "reason": "Variations stayed readable without noisy-only outcomes."
+      },
+      "training_priorities": [
+        {
+          "seam": "subconscious_pressure_backlog_generation",
+          "signal": "route_fit_weak",
+          "robustness": 0.97,
+          "suggested_test_name": "test_route_probe_exposes_weak_fit_without_forcing_routing",
+          "rationale": "Robust family pressure kept surfacing route_fit_weak.",
+          "urgency": "high"
+        },
+        {
+          "seam": "subconscious_pressure_backlog_generation",
+          "signal": "route_unclear",
+          "robustness": 0.97,
+          "suggested_test_name": "test_route_probe_marks_ambiguous_turns_without_overclaiming",
+          "rationale": "Robust family pressure kept surfacing route_unclear.",
+          "urgency": "high"
+        }
+      ],
+      "variation_results": [
+        {
+          "scenario_id": "repeated-weak-pressure",
+          "variation_id": "plain_followup",
+          "active_recent_signals": [
+            "route_unclear",
+            "route_fit_weak"
+          ],
+          "replan_requested": true,
+          "candidate_tests": [
+            {
+              "signal": "route_fit_weak",
+              "occurrences": 2,
+              "priority": "high",
+              "suggested_test_name": "test_route_probe_exposes_weak_fit_without_forcing_routing",
+              "rationale": "Route fit signals were too weak to support a confident comparison. Observed 2 time(s) in recent crack counts. The signal is still active in the latest pressure window. Snapshot window currently holds 2 of 12 recent pressure records."
+            },
+            {
+              "signal": "route_unclear",
+              "occurrences": 2,
+              "priority": "high",
+              "suggested_test_name": "test_route_probe_marks_ambiguous_turns_without_overclaiming",
+              "rationale": "Route comparison stayed unclear across recent pressure records. Observed 2 time(s) in recent crack counts. The signal is still active in the latest pressure window. Snapshot window currently holds 2 of 12 recent pressure records."
+            }
+          ]
+        },
+        {
+          "scenario_id": "repeated-weak-pressure",
+          "variation_id": "casual_checkin",
+          "active_recent_signals": [
+            "route_unclear",
+            "route_fit_weak"
+          ],
+          "replan_requested": true,
+          "candidate_tests": [
+            {
+              "signal": "route_fit_weak",
+              "occurrences": 2,
+              "priority": "high",
+              "suggested_test_name": "test_route_probe_exposes_weak_fit_without_forcing_routing",
+              "rationale": "Route fit signals were too weak to support a confident comparison. Observed 2 time(s) in recent crack counts. The signal is still active in the latest pressure window. Snapshot window currently holds 2 of 12 recent pressure records."
+            },
+            {
+              "signal": "route_unclear",
+              "occurrences": 2,
+              "priority": "high",
+              "suggested_test_name": "test_route_probe_marks_ambiguous_turns_without_overclaiming",
+              "rationale": "Route comparison stayed unclear across recent pressure records. Observed 2 time(s) in recent crack counts. The signal is still active in the latest pressure window. Snapshot window currently holds 2 of 12 recent pressure records."
+            }
+          ]
+        },
+        {
+          "scenario_id": "repeated-weak-pressure",
+          "variation_id": "ambiguous_clarification",
+          "active_recent_signals": [
+            "route_unclear",
+            "route_fit_weak"
+          ],
+          "replan_requested": true,
+          "candidate_tests": [
+            {
+              "signal": "route_fit_weak",
+              "occurrences": 2,
+              "priority": "high",
+              "suggested_test_name": "test_route_probe_exposes_weak_fit_without_forcing_routing",
+              "rationale": "Route fit signals were too weak to support a confident comparison. Observed 2 time(s) in recent crack counts. The signal is still active in the latest pressure window. Snapshot window currently holds 2 of 12 recent pressure records."
+            },
+            {
+              "signal": "route_unclear",
+              "occurrences": 2,
+              "priority": "high",
+              "suggested_test_name": "test_route_probe_marks_ambiguous_turns_without_overclaiming",
+              "rationale": "Route comparison stayed unclear across recent pressure records. Observed 2 time(s) in recent crack counts. The signal is still active in the latest pressure window. Snapshot window currently holds 2 of 12 recent pressure records."
+            }
+          ]
+        },
+        {
+          "scenario_id": "repeated-weak-pressure",
+          "variation_id": "soft_smalltalk_then_ambiguity",
+          "active_recent_signals": [
+            "route_unclear",
+            "route_fit_weak"
+          ],
+          "replan_requested": true,
+          "candidate_tests": [
+            {
+              "signal": "route_fit_weak",
+              "occurrences": 2,
+              "priority": "high",
+              "suggested_test_name": "test_route_probe_exposes_weak_fit_without_forcing_routing",
+              "rationale": "Route fit signals were too weak to support a confident comparison. Observed 2 time(s) in recent crack counts. The signal is still active in the latest pressure window. Snapshot window currently holds 2 of 12 recent pressure records."
+            },
+            {
+              "signal": "route_unclear",
+              "occurrences": 2,
+              "priority": "high",
+              "suggested_test_name": "test_route_probe_marks_ambiguous_turns_without_overclaiming",
+              "rationale": "Route comparison stayed unclear across recent pressure records. Observed 2 time(s) in recent crack counts. The signal is still active in the latest pressure window. Snapshot window currently holds 2 of 12 recent pressure records."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "family_id": "weather-continuation-fallthrough-family",
+      "target_seam": "weather_continuation_route_fallthrough",
+      "variation_count": 4,
+      "noise_summary": {
+        "quiet_variations": 3,
+        "noisy_variations": 1,
+        "useful_variations": 0,
+        "variation_count": 4,
+        "quiet_control": false
+      },
+      "repeated_signals": [
+        {
+          "signal": "route_fit_weak",
+          "hit_count": 1,
+          "variation_count": 4,
+          "consistency_ratio": 0.25,
+          "classification": "script_specific"
+        },
+        {
+          "signal": "route_unclear",
+          "hit_count": 1,
+          "variation_count": 4,
+          "consistency_ratio": 0.25,
+          "classification": "script_specific"
+        }
+      ],
+      "robust_signals": [],
+      "script_specific_signals": [
+        {
+          "signal": "route_fit_weak",
+          "hit_count": 1,
+          "variation_count": 4,
+          "consistency_ratio": 0.25,
+          "classification": "script_specific",
+          "variation_hit_ratio": 0.25,
+          "family_consistency": 0.25,
+          "variation_survival_ratio": 0.3333,
+          "noise_resistance": 0.75,
+          "stability_factor": 1.0,
+          "robustness_score": 0.1875
+        },
+        {
+          "signal": "route_unclear",
+          "hit_count": 1,
+          "variation_count": 4,
+          "consistency_ratio": 0.25,
+          "classification": "script_specific",
+          "variation_hit_ratio": 0.25,
+          "family_consistency": 0.25,
+          "variation_survival_ratio": 0.3333,
+          "noise_resistance": 0.75,
+          "stability_factor": 1.0,
+          "robustness_score": 0.1875
+        }
+      ],
+      "robust_backlog_candidates": [],
+      "quiet_control_verdict": {
+        "quiet_control": false,
+        "status": "noise_present",
+        "reason": "Some variations produced noise without useful cracks."
+      },
+      "training_priorities": [],
+      "variation_results": [
+        {
+          "scenario_id": "weather-continuation-fallthrough",
+          "variation_id": "bare_go_ahead",
+          "active_recent_signals": [],
+          "replan_requested": false,
+          "candidate_tests": []
+        },
+        {
+          "scenario_id": "weather-continuation-fallthrough",
+          "variation_id": "polite_saved_location",
+          "active_recent_signals": [],
+          "replan_requested": false,
+          "candidate_tests": []
+        },
+        {
+          "scenario_id": "weather-continuation-fallthrough",
+          "variation_id": "shared_location_followup",
+          "active_recent_signals": [
+            "route_unclear",
+            "route_fit_weak"
+          ],
+          "replan_requested": false,
+          "candidate_tests": []
+        },
+        {
+          "scenario_id": "weather-continuation-fallthrough",
+          "variation_id": "short_okay_do_that",
+          "active_recent_signals": [],
+          "replan_requested": false,
+          "candidate_tests": []
+        }
+      ]
+    },
+    {
+      "family_id": "retrieval-followup-fallthrough-family",
+      "target_seam": "retrieval_followup_route_fallthrough",
+      "variation_count": 3,
+      "noise_summary": {
+        "quiet_variations": 3,
+        "noisy_variations": 0,
+        "useful_variations": 0,
+        "variation_count": 3,
+        "quiet_control": true
+      },
+      "repeated_signals": [],
+      "robust_signals": [],
+      "script_specific_signals": [],
+      "robust_backlog_candidates": [],
+      "quiet_control_verdict": {
+        "quiet_control": true,
+        "status": "quiet_control",
+        "reason": "All variations stayed quiet, so this family acts as a control."
+      },
+      "training_priorities": [],
+      "variation_results": [
+        {
+          "scenario_id": "retrieval-followup-fallthrough",
+          "variation_id": "selected_result_followup",
+          "active_recent_signals": [],
+          "replan_requested": false,
+          "candidate_tests": []
+        },
+        {
+          "scenario_id": "retrieval-followup-fallthrough",
+          "variation_id": "meta_question_followup",
+          "active_recent_signals": [],
+          "replan_requested": false,
+          "candidate_tests": []
+        },
+        {
+          "scenario_id": "retrieval-followup-fallthrough",
+          "variation_id": "keyword_continue",
+          "active_recent_signals": [],
+          "replan_requested": false,
+          "candidate_tests": []
+        }
+      ]
+    },
+    {
+      "family_id": "patch-routing-fallthrough-family",
+      "target_seam": "patch_routing_fallthrough",
+      "variation_count": 3,
+      "noise_summary": {
+        "quiet_variations": 0,
+        "noisy_variations": 3,
+        "useful_variations": 0,
+        "variation_count": 3,
+        "quiet_control": false
+      },
+      "repeated_signals": [
+        {
+          "signal": "route_fit_weak",
+          "hit_count": 3,
+          "variation_count": 3,
+          "consistency_ratio": 1.0,
+          "classification": "robust"
+        },
+        {
+          "signal": "route_unclear",
+          "hit_count": 3,
+          "variation_count": 3,
+          "consistency_ratio": 1.0,
+          "classification": "robust"
+        }
+      ],
+      "robust_signals": [
+        {
+          "signal": "route_fit_weak",
+          "hit_count": 3,
+          "variation_count": 3,
+          "consistency_ratio": 1.0,
+          "classification": "robust",
+          "variation_hit_ratio": 1.0,
+          "family_consistency": 1.0,
+          "variation_survival_ratio": 1.0,
+          "noise_resistance": 0.0,
+          "stability_factor": 1.0,
+          "robustness_score": 0.0
+        },
+        {
+          "signal": "route_unclear",
+          "hit_count": 3,
+          "variation_count": 3,
+          "consistency_ratio": 1.0,
+          "classification": "robust",
+          "variation_hit_ratio": 1.0,
+          "family_consistency": 1.0,
+          "variation_survival_ratio": 1.0,
+          "noise_resistance": 0.0,
+          "stability_factor": 1.0,
+          "robustness_score": 0.0
+        }
+      ],
+      "script_specific_signals": [],
+      "robust_backlog_candidates": [],
+      "quiet_control_verdict": {
+        "quiet_control": false,
+        "status": "noise_present",
+        "reason": "Some variations produced noise without useful cracks."
+      },
+      "training_priorities": [],
+      "variation_results": [
+        {
+          "scenario_id": "patch-routing-fallthrough",
+          "variation_id": "patch_apply_direct_tool",
+          "active_recent_signals": [
+            "route_unclear",
+            "route_fit_weak"
+          ],
+          "replan_requested": false,
+          "candidate_tests": []
+        },
+        {
+          "scenario_id": "patch-routing-fallthrough",
+          "variation_id": "patch_preview_command",
+          "active_recent_signals": [
+            "route_unclear",
+            "route_fit_weak"
+          ],
+          "replan_requested": false,
+          "candidate_tests": []
+        },
+        {
+          "scenario_id": "patch-routing-fallthrough",
+          "variation_id": "patch_rollback_command",
+          "active_recent_signals": [
+            "route_unclear",
+            "route_fit_weak"
+          ],
+          "replan_requested": false,
+          "candidate_tests": []
+        }
+      ]
+    },
+    {
+      "family_id": "session-fact-recall-fallthrough-family",
+      "target_seam": "session_fact_recall_route_fallthrough",
+      "variation_count": 4,
+      "noise_summary": {
+        "quiet_variations": 0,
+        "noisy_variations": 4,
+        "useful_variations": 0,
+        "variation_count": 4,
+        "quiet_control": false
+      },
+      "repeated_signals": [
+        {
+          "signal": "route_fit_weak",
+          "hit_count": 4,
+          "variation_count": 4,
+          "consistency_ratio": 1.0,
+          "classification": "robust"
+        },
+        {
+          "signal": "route_unclear",
+          "hit_count": 4,
+          "variation_count": 4,
+          "consistency_ratio": 1.0,
+          "classification": "robust"
+        }
+      ],
+      "robust_signals": [
+        {
+          "signal": "route_fit_weak",
+          "hit_count": 4,
+          "variation_count": 4,
+          "consistency_ratio": 1.0,
+          "classification": "robust",
+          "variation_hit_ratio": 1.0,
+          "family_consistency": 1.0,
+          "variation_survival_ratio": 1.0,
+          "noise_resistance": 0.0,
+          "stability_factor": 1.0,
+          "robustness_score": 0.0
+        },
+        {
+          "signal": "route_unclear",
+          "hit_count": 4,
+          "variation_count": 4,
+          "consistency_ratio": 1.0,
+          "classification": "robust",
+          "variation_hit_ratio": 1.0,
+          "family_consistency": 1.0,
+          "variation_survival_ratio": 1.0,
+          "noise_resistance": 0.0,
+          "stability_factor": 1.0,
+          "robustness_score": 0.0
+        }
+      ],
+      "script_specific_signals": [],
+      "robust_backlog_candidates": [],
+      "quiet_control_verdict": {
+        "quiet_control": false,
+        "status": "noise_present",
+        "reason": "Some variations produced noise without useful cracks."
+      },
+      "training_priorities": [],
+      "variation_results": [
+        {
+          "scenario_id": "session-fact-recall-fallthrough",
+          "variation_id": "codeword_recall",
+          "active_recent_signals": [
+            "route_unclear",
+            "route_fit_weak"
+          ],
+          "replan_requested": false,
+          "candidate_tests": []
+        },
+        {
+          "scenario_id": "session-fact-recall-fallthrough",
+          "variation_id": "topic_recall",
+          "active_recent_signals": [
+            "route_unclear",
+            "route_fit_weak"
+          ],
+          "replan_requested": false,
+          "candidate_tests": []
+        },
+        {
+          "scenario_id": "session-fact-recall-fallthrough",
+          "variation_id": "review_recall",
+          "active_recent_signals": [
+            "route_unclear",
+            "route_fit_weak"
+          ],
+          "replan_requested": false,
+          "candidate_tests": []
+        },
+        {
+          "scenario_id": "session-fact-recall-fallthrough",
+          "variation_id": "owner_recall",
+          "active_recent_signals": [
+            "route_unclear",
+            "route_fit_weak"
+          ],
+          "replan_requested": false,
+          "candidate_tests": []
+        }
+      ]
+    }
+  ]
+}

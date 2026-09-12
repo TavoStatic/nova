@@ -15,6 +15,7 @@ Rule:
 """
 from __future__ import annotations
 
+from collections.abc import Mapping
 from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
@@ -651,11 +652,18 @@ def record_refuse_on_branch(
     do_not_retry_while: list[dict[str, Any]] | None = None,
     tool_name: str = "",
     task_title: str = "",
+    causal: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Teach unclaimable without an invoke. Same trail as attempt judgments.
 
     Pressure is inherited from the last trail row when present so later
     applications of the lesson do not require paying again.
+
+    ``causal`` is an optional mapping of causal facts (causal_condition,
+    causal_observed_failure, causal_verified_cause, causal_change_made,
+    causal_observed_result, causal_scope) merged into the refusal record.
+    It is inert when absent: the stored refusal is semantically identical to
+    a refusal recorded without it.
     """
     import work_tree
 
@@ -697,6 +705,8 @@ def record_refuse_on_branch(
         "pressure": pressure,
         "source": REFUSE_SOURCE,
     }
+    if causal:
+        record.update({str(k): v for k, v in dict(causal).items()})
     if not record["retry_when"]:
         return {"ok": False, "reason": "retry_when_required"}
     branch.source_payload = append_attempt_judgment(payload, record)

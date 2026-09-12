@@ -311,9 +311,16 @@ def _regression_status_gate(
     elif not payload:
         blocking.append(f"full regression status unreadable: {path}")
     if status != "OK" or returncode != 0:
+        certification = str(payload.get("certification") or "").strip().upper()
+        reasons = [str(item).strip() for item in list(payload.get("reason") or []) if str(item).strip()]
+        truth_hint = ""
+        if certification or reasons:
+            truth_hint = " certification=" + (certification or status or "UNKNOWN")
+            if reasons:
+                truth_hint += " reason=" + ";".join(reasons[:6])
         detail = str(payload.get("detail") or "").strip()
         suffix = f" detail={detail}" if detail else ""
-        blocking.append(f"full regression status is not OK: status={status or 'UNKNOWN'} returncode={returncode}{suffix}")
+        blocking.append(f"full regression status is not OK: status={status or 'UNKNOWN'} returncode={returncode}{suffix}{truth_hint}")
     if missing_lanes:
         blocking.append(f"full regression status missing required lanes: {', '.join(missing_lanes)}")
     if generated_epoch <= 0:
@@ -337,6 +344,11 @@ def _regression_status_gate(
         "required_lanes": list(REQUIRED_REGRESSION_LANES),
         "missing_lanes": missing_lanes,
         "detail": str(payload.get("detail") or ""),
+        "certification": str(payload.get("certification") or "").strip().upper(),
+        "reason": [str(item).strip() for item in list(payload.get("reason") or []) if str(item).strip()],
+        "failed_lane": str(payload.get("failed_lane") or "").strip(),
+        "registry_fingerprint": str(payload.get("registry_fingerprint") or "").strip(),
+        "source": str(payload.get("source") or "").strip(),
         "blocking_issues": blocking,
     }
 

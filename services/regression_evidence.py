@@ -127,6 +127,13 @@ def apply_regression_status_payload(state: dict[str, Any], payload: dict[str, An
         if _text(item, 240)
     ]
     state["last_regression_failed_tests"] = failed_tests[:24]
+    reasons = [
+        _text(item, 120)
+        for item in list(payload.get("reason") or [])
+        if _text(item, 120)
+    ]
+    state["last_regression_reason"] = reasons[:24]
+    state["last_regression_certification"] = _text(payload.get("certification"), 40).upper()
     state["last_regression_tail"] = regression_tail_from_payload(payload)
     state["last_regression_stale"] = regression_evidence_stale(
         status_label=status,

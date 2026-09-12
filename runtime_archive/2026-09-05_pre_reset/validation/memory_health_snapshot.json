@@ -1,0 +1,7 @@
+{
+  "updated_at": 1787950356,
+  "last_good_total": 136,
+  "memory_db_path": "C:\\NOVA\\runtime\\validation\\nova_memory.sqlite",
+  "learned_facts_path": "C:\\NOVA\\runtime\\validation\\memory\\learned_facts.json",
+  "identity_path": "C:\\NOVA\\runtime\\validation\\memory\\identity.json"
+}

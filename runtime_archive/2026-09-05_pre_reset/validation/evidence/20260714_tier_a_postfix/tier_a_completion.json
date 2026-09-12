@@ -1,0 +1,29 @@
+{
+  "tier_a_completed_at": "2026-07-14",
+  "a1_harness": {
+    "pre_fix_evidence": "runtime/validation/evidence/20260714_tier_a_a1_prefix",
+    "post_fix_evidence": "runtime/validation/evidence/20260714_tier_a_postfix/harness_defect_resolution.json",
+    "status": "fixed_and_accepted"
+  },
+  "a2_probe": {
+    "isolation": "services/probe_bootstrap.py applied before production imports in agent-tools/run_thorough_audit_probe.py",
+    "verdict": "services/thorough_audit_verdict.py fails on live_closure.ok and gap_count, not only semantic live_gaps",
+    "tests": "tests/test_thorough_audit_verdict.py",
+    "status": "implemented"
+  },
+  "a3_pipeline": {
+    "lease_path": "runtime/pipelines/<pipeline>/worker.lease.json",
+    "scope_key": "(pipeline_id, runtime_root, lease_owner_pid)",
+    "root_files": ["services/pipeline_worker_supervision.py"],
+    "tests": [
+      "test_concurrent_ensure_creates_one_worker_lease",
+      "test_live_matching_lease_prevents_spawn",
+      "test_dead_lease_allows_single_replacement",
+      "test_heartbeat_write_is_atomic",
+      "test_conflicting_live_workers_surface_duplicate_ownership"
+    ],
+    "status": "implemented"
+  },
+  "acceptance_command": "python -m unittest tests.test_regression_evidence tests.test_thorough_audit_verdict tests.test_pipeline_worker_supervision tests.test_autonomy_maintenance.TestAutonomyMaintenance.test_run_active_work_tree_cycle_resyncs_core_thinning_before_execution",
+  "acceptance_result": "15 tests OK"
+}

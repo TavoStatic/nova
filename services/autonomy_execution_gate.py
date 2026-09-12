@@ -100,33 +100,53 @@ class AutonomyExecutionGateService:
         packet = _as_dict(decision_packet)
         policy = _as_dict(policy_snapshot)
         last_execution = _as_dict(last_execution_context)
+        action = _as_dict(packet.get("recommended_action"))
+        gate_subject = _safe_text(action.get("action_type"), 120)
+        gate_target = _safe_text(action.get("target_id"), 160)
         mode = self._policy_mode(policy)
         checks: dict[str, str] = {}
         refusal_reasons: list[str] = []
 
+        def _done(payload: dict[str, Any]) -> dict[str, Any]:
+            try:
+                from services.observation_spine import observe_quietly
+
+                refusals = list(payload.get("refusal_reasons") or [])
+                observe_quietly(
+                    source="execution_gate",
+                    operation="evaluate",
+                    subject=gate_subject or _safe_text(payload.get("action_type"), 120),
+                    input_ref=gate_target or None,
+                    outcome=_safe_text(payload.get("status"), 40),
+                    reason_code=_safe_text(refusals[0] if refusals else payload.get("reason"), 120) or None,
+                )
+            except Exception:
+                pass
+            return payload
+
         if mode not in {EXECUTION_MODE_CANARY, EXECUTION_MODE_EXECUTE}:
             checks["mode_allows_execution"] = "fail"
             refusal_reasons.append("execution_mode_advisory")
-            return self._result(False, "deferred", mode, checks, refusal_reasons, "Execution mode is advisory.")
+            return _done(self._result(False, "deferred", mode, checks, refusal_reasons, "Execution mode is advisory."))
         checks["mode_allows_execution"] = "pass"
 
         if not self._execute_enabled(policy):
             checks["execute_enabled"] = "fail"
             refusal_reasons.append("execution_disabled")
-            return self._result(False, "blocked", mode, checks, refusal_reasons, "Autonomy execution is disabled by policy.")
+            return _done(self._result(False, "blocked", mode, checks, refusal_reasons, "Autonomy execution is disabled by policy."))
         checks["execute_enabled"] = "pass"
 
         if packet.get("decision_type") != SPEC_DECISION_RECOMMEND_ACTION:
             checks["decision_recommends_action"] = "fail"
             refusal_reasons.append("decision_not_recommend_action")
-            return self._result(False, "deferred", mode, checks, refusal_reasons, "No recommended action is available to execute.")
+            return _done(self._result(False, "deferred", mode, checks, refusal_reasons, "No recommended action is available to execute."))
         checks["decision_recommends_action"] = "pass"
 
         packet_refusals = [_safe_text(item, 120) for item in _as_list(packet.get("refusal_reasons")) if _safe_text(item, 120)]
         if packet_refusals:
             checks["decision_refusal_reasons_clear"] = "fail"
             refusal_reasons.extend(["decision_has_refusal_reasons", *packet_refusals])
-            return self._result(False, "blocked", mode, checks, refusal_reasons, "Decision still carries refusal reasons.")
+            return _done(self._result(False, "blocked", mode, checks, refusal_reasons, "Decision still carries refusal reasons."))
         checks["decision_refusal_reasons_clear"] = "pass"
 
         action = _as_dict(packet.get("recommended_action"))
@@ -136,14 +156,14 @@ class AutonomyExecutionGateService:
         if not action_type or not is_autonomy_advisory_action(action_type):
             checks["dispatcher_catalog_action"] = "fail"
             refusal_reasons.append("action_not_dispatcher_owned")
-            return self._result(False, "blocked", mode, checks, refusal_reasons, "Recommended action is not dispatcher-owned.")
+            return _done(self._result(False, "blocked", mode, checks, refusal_reasons, "Recommended action is not dispatcher-owned."))
         checks["dispatcher_catalog_action"] = "pass"
 
         blocked_actions = _action_set(policy.get("execute_blocked_actions")) | _action_set(policy.get("blocked_actions"))
         if action_type in blocked_actions or "*" in blocked_actions:
             checks["execute_action_allowed"] = "fail"
             refusal_reasons.append("action_execute_blocked")
-            return self._result(False, "blocked", mode, checks, refusal_reasons, "Recommended action is blocked by policy.")
+            return _done(self._result(False, "blocked", mode, checks, refusal_reasons, "Recommended action is blocked by policy."))
 
         allowed_actions = self._execute_allowed_actions(policy, mode)
         allowed_groups = self._execute_allowed_action_groups(policy, mode)
@@ -157,7 +177,7 @@ class AutonomyExecutionGateService:
         if not action_allowed:
             checks["execute_action_allowed"] = "fail"
             refusal_reasons.append("action_not_execute_allowed")
-            return self._result(False, "blocked", mode, checks, refusal_reasons, "Recommended action is not enabled for execution.")
+            return _done(self._result(False, "blocked", mode, checks, refusal_reasons, "Recommended action is not enabled for execution."))
         checks["execute_action_allowed"] = "pass"
 
         confidence = _as_float(packet.get("confidence"), 0.0)
@@ -170,7 +190,7 @@ class AutonomyExecutionGateService:
         if confidence < threshold and not concrete_active_work_tree:
             checks["confidence_threshold"] = "fail"
             refusal_reasons.append("confidence_below_execute_threshold")
-            return self._result(False, "deferred", mode, checks, refusal_reasons, "Recommendation confidence is below execution threshold.")
+            return _done(self._result(False, "deferred", mode, checks, refusal_reasons, "Recommendation confidence is below execution threshold."))
         checks["confidence_threshold"] = "pass" if confidence >= threshold else "concrete_active_work_tree"
 
         ack_required = bool(action.get("requires_ack", False))
@@ -181,7 +201,7 @@ class AutonomyExecutionGateService:
         if ack_required and not operator_ack_present:
             checks["operator_ack"] = "fail"
             refusal_reasons.append("operator_ack_required")
-            return self._result(False, "deferred", mode, checks, refusal_reasons, "Operator acknowledgement is required before execution.")
+            return _done(self._result(False, "deferred", mode, checks, refusal_reasons, "Operator acknowledgement is required before execution."))
         checks["operator_ack"] = "pass"
 
         cooldown_active = bool(last_execution.get("cooldown_active", False))
@@ -196,7 +216,7 @@ class AutonomyExecutionGateService:
         ):
             checks["cooldown"] = "fail"
             refusal_reasons.append("cooldown_active")
-            return self._result(False, "deferred", mode, checks, refusal_reasons, "Cooldown is still active for this action.")
+            return _done(self._result(False, "deferred", mode, checks, refusal_reasons, "Cooldown is still active for this action."))
         checks["cooldown"] = "pass"
 
         payload = {
@@ -217,7 +237,7 @@ class AutonomyExecutionGateService:
             value = int(_as_float(action.get(key), 0))
             if value > 0:
                 payload[key] = value
-        return {
+        return _done({
             "allow_execute": True,
             "status": "allowed",
             "mode": mode,
@@ -231,7 +251,7 @@ class AutonomyExecutionGateService:
             "confidence": confidence,
             "cooldown_sec": int(_as_float(action.get("cooldown_sec"), _as_float(policy.get("cooldown_sec"), 180))),
             "explain_text": "Recommendation passed autonomy execution gate.",
-        }
+        })
 
     @staticmethod
     def _result(

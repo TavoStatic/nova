@@ -1,0 +1,140 @@
+{
+  "ts": "2026-05-19 08:04:51",
+  "channel": "http",
+  "session_id": "codex_probe_weather_pending_9f23eb",
+  "input_source": "typed",
+  "user_input": "what is the weather like today nova?",
+  "intent": "",
+  "planner_decision": "run_tool",
+  "tool": "weather_current_location",
+  "tool_args": {
+    "args": []
+  },
+  "tool_result": "25.909837811138377,-97.50619928541175: Today: 95\u00c2\u00b0F, Partly Sunny. Wind 16 mph SE. [source: api.weather.gov]",
+  "final_answer": "25.909837811138377,-97.50619928541175: Today: 95\u00c2\u00b0F, Partly Sunny. Wind 16 mph SE. [source: api.weather.gov]",
+  "reply_contract": "weather_lookup.current_location",
+  "reply_outcome": {
+    "intent": "weather_lookup",
+    "kind": "current_location",
+    "reply_contract": "weather_lookup.current_location",
+    "execution_profile": {
+      "total_time": 2901,
+      "planner_time": 2901,
+      "llm_time": 0,
+      "tool_time": 2112,
+      "post_time": 0,
+      "tool_selection_time": 599
+    }
+  },
+  "turn_acts": [],
+  "grounded": true,
+  "active_subject": "",
+  "continuation_used": false,
+  "route_trace": [
+    {
+      "stage": "input",
+      "outcome": "received",
+      "data": {
+        "channel": "http",
+        "input_source": "typed"
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "semantic_tool_intent",
+      "data": {
+        "duration_ms": 599
+      }
+    },
+    {
+      "stage": "action_planner",
+      "outcome": "semantic_intent",
+      "data": {
+        "tool": "weather_current_location",
+        "confidence": 0.0
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "tool_selection",
+      "data": {
+        "duration_ms": 599
+      }
+    },
+    {
+      "stage": "action_planner",
+      "outcome": "run_tool",
+      "data": {
+        "tool": "weather_current_location"
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "tool_response",
+      "data": {
+        "duration_ms": 2112,
+        "tool": "weather_current_location"
+      }
+    },
+    {
+      "stage": "tool_execution",
+      "outcome": "ok",
+      "data": {
+        "tool": "weather_current_location",
+        "grounded": true
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "planner",
+      "data": {
+        "duration_ms": 2901
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "planner_call",
+      "data": {
+        "duration_ms": 2901
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "execute_reply_sequence",
+      "data": {
+        "duration_ms": 2901
+      }
+    },
+    {
+      "stage": "timing_breakdown",
+      "outcome": "completed",
+      "detail": "execute_reply_sequence",
+      "data": {
+        "total_time": 2901,
+        "planner_time": 2901,
+        "llm_time": 0,
+        "tool_time": 2112,
+        "post_time": 0,
+        "tool_selection_time": 599
+      }
+    },
+    {
+      "stage": "finalize",
+      "outcome": "run_tool",
+      "data": {
+        "grounded": true,
+        "tool": "weather_current_location"
+      }
+    }
+  ],
+  "provider_used": "weather_current_location",
+  "provider_candidates": [],
+  "provider_family": "weather_current_location",
+  "route_summary": "input:received -> action_planner:semantic_intent -> action_planner:run_tool -> tool_execution:ok -> finalize:run_tool"
+}

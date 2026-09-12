@@ -1,0 +1,23 @@
+{
+  "turns": [
+    {
+      "role": "user",
+      "text": "how are you doing today ?"
+    },
+    {
+      "role": "assistant",
+      "text": "I\u2019m running steady, all core surfaces are responding as expected. How\u2019s your day going?"
+    },
+    {
+      "role": "user",
+      "text": "what now"
+    },
+    {
+      "role": "assistant",
+      "text": "I'm holding the runtime surfaces active and standing by for your direction. What would you like to tackle next?"
+    }
+  ],
+  "turn_ts": 1788357359.0589464,
+  "session_id": "http-1e7337d2a5d1",
+  "ts": 1788357304.1819234
+}

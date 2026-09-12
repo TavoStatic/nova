@@ -1,0 +1,12 @@
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//NOVA//Temporal Verification//EN
+BEGIN:VEVENT
+UID:nova-temporal-verification-20260608
+SUMMARY:Temporal verification review
+DTSTART:20260608T090000Z
+DTEND:20260608T093000Z
+STATUS:CANCELLED
+DESCRIPTION:Operator closed 2026-08-27: one-shot temporal verification window is past. Not live climb work.
+END:VEVENT
+END:VCALENDAR

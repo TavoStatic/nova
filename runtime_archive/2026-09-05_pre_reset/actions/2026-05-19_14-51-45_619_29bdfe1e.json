@@ -1,0 +1,148 @@
+{
+  "ts": "2026-05-19 14:51:44",
+  "channel": "http",
+  "session_id": "gate_649426b5",
+  "input_source": "typed",
+  "user_input": "can you access https://example.com/?",
+  "intent": "",
+  "planner_decision": "run_tool",
+  "tool": "web_fetch",
+  "tool_args": {
+    "args": [
+      "https://example.com/"
+    ]
+  },
+  "tool_result": "I cannot access the web for https://example.com/ because my web tool only allows specific sources:\n- api.weather.gov\n- weather.com\n- wikipedia.org\n- stackoverflow.com\n- stackexchange.com\n- docs.python.org\n- python.org\n- github.com\n- 127.0.0.1\nIf you'd like, I can try again using api.weather.gov.\nTo add a new allowed domain, use: policy allow <domain>",
+  "final_answer": "I cannot access the web for https://example.com/ because my web tool only allows specific sources:\n- api.weather.gov\n- weather.com\n- wikipedia.org\n- stackoverflow.com\n- stackexchange.com\n- docs.python.org\n- python.org\n- github.com\n- 127.0.0.1\nIf you'd like, I can try again using api.weather.gov.\nTo add a new allowed domain, use: policy allow <domain>",
+  "reply_contract": "",
+  "reply_outcome": {
+    "execution_profile": {
+      "total_time": 1054,
+      "planner_time": 1053,
+      "llm_time": 0,
+      "tool_time": 3,
+      "post_time": 0,
+      "tool_selection_time": 1050
+    }
+  },
+  "turn_acts": [],
+  "grounded": true,
+  "active_subject": "",
+  "continuation_used": false,
+  "route_trace": [
+    {
+      "stage": "input",
+      "outcome": "received",
+      "data": {
+        "channel": "http",
+        "input_source": "typed"
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "semantic_tool_intent",
+      "data": {
+        "duration_ms": 1050
+      }
+    },
+    {
+      "stage": "action_planner",
+      "outcome": "semantic_intent",
+      "data": {
+        "tool": "web_fetch",
+        "confidence": 0.0
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "tool_selection",
+      "data": {
+        "duration_ms": 1050
+      }
+    },
+    {
+      "stage": "action_planner",
+      "outcome": "run_tool",
+      "data": {
+        "tool": "web_fetch"
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "tool_response",
+      "data": {
+        "duration_ms": 3,
+        "tool": "web_fetch"
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "web_search",
+      "data": {
+        "duration_ms": 3,
+        "tool": "web_fetch"
+      }
+    },
+    {
+      "stage": "tool_execution",
+      "outcome": "ok",
+      "data": {
+        "tool": "web_fetch",
+        "grounded": true
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "planner",
+      "data": {
+        "duration_ms": 1053
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "planner_call",
+      "data": {
+        "duration_ms": 1054
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "execute_reply_sequence",
+      "data": {
+        "duration_ms": 1054
+      }
+    },
+    {
+      "stage": "timing_breakdown",
+      "outcome": "completed",
+      "detail": "execute_reply_sequence",
+      "data": {
+        "total_time": 1054,
+        "planner_time": 1053,
+        "llm_time": 0,
+        "tool_time": 3,
+        "post_time": 0,
+        "tool_selection_time": 1050
+      }
+    },
+    {
+      "stage": "finalize",
+      "outcome": "run_tool",
+      "data": {
+        "grounded": true,
+        "tool": "web_fetch"
+      }
+    }
+  ],
+  "provider_used": "web fetch",
+  "provider_candidates": [],
+  "provider_family": "web fetch",
+  "route_summary": "input:received -> action_planner:semantic_intent -> action_planner:run_tool -> tool_execution:ok -> finalize:run_tool"
+}

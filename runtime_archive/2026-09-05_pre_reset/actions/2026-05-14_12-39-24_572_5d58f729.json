@@ -1,0 +1,65 @@
+{
+  "ts": "2026-05-14 12:39:19",
+  "channel": "http",
+  "session_id": "864e662f8c440dfb",
+  "input_source": "typed",
+  "user_input": "is something wrong with you today?",
+  "intent": "chat",
+  "planner_decision": "grounded_self_report",
+  "tool": "",
+  "tool_args": {},
+  "tool_result": "",
+  "final_answer": "Today I am mainly stuck on: Work Tree is operator_hold with 1 open task(s); current branch: Release package is verified but missing promotion judgment; Release package is verified but waiting for operator promotion judgment.\nWork Tree is operator_hold with 1 open task(s). Current branch: Release package is verified but missing promotion judgment.\nRelease readiness: needs-promotion.\nSource: live control status and Work Tree.",
+  "reply_contract": "runtime.self_report.live_status",
+  "reply_outcome": {
+    "source": "live_control_status_and_work_tree",
+    "tool": "control_status"
+  },
+  "turn_acts": [
+    "correct",
+    "command"
+  ],
+  "grounded": true,
+  "active_subject": "",
+  "continuation_used": false,
+  "route_trace": [
+    {
+      "stage": "input",
+      "outcome": "received",
+      "data": {
+        "channel": "http",
+        "input_source": "typed",
+        "intent": "chat"
+      }
+    },
+    {
+      "stage": "direction_analysis",
+      "outcome": "correction_feedback",
+      "data": {
+        "effective_query": "is something wrong with you today?",
+        "turn_acts": "correct,command",
+        "identity_focused": false,
+        "bypass_pattern_routes": false
+      }
+    },
+    {
+      "stage": "grounded_self_report",
+      "outcome": "control_status",
+      "detail": "live_status_reply",
+      "data": {
+        "tool": "control_status"
+      }
+    },
+    {
+      "stage": "finalize",
+      "outcome": "grounded_self_report",
+      "data": {
+        "grounded": true
+      }
+    }
+  ],
+  "provider_used": "",
+  "provider_candidates": [],
+  "provider_family": "",
+  "route_summary": "input:received -> direction_analysis:correction_feedback -> grounded_self_report:control_status -> finalize:grounded_self_report"
+}

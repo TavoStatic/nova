@@ -1,0 +1,159 @@
+{
+  "ts": "2026-07-23 20:01:14",
+  "channel": "cli",
+  "session_id": "",
+  "input_source": "typed",
+  "user_input": "C:\\Users\\hotst\\OneDrive\\Desktop\\Original_Document.pdf",
+  "intent": "",
+  "planner_decision": "run_tool",
+  "tool": "read",
+  "tool_args": {
+    "args": [
+      "C:\\Users\\hotst\\OneDrive\\Desktop\\Original_Document.pdf"
+    ]
+  },
+  "tool_result": "Denied: path is outside allowed root: C:\\NOVA",
+  "final_answer": "Assistant returned a tool result. The result is available as last tool evidence.",
+  "reply_contract": "",
+  "reply_outcome": {
+    "execution_profile": {
+      "total_time": 4584,
+      "planner_time": 2429,
+      "llm_time": 0,
+      "tool_time": 3,
+      "post_time": 0,
+      "tool_selection_time": 2426
+    }
+  },
+  "turn_acts": [],
+  "grounded": true,
+  "active_subject": "last_tool_evidence:read",
+  "continuation_used": false,
+  "route_trace": [
+    {
+      "stage": "input",
+      "outcome": "received",
+      "data": {
+        "channel": "cli",
+        "input_source": "typed"
+      }
+    },
+    {
+      "stage": "intent_understanding",
+      "outcome": "classified",
+      "detail": "file location",
+      "data": {
+        "level": "sharing",
+        "domain": "system",
+        "confidence": 0.8,
+        "strategy": "accept_and_engage"
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "semantic_tool_intent",
+      "data": {
+        "duration_ms": 2426
+      }
+    },
+    {
+      "stage": "action_planner",
+      "outcome": "semantic_intent",
+      "detail": "The user is asking for file reading assistance, which requires a tool action to read the specified file.",
+      "data": {
+        "tool": "read",
+        "confidence": 0.9
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "tool_selection",
+      "data": {
+        "duration_ms": 2426
+      }
+    },
+    {
+      "stage": "action_planner",
+      "outcome": "run_tool",
+      "data": {
+        "tool": "read"
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "tool_response",
+      "data": {
+        "duration_ms": 3,
+        "tool": "read"
+      }
+    },
+    {
+      "stage": "tool_execution",
+      "outcome": "ok",
+      "data": {
+        "tool": "read",
+        "grounded": true
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "planner",
+      "data": {
+        "duration_ms": 2429
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "planner_call",
+      "data": {
+        "duration_ms": 2429
+      }
+    },
+    {
+      "stage": "timing",
+      "outcome": "completed",
+      "detail": "execute_reply_sequence",
+      "data": {
+        "duration_ms": 4584
+      }
+    },
+    {
+      "stage": "timing_breakdown",
+      "outcome": "completed",
+      "detail": "execute_reply_sequence",
+      "data": {
+        "total_time": 4584,
+        "planner_time": 2429,
+        "llm_time": 0,
+        "tool_time": 3,
+        "post_time": 0,
+        "tool_selection_time": 2426
+      }
+    },
+    {
+      "stage": "finalize",
+      "outcome": "run_tool",
+      "data": {
+        "grounded": true,
+        "tool": "read"
+      }
+    }
+  ],
+  "provider_used": "read",
+  "provider_candidates": [],
+  "provider_family": "read",
+  "routing_decision": {
+    "final_owner": "action_planner",
+    "planner_owner": "action_planner",
+    "planner_action": "run_tool",
+    "planner_tool": "read",
+    "reply_outcome_kind": "",
+    "turn_acts": []
+  },
+  "route_summary": "input:received -> intent_understanding:classified -> action_planner:semantic_intent -> action_planner:run_tool -> tool_execution:ok -> finalize:run_tool"
+}
