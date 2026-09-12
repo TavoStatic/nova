@@ -71,11 +71,18 @@ class MemoryRoutingService:
         if any(
             cue in low
             for cue in (
-                "remember when",
+                "remember",
                 "recall",
-                "earlier memory",
-                "what did i say",
+                "earlier",
+                "before",
+                "what did",
+                "you said",
+                "we discussed",
                 "from memory",
+                "last time",
+                "again",
+                "same as",
+                "like before",
             )
         ):
             return "explicit_recall"

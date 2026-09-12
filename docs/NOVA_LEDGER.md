@@ -1,6 +1,6 @@
 # Nova Living Ledger
 
-_Generated: 2026-09-12 01:19_
+_Generated: 2026-09-12 01:30_
 
 Two sources feed this document: **developer sessions** and **Nova's own scan findings**.
 Append to `docs/ledger/session_log.jsonl` (developer) or `docs/ledger/nova_findings.jsonl` (Nova),
@@ -38,6 +38,21 @@ _Session: hygiene-and-aliases-20260912_
 - strip UTF-8 BOM from 28 Python files
 
 **Meta:** 159 tests added
+
+### 2026-09-12 — claude-cowork
+_Session: leah-memory-recall-at5-20260912_
+
+**Modules touched:** `services/memory_routing.py`, `tests/test_memory_routing_service.py`, `capabilities_roadmap.json`
+
+**Changes:**
+- Fix memory routing purpose inference to match explicit recall cues (what did I tell you
+- you said
+- we discussed
+- last time
+- etc.)
+- unblocking new-session mem_recall queries for AT-5
+
+**Meta:** 45 tests added
 
 ### 2026-09-09 — opencode
 
@@ -1386,7 +1401,7 @@ Promote skip/remint/stop/pulse mill-cycle control only. Three trailing mill skip
 Latest ring and execution findings. Identical cycle reprints are collapsed to one line.
 
 - **2026-09-12** Ring 3 `climb_integrity` — verified: gap_count=0, queue=0 climbable=0 unclimbable=0
-- **2026-09-12** Ring 2 `contract_integrity` — drifted: gap_count=75, probe_context=live_status, wiring_gaps=40, closure_gaps=35
+- **2026-09-12** Ring 2 `contract_integrity` — drifted: gap_count=61, probe_context=live_status, wiring_gaps=33, closure_gaps=28
 - **2026-09-12** Ring 1 `map_integrity` — drifted: gap_count=1, undeclared_docs=1
 - **2026-09-11** Ring 2 `contract_integrity` — verified: gap_count=0, probe_context=live_status
 - **2026-09-09** Ring 1 `map_integrity` — drifted: gap_count=2, unclassified_files=2
@@ -1411,9 +1426,9 @@ Latest ring and execution findings. Identical cycle reprints are collapsed to on
 - **2026-08-05** Ring 1 `nova_doc_coverage` — 9 doc(s) have stale NOVA_DOC block (last_session > 30 days)
 - **2026-09-09** Ring 1 `nova_root_inventory` — 2 source file(s) have no SOURCE_ROOT classification
 - **2026-09-12** Ring 1 `nova_doc_coverage` — 1 doc(s) in docs/ missing NOVA_DOC header block
-- **2026-09-12** Ring 2 `ring2_contract_integrity` — 35 closure gap(s): work-tree tracks open but no resolution evidence
+- **2026-09-12** Ring 2 `ring2_contract_integrity` — 28 closure gap(s): work-tree tracks open but no resolution evidence
 - **2026-08-22** Ring 2 `ring2_contract_integrity` — 1 contract probe gap(s) (live_status): services lack HTTP-reachable health probe
-- **2026-09-12** Ring 2 `ring2_contract_integrity` — 40 wiring gap(s): service/script registered but not surfaced in status
+- **2026-09-12** Ring 2 `ring2_contract_integrity` — 33 wiring gap(s): service/script registered but not surfaced in status
 
 ### Stale authority documents
 

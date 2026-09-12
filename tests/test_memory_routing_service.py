@@ -69,6 +69,14 @@ class TestMemoryRoutingService(unittest.TestCase):
             self.service.infer_purpose("recall what I said earlier"),
             "explicit_recall",
         )
+        self.assertEqual(
+            self.service.infer_purpose("what did I tell you about the orchard lot code"),
+            "explicit_recall",
+        )
+        self.assertEqual(
+            self.service.infer_purpose("we discussed this last time"),
+            "explicit_recall",
+        )
 
     def test_recent_learning_summary_overrides_session_priority(self):
         plan = self.service.plan_durable_recall(
