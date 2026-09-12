@@ -1,41 +1,22 @@
 {
-  "allowed_root": "C:\\Users\\guribe\\Desktop\\UniserverZ",
   "allow_shell": false,
   "confirm_writes": true,
   "confirm_exec": true,
-  "tools_enabled": {
-    "screen": true,
-    "camera": true,
-    "files": true,
-    "health": true
-  },
-  "models": {
-    "chat": "llama3.2:3b",
-    "vision": "qwen2.5vl:7b",
-    "stt_size": "small"
-  },
-  "memory": {
-    "enabled": false,
-    "mode": "B",
-    "top_k": 5,
-    "context_top_k": 3,
-    "store_min_chars": 12
-  },
-  "temporal": {
-    "enabled": false,
-    "ics_paths": [],
-    "poll_interval_sec": 900,
-    "surface_min_score": 45.0,
-    "max_surface_events": 8
-  },
-  "patch": {
-    "strict_manifest": true,
-    "behavioral_check": true,
-    "behavioral_check_timeout_sec": 600
-  },
   "web": {
-    "enabled": false,
-    "allow_domains": [],
+    "search_provider": "searxng",
+    "enabled": true,
+    "search_api_endpoint": "http://127.0.0.1:8081/search",
+    "allow_domains": [
+      "api.weather.gov",
+      "weather.com",
+      "wikipedia.org",
+      "stackoverflow.com",
+      "stackexchange.com",
+      "docs.python.org",
+      "python.org",
+      "github.com",
+      "127.0.0.1"
+    ],
     "max_bytes": 20000000,
     "research_domains_limit": 4,
     "research_pages_per_domain": 8,
@@ -43,6 +24,238 @@
     "research_max_depth": 1,
     "research_seeds_per_domain": 8,
     "research_max_results": 8,
-    "research_min_score": 3.0
+    "research_min_score": 3.0,
+    "search_provider_priority": [
+      "wikipedia",
+      "stackexchange",
+      "general_web"
+    ],
+    "stackexchange_site": "stackoverflow",
+    "stackexchange_api_endpoint": "https://api.stackexchange.com/2.3/search/advanced",
+    "stackexchange_api_key_env": "STACKEXCHANGE_API_KEY",
+    "github_api_key_env": "GITHUB_TOKEN"
+  },
+  "server_side": {
+    "mode": "native",
+    "frontdoor": "direct",
+    "frontdoor_base_url": "",
+    "docker_enabled": false
+  },
+  "allowed_root": "C:\\NOVA",
+  "tools_enabled": {
+    "screen": true,
+    "camera": true,
+    "files": true,
+    "health": true,
+    "web": true,
+    "temporal_review": true
+  },
+  "models": {
+    "chat": "qwen3.5:4b",
+    "routing": "qwen3.5:4b",
+    "vision": "qwen2.5vl:7b",
+    "stt_size": "medium"
+  },
+  "preferred_models": {
+    "_comment": "Override SOCK tier defaults without code changes. Remove a key to let SOCK decide. SOCK still validates VRAM fit before applying.",
+    "tier_24gb_chat": "qwen2.5:32b",
+    "tier_12gb_chat": "phi4:14b",
+    "tier_8gb_chat": "qwen2.5:14b",
+    "tier_4gb_chat": "qwen3.5:4b",
+    "tier_cpu32_chat": "qwen2.5:14b",
+    "tier_cpu16_chat": "llama3.1:8b",
+    "tier_24gb_vision": "qwen2.5vl:72b",
+    "tier_12gb_vision": "qwen2.5vl:14b",
+    "tier_4gb_vision": "qwen2.5vl:7b",
+    "routing": "qwen3.5:4b"
+  },
+  "memory": {
+    "enabled": true,
+    "mode": "B",
+    "scope": "hybrid",
+    "top_k": 5,
+    "context_top_k": 3,
+    "min_score": 0.18,
+    "store_min_chars": 12,
+    "store_include_patterns": [
+      "^remember this",
+      "^learned_fact:",
+      "\\b(my name is|my location is|i live in|i work in|my favorite)\\b"
+    ],
+    "store_exclude_patterns": [
+      "^tip:",
+      "^network error:",
+      "^loading",
+      "^please try:"
+    ],
+    "exclude_sources": [
+      "voice"
+    ],
+    "retention": {
+      "durable_kinds": [
+        "identity",
+        "fact",
+        "user_correction",
+        "profile",
+        "user_fact"
+      ],
+      "ephemeral_kinds": [
+        "chat_user"
+      ],
+      "recall_exclude_kinds": [
+        "chat_user"
+      ],
+      "store_blocked_kinds": [
+        "chat_user"
+      ],
+      "contamination_min_ephemeral_rows": 1
+    }
+  },
+  "temporal": {
+    "enabled": true,
+    "ics_paths": [
+      "c:\\NOVA\\runtime\\temporal\\operator_calendar.ics"
+    ],
+    "poll_interval_sec": 900,
+    "surface_min_score": 38.0,
+    "max_surface_events": 8
+  },
+  "patch": {
+    "strict_manifest": true,
+    "enabled": true,
+    "allow_force": false,
+    "behavioral_check": true,
+    "behavioral_check_timeout_sec": 600
+  },
+  "safety_envelope": {
+    "enabled": true,
+    "mode": "enforce",
+    "replay_threshold": 1.0,
+    "replay_attempts": 2,
+    "novelty_min": 0.35,
+    "entropy_min": 2.8,
+    "diversity_min_messages": 3,
+    "human_veto_first_n": 3,
+    "auto_demote_threshold": 0.98,
+    "max_candidates_per_cycle": 12,
+    "full_regression_required": false,
+    "quarantine_root": "C:\\Nova\\runtime\\test_sessions\\quarantine",
+    "pending_review_root": "C:\\Nova\\runtime\\test_sessions\\pending_review"
+  },
+  "kidney": {
+    "enabled": true,
+    "mode": "enforce",
+    "definition_max_age_days": 2,
+    "definition_novelty_min": 0.5,
+    "quarantine_max_age_hours": 12,
+    "preview_max_age_days": 1,
+    "snapshot_max_age_days": 5,
+    "snapshot_max_count": 2,
+    "snapshot_max_total_gb": 1,
+    "temp_max_age_days": 2,
+    "temp_max_total_mb": 50,
+    "protect_patterns": [
+      "core_health_brief.json",
+      "work_tree.db"
+    ],
+    "exports_max_age_days": 3,
+    "ledger_max_mb": 20,
+    "release_extract_max_age_days": 3,
+    "release_validation_extract_max_total_mb": 1024,
+    "release_stage_max_age_days": 3,
+    "release_stage_max_total_mb": 256,
+    "subconscious_run_max_age_days": 2,
+    "subconscious_run_keep_count": 24,
+    "subconscious_run_max_flag": 400,
+    "recovery_quarantine_max_age_days": 14,
+    "recovery_quarantine_keep_count": 1
+  },
+  "observation_spine": {
+    "enabled": true,
+    "mode": "enforce",
+    "repeat_unchanged_threshold": 3,
+    "window_size": 64,
+    "persist_to_runtime": true,
+    "comments": "repeat_unchanged_threshold: minimum consecutive identical (source, operation, subject, input_ref) to trigger REPEATED_UNCHANGED_PATH. window_size: max observations retained in rolling buffer. Lower threshold=more aggressive loop detection, higher=more tolerance for legitimate repetition."
+  },
+  "layers": {
+    "leah": {
+      "mode": "active",
+      "fast_chat": true,
+      "fast_chat_skip_spine": false,
+      "promoted_capabilities": [
+        "leah_conversation_continuity"
+      ]
+    },
+    "codegen": {
+      "mode": "observe",
+      "promoted_capabilities": []
+    }
+  },
+  "autonomy": {
+    "enabled": true,
+    "mode": "canary",
+    "execute_enabled": true,
+    "orchestrator_owns_execution": true,
+    "legacy_maintenance_execution_enabled": false,
+    "allowed_actions": [
+      "guard_start",
+      "autonomy_maintenance_start",
+      "generated_queue_run_next",
+      "generated_queue_investigate",
+      "update_now_dry_run",
+      "pulse_status",
+      "patch_queue_run_next",
+      "active_work_tree_run_next",
+      "codegen_run",
+      "leah_build_run_next"
+    ],
+    "execute_allowed_actions": [
+      "generated_queue_run_next",
+      "generated_queue_investigate",
+      "pulse_status",
+      "patch_queue_run_next",
+      "active_work_tree_run_next",
+      "codegen_run",
+      "leah_build_run_next"
+    ],
+    "execute_allowed_action_groups": [
+      "runtime_health",
+      "generated_queue",
+      "patch_queue",
+      "active_work_tree",
+      "generated_code",
+      "leah_build",
+      "runtime_control"
+    ],
+    "execute_blocked_actions": [],
+    "requires_operator_ack_for": [
+      "update_now_dry_run",
+      "patch_preview_approve",
+      "patch_apply",
+      "governed_patch_apply"
+    ],
+    "confidence_threshold": 0.55,
+    "execute_min_confidence": 0.55,
+    "cooldown_sec": 0,
+    "mission": {
+      "enabled": true,
+      "mode": "steady_state_guard",
+      "objective": "hold_steady_and_surface_fresh_gaps",
+      "release_stale_ready_is_pressure": false,
+      "subconscious_triage_is_pressure": false,
+      "generated_queue_backlog_is_pressure": false,
+      "require_core_gate_for_green": true,
+      "ingestion_suppress_ambient_on_hold": false,
+      "sustained_watch_cycles": 6,
+      "hold_block_actions": [],
+      "hold_allow_actions": [
+        "patch_queue_run_next",
+        "guard_start",
+        "autonomy_maintenance_start"
+      ]
+    },
+    "active_work_tree_max_steps_per_cycle": 3,
+    "active_work_tree_max_trees_per_cycle": 8
   }
 }
