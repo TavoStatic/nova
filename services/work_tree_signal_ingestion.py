@@ -5979,6 +5979,12 @@ def _sequence_item_satisfied(branch_id: str, item: dict[str, Any]) -> bool:
         in {"complete", "attempted"}
     }
     if not progressed_task_ids:
+        if all(
+            str(getattr(getattr(task, "status", ""), "value", getattr(task, "status", "")) or "").strip().lower()
+            in {"complete", "dropped"}
+            for task in matching_tasks
+        ):
+            return True
         return False
     # An attempted stem advances the sequence, but remains unresolved work.
     # Finding closure is handled separately by the work-tree lifecycle.
@@ -6182,6 +6188,19 @@ class WorkTreeSignalIngestionService:
                 tree.tree_id, normalized, open_only=False
             )
         if closed_branch is not None:
+            try:
+                from services.solution_trail import trail_world_holds
+
+                held = trail_world_holds(closed_branch, has_open_stem=True)
+                if held and str(held.get("class") or "").strip().lower() == "refused":
+                    return {
+                        "action": "ignored",
+                        "tree_id": tree.tree_id,
+                        "branch_id": closed_branch.branch_id,
+                        "reason": f"closed_branch_trail_refused:{held.get('reason')}",
+                    }
+            except Exception:
+                pass
             has_unfulfilled = bool(_next_sequence_task(closed_branch.branch_id, normalized))
             if not has_unfulfilled:
                 return {
