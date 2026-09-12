@@ -3,9 +3,7 @@ from __future__ import annotations
 import time
 from typing import Any
 
-
-def _text(value: Any, limit: int = 240) -> str:
-    return str(value or "").strip()[:limit]
+from services.type_utils import _text
 
 
 def regression_outcome_label(status_label: str) -> str:

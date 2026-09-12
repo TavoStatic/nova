@@ -71,14 +71,7 @@ _LEGACY_ALIASES: dict[str, str] = {
     "core_thinning_prior_satisfaction_status": KEY_PRIOR_SATISFACTION_STATUS,
     "core_thinning_prior_completion_action": KEY_PRIOR_COMPLETION_ACTION,
 }
-
-
-def _as_dict(value: Any) -> dict[str, Any]:
-    return dict(value) if isinstance(value, dict) else {}
-
-
-def _text(value: Any, limit: int = 240) -> str:
-    return str(value or "").strip()[:limit]
+from services.type_utils import _as_dict, _text
 
 
 def _slug(value: str) -> str:

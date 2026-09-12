@@ -5,19 +5,11 @@ from pathlib import Path
 from typing import Any
 
 
+from services.type_utils import _as_dict, _as_int
+
+
 def _safe_text(value: Any, limit: int = 220) -> str:
     return str(value or "").strip()[:limit]
-
-
-def _as_int(value: Any, default: int = 0) -> int:
-    try:
-        return int(value)
-    except Exception:
-        return default
-
-
-def _as_dict(value: Any) -> dict[str, Any]:
-    return dict(value) if isinstance(value, dict) else {}
 
 
 SPEC_TO_LEGACY_DECISION = {

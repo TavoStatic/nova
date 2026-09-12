@@ -1,6 +1,6 @@
 # Nova Living Ledger
 
-_Generated: 2026-09-12 13:15_
+_Generated: 2026-09-12 13:28_
 
 Two sources feed this document: **developer sessions** and **Nova's own scan findings**.
 Append to `docs/ledger/session_log.jsonl` (developer) or `docs/ledger/nova_findings.jsonl` (Nova),
@@ -95,6 +95,22 @@ _Session: fix-signal-reopen-trail-refused-20260912_
 - and treat items with all closed (complete/dropped) tasks as satisfied in _sequence_item_satisfied
 
 **Meta:** 234 tests added
+
+### 2026-09-12 — claude-cowork
+_Session: consolidate-type-utils-20260912_
+
+**Modules touched:** `services/type_utils.py`, `services/autonomy_execution_gate.py`, `services/autonomy_orchestrator.py`, `services/autonomy_orchestrator_ledger.py`, `services/decision_proposal_judge.py`, `services/nova_grounded_self_report.py`, `services/nova_mission.py`, `services/nova_mission_owner_verdicts.py`, `services/recurring_finding_lifecycle.py`, `services/regression_evidence.py`, `services/regression_truth_registry.py`, `services/solution_trail.py`, `services/work_tree_operator_hold.py`, `services/work_tree_pressure_snapshot.py`
+
+**Changes:**
+- Created services/type_utils.py and consolidated duplicate type-casting helpers (_as_dict
+- _as_list
+- _as_int
+- _as_float
+- _as_bool
+- _as_bool_or_none
+- _text) across 13 service modules
+
+**Meta:** 155 tests added
 
 ### 2026-09-09 — opencode
 
@@ -1442,14 +1458,14 @@ Promote skip/remint/stop/pulse mill-cycle control only. Three trailing mill skip
 
 Latest ring and execution findings. Identical cycle reprints are collapsed to one line.
 
-- **2026-09-12** Ring 3 `climb_integrity` — verified: gap_count=0, queue=8 climbable=1 unclimbable=7
+- **2026-09-12** Ring 3 `climb_integrity` — caution: gap_count=0, queue=8 climbable=0 unclimbable=8
 - **2026-09-12** Ring 2 `contract_integrity` — drifted: gap_count=75, probe_context=live_status, wiring_gaps=40, closure_gaps=35
+- **2026-09-12** Ring 1 `map_integrity` — drifted: gap_count=2, unclassified_files=1, undeclared_docs=1
 - **2026-09-12** Ring 1 `map_integrity` — drifted: gap_count=1, undeclared_docs=1
 - **2026-09-12** Ring 2 `contract_integrity` — verified: gap_count=0, probe_context=live_status
 - **2026-09-09** Ring 1 `map_integrity` — drifted: gap_count=2, unclassified_files=2
 - **2026-09-09** Ring 2 `contract_integrity` — drifted: gap_count=1, probe_context=live_status, closure_gaps=1
 - **2026-09-08** Ring 1 `map_integrity` — verified: gap_count=0
-- **2026-09-07** Ring 1 `map_integrity` — drifted: gap_count=2, unclassified_files=1, undeclared_docs=1
 - **2026-09-01** `autonomy_maintenance` — caution: Overnight 2026-08-31 23:45 to 2026-09-01 06:41: 74 cycles ok, mill executed=0 trees=0, no capacity lease. Spine REPEATED_UNCHANGED_PATH on pulse_status not mill skip.
 - **2026-08-22** Ring 2 `contract_integrity` — drifted: gap_count=76, probe_context=live_status, wiring_gaps=40, closure_gaps=35, probe_gaps=1
 - **2026-08-22** Ring 2 `contract_integrity` — drifted: gap_count=2, probe_context=live_status, closure_gaps=1, probe_gaps=1
@@ -1466,7 +1482,7 @@ Latest ring and execution findings. Identical cycle reprints are collapsed to on
 ### Ring scan gaps (latest per category)
 
 - **2026-08-05** Ring 1 `nova_doc_coverage` — 9 doc(s) have stale NOVA_DOC block (last_session > 30 days)
-- **2026-09-09** Ring 1 `nova_root_inventory` — 2 source file(s) have no SOURCE_ROOT classification
+- **2026-09-12** Ring 1 `nova_root_inventory` — 1 source file(s) have no SOURCE_ROOT classification
 - **2026-09-12** Ring 1 `nova_doc_coverage` — 1 doc(s) in docs/ missing NOVA_DOC header block
 - **2026-09-12** Ring 2 `ring2_contract_integrity` — 35 closure gap(s): work-tree tracks open but no resolution evidence
 - **2026-08-22** Ring 2 `ring2_contract_integrity` — 1 contract probe gap(s) (live_status): services lack HTTP-reachable health probe

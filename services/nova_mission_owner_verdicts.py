@@ -30,38 +30,7 @@ RELEASE_SOLUTION_LADDER_TOOLS = (
     RELEASE_RECORD_VALIDATION_OUTCOME,
     RELEASE_PROMOTION_JUDGMENT,
 )
-
-
-def _as_dict(value: Any) -> dict:
-    return dict(value) if isinstance(value, dict) else {}
-
-
-def _as_list(value: Any) -> list:
-    return list(value) if isinstance(value, list) else []
-
-
-def _as_int(value: Any, default: int = 0) -> int:
-    try:
-        return int(value)
-    except Exception:
-        return default
-
-
-def _as_bool(value: Any, default: bool = False) -> bool:
-    if isinstance(value, bool):
-        return value
-    if value is None:
-        return default
-    text = str(value).strip().lower()
-    if text in {"1", "true", "yes", "y", "on"}:
-        return True
-    if text in {"0", "false", "no", "n", "off"}:
-        return False
-    return default
-
-
-def _text(value: Any, limit: int = 220) -> str:
-    return str(value or "").strip()[:limit]
+from services.type_utils import _as_bool, _as_dict, _as_int, _as_list, _text
 
 
 def _regression_evidence_current(

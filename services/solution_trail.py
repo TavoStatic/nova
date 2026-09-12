@@ -203,12 +203,7 @@ def record_world_hold_on_branch(
     return {"ok": True, "judgment": record}
 
 
-def _as_dict(value: Any) -> dict[str, Any]:
-    return dict(value) if isinstance(value, dict) else {}
-
-
-def _text(value: Any, limit: int = 240) -> str:
-    return str(value or "").strip()[:limit]
+from services.type_utils import _as_dict, _text
 
 
 def _norm_tool(value: Any) -> str:

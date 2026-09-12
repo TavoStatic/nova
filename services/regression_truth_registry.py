@@ -18,14 +18,12 @@ import time
 from pathlib import Path
 from typing import Any
 
+from services.type_utils import _text
+
 REQUIRED_LANES: tuple[str, ...] = ("unit", "behavior", "integration")
 LANE_ORDER: tuple[str, ...] = REQUIRED_LANES
 
 LANE_STATUSES: tuple[str, ...] = ("PASS", "FAILED", "TIMED_OUT")
-
-
-def _text(value: Any, limit: int = 120) -> str:
-    return str(value or "").strip()[:limit]
 
 
 def validate_lane_result(record: dict[str, Any]) -> list[str]:

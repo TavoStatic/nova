@@ -2,22 +2,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from services.type_utils import _as_dict, _as_int, _as_list, _text
 from services.work_tree_operator_hold import node_is_operator_hold
-
-
-def _as_dict(value: Any) -> dict:
-    return dict(value) if isinstance(value, dict) else {}
-
-
-def _as_list(value: Any) -> list:
-    return list(value) if isinstance(value, list) else []
-
-
-def _as_int(value: Any, default: int = 0) -> int:
-    try:
-        return int(value)
-    except Exception:
-        return default
 
 
 def _branches_from_counts(counts: dict, *, fallback: int = 0) -> int:

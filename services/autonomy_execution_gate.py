@@ -4,6 +4,7 @@ from typing import Any
 
 from services.autonomy_orchestrator import SPEC_DECISION_RECOMMEND_ACTION
 from services.nova_control_action_dispatcher import autonomy_advisory_action_catalog, is_autonomy_advisory_action
+from services.type_utils import _as_dict, _as_float, _as_list
 
 
 EXECUTION_MODE_ADVISORY = "advisory"
@@ -11,24 +12,9 @@ EXECUTION_MODE_CANARY = "canary"
 EXECUTION_MODE_EXECUTE = "execute"
 
 
-def _as_dict(value: Any) -> dict[str, Any]:
-    return value if isinstance(value, dict) else {}
-
-
-def _as_list(value: Any) -> list[Any]:
-    return value if isinstance(value, list) else []
-
-
 def _safe_text(value: Any, limit: int = 160) -> str:
     text = str(value or "").strip()
     return text[: max(1, int(limit or 160))]
-
-
-def _as_float(value: Any, default: float = 0.0) -> float:
-    try:
-        return float(value)
-    except Exception:
-        return default
 
 
 def _action_set(value: Any) -> set[str]:

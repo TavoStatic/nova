@@ -47,6 +47,14 @@ LEGACY_TO_SPEC_DECISION = {
 }
 
 ADVISORY_MODE = "advisory"
+from services.type_utils import (
+    _as_bool_or_none,
+    _as_dict,
+    _as_float,
+    _as_int,
+    _as_list,
+)
+
 EXECUTE_MODE = "execute"
 DEFAULT_CYCLE_CADENCE_SEC = 30
 DEFAULT_CYCLE_JITTER_PCT = 10
@@ -54,41 +62,6 @@ HARD_STALE_THRESHOLD_SEC = 120
 SOFT_STALE_THRESHOLD_SEC = 300
 DEFAULT_RECOMMENDATION_THRESHOLD = 0.55
 MISSION_GREEN_HOLD_PENALTY = 0.0
-
-
-def _as_dict(value: Any) -> dict[str, Any]:
-    return dict(value) if isinstance(value, dict) else {}
-
-
-def _as_list(value: Any) -> list[Any]:
-    return list(value) if isinstance(value, list) else []
-
-
-def _as_int(value: Any, default: int = 0) -> int:
-    try:
-        return int(value)
-    except Exception:
-        return default
-
-
-def _as_float(value: Any, default: float = 0.0) -> float:
-    try:
-        return float(value)
-    except Exception:
-        return default
-
-
-def _as_bool_or_none(value: Any) -> bool | None:
-    if isinstance(value, bool):
-        return value
-    if value is None:
-        return None
-    text = str(value).strip().lower()
-    if text in {"1", "true", "yes", "y", "ok", "running", "active", "healthy"}:
-        return True
-    if text in {"0", "false", "no", "n", "stopped", "inactive", "failed", "error", "missing"}:
-        return False
-    return None
 
 
 def _clamp_float(value: Any, default: float = 0.0) -> float:
