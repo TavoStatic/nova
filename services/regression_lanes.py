@@ -169,6 +169,8 @@ SOURCE_PROFILE_LANES: dict[str, list[str]] = {
         "tests.test_nova_memory_learning_service",
         "tests.test_leah_memory_recall_acceptance",
         "tests.test_leah_memory_recall_at5",
+        "tests.test_leah_voice_persona_engine",
+        "tests.test_leah_emotional_state_model",
     ],
     "source_backpack": [
         "tests.test_backpack_capability_surface",
@@ -283,6 +285,7 @@ SOURCE_PROFILE_LANES: dict[str, list[str]] = {
         "tests.test_observation_spine",
         "tests.test_observation_spine_fixes",
         "tests.test_self_scan_rings",
+        "tests.test_type_utils",
         "tests.test_work_admission_kernel",
     ],
     "source_tool_registry_policy": [

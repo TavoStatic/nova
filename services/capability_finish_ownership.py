@@ -45,7 +45,7 @@ DEFAULT_FINISH_OWNERSHIP: dict[str, dict[str, str]] = {
     },
     "leah_emotional_state_model": {
         "finisher": "nova_code",
-        "missing": "Implement and wire simple emotional state model",
+        "missing": None,
     },
     "dependency_resolution": {
         "finisher": "nova_code",

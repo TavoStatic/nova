@@ -1,6 +1,6 @@
 # Nova Living Ledger
 
-_Generated: 2026-09-12 13:28_
+_Generated: 2026-09-12 13:38_
 
 Two sources feed this document: **developer sessions** and **Nova's own scan findings**.
 Append to `docs/ledger/session_log.jsonl` (developer) or `docs/ledger/nova_findings.jsonl` (Nova),
@@ -111,6 +111,22 @@ _Session: consolidate-type-utils-20260912_
 - _text) across 13 service modules
 
 **Meta:** 155 tests added
+
+### 2026-09-12 — claude-cowork
+_Session: leah-emotional-state-model-20260912_
+
+**Modules touched:** `services/leah_emotional_state_model.py`, `tests/test_leah_emotional_state_model.py`, `capabilities.json`, `capabilities_roadmap.json`, `services/capability_finish_ownership.py`, `services/regression_lanes.py`
+
+**Changes:**
+- Implement leah_emotional_state_model capability: valence/arousal/confidence dimension tracking
+- text signal analysis
+- primary emotion derivation
+- decay dynamics
+- prompt posture modulation
+- disk persistence
+- and CognitiveWorkspace integration
+
+**Meta:** 49 tests added
 
 ### 2026-09-09 — opencode
 
@@ -1458,7 +1474,7 @@ Promote skip/remint/stop/pulse mill-cycle control only. Three trailing mill skip
 
 Latest ring and execution findings. Identical cycle reprints are collapsed to one line.
 
-- **2026-09-12** Ring 3 `climb_integrity` — caution: gap_count=0, queue=8 climbable=0 unclimbable=8
+- **2026-09-12** Ring 3 `climb_integrity` — verified: gap_count=0, queue=0 climbable=0 unclimbable=0
 - **2026-09-12** Ring 2 `contract_integrity` — drifted: gap_count=75, probe_context=live_status, wiring_gaps=40, closure_gaps=35
 - **2026-09-12** Ring 1 `map_integrity` — drifted: gap_count=2, unclassified_files=1, undeclared_docs=1
 - **2026-09-12** Ring 1 `map_integrity` — drifted: gap_count=1, undeclared_docs=1

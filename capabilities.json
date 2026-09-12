@@ -27,5 +27,7 @@
   "capability_gap_detection": "Nova can detect gaps between desired capabilities (roadmap) and registered capabilities",
   "codegen_tool": "Nova can generate code from specifications with preview-only safety constraints",
   "codegen_patch_bridge": "Nova can convert codegen previews into formal patch artifacts compatible with patch queue",
-  "code_generation_memory": "Nova records generated code patterns and can reuse them for similar future specs"
+  "code_generation_memory": "Nova records generated code patterns and can reuse them for similar future specs",
+  "leah_voice_persona_engine": "Leah can speak with a stable voice persona and response style",
+  "leah_emotional_state_model": "Leah can track a simple emotional state model for replies"
 }
