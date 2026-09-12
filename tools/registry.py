@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import json
 import os
@@ -76,12 +76,22 @@ def _append_tool_event(payload: dict[str, Any]) -> None:
 
 
 class ToolRegistry:
+    TOOL_ALIASES: dict[str, str] = {
+        "search_web": "web_search",
+        "google_search": "web_search",
+        "fetch_url": "web_fetch",
+        "fetch_web": "web_fetch",
+        "get_url": "web_fetch",
+    }
+
     def __init__(self, tools: list[NovaTool]):
         self._tools = {tool.name: tool for tool in tools}
         self._manifest = _load_manifest()
 
     def get(self, name: str) -> NovaTool | None:
-        return self._tools.get(str(name or "").strip())
+        key = str(name or "").strip()
+        key = self.TOOL_ALIASES.get(key, key)
+        return self._tools.get(key)
 
     def list_metadata(self) -> list[dict[str, Any]]:
         manifest_tools = self._manifest.get("tools") if isinstance(self._manifest.get("tools"), list) else []

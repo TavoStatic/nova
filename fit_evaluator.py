@@ -1,4 +1,4 @@
-﻿"""Fit evaluation seams for Nova's shared-state architecture."""
+"""Fit evaluation seams for Nova's shared-state architecture."""
 
 from __future__ import annotations
 

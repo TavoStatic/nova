@@ -1,4 +1,4 @@
-﻿import sqlite3
+import sqlite3
 c = sqlite3.connect(r"runtime/_internal/work_tree.db")
 rows = c.execute(
     """

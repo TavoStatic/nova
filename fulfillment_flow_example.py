@@ -1,4 +1,4 @@
-﻿"""Small end-to-end demonstration of Nova's fulfillment architecture.
+"""Small end-to-end demonstration of Nova's fulfillment architecture.
 
 This module uses placeholder example content only to exercise the shape of the
 architecture. It is not intended to define domain logic or become the basis for

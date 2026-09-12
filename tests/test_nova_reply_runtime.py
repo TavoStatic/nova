@@ -1,4 +1,4 @@
-﻿import unittest
+import unittest
 
 from services.nova_reply_runtime import apply_reply_runtime_effects
 

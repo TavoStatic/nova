@@ -1,4 +1,4 @@
-﻿import sqlite3, json
+import sqlite3, json
 from pathlib import Path
 c = sqlite3.connect(r"runtime/_internal/work_tree.db")
 c.row_factory = sqlite3.Row

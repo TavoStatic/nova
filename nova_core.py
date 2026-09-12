@@ -2904,18 +2904,18 @@ def _clamp_language_mix(value: Any) -> int:
 
 
 def _estimate_spanish_ratio(text: str) -> float:
-    """Estimate Spanish content from Unicode character profile only â€” no keyword lists."""
+    """Estimate Spanish content from Unicode character profile only — no keyword lists."""
     raw = str(text or "")
     if not raw.strip():
         return 0.0
     # Spanish-specific characters not naturally present in standard English text.
     # Using character-level evidence avoids keyword-trigger brittleness.
-    spanish_chars = set("Ã¡Ã©Ã­Ã³ÃºÃ¼Ã±ÃÃ‰ÃÃ“ÃšÃœÃ‘Â¿Â¡")
+    spanish_chars = set("áéíóúüñÁÉÍÓÚÜÑ¿¡")
     letter_count = sum(1 for c in raw if c.isalpha())
     if letter_count == 0:
         return 0.0
     accent_count = sum(1 for c in raw if c in spanish_chars)
-    # Accented chars are a strong signal; scale so ~12% accent ratio â†’ 1.0
+    # Accented chars are a strong signal; scale so ~12% accent ratio → 1.0
     return min(1.0, float(accent_count) / max(1, letter_count) * 8.0)
 
 

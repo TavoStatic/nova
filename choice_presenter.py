@@ -1,4 +1,4 @@
-﻿"""Choice presentation seams for Nova's shared-state architecture."""
+"""Choice presentation seams for Nova's shared-state architecture."""
 
 from __future__ import annotations
 

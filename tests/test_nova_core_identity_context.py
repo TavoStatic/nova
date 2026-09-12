@@ -134,6 +134,11 @@ class TestNovaCoreIdentityContext(unittest.TestCase):
         self.assertIn("Assistant: prior answer", context)
         self.assertNotIn("User: current turn", context)
 
+    def test_estimate_spanish_ratio_accented_characters(self):
+        self.assertEqual(nova_core._estimate_spanish_ratio("Hello world"), 0.0)
+        self.assertGreater(nova_core._estimate_spanish_ratio("Como estás"), 0.0)
+        self.assertEqual(nova_core._estimate_spanish_ratio("¿Cómo estás?"), 1.0)
+
 
 if __name__ == "__main__":
     unittest.main()

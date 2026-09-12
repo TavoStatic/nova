@@ -479,6 +479,23 @@ class TestToolRegistry(unittest.TestCase):
             self.assertEqual(payload["status"], "error")
             self.assertIn("system_helper_failed", payload["error"])
 
+    def test_tool_registry_resolves_web_tool_aliases(self):
+        from services.nova_tool_policy import research_handlers
+        dummy_fetch = lambda *a: "fetch"
+        dummy_search = lambda *a: "search"
+        handlers = research_handlers(
+            tool_web_fetch_fn=dummy_fetch,
+            tool_web_search_fn=dummy_search,
+            tool_web_research_fn=lambda *a: "research",
+            tool_web_gather_fn=lambda *a: "gather",
+            tool_wikipedia_lookup_fn=lambda *a: "wiki",
+            tool_stackexchange_search_fn=lambda *a: "se",
+        )
+        self.assertEqual(handlers.get("search_web"), dummy_search)
+        self.assertEqual(handlers.get("google_search"), dummy_search)
+        self.assertEqual(handlers.get("fetch_url"), dummy_fetch)
+        self.assertEqual(handlers.get("fetch_web"), dummy_fetch)
+
     def test_core_keyword_to_status_event_pipeline(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

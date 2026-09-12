@@ -26,6 +26,10 @@ def research_handlers(
         "web_gather": tool_web_gather_fn,
         "wikipedia_lookup": tool_wikipedia_lookup_fn,
         "stackexchange_search": tool_stackexchange_search_fn,
+        "search_web": tool_web_search_fn,
+        "google_search": tool_web_search_fn,
+        "fetch_url": tool_web_fetch_fn,
+        "fetch_web": tool_web_fetch_fn,
     }
 
 
