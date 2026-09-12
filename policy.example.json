@@ -184,7 +184,10 @@
       "fast_chat": true,
       "fast_chat_skip_spine": false,
       "promoted_capabilities": [
-        "leah_conversation_continuity"
+        "leah_conversation_continuity",
+        "leah_memory_recall",
+        "leah_voice_persona_engine",
+        "leah_emotional_state_model"
       ]
     },
     "codegen": {

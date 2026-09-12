@@ -179,6 +179,41 @@ class TestNovaHttpRequestBindingService(unittest.TestCase):
         self.assertEqual(payload.get("reply"), f"{payload.get('session_id')}:hi nova:runner")
         self.assertEqual(invalidations, ["invalidated"])
 
+    def test_handle_chat_request_runs_emotional_state_and_voice_persona_services(self):
+        invalidations = []
+        emotion_updates = []
+
+        class FakeEmotionalStateService:
+            def update_state(self, text):
+                emotion_updates.append(text)
+            def get_instruction(self):
+                return "Emotional posture: Friendly and warm."
+
+        class FakeVoicePersonaService:
+            def process_response(self, reply, context_text=""):
+                return f"[Friendly] {reply}"
+
+        code, payload = HTTP_REQUEST_BINDING_SERVICE.handle_chat_request(
+            handler=object(),
+            qs={},
+            payload={"message": "hello Leah", "session_id": "emot123", "user_id": "runner"},
+            chat_login_auth_fn=lambda _handler: (True, "runner"),
+            normalize_user_id_fn=lambda user: str(user or "").strip(),
+            request_user_id_fn=lambda *_args, **_kwargs: "runner",
+            assert_session_owner_fn=lambda *_args, **_kwargs: (True, "owner_bound"),
+            process_chat_fn=lambda session_id, message, user_id="": "I am doing great!",
+            invalidate_control_status_cache_fn=lambda: invalidations.append("invalidated"),
+            token_hex_fn=lambda _size: "unused",
+            emotional_state_service=FakeEmotionalStateService(),
+            voice_persona_service=FakeVoicePersonaService(),
+        )
+
+        self.assertEqual(code, 200)
+        self.assertEqual(payload.get("reply"), "[Friendly] I am doing great!")
+        self.assertEqual(payload.get("emotional_instruction"), "Emotional posture: Friendly and warm.")
+        self.assertEqual(emotion_updates, ["hello Leah", "I am doing great!"])
+        self.assertEqual(invalidations, ["invalidated"])
+
 
 if __name__ == "__main__":
     unittest.main()

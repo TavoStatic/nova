@@ -16,13 +16,13 @@ class TestCapabilityFinishOwnership(unittest.TestCase):
             "autonomous_code_generation",
             "api_gateway",
             "deployment_automation",
-            "leah_voice_persona_engine",
+            "security_scanning",
         ]
         part = partition_capability_gaps(gaps)
         self.assertIn("autonomous_code_generation", part["nova_code_gap_names"])
         self.assertIn("api_gateway", part["external_gap_names"])
         self.assertIn("deployment_automation", part["external_gap_names"])
-        self.assertIn("leah_voice_persona_engine", part["external_gap_names"])
+        self.assertIn("security_scanning", part["external_gap_names"])
         self.assertNotIn("api_gateway", part["nova_code_gap_names"])
 
     def test_classify_nova_code(self):
@@ -78,7 +78,9 @@ class TestExternalFinishSurfaces(unittest.TestCase):
         self.assertFalse(status.get("ok"))
         self.assertGreaterEqual(int(status.get("incomplete_count") or 0), 1)
         names = {row.get("area") for row in list(status.get("incomplete_areas") or [])}
-        self.assertIn("default_supervisor_rule_specs", names)
+        all_names = {row.get("area") for row in list(status.get("areas") or [])}
+        self.assertIn("explicit_intent_ownership_rules", names)
+        self.assertIn("default_supervisor_rule_specs", all_names)
 
     def test_finish_areas_inventory_aggregates(self):
         from services.finish_areas_inventory import build_finish_areas_inventory

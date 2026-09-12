@@ -59,6 +59,8 @@ class NovaHttpRequestBindingService:
         attachment_context_service=None,
         append_session_turn_fn=None,
         memory_recall_service=None,
+        voice_persona_service=None,
+        emotional_state_service=None,
     ) -> tuple[int, dict]:
         ok_chat, chat_user = chat_login_auth_fn(handler)
         if not ok_chat:
@@ -92,6 +94,12 @@ class NovaHttpRequestBindingService:
             except Exception:
                 pass  # store failure must never break a chat turn
 
+        if emotional_state_service is not None:
+            try:
+                emotional_state_service.update_state(message)
+            except Exception:
+                pass  # emotional state update failure must never break chat turn
+
         if memory_recall_service is not None:
             try:
                 recall_ctx = memory_recall_service.recall_for_turn(message)
@@ -104,8 +112,29 @@ class NovaHttpRequestBindingService:
         except Exception as exc:
             return 500, {"ok": False, "session_id": session_id, "error": f"chat_failed: {exc}"}
 
+        if emotional_state_service is not None:
+            try:
+                emotional_state_service.update_state(reply)
+            except Exception:
+                pass
+
+        if voice_persona_service is not None:
+            try:
+                reply = voice_persona_service.process_response(reply, context_text=message)
+            except Exception:
+                pass
+
+        response_dict = {"ok": True, "session_id": session_id, "reply": reply}
+        if emotional_state_service is not None:
+            try:
+                instruction = emotional_state_service.get_instruction()
+                if instruction:
+                    response_dict["emotional_instruction"] = instruction
+            except Exception:
+                pass
+
         invalidate_control_status_cache_fn()
-        return 200, {"ok": True, "session_id": session_id, "reply": reply}
+        return 200, response_dict
 
     @staticmethod
     def handle_upload_request(
@@ -203,9 +232,11 @@ class NovaHttpRequestBindingService:
             process_chat_fn=runtime_fn(runtime_scope, "process_chat"),
             invalidate_control_status_cache_fn=runtime_fn(runtime_scope, "_invalidate_control_status_cache"),
             token_hex_fn=secrets.token_hex,
-            attachment_context_service=runtime_fn(runtime_scope, "LEAH_FRONTDOOR_SERVICE"),
-            append_session_turn_fn=runtime_fn(runtime_scope, "_append_session_turn"),
-            memory_recall_service=runtime_fn(runtime_scope, "LEAH_MEMORY_RECALL_SERVICE"),
+            attachment_context_service=runtime_scope.get("LEAH_FRONTDOOR_SERVICE"),
+            append_session_turn_fn=runtime_scope.get("_append_session_turn"),
+            memory_recall_service=runtime_scope.get("LEAH_MEMORY_RECALL_SERVICE"),
+            voice_persona_service=runtime_scope.get("LEAH_VOICE_PERSONA_ENGINE_SERVICE"),
+            emotional_state_service=runtime_scope.get("LEAH_EMOTIONAL_STATE_MODEL_SERVICE"),
         )
 
 

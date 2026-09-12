@@ -37,13 +37,17 @@ DEFAULT_FINISH_OWNERSHIP: dict[str, dict[str, str]] = {
     },
     "leah_conversation_continuity": {
         "finisher": "nova_code",
-        "missing": "Finish continuity wiring and honest registration",
+        "missing": None,
     },
     "leah_memory_recall": {
         "finisher": "nova_code",
-        "missing": "Finish Leah recall path on real memory surfaces",
+        "missing": None,
     },
     "leah_emotional_state_model": {
+        "finisher": "nova_code",
+        "missing": None,
+    },
+    "leah_voice_persona_engine": {
         "finisher": "nova_code",
         "missing": None,
     },
@@ -66,11 +70,6 @@ DEFAULT_FINISH_OWNERSHIP: dict[str, dict[str, str]] = {
     "integration_testing": {
         "finisher": "nova_code",
         "missing": "Generate/run integration tests for generated features",
-    },
-    # Needs environment / models / runtime stack
-    "leah_voice_persona_engine": {
-        "finisher": "environment",
-        "missing": "Voice/TTS runtime, models, and machine capacity",
     },
     # Needs product decision + external systems (not local thrash)
     "api_gateway": {
