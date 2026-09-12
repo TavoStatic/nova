@@ -6182,6 +6182,14 @@ class WorkTreeSignalIngestionService:
                 tree.tree_id, normalized, open_only=False
             )
         if closed_branch is not None:
+            has_unfulfilled = bool(_next_sequence_task(closed_branch.branch_id, normalized))
+            if not has_unfulfilled:
+                return {
+                    "action": "ignored",
+                    "tree_id": tree.tree_id,
+                    "branch_id": closed_branch.branch_id,
+                    "reason": "closed_branch_sequence_already_satisfied",
+                }
             closed_branch.source_payload = bump_branch_reopen(
                 closed_branch.source_payload,
                 finding_key=source_key,
@@ -8418,6 +8426,14 @@ class WorkTreeSignalIngestionService:
                     ),
                 )
                 work_tree.mark_task_blocked(task.task_id, blocked_reason)
+            elif not open_tasks and not task_text and not blocked_task:
+                resolution = str(getattr(branch, "resolution_state", "") or "").strip().lower()
+                if resolution in {"open", "observing"}:
+                    _mark_branch_resolved_with_lifecycle(
+                        branch,
+                        note="Signal task sequence satisfied with no open task stems.",
+                        completion_action="signal_sequence_exhausted",
+                    )
                 blocked_open_tasks = True
             elif blocked_open_tasks and blocked_task:
                 blocked_reason = str(normalized.get("blocked_reason") or "").strip() or MEMORY_BOOTSTRAP_ORIGIN_CONTRACT_REQUIRED

@@ -5082,6 +5082,41 @@ class TestSignalBranchDedupe(unittest.TestCase):
             "governance_pressure:source_root_inventory:source_root_inventory_gap:source_root_inventory_gap",
         )
 
+    def test_closed_branch_not_reopened_when_sequence_is_satisfied(self) -> None:
+        signal = {
+            "source": "test_ecosystem",
+            "signal_class": "governance_pressure",
+            "title": "Satisfied sequence test signal",
+            "source_key": "governance_pressure:test_ecosystem:satisfied_sequence_test",
+            "payload": {
+                "task_sequence": [
+                    {"title": "Step 1", "allowed_tools": ["read"], "preferred_tool": "read"}
+                ]
+            },
+            "severity": "high",
+            "actionability": "safe_now",
+        }
+        res1 = self.service.ingest_signal(signal)
+        branch_id = res1["branch_id"]
+        branch = work_tree.get_branch(branch_id)
+        tasks = work_tree.list_branch_tasks(branch_id)
+        self.assertEqual(len(tasks), 1)
+
+        # Mark task complete and branch resolved
+        work_tree.mark_task_complete(tasks[0].task_id)
+        branch.resolution_state = "resolved"
+        branch.status = work_tree.BranchStatus.COMPLETE
+        work_tree.touch_branch(branch_id)
+
+        # Re-ingest same signal
+        res2 = self.service.ingest_signal(signal)
+        self.assertEqual(res2["action"], "ignored")
+        self.assertEqual(res2["reason"], "closed_branch_sequence_already_satisfied")
+
+        reloaded_branch = work_tree.get_branch(branch_id)
+        self.assertEqual(reloaded_branch.status, work_tree.BranchStatus.COMPLETE)
+        self.assertEqual(reloaded_branch.resolution_state, "resolved")
+
 
 if __name__ == "__main__":
     unittest.main()
