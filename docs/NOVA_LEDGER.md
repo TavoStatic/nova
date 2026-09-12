@@ -1,6 +1,6 @@
 # Nova Living Ledger
 
-_Generated: 2026-09-12 01:30_
+_Generated: 2026-09-12 12:51_
 
 Two sources feed this document: **developer sessions** and **Nova's own scan findings**.
 Append to `docs/ledger/session_log.jsonl` (developer) or `docs/ledger/nova_findings.jsonl` (Nova),
@@ -53,6 +53,16 @@ _Session: leah-memory-recall-at5-20260912_
 - unblocking new-session mem_recall queries for AT-5
 
 **Meta:** 45 tests added
+
+### 2026-09-12 — claude-cowork
+_Session: fix-guard-file-leak-20260912_
+
+**Modules touched:** `nova_guard.py`, `tests/test_nova_guard_boot.py`
+
+**Changes:**
+- Fix file handle leak in nova_guard._maintenance_tick by wrapping MAINTENANCE_LOG open in context manager
+
+**Meta:** 9 tests added
 
 ### 2026-09-09 — opencode
 
@@ -1403,7 +1413,7 @@ Latest ring and execution findings. Identical cycle reprints are collapsed to on
 - **2026-09-12** Ring 3 `climb_integrity` — verified: gap_count=0, queue=0 climbable=0 unclimbable=0
 - **2026-09-12** Ring 2 `contract_integrity` — drifted: gap_count=61, probe_context=live_status, wiring_gaps=33, closure_gaps=28
 - **2026-09-12** Ring 1 `map_integrity` — drifted: gap_count=1, undeclared_docs=1
-- **2026-09-11** Ring 2 `contract_integrity` — verified: gap_count=0, probe_context=live_status
+- **2026-09-12** Ring 2 `contract_integrity` — verified: gap_count=0, probe_context=live_status
 - **2026-09-09** Ring 1 `map_integrity` — drifted: gap_count=2, unclassified_files=2
 - **2026-09-09** Ring 2 `contract_integrity` — drifted: gap_count=1, probe_context=live_status, closure_gaps=1
 - **2026-09-08** Ring 1 `map_integrity` — verified: gap_count=0

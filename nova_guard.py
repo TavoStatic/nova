@@ -1025,14 +1025,14 @@ def _maintenance_tick(attempt: GuardAttempt) -> None:
         flags = 0
         if os.name == "nt":
             flags = subprocess.CREATE_NEW_PROCESS_GROUP | getattr(subprocess, "CREATE_NO_WINDOW", 0)
-        fh = open(MAINTENANCE_LOG, "a", encoding="utf-8")
-        _MAINTENANCE_PROC = subprocess.Popen(
-            [str(VENV_PY), str(MAINTENANCE_SCRIPT), "--once"],
-            cwd=str(ROOT),
-            stdout=fh,
-            stderr=subprocess.STDOUT,
-            creationflags=flags,
-        )
+        with open(MAINTENANCE_LOG, "a", encoding="utf-8") as fh:
+            _MAINTENANCE_PROC = subprocess.Popen(
+                [str(VENV_PY), str(MAINTENANCE_SCRIPT), "--once"],
+                cwd=str(ROOT),
+                stdout=fh,
+                stderr=subprocess.STDOUT,
+                creationflags=flags,
+            )
         _LAST_MAINTENANCE_LAUNCH = now
         _MAINTENANCE_LAUNCHED_AT = now
         log(f"[GUARD] Maintenance cycle launched pid={_MAINTENANCE_PROC.pid}")
