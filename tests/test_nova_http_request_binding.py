@@ -214,6 +214,37 @@ class TestNovaHttpRequestBindingService(unittest.TestCase):
         self.assertEqual(emotion_updates, ["hello Leah", "I am doing great!"])
         self.assertEqual(invalidations, ["invalidated"])
 
+    def test_handle_chat_request_applies_selected_voice_tone(self):
+        selected = []
+
+        class FakeVoicePersonaService:
+            def select_persona(self, *, force=None):
+                selected.append(force)
+
+            def process_response(self, reply):
+                return reply
+
+        code, _payload = HTTP_REQUEST_BINDING_SERVICE.handle_chat_request(
+            handler=object(),
+            qs={},
+            payload={
+                "message": "hello Leah",
+                "session_id": "tone123",
+                "voice_persona": "empathetic",
+            },
+            chat_login_auth_fn=lambda _handler: (True, "runner"),
+            normalize_user_id_fn=lambda user: str(user or "").strip(),
+            request_user_id_fn=lambda *_args, **_kwargs: "runner",
+            assert_session_owner_fn=lambda *_args, **_kwargs: (True, "owner_bound"),
+            process_chat_fn=lambda _session_id, _message, user_id="": "reply",
+            invalidate_control_status_cache_fn=lambda: None,
+            token_hex_fn=lambda _size: "unused",
+            voice_persona_service=FakeVoicePersonaService(),
+        )
+
+        self.assertEqual(code, 200)
+        self.assertEqual(selected, ["empathetic"])
+
 
 if __name__ == "__main__":
     unittest.main()

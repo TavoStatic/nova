@@ -21,7 +21,7 @@
     userId: "",
     sessionId: "",
     chatLoginEnabled: false,
-    voiceEnabled: false,
+    voiceEnabled: true,
     listenMode: false,
     recognition: null,
     recognitionActive: false,
@@ -42,6 +42,7 @@
     moodReason: "steady runtime",
     lastRuntimePulse: null,
     lastOutreachId: "",
+    voicePersona: localStorage.getItem("leah_voice_persona") || "friendly",
   };
 
   const moodProfiles = {
@@ -99,6 +100,7 @@
     btnMic: document.getElementById("btnMic"),
     btnListen: document.getElementById("btnListen"),
     btnVoice: document.getElementById("btnVoice"),
+    voiceTone: document.getElementById("voiceTone"),
     btnSend: document.getElementById("btnSend"),
     btnNewSession: null,
     stagedList: document.getElementById("stagedList"),
@@ -146,6 +148,7 @@
     evidenceFeed: document.getElementById("evidenceFeed"),
     hudStatus: document.getElementById("hudStatus"),
     hudRing: document.querySelector(".hud-container"),
+    activityRing: document.getElementById("activityRing"),
   };
 
   function makeUserId() {
@@ -216,7 +219,7 @@
 
   function updateStatusDots(summary) {
     setStatus(dom.dotCore, summary.runtimeOk, summary.runtimeOk ? "ONLINE" : "OFFLINE");
-    setStatus(dom.dotGuard, state.lastRuntimePulse?.guard_running ?? false, (state.lastRuntimePulse?.guard_running ?? false) ? "ACTIVE" : "INACTIVE");
+    setStatus(dom.dotGuard, summary.guardRunning, summary.guardRunning ? "ACTIVE" : "INACTIVE");
     setStatus(dom.dotHttp, true, "CONNECTED");
     setStatus(dom.dotOllama, state.lastRuntimePulse?.ollama_api_up ?? false, (state.lastRuntimePulse?.ollama_api_up ?? false) ? "READY" : "OFFLINE");
   }
@@ -232,7 +235,7 @@
   function appendEvidence(text) {
     if (!dom.evidenceFeed) return;
     const entry = document.createElement("div");
-    entry.className = "evidence-entry";
+    entry.className = "evidence-item";
     entry.innerHTML = '<span class="evidence-text">' + text + '</span><span class="evidence-time">now</span>';
     dom.evidenceFeed.prepend(entry);
     while (dom.evidenceFeed.children.length > 8) {
@@ -480,6 +483,7 @@
     const summary = {
       health: Number(payload?.health_score || 0),
       runtimeOk: Boolean(payload?.core_running),
+      guardRunning: Boolean(payload?.guard_running),
       queueActionable: Number(payload?.queue_actionable_count || 0),
       queueOpen: Number(payload?.queue_open_count || 0),
       patchReview: Number(payload?.patch_review_previews_total || 0),
@@ -567,13 +571,69 @@
     dom.chat.scrollTop = dom.chat.scrollHeight;
     if (kind === "assistant") {
       startReplyPulse(text, card);
-      speakAssistant(text);
+      if (state.voiceEnabled) speakAssistant(text);
     }
+  }
+
+  let vuMeterInterval = null;
+  let vuWordTimeouts = [];
+
+  function startVUMeter() {
+    if (vuMeterInterval) return;
+    const segs = dom.activityRing ? dom.activityRing.querySelectorAll(".ring-seg") : [];
+    if (!segs.length) return;
+    let lastLevel = [0.5, 0.5, 0.5, 0.5, 0.5, 0.5];
+    vuMeterInterval = setInterval(() => {
+      segs.forEach((seg, i) => {
+        const prev = lastLevel[i];
+        const delta = (Math.random() - 0.5) * 0.35;
+        const level = Math.max(0.15, Math.min(1, prev + delta));
+        lastLevel[i] = level;
+        const width = 14 + level * 10;
+        seg.style.opacity = String(level);
+        seg.style.strokeWidth = String(width);
+      });
+    }, 120);
+  }
+
+  function stopVUMeter() {
+    if (vuMeterInterval) {
+      clearInterval(vuMeterInterval);
+      vuMeterInterval = null;
+    }
+    vuWordTimeouts.forEach(t => clearTimeout(t));
+    vuWordTimeouts = [];
+    const segs = dom.activityRing ? dom.activityRing.querySelectorAll(".ring-seg") : [];
+    segs.forEach((seg) => {
+      seg.style.opacity = "";
+      seg.style.strokeWidth = "";
+    });
+  }
+
+  function runSpeechAnimator(text) {
+    const words = text.split(/\s+/).filter(Boolean);
+    let cursor = 0;
+    words.forEach((word) => {
+      const charCount = word.length;
+      const baseDur = 180 + charCount * 35;
+      const hasPunct = /[.,;:!?]/.test(word);
+      const pauseAfter = hasPunct ? 500 : 80;
+      vuWordTimeouts.push(setTimeout(() => {
+        if (!dom.activityRing?.classList.contains("speaking")) return;
+        startVUMeter();
+      }, cursor));
+      vuWordTimeouts.push(setTimeout(() => {
+        stopVUMeter();
+      }, cursor + baseDur));
+      cursor += baseDur + pauseAfter;
+    });
   }
 
   function clearReplyPulseTimers() {
     state.replyPulseTimers.forEach((timer) => window.clearTimeout(timer));
     state.replyPulseTimers = [];
+    stopVUMeter();
+    if (dom.activityRing) dom.activityRing.classList.remove("speaking");
     if (state.replyPulseFadeTimer) {
       window.clearTimeout(state.replyPulseFadeTimer);
       state.replyPulseFadeTimer = null;
@@ -689,16 +749,241 @@
     if (!spoken) return;
     try {
       window.speechSynthesis.cancel();
+      stopVUMeter();
       const utterance = new SpeechSynthesisUtterance(spoken);
       utterance.rate = 1;
       utterance.pitch = 1;
+      const voices = window.speechSynthesis.getVoices();
+      const preferred = voices.find(v => /Microsoft.*David|Microsoft.*Zira|Google.*US|SAPI|enhanced/i.test(v.name) && v.lang.startsWith("en"))
+        || voices.find(v => v.lang.startsWith("en"))
+        || voices[0];
+      if (preferred) utterance.voice = preferred;
+      let cleaned = false;
+      const cleanup = () => {
+        if (cleaned) return;
+        cleaned = true;
+        stopVUMeter();
+        if (dom.activityRing) dom.activityRing.classList.remove("speaking");
+      };
+      utterance.onstart = () => {
+        if (dom.activityRing) dom.activityRing.classList.add("speaking");
+        runSpeechAnimator(spoken);
+      };
+      utterance.onend = cleanup;
+      utterance.onerror = cleanup;
       window.speechSynthesis.speak(utterance);
+      setTimeout(cleanup, Math.max(spoken.length * 80, 8000));
     } catch (_) {
-      // Keep the panel usable even if speech APIs are flaky.
+      stopVUMeter();
+      if (dom.activityRing) dom.activityRing.classList.remove("speaking");
     }
   }
 
   async function ensureChatLogin(forcePrompt = false) {
+
+  // ── Audio-Reactive Speech Animation ──
+  const audioReactive = (() => {
+    let audioCtx = null;
+    let analyser = null;
+    let sourceNode = null;
+    let rafId = null;
+    let speaking = false;
+    let wordTimeouts = [];
+
+    const ATTACK = 0.25;
+    const RELEASE = 0.06;
+
+    const target = { voiceLevel: 0, bass: 0, mid: 0, treble: 0 };
+    const smoothed = { voiceLevel: 0, bass: 0, mid: 0, treble: 0 };
+
+    function initAudioContext() {
+      if (audioCtx) return audioCtx;
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      analyser = audioCtx.createAnalyser();
+      analyser.fftSize = 512;
+      analyser.smoothingTimeConstant = 0.8;
+      analyser.connect(audioCtx.destination);
+      return audioCtx;
+    }
+
+    function resumeAudioContext() {
+      if (audioCtx && audioCtx.state === "suspended") {
+        audioCtx.resume();
+      }
+    }
+
+    function connectAudioElement(el) {
+      initAudioContext();
+      resumeAudioContext();
+      if (sourceNode) {
+        try { sourceNode.disconnect(); } catch (_) {}
+      }
+      sourceNode = audioCtx.createMediaElementSource(el);
+      sourceNode.connect(analyser);
+      el.play();
+    }
+
+    function smoothValue(prop, val) {
+      const speed = val > smoothed[prop] ? ATTACK : RELEASE;
+      smoothed[prop] = smoothed[prop] + (val - smoothed[prop]) * speed;
+      if (Math.abs(smoothed[prop] - val) < 0.001) smoothed[prop] = val;
+    }
+
+    function writeCSSProps() {
+      const root = document.documentElement;
+      root.style.setProperty("--voice-level", smoothed.voiceLevel.toFixed(3));
+      root.style.setProperty("--voice-bass", smoothed.bass.toFixed(3));
+      root.style.setProperty("--voice-mid", smoothed.mid.toFixed(3));
+      root.style.setProperty("--voice-treble", smoothed.treble.toFixed(3));
+    }
+
+    function readAnalyserData() {
+      if (!analyser) return;
+      const bufLen = analyser.frequencyBinCount;
+      const data = new Uint8Array(bufLen);
+      analyser.getByteFrequencyData(data);
+
+      let sum = 0;
+      let bassSum = 0;
+      let midSum = 0;
+      let trebleSum = 0;
+      const bassEnd = Math.floor(bufLen * 0.15);
+      const midEnd = Math.floor(bufLen * 0.5);
+
+      for (let i = 0; i < bufLen; i++) {
+        const v = data[i] / 255;
+        sum += v * v;
+        if (i < bassEnd) bassSum += v;
+        else if (i < midEnd) midSum += v;
+        else trebleSum += v;
+      }
+
+      target.voiceLevel = Math.sqrt(sum / bufLen);
+      target.bass = bassEnd > 0 ? bassSum / bassEnd : 0;
+      target.mid = (midEnd - bassEnd) > 0 ? midSum / (midEnd - bassEnd) : 0;
+      target.treble = (bufLen - midEnd) > 0 ? trebleSum / (bufLen - midEnd) : 0;
+    }
+
+    function animate() {
+      if (analyser && sourceNode) {
+        readAnalyserData();
+      }
+      smoothValue("voiceLevel", target.voiceLevel);
+      smoothValue("bass", target.bass);
+      smoothValue("mid", target.mid);
+      smoothValue("treble", target.treble);
+      writeCSSProps();
+      rafId = requestAnimationFrame(animate);
+    }
+
+    function startLoop() {
+      if (rafId) return;
+      initAudioContext();
+      animate();
+    }
+
+    function stopLoop() {
+      if (rafId) {
+        cancelAnimationFrame(rafId);
+        rafId = null;
+      }
+    }
+
+    function decayToZero() {
+      target.voiceLevel = 0;
+      target.bass = 0;
+      target.mid = 0;
+      target.treble = 0;
+    }
+
+    function isDecayed() {
+      return (
+        smoothed.voiceLevel < 0.005 &&
+        smoothed.bass < 0.005 &&
+        smoothed.mid < 0.005 &&
+        smoothed.treble < 0.005
+      );
+    }
+
+    function textTimedAnalysis(text) {
+      const words = text.split(/\s+/).filter(Boolean);
+      let cursor = 0;
+      words.forEach((word) => {
+        const chars = word.length;
+        const wordDur = 180 + chars * 35;
+        const punct = /[.,;:!?]/.test(word);
+        const pause = punct ? 450 : 60;
+
+        wordTimeouts.push(setTimeout(() => {
+          target.voiceLevel = 0.5 + Math.random() * 0.5;
+          target.bass = 0.3 + Math.random() * 0.5;
+          target.mid = 0.6 + Math.random() * 0.4;
+          target.treble = 0.2 + Math.random() * 0.6;
+        }, cursor));
+
+        wordTimeouts.push(setTimeout(() => {
+          target.voiceLevel = 0.05;
+          target.bass = 0.02;
+          target.mid = 0.08;
+          target.treble = 0.02;
+        }, cursor + wordDur));
+
+        cursor += wordDur + pause;
+      });
+    }
+
+    function onSpeechStart(text) {
+      speaking = true;
+      startLoop();
+      textTimedAnalysis(text);
+    }
+
+    function onSpeechEnd() {
+      speaking = false;
+      wordTimeouts.forEach(clearTimeout);
+      wordTimeouts = [];
+      decayToZero();
+      const checkDecay = () => {
+        writeCSSProps();
+        if (isDecayed()) {
+          stopLoop();
+          return;
+        }
+        requestAnimationFrame(checkDecay);
+      };
+      requestAnimationFrame(checkDecay);
+    }
+
+    function initUserGesture() {
+      const handler = () => {
+        initAudioContext();
+        resumeAudioContext();
+        document.removeEventListener("click", handler);
+        document.removeEventListener("keydown", handler);
+        document.removeEventListener("submit", handler);
+      };
+      document.addEventListener("click", handler);
+      document.addEventListener("keydown", handler);
+      document.addEventListener("submit", handler);
+    }
+
+    initUserGesture();
+    startLoop();
+    writeCSSProps();
+
+    return {
+      onSpeechStart,
+      onSpeechEnd,
+      connectAudioElement,
+      resumeAudioContext,
+      get voiceLevel() { return smoothed.voiceLevel; },
+      get bass() { return smoothed.bass; },
+      get mid() { return smoothed.mid; },
+      get treble() { return smoothed.treble; },
+    };
+  })();
+
+  window.__audioReactive = audioReactive;
     if (!state.chatLoginEnabled && !forcePrompt) return true;
     let username = (localStorage.getItem("nova_chat_user") || state.userId || "").trim();
     if (!username || forcePrompt) {
@@ -838,6 +1123,7 @@
         body: JSON.stringify({
           session_id: state.sessionId,
           user_id: state.userId,
+          voice_persona: state.voicePersona,
           items,
         }),
       });
@@ -1189,6 +1475,7 @@
 
   async function loadHistory() {
     if (!state.sessionId) return;
+    state.loadingHistory = true;
     try {
       const response = await chatFetch(
         `${config.chatHistoryUrl}?session_id=${encodeURIComponent(state.sessionId)}&user_id=${encodeURIComponent(state.userId)}`,
@@ -1205,6 +1492,8 @@
       setActivityHeadline("Nova reopened the last lived session.");
     } catch (_) {
       // Keep startup resilient.
+    } finally {
+      state.loadingHistory = false;
     }
   }
 
@@ -1287,6 +1576,12 @@
       syncPresence();
     });
 
+    dom.voiceTone?.addEventListener("change", () => {
+      state.voicePersona = String(dom.voiceTone.value || "friendly");
+      localStorage.setItem("leah_voice_persona", state.voicePersona);
+      pushActivity("Voice tone", dom.voiceTone.options[dom.voiceTone.selectedIndex]?.text || state.voicePersona);
+    });
+
     dom.btnMic?.addEventListener("click", () => {
       if (state.recognitionActive && !state.listenMode && state.recognition) {
         try {
@@ -1333,13 +1628,18 @@
   async function boot() {
     state.userId = (qs.get("uid") || localStorage.getItem("nova_user_id") || makeUserId()).trim();
     state.sessionId = (qs.get("sid") || localStorage.getItem("nova_session_id") || "").trim();
-    state.voiceEnabled = localStorage.getItem("leah_voice_output") === "on";
+    state.voiceEnabled = localStorage.getItem("leah_voice_output") !== "off";
+    if (window.speechSynthesis) {
+      window.speechSynthesis.getVoices();
+      window.speechSynthesis.onvoiceschanged = () => window.speechSynthesis.getVoices();
+    }
     localStorage.setItem("nova_user_id", state.userId);
     if (state.sessionId) {
       localStorage.setItem("nova_session_id", state.sessionId);
     }
 
     bindEvents();
+    if (dom.voiceTone) dom.voiceTone.value = state.voicePersona;
     renderStagedItems();
     setMood("calm", "steady runtime");
     syncPresence();

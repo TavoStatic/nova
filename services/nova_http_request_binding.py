@@ -68,6 +68,7 @@ class NovaHttpRequestBindingService:
 
         message = str(payload.get("message") or "").strip()
         session_id = str(payload.get("session_id") or "").strip()
+        voice_persona_id = str(payload.get("voice_persona") or "").strip().lower()
         user_id = normalize_user_id_fn(chat_user) or request_user_id_fn(handler, qs, payload)
         attachments = NovaHttpRequestBindingService._normalize_attachment_items(payload.get("attachments"))
         if not session_id:
@@ -100,6 +101,12 @@ class NovaHttpRequestBindingService:
             except Exception:
                 pass  # emotional state update failure must never break chat turn
 
+        if voice_persona_service is not None and voice_persona_id:
+            try:
+                voice_persona_service.select_persona(force=voice_persona_id)
+            except Exception:
+                pass  # invalid or unavailable persona must not break chat
+
         if memory_recall_service is not None:
             try:
                 recall_ctx = memory_recall_service.recall_for_turn(message)
@@ -120,7 +127,7 @@ class NovaHttpRequestBindingService:
 
         if voice_persona_service is not None:
             try:
-                reply = voice_persona_service.process_response(reply, context_text=message)
+                reply = voice_persona_service.process_response(reply)
             except Exception:
                 pass
 
