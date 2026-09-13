@@ -46,12 +46,14 @@
                      "data_sources/*/lane_control.json",
                      "nova_memory.sqlite",
                      "runtime",
+                     "runtime_archive",
                      "logs",
                      "memory",
                      "updates",
                      "interpreter caches",
                      "ad hoc local status files",
                      "operator-only notes",
-                     "codex scratch telemetry"
+                     "codex scratch telemetry",
+                     "local browser probe artifacts"
                  ]
 }

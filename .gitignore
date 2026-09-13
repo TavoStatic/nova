@@ -1,5 +1,6 @@
 ﻿# Runtime artifacts - never commit these
 runtime/
+runtime_archive/
 updates/
 logs/
 memory/
@@ -31,6 +32,15 @@ codex_probe_*.sqlite3
 codex_probe_*.sqlite3-journal
 probe_sqlite_*.sqlite
 probe_sqlite_*.sqlite-journal
+compare.js
+screenshot.js
+smoke_test.ps1
+comparison_*.png
+leah_screenshot.png
+hud_instrument.svg
+node_modules/
+package.json
+package-lock.json
 runtime_probe_cli_ledger/
 _handle_commands_current.txt
 _run_loop_current.txt
