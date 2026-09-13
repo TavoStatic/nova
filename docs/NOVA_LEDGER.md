@@ -1,6 +1,6 @@
 # Nova Living Ledger
 
-_Generated: 2026-09-13 18:24_
+_Generated: 2026-09-13 18:38_
 
 Two sources feed this document: **developer sessions** and **Nova's own scan findings**.
 Append to `docs/ledger/session_log.jsonl` (developer) or `docs/ledger/nova_findings.jsonl` (Nova),
@@ -47,6 +47,19 @@ _Session: github-branch-correction-20260913_
 - Open PR #4 toward main without merging known failing tests
 
 _Note: main was behind current development branch; default branch corrected before promotion. PR remains open pending existing test failures._
+
+### 2026-09-13 — claude-cowork
+_Session: branch-history-consolidation-20260913_
+
+**Modules touched:** `requirements.txt`, `.github`, `docs/NOVA_LEDGER.md`
+
+**Changes:**
+- Inspect all branch ancestry and ahead-behind relationships
+- Consolidate five valid Dependabot dependency updates onto codex/push-prep
+- Remove proven ancestor and redundant remote branches
+- Retain phase and backup branches with unique unreviewed history
+
+_Note: Evidence-driven cleanup: codex/push-prep was the common parent of five one-commit Dependabot branches; requirements validation passed and no new branch was created._
 
 ### 2026-09-12 — claude-cowork
 _Session: push-prep-20260912_
