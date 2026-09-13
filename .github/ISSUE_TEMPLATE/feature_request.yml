@@ -1,0 +1,25 @@
+name: Feature request
+description: Propose a user-facing capability or workflow improvement
+title: "feature: "
+labels:
+  - enhancement
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem to solve
+      description: What operator or user problem remains incomplete?
+    validations:
+      required: true
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Desired outcome
+      description: Describe the observable end-to-end behavior.
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Existing evidence and constraints
+      description: Link relevant runtime evidence, tests, Work Tree items, or code paths.

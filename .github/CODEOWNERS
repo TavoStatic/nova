@@ -1,0 +1,10 @@
+# Default owner for repository changes.
+* @TavoStatic
+
+# Runtime and governance changes deserve explicit review.
+/nova_core.py @TavoStatic
+/nova_guard.py @TavoStatic
+/autonomy_maintenance.py @TavoStatic
+/services/ @TavoStatic
+/work_tree.py @TavoStatic
+/work_tree_contracts.py @TavoStatic
