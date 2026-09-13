@@ -197,6 +197,18 @@ body {
     drop-shadow(0 0 calc(40px * var(--voice-level, 0)) rgba(0, 240, 255, var(--voice-level, 0)));
 }
 
+.hud-node {
+  cursor: pointer;
+  outline: none;
+  transition: opacity 160ms ease, filter 160ms ease;
+}
+
+.hud-node:hover,
+.hud-node:focus-visible {
+  opacity: 0.86;
+  filter: brightness(1.25);
+}
+
 /* Audio-reactive: center chamber breathing */
 .hud-svg .core-breath {
   transform-origin: 350px 350px;
@@ -441,6 +453,10 @@ body {
 .voice-tone-control select:focus {
   outline: 1px solid var(--accent);
   color: var(--ink);
+}
+
+.voice-choice-control select {
+  max-width: 150px;
 }
 
 .input-send {

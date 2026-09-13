@@ -43,6 +43,7 @@
     lastRuntimePulse: null,
     lastOutreachId: "",
     voicePersona: localStorage.getItem("leah_voice_persona") || "friendly",
+    voiceName: localStorage.getItem("leah_speech_voice") || "",
   };
 
   const moodProfiles = {
@@ -101,6 +102,7 @@
     btnListen: document.getElementById("btnListen"),
     btnVoice: document.getElementById("btnVoice"),
     voiceTone: document.getElementById("voiceTone"),
+    voiceChoice: document.getElementById("voiceChoice"),
     btnSend: document.getElementById("btnSend"),
     btnNewSession: null,
     stagedList: document.getElementById("stagedList"),
@@ -149,6 +151,12 @@
     hudStatus: document.getElementById("hudStatus"),
     hudRing: document.querySelector(".hud-container"),
     activityRing: document.getElementById("activityRing"),
+    ringMemory: document.getElementById("ringMemory"),
+    ringVoice: document.getElementById("ringVoice"),
+    ringContinuity: document.getElementById("ringContinuity"),
+    ringPersona: document.getElementById("ringPersona"),
+    ringState: document.getElementById("ringState"),
+    ringNova: document.getElementById("ringNova"),
   };
 
   function makeUserId() {
@@ -230,6 +238,72 @@
     if (dom.focusMemory) dom.focusMemory.textContent = state.lastRuntimePulse?.memory_enabled ? "Retrieval active" : "Memory off";
     if (dom.focusContinuity) dom.focusContinuity.textContent = state.sessionId ? "Maintaining session" : "No active session";
     if (dom.focusVoice) dom.focusVoice.textContent = state.voiceEnabled ? "Active" : "Ready";
+  }
+
+  function updateRingNodes(summary) {
+    const memory = state.lastRuntimePulse?.memory_enabled ? "active" : "off";
+    const voice = state.voiceEnabled ? (state.voiceName || "system voice") : "off";
+    const continuity = state.sessionId ? "session active" : "no session";
+    const persona = state.voicePersona || "friendly";
+    const stateLabel = (moodProfiles[state.moodMode] || moodProfiles.calm).label;
+    const nova = summary.runtimeOk ? "core online" : "runtime recovering";
+    const nodes = [
+      [dom.ringMemory, `Memory: ${memory}`],
+      [dom.ringVoice, `Voice: ${voice}`],
+      [dom.ringContinuity, `Continuity: ${continuity}`],
+      [dom.ringPersona, `Persona: ${persona}`],
+      [dom.ringState, `State: ${stateLabel}`],
+      [dom.ringNova, `Nova runtime: ${nova}`],
+    ];
+    nodes.forEach(([node, label]) => {
+      if (!node) return;
+      node.setAttribute("aria-label", label);
+      node.dataset.status = label;
+    });
+  }
+
+  function bindRingNodes() {
+    const actions = new Map([
+      [dom.ringMemory, () => {
+        dom.focusMemory?.scrollIntoView({ behavior: "smooth", block: "center" });
+        dom.focusMemory?.focus?.();
+      }],
+      [dom.ringVoice, () => {
+        dom.voiceChoice?.focus();
+        dom.voiceChoice?.showPicker?.();
+      }],
+      [dom.ringContinuity, () => {
+        dom.focusContinuity?.scrollIntoView({ behavior: "smooth", block: "center" });
+        dom.focusContinuity?.focus?.();
+      }],
+      [dom.ringPersona, () => {
+        dom.voiceTone?.focus();
+        dom.voiceTone?.showPicker?.();
+      }],
+      [dom.ringState, () => {
+        dom.moodLabel?.scrollIntoView({ behavior: "smooth", block: "center" });
+        dom.moodLabel?.focus?.();
+      }],
+      [dom.ringNova, () => {
+        dom.focusSystem?.scrollIntoView({ behavior: "smooth", block: "center" });
+        dom.focusSystem?.focus?.();
+      }],
+    ]);
+    actions.forEach((action, node) => {
+      if (!node) return;
+      const announce = () => {
+        pushActivity("Leah layer", node.getAttribute("aria-label") || "Live status");
+        setActivityHeadline(node.getAttribute("aria-label") || "Live Leah status");
+        action();
+      };
+      node.addEventListener("click", announce);
+      node.addEventListener("keydown", (event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          announce();
+        }
+      });
+    });
   }
 
   function appendEvidence(text) {
@@ -531,6 +605,7 @@
 
     updateStatusDots(summary);
     updateFocusPanel(summary);
+    updateRingNodes(summary);
 
     if (dom.hudStatus) {
       if (state.thinking) {
@@ -754,7 +829,8 @@
       utterance.rate = 1;
       utterance.pitch = 1;
       const voices = window.speechSynthesis.getVoices();
-      const preferred = voices.find(v => /Microsoft.*David|Microsoft.*Zira|Google.*US|SAPI|enhanced/i.test(v.name) && v.lang.startsWith("en"))
+      const selected = voices.find(v => v.name === state.voiceName);
+      const preferred = selected || voices.find(v => /Microsoft.*Zira|Google.*US|SAPI|enhanced/i.test(v.name) && v.lang.startsWith("en"))
         || voices.find(v => v.lang.startsWith("en"))
         || voices[0];
       if (preferred) utterance.voice = preferred;
@@ -1273,6 +1349,31 @@
     }
   }
 
+  function populateSpeechVoices() {
+    if (!dom.voiceChoice || !window.speechSynthesis) return;
+    const voices = window.speechSynthesis.getVoices().filter((voice) => voice && voice.lang);
+    const english = voices.filter((voice) => voice.lang.toLowerCase().startsWith("en"));
+    const available = english.length ? english : voices;
+    const previous = state.voiceName;
+    dom.voiceChoice.innerHTML = "";
+    const systemOption = document.createElement("option");
+    systemOption.value = "";
+    systemOption.textContent = "System default";
+    dom.voiceChoice.appendChild(systemOption);
+    available.forEach((voice) => {
+      const option = document.createElement("option");
+      option.value = voice.name;
+      option.textContent = `${voice.name} (${voice.lang})`;
+      dom.voiceChoice.appendChild(option);
+    });
+    const stillAvailable = available.some((voice) => voice.name === previous);
+    dom.voiceChoice.value = stillAvailable ? previous : "";
+    if (!stillAvailable && previous) {
+      state.voiceName = "";
+      localStorage.removeItem("leah_speech_voice");
+    }
+  }
+
   function stopCamera() {
     if (state.cameraStream) {
       state.cameraStream.getTracks().forEach((track) => track.stop());
@@ -1582,6 +1683,12 @@
       pushActivity("Voice tone", dom.voiceTone.options[dom.voiceTone.selectedIndex]?.text || state.voicePersona);
     });
 
+    dom.voiceChoice?.addEventListener("change", () => {
+      state.voiceName = String(dom.voiceChoice.value || "");
+      localStorage.setItem("leah_speech_voice", state.voiceName);
+      pushActivity("Speech voice", dom.voiceChoice.options[dom.voiceChoice.selectedIndex]?.text || "System default");
+    });
+
     dom.btnMic?.addEventListener("click", () => {
       if (state.recognitionActive && !state.listenMode && state.recognition) {
         try {
@@ -1631,7 +1738,7 @@
     state.voiceEnabled = localStorage.getItem("leah_voice_output") !== "off";
     if (window.speechSynthesis) {
       window.speechSynthesis.getVoices();
-      window.speechSynthesis.onvoiceschanged = () => window.speechSynthesis.getVoices();
+      window.speechSynthesis.onvoiceschanged = populateSpeechVoices;
     }
     localStorage.setItem("nova_user_id", state.userId);
     if (state.sessionId) {
@@ -1639,7 +1746,9 @@
     }
 
     bindEvents();
+    bindRingNodes();
     if (dom.voiceTone) dom.voiceTone.value = state.voicePersona;
+    populateSpeechVoices();
     renderStagedItems();
     setMood("calm", "steady runtime");
     syncPresence();
