@@ -30,6 +30,9 @@ def spawn_unattached(
     argv: list[str],
     *,
     cwd: str | Path,
+    stdout_path: str | Path | None = None,
+    stderr_path: str | Path | None = None,
+    exit_code_path: str | Path | None = None,
     wmi_create_fn=None,
     popen_fn=None,
 ) -> tuple[bool, int | None, str]:
@@ -40,24 +43,59 @@ def spawn_unattached(
     workdir = str(Path(cwd))
     if os.name == "nt":
         creator = wmi_create_fn or _wmi_create_process
-        ok, pid, detail = creator(quote_windows_command(command), workdir)
+        command_text = quote_windows_command(command)
+        if stdout_path or stderr_path or exit_code_path:
+            command_text = _quote_windows_redirected_command(
+                command_text,
+                stdout_path=stdout_path,
+                stderr_path=stderr_path,
+                exit_code_path=exit_code_path,
+            )
+        ok, pid, detail = creator(command_text, workdir)
         if ok:
             return True, pid, detail
         return False, None, detail or "wmi_failed"
     starter = popen_fn or subprocess.Popen
+    stdout_handle = None
+    stderr_handle = None
     try:
+        if stdout_path:
+            stdout_handle = open(stdout_path, "ab")
+        if stderr_path:
+            stderr_handle = open(stderr_path, "ab")
         proc = starter(
             command,
             cwd=workdir,
             stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+            stdout=stdout_handle or subprocess.DEVNULL,
+            stderr=stderr_handle or subprocess.DEVNULL,
             start_new_session=True,
         )
     except Exception as exc:
         return False, None, f"popen_failed:{exc}"
+    finally:
+        if stdout_handle:
+            stdout_handle.close()
+        if stderr_handle:
+            stderr_handle.close()
     pid = int(getattr(proc, "pid", 0) or 0)
     return True, (pid or None), "posix_detached"
+
+
+def _quote_windows_redirected_command(
+    command_text: str,
+    *,
+    stdout_path: str | Path | None,
+    stderr_path: str | Path | None,
+    exit_code_path: str | Path | None,
+) -> str:
+    stdout_text = str(stdout_path) if stdout_path else "NUL"
+    stderr_text = str(stderr_path) if stderr_path else "NUL"
+    exit_text = str(exit_code_path) if exit_code_path else ""
+    command = f'cmd.exe /d /v:on /s /c "{command_text} 1>"{stdout_text}" 2>"{stderr_text}"'
+    if exit_text:
+        command += f' & echo !ERRORLEVEL! >"{exit_text}"'
+    return command + '"'
 
 
 def _wmi_create_process(command: str, cwd: str) -> tuple[bool, int | None, str]:
