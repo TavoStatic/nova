@@ -126,15 +126,12 @@ jobs:
           $ErrorActionPreference = "Stop"
           $validationDir = Join-Path $env:RUNNER_TEMP "nova-validation"
           New-Item -ItemType Directory -Force -Path $validationDir | Out-Null
-          $stdout = Join-Path $validationDir "webui.stdout.log"
-          $stderr = Join-Path $validationDir "webui.stderr.log"
-          $webui = Start-Process -FilePath $env:ComSpec `
-            -ArgumentList @('/c', 'nova.cmd webui-start --host 127.0.0.1 --port 8080') `
-            -WorkingDirectory $PWD `
-            -RedirectStandardOutput $stdout `
-            -RedirectStandardError $stderr `
-            -PassThru
-          $webui.Id | Set-Content (Join-Path $validationDir "webui-wrapper.pid")
+          $webuiStartLog = Join-Path $validationDir "webui-start.log"
+          & .\nova.cmd webui-start --host 127.0.0.1 --port 8080 *> $webuiStartLog
+          $webuiStartExit = $LASTEXITCODE
+          if ($webuiStartExit -ne 0) {
+            throw "nova.cmd webui-start failed with exit code $webuiStartExit"
+          }
 
       - name: Probe health and interface
         run: |
@@ -211,6 +208,12 @@ jobs:
           $changes = @(git status --porcelain=v1 --untracked-files=all)
           if ($changes.Count -gt 0) {
             $cleanupFailures += "Unexpected repository change after use: $($changes -join '; ')"
+          }
+
+          foreach ($appLog in @("logs/nova_http.out.log", "logs/nova_http.err.log")) {
+            if (Test-Path -LiteralPath $appLog -PathType Leaf) {
+              Copy-Item -LiteralPath $appLog -Destination (Join-Path $validationDir ([System.IO.Path]::GetFileName($appLog))) -Force
+            }
           }
 
           if ($cleanupFailures.Count -gt 0) {
