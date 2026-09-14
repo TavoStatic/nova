@@ -1,0 +1,230 @@
+name: Fresh Install Validation
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  fresh-install:
+    name: Clean Windows install and service validation
+    runs-on: windows-latest
+    timeout-minutes: 35
+    defaults:
+      run:
+        shell: pwsh
+
+    steps:
+      - name: Check out codex/push-prep with Git LFS
+        uses: actions/checkout@v4
+        with:
+          ref: codex/push-prep
+          lfs: true
+          fetch-depth: 1
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Verify Git LFS and Piper assets
+        run: |
+          $ErrorActionPreference = "Stop"
+          $validationDir = Join-Path $env:RUNNER_TEMP "nova-validation"
+          New-Item -ItemType Directory -Force -Path $validationDir | Out-Null
+          git lfs version | Tee-Object -FilePath (Join-Path $validationDir "lfs-version.log")
+          git lfs ls-files -l | Tee-Object -FilePath (Join-Path $validationDir "lfs-files.log")
+
+          $assets = @(
+            "piper/piper.exe",
+            "piper/espeak-ng.dll",
+            "piper/onnxruntime.dll",
+            "piper/onnxruntime_providers_shared.dll",
+            "piper/piper_phonemize.dll",
+            "piper/models/en_US-lessac-medium.onnx"
+          )
+
+          foreach ($asset in $assets) {
+            if (-not (Test-Path -LiteralPath $asset -PathType Leaf)) {
+              throw "Missing Piper asset: $asset"
+            }
+
+            $pointer = @(git cat-file blob "HEAD:$asset")
+            $oidLine = $pointer | Where-Object { $_ -match '^oid sha256:' } | Select-Object -First 1
+            $sizeLine = $pointer | Where-Object { $_ -match '^size ' } | Select-Object -First 1
+            if (-not $oidLine -or -not $sizeLine) {
+              throw "HEAD does not contain an LFS pointer for $asset"
+            }
+
+            $expectedOid = ($oidLine -replace '^oid sha256:', '').Trim().ToLowerInvariant()
+            $expectedSize = [int64](($sizeLine -replace '^size ', '').Trim())
+            $actualFile = Get-Item -LiteralPath $asset
+            $actualOid = (Get-FileHash -LiteralPath $actualFile.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+
+            if ($actualFile.Length -ne $expectedSize) {
+              throw "$asset has size $($actualFile.Length), expected $expectedSize"
+            }
+            if ($actualOid -ne $expectedOid) {
+              throw "$asset hash $actualOid does not match LFS object $expectedOid"
+            }
+
+            "OK $asset size=$($actualFile.Length) sha256=$actualOid" | Tee-Object -FilePath (Join-Path $validationDir "piper-assets.log") -Append
+          }
+
+      - name: Install Nova
+        run: |
+          $ErrorActionPreference = "Stop"
+          $validationDir = Join-Path $env:RUNNER_TEMP "nova-validation"
+          New-Item -ItemType Directory -Force -Path $validationDir | Out-Null
+          .\nova.cmd install 2>&1 | Tee-Object -FilePath (Join-Path $validationDir "install.log")
+          if ($LASTEXITCODE -ne 0) { throw "nova.cmd install failed with exit code $LASTEXITCODE" }
+
+      - name: Run Nova doctor
+        run: |
+          $ErrorActionPreference = "Stop"
+          $validationDir = Join-Path $env:RUNNER_TEMP "nova-validation"
+          New-Item -ItemType Directory -Force -Path $validationDir | Out-Null
+          .\nova.cmd doctor 2>&1 | Tee-Object -FilePath (Join-Path $validationDir "doctor.log")
+          if ($LASTEXITCODE -ne 0) { throw "nova.cmd doctor failed with exit code $LASTEXITCODE" }
+
+      - name: Check repository status after installation
+        run: |
+          $ErrorActionPreference = "Stop"
+          $validationDir = Join-Path $env:RUNNER_TEMP "nova-validation"
+          New-Item -ItemType Directory -Force -Path $validationDir | Out-Null
+          git status --short --branch | Tee-Object -FilePath (Join-Path $validationDir "status-after-install.log")
+          $changes = @(git status --porcelain=v1 --untracked-files=all)
+          if ($changes.Count -gt 0) {
+            $changes | ForEach-Object { Write-Error "Unexpected repository change: $_" }
+            throw "Repository is not clean after installation"
+          }
+
+      - name: Start guard and verify core
+        run: |
+          $ErrorActionPreference = "Stop"
+          $validationDir = Join-Path $env:RUNNER_TEMP "nova-validation"
+          New-Item -ItemType Directory -Force -Path $validationDir | Out-Null
+          .\nova.cmd guard 2>&1 | Tee-Object -FilePath (Join-Path $validationDir "guard.log")
+          if ($LASTEXITCODE -ne 0) { throw "nova.cmd guard failed with exit code $LASTEXITCODE" }
+
+          $deadline = (Get-Date).ToUniversalTime().AddSeconds(30)
+          while ((Get-Date).ToUniversalTime() -lt $deadline) {
+            if ((Test-Path runtime/core_state.json) -and (Test-Path runtime/core.heartbeat)) { break }
+            Start-Sleep -Seconds 1
+          }
+          if (-not (Test-Path runtime/core_state.json)) { throw "Core state file was not created" }
+          if (-not (Test-Path runtime/core.heartbeat)) { throw "Core heartbeat was not created" }
+
+          Get-CimInstance Win32_Process |
+            Where-Object { $_.CommandLine -match 'nova_guard\.py|nova_core\.py' } |
+            Select-Object ProcessId,ParentProcessId,Name,CommandLine |
+            Format-List | Tee-Object -FilePath (Join-Path $validationDir "processes-after-guard.log")
+
+      - name: Start Web UI on port 8080
+        run: |
+          $ErrorActionPreference = "Stop"
+          $validationDir = Join-Path $env:RUNNER_TEMP "nova-validation"
+          New-Item -ItemType Directory -Force -Path $validationDir | Out-Null
+          $stdout = Join-Path $validationDir "webui.stdout.log"
+          $stderr = Join-Path $validationDir "webui.stderr.log"
+          $webui = Start-Process -FilePath $env:ComSpec `
+            -ArgumentList @('/c', 'nova.cmd webui-start --host 127.0.0.1 --port 8080') `
+            -WorkingDirectory $PWD `
+            -RedirectStandardOutput $stdout `
+            -RedirectStandardError $stderr `
+            -PassThru
+          $webui.Id | Set-Content (Join-Path $validationDir "webui-wrapper.pid")
+
+      - name: Probe health and interface
+        run: |
+          $ErrorActionPreference = "Stop"
+          $validationDir = Join-Path $env:RUNNER_TEMP "nova-validation"
+          New-Item -ItemType Directory -Force -Path $validationDir | Out-Null
+          $deadline = (Get-Date).ToUniversalTime().AddSeconds(60)
+          $health = $null
+          while ((Get-Date).ToUniversalTime() -lt $deadline) {
+            try {
+              $health = Invoke-WebRequest -UseBasicParsing -Uri "http://127.0.0.1:8080/api/health" -TimeoutSec 5
+              if ($health.StatusCode -eq 200) { break }
+            } catch {
+              Start-Sleep -Seconds 2
+            }
+          }
+          if ($null -eq $health -or $health.StatusCode -ne 200) { throw "HTTP health probe failed" }
+          $health | Out-String | Set-Content (Join-Path $validationDir "health-response.log")
+
+          $leah = Invoke-WebRequest -UseBasicParsing -Uri "http://127.0.0.1:8080/leah" -TimeoutSec 10
+          if ($leah.StatusCode -ne 200 -or [string]::IsNullOrWhiteSpace($leah.Content)) {
+            throw "Leah interface probe failed"
+          }
+          $leah.Content | Set-Content (Join-Path $validationDir "leah-response.html")
+
+          Get-CimInstance Win32_Process |
+            Where-Object { $_.CommandLine -match 'nova_guard\.py|nova_core\.py|nova_http\.py' } |
+            Select-Object ProcessId,ParentProcessId,Name,CommandLine |
+            Format-List | Tee-Object -FilePath (Join-Path $validationDir "processes-after-webui.log")
+
+      - name: Stop Nova and verify clean shutdown
+        if: always()
+        run: |
+          $validationDir = Join-Path $env:RUNNER_TEMP "nova-validation"
+          New-Item -ItemType Directory -Force -Path $validationDir | Out-Null
+          $cleanupFailures = @()
+          $venvPython = Join-Path $PWD ".venv\Scripts\python.exe"
+
+          if (Test-Path -LiteralPath $venvPython) {
+            $webuiStopLog = Join-Path $validationDir "webui-stop.log"
+            $novaStopLog = Join-Path $validationDir "nova-stop.log"
+
+            & .\nova.cmd webui-stop --port 8080 *> $webuiStopLog
+            $webuiStopExit = $LASTEXITCODE
+            "webui-stop exit=$webuiStopExit" | Tee-Object -FilePath (Join-Path $validationDir "shutdown-exit-codes.log")
+            if ($webuiStopExit -ne 0) { $cleanupFailures += "webui-stop exited $webuiStopExit" }
+
+            & .\nova.cmd stop *> $novaStopLog
+            $novaStopExit = $LASTEXITCODE
+            "nova stop exit=$novaStopExit" | Tee-Object -FilePath (Join-Path $validationDir "shutdown-exit-codes.log") -Append
+            if ($novaStopExit -ne 0) { $cleanupFailures += "nova stop exited $novaStopExit" }
+          } else {
+            "shutdown commands skipped: .venv was not created" | Tee-Object -FilePath (Join-Path $validationDir "shutdown-exit-codes.log")
+          }
+
+          Start-Sleep -Seconds 3
+
+          $remaining = @(Get-CimInstance Win32_Process |
+            Where-Object { $_.CommandLine -match 'nova_guard\.py|nova_core\.py|nova_http\.py' })
+          $remaining |
+            Select-Object ProcessId,ParentProcessId,Name,CommandLine |
+            Format-List | Tee-Object -FilePath (Join-Path $validationDir "processes-after-stop.log")
+          if ($remaining.Count -gt 0) {
+            $cleanupFailures += "Nova processes remain after shutdown"
+          }
+
+          $listener = @(Get-NetTCPConnection -LocalPort 8080 -State Listen -ErrorAction SilentlyContinue)
+          $listener | Format-List | Tee-Object -FilePath (Join-Path $validationDir "listener-after-stop.log")
+          if ($listener.Count -gt 0) {
+            $cleanupFailures += "Port 8080 remains listening after shutdown"
+          }
+
+          git status --short --branch | Tee-Object -FilePath (Join-Path $validationDir "status-after-stop.log")
+          $changes = @(git status --porcelain=v1 --untracked-files=all)
+          if ($changes.Count -gt 0) {
+            $cleanupFailures += "Unexpected repository change after use: $($changes -join '; ')"
+          }
+
+          if ($cleanupFailures.Count -gt 0) {
+            $cleanupFailures | ForEach-Object { Write-Error "Cleanup validation: $_" }
+            Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value ("### Cleanup validation failures`n" + (($cleanupFailures | ForEach-Object { "- $_" }) -join "`n"))
+            exit 1
+          } else {
+            Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "### Cleanup validation`n- Nova shutdown commands completed successfully.`n- No Nova processes remained.`n- Port 8080 was not listening.`n- Repository status remained clean."
+          }
+
+      - name: Upload validation logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nova-fresh-install-validation
+          path: ${{ runner.temp }}/nova-validation/
+          if-no-files-found: error
