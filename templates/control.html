@@ -1092,7 +1092,7 @@
                     <div class="section-head">
                         <div>
                             <div class="section-title"><span class="section-title-wrap"><i class="bi bi-box-seam section-title-icon" aria-hidden="true"></i><span>Backpacks</span></span></div>
-                            <div class="section-subtitle">Optional capabilities after Nova core settles. Install data connector (or future backpacks) here — not during first Nova setup. Secrets stay on this machine only.</div>
+                            <div class="section-subtitle">Optional capabilities after Nova core settles. Install backpacks here, not during first Nova setup. Secrets stay on this machine only.</div>
                         </div>
                         <div class="button-row wrap-buttons">
                             <button id="btnBackpacksRefresh" class="btn btn-sm btn-operator-alt" type="button">Refresh</button>
@@ -1113,7 +1113,7 @@
                         <div class="pipeline-detail-panel">
                             <div id="backpackEmptyState" class="backpack-empty-state">
                                 <div class="section-title">Select a backpack</div>
-                                <div class="section-subtitle">Nothing is selected. Pick a backpack from the list to turn it on/off, enter ODS credentials, install, or run reports.</div>
+                                <div class="section-subtitle">Nothing is selected. Pick a backpack from the list to configure, install, or inspect it.</div>
                             </div>
                             <div id="backpackDetailBody" class="d-none">
                                 <div class="mb-3">
@@ -1127,62 +1127,17 @@
                                 </div>
                                 <div id="backpackStatusGrid" class="inspector-stack mb-3">Status pending.</div>
                                 <div class="mb-3">
-                                    <div class="section-title">Connection (key &amp; secret)</div>
-                                    <div class="section-subtitle">District ODS credentials. Never commit these. Stored only under runtime/ on this machine.</div>
-                                    <label class="field-label" for="bpFieldConnectionId">Connection name</label>
-                                    <input id="bpFieldConnectionId" class="form-control form-control-sm mb-2" type="text" placeholder="district-main" autocomplete="off">
-                                    <label class="field-label" for="bpFieldBaseUrl">ODS base URL</label>
-                                    <input id="bpFieldBaseUrl" class="form-control form-control-sm mb-2" type="url" placeholder="https://edfi.yourdomain.org" autocomplete="off">
-                                    <label class="field-label" for="bpFieldClientId">Client ID</label>
-                                    <input id="bpFieldClientId" class="form-control form-control-sm mb-2" type="text" placeholder="OAuth client id" autocomplete="off">
-                                    <label class="field-label" for="bpFieldClientSecret">Client secret</label>
-                                    <input id="bpFieldClientSecret" class="form-control form-control-sm mb-2" type="password" placeholder="OAuth client secret" autocomplete="new-password">
-                                    <label class="field-label" for="bpFieldLea">District LEA ID</label>
-                                    <input id="bpFieldLea" class="form-control form-control-sm mb-2" type="text" placeholder="your-lea-id" autocomplete="off">
-                                    <label class="field-label" for="bpFieldScope">Scope mode</label>
-                                    <select id="bpFieldScope" class="form-select form-select-sm mb-2">
-                                        <option value="single_lea">single_lea (one district)</option>
-                                        <option value="multi_lea">multi_lea (region — allowed list)</option>
-                                    </select>
-                                    <label class="field-label" for="bpFieldAllowedLeas">Allowed LEA IDs (region only)</label>
-                                    <input id="bpFieldAllowedLeas" class="form-control form-control-sm mb-2" type="text" placeholder="lea-id-1, lea-id-2" autocomplete="off">
-                                    <label class="field-label" for="bpFieldAccessTier">Key access level</label>
-                                    <select id="bpFieldAccessTier" class="form-select form-select-sm mb-2">
-                                        <option value="read">read</option>
-                                        <option value="limited">limited</option>
-                                        <option value="full">full</option>
-                                    </select>
-                                    <div class="button-row wrap-buttons mb-2">
-                                        <button id="btnBackpackTestConn" class="btn btn-sm btn-operator-alt" type="button">Test connection</button>
-                                    </div>
+                                    <div class="section-title">Settings</div>
+                                    <div class="section-subtitle">Backpack-specific settings are stored locally under the runtime directory.</div>
+                                    <label class="field-label" for="bpFieldSettingsJson">Settings JSON</label>
+                                    <textarea id="bpFieldSettingsJson" class="form-control form-control-sm mb-2" rows="8" spellcheck="false">{}</textarea>
                                     <div class="button-row wrap-buttons mb-2">
                                         <button id="btnBackpackSaveSettings" class="btn btn-sm btn-operator-alt" type="button">Save settings</button>
-                                        <button id="btnBackpackInstall" class="btn btn-sm btn-operator-primary" type="button">Install + profile</button>
+                                        <button id="btnBackpackInstall" class="btn btn-sm btn-operator-primary" type="button">Install</button>
                                     </div>
                                     <div class="button-row wrap-buttons mb-2">
                                         <button id="btnBackpackUninstall" class="btn btn-sm btn-operator-danger" type="button">Uninstall backpack</button>
                                     </div>
-                                    <label class="field-label" for="backpackProbeLea">Probe LEA</label>
-                                    <div class="control-grid-2 mb-2">
-                                        <input id="backpackProbeLea" class="form-control form-control-sm" type="text" placeholder="your-lea-id">
-                                        <button id="btnBackpackProbeLea" class="btn btn-sm btn-operator-alt" type="button">Probe LEA</button>
-                                    </div>
-                                </div>
-                                <div class="mb-3">
-                                    <div class="section-title">User report (local extract first)</div>
-                                    <div class="section-subtitle">
-                                        Reports read <strong>local cleaned data</strong> when available (no TEA call).
-                                        Use <strong>Refresh from ODS</strong> only when you need a new pull — TEA rate-limits live traffic.
-                                    </div>
-                                    <div class="button-row wrap-buttons mb-2">
-                                        <button id="btnBackpackReportHealth" class="btn btn-sm btn-operator-alt" type="button">Report: health</button>
-                                        <button id="btnBackpackReportSchools" class="btn btn-sm btn-operator-primary" type="button">Show schools (local)</button>
-                                        <button id="btnBackpackRefreshSchools" class="btn btn-sm btn-operator-warn" type="button">Refresh schools from ODS</button>
-                                    </div>
-                                    <label class="field-label" for="backpackReportLimit">Table row limit (display only; school refresh pulls full LEA)</label>
-                                    <input id="backpackReportLimit" class="form-control form-control-sm mb-2" type="number" min="1" max="2000" value="50">
-                                    <div id="backpackReportSummary" class="section-footnote mb-2">No report run yet. Prefer Show schools (local) after one successful ODS refresh.</div>
-                                    <div id="backpackReportTable" class="pipeline-query-table-wrap mb-2 d-none"></div>
                                 </div>
                                 <div class="mb-2">
                                     <div class="section-title">Activity</div>
@@ -1230,18 +1185,6 @@
 
                         <div class="pipeline-detail-panel">
                             <div id="pipelineStatusGrid" class="inspector-stack mb-3">Select a pipeline to inspect readiness.</div>
-                            <div id="pipelineEdfiSection" class="mb-3 d-none">
-                                <div class="section-title"><span class="section-title-wrap"><i class="bi bi-hdd-network section-title-icon" aria-hidden="true"></i><span>data connector operator console</span></span></div>
-                                <div class="section-subtitle">Quick reads against the configured connection. Credentials stay in local runtime config only.</div>
-                                <div class="button-row wrap-buttons mb-2">
-                                    <button id="btnEdfiQuickHealth" class="btn btn-sm btn-operator-alt" type="button">Connection health</button>
-                                    <button id="btnEdfiQuickSchools" class="btn btn-sm btn-operator-alt" type="button">List schools</button>
-                                    <button id="btnEdfiQuickStudents" class="btn btn-sm btn-operator-alt" type="button">List students</button>
-                                    <button id="btnEdfiQuickSync" class="btn btn-sm btn-operator-alt" type="button">Sync status</button>
-                                    <button id="btnEdfiQuickChanges" class="btn btn-sm btn-operator-primary" type="button">Pull changes</button>
-                                </div>
-                                <div id="pipelineEdfiSyncGrid" class="inspector-stack mb-2">Change sync summary pending.</div>
-                            </div>
                             <div id="pipelineQuerySection" class="mb-3 d-none">
                                 <div class="section-title"><span class="section-title-wrap"><i class="bi bi-play-circle section-title-icon" aria-hidden="true"></i><span>Governed query runner</span></span></div>
                                 <div class="section-subtitle">Preview a dry-run plan first. Live runs use the governed pipeline path and row caps.</div>

@@ -97,7 +97,6 @@ def group_entries(entries: list[dict]) -> dict[str, list[dict]]:
     groups: dict[str, list[dict]] = {}
     order = [
         ("services/backpack_host/", "Backpack Host"),
-        ("services/edfi/", "data connector Data Layer"),
         ("services/nova_shell/", "Nova Shell"),
     ]
     flat: list[dict] = []
@@ -144,7 +143,7 @@ def render(entries: list[dict]) -> str:
         "- Tools and policy: `tool_*`, `nova_tool_*`, `policy_*`, `os_*`, `evidence_validity`.",
         "- Autonomy and feedback: `autonomy_*`, `nova_mission*`, `work_tree_*`, `subconscious_*`, `core_*`, `layer_maturity_policy`.",
         "- Patch, codegen, test, and release: `nova_patching`, `patch_*`, `codegen_*`, `test_session_*`, `regression_*`, `validation_*`, `release_*`, `installer_validation`.",
-        "- Data and data connector: `data_pipeline_registry`, `control_pipelines`, `pipeline_privileged_bridge`, and `services/edfi/*`.",
+        "- Data pipelines and backpacks: `data_pipeline_registry`, `control_pipelines`, `pipeline_privileged_bridge`, and `services/backpack_host/*`.",
         "- Backpack Host: `services/backpack_host/*` — discovery, install, grant enforcement, uninstall sanitizer, residue scan.",
         "- Nova Shell: `services/nova_shell/*` — operator authentication, TOTP, role management, session trust.",
         "- Decision Judge: `decision_proposal_judge` — pre-execution claim evaluation with judge reports and episodes.",

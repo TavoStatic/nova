@@ -6,8 +6,6 @@ from pathlib import Path
 
 from services.data_pipeline_registry import list_pipeline_summaries
 from services.data_pipeline_registry import pipeline_worker_summary
-from services.edfi.core_readiness import read_edfi_core_readiness
-from services.edfi.profile_evidence import build_capability_profile_evidence
 from services.frontdoor_cli_parity import FRONTDOOR_CLI_PARITY_SERVICE
 from services.nova_grounded_self_report import GROUNDED_SELF_REPORT_SERVICE
 from services.regression_lanes import SOURCE_PROFILE_LANES
@@ -329,48 +327,22 @@ class ControlStatusService:
                 "error": str(exc),
             }
         try:
-            edfi_capability_profile = build_capability_profile_evidence()
-        except Exception as exc:
-            edfi_capability_profile = {
-                "ok": False,
-                "status": "failure",
-                "present": False,
-                "issue_count": 1,
-                "issues": [{
-                    "code": "edfi_profile_evidence_unreadable",
-                    "severity": "failure",
-                    "detail": str(exc),
-                }],
-                "profile_evidence_path": "runtime/edfi/profiles/district-main.json",
+            # Control status is polled often. No backpack is installed, so there is
+            # no capability fusion to surface; report a neutral empty payload.
+            backpack_fusion = {
+                "ok": True,
+                "required_ok": True,
+                "available_capability_ids": [],
+                "nova_must_know": {},
+                "teach_rules": [],
             }
-        try:
-            edfi_core_readiness = read_edfi_core_readiness("district-main")
-        except Exception as exc:
-            edfi_core_readiness = {
-                "ready": False,
-                "milestone": "",
-                "connection_id": "district-main",
-                "issues": [{"code": "edfi_core_readiness_unreadable", "detail": str(exc)}],
-            }
-        try:
-            # Control status is polled often. Prefer the last fusion scan file only —
-            # never force a rescan on the hot path (that raced with webui responsiveness
-            # after backpack/work-tree governance work landed).
-            from services.backpack_host.capability_surface import get_fusion_status, load_last_scan
-
-            backpack_fusion = load_last_scan()
-            if not isinstance(backpack_fusion, dict) or not backpack_fusion:
-                backpack_fusion = get_fusion_status(max_age_sec=3600.0, force=False)
-            else:
-                backpack_fusion = dict(backpack_fusion)
-                backpack_fusion["from_cache"] = True
         except Exception as exc:
             backpack_fusion = {
                 "ok": False,
                 "required_ok": False,
                 "error": str(exc),
                 "available_capability_ids": [],
-                "nova_must_know": {"has_edfi_backpack": False},
+                "nova_must_know": {},
             }
         requests_total, errors_total = metrics_totals
         if hasattr(core_module, "ollama_health_payload"):
@@ -449,8 +421,6 @@ class ControlStatusService:
             pulse_payload=pulse_payload,
             update_now_pending=update_now_pending,
             data_pipelines=data_pipelines,
-            edfi_capability_profile=edfi_capability_profile,
-            edfi_core_readiness=edfi_core_readiness,
             backpack_fusion=backpack_fusion,
             requests_total=requests_total,
             errors_total=errors_total,
@@ -827,8 +797,6 @@ class ControlStatusService:
         vision_status: dict | None = None,
         port_ownership: dict | None = None,
         data_pipelines: dict | None = None,
-        edfi_capability_profile: dict | None = None,
-        edfi_core_readiness: dict | None = None,
         backpack_fusion: dict | None = None,
         installer_status: dict | None = None,
     ) -> dict:
@@ -844,16 +812,6 @@ class ControlStatusService:
         voice_status_payload = dict(voice_status or {}) if isinstance(voice_status, dict) else {}
         vision_status_payload = dict(vision_status or {}) if isinstance(vision_status, dict) else {}
         data_pipeline_payload = dict(data_pipelines or {}) if isinstance(data_pipelines, dict) else {"ok": True, "pipelines": []}
-        edfi_profile_payload = (
-            dict(edfi_capability_profile or {})
-            if isinstance(edfi_capability_profile, dict)
-            else {"ok": False, "status": "missing", "present": False, "issue_count": 0, "issues": []}
-        )
-        edfi_core_readiness_payload = (
-            dict(edfi_core_readiness or {})
-            if isinstance(edfi_core_readiness, dict)
-            else {"ready": False, "milestone": "", "connection_id": "district-main", "issues": []}
-        )
         backpack_fusion_payload = (
             dict(backpack_fusion or {})
             if isinstance(backpack_fusion, dict)
@@ -1027,23 +985,6 @@ class ControlStatusService:
                 for item in data_pipeline_rows
                 if str(item.get("pipeline_id") or "").strip()
             ],
-            "edfi_capability_profile": edfi_profile_payload,
-            "edfi_capability_profile_ok": bool(edfi_profile_payload.get("ok")),
-            "edfi_capability_profile_status": str(edfi_profile_payload.get("status") or ""),
-            "edfi_capability_profile_present": bool(edfi_profile_payload.get("present")),
-            "edfi_capability_profile_connection_id": str(edfi_profile_payload.get("connection_id") or ""),
-            "edfi_capability_profile_resource_count": int(edfi_profile_payload.get("resource_count") or 0),
-            "edfi_capability_profile_discovered_at": int(edfi_profile_payload.get("discovered_at") or 0),
-            "edfi_capability_profile_auth_ok": bool(edfi_profile_payload.get("auth_ok")),
-            "edfi_capability_profile_issue_count": int(edfi_profile_payload.get("issue_count") or 0),
-            "edfi_capability_profile_path": str(
-                edfi_profile_payload.get("profile_evidence_path")
-                or edfi_profile_payload.get("profile_path")
-                or ""
-            ),
-            "edfi_core_readiness": dict(edfi_core_readiness_payload),
-            "edfi_core_ready": bool(edfi_core_readiness_payload.get("ready", False)),
-            "edfi_core_milestone": str(edfi_core_readiness_payload.get("milestone") or ""),
             "backpack_fusion": backpack_fusion_payload,
             "backpack_fusion_ok": bool(backpack_fusion_payload.get("ok")),
             "backpack_fusion_required_ok": bool(backpack_fusion_payload.get("required_ok")),
@@ -1055,9 +996,6 @@ class ControlStatusService:
             ),
             "backpack_teach_rules": list(backpack_fusion_payload.get("teach_rules") or []),
             "backpack_nova_must_know": dict(backpack_fusion_payload.get("nova_must_know") or {}),
-            "backpack_local_schools_rows": int(
-                ((backpack_fusion_payload.get("local_hold") or {}).get("row_count") or 0)
-            ),
         }
 
         runtime_worker = autonomy_payload.get("runtime_worker") if isinstance(autonomy_payload.get("runtime_worker"), dict) else {}

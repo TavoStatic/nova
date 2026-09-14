@@ -352,14 +352,14 @@ _Session: contract-reconciliation-and-release-20260906_
 
 **Changes:**
 - Reconciled stale SOCK and mission contracts
-- Removed Ed-Fi core from active regression and closure contracts while preserving backpack surfaces
+- Removed an optional provider implementation from active regression and closure contracts while preserving generic backpack surfaces
 - Fixed Work Tree attempted-versus-complete expectations and legacy retirement discovery
 - Fixed HTTP session continuity deletion
 - Fixed release package PowerShell parsing and forbidden-content verification
 
 **Meta:** 124 tests added · docs added: `none` · docs updated: `none`
 
-_Note: Full uncapped regression completed with unit and behavior green; integration was subsequently rerun after package/installer fixes and passed 83 tests. Ed-Fi core remains repository residue for later push cleanup, not an active Nova contract._
+_Note: Full uncapped regression completed with unit and behavior green; integration was subsequently rerun after package/installer fixes and passed 83 tests._
 
 ### 2026-09-05 — codex
 _Session: runtime-reset-and-regression-root-20260905_
@@ -604,7 +604,7 @@ _Session: release-regression-roots_
 **Changes:**
 - Daily regression timeout now writes host regression_status.json
 - Dead regression lock is cleared
-- Wiring surface points at backpack Ed-Fi files not deleted data_connector
+ - Wiring surface points at generic backpack files
 
 **Meta:** 2 tests added
 
@@ -942,7 +942,7 @@ _Session: kidney-runs-and-backpack-residue_
 
 **Meta:** 6 tests added
 
-_Note: Live: sanitizer removed runtime/edfi and views. Kidney deleted 400 oldest subconscious runs plus May decontam. latest.json kept. Remaining runs feed the next cycles._
+_Note: Live: sanitizer removed stale backpack runtime and views. Kidney deleted 400 oldest subconscious runs plus May decontam. latest.json kept. Remaining runs feed the next cycles._
 
 ### 2026-08-21 — grok
 _Session: storage-watch-tree-close_
@@ -1017,28 +1017,28 @@ _Session: extract-outbox-republish-root_
 _Note: Live loop after the first fix: extract stayed open with core_thinning=failed, so every cycle republished tool_failure_judgment and recreated the wait hold. Applied feed+reconcile+hold resolve on the live tree; intake reads are now the open work._
 
 ### 2026-08-16 — grok
-_Session: edfi-uninstall-residue_
+_Session: backpack-uninstall-residue_
 
-**Modules touched:** `services/backpack_host/install_state.py`, `services/control_backpacks.py`, `services/edfi/profile_evidence.py`, `services/edfi/core_readiness.py`, `services/backpack_host/capability_surface.py`, `services/backpack_host/registry.py`, `services/work_tree_signal_ingestion.py`
+**Modules touched:** `services/backpack_host/install_state.py`, `services/control_backpacks.py`, `services/backpack_host/registry.py`, `services/work_tree_signal_ingestion.py`
 
 **Changes:**
-- Uninstalled Ed-Fi is a valid quiet state
+- Uninstalled backpacks are a valid quiet state
 - not a missing-profile defect
 - Fusion/core/pipeline registry no longer treat package files as an installed backpack
-- Work-tree Ed-Fi and pipeline-registry branches resolve without requiring a read of a deleted profile
+- Work-tree backpack branches resolve without requiring deleted provider artifacts
 
 **Meta:** 4 tests added
 
-_Note: Residue after backpack uninstall: status still defaulted district-main, fusion scored missing settings as unhealthy, and profile close required read evidence of the deleted file._
+_Note: Residue after backpack uninstall was caused by status/fusion state surviving beyond the install contract._
 
 ### 2026-08-16 — grok
 _Session: backpack-uninstall-sanitize_
 
-**Modules touched:** `services/backpack_host/sanitize.py`, `services/control_backpacks.py`, `services/edfi/warehouse_sync.py`
+**Modules touched:** `services/backpack_host/sanitize.py`, `services/control_backpacks.py`
 
 **Changes:**
 - Uninstall now sanitizes a declared touch-point list
-- not just runtime/edfi
+- not just the primary runtime directory
 - Fusion cache and pipeline workers are removed with the backpack
 - Scheduled warehouse sync stays quiet when the backpack is not installed
 
@@ -1059,7 +1059,7 @@ _Session: any-backpack-uninstall-sanitize_
 
 **Meta:** 5 tests added
 
-_Note: Ed-Fi-only overlay is no longer the sanitizer. Any backpack gets runtime dir, pipeline workers, manifest paths, matching work-tree branches, and a leftover scan._
+_Note: Any backpack gets runtime dir, pipeline workers, manifest paths, matching work-tree branches, and a leftover scan._
 
 ### 2026-08-16 — grok
 _Session: ledger-decision-dedupe_
@@ -1225,16 +1225,16 @@ _Session: arch_decisions_mining_20260804_
 _Note: Task 34 complete. Decisions cover: services_import_boundary, three_runtime_architecture, evidence_validity_json_aware, maintenance_local_enrichment, hardware_constraint_core_solid, leah_observe_mode, subconscious_no_routing, control_status_read_only, nova_grok_file_origin, commit_is_deployment, root_cause_first_principle, operator_outbox_durable_lane_
 
 ### 2026-08-03 — claude-cowork
-_Session: edfi_backpack_and_nova_shell_
+_Session: backpack_and_nova_shell_
 
-**Modules touched:** `backpacks/edfi/`, `services/backpack_host/`, `nova_shell/`, `tools/`
+**Modules touched:** `services/backpack_host/`, `nova_shell/`, `tools/`
 
 **Changes:**
-- Ed-Fi backpack structure built
+- Backpack structure built
 - Backpack Host — discovery, install, grant enforcement, lifecycle
 - Nova Shell security scaffolding, identity, store, roles, auth, admin
 - Custom roles CRUD added
-- Ed-Fi code scan completed
+- Backpack code scan completed
 
 _Note: Tasks 13-25 completed_
 
@@ -1520,7 +1520,7 @@ If a backpack can write into a Nova surface, that surface has to be on the unins
 
 **Rationale:** Nova self-corrects. An uninstall that only deletes the backpack folder leaves status, fusion, pipeline workers, warehouse sync, and work-tree signals treating the backpack as a broken install. Those surfaces keep opening the same tasks. The install contract must name every write target or the residue scan must admit the gap.
 
-**Affects:** `services/backpack_host/sanitize.py`, `services/backpack_host/install_state.py`, `services/control_backpacks.py`, `services/edfi/warehouse_sync.py`, `services/work_tree_signal_ingestion.py`
+**Affects:** `services/backpack_host/sanitize.py`, `services/backpack_host/install_state.py`, `services/control_backpacks.py`, `services/work_tree_signal_ingestion.py`
 **Source:** `operator session 2026-08-16` · Status: active
 
 ### `unnamed` — 2026-09-01

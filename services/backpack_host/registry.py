@@ -13,7 +13,7 @@ class from the backpack's pipeline/connector.py.
 
 Merge rule: if a backpack has the same pipeline_id as a data_sources pipeline,
 the backpack wins. This allows backpacks to provide domain-specific
-pipelines (e.g., data_connector → edfi) when the district migrates to the backpack.
+pipelines that supersede a legacy data_sources lane of the same id.
 """
 
 import json
@@ -163,7 +163,7 @@ class BackpackAwarePipelineRegistry(PipelineRegistry):
         Return all pipeline manifests: data_sources pipelines + backpacks.
 
         Backpacks shadow same-id data_sources pipelines (intentional: migration
-        path from data_connector → edfi).
+        path from a legacy data_sources lane to its backpack).
         """
         pipeline_manifests = {m.pipeline_id: m for m in super().discover(refresh=refresh)}
         backpack_manifests = {m.pipeline_id: m for m in self._discover_backpacks(refresh=refresh)}

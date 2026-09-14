@@ -59,12 +59,8 @@ def _hermetic_status_patches() -> list[tuple[str, object]]:
         ("nova_http.nova_core.get_search_provider_priority", lambda: ["html"]),
         ("services.control_status.pipeline_worker_summary", lambda: {"ok": True, "worker_count": 0, "supervised_count": 0}),
         ("services.control_status.list_pipeline_summaries", lambda: []),
-        ("services.control_status.build_capability_profile_evidence", lambda: {"ok": False, "status": "failure", "present": False, "issue_count": 0, "issues": []}),
-        ("services.control_status.read_edfi_core_readiness", lambda connection_id="district-main": {"ready": False, "connection_id": connection_id}),
         ("services.control_status.summarize_gatekeeper_records", lambda: {"ok": True, "count": 0, "status_counts": {}}),
         ("services.control_status.FRONTDOOR_CLI_PARITY_SERVICE.build_surfaces", lambda **kwargs: {"ok": True, "backend_commands": [], "frontdoor_cli_status": "", "cli_http_parity": {}}),
-        ("services.backpack_host.capability_surface.load_last_scan", lambda: {"ok": True, "available_capability_ids": []}),
-        ("services.backpack_host.capability_surface.get_fusion_status", lambda **kwargs: {"ok": True, "required_ok": True, "available_capability_ids": []}),
     ]
 
 
@@ -93,7 +89,6 @@ class TestToolRegistry(unittest.TestCase):
                 "tool_system_check",
                 "tool_queue_status",
                 "tool_temporal_review",
-                "tool_edfi_explore",
                 "tool_pipeline",
                 "tool_patch_preview_apply",
                 "tool_patch_preview_approve",

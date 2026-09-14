@@ -188,22 +188,6 @@ class ToolRegistry:
             raise
 
 
-def _optional_data_connector_tool() -> NovaTool | None:
-    """Backpack explore tool is optional — Nova core must boot without a dropped-in pack."""
-    try:
-        from .edfi_tool import DataConnectorExploreTool
-
-        return DataConnectorExploreTool()
-    except Exception:
-        pass
-    try:
-        from .edfi_tool import EdFiExploreTool
-
-        return EdFiExploreTool()
-    except Exception:
-        return None
-
-
 def build_default_registry() -> ToolRegistry:
     tools: list[NovaTool] = [
         FileSystemTool(),
@@ -215,9 +199,6 @@ def build_default_registry() -> ToolRegistry:
         OsCapabilityTool(),
         TemporalReviewTool(),
     ]
-    connector = _optional_data_connector_tool()
-    if connector is not None:
-        tools.append(connector)
     return ToolRegistry(tools)
 
 
@@ -269,28 +250,6 @@ def build_core_tool_exports(runtime_scope: dict[str, Any]) -> dict[str, Any]:
 
     def tool_camera():
         return execute_registered_tool_fn("vision", {"action": "camera"})
-
-    def tool_edfi_explore(
-        action: str = "health",
-        connection_id: str = "district-main",
-        resource: str = "",
-        limit: int = 25,
-        offset: int = 0,
-        query: str = "",
-        namespace: str = "",
-    ):
-        return execute_registered_tool_fn(
-            "edfi_explore",
-            {
-                "action": str(action or "health").strip().lower(),
-                "connection_id": str(connection_id or "district-main").strip() or "district-main",
-                "resource": str(resource or "").strip(),
-                "limit": int(limit or 25),
-                "offset": int(offset or 0),
-                "query": str(query or "").strip(),
-                "namespace": str(namespace or "").strip(),
-            },
-        )
 
     def tool_pipeline(command_text: str = "pipeline help"):
         return service_handle_pipeline_command(
@@ -520,7 +479,6 @@ def build_core_tool_exports(runtime_scope: dict[str, Any]) -> dict[str, Any]:
         "tool_temporal_review": tool_temporal_review,
         "tool_screen": tool_screen,
         "tool_camera": tool_camera,
-        "tool_edfi_explore": tool_edfi_explore,
         "tool_pipeline": tool_pipeline,
         "tool_patch_preview_apply": tool_patch_preview_apply,
         "tool_patch_preview_approve": tool_patch_preview_approve,

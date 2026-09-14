@@ -622,15 +622,15 @@ class ObservationSpineCirculationTests(unittest.TestCase):
             meta={"kind": "signal_ingestion", "source": "runtime_signals", "signal_ingestion": True},
         )
         root = work_tree._BRANCHES[tree.root_branch_id]
-        branch = work_tree.add_branch_to_tree(tree.tree_id, "Saved data connector capability profile is missing", "work", root.branch_id)
-        branch.source_type = "edfi_capability_profile"
-        branch.source_key = "governance_pressure:edfi_capability_profile:edfi_profile_missing:district-main"
+        branch = work_tree.add_branch_to_tree(tree.tree_id, "Backpack install residue is present", "work", root.branch_id)
+        branch.source_type = "backpack_host"
+        branch.source_key = "governance_pressure:backpack_host:backpack_host_uninstall_residue:example_connector"
         branch.resolution_state = "open"
         with mock.patch.object(work_tree, "reload_persisted_state", return_value=True):
             results = _sanitize_work_tree(
-                "edfi",
-                points={"signal_sources": ["edfi_capability_profile"], "pipeline_ids": ["edfi"]},
-                reason="edfi backpack was uninstalled; leftover pressure is residue, not live work.",
+                "example_connector",
+                points={"signal_sources": ["backpack_host"], "pipeline_ids": ["example_connector"]},
+                reason="A backpack was uninstalled; leftover pressure is residue, not live work.",
             )
         self.assertTrue(any(item.get("branch_id") == branch.branch_id and item.get("action") == "resolved" for item in results))
         rows = recent_observations()

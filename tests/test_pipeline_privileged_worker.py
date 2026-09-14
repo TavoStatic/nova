@@ -12,7 +12,7 @@ class TestPipelinePrivilegedWorker(unittest.TestCase):
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
         self.runtime_root = Path(self.temp_dir.name)
-        self.paths = build_protocol_paths(self.runtime_root, "sis_test")
+        self.paths = build_protocol_paths(self.runtime_root, "example_connector")
 
     def tearDown(self):
         self.temp_dir.cleanup()
@@ -20,22 +20,22 @@ class TestPipelinePrivilegedWorker(unittest.TestCase):
     def test_process_next_privileged_request_writes_response(self):
         request = submit_request(
             self.paths,
-            pipeline_id="sis_test",
-            operation="student_lookup",
-            params={"student_id": "12345"},
+            pipeline_id="example_connector",
+            operation="inventory/items",
+            params={"item_id": "12345"},
             row_limit=5,
             requested_by="test",
         )
 
         def fake_execute(pipeline_id, operation, params, row_limit=None, data_sources_root=None):
-            self.assertEqual(pipeline_id, "sis_test")
-            self.assertEqual(operation, "student_lookup")
-            self.assertEqual(params["student_id"], "12345")
+            self.assertEqual(pipeline_id, "example_connector")
+            self.assertEqual(operation, "inventory/items")
+            self.assertEqual(params["item_id"], "12345")
             self.assertEqual(row_limit, 5)
             return {"ok": True, "execution_mode": "live", "row_count": 1}
 
         response = process_next_privileged_request(
-            "sis_test",
+            "example_connector",
             runtime_root=self.runtime_root,
             data_sources_root=Path(self.temp_dir.name),
             execute_fn=fake_execute,

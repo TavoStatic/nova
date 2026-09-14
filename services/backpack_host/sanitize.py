@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-"""Uninstall sanitization for every backpack, not just Ed-Fi.
+"""Uninstall sanitization for every backpack.
 
 A backpack can write outside runtime/{id}/. Those extra paths must come from
 the backpack's own manifest and settings defaults, plus a small overlay for
@@ -22,14 +22,7 @@ from services.backpack_host.install_state import (
 
 # Nova surfaces the backpack package cannot declare in backpack.json.
 # Keep this thin. Manifest runtime/settings paths are discovered automatically.
-BACKPACK_SURFACE_OVERLAYS: dict[str, dict[str, Any]] = {
-    "edfi": {
-        "signal_sources": ("edfi_capability_profile", "edfi_core", "backpack_edfi", "backpack_host"),
-        "fusion_scan": True,
-        "maintenance_state_keys": ("last_edfi_warehouse_sync",),
-        "pipeline_ids": ("edfi_bisd",),
-    }
-}
+BACKPACK_SURFACE_OVERLAYS: dict[str, dict[str, Any]] = {}
 
 _TEMPLATE_TAIL = re.compile(r"/\{[^}]+\}.*")
 

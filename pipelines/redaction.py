@@ -5,31 +5,16 @@ from typing import Any, Mapping
 
 REDACTED = "[REDACTED]"
 
-STUDENT_SENSITIVE_FIELDS = frozenset({
-    "firstName",
-    "middleName",
-    "lastSurname",
-    "maidenName",
-    "birthDate",
-    "birthCity",
-    "birthCountryDescriptor",
-    "birthStateAbbreviationDescriptor",
-    "generationCodeSuffix",
-    "personalTitlePrefix",
-    "electronicMails",
-    "identificationDocuments",
-    "languages",
-    "otherNames",
-    "races",
-    "characteristics",
-    "studentIdentificationCodes",
+SENSITIVE_FIELDS = frozenset({
+    "name",
+    "full_name",
+    "email",
+    "phone",
     "addresses",
     "telephones",
 })
 
-EDUCATION_ORG_SENSITIVE_FIELDS = frozenset({
-    "addresses",
-    "telephones",
+ORGANIZATION_SENSITIVE_FIELDS = frozenset({
     "faxNumber",
     "website",
 })
@@ -39,11 +24,9 @@ SUMMARY_ONLY_FIELDS = frozenset({
     "row_count",
     "total_matches",
     "resource_count",
-    "schoolId",
-    "studentUniqueId",
-    "localEducationAgencyReference",
-    "schoolReference",
-    "nameOfInstitution",
+    "item_id",
+    "display_name",
+    "category",
     "preset",
     "resource",
     "educationOrganizationCategoryDescriptor",
@@ -66,16 +49,6 @@ METADATA_ONLY_FIELDS = frozenset({
     "redaction_applied",
 })
 
-STUDENT_BEARING_RESOURCES = frozenset({
-    "backpack/students",
-    "backpack/studentSchoolAssociations",
-})
-
-STUDENT_OPERATIONS = frozenset({
-    "list_students",
-    "student_school_associations",
-})
-
 METADATA_OPERATIONS = frozenset({
     "connection_health",
     "list_resources",
@@ -94,12 +67,8 @@ def _normalize_backpack_resource(resource: Any) -> str:
 
 def profile_for_resource(resource: Any) -> str:
     normalized = _normalize_backpack_resource(resource)
-    if normalized in STUDENT_BEARING_RESOURCES:
-        return "student_default"
-    if normalized == "backpack/schools":
-        return "education_org_default"
     if normalized.startswith("backpack/"):
-        return "student_default"
+        return "sensitive_default"
     return "none"
 
 
@@ -110,10 +79,6 @@ def resolve_redaction_profile(
     resource: Any = None,
 ) -> str:
     op = str(operation or "").strip()
-    if op in STUDENT_OPERATIONS:
-        return "student_default"
-    if op == "list_schools":
-        return "education_org_default"
     if op in METADATA_OPERATIONS:
         return "none"
 
@@ -131,12 +96,12 @@ def normalize_redaction_profile(value: Any) -> str:
     profile = str(value or "none").strip().lower() or "none"
     if profile not in {
         "none",
-        "student_default",
-        "education_org_default",
+        "sensitive_default",
+        "organization_default",
         "summary_only",
         "metadata_only",
     }:
-        return "student_default"
+        return "sensitive_default"
     return profile
 
 
@@ -166,10 +131,10 @@ def redact_row(row: Any, profile: str) -> Any:
     normalized = normalize_redaction_profile(profile)
     if normalized == "none" or not isinstance(row, dict):
         return row
-    if normalized == "student_default":
-        return _redact_mapping(row, deny_fields=STUDENT_SENSITIVE_FIELDS)
-    if normalized == "education_org_default":
-        return _redact_mapping(row, deny_fields=EDUCATION_ORG_SENSITIVE_FIELDS)
+    if normalized == "sensitive_default":
+        return _redact_mapping(row, deny_fields=SENSITIVE_FIELDS)
+    if normalized == "organization_default":
+        return _redact_mapping(row, deny_fields=ORGANIZATION_SENSITIVE_FIELDS)
     if normalized == "summary_only":
         return _keep_fields(row, allow_fields=SUMMARY_ONLY_FIELDS)
     if normalized == "metadata_only":
@@ -196,8 +161,8 @@ def redaction_profile_protects_resource(profile: str, resource: Any) -> bool:
     if normalized == "none":
         return False
     resource_profile = profile_for_resource(resource)
-    if resource_profile == "student_default":
-        return normalized == "student_default"
+    if resource_profile == "sensitive_default":
+        return normalized == "sensitive_default"
     return normalized != "none"
 
 
@@ -229,29 +194,4 @@ def apply_redaction_to_payload(
 
     _redact_record_collections(result, normalized)
 
-    edfi = result.get("edfi")
-    if isinstance(edfi, dict):
-        redacted_edfi = deepcopy(edfi)
-        _redact_record_collections(redacted_edfi, normalized)
-        result["edfi"] = redacted_edfi
-
     return result
-
-
-def redact_edfi_result(
-    result: Mapping[str, Any],
-    *,
-    operation: str = "",
-    resource: Any = None,
-    template_profile: Any = None,
-) -> dict[str, Any]:
-    profile = resolve_redaction_profile(
-        operation=operation,
-        template_profile=template_profile,
-        resource=resource or result.get("resource"),
-    )
-    return apply_redaction_to_payload(
-        result,
-        profile,
-        resource=resource or result.get("resource"),
-    )

@@ -10,28 +10,17 @@ from unittest import mock
 from pathlib import Path
 
 import work_tree
-try:
-    from services.edfi.config import CAPABILITY_SCHEMA
-    from services.edfi.profile_evidence import EXPECTED_RESOURCE_COUNT as EXPECTED_RESOURCE_COUNT
-except ImportError:
-    CAPABILITY_SCHEMA: dict = {}
-    EXPECTED_RESOURCE_COUNT: int = 0
 from services.work_tree_signal_ingestion import (
-    EDFI_CAPABILITY_PROFILE_READ_HOLD_REASON,
-    EDFI_CAPABILITY_PROFILE_READ_TASK_TITLE,
     META_CONTINUITY_GAP_REASON,
     META_CONTINUITY_GAP_SELF_QUESTION,
     META_CONTINUITY_GAP_TASK_TITLE,
     SOURCE_ROOT_SEQUENCE_EXHAUSTED_HOLD_REASON,
     WorkTreeSignalIngestionService,
     _autonomy_orchestrator_signal_from_status,
-    _backpack_edfi_signal_from_status,
     _backpack_host_signal_from_status,
     _branch_why_summary,
     _data_pipeline_evidence_task,
     _data_pipeline_signal_from_status,
-    _edfi_capability_profile_read_evidence_satisfied,
-    _edfi_capability_profile_signal_from_status,
     _gap_evidence_task,
     _looks_like_source_root_file_gap,
     _operator_control_signal_from_status,
@@ -47,60 +36,6 @@ from services.work_tree_signal_ingestion import (
 
 
 WORK_TMP_ROOT = Path(os.environ.get("NOVA_VALIDATION_RUNTIME_DIR") or Path(__file__).resolve().parents[1] / "runtime" / "validation") / "pytest_temp"
-
-_MISSING_EDFI_PROFILE_STATUS = {
-    "edfi_capability_profile_ok": False,
-    "edfi_capability_profile_present": False,
-    "edfi_capability_profile_status": "missing",
-    "edfi_capability_profile_issue_count": 1,
-    "edfi_capability_profile_path": "runtime/edfi/profiles/district-main.json",
-    "edfi_capability_profile": {
-        "ok": False,
-        "status": "missing",
-        "present": False,
-        "issue_count": 1,
-        "issues": [{"code": "edfi_profile_missing"}],
-        "profile_evidence_path": "runtime/edfi/profiles/district-main.json",
-        "evidence_source": "saved_capability_profile",
-        "live_api_required": False,
-    },
-}
-
-_VALID_EDFI_PROFILE_READ_RESULT = json.dumps(
-    {
-        "schema": CAPABILITY_SCHEMA,
-        "milestone": "NOVA-EDFI-001",
-        "connection_id": "district-main",
-        "discovered_at": 1700000000,
-        "auth": {"ok": True},
-        "discovery": {
-            "ok": True,
-            "resource_count": EXPECTED_RESOURCE_COUNT,
-            "resources": ["backpack/schools"],
-        },
-    }
-)
-
-_HEALTHY_EDFI_PROFILE_STATUS = {
-    "edfi_capability_profile_ok": True,
-    "edfi_capability_profile_present": True,
-    "edfi_capability_profile_status": "ok",
-    "edfi_capability_profile_auth_ok": True,
-    "edfi_capability_profile_resource_count": 445,
-    "edfi_capability_profile_issue_count": 0,
-    "edfi_capability_profile_path": "runtime/edfi/profiles/district-main.json",
-    "edfi_capability_profile": {
-        "ok": True,
-        "status": "ok",
-        "present": True,
-        "auth_ok": True,
-        "resource_count": 445,
-        "discovered_at": 1700000000,
-        "profile_evidence_path": "runtime/edfi/profiles/district-main.json",
-        "evidence_source": "saved_capability_profile",
-        "live_api_required": False,
-    },
-}
 
 
 class TestAutonomyOrchestratorSignal(unittest.TestCase):
@@ -152,35 +87,6 @@ class TestAutonomyOrchestratorSignal(unittest.TestCase):
 
 
 class TestBackpackHostSignals(unittest.TestCase):
-    def test_edfi_fusion_unhealthy_does_not_crash_when_fusion_dict_is_present(self) -> None:
-        signal = _backpack_edfi_signal_from_status(
-            {
-                "backpack_fusion_ok": False,
-                "backpack_capability_count": 2,
-                "backpack_fusion": {"installed": True, "status": "installed", "ok": False},
-            }
-        )
-        self.assertIsNotNone(signal)
-        self.assertEqual(signal.get("source"), "backpack_edfi")
-
-    def test_edfi_fusion_stays_quiet_when_backpack_is_not_installed(self) -> None:
-        signal = _backpack_edfi_signal_from_status(
-            {
-                "backpack_fusion_ok": False,
-                "backpack_fusion": {"installed": False, "status": "not_installed", "ok": False},
-            }
-        )
-        self.assertIsNone(signal)
-
-    def test_edfi_fusion_stays_quiet_when_install_contract_is_unreadable(self) -> None:
-        signal = _backpack_edfi_signal_from_status(
-            {
-                "backpack_fusion_ok": False,
-                "backpack_fusion": {"ok": False, "error": "fusion_unreadable"},
-            }
-        )
-        self.assertIsNone(signal)
-
     def test_host_stays_quiet_when_uninstall_is_closed(self) -> None:
         signal = _backpack_host_signal_from_status(
             {
@@ -258,12 +164,12 @@ class TestBackpackHostSignals(unittest.TestCase):
                 {
                     "data_pipeline_registry_ok": True,
                     "data_pipeline_count": 1,
-                    "data_pipeline_ids": ["edfi_bisd"],
+                    "data_pipeline_ids": ["example_connector"],
                     "data_pipelines": {
                         "ok": True,
                         "pipelines": [
                             {
-                                "pipeline_id": "edfi_bisd",
+                                "pipeline_id": "example_connector",
                                 "installed": False,
                                 "status": "not_installed",
                                 "lane_state": {"enabled": False, "state": "paused"},
@@ -279,12 +185,12 @@ class TestBackpackHostSignals(unittest.TestCase):
             {
                 "data_pipeline_registry_ok": True,
                 "data_pipeline_count": 1,
-                "data_pipeline_ids": ["sis_test"],
+                    "data_pipeline_ids": ["example_connector"],
                 "data_pipelines": {
                     "ok": True,
                     "pipelines": [
                         {
-                            "pipeline_id": "sis_test",
+                                "pipeline_id": "example_connector",
                             "installed": True,
                             "lane_state": {"enabled": False, "state": "paused"},
                         }
@@ -294,7 +200,7 @@ class TestBackpackHostSignals(unittest.TestCase):
         )
         self.assertIsNotNone(signal)
         self.assertEqual((signal or {}).get("title"), "Data pipeline lane is blocked or paused")
-        self.assertEqual(((signal or {}).get("fingerprint") or {}).get("symbol"), "sis_test")
+        self.assertEqual(((signal or {}).get("fingerprint") or {}).get("symbol"), "example_connector")
 
 
 def _workspace_case_dir(prefix: str) -> Path:
@@ -1058,139 +964,6 @@ class TestWorkTreeSignalIngestionService(unittest.TestCase):
         self.assertEqual(str(branch.source_type or ""), "patch_pipeline")
         self.assertEqual(str(branch.work_class or ""), "governance_pressure")
         self.assertIn("patch_strict_manifest_disabled", branch.source_payload.get("reasons") or [])
-
-    def test_status_snapshot_ingests_missing_edfi_capability_profile(self) -> None:
-        results = self.service.ingest_status_snapshot(dict(_MISSING_EDFI_PROFILE_STATUS))
-
-        self.assertTrue(any(item.get("action") == "created" for item in results))
-        branch = self._signal_branches()[0]
-        self.assertEqual(str(branch.source_type or ""), "edfi_capability_profile")
-        self.assertEqual(str(branch.work_class or ""), "governance_pressure")
-        self.assertEqual((branch.source_payload or {}).get("evidence_source"), "saved_capability_profile")
-        self.assertFalse((branch.source_payload or {}).get("live_api_required"))
-        self.assertTrue((branch.source_payload or {}).get("profile_evidence_closure_required"))
-        task = work_tree.list_branch_tasks(branch.branch_id)[0]
-        self.assertEqual(task.title, EDFI_CAPABILITY_PROFILE_READ_TASK_TITLE)
-        self.assertEqual(task.meta.get("tool_args"), ["runtime/edfi/profiles/district-main.json"])
-        self.assertEqual(task.meta.get("expected_tool"), "read")
-
-    def test_edfi_profile_branch_holds_when_healthy_without_read_evidence(self) -> None:
-        self.service.sync_status_snapshot(dict(_MISSING_EDFI_PROFILE_STATUS))
-        branch = self._signal_branches()[0]
-
-        results = self.service.sync_status_snapshot(dict(_HEALTHY_EDFI_PROFILE_STATUS))
-
-        self.assertTrue(any(item.get("action") == "observing" for item in results))
-        self.assertFalse(any(item.get("action") == "resolved" for item in results))
-        branch = work_tree.get_branch(branch.branch_id)
-        self.assertEqual(branch.status, work_tree.BranchStatus.BLOCKED)
-        self.assertEqual(str(branch.resolution_state or ""), "observing")
-        self.assertFalse(_edfi_capability_profile_read_evidence_satisfied(branch.branch_id))
-        hold_tasks = [
-            task
-            for task in work_tree.list_branch_tasks(branch.branch_id)
-            if task.status == work_tree.TaskStatus.BLOCKED
-        ]
-        self.assertTrue(hold_tasks)
-        self.assertEqual((hold_tasks[0].meta or {}).get("blocked_reason"), EDFI_CAPABILITY_PROFILE_READ_HOLD_REASON)
-
-    def test_edfi_profile_branch_resolves_after_verified_read_evidence(self) -> None:
-        self.service.sync_status_snapshot(dict(_MISSING_EDFI_PROFILE_STATUS))
-        branch = self._signal_branches()[0]
-        read_task = [
-            task
-            for task in work_tree.list_branch_tasks(branch.branch_id)
-            if task.title == EDFI_CAPABILITY_PROFILE_READ_TASK_TITLE
-        ][0]
-        work_tree.record_task_evidence(
-            branch_id=branch.branch_id,
-            task_id=read_task.task_id,
-            tool_name="read",
-            tool_args=["runtime/edfi/profiles/district-main.json"],
-            result=_VALID_EDFI_PROFILE_READ_RESULT,
-        )
-        work_tree.mark_task_complete(read_task.task_id)
-        self.assertTrue(_edfi_capability_profile_read_evidence_satisfied(branch.branch_id))
-
-        results = self.service.sync_status_snapshot(dict(_HEALTHY_EDFI_PROFILE_STATUS))
-
-        self.assertTrue(any(item.get("action") == "resolved" for item in results))
-        branch = work_tree.get_branch(branch.branch_id)
-        self.assertEqual(branch.status, work_tree.BranchStatus.COMPLETE)
-        self.assertEqual(str(branch.resolution_state or ""), "resolved")
-
-    def test_edfi_profile_branch_does_not_resolve_on_missing_file_read_evidence(self) -> None:
-        self.service.sync_status_snapshot(dict(_MISSING_EDFI_PROFILE_STATUS))
-        branch = self._signal_branches()[0]
-        read_task = [
-            task
-            for task in work_tree.list_branch_tasks(branch.branch_id)
-            if task.title == EDFI_CAPABILITY_PROFILE_READ_TASK_TITLE
-        ][0]
-        work_tree.record_task_evidence(
-            branch_id=branch.branch_id,
-            task_id=read_task.task_id,
-            tool_name="read",
-            tool_args=["runtime/edfi/profiles/district-main.json"],
-            result="file not found: runtime/edfi/profiles/district-main.json",
-        )
-        work_tree.mark_task_complete(read_task.task_id)
-
-        self.assertFalse(_edfi_capability_profile_read_evidence_satisfied(branch.branch_id))
-        results = self.service.sync_status_snapshot(dict(_HEALTHY_EDFI_PROFILE_STATUS))
-        self.assertFalse(any(item.get("action") == "resolved" for item in results))
-        self.assertTrue(any(item.get("action") == "observing" for item in results))
-
-    def test_edfi_profile_evidence_loop_e2e(self) -> None:
-        created = self.service.ingest_status_snapshot(dict(_MISSING_EDFI_PROFILE_STATUS))
-        self.assertTrue(any(item.get("action") == "created" for item in created))
-        branch = self._signal_branches()[0]
-        self.assertEqual(str(branch.source_type or ""), "edfi_capability_profile")
-
-        read_task = work_tree.list_branch_tasks(branch.branch_id)[0]
-        work_tree.record_task_evidence(
-            branch_id=branch.branch_id,
-            task_id=read_task.task_id,
-            tool_name="read",
-            tool_args=["runtime/edfi/profiles/district-main.json"],
-            result=_VALID_EDFI_PROFILE_READ_RESULT,
-        )
-        work_tree.mark_task_complete(read_task.task_id)
-        self.assertTrue(_edfi_capability_profile_read_evidence_satisfied(branch.branch_id))
-
-        resolved = self.service.sync_status_snapshot(dict(_HEALTHY_EDFI_PROFILE_STATUS))
-        self.assertTrue(any(item.get("action") == "resolved" for item in resolved))
-        branch = work_tree.get_branch(branch.branch_id)
-        self.assertEqual(branch.status, work_tree.BranchStatus.COMPLETE)
-        self.assertEqual(str(branch.resolution_state or ""), "resolved")
-        self.assertIn("Resolution:", str(branch.notes or ""))
-
-    def test_edfi_profile_sequence_advances_after_profile_read_evidence(self) -> None:
-        self.service.sync_status_snapshot(dict(_MISSING_EDFI_PROFILE_STATUS))
-        branch = self._signal_branches()[0]
-        read_task = [
-            task
-            for task in work_tree.list_branch_tasks(branch.branch_id)
-            if task.title == EDFI_CAPABILITY_PROFILE_READ_TASK_TITLE
-        ][0]
-        work_tree.record_task_evidence(
-            branch_id=branch.branch_id,
-            task_id=read_task.task_id,
-            tool_name="read",
-            tool_args=["runtime/edfi/profiles/district-main.json"],
-            result=_VALID_EDFI_PROFILE_READ_RESULT,
-        )
-        work_tree.mark_task_complete(read_task.task_id)
-
-        self.service.sync_status_snapshot(dict(_MISSING_EDFI_PROFILE_STATUS))
-
-        open_tasks = [
-            task
-            for task in work_tree.list_branch_tasks(branch.branch_id)
-            if task.status not in {work_tree.TaskStatus.COMPLETE, work_tree.TaskStatus.DROPPED}
-        ]
-        self.assertEqual(open_tasks[0].title, "Read data connector profile evidence builder")
-        self.assertEqual(open_tasks[0].meta.get("tool_args"), ["services/edfi/profile_evidence.py"])
 
     def test_status_snapshot_ingests_autonomy_orchestrator_ack_hold(self) -> None:
         results = self.service.ingest_status_snapshot(
@@ -2894,10 +2667,6 @@ class TestWorkTreeSignalIngestionService(unittest.TestCase):
             if str(item.source_type or "") == "backpack_host"
         )
         self.assertEqual(str(branch.work_class or ""), "governance_pressure")
-        self.assertNotIn(
-            "backpack_edfi",
-            {str(item.source_type or "") for item in self._signal_branches()},
-        )
 
     def test_status_snapshot_ingests_blocked_generated_queue_pressure(self) -> None:
         status_payload = {
@@ -4557,31 +4326,6 @@ class TestWorkTreeSignalIngestionService(unittest.TestCase):
         self.assertEqual(branch.status, work_tree.BranchStatus.COMPLETE)
         self.assertIn("Regression failure aged stale", str(branch.notes or ""))
 
-    def test_uninstalled_edfi_backpack_resolves_missing_profile_branch(self) -> None:
-        self.service.sync_status_snapshot(dict(_MISSING_EDFI_PROFILE_STATUS))
-        branch = self._signal_branches()[0]
-        self.assertEqual(str(branch.source_type or ""), "edfi_capability_profile")
-
-        results = self.service.sync_status_snapshot(
-            {
-                "edfi_capability_profile_ok": True,
-                "edfi_capability_profile_present": False,
-                "edfi_capability_profile_status": "not_installed",
-                "edfi_capability_profile": {
-                    "ok": True,
-                    "status": "not_installed",
-                    "present": False,
-                    "installed": False,
-                    "evidence_source": "backpack_not_installed",
-                },
-            }
-        )
-        branch = work_tree.get_branch(branch.branch_id)
-        self.assertTrue(any(item.get("action") == "resolved" for item in results))
-        self.assertEqual(branch.status, work_tree.BranchStatus.COMPLETE)
-        self.assertEqual(str(branch.resolution_state or ""), "resolved")
-
-
 class TestSourceRootInventorySignalHelpers(unittest.TestCase):
     def test_policy_gates_does_not_treat_missing_allow_domain_count_as_zero(self) -> None:
         self.assertIsNone(_policy_gates_signal_from_status({"web_enabled": True}))
@@ -4651,48 +4395,8 @@ class TestSourceRootInventorySignalHelpers(unittest.TestCase):
     def test_data_pipeline_evidence_task_reads_registry_or_lane_manifest(self) -> None:
         registry_task = _data_pipeline_evidence_task([])
         self.assertEqual(registry_task["tool_args"], ["services/data_pipeline_registry.py"])
-        lane_task = _data_pipeline_evidence_task([{"pipeline_id": "sis_test"}])
-        self.assertEqual(lane_task["tool_args"], ["data_sources/sis_test/pipeline.json"])
-
-    def test_edfi_capability_profile_signal_absent_when_saved_profile_is_healthy(self) -> None:
-        signal = _edfi_capability_profile_signal_from_status(
-            {
-                "edfi_capability_profile_ok": True,
-                "edfi_capability_profile_present": True,
-                "edfi_capability_profile_auth_ok": True,
-                "edfi_capability_profile_resource_count": 445,
-                "edfi_capability_profile_issue_count": 0,
-                "edfi_capability_profile": {
-                    "ok": True,
-                    "status": "ok",
-                    "present": True,
-                    "auth_ok": True,
-                    "resource_count": 445,
-                    "discovered_at": 1700000000,
-                    "profile_evidence_path": "runtime/edfi/profiles/district-main.json",
-                    "evidence_source": "saved_capability_profile",
-                    "live_api_required": False,
-                },
-            }
-        )
-        self.assertIsNone(signal)
-
-    def test_edfi_capability_profile_signal_absent_when_backpack_not_installed(self) -> None:
-        signal = _edfi_capability_profile_signal_from_status(
-            {
-                "edfi_capability_profile_ok": True,
-                "edfi_capability_profile_present": False,
-                "edfi_capability_profile_status": "not_installed",
-                "edfi_capability_profile": {
-                    "ok": True,
-                    "status": "not_installed",
-                    "present": False,
-                    "installed": False,
-                    "evidence_source": "backpack_not_installed",
-                },
-            }
-        )
-        self.assertIsNone(signal)
+        lane_task = _data_pipeline_evidence_task([{"pipeline_id": "example_connector"}])
+        self.assertEqual(lane_task["tool_args"], ["data_sources/example_connector/pipeline.json"])
 
 class TestMissionAmbientGovernanceSuppression(unittest.TestCase):
     def test_quiet_hold_still_opens_ambient_fronts(self) -> None:

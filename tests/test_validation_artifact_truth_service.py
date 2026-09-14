@@ -52,7 +52,7 @@ class TestValidationArtifactTruthService(unittest.TestCase):
                 json.dumps({
                     "ts": "2026-05-15 00:08:13",
                     "session_id": "s5_correction_followup_http",
-                    "user_input": "what is tsds?",
+                    "user_input": "what is a pipeline?",
                     "planner_decision": "llm_fallback",
                     "route_trace": [
                         {"stage": "input", "outcome": "received"},

@@ -15,11 +15,11 @@ Why not the privileged worker?
   data_pipeline_registry.py. That's a future task.
 
   For v1, backpack pipelines are read-only and governed (safe_query with audit).
-  In-process is sufficient. The audit log in DataConnectorPipeline.audit records every call.
+    In-process is sufficient. The governed audit log records every call.
 
 Usage:
     from services.backpack_host.query import run_backpack_query
-    result = run_backpack_query("edfi", "list_schools", row_limit=10)
+    result = run_backpack_query("example_backpack", "list_records", row_limit=10)
 """
 
 from pathlib import Path
@@ -85,7 +85,7 @@ def run_backpack_query(
     Run a governed query against a backpack pipeline.
 
     Args:
-        pipeline_id:  Backpack pipeline_id (e.g. 'edfi').
+        pipeline_id:  Backpack pipeline_id.
         operation:    Pipeline operation name (e.g. 'list_schools').
         params:       Optional operation parameters.
         row_limit:    Optional row cap (pipeline enforces hard cap regardless).

@@ -848,7 +848,7 @@ class SolutionTrailTests(unittest.TestCase):
             meta={"kind": "signal_ingestion", "last_active_source_keys": []},
         )
         branch = work_tree.add_branch_to_tree(tree.tree_id, "Uninstalled leftover", "work", tree.root_branch_id)
-        branch.source_key = "declared_capability_absent:edfi"
+        branch.source_key = "declared_capability_absent:example_connector"
         work_tree.set_branch_tools(branch.branch_id, allowed_tools=["read"], preferred_tool="read")
         work_tree.add_task_to_branch(
             branch.branch_id,

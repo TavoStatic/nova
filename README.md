@@ -85,7 +85,7 @@ Backpacks are installable capability modules. Drop a backpack folder into `backp
 backpacks/
   my-backpack/
     backpack.json       ← manifest + protocol version
-    connector.py        ← data connector
+    connector.py        ← connector implementation
     operations.json     ← declared operations
     settings_schema.json
 ```

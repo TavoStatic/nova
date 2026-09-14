@@ -228,9 +228,8 @@ SOURCE_ROOTS: tuple[SourceRoot, ...] = (
     ),
     SourceRoot(
         "backpack_host",
-        "Backpack host infrastructure — fusion, control surface, capability scan, and run entrypoint",
+        "Backpack host infrastructure — control surface, query, installation, and residue cleanup",
         (
-            "services/backpack_host/capability_surface.py",
             "services/backpack_host/query.py",
             "services/backpack_host/sanitize.py",
             "services/backpack_host/install_state.py",
@@ -302,8 +301,6 @@ SOURCE_ROOTS: tuple[SourceRoot, ...] = (
         "Source-root discovery, root coverage comparison, and wiring inventory completeness",
         ("services/nova_root_inventory.py", "services/nova_wiring_inventory.py", "services/end_to_end_wiring.py"),
     ),
-    # NOTE: data connector service layer and data lane ship with the installable backpack,
-    # not with Nova core. See backpacks/ for the reference implementation.
 )
 
 
@@ -415,8 +412,6 @@ def _coverage_root_for_path(path: str) -> str:
         or "smoke" in low
     ):
         return "test_ecosystem"
-    if low.startswith("services/edfi/"):
-        return "backpack_host"  # ships with the data connector backpack, not core
     if (
         low.startswith("backpacks/")
         or low.startswith("services/backpack_host/")
@@ -439,12 +434,6 @@ def _coverage_root_for_path(path: str) -> str:
         or name.startswith("_start_")
         or name in {"build_nova_setup_exe.ps1", "bring_up_webui.py", "webui_watchdog.py"}
     ):
-        return "diagnostics_hygiene"
-    if low.startswith("data_sources/data_connector/"):
-        return "backpack_host"
-    if name in {"run_edfi_profile.py", "run_edfi_explore.py", "demo_edfi_core_lifecycle.py"} or low == "tools/edfi_tool.py":
-        return "backpack_host"
-    if low.startswith("docs/") and "edfi" in low:
         return "diagnostics_hygiene"
     if name in {"readme.md", "requirements.txt"}:
         return "frontdoor_cli"

@@ -240,7 +240,6 @@ ACTIVE_WORK_TREE_EXECUTE_TOOLS = [
     LS,
     FIND,
     "pipeline",
-    "edfi_explore",
     "core_health",
     "core_thinning",
     GENERATED_QUEUE_RUN,
@@ -8251,35 +8250,6 @@ def run_once(*, worker_loop: bool = False) -> int:
     regression_status_synced = _sync_regression_status_from_file(state)
     _finalize_regression_branch(state, regression_status, regression_status_synced)
     _append_log(f"{regression_status}{'_synced_status_file' if regression_status_synced else ''}")
-
-    # data connector backpack: paced warehouse sync (schools) when schedule says due.
-    # Not a live ODS hammer — warehouse_sync module enforces min gap / local hour.
-    try:
-        from services.edfi.warehouse_sync import maybe_run_scheduled_warehouse_sync
-
-        edfi_warehouse = maybe_run_scheduled_warehouse_sync(force=False)
-        if not isinstance(edfi_warehouse, dict):
-            edfi_warehouse = {"ok": False, "error": "invalid_warehouse_result"}
-        edfi_warehouse = {
-            "ts": _patch_queue_timestamp(),
-            **edfi_warehouse,
-        }
-        state["last_edfi_warehouse_sync"] = edfi_warehouse
-        _append_log(
-            "edfi_warehouse_sync"
-            f" ok={bool(edfi_warehouse.get('ok'))}"
-            f" ran={bool(edfi_warehouse.get('ran'))}"
-            f" reason={str((edfi_warehouse.get('schedule') or {}).get('reason') or edfi_warehouse.get('error') or '')[:80]}"
-        )
-    except Exception as exc:
-        edfi_warehouse = {
-            "ts": _patch_queue_timestamp(),
-            "ok": False,
-            "ran": False,
-            "error": str(exc)[:400],
-        }
-        state["last_edfi_warehouse_sync"] = edfi_warehouse
-        _append_log(f"edfi_warehouse_sync_failed {exc}")
 
     try:
         signal_ingestion = _sync_signal_intake_work_tree(

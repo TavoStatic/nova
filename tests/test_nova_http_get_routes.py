@@ -308,7 +308,7 @@ class TestNovaHttpGetRoutesService(unittest.TestCase):
         result = HTTP_GET_ROUTES_SERVICE.handle_control_api_request_from_runtime(
             "/api/control/pipelines",
             handler=object(),
-            qs={"pipeline_id": ["sis_test"]},
+            qs={"pipeline_id": ["example_connector"]},
             runtime_scope={
                 "SOURCE": "runtime-pipeline-service",
                 "HTTP_PIPELINE_CONTROL_SERVICE": _PipelineControl(),
@@ -330,7 +330,7 @@ class TestNovaHttpGetRoutesService(unittest.TestCase):
                 {
                     "ok": True,
                     "source": "runtime-pipeline-service",
-                    "selected_pipeline_id": "sis_test",
+                    "selected_pipeline_id": "example_connector",
                 },
             ),
         )

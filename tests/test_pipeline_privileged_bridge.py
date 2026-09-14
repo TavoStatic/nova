@@ -28,17 +28,17 @@ class TestPipelinePrivilegedBridge(unittest.TestCase):
 
     def test_queue_and_wait_for_privileged_pipeline_query(self):
         request = queue_privileged_pipeline_query(
-            "sis_test",
-            "student_lookup",
-            {"student_id": "12345"},
+            "example_connector",
+            "inventory/items",
+            {"item_id": "12345"},
             row_limit=5,
             requested_by="test",
             runtime_root=self.runtime_root,
         )
-        paths = build_protocol_paths(self.runtime_root, "sis_test")
+        paths = build_protocol_paths(self.runtime_root, "example_connector")
         request_path = paths.requests_dir / f"{request['request_id']}.request.json"
         payload = load_request(request_path)
-        self.assertEqual(payload["operation"], "student_lookup")
+        self.assertEqual(payload["operation"], "inventory/items")
 
         write_response(
             paths,
@@ -46,7 +46,7 @@ class TestPipelinePrivilegedBridge(unittest.TestCase):
             {"ok": True, "request_id": request["request_id"], "result": {"row_count": 0}},
         )
         response = wait_for_privileged_pipeline_query(
-            "sis_test",
+            "example_connector",
             request["request_id"],
             timeout_sec=2,
             poll_interval_sec=0.1,
@@ -60,7 +60,7 @@ class TestPipelinePrivilegedBridge(unittest.TestCase):
         def worker():
             while "request_id" not in holder:
                 time.sleep(0.05)
-            paths = build_protocol_paths(self.runtime_root, "sis_test")
+            paths = build_protocol_paths(self.runtime_root, "example_connector")
             write_response(
                 paths,
                 holder["request_id"],
@@ -83,9 +83,9 @@ class TestPipelinePrivilegedBridge(unittest.TestCase):
         try:
             bridge.queue_privileged_pipeline_query = wrapped_queue
             response = run_privileged_pipeline_query(
-                "sis_test",
-                "student_lookup",
-                {"student_id": "12345"},
+                "example_connector",
+                "inventory/items",
+                {"item_id": "12345"},
                 row_limit=5,
                 runtime_root=self.runtime_root,
                 timeout_sec=5,

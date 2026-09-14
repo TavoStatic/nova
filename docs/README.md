@@ -51,7 +51,7 @@ When two sources conflict, the lower-numbered source wins regardless of date.
 
 - [KIDNEY_SYSTEM.md](KIDNEY_SYSTEM.md): cleanup, retention, retirement, and storage pressure
 - [SOCK_SYSTEM.md](SOCK_SYSTEM.md): hardware/model compatibility and policy recommendations
-- [DATA_PIPELINES.md](DATA_PIPELINES.md): pipeline framework, data connector core, and the district lane
+- [DATA_PIPELINES.md](DATA_PIPELINES.md): pipeline framework and installable lanes
 - [SEARCH_PROVIDER_ARCHITECTURE.md](SEARCH_PROVIDER_ARCHITECTURE.md): web/research provider roles
 - [PATCHING.md](PATCHING.md): patch proposal and apply/rollback governance
 - [MEMORY_SYSTEM_PLAN.md](MEMORY_SYSTEM_PLAN.md): memory design and implementation history; verify current behavior against the code indexes

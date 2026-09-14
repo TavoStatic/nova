@@ -1,38 +1,5 @@
 #!/usr/bin/env python3
-"""
-Backpack host CLI — list, install, status, query.
-
-Examples:
-  python scripts/run_backpack.py list
-  python scripts/run_backpack.py grants edfi --role viewer
-  python scripts/run_backpack.py status edfi --role account_admin
-  python scripts/run_backpack.py install edfi --settings path/to/settings.json
-  python scripts/run_backpack.py install edfi --settings path.json --skip-profile
-  python scripts/run_backpack.py query edfi connection_health --role standard_user
-  python scripts/run_backpack.py query edfi list_schools --role standard_user --lea [lea-id]
-  python scripts/run_backpack.py probe-lea edfi --lea [lea-id] --limit 3
-  python scripts/run_backpack.py report edfi schools --role standard_user --limit 10
-  python scripts/run_backpack.py report edfi schools --refresh --limit 50
-  python scripts/run_backpack.py report edfi health --role viewer
-  python scripts/run_backpack.py rate-limit-evidence
-  python scripts/run_backpack.py warehouse-status edfi
-  python scripts/run_backpack.py warehouse-sync edfi
-  python scripts/run_backpack.py warehouse-sync edfi --force
-  python scripts/run_backpack.py warehouse-sync edfi --full
-  python scripts/run_backpack.py warehouse-sync edfi --full --force
-  python scripts/run_backpack.py warehouse-sync edfi --resource students
-  python scripts/run_backpack.py warehouse-sync edfi --resource grades
-  python scripts/run_backpack.py warehouse-sync edfi --resources students,attendance,grades
-  python scripts/run_backpack.py warehouse-query edfi --query-type status
-  python scripts/run_backpack.py warehouse-query edfi --query-type students --limit 20
-  python scripts/run_backpack.py warehouse-query edfi --query-type attendance --school-year 2025
-  python scripts/run_backpack.py warehouse-query edfi --query-type grades --student-id 1234567
-
-Legacy: data_sources/data_connector is the old [district]-named lane. New installs use backpacks/edfi.
-TEA keys are usually statewide; --lea / allowed_lea_ids are Nova policy filters.
-Reports return reader-friendly rows for dashboards (not raw ODS JSON).
-Rate-limit evidence is captured passively on real 429s — do not flood TEA to force samples.
-"""
+"""Run generic backpack discovery, installation, status, and query operations."""
 from __future__ import annotations
 
 import argparse
@@ -61,37 +28,21 @@ def _backpack_dir(backpack_id: str) -> Path:
 def cmd_list(_: argparse.Namespace) -> int:
     from services.backpack_host.query import list_backpack_summaries
 
-    rows = list_backpack_summaries()
-    print(json.dumps({"ok": True, "backpacks": rows}, indent=2))
-    return 0
-
-
-def cmd_grants(args: argparse.Namespace) -> int:
-    from services.backpack_host.grant_enforcer import operation_summary
-
-    summary = operation_summary(_backpack_dir(args.backpack_id), args.role)
-    print(json.dumps(summary, indent=2))
+    print(json.dumps({"ok": True, "backpacks": list_backpack_summaries()}, indent=2))
     return 0
 
 
 def cmd_status(args: argparse.Namespace) -> int:
-    from services.backpack_host.query import backpack_status, run_backpack_query
+    from services.backpack_host.query import backpack_status
 
     status = backpack_status(args.backpack_id)
-    # Also attempt connection_health under the given role (shows grant + readiness)
-    health = run_backpack_query(
-        args.backpack_id,
-        "connection_health",
-        role=args.role,
-    )
-    print(json.dumps({"status": status, "connection_health": health}, indent=2, default=str))
-    return 0 if health.get("ok") or status.get("ok") is not False else 1
+    print(json.dumps(status, indent=2, default=str))
+    return 0 if status.get("ok") else 1
 
 
 def cmd_install(args: argparse.Namespace) -> int:
     from services.backpack_host.installer import BackpackInstaller
 
-    backpack_dir = _backpack_dir(args.backpack_id)
     settings_path = Path(args.settings)
     if not settings_path.is_file():
         raise SystemExit(f"settings file not found: {settings_path}")
@@ -102,49 +53,21 @@ def cmd_install(args: argparse.Namespace) -> int:
     if not isinstance(values, dict):
         raise SystemExit("settings JSON must be an object")
 
+    backpack_dir = _backpack_dir(args.backpack_id)
     installer = BackpackInstaller()
     errors = installer.validate(backpack_dir, values)
     if errors:
         print(json.dumps({"ok": False, "phase": "validate", "errors": errors}, indent=2))
         return 1
-
-    apply_result = installer.apply(backpack_dir, values, runtime_root=_runtime_root())
-    if not apply_result.get("ok"):
-        print(json.dumps({"ok": False, "phase": "apply", "result": apply_result}, indent=2))
-        return 1
-
-    if args.skip_profile:
-        print(
-            json.dumps(
-                {
-                    "ok": True,
-                    "phase": "apply_only",
-                    "apply": apply_result,
-                    "note": "Skipped install_steps (--skip-profile). Re-run without flag to profile ODS.",
-                },
-                indent=2,
-            )
-        )
-        return 0
-
-    steps = installer.run_all_install_steps(
-        backpack_dir, values, runtime_root=_runtime_root()
-    )
-    ok = all(bool(s.get("ok")) for s in steps) if steps else True
-    print(
-        json.dumps(
-            {"ok": ok, "phase": "install", "apply": apply_result, "steps": steps},
-            indent=2,
-            default=str,
-        )
-    )
-    return 0 if ok else 1
+    result = installer.apply(backpack_dir, values, runtime_root=_runtime_root())
+    print(json.dumps(result, indent=2, default=str))
+    return 0 if result.get("ok") else 1
 
 
 def cmd_query(args: argparse.Namespace) -> int:
     from services.backpack_host.query import run_backpack_query
 
-    params: dict = {}
+    params: dict[str, object] = {}
     if args.params:
         try:
             params = json.loads(args.params)
@@ -152,422 +75,44 @@ def cmd_query(args: argparse.Namespace) -> int:
             raise SystemExit(f"invalid --params JSON: {exc}") from exc
         if not isinstance(params, dict):
             raise SystemExit("--params must be a JSON object")
-    if getattr(args, "lea", None):
-        params["district_lea_id"] = str(args.lea).strip()
     result = run_backpack_query(
         args.backpack_id,
         args.operation,
         params or None,
         row_limit=args.limit,
         role=args.role,
-        skip_grant_check=bool(args.skip_grants),
     )
     print(json.dumps(result, indent=2, default=str))
     return 0 if result.get("ok") else 1
 
 
-def cmd_report(args: argparse.Namespace) -> int:
-    from services.backpack_host.reports import list_report_intents, run_backpack_report
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description=__doc__)
+    subparsers = parser.add_subparsers(dest="command", required=True)
 
-    if args.intent in {"list", "intents", "help", ""}:
-        print(
-            json.dumps(
-                {"ok": True, "intents": list_report_intents(args.backpack_id)},
-                indent=2,
-            )
-        )
-        return 0
-    force = bool(getattr(args, "refresh", False))
-    report = run_backpack_report(
-        args.intent,
-        backpack_id=args.backpack_id,
-        role=args.role,
-        lea=str(args.lea or ""),
-        limit=args.limit,
-        force_refresh=force,
-        prefer_local=not force,
-    )
-    print(json.dumps(report, indent=2, default=str))
-    return 0 if report.get("ok") else 1
+    subparsers.add_parser("list").set_defaults(func=cmd_list)
 
+    status = subparsers.add_parser("status")
+    status.add_argument("backpack_id")
+    status.set_defaults(func=cmd_status)
 
-def cmd_rate_limit_evidence(args: argparse.Namespace) -> int:
-    """Show passively captured TEA rate-limit evidence (no live flood probe)."""
-    from services.edfi.rate_limit_evidence import evidence_summary, load_recent_events
+    install = subparsers.add_parser("install")
+    install.add_argument("backpack_id")
+    install.add_argument("--settings", required=True)
+    install.set_defaults(func=cmd_install)
 
-    summary = evidence_summary()
-    if getattr(args, "recent", False):
-        summary["recent_events"] = load_recent_events(limit=int(args.limit or 20))
-    print(json.dumps(summary, indent=2, default=str))
-    if not summary.get("latest"):
-        print(
-            "\nNo rate-limit events yet. Use a normal report/refresh once; "
-            "if TEA returns 429, evidence is written under runtime/edfi/rate_limit_evidence/.\n"
-            "Do NOT send requests until you force a 429 — that can look like abuse.",
-            file=sys.stderr,
-        )
-    return 0
-
-
-def cmd_fusion_scan(args: argparse.Namespace) -> int:
-    """Probe backpack ↔ Nova nervous system (local-first; no full TEA scan)."""
-    from services.backpack_host.capability_surface import scan_backpack_fusion
-
-    scan = scan_backpack_fusion(
-        str(getattr(args, "backpack_id", None) or "edfi"),
-        persist=True,
-    )
-    print(json.dumps(scan, indent=2, default=str))
-    return 0 if scan.get("ok") else 1
-
-
-def cmd_warehouse_status(args: argparse.Namespace) -> int:
-    from services.edfi.warehouse import warehouse_status
-    from services.edfi.warehouse_sync import due_for_scheduled_sync, load_backpack_settings, _lea_id
-
-    settings = load_backpack_settings()
-    lea = str(args.lea or _lea_id(settings) or "").strip()
-    conn = str(args.connection_id or settings.get("connection_id") or "district-main").strip()
-    status = warehouse_status(conn, lea_id=lea)
-    schedule = due_for_scheduled_sync(connection_id=conn, lea_id=lea, settings=settings)
-    print(json.dumps({"warehouse": status, "schedule": schedule}, indent=2, default=str))
-    return 0 if status.get("ok") or status.get("exists") else 1
-
-
-def cmd_warehouse_sync(args: argparse.Namespace) -> int:
-    from services.edfi.warehouse_sync import (
-        _connection_id,
-        _lea_id,
-        load_backpack_settings,
-        maybe_run_scheduled_warehouse_sync,
-        run_full_sync,
-        run_resource_sync,
-    )
-
-    force = bool(getattr(args, "force", False))
-    resource = str(getattr(args, "resource", "") or "").strip().lower()
-    resources_raw = str(getattr(args, "resources", "") or "").strip()
-    full = bool(getattr(args, "full", False))
-    lea = str(getattr(args, "lea", "") or "").strip()
-    limit_override = int(getattr(args, "limit", 0) or 0)
-
-    settings = load_backpack_settings()
-    conn = _connection_id(settings)
-    lea = lea or _lea_id(settings, lea)
-
-    if resource:
-        # Single named resource — always runs regardless of schedule.
-        result = run_resource_sync(
-            resource,
-            connection_id=conn,
-            lea_id=lea,
-            settings=settings,
-            limit=limit_override,
-        )
-        result.setdefault("mode", "single_resource")
-        print(json.dumps(result, indent=2, default=str))
-        return 0 if result.get("ok") else 1
-
-    if full or resources_raw:
-        # Ordered full sync (all layers, or comma-sep subset).
-        resource_list: list[str] | None = (
-            [r.strip() for r in resources_raw.split(",") if r.strip()]
-            if resources_raw else None
-        )
-        result = run_full_sync(
-            connection_id=conn,
-            lea_id=lea,
-            resources=resource_list,
-            settings=settings,
-        )
-        if force:
-            result["forced"] = True
-        result.setdefault("mode", "full_sync")
-        print(json.dumps(result, indent=2, default=str))
-        return 0 if result.get("ok") is not False else 1
-
-    # Default: respect the daily schedule gate (or force past it).
-    result = maybe_run_scheduled_warehouse_sync(force=force, settings=settings)
-    result.setdefault("mode", "scheduled")
-    print(json.dumps(result, indent=2, default=str))
-    return 0 if result.get("ok") is not False else 1
-
-
-def cmd_warehouse_query(args: argparse.Namespace) -> int:
-    """Query the local warehouse — never hits the live ODS."""
-    from services.edfi.warehouse_sync import load_backpack_settings, _lea_id, _connection_id
-
-    settings = load_backpack_settings()
-    conn = _connection_id(settings)
-    lea = str(getattr(args, "lea", "") or _lea_id(settings) or "").strip()
-    query_type = str(args.query_type or "status").strip().lower()
-
-    params: dict = {
-        "query_type": query_type,
-        "district_lea_id": lea,
-        "lea_id": lea,
-    }
-    for flag in ("school_id", "school_year", "student_unique_id",
-                 "category", "date_from", "date_to",
-                 "grade_type", "grading_period", "program_type"):
-        val = getattr(args, flag.replace("-", "_"), None)
-        if val:
-            params[flag] = val
-    limit = int(getattr(args, "limit", 50) or 50)
-
-    from services.backpack_host.query import run_backpack_query
-    result = run_backpack_query(conn if False else "edfi", "warehouse_query",
-                                params, row_limit=limit, role=args.role,
-                                skip_grant_check=True)
-
-    if query_type == "status":
-        # Prefer tabular rows from connector/present; fall back to resource_status.
-        table_rows = [r for r in (result.get("rows") or []) if isinstance(r, dict)]
-        if not table_rows and isinstance(result.get("resource_status"), dict):
-            for name, info in sorted(result["resource_status"].items()):
-                if isinstance(info, dict):
-                    table_rows.append(
-                        {
-                            "resource": name,
-                            "synced": info.get("synced"),
-                            "row_count": info.get("row_count") or 0,
-                            "last_sync_at": info.get("last_sync_at") or info.get("synced_at") or "—",
-                        }
-                    )
-        header = f"{'Resource':<35} {'Synced':<8} {'Rows':>8}  Last sync"
-        print(header)
-        print("-" * len(header))
-        for row in table_rows:
-            name = str(row.get("resource") or "")
-            synced = "yes" if row.get("synced") else "no"
-            nrows = str(row.get("row_count") or 0)
-            last = str(row.get("last_sync_at") or "—")[:19]
-            print(f"{name:<35} {synced:<8} {nrows:>8}  {last}")
-        if result.get("summary"):
-            print(result["summary"])
-        return 0 if result.get("ok") is not False else 1
-
-    print(json.dumps(result, indent=2, default=str))
-    return 0 if result.get("ok") is not False else 1
-
-
-def cmd_probe_lea(args: argparse.Namespace) -> int:
-    """Small, rate-limit-friendly check that an LEA returns schools (Nova-filtered)."""
-    from services.backpack_host.query import run_backpack_query
-    from services.backpack_host.scope_settings import format_lea_id, lea_identity_key
-
-    lea = str(args.lea or "").strip()
-    if not lea:
-        raise SystemExit("--lea is required")
-    key = lea_identity_key(lea)
-    result = run_backpack_query(
-        args.backpack_id,
-        "list_schools",
-        {"district_lea_id": lea},
-        row_limit=int(args.limit or 3),
-        role=args.role,
-        skip_grant_check=bool(args.skip_grants),
-    )
-    items = list(result.get("items") or result.get("rows") or [])
-    summary = {
-        "ok": bool(result.get("ok")),
-        "backpack_id": args.backpack_id,
-        "requested_lea": lea,
-        "normalized_lea": format_lea_id(lea) if key is not None else lea,
-        "school_items": len(items),
-        "error": result.get("error") or result.get("error_code"),
-        "note": (
-            "Scoped probe only. TEA keys are usually statewide; "
-            "empty results usually mean wrong LEA or rate limit — not a single-district key."
-        ),
-    }
-    print(json.dumps(summary, indent=2, default=str))
-    return 0 if summary["ok"] and len(items) > 0 else 1
+    query = subparsers.add_parser("query")
+    query.add_argument("backpack_id")
+    query.add_argument("operation")
+    query.add_argument("--params", default="")
+    query.add_argument("--limit", type=int, default=25)
+    query.add_argument("--role", default="standard_user")
+    query.set_defaults(func=cmd_query)
+    return parser
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Nova backpack host CLI")
-    sub = parser.add_subparsers(dest="command", required=True)
-
-    p_list = sub.add_parser("list", help="List discovered backpacks")
-    p_list.set_defaults(func=cmd_list)
-
-    p_grants = sub.add_parser("grants", help="Show operation grants for a role")
-    p_grants.add_argument("backpack_id")
-    p_grants.add_argument("--role", default="standard_user")
-    p_grants.set_defaults(func=cmd_grants)
-
-    p_status = sub.add_parser("status", help="Backpack status + connection_health")
-    p_status.add_argument("backpack_id")
-    p_status.add_argument("--role", default="account_admin")
-    p_status.set_defaults(func=cmd_status)
-
-    p_install = sub.add_parser("install", help="Validate/apply settings and run install_steps")
-    p_install.add_argument("backpack_id")
-    p_install.add_argument(
-        "--settings",
-        required=True,
-        help="JSON file matching settings_schema.json fields",
-    )
-    p_install.add_argument(
-        "--skip-profile",
-        action="store_true",
-        help="Write settings only; skip ODS profile / LEA verify steps",
-    )
-    p_install.set_defaults(func=cmd_install)
-
-    p_query = sub.add_parser("query", help="Run a pipeline operation via backpack host")
-    p_query.add_argument("backpack_id")
-    p_query.add_argument("operation")
-    p_query.add_argument("--role", default="standard_user")
-    p_query.add_argument("--limit", type=int, default=None)
-    p_query.add_argument("--params", default="", help="JSON object of operation params")
-    p_query.add_argument(
-        "--lea",
-        default="",
-        help="District LEA for this query ([lea-id] or 31901). Must be allowed by install scope.",
-    )
-    p_query.add_argument(
-        "--skip-grants",
-        action="store_true",
-        help="Bypass operations.json grants (debug only)",
-    )
-    p_query.set_defaults(func=cmd_query)
-
-    p_probe = sub.add_parser(
-        "probe-lea",
-        help="Small schools probe for one LEA (avoids unscoped statewide scans)",
-    )
-    p_probe.add_argument("backpack_id")
-    p_probe.add_argument("--lea", required=True, help="LEA to probe (e.g. [lea-id])")
-    p_probe.add_argument("--limit", type=int, default=3)
-    p_probe.add_argument("--role", default="account_admin")
-    p_probe.add_argument("--skip-grants", action="store_true")
-    p_probe.set_defaults(func=cmd_probe_lea)
-
-    p_report = sub.add_parser(
-        "report",
-        help="User-request report (schools|health|students) → shaped rows",
-    )
-    p_report.add_argument("backpack_id")
-    p_report.add_argument(
-        "intent",
-        nargs="?",
-        default="list",
-        help="schools | health | students | list",
-    )
-    p_report.add_argument("--role", default="standard_user")
-    p_report.add_argument("--lea", default="", help="Optional LEA filter ([lea-id] or 31901)")
-    p_report.add_argument("--limit", type=int, default=25)
-    p_report.add_argument(
-        "--refresh",
-        action="store_true",
-        help="Force live ODS pull and save local extract (rate-limit risk)",
-    )
-    p_report.set_defaults(func=cmd_report)
-
-    p_rl = sub.add_parser(
-        "rate-limit-evidence",
-        help="Show passive TEA 429 evidence (headers/cooldown). Does NOT probe TEA.",
-    )
-    p_rl.add_argument(
-        "--recent",
-        action="store_true",
-        help="Include recent events from the JSONL log",
-    )
-    p_rl.add_argument("--limit", type=int, default=20, help="Recent event count with --recent")
-    p_rl.set_defaults(func=cmd_rate_limit_evidence)
-
-    p_wq = sub.add_parser(
-        "warehouse-query",
-        help=(
-            "Query the local warehouse without hitting the ODS. "
-            "query-types: status | students | attendance | attendance_summary | grades | programs"
-        ),
-    )
-    p_wq.add_argument("backpack_id", nargs="?", default="edfi")
-    p_wq.add_argument(
-        "--query-type", dest="query_type", default="status",
-        help="status | students | attendance | attendance_summary | grades | programs",
-    )
-    p_wq.add_argument("--lea", default="", help="LEA ID override")
-    p_wq.add_argument("--school-id", dest="school_id", default="")
-    p_wq.add_argument("--school-year", dest="school_year", type=int, default=0)
-    p_wq.add_argument("--student-id", dest="student_unique_id", default="")
-    p_wq.add_argument("--category", default="", help="Attendance category filter")
-    p_wq.add_argument("--date-from", dest="date_from", default="")
-    p_wq.add_argument("--date-to", dest="date_to", default="")
-    p_wq.add_argument("--grade-type", dest="grade_type", default="")
-    p_wq.add_argument("--grading-period", dest="grading_period", default="")
-    p_wq.add_argument("--program-type", dest="program_type", default="")
-    p_wq.add_argument("--limit", type=int, default=50)
-    p_wq.add_argument("--role", default="account_admin")
-    p_wq.set_defaults(func=cmd_warehouse_query)
-
-    p_fuse = sub.add_parser(
-        "fusion-scan",
-        help="Probe backpack fusion into Nova nervous system (capabilities Nova may claim)",
-    )
-    p_fuse.add_argument("backpack_id", nargs="?", default="edfi")
-    p_fuse.set_defaults(func=cmd_fusion_scan)
-
-    p_ws = sub.add_parser(
-        "warehouse-status",
-        help="Local data connector SQLite warehouse status + daily schedule gate",
-    )
-    p_ws.add_argument("backpack_id", nargs="?", default="edfi")
-    p_ws.add_argument("--lea", default="")
-    p_ws.add_argument("--connection-id", default="")
-    p_ws.set_defaults(func=cmd_warehouse_status)
-
-    p_wsync = sub.add_parser(
-        "warehouse-sync",
-        help=(
-            "Sync LEA data into the local warehouse. "
-            "Default: respects daily schedule. "
-            "Use --full for all layers, --resource for one, --resources for a subset."
-        ),
-    )
-    p_wsync.add_argument("backpack_id", nargs="?", default="edfi")
-    p_wsync.add_argument("--lea", default="", help="Override LEA ID (e.g. [lea-id])")
-    p_wsync.add_argument(
-        "--resource",
-        default="",
-        help=(
-            "Sync a single named resource (e.g. students, grades, attendance). "
-            "Always runs regardless of schedule. Safe to repeat (one resource only)."
-        ),
-    )
-    p_wsync.add_argument(
-        "--resources",
-        default="",
-        help="Comma-separated subset of resources to sync (e.g. students,grades,attendance).",
-    )
-    p_wsync.add_argument(
-        "--full",
-        action="store_true",
-        help=(
-            "Run ordered full sync across all 22 resource layers in SYNC_PLAN order. "
-            "Stops on rate limit; safe to resume later."
-        ),
-    )
-    p_wsync.add_argument(
-        "--force",
-        action="store_true",
-        help="Ignore daily schedule / min gap. With --full, runs all layers immediately.",
-    )
-    p_wsync.add_argument(
-        "--limit",
-        type=int,
-        default=0,
-        help=(
-            "Override the per-resource match cap (default: 0 = use built-in per-resource cap). "
-            "Example: --limit 5000 caps a single-resource sync at 5000 matching rows."
-        ),
-    )
-    p_wsync.set_defaults(func=cmd_warehouse_sync)
-
-    args = parser.parse_args(argv)
+    args = build_parser().parse_args(argv)
     return int(args.func(args))
 
 

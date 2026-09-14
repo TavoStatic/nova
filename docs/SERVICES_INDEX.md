@@ -15,7 +15,7 @@ This is the exhaustive service-module index. Architectural ownership is describe
 - Tools and policy: `tool_*`, `nova_tool_*`, `policy_*`, `os_*`, `evidence_validity`.
 - Autonomy and feedback: `autonomy_*`, `nova_mission*`, `work_tree_*`, `subconscious_*`, `core_*`, `layer_maturity_policy`.
 - Patch, codegen, test, and release: `nova_patching`, `patch_*`, `codegen_*`, `test_session_*`, `regression_*`, `validation_*`, `release_*`, `installer_validation`.
-- Data and data connector: `data_pipeline_registry`, `control_pipelines`, `pipeline_privileged_bridge`, and `services/edfi/*`.
+- Data pipelines and backpacks: `data_pipeline_registry`, `control_pipelines`, `pipeline_privileged_bridge`, and `services/backpack_host/*`.
 - Backpack Host: `services/backpack_host/*` — discovery, install, grant enforcement, uninstall sanitizer, residue scan.
 - Nova Shell: `services/nova_shell/*` — operator authentication, TOTP, role management, session trust.
 - Decision Judge: `decision_proposal_judge` — pre-execution claim evaluation with judge reports and episodes.
@@ -242,30 +242,6 @@ This is the exhaustive service-module index. Architectural ownership is describe
 | `services/backpack_host/reports.py` | 624 | list_report_intents, resolve_report_intent, clear_report_cache, run_backpack_report | - | - |
 | `services/backpack_host/sanitize.py` | 424 | backpack_touch_points, planned_sanitize_paths, scan_backpack_residue, sanitize_uninstalled_backpack | - | - |
 | `services/backpack_host/scope_settings.py` | 231 | normalize_scope_mode, normalize_access_tier, lea_identity_key, format_lea_id, lea_in_list, parse_lea_list, allowed_leas_from_settings, primary_lea_from_settings, +2 more | - | - |
-
-## data connector Data Layer
-
-| Module | Lines | Public classes/functions | Singleton | Description |
-|---|---:|---|---|---|
-| `services/edfi/__init__.py` | 221 | run_self_profile | - | - |
-| `services/edfi/auth.py` | 170 | AuthResult, EdFiAuthService | - | - |
-| `services/edfi/auth_probe.py` | 191 | probe_auth | - | - |
-| `services/edfi/change_tracking.py` | 490 | resolve_change_queries_base, resolve_data_management_api, fetch_available_change_versions, load_sync_state, save_sync_state, sync_status, maybe_advance_tracked_cursors, pull_changes_since | - | - |
-| `services/edfi/client.py` | 255 | get_cooldown_remaining, clear_cooldown, EdFiResponse, EdFiClient | - | - |
-| `services/edfi/config.py` | 227 | ConnectionConfig, TokenCacheEntry, connection_dir, connection_config_path, profile_path, ensure_runtime_dirs, change_cursor_path, validate_connection_payload, +6 more | - | - |
-| `services/edfi/core_readiness.py` | 231 | read_edfi_core_readiness | - | - |
-| `services/edfi/diagnostics.py` | 140 | build_health_payload, build_config_error_health, append_audit_event | - | - |
-| `services/edfi/discovery.py` | 317 | DiscoveryResult, discover_metadata, build_capability_profile, discover_and_save_profile | - | - |
-| `services/edfi/district_scope.py` | 138 | normalize_district_lea_id, district_lea_filter_clause, merge_filter_params, uses_client_side_district_filter, item_matches_district, district_filter_strategy | - | - |
-| `services/edfi/errors.py` | 69 | classify_http_status, classify_request_exception, issue_from_error, config_validation_issues, empty_health_shell | - | - |
-| `services/edfi/extract_store.py` | 205 | canonical_extract_intent, extract_path, save_extract, load_extract, list_extracts | - | - |
-| `services/edfi/inventory.py` | 472 | build_client, profile_summary, refresh_resource_catalog, list_resources, read_resource, read_preset | - | - |
-| `services/edfi/present.py` | 308 | format_lea_display, shape_school_row, shape_student_row, shape_association_row, shape_health_row, shape_resource_name_rows, present_operation_result | - | - |
-| `services/edfi/profile_evidence.py` | 422 | extract_profile_from_read_result, capability_profile_payload_valid, profile_read_evidence_valid, audit_runtime_profile_contract, build_capability_profile_evidence, get_district_layer_facts | - | - |
-| `services/edfi/rate_limit_evidence.py` | 351 | evidence_dir, extract_rate_limit_headers, parse_retry_after_seconds, suggested_cooldown_seconds, record_rate_limit_event, record_recovery_if_pending, load_latest_evidence, load_recent_events, +2 more | - | - |
-| `services/edfi/resources.py` | 367 | PageResult, ResourceReadResult, get_page, get_district_scoped_page, get_all | - | - |
-| `services/edfi/warehouse.py` | 1819 | warehouse_path, begin_sync_run, finish_sync_run, last_successful_sync, replace_schools, list_schools, schools_count, replace_students, +28 more | - | - |
-| `services/edfi/warehouse_sync.py` | 966 | load_backpack_settings, sync_schedule_config, due_for_scheduled_sync, run_resource_sync, run_full_sync, run_full_schools_sync, maybe_run_scheduled_warehouse_sync, schools_report_from_warehouse | - | - |
 
 ## Nova Shell
 

@@ -199,7 +199,7 @@ Where to look when working on unfinished product layers:
 |---|---|---|
 | **Runtime core** | Active — primary focus | `AGENTS.md`, `SYSTEM_MAP.md`, `AUTONOMY_AND_MISSION.md` |
 | **LEAH** | Observe mode — shell exists, 4 capabilities not built | `docs/LEAH_INSTANCE_PROMOTION_PLAN.md`, `capabilities_roadmap.json` phase_2_leah_build |
-| **data connector / backpack** | In progress — warehouse path first-class | `docs/DATA_PIPELINES.md`, `backpacks/edfi/`, `services/backpack_host/` |
+| **backpacks** | Optional installable capability lanes | `services/backpack_host/`, `backpacks/` |
 | **Codegen / Leah Build** | Wired in governance, not yet active | `capabilities_roadmap.json`, `services/codegen_pipeline.py` |
 | **Nova Shell** | Wired into HTTP auth via nova_shell_control_bridge.py (2026-08-05) | `nova_shell/`, `services/nova_shell_control_bridge.py` |
 | **Decision Judge** | Active, observe mode (enforce off) | `docs/DECISION_PROPOSAL_JUDGE.md`, `services/decision_proposal_judge.py` |

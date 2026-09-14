@@ -64,7 +64,8 @@ This file tells you who owns what. The ledger tells you what is current.
 - `KIDNEY_SYSTEM.md`: cleanup and retention
 - `SOCK_SYSTEM.md`: hardware/model compatibility and mill capacity lease (standing vs temporary sip)
 - `MILL_LANE_MEASURE_2026-09-01.md`: Ollama mill-judgment scores (3.5 vs 2.5); evidence only — does not override live mill
-- `DATA_PIPELINES.md`: pipeline framework, data connector core, and domain lanes
+- `DATA_PIPELINES.md`: pipeline framework and installable domain lanes
+- `DEFERRED_LOCAL_DISPOSAL.json`: local-only deferred disposal candidates; deletion requires separate approval
 - Backpack uninstall contract lives in code: `services/backpack_host/sanitize.py` and `services/backpack_host/install_state.py`. The named decision is `backpack_uninstall_touch_list` in the ledger.
 - `SEARCH_PROVIDER_ARCHITECTURE.md`: search providers and research routing
 - `PATCHING.md`: patch governance

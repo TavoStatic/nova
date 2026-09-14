@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -53,19 +54,18 @@ def _active_pipeline_ids(root: Path) -> list[str]:
 
 
 def _missing_install_lanes(path: Path, text: str, active_pipeline_ids: set[str]) -> list[str]:
-    if path.name.lower().startswith("test_edfi"):
-        return ["edfi_core"]
     normalized = text.replace("'", '"')
     uses_repo_data_sources = 'parents[1] / "data_sources"' in normalized or 'PipelineRegistry(Path(__file__).resolve().parents[1] / "data_sources")' in normalized
-    imports_archived_connector = "data_sources.sis_test" in normalized
-    requires_sis_test = '"sis_test"' in normalized and (uses_repo_data_sources or imports_archived_connector or "includes_sis_test" in normalized)
-    if requires_sis_test and "sis_test" not in active_pipeline_ids:
-        return ["sis_test"]
+    declared_pipeline_ids = re.findall(r'pipeline_id["\']\s*[:=]\s*["\']([^"\']+)', normalized)
+    declared_pipeline_ids.extend(re.findall(r'INSTALL_PROFILE_LANES\s*=\s*\(\s*["\']([^"\']+)', normalized))
+    missing = [pipeline_id for pipeline_id in declared_pipeline_ids if pipeline_id not in active_pipeline_ids]
+    if missing and (uses_repo_data_sources or "INSTALL_PROFILE_LANES" in normalized):
+        return sorted(set(missing))
     return []
 
 
 def _is_removed_install_surface(path: Path) -> bool:
-    return path.name.lower().startswith("test_edfi")
+    return False
 
 
 def _optional_inactive_install_lanes(text: str, missing_lanes: list[str]) -> list[str]:
@@ -76,11 +76,9 @@ def _optional_inactive_install_lanes(text: str, missing_lanes: list[str]) -> lis
         "skipunless",
         "not active in this install",
     )
-    if not all(marker in normalized for marker in ("sis_test",)):
-        return []
     if not any(marker in normalized for marker in optional_markers):
         return []
-    return [lane for lane in missing_lanes if lane == "sis_test"]
+    return list(missing_lanes)
 
 
 def _surface_hint(path: Path) -> str:

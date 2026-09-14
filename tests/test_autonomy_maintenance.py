@@ -623,7 +623,7 @@ class TestAutonomyMaintenance(unittest.TestCase):
 
     def test_sync_pipeline_workers_skipped_in_validation_scope(self):
         state: dict = {}
-        classified = {"enabled": ["data_connector"], "paused": [], "discovered": ["data_connector"]}
+        classified = {"enabled": ["example_connector"], "paused": [], "discovered": ["example_connector"]}
         with mock.patch.object(autonomy_maintenance, "classify_pipeline_ids_for_workers", return_value=classified), \
              mock.patch.object(autonomy_maintenance, "runtime_pipeline_worker_ids", return_value=[]), \
              mock.patch.object(autonomy_maintenance, "reconcile_pipeline_workers_for_ids") as reconcile_mock, \
@@ -645,7 +645,7 @@ class TestAutonomyMaintenance(unittest.TestCase):
 
     def test_sync_pipeline_workers_runs_reconcile_and_ensure_in_live_scope(self):
         state: dict = {}
-        classified = {"enabled": ["data_connector"], "paused": [], "discovered": ["data_connector"]}
+        classified = {"enabled": ["example_connector"], "paused": [], "discovered": ["example_connector"]}
         reconcile_payload = {"status": "ok", "reclaimed_count": 0, "cleared_count": 0}
         ensure_payload = {"status": "ok", "running_count": 1, "started_count": 0, "failed_count": 0}
         with mock.patch.object(autonomy_maintenance, "classify_pipeline_ids_for_workers", return_value=classified), \
@@ -659,7 +659,7 @@ class TestAutonomyMaintenance(unittest.TestCase):
         reconcile_mock.assert_called_once()
         stop_mock.assert_called_once_with([], runtime_root=autonomy_maintenance.RUNTIME_DIR, os_name=mock.ANY)
         ensure_mock.assert_called_once()
-        self.assertEqual(ensure_mock.call_args.args[0], ["data_connector"])
+        self.assertEqual(ensure_mock.call_args.args[0], ["example_connector"])
         self.assertEqual((state.get("last_pipeline_worker_reconcile") or {}).get("status"), "ok")
         self.assertEqual((state.get("last_pipeline_worker_ensure") or {}).get("running_count"), 1)
 
@@ -694,24 +694,24 @@ class TestAutonomyMaintenance(unittest.TestCase):
     def test_sanitize_uninstalled_backpack_residue_runs_when_not_installed(self):
         state: dict = {}
         with mock.patch.object(autonomy_maintenance, "runtime_scope_name", return_value="live"), \
-             mock.patch.object(autonomy_maintenance, "_discover_backpack_ids", return_value=["edfi"]), \
+             mock.patch.object(autonomy_maintenance, "_discover_backpack_ids", return_value=["example_connector"]), \
              mock.patch(
                  "services.backpack_host.install_state.backpack_runtime_installed",
                  return_value=False,
              ), \
              mock.patch(
                  "services.backpack_host.sanitize.scan_backpack_residue",
-                 return_value={"residue": True, "found": ["runtime/edfi"]},
+                 return_value={"residue": True, "found": ["runtime/example_connector"]},
              ), \
              mock.patch(
                  "services.backpack_host.sanitize.sanitize_uninstalled_backpack",
-                 return_value={"ok": True, "backpack_id": "edfi"},
+                 return_value={"ok": True, "backpack_id": "example_connector"},
              ) as sanitize_mock:
             payload = autonomy_maintenance._sanitize_uninstalled_backpack_residue(state)
         sanitize_mock.assert_called_once()
         self.assertEqual(payload.get("status"), "ok")
         self.assertEqual(int(payload.get("sanitized_count", 0) or 0), 1)
-        self.assertEqual(payload.get("backpack_ids"), ["edfi"])
+        self.assertEqual(payload.get("backpack_ids"), ["example_connector"])
 
     def test_backpack_residue_sanitize_step_records_failure(self):
         state: dict = {}

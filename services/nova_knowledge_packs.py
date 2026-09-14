@@ -9,8 +9,6 @@ from typing import Callable, Optional
 def tokenize(query: str) -> list[str]:
     lowered = (query or "").lower()
     tokens = re.findall(r"[a-z0-9]{3,}", lowered)
-    if "student_data" in lowered and "student_data" not in tokens:
-        tokens.append("student_data")
     return list(dict.fromkeys(tokens))[:25]
 
 

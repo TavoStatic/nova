@@ -194,7 +194,7 @@ class TestHttpSessionManager(unittest.TestCase):
                 "enabled": True,
                 "search_provider": "html",
                 "search_api_endpoint": "",
-                "allow_domains": ["tea.texas.gov"],
+                "allow_domains": ["example.test"],
             },
         }
         with mock.patch("nova_http.nova_core.load_policy", return_value=policy), \
