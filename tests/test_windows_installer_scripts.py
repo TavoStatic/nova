@@ -104,7 +104,10 @@ class TestWindowsInstallerScripts(unittest.TestCase):
             compiler_env = json.loads((installer_dir / "compiler_env.json").read_text(encoding="utf-8-sig"))
             self.assertTrue(str(compiler_env.get("iss_path") or "").endswith("installer\\Nova_Setup.iss"))
             self.assertFalse(str(compiler_env.get("payload_dir") or "").endswith("_stage"))
-            self.assertEqual(Path(compiler_env.get("output_dir")), installer_dir)
+            self.assertEqual(
+                Path(compiler_env.get("output_dir")).resolve(),
+                installer_dir.resolve(),
+            )
             self.assertTrue((repo / "runtime" / "exports" / "installers" / "_payload").exists())
 
             installer_verify_result = _run_powershell(installer_verify_script, repo, str(installer_artifacts[0]))

@@ -115,7 +115,7 @@ class TestRunTestSessionIsolation(unittest.TestCase):
         orig_ollama_chat = nova_core.ollama_chat
 
         try:
-            nova_core.mem_recall = lambda _query: f"- memory-user:{nova_core._memory_runtime_user() or 'none'}"
+            nova_core.mem_recall = lambda _query, **_kwargs: f"- memory-user:{nova_core._memory_runtime_user() or 'none'}"
             nova_core.kb_search = lambda _query: ""
 
             def fake_ollama(_text: str, retrieved_context: str = "", **_kwargs) -> str:
@@ -161,7 +161,7 @@ class TestRunTestSessionIsolation(unittest.TestCase):
         orig_ollama_chat = nova_core.ollama_chat
 
         try:
-            nova_core.mem_recall = lambda _query: f"- memory-user:{nova_core._memory_runtime_user() or 'none'}"
+            nova_core.mem_recall = lambda _query, **_kwargs: f"- memory-user:{nova_core._memory_runtime_user() or 'none'}"
             nova_core.kb_search = lambda _query: ""
 
             def fake_ollama(_text: str, retrieved_context: str = "", **_kwargs) -> str:

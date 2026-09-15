@@ -40,7 +40,7 @@ def spawn_unattached(
     command = [str(item) for item in list(argv or []) if str(item)]
     if len(command) < 2:
         return False, None, "command_required"
-    workdir = str(Path(cwd))
+    workdir = os.fspath(cwd)
     if os.name == "nt":
         creator = wmi_create_fn or _wmi_create_process
         command_text = quote_windows_command(command)

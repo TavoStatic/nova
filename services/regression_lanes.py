@@ -273,6 +273,7 @@ SOURCE_PROFILE_LANES: dict[str, list[str]] = {
         "tests.test_port_ownership_service",
         "tests.test_safety_envelope",
         "tests.test_schedule_registry",
+        "tests.test_start_webui_detached",
         "tests.test_smoke_e2e_script",
         "tests.test_source_root_inventory_service",
         "tests.test_storage_watch_service",

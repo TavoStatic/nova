@@ -223,7 +223,7 @@ class TestToolRegistry(unittest.TestCase):
 
             out = registry.run_tool("filesystem", {"action": "find", "keyword": "needle_symbol"}, ctx)
 
-            self.assertIn(str(live), out)
+            self.assertIn(str(live.resolve()), out)
             self.assertNotIn(str(archive), out)
             self.assertNotIn(str(quarantine), out)
             self.assertNotIn(str(validation), out)
@@ -249,7 +249,7 @@ class TestToolRegistry(unittest.TestCase):
                 ctx,
             )
 
-            self.assertIn(str(archive), out)
+            self.assertIn(str(archive.resolve()), out)
 
     def test_filesystem_find_can_target_specific_file(self):
         registry = build_default_registry()
@@ -273,7 +273,7 @@ class TestToolRegistry(unittest.TestCase):
                 ctx,
             )
 
-            self.assertIn(str(source), out)
+            self.assertIn(str(source.resolve()), out)
             self.assertNotIn(str(sibling), out)
 
     def test_disabled_tool_is_denied(self):
