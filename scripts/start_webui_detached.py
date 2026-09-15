@@ -25,7 +25,7 @@ def _tail(path: Path, limit: int = 80) -> str:
     return "\n".join(path.read_text(encoding="utf-8", errors="replace").splitlines()[-limit:])
 
 
-def _http_ready(host: str, port: int, timeout: float = 3.0) -> bool:
+def _http_ready(host: str, port: int, timeout: float = 10.0) -> bool:
     try:
         with urllib.request.urlopen(f"http://{host}:{port}/api/health", timeout=timeout) as response:
             return response.status == 200
@@ -44,7 +44,7 @@ def _pid_exists(pid: int | None) -> bool:
         return True
 
 
-def wait_for_http_ready(pid: int | None, host: str, port: int, timeout: float = 30.0, poll: float = 0.5) -> bool:
+def wait_for_http_ready(pid: int | None, host: str, port: int, timeout: float = 60.0, poll: float = 1.0) -> bool:
     deadline = time.monotonic() + max(0.0, timeout)
     while time.monotonic() < deadline:
         if _http_ready(host, port):
