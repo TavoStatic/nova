@@ -100,26 +100,76 @@ function Test-NovaCommandLineHasPath([object]$process, [string]$expectedPath) {
   return [bool]$scriptName -and $normalizedCommand.Contains($scriptName)
 }
 
-function Get-BootstrapPythonDescription {
-  if (Test-Path $venvPython) {
-    return $venvPython
+function Test-SupportedPythonVersion([string]$executablePath, [string[]]$prefixArgs=@()) {
+  try {
+    $versionOutput = & $executablePath @prefixArgs -c "import sys; v=sys.version_info; sys.stdout.write(f'{v[0]}.{v[1]}'); sys.exit(0 if (v[0]==3 and 10<=v[1]<=12) else 1)" 2>$null
+    if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($versionOutput)) {
+      return $versionOutput.Trim()
+    }
+  } catch {
+    return $null
   }
+  return $null
+}
 
-  $pyCmd = Get-Command py -ErrorAction SilentlyContinue
-  if ($pyCmd) {
-    return ($pyCmd.Source + " -3")
+function Get-BootstrapPythonSpec {
+  if (Test-Path $venvPython) {
+    $v = Test-SupportedPythonVersion $venvPython
+    if ($v) {
+      return @{
+        Executable = $venvPython
+        PrefixArgs = @()
+        Description = "$venvPython (Python $v)"
+      }
+    }
   }
 
   $pythonCmd = Get-Command python -ErrorAction SilentlyContinue
   if ($pythonCmd) {
-    return $pythonCmd.Source
+    $v = Test-SupportedPythonVersion $pythonCmd.Source
+    if ($v) {
+      return @{
+        Executable = $pythonCmd.Source
+        PrefixArgs = @()
+        Description = "$($pythonCmd.Source) (Python $v)"
+      }
+    }
   }
 
   $python3Cmd = Get-Command python3 -ErrorAction SilentlyContinue
   if ($python3Cmd) {
-    return $python3Cmd.Source
+    $v = Test-SupportedPythonVersion $python3Cmd.Source
+    if ($v) {
+      return @{
+        Executable = $python3Cmd.Source
+        PrefixArgs = @()
+        Description = "$($python3Cmd.Source) (Python $v)"
+      }
+    }
   }
 
+  $pyCmd = Get-Command py -ErrorAction SilentlyContinue
+  if ($pyCmd) {
+    foreach ($ver in @("-3.12", "-3.11", "-3.10", "-3")) {
+      $v = Test-SupportedPythonVersion $pyCmd.Source @($ver)
+      if ($v) {
+        return @{
+          Executable = $pyCmd.Source
+          PrefixArgs = @($ver)
+          Description = "$($pyCmd.Source) $ver (Python $v)"
+        }
+      }
+    }
+  }
+
+  return $null
+}
+
+function Get-BootstrapPythonDescription {
+  $spec = Get-BootstrapPythonSpec
+  if ($spec) {
+    return $spec.Description
+  }
   return ""
 }
 
@@ -130,34 +180,14 @@ function Invoke-NovaNative([string]$executablePath, [string[]]$argumentList=@())
 }
 
 function Invoke-BootstrapPython([string[]]$pythonTokens=@()) {
-  if (Test-Path $venvPython) {
-    & $venvPython --version *> $null
-    if ($null -eq $LASTEXITCODE -or [int]$LASTEXITCODE -eq 0) {
-      return (Invoke-NovaNative $venvPython $pythonTokens)
-    }
-
-    Write-Host ("[WARN] venv python exists but is not runnable: " + $venvPython)
-    Write-Host "       Falling back to a bootstrap Python for this command."
+  $spec = Get-BootstrapPythonSpec
+  if ($null -ne $spec) {
+    $allArgs = $spec.PrefixArgs + $pythonTokens
+    return (Invoke-NovaNative $spec.Executable $allArgs)
   }
 
-  $pyCmd = Get-Command py -ErrorAction SilentlyContinue
-  if ($pyCmd) {
-    $pyArgs = @("-3") + $pythonTokens
-    return (Invoke-NovaNative $pyCmd.Source $pyArgs)
-  }
-
-  $pythonCmd = Get-Command python -ErrorAction SilentlyContinue
-  if ($pythonCmd) {
-    return (Invoke-NovaNative $pythonCmd.Source $pythonTokens)
-  }
-
-  $python3Cmd = Get-Command python3 -ErrorAction SilentlyContinue
-  if ($python3Cmd) {
-    return (Invoke-NovaNative $python3Cmd.Source $pythonTokens)
-  }
-
-  Write-Host "[FAIL] No bootstrap Python was found on PATH."
-  Write-Host "       Install Python 3 with venv support, then run: nova install"
+  Write-Host "[FAIL] No supported Python (3.10-3.12) was found on PATH or via py launcher."
+  Write-Host "       Install Python 3.10, 3.11, or 3.12 with venv support, then run: nova install"
   return 1
 }
 
@@ -176,15 +206,16 @@ function Invoke-NovaInstall {
   }
 
   if (-not (Test-Path $venvPython)) {
-    $bootstrapSource = Get-BootstrapPythonDescription
-    if ([string]::IsNullOrWhiteSpace($bootstrapSource)) {
-      Write-Host "[FAIL] No bootstrap Python was found on PATH."
-      Write-Host "       Install Python 3 with venv support, then run: nova install"
+    $bootstrapSpec = Get-BootstrapPythonSpec
+    if ($null -eq $bootstrapSpec) {
+      Write-Host "[FAIL] No supported Python (3.10-3.12) was found on PATH or via py launcher."
+      Write-Host "       Install Python 3.10, 3.11, or 3.12 with venv support, then run: nova install"
       return 1
     }
 
-    Write-Host ("[INFO] Creating virtual environment with " + $bootstrapSource)
-    $createCode = Invoke-BootstrapPython @("-m", "venv", $venvDir)
+    Write-Host ("[INFO] Creating virtual environment with " + $bootstrapSpec.Description)
+    $createArgs = $bootstrapSpec.PrefixArgs + @("-m", "venv", $venvDir)
+    $createCode = Invoke-NovaNative $bootstrapSpec.Executable $createArgs
     if ($createCode -ne 0 -or -not (Test-Path $venvPython)) {
       Write-Host "[FAIL] Virtual environment creation failed."
       return 1
