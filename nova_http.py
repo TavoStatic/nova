@@ -1923,6 +1923,15 @@ def _control_action(action: str, payload: dict) -> tuple[bool, str, dict]:
 
 
 def _health_payload() -> dict:
+    return {
+        "ok": True,
+        "memory_enabled": bool(nova_core.mem_enabled()),
+        "chat_login_enabled": bool(_chat_login_enabled()),
+        "service": "nova_http",
+    }
+
+
+def _health_dependencies_payload() -> dict:
     outbox_summary = OPERATOR_OUTBOX_SERVICE.summary(OPERATOR_OUTBOX_FILE, limit=5)
     return {
         "ok": True,
