@@ -102,7 +102,7 @@ function Test-NovaCommandLineHasPath([object]$process, [string]$expectedPath) {
 
 function Test-SupportedPythonVersion([string]$executablePath, [string[]]$prefixArgs=@()) {
   try {
-    $versionOutput = & $executablePath @prefixArgs -c "import sys; v=sys.version_info; sys.stdout.write(f'{v[0]}.{v[1]}'); sys.exit(0 if (v[0]==3 and 10<=v[1]<=12) else 1)" 2>$null
+    $versionOutput = & $executablePath @prefixArgs -c "import sys; v=sys.version_info; sys.stdout.write(f'{v[0]}.{v[1]}'); sys.exit(0 if (v[0]==3 and 11<=v[1]<=12) else 1)" 2>$null
     if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($versionOutput)) {
       return $versionOutput.Trim()
     }
@@ -150,7 +150,7 @@ function Get-BootstrapPythonSpec {
 
   $pyCmd = Get-Command py -ErrorAction SilentlyContinue
   if ($pyCmd) {
-    foreach ($ver in @("-3.12", "-3.11", "-3.10", "-3")) {
+    foreach ($ver in @("-3.12", "-3.11")) {
       $v = Test-SupportedPythonVersion $pyCmd.Source @($ver)
       if ($v) {
         return @{
@@ -186,8 +186,8 @@ function Invoke-BootstrapPython([string[]]$pythonTokens=@()) {
     return (Invoke-NovaNative $spec.Executable $allArgs)
   }
 
-  Write-Host "[FAIL] No supported Python (3.10-3.12) was found on PATH or via py launcher."
-  Write-Host "       Install Python 3.10, 3.11, or 3.12 with venv support, then run: nova install"
+  Write-Host "[FAIL] No supported Python (3.11-3.12) was found on PATH or via py launcher."
+  Write-Host "       Install Python 3.11 or 3.12 with venv support, then run: nova install"
   return 1
 }
 
@@ -208,8 +208,8 @@ function Invoke-NovaInstall {
   if (-not (Test-Path $venvPython)) {
     $bootstrapSpec = Get-BootstrapPythonSpec
     if ($null -eq $bootstrapSpec) {
-      Write-Host "[FAIL] No supported Python (3.10-3.12) was found on PATH or via py launcher."
-      Write-Host "       Install Python 3.10, 3.11, or 3.12 with venv support, then run: nova install"
+      Write-Host "[FAIL] No supported Python (3.11-3.12) was found on PATH or via py launcher."
+      Write-Host "       Install Python 3.11 or 3.12 with venv support, then run: nova install"
       return 1
     }
 
