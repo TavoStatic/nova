@@ -21,6 +21,7 @@ permissions:
 jobs:
   analyze:
     name: Analyze Python
+    if: ${{ github.event.repository.visibility == 'public' }}
     runs-on: windows-latest
     timeout-minutes: 20
     strategy:
