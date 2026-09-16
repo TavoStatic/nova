@@ -72,7 +72,7 @@ class TestRuntimeDetach(unittest.TestCase):
 
         with mock.patch("tools.runtime_detach.os.name", "posix"):
             ok, pid, detail = spawn_unattached(
-                ["python", "nova_guard.py"], cwd=Path("."), popen_fn=starter
+                ["python", "nova_guard.py"], cwd=".", popen_fn=starter
             )
 
         self.assertTrue(ok)
@@ -184,7 +184,7 @@ class TestRuntimeDetach(unittest.TestCase):
         with mock.patch("tools.runtime_detach.os.name", "posix"):
             ok, pid, detail = spawn_unattached(
                 ["python", "nova_guard.py"],
-                cwd=Path("."),
+                cwd=".",
                 popen_fn=lambda *args, **kwargs: _Proc(),
             )
         self.assertTrue(ok)

@@ -17,6 +17,7 @@ import argparse
 import hashlib
 import json
 import os
+import sys
 import subprocess
 import time
 import urllib.error
@@ -4885,7 +4886,8 @@ def _run_daily_regression_if_due(state: dict) -> str:
         worker_env["NOVA_REGRESSION_LOCK_FILE"] = str(RUNTIME_DIR / "regression.lock")
         worker_env["NOVA_REGRESSION_MAX_LANE_SECONDS"] = str(timeout_sec)
         worker_env["NOVA_REGRESSION_WORKER_LOG"] = str(worker_log)
-        cmd = [str(VENV_PY), str(REGRESSION_LANE_WORKER), lane, current_fingerprint]
+        worker_python = VENV_PY if VENV_PY.is_file() else Path(sys.executable)
+        cmd = [str(worker_python), str(REGRESSION_LANE_WORKER), lane, current_fingerprint]
         creation_flags = 0
         if os.name == "nt":
             creation_flags |= getattr(subprocess, "CREATE_NO_WINDOW", 0)
