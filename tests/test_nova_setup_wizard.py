@@ -88,7 +88,7 @@ class TestNovaSetupWizard(unittest.TestCase):
                         step = ensure_nova_path(root, install=True)
             shim = root / "local" / "Nova" / "bin" / "nova.cmd"
             self.assertTrue(shim.is_file())
-            self.assertIn(str(root / "nova.cmd"), shim.read_text(encoding="utf-8"))
+            self.assertIn(str((root / "nova.cmd").resolve()), shim.read_text(encoding="utf-8"))
             self.assertTrue(step.get("ok"))
             self.assertEqual(step.get("name"), "nova_path")
 

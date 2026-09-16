@@ -159,7 +159,10 @@ class TestWindowsInstallerScripts(unittest.TestCase):
             ]
             installer_rows = [row for row in ledger_rows if row.get("artifact_kind") == "windows-installer"]
             self.assertEqual([row["event"] for row in installer_rows], ["build", "verify", "promotion"])
-            self.assertEqual(installer_rows[0]["artifact_path"], str(installer_artifacts[0]))
+            self.assertEqual(
+                Path(installer_rows[0]["artifact_path"]).resolve(),
+                installer_artifacts[0].resolve(),
+            )
             self.assertEqual(installer_rows[-1]["validation_result"], "pass-with-notes")
 
 
