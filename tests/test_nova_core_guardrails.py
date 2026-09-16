@@ -5,7 +5,7 @@ import unittest
 from pathlib import Path
 
 
-NOVA_CORE_PATH = Path(r"C:\Nova\nova_core.py")
+NOVA_CORE_PATH = Path(__file__).resolve().parents[1] / "nova_core.py"
 MAX_NOVA_CORE_LINES = 8000
 EXPECTED_SERVICE_DELEGATES = {
     "start_action_ledger_record": "service_start_action_ledger_record",
