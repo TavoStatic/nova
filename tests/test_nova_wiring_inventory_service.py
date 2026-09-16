@@ -26,12 +26,12 @@ def _status_contract() -> dict[str, object]:
 
 
 class NovaWiringInventoryServiceTests(unittest.TestCase):
-    def test_empty_status_is_not_self_repair_closed(self) -> None:
+    def test_empty_status_reports_static_source_contract(self) -> None:
         payload = build_self_repair_closure_inventory_payload({})
 
-        self.assertFalse(payload["ok"])
-        self.assertEqual(payload["gap_count"], payload["root_count"])
-        self.assertEqual(payload["depth_counts"], {"visible_only": payload["root_count"]})
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["gap_count"], 0)
+        self.assertEqual(payload["depth_counts"], {"source_contract_ready": payload["root_count"]})
 
     def test_missing_execution_path_is_reported_as_action_wired_only(self) -> None:
         payload = build_self_repair_closure_inventory_payload(

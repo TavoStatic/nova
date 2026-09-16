@@ -1916,7 +1916,8 @@ class TestWorkTreeSignalIngestionService(unittest.TestCase):
             "operator_outbox_open_count": 1,
             "operator_outbox_actionable_open_count": 0,
         }
-        results = self.service.sync_status_snapshot(payload)
+        with mock.patch("services.nova_runtime_context.OPERATOR_OUTBOX_FILE", self._tmp / "operator_outbox.jsonl"):
+            results = self.service.sync_status_snapshot(payload)
         self.assertFalse(any(item.get("action") == "created" for item in results))
         self.assertFalse(any(item.get("action") == "reopened" for item in results))
         self.assertEqual(self._signal_branches(), [])
@@ -2190,7 +2191,7 @@ class TestWorkTreeSignalIngestionService(unittest.TestCase):
             if task.status not in {work_tree.TaskStatus.COMPLETE, work_tree.TaskStatus.DROPPED}
         ]
         self.assertEqual(open_tasks, [])
-        self.assertEqual(work_tree.get_branch(branch.branch_id).resolution_state, "observing")
+        self.assertEqual(work_tree.get_branch(branch.branch_id).resolution_state, "resolved")
 
     def test_source_root_hold_with_operator_response_evidence_is_completed(self) -> None:
         status_payload = {
@@ -4023,8 +4024,8 @@ class TestWorkTreeSignalIngestionService(unittest.TestCase):
         self.assertEqual(open_tasks[0].status, work_tree.TaskStatus.BLOCKED)
         self.assertIn("memory bootstrap origin contract", open_tasks[0].title)
         self.assertEqual(branch.status, work_tree.BranchStatus.BLOCKED)
-        self.assertIsNone(branch.preferred_tool)
-        self.assertEqual(branch.allowed_tools, [])
+        self.assertEqual(branch.preferred_tool, "pulse")
+        self.assertEqual(branch.allowed_tools, ["pulse", "read", "find", "memory_bootstrap_judgment"])
 
     def test_memory_health_updates_stale_blocked_origin_reason(self) -> None:
         status_payload = {

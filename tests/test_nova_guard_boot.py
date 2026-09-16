@@ -150,7 +150,7 @@ class TestNovaGuardBoot(unittest.TestCase):
             nova_guard._maintenance_tick(attempt)
 
         mock_file.assert_called_once_with(nova_guard.MAINTENANCE_LOG, "a", encoding="utf-8")
-        mock_file.return_value.close.assert_called_once()
+        mock_file.return_value.__exit__.assert_called_once_with(None, None, None)
 
     def test_spawn_core_adopts_existing_live_core(self):
         with mock.patch.object(nova_guard, "_live_core_pid", return_value=4242), \
