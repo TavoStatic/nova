@@ -455,6 +455,68 @@ class TestRuntimeControlService(unittest.TestCase):
             self.assertTrue(ok)
             self.assertEqual(msg, "guard_already_running")
 
+    def test_schedule_detached_start_uses_unattached_helper(self):
+        calls = []
+        with tempfile.TemporaryDirectory() as td:
+            base = Path(td)
+            venv_py = base / "python.exe"
+            later = base / "scripts" / "start_unattached_later.py"
+            later.parent.mkdir(parents=True, exist_ok=True)
+            later.write_text("print('later')\n", encoding="utf-8")
+            venv_py.write_text("", encoding="utf-8")
+            ok, msg = RUNTIME_CONTROL_SERVICE.schedule_detached_start(
+                [str(venv_py), str(base / "nova_guard.py")],
+                venv_python=venv_py,
+                base_dir=base,
+                delay_seconds=2.0,
+                cwd=base,
+                remove_before_start=[base / "runtime" / "guard.stop"],
+                spawn_unattached_fn=lambda command, cwd=None: (
+                    calls.append((command, cwd)) or (True, 88, "wmi_created:88")
+                ),
+            )
+        self.assertTrue(ok)
+        self.assertEqual(msg, "delayed_start_scheduled")
+        helper = calls[0][0]
+        self.assertEqual(helper[0], str(venv_py))
+        self.assertTrue(str(helper[1]).endswith("start_unattached_later.py"))
+        self.assertIn("--delay", helper)
+        self.assertIn("2.0", helper)
+        self.assertIn("--remove", helper)
+        self.assertIn("--", helper)
+        self.assertIn(str(base / "nova_guard.py"), helper)
+
+    def test_start_guard_uses_unattached_spawn(self):
+        calls = []
+        with tempfile.TemporaryDirectory() as td:
+            base = Path(td)
+            venv_py = base / ".venv" / "Scripts" / "python.exe"
+            guard_py = base / "nova_guard.py"
+            runtime_dir = base / "runtime"
+            venv_py.parent.mkdir(parents=True, exist_ok=True)
+            venv_py.write_text("", encoding="utf-8")
+            guard_py.write_text("print('guard')\n", encoding="utf-8")
+            runtime_dir.mkdir(parents=True, exist_ok=True)
+
+            with mock.patch(
+                "services.runtime_control.logical_service_processes",
+                side_effect=[[], [{"pid": 31072}]],
+            ):
+                ok, msg = RUNTIME_CONTROL_SERVICE.start_guard(
+                    venv_python=venv_py,
+                    guard_py=guard_py,
+                    runtime_dir=runtime_dir,
+                    base_dir=base,
+                    guard_status_fn=lambda: {"running": False},
+                    spawn_unattached_fn=lambda command, cwd=None: (
+                        calls.append((command, cwd)) or (True, 31072, "wmi_created:31072")
+                    ),
+                )
+
+        self.assertTrue(ok)
+        self.assertEqual(msg, "guard_start_confirmed")
+        self.assertEqual(calls[0][0], [str(venv_py), str(guard_py)])
+
     def test_start_nova_core_routes_through_guard(self):
         import sys
         ok, msg = RUNTIME_CONTROL_SERVICE.start_nova_core(
@@ -602,6 +664,9 @@ class TestRuntimeControlService(unittest.TestCase):
                 interval_sec=120,
                 runtime_processes_module=runtime_processes,
                 subprocess_module=_FakeSubprocess,
+                spawn_unattached_fn=lambda command, cwd=None: (
+                    calls.append((command, cwd)) or (True, 4242, "wmi_created:4242")
+                ),
             )
 
         self.assertTrue(ok)

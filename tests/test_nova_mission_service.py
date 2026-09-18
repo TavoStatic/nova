@@ -199,7 +199,7 @@ class TestNovaMissionService(unittest.TestCase):
                 mission_snapshot=mission,
             )
         )
-        self.assertTrue(
+        self.assertFalse(
             NovaMissionService.hold_blocks_action(
                 "active_work_tree_run_next",
                 mission_snapshot=mission,
@@ -227,7 +227,7 @@ class TestNovaMissionService(unittest.TestCase):
 
         self.assertIn("validation_truth_missing", mission.get("truth_blockers") or [])
         self.assertIn("generated_queue_untested", mission.get("truth_blockers") or [])
-        self.assertTrue(
+        self.assertFalse(
             NovaMissionService.hold_blocks_action(
                 "generated_queue_run_next",
                 mission_snapshot=mission,
@@ -298,6 +298,38 @@ class TestNovaMissionService(unittest.TestCase):
         self.assertEqual(mission.get("action"), "investigate")
         self.assertEqual(mission.get("status"), "watch")
         self.assertGreater(int(mission.get("fresh_gap_signal_count") or 0), 0)
+
+    def test_unfinished_work_tree_continue_is_mission_pressure(self):
+        mission = NOVA_MISSION_SERVICE.build_snapshot(
+            **_base_inputs(
+                work_tree_snapshot={
+                    "latent_root_signal_count": 0,
+                    "working_count": 1,
+                    "pending_count": 0,
+                    "active_executable_count": 1,
+                    "progress_moving_count": 1,
+                    "branches": [],
+                },
+            )
+        )
+
+        self.assertEqual(mission.get("unfinished_continue_count"), 1)
+        self.assertGreater(int(mission.get("actionable_fresh_gap_signal_count") or 0), 0)
+        self.assertEqual(mission.get("action"), "investigate")
+        self.assertEqual(mission.get("status"), "watch")
+        self.assertFalse(
+            NovaMissionService.hold_blocks_action(
+                "active_work_tree_run_next",
+                mission_snapshot=mission,
+                action_context={"recommended_tool": "pipeline"},
+            )
+        )
+        self.assertFalse(
+            NovaMissionService.hold_blocks_action(
+                "codegen_run",
+                mission_snapshot=mission,
+            )
+        )
 
     def test_operator_holds_do_not_block_green_cycle(self):
         mission = NOVA_MISSION_SERVICE.build_snapshot(
@@ -548,8 +580,7 @@ class TestNovaMissionService(unittest.TestCase):
                 },
             )
         )
-        # Random non-release reads still stay held.
-        self.assertTrue(
+        self.assertFalse(
             NovaMissionService.hold_blocks_action(
                 "active_work_tree_run_next",
                 mission_snapshot=mission,
@@ -557,6 +588,56 @@ class TestNovaMissionService(unittest.TestCase):
                     "recommended_tool": "read",
                     "title": "Investigate control status spike",
                     "task_title": "Read control status logs",
+                },
+            )
+        )
+        # Housekeeping inspect must not dead-lock the same way read used to.
+        self.assertFalse(
+            NovaMissionService.hold_blocks_action(
+                "active_work_tree_run_next",
+                mission_snapshot=mission,
+                action_context={
+                    "recommended_tool": "system_check",
+                    "title": "Runtime storage watch reports pressure",
+                    "task_title": "Inspect storage watch snapshot and runtime archive growth",
+                    "progress_family": "maintenance_pressure|storage_release_pressure",
+                },
+            )
+        )
+        self.assertFalse(
+            NovaMissionService.hold_blocks_action(
+                "active_work_tree_run_next",
+                mission_snapshot=mission,
+                action_context={
+                    "recommended_tool": "system_check",
+                    "title": "Investigate control status spike",
+                    "task_title": "Run system check on HTTP",
+                },
+            )
+        )
+        # Class rail: maintenance_pressure is housekeeping even with a bland title.
+        self.assertFalse(
+            NovaMissionService.hold_blocks_action(
+                "active_work_tree_run_next",
+                mission_snapshot=mission,
+                action_context={
+                    "recommended_tool": "system_check",
+                    "title": "Inspect runtime pressure",
+                    "task_title": "Run system check",
+                    "work_class": "maintenance_pressure",
+                    "source_type": "storage_release_pressure",
+                },
+            )
+        )
+        self.assertFalse(
+            NovaMissionService.hold_blocks_action(
+                "active_work_tree_run_next",
+                mission_snapshot=mission,
+                action_context={
+                    "recommended_tool": "system_check",
+                    "title": "Declared capability gap",
+                    "work_class": "capability_gap",
+                    "source_type": "capability_manifest",
                 },
             )
         )
@@ -570,7 +651,7 @@ class TestNovaMissionService(unittest.TestCase):
 
         self.assertTrue(bool(mission.get("active_work_evidence_current")))
         self.assertIn("core_gate_roots_blocked", mission.get("truth_blockers") or [])
-        self.assertTrue(
+        self.assertFalse(
             NovaMissionService.hold_blocks_action(
                 "active_work_tree_run_next",
                 mission_snapshot=mission,
@@ -595,7 +676,7 @@ class TestNovaMissionService(unittest.TestCase):
         }
 
         self.assertTrue(bool(NovaMissionService.active_work_evidence_current(mission)))
-        self.assertTrue(
+        self.assertFalse(
             NovaMissionService.hold_blocks_action(
                 "active_work_tree_run_next",
                 mission_snapshot=mission,
@@ -620,7 +701,7 @@ class TestNovaMissionService(unittest.TestCase):
 
         self.assertTrue(bool(mission.get("active_work_evidence_current")))
         self.assertIn("core_gate_release_drift", mission.get("truth_blockers") or [])
-        self.assertTrue(
+        self.assertFalse(
             NovaMissionService.hold_blocks_action(
                 "active_work_tree_run_next",
                 mission_snapshot=mission,
@@ -632,14 +713,14 @@ class TestNovaMissionService(unittest.TestCase):
         mission = _steady_hold_mission()
         policy = {"mission": NovaMissionService.DEFAULT_POLICY}
 
-        self.assertTrue(
+        self.assertFalse(
             NovaMissionService.hold_blocks_action(
                 "generated_queue_run_next",
                 mission_snapshot=mission,
                 policy_snapshot=policy,
             )
         )
-        self.assertTrue(
+        self.assertFalse(
             NovaMissionService.hold_blocks_action(
                 "active_work_tree_run_next",
                 mission_snapshot=mission,
@@ -706,8 +787,7 @@ class TestNovaMissionService(unittest.TestCase):
                 },
             )
         )
-        # Random non-release reads still stay caged on hold.
-        self.assertTrue(
+        self.assertFalse(
             NovaMissionService.hold_blocks_action(
                 "active_work_tree_run_next",
                 mission_snapshot=mission,
@@ -723,7 +803,7 @@ class TestNovaMissionService(unittest.TestCase):
         mission = _steady_hold_mission(actionable_fresh_gap_signal_count=0)
         policy = {"mission": NovaMissionService.DEFAULT_POLICY}
 
-        self.assertTrue(
+        self.assertFalse(
             NovaMissionService.ingestion_suppresses_ambient_governance(mission, policy_snapshot=policy)
         )
 
@@ -883,7 +963,7 @@ class TestNovaMissionService(unittest.TestCase):
             ],
         }
 
-        self.assertTrue(
+        self.assertFalse(
             NovaMissionService.hold_blocks_action(
                 "generated_queue_run_next",
                 mission_snapshot=mission,

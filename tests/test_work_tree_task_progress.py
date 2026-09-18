@@ -39,6 +39,7 @@ class ToolIdentityTests(unittest.TestCase):
     def test_evidence_quality_maps_verified_and_observed(self):
         self.assertEqual(evidence_quality(RELEASE_REBUILD_VERIFY), "verified")
         self.assertEqual(evidence_quality("read"), "observed")
+        self.assertEqual(evidence_quality("core_thinning"), "observed")
         self.assertEqual(VERIFIED_TOOLS, frozenset(
             n for n, t in EVIDENCE_QUALITY.items() if t == "verified"
         ))
@@ -147,6 +148,7 @@ class WorkTreeTaskProgressTests(unittest.TestCase):
         families = {row["family_key"] for row in list_seeded_families()}
         self.assertIn("release_readiness_gap|release", families)
         self.assertIn("governance_pressure|root_closure_inventory", families)
+        self.assertIn("core_thinning|core_scan", families)
 
     def test_release_task_without_evidence_is_zero_not_started(self):
         payload = measure_task_progress(
@@ -362,6 +364,42 @@ class WorkTreeTaskProgressTests(unittest.TestCase):
         self.assertFalse(rebuilt["prereqs_met"])
         self.assertEqual(payload["percent"], 0)
 
+    def test_failed_rebuild_does_not_count_as_package_rebuilt(self):
+        from datetime import datetime, timedelta
+
+        now = datetime.now()
+        ts = lambda m: (now - timedelta(minutes=m)).strftime("%Y-%m-%dT%H:%M:%S")
+        payload = measure_task_progress(
+            task_title="Rebuild and verify release package from current source",
+            task_status="open",
+            work_class="release_readiness_gap",
+            source_type="release",
+            branch_title="Release package is verified but validation outcome is missing",
+            evidence=[
+                {
+                    "tool_name": "read",
+                    "result_text": "ledger package seed",
+                    "created_at": ts(40),
+                },
+                {
+                    "tool_name": "read",
+                    "result_text": "source changed stale drift",
+                    "created_at": ts(30),
+                },
+                {
+                    "tool_name": "release_rebuild_verify",
+                    "result_text": json.dumps(
+                        {"ok": False, "reason": "unknown error", "tool_result": {"ok": False, "failure_reason": "package_build_failed"}}
+                    ),
+                    "created_at": ts(20),
+                },
+            ],
+            stall_hours=6.0,
+            learned={},
+        )
+        rebuilt = next(m for m in payload["markers"] if m["id"] == "package_rebuilt")
+        self.assertFalse(rebuilt.get("counts"))
+
     def test_release_full_honest_path(self):
         from datetime import datetime, timedelta
 
@@ -538,6 +576,90 @@ class WorkTreeTaskProgressTests(unittest.TestCase):
         self.assertEqual(after.get("work_start_state"), "started")
         self.assertTrue(str(after.get("work_started_at") or "").strip())
         self.assertTrue(str((branch.source_payload or {}).get("work_started_at") or "").strip())
+
+    def test_core_thinning_miss_does_not_count_as_solution_step(self):
+        from services.work_tree_task_progress import measure_solution_progress
+
+        learned = {
+            "unknown|unknown": SolutionLadder(
+                family_key="unknown|unknown",
+                intent="Thin core",
+                solution="Wrapper removed",
+                source="learned",
+                markers=(
+                    SolutionMarker("started", "Started", 0.4, stage=0, any_evidence=True),
+                    SolutionMarker(
+                        "via_core_thinning",
+                        "Evidence via core_thinning",
+                        0.6,
+                        stage=1,
+                        tools=("core_thinning",),
+                        requires_markers=("started",),
+                    ),
+                ),
+            )
+        }
+        miss = measure_solution_progress(
+            work_class="",
+            source_type="",
+            branch_title="Review wrapper shim mem_get_recent_learned",
+            evidence=[
+                {
+                    "tool_name": "core_thinning",
+                    "result_text": json.dumps({"ok": False, "reason": "callers_still_present"}),
+                }
+            ],
+            learned=learned,
+        )
+        via = next(m for m in miss["markers"] if m["id"] == "via_core_thinning")
+        self.assertFalse(via.get("counts"))
+        witness = measure_solution_progress(
+            work_class="",
+            source_type="",
+            branch_title="Map HTTP extraction boundary: chat_sessions",
+            evidence=[
+                {
+                    "tool_name": "core_thinning",
+                    "result_text": json.dumps(
+                        {"ok": True, "verified": False, "action": "witnessed_http_extraction_boundary"}
+                    ),
+                }
+            ],
+            learned=learned,
+        )
+        via_w = next(m for m in witness["markers"] if m["id"] == "via_core_thinning")
+        self.assertFalse(via_w.get("counts"))
+        removed = measure_solution_progress(
+            work_class="",
+            source_type="",
+            branch_title="Review wrapper shim leftover",
+            evidence=[
+                {
+                    "tool_name": "core_thinning",
+                    "result_text": json.dumps(
+                        {"ok": True, "verified": True, "action": "removed_unused_wrapper"}
+                    ),
+                }
+            ],
+            learned=learned,
+        )
+        via_r = next(m for m in removed["markers"] if m["id"] == "via_core_thinning")
+        self.assertTrue(via_r.get("counts"))
+        named = measure_solution_progress(
+            work_class="core_thinning",
+            source_type="core_scan",
+            branch_title="Review wrapper shim mem_get_recent_learned",
+            evidence=[
+                {
+                    "tool_name": "core_thinning",
+                    "result_text": json.dumps({"ok": False, "reason": "callers_still_present"}),
+                }
+            ],
+            learned={},
+        )
+        self.assertEqual(named.get("family_key"), "core_thinning|core_scan")
+        via_named = next(m for m in named["markers"] if m["id"] == "via_core_thinning")
+        self.assertFalse(via_named.get("counts"))
 
 
 if __name__ == "__main__":

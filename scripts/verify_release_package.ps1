@@ -285,6 +285,7 @@ $forbiddenPathPrefixes = @(
   ".ci_venv",
   ".venv",
   ".pytest_cache",
+  "knowledge/internal",
   "knowledge/packs",
   "knowledge/web",
   "logs",
@@ -333,7 +334,9 @@ Add-CheckResult $failures (-not [string]::IsNullOrWhiteSpace([string]$manifest.b
 
 $manifestValidationCommands = @($manifest.validation_commands)
 foreach ($requiredCommand in $requiredValidationCommands) {
-  Add-CheckResult $failures ($manifestValidationCommands -contains $requiredCommand) ("validation command present: " + $requiredCommand) ("validation command missing: " + $requiredCommand)
+  $normalizedRequiredCommand = ($requiredCommand -replace '\\+', '\\').Trim()
+  $hasCommand = @($manifestValidationCommands | ForEach-Object { ( [string]$_ -replace '\\+', '\\').Trim() }) -contains $normalizedRequiredCommand
+  Add-CheckResult $failures $hasCommand ("validation command present: " + $requiredCommand) ("validation command missing: " + $requiredCommand)
 }
 
 $profileNames = @($manifest.validation_profiles.PSObject.Properties.Name)

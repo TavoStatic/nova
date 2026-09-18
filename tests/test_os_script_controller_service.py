@@ -168,7 +168,7 @@ class TestOsScriptControllerService(unittest.TestCase):
         self.assertEqual(rows[0]["stdout"], '{"ok":true}')
         self.assertEqual(rows[0]["args"]["base_url"], "http://127.0.0.1:11434")
         self.assertIn("-ArgsJson", captured["command"])
-        self.assertEqual(captured["kwargs"]["cwd"], str(root))
+        self.assertEqual(Path(captured["kwargs"]["cwd"]).resolve(), root.resolve())
 
     def test_invalid_args_write_operator_worthy_ledger_without_running(self):
         with TemporaryDirectory() as td:
@@ -444,7 +444,10 @@ class TestOsScriptControllerService(unittest.TestCase):
 
         self.assertTrue(result["ok"])
         self.assertTrue(rows[0]["write_contract"]["checked"])
-        self.assertEqual(rows[0]["write_contract"]["verified_paths"], [str(output_path)])
+        self.assertEqual(
+            [Path(path).resolve() for path in rows[0]["write_contract"]["verified_paths"]],
+            [output_path.resolve()],
+        )
 
     def test_evidence_write_blocks_reported_path_outside_contract(self):
         with TemporaryDirectory() as td:

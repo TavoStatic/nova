@@ -6,27 +6,15 @@ from dataclasses import dataclass
 from typing import Any
 
 
+from services.type_utils import _as_dict, _as_list, _text
+
+
 NO_ACTIVE_STUCK_POINT_LINE = "I do not see an active stuck point in live control status right now."
 LIVE_STATUS_SOURCE_LINE = "Source: live control status and Work Tree."
 
 
-def _as_dict(value: Any) -> dict[str, Any]:
-    return value if isinstance(value, dict) else {}
-
-
-def _as_list(value: Any) -> list[Any]:
-    return value if isinstance(value, list) else []
-
-
 def _truthy(value: Any) -> bool:
     return value is True or str(value).strip().lower() in {"true", "yes", "ok", "ready", "running"}
-
-
-def _text(value: Any, default: str = "unknown") -> str:
-    if value is None:
-        return default
-    rendered = str(value).strip()
-    return rendered if rendered else default
 
 
 @dataclass(frozen=True)

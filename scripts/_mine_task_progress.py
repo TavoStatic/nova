@@ -1,4 +1,4 @@
-﻿import sqlite3, json, re
+import sqlite3, json, re
 from collections import Counter, defaultdict
 c = sqlite3.connect(r"runtime/_internal/work_tree.db")
 c.row_factory = sqlite3.Row

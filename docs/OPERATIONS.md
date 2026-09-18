@@ -9,7 +9,7 @@ next_step: review operational runbook for accuracy
 open: none
 -->
 
-# Nova SYSTEMS Operations
+# Nova Operations
 
 ## Environment
 
@@ -51,7 +51,7 @@ Run the core directly only when guard supervision and periodic guard-launched ma
 C:\Nova\nova.cmd run
 ```
 
-Run the Nova SYSTEMS web UI:
+Run the Nova web UI:
 
 ```powershell
 C:\Nova\nova.cmd webui --host 127.0.0.1 --port 8080

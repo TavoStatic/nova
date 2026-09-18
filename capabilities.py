@@ -68,15 +68,8 @@ def analyze_task(task: str) -> dict:  # ← change return type for clarity
     t = task.lower().strip()
     requirements = []
 
-    # Education/state education data specific
-    if any(word in t for word in ["attendance",  "tsds", "student data", "enrollment", "gradebook"]):
-        requirements += ["database_connection", "sis_attendance_table", "query_execution"]
-
-    if any(word in t for word in ["student", "grades", "report card", "transcript", "aeries", "skyward"]):
-        requirements += ["database_connection", "student_records_table", "query_execution"]
-
     # Web / external access
-    if any(word in t for word in ["web", "internet", "browse", "search", "lookup", "tea.texas.gov", "fetch"]):
+    if any(word in t for word in ["web", "internet", "browse", "search", "lookup", "fetch"]):
         requirements += ["web_access"]
 
     # Default: most tasks don't require special caps

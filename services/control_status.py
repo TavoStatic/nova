@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import os
 import time
@@ -6,8 +6,6 @@ from pathlib import Path
 
 from services.data_pipeline_registry import list_pipeline_summaries
 from services.data_pipeline_registry import pipeline_worker_summary
-from services.edfi.core_readiness import read_edfi_core_readiness
-from services.edfi.profile_evidence import build_capability_profile_evidence
 from services.frontdoor_cli_parity import FRONTDOOR_CLI_PARITY_SERVICE
 from services.nova_grounded_self_report import GROUNDED_SELF_REPORT_SERVICE
 from services.regression_lanes import SOURCE_PROFILE_LANES
@@ -26,13 +24,47 @@ from services.nova_shell.external_finish import external_finish_status as shell_
 from services.supervisor_finish import supervisor_ownership_finish_status
 from services.finish_areas_inventory import build_finish_areas_inventory
 from services.control_status_surfaces import CONTROL_STATUS_SURFACES_SERVICE
+from services.observation_spine import build_observation_spine_payload
 from services.work_tree_pressure_snapshot import build_work_tree_pressure_snapshot
+from services.gatekeeper import summarize_records as summarize_gatekeeper_records
 
 ROOT = Path(__file__).resolve().parents[1]
 
 
 class ControlStatusService:
     """Own HTTP control-status payload assembly outside the transport layer."""
+
+    @staticmethod
+    def _stamp_observation_spine(payload: dict) -> None:
+        try:
+            spine = build_observation_spine_payload()
+        except Exception:
+            spine = {
+                "ok": False,
+                "status": "unavailable",
+                "window_count": 0,
+                "finding_code": "NO_META_INTERVENTION",
+                "effect": "continue",
+                "intervening": False,
+                "observations": [],
+            }
+        if not isinstance(spine, dict):
+            spine = {"ok": False, "status": "unavailable", "intervening": False, "observations": []}
+        payload["observation_spine"] = spine
+        payload["observation_spine_ok"] = bool(spine.get("ok", False))
+        payload["observation_spine_status"] = str(spine.get("status") or "")
+        payload["observation_finding_code"] = str(spine.get("finding_code") or "")
+        payload["observation_finding_label"] = str(spine.get("finding_label") or "")
+        payload["observation_effect"] = str(spine.get("effect") or "")
+        payload["observation_effect_label"] = str(spine.get("effect_label") or "")
+        payload["observation_subject"] = str(spine.get("subject") or "")
+        payload["observation_input_ref"] = spine.get("input_ref")
+        payload["observation_window_count"] = int(spine.get("window_count", 0) or 0)
+        payload["observation_intervening"] = bool(spine.get("intervening", False))
+        payload["observation_self_questions"] = list(spine.get("self_questions") or [])
+        payload["observation_internal_positions"] = list(spine.get("internal_positions") or [])
+        payload["observation_self_model"] = dict(spine.get("self_model") or {}) if isinstance(spine.get("self_model"), dict) else {}
+        payload["observation_cognitive_events"] = list(spine.get("cognitive_events") or [])
 
     @staticmethod
     def _clean_provider_value(value) -> str:
@@ -278,12 +310,14 @@ class ControlStatusService:
         update_now_pending = core_module.update_now_pending_payload()
         try:
             worker_summary = pipeline_worker_summary()
+            pipeline_rows = list_pipeline_summaries()
+            worker_count = int(worker_summary.get("worker_count", 0) or 0)
+            supervised_count = int(worker_summary.get("supervised_count", 0) or 0)
             data_pipelines = {
                 "ok": True,
-                "pipelines": list_pipeline_summaries(),
+                "pipelines": pipeline_rows,
                 "worker": worker_summary,
-                "worker_supervised_ok": bool(worker_summary.get("supervised_count", 0)) == int(worker_summary.get("worker_count", 0) or 0)
-                and int(worker_summary.get("worker_count", 0) or 0) > 0,
+                "worker_supervised_ok": supervised_count == worker_count,
                 "error": "",
             }
         except Exception as exc:
@@ -293,48 +327,22 @@ class ControlStatusService:
                 "error": str(exc),
             }
         try:
-            edfi_capability_profile = build_capability_profile_evidence()
-        except Exception as exc:
-            edfi_capability_profile = {
-                "ok": False,
-                "status": "failure",
-                "present": False,
-                "issue_count": 1,
-                "issues": [{
-                    "code": "edfi_profile_evidence_unreadable",
-                    "severity": "failure",
-                    "detail": str(exc),
-                }],
-                "profile_evidence_path": "runtime/edfi/profiles/district-main.json",
+            # Control status is polled often. No backpack is installed, so there is
+            # no capability fusion to surface; report a neutral empty payload.
+            backpack_fusion = {
+                "ok": True,
+                "required_ok": True,
+                "available_capability_ids": [],
+                "nova_must_know": {},
+                "teach_rules": [],
             }
-        try:
-            edfi_core_readiness = read_edfi_core_readiness("district-main")
-        except Exception as exc:
-            edfi_core_readiness = {
-                "ready": False,
-                "milestone": "",
-                "connection_id": "district-main",
-                "issues": [{"code": "edfi_core_readiness_unreadable", "detail": str(exc)}],
-            }
-        try:
-            # Control status is polled often. Prefer the last fusion scan file only —
-            # never force a rescan on the hot path (that raced with webui responsiveness
-            # after backpack/work-tree governance work landed).
-            from services.backpack_host.capability_surface import get_fusion_status, load_last_scan
-
-            backpack_fusion = load_last_scan()
-            if not isinstance(backpack_fusion, dict) or not backpack_fusion:
-                backpack_fusion = get_fusion_status(max_age_sec=3600.0, force=False)
-            else:
-                backpack_fusion = dict(backpack_fusion)
-                backpack_fusion["from_cache"] = True
         except Exception as exc:
             backpack_fusion = {
                 "ok": False,
                 "required_ok": False,
                 "error": str(exc),
                 "available_capability_ids": [],
-                "nova_must_know": {"has_edfi_backpack": False},
+                "nova_must_know": {},
             }
         requests_total, errors_total = metrics_totals
         if hasattr(core_module, "ollama_health_payload"):
@@ -413,8 +421,6 @@ class ControlStatusService:
             pulse_payload=pulse_payload,
             update_now_pending=update_now_pending,
             data_pipelines=data_pipelines,
-            edfi_capability_profile=edfi_capability_profile,
-            edfi_core_readiness=edfi_core_readiness,
             backpack_fusion=backpack_fusion,
             requests_total=requests_total,
             errors_total=errors_total,
@@ -426,6 +432,8 @@ class ControlStatusService:
         payload["health_score"] = int(self_check.get("health_score", 0))
         payload["self_check_pass_ratio"] = float(self_check.get("pass_ratio", 0.0))
         payload["alerts"] = list(self_check.get("alerts") or [])
+        payload["gatekeeper"] = summarize_gatekeeper_records()
+        payload["gatekeeper_ok"] = bool(payload["gatekeeper"].get("ok", False))
         if not lightweight:
             report_payload = GROUNDED_SELF_REPORT_SERVICE.build_payload(payload, work_trees_payload)
             operator_attention = GROUNDED_SELF_REPORT_SERVICE.build_operator_attention(report_payload)
@@ -659,6 +667,14 @@ class ControlStatusService:
             "core_thinning_tree_id": str(core_thinning_sync.get("tree_id") or ""),
             "last_regression_status": str(autonomy_payload.get("last_regression_status") or ""),
             "last_regression_stale": bool(autonomy_payload.get("last_regression_stale", False)),
+            "last_regression_skip_reason": str(autonomy_payload.get("last_regression_skip_reason") or ""),
+            "last_regression_retry_eligible": bool(autonomy_payload.get("last_regression_retry_eligible", False)),
+            "last_regression_current_fingerprint": str(
+                autonomy_payload.get("last_regression_current_fingerprint") or ""
+            )[:64],
+            "last_regression_lesson": dict(autonomy_payload.get("last_regression_lesson") or {})
+            if isinstance(autonomy_payload.get("last_regression_lesson"), dict)
+            else {},
             "validation_artifact_truth": validation_truth_payload,
             "validation_artifact_truth_ok": bool(validation_truth_payload.get("ok", True)),
             "validation_artifact_truth_status": str(validation_truth_payload.get("status") or ""),
@@ -716,6 +732,7 @@ class ControlStatusService:
             "work_tree_latent_root_signal_count": int(work_tree_payload.get("latent_root_signal_count", 0) or 0),
             "work_tree_release_stale_ready_count": int(work_tree_payload.get("release_stale_ready_count", 0) or 0),
         }
+        ControlStatusService._stamp_observation_spine(payload)
         return CONTROL_STATUS_SURFACES_SERVICE.build_surfaces_payload(payload)
 
     @staticmethod
@@ -780,8 +797,6 @@ class ControlStatusService:
         vision_status: dict | None = None,
         port_ownership: dict | None = None,
         data_pipelines: dict | None = None,
-        edfi_capability_profile: dict | None = None,
-        edfi_core_readiness: dict | None = None,
         backpack_fusion: dict | None = None,
         installer_status: dict | None = None,
     ) -> dict:
@@ -797,16 +812,6 @@ class ControlStatusService:
         voice_status_payload = dict(voice_status or {}) if isinstance(voice_status, dict) else {}
         vision_status_payload = dict(vision_status or {}) if isinstance(vision_status, dict) else {}
         data_pipeline_payload = dict(data_pipelines or {}) if isinstance(data_pipelines, dict) else {"ok": True, "pipelines": []}
-        edfi_profile_payload = (
-            dict(edfi_capability_profile or {})
-            if isinstance(edfi_capability_profile, dict)
-            else {"ok": False, "status": "missing", "present": False, "issue_count": 0, "issues": []}
-        )
-        edfi_core_readiness_payload = (
-            dict(edfi_core_readiness or {})
-            if isinstance(edfi_core_readiness, dict)
-            else {"ready": False, "milestone": "", "connection_id": "district-main", "issues": []}
-        )
         backpack_fusion_payload = (
             dict(backpack_fusion or {})
             if isinstance(backpack_fusion, dict)
@@ -980,23 +985,6 @@ class ControlStatusService:
                 for item in data_pipeline_rows
                 if str(item.get("pipeline_id") or "").strip()
             ],
-            "edfi_capability_profile": edfi_profile_payload,
-            "edfi_capability_profile_ok": bool(edfi_profile_payload.get("ok")),
-            "edfi_capability_profile_status": str(edfi_profile_payload.get("status") or ""),
-            "edfi_capability_profile_present": bool(edfi_profile_payload.get("present")),
-            "edfi_capability_profile_connection_id": str(edfi_profile_payload.get("connection_id") or ""),
-            "edfi_capability_profile_resource_count": int(edfi_profile_payload.get("resource_count") or 0),
-            "edfi_capability_profile_discovered_at": int(edfi_profile_payload.get("discovered_at") or 0),
-            "edfi_capability_profile_auth_ok": bool(edfi_profile_payload.get("auth_ok")),
-            "edfi_capability_profile_issue_count": int(edfi_profile_payload.get("issue_count") or 0),
-            "edfi_capability_profile_path": str(
-                edfi_profile_payload.get("profile_evidence_path")
-                or edfi_profile_payload.get("profile_path")
-                or ""
-            ),
-            "edfi_core_readiness": dict(edfi_core_readiness_payload),
-            "edfi_core_ready": bool(edfi_core_readiness_payload.get("ready", False)),
-            "edfi_core_milestone": str(edfi_core_readiness_payload.get("milestone") or ""),
             "backpack_fusion": backpack_fusion_payload,
             "backpack_fusion_ok": bool(backpack_fusion_payload.get("ok")),
             "backpack_fusion_required_ok": bool(backpack_fusion_payload.get("required_ok")),
@@ -1008,9 +996,6 @@ class ControlStatusService:
             ),
             "backpack_teach_rules": list(backpack_fusion_payload.get("teach_rules") or []),
             "backpack_nova_must_know": dict(backpack_fusion_payload.get("nova_must_know") or {}),
-            "backpack_local_schools_rows": int(
-                ((backpack_fusion_payload.get("local_hold") or {}).get("row_count") or 0)
-            ),
         }
 
         runtime_worker = autonomy_payload.get("runtime_worker") if isinstance(autonomy_payload.get("runtime_worker"), dict) else {}
@@ -1302,6 +1287,7 @@ class ControlStatusService:
             "observing_branch_count": observing_count,
             "latent_root_signal_count": latent_root_signal_count,
         }
+        ControlStatusService._stamp_observation_spine(payload)
         autonomy_payload["work_tree_truth_status"] = work_tree_truth_status
         autonomy_payload["work_tree_blocked_branch_count"] = work_tree_blocked_count
         autonomy_payload["work_tree_observing_branch_count"] = observing_count

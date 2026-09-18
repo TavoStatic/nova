@@ -155,24 +155,25 @@ class TestHttpSessionManager(unittest.TestCase):
             "memory": {"enabled": False, "scope": "private"},
             "web": {"enabled": False, "search_provider": "html", "search_api_endpoint": "", "allow_domains": []},
         }
-        with mock.patch("nova_http.nova_core.load_policy", return_value=policy), \
-            mock.patch("nova_http.nova_core.ollama_api_up", return_value=False), \
-            mock.patch("nova_http.nova_core.chat_model", return_value="test-model"), \
-            mock.patch("nova_http.nova_core.mem_enabled", return_value=False), \
-            mock.patch("nova_http.nova_core.mem_stats_payload", return_value={"ok": True, "total": 0, "by_user": {}}), \
-            mock.patch("nova_http.nova_core.patch_status_payload", return_value={"ok": True, "enabled": True, "strict_manifest": True, "allow_force": False, "behavioral_check": True, "behavioral_check_timeout_sec": 600, "tests_available": True, "pipeline_ready": True, "current_revision": 4, "previews_total": 1, "previews_pending": 1, "previews_approved": 0, "previews_rejected": 0, "previews_eligible": 1, "previews_approved_eligible": 0, "last_preview_name": "preview.txt", "last_preview_status": "eligible", "last_preview_decision": "pending", "last_patch_log_line": "APPLY_OK files=1", "ready_for_validated_apply": False}), \
-            mock.patch("nova_http._chat_login_enabled", return_value=False), \
-            mock.patch("nova_http._chat_auth_source", return_value="disabled"), \
-            mock.patch("nova_http._chat_users", return_value={}), \
-            mock.patch("nova_http._memory_events_summary", return_value={"ok": True, "count": 0}), \
-            mock.patch("nova_http._tool_events_summary", return_value={"ok": True, "count": 0}), \
-            mock.patch("nova_http._action_ledger_summary", return_value={"ok": True, "count": 0}), \
-            mock.patch("nova_http._guard_status_payload", return_value={"running": False, "status": "boot_timeout", "process_count": 0, "lock_exists": True, "stop_flag": False}), \
-            mock.patch("nova_http._core_status_payload", return_value={"running": False, "status": "heartbeat_stale", "pid": None, "heartbeat_age_sec": 12, "process_count": 0, "state_exists": True}), \
-            mock.patch("nova_http._http_status_payload", return_value={"running": True, "status": "running", "pid": 456, "process_count": 1}), \
-            mock.patch("nova_http._append_metrics_snapshot", return_value=None), \
-            mock.patch("nova_http._build_self_check", return_value={"health_score": 100, "pass_ratio": 1.0, "alerts": []}), \
-            mock.patch("nova_http.os.name", "nt"):
+        with ExitStack() as stack:
+            stack.enter_context(mock.patch("nova_http.nova_core.load_policy", return_value=policy))
+            stack.enter_context(mock.patch("nova_http.nova_core.ollama_api_up", return_value=False))
+            stack.enter_context(mock.patch("nova_http.nova_core.chat_model", return_value="test-model"))
+            stack.enter_context(mock.patch("nova_http.nova_core.mem_enabled", return_value=False))
+            stack.enter_context(mock.patch("nova_http.nova_core.mem_stats_payload", return_value={"ok": True, "total": 0, "by_user": {}}))
+            stack.enter_context(mock.patch("nova_http.nova_core.patch_status_payload", return_value={"ok": True, "enabled": True, "strict_manifest": True, "allow_force": False, "behavioral_check": True, "behavioral_check_timeout_sec": 600, "tests_available": True, "pipeline_ready": True, "current_revision": 4, "previews_total": 1, "previews_pending": 1, "previews_approved": 0, "previews_rejected": 0, "previews_eligible": 1, "previews_approved_eligible": 0, "last_preview_name": "preview.txt", "last_preview_status": "eligible", "last_preview_decision": "pending", "last_patch_log_line": "APPLY_OK files=1", "ready_for_validated_apply": False}))
+            stack.enter_context(mock.patch("nova_http._chat_login_enabled", return_value=False))
+            stack.enter_context(mock.patch("nova_http._chat_auth_source", return_value="disabled"))
+            stack.enter_context(mock.patch("nova_http._chat_users", return_value={}))
+            stack.enter_context(mock.patch("nova_http._memory_events_summary", return_value={"ok": True, "count": 0}))
+            stack.enter_context(mock.patch("nova_http._tool_events_summary", return_value={"ok": True, "count": 0}))
+            stack.enter_context(mock.patch("nova_http._action_ledger_summary", return_value={"ok": True, "count": 0}))
+            stack.enter_context(mock.patch("nova_http._guard_status_payload", return_value={"running": False, "status": "boot_timeout", "process_count": 0, "lock_exists": True, "stop_flag": False}))
+            stack.enter_context(mock.patch("nova_http._core_status_payload", return_value={"running": False, "status": "heartbeat_stale", "pid": None, "heartbeat_age_sec": 12, "process_count": 0, "state_exists": True}))
+            stack.enter_context(mock.patch("nova_http._http_status_payload", return_value={"running": True, "status": "running", "pid": 456, "process_count": 1}))
+            stack.enter_context(mock.patch("nova_http._append_metrics_snapshot", return_value=None))
+            stack.enter_context(mock.patch("nova_http._build_self_check", return_value={"health_score": 100, "pass_ratio": 1.0, "alerts": []}))
+            stack.enter_context(mock.patch("nova_http.os.name", "nt"))
             payload = nova_http._control_status_payload()
 
         self.assertEqual(payload.get("process_counting_mode"), "logical_leaf_processes")
@@ -194,15 +195,16 @@ class TestHttpSessionManager(unittest.TestCase):
                 "enabled": True,
                 "search_provider": "html",
                 "search_api_endpoint": "",
-                "allow_domains": ["tea.texas.gov"],
+                "allow_domains": ["example.test"],
             },
         }
-        with mock.patch("nova_http.nova_core.load_policy", return_value=policy), \
-            mock.patch("nova_http.nova_core.ollama_api_up", return_value=True), \
-            mock.patch("nova_http.nova_core.chat_model", return_value="test-model"), \
-            mock.patch("nova_http.nova_core.mem_enabled", return_value=True), \
-            mock.patch("nova_http.nova_core.mem_stats_payload", return_value={"ok": True, "total": 7, "by_user": {"gus": 7}}), \
-            mock.patch("nova_http.nova_core.patch_status_payload", return_value={
+        with ExitStack() as stack:
+            stack.enter_context(mock.patch("nova_http.nova_core.load_policy", return_value=policy))
+            stack.enter_context(mock.patch("nova_http.nova_core.ollama_api_up", return_value=True))
+            stack.enter_context(mock.patch("nova_http.nova_core.chat_model", return_value="test-model"))
+            stack.enter_context(mock.patch("nova_http.nova_core.mem_enabled", return_value=True))
+            stack.enter_context(mock.patch("nova_http.nova_core.mem_stats_payload", return_value={"ok": True, "total": 7, "by_user": {"gus": 7}}))
+            stack.enter_context(mock.patch("nova_http.nova_core.patch_status_payload", return_value={
                 "ok": True,
                 "enabled": True,
                 "strict_manifest": True,
@@ -223,11 +225,11 @@ class TestHttpSessionManager(unittest.TestCase):
                 "last_preview_decision": "approved",
                 "last_patch_log_line": "BEHAVIOR_OK OK",
                 "ready_for_validated_apply": True,
-            }), \
-            mock.patch("nova_http._chat_login_enabled", return_value=True), \
-            mock.patch("nova_http._chat_auth_source", return_value="managed_file"), \
-            mock.patch("nova_http._chat_users", return_value={"gus": {"password_hash": "x"}}), \
-            mock.patch("nova_http._memory_events_summary", return_value={
+            }))
+            stack.enter_context(mock.patch("nova_http._chat_login_enabled", return_value=True))
+            stack.enter_context(mock.patch("nova_http._chat_auth_source", return_value="managed_file"))
+            stack.enter_context(mock.patch("nova_http._chat_users", return_value={"gus": {"password_hash": "x"}}))
+            stack.enter_context(mock.patch("nova_http._memory_events_summary", return_value={
                 "ok": True,
                 "count": 4,
                 "write_count": 2,
@@ -235,8 +237,8 @@ class TestHttpSessionManager(unittest.TestCase):
                 "skipped_count": 1,
                 "avg_latency_ms": 18,
                 "last_event": {"action": "add", "status": "ok"},
-            }), \
-            mock.patch("nova_http._tool_events_summary", return_value={
+            }))
+            stack.enter_context(mock.patch("nova_http._tool_events_summary", return_value={
                 "ok": True,
                 "count": 5,
                 "status_counts": {"ok": 4, "denied": 1, "error": 0},
@@ -246,8 +248,8 @@ class TestHttpSessionManager(unittest.TestCase):
                 "avg_latency_ms_by_tool": {"web_research": 91},
                 "last_error_summary": "",
                 "last_event": {"tool": "web_research", "status": "ok", "user": "gus"},
-            }), \
-            mock.patch("nova_http._action_ledger_summary", return_value={
+            }))
+            stack.enter_context(mock.patch("nova_http._action_ledger_summary", return_value={
                 "ok": True,
                 "count": 3,
                 "last_record": {
@@ -255,12 +257,12 @@ class TestHttpSessionManager(unittest.TestCase):
                     "route_summary": "planner>tool",
                     "grounded": True,
                 },
-            }), \
-            mock.patch("nova_http._guard_status_payload", return_value={"running": True, "status": "starting", "process_count": 1, "lock_exists": True, "stop_flag": False}), \
-            mock.patch("nova_http._core_status_payload", return_value={"running": True, "status": "heartbeat_only", "pid": 123, "heartbeat_age_sec": 2, "process_count": 1, "state_exists": True}), \
-            mock.patch("nova_http._http_status_payload", return_value={"running": True, "status": "running", "pid": 654, "process_count": 1}), \
-            mock.patch("nova_http._append_metrics_snapshot", return_value=None), \
-            mock.patch("nova_http._build_self_check", return_value={"health_score": 92, "pass_ratio": 0.8, "alerts": ["tool latency elevated"]}):
+            }))
+            stack.enter_context(mock.patch("nova_http._guard_status_payload", return_value={"running": True, "status": "starting", "process_count": 1, "lock_exists": True, "stop_flag": False}))
+            stack.enter_context(mock.patch("nova_http._core_status_payload", return_value={"running": True, "status": "heartbeat_only", "pid": 123, "heartbeat_age_sec": 2, "process_count": 1, "state_exists": True}))
+            stack.enter_context(mock.patch("nova_http._http_status_payload", return_value={"running": True, "status": "running", "pid": 654, "process_count": 1}))
+            stack.enter_context(mock.patch("nova_http._append_metrics_snapshot", return_value=None))
+            stack.enter_context(mock.patch("nova_http._build_self_check", return_value={"health_score": 92, "pass_ratio": 0.8, "alerts": ["tool latency elevated"]}))
             payload = nova_http._control_status_payload()
 
         self.assertEqual(payload.get("active_http_sessions"), 1)
@@ -302,26 +304,27 @@ class TestHttpSessionManager(unittest.TestCase):
                 "allow_domains": [],
             },
         }
-        with mock.patch("nova_http.nova_core.load_policy", return_value=policy), \
-            mock.patch("nova_http.nova_core.get_search_provider_priority", return_value=["stackexchange", "wikipedia", "general_web"]), \
-            mock.patch("nova_http.nova_core._recent_action_ledger_records", return_value=[{"tool": "stackexchange_search", "provider_used": "stackexchange"}, {"tool": "web_research", "provider_used": "github"}]), \
-            mock.patch("nova_http.nova_core.ollama_api_up", return_value=False), \
-            mock.patch("nova_http.nova_core.chat_model", return_value="test-model"), \
-            mock.patch("nova_http.nova_core.mem_enabled", return_value=False), \
-            mock.patch("nova_http.nova_core.mem_stats_payload", return_value={"ok": True, "total": 0, "by_user": {}}), \
-            mock.patch("nova_http.nova_core.patch_status_payload", return_value={"ok": True}), \
-            mock.patch("nova_http._probe_searxng", return_value=(True, "status=200")), \
-            mock.patch("nova_http._chat_login_enabled", return_value=False), \
-            mock.patch("nova_http._chat_auth_source", return_value="disabled"), \
-            mock.patch("nova_http._chat_users", return_value={}), \
-            mock.patch("nova_http._memory_events_summary", return_value={"ok": True, "count": 0}), \
-            mock.patch("nova_http._tool_events_summary", return_value={"ok": True, "count": 1, "status_counts": {}, "avg_latency_ms_by_tool": {"stackexchange_search": 44}}), \
-            mock.patch("nova_http._action_ledger_summary", return_value={"ok": True, "count": 1, "last_record": {"tool": "stackexchange_search", "provider_used": "stackexchange", "provider_family": "stackexchange", "reply_outcome": {"query": "fastapi oauth error"}}}), \
-            mock.patch("nova_http._guard_status_payload", return_value={}), \
-            mock.patch("nova_http._core_status_payload", return_value={}), \
-            mock.patch("nova_http._http_status_payload", return_value={}), \
-            mock.patch("nova_http._append_metrics_snapshot", return_value=None), \
-            mock.patch("nova_http._build_self_check", return_value={"health_score": 100, "pass_ratio": 1.0, "alerts": []}):
+        with ExitStack() as stack:
+            stack.enter_context(mock.patch("nova_http.nova_core.load_policy", return_value=policy))
+            stack.enter_context(mock.patch("nova_http.nova_core.get_search_provider_priority", return_value=["stackexchange", "wikipedia", "general_web"]))
+            stack.enter_context(mock.patch("nova_http.nova_core._recent_action_ledger_records", return_value=[{"tool": "stackexchange_search", "provider_used": "stackexchange"}, {"tool": "web_research", "provider_used": "github"}]))
+            stack.enter_context(mock.patch("nova_http.nova_core.ollama_api_up", return_value=False))
+            stack.enter_context(mock.patch("nova_http.nova_core.chat_model", return_value="test-model"))
+            stack.enter_context(mock.patch("nova_http.nova_core.mem_enabled", return_value=False))
+            stack.enter_context(mock.patch("nova_http.nova_core.mem_stats_payload", return_value={"ok": True, "total": 0, "by_user": {}}))
+            stack.enter_context(mock.patch("nova_http.nova_core.patch_status_payload", return_value={"ok": True}))
+            stack.enter_context(mock.patch("nova_http._probe_searxng", return_value=(True, "status=200")))
+            stack.enter_context(mock.patch("nova_http._chat_login_enabled", return_value=False))
+            stack.enter_context(mock.patch("nova_http._chat_auth_source", return_value="disabled"))
+            stack.enter_context(mock.patch("nova_http._chat_users", return_value={}))
+            stack.enter_context(mock.patch("nova_http._memory_events_summary", return_value={"ok": True, "count": 0}))
+            stack.enter_context(mock.patch("nova_http._tool_events_summary", return_value={"ok": True, "count": 1, "status_counts": {}, "avg_latency_ms_by_tool": {"stackexchange_search": 44}}))
+            stack.enter_context(mock.patch("nova_http._action_ledger_summary", return_value={"ok": True, "count": 1, "last_record": {"tool": "stackexchange_search", "provider_used": "stackexchange", "provider_family": "stackexchange", "reply_outcome": {"query": "fastapi oauth error"}}}))
+            stack.enter_context(mock.patch("nova_http._guard_status_payload", return_value={}))
+            stack.enter_context(mock.patch("nova_http._core_status_payload", return_value={}))
+            stack.enter_context(mock.patch("nova_http._http_status_payload", return_value={}))
+            stack.enter_context(mock.patch("nova_http._append_metrics_snapshot", return_value=None))
+            stack.enter_context(mock.patch("nova_http._build_self_check", return_value={"health_score": 100, "pass_ratio": 1.0, "alerts": []}))
             payload = nova_http._control_status_payload()
 
         self.assertEqual(payload.get("search_provider_priority"), ["stackexchange", "wikipedia", "general_web"])
@@ -937,11 +940,14 @@ class TestHttpSessionManager(unittest.TestCase):
         self.assertIn("real_world_task_create", script)
         self.assertIn("renderRealWorldTasks", script)
         self.assertIn("taskManagerSelect", script)
-        self.assertIn("Nova Control", html)
+        self.assertIn("NOT YOUR ORDINARY AI SYSTEM", html)
         self.assertIn("NOT YOUR ORDINARY AI SYSTEM", html)
         self.assertIn("Overview", html)
         self.assertIn("Operations", html)
         self.assertIn("Sessions", html)
+        self.assertIn('data-view-target="meta"', html)
+        self.assertIn('data-view="meta"', html)
+        self.assertIn("renderMetaView", script)
         self.assertIn("Logs", html)
         self.assertIn("Parity Test Runs", html)
         self.assertIn('data-layer-tab="task-manager"', html)
@@ -1134,30 +1140,31 @@ class TestHttpSessionManager(unittest.TestCase):
             "memory": {"enabled": False, "scope": "private"},
             "web": {"enabled": False, "search_provider": "html", "search_api_endpoint": "", "allow_domains": []},
         }
-        with mock.patch("nova_http.nova_core.load_policy", return_value=policy), \
-            mock.patch("nova_http.nova_core.ollama_api_up", return_value=False), \
-            mock.patch("nova_http.nova_core.chat_model", return_value="test-model"), \
-            mock.patch("nova_http.nova_core.mem_enabled", return_value=False), \
-            mock.patch("nova_http.nova_core.mem_stats_payload", return_value={"ok": True, "total": 0, "by_user": {}}), \
-            mock.patch("nova_http.nova_core.patch_status_payload", return_value={"ok": True}), \
-            mock.patch("nova_http._chat_login_enabled", return_value=False), \
-            mock.patch("nova_http._chat_auth_source", return_value="disabled"), \
-            mock.patch("nova_http._chat_users", return_value={}), \
-            mock.patch("nova_http._memory_events_summary", return_value={"ok": True, "count": 0}), \
-            mock.patch("nova_http._tool_events_summary", return_value={"ok": True, "count": 0}), \
-            mock.patch("nova_http._action_ledger_summary", return_value={"ok": True, "count": 0}), \
-            mock.patch("nova_http._guard_status_payload", return_value={"running": False, "status": "stopped", "process_count": 0, "lock_exists": False, "stop_flag": False}), \
-            mock.patch("nova_http._core_status_payload", return_value={"running": False, "status": "stopped", "pid": None, "heartbeat_age_sec": None, "process_count": 0, "state_exists": True}), \
-            mock.patch("nova_http._http_status_payload", return_value={"running": True, "status": "running", "pid": 456, "process_count": 1}), \
-            mock.patch("nova_http._append_metrics_snapshot", return_value=None), \
-            mock.patch("nova_http._build_self_check", return_value={"health_score": 100, "pass_ratio": 1.0, "alerts": []}), \
-            mock.patch("nova_http._autonomy_maintenance_summary", return_value={
+        with ExitStack() as stack:
+            stack.enter_context(mock.patch("nova_http.nova_core.load_policy", return_value=policy))
+            stack.enter_context(mock.patch("nova_http.nova_core.ollama_api_up", return_value=False))
+            stack.enter_context(mock.patch("nova_http.nova_core.chat_model", return_value="test-model"))
+            stack.enter_context(mock.patch("nova_http.nova_core.mem_enabled", return_value=False))
+            stack.enter_context(mock.patch("nova_http.nova_core.mem_stats_payload", return_value={"ok": True, "total": 0, "by_user": {}}))
+            stack.enter_context(mock.patch("nova_http.nova_core.patch_status_payload", return_value={"ok": True}))
+            stack.enter_context(mock.patch("nova_http._chat_login_enabled", return_value=False))
+            stack.enter_context(mock.patch("nova_http._chat_auth_source", return_value="disabled"))
+            stack.enter_context(mock.patch("nova_http._chat_users", return_value={}))
+            stack.enter_context(mock.patch("nova_http._memory_events_summary", return_value={"ok": True, "count": 0}))
+            stack.enter_context(mock.patch("nova_http._tool_events_summary", return_value={"ok": True, "count": 0}))
+            stack.enter_context(mock.patch("nova_http._action_ledger_summary", return_value={"ok": True, "count": 0}))
+            stack.enter_context(mock.patch("nova_http._guard_status_payload", return_value={"running": False, "status": "stopped", "process_count": 0, "lock_exists": False, "stop_flag": False}))
+            stack.enter_context(mock.patch("nova_http._core_status_payload", return_value={"running": False, "status": "stopped", "pid": None, "heartbeat_age_sec": None, "process_count": 0, "state_exists": True}))
+            stack.enter_context(mock.patch("nova_http._http_status_payload", return_value={"running": True, "status": "running", "pid": 456, "process_count": 1}))
+            stack.enter_context(mock.patch("nova_http._append_metrics_snapshot", return_value=None))
+            stack.enter_context(mock.patch("nova_http._build_self_check", return_value={"health_score": 100, "pass_ratio": 1.0, "alerts": []}))
+            stack.enter_context(mock.patch("nova_http._autonomy_maintenance_summary", return_value={
                 "ok": True,
                 "runtime_worker": {"last_cycle_status": "ok", "interval_sec": 300, "cycle_count": 5, "last_completed_at": "2026-04-04 03:10:00"},
                 "last_generated_queue_run": {"status": "ok", "selected_file": "next_generated.json", "latest_report_status": "warning", "ts": "2026-04-04 03:09:00"},
-            }), \
-            mock.patch("nova_http._subconscious_live_summary", return_value={"tracked_session_count": 0, "replan_session_count": 0, "pressure_config": {"recent_pressure_window_cap": 12, "weak_crack_repeat_threshold": 3, "weak_signal_thresholds": {"route_unclear": 3, "route_fit_weak": 2}}, "sessions": []}), \
-            mock.patch("nova_http._generated_work_queue", return_value={
+            }))
+            stack.enter_context(mock.patch("nova_http._subconscious_live_summary", return_value={"tracked_session_count": 0, "replan_session_count": 0, "pressure_config": {"recent_pressure_window_cap": 12, "weak_crack_repeat_threshold": 3, "weak_signal_thresholds": {"route_unclear": 3, "route_fit_weak": 2}}, "sessions": []}))
+            stack.enter_context(mock.patch("nova_http._generated_work_queue", return_value={
                 "count": 3,
                 "open_count": 2,
                 "green_count": 1,
@@ -1166,8 +1173,8 @@ class TestHttpSessionManager(unittest.TestCase):
                 "never_run_count": 1,
                 "next_item": {"file": "next_generated.json", "latest_status": "drift", "open": True},
                 "items": [{"file": "next_generated.json", "latest_status": "drift", "open": True}],
-            }), \
-            mock.patch("nova_http._subconscious_status_summary", return_value={
+            }))
+            stack.enter_context(mock.patch("nova_http._subconscious_status_summary", return_value={
                 "ok": True,
                 "generated_at": "2026-03-24 10:17:01",
                 "label": "hourly",
@@ -1177,7 +1184,7 @@ class TestHttpSessionManager(unittest.TestCase):
                 "generated_definition_count": 6,
                 "latest_report_path": "runtime/subconscious_runs/latest.json",
                 "top_priorities": [{"signal": "fallback_overuse", "urgency": "high", "seam": "session_fact_recall_route_fallthrough", "seam_label": "session fact recall route fallthrough", "suggested_test_name": "route_selection_fallback_overuse", "robustness": 1.0}],
-            }):
+            }))
             payload = nova_http._control_status_payload()
 
         self.assertTrue(payload.get("subconscious_ok"))
@@ -1760,7 +1767,10 @@ class TestHttpSessionManager(unittest.TestCase):
             stop_file = nova_http.RUNTIME_DIR / "guard.stop"
             stop_file.write_text("stale", encoding="utf-8")
 
-            with mock.patch("nova_http.subprocess.Popen"):
+            with mock.patch(
+                "services.runtime_control.spawn_unattached",
+                return_value=(True, 777, "mock_spawn"),
+            ):
                 ok, msg = nova_http._start_guard()
 
             self.assertTrue(ok)

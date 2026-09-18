@@ -35,15 +35,6 @@ def _prioritize_research_domains(domains: list[str], query_tokens: list[str]) ->
     def _domain_score(domain: str) -> tuple[float, str]:
         low = str(domain or "").strip().lower()
         score = 0.0
-        if any(term in {"tsds", "attendance", "ada", "submission", "reporting"} for term in raw_terms):
-            if low == "tea.texas.gov" or low.endswith(".tea.texas.gov"):
-                score += 16.0
-            if "tsds.txschools.gov" in low:
-                score += 14.0
-            if "texasstudentdatasystem.org" in low:
-                score += 12.0
-            if low == "txschools.gov" or low.endswith(".txschools.gov"):
-                score += 8.0
         score += sum(low.count(term) * 4.0 for term in raw_terms)
         return (-score, low)
 
@@ -55,10 +46,6 @@ def _query_seed_urls_for_domain(domain: str, query_tokens: list[str], max_candid
     domain_low = str(domain or "").strip().lower()
     raw_terms = [str(token or "").strip().lower() for token in query_tokens if str(token or "").strip()]
     expanded_terms = list(raw_terms)
-    if "attendance" in raw_terms:
-        for term in ("ada", "reporting"):
-            if term not in expanded_terms:
-                expanded_terms.append(term)
     slugs: list[str] = []
     for term in expanded_terms:
         slug = re.sub(r"[^a-z0-9]+", "-", term).strip("-")
@@ -75,24 +62,8 @@ def _query_seed_urls_for_domain(domain: str, query_tokens: list[str], max_candid
         seen.add(clean)
         candidates.append(clean)
 
-    if domain_low == "tea.texas.gov" or domain_low.endswith(".tea.texas.gov"):
-        _add(f"{base}/reports-and-data/data-submission")
-        _add(f"{base}/reports-and-data")
-        for slug in slugs[:4]:
-            _add(f"{base}/reports-and-data/data-submission/{slug}")
-            _add(f"{base}/reports-and-data/{slug}")
-    elif "tsds.txschools.gov" in domain_low or "texasstudentdatasystem.org" in domain_low:
-        _add(f"{base}/tsds")
-        for slug in slugs[:4]:
-            _add(f"{base}/{slug}")
-            _add(f"{base}/resources/{slug}")
-    elif domain_low == "txschools.gov" or domain_low.endswith(".txschools.gov"):
-        _add(f"{base}/tsds")
-        for slug in slugs[:4]:
-            _add(f"{base}/{slug}")
-    else:
-        for slug in slugs[:4]:
-            _add(f"{base}/{slug}")
+    for slug in slugs[:4]:
+        _add(f"{base}/{slug}")
 
     _add(f"{base}/")
 
@@ -118,7 +89,7 @@ def scan_candidate_urls_for_query(
         score = 0.0
         for term in terms:
             score += low.count(term) * 2.0
-        for keyword in ("tsds", "attendance", "ada", "submission", "calendar", "timeline", "report", "student-data"):
+        for keyword in ("calendar", "timeline", "report"):
             if keyword in low:
                 score += 3.0
         if (parsed.path or "/") in {"", "/"}:
@@ -237,10 +208,6 @@ def extract_same_host_links(raw_html: str, base_url: str, host: str) -> list[str
 
 def expand_research_terms(tokens: list[str]) -> list[str]:
     terms = {token for token in tokens if token}
-    if "reporting" in terms:
-        terms.update({"submission", "report"})
-    if "attendance" in terms:
-        terms.update({"ada", "attendance", "reporting"})
     if "timeline" in terms:
         terms.update({"calendar", "deadline", "dates"})
     return list(terms)
@@ -262,7 +229,7 @@ def score_research_hit(
     total_text_hits = sum(low_text.count(token) for token in terms)
     total_url_hits = sum(low_url.count(token) for token in terms)
 
-    boost_patterns = ["tsds", "attendance", "ada", "submission", "calendar", "timeline", "report", "student-data"]
+    boost_patterns = ["calendar", "timeline", "report"]
     path_boost = sum(1 for token in boost_patterns if token in low_url)
 
     score = (
@@ -350,7 +317,7 @@ def seed_urls_for_domain(
     for url in candidates:
         low = url.lower()
         score = sum(low.count(term) for term in terms)
-        for token in ("tsds", "attendance", "ada", "submission", "calendar", "timeline", "report"):
+        for token in ("calendar", "timeline", "report"):
             if token in low:
                 score += 2
         if score > 0:
@@ -425,7 +392,6 @@ def is_weak_grounded_snippet(value: str) -> bool:
         return True
     weak_markers = (
         "you need to enable javascript",
-        "welcome to texas education agency",
         "skip to main content",
         "cookie",
         "privacy policy",

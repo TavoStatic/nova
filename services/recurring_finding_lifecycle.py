@@ -27,12 +27,22 @@ PRODUCTIVE_CLOSURE_ACTIONS = frozenset(
     }
 )
 
-# Witness actions record scoped verification progress but do not close recurring pressure.
-WITNESS_CLOSURE_ACTIONS = frozenset(
+# Witness actions close the mapping stage only. They do not close wrapper
+# pressure and they do not count as extraction.
+MAPPING_CLOSURE_ACTIONS = frozenset(
     {
         "witnessed_http_extraction_boundary",
-        # Legacy alias kept so older task meta still classifies as non-productive.
         "mapped_http_extraction_boundary",
+    }
+)
+# Legacy name kept for imports/tests that still say "witness".
+WITNESS_CLOSURE_ACTIONS = MAPPING_CLOSURE_ACTIONS
+# Extract is a separate stage. These close that stage without claiming the
+# HTTP surface was moved. Do not reopen while extraction is unimplemented.
+EXTRACT_STAGE_CLOSURE_ACTIONS = frozenset(
+    {
+        "blocked_http_extraction",
+        "operator_do_not_retry",
     }
 )
 
@@ -61,14 +71,7 @@ _LEGACY_ALIASES: dict[str, str] = {
     "core_thinning_prior_satisfaction_status": KEY_PRIOR_SATISFACTION_STATUS,
     "core_thinning_prior_completion_action": KEY_PRIOR_COMPLETION_ACTION,
 }
-
-
-def _as_dict(value: Any) -> dict[str, Any]:
-    return dict(value) if isinstance(value, dict) else {}
-
-
-def _text(value: Any, limit: int = 240) -> str:
-    return str(value or "").strip()[:limit]
+from services.type_utils import _as_dict, _text
 
 
 def _slug(value: str) -> str:
@@ -215,16 +218,43 @@ def classify_existing_item(
     return DECISION_INACTIVE_RESOLVE
 
 
+def task_has_mapping_closure(meta: dict[str, Any] | None) -> bool:
+    state = read_task_state(meta)
+    if _text(state.get(KEY_SATISFACTION_STATUS), 40).lower() != STATUS_SATISFIED:
+        return False
+    return _text(state.get(KEY_COMPLETION_ACTION), 120).lower() in MAPPING_CLOSURE_ACTIONS
+
+
+def task_is_http_extract(meta: dict[str, Any] | None) -> bool:
+    return _text(_as_dict(meta).get("kind"), 80).lower() == "http_surface_extract"
+
+
+def task_has_extract_stage_closure(meta: dict[str, Any] | None) -> bool:
+    if not task_is_http_extract(meta):
+        return False
+    state = read_task_state(meta)
+    action = _text(state.get(KEY_COMPLETION_ACTION), 120).lower()
+    if action in EXTRACT_STAGE_CLOSURE_ACTIONS:
+        return True
+    # Extraction is not implemented. A completed extract stage is terminal
+    # until a real extractor exists — cluster persistence is not a retry signal.
+    return _text(state.get(KEY_SATISFACTION_STATUS), 40).lower() == STATUS_SATISFIED
+
+
 def task_has_productive_closure(
     meta: dict[str, Any] | None,
     *,
     current_fingerprint: str = "",
+    finding_still_active: bool = False,
 ) -> bool:
     state = read_task_state(meta)
     if _text(state.get(KEY_SATISFACTION_STATUS), 40).lower() != STATUS_SATISFIED:
         return False
     completion_action = _text(state.get(KEY_COMPLETION_ACTION), 120).lower()
     if completion_action not in PRODUCTIVE_CLOSURE_ACTIONS:
+        return False
+    # Current source still reports this wrapper — historical removal is not satisfaction.
+    if finding_still_active and completion_action == "removed_unused_wrapper":
         return False
     prior_fp = _text(state.get(KEY_SATISFACTION_FINGERPRINT), 160)
     next_fp = _text(current_fingerprint, 160)
@@ -246,9 +276,14 @@ def classify_task_meta(
         active_finding_keys=active_finding_keys,
         current_fingerprint=current_fingerprint,
     )
+    if decision == DECISION_REOPEN and task_has_mapping_closure(meta):
+        return DECISION_SATISFIED
+    if decision == DECISION_REOPEN and task_has_extract_stage_closure(meta):
+        return DECISION_SATISFIED
     if decision == DECISION_REOPEN and task_has_productive_closure(
         meta,
         current_fingerprint=current_fingerprint,
+        finding_still_active=key in active_finding_keys,
     ):
         return DECISION_SATISFIED
     if decision != DECISION_ACTIVE or not current_fingerprint:

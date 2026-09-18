@@ -2,8 +2,8 @@
 NOVA_DOC
 category: architecture
 authority: active_authority
-last_session: 2026-08-05
-last_agent: claude-cowork
+last_session: 2026-09-01
+last_agent: grok
 session_state: current
 next_step: none
 open: none
@@ -11,7 +11,7 @@ open: none
 
 # Documentation Ownership
 
-Last verified: 2026-08-05
+Last verified: 2026-08-16
 
 ## Start Here
 
@@ -37,7 +37,7 @@ This file tells you who owns what. The ledger tells you what is current.
 
 - `SYSTEM_MAP.md`: current processes, ownership, APIs, artifacts, and wiring surfaces — anchored to commit 92ca149
 - `ARCHITECTURE.md`: design intent and current implementation boundaries
-- `SERVICES_INDEX.md`: every service module — current as of Aug 2026
+- `SERVICES_INDEX.md`: every service module — regenerate after backpack-host or sanitizer changes (`python scripts/regenerate_services_index.py`)
 - `FUNCTION_INDEX.md`: every active source function, method, and class — regenerated 2026-08-05 (561 files, 6577 fns)
 - `TEST_INDEX.md`: every discovered test function and lane membership — regenerated 2026-08-05 (245 modules, 2344 fns)
 
@@ -52,13 +52,21 @@ This file tells you who owns what. The ledger tells you what is current.
 - `CODE_TRUTH_AUDIT_2026-08-04.md`: deep scan August 2026 — archived
 - `CODE_TRUTH_AUDIT_2026-07-12.md`: scan baseline July 2026 — archived
 
+### Current Audit Work Map
+
+- `AUDIT_WORK_MAP_2026-08-25.md`: current audit scope and work mapping only; does not declare health or authorize repairs
+
 ### Subsystem Truth
 
-- `AUTONOMY_AND_MISSION.md`: Mission, orchestrator, gate, Work Tree, pressure, and outbox
+- `AUTONOMY_AND_MISSION.md`: Mission, orchestrator, gate, Work Tree, pressure, outbox, and promoted mill skip/remint/stop/pulse (sip-execute not promoted)
+- `services/gatekeeper.py`: evidence-backed observation of existing gate and rail decisions; non-authoritative, no policy mutation or automatic retirement
 - `TEST_ECOSYSTEM.md`: test discovery, lane membership, generated tests, and validation truth
 - `KIDNEY_SYSTEM.md`: cleanup and retention
-- `SOCK_SYSTEM.md`: hardware/model compatibility
-- `DATA_PIPELINES.md`: pipeline framework, data connector core, and domain lanes
+- `SOCK_SYSTEM.md`: hardware/model compatibility and mill capacity lease (standing vs temporary sip)
+- `MILL_LANE_MEASURE_2026-09-01.md`: Ollama mill-judgment scores (3.5 vs 2.5); evidence only — does not override live mill
+- `DATA_PIPELINES.md`: pipeline framework and installable domain lanes
+- `DEFERRED_LOCAL_DISPOSAL.json`: local-only deferred disposal candidates; deletion requires separate approval
+- Backpack uninstall contract lives in code: `services/backpack_host/sanitize.py` and `services/backpack_host/install_state.py`. The named decision is `backpack_uninstall_touch_list` in the ledger.
 - `SEARCH_PROVIDER_ARCHITECTURE.md`: search providers and research routing
 - `PATCHING.md`: patch governance
 - `OPERATIONS.md`: commands and operating procedures
@@ -68,6 +76,7 @@ This file tells you who owns what. The ledger tells you what is current.
 - `SELF_SCAN_RINGS_DESIGN.md`: three-ring self-scan design — woven into existing scanners, not a second engine
 - `DECISION_PROPOSAL_JUDGE.md`: Decision Judge schemas (DecisionProposal, JudgeReport, DecisionEpisode), disposition rules, provenance
 - `SOLUTION_EXPERIENCE_BACKLOG.md`: backlog for solution experience improvements
+- `RESEARCH_BRIEF.md`: two-page sponsor brief — preliminary white-box evidence for Work Admission Kernel v1; historical; does not override code/runtime; not a live-autonomy claim
 
 ### Nova Coaching
 
@@ -91,6 +100,7 @@ Remaining archive candidates (at root):
 - adding or removing a source function requires regenerating `FUNCTION_INDEX.md`
 - adding or removing a service requires regenerating `SERVICES_INDEX.md`
 - adding or removing tests or lane membership requires regenerating `TEST_INDEX.md` and checking `TEST_ECOSYSTEM.md`
+- adding a backpack runtime write path requires declaring it in that backpack's manifest and keeping `services/backpack_host/sanitize.py` able to discover it
 - adding a wiring surface or source root requires updating `SYSTEM_MAP.md`
 - changing Mission, orchestrator, gate, maintenance order, Work Tree pressure, or outbox semantics requires updating `AUTONOMY_AND_MISSION.md`
 - changing process topology or HTTP routes requires updating `SYSTEM_MAP.md` and the root README

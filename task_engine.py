@@ -47,7 +47,7 @@ def _looks_like_explicit_web_research(text: str) -> bool:
         return True
 
     research_terms = ["research", "search", "find", "lookup", "look up", "browse", "fetch"]
-    web_terms = ["web", "online", "internet", "website", "site", "tea.texas.gov", "txschools.gov"]
+    web_terms = ["web", "online", "internet", "website", "site"]
     return any(term in low for term in research_terms) and any(term in low for term in web_terms)
 
 
@@ -112,52 +112,6 @@ def extract_requirements(user_text: str, config: dict | None = None) -> list[str
     explicit_web_research = _looks_like_explicit_web_research(t)
 
     # --------------------------------------------------
-    # SIS / student data / state education data
-    # --------------------------------------------------
-
-    sis_keywords = [
-        "attendance",
-        "ada",
-        "enrollment",
-        "withdrawal",
-        "student",
-        "grade",
-        "transcript",
-        "report card",
-        "aeries",
-        "skyward",
-        "powerschool",
-        "infinite campus",
-        "records",
-        "roster",
-        "outcome",
-        "list all",
-        "show me"
-    ]
-
-    if any(kw in t for kw in sis_keywords) and not (explicit_web_research or prefer_web_for_data_queries):
-
-        req.update([
-            "database_connection",
-            "query_execution"
-        ])
-
-        if any(kw in t for kw in ["attendance", "ada", "outcome"]):
-            req.add("sis_attendance_table")
-
-        if any(kw in t for kw in [
-            "student",
-            "grade",
-            "transcript",
-            "records",
-            "roster",
-            "report card",
-            "list all",
-            "show me"
-        ]):
-            req.add("student_records_table")
-
-    # --------------------------------------------------
     # Web / external lookup
     # --------------------------------------------------
 
@@ -168,11 +122,9 @@ def extract_requirements(user_text: str, config: dict | None = None) -> list[str
         "search",
         "lookup",
         "fetch",
-        "tea.texas.gov",
-        "txschools.gov",
         "guidelines",
         "manual",
-        "data submission"
+        "documentation"
     ]
 
     if any(kw in t for kw in web_keywords):
@@ -223,12 +175,6 @@ def analyze_request(user_text: str, config: dict | None = None) -> TaskResult:
 
         if m in SUGGESTIONS:
             msg_lines.append(f"  Suggestion: {SUGGESTIONS[m]}")
-
-    if "web_access" in missing and "tea" in user_text.lower():
-        msg_lines.append("")
-        msg_lines.append(
-            "Note: Web access is restricted to official TEA/TSDS domains only."
-        )
 
     return TaskResult(
         allow_llm=False,

@@ -447,6 +447,17 @@ class ReleaseStatusService:
             "latest_validation_record_missing_fields": list(validation_record.get("missing_fields") or []),
             "latest_validation_record_artifact_matches": bool(validation_record.get("artifact_matches")),
         })
+        record_result = str(out.get("latest_validation_record_result") or "").strip().lower()
+        promotion_result = str(out.get("latest_validation_result") or "").strip().lower()
+        if (
+            str(out.get("latest_readiness_state") or "").strip().lower() == "needs-promotion"
+            and not promotion_result
+            and bool(out.get("latest_validation_record_complete"))
+            and record_result == "fail"
+        ):
+            out["latest_readiness_state"] = "blocked"
+            out["latest_ready_to_ship"] = False
+            out["latest_readiness_note"] = "Latest build has a failing validation result."
         if source_root is not None:
             freshness = self.source_freshness_payload(
                 Path(source_root),

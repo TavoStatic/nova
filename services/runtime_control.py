@@ -9,6 +9,7 @@ from pathlib import Path
 
 import psutil
 
+from tools.runtime_detach import spawn_unattached
 from tools.runtime_processes import logical_service_processes
 
 
@@ -398,7 +399,7 @@ class RuntimeControlService:
         cmdline = [str(item or "").strip().lower() for item in list((process or {}).get("cmdline") or [])]
         if not cmdline:
             return True
-        return "--loop" in cmdline
+        return ("--loop" in cmdline or "--once" in cmdline)
 
     @classmethod
     def _autonomy_worker_processes(cls, processes: list[dict]) -> list[dict]:
@@ -431,10 +432,8 @@ class RuntimeControlService:
     def detached_creation_flags(*, os_name: str = os.name, subprocess_module=subprocess) -> int:
         if os_name != "nt":
             return 0
-        # CREATE_BREAKAWAY_FROM_JOB is required so guard/maintenance children survive
-        # when the parent process is inside a Windows job object (shells, agents, --once
-        # maintenance). Without it, "guard_start_confirmed" is followed by a silent
-        # death as soon as the parent exits — autonomy freezes on endless guard_start.
+        # Legacy flags only. Durable start/restart uses spawn_unattached (WMI).
+        # These flags do not escape this host's agent/shell job.
         create_breakaway = int(getattr(subprocess_module, "CREATE_BREAKAWAY_FROM_JOB", 0x01000000) or 0)
         return (
             subprocess_module.DETACHED_PROCESS
@@ -455,6 +454,7 @@ class RuntimeControlService:
         restart_provenance_service=None,
         subprocess_module=subprocess,
         os_name: str = os.name,
+        spawn_unattached_fn=None,
     ) -> tuple[bool, str]:
         if not Path(venv_python).exists():
             return False, f"venv_python_missing:{venv_python}"
@@ -488,14 +488,10 @@ class RuntimeControlService:
             return False, intent_msg
 
         try:
-            flags = self.detached_creation_flags(os_name=os_name, subprocess_module=subprocess_module)
-            subprocess_module.Popen(
-                [str(venv_python), str(guard_py)],
-                cwd=str(base_dir),
-                stdout=subprocess_module.DEVNULL,
-                stderr=subprocess_module.DEVNULL,
-                creationflags=flags,
-            )
+            spawn = spawn_unattached_fn or spawn_unattached
+            ok, pid, detail = spawn([str(venv_python), str(guard_py)], cwd=str(base_dir))
+            if not ok:
+                return False, f"guard_start_failed:{detail}"
             # Brief settle window so overlapping start actions see the new process
             # and return guard_already_running instead of spawning another tree.
             for _ in range(20):
@@ -505,7 +501,7 @@ class RuntimeControlService:
                 status = guard_status_fn()
                 if status.get("running"):
                     return True, "guard_start_confirmed"
-            return True, "guard_start_requested"
+            return True, f"guard_start_requested:{detail}:pid={pid}"
         except Exception as exc:
             return False, f"guard_start_failed:{exc}"
 
@@ -520,6 +516,7 @@ class RuntimeControlService:
         runtime_processes_module,
         subprocess_module=subprocess,
         os_name: str = os.name,
+        spawn_unattached_fn=None,
     ) -> tuple[bool, str]:
         if not Path(venv_python).exists():
             return False, f"venv_python_missing:{venv_python}"
@@ -533,14 +530,19 @@ class RuntimeControlService:
             return True, "autonomy_maintenance_already_running"
 
         try:
-            flags = self.detached_creation_flags(os_name=os_name, subprocess_module=subprocess_module)
-            subprocess_module.Popen(
-                [str(venv_python), str(maintenance_py), "--loop", "--interval-sec", str(max(1, int(interval_sec or 300)))],
+            spawn = spawn_unattached_fn or spawn_unattached
+            ok, _pid, detail = spawn(
+                [
+                    str(venv_python),
+                    str(maintenance_py),
+                    "--loop",
+                    "--interval-sec",
+                    str(max(1, int(interval_sec or 300))),
+                ],
                 cwd=str(base_dir),
-                stdout=subprocess_module.DEVNULL,
-                stderr=subprocess_module.DEVNULL,
-                creationflags=flags,
             )
+            if not ok:
+                return False, f"autonomy_maintenance_start_failed:{detail}"
             return True, "autonomy_maintenance_start_requested"
         except Exception as exc:
             return False, f"autonomy_maintenance_start_failed:{exc}"
@@ -592,38 +594,36 @@ class RuntimeControlService:
         remove_before_start: list[Path] | None = None,
         subprocess_module=subprocess,
         os_name: str = os.name,
+        spawn_unattached_fn=None,
     ) -> tuple[bool, str]:
         if not Path(venv_python).exists():
             return False, f"venv_python_missing:{venv_python}"
+        later = Path(base_dir) / "scripts" / "start_unattached_later.py"
+        if not later.exists():
+            return False, f"delayed_start_helper_missing:{later}"
         work_dir = str(cwd or base_dir)
-        log_dir = Path(base_dir) / "logs"
-        log_dir.mkdir(parents=True, exist_ok=True)
-        out_log = str(log_dir / "nova_http.out.log")
-        err_log = str(log_dir / "nova_http.err.log")
-        flags = self.detached_creation_flags(os_name=os_name, subprocess_module=subprocess_module)
-        cleanup_code = "".join(
-            f"Path({str(Path(path))!r}).unlink(missing_ok=True);"
-            for path in (remove_before_start or [])
-        )
-        launcher_code = (
-            "import subprocess,time;from pathlib import Path;"
-            f"time.sleep({max(0.0, float(delay_seconds))});"
-            f"{cleanup_code}"
-            f"out=open({out_log!r}, 'a', encoding='utf-8');"
-            f"err=open({err_log!r}, 'a', encoding='utf-8');"
-            f"subprocess.Popen({list(command)!r}, cwd={work_dir!r}, stdout=out, stderr=err, creationflags={int(flags)})"
-        )
+        helper = [
+            str(venv_python),
+            str(later),
+            "--delay",
+            str(max(0.0, float(delay_seconds))),
+            "--cwd",
+            work_dir,
+        ]
+        for path in list(remove_before_start or []):
+            helper.extend(["--remove", str(path)])
+        helper.append("--")
+        helper.extend([str(item) for item in list(command or []) if str(item)])
+        if len(command or []) < 2:
+            return False, "delayed_start_command_required"
+        spawn = spawn_unattached_fn or spawn_unattached
         try:
-            subprocess_module.Popen(
-                [str(venv_python), "-c", launcher_code],
-                cwd=work_dir,
-                stdout=subprocess_module.DEVNULL,
-                stderr=subprocess_module.DEVNULL,
-                creationflags=flags,
-            )
-            return True, "delayed_start_scheduled"
+            ok, _pid, detail = spawn(helper, cwd=str(base_dir))
         except Exception as exc:
             return False, f"delayed_start_failed:{exc}"
+        if not ok:
+            return False, f"delayed_start_failed:{detail}"
+        return True, "delayed_start_scheduled"
 
     @staticmethod
     def core_identity_from_runtime(*, runtime_dir: Path, runtime_processes_module) -> tuple[int | None, float | None]:

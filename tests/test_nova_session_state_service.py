@@ -1,4 +1,4 @@
-﻿import unittest
+import unittest
 
 from conversation_manager import ConversationSession
 from services import nova_session_state

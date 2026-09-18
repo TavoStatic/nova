@@ -17,8 +17,10 @@ from services.sock_service import (
     _is_stable_pair,
     _routing_safe_for_pair,
     build_diff,
+    choose_mill_capacity,
     recommend_models,
     run_sock,
+    run_with_mill_capacity,
     scan_ollama,
     validate_concurrent_warm,
 )
@@ -47,6 +49,13 @@ def _policy_path(tmp_path: Path, models: dict) -> Path:
 
 
 class TestRecommendModels(unittest.TestCase):
+    def setUp(self) -> None:
+        # SOCK hardware defaults, not this box's mill-evidence preferred_models.
+        self._pref = mock.patch("services.sock_service._preferred_models", return_value={})
+        self._pref.start()
+
+    def tearDown(self) -> None:
+        self._pref.stop()
 
     def test_mid_vram_selects_gpu_7b_chat_not_cpu_14b(self):
         # 6 GB VRAM + 32 GB RAM: previously selected CPU 14b, which caused
@@ -83,20 +92,17 @@ class TestRecommendModels(unittest.TestCase):
         self.assertTrue(_is_stable_pair("qwen2.5:7b", routing, 6.0))
 
     def test_8gb_vram_produces_stable_pair_with_downgraded_routing(self):
-        # 8 GB VRAM: llama3.1:8b chat (5 GB) + qwen2.5:14b routing (9 GB) cannot
-        # coexist (14 GB > 8 GB), so routing downgrades to llama3.2:3b (2 GB).
-        # This is an explicit quality tradeoff — locked here so any future change
-        # to this tier requires a deliberate decision.
+        # Current fallback tiers prefer a single resident 14B model at 8 GB.
         hw = _hw(ram_gb=16.0, vram_gb=8.0)
         rec = recommend_models(hw)
-        self.assertEqual(rec.chat, "llama3.1:8b")
-        self.assertEqual(rec.routing, "llama3.2:3b")
+        self.assertEqual(rec.chat, "qwen2.5:14b")
+        self.assertEqual(rec.routing, "qwen2.5:14b")
         self.assertTrue(_is_stable_pair(rec.chat, rec.routing, hw.vram_gb))
 
     def test_routing_upgrades_on_high_vram(self):
         hw = _hw(vram_gb=12.0)
         rec = recommend_models(hw)
-        self.assertEqual(rec.routing, "qwen2.5:14b")
+        self.assertEqual(rec.routing, "llama3.2:3b")
 
     def test_vision_stays_7b_on_low_vram(self):
         hw = _hw(vram_gb=6.0)
@@ -106,7 +112,7 @@ class TestRecommendModels(unittest.TestCase):
     def test_vision_upgrades_on_high_vram(self):
         hw = _hw(vram_gb=10.0)
         rec = recommend_models(hw)
-        self.assertEqual(rec.vision, "qwen2.5vl:14b")
+        self.assertEqual(rec.vision, "qwen2.5vl:7b")
 
     def test_stt_upgrades_to_medium_on_capable_hardware(self):
         hw = _hw(cpu_cores=12, ram_gb=32.0)
@@ -295,6 +301,12 @@ class TestFillMissing(unittest.TestCase):
 
 
 class TestRunSock(unittest.TestCase):
+    def setUp(self) -> None:
+        self._pref = mock.patch("services.sock_service._preferred_models", return_value={})
+        self._pref.start()
+
+    def tearDown(self) -> None:
+        self._pref.stop()
 
     def test_run_returns_report_with_hardware_and_recommendation(self):
         import tempfile
@@ -461,3 +473,116 @@ class TestDetectionWindows(unittest.TestCase):
             from services.sock_service import _find_nvidia_smi
             result = _find_nvidia_smi()
         self.assertIsNone(result)
+
+
+class TestMillCapacityLease(unittest.TestCase):
+    def _policy(self, tmp: Path, chat: str = "qwen2.5:7b") -> Path:
+        p = tmp / "policy.json"
+        p.write_text(json.dumps({"models": {"chat": chat, "routing": chat}}), encoding="utf-8")
+        return p
+
+    def _inv(self, *models: str) -> OllamaInventory:
+        return OllamaInventory(reachable=True, pulled=list(models))
+
+    def test_refused_leases_9b_not_14b(self):
+        hw = _hw(ram_gb=32.0, vram_gb=6.0)
+        lease = choose_mill_capacity(
+            {"class": "refused", "pressure_event": "empty_claim"},
+            standing="qwen2.5:7b",
+            hw=hw,
+            inventory=self._inv("qwen2.5:7b", "qwen3.5:9b", "qwen2.5:14b"),
+        )
+        self.assertEqual(lease.model, "qwen3.5:9b")
+        self.assertTrue(lease.temporary)
+        self.assertEqual(lease.standing, "qwen2.5:7b")
+
+    def test_paid_trail_stays_standing_not_larger(self):
+        hw = _hw(ram_gb=32.0, vram_gb=6.0)
+        lease = choose_mill_capacity(
+            {"class": "redundant", "pressure_event": "inherited_attempt", "controlling": True},
+            standing="qwen2.5:7b",
+            hw=hw,
+            inventory=self._inv("qwen2.5:7b", "qwen3.5:9b", "qwen2.5:14b"),
+        )
+        self.assertEqual(lease.model, "qwen2.5:7b")
+        self.assertFalse(lease.temporary)
+        self.assertNotEqual(lease.model, "qwen2.5:14b")
+
+    def test_empty_claim_redundant_uses_9b(self):
+        hw = _hw(ram_gb=32.0, vram_gb=6.0)
+        lease = choose_mill_capacity(
+            {"class": "redundant", "pressure_event": "empty_claim"},
+            standing="qwen2.5:7b",
+            hw=hw,
+            inventory=self._inv("qwen2.5:7b", "qwen3.5:9b", "qwen2.5:14b"),
+        )
+        self.assertEqual(lease.model, "qwen3.5:9b")
+        self.assertTrue(lease.temporary)
+
+    def test_14b_never_chosen_even_when_pulled(self):
+        hw = _hw(ram_gb=32.0, vram_gb=6.0)
+        for signal in (
+            {"class": "refused", "pressure_event": "inherited_attempt"},
+            {"class": "redundant", "pressure_event": "inherited_attempt"},
+            {"class": "redundant", "pressure_event": "empty_claim"},
+            {"class": "premature", "pressure_event": ""},
+            {"class": "", "pressure_event": ""},
+        ):
+            lease = choose_mill_capacity(
+                signal,
+                standing="qwen2.5:7b",
+                hw=hw,
+                inventory=self._inv("qwen2.5:7b", "qwen3.5:9b", "qwen2.5:14b"),
+            )
+            self.assertNotEqual(lease.model, "qwen2.5:14b", signal)
+
+    def test_missing_9b_falls_back_to_standing(self):
+        hw = _hw(ram_gb=32.0, vram_gb=6.0)
+        lease = choose_mill_capacity(
+            {"class": "refused", "pressure_event": ""},
+            standing="qwen2.5:7b",
+            hw=hw,
+            inventory=self._inv("qwen2.5:7b", "qwen2.5:14b"),
+        )
+        self.assertEqual(lease.model, "qwen2.5:7b")
+        self.assertEqual(lease.reason, "deliberate_not_pulled")
+
+    def test_low_ram_does_not_sip(self):
+        hw = _hw(ram_gb=8.0, vram_gb=6.0)
+        lease = choose_mill_capacity(
+            {"class": "refused", "pressure_event": ""},
+            standing="qwen2.5:7b",
+            hw=hw,
+            inventory=self._inv("qwen2.5:7b", "qwen3.5:9b"),
+        )
+        self.assertEqual(lease.model, "qwen2.5:7b")
+        self.assertEqual(lease.reason, "deliberate_not_feasible")
+
+    def test_lease_does_not_rewrite_policy_and_unloads(self):
+        import tempfile
+
+        stopped: list[str] = []
+        with tempfile.TemporaryDirectory() as tmp:
+            policy = self._policy(Path(tmp))
+            before = policy.read_text(encoding="utf-8")
+            record = Path(tmp) / "capacity_lease.json"
+            lease, result = run_with_mill_capacity(
+                {"class": "refused", "pressure_event": "empty_claim"},
+                lambda model: f"ran:{model}",
+                standing="qwen2.5:7b",
+                hw=_hw(ram_gb=32.0, vram_gb=6.0),
+                inventory=self._inv("qwen2.5:7b", "qwen3.5:9b", "qwen2.5:14b"),
+                policy_path=policy,
+                stop_fn=stopped.append,
+                record_path=record,
+            )
+            self.assertEqual(result, "ran:qwen3.5:9b")
+            self.assertEqual(lease.ran_model, "qwen3.5:9b")
+            self.assertTrue(lease.granted)
+            self.assertTrue(lease.released)
+            self.assertEqual(stopped, ["qwen2.5:7b", "qwen3.5:9b"])
+            self.assertEqual(policy.read_text(encoding="utf-8"), before)
+            saved = json.loads(record.read_text(encoding="utf-8"))
+            self.assertEqual(saved.get("ran_model"), "qwen3.5:9b")
+            self.assertTrue(saved.get("released"))
+            self.assertNotIn("qwen2.5:14b", saved.get("model"))

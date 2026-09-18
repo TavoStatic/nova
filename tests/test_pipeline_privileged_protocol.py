@@ -15,7 +15,7 @@ class TestPipelinePrivilegedProtocol(unittest.TestCase):
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
         self.runtime_root = Path(self.temp_dir.name)
-        self.paths = build_protocol_paths(self.runtime_root, "sis_test")
+        self.paths = build_protocol_paths(self.runtime_root, "example_connector")
 
     def tearDown(self):
         self.temp_dir.cleanup()
@@ -23,9 +23,9 @@ class TestPipelinePrivilegedProtocol(unittest.TestCase):
     def test_submit_claim_and_archive_request(self):
         request = submit_request(
             self.paths,
-            pipeline_id="sis_test",
-            operation="student_lookup",
-            params={"student_id": "12345"},
+            pipeline_id="example_connector",
+            operation="inventory/items",
+            params={"item_id": "12345"},
             row_limit=5,
             requested_by="test",
         )
@@ -39,9 +39,9 @@ class TestPipelinePrivilegedProtocol(unittest.TestCase):
     def test_wait_for_response_returns_written_payload(self):
         request = submit_request(
             self.paths,
-            pipeline_id="sis_test",
-            operation="student_lookup",
-            params={"student_id": "12345"},
+            pipeline_id="example_connector",
+            operation="inventory/items",
+            params={"item_id": "12345"},
         )
         write_response(
             self.paths,

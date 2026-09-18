@@ -1,4 +1,4 @@
-﻿"""Dynamic replanning seams for Nova's shared-state architecture."""
+"""Dynamic replanning seams for Nova's shared-state architecture."""
 
 from __future__ import annotations
 

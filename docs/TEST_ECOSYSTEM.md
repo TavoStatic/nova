@@ -66,8 +66,7 @@ Source-profile lanes bind subsystem changes to relevant tests. Current profiles 
 - data pipelines
 - HTTP/API/control
 - memory/identity
-- data connector core
-- the district data connector lane
+- installable backpack lanes
 - model runtime
 - patch pipeline
 - generated code

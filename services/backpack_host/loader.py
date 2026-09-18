@@ -37,7 +37,7 @@ def _module_from_rel_path(backpack_id: str, rel_file: str) -> str:
     """
     Translate a relative file path to a Python module path scoped under backpacks.
 
-    'pipeline/connector.py' → 'backpacks.edfi.pipeline.connector'
+    'pipeline/connector.py' → 'backpacks.<backpack_id>.pipeline.connector'
     """
     normalized = rel_file.replace("\\", "/")
     if normalized.endswith(".py"):
@@ -56,7 +56,7 @@ def load_backpack_manifest(
     Parse backpack.json and return a PipelineManifest.
 
     Args:
-        backpack_dir:  Absolute path to the backpack root (e.g. backpacks/edfi/).
+        backpack_dir:  Absolute path to the backpack root.
         nova_root:     Nova project root (C:\\NOVA). Used to resolve relative runtime paths.
         runtime_root:  Nova runtime root (C:\\NOVA\\runtime). Settings file written here.
 

@@ -64,7 +64,7 @@ Operator / user / scheduler
                |-- Ollama
                |-- SearXNG and selected web APIs
                |-- Piper and Faster-Whisper
-               `-- operator-configured data connector ODS/API
+              `-- operator-configured backpack source/API
 ```
 
 Nova is local-first, not dependency-free. Some capabilities call operator-configured network services.
@@ -245,7 +245,7 @@ Policy controls memory enablement, scope, retention kinds, blocked kinds, source
 
 ## Tools And OS Capabilities
 
-The direct tool registry contains filesystem, codegen, patch, vision, research, system, OS capability, temporal review, and data connector explore tools.
+The direct tool registry contains filesystem, codegen, patch, vision, research, system, OS capability, and temporal review tools.
 
 Core exports additional named actions over those tools and services. Work Tree execution checks tree, branch, task, and tool declarations before dispatch.
 
@@ -288,13 +288,13 @@ Nova distinguishes discovered tests, compact lanes, source-profile lanes, genera
 
 No static test count or old pass result is live truth.
 
-## Data Pipelines And data connector
+## Data Pipelines And Backpacks
 
 The pipeline framework owns manifests, registry discovery, query guards, audit, privileged protocol/worker, control actions, schema probes, and query execution.
 
-The vendor-neutral data connector core owns OAuth, client behavior, discovery, resources, paging, district scope, diagnostics, capability profiles, readiness, and change tracking.
+The generic pipeline and backpack host own discovery, client behavior, resources, query governance, diagnostics, readiness, and lifecycle cleanup.
 
-The active the district lane owns district-specific configuration, allowlisted query templates, schema manifest, connector behavior, and lane controls. Domain logic does not belong in the vendor-neutral data connector core.
+Each active lane owns its configuration, allowlisted query templates, schema manifest, connector behavior, and lane controls. Domain logic does not belong in the generic host.
 
 ## Wiring Surfaces
 
@@ -308,11 +308,11 @@ The active the district lane owns district-specific configuration, allowlisted q
 | Tools and policy | `tool_registry_policy`, `tool_evidence`, `policy_gates`, `operator_control`, `safety_envelope` |
 | Memory and retrieval | `memory_identity`, `identity_profile_answers`, `web_search`, `retrieval_knowledge`, `weather_location` |
 | Mutation and release | `patch_pipeline`, `codegen_pipeline`, `release`, `installer_packaging`, `storage_release_pressure` |
-| Data | `data_pipelines`, `edfi_capability_profile`, `edfi_core`, `data_lane_data_connector` |
+| Data | `data_pipelines`, `backpack_host` |
 | Media and host | `voice`, `tts_audio_output`, `vision`, `hardware_profile` |
 | Quality and operations | `test_ecosystem`, `diagnostics_hygiene`, `metrics_ops_journal`, `frontdoor_cli` |
 
-The source-root inventory declares 44 unique roots as of 2026-08-05. The previous duplicate `edfi_core` and `data_lane_data_connector` entries were removed — each now has one complete entry with the full evidence file list.
+The source-root inventory is source-derived and each active root has one complete entry with its evidence file list.
 
 ## Important Runtime Artifacts
 
@@ -344,6 +344,12 @@ The source-root inventory declares 44 unique roots as of 2026-08-05. The previou
 
 The judge is wired into `_execute_autonomy_recommendation` in `autonomy_maintenance.py`. Default policy: `decision_judge_enforce: false` (observe mode). Calibration bar: 12 episodes before signals, 30 before enforcement. `controlling_dimension` and `field_sources` provide provenance per decision.
 
+## Gatekeeper
+
+`services/gatekeeper.py` observes existing gates and rails without becoming a new authority layer. It validates and compacts `runtime/gatekeeper_records.jsonl`, preserves repeated observations with `seen_count` plus first/last observation timestamps, and exposes a read-only summary through control status.
+
+Gatekeeper records may describe stale evidence, retry decisions, expected effects, and later outcomes. Utility remains `unknown` until an accepted oracle verifies it. Models are analysts only; Gatekeeper does not mutate policy, authorize actions, or retire gates.
+
 ## Nova Shell
 
 `services/nova_shell/` is the operator authentication and session-trust subsystem. Wired into `nova_http.py` auth via `services/nova_shell_control_bridge.py` as of Aug 2026.
@@ -354,11 +360,11 @@ Capabilities: password hashing, TOTP two-factor, role resolution (built-in + cus
 
 ## Backpack Host
 
-`services/backpack_host/` is the data connector backpack discovery, installation, grant enforcement, and lifecycle subsystem.
+`services/backpack_host/` is the generic backpack discovery, installation, grant enforcement, query, and lifecycle subsystem.
 
 Modules: `__init__.py`, `registry.py`, `loader.py`, `installer.py`, `grant_enforcer.py`, `capability_surface.py`, `query.py`, `ops_map.py`, `reports.py`, `scope_settings.py`.
 
-Backpacks are self-contained data connector data connectors. The host discovers them, validates grants, controls their lifecycle, and exposes them through `services/control_backpacks.py` and `services/nova_http_backpack_control.py`.
+Backpacks are self-contained connectors. The host discovers them, validates grants, controls their lifecycle, and exposes them through the control and HTTP services.
 
 ## Solution Trail
 
@@ -385,11 +391,9 @@ Results write to `docs/ledger/nova_findings.jsonl` via `scripts/nova_ledger_inge
 - Legacy and orchestrator execution coexist.
 - ~~Nova Shell not wired into HTTP auth~~ — wired 2026-08-05 via nova_shell_control_bridge.py; falls back to env-var auth when no Shell DB exists.
 - Decision Judge is in observe mode — enforce gate not yet active.
-- ~~Duplicate SOURCE_ROOT entries~~ — fixed 2026-08-05; `edfi_core` and `data_lane_data_connector` now have one complete entry each.
 - failed Work Tree tools can be marked complete by maintenance.
 - actionable outbox classification is too broad by source.
 - active-work target resolution is bounded by candidate enumeration.
 - ~~Supervisor default ownership empty~~ — 4 rules registered 2026-08-05; safe_fallback_contract still non-owning (needs fulfillment path contract to elevate).
-- ~~source-root inventory contains duplicate IDs~~ — fixed 2026-08-05.
 
 These are part of the map because hiding them would make the documentation less truthful than the code.

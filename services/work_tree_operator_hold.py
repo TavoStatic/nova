@@ -18,14 +18,7 @@ OPERATOR_HOLD_TASK_TITLES = frozenset(
         "Wait for operator response or authority assignment on the open outbox item",
     }
 )
-
-
-def _as_dict(value: Any) -> dict:
-    return dict(value) if isinstance(value, dict) else {}
-
-
-def _text(value: Any, limit: int = 240) -> str:
-    return str(value or "").strip()[:limit]
+from services.type_utils import _as_dict, _text
 
 
 def node_is_operator_hold(node: dict[str, Any] | None) -> bool:

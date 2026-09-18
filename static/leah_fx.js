@@ -9,7 +9,7 @@
     antialias: true,
     depth: false,
     stencil: false,
-    powerPreference: "low-power",
+    powerPreference: "high-performance",
     premultipliedAlpha: false,
   });
   if (!gl) {
@@ -216,7 +216,7 @@
   }
 
   function resize() {
-    const dpr = Math.min(window.devicePixelRatio || 1, 1.6);
+    const dpr = Math.min(window.devicePixelRatio || 1, 2.0);
     const width = Math.max(1, Math.floor(window.innerWidth * dpr));
     const height = Math.max(1, Math.floor(window.innerHeight * dpr));
     if (canvas.width !== width || canvas.height !== height) {

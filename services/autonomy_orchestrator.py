@@ -47,48 +47,21 @@ LEGACY_TO_SPEC_DECISION = {
 }
 
 ADVISORY_MODE = "advisory"
+from services.type_utils import (
+    _as_bool_or_none,
+    _as_dict,
+    _as_float,
+    _as_int,
+    _as_list,
+)
+
 EXECUTE_MODE = "execute"
 DEFAULT_CYCLE_CADENCE_SEC = 30
 DEFAULT_CYCLE_JITTER_PCT = 10
 HARD_STALE_THRESHOLD_SEC = 120
 SOFT_STALE_THRESHOLD_SEC = 300
 DEFAULT_RECOMMENDATION_THRESHOLD = 0.55
-MISSION_GREEN_HOLD_PENALTY = 0.35
-
-
-def _as_dict(value: Any) -> dict[str, Any]:
-    return dict(value) if isinstance(value, dict) else {}
-
-
-def _as_list(value: Any) -> list[Any]:
-    return list(value) if isinstance(value, list) else []
-
-
-def _as_int(value: Any, default: int = 0) -> int:
-    try:
-        return int(value)
-    except Exception:
-        return default
-
-
-def _as_float(value: Any, default: float = 0.0) -> float:
-    try:
-        return float(value)
-    except Exception:
-        return default
-
-
-def _as_bool_or_none(value: Any) -> bool | None:
-    if isinstance(value, bool):
-        return value
-    if value is None:
-        return None
-    text = str(value).strip().lower()
-    if text in {"1", "true", "yes", "y", "ok", "running", "active", "healthy"}:
-        return True
-    if text in {"0", "false", "no", "n", "stopped", "inactive", "failed", "error", "missing"}:
-        return False
-    return None
+MISSION_GREEN_HOLD_PENALTY = 0.0
 
 
 def _clamp_float(value: Any, default: float = 0.0) -> float:
@@ -997,6 +970,7 @@ class AutonomyOrchestratorService:
             not self._mission_blocks_advisory_action("pulse_status", evidence)
             and _as_float(triage.get("max_seam_pressure")) >= 0.75
             and not concrete_lane_candidate_present
+            and not self._repeated_path_blocks_action("pulse_status")
         ):
             candidates.append(
                 {
@@ -1005,6 +979,34 @@ class AutonomyOrchestratorService:
                 }
             )
         return candidates
+
+    @staticmethod
+    def _repeated_path_blocks_action(action_type: str) -> bool:
+        """Honor persisted Phase-1 repeats across --once cycles. Pulse is not work."""
+        selected = _safe_text(action_type, 120)
+        if not selected:
+            return False
+        try:
+            from services.observation_spine import REPEATED_UNCHANGED_PATH, STOP_REPEATED_PATH, meta_check
+
+            finding = meta_check()
+        except Exception:
+            finding = None
+        if (
+            finding is not None
+            and finding.finding_code == REPEATED_UNCHANGED_PATH
+            and finding.effect == STOP_REPEATED_PATH
+            and finding.subject == selected
+        ):
+            return True
+        if selected == "pulse_status":
+            try:
+                from services.observation_spine import trailing_mill_skip_loop
+
+                return trailing_mill_skip_loop()
+            except Exception:
+                return False
+        return False
 
     @staticmethod
     def _score_contract_candidate(candidate: dict[str, Any], evidence: dict[str, Any]) -> tuple[float, dict[str, float]]:
@@ -1203,43 +1205,7 @@ class AutonomyOrchestratorService:
             refusal_reasons.append("evidence_conflict")
             return SPEC_DECISION_DEFER, {}, 0.0, refusal_reasons + conflicts, policy_checks, "Evidence conflicts require operator review."
 
-        mission_green_hold = self._mission_green_hold_active(_as_dict(evidence.get("mission_snapshot")))
         if not candidates_considered:
-            operator_hold_count = _as_int(work_tree.get("operator_hold_count"))
-            non_operator_observing = max(0, _as_int(work_tree.get("observing_count")) - operator_hold_count)
-            if _as_int(work_tree.get("latent_root_signal_count")) > 0 or non_operator_observing > 0:
-                refusal_reasons.append("work_tree_observing_root_truth")
-                policy_checks["candidate_available"] = "blocked"
-                return (
-                    SPEC_DECISION_DEFER,
-                    {},
-                    0.0,
-                    refusal_reasons,
-                    policy_checks,
-                    "Work Tree has blocked observing root signal(s); closure needs synthesized fix evidence, not a generic maintenance step.",
-                )
-            if operator_hold_count > 0:
-                refusal_reasons.append("operator_hold_pending")
-                policy_checks["candidate_available"] = "operator_hold"
-                return (
-                    SPEC_DECISION_DEFER,
-                    {},
-                    0.0,
-                    refusal_reasons,
-                    policy_checks,
-                    "Work Tree has operator-held branch(es); no autonomous repair action is available for that hold.",
-                )
-            if mission_green_hold:
-                refusal_reasons.extend(self._mission_hold_refusal_reasons(_as_dict(evidence.get("mission_snapshot"))))
-                policy_checks["candidate_available"] = "mission_hold"
-                return (
-                    SPEC_DECISION_DEFER,
-                    {},
-                    0.0,
-                    refusal_reasons,
-                    policy_checks,
-                    "Mission steady-state guard: hold without autonomous execution.",
-                )
             refusal_reasons.append("no_legal_action")
             policy_checks["candidate_available"] = "fail"
             return SPEC_DECISION_DEFER, {}, 0.0, refusal_reasons, policy_checks, "No governed candidate action was found."
@@ -1294,9 +1260,6 @@ class AutonomyOrchestratorService:
             refusal_reasons.append("below_recommendation_threshold")
             policy_checks["recommendation_threshold"] = "fail"
             explain = "No candidate scored above the recommendation threshold."
-            if mission_green_hold:
-                refusal_reasons.extend(self._mission_hold_refusal_reasons(mission))
-                explain = "Mission steady-state guard: hold without autonomous execution."
             return SPEC_DECISION_DEFER, {}, top_score, refusal_reasons, policy_checks, explain
         policy_checks["recommendation_threshold"] = "pass" if top_score >= DEFAULT_RECOMMENDATION_THRESHOLD else "concrete_active_work_tree"
 
@@ -1430,6 +1393,22 @@ class AutonomyOrchestratorService:
             decision["candidate_actions"] = decision["candidates_considered"]
             self._remember_decision(decision)
             self._last_error = ""
+            try:
+                from services.observation_spine import observe_quietly
+
+                recommended = _as_dict(recommended_action)
+                action_type = _safe_text(recommended.get("action_type"), 120)
+                if action_type:
+                    observe_quietly(
+                        source="planner",
+                        operation="select_next_action",
+                        subject=action_type,
+                        input_ref=_safe_text(recommended.get("target_id"), 160) or None,
+                        outcome="selected",
+                        reason_code=_safe_text(recommended.get("reason_code"), 120) or None,
+                    )
+            except Exception:
+                pass
             return decision
         except Exception as exc:
             self._error_count += 1

@@ -58,14 +58,17 @@ class NovaHttpRequestBindingService:
         token_hex_fn,
         attachment_context_service=None,
         append_session_turn_fn=None,
+        memory_recall_service=None,
+        voice_persona_service=None,
+        emotional_state_service=None,
     ) -> tuple[int, dict]:
         ok_chat, chat_user = chat_login_auth_fn(handler)
         if not ok_chat:
             return 403, {"ok": False, "error": chat_user}
 
         message = str(payload.get("message") or "").strip()
-        raw_message = message
         session_id = str(payload.get("session_id") or "").strip()
+        voice_persona_id = str(payload.get("voice_persona") or "").strip().lower()
         user_id = normalize_user_id_fn(chat_user) or request_user_id_fn(handler, qs, payload)
         attachments = NovaHttpRequestBindingService._normalize_attachment_items(payload.get("attachments"))
         if not session_id:
@@ -79,31 +82,66 @@ class NovaHttpRequestBindingService:
             return 403, {"ok": False, "error": reason_owner, "session_id": session_id}
 
         if attachments and attachment_context_service is not None:
-            recent_items, recent_stage = attachment_context_service.recent_session_context(session_id)
-            direct_attachment_reply = attachment_context_service.maybe_answer_attachment_turn(
-                message,
-                attachments,
-                recent_items=recent_items,
-                recent_stage=recent_stage,
-            )
             attachment_context_service.remember_session_context(session_id, attachments, stage="handoff")
             message = attachment_context_service.compose_chat_message(message, attachments)
+        elif attachment_context_service is not None:
+            # No live attachments in this turn — recover staged context from the store.
+            # This is the post-navigation path: browser JS staged list is empty but the
+            # server-side store still holds what the operator uploaded before navigating away.
+            try:
+                recovered_items, _stage = attachment_context_service.recent_session_context(session_id)
+                if recovered_items:
+                    message = attachment_context_service.compose_chat_message(message, recovered_items)
+            except Exception:
+                pass  # store failure must never break a chat turn
 
-            if direct_attachment_reply:
-                user_echo = raw_message or f"[Shared {len(attachments)} staged item(s)]"
-                if append_session_turn_fn is not None:
-                    append_session_turn_fn(session_id, "user", user_echo)
-                    append_session_turn_fn(session_id, "assistant", direct_attachment_reply)
-                invalidate_control_status_cache_fn()
-                return 200, {"ok": True, "session_id": session_id, "reply": direct_attachment_reply}
+        if emotional_state_service is not None:
+            try:
+                emotional_state_service.update_state(message)
+            except Exception:
+                pass  # emotional state update failure must never break chat turn
+
+        if voice_persona_service is not None and voice_persona_id:
+            try:
+                voice_persona_service.select_persona(force=voice_persona_id)
+            except Exception:
+                pass  # invalid or unavailable persona must not break chat
+
+        if memory_recall_service is not None:
+            try:
+                recall_ctx = memory_recall_service.recall_for_turn(message)
+                message = memory_recall_service.inject_into_message(message, recall_ctx)
+            except Exception:
+                pass  # recall failure must never break a chat turn
 
         try:
             reply = process_chat_fn(session_id, message, user_id=user_id)
         except Exception as exc:
             return 500, {"ok": False, "session_id": session_id, "error": f"chat_failed: {exc}"}
 
+        if emotional_state_service is not None:
+            try:
+                emotional_state_service.update_state(reply)
+            except Exception:
+                pass
+
+        if voice_persona_service is not None:
+            try:
+                reply = voice_persona_service.process_response(reply)
+            except Exception:
+                pass
+
+        response_dict = {"ok": True, "session_id": session_id, "reply": reply}
+        if emotional_state_service is not None:
+            try:
+                instruction = emotional_state_service.get_instruction()
+                if instruction:
+                    response_dict["emotional_instruction"] = instruction
+            except Exception:
+                pass
+
         invalidate_control_status_cache_fn()
-        return 200, {"ok": True, "session_id": session_id, "reply": reply}
+        return 200, response_dict
 
     @staticmethod
     def handle_upload_request(
@@ -201,8 +239,11 @@ class NovaHttpRequestBindingService:
             process_chat_fn=runtime_fn(runtime_scope, "process_chat"),
             invalidate_control_status_cache_fn=runtime_fn(runtime_scope, "_invalidate_control_status_cache"),
             token_hex_fn=secrets.token_hex,
-            attachment_context_service=runtime_fn(runtime_scope, "LEAH_FRONTDOOR_SERVICE"),
-            append_session_turn_fn=runtime_fn(runtime_scope, "_append_session_turn"),
+            attachment_context_service=runtime_scope.get("LEAH_FRONTDOOR_SERVICE"),
+            append_session_turn_fn=runtime_scope.get("_append_session_turn"),
+            memory_recall_service=runtime_scope.get("LEAH_MEMORY_RECALL_SERVICE"),
+            voice_persona_service=runtime_scope.get("LEAH_VOICE_PERSONA_ENGINE_SERVICE"),
+            emotional_state_service=runtime_scope.get("LEAH_EMOTIONAL_STATE_MODEL_SERVICE"),
         )
 
 

@@ -20,7 +20,7 @@ class TestPolicyCommands(unittest.TestCase):
                     "allowed_root": "C:/Nova",
                     "web": {
                         "enabled": True,
-                        "allow_domains": ["tea.texas.gov"],
+                        "allow_domains": ["example.test"],
                         "max_bytes": 1000,
                     },
                     "tools_enabled": {"web": True},
@@ -38,7 +38,7 @@ class TestPolicyCommands(unittest.TestCase):
 
     def test_list_allowed_domains_reads_current_policy(self):
         out = nova_core.list_allowed_domains()
-        self.assertIn("tea.texas.gov", out)
+        self.assertIn("example.test", out)
 
     def test_policy_allow_adds_domain(self):
         out = nova_core.policy_allow_domain("https://weather.com")
@@ -66,12 +66,12 @@ class TestPolicyCommands(unittest.TestCase):
         self.assertEqual(last.get("result"), "success")
 
     def test_policy_remove_domain(self):
-        out = nova_core.policy_remove_domain("tea.texas.gov")
-        self.assertIn("Removed allowed domain: tea.texas.gov", out)
+        out = nova_core.policy_remove_domain("example.test")
+        self.assertIn("Removed allowed domain: example.test", out)
 
         saved = json.loads(self.policy_path.read_text(encoding="utf-8"))
         domains = (saved.get("web") or {}).get("allow_domains") or []
-        self.assertNotIn("tea.texas.gov", domains)
+        self.assertNotIn("example.test", domains)
 
     def test_policy_remove_not_found(self):
         out = nova_core.policy_remove_domain("weather.com")

@@ -239,7 +239,7 @@ def rule_ambiguous_clarifier_gate(
 # ── Rule 4: safe_fallback_contract (handle phase, non-owning observer) ───────
 
 _SUSPICIOUS_FALLBACK_TERMS = frozenset({
-    "weather", "tsds", "attendance", "domain", "policy",
+    "weather", "domain", "policy",
     "fetch", "search", "research", "location",
 })
 

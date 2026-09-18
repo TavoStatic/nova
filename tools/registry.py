@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import json
 import os
@@ -14,7 +14,6 @@ from .filesystem_tool import FileSystemTool
 from .os_capability_tool import OsCapabilityTool
 from .patch_tool import PatchTool
 from .research_tool import ResearchTool
-from .edfi_tool import DataConnectorExploreTool
 from .temporal_review_tool import TemporalReviewTool
 from .system_tool import SystemTool
 from .vision_tool import VisionTool
@@ -77,12 +76,22 @@ def _append_tool_event(payload: dict[str, Any]) -> None:
 
 
 class ToolRegistry:
+    TOOL_ALIASES: dict[str, str] = {
+        "search_web": "web_search",
+        "google_search": "web_search",
+        "fetch_url": "web_fetch",
+        "fetch_web": "web_fetch",
+        "get_url": "web_fetch",
+    }
+
     def __init__(self, tools: list[NovaTool]):
         self._tools = {tool.name: tool for tool in tools}
         self._manifest = _load_manifest()
 
     def get(self, name: str) -> NovaTool | None:
-        return self._tools.get(str(name or "").strip())
+        key = str(name or "").strip()
+        key = self.TOOL_ALIASES.get(key, key)
+        return self._tools.get(key)
 
     def list_metadata(self) -> list[dict[str, Any]]:
         manifest_tools = self._manifest.get("tools") if isinstance(self._manifest.get("tools"), list) else []
@@ -180,7 +189,7 @@ class ToolRegistry:
 
 
 def build_default_registry() -> ToolRegistry:
-    return ToolRegistry([
+    tools: list[NovaTool] = [
         FileSystemTool(),
         CodegenTool(),
         PatchTool(),
@@ -189,8 +198,8 @@ def build_default_registry() -> ToolRegistry:
         SystemTool(),
         OsCapabilityTool(),
         TemporalReviewTool(),
-        DataConnectorExploreTool(),
-    ])
+    ]
+    return ToolRegistry(tools)
 
 
 def build_core_tool_exports(runtime_scope: dict[str, Any]) -> dict[str, Any]:
@@ -241,28 +250,6 @@ def build_core_tool_exports(runtime_scope: dict[str, Any]) -> dict[str, Any]:
 
     def tool_camera():
         return execute_registered_tool_fn("vision", {"action": "camera"})
-
-    def tool_edfi_explore(
-        action: str = "health",
-        connection_id: str = "district-main",
-        resource: str = "",
-        limit: int = 25,
-        offset: int = 0,
-        query: str = "",
-        namespace: str = "",
-    ):
-        return execute_registered_tool_fn(
-            "edfi_explore",
-            {
-                "action": str(action or "health").strip().lower(),
-                "connection_id": str(connection_id or "district-main").strip() or "district-main",
-                "resource": str(resource or "").strip(),
-                "limit": int(limit or 25),
-                "offset": int(offset or 0),
-                "query": str(query or "").strip(),
-                "namespace": str(namespace or "").strip(),
-            },
-        )
 
     def tool_pipeline(command_text: str = "pipeline help"):
         return service_handle_pipeline_command(
@@ -492,7 +479,6 @@ def build_core_tool_exports(runtime_scope: dict[str, Any]) -> dict[str, Any]:
         "tool_temporal_review": tool_temporal_review,
         "tool_screen": tool_screen,
         "tool_camera": tool_camera,
-        "tool_edfi_explore": tool_edfi_explore,
         "tool_pipeline": tool_pipeline,
         "tool_patch_preview_apply": tool_patch_preview_apply,
         "tool_patch_preview_approve": tool_patch_preview_approve,

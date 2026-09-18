@@ -13,7 +13,6 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from pipelines.privileged_worker import process_next_privileged_request
-from services.edfi.change_tracking import maybe_advance_tracked_cursors
 from services.nova_runtime_context import RUNTIME_DIR
 from services.pipeline_worker_supervision import (
     acquire_worker_lease,
@@ -22,34 +21,13 @@ from services.pipeline_worker_supervision import (
 )
 
 
-def _change_cursor_maintenance_enabled() -> bool:
-    """
-    Live TEA change-cursor advances are off by default.
-
-    The data connector backpack serves reports from local extracts; background cursor
-    maintenance was a major source of rate-limit pressure (hundreds of pulls).
-    Opt in with NOVA_EDFI_CHANGE_CURSOR_MAINTENANCE=1 when needed.
-    """
-    return str(os.environ.get("NOVA_EDFI_CHANGE_CURSOR_MAINTENANCE") or "").strip().lower() in {
-        "1",
-        "true",
-        "yes",
-        "on",
-    }
-
-
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Run a privileged Nova data-pipeline worker.")
-    parser.add_argument("--pipeline", required=True, help="Pipeline id to service, e.g. sis_test")
+    parser.add_argument("--pipeline", required=True, help="Pipeline id to service, e.g. example_connector")
     parser.add_argument("--runtime-root", default=str(RUNTIME_DIR))
     parser.add_argument("--data-sources-root", default=str(ROOT / "data_sources"))
     parser.add_argument("--once", action="store_true", help="Process at most one request and exit.")
     parser.add_argument("--poll-interval", type=float, default=1.0, help="Seconds between polls when idle.")
-    parser.add_argument(
-        "--connection-id",
-        default="district-main",
-        help="data connector connection id for scheduled change-cursor maintenance.",
-    )
     return parser
 
 
@@ -105,10 +83,6 @@ def main() -> int:
             runtime_root=runtime_root,
             data_sources_root=data_sources_root,
         )
-        if _change_cursor_maintenance_enabled():
-            maybe_advance_tracked_cursors(
-                str(args.connection_id or "district-main").strip() or "district-main"
-            )
         return 0
 
     idle_cycles = 0
@@ -140,10 +114,6 @@ def main() -> int:
                     status="idle",
                     detail="no_pending_requests",
                     pid=owner_pid,
-                )
-            if idle_cycles % 60 == 0 and _change_cursor_maintenance_enabled():
-                maybe_advance_tracked_cursors(
-                    str(args.connection_id or "district-main").strip() or "district-main"
                 )
             time.sleep(max(0.1, float(args.poll_interval)))
         else:

@@ -1,20 +1,23 @@
 {
   "name": "pause",
-  "description": "Pause or resume an automation's schedule (by `schedule_id` from `automation_list`). Use this when the user asks to pause, unpause, resume, stop, or cancel an automation or task.",
+  "description": "Pause or resume an automation. Prefer `task_id` (from automation_list) to pause the whole automation — required for event-trigger-only automations. Use `schedule_id` to pause only one schedule on a multi-schedule or schedule-backed automation. Use this when the user asks to pause, unpause, resume, stop, or cancel an automation or task.",
   "inputSchema": {
     "type": "object",
     "properties": {
+      "task_id": {
+        "type": "string",
+        "description": "The automation ID to pause/resume entirely (schedules + event triggers). Preferred for event-trigger automations."
+      },
       "schedule_id": {
         "type": "string",
-        "description": "The ID of the schedule to pause/resume"
+        "description": "The ID of a single schedule to pause/resume (from automation_list). Use when not pausing via task_id."
       },
       "is_enabled": {
         "type": "boolean",
-        "description": "Set to true to RESUME/UNPAUSE (enable the schedule), set to false to PAUSE (disable the schedule). This controls whether the schedule is active, NOT whether to perform a pause action."
+        "description": "Set to true to RESUME/UNPAUSE (enable), set to false to PAUSE (disable). This controls whether the automation/schedule is active, NOT whether to perform a pause action."
       }
     },
     "required": [
-      "schedule_id",
       "is_enabled"
     ]
   }

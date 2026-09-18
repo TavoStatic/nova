@@ -61,6 +61,26 @@ class TestWorkTreePressureSnapshotService(unittest.TestCase):
         self.assertEqual(snapshot.get("blocked_observing_count"), 1)
         self.assertEqual(snapshot.get("latent_root_signal_count"), 1)
         self.assertEqual(snapshot.get("release_stale_ready_count"), 1)
+        self.assertEqual(snapshot.get("branch_count"), 3)
+
+    def test_snapshot_counts_branches_from_per_status_dict(self):
+        snapshot = build_work_tree_pressure_snapshot(
+            {
+                "trees": [
+                    {
+                        "status": "active",
+                        "counts": {
+                            "open_tasks": 2,
+                            "branches": {"active": 1, "ready": 4, "blocked": 2, "complete": 9},
+                        },
+                        "nodes": [{"id": "a", "status": "blocked"}, {"id": "b", "status": "ready"}],
+                    }
+                ]
+            }
+        )
+
+        self.assertEqual(snapshot.get("branch_count"), 16)
+        self.assertEqual(snapshot.get("open_task_count"), 2)
 
 
 if __name__ == "__main__":

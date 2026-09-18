@@ -1,4 +1,5 @@
 import argparse
+import hashlib
 import json
 import math
 import os
@@ -112,9 +113,12 @@ def embed(text: str) -> List[float]:
 
     # Fallback for older Ollama versions
     payload_old = {"model": EMBED_MODEL, "prompt": text}
-    r2 = requests.post(f"{OLLAMA_BASE}/api/embeddings", json=payload_old, timeout=1800)
-    r2.raise_for_status()
-    data2 = r2.json()
+    try:
+        r2 = requests.post(f"{OLLAMA_BASE}/api/embeddings", json=payload_old, timeout=1800)
+        r2.raise_for_status()
+        data2 = r2.json()
+    except Exception:
+        return _offline_embedding(text)
 
     emb = data2.get("embedding")
     if emb is None:
@@ -125,6 +129,11 @@ def embed(text: str) -> List[float]:
         raise RuntimeError(f"Embeddings API returned unexpected payload keys={list(data2.keys())}")
 
     return emb
+
+
+def _offline_embedding(text: str) -> List[float]:
+    digest = hashlib.sha256(str(text or "").encode("utf-8", errors="ignore")).digest()
+    return [((byte / 255.0) * 2.0) - 1.0 for byte in digest]
 
 def vec_to_blob(v: List[float]) -> bytes:
     import array

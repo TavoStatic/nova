@@ -45,23 +45,12 @@ const backpackStatusGrid = document.getElementById('backpackStatusGrid');
 const backpackModelNote = document.getElementById('backpackModelNote');
 const backpackActionResult = document.getElementById('backpackActionResult');
 const backpackGrantsBox = document.getElementById('backpackGrantsBox');
-const backpackProbeLea = document.getElementById('backpackProbeLea');
-const backpackReportSummary = document.getElementById('backpackReportSummary');
-const backpackReportTable = document.getElementById('backpackReportTable');
-const backpackReportLimit = document.getElementById('backpackReportLimit');
 const backpackEmptyState = document.getElementById('backpackEmptyState');
 const backpackDetailBody = document.getElementById('backpackDetailBody');
 const backpackBusyBar = document.getElementById('backpackBusyBar');
 const backpackBusyText = document.getElementById('backpackBusyText');
 const backpackEnabledBadge = document.getElementById('backpackEnabledBadge');
-const bpFieldConnectionId = document.getElementById('bpFieldConnectionId');
-const bpFieldBaseUrl = document.getElementById('bpFieldBaseUrl');
-const bpFieldClientId = document.getElementById('bpFieldClientId');
-const bpFieldClientSecret = document.getElementById('bpFieldClientSecret');
-const bpFieldLea = document.getElementById('bpFieldLea');
-const bpFieldScope = document.getElementById('bpFieldScope');
-const bpFieldAllowedLeas = document.getElementById('bpFieldAllowedLeas');
-const bpFieldAccessTier = document.getElementById('bpFieldAccessTier');
+const bpFieldSettingsJson = document.getElementById('bpFieldSettingsJson');
 const pipelineSchemaSummary = document.getElementById('pipelineSchemaSummary');
 const pipelineNoteType = document.getElementById('pipelineNoteType');
 const pipelineNoteInput = document.getElementById('pipelineNoteInput');
@@ -77,8 +66,6 @@ const pipelinePopulationProgram = document.getElementById('pipelinePopulationPro
 const pipelinePopulationField = document.getElementById('pipelinePopulationField');
 const pipelinePopulationNotes = document.getElementById('pipelinePopulationNotes');
 const pipelinePopulationSection = document.getElementById('pipelinePopulationSection');
-const pipelineEdfiSection = document.getElementById('pipelineEdfiSection');
-const pipelineEdfiSyncGrid = document.getElementById('pipelineEdfiSyncGrid');
 const pipelineQuerySection = document.getElementById('pipelineQuerySection');
 const pipelineQueryOperation = document.getElementById('pipelineQueryOperation');
 const pipelineQueryDescription = document.getElementById('pipelineQueryDescription');
@@ -196,6 +183,19 @@ const telemetryGraphToolbar = document.getElementById('telemetryGraphToolbar');
 const telemetryGraphFootnote = document.getElementById('telemetryGraphFootnote');
 const telemetryGraphButtons = Array.from(document.querySelectorAll('[data-telemetry-graph]'));
 const temporalNavLink = document.getElementById('temporalNavLink');
+const navMetaMeta = document.getElementById('navMetaMeta');
+const metaFindingBadge = document.getElementById('metaFindingBadge');
+const metaFindingSummary = document.getElementById('metaFindingSummary');
+const metaFindingGrid = document.getElementById('metaFindingGrid');
+const metaBoundaryGrid = document.getElementById('metaBoundaryGrid');
+const metaWindowBadge = document.getElementById('metaWindowBadge');
+const metaTapeTable = document.getElementById('metaTapeTable');
+const metaSourceCounts = document.getElementById('metaSourceCounts');
+const metaSelfQuestions = document.getElementById('metaSelfQuestions');
+const metaInternalPositions = document.getElementById('metaInternalPositions');
+const metaSelfModel = document.getElementById('metaSelfModel');
+const metaOperationCounts = document.getElementById('metaOperationCounts');
+const metaSubjectCounts = document.getElementById('metaSubjectCounts');
 const navButtons = Array.from(document.querySelectorAll('[data-view-target]'));
 const mainViews = Array.from(document.querySelectorAll('.main-view'));
 const centerTabBar = document.querySelector('.center-tab-bar');
@@ -2040,14 +2040,8 @@ function renderPipelineSelect() {
 
 const PIPELINE_QUERY_PARAM_SPECS = {
     offset: {label: 'Offset', type: 'number', placeholder: '0', defaultValue: '0'},
-    query: {label: 'Query', type: 'text', placeholder: 'school'},
+    query: {label: 'Query', type: 'text', placeholder: 'search terms'},
     namespace: {label: 'Namespace', type: 'text', placeholder: 'namespace'},
-    resource: {
-        label: 'Resource',
-        type: 'select',
-        options: ['schools', 'students', 'studentSchoolAssociations'],
-        defaultValue: 'schools',
-    },
     min_change_version: {label: 'Min change version', type: 'number', placeholder: 'saved cursor'},
     advance_cursor: {label: 'Advance cursor after pull', type: 'checkbox', defaultValue: false},
 };
@@ -2181,12 +2175,6 @@ function formatPipelineQueryResult(result) {
     if (result.mechanism) lines.push(`mechanism: ${String(result.mechanism)}`);
     if (result.min_change_version != null) lines.push(`min_change_version: ${result.min_change_version}`);
     if (result.next_change_version != null) lines.push(`next_change_version: ${result.next_change_version}`);
-    if (result.edfi && typeof result.edfi === 'object') {
-        const edfi = result.edfi;
-        if (edfi.records_scanned != null) lines.push(`records_scanned: ${edfi.records_scanned}`);
-        if (edfi.district_filter_strategy) lines.push(`district_filter_strategy: ${edfi.district_filter_strategy}`);
-        if (edfi.resource) lines.push(`resource: ${edfi.resource}`);
-    }
     if (Array.isArray(result.rows) && result.rows.length) {
         lines.push('', `rows: showing up to 25 in table (${result.rows.length} total returned)`);
     } else if (Array.isArray(result.items) && result.items.length && typeof result.items[0] !== 'object') {
@@ -2202,48 +2190,15 @@ function formatPipelineQueryResult(result) {
     return lines.join('\n');
 }
 
-function renderEdfiSyncSummary(status) {
-    if (!pipelineEdfiSyncGrid) return;
-    const sync = status.change_sync && typeof status.change_sync === 'object' ? status.change_sync : {};
-    const resources = sync.resources && typeof sync.resources === 'object' ? sync.resources : {};
-    const rows = Object.keys(resources).sort().map((resource) => {
-        const entry = resources[resource] || {};
-        return {
-            label: 'Cursor',
-            value: `${resource} | last=${String(entry.last_change_version || 0)} | items=${String(entry.last_item_count || 0)} | mechanism=${String(entry.last_pull_mechanism || 'none')}`,
-        };
-    });
-    const available = sync.available && typeof sync.available === 'object' ? sync.available : {};
-    const summary = [
-        {label: 'Cached newest version', value: String(available.newest_change_version != null ? available.newest_change_version : (status.newest_change_version || 0))},
-        {label: 'Cached oldest version', value: String(available.oldest_change_version != null ? available.oldest_change_version : 'n/a')},
-        {label: 'Cursor file', value: String(sync.cursor_path || status.change_sync_path || 'not created yet')},
-        ...rows,
-    ];
-    if (!rows.length) {
-        summary.push({label: 'Cursors', value: 'No saved cursors yet. Run sync status or pull changes with advance cursor.'});
-    }
-    renderInspectorList(pipelineEdfiSyncGrid, summary);
-}
-
 function renderPipelineQueryControls(status, probe) {
     const kind = String(status.kind || selectedPipeline()?.kind || '').trim().toLowerCase();
-    const isEdfi = kind === 'edfi';
     const operations = Array.isArray(probe.query_templates) ? probe.query_templates.filter(Boolean) : [];
     const showRunner = operations.length > 0;
     pipelineQueryCatalogCache = pipelineQueryTemplateCatalog(probe);
-    if (pipelineEdfiSection) {
-        pipelineEdfiSection.classList.toggle('d-none', !isEdfi || !showRunner);
-    }
     if (pipelineQuerySection) {
         pipelineQuerySection.classList.toggle('d-none', !showRunner);
     }
-    if (pipelinePopulationSection) {
-        pipelinePopulationSection.classList.toggle('d-none', isEdfi);
-    }
-    if (isEdfi) {
-        renderEdfiSyncSummary(status);
-    }
+    if (pipelinePopulationSection) pipelinePopulationSection.classList.toggle('d-none', true);
     if (!pipelineQueryOperation) return;
     const previous = String(pipelineQueryOperation.value || '').trim();
     pipelineQueryOperation.innerHTML = '';
@@ -2294,7 +2249,7 @@ async function executePipelineQuery({live = false, operation = '', rowLimit = nu
         return null;
     }
     if (live && confirmLive) {
-        const confirmed = window.confirm(`Run live governed query ${selectedOperation} on ${pipelineId}? This may read district data from the configured source.`);
+        const confirmed = window.confirm(`Run live governed query ${selectedOperation} on ${pipelineId}? This may read data from the configured source.`);
         if (!confirmed) {
             setAction(`Live query canceled for ${selectedOperation}.`);
             return null;
@@ -2342,7 +2297,6 @@ function renderPipelineDetail(payload) {
         : (Array.isArray(readiness.blockers) ? readiness.blockers : []);
     const selectedSummary = selectedPipeline() || {};
     const pipelineKind = String(status.kind || selectedSummary.kind || '').trim().toLowerCase();
-    const isEdfi = pipelineKind === 'edfi';
 
     if (pipelineEditName) pipelineEditName.value = String(status.display_name || selectedPipelineId || '');
     if (pipelineEditDescription) pipelineEditDescription.value = String(status.description || selectedSummary.description || '');
@@ -2358,41 +2312,24 @@ function renderPipelineDetail(payload) {
         {label: 'Readiness', value: `${String(readiness.state || (status.live_query_ready ? 'ready' : 'blocked'))}${readinessBlockers.length ? ' | ' + readinessBlockers.join(', ') : ''}`},
         {label: 'Next step', value: String(status.next_step || readiness.next_step || 'n/a')},
     ];
-    if (isEdfi) {
-        statusRows.splice(4, 0,
-            {label: 'Connection', value: String(status.connection_id || 'not set')},
-            {label: 'District LEA', value: String(status.district_lea_id || 'not set')},
-            {label: 'Profile health', value: String(status.profile_health || 'unknown')},
-            {label: 'Resources', value: String(status.resource_count != null ? status.resource_count : 'unknown')},
-            {label: 'Cached change version', value: String(status.newest_change_version != null ? status.newest_change_version : 'n/a')},
-            {label: 'Sync cursors', value: String(
-                Object.keys((status.change_sync && status.change_sync.resources) || {}).length || 0
-            )},
-        );
-    } else {
-        statusRows.splice(5, 0,
-            {label: 'Network', value: String(network.reason || 'unknown')},
-            {label: 'Auth', value: String(auth.reason || 'unknown')},
-            {label: 'Identity', value: status.current_windows_identity || status.intended_windows_identity ? `${String(status.current_windows_identity || 'unknown')} -> ${String(status.intended_windows_identity || 'not set')}` : 'n/a'},
-            {label: 'Driver', value: String(status.driver_selected || 'none')},
-        );
-    }
+    statusRows.splice(5, 0,
+        {label: 'Network', value: String(network.reason || 'unknown')},
+        {label: 'Auth', value: String(auth.reason || 'unknown')},
+        {label: 'Identity', value: status.current_windows_identity || status.intended_windows_identity ? `${String(status.current_windows_identity || 'unknown')} -> ${String(status.intended_windows_identity || 'not set')}` : 'n/a'},
+        {label: 'Driver', value: String(status.driver_selected || 'none')},
+    );
     renderInspectorList(pipelineStatusGrid, statusRows);
 
     const schemaRows = [
-        {label: 'Schema status', value: String(schemaSource.verification_status || (isEdfi ? 'edfi_manifest' : 'unknown'))},
+        {label: 'Schema status', value: String(schemaSource.verification_status || 'unknown')},
         {label: 'Seeded groups', value: entities.map((entity) => `${entity.name}${entity.verification_status ? ' [' + entity.verification_status + ']' : ''}`).filter(Boolean).join(', ') || 'none'},
         {label: 'Governed operations', value: (Array.isArray(probe.query_templates) ? probe.query_templates : []).join(', ') || 'none'},
         {label: 'Intake log', value: String(intake.path || 'not created yet')},
     ];
-    if (isEdfi) {
-        schemaRows.splice(1, 0, {label: 'data connector entities', value: String(entities.length || 0)});
-    } else {
-        schemaRows.splice(1, 0,
-            {label: 'Vendor dictionary', value: vendorDictionary.table_count ? `${vendorDictionary.table_count} tables | ${vendorSource.grounding_status || 'vendor_grounded'}` : 'not loaded'},
-            {label: 'Population definitions', value: populations.map((item) => item.key).filter(Boolean).join(', ') || 'none'},
-        );
-    }
+    schemaRows.splice(1, 0,
+        {label: 'Vendor dictionary', value: vendorDictionary.table_count ? `${vendorDictionary.table_count} tables | ${vendorSource.grounding_status || 'vendor_grounded'}` : 'not loaded'},
+        {label: 'Population definitions', value: populations.map((item) => item.key).filter(Boolean).join(', ') || 'none'},
+    );
     renderInspectorList(pipelineSchemaSummary, schemaRows);
     renderPipelineQueryControls(status, probe);
     if (pipelineIntakeBox) {
@@ -3356,6 +3293,135 @@ function recommendedInspectorTab(status, session) {
     return {tab: 'ledger', label: 'Ledger', why: 'trace history is the next best signal'};
 }
 
+function observationSpine(status) {
+    const spine = status && status.observation_spine && typeof status.observation_spine === 'object'
+        ? status.observation_spine
+        : {};
+    const required = Array.isArray(spine.required_state_change) ? spine.required_state_change : [];
+    return {
+        ok: Boolean(status && (status.observation_spine_ok != null ? status.observation_spine_ok : spine.ok)),
+        status: String((status && status.observation_spine_status) || spine.status || 'empty'),
+        findingCode: String((status && status.observation_finding_code) || spine.finding_code || 'NO_META_INTERVENTION'),
+        findingLabel: String((status && status.observation_finding_label) || spine.finding_label || 'Watching — no interrupt'),
+        effect: String((status && status.observation_effect) || spine.effect || 'continue'),
+        effectLabel: String((status && status.observation_effect_label) || spine.effect_label || 'Continue'),
+        subject: String((status && status.observation_subject) || spine.subject || ''),
+        inputRef: (status && status.observation_input_ref != null ? status.observation_input_ref : spine.input_ref) || '',
+        windowCount: Number((status && status.observation_window_count != null) ? status.observation_window_count : (spine.window_count || 0)),
+        windowCap: Number(spine.window_cap != null ? spine.window_cap : 64),
+        firstSeq: Number(spine.first_seq || 0),
+        lastSeq: Number(spine.last_seq || 0),
+        intervening: Boolean(status && (status.observation_intervening != null ? status.observation_intervening : spine.intervening)),
+        requiredChange: required,
+        sourceCounts: spine.source_counts && typeof spine.source_counts === 'object' ? spine.source_counts : {},
+        operationCounts: spine.operation_counts && typeof spine.operation_counts === 'object' ? spine.operation_counts : {},
+        subjectCounts: spine.subject_counts && typeof spine.subject_counts === 'object' ? spine.subject_counts : {},
+        lastSelect: spine.last_select && typeof spine.last_select === 'object' ? spine.last_select : null,
+        lastInvoke: spine.last_invoke && typeof spine.last_invoke === 'object' ? spine.last_invoke : null,
+        lastGate: spine.last_gate && typeof spine.last_gate === 'object' ? spine.last_gate : null,
+        observations: Array.isArray(spine.observations) ? spine.observations : [],
+        selfQuestions: Array.isArray(spine.self_questions) ? spine.self_questions : (Array.isArray(status && status.observation_self_questions) ? status.observation_self_questions : []),
+        internalPositions: Array.isArray(spine.internal_positions) ? spine.internal_positions : (Array.isArray(status && status.observation_internal_positions) ? status.observation_internal_positions : []),
+        selfModel: spine.self_model && typeof spine.self_model === 'object' ? spine.self_model : ((status && status.observation_self_model && typeof status.observation_self_model === 'object') ? status.observation_self_model : {}),
+    };
+}
+
+function observationRowLine(row) {
+    if (!row || typeof row !== 'object') return 'none';
+    const parts = [
+        row.source || 'unknown',
+        row.operation || 'unknown',
+        row.subject || '',
+        row.outcome || '',
+    ].filter(Boolean);
+    const refs = [row.input_ref, row.reason_code].filter(Boolean);
+    return refs.length ? `${parts.join(' / ')}\n${refs.join(' | ')}` : parts.join(' / ');
+}
+
+function countEntries(counts) {
+    return Object.keys(counts || {}).map((key) => ({label: key, value: String(counts[key])}));
+}
+
+function renderMetaView(status) {
+    const meta = observationSpine(status);
+    if (navMetaMeta) {
+        navMetaMeta.textContent = meta.intervening
+            ? String(meta.findingCode || 'intervening').replace(/_/g, ' ').toLowerCase()
+            : (meta.windowCount ? 'watching' : 'empty');
+    }
+    if (metaFindingBadge) {
+        const tone = meta.intervening ? 'danger' : (meta.status === 'watching' ? 'good' : 'neutral');
+        metaFindingBadge.className = `status-pill status-pill-${tone}`;
+        metaFindingBadge.textContent = meta.intervening ? 'Intervening' : (meta.status === 'watching' ? 'Watching' : (meta.status || 'pending'));
+    }
+    if (metaFindingSummary) {
+        metaFindingSummary.textContent = meta.intervening
+            ? `${meta.findingLabel}. Effect: ${meta.effectLabel}.`
+            : (meta.windowCount
+                ? `Meta is watching ${meta.windowCount} boundary event${meta.windowCount === 1 ? '' : 's'}. No interrupt this pass.`
+                : 'Observation window is empty. Meta has nothing to score yet.');
+    }
+    renderInspectorList(metaFindingGrid, [
+        {label: 'Finding', value: `${meta.findingCode}\n${meta.findingLabel}`},
+        {label: 'Effect', value: `${meta.effect}\n${meta.effectLabel}`},
+        {label: 'Subject', value: meta.subject || 'n/a'},
+        {label: 'Controlling ref', value: meta.inputRef || 'n/a'},
+        {label: 'Required change', value: meta.requiredChange.length ? meta.requiredChange.join('\n') : 'none'},
+        {label: 'Window', value: `${meta.windowCount} / ${meta.windowCap}  seq ${meta.firstSeq || '—'}–${meta.lastSeq || '—'}`},
+    ]);
+    renderInspectorList(metaBoundaryGrid, [
+        {label: 'Last select', value: observationRowLine(meta.lastSelect)},
+        {label: 'Last invoke', value: observationRowLine(meta.lastInvoke)},
+        {label: 'Last gate', value: observationRowLine(meta.lastGate)},
+    ]);
+    if (metaWindowBadge) {
+        metaWindowBadge.textContent = `${meta.windowCount} / ${meta.windowCap}`;
+    }
+    if (metaTapeTable) {
+        const rows = meta.observations.slice().reverse();
+        if (!rows.length) {
+            metaTapeTable.innerHTML = '<tbody><tr><td>Observation tape empty.</td></tr></tbody>';
+        } else {
+            metaTapeTable.innerHTML = [
+                '<thead><tr><th>Seq</th><th>Source</th><th>Op</th><th>Subject</th><th>Input</th><th>Outcome</th><th>Reason</th></tr></thead>',
+                '<tbody>',
+                rows.map((row) => {
+                    const match = meta.intervening && meta.subject && String(row.subject || '') === meta.subject;
+                    return [
+                        `<tr class="${match ? 'meta-tape-row is-subject' : 'meta-tape-row'}">`,
+                        `<td>${escapeHtml(String(row.seq != null ? row.seq : ''))}</td>`,
+                        `<td>${escapeHtml(String(row.source || ''))}</td>`,
+                        `<td>${escapeHtml(String(row.operation || ''))}</td>`,
+                        `<td>${escapeHtml(String(row.subject || ''))}</td>`,
+                        `<td>${escapeHtml(String(row.input_ref || ''))}</td>`,
+                        `<td>${escapeHtml(String(row.outcome || ''))}</td>`,
+                        `<td>${escapeHtml(String(row.reason_code || ''))}</td>`,
+                        '</tr>'
+                    ].join('');
+                }).join(''),
+                '</tbody>'
+            ].join('');
+        }
+    }
+    renderInspectorList(metaSourceCounts, countEntries(meta.sourceCounts));
+    renderInspectorList(metaOperationCounts, countEntries(meta.operationCounts));
+    renderInspectorList(metaSubjectCounts, countEntries(meta.subjectCounts));
+    renderInspectorList(metaSelfQuestions, meta.selfQuestions.map((question) => ({label: 'Question', value: question})));
+    renderInspectorList(metaInternalPositions, meta.internalPositions.map((position) => ({
+        label: `${position.status || 'competing'} · ${Math.round(Number(position.confidence || 0) * 100)}%`,
+        value: `${position.proposition || 'n/a'}\n${(position.supporting_evidence || []).join(', ') || 'none'} supporting · ${(position.opposing_evidence || []).join(', ') || 'none'} opposing`,
+    })));
+    const modelCondition = meta.selfModel.current_internal_condition || {};
+    renderInspectorList(metaSelfModel, [
+        {label: 'Identity', value: meta.selfModel.identity || 'n/a'},
+        {label: 'Observed capabilities', value: (meta.selfModel.observed_capabilities || []).join(', ') || 'none'},
+        {label: 'Active constraints', value: (meta.selfModel.active_constraints || []).join(', ') || 'none'},
+        {label: 'Condition', value: JSON.stringify(modelCondition)},
+        {label: 'Predicted states', value: (meta.selfModel.predicted_future_states || []).join('\n') || 'none'},
+        {label: 'Evidence seqs', value: (meta.selfModel.source_observation_seqs || []).join(', ') || 'none'},
+    ]);
+}
+
 function openOperatorDeck() {
     setActiveView('operations');
     const operationsShell = document.querySelector('.layer-tab-shell[data-layer-tabs="operations"]');
@@ -3500,6 +3566,7 @@ function renderOverviewFocus(status) {
     const queueOpen = Number(status.generated_work_queue_open_count != null ? status.generated_work_queue_open_count : 0);
     const queueNext = shortArtifactName(status.generated_work_queue_next_file || '');
     const memory = memoryHealthDetails(status);
+    const meta = observationSpine(status);
     const heartbeatAge = Number((status.runtime_summary && status.runtime_summary.core && status.runtime_summary.core.heartbeat_age_sec != null)
         ? status.runtime_summary.core.heartbeat_age_sec
         : (status.heartbeat_age_sec != null ? status.heartbeat_age_sec : 0));
@@ -3524,16 +3591,23 @@ function renderOverviewFocus(status) {
                 ? `Needs Help\n${attentionMessage}`
                 : (operatorOutboxOpenCount(status) > 0
                     ? `Outbox Hold\n${operatorOutboxOpenCount(status)} open notice${operatorOutboxOpenCount(status) === 1 ? '' : 's'}`
-                    : `${centerTarget.label}\n${centerTarget.why}`),
+                    : (meta.intervening
+                        ? `Meta ${meta.findingCode}\n${meta.effectLabel}`
+                        : `${centerTarget.label}\n${centerTarget.why}`)),
             actions: operatorOutboxOpenCount(status) > 0
                 ? [
                     {label: 'Operator Deck', view: 'operations', layerTab: 'operator-deck'},
                     {label: 'Blocked Tree', view: 'scheduled-tree', workTreeMode: 'blocked'},
                 ]
-                : [
-                    {label: centerTarget.label, center: centerTarget.tab},
-                    {label: inspectorTarget.label, inspector: inspectorTarget.tab},
-                ],
+                : (meta.intervening
+                    ? [
+                        {label: 'Meta', view: 'meta'},
+                        {label: inspectorTarget.label, inspector: inspectorTarget.tab},
+                    ]
+                    : [
+                        {label: centerTarget.label, center: centerTarget.tab},
+                        {label: inspectorTarget.label, inspector: inspectorTarget.tab},
+                    ]),
         },
     ];
     overviewFocusStrip.innerHTML = focusCards.map((card) => [
@@ -3618,6 +3692,7 @@ function renderCenterMissionBrief(status) {
     const tool = String(status.last_action_tool || 'no tool');
     const routeSummary = compactRouteSummary(status.last_route_summary || 'route lane not available', 5);
     const memory = memoryHealthDetails(status);
+    const meta = observationSpine(status);
     const mission = status.nova_mission && typeof status.nova_mission === 'object' ? status.nova_mission : {};
     const missionStatus = String(mission.status || status.nova_mission_status || 'unknown');
     const missionAction = String(mission.action || status.nova_mission_action || 'n/a');
@@ -3688,11 +3763,18 @@ function renderCenterMissionBrief(status) {
         },
         {
             key: 'Recommended Surface',
-            value: `${centerTarget.label}\n${centerTarget.why}`,
-            actions: [
-                {label: `Open ${centerTarget.label}`, center: centerTarget.tab},
-                {label: `Lens ${inspectorTarget.label}`, inspector: inspectorTarget.tab},
-            ],
+            value: meta.intervening
+                ? `Meta\n${meta.findingLabel}`
+                : `${centerTarget.label}\n${centerTarget.why}`,
+            actions: meta.intervening
+                ? [
+                    {label: 'Open Meta', view: 'meta'},
+                    {label: `Lens ${inspectorTarget.label}`, inspector: inspectorTarget.tab},
+                ]
+                : [
+                    {label: `Open ${centerTarget.label}`, center: centerTarget.tab},
+                    {label: `Lens ${inspectorTarget.label}`, inspector: inspectorTarget.tab},
+                ],
             wide: true,
         },
     ];
@@ -3702,7 +3784,7 @@ function renderCenterMissionBrief(status) {
         `<div class="center-brief-value">${escapeHtml(card.value)}</div>`,
         Array.isArray(card.actions) && card.actions.length ? [
             '<div class="center-brief-actions">',
-            card.actions.map((action) => `<button type="button" class="focus-jump-button"${action.center ? ` data-focus-center-tab="${escapeHtml(action.center)}"` : ''}${action.inspector ? ` data-focus-inspector-tab="${escapeHtml(action.inspector)}"` : ''}>${escapeHtml(action.label)}</button>`).join(''),
+            card.actions.map((action) => `<button type="button" class="focus-jump-button"${action.center ? ` data-focus-center-tab="${escapeHtml(action.center)}"` : ''}${action.inspector ? ` data-focus-inspector-tab="${escapeHtml(action.inspector)}"` : ''}${action.view ? ` data-focus-view="${escapeHtml(action.view)}"` : ''}>${escapeHtml(action.label)}</button>`).join(''),
             '</div>'
         ].join('') : '',
         '</div>'
@@ -4263,9 +4345,11 @@ function formatWorkTreeLabel(tree) {
     const status = String(tree && tree.status ? tree.status : 'unknown').trim().toLowerCase();
     const counts = tree && tree.counts && typeof tree.counts === 'object' ? tree.counts : {};
     const branchCounts = counts && counts.branches && typeof counts.branches === 'object' ? counts.branches : {};
-    const branchTotal = Object.values(branchCounts).reduce((sum, value) => sum + Number(value || 0), 0);
+    const countedBranches = Object.values(branchCounts).reduce((sum, value) => sum + Number(value || 0), 0);
+    const nodeCount = Array.isArray(tree.nodes) ? tree.nodes.length : 0;
+    const branchTotal = countedBranches || nodeCount;
     const openTasks = Number(counts.open_tasks || 0);
-    return `${title} | tree ${status} | ${branchTotal} total branches | ${openTasks} open tasks`;
+    return `${title} | tree ${status} | ${branchTotal} total branches | ${openTasks} open task stems`;
 }
 
 function renderWorkTreeSelect() {
@@ -4326,23 +4410,31 @@ function workTreeNodeVisibleInMode(node) {
     return true;
 }
 
+function workTreeCountFromStatus(key, fallback = 0) {
+    const status = latestStatus && typeof latestStatus === 'object' ? latestStatus : {};
+    const value = Number(status[key]);
+    return Number.isFinite(value) ? value : fallback;
+}
+
 function renderWorkTreeAggregateSummary(payload) {
     const counts = payload && payload.counts && typeof payload.counts === 'object' ? payload.counts : {};
-    const total = Number(counts.total || workTreesCache.length || 0);
-    const active = Number(counts.active || 0);
-    const branches = Number(counts.branches || 0);
-    const openTasks = Number(counts.open_tasks || 0);
-    const working = Number(counts.working || 0);
-    const pending = Number(counts.pending || 0);
-    const blocked = Number(counts.blocked || 0);
-    const complete = Number(counts.complete || 0);
+    const total = Number(counts.total || workTreesCache.length || workTreeCountFromStatus('work_tree_tree_count') || 0);
+    const active = Number(counts.active || workTreeCountFromStatus('work_tree_active_tree_count') || 0);
+    const branches = Number(counts.branches || workTreeCountFromStatus('work_tree_branch_count') || 0);
+    const openTasks = Number(counts.open_tasks || workTreeCountFromStatus('work_tree_open_task_count') || 0);
+    const working = Number(counts.working || workTreeCountFromStatus('work_tree_working_branch_count') || 0);
+    const pending = Number(counts.pending || workTreeCountFromStatus('work_tree_pending_branch_count') || 0);
+    const blocked = Number(counts.blocked || workTreeCountFromStatus('work_tree_blocked_branch_count') || 0);
+    const complete = Number(counts.complete || workTreeCountFromStatus('work_tree_complete_branch_count') || 0);
     if (workTreeGlobalCounts) {
         workTreeGlobalCounts.innerHTML = [
             '<span class="scheduled-tree-count-label">All Trees</span>',
             `<span class="scheduled-tree-count-pill">${total} trees</span>`,
             `<span class="scheduled-tree-count-pill is-active">${active} active trees</span>`,
             `<span class="scheduled-tree-count-pill">${branches} total branches</span>`,
-            `<span class="scheduled-tree-count-pill">${openTasks} open tasks</span>`,
+            `<span class="scheduled-tree-count-pill">${openTasks} open task stems</span>`,
+            `<span class="scheduled-tree-count-pill">${pending} pending branches</span>`,
+            `<span class="scheduled-tree-count-pill">${blocked} blocked branches</span>`,
         ].join('');
     }
     if (workTreeLiveSummary) {
@@ -4362,7 +4454,9 @@ function renderSelectedWorkTreeSummary(tree) {
     }
     const counts = tree && tree.counts && typeof tree.counts === 'object' ? tree.counts : {};
     const branchCounts = counts && counts.branches && typeof counts.branches === 'object' ? counts.branches : {};
-    const branchTotal = Object.values(branchCounts).reduce((sum, value) => sum + Number(value || 0), 0);
+    const countedBranches = Object.values(branchCounts).reduce((sum, value) => sum + Number(value || 0), 0);
+    const nodeCount = Array.isArray(tree.nodes) ? tree.nodes.length : 0;
+    const branchTotal = countedBranches || nodeCount;
     const openTasks = Number(counts.open_tasks || 0);
     const nextStep = tree && tree.next_step && typeof tree.next_step === 'object' ? tree.next_step : {};
     const nextAction = String(nextStep.action || '').trim() || 'idle';
@@ -4373,9 +4467,10 @@ function renderSelectedWorkTreeSummary(tree) {
             '<span class="scheduled-tree-count-label">Selected Tree</span>',
             `<span class="${escapeHtml(workTreeStatusClass(tree.status))}">${escapeHtml(String(tree.status || 'unknown').toUpperCase())}</span>`,
             `<span class="scheduled-tree-count-pill">${branchTotal} total branches</span>`,
-            `<span class="scheduled-tree-count-pill">${openTasks} open tasks</span>`,
+            `<span class="scheduled-tree-count-pill">${openTasks} open task stems</span>`,
             `<span class="scheduled-tree-count-pill">${Number(branchCounts.active || 0)} working branches</span>`,
             `<span class="scheduled-tree-count-pill">${Number(branchCounts.ready || 0)} ready branches</span>`,
+            `<span class="scheduled-tree-count-pill">${Number(branchCounts.blocked || 0)} blocked branches</span>`,
         ].join('');
     }
     if (workTreeSelectedSummary) {
@@ -4390,6 +4485,17 @@ function renderSelectedWorkTreeSummary(tree) {
 
 let _inspectorBranchId = null;
 let _inspectorBranchStatus = null;
+
+function workTreeInstructionLine(node) {
+    const memory = node && node.branch_memory_kind && typeof node.branch_memory_kind === 'object'
+        ? node.branch_memory_kind
+        : {};
+    const kind = String(memory.kind || '').trim();
+    if (!kind) return 'Instruction: none';
+    const hold = memory.controlling ? 'holding' : 'released';
+    const reason = String(memory.reason || '').trim();
+    return `Instruction: ${kind} (${hold})${reason ? ` · ${reason}` : ''}`;
+}
 
 function workTreeSolutionProgress(currentTask, node) {
     // One unit: solution progress. Prefer the richest honest payload
@@ -4589,6 +4695,7 @@ function renderWorkTreeInspector(tree, node) {
         `Status: ${node.status || 'unknown'}`,
         `Depth: ${node.depth != null ? node.depth : 'n/a'}`,
         `Tasks: ${node.tasks_open != null ? node.tasks_open : 'n/a'} open / ${node.tasks_total != null ? node.tasks_total : 'n/a'} total`,
+        workTreeInstructionLine(node),
         `Preferred tool: ${node.preferred_tool || 'n/a'}`,
         `Current task: ${currentTask.title || 'none'}`,
         `Next step: ${nextStep.action || 'idle'} | tool=${nextStep.recommended_tool || 'n/a'}`,
@@ -5333,114 +5440,8 @@ function setBackpackBusy(busy, message, activeButtonId) {
     }
     const ids = [
         'btnBackpacksRefresh', 'btnBackpackEnable', 'btnBackpackDisable',
-        'btnBackpackTestConn', 'btnBackpackSaveSettings', 'btnBackpackInstall', 'btnBackpackUninstall', 'btnBackpackProbeLea',
-        'btnBackpackReportHealth', 'btnBackpackReportSchools', 'btnBackpackRefreshSchools',
+        'btnBackpackTestConn', 'btnBackpackSaveSettings', 'btnBackpackInstall', 'btnBackpackUninstall',
     ];
-    ids.forEach((id) => {
-        const el = document.getElementById(id);
-        if (!el) return;
-        el.disabled = Boolean(busy);
-        if (!el.dataset.idleLabel) {
-            el.dataset.idleLabel = String(el.textContent || '').trim();
-        }
-        if (busy && activeButtonId && id === activeButtonId) {
-            el.textContent = 'Working…';
-            el.classList.add('backpack-btn-busy');
-        } else if (!busy) {
-            if (el.dataset.idleLabel) el.textContent = el.dataset.idleLabel;
-            el.classList.remove('backpack-btn-busy');
-        }
-    });
-    if (backpackSelect) backpackSelect.disabled = Boolean(busy);
-}
-
-/** Let the browser paint the spinner before a long await (fetch/TEA). */
-function paintBackpackBusy() {
-    return new Promise((resolve) => {
-        requestAnimationFrame(() => {
-            requestAnimationFrame(() => {
-                window.setTimeout(resolve, 0);
-            });
-        });
-    });
-}
-
-function sleepMs(ms) {
-    return new Promise((resolve) => window.setTimeout(resolve, ms));
-}
-
-async function withBackpackBusy(message, activeButtonId, workFn, options = {}) {
-    // Minimum visible busy time so fast/failed actions still show feedback
-    const minMs = Number(options.minMs);
-    const holdMs = Number.isFinite(minMs) ? Math.max(0, minMs) : 900;
-    const started = Date.now();
-    setBackpackBusy(true, message, activeButtonId);
-    await paintBackpackBusy();
-    try {
-        return await workFn();
-    } finally {
-        const elapsed = Date.now() - started;
-        if (elapsed < holdMs) {
-            await sleepMs(holdMs - elapsed);
-        }
-        setBackpackBusy(false);
-    }
-}
-
-function showBackpackDetail(show) {
-    if (backpackEmptyState) backpackEmptyState.classList.toggle('d-none', Boolean(show));
-    if (backpackDetailBody) backpackDetailBody.classList.toggle('d-none', !show);
-}
-
-function renderBackpackCards() {
-    if (!backpackCards) return;
-    if (!backpacksCache.length) {
-        backpackCards.textContent = 'No backpacks discovered under backpacks/. Nova core can run without any.';
-        return;
-    }
-    const installed = backpacksCache.filter((bp) => bp.installed === true);
-    const available = backpacksCache.filter((bp) => !bp.installed);
-    let html = installed.map((bp) => {
-        const id = String(bp.backpack_id || '').trim();
-        const active = id === selectedBackpackId ? ' active' : '';
-        const onOff = bp.enabled === false ? 'off' : 'on';
-        const name = bp.display_name || id;
-        return `<button type="button" class="pipeline-card-button${active}" data-backpack-id="${id}">
-            <div class="pipeline-card-title">${name}</div>
-            <div class="pipeline-card-meta">${id} · installed · ${onOff} · v${bp.version || '?'}</div>
-        </button>`;
-    }).join('');
-    if (available.length) {
-        html += available.map((bp) => {
-            const id = String(bp.backpack_id || '').trim();
-            const active = id === selectedBackpackId ? ' active' : '';
-            const name = bp.display_name || id;
-            return `<button type="button" class="pipeline-card-button pipeline-card-button-dim${active}" data-backpack-id="${id}" title="Not installed — click to set up">
-                <div class="pipeline-card-title">${name}</div>
-                <div class="pipeline-card-meta">${id} · not installed · v${bp.version || '?'}</div>
-            </button>`;
-        }).join('');
-    }
-    backpackCards.innerHTML = html;
-    backpackCards.querySelectorAll('[data-backpack-id]').forEach((btn) => {
-        btn.addEventListener('click', async () => {
-            selectedBackpackId = String(btn.getAttribute('data-backpack-id') || '').trim();
-            await loadBackpacks({ keepFormSecrets: true });
-        });
-    });
-}
-
-function renderBackpackSelect() {
-    if (!backpackSelect) return;
-    const previous = selectedBackpackId;
-    backpackSelect.innerHTML = '';
-    const placeholder = document.createElement('option');
-    placeholder.value = '';
-    placeholder.textContent = '— Select a backpack —';
-    backpackSelect.appendChild(placeholder);
-    if (!backpacksCache.length) {
-        return;
-    }
     const installedBackpacks = backpacksCache.filter((bp) => bp.installed === true);
     if (!installedBackpacks.length) {
         placeholder.textContent = '— No backpacks installed —';
@@ -5463,24 +5464,11 @@ function renderBackpackSelect() {
 }
 
 function fillBackpackForm(detail) {
-    const pub = (detail && detail.settings_public && typeof detail.settings_public === 'object')
-        ? detail.settings_public
-        : {};
-    if (bpFieldConnectionId) bpFieldConnectionId.value = String(pub.connection_id || 'district-main');
-    if (bpFieldBaseUrl) bpFieldBaseUrl.value = String(pub.base_url || '');
-    if (bpFieldClientId) bpFieldClientId.value = String(pub.client_id || '');
-    // Never re-fill secret from server (we never return it).
-    if (bpFieldClientSecret && !String(bpFieldClientSecret.value || '').trim()) {
-        bpFieldClientSecret.placeholder = detail && detail.has_client_secret_on_disk
-            ? 'Saved on this machine — leave blank to keep'
-            : 'Required for first install';
-    }
-    if (bpFieldLea) bpFieldLea.value = String(pub.district_lea_id || '');
-    if (bpFieldScope) bpFieldScope.value = String(pub.scope_mode || 'single_lea');
-    if (bpFieldAllowedLeas) bpFieldAllowedLeas.value = String(pub.allowed_lea_ids || '');
-    if (bpFieldAccessTier) bpFieldAccessTier.value = String(pub.credential_access_tier || 'read');
-    if (backpackProbeLea && !String(backpackProbeLea.value || '').trim() && pub.district_lea_id) {
-        backpackProbeLea.value = String(pub.district_lea_id);
+    if (bpFieldSettingsJson) {
+        const settings = detail && detail.settings_public && typeof detail.settings_public === 'object'
+            ? detail.settings_public
+            : {};
+        bpFieldSettingsJson.value = JSON.stringify(settings, null, 2);
     }
 }
 
@@ -5592,144 +5580,18 @@ async function loadBackpacks(options = {}) {
 }
 
 function parseBackpackSettingsFromUi() {
-    const connectionId = bpFieldConnectionId ? String(bpFieldConnectionId.value || '').trim() : '';
-    const baseUrl = bpFieldBaseUrl ? String(bpFieldBaseUrl.value || '').trim() : '';
-    const clientId = bpFieldClientId ? String(bpFieldClientId.value || '').trim() : '';
-    const clientSecret = bpFieldClientSecret ? String(bpFieldClientSecret.value || '') : '';
-    const lea = bpFieldLea ? String(bpFieldLea.value || '').trim() : '';
-    const scope = bpFieldScope ? String(bpFieldScope.value || 'single_lea').trim() : 'single_lea';
-    const allowed = bpFieldAllowedLeas ? String(bpFieldAllowedLeas.value || '').trim() : '';
-    const tier = bpFieldAccessTier ? String(bpFieldAccessTier.value || 'read').trim() : 'read';
-    if (!connectionId) throw new Error('Connection name is required.');
-    if (!baseUrl) throw new Error('ODS base URL is required.');
-    if (!clientId) throw new Error('Client ID is required.');
-    // Secret required only on first install; later saves reuse on-disk secret if field left blank.
-    const hasSecretOnDisk = Boolean(
-        backpackDetailCache && backpackDetailCache.has_client_secret_on_disk
-    );
-    if (!clientSecret && !hasSecretOnDisk) {
-        throw new Error('Client secret is required for first install (it is not shown back after save).');
+    const raw = bpFieldSettingsJson ? String(bpFieldSettingsJson.value || '').trim() : '{}';
+    if (!raw) return {};
+    let settings;
+    try {
+        settings = JSON.parse(raw);
+    } catch (_error) {
+        throw new Error('Settings must be valid JSON.');
     }
-    if (scope === 'single_lea' && !lea) throw new Error('District LEA ID is required for single_lea scope.');
-    if (scope === 'multi_lea' && !allowed && !lea) {
-        throw new Error('Region mode needs allowed LEA IDs (or a primary LEA).');
+    if (!settings || typeof settings !== 'object' || Array.isArray(settings)) {
+        throw new Error('Settings must be a JSON object.');
     }
-    const settings = {
-        connection_id: connectionId,
-        base_url: baseUrl,
-        client_id: clientId,
-        client_secret: clientSecret,
-        scope_mode: scope,
-        credential_access_tier: tier,
-    };
-    if (lea) settings.district_lea_id = lea;
-    if (allowed) settings.allowed_lea_ids = allowed;
     return settings;
-}
-
-function renderBackpackReportTable(report) {
-    if (!backpackReportTable) return;
-    const columns = Array.isArray(report && report.columns) ? report.columns : [];
-    const rows = Array.isArray(report && report.rows) ? report.rows : [];
-    if (!columns.length || !rows.length) {
-        backpackReportTable.classList.add('d-none');
-        backpackReportTable.innerHTML = '';
-        return;
-    }
-    const head = columns.map((c) => `<th>${String(c)}</th>`).join('');
-    const body = rows.map((row) => {
-        const cells = columns.map((c) => {
-            const v = row && Object.prototype.hasOwnProperty.call(row, c) ? row[c] : '';
-            return `<td>${String(v === null || v === undefined ? '' : v)}</td>`;
-        }).join('');
-        return `<tr>${cells}</tr>`;
-    }).join('');
-    backpackReportTable.innerHTML = `<table class="pipeline-query-table"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>`;
-    backpackReportTable.classList.remove('d-none');
-}
-
-let backpackReportCooldownUntil = 0;
-
-function backpackReportCooldownLeft() {
-    return Math.max(0, Math.ceil((backpackReportCooldownUntil - Date.now()) / 1000));
-}
-
-async function runBackpackReport(intent, options = {}) {
-    const backpackId = selectedBackpackId;
-    if (!backpackId) throw new Error('Select a backpack first.');
-    const forceRefresh = Boolean(options.forceRefresh);
-    const left = backpackReportCooldownLeft();
-    // Local extract reads skip TEA — only block live refresh during cooldown
-    if (forceRefresh && left > 0) {
-        const msg = `TEA cooldown: wait ${left}s before Refresh from ODS. Use Show schools (local) if you already have an extract.`;
-        if (backpackReportSummary) {
-            backpackReportSummary.textContent = msg;
-            backpackReportSummary.classList.add('text-warning');
-        }
-        setAction(msg);
-        return { report_ok: false, error: msg, rate_limited: true };
-    }
-    const lea = backpackProbeLea ? String(backpackProbeLea.value || '').trim() : '';
-    // Display limit for table/UI. Refresh schools uses full_lea on the server
-    // (dynamic district size) — this number does not cap how many schools are extracted.
-    let limit = 50;
-    if (backpackReportLimit) {
-        const n = Number(backpackReportLimit.value);
-        if (Number.isFinite(n) && n > 0) limit = Math.min(2000, Math.floor(n));
-    }
-    const payload = await postAction('backpack_report', {
-        backpack_id: backpackId,
-        intent,
-        lea,
-        limit,
-        role: 'account_admin',
-        force_refresh: forceRefresh,
-        prefer_local: !forceRefresh,
-    });
-    const nested = payload && payload.report && typeof payload.report === 'object' ? payload.report : null;
-    const body = nested || payload || {};
-    const reportOk = payload.report_ok !== undefined
-        ? Boolean(payload.report_ok)
-        : (body.ok !== false && !body.error);
-    const err = String(payload.error || body.error || '').trim();
-    const summary = String(payload.summary || body.summary || payload.message || '').trim();
-    const rateLimited = Boolean(payload.rate_limited || body.rate_limited);
-    if (rateLimited || /rate limit/i.test(err)) {
-        backpackReportCooldownUntil = Date.now() + 60000;
-    }
-    if (backpackReportSummary) {
-        if (!reportOk || err) {
-            backpackReportSummary.textContent = err || summary || 'Report failed.';
-            backpackReportSummary.classList.add('text-warning');
-        } else {
-            let src = '';
-            if (payload.from_extract || body.from_extract) {
-                src = ' [local extract]';
-            } else if (payload.extract_saved || body.extract_saved) {
-                src = ' [live ODS → saved local extract]';
-            } else if (payload.live_pull || body.live_pull) {
-                src = ' [live ODS]';
-            } else if (payload.from_cache || body.from_cache) {
-                src = ' [local profile]';
-            }
-            backpackReportSummary.textContent = (summary || `Report ${intent} complete.`) + src;
-            backpackReportSummary.classList.remove('text-warning');
-        }
-    }
-    const tableBody = {
-        columns: payload.columns || body.columns || [],
-        rows: payload.rows || body.rows || [],
-    };
-    renderBackpackReportTable(tableBody);
-    if (backpackActionResult) {
-        backpackActionResult.textContent = JSON.stringify(payload, null, 2);
-    }
-    if (!reportOk || err) {
-        setAction(err || payload.message || 'backpack_report_failed');
-    } else {
-        setAction(payload.message || summary || 'backpack_report_ok');
-    }
-    return payload;
 }
 
 function mergeStatusPayload(base, update) {
@@ -5755,6 +5617,7 @@ function renderStatusSpine(status, metrics) {
     renderLiveTracking(status);
     renderOverviewFocus(status);
     renderCenterMissionBrief(status);
+    renderMetaView(status);
     renderTelemetrySummary(metrics, status);
     renderTelemetryPressure(metrics, status);
     if (runtimeNoteBar && status.runtime_process_note != null) {
@@ -6296,7 +6159,6 @@ bindClick('btnPipelinesRefresh', async () => {
 bindClick('btnBackpacksRefresh', async () => {
     await withBackpackBusy('Refreshing backpacks…', 'btnBackpacksRefresh', async () => {
         selectedBackpackId = '';
-        if (bpFieldClientSecret) bpFieldClientSecret.value = '';
         await loadBackpacks();
         setAction('Backpacks refreshed. Select a backpack to continue.');
     });
@@ -6304,7 +6166,6 @@ bindClick('btnBackpacksRefresh', async () => {
 if (backpackSelect) {
     backpackSelect.addEventListener('change', async () => {
         selectedBackpackId = String(backpackSelect.value || '').trim();
-        if (bpFieldClientSecret) bpFieldClientSecret.value = '';
         await withBackpackBusy('Loading backpack…', null, async () => {
             await loadBackpacks();
         });
@@ -6330,33 +6191,6 @@ bindClick('btnBackpackDisable', async () => {
         setAction(payload.message || 'backpack_disabled');
     });
 });
-bindClick('btnBackpackTestConn', async () => {
-    const backpackId = selectedBackpackId || (backpackSelect ? backpackSelect.value : '');
-    if (!backpackId) return setAction('Select a backpack first.');
-    const baseUrl = bpFieldBaseUrl ? String(bpFieldBaseUrl.value || '').trim() : '';
-    const clientId = bpFieldClientId ? String(bpFieldClientId.value || '').trim() : '';
-    const clientSecret = bpFieldClientSecret ? String(bpFieldClientSecret.value || '').trim() : '';
-    if (!baseUrl) return setAction('Enter the ODS base URL before testing.');
-    if (!clientId) return setAction('Enter Client ID before testing.');
-    // Secret may already be on disk; allow test with empty field (backend falls back to saved).
-    await withBackpackBusy('Testing credentials against IODS…', 'btnBackpackTestConn', async () => {
-        const payload = await postAction('backpack_probe_credentials', {
-            backpack_id: backpackId,
-            base_url: baseUrl,
-            client_id: clientId,
-            client_secret: clientSecret,
-            nova_user: currentNovaUser(),
-        });
-        if (backpackActionResult) backpackActionResult.textContent = JSON.stringify(payload, null, 2);
-        const hint = payload.hint || '';
-        const ms = payload.latency_ms != null ? ` (${payload.latency_ms}ms)` : '';
-        if (payload.ok) {
-            setAction(`✓ Connection verified${ms}. ${hint}`);
-        } else {
-            setAction(`✗ ${payload.error || 'Connection test failed.'} ${hint}`.trim());
-        }
-    });
-});
 bindClick('btnBackpackSaveSettings', async () => {
     const backpackId = selectedBackpackId || (backpackSelect ? backpackSelect.value : '');
     if (!backpackId) return setAction('Select a backpack first.');
@@ -6374,7 +6208,6 @@ bindClick('btnBackpackSaveSettings', async () => {
             nova_user: currentNovaUser(),
         });
         if (backpackActionResult) backpackActionResult.textContent = JSON.stringify(payload, null, 2);
-        if (bpFieldClientSecret) bpFieldClientSecret.value = '';
         await loadBackpacks();
         setAction(payload.message || 'backpack_settings_saved');
     });
@@ -6388,14 +6221,13 @@ bindClick('btnBackpackInstall', async () => {
     } catch (error) {
         return setAction(String(error && error.message ? error.message : error));
     }
-    await withBackpackBusy('Installing and profiling ODS (can take a minute)…', 'btnBackpackInstall', async () => {
+    await withBackpackBusy('Installing backpack…', 'btnBackpackInstall', async () => {
         const payload = await postAction('backpack_install', {
             backpack_id: backpackId,
             settings,
             nova_user: currentNovaUser(),
         });
         if (backpackActionResult) backpackActionResult.textContent = JSON.stringify(payload, null, 2);
-        if (bpFieldClientSecret) bpFieldClientSecret.value = '';
         await loadBackpacks();
         setAction(payload.message || 'backpack_install_ok');
     });
@@ -6418,51 +6250,6 @@ bindClick('btnBackpackUninstall', async () => {
             setAction(`✗ Uninstall failed: ${err && err.message ? err.message : String(err)}`);
         }
     });
-});
-bindClick('btnBackpackProbeLea', async () => {
-    const backpackId = selectedBackpackId;
-    if (!backpackId) return setAction('Select a backpack first.');
-    const lea = backpackProbeLea ? String(backpackProbeLea.value || '').trim() : '';
-    if (!lea) return setAction('Enter an LEA id to probe (e.g. your-lea-id).');
-    await withBackpackBusy('Probing LEA…', 'btnBackpackProbeLea', async () => {
-        const payload = await postAction('backpack_probe_lea', {
-            backpack_id: backpackId,
-            lea,
-            limit: 3,
-            role: 'account_admin',
-        });
-        if (backpackActionResult) backpackActionResult.textContent = JSON.stringify(payload, null, 2);
-        setAction(payload.message || 'backpack_probe_lea_ok');
-    });
-});
-bindClick('btnBackpackReportHealth', async () => {
-    if (!selectedBackpackId) return setAction('Select a backpack first.');
-    await withBackpackBusy('Loading health (local profile)…', 'btnBackpackReportHealth', async () => {
-        await runBackpackReport('health', { forceRefresh: false });
-    });
-});
-bindClick('btnBackpackReportSchools', async () => {
-    if (!selectedBackpackId) return setAction('Select a backpack first.');
-    // Default: local extract only — does not hit TEA when extract exists.
-    await withBackpackBusy(
-        'Loading schools from local extract…',
-        'btnBackpackReportSchools',
-        async () => {
-            await runBackpackReport('schools', { forceRefresh: false });
-        },
-        { minMs: 600 }
-    );
-});
-bindClick('btnBackpackRefreshSchools', async () => {
-    if (!selectedBackpackId) return setAction('Select a backpack first.');
-    await withBackpackBusy(
-        'Refreshing schools from TEA ODS (slow; may rate-limit)…',
-        'btnBackpackRefreshSchools',
-        async () => {
-            await runBackpackReport('schools', { forceRefresh: true });
-        },
-        { minMs: 1200 }
-    );
 });
 bindClick('btnPipelineCreate', async () => {
     const pipelineId = pipelineCreateId ? pipelineCreateId.value.trim() : '';
@@ -6539,27 +6326,6 @@ bindClick('btnPipelineQueryPreview', async () => {
 });
 bindClick('btnPipelineQueryRun', async () => {
     await executePipelineQuery({live: true});
-});
-bindClick('btnEdfiQuickHealth', async () => {
-    await executePipelineQuery({live: true, operation: 'connection_health', rowLimit: 1, params: {}, confirmLive: false});
-});
-bindClick('btnEdfiQuickSchools', async () => {
-    await executePipelineQuery({live: true, operation: 'list_schools', rowLimit: 10, params: {offset: 0}, confirmLive: false});
-});
-bindClick('btnEdfiQuickStudents', async () => {
-    await executePipelineQuery({live: true, operation: 'list_students', rowLimit: 10, params: {offset: 0}, confirmLive: false});
-});
-bindClick('btnEdfiQuickSync', async () => {
-    await executePipelineQuery({live: true, operation: 'sync_status', rowLimit: 1, params: {}, confirmLive: false});
-});
-bindClick('btnEdfiQuickChanges', async () => {
-    await executePipelineQuery({
-        live: true,
-        operation: 'changes_since',
-        rowLimit: 10,
-        params: {resource: 'schools', advance_cursor: true},
-        confirmLive: false,
-    });
 });
 bindClick('btnPipelineNoteSave', async () => {
     const pipelineId = pipelineSelect ? String(pipelineSelect.value || '').trim() : selectedPipelineId;
@@ -6679,6 +6445,9 @@ bindClick('btnWorkTreeRunNext', async () => {
             line += ' · queued for maintenance worker';
         }
         if (workTreeActionFeedback) workTreeActionFeedback.textContent = line;
+        if (Number.isFinite(executed) && executed <= 0 && !payload.triggered) {
+            throw new Error(line);
+        }
         // Refresh tree so progress ring updates after a real step.
         try {
             const trees = await fetchWorkTrees();
@@ -7063,6 +6832,8 @@ bindClick('btnStallOpenOperatorDeck', () => { openOperatorDeck(); setAction('Ope
 bindClick('btnStallDismissOutbox', async () => { await dismissOperatorOutboxNotice(); });
 bindClick('btnStallRunQueueNext', async () => { await runNextGeneratedQueueItem(); });
 bindClick('btnStallOpenScheduledTree', () => { openScheduledTreeBlockedView(); setAction('Opened Scheduled Tree blocked view.'); });
+bindClick('btnMetaOpenOperatorDeck', () => { openOperatorDeck(); setAction('Opened Operations → Operator Deck.'); });
+bindClick('btnMetaOpenHealth', () => { setActiveView('health'); setAction('Opened Health.'); });
 bindClick('btnWorkTreeOpenOperatorDeck', () => { openOperatorDeck(); setAction('Opened Operations → Operator Deck.'); });
 bindClick('btnWorkTreeDismissOutbox', async () => { await dismissOperatorOutboxNotice(); });
 bindClick('btnWorkTreeRunQueueNext', async () => { await runNextGeneratedQueueItem(); });

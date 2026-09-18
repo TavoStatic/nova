@@ -378,6 +378,33 @@ class TestRuntimeRecovery(unittest.TestCase):
             retained_lock = json.loads(lock_file.read_text(encoding="utf-8"))
             self.assertEqual(retained_lock["pid"], 3333)
 
+    def test_live_guard_process_pids_ignores_venv_launcher_parent(self):
+        launcher = mock.Mock()
+        launcher.pid = 31072
+        launcher.ppid.return_value = 100
+        launcher.info = {
+            "pid": 31072,
+            "ppid": 100,
+            "cmdline": [str(nova_guard.VENV_PY), str(nova_guard.GUARD_SCRIPT)],
+        }
+        launcher.cwd = mock.Mock(return_value=str(nova_guard.ROOT))
+        child = mock.Mock()
+        child.pid = 55944
+        child.ppid.return_value = 31072
+        child.info = {
+            "pid": 55944,
+            "ppid": 31072,
+            "cmdline": [str(nova_guard.VENV_PY), str(nova_guard.GUARD_SCRIPT)],
+        }
+        child.cwd = mock.Mock(return_value=str(nova_guard.ROOT))
+
+        with mock.patch("nova_guard.psutil.process_iter", return_value=[launcher, child]):
+            pids = nova_guard._live_guard_process_pids()
+            from_child = nova_guard._live_guard_process_pids(exclude_pid=55944)
+
+        self.assertEqual(pids, [55944])
+        self.assertEqual(from_child, [])
+
     def test_live_guard_process_pids_ignores_python_c_probes(self):
         probe = mock.Mock()
         probe.pid = 4242
@@ -432,6 +459,39 @@ class TestRuntimeRecovery(unittest.TestCase):
                 nova_guard._enforce_guard_singleton_or_exit()
 
             self.assertEqual(raised.exception.code, 0)
+
+    def test_lock_identity_accepts_live_guard_when_python_path_differs(self):
+        fake_process = mock.Mock()
+        fake_process.create_time.return_value = 55.0
+        fake_process.cmdline.return_value = [
+            r"C:\Windows\py.exe",
+            str(nova_guard.GUARD_SCRIPT),
+        ]
+
+        with mock.patch("nova_guard.psutil.Process", return_value=fake_process):
+            self.assertTrue(
+                nova_guard._lock_belongs_to_live_guard(
+                    {
+                        "pid": 5555,
+                        "create_time": 55.0,
+                        "command": {
+                            "executable": str(nova_guard.VENV_PY),
+                            "script": str(nova_guard.GUARD_SCRIPT),
+                        },
+                    }
+                )
+            )
+
+    def test_enforce_guard_singleton_or_exit_yields_to_older_sibling(self):
+        with mock.patch.object(nova_guard.os, "getpid", return_value=9999), \
+            mock.patch.object(nova_guard, "read_json", return_value={"pid": 9999}), \
+            mock.patch.object(nova_guard, "_live_guard_process_pids", return_value=[8888]), \
+            mock.patch.object(nova_guard, "_process_create_time", side_effect=lambda pid: 10.0 if pid == 8888 else 20.0), \
+            mock.patch.object(nova_guard, "log", lambda _msg: None), \
+            self.assertRaises(SystemExit) as raised:
+            nova_guard._enforce_guard_singleton_or_exit()
+
+        self.assertEqual(raised.exception.code, 0)
 
     def test_lock_identity_rejects_pid_reuse_with_wrong_command(self):
         fake_process = mock.Mock()
@@ -590,6 +650,7 @@ class TestRuntimeRecovery(unittest.TestCase):
         attempt = nova_guard.GuardAttempt()
 
         with mock.patch("nova_guard._clear_core_runtime_artifacts"), \
+            mock.patch("nova_guard._live_core_pid", return_value=None), \
             mock.patch("nova_guard.spawn_core", return_value=7777), \
             mock.patch("nova_guard._process_create_time", return_value=77.0), \
             mock.patch("nova_guard._derive_boot_timeout_seconds", return_value=42.0), \

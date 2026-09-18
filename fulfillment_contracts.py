@@ -1,4 +1,4 @@
-﻿"""Shared contract types for Nova's intent-first fulfillment model system."""
+"""Shared contract types for Nova's intent-first fulfillment model system."""
 
 from __future__ import annotations
 

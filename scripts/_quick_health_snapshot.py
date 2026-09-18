@@ -1,4 +1,4 @@
-﻿import sqlite3, json, urllib.request
+import sqlite3, json, urllib.request
 c = sqlite3.connect(r"runtime/_internal/work_tree.db")
 rows = c.execute(
     """

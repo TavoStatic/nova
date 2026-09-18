@@ -96,6 +96,7 @@ from services.nova_self_status import render_self_status as service_render_self_
 from services.control_work_trees import CONTROL_WORK_TREES_SERVICE
 from services.work_tree_pressure_snapshot import build_work_tree_pressure_snapshot
 from services.release_status import RELEASE_STATUS_SERVICE
+from services.regression_evidence import regression_outcome_failed as service_regression_outcome_failed
 from services.core_health_brief import build_core_health_brief as service_build_core_health_brief
 from services.core_health_brief import feed_core_health_brief_to_work_tree as service_feed_core_health_brief_to_work_tree
 from services.core_health_brief import render_core_health_brief as service_render_core_health_brief
@@ -1843,26 +1844,8 @@ def build_learning_context(query: str) -> str:
     return str(build_learning_context_details(query).get("context") or "")
 
 
-def _render_chat_context(turns: list[tuple[str, str]], max_chars: int = 1800, current_text: str = "") -> str:
-    return service_render_chat_context(
-        turns,
-        max_chars=max_chars,
-        current_text=current_text,
-        chat_context_turns=CHAT_CONTEXT_TURNS,
-    )
 
 
-def _render_session_state_context(
-    *,
-    conversation_state: dict | None = None,
-    pending_action: dict | None = None,
-    max_chars: int = 1600,
-) -> str:
-    return service_render_session_state_context(
-        conversation_state=conversation_state,
-        pending_action=pending_action,
-        max_chars=max_chars,
-    )
 
 
 def build_fallback_context_details(
@@ -2921,18 +2904,18 @@ def _clamp_language_mix(value: Any) -> int:
 
 
 def _estimate_spanish_ratio(text: str) -> float:
-    """Estimate Spanish content from Unicode character profile only â€” no keyword lists."""
+    """Estimate Spanish content from Unicode character profile only — no keyword lists."""
     raw = str(text or "")
     if not raw.strip():
         return 0.0
     # Spanish-specific characters not naturally present in standard English text.
     # Using character-level evidence avoids keyword-trigger brittleness.
-    spanish_chars = set("Ã¡Ã©Ã­Ã³ÃºÃ¼Ã±ÃÃ‰ÃÃ“ÃšÃœÃ‘Â¿Â¡")
+    spanish_chars = set("áéíóúüñÁÉÍÓÚÜÑ¿¡")
     letter_count = sum(1 for c in raw if c.isalpha())
     if letter_count == 0:
         return 0.0
     accent_count = sum(1 for c in raw if c in spanish_chars)
-    # Accented chars are a strong signal; scale so ~12% accent ratio â†’ 1.0
+    # Accented chars are a strong signal; scale so ~12% accent ratio → 1.0
     return min(1.0, float(accent_count) / max(1, letter_count) * 8.0)
 
 
@@ -3507,7 +3490,7 @@ def _self_report_local_status_payload(work_trees_payload: dict) -> dict:
     if memory_status and memory_status not in {"ok", "ready", "healthy"}:
         alerts.append(f"memory_health:{memory_status}")
     last_regression_status = str(pulse_payload.get("last_regression_status") or "").strip().upper()
-    if last_regression_status.startswith("FAIL") and not bool(pulse_payload.get("last_regression_stale")):
+    if service_regression_outcome_failed(last_regression_status) and not bool(pulse_payload.get("last_regression_stale")):
         alerts.append(f"regression:{last_regression_status}")
     work_tree_truth = _self_report_work_tree_truth(work_trees_payload)
     return {
@@ -3571,7 +3554,7 @@ def _apply_latest_regression_validation(pulse_payload: dict) -> dict:
         return payload
     payload["last_regression_status"] = "OK"
     payload["last_regression_stale"] = False
-    payload["last_regression_source"] = "scripts/run_regression.py"
+    payload["last_regression_source"] = str(marker.get("source") or "scripts/run_regression.py")
     payload["last_regression_at"] = str(marker.get("generated_at") or "")
     return payload
 
@@ -3770,6 +3753,13 @@ def run_loop(tts):
 # Entrypoint
 # =========================
 def main():
+    from tools.runtime_singleton import acquire_role_singleton, release_role_singleton
+
+    ok, detail = acquire_role_singleton("core")
+    if not ok:
+        print(f"Nova core already running ({detail}). Not starting a second instance.")
+        return
+
     ap = argparse.ArgumentParser()
     ap.add_argument("mode", nargs="?", default="run", choices=["run"])
     ap.add_argument("--heartbeat", default=str(DEFAULT_HEARTBEAT))
@@ -3793,6 +3783,7 @@ def main():
     finally:
         hb_stop.set()
         tts.stop()
+        release_role_singleton("core")
 
 
 if __name__ == "__main__":

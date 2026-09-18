@@ -104,7 +104,10 @@ class TestWindowsInstallerScripts(unittest.TestCase):
             compiler_env = json.loads((installer_dir / "compiler_env.json").read_text(encoding="utf-8-sig"))
             self.assertTrue(str(compiler_env.get("iss_path") or "").endswith("installer\\Nova_Setup.iss"))
             self.assertFalse(str(compiler_env.get("payload_dir") or "").endswith("_stage"))
-            self.assertEqual(Path(compiler_env.get("output_dir")), installer_dir)
+            self.assertEqual(
+                Path(compiler_env.get("output_dir")).resolve(),
+                installer_dir.resolve(),
+            )
             self.assertTrue((repo / "runtime" / "exports" / "installers" / "_payload").exists())
 
             installer_verify_result = _run_powershell(installer_verify_script, repo, str(installer_artifacts[0]))
@@ -156,7 +159,10 @@ class TestWindowsInstallerScripts(unittest.TestCase):
             ]
             installer_rows = [row for row in ledger_rows if row.get("artifact_kind") == "windows-installer"]
             self.assertEqual([row["event"] for row in installer_rows], ["build", "verify", "promotion"])
-            self.assertEqual(installer_rows[0]["artifact_path"], str(installer_artifacts[0]))
+            self.assertEqual(
+                Path(installer_rows[0]["artifact_path"]).resolve(),
+                installer_artifacts[0].resolve(),
+            )
             self.assertEqual(installer_rows[-1]["validation_result"], "pass-with-notes")
 
 

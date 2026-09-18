@@ -1,3 +1,4 @@
 piper/*.dll filter=lfs diff=lfs merge=lfs -text
 piper/*.exe filter=lfs diff=lfs merge=lfs -text
 piper/models/*.onnx filter=lfs diff=lfs merge=lfs -text
+tools/os_capabilities/*.ps1 text eol=lf

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+from pathlib import Path
 
 from services.nova_live_closure import build_live_closure_inventory_payload
 from tests.test_nova_wiring_inventory_service import _status_contract
@@ -84,13 +85,9 @@ class TestNovaLiveClosureService(unittest.TestCase):
 
         self.assertIn("feedback_loop_gap:active_regression_failure", row["live_gaps"])
 
-    def test_live_closure_marks_unvalidated_roots_as_source_contract_only(self) -> None:
+    def test_live_closure_does_not_publish_uninstalled_edfi_core_root(self) -> None:
         payload = build_live_closure_inventory_payload(_status_contract())
-        row = next(item for item in payload["roots"] if item["root_id"] == "edfi_core")
-
-        self.assertFalse(row["semantic_check_available"])
-        self.assertEqual(row["live_closure_depth"], "source_contract_only")
-        self.assertEqual(row["live_gaps"], [])
+        self.assertNotIn("edfi_core", [item["root_id"] for item in payload["roots"]])
 
 
 if __name__ == "__main__":

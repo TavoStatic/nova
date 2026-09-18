@@ -11,12 +11,6 @@ Write paths:
   1. runtime/{backpack_id}/settings.json
      Flat settings file read by the connector via manifest.local_config_path.
      This is what connector._settings() returns.
-
-  2. runtime/edfi/connections/{connection_id}/local_config.json  (data connector only)
-     Written via services.edfi.config.save_connection_config() so the DataConnector
-     service layer (run_self_profile, DataConnectorClient, etc.) can find the config.
-     Triggered when the settings include base_url + client_id + client_secret
-     (the shape of an HTTP-authenticated ODS connection).
 """
 
 import json
@@ -75,34 +69,8 @@ class BackpackInstaller:
 
     @staticmethod
     def normalize_settings_values(values: dict[str, Any]) -> dict[str, Any]:
-        """
-        Return a copy with canonical scope_mode, credential_access_tier, and LEA fields.
-
-        Used by validate (writes back into the caller's dict on success) and apply
-        (so settings.json never stores aliases like "district" instead of "single_lea").
-        """
-        prepared = dict(values or {})
-        try:
-            from services.backpack_host.scope_settings import (
-                allowed_leas_from_settings,
-                normalize_access_tier,
-                normalize_scope_mode,
-                primary_lea_from_settings,
-            )
-
-            prepared["scope_mode"] = normalize_scope_mode(prepared.get("scope_mode"))
-            prepared["credential_access_tier"] = normalize_access_tier(
-                prepared.get("credential_access_tier")
-            )
-            primary = primary_lea_from_settings(prepared)
-            if primary:
-                prepared["district_lea_id"] = primary
-            allowed = allowed_leas_from_settings(prepared)
-            if prepared.get("scope_mode") == "multi_lea" and allowed:
-                prepared["allowed_lea_ids"] = ", ".join(allowed)
-        except Exception:
-            pass
-        return prepared
+        """Return a copy of the supplied settings values."""
+        return dict(values or {})
 
     # ── Validation ─────────────────────────────────────────────────────────
 
@@ -115,8 +83,7 @@ class BackpackInstaller:
         Validate user-supplied values against settings_schema.json.
 
         On success (no errors), mutates `values` in place with normalized
-        scope_mode / credential_access_tier / LEA fields so a subsequent
-        apply() writes the same canonical form.
+        fields so a subsequent apply() writes the same canonical form.
 
         Returns a list of error dicts (empty = valid).
         Each error has: code, field, detail.
@@ -198,14 +165,6 @@ class BackpackInstaller:
                         "detail": f"'{label}' path does not exist: {value}",
                     })
 
-        # Scope rules (district vs region) — beyond per-field required flags
-        try:
-            from services.backpack_host.scope_settings import validate_scope_values
-
-            errors.extend(validate_scope_values(values))
-        except Exception:
-            pass
-
         # Write normalized form back into the caller's dict so apply() sees it.
         if not errors:
             prepared = self.normalize_settings_values(values)
@@ -229,18 +188,15 @@ class BackpackInstaller:
         Always writes:
           runtime/{backpack_id}/settings.json  (flat settings for connector)
 
-        Also writes (when values include an HTTP ODS connection):
-          runtime/edfi/connections/{connection_id}/local_config.json
-
-        Normalizes scope_mode / LEA / credential_access_tier before write, and
-        updates `values` in place so callers keep the canonical form.
+        Normalizes settings before write, and updates `values` in place so
+        callers keep the canonical form.
         """
         prepared = self.normalize_settings_values(values)
         values.clear()
         values.update(prepared)
 
         backpack_id = _backpack_id_from_dir(backpack_dir)
-        connection_id = str(values.get("connection_id") or "district-main").strip()
+        connection_id = str(values.get("connection_id") or "primary").strip()
 
         # 1. Flat settings file — connector reads via manifest.local_config_path
         settings_dir = Path(runtime_root) / backpack_id
@@ -258,22 +214,6 @@ class BackpackInstaller:
             "settings_path": str(settings_path),
         }
 
-        # 2. data connector ConnectionConfig — for DataConnector service layer (run_self_profile etc.)
-        # Triggered by shape: base_url + client_id + client_secret present
-        if (
-            str(values.get("base_url") or "").strip()
-            and str(values.get("client_id") or "").strip()
-            and str(values.get("client_secret") or "").strip()
-        ):
-            try:
-                from services.edfi.config import connection_config_from_dict, save_connection_config
-                config = connection_config_from_dict(values, connection_id=connection_id)
-                saved = save_connection_config(config)
-                result["connection_config_path"] = str(saved)
-            except ValueError as exc:
-                result["ok"] = False
-                result["error"] = str(exc)
-
         return result
 
     # ── Install steps ──────────────────────────────────────────────────────
@@ -288,7 +228,6 @@ class BackpackInstaller:
     ) -> dict[str, Any]:
         """Execute a single install_step from settings_schema.json."""
         action = str(step.get("action") or "")
-        connection_id = str(values.get("connection_id") or "district-main").strip()
 
         if action == "validate_settings":
             errors = self.validate(backpack_dir, values)
@@ -297,46 +236,6 @@ class BackpackInstaller:
                 "action": action,
                 "errors": errors,
             }
-
-        if action == "run_self_profile":
-            try:
-                from services.edfi import run_self_profile
-                result = run_self_profile(connection_id=connection_id)
-                return {
-                    "ok": bool(result.get("ok")),
-                    "action": action,
-                    "connection_id": connection_id,
-                    "health": result.get("health"),
-                    "resource_count": (result.get("discovery") or {}).get("resource_count"),
-                    "error": result.get("error_code") if not result.get("ok") else None,
-                }
-            except Exception as exc:
-                return {"ok": False, "action": action, "error": str(exc)}
-
-        if action == "verify_district_scope":
-            try:
-                from services.edfi.inventory import read_preset
-                result = read_preset(connection_id, "schools", limit=1, offset=0)
-                items = list(result.get("items") or [])
-                if not items:
-                    return {
-                        "ok": False,
-                        "action": action,
-                        "error": "district_scope_empty",
-                        "detail": (
-                            "No schools returned for this LEA ID. "
-                            "Verify district_lea_id in settings."
-                        ),
-                    }
-                return {
-                    "ok": True,
-                    "action": action,
-                    "connection_id": connection_id,
-                    "district_lea_id": str(values.get("district_lea_id") or ""),
-                    "schools_found": len(items),
-                }
-            except Exception as exc:
-                return {"ok": False, "action": action, "error": str(exc)}
 
         return {
             "ok": False,

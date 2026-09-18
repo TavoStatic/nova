@@ -3,116 +3,402 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>L.E.A.H. | Living Environment Autonomous Hub</title>
+  <title>Leah</title>
   <link rel="stylesheet" href="/static/leah.css?v={{LEAH_CSS_VERSION}}" />
 </head>
 <body>
- <!--  <canvas id="leahBackdrop" class="leah-backdrop" aria-hidden="true"></canvas> -->
-  <div class="leah-shell">
-    <aside class="leah-rail">
-      <div class="brand-card">
-        <div class="brand-mark">L.E.A.H.</div>
-        <h1>Living Environment Autonomous Hub</h1>
-        <p>Your local AI experience hub for conversation, sensing, and staged work.</p>
-        <div class="build-badge">Build {{LEAH_BUILD_VERSION}}</div>
-      </div>
+  <header class="top-bar">
+    <div class="top-brand">NOVA</div>
+    <nav class="top-nav">
+      <span class="top-nav-item">People</span>
+      <span class="top-nav-item">Context</span>
+      <span class="top-nav-item">Progress</span>
+    </nav>
+    <div class="top-status">
+      <span>LEAH</span>
+      <span>|</span>
+      <span>OPERATIONAL</span>
+      <div class="top-status-dot"></div>
+    </div>
+  </header>
 
-      <section class="rail-panel">
-        <div class="panel-title">Presence</div>
-        <div class="presence-grid">
-          <div class="presence-chip" id="presenceHealth">Checking health</div>
-          <div class="presence-chip" id="presenceThinking">Idle</div>
-          <div class="presence-chip" id="presenceListening">Listen Off</div>
-          <div class="presence-chip" id="presenceVoice">Voice Off</div>
-          <div class="presence-chip" id="presenceCamera">Camera Off</div>
-          <div class="presence-chip" id="presenceMood">Calm Flow</div>
-          <div class="presence-chip" id="presenceUploads">0 staged</div>
+  <div class="main-grid">
+    <aside class="left-rail">
+      <div class="status-card">
+        <div class="status-icon-wrap">
+          <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>
         </div>
-      </section>
-
-      <section class="rail-panel">
-        <div class="panel-title">Session</div>
-        <dl class="mini-facts">
-          <div><dt>Session</dt><dd id="sessionLabel">Not started</dd></div>
-          <div><dt>User</dt><dd id="userLabel">Unknown</dd></div>
-          <div><dt>Mode</dt><dd id="modeLabel">Conversation</dd></div>
-          <div><dt>Mood</dt><dd id="moodLabel">Calm Flow</dd></div>
-        </dl>
-      </section>
+        <div class="status-text">
+          <div class="status-label">CORE</div>
+          <div class="status-state ok" id="stateCore">ONLINE</div>
+        </div>
+      </div>
+      <div class="status-card">
+        <div class="status-icon-wrap">
+          <svg viewBox="0 0 24 24"><path d="M12 2L3 7v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V7l-9-5z"/></svg>
+        </div>
+        <div class="status-text">
+          <div class="status-label">GUARD</div>
+          <div class="status-state active" id="stateGuard">ACTIVE</div>
+        </div>
+      </div>
+      <div class="status-card">
+        <div class="status-icon-wrap">
+          <svg viewBox="0 0 24 24"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+        </div>
+        <div class="status-text">
+          <div class="status-label">HTTP</div>
+          <div class="status-state ok" id="stateHttp">CONNECTED</div>
+        </div>
+      </div>
+      <div class="status-card">
+        <div class="status-icon-wrap">
+          <svg viewBox="0 0 24 24"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>
+        </div>
+        <div class="status-text">
+          <div class="status-label">OLLAMA</div>
+          <div class="status-state ok" id="stateOllama">READY</div>
+        </div>
+      </div>
+      <div class="left-footer">A MORE<br>HUMAN<br>TOMORROW</div>
     </aside>
 
-    <main class="leah-main">
-      <section class="conversation-stage">
-        <div class="conversation-head">
-          <div class="welcome-line">Hi, <span id="welcomeUser" class="welcome-user">there</span></div>
-          <button id="btnNewSession" type="button" class="action-button ghost">New Session</button>
-        </div>
-
-        <div id="chat" class="chat-stream"></div>
-
-        <div class="composer-wrap">
-          <div id="dropZone" class="drop-zone" tabindex="0" role="button" aria-label="Upload files to LEAH">
-            <div class="drop-title">Drop files here or tap to upload</div>
-            <div class="drop-copy">PDFs, images, notes, or anything you want Nova to stage for the next turn.</div>
-          </div>
-
-          <form id="composerForm" class="composer-form">
-            <textarea id="messageInput" rows="3" placeholder="Talk to Nova through LEAH..."></textarea>
-            <div class="composer-actions">
-              <div class="dock-actions">
-                <input id="fileInput" type="file" multiple hidden />
-                <button id="btnUpload" type="button" class="action-button">Upload</button>
-                <button id="btnCamera" type="button" class="action-button">Camera</button>
-                <button id="btnCapture" type="button" class="action-button ghost">Capture</button>
-                <button id="btnMic" type="button" class="action-button">Mic</button>
-                <button id="btnListen" type="button" class="action-button ghost">Listen</button>
-                <button id="btnVoice" type="button" class="action-button ghost">Voice</button>
-              </div>
-              <button id="btnSend" type="submit" class="send-button">Send</button>
-            </div>
-          </form>
-        </div>
-      </section>
+    <main class="center-stage">
+      <div class="hud-container">
+        <svg class="hud-svg" viewBox="-40 -40 780 780" xmlns="http://www.w3.org/2000/svg">
+          <defs>
+            <filter id="glow-sm" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="3" result="g"/><feMerge><feMergeNode in="g"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+            <filter id="glow-md" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="6" result="g"/><feMerge><feMergeNode in="g"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+            <filter id="glow-lg" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="12" result="g"/><feMerge><feMergeNode in="g"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+            <filter id="glow-xl" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="20" result="g"/><feMerge><feMergeNode in="g"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+            <!-- Honeycomb pattern -->
+            <pattern id="honeycomb" x="0" y="0" width="60" height="52" patternUnits="userSpaceOnUse" patternTransform="scale(1.2)">
+              <polygon points="30,2 56,15 56,37 30,50 4,37 4,15" fill="none" stroke="rgba(0,220,255,0.3)" stroke-width="1"/>
+              <polygon points="0,28 26,41 26,63 0,76 -26,63 -26,41" fill="none" stroke="rgba(0,220,255,0.2)" stroke-width="0.8"/>
+              <polygon points="60,28 86,41 86,63 60,76 34,63 34,41" fill="none" stroke="rgba(0,220,255,0.2)" stroke-width="0.8"/>
+            </pattern>
+            <!-- Mask: hide honeycomb inside rings, show outside -->
+            <mask id="honeycomb-mask">
+              <rect x="-400" y="-400" width="1580" height="1580" fill="white"/>
+              <circle cx="350" cy="350" r="340" fill="black"/>
+            </mask>
+            <radialGradient id="center-glow" cx="50%" cy="50%" r="50%">
+              <stop offset="0%" stop-color="rgba(0,200,255,0.4)"/>
+              <stop offset="30%" stop-color="rgba(0,150,220,0.18)"/>
+              <stop offset="70%" stop-color="rgba(0,100,180,0.05)"/>
+              <stop offset="100%" stop-color="transparent"/>
+            </radialGradient>
+            <radialGradient id="core-bg" cx="50%" cy="50%" r="50%">
+              <stop offset="0%" stop-color="rgba(0,200,255,0.2)"/>
+              <stop offset="40%" stop-color="rgba(0,150,220,0.08)"/>
+              <stop offset="70%" stop-color="rgba(6,14,28,0.95)"/>
+              <stop offset="100%" stop-color="rgba(6,14,28,1)"/>
+            </radialGradient>
+          </defs>
+          <!-- Center glow background -->
+          <circle cx="350" cy="350" r="345" fill="url(#center-glow)"/>
+          <g id="outer-ticks" opacity="0.7"></g>
+          <circle cx="350" cy="350" r="335" fill="none" stroke="rgba(0,200,255,0.55)" stroke-width="2.5"/>
+          <circle cx="350" cy="350" r="325" fill="none" stroke="rgba(0,200,255,0.3)" stroke-width="1" stroke-dasharray="3 8"/>
+          <g filter="url(#glow-xl)" id="activityRing">
+            <path d="M350,55 A295,295 0 0,1 605,203" fill="none" stroke="rgba(0,240,255,1)" stroke-width="20" stroke-linecap="round" class="ring-seg" data-seg="0"/>
+            <path d="M605,203 A295,295 0 0,1 605,497" fill="none" stroke="rgba(0,240,255,1)" stroke-width="20" stroke-linecap="round" class="ring-seg" data-seg="1"/>
+            <path d="M605,497 A295,295 0 0,1 350,645" fill="none" stroke="rgba(0,240,255,1)" stroke-width="20" stroke-linecap="round" class="ring-seg" data-seg="2"/>
+            <path d="M350,645 A295,295 0 0,1 95,497" fill="none" stroke="rgba(0,240,255,1)" stroke-width="20" stroke-linecap="round" class="ring-seg" data-seg="3"/>
+            <path d="M95,497 A295,295 0 0,1 95,203" fill="none" stroke="rgba(0,240,255,1)" stroke-width="20" stroke-linecap="round" class="ring-seg" data-seg="4"/>
+            <path d="M95,203 A295,295 0 0,1 350,55" fill="none" stroke="rgba(0,240,255,1)" stroke-width="20" stroke-linecap="round" class="ring-seg" data-seg="5"/>
+          </g>
+          <circle cx="350" cy="350" r="260" fill="none" stroke="rgba(0,200,255,0.5)" stroke-width="3"/>
+          <g id="mid-ticks" opacity="0.7"></g>
+          <g id="barcode"></g>
+          <circle cx="350" cy="350" r="195" fill="none" stroke="rgba(0,200,255,0.6)" stroke-width="3.5"/>
+          <circle cx="350" cy="350" r="185" fill="none" stroke="rgba(0,200,255,0.4)" stroke-width="1.5"/>
+          <g filter="url(#glow-sm)">
+            <circle cx="350" cy="155" r="3.5" fill="#00c8ff" opacity="0.8"/>
+            <circle cx="485" cy="205" r="3" fill="#00bbdd" opacity="0.7"/>
+            <circle cx="505" cy="365" r="3" fill="#00c8ff" opacity="0.75"/>
+            <circle cx="415" cy="495" r="2.5" fill="#00ee77" opacity="0.7"/>
+            <circle cx="275" cy="505" r="3" fill="#00c8ff" opacity="0.7"/>
+            <circle cx="195" cy="375" r="2.8" fill="#a855f7" opacity="0.65"/>
+            <circle cx="210" cy="225" r="2.5" fill="#00c8ff" opacity="0.7"/>
+            <path d="M350,155 L485,205" stroke="rgba(0,200,255,0.18)" stroke-width="0.8"/>
+            <path d="M485,205 L505,365" stroke="rgba(0,200,255,0.15)" stroke-width="0.6"/>
+            <path d="M505,365 L415,495" stroke="rgba(0,200,255,0.15)" stroke-width="0.6"/>
+            <path d="M415,495 L275,505" stroke="rgba(0,238,119,0.12)" stroke-width="0.5"/>
+            <path d="M275,505 L195,375" stroke="rgba(0,200,255,0.15)" stroke-width="0.6"/>
+            <path d="M195,375 L210,225" stroke="rgba(168,85,247,0.12)" stroke-width="0.5"/>
+            <path d="M210,225 L350,155" stroke="rgba(0,200,255,0.15)" stroke-width="0.6"/>
+          </g>
+          <circle cx="280" cy="120" r="2" fill="#00c8ff" opacity="0.7"><animate attributeName="opacity" values="0.4;0.9;0.4" dur="4s" repeatCount="indefinite"/></circle>
+          <circle cx="520" cy="150" r="1.5" fill="#00ee77" opacity="0.6"><animate attributeName="opacity" values="0.3;0.85;0.3" dur="5s" repeatCount="indefinite"/></circle>
+          <circle cx="580" cy="320" r="1.8" fill="#00c8ff" opacity="0.65"><animate attributeName="opacity" values="0.4;0.9;0.4" dur="3.5s" repeatCount="indefinite"/></circle>
+          <circle cx="550" cy="480" r="1.5" fill="#a855f7" opacity="0.6"><animate attributeName="opacity" values="0.3;0.8;0.3" dur="4.5s" repeatCount="indefinite"/></circle>
+          <circle cx="150" cy="450" r="1.8" fill="#00c8ff" opacity="0.7"><animate attributeName="opacity" values="0.4;0.9;0.4" dur="3.8s" repeatCount="indefinite"/></circle>
+          <circle cx="130" cy="250" r="1.5" fill="#00ee77" opacity="0.6"><animate attributeName="opacity" values="0.35;0.85;0.35" dur="4.2s" repeatCount="indefinite"/></circle>
+          <circle cx="400" cy="88" r="1.2" fill="#00c8ff" opacity="0.55"><animate attributeName="opacity" values="0.3;0.75;0.3" dur="5.5s" repeatCount="indefinite"/></circle>
+          <circle cx="300" cy="555" r="1.5" fill="#00c8ff" opacity="0.6"><animate attributeName="opacity" values="0.4;0.85;0.4" dur="3.2s" repeatCount="indefinite"/></circle>
+          <circle cx="460" cy="550" r="1.2" fill="#a855f7" opacity="0.5"><animate attributeName="opacity" values="0.3;0.75;0.3" dur="4.8s" repeatCount="indefinite"/></circle>
+          <circle cx="600" cy="250" r="1.5" fill="#00c8ff" opacity="0.6"><animate attributeName="opacity" values="0.35;0.85;0.35" dur="3.6s" repeatCount="indefinite"/></circle>
+          <circle cx="100" cy="350" r="1.5" fill="#00ee77" opacity="0.6"><animate attributeName="opacity" values="0.4;0.85;0.4" dur="4.4s" repeatCount="indefinite"/></circle>
+          <circle cx="350" cy="600" r="1.2" fill="#00c8ff" opacity="0.55"><animate attributeName="opacity" values="0.3;0.75;0.3" dur="5.2s" repeatCount="indefinite"/></circle>
+          <circle cx="250" cy="100" r="1.8" fill="#00c8ff" opacity="0.6"><animate attributeName="opacity" values="0.35;0.85;0.35" dur="3.3s" repeatCount="indefinite"/></circle>
+          <circle cx="500" cy="100" r="1.3" fill="#00ee77" opacity="0.55"><animate attributeName="opacity" values="0.3;0.8;0.3" dur="4.7s" repeatCount="indefinite"/></circle>
+          <circle cx="620" cy="380" r="1.5" fill="#a855f7" opacity="0.5"><animate attributeName="opacity" values="0.3;0.75;0.3" dur="5.1s" repeatCount="indefinite"/></circle>
+          <circle cx="350" cy="350" r="160" fill="url(#core-bg)" stroke="rgba(0,220,255,0.6)" stroke-width="4"/>
+          <circle cx="350" cy="350" r="152" fill="none" stroke="rgba(0,220,255,0.35)" stroke-width="1.5"/>
+          <!-- Breathing center glow -->
+          <circle cx="350" cy="350" r="130" fill="rgba(0,200,255,0.06)" id="coreBreath" class="core-breath">
+            <animate attributeName="r" values="133;124;133" dur="3s" repeatCount="indefinite"/>
+            <animate attributeName="fill" values="rgba(0,220,255,0.1);rgba(0,200,255,0.03);rgba(0,220,255,0.1)" dur="3s" repeatCount="indefinite"/>
+          </circle>
+          <circle cx="350" cy="350" r="95" fill="rgba(0,180,255,0.04)" id="coreBreathInner">
+            <animate attributeName="r" values="100;90;100" dur="3s" repeatCount="indefinite"/>
+            <animate attributeName="fill" values="rgba(0,200,255,0.08);rgba(0,180,255,0.02);rgba(0,200,255,0.08)" dur="3s" repeatCount="indefinite"/>
+          </circle>
+          <text x="350" y="340" text-anchor="middle" fill="#f0f8ff" font-size="76" font-weight="200" letter-spacing="20" font-family="Segoe UI, system-ui, sans-serif" filter="url(#glow-xl)">LEAH</text>
+          <text x="350" y="388" text-anchor="middle" fill="#00d8ff" font-size="15" letter-spacing="12" font-family="Segoe UI, system-ui, sans-serif" filter="url(#glow-lg)" id="hudStatus">OBSERVING</text>
+          <!-- MEMORY - top center (270°) -->
+          <g id="ringMemory" class="hud-node" role="button" tabindex="0" aria-label="Memory: unknown" transform="translate(350,70)">
+            <circle r="60" fill="rgba(6,14,28,0.85)" stroke="rgba(168,85,247,0.7)" stroke-width="3" filter="url(#glow-xl)"/>
+            <circle r="50" fill="none" stroke="rgba(168,85,247,0.45)" stroke-width="1.5"/>
+            <circle r="30" fill="rgba(168,85,247,0.2)" stroke="rgba(168,85,247,0.7)" stroke-width="3"/>
+            <text y="7" text-anchor="middle" fill="#a855f7" font-size="22" filter="url(#glow-md)">&#x1F9E0;</text>
+            <text y="82" text-anchor="middle" fill="#6a8aa8" font-size="11" letter-spacing="2" font-family="Segoe UI, system-ui, sans-serif">MEMORY</text>
+          </g>
+          <!-- VOICE - top right (330°) -->
+          <g id="ringVoice" class="hud-node" role="button" tabindex="0" aria-label="Voice: unknown" transform="translate(592,210)">
+            <circle r="60" fill="rgba(6,14,28,0.85)" stroke="rgba(0,200,255,0.7)" stroke-width="3" filter="url(#glow-xl)"/>
+            <circle r="50" fill="none" stroke="rgba(0,200,255,0.45)" stroke-width="1.5"/>
+            <circle r="30" fill="rgba(0,200,255,0.2)" stroke="rgba(0,200,255,0.7)" stroke-width="3"/>
+            <text y="7" text-anchor="middle" fill="#00c8ff" font-size="22" filter="url(#glow-md)">&#x1F3A4;</text>
+            <text y="82" text-anchor="middle" fill="#6a8aa8" font-size="11" letter-spacing="2" font-family="Segoe UI, system-ui, sans-serif">VOICE</text>
+          </g>
+          <!-- CONTINUITY - bottom right (30°) -->
+          <g id="ringContinuity" class="hud-node" role="button" tabindex="0" aria-label="Continuity: unknown" transform="translate(592,490)">
+            <circle r="60" fill="rgba(6,14,28,0.85)" stroke="rgba(0,200,255,0.7)" stroke-width="3" filter="url(#glow-xl)"/>
+            <circle r="50" fill="none" stroke="rgba(0,200,255,0.45)" stroke-width="1.5"/>
+            <circle r="30" fill="rgba(0,200,255,0.2)" stroke="rgba(0,200,255,0.7)" stroke-width="3"/>
+            <text y="7" text-anchor="middle" fill="#00c8ff" font-size="22" filter="url(#glow-md)">&#x1F465;</text>
+            <text y="82" text-anchor="middle" fill="#6a8aa8" font-size="11" letter-spacing="2" font-family="Segoe UI, system-ui, sans-serif">CONTINUITY</text>
+          </g>
+          <!-- PERSONA - bottom center (90°) -->
+          <g id="ringPersona" class="hud-node" role="button" tabindex="0" aria-label="Persona: unknown" transform="translate(350,630)">
+            <circle r="60" fill="rgba(6,14,28,0.85)" stroke="rgba(255,170,51,0.7)" stroke-width="3" filter="url(#glow-xl)"/>
+            <circle r="50" fill="none" stroke="rgba(255,170,51,0.45)" stroke-width="1.5"/>
+            <circle r="30" fill="rgba(255,170,51,0.2)" stroke="rgba(255,170,51,0.7)" stroke-width="3"/>
+            <text y="7" text-anchor="middle" fill="#ffaa33" font-size="22" filter="url(#glow-md)">&#x1F464;</text>
+            <text y="82" text-anchor="middle" fill="#6a8aa8" font-size="11" letter-spacing="2" font-family="Segoe UI, system-ui, sans-serif">PERSONA</text>
+          </g>
+          <!-- STATE - bottom left (150°) -->
+          <g id="ringState" class="hud-node" role="button" tabindex="0" aria-label="State: unknown" transform="translate(108,490)">
+            <circle r="60" fill="rgba(6,14,28,0.85)" stroke="rgba(0,200,255,0.7)" stroke-width="3" filter="url(#glow-xl)"/>
+            <circle r="50" fill="none" stroke="rgba(0,200,255,0.45)" stroke-width="1.5"/>
+            <circle r="30" fill="rgba(0,200,255,0.2)" stroke="rgba(0,200,255,0.7)" stroke-width="3"/>
+            <text y="7" text-anchor="middle" fill="#00c8ff" font-size="22" filter="url(#glow-md)">&#x1F4BE;</text>
+            <text y="82" text-anchor="middle" fill="#6a8aa8" font-size="11" letter-spacing="2" font-family="Segoe UI, system-ui, sans-serif">STATE</text>
+          </g>
+          <!-- NOVA - top left (210°) -->
+          <g id="ringNova" class="hud-node" role="button" tabindex="0" aria-label="Nova runtime: unknown" transform="translate(108,210)">
+            <circle r="60" fill="rgba(6,14,28,0.85)" stroke="rgba(0,200,255,0.7)" stroke-width="3" filter="url(#glow-xl)"/>
+            <circle r="50" fill="none" stroke="rgba(0,200,255,0.45)" stroke-width="1.5"/>
+            <circle r="30" fill="rgba(0,200,255,0.2)" stroke="rgba(0,200,255,0.7)" stroke-width="3"/>
+            <text y="7" text-anchor="middle" fill="#00c8ff" font-size="22" filter="url(#glow-md)">&#x1F441;</text>
+            <text y="82" text-anchor="middle" fill="#6a8aa8" font-size="11" letter-spacing="2" font-family="Segoe UI, system-ui, sans-serif">NOVA</text>
+          </g>
+        </svg>
+      </div>
     </main>
 
-    <aside class="context-rail">
-      <section class="context-panel">
-        <div class="panel-title">What Nova Is Doing</div>
-        <p id="activityHeadline" class="context-lead">Nova is idle and waiting for the next turn.</p>
-        <div id="activityDetail" class="context-detail">Nova is ready for your next file, question, or signal.</div>
-      </section>
-
-      <section class="context-panel">
-        <div class="panel-title">What You Shared</div>
-        <p class="panel-copy">Files and camera captures stay visible here until you hand them to Nova in a turn.</p>
-        <ul id="stagedList" class="staged-list"></ul>
-      </section>
-
-      <section class="context-panel">
-        <div class="panel-title">Live Sensing</div>
-        <div class="media-stack">
-          <video id="cameraPreview" class="camera-preview" autoplay playsinline muted></video>
-          <canvas id="cameraCanvas" hidden></canvas>
-          <div id="cameraEmpty" class="camera-empty">Camera preview will appear here when enabled.</div>
+    <aside class="right-rail">
+      <div class="panel">
+        <div class="panel-head">
+          <span class="panel-head-icon">&#9672;</span>
+          <span class="panel-head-title">CURRENT FOCUS</span>
+          <span class="panel-head-badge" id="focusBadge">OPERATOR</span>
         </div>
-        <div id="transcriptBox" class="transcript-box">Voice transcript will appear here when Nova is listening.</div>
-      </section>
+        <div class="focus-list">
+          <div class="focus-item"><span class="focus-key">Task</span><span class="focus-val" id="focusTask">Monitoring conversation</span></div>
+          <div class="focus-item"><span class="focus-key">Context</span><span class="focus-val" id="focusContext">Project workspace</span></div>
+          <div class="focus-item"><span class="focus-key">Memory</span><span class="focus-val" id="focusMemory">Retrieval active</span></div>
+          <div class="focus-item"><span class="focus-key">Voice</span><span class="focus-val" id="focusVoice">Ready</span></div>
+          <div class="focus-item"><span class="focus-key">Continuity</span><span class="focus-val" id="focusContinuity">Maintaining session</span></div>
+          <div class="focus-item"><span class="focus-key">System</span><span class="focus-val" id="focusSystem">All systems nominal</span></div>
+        </div>
+      </div>
+      <div class="panel">
+        <div class="panel-head">
+          <span class="panel-head-icon">&#9671;</span>
+          <span class="panel-head-title">EVIDENCE</span>
+          <span class="panel-head-badge live">LIVE</span>
+        </div>
+        <div class="evidence-list" id="evidenceFeed">
+          <div class="evidence-item"><span class="evidence-text">System initialized</span><span class="evidence-time">now</span></div>
+        </div>
+      </div>
+      <div class="right-footer">CONTEXT<br>CREATES<br>POSSIBILITY</div>
     </aside>
+  </div>
+
+  <div class="input-bar">
+    <form id="composerForm" class="input-pill">
+      <button id="btnUpload" type="button" class="input-btn" title="Attach file">
+        <svg viewBox="0 0 24 24"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
+      </button>
+      <textarea id="messageInput" rows="1" placeholder="Talk to Leah..."></textarea>
+      <button id="btnMic" type="button" class="input-btn" title="Voice input">
+        <svg viewBox="0 0 24 24"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/></svg>
+      </button>
+      <button id="btnVoice" type="button" class="input-btn" title="Toggle voice output" aria-pressed="true">
+        <svg viewBox="0 0 24 24"><path d="M11 5 6 9H2v6h4l5 4V5z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M18.5 5.5a9 9 0 0 1 0 13"/></svg>
+      </button>
+      <label class="voice-tone-control" title="Choose Leah's voice tone">
+        <span class="sr-only">Voice tone</span>
+        <select id="voiceTone" aria-label="Voice tone">
+          <option value="friendly">Friendly</option>
+          <option value="formal">Formal</option>
+          <option value="casual">Casual</option>
+          <option value="professional">Professional</option>
+          <option value="empathetic">Empathetic</option>
+          <option value="enthusiastic">Enthusiastic</option>
+        </select>
+      </label>
+      <label class="voice-tone-control voice-choice-control" title="Choose browser speech voice">
+        <span class="sr-only">Speech voice</span>
+        <select id="voiceChoice" aria-label="Speech voice">
+          <option value="">System default</option>
+        </select>
+      </label>
+      <button id="btnSend" type="submit" class="input-send" title="Send">
+        <svg viewBox="0 0 24 24"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+      </button>
+    </form>
+  </div>
+
+  <div class="sr-only" aria-hidden="true">
+    <div id="presenceThinking"></div>
+    <div id="presenceListening"></div>
+    <div id="presenceVoice"></div>
+    <div id="presenceCamera"></div>
+    <div id="presenceMood"></div>
+    <div id="presenceUploads"></div>
+    <div id="sessionLabel"></div>
+    <div id="userLabel"></div>
+    <div id="modeLabel"></div>
+    <div id="moodLabel"></div>
+    <div id="welcomeUser"></div>
+    <div id="activityDetail"></div>
+    <div id="heroState"></div>
+    <div id="heroInputs"></div>
+    <div id="pulseRuntime"></div>
+    <div id="pulseQueue"></div>
+    <div id="pulseSearch"></div>
+    <div id="pulseMaintenance"></div>
+    <div id="pulseTask"></div>
+    <div id="presenceHealth"></div>
+    <div id="headerPresenceHealth"></div>
+    <div id="headerPresenceThinking"></div>
+    <div id="headerPresenceListening"></div>
+    <div id="headerPresenceVoice"></div>
+    <div id="headerPresenceCamera"></div>
+    <div id="headerPresenceMood"></div>
+    <div id="activityHeadline"></div>
+    <div id="stagedList"></div>
+    <div id="transcriptBox"></div>
+    <div id="cameraPreview"></div>
+    <div id="cameraCanvas"></div>
+    <div id="cameraEmpty"></div>
+    <div id="sensingDock"></div>
+    <div id="chat"></div>
   </div>
 
   <script>
     window.__LEAH_CONFIG__ = {
-      healthUrl: '/api/health',
-      controlStatusUrl: '',
-      chatUrl: '/api/chat',
-      chatHistoryUrl: '/api/chat/history',
-      chatResumeUrl: '/api/chat/resume',
-      chatLoginUrl: '/api/chat/login',
-      chatLogoutUrl: '/api/chat/logout',
-      uploadUrl: '/api/chat/upload'
+      healthUrl: "/api/health",
+      controlStatusUrl: "/api/leah/pulse",
+      chatUrl: "/api/chat",
+      chatHistoryUrl: "/api/chat/history",
+      chatResumeUrl: "/api/chat/resume",
+      chatLoginUrl: "/api/chat/login",
+      chatLogoutUrl: "/api/chat/logout",
+      uploadUrl: "/api/chat/upload"
     };
+
+    // Generate tick marks for the SVG
+    (function() {
+      var svg = document.querySelector('.hud-svg');
+      if (!svg) return;
+      var ns = 'http://www.w3.org/2000/svg';
+      var cx = 350, cy = 350;
+
+      // Outer ticks - 72 around r=335
+      var outerTicks = document.getElementById('outer-ticks');
+      if (outerTicks) {
+        for (var i = 0; i < 96; i++) {
+          var angle = i * 3.75;
+          var rad = angle * Math.PI / 180;
+          var isMajor = i % 8 === 0;
+          var isMed = i % 4 === 0;
+          var r1 = 332;
+          var r2 = isMajor ? 315 : isMed ? 320 : 326;
+          var line = document.createElementNS(ns, 'line');
+          line.setAttribute('x1', cx + Math.sin(rad) * r1);
+          line.setAttribute('y1', cy - Math.cos(rad) * r1);
+          line.setAttribute('x2', cx + Math.sin(rad) * r2);
+          line.setAttribute('y2', cy - Math.cos(rad) * r2);
+          line.setAttribute('stroke', '#00c8ff');
+          line.setAttribute('stroke-width', isMajor ? '2' : isMed ? '1' : '0.6');
+          line.setAttribute('opacity', isMajor ? '0.8' : isMed ? '0.55' : '0.35');
+          outerTicks.appendChild(line);
+        }
+      }
+
+      // Mid ticks - 120 around r=260
+      var midTicks = document.getElementById('mid-ticks');
+      if (midTicks) {
+        for (var i = 0; i < 120; i++) {
+          var angle = i * 3;
+          var rad = angle * Math.PI / 180;
+          var isMajor = i % 10 === 0;
+          var isMed = i % 5 === 0;
+          var r1 = 257;
+          var r2 = isMajor ? 246 : isMed ? 250 : 254;
+          var line = document.createElementNS(ns, 'line');
+          line.setAttribute('x1', cx + Math.sin(rad) * r1);
+          line.setAttribute('y1', cy - Math.cos(rad) * r1);
+          line.setAttribute('x2', cx + Math.sin(rad) * r2);
+          line.setAttribute('y2', cy - Math.cos(rad) * r2);
+          var colorIdx = Math.floor(i / 10) % 3;
+          var color = colorIdx === 0 ? '#00c8ff' : colorIdx === 1 ? '#0088cc' : '#8855dd';
+          line.setAttribute('stroke', color);
+          line.setAttribute('stroke-width', isMajor ? '2' : isMed ? '1.2' : '0.6');
+          line.setAttribute('opacity', isMajor ? '0.75' : isMed ? '0.5' : '0.3');
+          midTicks.appendChild(line);
+        }
+      }
+
+      // Barcode - 180 radial lines between r=195 and r=255
+      var barcode = document.getElementById('barcode');
+      if (barcode) {
+        for (var i = 0; i < 180; i++) {
+          var angle = i * 2;
+          var rad = angle * Math.PI / 180;
+          var h = 5 + Math.random() * 20;
+          var r1 = 198;
+          var r2 = r1 + h;
+          var line = document.createElementNS(ns, 'line');
+          line.setAttribute('x1', cx + Math.sin(rad) * r1);
+          line.setAttribute('y1', cy - Math.cos(rad) * r1);
+          line.setAttribute('x2', cx + Math.sin(rad) * r2);
+          line.setAttribute('y2', cy - Math.cos(rad) * r2);
+          line.setAttribute('stroke', Math.random() > 0.7 ? '#00ee77' : '#00c8ff');
+          line.setAttribute('stroke-width', '2');
+          line.setAttribute('opacity', 0.25 + Math.random() * 0.45);
+          barcode.appendChild(line);
+        }
+      }
+    })();
   </script>
-  <script src="/static/leah_fx.js?v={{LEAH_FX_JS_VERSION}}"></script>
   <script src="/static/leah.js?v={{LEAH_JS_VERSION}}"></script>
+  <script src="/static/leah_fx.js?v={{LEAH_JS_VERSION}}"></script>
 </body>
 </html>

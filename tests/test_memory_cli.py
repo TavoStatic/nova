@@ -4,9 +4,23 @@ import sys
 import unittest
 import tempfile
 from pathlib import Path
+from unittest import mock
+
+import requests
+
+import memory
 
 
 class TestMemoryCLI(unittest.TestCase):
+    def test_offline_embedding_fallback_is_deterministic(self):
+        with mock.patch.object(memory.requests, "post", side_effect=requests.ConnectionError("offline")):
+            first = memory.embed("offline-memory-check")
+            second = memory.embed("offline-memory-check")
+
+        self.assertEqual(first, second)
+        self.assertEqual(len(first), 32)
+        self.assertGreater(memory.vec_norm(first), 0.0)
+
     def test_add_and_recall(self):
         py = sys.executable
         with tempfile.TemporaryDirectory() as tmp:

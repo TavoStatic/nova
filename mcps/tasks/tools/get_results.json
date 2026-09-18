@@ -1,6 +1,6 @@
 {
   "name": "get_results",
-  "description": "Get recent execution results for an automation (by `task_id` from `automation_create` / `automation_list`). Use this when the user asks about automation or task results, what a task found, or wants to check its output.",
+  "description": "Get recent execution results for an automation (by `task_id` from `automation_create` / `automation_list`). Use this when the user asks about automation or task results, what a task found, or wants to check its output — including after `automation_run_now` queued a test run.",
   "inputSchema": {
     "type": "object",
     "properties": {

@@ -1,5 +1,6 @@
 ﻿# Runtime artifacts - never commit these
 runtime/
+runtime_archive/
 updates/
 logs/
 memory/
@@ -31,12 +32,20 @@ codex_probe_*.sqlite3
 codex_probe_*.sqlite3-journal
 probe_sqlite_*.sqlite
 probe_sqlite_*.sqlite-journal
+compare.js
+screenshot.js
+smoke_test.ps1
+comparison_*.png
+leah_screenshot.png
+hud_instrument.svg
+node_modules/
+package.json
+package-lock.json
 runtime_probe_cli_ledger/
 _handle_commands_current.txt
 _run_loop_current.txt
 knowledge/packs/test-pack*/
 knowledge/packs/test-pack_*/
-knowledge/peims/
 docs/archive/
 This_is_nova
 tests_to_review.txt
@@ -70,23 +79,12 @@ htmlcov/
 backpacks/*
 !backpacks/.gitkeep
 
-# Ed-Fi service layer ships with the backpack, not with Nova core
-services/edfi/
-
 # Internal development artifacts — not for public repo
 terminals/
 agent-tools/
 data_sources/
 codex_audit.txt
 nova_grok.md
-docs/NOVA_EDFI_CORE_V1.html
-
-# Ed-Fi service files ship with the backpack
-tools/edfi_tool.py
-scripts/run_edfi_*.py
-scripts/_checklist_edfi_gates.py
-scripts/demo_edfi_core_lifecycle.py
-tests/test_edfi_*.py
 
 # Internal audit / health snapshots
 NOVA_CODE_SCAN_*.md
@@ -97,4 +95,3 @@ docs/FUNCTION_INDEX.md
 docs/TEST_INDEX.md
 
 # Internal planning documents
-EdFi_Backpack*.docx

@@ -792,7 +792,7 @@ def build_default_live_scenario_families() -> list[LiveSimulationFamily]:
                                 "subject": "web_research",
                                 "query": "state education data attendance",
                                 "result_count": 2,
-                                "urls": ["https://tea.texas.gov/a", "https://tea.texas.gov/b"],
+                                "urls": ["https://example.test/a", "https://example.test/b"],
                             },
                         )
                     ],
@@ -810,7 +810,7 @@ def build_default_live_scenario_families() -> list[LiveSimulationFamily]:
                                 "subject": "web_research",
                                 "query": "state education data attendance",
                                 "result_count": 2,
-                                "urls": ["https://tea.texas.gov/a", "https://tea.texas.gov/b"],
+                                "urls": ["https://example.test/a", "https://example.test/b"],
                             },
                         )
                     ],
@@ -828,7 +828,7 @@ def build_default_live_scenario_families() -> list[LiveSimulationFamily]:
                                 "subject": "web_research",
                                 "query": "state education data attendance",
                                 "result_count": 2,
-                                "urls": ["https://tea.texas.gov/a", "https://tea.texas.gov/b"],
+                                "urls": ["https://example.test/a", "https://example.test/b"],
                             },
                             assistant_reply="I found more sources. Type web continue to keep going.",
                         )

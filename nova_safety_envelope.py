@@ -534,6 +534,14 @@ def promote_or_quarantine(definition_path: str | Path, *, run_full_regression: b
         status = "disabled"
     elif mode == "observe":
         status = "observed_review" if result.get("review_required") else ("observed_pass" if result.get("passed") else "observed_fail")
+    elif not result.get("passed"):
+        quarantine_root = Path(str(cfg.get("quarantine_root") or QUARANTINE_ROOT))
+        quarantine_root.mkdir(parents=True, exist_ok=True)
+        target = quarantine_root / path.name
+        if not _same_path(path, target):
+            shutil.copy2(path, target)
+        status = "quarantined"
+        target_path = str(target)
     elif result.get("review_required"):
         pending_root = Path(str(cfg.get("pending_review_root") or PENDING_REVIEW_ROOT))
         pending_root.mkdir(parents=True, exist_ok=True)
@@ -542,20 +550,12 @@ def promote_or_quarantine(definition_path: str | Path, *, run_full_regression: b
             shutil.copy2(path, target)
         status = "pending_review"
         target_path = str(target)
-    elif result.get("passed"):
+    else:
         PROMOTED_DEFINITIONS_ROOT.mkdir(parents=True, exist_ok=True)
         target = PROMOTED_DEFINITIONS_ROOT / path.name
         if not _same_path(path, target):
             shutil.copy2(path, target)
         status = "promoted"
-        target_path = str(target)
-    else:
-        quarantine_root = Path(str(cfg.get("quarantine_root") or QUARANTINE_ROOT))
-        quarantine_root.mkdir(parents=True, exist_ok=True)
-        target = quarantine_root / path.name
-        if not _same_path(path, target):
-            shutil.copy2(path, target)
-        status = "quarantined"
         target_path = str(target)
 
     if managed_source and target_path:
@@ -586,6 +586,64 @@ def promote_or_quarantine(definition_path: str | Path, *, run_full_regression: b
     output = dict(result)
     output["status"] = status
     output["target_path"] = target_path
+    return output
+
+
+def operator_accept_pending_review(definition_path: str | Path, *, run_full_regression: bool = False) -> dict[str, Any]:
+    """Human veto: promote a pending item that already passed envelope gates."""
+    path = Path(definition_path)
+    cfg = policy_safety_envelope()
+    pending_root = Path(str(cfg.get("pending_review_root") or PENDING_REVIEW_ROOT))
+    if not path.exists():
+        return {"ok": False, "status": "missing", "file": path.name, "path": str(path)}
+    if not _same_path(path.parent, pending_root):
+        return {"ok": False, "status": "not_pending", "file": path.name, "path": str(path)}
+
+    result = evaluate_promotion_contract(path, run_full_regression=run_full_regression)
+    if not result.get("passed"):
+        output = dict(result)
+        output["ok"] = False
+        output["status"] = "refused_failed_gates"
+        output["target_path"] = ""
+        return output
+
+    PROMOTED_DEFINITIONS_ROOT.mkdir(parents=True, exist_ok=True)
+    target = PROMOTED_DEFINITIONS_ROOT / path.name
+    if not _same_path(path, target):
+        shutil.copy2(path, target)
+        try:
+            path.unlink()
+        except Exception:
+            pass
+
+    reasons = list(result.get("reasons") or [])
+    if "operator_accepted_human_review" not in reasons:
+        reasons.append("operator_accepted_human_review")
+    audit_row = {
+        "ts": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "file": path.name,
+        "path": str(path),
+        "fingerprint": str(result.get("fingerprint") or ""),
+        "mode": str(cfg.get("mode") or "observe"),
+        "status": "promoted",
+        "target_path": str(target),
+        "passed": True,
+        "review_required": False,
+        "family_id": str(result.get("family_id") or ""),
+        "variation_id": str(result.get("variation_id") or ""),
+        "reasons": reasons,
+        "metrics": dict(result.get("metrics") or {}),
+        "gates": dict(result.get("gates") or {}),
+        "operator_accepted": True,
+    }
+    _append_audit(audit_row)
+    output = dict(result)
+    output["ok"] = True
+    output["status"] = "promoted"
+    output["target_path"] = str(target)
+    output["review_required"] = False
+    output["reasons"] = reasons
+    output["operator_accepted"] = True
     return output
 
 

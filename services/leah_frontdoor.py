@@ -11,26 +11,6 @@ from typing import Any, Callable
 class LeahFrontdoorService:
     """Own LEAH front-door asset rendering, ingest, and recent handoff context."""
 
-    _TEXT_SUFFIXES = {
-        ".txt",
-        ".md",
-        ".json",
-        ".csv",
-        ".tsv",
-        ".py",
-        ".ps1",
-        ".js",
-        ".html",
-        ".css",
-        ".yml",
-        ".yaml",
-        ".toml",
-        ".ini",
-        ".xml",
-        ".sql",
-        ".log",
-    }
-
     def __init__(
         self,
         *,
@@ -207,53 +187,6 @@ class LeahFrontdoorService:
         stage = str(payload.get("stage") or "").strip().lower()
         return items[: self._upload_max_items], stage
 
-    def _attachment_intent(self, message: str, attachments: list[dict]) -> bool:
-        usable = [dict(item or {}) for item in list(attachments or []) if isinstance(item, dict)]
-        if not usable:
-            return False
-        normalized = " ".join(str(message or "").strip().lower().split())
-        if not normalized:
-            return True
-        cues = (
-            "read it",
-            "read this",
-            "can you read",
-            "can you see",
-            "look at it",
-            "look at this",
-            "inspect it",
-            "inspect this",
-            "review it",
-            "review this",
-            "summarize it",
-            "summarize this",
-            "what did i upload",
-            "did you get",
-            "open it",
-            "open this",
-            "can you open",
-            "what do you see",
-        )
-        return any(cue in normalized for cue in cues)
-
-    def _text_preview(self, path_text: str) -> str:
-        path = Path(str(path_text or "").strip())
-        if not path.exists() or not path.is_file():
-            return ""
-        suffix = path.suffix.lower()
-        if suffix not in self._TEXT_SUFFIXES:
-            return ""
-        try:
-            text = path.read_text(encoding="utf-8", errors="replace")
-        except Exception:
-            return ""
-        snippet = " ".join(text.lstrip("\ufeff").strip().split())
-        if not snippet:
-            return ""
-        if len(snippet) > 280:
-            return f"{snippet[:277]}..."
-        return snippet
-
     def maybe_answer_attachment_turn(
         self,
         message: str,
@@ -262,34 +195,6 @@ class LeahFrontdoorService:
         recent_items: list[dict] | None = None,
         recent_stage: str = "",
     ) -> str | None:
-        usable = [dict(item or {}) for item in list(attachments or []) if isinstance(item, dict)]
-        fallback_items = [dict(item or {}) for item in list(recent_items or []) if isinstance(item, dict)]
-        active_items = usable or fallback_items
-        if not self._attachment_intent(message, active_items):
-            return None
-        first = active_items[0]
-        total = len(active_items)
-        name = str(first.get("original_name") or first.get("name") or "item").strip() or "item"
-        source = str(first.get("source") or "upload").strip() or "upload"
-        mime = str(first.get("mime") or "").strip()
-        path_text = str(first.get("path") or "").strip()
-        preview = self._text_preview(path_text)
-        if usable:
-            header = f"Yes. I have {total} staged item{'s' if total != 1 else ''} for this turn."
-        elif str(recent_stage or "").strip().lower() == "handoff":
-            header = f"Yes. I still have the last {total} item{'s' if total != 1 else ''} you handed to Nova in this session."
-        else:
-            header = f"Yes. I still have {total} staged item{'s' if total != 1 else ''} waiting in this session."
-        if preview:
-            return (
-                f"{header} The first one is {name} ({mime or 'text'}). "
-                f"I can read it directly. Preview: {preview}"
-            )
-        if mime.startswith("image/") or source == "camera":
-            return None
-        if path_text:
-            return (
-                f"{header} I have {name} staged locally at {path_text}. "
-                "Tell me whether you want a summary, review, extraction, or a closer inspection."
-            )
-        return f"{header} Tell me what you want me to do with it next."
+        """Attachments stay on Nova's chat spine. Do not invent a Leah-only reply."""
+        del message, attachments, recent_items, recent_stage
+        return None

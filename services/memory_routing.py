@@ -20,7 +20,6 @@ class MemoryRoutingService:
         "user_preferences",
         "developer_profile",
         "explicit_recall",
-        "general_context",
         "recent_learning_summary",
     }
 
@@ -72,11 +71,18 @@ class MemoryRoutingService:
         if any(
             cue in low
             for cue in (
-                "remember when",
+                "remember",
                 "recall",
-                "earlier memory",
-                "what did i say",
+                "earlier",
+                "before",
+                "what did",
+                "you said",
+                "we discussed",
                 "from memory",
+                "last time",
+                "again",
+                "same as",
+                "like before",
             )
         ):
             return "explicit_recall"
@@ -115,7 +121,13 @@ class MemoryRoutingService:
             return MemoryRecallPlan(False, "durable_user", normalized_purpose, "too_short")
 
         if normalized_purpose in {"general", "general_context"}:
+            original_purpose = normalized_purpose
             normalized_purpose = self.infer_purpose(text)
+            # If inference didn't find a specific purpose, preserve the caller's original
+            # purpose when it was already in the allowed set — don't silently downgrade
+            # "general_context" (allowed) to "general" (not allowed).
+            if normalized_purpose == "general" and original_purpose in self._ALLOWED_PURPOSES:
+                normalized_purpose = original_purpose
 
         if self.session_priority_active(conversation_state=conversation_state, pending_action=pending_action):
             if normalized_purpose in self._ALLOWED_PURPOSES:

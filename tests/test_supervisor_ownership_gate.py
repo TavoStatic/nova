@@ -88,7 +88,7 @@ class TestSupervisorOwnershipGate(unittest.TestCase):
                 "subject": "web_research",
                 "query": "state education data attendance",
                 "result_count": 2,
-                "urls": ["https://tea.texas.gov/a", "https://tea.texas.gov/b"],
+                "urls": ["https://example.test/a", "https://example.test/b"],
             }
         )
 

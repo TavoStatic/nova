@@ -1,4 +1,4 @@
-﻿import unittest
+import unittest
 
 from services.nova_reply_runtime import apply_reply_runtime_effects
 
@@ -10,15 +10,15 @@ class TestNovaReplyRuntime(unittest.TestCase):
         payload = apply_reply_runtime_effects(
             planner_decision="run_tool",
             tool="queue_status",
-            tool_result="Standing work queue\nhttps://tea.texas.gov/a",
+            tool_result="Standing work queue\nhttps://example.test/a",
             behavior_record_event_fn=events.append,
-            extract_urls_fn=lambda text: ["https://tea.texas.gov/a"] if "https://tea.texas.gov/a" in text else [],
+            extract_urls_fn=lambda text: ["https://example.test/a"] if "https://example.test/a" in text else [],
         )
 
         self.assertEqual(events, ["tool_route"])
         self.assertTrue(payload.get("context_updated"))
         self.assertIn("Standing work queue", str(payload.get("recent_tool_context") or ""))
-        self.assertEqual(payload.get("recent_web_urls"), ["https://tea.texas.gov/a"])
+        self.assertEqual(payload.get("recent_web_urls"), ["https://example.test/a"])
 
     def test_conversation_followup_does_not_infer_context_from_reply_text(self):
         events = []
@@ -27,10 +27,10 @@ class TestNovaReplyRuntime(unittest.TestCase):
             planner_decision="conversation_followup",
             tool="",
             tool_result="",
-            final_reply="Gathered: https://tea.texas.gov/a",
+            final_reply="Gathered: https://example.test/a",
             active_state={"kind": "retrieval", "subject": "student_data"},
             behavior_record_event_fn=events.append,
-            extract_urls_fn=lambda text: ["https://tea.texas.gov/a"] if "https://tea.texas.gov/a" in text else [],
+            extract_urls_fn=lambda text: ["https://example.test/a"] if "https://example.test/a" in text else [],
         )
 
         self.assertEqual(events, [])

@@ -28,9 +28,7 @@ class _FakeAttachmentContext:
         return [], ""
 
     def maybe_answer_attachment_turn(self, message, attachments, *, recent_items=None, recent_stage=""):
-        del recent_items, recent_stage
-        if message == "can you read it?":
-            return "Yes. I can read it directly."
+        del message, attachments, recent_items, recent_stage
         return None
 
     def compose_chat_message(self, message, attachments):
@@ -121,10 +119,16 @@ class TestNovaHttpRequestBindingService(unittest.TestCase):
         self.assertEqual(payload.get("session_id"), "upload123")
         self.assertEqual(attachment_context.remembered[0][2], "staged")
 
-    def test_handle_chat_request_direct_attachment_reply_uses_attachment_context(self):
+    def test_handle_chat_request_attachments_go_through_nova_spine(self):
         invalidations = []
-        appended_turns = []
         attachment_context = _FakeAttachmentContext()
+        seen = {}
+
+        def _process(session_id, message, user_id=""):
+            seen["session_id"] = session_id
+            seen["message"] = message
+            seen["user_id"] = user_id
+            return "spine-reply"
 
         code, payload = HTTP_REQUEST_BINDING_SERVICE.handle_chat_request(
             handler=object(),
@@ -139,23 +143,17 @@ class TestNovaHttpRequestBindingService(unittest.TestCase):
             normalize_user_id_fn=lambda user: str(user or "").strip(),
             request_user_id_fn=lambda *_args, **_kwargs: "runner",
             assert_session_owner_fn=lambda *_args, **_kwargs: (True, "owner_bound"),
-            process_chat_fn=lambda *_args, **_kwargs: "should not run",
+            process_chat_fn=_process,
             invalidate_control_status_cache_fn=lambda: invalidations.append("invalidated"),
             token_hex_fn=lambda _size: "unused",
             attachment_context_service=attachment_context,
-            append_session_turn_fn=lambda session_id, role, text: appended_turns.append((session_id, role, text)),
         )
 
         self.assertEqual(code, 200)
-        self.assertEqual(payload.get("reply"), "Yes. I can read it directly.")
+        self.assertEqual(payload.get("reply"), "spine-reply")
+        self.assertEqual(seen.get("session_id"), "attach123")
+        self.assertIn("ATTACHMENTS=1", str(seen.get("message") or ""))
         self.assertEqual(invalidations, ["invalidated"])
-        self.assertEqual(
-            appended_turns,
-            [
-                ("attach123", "user", "can you read it?"),
-                ("attach123", "assistant", "Yes. I can read it directly."),
-            ],
-        )
         self.assertEqual(attachment_context.remembered[0][2], "handoff")
 
     def test_handle_chat_request_from_runtime_resolves_scope(self):
@@ -180,6 +178,72 @@ class TestNovaHttpRequestBindingService(unittest.TestCase):
         self.assertEqual(code, 200)
         self.assertEqual(payload.get("reply"), f"{payload.get('session_id')}:hi nova:runner")
         self.assertEqual(invalidations, ["invalidated"])
+
+    def test_handle_chat_request_runs_emotional_state_and_voice_persona_services(self):
+        invalidations = []
+        emotion_updates = []
+
+        class FakeEmotionalStateService:
+            def update_state(self, text):
+                emotion_updates.append(text)
+            def get_instruction(self):
+                return "Emotional posture: Friendly and warm."
+
+        class FakeVoicePersonaService:
+            def process_response(self, reply, context_text=""):
+                return f"[Friendly] {reply}"
+
+        code, payload = HTTP_REQUEST_BINDING_SERVICE.handle_chat_request(
+            handler=object(),
+            qs={},
+            payload={"message": "hello Leah", "session_id": "emot123", "user_id": "runner"},
+            chat_login_auth_fn=lambda _handler: (True, "runner"),
+            normalize_user_id_fn=lambda user: str(user or "").strip(),
+            request_user_id_fn=lambda *_args, **_kwargs: "runner",
+            assert_session_owner_fn=lambda *_args, **_kwargs: (True, "owner_bound"),
+            process_chat_fn=lambda session_id, message, user_id="": "I am doing great!",
+            invalidate_control_status_cache_fn=lambda: invalidations.append("invalidated"),
+            token_hex_fn=lambda _size: "unused",
+            emotional_state_service=FakeEmotionalStateService(),
+            voice_persona_service=FakeVoicePersonaService(),
+        )
+
+        self.assertEqual(code, 200)
+        self.assertEqual(payload.get("reply"), "[Friendly] I am doing great!")
+        self.assertEqual(payload.get("emotional_instruction"), "Emotional posture: Friendly and warm.")
+        self.assertEqual(emotion_updates, ["hello Leah", "I am doing great!"])
+        self.assertEqual(invalidations, ["invalidated"])
+
+    def test_handle_chat_request_applies_selected_voice_tone(self):
+        selected = []
+
+        class FakeVoicePersonaService:
+            def select_persona(self, *, force=None):
+                selected.append(force)
+
+            def process_response(self, reply):
+                return reply
+
+        code, _payload = HTTP_REQUEST_BINDING_SERVICE.handle_chat_request(
+            handler=object(),
+            qs={},
+            payload={
+                "message": "hello Leah",
+                "session_id": "tone123",
+                "voice_persona": "empathetic",
+            },
+            chat_login_auth_fn=lambda _handler: (True, "runner"),
+            normalize_user_id_fn=lambda user: str(user or "").strip(),
+            request_user_id_fn=lambda *_args, **_kwargs: "runner",
+            assert_session_owner_fn=lambda *_args, **_kwargs: (True, "owner_bound"),
+            process_chat_fn=lambda _session_id, _message, user_id="": "reply",
+            invalidate_control_status_cache_fn=lambda: None,
+            token_hex_fn=lambda _size: "unused",
+            voice_persona_service=FakeVoicePersonaService(),
+        )
+
+        self.assertEqual(code, 200)
+        self.assertEqual(selected, ["empathetic"])
 
 
 if __name__ == "__main__":

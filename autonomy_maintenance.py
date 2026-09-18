@@ -14,8 +14,10 @@ NOVA_DOC:
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
+import sys
 import subprocess
 import time
 import urllib.error
@@ -26,6 +28,8 @@ from typing import Callable
 
 import kidney
 import nova_core
+from services.storage_watch import StorageWatchService as _StorageWatchService
+_STORAGE_WATCH_SERVICE = _StorageWatchService()
 import nova_safety_envelope
 import work_tree
 from nova_safety_envelope import select_patch_candidate_definition_paths
@@ -74,12 +78,15 @@ from services.regression_evidence import (
     regression_failure_active,
     regression_outcome_failed,
 )
+from services.regression_status_projection import project_canonical_status
+from services.regression_truth_registry import lanes_needing_observation
 from services.release_runtime_truth import (
     RELEASE_RUNTIME_TRUTH_SERVICE,
     build_release_runtime_truth_summary,
     enrich_release_status,
     evaluate_http_model_runtime_probe,
 )
+from services.gatekeeper import append_record as append_gatekeeper_record
 from services.release_status import RELEASE_STATUS_SERVICE
 from services.control_work_trees import CONTROL_WORK_TREES_SERVICE
 from services.core_thinning import build_core_thinning_brief as service_build_core_thinning_brief
@@ -89,8 +96,13 @@ from services.core_steward import build_core_steward_payload as service_build_co
 from services.nova_control_action_dispatcher import NOVA_CONTROL_ACTION_DISPATCHER, autonomy_advisory_action_types
 from services.nova_mission import NOVA_MISSION_SERVICE, NovaMissionService
 from services.nova_root_inventory import build_source_root_inventory_payload
-from services.data_pipeline_registry import build_pipeline_registry
-from services.pipeline_worker_supervision import ensure_pipeline_workers_for_ids, reconcile_pipeline_workers_for_ids
+from services.data_pipeline_registry import classify_pipeline_ids_for_workers
+from services.pipeline_worker_supervision import (
+    ensure_pipeline_workers_for_ids,
+    reconcile_pipeline_workers_for_ids,
+    runtime_pipeline_worker_ids,
+    stop_pipeline_workers_for_ids,
+)
 from services.runtime_control import RUNTIME_CONTROL_SERVICE
 from services.nova_runtime_context import AUTONOMY_ORCHESTRATOR_LEDGER_FILE
 from services.nova_runtime_context import OPERATOR_OUTBOX_FILE
@@ -151,6 +163,16 @@ STATE_FILE = RUNTIME_DIR / "autonomy_maintenance_state.json"
 MAINT_LOG = RUNTIME_DIR / "autonomy_maintenance.log"
 REGRESSION_STATUS_FILE = RUNTIME_DIR / "regression_status.json"
 REGRESSION_RUNNER = ROOT / "scripts" / "run_regression.py"
+REGRESSION_LANE_WORKER = ROOT / "scripts" / "regression_lane_worker.py"
+# Guard kills --once at 20 minutes. A 90-minute regression wait is how overnight
+# cycles die silent after stale_cli_tree_archive with no cycle_complete line.
+DAILY_REGRESSION_TIMEOUT_SEC = 4 * 60 * 60
+REGRESSION_LANE_TIMEOUT_SEC = {
+    "unit": DAILY_REGRESSION_TIMEOUT_SEC,
+    "behavior": DAILY_REGRESSION_TIMEOUT_SEC,
+    "integration": DAILY_REGRESSION_TIMEOUT_SEC,
+}
+REGRESSION_TRUTHS_PATH = RUNTIME_DIR / "regression" / "regression_truth.jsonl"
 AUTONOMY_ORCHESTRATOR_LEDGER = AUTONOMY_ORCHESTRATOR_LEDGER_FILE
 OPERATOR_OUTBOX = OPERATOR_OUTBOX_FILE
 RESTART_INTENT_PATH = RUNTIME_DIR / "restart_intent.json"
@@ -219,7 +241,6 @@ ACTIVE_WORK_TREE_EXECUTE_TOOLS = [
     LS,
     FIND,
     "pipeline",
-    "edfi_explore",
     "core_health",
     "core_thinning",
     GENERATED_QUEUE_RUN,
@@ -558,6 +579,33 @@ def _active_work_candidate_args_resolvable(candidate: dict) -> bool:
     return any(str(item or "").strip() for item in list(args or []))
 
 
+def _active_work_candidate_is_pickup_able(candidate: dict) -> bool:
+    """Planner may only pin a stem pickup will actually admit."""
+    next_step = candidate.get("next_step") if isinstance(candidate.get("next_step"), dict) else {}
+    action = str(next_step.get("action") or "").strip().lower()
+    if action and action != "execute":
+        return False
+    tree_id = str(candidate.get("tree_id") or "").strip()
+    branch_id = str(next_step.get("branch_id") or candidate.get("active_branch_id") or "").strip()
+    tool_name = _active_work_candidate_tool(candidate)
+    if not tree_id or not branch_id:
+        return False
+    try:
+        options = work_tree.list_autonomous_options(tree_id)
+    except Exception:
+        return False
+    for option in list(options or []):
+        if not isinstance(option, dict):
+            continue
+        if str(option.get("branch_id") or "").strip() != branch_id:
+            continue
+        option_tool = str(option.get("recommended_tool") or "").strip()
+        if tool_name and option_tool and option_tool != tool_name:
+            continue
+        return True
+    return False
+
+
 def _active_work_candidate_is_executable(candidate: dict) -> bool:
     tool_name = _active_work_candidate_tool(candidate)
     if tool_name not in ACTIVE_WORK_TREE_EXECUTE_TOOLS:
@@ -566,7 +614,7 @@ def _active_work_candidate_is_executable(candidate: dict) -> bool:
         return False
     if not _active_work_candidate_args_resolvable(candidate):
         return False
-    return True
+    return _active_work_candidate_is_pickup_able(candidate)
 
 
 def _active_work_candidate_climb_assessment(candidate: dict) -> dict:
@@ -628,6 +676,20 @@ def _active_work_candidate_branch(candidate: dict) -> dict:
     if tool_status == "failed" or not executable:
         if motion in {"", "moving", "not_started"}:
             motion = "stalled"
+    work_class = ""
+    source_type = ""
+    branch_id = str(next_step.get("branch_id") or candidate.get("active_branch_id") or "").strip()
+    if branch_id:
+        try:
+            live_branch = work_tree.get_branch(branch_id)
+            if live_branch is not None:
+                work_class = str(getattr(live_branch, "work_class", "") or "").strip()
+                source_type = str(getattr(live_branch, "source_type", "") or "").strip()
+        except Exception:
+            pass
+    family = str(progress.get("family_key") or "").strip()
+    if not family and (work_class or source_type):
+        family = f"{work_class}|{source_type}"
     return {
         "branch_id": str(next_step.get("branch_id") or candidate.get("active_branch_id") or candidate.get("tree_id") or ""),
         "title": str(next_step.get("branch_title") or candidate.get("active_branch_title") or candidate.get("title") or ""),
@@ -643,11 +705,13 @@ def _active_work_candidate_branch(candidate: dict) -> dict:
         "tree_id": str(candidate.get("tree_id") or ""),
         "tree_title": str(candidate.get("title") or ""),
         "executable": executable,
+        "work_class": work_class,
+        "source_type": source_type,
         "progress_percent": _safe_int(progress.get("percent"), 0),
         "progress_motion": motion,
         "progress_confidence": float(progress.get("confidence") or 0.0) if progress else 0.0,
         "progress_summary": str(progress.get("operator_summary") or "")[:240],
-        "progress_family": str(progress.get("family_key") or "")[:120],
+        "progress_family": family[:120],
     }
 
 
@@ -660,6 +724,10 @@ def _work_tree_pressure_truth(work_tree_state: dict) -> dict:
         return pressure
     for field, module_key in (
         ("open_task_count", "open_task_count"),
+        ("branch_count", "branch_count"),
+        ("tree_count", "tree_count"),
+        ("active_tree_count", "active_tree_count"),
+        ("complete_count", "complete_count"),
         ("working_count", "working_count"),
         ("blocked_branch_count", "blocked_count"),
         ("blocked_count", "blocked_count"),
@@ -730,6 +798,7 @@ def _work_tree_snapshot_for_orchestrator(work_tree_state: dict, active_work_cand
             0,
         ),
         "working_count": _safe_int(pressure.get("working_count"), 0),
+        "pending_count": _safe_int(pressure.get("pending_count"), 0),
         "blocked_count": _safe_int(pressure.get("blocked_branch_count"), 0),
         "observing_count": _safe_int(pressure.get("blocked_observing_count"), 0),
         "total_observing_count": _safe_int(pressure.get("observing_branch_count"), 0),
@@ -1262,6 +1331,12 @@ def _truth_evidence_for_mission(state: dict | None) -> dict:
         "last_regression_failed_tests": list(current_state.get("last_regression_failed_tests") or []),
         "last_regression_tail": str(current_state.get("last_regression_tail") or "")[:2000],
         "last_regression_returncode": int(current_state.get("last_regression_returncode", 0) or 0),
+        "last_regression_skip_reason": str(current_state.get("last_regression_skip_reason") or ""),
+        "last_regression_retry_eligible": bool(current_state.get("last_regression_retry_eligible", False)),
+        "last_regression_current_fingerprint": str(current_state.get("last_regression_current_fingerprint") or "")[:64],
+        "last_regression_lesson": dict(current_state.get("last_regression_lesson") or {})
+        if isinstance(current_state.get("last_regression_lesson"), dict)
+        else {},
         "release_runtime_truth": release_truth,
         "release_status": release_status,
         "root_closure_inventory": root_closure_inventory,
@@ -1434,7 +1509,7 @@ def _policy_snapshot_for_orchestrator() -> dict:
         "subconscious_triage_is_pressure": bool(mission_settings.get("subconscious_triage_is_pressure", False)),
         "generated_queue_backlog_is_pressure": bool(mission_settings.get("generated_queue_backlog_is_pressure", False)),
         "require_core_gate_for_green": bool(mission_settings.get("require_core_gate_for_green", True)),
-        "ingestion_suppress_ambient_on_hold": bool(mission_settings.get("ingestion_suppress_ambient_on_hold", True)),
+        "ingestion_suppress_ambient_on_hold": bool(mission_settings.get("ingestion_suppress_ambient_on_hold", False)),
         "sustained_watch_cycles": _safe_int(mission_settings.get("sustained_watch_cycles"), 6),
         "hold_block_actions": _autonomy_policy_list(
             mission_settings,
@@ -2425,6 +2500,39 @@ def _live_control_status_payload_local_first(fallback_payload: dict) -> dict:
     )
     merged["signal_ingestion_status_source"] = "local_first_with_http_surfaces"
     return _enrich_signal_ingestion_status_payload(merged, only_missing=True)
+
+
+def _storage_watch_state_payload(snapshot: dict) -> dict:
+    snap = dict(snapshot or {})
+    return {
+        "ts": _patch_queue_timestamp(),
+        "status": snap.get("status"),
+        "note": snap.get("note"),
+        "runtime_file_count": snap.get("runtime_file_count"),
+        "runtime_total_mb": round(float(snap.get("runtime_total_bytes") or 0) / (1024 * 1024), 1),
+        "release_stage_count": snap.get("release_stage_count"),
+        "kidney_snapshot_count": snap.get("kidney_snapshot_count"),
+    }
+
+
+def _apply_storage_watch_to_status_payload(payload: dict, snapshot: dict | None = None) -> dict:
+    result = dict(payload or {})
+    snap = dict(snapshot or {})
+    result["storage_watch_status"] = str(snap.get("status") or "")
+    result["storage_watch_note"] = str(snap.get("note") or "")
+    result["storage_watch_total_bytes"] = int(snap.get("total_bytes", 0) or 0)
+    result["storage_watch_watched_total_bytes"] = int(snap.get("watched_total_bytes", 0) or 0)
+    result["runtime_storage_total_bytes"] = int(snap.get("runtime_total_bytes", 0) or 0)
+    result["runtime_storage_file_count"] = int(snap.get("runtime_file_count", 0) or 0)
+    result["patch_snapshot_count"] = int(snap.get("patch_snapshot_count", 0) or 0)
+    result["kidney_snapshot_count"] = int(snap.get("kidney_snapshot_count", 0) or 0)
+    result["release_validation_extract_count"] = int(snap.get("release_validation_extract_count", 0) or 0)
+    result["release_validation_extract_bytes"] = int(snap.get("release_validation_extract_bytes", 0) or 0)
+    result["release_stage_count"] = int(snap.get("release_stage_count", 0) or 0)
+    result["release_stage_bytes"] = int(snap.get("release_stage_bytes", 0) or 0)
+    result["release_zip_count"] = int(snap.get("release_zip_count", 0) or 0)
+    result["release_zip_bytes"] = int(snap.get("release_zip_bytes", 0) or 0)
+    return result
 
 
 def _live_control_status_payload_for_signal_ingestion(fallback_payload: dict) -> dict:
@@ -4100,6 +4208,20 @@ def _skipped_maintenance_execution_payload(state: dict, state_key: str, reason: 
         "executed_count": 0,
         "reason": str(reason or "orchestrator_owns_execution"),
     }
+    if str(state_key or "") == "last_active_work_tree_cycle" and str(reason or "") == "orchestrator_owns_execution":
+        try:
+            from services.observation_spine import observe_quietly
+
+            observe_quietly(
+                source="mill",
+                operation="invoke",
+                subject="active_work_tree_cycle",
+                input_ref=str(reason or "skipped")[:160],
+                outcome="skipped",
+                reason_code=str(reason or "orchestrator_owns_execution")[:120],
+            )
+        except Exception:
+            pass
     state[state_key] = payload
     return payload
 
@@ -4234,6 +4356,29 @@ def _active_work_tree_cycle_for_execution_mode(
     if active_work_tree_cycle:
         state["last_active_work_tree_cycle"] = active_work_tree_cycle
         return active_work_tree_cycle
+    mill_skip_loop = False
+    try:
+        from services.observation_spine import trailing_mill_skip_loop
+
+        mill_skip_loop = trailing_mill_skip_loop()
+    except Exception:
+        mill_skip_loop = False
+    if mill_skip_loop:
+        ran = _run_active_work_tree_cycle(state)
+        try:
+            from services.observation_spine import observe_quietly
+
+            observe_quietly(
+                source="mill",
+                operation="invoke",
+                subject="active_work_tree_cycle",
+                input_ref=str(ran.get("status") or "ran")[:160],
+                outcome=str(ran.get("status") or "ok")[:80] or "ok",
+                reason_code="mill_skip_stop_run",
+            )
+        except Exception:
+            pass
+        return ran
     return _skipped_maintenance_execution_payload(
         state,
         "last_active_work_tree_cycle",
@@ -4261,7 +4406,7 @@ def _runtime_worker_loop_identity_live(worker_state: dict) -> bool:
     except Exception:
         return False
     joined_cmdline = " ".join(cmdline)
-    return "--loop" in cmdline and "autonomy_maintenance.py" in joined_cmdline
+    return ("--loop" in cmdline or "--once" in cmdline) and "autonomy_maintenance.py" in joined_cmdline
 
 
 def _clear_non_loop_runtime_worker_state(state: dict, *, timestamp_fn: Callable[[], str] | None = None) -> bool:
@@ -4522,8 +4667,15 @@ def _regression_lock_owner_alive() -> tuple[bool, str]:
     if owner_pid <= 0 or owner_pid == int(os.getpid()):
         return False, ""
     try:
-        os.kill(owner_pid, 0)
-    except OSError:
+        import psutil
+
+        if not psutil.pid_exists(owner_pid):
+            try:
+                lock_path.unlink()
+            except Exception:
+                pass
+            return False, ""
+    except Exception:
         return False, ""
     lanes = ", ".join(str(item) for item in list(payload.get("lanes") or []))
     started_at = str(payload.get("started_at") or "").strip()
@@ -4553,53 +4705,347 @@ def _host_regression_status_file_fresh(
     return bool(gate.get("ok"))
 
 
+def _regression_source_fingerprint() -> str:
+    """Fingerprint code and tests so a changed surface can retry after failure."""
+    digest = hashlib.sha256()
+    roots = (ROOT / "services", ROOT / "tests", ROOT / "scripts")
+    paths: list[Path] = []
+    for root in roots:
+        if not root.exists():
+            continue
+        paths.extend(path for path in root.rglob("*") if path.is_file() and "__pycache__" not in path.parts)
+    paths.extend((ROOT / name for name in ("autonomy_maintenance.py", "work_tree.py", "policy.json") if (ROOT / name).is_file()))
+    for path in sorted(set(paths), key=lambda item: str(item).lower()):
+        try:
+            digest.update(str(path.relative_to(ROOT)).replace("\\", "/").encode("utf-8"))
+            digest.update(path.read_bytes())
+        except OSError:
+            continue
+    return digest.hexdigest()
+
+
+def _regression_lesson(
+    *,
+    outcome: str,
+    fingerprint: str,
+    previous_fingerprint: str = "",
+    reason: str = "",
+    failed_tests: list[str] | None = None,
+    failed_lane: str = "",
+    tail: str = "",
+) -> dict:
+    changed = bool(previous_fingerprint and previous_fingerprint != fingerprint)
+    tests = [str(item).strip() for item in list(failed_tests or []) if str(item).strip()]
+    return {
+        "outcome": str(outcome or "unknown").strip().lower(),
+        "source_changed_since_previous_attempt": changed,
+        "observed_failed_lane": str(failed_lane or "").strip(),
+        "observed_failed_tests": tests[:24],
+        "observed_detail": str(tail or "").strip()[:2000],
+        "rail_reason": str(reason or "").strip(),
+        "next_action": (
+            "retry_regression_after_source_change"
+            if changed
+            else "hold_until_source_or_evidence_changes"
+        ),
+    }
+
+
+def _record_regression_gate_observation(state: dict, *, decision: str, reason: str) -> None:
+    lesson = dict(state.get("last_regression_lesson") or {})
+    if not lesson:
+        return
+    now = time.strftime("%Y-%m-%dT%H:%M:%S%z")
+    record = {
+        "gate_id": "daily_regression_retry",
+        "record_type": "gate_observation",
+        "status": "WATCH",
+        "purpose": "Prevent overlapping regression runs while allowing new evidence or changed code to justify reevaluation.",
+        "decision_context": {
+            "decision": decision,
+            "controlling_reason": reason,
+            "observed_at": now,
+        },
+        "evidence_before": [
+            {
+                "source": "runtime/autonomy_maintenance_state.json",
+                "claim": str(state.get("last_regression_status") or ""),
+                "source_timestamp": str(state.get("last_regression_at") or now),
+                "fingerprint": str(state.get("last_regression_current_fingerprint") or ""),
+                "authority": "runtime_truth_surface",
+            }
+        ],
+        "expected_effect": {
+            "claim": "Avoid duplicate regression work without freezing changed code or new evidence.",
+            "verification_source": "next regression outcome and source fingerprint",
+        },
+        "outcome": {
+            "classification": "retry_decision_observed",
+            "finding": str(lesson.get("observed_detail") or ""),
+            "gate_logic_fault": False,
+            "evidence_freshness_fault": reason == "same_failed_fingerprint",
+        },
+        "utility_verdict": {
+            "value": "unknown",
+            "verified_by": None,
+            "reason": "The rail outcome is recorded; usefulness requires a later accepted oracle.",
+        },
+        "assumption_state": {
+            "architecture_drift_detected": False,
+            "input_contract_drift_detected": False,
+            "stale_input_detected": reason == "same_failed_fingerprint",
+            "inactivity_used_as_evidence": False,
+        },
+        "lesson": {
+            "statement": str(lesson.get("next_action") or ""),
+            "proposed_resolution": {
+                "type": "regression_reevaluation",
+                "action": str(lesson.get("next_action") or ""),
+                "changes_authority": False,
+                "changes_policy": False,
+            },
+        },
+        "resolution_candidates": [
+            {"action": "retry_regression_after_source_change", "reason": "Source or evidence changed."},
+            {"action": "surface_operator_notice", "reason": "Freshness or usefulness remains unknown."},
+        ],
+        "verification_contract": {
+            "accepted_oracles": ["fresh_runtime_observation", "closure_event", "operator_confirmed_verdict"],
+            "model_assessment_is_evidence": False,
+            "model_role": "analyst_only",
+        },
+        "assessment_ttl": {"expires_if_unverified": True, "expired_state": "unknown"},
+        "retirement_contract": {"retire_on_inactivity": False, "retire_on_elapsed_time": False, "review_on_assumption_drift": True},
+        "automatic_policy_change": False,
+        "automatic_gate_retirement": False,
+    }
+    try:
+        append_gatekeeper_record(record)
+    except Exception:
+        pass
+
+
 def _run_daily_regression_if_due(state: dict) -> str:
     today = time.strftime("%Y-%m-%d")
-    if str(state.get("last_regression_date") or "") == today:
-        # Date alone is not enough: refresh when the on-disk gate is stale/missing.
-        if _host_regression_status_file_fresh():
-            return "daily_regression_skipped_already_ran"
-        # Fall through and re-run so release host gate can become green.
+    _prune_regression_worker_tracking()
+    if str(state.get("last_regression_date") or "") == today and _host_regression_status_file_fresh():
+        return "daily_regression_skipped_already_ran"
+
+    current_fingerprint = _regression_source_fingerprint()
+    previous_fingerprint = str(state.get("last_regression_fingerprint") or "")
+    missing = lanes_needing_observation(REGRESSION_TRUTHS_PATH, current_fingerprint)
+    if not missing:
+        _write_regression_projection(state, current_fingerprint)
+        return "daily_regression_skipped_no_lane_needs_observation"
+
+    lane = _next_regression_lane(state, missing, current_fingerprint)
+    if lane is None:
+        state["last_regression_skip_reason"] = "same_failed_fingerprint"
+        state["last_regression_retry_eligible"] = False
+        state["last_regression_current_fingerprint"] = current_fingerprint
+        state["last_regression_lesson"] = _regression_lesson(
+            outcome="skipped",
+            fingerprint=current_fingerprint,
+            previous_fingerprint=previous_fingerprint,
+            reason="same_failed_fingerprint",
+            tail="all pending lanes attempted today on unchanged source",
+        )
+        _record_regression_gate_observation(state, decision="block", reason="same_failed_fingerprint")
+        _append_log("daily_regression_skipped_already_attempted reason=same_failed_fingerprint")
+        return "daily_regression_skipped_already_attempted"
 
     # Pre-check lock before spawning. Dual --once cycles used to each block for up to
     # the full regression timeout waiting on a sibling, freezing the climb timer.
     lock_held, lock_detail = _regression_lock_owner_alive()
     if lock_held:
         state["last_regression_tail"] = lock_detail[:2000]
-        return "daily_regression_skipped_already_running"
-
-    cmd = [str(VENV_PY), str(REGRESSION_RUNNER), "all"]
-    proc = subprocess.run(
-        cmd,
-        cwd=str(ROOT),
-        capture_output=True,
-        text=True,
-        timeout=5400,
-        env=_validation_subprocess_env(),
-    )
-    output = ((proc.stdout or "") + "\n" + (proc.stderr or "")).strip()
-    # Lock contention is not a test failure — do not freeze mission as regression_failed.
-    if proc.returncode != 0 and "already running" in output.lower():
-        state["last_regression_tail"] = output[-2000:]
-        return "daily_regression_skipped_already_running"
-    summary = "OK" if proc.returncode == 0 else "FAILED"
-
-    synced = _sync_regression_status_from_file(state, status_path=REGRESSION_STATUS_FILE)
-    if not synced:
-        state["last_regression_date"] = today
-        state["last_regression_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
-        state["last_regression_status"] = summary
-        state["last_regression_returncode"] = int(proc.returncode)
-        state["last_regression_source"] = "scripts/run_regression.py"
-        state["last_regression_lanes"] = ["all"]
-        state["last_regression_failed_lane"] = ""
-        state["last_regression_failed_tests"] = []
-        state["last_regression_tail"] = output[-2000:]
-        state["last_regression_stale"] = regression_evidence_stale(
-            status_label=summary,
-            regression_date=today,
+        state["last_regression_skip_reason"] = "regression_lock_held"
+        state["last_regression_retry_eligible"] = False
+        state["last_regression_current_fingerprint"] = current_fingerprint
+        state["last_regression_lesson"] = _regression_lesson(
+            outcome="running",
+            fingerprint=current_fingerprint,
+            previous_fingerprint=previous_fingerprint,
+            reason="regression_lock_held",
+            tail=lock_detail,
         )
-    return f"daily_regression_{summary.lower()}"
+        _record_regression_gate_observation(state, decision="defer", reason="regression_lock_held")
+        return "daily_regression_skipped_already_running"
+
+    timeout_sec = int(REGRESSION_LANE_TIMEOUT_SEC.get(lane, DAILY_REGRESSION_TIMEOUT_SEC))
+    worker_log = _regression_worker_log(lane)
+    _append_log(
+        "daily_regression_lane_starting "
+        + f"lane={lane} timeout_sec={timeout_sec} worker={REGRESSION_LANE_WORKER.name}"
+    )
+    try:
+        worker_log.parent.mkdir(parents=True, exist_ok=True)
+        worker_env = os.environ.copy()
+        worker_env["NOVA_REGRESSION_TRUTHS_PATH"] = str(REGRESSION_TRUTHS_PATH)
+        worker_env["NOVA_REGRESSION_STATUS_FILE"] = str(REGRESSION_STATUS_FILE)
+        worker_env["NOVA_REGRESSION_LOCK_FILE"] = str(RUNTIME_DIR / "regression.lock")
+        worker_env["NOVA_REGRESSION_MAX_LANE_SECONDS"] = str(timeout_sec)
+        worker_env["NOVA_REGRESSION_WORKER_LOG"] = str(worker_log)
+        worker_python = VENV_PY if VENV_PY.is_file() else Path(sys.executable)
+        cmd = [str(worker_python), str(REGRESSION_LANE_WORKER), lane, current_fingerprint]
+        creation_flags = 0
+        if os.name == "nt":
+            creation_flags |= getattr(subprocess, "CREATE_NO_WINDOW", 0)
+        with open(worker_log, "ab") as logf:
+            proc = subprocess.Popen(
+                cmd,
+                cwd=str(ROOT),
+                stdin=subprocess.DEVNULL,
+                stdout=logf,
+                stderr=subprocess.STDOUT,
+                env=worker_env,
+                start_new_session=True,
+                creationflags=creation_flags,
+            )
+    except Exception as exc:
+        state["last_regression_tail"] = str(exc)[:2000]
+        state["last_regression_skip_reason"] = "lane_start_failed"
+        state["last_regression_retry_eligible"] = False
+        state["last_regression_current_fingerprint"] = current_fingerprint
+        state["last_regression_lesson"] = _regression_lesson(
+            outcome="start_failed",
+            fingerprint=current_fingerprint,
+            previous_fingerprint=previous_fingerprint,
+            reason="lane_start_failed",
+            tail=str(exc)[:2000],
+        )
+        _record_regression_gate_observation(state, decision="defer", reason="lane_start_failed")
+        _append_log(f"daily_regression_lane_start_failed lane={lane} error={str(exc)[:200]}")
+        return "daily_regression_lane_start_failed"
+
+    worker_pid = int(getattr(proc, "pid", 0) or 0)
+    _track_regression_worker(proc)
+    _record_regression_lane_attempt(state, lane, current_fingerprint, today, pid=worker_pid)
+    _write_regression_projection(state, current_fingerprint)
+    state["last_regression_worker_pid"] = worker_pid
+    state["last_regression_worker_log"] = str(worker_log)
+    state["last_regression_skip_reason"] = ""
+    state["last_regression_retry_eligible"] = False
+    state["last_regression_current_fingerprint"] = current_fingerprint
+    state["last_regression_lesson"] = _regression_lesson(
+        outcome="started",
+        fingerprint=current_fingerprint,
+        previous_fingerprint=previous_fingerprint,
+        reason="lane_spawned_detached",
+        tail=f"lane={lane} pid={worker_pid} worker_log={worker_log}",
+    )
+    _record_regression_gate_observation(state, decision="defer", reason="lane_in_progress")
+    _append_log(f"daily_regression_lane_started lane={lane} pid={worker_pid} worker_log={worker_log}")
+    return "daily_regression_lane_started"
+
+
+_ACTIVE_REGRESSION_WORKERS: dict[int, "subprocess.Popen[bytes]"] = {}
+
+
+def _regression_worker_log(lane: str) -> Path:
+    return RUNTIME_DIR / "regression" / f"lane_{lane}_worker.log"
+
+
+def _track_regression_worker(proc: "subprocess.Popen[bytes] | None") -> None:
+    pid = int(getattr(proc, "pid", 0) or 0)
+    if not pid:
+        return
+    _ACTIVE_REGRESSION_WORKERS[int(pid)] = proc
+
+
+def _prune_regression_worker_tracking() -> None:
+    for pid, proc in list(_ACTIVE_REGRESSION_WORKERS.items()):
+        try:
+            if proc.poll() is not None:
+                _ACTIVE_REGRESSION_WORKERS.pop(int(pid), None)
+        except Exception:
+            _ACTIVE_REGRESSION_WORKERS.pop(int(pid), None)
+
+
+def _active_regression_worker_count() -> int:
+    _prune_regression_worker_tracking()
+    return len(_ACTIVE_REGRESSION_WORKERS)
+
+
+def _regression_attempts(state: dict, today: str) -> dict:
+    attempts = state.get("regression_lane_attempts")
+    if not isinstance(attempts, dict):
+        attempts = {}
+    if str(attempts.get("date") or "") != today:
+        attempts = {"date": today, "attempts": {}}
+        state["regression_lane_attempts"] = attempts
+    per_lane = attempts.get("attempts")
+    if not isinstance(per_lane, dict):
+        per_lane = {}
+        attempts["attempts"] = per_lane
+    return per_lane
+
+
+def _record_regression_lane_attempt(state: dict, lane: str, fingerprint: str, today: str, pid: int | None = None) -> None:
+    per_lane = _regression_attempts(state, today)
+    per_lane[str(lane)] = str(fingerprint)
+    attempts = state.get("regression_lane_attempts")
+    if not isinstance(attempts, dict):
+        attempts = {"date": today, "attempts": per_lane}
+    pids = attempts.get("attempt_pids")
+    if not isinstance(pids, dict):
+        pids = {}
+    if pid:
+        pids[str(lane)] = int(pid)
+    attempts["attempt_pids"] = pids
+    state["regression_lane_attempts"] = attempts
+
+
+def _next_regression_lane(state: dict, missing: list[str], fingerprint: str) -> str | None:
+    today = time.strftime("%Y-%m-%d")
+    per_lane = _regression_attempts(state, today)
+    attempts = state.get("regression_lane_attempts")
+    attempt_pids = attempts.get("attempt_pids") if isinstance(attempts, dict) else {}
+    if not isinstance(attempt_pids, dict):
+        attempt_pids = {}
+    for lane in missing:
+        if per_lane.get(str(lane)) != str(fingerprint):
+            return lane
+        pid = int(attempt_pids.get(str(lane)) or 0)
+        if pid > 0 and not _pid_exists(pid):
+            return lane
+    return None
+
+
+def _pid_exists(pid: int) -> bool:
+    if int(pid or 0) <= 0:
+        return False
+    try:
+        import psutil
+
+        return bool(psutil.pid_exists(int(pid)))
+    except Exception:
+        return False
+
+
+def _write_regression_projection(state: dict, fingerprint: str) -> None:
+    payload = project_canonical_status(REGRESSION_TRUTHS_PATH, fingerprint)
+    try:
+        REGRESSION_STATUS_FILE.parent.mkdir(parents=True, exist_ok=True)
+        REGRESSION_STATUS_FILE.write_text(json.dumps(payload, ensure_ascii=True, indent=2), encoding="utf-8")
+    except Exception:
+        pass
+    state["last_regression_date"] = str(payload.get("date") or "")
+    state["last_regression_at"] = str(payload.get("generated_at") or "")
+    state["last_regression_status"] = str(payload.get("status") or "")
+    state["last_regression_returncode"] = int(payload.get("returncode", 1) or 1)
+    state["last_regression_source"] = str(payload.get("source") or "scheduler:regression_truth_registry")
+    state["last_regression_lanes"] = [str(item) for item in list(payload.get("lanes") or [])]
+    state["last_regression_failed_lane"] = str(payload.get("failed_lane") or "")
+    state["last_regression_failed_tests"] = []
+    state["last_regression_tail"] = str(payload.get("detail") or "")[:2000]
+    state["last_regression_stale"] = regression_evidence_stale(
+        status_label=str(payload.get("status") or ""),
+        regression_date=str(payload.get("date") or ""),
+    )
+    state["last_regression_fingerprint"] = fingerprint
+    state["last_regression_current_fingerprint"] = fingerprint
+    state["last_regression_certification"] = str(payload.get("certification") or "")
 
 
 def _sync_regression_status_from_file(state: dict, *, status_path: Path = REGRESSION_STATUS_FILE) -> bool:
@@ -4634,6 +5080,15 @@ def _refresh_regression_stale_from_outcome(state: dict) -> None:
         status_label=status,
         regression_date=str(state.get("last_regression_date") or ""),
     )
+
+
+def _finalize_regression_branch(state: dict, regression_status: str, regression_status_synced: bool) -> None:
+    if regression_status == "daily_regression_skipped_already_ran" and not regression_status_synced:
+        _refresh_regression_stale_from_outcome(state)
+    elif regression_status_synced:
+        _refresh_regression_stale_from_outcome(state)
+    elif regression_status != "daily_regression_skipped_already_ran":
+        state["last_regression_stale"] = False
 
 
 def _sync_signal_intake_work_tree(
@@ -4703,6 +5158,15 @@ def _sync_signal_intake_work_tree(
                     status_payload[k] = v
     except Exception:
         pass
+
+    # Same class of linger as test-profile: HTTP surfaces omit storage_watch_*, so
+    # ingest never sees ok and never resolves. Stamp the live snapshot before sync.
+    try:
+        storage_snapshot = _STORAGE_WATCH_SERVICE.snapshot(base_dir=ROOT, runtime_dir=RUNTIME_DIR)
+        status_payload = _apply_storage_watch_to_status_payload(status_payload, storage_snapshot)
+        state["last_storage_watch"] = _storage_watch_state_payload(storage_snapshot)
+    except Exception as exc:
+        _append_log(f"storage_watch_ingest_stamp_failed {exc}")
 
     results = WORK_TREE_SIGNAL_INGESTION_SERVICE.sync_status_snapshot(
         status_payload,
@@ -6045,8 +6509,11 @@ def _resolve_targeted_work_pin(
     next_branch_id = str(next_step.get("branch_id") or "").strip()
     next_task_id = str(next_step.get("task_id") or "").strip()
     if branch_target and next_branch_id == branch_target and (not task_target or next_task_id == task_target):
-        return _active_work_candidate_context(payload)
-    if task_target and next_task_id == task_target:
+        # A leftover complete shell can already sit in next_step with no task.
+        # Advertising that preferred_tool is false work; fall through and refuse.
+        if next_task_id:
+            return _active_work_candidate_context(payload)
+    elif task_target and next_task_id == task_target:
         return _active_work_candidate_context(payload)
 
     resolved_branch_id = branch_target
@@ -6083,8 +6550,6 @@ def _resolve_targeted_work_pin(
                 work_tree.TaskStatus.DROPPED,
             ):
                 resolved_task = open_tasks[0] if open_tasks else None
-            if resolved_task is None:
-                return {}
         else:
             resolved_task = open_tasks[0] if open_tasks else None
     else:
@@ -6093,6 +6558,37 @@ def _resolve_targeted_work_pin(
     branch = work_tree.get_branch(resolved_branch_id)
     if branch is None:
         return {}
+
+    if resolved_task is None:
+        try:
+            from services.solution_trail import record_refuse_on_branch
+
+            record_refuse_on_branch(
+                resolved_branch_id,
+                reason="complete_without_open_stem",
+                retry_when=[{"type": "has_open_stem"}],
+                do_not_retry_while=[{"type": "no_open_stem"}],
+                tool_name=str(getattr(branch, "preferred_tool", "") or ""),
+            )
+        except Exception:
+            pass
+        return {}
+
+    try:
+        from services.solution_trail import branch_has_active_refuse
+
+        tree_obj = work_tree.get_tree(tree_id)
+        meta = dict(getattr(tree_obj, "meta", None) or {}) if tree_obj is not None else {}
+        raw_keys = meta.get("last_active_source_keys") if isinstance(meta, dict) else []
+        active_keys = {str(item or "").strip() for item in list(raw_keys or []) if str(item or "").strip()}
+        if branch_has_active_refuse(
+            branch,
+            has_open_stem=True,
+            active_source_keys=active_keys,
+        ):
+            return {}
+    except Exception:
+        pass
 
     recommended_tool = str(branch.preferred_tool or "").strip()
     if resolved_task is not None:
@@ -6150,7 +6646,12 @@ def _active_work_tree_payload_eligible(payload: dict) -> bool:
     if str(payload.get("kind") or "").strip().lower() in {PATCH_QUEUE_TREE_KIND, GENERATED_QUEUE_TREE_KIND}:
         return False
     next_step = payload.get("next_step") if isinstance(payload.get("next_step"), dict) else {}
-    return bool(next_step)
+    if not next_step:
+        return False
+    action = str(next_step.get("action") or "").strip().lower()
+    if action and action != "execute":
+        return False
+    return bool(str(next_step.get("branch_id") or "").strip())
 
 
 def _active_work_tree_payload_matches_target(
@@ -6220,8 +6721,8 @@ def _pin_active_work_payload(
         return None
     recommended_tool = str(pin.get("recommended_tool") or "").strip()
     if tool_target:
-        if recommended_tool and recommended_tool != tool_target:
-            return None
+        # Inspector preferred_tool can disagree with the task expected_tool.
+        # Dropping the pin made Run Next Step return executed=0 with no movement.
         recommended_tool = recommended_tool or tool_target
     if not recommended_tool:
         return None
@@ -6310,6 +6811,11 @@ def _active_work_tree_candidates(limit: int = ACTIVE_WORK_TREE_MAX_TREES) -> lis
             continue
         next_step = payload.get("next_step") if isinstance(payload.get("next_step"), dict) else {}
         if not next_step:
+            continue
+        action = str(next_step.get("action") or "").strip().lower()
+        if action and action != "execute":
+            continue
+        if not str(next_step.get("branch_id") or "").strip():
             continue
         candidates.append(payload)
     # Prefer moving near-complete work over stalled/blocked noise.
@@ -6490,21 +6996,38 @@ def _active_work_tree_target_decider(
             return tool_match
         if branch_fallback is not None:
             return branch_fallback
-        return {
-            "branch_id": branch_target or "__target_branch_not_available__",
-            "task_id": task_target,
-            "recommended_tool": tool_target,
-        }
+        # Pin is not in pickup. Do not invent a branch the option list cannot admit —
+        # that is the invalid_decision mill. Take an existing alternate or yield.
+        if options:
+            try:
+                from services.observation_spine import observe_quietly
+
+                observe_quietly(
+                    source="executor",
+                    operation="admit_action",
+                    subject=branch_target or "active_work_tree_run_next",
+                    input_ref=branch_target or None,
+                    outcome="denied",
+                    reason_code="PICKUP_PATH_GAP",
+                )
+            except Exception:
+                pass
+            opt = options[0] if isinstance(options[0], dict) else {}
+            return {
+                "branch_id": str(opt.get("branch_id") or "").strip(),
+                "task_id": str(opt.get("task_id") or "").strip(),
+                "recommended_tool": str(opt.get("recommended_tool") or "").strip(),
+            }
+        return {}
 
     return _decide
 
 
 def _active_work_tree_failure_aware_decider(tree_id: str, options: list[dict]) -> dict:
-    """Prefer options whose tool is not already marked FAILED in the branch tool_state.
-    Root fix to avoid repeated tool_failed executions on active work tree tasks.
+    """Pick the next stem even if the last attempt failed.
 
-    When every option is already failed, return an invalid branch id so the loop
-    emits invalid_decision instead of re-executing the same failed tool forever.
+    Skipping FAILED tools kept Nova safe from repeating a miss. She needs the
+    miss visible so the next attempt can find the truth.
     """
     del tree_id
     for option in list(options or []):
@@ -6514,22 +7037,13 @@ def _active_work_tree_failure_aware_decider(tree_id: str, options: list[dict]) -
         tool_name = str(option.get("recommended_tool") or "").strip()
         if not branch_id or not tool_name:
             continue
-        try:
-            branch = work_tree.get_branch(branch_id)
-            tool_state = branch.tool_state if branch is not None and isinstance(branch.tool_state, dict) else {}
-            raw = tool_state.get(tool_name)
-            status = str(getattr(raw, "value", raw) or "").strip().lower()
-            if status == "failed":
-                continue
-        except Exception:
-            pass
         return {
             "branch_id": branch_id,
             "task_id": str(option.get("task_id") or "").strip(),
             "recommended_tool": tool_name,
         }
     return {
-        "branch_id": "__all_tools_failed__",
+        "branch_id": "__no_attempt_available__",
         "task_id": "",
         "recommended_tool": "",
     }
@@ -6583,6 +7097,10 @@ def _run_active_work_tree_cycle(
     target_tool: str = "",
     sync_core_thinning: bool = True,
 ) -> dict:
+    try:
+        work_tree.reload_persisted_state()
+    except Exception:
+        pass
     tree_limit = max(1, _safe_int(max_trees, ACTIVE_WORK_TREE_MAX_TREES)) if max_trees is not None else ACTIVE_WORK_TREE_MAX_TREES
     step_limit = max(1, _safe_int(max_steps, ACTIVE_WORK_TREE_MAX_STEPS)) if max_steps is not None else ACTIVE_WORK_TREE_MAX_STEPS
     branch_target = str(target_branch_id or "").strip()
@@ -6626,10 +7144,6 @@ def _run_active_work_tree_cycle(
         }
         state["last_active_work_tree_cycle"] = payload
         return payload
-    if targeted:
-        target_decider = _active_work_tree_target_decider(branch_target, task_target, tool_target)
-    else:
-        target_decider = _active_work_tree_failure_aware_decider
     core_thinning_sync: dict = {}
     if sync_core_thinning and any(_candidate_uses_tool(candidate, "core_thinning") for candidate in candidates):
         core_thinning_sync = _sync_core_thinning_work_tree(state)
@@ -6663,6 +7177,37 @@ def _run_active_work_tree_cycle(
             }
             state["last_active_work_tree_cycle"] = payload
             return payload
+    pin_in_pickup = False
+    if targeted and branch_target:
+        for candidate in candidates:
+            tree_id = str(candidate.get("tree_id") or "").strip()
+            if not tree_id:
+                continue
+            try:
+                options = work_tree.list_autonomous_options(tree_id)
+            except Exception:
+                options = []
+            if any(str((option or {}).get("branch_id") or "").strip() == branch_target for option in list(options or []) if isinstance(option, dict)):
+                pin_in_pickup = True
+                break
+        if not pin_in_pickup:
+            try:
+                from services.observation_spine import observe_quietly
+
+                observe_quietly(
+                    source="executor",
+                    operation="admit_action",
+                    subject=branch_target,
+                    input_ref=branch_target,
+                    outcome="denied",
+                    reason_code="PICKUP_PATH_GAP",
+                )
+            except Exception:
+                pass
+    if targeted and pin_in_pickup:
+        target_decider = _active_work_tree_target_decider(branch_target, task_target, tool_target)
+    else:
+        target_decider = _active_work_tree_failure_aware_decider
     executed_total = 0
     attempted_total = 0
     full_history: list[dict] = []
@@ -6794,7 +7339,10 @@ def _retire_legacy_patch_update_trees(state: dict) -> dict:
     retired: list[dict] = []
     now = work_tree._now()
     reason = "Retired legacy patch/update shell after governed patch queue adoption."
-    for candidate in _active_work_tree_candidates(limit=64):
+    # Retirement is cleanup, not execution. Inspect the full visual-tree
+    # snapshot so unsafe or otherwise non-executable legacy shells are still
+    # retired instead of being hidden by the executable-work filter.
+    for candidate in work_tree.list_visual_trees(limit=None):
         tree_id = str(candidate.get("tree_id") or "").strip()
         tree_kind = str(candidate.get("kind") or "").strip().lower()
         tree_source = str(candidate.get("source") or "").strip().lower()
@@ -6989,16 +7537,108 @@ def _pipeline_worker_maintenance_skipped_payload(*, pipeline_ids: list[str]) -> 
     }
 
 
-def _sync_pipeline_workers_for_maintenance(state: dict) -> None:
-    pipeline_ids = [
-        str(item.pipeline_id or "").strip()
-        for item in build_pipeline_registry(ROOT / "data_sources").discover()
-        if str(item.pipeline_id or "").strip()
+def _discover_backpack_ids() -> list[str]:
+    root = ROOT / "backpacks"
+    if not root.is_dir():
+        return []
+    return [
+        child.name
+        for child in sorted(root.iterdir())
+        if child.is_dir() and (child / "backpack.json").exists()
     ]
+
+
+def _sanitize_uninstalled_backpack_residue(state: dict) -> dict:
+    from services.backpack_host.install_state import backpack_runtime_installed
+    from services.backpack_host.sanitize import sanitize_uninstalled_backpack, scan_backpack_residue
+
     if runtime_scope_name() == "validation":
-        skipped = _pipeline_worker_maintenance_skipped_payload(pipeline_ids=pipeline_ids)
+        payload = {
+            "ts": _patch_queue_timestamp(),
+            "status": "skipped_validation_scope",
+            "reason": "backpack_residue_disabled_in_validation_scope",
+            "sanitized_count": 0,
+            "backpacks": [],
+        }
+        state["last_backpack_residue_sanitize"] = payload
+        return payload
+    backpacks_root = ROOT / "backpacks"
+    results: list[dict] = []
+    for backpack_id in _discover_backpack_ids():
+        if backpack_runtime_installed(backpack_id, runtime_root=RUNTIME_DIR):
+            continue
+        residue = scan_backpack_residue(
+            backpack_id,
+            runtime_root=RUNTIME_DIR,
+            backpacks_root=backpacks_root,
+        )
+        if not residue.get("residue"):
+            continue
+        results.append(
+            sanitize_uninstalled_backpack(
+                backpack_id,
+                runtime_root=RUNTIME_DIR,
+                nova_user="autonomy_maintenance",
+                backpacks_root=backpacks_root,
+            )
+        )
+    payload = {
+        "ts": _patch_queue_timestamp(),
+        "status": "ok",
+        "sanitized_count": len(results),
+        "backpack_ids": [str(item.get("backpack_id") or "") for item in results],
+        "backpacks": results,
+    }
+    state["last_backpack_residue_sanitize"] = payload
+    return payload
+
+
+def _run_backpack_residue_sanitize_step(state: dict) -> dict:
+    try:
+        residue_sanitize = _sanitize_uninstalled_backpack_residue(state)
+        _append_log(
+            "backpack_residue_sanitize "
+            + f"status={residue_sanitize.get('status')} "
+            + f"sanitized={int(residue_sanitize.get('sanitized_count', 0) or 0)} "
+            + f"ids={','.join(list(residue_sanitize.get('backpack_ids') or [])) or '-'}"
+        )
+        return residue_sanitize
+    except Exception as exc:
+        _append_log(f"backpack_residue_sanitize_failed {exc}")
+        payload = {
+            "ts": _patch_queue_timestamp(),
+            "status": "failed",
+            "ok": False,
+            "error": str(exc)[:400],
+        }
+        try:
+            state["last_backpack_residue_sanitize"] = payload
+        except Exception:
+            pass
+        return payload
+
+
+def _sync_pipeline_workers_for_maintenance(state: dict) -> None:
+    classified = classify_pipeline_ids_for_workers(ROOT / "data_sources")
+    enabled_ids = [str(item or "").strip() for item in list(classified.get("enabled") or []) if str(item or "").strip()]
+    paused_ids = [str(item or "").strip() for item in list(classified.get("paused") or []) if str(item or "").strip()]
+    discovered_ids = [
+        str(item or "").strip()
+        for item in list(classified.get("discovered") or [])
+        if str(item or "").strip()
+    ]
+    leftover_ids = [
+        pipeline_id
+        for pipeline_id in runtime_pipeline_worker_ids(runtime_root=RUNTIME_DIR)
+        if pipeline_id not in set(enabled_ids)
+    ]
+    stop_ids = list(dict.fromkeys([*paused_ids, *leftover_ids]))
+    reconcile_ids = list(dict.fromkeys([*discovered_ids, *leftover_ids]))
+    if runtime_scope_name() == "validation":
+        skipped = _pipeline_worker_maintenance_skipped_payload(pipeline_ids=discovered_ids)
         state["last_pipeline_worker_reconcile"] = dict(skipped)
         state["last_pipeline_worker_ensure"] = dict(skipped)
+        state["last_pipeline_worker_stop"] = dict(skipped)
         _append_log(
             "pipeline_worker_ensure "
             + f"status={skipped.get('status')} "
@@ -7007,7 +7647,7 @@ def _sync_pipeline_workers_for_maintenance(state: dict) -> None:
         )
         return
     worker_reconcile = reconcile_pipeline_workers_for_ids(
-        pipeline_ids,
+        reconcile_ids,
         runtime_root=RUNTIME_DIR,
         os_name=os.name,
     )
@@ -7018,8 +7658,21 @@ def _sync_pipeline_workers_for_maintenance(state: dict) -> None:
         + f"reclaimed={int(worker_reconcile.get('reclaimed_count', 0) or 0)} "
         + f"cleared={int(worker_reconcile.get('cleared_count', 0) or 0)}"
     )
+    worker_stop = stop_pipeline_workers_for_ids(
+        stop_ids,
+        runtime_root=RUNTIME_DIR,
+        os_name=os.name,
+    )
+    state["last_pipeline_worker_stop"] = worker_stop
+    _append_log(
+        "pipeline_worker_stop "
+        + f"status={worker_stop.get('status')} "
+        + f"stopped={int(worker_stop.get('stopped_count', 0) or 0)} "
+        + f"cleared={int(worker_stop.get('cleared_count', 0) or 0)} "
+        + f"ids={','.join(stop_ids) or '-'}"
+    )
     worker_ensure = ensure_pipeline_workers_for_ids(
-        pipeline_ids,
+        enabled_ids,
         worker_script=PIPELINE_WORKER_PY,
         venv_python=VENV_PY,
         runtime_root=RUNTIME_DIR,
@@ -7079,6 +7732,8 @@ def run_once(*, worker_loop: bool = False) -> int:
             }
         except Exception:
             pass
+
+    _run_backpack_residue_sanitize_step(state)
 
     # Check for an HTTP-side trigger requesting an immediate active-work-tree run.
     if WORK_TREE_RUN_TRIGGER.exists():
@@ -7595,42 +8250,8 @@ def run_once(*, worker_loop: bool = False) -> int:
 
     regression_status = _run_daily_regression_if_due(state)
     regression_status_synced = _sync_regression_status_from_file(state)
-    if regression_status == "daily_regression_skipped_already_ran" and not regression_status_synced:
-        _refresh_regression_stale_from_outcome(state)
-    elif regression_status_synced:
-        _refresh_regression_stale_from_outcome(state)
-    elif regression_status != "daily_regression_skipped_already_ran":
-        state["last_regression_stale"] = False
+    _finalize_regression_branch(state, regression_status, regression_status_synced)
     _append_log(f"{regression_status}{'_synced_status_file' if regression_status_synced else ''}")
-
-    # data connector backpack: paced warehouse sync (schools) when schedule says due.
-    # Not a live ODS hammer — warehouse_sync module enforces min gap / local hour.
-    try:
-        from services.edfi.warehouse_sync import maybe_run_scheduled_warehouse_sync
-
-        edfi_warehouse = maybe_run_scheduled_warehouse_sync(force=False)
-        if not isinstance(edfi_warehouse, dict):
-            edfi_warehouse = {"ok": False, "error": "invalid_warehouse_result"}
-        edfi_warehouse = {
-            "ts": _patch_queue_timestamp(),
-            **edfi_warehouse,
-        }
-        state["last_edfi_warehouse_sync"] = edfi_warehouse
-        _append_log(
-            "edfi_warehouse_sync"
-            f" ok={bool(edfi_warehouse.get('ok'))}"
-            f" ran={bool(edfi_warehouse.get('ran'))}"
-            f" reason={str((edfi_warehouse.get('schedule') or {}).get('reason') or edfi_warehouse.get('error') or '')[:80]}"
-        )
-    except Exception as exc:
-        edfi_warehouse = {
-            "ts": _patch_queue_timestamp(),
-            "ok": False,
-            "ran": False,
-            "error": str(exc)[:400],
-        }
-        state["last_edfi_warehouse_sync"] = edfi_warehouse
-        _append_log(f"edfi_warehouse_sync_failed {exc}")
 
     try:
         signal_ingestion = _sync_signal_intake_work_tree(
@@ -7690,6 +8311,19 @@ def run_once(*, worker_loop: bool = False) -> int:
     except Exception as exc:
         _append_log(f"mission_refresh_after_signal_ingestion_failed {exc}")
 
+    if not isinstance(state.get("last_storage_watch"), dict) or not str((state.get("last_storage_watch") or {}).get("ts") or "").strip():
+        try:
+            storage_snapshot = _STORAGE_WATCH_SERVICE.snapshot(base_dir=ROOT, runtime_dir=RUNTIME_DIR)
+            state["last_storage_watch"] = _storage_watch_state_payload(storage_snapshot)
+            _append_log(
+                "storage_watch"
+                f" status={storage_snapshot.get('status')}"
+                f" runtime_mb={round(float(storage_snapshot.get('runtime_total_bytes') or 0) / (1024 * 1024), 1)}"
+                f" note={storage_snapshot.get('note')}"
+            )
+        except Exception as exc:
+            _append_log(f"storage_watch_failed {exc}")
+
     _save_state(state)
     return _finish_cycle(0, "ok")
 
@@ -7734,15 +8368,22 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--max-cycles", type=int, default=0, help="Optional cycle cap for loop mode; 0 means run continuously")
     parser.add_argument("--stop-on-error", action="store_true", help="Exit loop mode after the first failed cycle")
     args = parser.parse_args(argv)
-    if args.loop:
-        return run_worker(
-            interval_sec=args.interval_sec,
-            max_cycles=args.max_cycles,
-            continue_on_error=not bool(args.stop_on_error),
-        )
-    if args.once:
+    from tools.runtime_singleton import acquire_role_singleton, release_role_singleton
+
+    ok, detail = acquire_role_singleton("maintenance")
+    if not ok:
+        print(f"Nova maintenance already running ({detail}). Skipping this cycle.")
+        return 0
+    try:
+        if args.loop:
+            return run_worker(
+                interval_sec=args.interval_sec,
+                max_cycles=args.max_cycles,
+                continue_on_error=not bool(args.stop_on_error),
+            )
         return run_once()
-    return run_once()
+    finally:
+        release_role_singleton("maintenance")
 
 
 if __name__ == "__main__":

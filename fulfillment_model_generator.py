@@ -1,4 +1,4 @@
-﻿"""Fulfillment model generation seams for Nova's shared-state architecture."""
+"""Fulfillment model generation seams for Nova's shared-state architecture."""
 
 from __future__ import annotations
 

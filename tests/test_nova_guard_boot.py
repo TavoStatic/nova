@@ -134,6 +134,49 @@ class TestNovaGuardBoot(unittest.TestCase):
         hung.terminate.assert_called()
         popen_mock.assert_called_once()
 
+    def test_maintenance_tick_closes_file_handle_on_launch(self):
+        attempt = nova_guard.GuardAttempt(state=nova_guard.STATE_RUNNING)
+        mock_file = mock.mock_open()
+        new_proc = mock.MagicMock()
+        new_proc.pid = 99999
+
+        with mock.patch.object(nova_guard, "_MAINTENANCE_PROC", None), \
+            mock.patch.object(nova_guard, "_LAST_MAINTENANCE_LAUNCH", 0.0), \
+            mock.patch("nova_guard.time.time", return_value=1000.0), \
+            mock.patch("nova_guard._is_maintenance_already_running", return_value=False), \
+            mock.patch("nova_guard.subprocess.Popen", return_value=new_proc), \
+            mock.patch("nova_guard.open", mock_file), \
+            mock.patch("nova_guard.log"):
+            nova_guard._maintenance_tick(attempt)
+
+        mock_file.assert_called_once_with(nova_guard.MAINTENANCE_LOG, "a", encoding="utf-8")
+        mock_file.return_value.__exit__.assert_called_once_with(None, None, None)
+
+    def test_spawn_core_adopts_existing_live_core(self):
+        with mock.patch.object(nova_guard, "_live_core_pid", return_value=4242), \
+            mock.patch.object(nova_guard, "log", lambda _msg: None), \
+            mock.patch.object(nova_guard.subprocess, "Popen") as popen_mock:
+            pid = nova_guard.spawn_core("initial_start")
+
+        self.assertEqual(pid, 4242)
+        popen_mock.assert_not_called()
+
+    def test_start_new_attempt_does_not_clear_when_core_already_live(self):
+        attempt = nova_guard.GuardAttempt()
+        with mock.patch.object(nova_guard, "_live_core_pid", return_value=5151), \
+            mock.patch.object(nova_guard, "_clear_core_runtime_artifacts") as clear_mock, \
+            mock.patch.object(nova_guard, "spawn_core") as spawn_mock, \
+            mock.patch.object(nova_guard, "_process_create_time", return_value=51.0), \
+            mock.patch.object(nova_guard, "_derive_boot_timeout_seconds", return_value=20.0), \
+            mock.patch.object(nova_guard, "time") as time_mock, \
+            mock.patch.object(nova_guard, "log", lambda _msg: None):
+            time_mock.time.return_value = 100.0
+            nova_guard.start_new_attempt(attempt, "initial_start")
+
+        self.assertEqual(attempt.pid, 5151)
+        clear_mock.assert_not_called()
+        spawn_mock.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()

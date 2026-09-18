@@ -4,7 +4,7 @@
   const config = Object.assign(
     {
       healthUrl: "/api/health",
-      controlStatusUrl: "/api/control/status",
+      controlStatusUrl: "/api/leah/pulse",
       chatUrl: "/api/chat",
       chatHistoryUrl: "/api/chat/history",
       chatResumeUrl: "/api/chat/resume",
@@ -21,7 +21,7 @@
     userId: "",
     sessionId: "",
     chatLoginEnabled: false,
-    voiceEnabled: false,
+    voiceEnabled: true,
     listenMode: false,
     recognition: null,
     recognitionActive: false,
@@ -41,6 +41,9 @@
     moodMode: "calm",
     moodReason: "steady runtime",
     lastRuntimePulse: null,
+    lastOutreachId: "",
+    voicePersona: localStorage.getItem("leah_voice_persona") || "friendly",
+    voiceName: localStorage.getItem("leah_speech_voice") || "",
   };
 
   const moodProfiles = {
@@ -98,8 +101,10 @@
     btnMic: document.getElementById("btnMic"),
     btnListen: document.getElementById("btnListen"),
     btnVoice: document.getElementById("btnVoice"),
+    voiceTone: document.getElementById("voiceTone"),
+    voiceChoice: document.getElementById("voiceChoice"),
     btnSend: document.getElementById("btnSend"),
-    btnNewSession: document.getElementById("btnNewSession"),
+    btnNewSession: null,
     stagedList: document.getElementById("stagedList"),
     activityHeadline: document.getElementById("activityHeadline"),
     activityDetail: document.getElementById("activityDetail"),
@@ -132,6 +137,26 @@
     headerPresenceVoice: document.getElementById("headerPresenceVoice"),
     headerPresenceCamera: document.getElementById("headerPresenceCamera"),
     headerPresenceMood: document.getElementById("headerPresenceMood"),
+    dotCore: document.getElementById("stateCore"),
+    dotGuard: document.getElementById("stateGuard"),
+    dotHttp: document.getElementById("stateHttp"),
+    dotOllama: document.getElementById("stateOllama"),
+    focusTask: document.getElementById("focusTask"),
+    focusContext: document.getElementById("focusContext"),
+    focusMemory: document.getElementById("focusMemory"),
+    focusVoice: document.getElementById("focusVoice"),
+    focusContinuity: document.getElementById("focusContinuity"),
+    focusSystem: document.getElementById("focusSystem"),
+    evidenceFeed: document.getElementById("evidenceFeed"),
+    hudStatus: document.getElementById("hudStatus"),
+    hudRing: document.querySelector(".hud-container"),
+    activityRing: document.getElementById("activityRing"),
+    ringMemory: document.getElementById("ringMemory"),
+    ringVoice: document.getElementById("ringVoice"),
+    ringContinuity: document.getElementById("ringContinuity"),
+    ringPersona: document.getElementById("ringPersona"),
+    ringState: document.getElementById("ringState"),
+    ringNova: document.getElementById("ringNova"),
   };
 
   function makeUserId() {
@@ -194,6 +219,104 @@
     }
   }
 
+  function setStatus(el, ok, label) {
+    if (!el) return;
+    el.textContent = label || (ok ? "ONLINE" : "OFFLINE");
+    el.className = "status-state " + (ok ? "ok" : "off");
+  }
+
+  function updateStatusDots(summary) {
+    setStatus(dom.dotCore, summary.runtimeOk, summary.runtimeOk ? "ONLINE" : "OFFLINE");
+    setStatus(dom.dotGuard, summary.guardRunning, summary.guardRunning ? "ACTIVE" : "INACTIVE");
+    setStatus(dom.dotHttp, true, "CONNECTED");
+    setStatus(dom.dotOllama, state.lastRuntimePulse?.ollama_api_up ?? false, (state.lastRuntimePulse?.ollama_api_up ?? false) ? "READY" : "OFFLINE");
+  }
+
+  function updateFocusPanel(summary) {
+    if (dom.focusTask) dom.focusTask.textContent = summary.queueActionable > 0 ? "Active repair queue" : "Monitoring conversation";
+    if (dom.focusSystem) dom.focusSystem.textContent = summary.runtimeOk ? "All systems nominal" : "Runtime recovering";
+    if (dom.focusMemory) dom.focusMemory.textContent = state.lastRuntimePulse?.memory_enabled ? "Retrieval active" : "Memory off";
+    if (dom.focusContinuity) dom.focusContinuity.textContent = state.sessionId ? "Maintaining session" : "No active session";
+    if (dom.focusVoice) dom.focusVoice.textContent = state.voiceEnabled ? "Active" : "Ready";
+  }
+
+  function updateRingNodes(summary) {
+    const memory = state.lastRuntimePulse?.memory_enabled ? "active" : "off";
+    const voice = state.voiceEnabled ? (state.voiceName || "system voice") : "off";
+    const continuity = state.sessionId ? "session active" : "no session";
+    const persona = state.voicePersona || "friendly";
+    const stateLabel = (moodProfiles[state.moodMode] || moodProfiles.calm).label;
+    const nova = summary.runtimeOk ? "core online" : "runtime recovering";
+    const nodes = [
+      [dom.ringMemory, `Memory: ${memory}`],
+      [dom.ringVoice, `Voice: ${voice}`],
+      [dom.ringContinuity, `Continuity: ${continuity}`],
+      [dom.ringPersona, `Persona: ${persona}`],
+      [dom.ringState, `State: ${stateLabel}`],
+      [dom.ringNova, `Nova runtime: ${nova}`],
+    ];
+    nodes.forEach(([node, label]) => {
+      if (!node) return;
+      node.setAttribute("aria-label", label);
+      node.dataset.status = label;
+    });
+  }
+
+  function bindRingNodes() {
+    const actions = new Map([
+      [dom.ringMemory, () => {
+        dom.focusMemory?.scrollIntoView({ behavior: "smooth", block: "center" });
+        dom.focusMemory?.focus?.();
+      }],
+      [dom.ringVoice, () => {
+        dom.voiceChoice?.focus();
+        dom.voiceChoice?.showPicker?.();
+      }],
+      [dom.ringContinuity, () => {
+        dom.focusContinuity?.scrollIntoView({ behavior: "smooth", block: "center" });
+        dom.focusContinuity?.focus?.();
+      }],
+      [dom.ringPersona, () => {
+        dom.voiceTone?.focus();
+        dom.voiceTone?.showPicker?.();
+      }],
+      [dom.ringState, () => {
+        dom.moodLabel?.scrollIntoView({ behavior: "smooth", block: "center" });
+        dom.moodLabel?.focus?.();
+      }],
+      [dom.ringNova, () => {
+        dom.focusSystem?.scrollIntoView({ behavior: "smooth", block: "center" });
+        dom.focusSystem?.focus?.();
+      }],
+    ]);
+    actions.forEach((action, node) => {
+      if (!node) return;
+      const announce = () => {
+        pushActivity("Leah layer", node.getAttribute("aria-label") || "Live status");
+        setActivityHeadline(node.getAttribute("aria-label") || "Live Leah status");
+        action();
+      };
+      node.addEventListener("click", announce);
+      node.addEventListener("keydown", (event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          announce();
+        }
+      });
+    });
+  }
+
+  function appendEvidence(text) {
+    if (!dom.evidenceFeed) return;
+    const entry = document.createElement("div");
+    entry.className = "evidence-item";
+    entry.innerHTML = '<span class="evidence-text">' + text + '</span><span class="evidence-time">now</span>';
+    dom.evidenceFeed.prepend(entry);
+    while (dom.evidenceFeed.children.length > 8) {
+      dom.evidenceFeed.lastChild.remove();
+    }
+  }
+
   function syncHeroInputs() {
     const parts = ["Text"];
     if (state.stagedItems.length) parts.push(`${state.stagedItems.length} staged`);
@@ -234,6 +357,7 @@
     syncHeroInputs();
     syncSessionLabels();
     syncButtons();
+    syncSensingDock();
   }
 
   function hasImmediateLocalFocus() {
@@ -303,17 +427,14 @@
   function syncButtons() {
     if (dom.btnVoice) {
       dom.btnVoice.classList.toggle("live", state.voiceEnabled);
-      dom.btnVoice.textContent = state.voiceEnabled ? "Voice On" : "Voice";
     }
     if (dom.btnMic) {
       dom.btnMic.disabled = !SpeechRecognitionCtor;
       dom.btnMic.classList.toggle("live", !state.listenMode && state.recognitionActive);
-      dom.btnMic.textContent = !SpeechRecognitionCtor ? "Mic Unavailable" : (state.listenMode ? "Mic Ready" : (state.recognitionActive ? "Stop Mic" : "Mic"));
     }
     if (dom.btnListen) {
       dom.btnListen.disabled = !SpeechRecognitionCtor;
       dom.btnListen.classList.toggle("live", state.listenMode);
-      dom.btnListen.textContent = !SpeechRecognitionCtor ? "Listen Off" : (state.listenMode ? "Stop Listen" : "Listen");
     }
     if (dom.btnCamera) {
       dom.btnCamera.classList.toggle("live", state.cameraLive);
@@ -327,10 +448,27 @@
     }
   }
 
+  function syncSensingDock() {
+    const dock = document.getElementById("sensingDock");
+    if (!dock) return;
+    const hasStage = state.stagedItems.length > 0 || state.recentHandoff.length > 0;
+    const show = Boolean(state.cameraLive || state.recognitionActive || hasStage);
+    dock.hidden = !show;
+    if (dom.transcriptBox) {
+      dom.transcriptBox.hidden = !state.recognitionActive && !(dom.transcriptBox.textContent || "").trim();
+    }
+    if (dom.btnCapture) {
+      dom.btnCapture.hidden = !state.cameraLive;
+    }
+  }
+
   function setTranscript(text, live = false) {
     if (!dom.transcriptBox) return;
-    dom.transcriptBox.textContent = text || "Voice transcript will appear here when Nova is listening.";
-    dom.transcriptBox.classList.toggle("live", Boolean(live && text));
+    const value = String(text || "").trim();
+    dom.transcriptBox.textContent = value;
+    dom.transcriptBox.hidden = !value;
+    dom.transcriptBox.classList.toggle("live", Boolean(live && value));
+    syncSensingDock();
   }
 
   function pushActivity(title, meta = "") {
@@ -406,17 +544,12 @@
       setUserFacingStatus(payload, summary);
       return;
     }
-    if (!summary.searchOk) {
-      setActivityHeadline("Nova is online, but the search lane is offline right now.");
-      setUserFacingStatus(payload, summary);
-      return;
-    }
     if (summary.workTreeStatus && summary.workTreeStatus !== "idle" && summary.workTreeStatus !== "complete") {
-      setActivityHeadline(`Nova is online and the Work Tree is ${summary.workTreeStatus}.`);
+      setActivityHeadline(`Nova is here. Work tree is ${summary.workTreeStatus.replace(/_/g, " ")}.`);
       setUserFacingStatus(payload, summary);
       return;
     }
-    setActivityHeadline("Nova is online, healthy, and waiting for the next thing that matters.");
+    setActivityHeadline("Nova is here.");
     setUserFacingStatus(payload, summary);
   }
 
@@ -424,6 +557,7 @@
     const summary = {
       health: Number(payload?.health_score || 0),
       runtimeOk: Boolean(payload?.core_running),
+      guardRunning: Boolean(payload?.guard_running),
       queueActionable: Number(payload?.queue_actionable_count || 0),
       queueOpen: Number(payload?.queue_open_count || 0),
       patchReview: Number(payload?.patch_review_previews_total || 0),
@@ -469,6 +603,26 @@
       setPulseField(dom.pulseMaintenance, describeMaintenanceMode(summary.maintenanceStatus));
       setPulseField(dom.pulseTask, taskText);
 
+    updateStatusDots(summary);
+    updateFocusPanel(summary);
+    updateRingNodes(summary);
+
+    if (dom.hudStatus) {
+      if (state.thinking) {
+        dom.hudStatus.textContent = "THINKING";
+      } else if (state.uploading) {
+        dom.hudStatus.textContent = "STAGING";
+      } else if (state.listenMode) {
+        dom.hudStatus.textContent = "LISTENING";
+      } else if (summary.runtimeOk && summary.health >= 100) {
+        dom.hudStatus.textContent = "OBSERVING";
+      } else if (summary.runtimeOk) {
+        dom.hudStatus.textContent = "ONLINE";
+      } else {
+        dom.hudStatus.textContent = "RECOVERING";
+      }
+    }
+
     if (!state.thinking && !state.uploading && !state.listenMode && !state.recognitionActive) {
       if (!summary.searchOk) {
         setMood("strain", "search lane offline");
@@ -492,13 +646,69 @@
     dom.chat.scrollTop = dom.chat.scrollHeight;
     if (kind === "assistant") {
       startReplyPulse(text, card);
-      speakAssistant(text);
+      if (state.voiceEnabled) speakAssistant(text);
     }
+  }
+
+  let vuMeterInterval = null;
+  let vuWordTimeouts = [];
+
+  function startVUMeter() {
+    if (vuMeterInterval) return;
+    const segs = dom.activityRing ? dom.activityRing.querySelectorAll(".ring-seg") : [];
+    if (!segs.length) return;
+    let lastLevel = [0.5, 0.5, 0.5, 0.5, 0.5, 0.5];
+    vuMeterInterval = setInterval(() => {
+      segs.forEach((seg, i) => {
+        const prev = lastLevel[i];
+        const delta = (Math.random() - 0.5) * 0.35;
+        const level = Math.max(0.15, Math.min(1, prev + delta));
+        lastLevel[i] = level;
+        const width = 14 + level * 10;
+        seg.style.opacity = String(level);
+        seg.style.strokeWidth = String(width);
+      });
+    }, 120);
+  }
+
+  function stopVUMeter() {
+    if (vuMeterInterval) {
+      clearInterval(vuMeterInterval);
+      vuMeterInterval = null;
+    }
+    vuWordTimeouts.forEach(t => clearTimeout(t));
+    vuWordTimeouts = [];
+    const segs = dom.activityRing ? dom.activityRing.querySelectorAll(".ring-seg") : [];
+    segs.forEach((seg) => {
+      seg.style.opacity = "";
+      seg.style.strokeWidth = "";
+    });
+  }
+
+  function runSpeechAnimator(text) {
+    const words = text.split(/\s+/).filter(Boolean);
+    let cursor = 0;
+    words.forEach((word) => {
+      const charCount = word.length;
+      const baseDur = 180 + charCount * 35;
+      const hasPunct = /[.,;:!?]/.test(word);
+      const pauseAfter = hasPunct ? 500 : 80;
+      vuWordTimeouts.push(setTimeout(() => {
+        if (!dom.activityRing?.classList.contains("speaking")) return;
+        startVUMeter();
+      }, cursor));
+      vuWordTimeouts.push(setTimeout(() => {
+        stopVUMeter();
+      }, cursor + baseDur));
+      cursor += baseDur + pauseAfter;
+    });
   }
 
   function clearReplyPulseTimers() {
     state.replyPulseTimers.forEach((timer) => window.clearTimeout(timer));
     state.replyPulseTimers = [];
+    stopVUMeter();
+    if (dom.activityRing) dom.activityRing.classList.remove("speaking");
     if (state.replyPulseFadeTimer) {
       window.clearTimeout(state.replyPulseFadeTimer);
       state.replyPulseFadeTimer = null;
@@ -559,10 +769,7 @@
     if (!dom.stagedList) return;
     dom.stagedList.innerHTML = "";
     if (!state.stagedItems.length && !state.recentHandoff.length) {
-      const empty = document.createElement("li");
-      empty.className = "empty-state";
-      empty.textContent = "Nothing staged yet. Upload a file or capture something before the next turn.";
-      dom.stagedList.appendChild(empty);
+      syncSensingDock();
       syncPresence();
       return;
     }
@@ -607,6 +814,7 @@
       entry.appendChild(meta);
       dom.stagedList.appendChild(entry);
     });
+    syncSensingDock();
     syncPresence();
   }
 
@@ -616,16 +824,242 @@
     if (!spoken) return;
     try {
       window.speechSynthesis.cancel();
+      stopVUMeter();
       const utterance = new SpeechSynthesisUtterance(spoken);
       utterance.rate = 1;
       utterance.pitch = 1;
+      const voices = window.speechSynthesis.getVoices();
+      const selected = voices.find(v => v.name === state.voiceName);
+      const preferred = selected || voices.find(v => /Microsoft.*Zira|Google.*US|SAPI|enhanced/i.test(v.name) && v.lang.startsWith("en"))
+        || voices.find(v => v.lang.startsWith("en"))
+        || voices[0];
+      if (preferred) utterance.voice = preferred;
+      let cleaned = false;
+      const cleanup = () => {
+        if (cleaned) return;
+        cleaned = true;
+        stopVUMeter();
+        if (dom.activityRing) dom.activityRing.classList.remove("speaking");
+      };
+      utterance.onstart = () => {
+        if (dom.activityRing) dom.activityRing.classList.add("speaking");
+        runSpeechAnimator(spoken);
+      };
+      utterance.onend = cleanup;
+      utterance.onerror = cleanup;
       window.speechSynthesis.speak(utterance);
+      setTimeout(cleanup, Math.max(spoken.length * 80, 8000));
     } catch (_) {
-      // Keep the panel usable even if speech APIs are flaky.
+      stopVUMeter();
+      if (dom.activityRing) dom.activityRing.classList.remove("speaking");
     }
   }
 
   async function ensureChatLogin(forcePrompt = false) {
+
+  // ── Audio-Reactive Speech Animation ──
+  const audioReactive = (() => {
+    let audioCtx = null;
+    let analyser = null;
+    let sourceNode = null;
+    let rafId = null;
+    let speaking = false;
+    let wordTimeouts = [];
+
+    const ATTACK = 0.25;
+    const RELEASE = 0.06;
+
+    const target = { voiceLevel: 0, bass: 0, mid: 0, treble: 0 };
+    const smoothed = { voiceLevel: 0, bass: 0, mid: 0, treble: 0 };
+
+    function initAudioContext() {
+      if (audioCtx) return audioCtx;
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      analyser = audioCtx.createAnalyser();
+      analyser.fftSize = 512;
+      analyser.smoothingTimeConstant = 0.8;
+      analyser.connect(audioCtx.destination);
+      return audioCtx;
+    }
+
+    function resumeAudioContext() {
+      if (audioCtx && audioCtx.state === "suspended") {
+        audioCtx.resume();
+      }
+    }
+
+    function connectAudioElement(el) {
+      initAudioContext();
+      resumeAudioContext();
+      if (sourceNode) {
+        try { sourceNode.disconnect(); } catch (_) {}
+      }
+      sourceNode = audioCtx.createMediaElementSource(el);
+      sourceNode.connect(analyser);
+      el.play();
+    }
+
+    function smoothValue(prop, val) {
+      const speed = val > smoothed[prop] ? ATTACK : RELEASE;
+      smoothed[prop] = smoothed[prop] + (val - smoothed[prop]) * speed;
+      if (Math.abs(smoothed[prop] - val) < 0.001) smoothed[prop] = val;
+    }
+
+    function writeCSSProps() {
+      const root = document.documentElement;
+      root.style.setProperty("--voice-level", smoothed.voiceLevel.toFixed(3));
+      root.style.setProperty("--voice-bass", smoothed.bass.toFixed(3));
+      root.style.setProperty("--voice-mid", smoothed.mid.toFixed(3));
+      root.style.setProperty("--voice-treble", smoothed.treble.toFixed(3));
+    }
+
+    function readAnalyserData() {
+      if (!analyser) return;
+      const bufLen = analyser.frequencyBinCount;
+      const data = new Uint8Array(bufLen);
+      analyser.getByteFrequencyData(data);
+
+      let sum = 0;
+      let bassSum = 0;
+      let midSum = 0;
+      let trebleSum = 0;
+      const bassEnd = Math.floor(bufLen * 0.15);
+      const midEnd = Math.floor(bufLen * 0.5);
+
+      for (let i = 0; i < bufLen; i++) {
+        const v = data[i] / 255;
+        sum += v * v;
+        if (i < bassEnd) bassSum += v;
+        else if (i < midEnd) midSum += v;
+        else trebleSum += v;
+      }
+
+      target.voiceLevel = Math.sqrt(sum / bufLen);
+      target.bass = bassEnd > 0 ? bassSum / bassEnd : 0;
+      target.mid = (midEnd - bassEnd) > 0 ? midSum / (midEnd - bassEnd) : 0;
+      target.treble = (bufLen - midEnd) > 0 ? trebleSum / (bufLen - midEnd) : 0;
+    }
+
+    function animate() {
+      if (analyser && sourceNode) {
+        readAnalyserData();
+      }
+      smoothValue("voiceLevel", target.voiceLevel);
+      smoothValue("bass", target.bass);
+      smoothValue("mid", target.mid);
+      smoothValue("treble", target.treble);
+      writeCSSProps();
+      rafId = requestAnimationFrame(animate);
+    }
+
+    function startLoop() {
+      if (rafId) return;
+      initAudioContext();
+      animate();
+    }
+
+    function stopLoop() {
+      if (rafId) {
+        cancelAnimationFrame(rafId);
+        rafId = null;
+      }
+    }
+
+    function decayToZero() {
+      target.voiceLevel = 0;
+      target.bass = 0;
+      target.mid = 0;
+      target.treble = 0;
+    }
+
+    function isDecayed() {
+      return (
+        smoothed.voiceLevel < 0.005 &&
+        smoothed.bass < 0.005 &&
+        smoothed.mid < 0.005 &&
+        smoothed.treble < 0.005
+      );
+    }
+
+    function textTimedAnalysis(text) {
+      const words = text.split(/\s+/).filter(Boolean);
+      let cursor = 0;
+      words.forEach((word) => {
+        const chars = word.length;
+        const wordDur = 180 + chars * 35;
+        const punct = /[.,;:!?]/.test(word);
+        const pause = punct ? 450 : 60;
+
+        wordTimeouts.push(setTimeout(() => {
+          target.voiceLevel = 0.5 + Math.random() * 0.5;
+          target.bass = 0.3 + Math.random() * 0.5;
+          target.mid = 0.6 + Math.random() * 0.4;
+          target.treble = 0.2 + Math.random() * 0.6;
+        }, cursor));
+
+        wordTimeouts.push(setTimeout(() => {
+          target.voiceLevel = 0.05;
+          target.bass = 0.02;
+          target.mid = 0.08;
+          target.treble = 0.02;
+        }, cursor + wordDur));
+
+        cursor += wordDur + pause;
+      });
+    }
+
+    function onSpeechStart(text) {
+      speaking = true;
+      startLoop();
+      textTimedAnalysis(text);
+    }
+
+    function onSpeechEnd() {
+      speaking = false;
+      wordTimeouts.forEach(clearTimeout);
+      wordTimeouts = [];
+      decayToZero();
+      const checkDecay = () => {
+        writeCSSProps();
+        if (isDecayed()) {
+          stopLoop();
+          return;
+        }
+        requestAnimationFrame(checkDecay);
+      };
+      requestAnimationFrame(checkDecay);
+    }
+
+    function initUserGesture() {
+      const handler = () => {
+        initAudioContext();
+        resumeAudioContext();
+        document.removeEventListener("click", handler);
+        document.removeEventListener("keydown", handler);
+        document.removeEventListener("submit", handler);
+      };
+      document.addEventListener("click", handler);
+      document.addEventListener("keydown", handler);
+      document.addEventListener("submit", handler);
+    }
+
+    initUserGesture();
+    startLoop();
+    writeCSSProps();
+
+    return {
+      onSpeechStart,
+      onSpeechEnd,
+      connectAudioElement,
+      resumeAudioContext,
+      get voiceLevel() { return smoothed.voiceLevel; },
+      get bass() { return smoothed.bass; },
+      get mid() { return smoothed.mid; },
+      get treble() { return smoothed.treble; },
+    };
+  })();
+
+  window.__audioReactive = audioReactive;
     if (!state.chatLoginEnabled && !forcePrompt) return true;
     let username = (localStorage.getItem("nova_chat_user") || state.userId || "").trim();
     if (!username || forcePrompt) {
@@ -697,14 +1131,18 @@
       const payload = await response.json();
       state.chatLoginEnabled = Boolean(payload.chat_login_enabled);
       if (payload.ollama_api_up) {
-        setChip(dom.presenceHealth, `Healthy | ${payload.chat_model || "model ready"}`, "ok");
-        setChip(dom.headerPresenceHealth, `Healthy | ${payload.chat_model || "model ready"}`, "ok");
+        appendEvidence("Ollama online");
+        setChip(dom.presenceHealth, "Ready", "ok");
+        setChip(dom.headerPresenceHealth, "Ready", "ok");
+        state.lastRuntimePulse = state.lastRuntimePulse || {};
+        state.lastRuntimePulse.ollama_api_up = true;
+        state.lastRuntimePulse.memory_enabled = payload.memory_enabled;
         if (!state.thinking && !state.uploading && !state.listenMode && !state.recognitionActive && !state.cameraLive && !state.stagedItems.length && !state.recentHandoff.length) {
           setMood("calm", "steady runtime");
         }
       } else {
-        setChip(dom.presenceHealth, "Model unavailable", "danger");
-        setChip(dom.headerPresenceHealth, "Model unavailable", "danger");
+        setChip(dom.presenceHealth, "Offline", "danger");
+        setChip(dom.headerPresenceHealth, "Offline", "danger");
         setMood("strain", "model unavailable");
       }
     } catch (_) {
@@ -714,12 +1152,27 @@
     }
   }
 
+  function applyNovaOutreach(payload) {
+    const outreach = payload && payload.nova_outreach;
+    if (!outreach) return;
+    const kind = String(outreach.kind || "");
+    const text = String(outreach.text || "").trim();
+    if (kind !== "attention" || !text) return;
+    const oid = String(outreach.id || "");
+    if (oid && oid === state.lastOutreachId) return;
+    state.lastOutreachId = oid;
+    addMessage("assistant", text);
+    setActivityHeadline(text);
+    setMood("focus", "runtime pressure");
+  }
+
   async function refreshRuntimePulse() {
     if (!config.controlStatusUrl) return;
     try {
       const response = await fetch(config.controlStatusUrl);
       const payload = await response.json();
       updateRuntimePulse(payload || {});
+      applyNovaOutreach(payload || {});
     } catch (_) {
       setPulseField(dom.pulseRuntime, "Unable to reach runtime pulse.");
       setPulseField(dom.pulseQueue, "Queue state unavailable.");
@@ -746,6 +1199,7 @@
         body: JSON.stringify({
           session_id: state.sessionId,
           user_id: state.userId,
+          voice_persona: state.voicePersona,
           items,
         }),
       });
@@ -816,6 +1270,7 @@
     const outgoing = raw || "Please inspect the staged context for this turn.";
     const userEcho = raw || `[Shared ${state.stagedItems.length} staged item(s)]`;
     addMessage("user", userEcho);
+    appendEvidence("Turn sent" + (hasStaged ? " with " + state.stagedItems.length + " attachments" : ""));
     state.thinking = true;
     setMood(
       hasStaged ? "focus" : inferMoodFromText(outgoing, "focus"),
@@ -852,6 +1307,7 @@
       }
       const reply = payload.reply || (payload.error ? `Error: ${payload.error}` : "No reply");
       addMessage("assistant", String(reply));
+      appendEvidence(reply.substring(0, 60) + (reply.length > 60 ? "..." : ""));
       if (response.ok && payload.reply) {
         const replyMood = inferMoodFromText(reply, hasStaged ? "focus" : "calm");
         const replyReason =
@@ -890,6 +1346,31 @@
       window.clearTimeout(stillWorkingTimer);
       state.thinking = false;
       syncPresence();
+    }
+  }
+
+  function populateSpeechVoices() {
+    if (!dom.voiceChoice || !window.speechSynthesis) return;
+    const voices = window.speechSynthesis.getVoices().filter((voice) => voice && voice.lang);
+    const english = voices.filter((voice) => voice.lang.toLowerCase().startsWith("en"));
+    const available = english.length ? english : voices;
+    const previous = state.voiceName;
+    dom.voiceChoice.innerHTML = "";
+    const systemOption = document.createElement("option");
+    systemOption.value = "";
+    systemOption.textContent = "System default";
+    dom.voiceChoice.appendChild(systemOption);
+    available.forEach((voice) => {
+      const option = document.createElement("option");
+      option.value = voice.name;
+      option.textContent = `${voice.name} (${voice.lang})`;
+      dom.voiceChoice.appendChild(option);
+    });
+    const stillAvailable = available.some((voice) => voice.name === previous);
+    dom.voiceChoice.value = stillAvailable ? previous : "";
+    if (!stillAvailable && previous) {
+      state.voiceName = "";
+      localStorage.removeItem("leah_speech_voice");
     }
   }
 
@@ -1095,6 +1576,7 @@
 
   async function loadHistory() {
     if (!state.sessionId) return;
+    state.loadingHistory = true;
     try {
       const response = await chatFetch(
         `${config.chatHistoryUrl}?session_id=${encodeURIComponent(state.sessionId)}&user_id=${encodeURIComponent(state.userId)}`,
@@ -1111,6 +1593,8 @@
       setActivityHeadline("Nova reopened the last lived session.");
     } catch (_) {
       // Keep startup resilient.
+    } finally {
+      state.loadingHistory = false;
     }
   }
 
@@ -1168,13 +1652,7 @@
       if (dom.fileInput) dom.fileInput.value = "";
     });
 
-    dom.dropZone?.addEventListener("click", () => dom.fileInput?.click());
-    dom.dropZone?.addEventListener("keydown", (event) => {
-      if (event.key === "Enter" || event.key === " ") {
-        event.preventDefault();
-        dom.fileInput?.click();
-      }
-    });
+    // File button opens the picker. Drop-zone is drag-only so typing is not stolen.
     dom.dropZone?.addEventListener("dragover", (event) => {
       event.preventDefault();
       dom.dropZone?.classList.add("dragging");
@@ -1197,6 +1675,18 @@
       pushActivity("Voice output", state.voiceEnabled ? "Browser speech is on." : "Browser speech is off.");
       setActivityHeadline(state.voiceEnabled ? "Nova can speak back through this browser." : "Voice output is off.");
       syncPresence();
+    });
+
+    dom.voiceTone?.addEventListener("change", () => {
+      state.voicePersona = String(dom.voiceTone.value || "friendly");
+      localStorage.setItem("leah_voice_persona", state.voicePersona);
+      pushActivity("Voice tone", dom.voiceTone.options[dom.voiceTone.selectedIndex]?.text || state.voicePersona);
+    });
+
+    dom.voiceChoice?.addEventListener("change", () => {
+      state.voiceName = String(dom.voiceChoice.value || "");
+      localStorage.setItem("leah_speech_voice", state.voiceName);
+      pushActivity("Speech voice", dom.voiceChoice.options[dom.voiceChoice.selectedIndex]?.text || "System default");
     });
 
     dom.btnMic?.addEventListener("click", () => {
@@ -1226,30 +1716,59 @@
     dom.btnNewSession?.addEventListener("click", () => {
       resetSession();
     });
+
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "/" && document.activeElement?.tagName !== "TEXTAREA" && document.activeElement?.tagName !== "INPUT") {
+        event.preventDefault();
+        dom.input?.focus();
+      }
+      if (event.key === "Escape" && document.activeElement === dom.input) {
+        dom.input.blur();
+      }
+      if (event.ctrlKey && event.shiftKey && event.key === "N") {
+        event.preventDefault();
+        resetSession();
+      }
+    });
   }
 
   async function boot() {
     state.userId = (qs.get("uid") || localStorage.getItem("nova_user_id") || makeUserId()).trim();
     state.sessionId = (qs.get("sid") || localStorage.getItem("nova_session_id") || "").trim();
-    state.voiceEnabled = localStorage.getItem("leah_voice_output") === "on";
+    state.voiceEnabled = localStorage.getItem("leah_voice_output") !== "off";
+    if (window.speechSynthesis) {
+      window.speechSynthesis.getVoices();
+      window.speechSynthesis.onvoiceschanged = populateSpeechVoices;
+    }
     localStorage.setItem("nova_user_id", state.userId);
     if (state.sessionId) {
       localStorage.setItem("nova_session_id", state.sessionId);
     }
 
     bindEvents();
+    bindRingNodes();
+    if (dom.voiceTone) dom.voiceTone.value = state.voicePersona;
+    populateSpeechVoices();
     renderStagedItems();
     setMood("calm", "steady runtime");
     syncPresence();
+    appendEvidence("System initialized");
     await loadHistory();
     await resumePendingTurn();
-    if (!state.historyLoaded) {
-      addMessage("system", "LEAH is live. Upload, speak, capture, or start typing when you are ready.");
-      setActivityHeadline("Nova is here. Bring it your next file, thought, or signal.");
+    try {
+      const response = await fetch(config.controlStatusUrl);
+      const payload = await response.json();
+      updateRuntimePulse(payload || {});
+      applyNovaOutreach(payload || {});
+    } catch (_) {
+      if (!state.historyLoaded) {
+        setActivityHeadline("Nova is here.");
+      }
     }
     void checkHealth();
     state.healthTimer = window.setInterval(() => {
       void checkHealth();
+      void refreshRuntimePulse();
     }, 25000);
   }
 

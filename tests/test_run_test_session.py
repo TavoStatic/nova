@@ -115,7 +115,7 @@ class TestRunTestSessionIsolation(unittest.TestCase):
         orig_ollama_chat = nova_core.ollama_chat
 
         try:
-            nova_core.mem_recall = lambda _query: f"- memory-user:{nova_core._memory_runtime_user() or 'none'}"
+            nova_core.mem_recall = lambda _query, **_kwargs: f"- memory-user:{nova_core._memory_runtime_user() or 'none'}"
             nova_core.kb_search = lambda _query: ""
 
             def fake_ollama(_text: str, retrieved_context: str = "", **_kwargs) -> str:
@@ -126,12 +126,8 @@ class TestRunTestSessionIsolation(unittest.TestCase):
 
             with tempfile.TemporaryDirectory() as td:
                 base = Path(td)
-                with mock.patch(
-                    "services.nova_reply_sequence.load_leah_fast_chat_from_core",
-                    return_value=False,
-                ):
-                    cli_result = run_cli_session(session_meta["messages"], base / "cli")
-                    http_result = run_http_session(session_meta["messages"], base / "http")
+                cli_result = run_cli_session(session_meta["messages"], base / "cli")
+                http_result = run_http_session(session_meta["messages"], base / "http")
 
             comparison = compare_sessions(cli_result, http_result)
         finally:
@@ -165,7 +161,7 @@ class TestRunTestSessionIsolation(unittest.TestCase):
         orig_ollama_chat = nova_core.ollama_chat
 
         try:
-            nova_core.mem_recall = lambda _query: f"- memory-user:{nova_core._memory_runtime_user() or 'none'}"
+            nova_core.mem_recall = lambda _query, **_kwargs: f"- memory-user:{nova_core._memory_runtime_user() or 'none'}"
             nova_core.kb_search = lambda _query: ""
 
             def fake_ollama(_text: str, retrieved_context: str = "", **_kwargs) -> str:

@@ -1,0 +1,35 @@
+name: Bug report
+description: Report a reproducible Nova defect
+title: "bug: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please include observed runtime evidence where possible. Do not include secrets or private operator data.
+  - type: textarea
+    id: observed
+    attributes:
+      label: Observed behavior
+      description: What happened, including the concrete symptom?
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction and evidence
+      description: Commands, relevant logs, runtime status, or a minimal reproduction.
+    validations:
+      required: true
+  - type: input
+    id: branch
+    attributes:
+      label: Commit or branch
+      placeholder: SHA or branch name

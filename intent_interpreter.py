@@ -1,4 +1,4 @@
-﻿"""Intent interpretation seams for Nova's shared-state architecture.
+"""Intent interpretation seams for Nova's shared-state architecture.
 
 This module is intentionally light on implementation. It defines the callable
 surface for turning raw user input plus shared context into an updated Intent.

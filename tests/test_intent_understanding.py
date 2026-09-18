@@ -27,6 +27,7 @@ from services.nova_intent_understanding import (
     classify_turn_intent,
     record_intent_outcome,
     select_response_strategy,
+    self_status_belongs_to_turn,
     _build_intent_gap_signal,
     _default_intent,
     _is_gap_outcome,
@@ -104,6 +105,23 @@ class TestSelectResponseStrategy(unittest.TestCase):
         result = select_response_strategy(self._intent(CASUAL, GENERAL))
         self.assertEqual(result["strategy"], ACCEPT)
         self.assertFalse(result["use_tool"])
+
+    def test_self_status_stays_off_presence_turns(self):
+        casual = self._intent(CASUAL, GENERAL)
+        self.assertFalse(
+            self_status_belongs_to_turn(casual, select_response_strategy(casual))
+        )
+        feeling = self._intent(REQUESTING, GENERAL)
+        self.assertFalse(
+            self_status_belongs_to_turn(feeling, select_response_strategy(feeling))
+        )
+        self.assertTrue(self_status_belongs_to_turn({}, {}))
+
+    def test_self_status_stays_on_for_live_system_asks(self):
+        intent = self._intent(REQUESTING, SYSTEM)
+        self.assertTrue(
+            self_status_belongs_to_turn(intent, select_response_strategy(intent))
+        )
 
     def test_low_confidence_triggers_clarify(self):
         result = select_response_strategy(

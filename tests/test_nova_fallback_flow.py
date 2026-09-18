@@ -3,6 +3,8 @@ import unittest
 from services.nova_fallback_flow import build_fallback_context
 from services.nova_fallback_flow import finalize_llm_fallback_reply
 from services.nova_fallback_flow import prepare_fallback_flow
+from services.nova_fallback_flow import _shape_conversation_scoped_reply
+from services.nova_self_evidence_reply import turn_asks_nova_self
 from services.nova_turn_intent_trace import build_turn_intent_evidence_packet
 from services.nova_turn_intent_trace import render_turn_intent_evidence_packet
 
@@ -452,6 +454,111 @@ class TestNovaFallbackFlow(unittest.TestCase):
 
         self.assertEqual(out.get("reply"), "This can stay simple.")
 
+    def test_conversation_form_shapes_helpdesk_greeting_to_a_statement(self):
+        packet = build_turn_intent_evidence_packet(
+            text="hi nova",
+            turns=[("user", "hi nova")],
+            fallback_context={"chat_context": "recent turns"},
+            semantic_tool_observation={
+                "status": "none",
+                "intent": {
+                    "tool": "none",
+                    "confidence": 0.91,
+                    "evidence_need": "conversation",
+                    "answer_target": "current_conversation",
+                },
+            },
+        )
+        out = finalize_llm_fallback_reply(
+            text="hi nova",
+            raw_user_text="hi nova",
+            input_source="typed",
+            retrieved_context="",
+            language_mix_spanish_pct=0,
+            ollama_chat_fn=lambda *args, **kwargs: "Hello! How can I assist you today?",
+            mem_enabled_fn=lambda: False,
+            mem_should_store_fn=lambda text: False,
+            mem_add_fn=lambda kind, source, text: None,
+            strip_mem_leak_fn=lambda reply, retrieved_context: reply,
+            behavior_record_event_fn=lambda event: None,
+            action_ledger_add_step=lambda *args, **kwargs: None,
+            ensure_reply_fn=lambda text: text,
+            intent_evidence_packet=packet,
+            fallback_context={},
+        )
+
+        self.assertEqual(out.get("reply"), "Hello!")
+        self.assertNotIn("assist", str(out.get("reply") or "").lower())
+
+    def test_identity_ask_uses_evidence_when_router_misses_nova_self(self):
+        calls = []
+        out = finalize_llm_fallback_reply(
+            text="who are you?",
+            raw_user_text="who are you?",
+            input_source="http",
+            retrieved_context="",
+            language_mix_spanish_pct=0,
+            ollama_chat_fn=lambda *args, **kwargs: calls.append("llm") or "I am a chatbot designed to help.",
+            mem_enabled_fn=lambda: False,
+            mem_should_store_fn=lambda text: False,
+            mem_add_fn=lambda kind, source, text: None,
+            strip_mem_leak_fn=lambda reply, retrieved_context: reply,
+            behavior_record_event_fn=lambda event: None,
+            action_ledger_add_step=lambda *args, **kwargs: None,
+            ensure_reply_fn=lambda text: text,
+            intent_evidence_packet={},
+            fallback_context={
+                "learning_context": (
+                    "Confirmed Nova identity evidence: operator confirmed\n"
+                    "Identity fact: assistant_name=Nova\n"
+                    "Operational Nova self evidence:\n"
+                    "Registered internal surfaces observed from the capability registry:\n"
+                    "- runtime_core: Nova runs as a local runtime\n"
+                    "- work_tree: Nova can organize internal work\n"
+                ),
+            },
+            leah_fast_chat=True,
+        )
+
+        self.assertEqual(out.get("planner_decision"), "evidence_bound_reply")
+        self.assertIn("I am Nova", out.get("reply"))
+        self.assertIn("local AI runtime", out.get("reply"))
+        self.assertNotIn("chatbot", str(out.get("reply") or "").lower())
+        self.assertNotIn("llm", calls)
+
+    def test_chatbot_ask_uses_operational_evidence_not_model_prior(self):
+        calls = []
+        out = finalize_llm_fallback_reply(
+            text="are you a chat bot ?",
+            raw_user_text="are you a chat bot ?",
+            input_source="http",
+            retrieved_context="",
+            language_mix_spanish_pct=0,
+            ollama_chat_fn=lambda *args, **kwargs: calls.append("llm") or "Yes, I'm a chatbot.",
+            mem_enabled_fn=lambda: False,
+            mem_should_store_fn=lambda text: False,
+            mem_add_fn=lambda kind, source, text: None,
+            strip_mem_leak_fn=lambda reply, retrieved_context: reply,
+            behavior_record_event_fn=lambda event: None,
+            action_ledger_add_step=lambda *args, **kwargs: None,
+            ensure_reply_fn=lambda text: text,
+            intent_evidence_packet={},
+            fallback_context={
+                "learning_context": (
+                    "Identity fact: assistant_name=Nova\n"
+                    "Operational Nova self evidence:\n"
+                    "Registered internal surfaces observed from the capability registry:\n"
+                    "- guard_system: Nova has a guard process\n"
+                ),
+            },
+            leah_fast_chat=True,
+        )
+
+        self.assertIn("I am Nova", out.get("reply"))
+        self.assertIn("not only a model reply", out.get("reply"))
+        self.assertNotIn("Yes, I'm a chatbot", out.get("reply") or "")
+        self.assertNotIn("llm", calls)
+
     def test_finalize_fallback_binds_operational_self_answer_to_evidence_without_llm(self):
         calls = []
         packet = build_turn_intent_evidence_packet(
@@ -580,7 +687,7 @@ class TestNovaFallbackFlow(unittest.TestCase):
         self.assertEqual(out.get("planner_decision"), "llm_fallback")
         self.assertEqual(out.get("reply"), "MODEL_REPLY")
 
-    def test_finalize_fallback_does_not_bind_low_confidence_self_evidence(self):
+    def test_clear_identity_ask_binds_even_when_router_confidence_is_low(self):
         packet = build_turn_intent_evidence_packet(
             text="what are you?",
             turns=[("user", "what are you?")],
@@ -594,6 +701,45 @@ class TestNovaFallbackFlow(unittest.TestCase):
         out = finalize_llm_fallback_reply(
             text="what are you?",
             raw_user_text="what are you?",
+            input_source="http",
+            retrieved_context="",
+            language_mix_spanish_pct=0,
+            ollama_chat_fn=lambda *args, **kwargs: "MODEL_REPLY",
+            mem_enabled_fn=lambda: False,
+            mem_should_store_fn=lambda text: False,
+            mem_add_fn=lambda kind, source, text: None,
+            strip_mem_leak_fn=lambda reply, retrieved_context: reply,
+            behavior_record_event_fn=lambda event: None,
+            action_ledger_add_step=lambda *args, **kwargs: None,
+            ensure_reply_fn=lambda text: text,
+            intent_evidence_packet=packet,
+            fallback_context={
+                "learning_context": (
+                    "Identity fact: assistant_name=Nova\n"
+                    "Operational Nova self evidence:\n"
+                    "- runtime_core: Nova runs as a local runtime\n"
+                ),
+            },
+        )
+
+        self.assertEqual(out.get("planner_decision"), "evidence_bound_reply")
+        self.assertIn("I am Nova", out.get("reply"))
+        self.assertNotIn("MODEL_REPLY", out.get("reply") or "")
+
+    def test_finalize_fallback_does_not_bind_low_confidence_unrelated_self_route(self):
+        packet = build_turn_intent_evidence_packet(
+            text="how is that working?",
+            turns=[("user", "how is that working?")],
+            fallback_context={"identity_used": True, "identity_chars": 10, "operational_identity_used": True, "operational_identity_chars": 20},
+            semantic_tool_observation={
+                "status": "none",
+                "intent": {"tool": "none", "confidence": 0.31, "evidence_need": "operational_self", "answer_target": "nova_self"},
+            },
+        )
+
+        out = finalize_llm_fallback_reply(
+            text="how is that working?",
+            raw_user_text="how is that working?",
             input_source="http",
             retrieved_context="",
             language_mix_spanish_pct=0,
@@ -760,6 +906,17 @@ class TestNovaFallbackFlow(unittest.TestCase):
         self.assertEqual(out.get("reply_contract"), "")
         self.assertEqual(out.get("reply"), "I repeated myself there.")
         self.assertIn("llm", calls)
+
+
+class TestPresenceAndIdentityDetectors(unittest.TestCase):
+    def test_identity_ask_is_detected(self):
+        self.assertEqual(turn_asks_nova_self("who are you?"), "operational_self")
+        self.assertEqual(turn_asks_nova_self("are you a chatbot?"), "operational_self")
+        self.assertEqual(turn_asks_nova_self("hi"), "")
+
+    def test_question_only_reply_does_not_keep_the_ticket(self):
+        self.assertEqual(_shape_conversation_scoped_reply("What would you like to know or do?"), "")
+        self.assertEqual(_shape_conversation_scoped_reply("What topic are you interested in learning about?"), "")
 
 
 if __name__ == "__main__":

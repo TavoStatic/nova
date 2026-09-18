@@ -65,7 +65,13 @@ class TestWorkTreeIngestion(unittest.TestCase):
         task = work_tree.add_task_to_branch(root.branch_id, "Single task")
         work_tree.mark_task_complete(task.task_id)
         self.assertEqual(task.status, TaskStatus.COMPLETE)
-        self.assertEqual(root.status, BranchStatus.COMPLETE)
+        self.assertNotEqual(root.status, BranchStatus.COMPLETE)
+        open_titles = [
+            item.title
+            for item in work_tree.list_branch_tasks(root.branch_id)
+            if item.status not in {TaskStatus.COMPLETE, TaskStatus.DROPPED}
+        ]
+        self.assertEqual(open_titles, [])
 
     def test_tree_persists_and_reloads_correctly(self):
         db_path = self._tmp / "persist_test.sqlite3"

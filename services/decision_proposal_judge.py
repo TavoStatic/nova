@@ -193,16 +193,7 @@ _ACTION_CLAIM_CATALOG: dict[str, dict[str, Any]] = {
 }
 
 
-def _text(value: Any, limit: int = 400) -> str:
-    return str(value or "").strip()[: max(1, int(limit or 1))]
-
-
-def _as_dict(value: Any) -> dict[str, Any]:
-    return dict(value) if isinstance(value, dict) else {}
-
-
-def _as_list(value: Any) -> list[Any]:
-    return list(value) if isinstance(value, list) else []
+from services.type_utils import _as_dict, _as_list, _text
 
 
 def _clamp01(value: float) -> float:

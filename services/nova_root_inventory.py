@@ -47,6 +47,7 @@ SOURCE_ROOTS: tuple[SourceRoot, ...] = (
         (
             "services/autonomy_orchestrator.py",
             "services/nova_mission.py",
+            "services/gatekeeper.py",
             "autonomy_maintenance.py",
             "services/work_tree_signal_ingestion.py",
         ),
@@ -227,10 +228,11 @@ SOURCE_ROOTS: tuple[SourceRoot, ...] = (
     ),
     SourceRoot(
         "backpack_host",
-        "Backpack host infrastructure — fusion, control surface, capability scan, and run entrypoint",
+        "Backpack host infrastructure — control surface, query, installation, and residue cleanup",
         (
-            "services/backpack_host/capability_surface.py",
             "services/backpack_host/query.py",
+            "services/backpack_host/sanitize.py",
+            "services/backpack_host/install_state.py",
             "services/control_backpacks.py",
             "scripts/run_backpack.py",
         ),
@@ -261,9 +263,11 @@ SOURCE_ROOTS: tuple[SourceRoot, ...] = (
         (
             "scripts/run_regression.py",
             "scripts/run_test_session.py",
+            "scripts/regression_lane_worker.py",
             "services/validation_artifact_truth.py",
             "services/regression_profile_inventory.py",
             "services/regression_lanes.py",
+            "services/regression_status_projection.py",
         ),
     ),
     SourceRoot(
@@ -297,8 +301,6 @@ SOURCE_ROOTS: tuple[SourceRoot, ...] = (
         "Source-root discovery, root coverage comparison, and wiring inventory completeness",
         ("services/nova_root_inventory.py", "services/nova_wiring_inventory.py", "services/end_to_end_wiring.py"),
     ),
-    # NOTE: data connector service layer and data lane ship with the installable backpack,
-    # not with Nova core. See backpacks/ for the reference implementation.
 )
 
 
@@ -401,6 +403,7 @@ def _coverage_root_for_path(path: str) -> str:
         or name.startswith("test_")
         or name in {"smoke_test.py", "http_test_session_helpers.py", "http_chat_flow.py", "run_regression.py"}
         or "run_regression" in low
+        or "regression" in low
         or "regression_lanes" in low
         or "regression_evidence" in low
         or "validation_artifact" in low
@@ -409,8 +412,6 @@ def _coverage_root_for_path(path: str) -> str:
         or "smoke" in low
     ):
         return "test_ecosystem"
-    if low.startswith("services/edfi/"):
-        return "backpack_host"  # ships with the data connector backpack, not core
     if (
         low.startswith("backpacks/")
         or low.startswith("services/backpack_host/")
@@ -434,12 +435,6 @@ def _coverage_root_for_path(path: str) -> str:
         or name in {"build_nova_setup_exe.ps1", "bring_up_webui.py", "webui_watchdog.py"}
     ):
         return "diagnostics_hygiene"
-    if low.startswith("data_sources/data_connector/"):
-        return "backpack_host"
-    if name in {"run_edfi_profile.py", "run_edfi_explore.py", "demo_edfi_core_lifecycle.py"} or low == "tools/edfi_tool.py":
-        return "backpack_host"
-    if low.startswith("docs/") and "edfi" in low:
-        return "diagnostics_hygiene"
     if name in {"readme.md", "requirements.txt"}:
         return "frontdoor_cli"
     if name in {".gitattributes", ".gitignore", "pytest.ini"}:
@@ -448,8 +443,30 @@ def _coverage_root_for_path(path: str) -> str:
         return "diagnostics_hygiene"
     if name == "this_is_nova":
         return "source_root_inventory"
-    if name == "nova-autostart.ps1":
+    if name in {"nova-autostart.ps1", "nyo-nova-autostart.ps1", "nova-nova-autostart.ps1"}:
         return "frontdoor_cli"
+    if name.startswith("tmp_") or name.startswith("_tmp") or low.startswith("scripts/_"):
+        return "diagnostics_hygiene"
+    if name in {"tmp_inspect_task.py"}:
+        return "diagnostics_hygiene"
+    if name in {"check_changes.py", "status_check.py", "run_critical_tests.py"}:
+        return "diagnostics_hygiene"
+    if "observation_spine" in low:
+        return "work_tree"
+    if "cognitive_workspace" in low:
+        return "work_tree"
+    if name in {"regenerate_function_index.py", "regenerate_services_index.py", "generate_nova_ledger.py", "nova_ledger_ingest.py", "log_session.py"}:
+        return "source_root_inventory"
+    if name == "probe_raw_resource.py":
+        return "backpack_host"
+    if name == "start_unattached_later.py":
+        return "runtime_core"
+    if "decision_proposal_judge" in low:
+        return "autonomy_orchestrator"
+    if low == "services/gatekeeper.py":
+        return "autonomy_orchestrator"
+    if "finish_areas_inventory" in low:
+        return "source_root_inventory"
     if low.startswith("updates/"):
         return "patch_pipeline"
     if "nova_server_side" in low:

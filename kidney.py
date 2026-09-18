@@ -68,6 +68,17 @@ def policy_kidney() -> dict[str, Any]:
     cfg.setdefault("temp_max_total_mb", 50)
     cfg.setdefault("protect_patterns", [])
     cfg.setdefault("generated_definition_retire_cooldown_hours", 24)
+    cfg.setdefault("exports_max_age_days", 3)
+    cfg.setdefault("ledger_max_mb", 20)
+    cfg.setdefault("release_extract_max_age_days", 3)
+    cfg.setdefault("release_validation_extract_max_total_mb", 1024)
+    cfg.setdefault("release_stage_max_age_days", 3)
+    cfg.setdefault("release_stage_max_total_mb", 256)
+    cfg.setdefault("subconscious_run_max_age_days", 2)
+    cfg.setdefault("subconscious_run_keep_count", 24)
+    cfg.setdefault("subconscious_run_max_flag", 400)
+    cfg.setdefault("recovery_quarantine_max_age_days", 14)
+    cfg.setdefault("recovery_quarantine_keep_count", 1)
     return cfg
 
 
@@ -253,6 +264,68 @@ def _build_candidate(path: Path, category: str, action: str, reason: str, *, ext
     return payload
 
 
+_RELEASE_EXTRACT_PROTECT_NAMES = {"release_command_logs"}
+_STORAGE_WATCH_DELETE_CATEGORIES = {
+    "stale_snapshot",
+    "release_extract_bloat",
+    "release_stage_bloat",
+    "subconscious_run_bloat",
+    "recovery_quarantine_bloat",
+}
+
+
+def _flag_watched_dir_bloat(
+    out: list[dict[str, Any]],
+    *,
+    root: Path,
+    category: str,
+    age_reason: str,
+    size_reason: str,
+    max_age_seconds: float,
+    max_total_bytes: int,
+    protect_patterns: list[str],
+    now: float,
+    protect_names: set[str] | None = None,
+    max_count: int = 0,
+    count_reason: str = "",
+    max_flag: int = 0,
+    skip_size: bool = False,
+) -> None:
+    """Age-out, count-cap, and size-cap directory trees the cycle already watches."""
+    if not root.exists():
+        return
+    protected = set(protect_names or ())
+    children = [
+        child
+        for child in root.iterdir()
+        if child.is_dir() and child.name not in protected and not _is_protected(child, protect_patterns)
+    ]
+    children.sort(key=lambda path: path.stat().st_mtime if path.exists() else 0.0, reverse=True)
+    retained_bytes = 0
+    retained_count = 0
+    pending: list[dict[str, Any]] = []
+    for child in children:
+        age_seconds = _age_seconds(child, now)
+        size_bytes = 0 if skip_size else _path_size_bytes(child)
+        reason = ""
+        if max_age_seconds > 0.0 and age_seconds > max_age_seconds:
+            reason = age_reason
+        elif max_count > 0 and retained_count >= max_count:
+            reason = count_reason or size_reason
+        elif max_total_bytes > 0 and not skip_size and retained_bytes + size_bytes > max_total_bytes:
+            reason = size_reason
+        else:
+            retained_count += 1
+            retained_bytes += size_bytes
+            continue
+        extra = {"size_bytes": size_bytes} if skip_size else None
+        pending.append(_build_candidate(child, category, "delete", reason, extra=extra))
+    pending.sort(key=lambda row: float(row.get("age_seconds") or 0.0), reverse=True)
+    if max_flag > 0:
+        pending = pending[:max_flag]
+    out.extend(pending)
+
+
 def scan_candidates() -> list[dict[str, Any]]:
     cfg = policy_kidney()
     now = _now_ts()
@@ -413,6 +486,71 @@ def scan_candidates() -> list[dict[str, Any]]:
                 if _age_seconds(path, now) > export_max_age:
                     out.append(_build_candidate(path, "export_bloat", "delete", "export_age_limit"))
 
+    # Storage watch already reports these trees. Kidney is the organ that should
+    # actually remove them. Release zips and the ledger stay identity, not bloat.
+    extract_max_age = float(cfg.get("release_extract_max_age_days", 3) or 3) * 86400.0
+    extract_max_total = int(float(cfg.get("release_validation_extract_max_total_mb", 1024) or 1024) * 1024 * 1024)
+    _flag_watched_dir_bloat(
+        out,
+        root=RUNTIME_DIR / "validation" / "release",
+        category="release_extract_bloat",
+        age_reason="release_extract_age_limit",
+        size_reason="release_extract_total_size_limit",
+        max_age_seconds=extract_max_age,
+        max_total_bytes=extract_max_total,
+        protect_patterns=protect_patterns,
+        now=now,
+        protect_names=_RELEASE_EXTRACT_PROTECT_NAMES,
+    )
+    stage_max_age = float(cfg.get("release_stage_max_age_days", cfg.get("release_extract_max_age_days", 3)) or 3) * 86400.0
+    stage_max_total = int(float(cfg.get("release_stage_max_total_mb", 256) or 256) * 1024 * 1024)
+    _flag_watched_dir_bloat(
+        out,
+        root=RUNTIME_DIR / "exports" / "release_packages" / "_stage",
+        category="release_stage_bloat",
+        age_reason="release_stage_age_limit",
+        size_reason="release_stage_total_size_limit",
+        max_age_seconds=stage_max_age,
+        max_total_bytes=stage_max_total,
+        protect_patterns=protect_patterns,
+        now=now,
+    )
+    run_max_age = float(cfg.get("subconscious_run_max_age_days", 2) or 2) * 86400.0
+    run_keep = max(0, int(cfg.get("subconscious_run_keep_count", 24) or 24))
+    run_flag = max(0, int(cfg.get("subconscious_run_max_flag", 400) or 400))
+    _flag_watched_dir_bloat(
+        out,
+        root=RUNTIME_DIR / "subconscious_runs",
+        category="subconscious_run_bloat",
+        age_reason="subconscious_run_age_limit",
+        size_reason="subconscious_run_count_limit",
+        max_age_seconds=run_max_age,
+        max_total_bytes=0,
+        protect_patterns=protect_patterns,
+        now=now,
+        max_count=run_keep,
+        count_reason="subconscious_run_count_limit",
+        max_flag=run_flag,
+        skip_size=True,
+    )
+    quarantine_max_age = float(cfg.get("recovery_quarantine_max_age_days", 14) or 14) * 86400.0
+    quarantine_keep = max(0, int(cfg.get("recovery_quarantine_keep_count", 1) or 1))
+    _flag_watched_dir_bloat(
+        out,
+        root=RUNTIME_DIR / "recovery_quarantine",
+        category="recovery_quarantine_bloat",
+        age_reason="recovery_quarantine_age_limit",
+        size_reason="recovery_quarantine_count_limit",
+        max_age_seconds=quarantine_max_age,
+        max_total_bytes=0,
+        protect_patterns=protect_patterns,
+        now=now,
+        max_count=quarantine_keep,
+        count_reason="recovery_quarantine_count_limit",
+        max_flag=20,
+        skip_size=True,
+    )
+
     ledger_max = int(float(cfg.get("ledger_max_mb", 20) or 20) * 1024 * 1024)
     for ledger_name in ("ops_journal.jsonl", "operator_outbox.jsonl", "control_action_audit.jsonl", "tool_events.jsonl"):
         p = RUNTIME_DIR / "validation" / ledger_name
@@ -424,6 +562,7 @@ def scan_candidates() -> list[dict[str, Any]]:
                     out.append(_build_candidate(p, "ledger_bloat", "delete", "ledger_size_limit"))
             except Exception:
                 pass
+
     return out
 
 
@@ -457,6 +596,12 @@ def _skip_cleanup_snapshot(candidates: list[dict[str, Any]], *, cfg: dict[str, A
         for item in candidates
     ):
         return "stale_snapshot_batch"
+    if all(
+        str(item.get("category") or "") in _STORAGE_WATCH_DELETE_CATEGORIES
+        and str(item.get("action") or "") == "delete"
+        for item in candidates
+    ):
+        return "storage_watch_batch"
     total_bytes = sum(int(item.get("size_bytes", 0) or 0) for item in candidates)
     max_total_bytes = _cleanup_snapshot_max_total_bytes(cfg)
     if max_total_bytes and total_bytes > max_total_bytes:

@@ -24,7 +24,10 @@ class NovaHttpResponsesService:
         for key, value in (headers or {}).items():
             handler.send_header(key, value)
         handler.end_headers()
-        handler.wfile.write(body)
+        try:
+            handler.wfile.write(body)
+        except (ConnectionAbortedError, ConnectionResetError, BrokenPipeError):
+            return
         record_http_response_fn(code)
 
     def json_response(self, handler, code: int, payload: dict, *, record_http_response_fn) -> None:
@@ -43,7 +46,10 @@ class NovaHttpResponsesService:
         handler.send_header("Content-Length", str(len(body)))
         handler.send_header("Cache-Control", "no-store")
         handler.end_headers()
-        handler.wfile.write(body)
+        try:
+            handler.wfile.write(body)
+        except (ConnectionAbortedError, ConnectionResetError, BrokenPipeError):
+            return
         record_http_response_fn(code)
 
     def file_response(

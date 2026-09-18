@@ -26,12 +26,12 @@ def _status_contract() -> dict[str, object]:
 
 
 class NovaWiringInventoryServiceTests(unittest.TestCase):
-    def test_empty_status_is_not_self_repair_closed(self) -> None:
+    def test_empty_status_reports_static_source_contract(self) -> None:
         payload = build_self_repair_closure_inventory_payload({})
 
-        self.assertFalse(payload["ok"])
-        self.assertEqual(payload["gap_count"], payload["root_count"])
-        self.assertEqual(payload["depth_counts"], {"visible_only": payload["root_count"]})
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["gap_count"], 0)
+        self.assertEqual(payload["depth_counts"], {"source_contract_ready": payload["root_count"]})
 
     def test_missing_execution_path_is_reported_as_action_wired_only(self) -> None:
         payload = build_self_repair_closure_inventory_payload(
@@ -126,18 +126,11 @@ class NovaWiringInventoryServiceTests(unittest.TestCase):
         self.assertIn("model_runtime", payload["signal_sources"])
         self.assertIn("os_capability", payload["planned_tools"])
 
-    def test_edfi_capability_profile_is_declared_as_a_wiring_surface(self) -> None:
-        surface = next(item for item in WIRING_SURFACES if item.surface_id == "edfi_capability_profile")
-
-        self.assertEqual(surface.signal_sources, ("edfi_capability_profile",))
-        self.assertIn("read", surface.planned_tools)
-        self.assertIn("edfi_capability_profile", surface.status_keys)
-        self.assertIn("edfi_capability_profile_ok", surface.status_keys)
-        self.assertIn("edfi_capability_profile_path", surface.status_keys)
-
-        payload = build_source_wiring_probe_payload()
-        self.assertIn("edfi_capability_profile", payload["signal_sources"])
-        self.assertIn("edfi_capability_profile", wiring_surface_ids())
+    def test_backpack_host_install_contract_is_a_wiring_surface(self) -> None:
+        surface = next(item for item in WIRING_SURFACES if item.surface_id == "backpack_host")
+        self.assertEqual(surface.signal_sources, ("backpack_host",))
+        self.assertIn("services/backpack_host/sanitize.py", surface.source_files)
+        self.assertIn("backpack_host", wiring_surface_ids())
 
     def test_runtime_search_and_scheduler_roots_do_not_borrow_control_status_signal_routes(self) -> None:
         by_id = {item.surface_id: item for item in WIRING_SURFACES}

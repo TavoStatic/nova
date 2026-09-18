@@ -4,8 +4,8 @@ import time
 from typing import Callable
 
 from services import nova_planner_contract
-from services.leah_fast_chat import load_leah_fast_chat_from_core
 from services.nova_fallback_flow import finalize_llm_fallback_reply, prepare_fallback_flow
+from services.nova_intent_understanding import ACCEPT, self_status_belongs_to_turn
 from services.memory_production import MEMORY_LEARNING_SHORT_CIRCUIT_ACTIONS
 from services.nova_turn_contract import bind_turn_request, maybe_run_attachment_vision_turn
 
@@ -229,8 +229,6 @@ def execute_reply_sequence(
                     },
                 )
 
-    leah_fast_chat = load_leah_fast_chat_from_core(core) and input_source == "http"
-
     # --- Intent understanding: classify the turn BEFORE the planner runs ---
     turn_intent: dict = {}
     response_strategy: dict = {}
@@ -275,7 +273,12 @@ def execute_reply_sequence(
     if attachment_vision_outcome is not None:
         return _timed_return(*_break_fallback_loop(*attachment_vision_outcome))
 
-    planner_outcome = nova_planner_contract.maybe_handle_planner_sequence(
+    planner_outcome = None
+    if str(response_strategy.get("strategy") or "") == ACCEPT:
+        timing_profile["planner_time"] = 0
+        trace("timing", "completed", "planner_call", duration_ms=0)
+    else:
+        planner_outcome = nova_planner_contract.maybe_handle_planner_sequence(
         text=text,
         turns=turns,
         pending_action=pending_action,
@@ -317,11 +320,19 @@ def execute_reply_sequence(
                     "tool_result_available": True,
                 }
             )
-            trace(
-                "action_planner",
-                "tool_evidence_for_fallback",
-                tool=str(planner_payload.get("tool") or ""),
-            )
+            if (
+                str(planner_payload.get("tool") or "").strip() == "self_status"
+                and not self_status_belongs_to_turn(turn_intent, response_strategy)
+            ):
+                deferred_tool_meta = {}
+                semantic_tool_observation.clear()
+                trace("action_planner", "self_status_held_for_conversation")
+            else:
+                trace(
+                    "action_planner",
+                    "tool_evidence_for_fallback",
+                    tool=str(planner_payload.get("tool") or ""),
+                )
         else:
             return _timed_return(*_break_fallback_loop(planner_reply, planner_payload))
 
@@ -410,7 +421,6 @@ def execute_reply_sequence(
         action_ledger_add_step=lambda stage, outcome, detail="", **data: trace(stage, outcome, detail, **data),
         ensure_reply_fn=ensure_reply,
         intent_evidence_packet=intent_evidence_packet,
-        leah_fast_chat=leah_fast_chat,
         fallback_context=fallback_entry.get("fallback_context") if isinstance(fallback_entry.get("fallback_context"), dict) else {},
     )
     timing_profile["llm_time"] = int(llm_fallback_outcome.get("llm_time_ms") or 0)

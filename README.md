@@ -2,20 +2,43 @@
 
 **By SG Intelligence Tech, LLC**
 
-Nova is a local AI runtime that works continuously — not just when you talk to it. It plans, remembers, uses tools, manages ongoing work, checks its own results, and extends itself through installable backpacks.
+<table>
+<tr>
+<td valign="top" width="58%">
+
+Nova is a local AI runtime that works continuously — not just when you talk to it. It plans, remembers, uses tools, manages ongoing work, checks its own results, and extends itself through installable backpacks. Most AI tools respond and forget. Nova keeps working.
+
+</td>
+<td valign="top" width="42%">
+
+<img src="docs/screenshots/nova-control-overview.jpg" width="100%" />
+
+</td>
+</tr>
+</table>
 
 ---
 
 ## What Nova Does
 
-Most AI tools respond and forget. Nova keeps working.
+<table>
+<tr>
+<td valign="top" width="58%">
 
-- **Persistent runtime** — Nova runs in the background with a guard process, heartbeat, and maintenance loop. Work continues across sessions.
-- **Work Trees** — complex goals are broken into branches, tasks, and dependencies. Nova tracks what is open, blocked, or complete.
-- **Memory** — Nova retains facts, corrections, and context with rules for when to remember, recall, or discard stale material.
-- **Tools** — file access, web research, vision, voice, system inspection, code generation, and data pipelines. Tool results are recorded as evidence, not assumed.
-- **Self-observation** — Nova monitors its own health, runs regression tests, watches for repeated weak signals, and surfaces blockers instead of hiding them.
-- **Backpacks** — domain capabilities install as self-contained plugins. Nova discovers and validates them automatically.
+Nova runs in the background with a guard process, heartbeat, and maintenance loop. Work continues across sessions without a person present. When a goal is too large for one action, Nova organizes it into a Work Tree — a structure that keeps the objective, branches, tasks, dependencies, blockers, tool choices, and evidence together. This gives Nova a way to carry meaningful work forward over time rather than treating every conversation as a fresh start.
+
+Nova retains facts, corrections, and context with rules for when information should be remembered, when it should be recalled, and when stale material should be removed. Memory supports judgment without silently becoming the source of false certainty.
+
+Tool results are recorded as evidence, not assumed. Nova can distinguish between a tool being available, a tool being allowed, and a tool actually returning valid evidence. An attempted action is not the same as a successful result.
+
+</td>
+<td valign="top" width="42%">
+
+<img src="docs/screenshots/nova-work-tree.jpg" width="100%" />
+
+</td>
+</tr>
+</table>
 
 ---
 
@@ -52,18 +75,29 @@ Then open:
 
 ## Backpacks
 
-Backpacks are installable capability modules. Drop a backpack folder into `backpacks/` and Nova detects it on the next control panel refresh, validates the protocol handshake, and makes it available for install.
+<table>
+<tr>
+<td valign="top" width="58%">
 
-Each backpack ships its own manifest, schema, connector, and operations — Nova provides the platform.
+Backpacks are installable capability modules. Drop a backpack folder into `backpacks/` and Nova detects it on the next control panel refresh, validates the protocol handshake, and makes it available for install. Each backpack ships its own manifest, schema, connector, and operations — Nova provides the platform. A new field of work connects through the backpack interface without touching Nova's core.
 
 ```
 backpacks/
   my-backpack/
     backpack.json       ← manifest + protocol version
-    connector.py        ← data connector
+    connector.py        ← connector implementation
     operations.json     ← declared operations
     settings_schema.json
 ```
+
+</td>
+<td valign="top" width="42%">
+
+<img src="docs/screenshots/nova-backpacks.jpg" width="100%" />
+
+</td>
+</tr>
+</table>
 
 ---
 
@@ -86,6 +120,10 @@ Nova separates the platform (core, guard, shell, pipelines) from domain knowledg
 
 ## Key Interfaces
 
+<table>
+<tr>
+<td valign="top" width="58%">
+
 | Interface | URL | Description |
 |-----------|-----|-------------|
 | Control Room | `/control` | Manage backpacks, pipelines, work tree, system status |
@@ -93,17 +131,33 @@ Nova separates the platform (core, guard, shell, pipelines) from domain knowledg
 | CLI | `nova.cmd` | Install, doctor, smoke tests, releases |
 | Voice | — | Speech-to-text input, TTS output |
 
+</td>
+<td valign="top" width="42%">
+
+<img src="docs/screenshots/nova-sessions.jpg" width="100%" />
+
+</td>
+</tr>
+</table>
+
 ---
 
 ## Self-Governance
 
-Nova does not assume things worked. It records evidence.
+<table>
+<tr>
+<td valign="top" width="58%">
 
-- Tests span conversation, memory, tools, autonomy, pipelines, and domain layers (236 test files)
-- The subconscious system watches for repeated weak signals and surfaces them as organized work
-- The Kidney system archives stale material and cleans what no longer belongs
-- SOCK profiles the host machine and matches AI models to available hardware
-- The guard recovers a failed runtime without operator intervention
+Nova does not assume things worked. It records evidence. Tests span conversation, memory, tools, autonomy, pipelines, and domain layers across 236 test files. The subconscious system watches for repeated weak signals and surfaces them as organized work when the pattern becomes strong enough. The Kidney system archives stale material and cleans what no longer belongs. SOCK profiles the host machine and matches AI models to available hardware. The guard recovers a failed runtime without operator intervention.
+
+</td>
+<td valign="top" width="42%">
+
+<img src="docs/screenshots/nova-health.jpg" width="100%" />
+
+</td>
+</tr>
+</table>
 
 ---
 
@@ -123,4 +177,4 @@ Nova does not assume things worked. It records evidence.
 
 Nova is proprietary software. © 2026 SG Intelligence Tech, LLC. All rights reserved.
 
-Contact: [github.com/TavoStatic](https://github.com/TavoStatic)
+Contact: [sg-intell.tech](https://sg-intell.tech/) · [github.com/TavoStatic](https://github.com/TavoStatic)

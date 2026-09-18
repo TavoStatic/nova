@@ -24,7 +24,22 @@ class TestNovaHttpGetRoutesService(unittest.TestCase):
 
         self.assertEqual(
             result,
-            {"kind": "json", "code": 200, "body": {"ok": True, "ollama_api_up": True, "chat_model": "phi", "memory_enabled": True, "chat_login_enabled": False}},
+            {"kind": "json", "code": 200, "body": {"ok": True, "memory_enabled": True, "chat_login_enabled": False, "service": "nova_http"}},
+        )
+
+    def test_handle_basic_route_request_returns_dependency_health_payload(self):
+        result = HTTP_GET_ROUTES_SERVICE.handle_basic_route_request(
+            "/api/health/dependencies",
+            handler=object(),
+            control_login_enabled_fn=lambda: True,
+            control_page_gate_fn=lambda _handler: (True, ""),
+            health_payload_fn=lambda: {"ok": True, "service": "nova_http"},
+            health_dependencies_payload_fn=lambda: {"ok": True, "ollama_api_up": False},
+        )
+
+        self.assertEqual(
+            result,
+            {"kind": "json", "code": 200, "body": {"ok": True, "ollama_api_up": False}},
         )
 
     def test_handle_basic_route_request_returns_file_route(self):
@@ -308,7 +323,7 @@ class TestNovaHttpGetRoutesService(unittest.TestCase):
         result = HTTP_GET_ROUTES_SERVICE.handle_control_api_request_from_runtime(
             "/api/control/pipelines",
             handler=object(),
-            qs={"pipeline_id": ["sis_test"]},
+            qs={"pipeline_id": ["example_connector"]},
             runtime_scope={
                 "SOURCE": "runtime-pipeline-service",
                 "HTTP_PIPELINE_CONTROL_SERVICE": _PipelineControl(),
@@ -330,7 +345,7 @@ class TestNovaHttpGetRoutesService(unittest.TestCase):
                 {
                     "ok": True,
                     "source": "runtime-pipeline-service",
-                    "selected_pipeline_id": "sis_test",
+                    "selected_pipeline_id": "example_connector",
                 },
             ),
         )

@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 from .base_tool import NovaTool, ToolContext, ToolInvocationError
 

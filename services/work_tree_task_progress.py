@@ -47,6 +47,32 @@ from services.tool_identity import (
 
 SCHEMA = "nova.work_tree_solution_ladder.v1"
 DEFAULT_STALL_HOURS = 6.0
+_THINNING_PRODUCTIVE_ACTIONS = frozenset({"removed_unused_wrapper"})
+
+
+def _result_action(row: dict[str, Any]) -> str:
+    text = str(row.get("result_text") or "").strip()
+    if not text.startswith("{"):
+        return ""
+    try:
+        payload = json.loads(text)
+    except Exception:
+        return ""
+    if not isinstance(payload, dict):
+        return ""
+    return str(payload.get("action") or "").strip().lower()
+
+
+def _evidence_counts_toward_markers(row: dict[str, Any]) -> bool:
+    """A miss must not look like a solution step."""
+    from services.evidence_validity import evidence_result_valid
+
+    if not evidence_result_valid(row):
+        return False
+    tool = canonicalize_tool_name(row.get("tool_name"))
+    if tool != "core_thinning":
+        return True
+    return _result_action(row) in _THINNING_PRODUCTIVE_ACTIONS
 
 
 @dataclass(frozen=True)
@@ -367,6 +393,37 @@ _SEEDED: dict[str, SolutionLadder] = {
                 stage=2,
                 requires_complete=True,
                 requires_markers=("queue_run",),
+            ),
+        ),
+    ),
+    "core_thinning|core_scan": SolutionLadder(
+        family_key="core_thinning|core_scan",
+        intent="Thin wrappers and HTTP surfaces the core scan still owns.",
+        solution="Unused wrapper removed. Mapping is a look, not a close.",
+        source="seeded",
+        markers=(
+            SolutionMarker(
+                "started",
+                "Thinning evidence recorded",
+                0.30,
+                stage=0,
+                any_evidence=True,
+            ),
+            SolutionMarker(
+                "via_core_thinning",
+                "Unused wrapper removed",
+                0.50,
+                stage=1,
+                tools=("core_thinning",),
+                requires_markers=("started",),
+            ),
+            SolutionMarker(
+                "closed",
+                "Finding closed after a real removal",
+                0.20,
+                stage=2,
+                requires_complete=True,
+                requires_markers=("via_core_thinning",),
             ),
         ),
     ),
@@ -700,8 +757,9 @@ def _raw_observation(
                 if any(k in blob for k in keys) or any(k in title for k in keys):
                     return True, f"tool={tool} matched keywords", "observed"
             else:
-                # Explicit observed tier stays observed; other marker tools verify.
-                return True, f"tool={tool}", "observed" if is_observed_tool(tool) else "verified"
+                # Unknown tools are not verified. Verified is only the listed tier.
+                quality = "verified" if is_verified_tool(tool) else "observed"
+                return True, f"tool={tool}", quality
         return False, "marker tool/evidence not seen", "absent"
 
     if keys:
@@ -837,6 +895,7 @@ def measure_solution_progress(
     """
     ladder = get_ladder(work_class=work_class, source_type=source_type, learned=learned)
     rows = list(evidence or [])
+    marker_evidence = [row for row in rows if isinstance(row, dict) and _evidence_counts_toward_markers(row)]
     effort = [
         {
             "evidence_id": str(row.get("evidence_id") or ""),
@@ -864,8 +923,8 @@ def measure_solution_progress(
     solution_closed = status in {"complete", "completed", "done", "resolved", "retired"}
     # Closing a finding without tool evidence must not invent 100% verified work.
     # That produced "100% done" with empty "Completed so far" in the control panel.
-    closed_without_effort = bool(solution_closed and not rows)
-    closed_with_effort = bool(solution_closed and rows)
+    closed_without_effort = bool(solution_closed and not marker_evidence)
+    closed_with_effort = bool(solution_closed and marker_evidence)
 
     earned = 0.0
     total_w = 0.0
@@ -901,7 +960,7 @@ def measure_solution_progress(
             marker,
             task_title=combined_title,
             task_status=solution_status,
-            evidence=rows,
+            evidence=marker_evidence,
         )
         missing_prereq = [
             mid for mid in marker.requires_markers if not holding.get(mid, False)
