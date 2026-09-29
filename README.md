@@ -117,7 +117,7 @@ pipelines/             ← governed data pipeline framework
 services/nova_shell/  ← authentication, roles, TOTP, sessions
 ```
 
-Nova separates the platform (core, guard, shell, pipelines) from domain knowledge (backpacks). A new field of work connects through the backpack interface without touching Nova's core.
+Nova's guard supervises core and launches a one-shot maintenance process when core is running, with a 300-second launch interval. Maintenance coordinates work-tree intake and execution, regression, subconscious signals, operator notices, and governed autonomy. The HTTP process serves the authenticated Control Room and Leah separately. Work Tree holds durable tasks and evidence; policy, review, and execution gates determine which proposed actions can proceed. Nova separates these platform services from optional backpack capabilities.
 
 ---
 
