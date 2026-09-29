@@ -6,7 +6,7 @@
 <tr>
 <td valign="top" width="58%">
 
-Nova is a Windows-first local AI runtime with supervised core, maintenance, and web processes. It routes conversations and tools through policy, keeps durable work and evidence, and supports optional installable backpacks. This repository is active development; use the source and validation results for current behavior.
+Nova is a Windows-first local AI runtime with supervised core, maintenance, and web processes. It routes conversations and tools through policy, keeps durable work and evidence, and supports optional installable backpacks. Nova has a substantial working implementation and is approaching product readiness. Release readiness is assessed through its validation and packaging workflows.
 
 </td>
 <td valign="top" width="42%">
