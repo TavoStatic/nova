@@ -3,7 +3,7 @@ NOVA_DOC
 category: subsystem
 authority: active_working
 last_session: 2026-08-05
-last_agent: claude-cowork
+last_agent: codex
 session_state: needs_update
 next_step: verify setup wizard reflects this
 open: none
@@ -31,7 +31,7 @@ Current packaging reality:
 ## Minimum Requirements
 
 - Windows with PowerShell available
-- Python 3 with `venv` support on `PATH`
+- Python 3.11 or 3.12 with `venv` support on `PATH` or available through the Windows `py` launcher
 - a writable package root directory containing the Nova files
 
 Optional but recommended:

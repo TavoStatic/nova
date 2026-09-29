@@ -6,7 +6,7 @@
 <tr>
 <td valign="top" width="58%">
 
-Nova is a local AI runtime that works continuously — not just when you talk to it. It plans, remembers, uses tools, manages ongoing work, checks its own results, and extends itself through installable backpacks. Most AI tools respond and forget. Nova keeps working.
+Nova is a Windows-first local AI runtime with supervised core, maintenance, and web processes. It routes conversations and tools through policy, keeps durable work and evidence, and supports optional installable backpacks. Nova has a substantial working implementation and is approaching product readiness. Release readiness is assessed through its validation and packaging workflows.
 
 </td>
 <td valign="top" width="42%">
@@ -45,22 +45,23 @@ Tool results are recorded as evidence, not assumed. Nova can distinguish between
 ## Requirements
 
 - Windows 10 / 11
-- Python 3.11+
-- [Ollama](https://ollama.com) (local model runtime)
-- PowerShell 7+
+- Python 3.11 or 3.12 with `venv` support
+- Windows PowerShell (used by `nova.cmd`)
+- [Ollama](https://ollama.com) for model-backed chat and runtime flows (installed separately)
+- Git LFS if cloning the source, to materialize bundled Piper assets
 
 ---
 
 ## Quick Start
 
 ```powershell
-# 1. Install dependencies
+# 1. Create the virtual environment, install dependencies, and run doctor --fix
 .\nova.cmd install
 
 # 2. Run diagnostics
 .\nova.cmd doctor
 
-# 3. Start the guard (keeps Nova running)
+# 3. Start the core under guard supervision
 .\nova.cmd guard
 
 # 4. Open the control panel
@@ -71,6 +72,8 @@ Then open:
 - **Control Room** → http://127.0.0.1:8080/control
 - **Leah** (conversational interface) → http://127.0.0.1:8080/leah
 
+The HTTP process is started separately from the guard. `install` does not install Ollama; model-backed paths require a reachable local Ollama service and models configured for the installation. `doctor` checks the local environment, while a successful install alone does not establish full runtime readiness. See [Operations](docs/OPERATIONS.md) and [Fresh Machine Validation](docs/FRESH_MACHINE_VALIDATION.md).
+
 ---
 
 ## Backpacks
@@ -79,7 +82,7 @@ Then open:
 <tr>
 <td valign="top" width="58%">
 
-Backpacks are installable capability modules. Drop a backpack folder into `backpacks/` and Nova detects it on the next control panel refresh, validates the protocol handshake, and makes it available for install. Each backpack ships its own manifest, schema, connector, and operations — Nova provides the platform. A new field of work connects through the backpack interface without touching Nova's core.
+Backpacks are optional capability modules discovered from `backpacks/`. The control service lists candidates, checks their manifests and supported protocol versions, and provides separate installation and status operations. A folder's presence alone does not mean its capability is installed or enabled. Backpacks can declare settings, operations, and a pipeline connector; the host applies its own grants and install state.
 
 ```
 backpacks/
@@ -108,13 +111,13 @@ nova_guard.py          ← supervises the runtime, restarts on failure
 nova_core.py           ← routes requests, owns memory and tool dispatch
 autonomy_maintenance.py← maintenance loop: work trees, regression, cleanup
 nova_http.py           ← HTTP layer (control panel, Leah, API)
-services/              ← 190+ service modules
+services/              ← runtime and domain services
 backpacks/             ← installable domain capabilities
 pipelines/             ← governed data pipeline framework
-nova_shell/            ← authentication, roles, TOTP, session management
+services/nova_shell/  ← authentication, roles, TOTP, sessions
 ```
 
-Nova separates the platform (core, guard, shell, pipelines) from domain knowledge (backpacks). A new field of work connects through the backpack interface without touching Nova's core.
+Nova's guard supervises core and launches a one-shot maintenance process when core is running, with a 300-second launch interval. Maintenance coordinates work-tree intake and execution, regression, subconscious signals, operator notices, and governed autonomy. The HTTP process serves the authenticated Control Room and Leah separately. Work Tree holds durable tasks and evidence; policy, review, and execution gates determine which proposed actions can proceed. Nova separates these platform services from optional backpack capabilities.
 
 ---
 
@@ -148,7 +151,7 @@ Nova separates the platform (core, guard, shell, pipelines) from domain knowledg
 <tr>
 <td valign="top" width="58%">
 
-Nova does not assume things worked. It records evidence. Tests span conversation, memory, tools, autonomy, pipelines, and domain layers across 236 test files. The subconscious system watches for repeated weak signals and surfaces them as organized work when the pattern becomes strong enough. The Kidney system archives stale material and cleans what no longer belongs. SOCK profiles the host machine and matches AI models to available hardware. The guard recovers a failed runtime without operator intervention.
+Nova records tool and runtime evidence and includes tests across conversation, memory, tools, autonomy, pipelines, and domain layers. Subconscious, Kidney, and SOCK are separate subsystems for signal handling, retention, and host/model assessment. The guard supervises core and schedules maintenance cycles. These mechanisms have individual validation paths; their presence is not a claim that every autonomous or recovery path succeeds end to end.
 
 </td>
 <td valign="top" width="42%">

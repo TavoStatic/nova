@@ -3,7 +3,7 @@ NOVA_DOC
 category: subsystem
 authority: active_working
 last_session: 2026-08-05
-last_agent: claude-cowork
+last_agent: codex
 session_state: needs_update
 next_step: verify contract still holds
 open: none
@@ -29,7 +29,7 @@ It defines what is required to bootstrap the package, what is bundled inside the
 These are required to run `nova install` and create a working local package environment.
 
 - Windows with PowerShell
-- Python 3 with `venv` support available on `PATH`
+- Python 3.11 or 3.12 with `venv` support on `PATH` or available through the Windows `py` launcher
 - network access sufficient for `pip install -r requirements.txt`
 
 ### Level 2: Bundled In The Current Base Package
@@ -49,14 +49,7 @@ Current decision:
 
 ### Level 3: Installed Python Dependencies
 
-`nova install` currently installs the following package set from `requirements.txt`:
-
-- `requests`
-- `psutil`
-- `faster-whisper`
-- `sounddevice`
-- `scipy`
-- `pyttsx3`
+`nova install` installs the complete package set from the root [`requirements.txt`](../requirements.txt). That manifest is the current authority for package names and version bounds, including the web, voice, imaging, scheduling, database, and Nova Shell dependencies. Inspect it before changing or auditing a dependency; this document does not duplicate a versioned package inventory.
 
 Current contract:
 
