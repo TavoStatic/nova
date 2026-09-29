@@ -2,8 +2,8 @@
 NOVA_DOC
 category: architecture
 authority: active_authority
-last_session: 2026-08-05
-last_agent: claude-cowork
+last_session: 2026-09-29
+last_agent: codex
 session_state: current
 next_step: none
 open: none
@@ -38,13 +38,11 @@ When two sources conflict, the lower-numbered source wins regardless of date.
 
 ## Current Authority Files
 
-- [SYSTEM_MAP.md](SYSTEM_MAP.md): processes, ownership, APIs, wiring surfaces — anchored to commit 92ca149, check ledger for drift
+- [SYSTEM_MAP.md](SYSTEM_MAP.md): processes, ownership, APIs, wiring surfaces — check against current source before relying on it
 - [ARCHITECTURE.md](ARCHITECTURE.md): design intent and current implementation boundaries
 - [AUTONOMY_AND_MISSION.md](AUTONOMY_AND_MISSION.md): Mission, orchestrator, Work Tree, outbox contracts
 - [SERVICES_INDEX.md](SERVICES_INDEX.md): service-module inventory — check ledger for drift
-- [FUNCTION_INDEX.md](FUNCTION_INDEX.md): source function/class inventory — check ledger for drift
 - [TEST_ECOSYSTEM.md](TEST_ECOSYSTEM.md): test truth model and ownership
-- [TEST_INDEX.md](TEST_INDEX.md): test function inventory — check ledger for drift
 - [DOC_OWNERSHIP.md](DOC_OWNERSHIP.md): authority classification for all docs
 
 ## Current Subsystems
@@ -78,7 +76,7 @@ The following documents are useful planning or historical context, but they are 
 - `REAL_WORLD_TASKS.md`
 - dated root scans and health reviews
 
-Archived to `docs/archive/` (2026-08-05): `PHASE2_SAFETY_ENVELOPE.md`, `PHASE_CLOSEOUT_CHECKLIST.md`, `PHASE_COMPLETION_ASSESSMENT.md`, `HANDOFF.md`, `STATUS.md`, `CODE_TRUTH_AUDIT_2026-*.md`, coaching session docs.
+Some older plans and audits are retained under `docs/` and `docs/archive/`. Check the file's presence and authority header before following a historical reference. The function and test indexes mentioned in older documents are not present in this checkout.
 
 ## Dated Audits and Scan Records
 
