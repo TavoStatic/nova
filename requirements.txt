@@ -9,7 +9,7 @@ mss
 Pillow
 opencv-python
 APScheduler>=3.11.3,<4
-icalendar>=7.3.0
+icalendar>=7.3.2
 SQLAlchemy>=2.0.52
 # Nova Shell security (argon2 passwords, TOTP, LLC Ed25519 verify)
 argon2-cffi>=25.1.0
